@@ -1,0 +1,23 @@
+{
+  "descriptor": "website/src/snippets/landing/helpdesk.alvo.json",
+  "keys": {
+    "demo": { "roles": ["authenticated"], "scopes": ["*:read", "*:write"], "secretVariable": "ALVO_DEMO_KEY_SECRET" }
+  },
+  "steps": [
+    {
+      "key": "demo",
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": { "title": "  Printer on fire  " },
+      "expect": 201
+    },
+    {
+      "key": null,
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": { "title": "Brakes squeak" },
+      "expect": 403,
+      "expectType": "forbidden"
+    }
+  ]
+}

@@ -1,0 +1,229 @@
+---
+title: "Entities and fields"
+description: "Add an entity to the descriptor, give its fields types and constraints, decide per caller who reads and writes a field, and link entities with references."
+sidebar:
+  order: 1
+---
+
+import { Code, Steps } from '@astrojs/starlight/components';
+import Exchange from '../../../components/Exchange.astro';
+import start from '../../../snippets/shell/entities-and-fields-start.sh?raw';
+import step2 from '../../../snippets/shell/entities-and-fields-step-2.sh?raw';
+import basic from '../../../snippets/entities-and-fields/01-basic.alvo.json?raw';
+import withRef from '../../../snippets/entities-and-fields/02-ref.alvo.json?raw';
+
+:::tip[What you will achieve]
+A `customers` entity whose fields check their own values, with one field only administrators may write and one only
+they may read, and a `tickets` entity that points at a customer. About ten minutes, starting from the stack in
+[Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
+:::
+
+## Before you start
+
+- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), run from its `alvo-help-desk`
+  directory with `COMPOSE_FILE` and that page's secrets exported in this shell.
+- Two keys: `agent` (roles `agent`, `authenticated`) and `admin` (roles `admin`, `authenticated`). The descriptors on
+  this page declare both roles.
+
+The responses below were captured from a real host when the site was built, so your ids will differ.
+
+## 1. Add an entity
+
+An entity lives at `/entities/<name>` and each field at `/entities/<name>/fields/<field>`. Both names are lower-case
+snake_case. Every field has a `type`; its other keys constrain the value.
+
+<Steps>
+
+1. Start the stack over this page's first descriptor. The first command **deletes the stack's database**, so the
+   descriptor starts from an empty one:
+
+   <Code code={start.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+2. This is the descriptor the stack now serves:
+
+   <Code code={basic} lang="json" title="help-desk.alvo.json" />
+
+   `rules` holds one CEL condition per operation. Alvo is default-deny: an entity without `rules` answers nobody, so
+   every new entity needs them. [Access rules](/MMLib.Alvo/guides/access-rules/) covers them in depth.
+
+3. Create a customer as `agent`:
+
+   <Exchange name="entities-and-fields/01-fields" wrap steps={[0]} />
+
+   `tier` was filled from its `default`, and `credit_limit` is `null`. `internal_note` is missing because it is
+   hidden from this caller; step 3 explains why.
+
+</Steps>
+
+## 2. Constrain the values
+
+The API checks every facet before anything is written, and each refusal names the field.
+
+- `required` makes the field NOT NULL: a create must carry it, and an update may not set it to `null`.
+- `maxLength` bounds a `string`, counted in Unicode code points.
+- `unique` makes the value unique across the entity, and per tenant on a tenant-scoped one.
+- `default` is a literal of the field's own type, within its facets. It becomes the column's default.
+
+<Steps>
+
+1. Leave out the required `name` and send a phone number longer than 20 characters. Each field gets one violation:
+
+   <Exchange name="entities-and-fields/01-fields" wrap steps={[1]} />
+
+2. Reuse the first customer's email. Only the database knows that another row holds it, so this refusal is a 409, not
+   a 422:
+
+   <Exchange name="entities-and-fields/01-fields" wrap steps={[2]} />
+
+</Steps>
+
+Branch on a violation's `code` (`required`, `max-length`, `unique`), never on its `message`.
+
+## 3. Decide per caller: `readOnly` and `hidden`
+
+`readOnly` keeps a caller from writing a field, and `hidden` keeps it out of every response. Each is `true`, or a CEL
+condition over `@user` and `@tenant` that decides per caller; the condition may not read the row's own fields. In this
+descriptor, `credit_limit` is read-only and `internal_note` is hidden for everyone who is not an administrator.
+
+<Steps>
+
+1. An agent who sends `credit_limit` is refused, not silently ignored:
+
+   <Exchange name="entities-and-fields/01-fields" wrap steps={[3]} />
+
+2. An administrator may write both fields and reads both back:
+
+   <Exchange name="entities-and-fields/01-fields" wrap steps={[4]} fields={["id", "credit_limit", "internal_note"]} />
+
+3. The agent reads the same customer: `credit_limit` is there, `internal_note` is not.
+
+   <Exchange name="entities-and-fields/01-fields" wrap steps={[5]} />
+
+</Steps>
+
+`hidden` restricts reading only: an agent may still write `internal_note`. A `required` field that is also
+`"readOnly": true` could never be created, so Alvo refuses that pair at apply unless a literal `default` supplies the
+value.
+
+## 4. Link entities with a reference
+
+A `ref` field holds the id of a row in another entity. `entity` names the target, and `onDelete` says what deleting the
+target does to this row.
+
+<Steps>
+
+1. Add a `tickets` entity whose `customer_id` points at `customers`:
+
+   <Code code={withRef} lang="json" title="help-desk.alvo.json" ins={[{ range: '38-54' }]} />
+
+   `restrict` is the default for `onDelete`; it is written out here so you can see it. `assignee_id` points at
+   `users`, the built-in auth entity, and holds a user's id.
+
+2. Apply it by recreating the `alvo` container. Adding an entity discards nothing, so the restart applies it.
+   ([Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/) covers every way to apply a change.)
+
+   <Code code={step2.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+3. Create a customer under an id you choose (a `PUT` to an id that does not exist yet creates the row), then a ticket
+   for that customer:
+
+   <Exchange name="entities-and-fields/02-ref" wrap steps={[0]} fields={["id", "name"]} />
+
+   <Exchange name="entities-and-fields/02-ref" wrap steps={[1]} />
+
+4. A reference to a row that does not exist is refused. So is a reference to a row you cannot read, and the two
+   refusals are identical on purpose:
+
+   <Exchange name="entities-and-fields/02-ref" wrap steps={[2]} />
+
+5. Delete the customer while a ticket still points at it, and `restrict` refuses:
+
+   <Exchange name="entities-and-fields/02-ref" wrap steps={[3]} />
+
+   The refusal names no entity, because the records that point here may be data the caller cannot read.
+
+</Steps>
+
+## How it works
+
+Each entity becomes a table, each field a column, and each `ref` to a declared entity a foreign key. The API checks the
+facets it can before the write. `unique` and `restrict` are enforced by the database, and Alvo translates their
+refusals into the same problem shape. [The descriptor](/MMLib.Alvo/concepts/descriptor/) explains the model.
+
+## Options and variations
+
+A field's `type` decides which facets it takes. A facet on any other type is refused at apply.
+
+| `type` | Holds | Facets |
+|---|---|---|
+| `string` | bounded text | [`maxLength`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.maxLength), [`format`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.format) |
+| `text` | unbounded prose | none |
+| `integer` | a whole number | none |
+| `decimal` | an exact number | [`precision`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.precision) (all digits) and [`scale`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.scale) (digits after the point), both required |
+| `boolean` | `true` or `false` | none |
+| `date`, `datetime` | a day, an instant | none |
+| `uuid` | an id | none |
+| `json` | any JSON value | none |
+| `enum` | one value of a fixed list | [`values`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.values), required |
+| `ref` | the id of a row in another entity | [`entity`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.entity), required; [`onDelete`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.onDelete): `restrict`, `cascade` or `setNull` |
+
+Every type also takes [`required`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.required),
+[`unique`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.unique),
+[`default`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.default),
+[`hidden`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.hidden),
+[`readOnly`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.readOnly),
+[`index`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.index) and
+[`description`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.description).
+
+**Formats.** A `string` field's `format` is a built-in (`email`, `uri` or `phone`) or the name of a format you declare
+under [`formats`](/MMLib.Alvo/reference/descriptor/formats/) with a `pattern` and a `description`. A name that is
+neither is refused at apply.
+
+**References to `users`.** A `ref` to the built-in `users` entity gets no foreign key, no `onDelete` behaviour and no
+index of its own. Leave `onDelete` off it, and add `"index": true` if callers filter by it, as `assignee_id` does.
+
+**Reserved names.** No field may be called `order`, `limit`, `offset`, `after`, `select`, `or`, `and` or `not`, because
+the query string uses those names. No entity may be called `users`. The columns that the `audit` and `tenancy` traits
+add (`created_at`, `tenant_id` and the rest) may not be declared on an entity that has the trait; see
+[`entities`](/MMLib.Alvo/reference/descriptor/entities/).
+
+**Renames.** Renaming a field or an entity without losing its data takes `renamedFrom`; see
+[Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/#5-rename-without-losing-data).
+
+:::caution[Not in this build]
+Three keys the schema declares are refused when the descriptor is applied
+([Capabilities in this build](/MMLib.Alvo/reference/capabilities/#refused-at-apply)):
+
+- an entity's `softDelete`: a delete would remove the row outright. Remove the key.
+- a field's `validation`: the expression is not evaluated. Use a facet (`maxLength`, `precision` and `scale`, enum
+  `values`, a `format`) or a [before-hook](/MMLib.Alvo/guides/before-hooks/).
+- a `default` written as `{"$cel": "…"}`: only a literal default is honoured. Send the value on create instead.
+:::
+
+## What can go wrong
+
+| Status | Problem type | When | Fix | Returned by |
+|---|---|---|---|---|
+| 409 | [`conflict`](/MMLib.Alvo/reference/problem-types/#conflict) | Another row already holds a `unique` value (code `unique`), or a `restrict` reference refuses a delete (code `referenced`). | Send a different value, or delete or repoint the rows that reference this one. | every host |
+| 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | The body breaks a facet (`required`, `max-length`, `enum-value`, `format`, `precision`, `scale`), writes a field that is read-only for the caller (`read-only-field`), references a row that cannot be resolved (`unresolved-reference`), names an undeclared field (`unknown-field`), sends a value the type cannot hold (`invalid-value`), cannot create because a required field is read-only for this caller (`read-only-required-field`), or a format check timed out (`format-not-evaluated`, retry). | Follow each violation's `pointer` and `fixSuggestion`. | every host |
+
+If the container does not come back after you change the descriptor, the new version was refused when it was
+applied: a facet on the wrong type, a reserved name, one of the keys above. The reason is at the end of
+`docker compose logs alvo`; see [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/#what-can-go-wrong). In
+this build that refusal ends the process with exit code 139 instead of 78
+([#340](https://github.com/Burgyn/MMLib.Alvo/issues/340)).
+
+## Reference
+
+- Descriptor keys: [`entities`](/MMLib.Alvo/reference/descriptor/entities/),
+  [fields](/MMLib.Alvo/reference/descriptor/entities-fields/), [`formats`](/MMLib.Alvo/reference/descriptor/formats/),
+  [rules](/MMLib.Alvo/reference/descriptor/entities-rules/).
+- Problem types: [`conflict`](/MMLib.Alvo/reference/problem-types/#conflict),
+  [`validation`](/MMLib.Alvo/reference/problem-types/#validation).
+- How a database constraint becomes a 409:
+  [`docs/architecture/data-api.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md#how-a-database-constraint-violation-reaches-the-caller-138-fixed).
+
+## Next
+
+**[Computed fields and rollups](/MMLib.Alvo/guides/computed-and-rollups/)**: derive a value from the row's own fields,
+or from the rows that point at it.

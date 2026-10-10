@@ -1,0 +1,212 @@
+---
+title: "After-hooks, events and webhooks"
+description: "React to a committed change: post the event to a webhook or send an email, know exactly what is delivered, how often it is retried, and where it may go."
+sidebar:
+  order: 10
+---
+
+import { Code, Steps } from '@astrojs/starlight/components';
+import Exchange from '../../../components/Exchange.astro';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import start from '../../../snippets/shell/after-hooks-start.sh?raw';
+import logs from '../../../snippets/shell/after-hooks-logs.sh?raw';
+import webhook from '../../../snippets/after-hooks-and-webhooks/01-webhook.alvo.json?raw';
+import envelope from '../../../../../test/MMLib.Alvo.Tests/CloudEventsConformanceTests.One_real_envelope_is_pinned_verbatim.verified.txt?raw';
+import events from '../../../../../src/MMLib.Alvo.Abstractions/Events/IAlvoEvents.cs?raw';
+
+:::tip[What you will achieve]
+A high-priority ticket is posted to your webhook, and closing a ticket sends a mail to the support lead. You will
+know what the receiver gets, when, how often it is retried, and which networks it may reach. About fifteen minutes,
+starting from the stack in [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
+:::
+
+## Before you start
+
+- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), run from its `alvo-help-desk`
+  directory with `COMPOSE_FILE` and that page's secrets exported in this shell. This page uses the `agent` key (roles
+  `agent`, `authenticated`).
+- An HTTPS endpoint you control, if you want to see a delivery arrive. The descriptor below points at
+  `ops.example.com`, which does not exist, so its deliveries fail and are retried.
+
+## 1. Declare the endpoint and the template
+
+Every write appends an event, and an after-hook says which events to act on and what to do. This build runs two
+actions: `webhook`, which posts the event to an endpoint, and `email`, which renders a template. Both targets are
+declared once, at the top of the descriptor.
+
+<Steps>
+
+1. Start the stack over this page's descriptor. The first command **deletes the stack's database**:
+
+   <Code code={start.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+2. The descriptor declares the `ops-board` endpoint and the `ticket-closed` template, and two after-hooks use them:
+
+   <Code code={webhook} lang="json" title="help-desk.alvo.json" ins={[{ range: '8-21' }, { range: '37-50' }]} />
+
+   - An endpoint's `url` must be `https`; plain `http` is refused at apply, except for a loopback address such as
+     `http://127.0.0.1:5081/hook`. The schema requires `secretRef`, but this build does not read it: deliveries are
+     not signed (see *Not in this build* below).
+   - A template's `subject` and `body` take `{{…}}` placeholders over `new.<field>`, `old.<field>`, `event.id`,
+     `event.type`, `event.time`, `event.subject` and `@user.id`. A placeholder that names a field the entity does not have is refused at apply, never rendered empty.
+   - A condition reads `new.`, `old.`, `changed()` and `@user.id`. `@user.id` is the user who made the change.
+     `@user.roles` and `@tenant.id` are refused in an after-hook condition, because the event does not record them.
+
+</Steps>
+
+## 2. Trigger it
+
+<Steps>
+
+1. Create a high-priority ticket, then close it:
+
+   <Exchange name="after-hooks-and-webhooks/01-trigger" wrap steps={[0]} fields={["id", "title", "priority", "status"]} />
+
+   <Exchange name="after-hooks-and-webhooks/01-trigger" wrap steps={[1]} fields={["id", "status", "resolution"]} />
+
+   Both writes answered at once. The after-hooks run later, after the commit, so nothing they do can change or
+   delay the answer.
+
+2. Read what happened in the log:
+
+   <Code code={logs.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+   The mail is there: this build's only mail provider writes each message to the log (recipient and subject; the
+   body only at `Debug`) instead of sending it. The webhook to `ops.example.com` shows as *failed to deliver … on
+   attempt 1*, then 2, and so on, until it reaches the attempt ceiling.
+
+</Steps>
+
+## 3. What the receiver gets
+
+A webhook's body is the event, a [CloudEvents 1.0](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md)
+envelope in JSON. This one is pinned by the test suite; an update carries both images and the fields that moved:
+
+<SourceExcerpt code={envelope} from="specversion" to="specversion" lang="json" title="An entity.vehicles.updated event" wrap />
+
+In this build `authid` is the id of the user the key acts as, not the key's id: the sample's `key-42` is a
+placeholder, and the design note's wording is tracked in [#344](https://github.com/Burgyn/MMLib.Alvo/issues/344).
+
+| Member | What it holds |
+|---|---|
+| `id` | The event's id. Delivery is at least once, so **deduplicate on `id`**: it is the one value that stays the same across retries. |
+| `type` | `entity.<entity>.created`, `.updated` or `.deleted`. |
+| `subject`, `partitionkey` | The row: `<entity>/<id>` and `<entity>:<id>`. |
+| `time` | The instant of the write, the same one its audit columns record, in UTC. |
+| `authtype`, `authid` | `apikey`, `system` or `anon`, and the id of the user who made the change (absent for an anonymous caller). |
+| `correlationid` | The trace id of the request that made the change, or the event's own id when there was none. |
+| `data.record`, `data.old_record` | The row after and before the write. `old_record` is absent on a create, `record` on a delete. |
+| `data.changed` | The fields whose value moved. |
+| `specversion`, `source`, `datacontenttype`, `payloadversion`, `chaindepth`, `causationid` | CloudEvents and Alvo bookkeeping: `1.0`, `/alvo`, `application/json`, the payload schema version, the hook-chain depth, and the causing event's id when there is one. |
+
+**The record is complete.** It includes fields that are `hidden` from callers, because the endpoint is declared by
+the same author who declared the `hidden` rule. Treat the endpoint as a place that sees every field. A webhook's
+optional [`payload`](/MMLib.Alvo/reference/descriptor/entities-hooks/#entities.hooks.afterCreate.action.payload) replaces
+the envelope with a `{{…}}` template you write, which must be JSON around its placeholders.
+
+## 4. Delivery and retries
+
+The event is written in the same transaction as the row, so a write that rolls back leaves no event, and a committed
+write always has one. One background dispatcher then claims events in order and runs each matching after-hook.
+
+- **Every failure is retried**, whatever it was: a 500, a 404, a timeout, a name that does not resolve. A redirect is
+  a failure too; the client follows none. An endpoint that answers 2xx is done.
+- **Each attempt waits at most 10 seconds** for a 2xx; a slower endpoint counts as a failure. The body is sent as
+  `application/json`.
+- **Retries back off linearly:** the wait grows by one poll interval per attempt, so at the defaults ten attempts span
+  at least 45 seconds. After [`Alvo:Events:MaxAttempts`](/MMLib.Alvo/reference/configuration/#alvoevents) (10) the
+  event is left alone: it stays in the outbox table, undelivered, and the log has an error line naming it. Nothing
+  deletes it, and nothing redelivers it.
+- **Retries are not in order.** An event whose delivery failed is tried again later, after events that came behind it,
+  including events for the same row: above, the close's mail went out while the create's webhook was still failing.
+- **Run one dispatcher.** Two hosts draining one database break ordering silently
+  ([#150](https://github.com/Burgyn/MMLib.Alvo/issues/150)). With several replicas, set `Alvo:Events:Enabled` to
+  `false` on all but one: writes still append events, and the one dispatcher delivers them.
+
+Alvo's own log lines never write an endpoint's URL, because a URL can hold the only secret an unsigned endpoint has:
+a failed attempt names the event id and type, and the attached error names the endpoint by its descriptor name. Neither does the HTTP client's: Alvo registers the webhook client without the default transport loggers, so no line
+carries the URL at any log level. An embedded host that adds its own logger to that client gets transport lines back,
+and owns their redaction.
+
+## 5. Allow an internal network
+
+Webhook delivery refuses every address that is not public: private ranges, loopback, link-local (including the cloud
+metadata endpoint), carrier-grade NAT, multicast and reserved ranges. It is judged on the address the name resolves
+to, when the connection opens, so a public-looking name that points inside your network is refused too. Loopback is
+allowed only when the URL names it literally, such as `127.0.0.1` or `localhost`.
+
+To deliver to a service on your own network, list its network in CIDR notation under
+[`Alvo:Events:WebhookAllowedNetworks`](/MMLib.Alvo/reference/configuration/#alvoevents), one entry per index:
+`Alvo__Events__WebhookAllowedNetworks__0=10.20.0.0/16`. A listed network overrides every other refusal, so list the
+narrowest one that works. An entry that is not CIDR notation is refused at startup. A refused address is an ordinary
+failed delivery, retried like any other.
+
+## 6. Publish your own event
+
+An embedded host can put its own events on the same durable queue with `IAlvoEvents`:
+
+<SourceExcerpt code={events} from="Task PublishAsync(" to="CancellationToken cancellationToken = default);" title="IAlvoEvents.cs" />
+
+The `type` is two or more lower-case segments separated by dots, such as `orders.approved`, and never starts with
+`entity.`, `auth.` or `storage.`: those are Alvo's own, and a name in one is refused. Values in `data` must be scalars.
+Know what a custom event is not, before you build on it:
+
+- **Nothing subscribes to it yet.** No after-hook can name it, so the dispatcher records it and runs nothing.
+- **It is not part of your transaction.** It is appended on its own, so it can commit when your write does not.
+- **A retried publish appends a second event**, with a new `id`.
+- **It carries no tenant.**
+
+:::caution[Not in this build]
+- **Signing.** No delivery is signed: `secretRef` is not read and no Standard Webhooks `webhook-signature` header is
+  sent, so a receiver cannot verify that a request came from Alvo. Put the receiver where only Alvo can reach it, or
+  give it a URL nobody can guess.
+- **Projection.** The body is the whole envelope or the whole rendered `payload`; there is no per-endpoint selection
+  of fields ([#152](https://github.com/Burgyn/MMLib.Alvo/issues/152)).
+- **Mail.** The only mail provider writes to the log. An embedded host can register its own `IEmailSender`.
+- **Other actions.** `function`, `entity.update` and `http.call` are refused by name at apply; a JSONata expression
+  in `payload` is refused too ([#149](https://github.com/Burgyn/MMLib.Alvo/issues/149)), and so are an email's
+  `data` and a template's `bodyFile`.
+- **`automation`**, rules that run on events or on a schedule, is parsed and warned about, and nothing runs.
+- **A dead-letter queue** with redelivery, and **retention** for the outbox table, which keeps every event's
+  complete rows ([#154](https://github.com/Burgyn/MMLib.Alvo/issues/154)).
+
+[Capabilities in this build](/MMLib.Alvo/reference/capabilities/) lists each of these in the framework's own words.
+:::
+
+If an email's `to` is a placeholder such as `{{new.contact_email}}`, anyone who can write the row chooses who
+receives the mail and its data. It is harmless with the log-only provider; decide it deliberately before you register
+a real one.
+
+## What can go wrong
+
+An after-hook never changes the answer to the write that triggered it, so it returns no problem type. What can go
+wrong shows up when the descriptor is applied, or in the log:
+
+| Where | When | Fix |
+|---|---|---|
+| Apply | The endpoint's URL is relative, or `http` to a host that is not loopback. | Use an absolute `https` URL. |
+| Apply | A placeholder names a field the entity does not have, or a hook names an endpoint or a template that is not declared. | Correct the name; the refusal points at the hook. |
+| Apply | The action is `function`, `entity.update` or `http.call`, or `payload` holds JSONata. | Use `webhook` or `email`, and a `{{…}}` template. |
+| Apply | An after-hook condition reads `@user.roles` or `@tenant.id`. | Read the row's own fields, or `@user.id`. |
+| Log | *failed to deliver … on attempt N* | Check the endpoint; a non-public address needs `Alvo:Events:WebhookAllowedNetworks`. |
+
+An apply refusal stops the container from coming back, and the reason is at the end of `docker compose logs alvo`.
+In this build that refusal ends the process with exit code 139 instead of 78
+([#340](https://github.com/Burgyn/MMLib.Alvo/issues/340)).
+
+## Reference
+
+- Descriptor keys: [`webhooks`](/MMLib.Alvo/reference/descriptor/webhooks/),
+  [`templates`](/MMLib.Alvo/reference/descriptor/templates/),
+  [`afterCreate`](/MMLib.Alvo/reference/descriptor/entities-hooks/#entities.hooks.afterCreate),
+  [`afterUpdate`](/MMLib.Alvo/reference/descriptor/entities-hooks/#entities.hooks.afterUpdate),
+  [`afterDelete`](/MMLib.Alvo/reference/descriptor/entities-hooks/#entities.hooks.afterDelete).
+- Configuration: [`Alvo:Events`](/MMLib.Alvo/reference/configuration/#alvoevents).
+- C#: [`IAlvoEvents`](/MMLib.Alvo/reference/csharp/mmlib-alvo-abstractions/).
+- Design notes: [the envelope](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/events.md#the-envelope),
+  [after-hooks](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/events.md#after-hooks) and
+  [the attempt ceiling](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/events.md#the-attempt-ceiling-is-the-dlq-stand-in-and-abandoned-is-observable).
+
+## Next
+
+**[Audit row changes](/MMLib.Alvo/guides/audit-row-changes/)**: record who created and last changed each row.

@@ -1,0 +1,91 @@
+{
+  "name": "alvo-dark",
+  "type": "dark",
+  "colors": {
+    "editor.background": "#191b22",
+    "editor.foreground": "#d5d9e5"
+  },
+  "tokenColors": [
+    {
+      "settings": {
+        "foreground": "#d5d9e5"
+      }
+    },
+    {
+      "name": "Comment",
+      "scope": [
+        "comment",
+        "punctuation.definition.comment"
+      ],
+      "settings": {
+        "foreground": "#8b92ab"
+      }
+    },
+    {
+      "name": "Key",
+      "scope": [
+        "support.type.property-name",
+        "entity.name.tag",
+        "meta.object-literal.key",
+        "variable",
+        "variable.other",
+        "keyword",
+        "storage",
+        "entity.other.attribute-name",
+        "support.type.property-name.json"
+      ],
+      "settings": {
+        "foreground": "#8fb8ff"
+      }
+    },
+    {
+      "name": "String",
+      "scope": [
+        "string",
+        "string.quoted",
+        "markup.inline.raw"
+      ],
+      "settings": {
+        "foreground": "#a6e3b8"
+      }
+    },
+    {
+      "name": "CEL and functions",
+      "scope": [
+        "entity.name.function",
+        "support.function",
+        "meta.function-call",
+        "entity.name.type",
+        "support.class",
+        "entity.name.class",
+        "support.type"
+      ],
+      "settings": {
+        "foreground": "#d2b4ff"
+      }
+    },
+    {
+      "name": "Number",
+      "scope": [
+        "constant.numeric",
+        "constant.language",
+        "constant.character",
+        "constant.other"
+      ],
+      "settings": {
+        "foreground": "#f2b77a"
+      }
+    },
+    {
+      "name": "Punctuation",
+      "scope": [
+        "punctuation",
+        "meta.brace",
+        "keyword.operator"
+      ],
+      "settings": {
+        "foreground": "#d5d9e5"
+      }
+    }
+  ]
+}

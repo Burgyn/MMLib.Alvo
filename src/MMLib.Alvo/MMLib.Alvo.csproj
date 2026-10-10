@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <Description>The Alvo core: schema registry, Data API, rule engine, events and management, registered with AddAlvo.</Description>
+  </PropertyGroup>
+
+  <PropertyGroup>
     <!-- Force ALL Corvus-generated types (root + every $defs type) to internal, regardless of
          the source generator's own default — the descriptor schema types must never leak onto
          MMLib.Alvo's public API surface. -->

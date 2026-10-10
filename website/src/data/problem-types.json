@@ -1,0 +1,168 @@
+{
+  "validation": {
+    "causes": [
+      "A field the entity declares `required` is missing or null.",
+      "A value breaks a declared facet: `maxLength`, `enum`, `format`, `precision` or `scale`.",
+      "The body names a field the entity does not declare, writes a read-only field, or points a `ref` at a row that does not exist.",
+      "The body is not a JSON object, is not valid JSON, repeats a field, or is larger, deeper or wider than the configured limits.",
+      "A batch body has no `rows` array, an empty one, too many rows, or a row without a valid `id`.",
+      "A Management API apply carried a descriptor that does not validate."
+    ],
+    "fix": "Correct each field the violations point at; every violation carries a `pointer` and a `fixSuggestion`.",
+    "violationCodes": [
+      "required", "max-length", "enum-value", "format", "format-not-evaluated", "precision", "scale",
+      "unknown-field", "invalid-value", "read-only-field", "read-only-required-field", "unresolved-reference",
+      "not-an-object", "malformed-json", "duplicate-field", "body-too-large", "body-too-deep", "body-too-many-fields",
+      "not-a-batch", "empty-batch", "batch-too-many-rows", "invalid-row-id", "descriptor"
+    ],
+    "guides": ["guides/write-data", "guides/entities-and-fields", "guides/handle-errors"],
+    "needsProblemDetails": false
+  },
+  "malformed-query": {
+    "causes": [
+      "A `filter`, `order`, `select`, `limit`, `offset` or `after` parameter is malformed, repeated or contradicts another.",
+      "A filter names a field that is unavailable to the caller, or uses an operator the field's type does not support.",
+      "A filter is deeper, wider or lists more `in` candidates than the limits allow.",
+      "A query sent as a request body is not a JSON object, is not valid JSON, names a parameter twice, or is larger, deeper or wider than the limits allow."
+    ],
+    "fix": "Correct the parameter each violation names in its `pointer`; the shape is wrong, nothing is hidden.",
+    "violationCodes": [
+      "unavailable-field", "unknown-operator", "unsupported-operator-for-field", "malformed-filter", "malformed-filter-group",
+      "malformed-in-list", "malformed-is-operand", "invalid-filter-value", "filter-too-deep", "filter-too-wide",
+      "too-many-in-candidates", "filter-beyond-port-limits", "pattern-too-long", "invalid-page-size", "invalid-offset",
+      "invalid-cursor", "conflicting-paging", "malformed-order", "repeated-sort-key", "malformed-select",
+      "malformed-select-alias", "colliding-projection-key", "projection-too-wide", "too-many-select-entries",
+      "too-many-query-values", "unrepresentable-query-value", "repeated-parameter",
+      "not-an-object", "malformed-json", "duplicate-field", "body-too-large", "body-too-deep", "body-too-many-fields"
+    ],
+    "guides": ["guides/read-data", "guides/handle-errors"],
+    "needsProblemDetails": false
+  },
+  "forbidden": {
+    "causes": [
+      "The entity's access rules deny the operation, or the row being written would not satisfy them.",
+      "A before-hook's `reject` fired, or a `mutate` produced a value the target field's facets refuse.",
+      "A Management API caller does not reach the project access level the route needs.",
+      "In a batch, rows refused by policy or named twice are listed in `violations`, one entry per row."
+    ],
+    "fix": "Change the request so the rules admit it, or call with a role the rules grant. A rule's refusal never says which rule refused; a before-hook's `reject` puts its own message in `detail`, written for the caller.",
+    "violationCodes": ["forbidden", "duplicate-row"],
+    "guides": ["guides/access-rules", "guides/before-hooks", "guides/computed-and-rollups", "guides/apply-and-evolve", "guides/handle-errors"],
+    "needsProblemDetails": false
+  },
+  "out-of-scope": {
+    "causes": [
+      "The presented API key's scopes do not cover this entity and operation."
+    ],
+    "fix": "Grant the key the scope it needs, such as `*:read` or `*:write`. This is a different fix from `forbidden`, which is a rule.",
+    "violationCodes": [],
+    "guides": ["guides/authentication", "guides/handle-errors"],
+    "needsProblemDetails": false
+  },
+  "not-found": {
+    "causes": [
+      "The row does not exist, or the caller's rules exclude it; the two are deliberately indistinguishable.",
+      "On the Management API, the project or revision does not exist."
+    ],
+    "fix": "Check the id, and check that the caller's rules let it read the row.",
+    "violationCodes": [],
+    "guides": ["guides/read-data", "guides/access-rules", "guides/handle-errors"],
+    "needsProblemDetails": false
+  },
+  "precondition-failed": {
+    "causes": [
+      "The `If-Match` version does not match the stored row: someone else changed it, or your own earlier write already landed.",
+      "The request carries a precondition this API cannot evaluate: several or weak tags in `If-Match`, `If-None-Match` on a write, any precondition on a create, or a version on an entity without `audit`.",
+      "A Management API apply or rollback named a revision that is no longer current."
+    ],
+    "fix": "Read the row (or the descriptor) again, reapply your change, and resend it with the new `ETag` in `If-Match`.",
+    "violationCodes": [],
+    "guides": ["guides/write-data", "guides/apply-and-evolve"],
+    "needsProblemDetails": false
+  },
+  "precondition-required": {
+    "causes": [
+      "A Management API apply or rollback carried no `If-Match`."
+    ],
+    "fix": "Read the current revision and send it as `If-Match`.",
+    "violationCodes": [],
+    "guides": ["guides/apply-and-evolve"],
+    "needsProblemDetails": false,
+    "managementApiOnly": true
+  },
+  "idempotency-conflict": {
+    "causes": [
+      "An `Idempotency-Key` was reused for a different request."
+    ],
+    "fix": "Send a fresh key with a different request; reuse a key only to retry the identical request.",
+    "violationCodes": [],
+    "guides": ["guides/write-data", "guides/apply-and-evolve"],
+    "needsProblemDetails": false
+  },
+  "conflict": {
+    "causes": [
+      "A value another record already holds on a `unique` field.",
+      "A delete that a `ref` declaring `onDelete: \"restrict\"` refuses, because other records still point at the row."
+    ],
+    "fix": "Send a value no other record holds, or delete or repoint the records that reference this one, then retry.",
+    "violationCodes": ["unique", "referenced"],
+    "guides": ["guides/write-data", "guides/entities-and-fields", "guides/indexes"],
+    "needsProblemDetails": false
+  },
+  "destructive-change": {
+    "causes": [
+      "A Management API apply whose plan would discard data, sent without the destructive allowance."
+    ],
+    "fix": "Resend with an explicit destructive allowance, or send a descriptor that keeps what the plan would drop.",
+    "violationCodes": [],
+    "guides": ["guides/apply-and-evolve"],
+    "needsProblemDetails": false,
+    "managementApiOnly": true
+  },
+  "unauthenticated": {
+    "causes": [
+      "A credential was presented and cannot be used: an unknown, revoked or expired key, a wrong secret, or a key not issued for the requested tenant.",
+      "A request with no credential at all is not refused with this slug: it runs as an anonymous caller, and the rules decide."
+    ],
+    "fix": "Send a valid key in the header the `WWW-Authenticate` challenge names, `X-Alvo-Api-Key` by default.",
+    "violationCodes": [],
+    "guides": ["guides/authentication", "guides/handle-errors"],
+    "needsProblemDetails": false
+  },
+  "unreadable-request": {
+    "causes": [
+      "The web server refused the request before Alvo read it: a body over the server's request size limit (413), one arriving too slowly (408), or one whose framing broke (400)."
+    ],
+    "fix": "Send a different request: a smaller body, sent in one go, with valid framing.",
+    "violationCodes": [],
+    "guides": ["guides/write-data", "guides/handle-errors"],
+    "needsProblemDetails": true
+  },
+  "unsupported-media-type": {
+    "causes": [
+      "A request body was not declared as JSON, or carried no `Content-Type` at all, so nothing read it."
+    ],
+    "fix": "Send `Content-Type: application/json`. The fix is the header, not the body.",
+    "violationCodes": [],
+    "guides": ["guides/write-data", "guides/handle-errors"],
+    "needsProblemDetails": false
+  },
+  "internal": {
+    "causes": [
+      "An invariant Alvo itself relies on is broken. The answer carries no reason, by design."
+    ],
+    "fix": "Nothing in the request is at fault. The host's log has the exception and its stack trace.",
+    "violationCodes": [],
+    "guides": ["guides/handle-errors", "guides/production"],
+    "needsProblemDetails": true
+  },
+  "function-failed": {
+    "causes": [
+      "A CEL function failed while a write was evaluated: a host function threw, a built-in refused (an overflow, a result too long), or an argument did not fit its parameter's type. Nothing was written."
+    ],
+    "fix": "Check the function the detail names and the values the write passes to it; the host's own exception is in its log, never in the response.",
+    "violationCodes": [],
+    "guides": ["guides/custom-cel-functions", "guides/handle-errors"],
+    "needsProblemDetails": true
+  }
+}

@@ -1,0 +1,210 @@
+---
+title: Embed Alvo in ASP.NET Core
+description: Add Alvo to an existing ASP.NET Core app, so it serves its API next to your own endpoints from the same descriptor.
+sidebar:
+  order: 5
+---
+
+import { Code, Tabs, TabItem } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import JsonExcerpt from '../../../components/JsonExcerpt.astro';
+import projectReference from '../../../snippets/shell/embed-project-reference.sh?raw';
+import localFeed from '../../../snippets/shell/embed-local-feed.sh?raw';
+import nuget from '../../../snippets/shell/embed-nuget.sh?raw';
+import runSample from '../../../snippets/shell/embed-run-sample.sh?raw';
+import sampleHost from '../../../../../samples/MMLib.Alvo.Samples.EmbeddedHost/SampleHost.cs?raw';
+import appsettings from '../../../../../samples/MMLib.Alvo.Samples.EmbeddedHost/appsettings.json?raw';
+
+:::tip[What you will achieve]
+Alvo inside your own ASP.NET Core app: the generated API under a prefix of your choice, beside your own routes, driven by
+the same descriptor the Docker image serves. About fifteen minutes, starting from an existing web project on .NET 10.
+:::
+
+## Before you start
+
+- The .NET 10 SDK and an ASP.NET Core project (`dotnet new web` is enough), plus a clone of the repository: Alvo is
+  pre-v0.1 and **no package is on NuGet yet**.
+- A descriptor. The code below uses `examples/vehicle-registry`; [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/)
+  is the Docker-only way to try one first.
+
+## 1. Reference the packages
+
+Two packages are the minimum: `MMLib.Alvo`, the core (schema registry, Data API, rule engine, events, management),
+and one database driver, `MMLib.Alvo.Data.Sqlite` or `MMLib.Alvo.Data.PostgreSql`. The core never references a driver;
+the driver you add is the one you select in code. Every package is listed in the [C# API reference](/MMLib.Alvo/reference/csharp/).
+
+Today you either reference the projects in a clone or install from a local package feed you pack yourself;
+`dotnet add package` from NuGet works from v0.1.
+
+<Tabs>
+<TabItem label="Project reference (today)">
+
+Reference the projects in your clone directly. `ALVO_CLONE` is where you cloned the repository:
+
+<Code code={projectReference.trimEnd()} lang="sh" title="Terminal (in your project)" frame="terminal" />
+
+</TabItem>
+<TabItem label="Local package feed (today)">
+
+Pack the clone into a folder, register that folder as a package source in your project's `nuget.config` (so every
+later restore finds it), and install from it. The packages carry a pre-release version, hence `--prerelease`:
+
+<Code code={localFeed.trimEnd()} lang="sh" title="Terminal (in your project)" frame="terminal" />
+
+</TabItem>
+<TabItem label="NuGet (available from v0.1)">
+
+:::caution[Not published yet]
+These commands fail today: `MMLib.Alvo` is not on NuGet before v0.1. Use one of the other two tabs.
+:::
+
+<Code code={nuget.trimEnd()} lang="sh" title="Terminal (in your project)" frame="terminal" />
+
+</TabItem>
+</Tabs>
+
+## 2. Register Alvo
+
+The embedded sample, [`samples/MMLib.Alvo.Samples.EmbeddedHost`](https://github.com/Burgyn/MMLib.Alvo/tree/main/samples/MMLib.Alvo.Samples.EmbeddedHost),
+is a fleet-desk app that keeps its records in Alvo. Its registration is the pattern to copy. `AddAlvo` is the one entry
+point: `UseSqlite` selects the database, `FromDescriptor` supplies the descriptor, and `AddDataApi` mounts the generated
+API under `/api/alvo` so it never collides with the app's own routes. The last line registers a CEL function written in
+C#, which the descriptor's hooks may call.
+
+<SourceExcerpt code={sampleHost} from="builder.Services.AddAlvo(alvo => alvo" to="NormalizeVinSummary));" dropComments={true} title="SampleHost.cs" />
+
+There is no call to apply the descriptor: `AddAlvo` registers a hosted service that brings the schema up before the app
+starts serving, and `/health/ready` answers 200 once it has.
+
+The API keys come from configuration. The sample declares one dev key in `appsettings.json`, deliberately without a
+secret, and binds the section:
+
+<JsonExcerpt code={appsettings} pointer="/Alvo/Auth" title="appsettings.json" />
+
+<SourceExcerpt code={sampleHost} from="builder.Services.Configure<AlvoAuthOptions>" to="builder.Services.Configure<AlvoAuthOptions>" title="SampleHost.cs" />
+
+Alvo refuses to start without a secret of at least 32 characters, so the app cannot ship a working default credential.
+Supply it outside source control, as step 4 does with user secrets.
+
+## 3. Map the endpoints
+
+Mapping is a separate step, so the routes land exactly where your pipeline wants them:
+
+<SourceExcerpt code={sampleHost} from="private static void MapAlvoEndpoints" to="app.MapAlvoDataApi().WithTags" dropComments={true} title="SampleHost.cs" />
+
+`MapAlvoHealth` maps `/health/live` and `/health/ready` on their own. `MapAlvoDataApi` returns a convention builder
+over Alvo's generated data routes and nothing else, so you can attach your own rate limiting, telemetry, tags or an
+authorization policy to them, and none of it ever reaches the probes, which a container calls without a credential.
+
+## 4. Run it
+
+The sample runs from the clone. Give its dev key a secret, then start it:
+
+<Code code={runSample.trimEnd()} lang="sh" title="Terminal (in the clone)" frame="terminal" />
+
+It listens on `http://localhost:5199` and keeps a SQLite file beside itself. The sample's README shows a request to each
+of its two surfaces under [*Try both*](https://github.com/Burgyn/MMLib.Alvo/tree/main/samples/MMLib.Alvo.Samples.EmbeddedHost#try-both).
+
+## Add the dashboard (optional)
+
+The admin dashboard and the schema assistant are three more packages: `MMLib.Alvo.Admin` (the dashboard, a
+server-interactive Blazor app), `MMLib.Alvo.Identity` (local accounts and the cookie sign-in) and `MMLib.Alvo.Ai` (the
+assistant). The embedded sample does not use them; the standalone image's
+[`AlvoHost.cs`](https://github.com/Burgyn/MMLib.Alvo/blob/main/src/MMLib.Alvo.Host/AlvoHost.cs) is the composition to
+copy. Its registration, beside `AddAlvo`:
+
+```csharp title="Program.cs"
+builder.Services.AddAlvoIdentity(
+    store => store.UseSqlite(builder.Configuration.GetConnectionString("AlvoIdentity")),
+    identity => builder.Configuration.GetSection(AlvoIdentity.ConfigurationSection).Bind(identity));
+builder.Services.AddAlvoIdentityCookieSignIn(AlvoAdmin.SignInPath);
+builder.Services.AddAlvoAdmin(admin =>
+    builder.Configuration.GetSection(AlvoAdmin.ConfigurationSection).Bind(admin));
+builder.Services.AddAlvoAi();
+builder.Services.AddScoped<IAlvoAdminCallerResolver, AdminCallerResolver>();
+```
+
+The dashboard references neither the identity package nor the core, so the host fills the one port between them,
+`IAlvoAdminCallerResolver`, which turns the signed-in operator into the caller Alvo authorizes. Over
+`MMLib.Alvo.Identity` it asks the identity package's own resolver, registered under `AlvoIdentity.ResolverKey`:
+
+```csharp title="AdminCallerResolver.cs"
+sealed class AdminCallerResolver(IServiceProvider services) : IAlvoAdminCallerResolver
+{
+    public ValueTask<AlvoPrincipal?> ResolveAsync(ClaimsPrincipal signedIn, CancellationToken cancellationToken)
+    {
+        var subject = signedIn.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (subject is not { Length: > 0 })
+        {
+            return ValueTask.FromResult<AlvoPrincipal?>(null);
+        }
+
+        var resolver = services.GetRequiredKeyedService<IAlvoContextResolver>(AlvoIdentity.ResolverKey);
+        return resolver.ResolveAsync(subject, requestedTenant: null, cancellationToken);
+    }
+}
+```
+
+`MapAlvoAdmin` maps the dashboard's components and nothing else. The middleware it needs is yours to order, before it:
+
+```csharp title="Program.cs"
+app.MapStaticAssets();
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseAntiforgery();
+
+app.MapAlvoAdmin();
+```
+
+Two pieces stay with the host. The sign-in, sign-out and set-password screens post to `AlvoAdmin.SignInEndpoint`,
+`AlvoAdmin.SignOutEndpoint` and `AlvoAdmin.SetPasswordEndpoint`, and no package maps those: map them over `AlvoSignIn`,
+validating the antiforgery token in each, as the standalone host's
+[`AlvoAdminSignIn.cs`](https://github.com/Burgyn/MMLib.Alvo/blob/main/src/MMLib.Alvo.Host/Internal/AlvoAdminSignIn.cs)
+does. A host with its own users skips `MMLib.Alvo.Identity` and implements `IAlvoAdminCallerResolver` over its own
+store instead. The packages' entry points are in the C# reference:
+[`MMLib.Alvo.Admin`](/MMLib.Alvo/reference/csharp/mmlib-alvo-admin/) and
+[`MMLib.Alvo.Identity`](/MMLib.Alvo/reference/csharp/mmlib-alvo-identity/).
+
+## What your host still owns
+
+Alvo adds no authentication, authorization or routing middleware on your behalf. Three things stay yours:
+
+- **Authentication of your own users.** Alvo's generated API authenticates its own API keys. Your app's cookie or token
+  users reach the same data through your own endpoints, which pass Alvo the caller and let the descriptor's rules
+  decide: [Use your own authentication](/MMLib.Alvo/guides/own-authentication/).
+- **Error rendering.** The sample deliberately does not call `AddAlvoProblemDetails()`, because an embedded host owns
+  the shape of its error responses. Without it, Alvo's endpoints still answer their own refusals as problem documents,
+  but three problem types are only produced with it: `unreadable-request`, `internal` and `function-failed`
+  ([Problem types](/MMLib.Alvo/reference/problem-types/)).
+- **Your own endpoints.** They call Alvo in process through `IAlvoData`, with no HTTP round trip and no second
+  authorization model: [Call Alvo from your endpoints](/MMLib.Alvo/guides/call-from-endpoints/).
+
+:::caution[Not in this build]
+A host cannot yet publish its own signed-in user to the generated `/api/alvo` routes: they authenticate the API-key
+header only, so your users go through your own endpoints. Do not point `Alvo:Auth:HeaderName` at `Cookie` to get
+around it; Alvo refuses that at startup, because it would make every generated route a cross-site request forgery
+target. The seam is planned for a later phase ([#210](https://github.com/Burgyn/MMLib.Alvo/issues/210)).
+:::
+
+## What can go wrong
+
+| Status | Problem type | When | Fix | Returned by |
+|---|---|---|---|---|
+| 401 | [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | An API key was sent to `/api/alvo` and cannot be used: a wrong secret, or a role the descriptor does not declare. | Use the secret you configured; give the key only roles in `auth.roles` or built in. | every host |
+
+If the app stops at startup instead, the message names the option it refused, such as a dev key with no secret, and
+what to set.
+
+## Reference
+
+- Registration: [`MMLib.Alvo`](/MMLib.Alvo/reference/csharp/mmlib-alvo/),
+  [`MMLib.Alvo.Data.Sqlite`](/MMLib.Alvo/reference/csharp/mmlib-alvo-data-sqlite/),
+  [`MMLib.Alvo.Data.PostgreSql`](/MMLib.Alvo/reference/csharp/mmlib-alvo-data-postgresql/).
+- Configuration: [`Alvo:Auth`, `Alvo:Api` and every other key](/MMLib.Alvo/reference/configuration/).
+- The rules every extending package follows:
+  [`docs/architecture/extensibility.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/extensibility.md).
+
+## Next
+
+**[Call Alvo from your endpoints](/MMLib.Alvo/guides/call-from-endpoints/)**: read and write Alvo's data from your own
+minimal-API routes, under your users' identity and the descriptor's rules.

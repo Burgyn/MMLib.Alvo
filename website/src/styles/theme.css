@@ -1,0 +1,448 @@
+/* Alvo docs theme over the admin design tokens.
+   The tokens come from src/MMLib.Alvo.Admin/wwwroot/alvo.css through
+   scripts/sync-tokens.mjs (alvo-tokens.generated.css). They resolve through
+   light-dark() and the color-scheme the tokens set from :root[data-theme], the
+   attribute Starlight's theme script sets, so one declaration serves both themes.
+   No hex colour here except --alvo-control-border (spec §9). */
+
+:root {
+  --sl-font: var(--font-public-sans);
+  --sl-font-mono: var(--font-ibm-plex-mono);
+  --sl-content-width: 47.5rem;
+  --sl-nav-height: 3.5rem;
+  --sl-color-accent-low: color-mix(in srgb, var(--accent) 14%, var(--bg));
+  --sl-color-accent: var(--accent);
+  --sl-color-accent-high: var(--accentInk);
+  --sl-color-white: var(--text);
+  --sl-color-gray-1: var(--text);
+  --sl-color-gray-2: color-mix(in srgb, var(--text) 80%, var(--dim));
+  --sl-color-gray-3: var(--dim);
+  --sl-color-gray-4: var(--faint);
+  --sl-color-gray-5: var(--border2);
+  --sl-color-gray-6: var(--panel2);
+  --sl-color-gray-7: var(--panel);
+  --sl-color-black: var(--bg);
+  --alvo-control-border: light-dark(#858b9b, #7a8099);
+  --alvo-gutter: clamp(16px, 3vw, 32px);
+
+  --alvo-code-border: light-dark(var(--border2), var(--border));
+  --sl-color-text: var(--text);
+  --sl-color-text-accent: var(--accentInk);
+  --sl-color-text-invert: var(--accentText);
+  --sl-color-bg: var(--bg);
+  --sl-color-bg-nav: var(--bg);
+  --sl-color-bg-sidebar: var(--bg);
+  --sl-color-bg-inline-code: var(--panel2);
+  --sl-color-bg-accent: var(--accent);
+  --sl-color-hairline: var(--border);
+  --sl-color-hairline-light: var(--border);
+  --sl-color-hairline-shade: var(--border);
+  --sl-sidebar-width: 17rem;
+  --sl-menu-button-size: 2.75rem;
+  --sl-mobile-toc-height: 3.5rem;
+  --sl-text-h1: 2rem;
+  --sl-text-h2: 1.5rem;
+  --sl-text-h3: 1.25rem;
+  --sl-text-h4: 1.125rem;
+}
+
+@media (min-width: 50em) {
+  :root {
+    --sl-nav-pad-x: var(--alvo-gutter);
+    --sl-text-h1: 2.5rem;
+    --sl-text-h2: 1.625rem;
+  }
+}
+
+@media (min-width: 72rem) {
+  :root {
+    --sl-mobile-toc-height: 0rem;
+  }
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+}
+
+/* Measure (U-S9): prose reads at 68ch; code frames and tables take the full content width. */
+.sl-markdown-content :is(p, ul, ol, blockquote, dl):not(:where(.not-content *)) { max-width: 68ch; }
+.sl-markdown-content code { font-variant-ligatures: none; }
+
+/* Headings. */
+h1#_top {
+  margin-top: 0.5rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.12;
+}
+.sl-markdown-content :is(h2, h3, h4):not(:where(.not-content *)) {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+.sl-markdown-content :not(pre) > code:not(:where(.not-content *)) {
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  font-size: 0.875em;
+}
+
+/* Focus (U-M7): the admin's focus ring (--focus-ring) on every focusable element. */
+:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+site-search button[data-open-modal] {
+  border: 1px solid var(--alvo-control-border);
+  min-height: 44px;
+}
+site-search button[data-open-modal]:focus-visible {
+  box-shadow: 0 0 0 3px var(--accentSoft);
+  border-color: var(--accent);
+}
+
+/* Link affordance (U-C3): prose links are underlined; cards and buttons are not. */
+.sl-markdown-content a:not(.sl-link-button, .card):not(:where(.not-content *)) {
+  color: var(--accentInk);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+.sl-markdown-content a:not(.sl-link-button, .card):not(:where(.not-content *)):hover { text-decoration-thickness: 2px; }
+.sl-markdown-content :is(.card, .sl-link-button) {
+  text-decoration: none;
+  transition: border-color 0.12s, background-color 0.12s;
+}
+.sl-markdown-content :is(.card, .sl-link-button):hover {
+  border-color: var(--alvo-control-border);
+  background-color: var(--panel);
+}
+
+/* Targets (U-S11): 44px for every header, footer, button and pagination control. */
+:is(.sl-link-button, starlight-theme-select select, site-search button[data-open-modal], .pagination-links a, footer a, .social-icons a) {
+  min-height: 44px;
+  min-width: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+/* Starlight shows and hides these with its own utility classes, so only their size is set here. */
+:is(.sl-menu-button, site-search button[data-close-modal]) {
+  min-height: 44px;
+  min-width: 44px;
+  align-items: center;
+}
+@media (pointer: coarse), (max-width: 50rem) {
+  :is(nav.sidebar a, nav.sidebar summary, starlight-toc a, mobile-starlight-toc a) {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+}
+
+/* Theme control (U-M6): a 44px button-like select. */
+starlight-theme-select label {
+  color: var(--dim);
+  border-radius: var(--radius-sm);
+}
+starlight-theme-select label:hover { color: var(--text); background-color: var(--panel2); }
+starlight-theme-select select {
+  min-height: 44px;
+  border-radius: var(--radius-sm);
+  margin-inline: 0;
+  font-weight: 500;
+}
+
+/* The mobile menu button (U-M4): a 44px icon button, not a floating disc. */
+.sl-menu-button,
+:root[data-theme='light'] .sl-menu-button {
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background-color: transparent;
+  color: var(--text);
+  box-shadow: none;
+  padding: 0.6875rem;
+}
+.sl-menu-button:has(~ :popover-open),
+:root[data-theme='light'] .sl-menu-button:has(~ :popover-open) {
+  background-color: transparent;
+  color: var(--text);
+}
+.sl-menu-button:hover,
+:root[data-theme='light'] .sl-menu-button:hover {
+  background-color: var(--panel2);
+}
+
+/* Code (U-S6): frames take --codeBg through Expressive Code styleOverrides in astro.config.mjs. */
+
+/* Tables (U-M5): every Markdown table scrolls inside its own frame. */
+.alvo-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.alvo-table-wrap > table {
+  display: table;
+  min-width: 560px;
+  width: 100%;
+  margin: 0;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+.alvo-table-wrap :is(th, td) {
+  padding: 10px 14px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+}
+.alvo-table-wrap thead :is(th, td) {
+  border-top: 0;
+  background-color: var(--panel2);
+  font-weight: 600;
+}
+
+/* Asides (U-C7): the admin's semantic states. */
+.starlight-aside {
+  border: 1px solid var(--sl-color-asides-border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  color: var(--text);
+}
+.starlight-aside__title { font-size: 1rem; font-weight: 700; }
+.starlight-aside--note {
+  --sl-color-asides-text-accent: var(--neutral-fg);
+  --sl-color-asides-border: var(--neutral-fg);
+  background-color: var(--neutral-bg);
+}
+.starlight-aside--tip {
+  --sl-color-asides-text-accent: var(--ok-fg);
+  --sl-color-asides-border: var(--ok-fg);
+  background-color: var(--ok-bg);
+}
+.starlight-aside--caution {
+  --sl-color-asides-text-accent: var(--warn-fg);
+  --sl-color-asides-border: var(--warn-fg);
+  background-color: var(--warn-bg);
+}
+.starlight-aside--danger {
+  --sl-color-asides-text-accent: var(--danger-fg);
+  --sl-color-asides-border: var(--danger-fg);
+  background-color: var(--danger-bg);
+}
+
+/* starlight-openapi's "required" marker reads --sl-color-red, which misses AA on our panels; the danger tone passes. */
+.sl-openapi-key-name { --sl-color-red: var(--danger-fg); }
+
+/* Status (U-S8): the one status-colour map, driven by statusTone() in src/lib/status.ts. */
+.alvo-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  font: 600 var(--text-sm)/1.8 var(--font-ibm-plex-mono);
+}
+.alvo-status--ok { color: var(--ok-fg); background: var(--ok-bg); }
+.alvo-status--neutral { color: var(--neutral-fg); background: var(--neutral-bg); }
+.alvo-status--warn { color: var(--warn-fg); background: var(--warn-bg); }
+.alvo-status--danger { color: var(--danger-fg); background: var(--danger-bg); }
+
+/* Sidebar (U-S10): Starlight's pane is already fixed from under the header to the bottom of the
+   viewport, scrolls on its own and draws its border the full height; ux-check asserts it. */
+nav.sidebar .sidebar-content { padding: 20px 12px 40px 16px; gap: 0.5rem; }
+nav.sidebar ul ul { margin: 0 0 8px; padding-inline-start: 10px; }
+nav.sidebar ul ul li { margin: 0; padding: 0; border: 0; }
+nav.sidebar .top-level > li + li { margin-top: 2px; }
+nav.sidebar summary {
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: var(--radius-xs);
+}
+nav.sidebar summary .large,
+nav.sidebar .top-level > li > a.large {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text);
+}
+nav.sidebar summary .caret { color: var(--faint); }
+nav.sidebar a {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 4px 10px 4px 12px;
+  line-height: 1.35;
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--dim);
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+}
+nav.sidebar ul ul a { border-inline-start: 2px solid var(--border); }
+nav.sidebar .top-level > li > a.large { padding-inline-start: 10px; border-radius: var(--radius-xs); }
+nav.sidebar :is(a, summary):hover { color: var(--text); background-color: var(--panel2); }
+nav.sidebar a[aria-current='page'],
+nav.sidebar a[aria-current='page']:hover,
+nav.sidebar a[aria-current='page']:focus {
+  color: var(--accentInk);
+  background-color: var(--accentSoft);
+  border-inline-start-color: var(--accent);
+  font-weight: 600;
+}
+@media (max-width: 50rem) {
+  nav.sidebar .sidebar-content { padding: 8px var(--alvo-gutter) 32px; }
+  nav.sidebar :is(summary .large, a) { font-size: 0.9375rem; }
+}
+@media (pointer: coarse), (max-width: 50rem) {
+  nav.sidebar :is(a, summary) { min-height: 44px; }
+}
+
+/* The mobile drawer's preferences row (GitHub + theme) sits on top, as bordered 44px buttons. */
+nav.sidebar .sidebar-content > .md\:sl-hidden { order: -1; }
+.mobile-preferences {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 0 16px;
+  border-top: 0;
+  border-bottom: 1px solid var(--border);
+}
+.mobile-preferences .social-icons { padding: 0; margin: 0; }
+.mobile-preferences .social-icons a,
+.mobile-preferences starlight-theme-select label {
+  justify-content: center;
+  width: 100%;
+  margin: 0;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+.mobile-preferences .social-icons a { min-height: 44px; text-decoration: none; }
+.mobile-preferences .social-icons a::after { content: 'GitHub' / ''; margin-inline-start: 8px; font-weight: 600; }
+/* The options read Auto / Light / Dark (Starlight's strings); only this drawer shows a visible "Theme:". */
+.mobile-preferences starlight-theme-select label { position: relative; }
+.mobile-preferences starlight-theme-select label::before {
+  content: 'Theme:' / '';
+  position: absolute;
+  inset-inline-start: 0;
+  width: 50%;
+  padding-inline-end: 4px;
+  text-align: end;
+  font-weight: 600;
+  color: var(--dim);
+  pointer-events: none;
+}
+.mobile-preferences starlight-theme-select select {
+  width: 100%;
+  padding-inline: calc(50% + 2px) 32px;
+  font-weight: 600;
+  text-align: start;
+}
+.mobile-preferences starlight-theme-select .label-icon { display: none; }
+.mobile-preferences starlight-theme-select .caret { inset-inline-end: 12px; width: 14px; height: 14px; font-size: 14px; }
+
+/* Table of contents: 32px rows with a rail on desktop (≥ 24px, WCAG 2.5.8). */
+.right-sidebar { border-inline-start: 0; }
+.right-sidebar-panel { padding: 2.25rem 20px 40px 8px; }
+starlight-toc h2 {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text);
+}
+starlight-toc ul ul { padding: 0; }
+starlight-toc a {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  padding-block: 2px;
+  border-inline-start: 2px solid var(--border);
+  border-radius: 0;
+  font-size: var(--text-base);
+  color: var(--dim);
+}
+starlight-toc a:hover { color: var(--text); }
+starlight-toc a[aria-current='true'] {
+  color: var(--accentInk);
+  border-inline-start-color: var(--accent);
+  font-weight: 600;
+}
+
+/* Mobile "On this page". */
+mobile-starlight-toc nav { border-top: 0; border-bottom: 1px solid var(--border); }
+mobile-starlight-toc summary {
+  border-bottom: 0;
+  padding-inline: var(--alvo-gutter);
+  font-size: var(--text-base);
+}
+mobile-starlight-toc .toggle {
+  min-height: 40px;
+  border-color: var(--border);
+  border-radius: var(--radius-sm);
+  background-color: var(--panel);
+  font-weight: 600;
+}
+mobile-starlight-toc .display-current { color: var(--faint); }
+
+/* Footer and pagination: the design's cards. */
+.pagination-links a {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: none;
+  color: var(--faint);
+  padding: 14px 18px;
+}
+.pagination-links a:hover { border-color: var(--alvo-control-border); background-color: var(--panel); }
+.pagination-links .link-title { font-size: 1rem; font-weight: 600; color: var(--text); }
+footer .meta a { color: var(--dim); gap: 8px; }
+
+/* Content gutters. */
+.content-panel { padding-inline: var(--alvo-gutter); }
+.content-panel + .content-panel { border-top: 0; padding-top: 0; }
+
+/* Banner (D-S15, U-C1): one line on docs pages, linking to the roadmap. */
+.alvo-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  column-gap: 10px;
+  min-height: 40px;
+  padding: 0 var(--alvo-gutter);
+  border-bottom: 1px solid var(--border);
+  background-color: var(--warn-bg);
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  text-align: center;
+}
+.alvo-banner::before {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--warn-fg);
+}
+.alvo-banner a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.alvo-banner__short { display: none; }
+@media (max-width: 47.99rem) {
+  .alvo-banner::before { display: none; }
+  .alvo-banner__long { display: none; }
+  .alvo-banner__short { display: inline; }
+}
+
+/* Mermaid diagrams: rehype-mermaid-theme emits a light and a dark image; the site's theme shows one. */
+.alvo-mermaid { margin: 1.5rem 0; overflow-x: auto; }
+.alvo-mermaid:focus-visible { outline: 2px solid var(--sl-color-accent); outline-offset: 2px; }
+.alvo-mermaid__img { display: block; width: 100%; height: auto; max-width: none; }
+.alvo-mermaid__img--dark { display: none; }
+:root[data-theme='dark'] .alvo-mermaid__img--dark { display: block; }
+:root[data-theme='dark'] .alvo-mermaid__img--light { display: none; }

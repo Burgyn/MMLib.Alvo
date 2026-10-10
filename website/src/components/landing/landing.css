@@ -1,0 +1,557 @@
+/* The landing page (design/Main.dc.html is the layout authority). Tokens only: every colour comes from
+   alvo-tokens.generated.css or theme.css. Breakpoints follow the design: < 1200 one column, < 1024 the
+   hero panes stack, < 768 the phone layout, < 480 full-width CTAs. */
+
+/* The splash page hands its whole width to the landing; Starlight's title panel is not used (the hero
+   carries the page's only h1, with id _top for the skip link). */
+main:has(.alvo-landing) .content-panel:first-child { display: none; }
+main:has(.alvo-landing) .content-panel { padding: 0; }
+main:has(.alvo-landing) .sl-container { max-width: none; margin: 0; }
+main:has(.alvo-landing) .sl-markdown-content > footer,
+main:has(.alvo-landing) .content-panel > .sl-container > footer { display: none; }
+
+.alvo-landing {
+  --alvo-measure: 1264px;
+  color: var(--text);
+  font-size: 1rem;
+  line-height: 1.55;
+}
+.alvo-landing :where(h1, h2, h3, p, ul, ol, figure) { margin: 0; max-width: none; }
+.alvo-landing :where(ul, ol) { padding: 0; list-style: none; }
+.alvo-landing :where(li + li) { margin-top: 0; }
+:where(.alvo-landing) a { text-decoration: none; color: inherit; }
+.alvo-landing :where(h1, h2, h3) { color: var(--text); text-wrap: balance; }
+.alvo-landing h2 { font-size: clamp(26px, 3.2vw, 40px); font-weight: 800; letter-spacing: -0.025em; line-height: 1.15; }
+.alvo-landing h3 { font-size: 20px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.3; }
+
+.alvo-wrap {
+  max-width: var(--alvo-measure);
+  margin-inline: auto;
+  padding-inline: var(--alvo-gutter);
+}
+.alvo-band {
+  border-block: 1px solid var(--border);
+  background: var(--panel);
+}
+.alvo-eyebrow {
+  font-family: var(--font-ibm-plex-mono);
+  font-size: 13px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accentInk);
+}
+.alvo-lede { font-size: 18px; color: var(--dim); }
+.alvo-landing .alvo-prose-link {
+  color: var(--accentInk);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.alvo-landing .alvo-prose-link:hover { text-decoration-thickness: 2px; }
+.alvo-textlink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accentInk);
+}
+.alvo-landing .alvo-textlink:hover { text-decoration: underline; text-underline-offset: 3px; }
+.alvo-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-xs);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  background: var(--accentSoft);
+  color: var(--accentInk);
+}
+.alvo-badge--mono { font-family: var(--font-ibm-plex-mono); font-weight: 500; }
+.alvo-badge--warn { background: var(--warn-bg); color: var(--warn-fg); }
+
+/* Buttons. */
+.alvo-cta-row { display: flex; flex-wrap: wrap; gap: 12px; }
+.alvo-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 22px;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  transition: background-color 0.12s, border-color 0.12s, filter 0.12s;
+}
+.alvo-btn--primary { background: var(--accent); color: var(--accentText); }
+.alvo-btn--primary:hover { filter: brightness(1.07); }
+.alvo-btn--ghost { border: 1px solid var(--border2); color: var(--text); font-weight: 600; }
+.alvo-btn--ghost:hover { background: var(--panel2); border-color: var(--alvo-control-border); }
+.alvo-btn svg { flex: none; }
+
+/* Code inside landing panes: Expressive Code without its own frame. */
+.alvo-landing .expressive-code {
+  --ec-codePadBlk: 0px;
+  --ec-codePadInl: 0px;
+  margin: 0;
+}
+.alvo-landing .expressive-code pre {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.alvo-landing .expressive-code pre > code { font-size: 13px; line-height: 1.55; }
+
+/* Hero. */
+.alvo-hero { padding-top: 56px; }
+.alvo-hero__intro {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 440px);
+  align-items: end;
+  gap: 28px 56px;
+}
+.alvo-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-pill);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--dim);
+  transition: border-color 0.12s, color 0.12s;
+}
+.alvo-landing .alvo-pill:hover { border-color: var(--alvo-control-border); color: var(--text); }
+.alvo-pill__dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--warn-fg); }
+.alvo-landing .alvo-hero h1 {
+  margin-top: 20px;
+  font-size: clamp(40px, 6vw, 64px);
+  font-weight: 800;
+  line-height: 1.04;
+  letter-spacing: -0.03em;
+}
+.alvo-accent { color: var(--accent); }
+.alvo-hero__lead {
+  margin-top: 18px;
+  max-width: 640px;
+  font-size: 20px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+.alvo-hero__actions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+.alvo-clone__label { margin-bottom: 6px; font-size: 13px; color: var(--faint); }
+.alvo-clone__box {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  padding-inline-start: 14px;
+  border: 1px solid var(--alvo-code-border);
+  border-radius: var(--radius-sm);
+  background: var(--codeBg);
+  font-family: var(--font-ibm-plex-mono);
+  font-size: 13px;
+}
+.alvo-clone__box code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  color: var(--text);
+}
+.alvo-clone__prompt { color: var(--faint); }
+.alvo-copy {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+.alvo-copy:hover { color: var(--text); background: var(--panel2); }
+.alvo-copy[data-copied] { color: var(--ok-fg); }
+.alvo-copy .alvo-copy__done { display: none; }
+.alvo-copy[data-copied] .alvo-copy__done { display: block; }
+.alvo-copy[data-copied] .alvo-copy__idle { display: none; }
+
+.alvo-hero__card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  margin-top: 32px;
+  border: 1px solid var(--alvo-code-border);
+  border-radius: var(--radius-lg);
+  background: var(--codeBg);
+  box-shadow: var(--shadow-pop);
+}
+.alvo-pane { min-width: 0; }
+.alvo-pane + .alvo-pane { border-inline-start: 1px solid var(--alvo-code-border); }
+.alvo-pane__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--alvo-code-border);
+  font-family: var(--font-ibm-plex-mono);
+  font-size: 13px;
+  color: var(--faint);
+}
+.alvo-pane__file { color: var(--text); }
+.alvo-pane__end { margin-inline-start: auto; display: inline-flex; align-items: center; gap: 6px; }
+.alvo-pane__ok { color: var(--ok-fg); }
+.alvo-pane__body { padding: 16px 18px 18px; }
+.alvo-pane__body .alvo-exchange + .alvo-exchange {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--alvo-code-border);
+}
+.alvo-exchange--compact .alvo-exchange__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 8px 0 6px;
+}
+.alvo-exchange__request { position: relative; }
+.alvo-exchange__note {
+  font-family: var(--font-ibm-plex-mono);
+  font-size: 13px;
+  color: var(--faint);
+}
+.alvo-exchange__note--request { position: absolute; top: 0; right: 0; line-height: 1.55; }
+.alvo-exchange--compact .alvo-status { font-size: 13px; }
+
+/* The descriptor → API connector: the seam between the panes, an accent line that sweeps once. */
+.alvo-hero__connector {
+  position: absolute;
+  top: 40px;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-1px);
+  background: linear-gradient(to bottom, transparent, var(--accent) 50%, transparent);
+  background-size: 100% 200%;
+  background-position: 0 100%;
+  opacity: 0.55;
+  pointer-events: none;
+}
+.alvo-hero__chip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--accentBorder);
+  border-radius: var(--radius-pill);
+  background: var(--codeBg);
+  color: var(--accent);
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .alvo-hero__connector { animation: alvo-sweep 1.6s ease-out 0.4s 1 both; }
+  @keyframes alvo-sweep {
+    from { background-position: 0 100%; }
+    to { background-position: 0 -100%; }
+  }
+}
+
+.alvo-proof {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 22px 0 8px;
+  font-size: 14px;
+  color: var(--dim);
+}
+.alvo-proof li { display: inline-flex; align-items: center; gap: 8px; }
+.alvo-proof .alvo-proof__sep { color: var(--faint); }
+
+/* How it works: a 4/8 split with a numbered rail. */
+.alvo-how { margin-top: 72px; }
+.alvo-how__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
+  gap: 40px 64px;
+  padding-block: 80px;
+}
+.alvo-how h2 { margin: 12px 0 16px; }
+.alvo-rail li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 20px;
+  padding-bottom: 32px;
+}
+.alvo-rail li:last-child { padding-bottom: 0; }
+.alvo-rail li:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 21px;
+  top: 44px;
+  bottom: 0;
+  width: 2px;
+  background: var(--border2);
+}
+.alvo-rail__n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--accentBorder);
+  border-radius: var(--radius-pill);
+  background: var(--accentSoft);
+  color: var(--accentInk);
+  font-family: var(--font-ibm-plex-mono);
+  font-size: 14px;
+  font-weight: 600;
+}
+.alvo-rail__body { min-width: 0; padding-top: 8px; }
+.alvo-rail__body p { margin: 6px 0 12px; color: var(--dim); }
+.alvo-chip {
+  display: block;
+  padding: 10px 14px;
+  border: 1px solid var(--alvo-code-border);
+  border-radius: var(--radius-sm);
+  background: var(--codeBg);
+  font-family: var(--font-ibm-plex-mono);
+  font-size: 13px;
+  color: var(--text);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.alvo-chip__verb { color: var(--accentInk); font-weight: 600; }
+
+/* Differentiators: four cards, each a proof instead of an icon. */
+.alvo-diff { padding-block: 88px 24px; }
+.alvo-diff > .alvo-wrap > h2 { max-width: 760px; margin-bottom: 12px; }
+.alvo-diff .alvo-lede { max-width: 640px; margin-bottom: 36px; }
+.alvo-diff__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.alvo-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 26px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  transition: border-color 0.12s;
+}
+.alvo-card:hover { border-color: var(--alvo-control-border); }
+.alvo-card > p { color: var(--dim); }
+.alvo-card__title { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.alvo-card--planned { border-style: dashed; border-color: var(--border2); background: transparent; }
+.alvo-card__fine { font-size: 14px; color: var(--faint); }
+.alvo-card .alvo-textlink { margin-top: auto; }
+.alvo-proofbox {
+  margin-top: 6px;
+  border: 1px solid var(--alvo-code-border);
+  border-radius: var(--radius-sm);
+  background: var(--codeBg);
+  overflow: hidden;
+}
+.alvo-proofbox > * { padding: 10px 14px; }
+.alvo-proofbox > * + * { border-top: 1px dashed var(--alvo-code-border); }
+.alvo-proofbox__caption { font-size: 13px; color: var(--faint); font-family: var(--font-ibm-plex-mono); }
+.alvo-proofbox .alvo-exchange--compact .alvo-exchange__status { margin: 8px 0; }
+.alvo-proofline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+.alvo-proofline code {
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  font-family: var(--font-ibm-plex-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.alvo-proofline__verb { color: var(--accentInk); font-weight: 600; }
+.alvo-proofline .alvo-status { font-size: 13px; }
+
+/* Two ways to run it. */
+.alvo-ways { padding-block: 72px 88px; }
+.alvo-split-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px 64px;
+  align-items: end;
+  margin-bottom: 32px;
+}
+.alvo-ways__grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 20px; }
+.alvo-way {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  overflow: hidden;
+}
+.alvo-way__head { padding: 24px 24px 18px; }
+.alvo-way__head p { margin-top: 8px; color: var(--dim); }
+.alvo-way__code {
+  margin-top: auto;
+  padding: 16px 24px 20px;
+  border-top: 1px solid var(--alvo-code-border);
+  background: var(--codeBg);
+}
+.alvo-way__code .expressive-code pre { overflow-x: auto; }
+
+/* Dashboard. */
+.alvo-dash .alvo-wrap { padding-block: 80px; }
+.alvo-dash h2 { margin-top: 12px; }
+.alvo-checks { display: grid; gap: 10px; color: var(--dim); }
+.alvo-checks li { display: flex; gap: 10px; }
+.alvo-checks svg { flex: none; margin-top: 4px; color: var(--accentInk); }
+.alvo-shot {
+  position: relative;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-pop);
+  background: var(--bg);
+}
+.alvo-shot img { display: block; width: 100%; height: auto; }
+.alvo-landing figcaption { margin-top: 12px; font-size: 14px; color: var(--faint); }
+
+/* Theme-paired screenshots: the site's theme is an attribute, not the OS preference, so each theme's
+   picture is shown by the attribute (a lazy image that is not displayed is not fetched). */
+.alvo-landing .alvo-themed--dark { display: none; }
+:root[data-theme='dark'] .alvo-landing .alvo-themed--dark { display: block; }
+:root[data-theme='dark'] .alvo-landing .alvo-themed--light { display: none; }
+
+/* Agent-first. */
+.alvo-agent { padding-block: 88px; }
+.alvo-agent__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: 40px 56px;
+  align-items: center;
+}
+.alvo-agent h2 { margin: 12px 0 16px; }
+.alvo-agent .alvo-lede { margin-bottom: 24px; }
+.alvo-numbered { display: grid; gap: 14px; }
+.alvo-numbered li { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; }
+.alvo-numbered__n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-xs);
+  background: var(--accentSoft);
+  color: var(--accentInk);
+  font-family: var(--font-ibm-plex-mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+.alvo-agent .alvo-textlink { margin-top: 12px; font-size: 1rem; }
+.alvo-codecard {
+  min-width: 0;
+  border: 1px solid var(--alvo-code-border);
+  border-radius: var(--radius-lg);
+  background: var(--codeBg);
+  overflow: hidden;
+}
+
+/* Closing CTA: the band is dark in both themes, so its tokens resolve through a dark color-scheme. */
+.alvo-close { padding-bottom: 88px; }
+.alvo-cta {
+  color-scheme: dark;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  padding: clamp(28px, 5vw, 56px) clamp(20px, 4.5vw, 48px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--codeBg);
+  color: var(--text);
+}
+.alvo-cta__copy { flex: 1 1 460px; min-width: 0; }
+.alvo-landing .alvo-cta h2 { color: var(--text); font-size: clamp(26px, 3vw, 40px); }
+.alvo-cta p { margin-top: 12px; max-width: 620px; font-size: 18px; color: var(--dim); }
+
+.alvo-footer { border-top: 1px solid var(--border); }
+.alvo-footer__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px 40px;
+  padding-block: 32px 40px;
+  font-size: 14px;
+  color: var(--dim);
+}
+.alvo-footer__brand { display: inline-flex; align-items: center; gap: 10px; }
+.alvo-footer__links { display: flex; flex-wrap: wrap; gap: 0 4px; }
+.alvo-footer__links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 10px;
+  border-radius: var(--radius-xs);
+}
+.alvo-landing .alvo-footer__links a:hover { color: var(--text); background: var(--panel2); }
+.alvo-footer__meta { margin-inline-start: auto; color: var(--faint); }
+
+@media (max-width: 1199px) {
+  .alvo-hero__intro,
+  .alvo-how__grid,
+  .alvo-ways__grid,
+  .alvo-agent__grid { grid-template-columns: minmax(0, 1fr); }
+  .alvo-hero__actions { max-width: 560px; }
+}
+@media (max-width: 1023px) {
+  .alvo-hero__card,
+  .alvo-split-head { grid-template-columns: minmax(0, 1fr); }
+  .alvo-pane + .alvo-pane { border-inline-start: 0; border-top: 1px solid var(--alvo-code-border); }
+  .alvo-hero__connector,
+  .alvo-hero__chip { display: none; }
+}
+@media (max-width: 767px) {
+  .alvo-hero { padding-top: 32px; }
+  .alvo-diff__grid { grid-template-columns: minmax(0, 1fr); }
+  .alvo-proof { justify-content: flex-start; }
+  .alvo-proof .alvo-proof__sep { display: none; }
+  .alvo-pane__note,
+  .alvo-exchange__note--request { display: none; }
+  .alvo-how__grid, .alvo-dash .alvo-wrap { padding-block: 56px; }
+  .alvo-diff, .alvo-agent { padding-block: 64px 24px; }
+  .alvo-ways { padding-block: 48px 64px; }
+  .alvo-landing .expressive-code pre > code { font-size: 12px; }
+  .alvo-footer__links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .alvo-footer__meta { margin-inline-start: 0; }
+  .alvo-chip { white-space: pre-wrap; word-break: break-all; }
+}
+@media (max-width: 479px) {
+  .alvo-cta-row > a { flex: 1 1 100%; justify-content: center; }
+}
+
+.alvo-agent__note { margin-bottom: 8px; font-family: var(--font-ibm-plex-mono); font-size: 13px; color: var(--faint); }
+.alvo-agent__call { margin-top: 16px; padding-top: 16px; border-top: 1px dashed var(--alvo-code-border); }

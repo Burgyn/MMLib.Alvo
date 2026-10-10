@@ -1,5 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <PropertyGroup>
+    <Description>The relational adapter every Alvo engine driver is built on.</Description>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="../MMLib.Alvo.Abstractions/MMLib.Alvo.Abstractions.csproj" />
   </ItemGroup>

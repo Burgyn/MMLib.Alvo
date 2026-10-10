@@ -1,0 +1,111 @@
+name: Docs
+
+# Builds the documentation site (website/) on every PR that can change what it renders, and
+# deploys main to GitHub Pages. Not a required check (F6 docs-site design §6.1/§9): a docs
+# break is fixed forward, and the snippets it validates already run in the rings.
+on:
+  pull_request:
+    paths:
+      - 'website/**'
+      - 'tools/**'
+      - 'schema/**'
+      - 'src/**'
+      - 'examples/**'
+      - 'samples/**'
+      - 'README.md'
+      - 'PACKAGE_README.md'
+      - 'CHANGELOG.md'
+      - 'CONTRIBUTING.md'
+      - 'docker-compose.yml'
+      - 'Directory.Packages.props'
+      - 'Directory.Build.props'
+      - 'global.json'
+      - '.claude/skills/alvo-descriptor-*/**'
+      - 'test/_shared/docs/**'
+      - 'test/MMLib.Alvo.DocsGen.Tests/**'
+      - '.github/workflows/docs.yml'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push supersedes a PR build, but a deploy of main is never cancelled half-way.
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build docs site
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      # No packages.lock.json in the repo, so setup-dotnet's own cache cannot key on one;
+      # the central package versions and the project files are the restore inputs.
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('global.json', 'Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install site dependencies
+        working-directory: website
+        run: npm ci
+
+      # rehype-mermaid's img-svg strategy renders every diagram in a headless Chromium at build time.
+      - name: Install Chromium for build-time Mermaid
+        working-directory: website
+        run: npx playwright install --with-deps chromium
+
+      - name: Build (tokens, generator, captured exchanges, Astro, link validation)
+        working-directory: website
+        run: npm run build
+
+      - name: Validate snippets against the schema
+        run: dotnet test --project test/MMLib.Alvo.Schema.Tests/MMLib.Alvo.Schema.Tests.csproj
+
+      - name: Apply runnable snippets
+        run: dotnet test --project test/MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj --filter-class "MMLib.Alvo.Tests.Descriptor.DocsSnippetTests"
+
+      - name: Upload Pages artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: website/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5

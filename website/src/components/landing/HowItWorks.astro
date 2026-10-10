@@ -1,0 +1,48 @@
+---
+import { jsonExcerpt } from '../../lib/json-excerpt';
+import { requestLine } from '../../lib/exchanges';
+import helpdesk from '../../snippets/landing/helpdesk.alvo.json?raw';
+
+const schema = jsonExcerpt(helpdesk, '/$schema');
+const apply = requestLine('landing/agent-dry-run', 1);
+const read = requestLine('landing/read', 1);
+const [schemaKey, schemaValue] = [schema.slice(0, schema.indexOf(':') + 1), schema.slice(schema.indexOf(':') + 1)];
+const steps = [
+  {
+    n: '01', title: 'Describe', href: '/MMLib.Alvo/concepts/descriptor/', link: 'The project descriptor',
+    text: 'Entities, fields, rules and hooks in one JSON file. The published JSON Schema describes every key, so an editor completes it as you type.',
+    verb: schemaKey, code: schemaValue,
+  },
+  {
+    n: '02', title: 'Apply', href: '/MMLib.Alvo/guides/apply-and-evolve/', link: 'Apply and evolve your descriptor',
+    text: 'Alvo compares it with the live database and shows the plan first. A change that would discard data is refused unless you allow it.',
+    verb: apply.method, code: ` ${apply.target}`,
+  },
+  {
+    n: '03', title: 'Call', href: '/MMLib.Alvo/guides/read-data/', link: 'Read data: filter, sort, page',
+    text: 'A REST API with PostgREST-style filters, keyset paging and problem documents, described by its own OpenAPI document.',
+    verb: read.method, code: ` ${read.target}`,
+  },
+];
+---
+<section class="alvo-how alvo-band" aria-labelledby="how-title">
+  <div class="alvo-how__grid alvo-wrap">
+    <div>
+      <p class="alvo-eyebrow">How it works</p>
+      <h2 id="how-title">Describe it, apply it, call it.</h2>
+      <p class="alvo-lede">Nothing to scaffold and no migrations to write: Alvo compares the descriptor with the live database and serves exactly what it describes.</p>
+    </div>
+    <ol class="alvo-rail">
+      {steps.map((step) => (
+        <li>
+          <span class="alvo-rail__n" aria-hidden="true">{step.n}</span>
+          <div class="alvo-rail__body">
+            <h3>{step.title}</h3>
+            <p>{step.text} <a class="alvo-prose-link" href={step.href}>{step.link}</a></p>
+            <code class="alvo-chip"><span class="alvo-chip__verb">{step.verb}</span>{step.code}</code>
+          </div>
+        </li>
+      ))}
+    </ol>
+  </div>
+</section>

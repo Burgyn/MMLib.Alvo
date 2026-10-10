@@ -7,6 +7,10 @@
     samples/MMLib.Alvo.Samples.EmbeddedHost, which resolves its callers through its own cookie auth
     and IRoleCatalogProvider.
   -->
+  <PropertyGroup>
+    <Description>ASP.NET Core Identity for Alvo: administrator accounts, roles, cookie sign-in and the bootstrap administrator.</Description>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="../MMLib.Alvo.Abstractions/MMLib.Alvo.Abstractions.csproj" />
   </ItemGroup>

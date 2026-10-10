@@ -1,0 +1,42 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "help-desk",
+  "auth": {
+    "roles": ["admin", "agent"]
+  },
+  "entities": {
+    "tickets": {
+      "audit": true,
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 120 },
+        "status": { "type": "enum", "values": ["open", "closed"], "default": "open" },
+        "resolution": { "type": "text" },
+        "slug": { "type": "string", "maxLength": 40 }
+      },
+      "rules": {
+        "list": "created_by == @user.id || 'admin' in @user.roles",
+        "get": "created_by == @user.id || 'admin' in @user.roles",
+        "create": "'agent' in @user.roles || 'admin' in @user.roles",
+        "update": "created_by == @user.id || 'admin' in @user.roles"
+      },
+      "hooks": {
+        "beforeCreate": [
+          {
+            "action": {
+              "mutate": {
+                "slug": { "$cel": "lowerAscii(replace(trim(new.title), ' ', '-'))" }
+              }
+            }
+          }
+        ],
+        "beforeUpdate": [
+          {
+            "condition": "new.status == 'closed' && !has(new.resolution)",
+            "action": { "reject": "Close a ticket with a resolution: say how it was solved." }
+          }
+        ]
+      }
+    }
+  }
+}

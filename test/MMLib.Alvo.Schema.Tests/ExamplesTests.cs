@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using MMLib.Alvo.Docs.Tests;
+using System.Text.Json;
 
 namespace MMLib.Alvo.Schema.Tests;
 
@@ -11,6 +12,21 @@ public class ExamplesTests
 
     public static IEnumerable<object[]> Negative() =>
         SchemaPaths.NegativeExamples().Select(path => new object[] { path });
+
+    public static IEnumerable<object[]> Snippets() =>
+        DocsSnippets.All().Select(path => new object[] { path });
+
+    [Fact]
+    public void The_docs_snippets_tree_is_findable() =>
+        DocsSnippets.All().ShouldNotBeEmpty("website/src/snippets must hold at least one *.alvo.json, or the theory below covers nothing");
+
+    [Theory]
+    [MemberData(nameof(Snippets))]
+    public void Docs_snippet_validates(string path)
+    {
+        var failures = SchemaValidator.Failures(SchemaValidator.Load(), File.ReadAllText(path));
+        failures.ShouldBeEmpty($"{DocsSnippets.Relative(path)} must validate against the schema");
+    }
 
     [Theory]
     [MemberData(nameof(Positive))]

@@ -1,0 +1,12 @@
+<Project>
+
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))"
+          Condition="'' != $([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <!-- A build tool is run, never referenced or packed: the docs site's generator. Not packable also keeps
+         SolutionConventionTests' "every packable src project has a tests project" rule out of tools/. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

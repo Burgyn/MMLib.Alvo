@@ -1,0 +1,106 @@
+---
+title: The project descriptor
+description: "Understand the one JSON document that defines an Alvo backend: what belongs in it, where it lives, how it is checked and how it changes over time."
+sidebar:
+  order: 1
+---
+
+import { Code } from '@astrojs/starlight/components';
+import helpDesk from '../../../../../examples/help-desk/help-desk.alvo.json?raw';
+
+An Alvo backend is defined by one JSON document, the **project descriptor**. It says what the backend *is*: its
+entities and fields, who may read and write each one, what happens as a row is written, which values are derived, and
+who may manage the project. Alvo turns it into tables, a REST API with its own OpenAPI document, compiled access rules
+and hooks. There is no second place where any of that is configured.
+
+This is the whole help-desk backend the [tutorial](/MMLib.Alvo/start-here/tutorial/) builds:
+
+<Code code={helpDesk} lang="json" title="examples/help-desk/help-desk.alvo.json" />
+
+## What belongs in it, and what does not
+
+The descriptor defines the backend. **Infrastructure stays out**: connection strings, API keys, the administrator's
+credentials, the AI connection, the startup mode and the path the host is served under are configuration of the
+deployment ([Configuration keys](/MMLib.Alvo/reference/configuration/)). The line is deliberate: a descriptor can live
+in Git and be reviewed like code without carrying a secret, and the same descriptor runs unchanged against a laptop's
+SQLite file and a production PostgreSQL.
+
+Access rules sit on the other side of that line: who may manage the project is the descriptor's `access` block, so it is
+versioned and reviewed with everything else.
+
+## One descriptor, two homes
+
+The format is one; where the current version lives has two answers.
+
+- **A file.** The standalone image reads `/alvo/descriptor.json`; an embedded host passes a path to `FromDescriptor`.
+  The file can live in your repository, and changing it plus a restart is a deploy.
+- **Records in the database.** Every apply, on boot or through the [Management API](/MMLib.Alvo/reference/management-api/)
+  or the dashboard, appends a revision to the project's history in the database: the descriptor, who applied it, when
+  and why. That history is append-only, and it is what the dashboard reads and rolls back.
+
+The two meet at every boot. The host compares the file with the database: a descriptor the history already holds at an
+older revision is not served, so a stale file can never quietly undo a change made through the API. The dashboard's
+*Import / export* moves a descriptor between the two homes byte for byte. Which home is authoritative is your choice;
+[Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/) shows both loops.
+
+## The top-level blocks
+
+Only `apiVersion`, `name` and `entities` are required. Each block has its own reference page, generated from the
+schema:
+
+| Block | What it defines | In this build |
+|---|---|---|
+| [`entities`](/MMLib.Alvo/reference/descriptor/entities/) | entities with their [fields](/MMLib.Alvo/reference/descriptor/entities-fields/), [rules](/MMLib.Alvo/reference/descriptor/entities-rules/), [hooks](/MMLib.Alvo/reference/descriptor/entities-hooks/), [computed fields and rollups](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/) and [indexes](/MMLib.Alvo/reference/descriptor/entities-indexes/) | honoured, except the parts listed as refused |
+| [`auth`](/MMLib.Alvo/reference/descriptor/auth/) | the application's roles, and the sign-in providers | honoured; sign-in providers other than `local` are not run |
+| [`tenancy`](/MMLib.Alvo/reference/descriptor/tenancy/) | whether the backend is multi-tenant | honoured |
+| [`access`](/MMLib.Alvo/reference/descriptor/access/) | which roles reach the `viewer`, `developer` and `admin` management levels | honoured |
+| [`formats`](/MMLib.Alvo/reference/descriptor/formats/) | named validation formats a field can reference | honoured |
+| [`templates`](/MMLib.Alvo/reference/descriptor/templates/), [`webhooks`](/MMLib.Alvo/reference/descriptor/webhooks/) | message templates and webhook endpoints an after-hook uses | run when an after-hook uses them; the rest is not |
+| [`automation`](/MMLib.Alvo/reference/descriptor/automation/), [`functions`](/MMLib.Alvo/reference/descriptor/functions/), [`dynamicEntities`](/MMLib.Alvo/reference/descriptor/dynamic-entities/) | event rules, custom functions, runtime entities | parsed, not run |
+| [`branding`](/MMLib.Alvo/reference/descriptor/branding/) | the project's display name and logo | parsed, nothing renders it yet |
+
+`$schema`, `description` and `revision` are metadata, and keys starting with `x-` are carried through apply and export
+untouched, for your own tooling. [Capabilities in this build](/MMLib.Alvo/reference/capabilities/) is the authority on
+the last column.
+
+## How a descriptor is checked
+
+A descriptor is checked in layers, and every finding names the place with a JSON pointer and says how to fix it. All of
+it happens when the descriptor is applied, never when a request arrives: a rule naming a column that does not exist
+fails the apply, not the first caller.
+
+1. **The JSON Schema.** The shape: required keys, types, names, the facets each field type must carry. The schema closes
+   every object (`additionalProperties: false`, with only `x-` extension keys admitted), so a misspelled key is an
+   error, not a silently ignored one.
+2. **The semantic checks.** What the schema cannot express: references to entities and fields that exist, reserved and
+   framework-managed names, roles a rule names that `auth.roles` does not declare. Every rule, hook and computed
+   expression is compiled in its [CEL profile](/MMLib.Alvo/concepts/cel/) against the entity it belongs to.
+3. **The apply.** Features this build accepts in the schema but cannot honour are **refused** with a reason, rather than
+   accepted and ignored. Blocks it parses and does not run are **warned**. Then the migration is planned against the
+   current schema, and a plan that would discard data is refused unless the apply allows it explicitly.
+
+The same checks answer a dry run (`?dryRun=true` on the Management API), the dashboard's live check on each expression,
+and the schema assistant's proposals. Nothing applies half a descriptor.
+
+## Revisions
+
+Every accepted apply appends a **revision**: the descriptor, its number, the author and the reason. A change through the
+Management API names the revision it was written against in `If-Match`; if someone applied first, the change is refused
+rather than written over theirs. A rollback applies an earlier revision's descriptor as a new revision; nothing is
+erased. [Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/) walks through it, including renames that
+keep their data and drops that need your permission.
+
+## Format version and editor support
+
+`apiVersion` is `alvo.dev/v1`. The schema's own rule for it: within v1 the format only grows, and a breaking change
+becomes `alvo.dev/v2`. The schema has a description on every key, and this site serves it at
+`https://burgyn.github.io/MMLib.Alvo/schema/v1/project.json`. The `$schema` URL a descriptor carries,
+`https://alvo.dev/schema/v1/project.json`, does not resolve yet, so map your editor to the served copy:
+[For coding agents](/MMLib.Alvo/start-here/coding-agents/#2-give-the-editor-the-schema) shows the VS Code setting.
+
+## Put it to work
+
+- [Tutorial: your first backend](/MMLib.Alvo/start-here/tutorial/): write a descriptor step by step.
+- [Entities and fields](/MMLib.Alvo/guides/entities-and-fields/): the core of every descriptor.
+- [Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/): change a running backend safely.
+- [Descriptor reference](/MMLib.Alvo/reference/descriptor/): every key, generated from the schema.

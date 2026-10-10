@@ -1,0 +1,137 @@
+---
+title: The schema assistant
+description: "Connect the dashboard's schema assistant to a model, ask it for a descriptor change in your own words, and review the checked proposal before you apply it yourself."
+sidebar:
+  order: 12
+---
+
+:::tip[What you will achieve]
+A schema assistant in your dashboard that turns "add a notes field to bikes" into a descriptor change Alvo has already
+checked, which you then review and apply. About ten minutes, starting from a running dashboard and access to a model
+(OpenAI, Azure OpenAI, or a local OpenAI-compatible server such as Ollama).
+:::
+
+## Before you start
+
+- A running dashboard: [The admin dashboard](/MMLib.Alvo/guides/admin-dashboard/). Its demo asks for a model
+  connection when it starts; `--no-ai` is what skips it.
+- The `admin` management level to save a connection from the dashboard. Asking the assistant needs only what the
+  question touches: it acts with your level, never more.
+
+## What it can and cannot do
+
+The assistant reads the project and runs dry runs. It **cannot apply anything**: there is no apply tool in its tool
+set, so no instruction, however it is phrased, gives it one. Every change it makes is a proposal you review and apply.
+The table is its complete tool set: five reads, two dry runs and two skill readers.
+
+| It may call | What for |
+|---|---|
+| `get_descriptor`, `get_schema` | the current descriptor and the revision a change must be written against, and the resolved schema |
+| `get_capabilities` | what this build honours, so it says "not in this build" instead of writing a key nothing runs |
+| `get_cel_functions` | the CEL functions this host knows, built in and registered by the host, with the profiles each works in |
+| `get_revisions` | what changed recently, and why |
+| `check_change`, `propose_change` | a dry run of a change: "would this apply?", and the only way a change becomes a proposal |
+| `load_skill`, `read_skill_resource` | the nine descriptor skills, and the schema slices they cite |
+
+What follows from that:
+
+- **It reaches what you reach.** It calls the Management API in process as you, so a `viewer` gets a `viewer`'s
+  answers, and there is no service account behind it.
+- **It never sees your data.** The Data API is not among its tools, so no record reaches the model.
+- **A proposal is already checked.** It passed the same dry run an apply runs. When Alvo refuses a draft, the
+  assistant reads the refusal, fixes the draft and tries again within the same turn, a bounded number of times.
+- **It cannot drop data.** Its dry runs never allow a destructive plan, so a change that would drop a column comes back
+  as a refusal it has to show you.
+- **It says "proposed", never "done"**, and answers in the language you wrote in. It quotes what this build cannot do
+  from `get_capabilities` rather than from memory.
+
+Its instructions and skills are compiled into the package. A deployment cannot edit them, because an editable prompt
+would be a way to change what the assistant believes with nothing guarding it.
+
+## 1. Connect a model
+
+The connection is infrastructure, not part of the descriptor, so it lives in configuration or in the host's secret
+store. Four keys, under [`Alvo:Ai`](/MMLib.Alvo/reference/configuration/#alvoai):
+
+| Key | Value |
+|---|---|
+| `Alvo__Ai__Kind` | `openai-compatible` or `azure-openai` |
+| `Alvo__Ai__Endpoint` | the base address: `https://api.openai.com/v1`, `http://localhost:11434/v1` for Ollama, or `https://<resource>.openai.azure.com` |
+| `Alvo__Ai__Model` | the model, or the Azure OpenAI deployment name |
+| `Alvo__Ai__ApiKeySecretRef` | the **name** of the secret that holds the API key, such as `openai`; none for a local endpoint that needs no key |
+
+The key itself is a secret: `Alvo__Secrets__Values__openai`, from whatever configuration source your deployment keeps
+secrets in. [Running in production](/MMLib.Alvo/guides/production/#3-keep-every-secret-in-a-file) covers the secret
+store.
+
+Or save the connection from the dashboard: **Settings**, then **Edit the connection** under *AI assistant*. That needs
+the `admin` level, and an encryption key file (`Alvo:Secrets:EncryptionKeyFile`) so the host has somewhere encrypted
+to keep the key. A connection in configuration wins over a saved one, and then the dashboard shows it but cannot change
+it.
+
+*Settings* reports whether a connection is configured, its kind and model, and where it came from, never its endpoint
+or key. It also warns when the key is missing and every request will be refused. With no connection at all, the
+assistant is simply absent: no launcher appears, and the rest of the dashboard works as before.
+
+## 2. Ask for a change
+
+Open the assistant with **Ask Alvo** in the top bar and describe the change: *"Bikes need an optional notes field."*
+While it works, it streams its answer and the tools it calls. When a draft passes the dry run, the pane shows **A
+proposed change**, written against the current revision, with the words *Nothing has been applied*. When every attempt
+in the turn was refused, it shows the refusals instead. *Turn details* lists the calls it made and what each one
+returned.
+
+## 3. Review and apply it yourself
+
+**Review it in Preview** puts the proposal into your working copy and opens **Preview changes**: the same diff, the same
+migration plan and the same **Apply** button as a change you made by hand. If the working copy already holds edits of
+your own, the dashboard asks before replacing them.
+
+The *Why* box is pre-filled with what you asked for; change it as you like. The revision records **you** as its
+author, because a person decided to apply it, and you can roll it back from *Configuration history* like any other.
+[The admin dashboard](/MMLib.Alvo/guides/admin-dashboard/#3-change-the-schema) covers Preview and Apply.
+
+## The skills it shares with coding agents
+
+The assistant learns the descriptor from nine skills: entities and fields, field types and formats, rules and CEL,
+hooks, computed fields and rollups, indexes, traits and tenancy, project access, and capabilities and limits. They are
+plain Markdown files in the repository, `.claude/skills/alvo-descriptor-*`, and the package embeds exactly those files,
+so the assistant and your coding agent learn the same rules from one source.
+[For coding agents](/MMLib.Alvo/start-here/coding-agents/#3-load-the-shared-skills) links each one.
+
+## In an embedded host
+
+The standalone image includes the assistant. An embedded host adds the `MMLib.Alvo.Ai` package and registers it with
+`AddAlvoAi()` ([C# reference](/MMLib.Alvo/reference/csharp/mmlib-alvo-ai/)); the core never references it, so a host
+that wants only the Data API never acquires an agent runtime.
+
+## What can go wrong
+
+The assistant and the dashboard call the Management API's operations in process, so they refuse for the same reasons;
+the table names the problem type the same refusal carries over HTTP.
+
+| Status | Problem type | When | Fix | Returned by |
+|---|---|---|---|---|
+| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | You save the AI connection without the `admin` level (`PUT …/ai/connection`), or ask about something your level may not read. | Ask an `admin`, or grant your role the level in `access`. | every host |
+| 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | Every draft in the turn was refused; the pane lists the refusals. | Rephrase or narrow the request, or make the change by hand following the refusal's fix. | every host |
+
+**No launcher appears.** No connection is configured: set `Alvo:Ai`, or save one from *Settings*.
+
+**Every turn fails, and *Settings* says the key is missing.** The secret `Alvo:Ai:ApiKeySecretRef` names does not
+exist, or the endpoint needs a key and none was saved. Save the secret under that name, or edit the connection and type
+the key.
+
+## Reference
+
+- Configuration: [`Alvo:Ai`](/MMLib.Alvo/reference/configuration/#alvoai),
+  [`Alvo:Secrets`](/MMLib.Alvo/reference/configuration/#alvosecrets).
+- [Management API](/MMLib.Alvo/reference/management-api/): `GET …/info` and `PUT …/ai/connection`.
+- [`MMLib.Alvo.Ai`](/MMLib.Alvo/reference/csharp/mmlib-alvo-ai/).
+- Problem types: [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden),
+  [`validation`](/MMLib.Alvo/reference/problem-types/#validation).
+- Design note: [the package boundary](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/package-boundary.md).
+
+## Next
+
+**[For coding agents](/MMLib.Alvo/start-here/coding-agents/)**: give your own agent the same skills, the schema and a
+safe way to apply.

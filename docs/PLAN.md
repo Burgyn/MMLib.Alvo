@@ -71,6 +71,11 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   ← YOU ARE HERE ([milestone #6](https://github.com/Burgyn/MMLib.Alvo/milestone/6))
 - [ ] **F6 — v0.1** — documentation, logo, release.
   ([milestone #7](https://github.com/Burgyn/MMLib.Alvo/milestone/7))
+  The documentation line landed ahead of F5's close, the same way F4 ran
+  beside F3: README, NuGet package readme and the generated docs site
+  (`website/`, `tools/MMLib.Alvo.DocsGen`), per
+  `docs/superpowers/specs/2026-10-09-f6-docs-site-design.md`. Logo and
+  release remain.
 - [ ] **F7 — Further components** — by value, gradually, contract tests
   first; includes **dynamic (metadata-driven) entities** — the shared
   `entity_records` store that lets ERP end-users create their own record

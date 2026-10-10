@@ -1,0 +1,41 @@
+# Saved as docker-compose.override.yml, it replaces the one from "Run your own descriptor" and keeps everything
+# that one sets. Keys 3 and 4 each belong to one tenant: every row they write lands in that tenant, and they never
+# see another tenant's rows.
+name: alvo-help-desk
+
+services:
+  alvo:
+    environment:
+      Alvo__DescriptorPath: /alvo/descriptor.json
+      Alvo__Auth__DevKeys__1__KeyId: agent
+      Alvo__Auth__DevKeys__1__Secret: ${ALVO_AGENT_KEY_SECRET:?set ALVO_AGENT_KEY_SECRET before starting the stack}
+      Alvo__Auth__DevKeys__1__User: 3f2b8c1e-7a4d-4e9b-9c21-5d6e7f8a9b01
+      Alvo__Auth__DevKeys__1__Roles__0: agent
+      Alvo__Auth__DevKeys__1__Roles__1: authenticated
+      Alvo__Auth__DevKeys__1__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__1__Scopes__1: "*:write"
+      Alvo__Auth__DevKeys__2__KeyId: admin
+      Alvo__Auth__DevKeys__2__Secret: ${ALVO_ADMIN_KEY_SECRET:?set ALVO_ADMIN_KEY_SECRET before starting the stack}
+      Alvo__Auth__DevKeys__2__User: 8d4e2a6c-1b3f-4c5d-8e7a-9f0b1c2d3e02
+      Alvo__Auth__DevKeys__2__Roles__0: admin
+      Alvo__Auth__DevKeys__2__Roles__1: authenticated
+      Alvo__Auth__DevKeys__2__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__2__Scopes__1: "*:write"
+      Alvo__Auth__DevKeys__3__KeyId: acme
+      Alvo__Auth__DevKeys__3__Secret: ${ALVO_ACME_KEY_SECRET:?set ALVO_ACME_KEY_SECRET before starting the stack}
+      Alvo__Auth__DevKeys__3__User: a1c3e5f7-2b4d-4c6e-8f0a-1b3d5f7a9c01
+      Alvo__Auth__DevKeys__3__Tenant: 0b8f3c2a-5d4e-4f6a-8b7c-1d2e3f4a5b6c
+      Alvo__Auth__DevKeys__3__Roles__0: agent
+      Alvo__Auth__DevKeys__3__Roles__1: authenticated
+      Alvo__Auth__DevKeys__3__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__3__Scopes__1: "*:write"
+      Alvo__Auth__DevKeys__4__KeyId: globex
+      Alvo__Auth__DevKeys__4__Secret: ${ALVO_GLOBEX_KEY_SECRET:?set ALVO_GLOBEX_KEY_SECRET before starting the stack}
+      Alvo__Auth__DevKeys__4__User: b2d4f6a8-3c5e-4d7f-9a1b-2c4e6f8a0b02
+      Alvo__Auth__DevKeys__4__Tenant: 7e6d5c4b-3a29-4180-9f7e-6d5c4b3a2918
+      Alvo__Auth__DevKeys__4__Roles__0: agent
+      Alvo__Auth__DevKeys__4__Roles__1: authenticated
+      Alvo__Auth__DevKeys__4__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__4__Scopes__1: "*:write"
+    volumes:
+      - ./help-desk.alvo.json:/alvo/descriptor.json:ro

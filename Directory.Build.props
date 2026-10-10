@@ -28,7 +28,9 @@
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageTags>baas;backend-as-a-service;dotnet;alvo</PackageTags>
     <PackageIcon>icon.png</PackageIcon>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- nuget.org renders no Mermaid, <picture>, raw HTML or relative image, so packages carry a readme of their own
+         instead of the repository's README (docs review S10). -->
+    <PackageReadmeFile>PACKAGE_README.md</PackageReadmeFile>
     <!-- Version is intentionally absent — MinVer owns it from git tags (issue #14). -->
     <MinVerTagPrefix>v</MinVerTagPrefix>
   </PropertyGroup>
@@ -40,7 +42,7 @@
 
   <ItemGroup Condition="'$(IsPackable)' != 'false'">
     <None Include="$(MSBuildThisFileDirectory)icon.png" Pack="true" PackagePath="\" Visible="false" />
-    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)PACKAGE_README.md" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
 
   <!-- Installs the Husky.Net git hooks on restore/build so no manual `git config`

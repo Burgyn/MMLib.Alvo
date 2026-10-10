@@ -1,0 +1,24 @@
+{
+  "descriptor": "website/src/snippets/landing/managed/helpdesk.alvo.json",
+  "keys": {
+    "demo": { "roles": ["admin", "authenticated"], "scopes": ["*:read", "*:write"], "secretVariable": "ALVO_DEMO_KEY_SECRET" }
+  },
+  "steps": [
+    {
+      "key": "demo",
+      "method": "GET",
+      "path": "/management/projects/helpdesk/descriptor",
+      "expect": 200
+    },
+    {
+      "key": "demo",
+      "method": "PUT",
+      "path": "/management/projects/helpdesk/descriptor?dryRun=true",
+      "headers": { "If-Match": "\"{0.body.revision}\"" },
+      "bodyFile": "website/src/snippets/landing/typo/helpdesk.alvo.json",
+      "bodyFileAs": "descriptorJson",
+      "expect": 422,
+      "expectType": "validation"
+    }
+  ]
+}

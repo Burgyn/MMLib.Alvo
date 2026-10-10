@@ -26,6 +26,7 @@
 #       /alvo/examples/vehicle-registry/vehicles.alvo.json   owners, vehicles, inspections — works as is
 #       /alvo/examples/simple-tasks/tasks.alvo.json          projects and tasks — works as is
 #       /alvo/examples/bike-workshop/bike-workshop.alvo.json the dashboard's demo workshop — works as is
+#       /alvo/examples/help-desk/help-desk.alvo.json         the docs tutorial's tickets — works as is (as admin)
 #       /alvo/examples/field-service/field-service.alvo.json two tenants. Without a tenant on the key only
 #           the global `regions` answer; `customers` and `work_orders` are 403. Add under `environment:`
 #             Alvo__Auth__DevKeys__0__Tenant: 7e9a1c00-0001-4000-8000-00000000000a

@@ -1,0 +1,52 @@
+import { chromium } from 'playwright';
+import { AxeBuilder } from '@axe-core/playwright';
+import { withPreview } from './preview-server.mjs';
+
+const pages = ['/', '/start-here/quick-start/', '/start-here/run-your-own/', '/start-here/tutorial/', '/start-here/coding-agents/', '/guides/authentication/', '/guides/access-rules/', '/guides/multi-tenancy/', '/guides/before-hooks/', '/guides/after-hooks-and-webhooks/', '/guides/audit-row-changes/', '/guides/entities-and-fields/', '/guides/computed-and-rollups/', '/guides/indexes/', '/guides/apply-and-evolve/', '/guides/read-data/', '/guides/write-data/', '/guides/handle-errors/', '/guides/own-authentication/', '/guides/call-from-endpoints/', '/guides/custom-cel-functions/', '/guides/production/', '/guides/admin-dashboard/', '/guides/schema-assistant/', '/concepts/descriptor/', '/concepts/cel/', '/concepts/security-model/', '/concepts/modes/', '/concepts/architecture/', '/concepts/dynamic-entities/', '/concepts/glossary/', '/project/roadmap/', '/project/faq/', '/data-api/conventions/', '/reference/problem-types/', '/reference/cel-functions/', '/reference/data-api/', '/reference/data-api/operations/ownerslist/', '/reference/csharp/mmlib-alvo/', '/examples/', '/project/changelog/', '/project/license/'];
+const themes = ['light', 'dark'];
+
+await withPreview(async (baseUrl) => {
+  const browser = await chromium.launch();
+  try {
+    for (const path of pages) {
+      for (const theme of themes) await audit(browser, baseUrl, path, theme);
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+async function audit(browser, baseUrl, path, theme) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  try {
+    await page.addInitScript((t) => localStorage.setItem('starlight-theme', t), theme);
+    const response = await page.goto(baseUrl + path, { waitUntil: 'networkidle' });
+    if (response?.status() === 404) {
+      if (theme === themes[0]) console.log(`skip ${path}: 404 (its task has not landed yet)`);
+      return;
+    }
+    const actual = await page.evaluate(() => document.documentElement.dataset.theme);
+    if (actual !== theme) {
+      console.log(`FAIL ${path} [${theme}]: data-theme is "${actual}"`);
+      process.exitCode = 1;
+      return;
+    }
+    const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+    report(path, theme, violations);
+  } finally {
+    await context.close();
+  }
+}
+
+function report(path, theme, violations) {
+  if (violations.length === 0) {
+    console.log(`ok   ${path} [${theme}]: 0 violations`);
+    return;
+  }
+  process.exitCode = 1;
+  for (const v of violations) {
+    const targets = v.nodes.slice(0, 3).map((n) => n.target.join(' ')).join(' | ');
+    console.log(`FAIL ${path} [${theme}]: ${v.id} (${v.impact}) ${targets}`);
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "descriptor": "website/src/snippets/access-rules/02-ownership.alvo.json",
+  "keys": {
+    "admin": {
+      "roles": [
+        "admin",
+        "authenticated"
+      ],
+      "scopes": [
+        "*:read",
+        "*:write"
+      ],
+      "secretVariable": "ALVO_ADMIN_KEY_SECRET",
+      "user": "8d4e2a6c-1b3f-4c5d-8e7a-9f0b1c2d3e02"
+    }
+  },
+  "steps": [
+    {
+      "key": "admin",
+      "method": "POST",
+      "path": "/management/projects/help-desk/policy/simulate",
+      "body": {
+        "entity": "tickets",
+        "operation": "get",
+        "caller": {
+          "user": "3f2b8c1e-7a4d-4e9b-9c21-5d6e7f8a9b01",
+          "roles": [
+            "agent",
+            "authenticated"
+          ]
+        }
+      },
+      "expect": 200
+    },
+    {
+      "key": "admin",
+      "method": "POST",
+      "path": "/management/projects/help-desk/policy/simulate",
+      "body": {
+        "entity": "tickets",
+        "operation": "delete",
+        "caller": {
+          "user": "3f2b8c1e-7a4d-4e9b-9c21-5d6e7f8a9b01",
+          "roles": [
+            "agent",
+            "authenticated"
+          ]
+        }
+      },
+      "expect": 200
+    }
+  ]
+}

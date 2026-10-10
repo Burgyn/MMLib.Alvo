@@ -1,0 +1,39 @@
+---
+import { Code } from '@astrojs/starlight/components';
+interface Range { from: string; to: string }
+interface Props {
+  code: string; from: string; to: string; lang?: string; title?: string;
+  dropComments?: boolean; then?: Range; pick?: RegExp; frame?: 'auto' | 'code' | 'terminal' | 'none'; wrap?: boolean;
+}
+const { code, from, to, lang = 'csharp', title, dropComments = false, then, pick, frame, wrap } = Astro.props;
+const lines = code.replace(/^﻿/, '').replace(/\r\n/g, '\n').split('\n');
+const slice = ({ from, to }: Range) => {
+  const start = lines.findIndex((line) => line.includes(from));
+  const end = start < 0 ? -1 : lines.findIndex((line, i) => i >= start && line.includes(to));
+  if (start < 0 || end < 0) throw new Error(`SourceExcerpt: anchors not found (from "${from}", to "${to}")`);
+  return lines.slice(start, end + 1);
+};
+const blank = (line: string | undefined) => line === undefined || !line.trim();
+const closes = (line: string | undefined) => line !== undefined && /^\s*[})\]]/.test(line);
+const opens = (line: string | undefined) => line !== undefined && /[{(]\s*$/.test(line);
+const chains = (line: string | undefined) => line !== undefined && /^\s*\./.test(line);
+const withoutComments = (source: string[]) => {
+  const code = source.filter((line) => !/^\s*\/\//.test(line));
+  return code.filter((line, i) => !blank(line) || (!blank(code[i - 1]) && !closes(code[i + 1]) && !chains(code[i + 1]) && !opens(code[i - 1])));
+};
+const dedent = (part: string[]) => {
+  const indent = Math.min(...part.filter((l) => l.trim()).map((l) => l.match(/^ */)![0].length));
+  return part.map((l) => l.slice(indent));
+};
+const shaped = (part: string[]) => dedent(dropComments ? withoutComments(part) : part);
+const picked = (part: string[]) => {
+  if (!pick) return part;
+  const values = part.map((line) => pick.exec(line)?.[1]).filter((value): value is string => value !== undefined);
+  if (values.length === 0) throw new Error(`SourceExcerpt: ${pick} matches no line between "${from}" and "${to}"`);
+  return values;
+};
+const parts = [shaped(slice({ from, to }))];
+if (then) parts.push(shaped(slice(then)));
+const excerpt = parts.map(picked).map((part) => part.join('\n')).join('\n// …\n');
+---
+<Code code={excerpt} lang={lang} title={title} frame={frame} wrap={wrap} />

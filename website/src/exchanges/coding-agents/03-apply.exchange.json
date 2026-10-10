@@ -1,0 +1,41 @@
+{
+  "descriptor": "website/src/snippets/coding-agents/01-base.alvo.json",
+  "keys": {
+    "admin": { "roles": ["admin", "authenticated"], "scopes": ["*:read", "*:write"], "secretVariable": "ALVO_ADMIN_KEY_SECRET" }
+  },
+  "steps": [
+    {
+      "key": "admin",
+      "method": "GET",
+      "path": "/management/projects/help-desk/descriptor",
+      "expect": 200
+    },
+    {
+      "key": "admin",
+      "method": "PUT",
+      "path": "/management/projects/help-desk/descriptor",
+      "bodyFile": "website/src/snippets/coding-agents/02-add-field.alvo.json",
+      "bodyFileAs": "descriptorJson",
+      "expect": 428,
+      "expectType": "precondition-required"
+    },
+    {
+      "key": "admin",
+      "method": "PUT",
+      "path": "/management/projects/help-desk/descriptor",
+      "headers": { "If-Match": "\"{0.body.revision}\"", "Idempotency-Key": "help-desk-add-due-on" },
+      "bodyFile": "website/src/snippets/coding-agents/02-add-field.alvo.json",
+      "bodyFileAs": "descriptorJson",
+      "expect": 200
+    },
+    {
+      "key": "admin",
+      "method": "PUT",
+      "path": "/management/projects/help-desk/descriptor",
+      "headers": { "If-Match": "\"{0.body.revision}\"", "Idempotency-Key": "help-desk-add-due-on" },
+      "bodyFile": "website/src/snippets/coding-agents/02-add-field.alvo.json",
+      "bodyFileAs": "descriptorJson",
+      "expect": 200
+    }
+  ]
+}

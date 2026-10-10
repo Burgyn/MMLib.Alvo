@@ -1,0 +1,39 @@
+---
+import JsonExcerpt from '../JsonExcerpt.astro';
+import Exchange from '../Exchange.astro';
+import typo from '../../snippets/landing/typo/helpdesk.alvo.json?raw';
+
+const points = [
+  { n: '1', lead: 'A JSON Schema with a description on every key,', rest: 'and descriptor skills written for models.' },
+  { n: '2', lead: 'Problem documents with a pointer and a fix suggestion,', rest: 'keyed by a stable type.' },
+  { n: '3', lead: 'A Management API with dry runs and If-Match,', rest: 'and Idempotency-Key on Data API writes.' },
+];
+---
+<section class="alvo-agent" aria-labelledby="agent-title">
+  <div class="alvo-agent__grid alvo-wrap">
+    <div>
+      <p class="alvo-eyebrow">Agent-first</p>
+      <h2 id="agent-title">Your coding agent can drive it.</h2>
+      <p class="alvo-lede">Configuration an agent can write, refusals it can act on, and changes it can preview before anything is applied.</p>
+      <ul class="alvo-numbered">
+        {points.map((point) => (
+          <li><span class="alvo-numbered__n" aria-hidden="true">{point.n}</span><span><b>{point.lead}</b> {point.rest}</span></li>
+        ))}
+      </ul>
+      <a class="alvo-textlink" href="/MMLib.Alvo/start-here/coding-agents/">For coding agents →</a>
+    </div>
+    <div class="alvo-codecard" role="group" aria-label="A dry run that catches a typo">
+      <div class="alvo-pane__head">
+        <span class="alvo-pane__file">A dry run catches a typo</span>
+        <span class="alvo-pane__end alvo-pane__note">nothing is applied</span>
+      </div>
+      <div class="alvo-pane__body">
+        <p class="alvo-agent__note">The descriptor it sends has one typo in a before-hook:</p>
+        <JsonExcerpt code={typo} pointer="/entities/tickets/hooks/beforeCreate/0/action/mutate" frame="none" />
+        <div class="alvo-agent__call">
+          <Exchange name="landing/agent-dry-run" form="http" steps={[1]} requestBody={false} fields={['type', 'violations']} compact flow={false} wrap />
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

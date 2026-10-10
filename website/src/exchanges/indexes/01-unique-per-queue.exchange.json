@@ -1,0 +1,30 @@
+{
+  "descriptor": "website/src/snippets/indexes/01-indexes.alvo.json",
+  "keys": {
+    "agent": { "roles": ["agent", "authenticated"], "scopes": ["*:read", "*:write"], "secretVariable": "ALVO_AGENT_KEY_SECRET" }
+  },
+  "steps": [
+    {
+      "key": "agent",
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": { "queue": "billing", "number": 1, "title": "Invoice sent twice" },
+      "expect": 201
+    },
+    {
+      "key": "agent",
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": { "queue": "hardware", "number": 1, "title": "Laptop will not charge" },
+      "expect": 201
+    },
+    {
+      "key": "agent",
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": { "queue": "billing", "number": 1, "title": "Refund for March" },
+      "expect": 409,
+      "expectType": "conflict"
+    }
+  ]
+}

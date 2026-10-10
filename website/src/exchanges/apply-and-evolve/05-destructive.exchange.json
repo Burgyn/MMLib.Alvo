@@ -1,0 +1,65 @@
+{
+  "descriptor": "website/src/snippets/apply-and-evolve/02-add-field.alvo.json",
+  "keys": {
+    "admin": {
+      "roles": [
+        "admin",
+        "authenticated"
+      ],
+      "scopes": [
+        "*:read",
+        "*:write"
+      ],
+      "secretVariable": "ALVO_ADMIN_KEY_SECRET"
+    }
+  },
+  "steps": [
+    {
+      "key": "admin",
+      "method": "GET",
+      "path": "/management/projects/help-desk/descriptor",
+      "expect": 200
+    },
+    {
+      "key": "admin",
+      "method": "PUT",
+      "path": "/management/projects/help-desk/descriptor",
+      "headers": {
+        "If-Match": "\"{0.body.revision}\""
+      },
+      "bodyFile": "website/src/snippets/apply-and-evolve/03-drop-field.alvo.json",
+      "bodyFileAs": "descriptorJson",
+      "expect": 409,
+      "expectType": "destructive-change"
+    },
+    {
+      "key": "admin",
+      "method": "PUT",
+      "path": "/management/projects/help-desk/descriptor?dryRun=true",
+      "headers": {
+        "If-Match": "\"{0.body.revision}\""
+      },
+      "bodyFile": "website/src/snippets/apply-and-evolve/03-drop-field.alvo.json",
+      "bodyFileAs": "descriptorJson",
+      "body": {
+        "allowDestructive": true
+      },
+      "expect": 200
+    },
+    {
+      "key": "admin",
+      "method": "PUT",
+      "path": "/management/projects/help-desk/descriptor",
+      "headers": {
+        "If-Match": "\"{0.body.revision}\""
+      },
+      "bodyFile": "website/src/snippets/apply-and-evolve/03-drop-field.alvo.json",
+      "bodyFileAs": "descriptorJson",
+      "body": {
+        "allowDestructive": true,
+        "reason": "Priority is decided by category now."
+      },
+      "expect": 200
+    }
+  ]
+}

@@ -1,0 +1,101 @@
+---
+import JsonExcerpt from '../JsonExcerpt.astro';
+import Exchange from '../Exchange.astro';
+import helpdesk from '../../snippets/landing/helpdesk.alvo.json?raw';
+import quickStart from '../../snippets/shell/quick-start.sh?raw';
+
+const firstStep = quickStart.split('\n')[0];
+const quickStartHref = '/MMLib.Alvo/start-here/quick-start/';
+const github = 'https://github.com/Burgyn/MMLib.Alvo';
+---
+<section class="alvo-hero alvo-wrap" aria-labelledby="_top">
+  <div class="alvo-hero__intro">
+    <div>
+      <a class="alvo-pill" href="/MMLib.Alvo/project/roadmap/">
+        <span class="alvo-pill__dot" aria-hidden="true"></span>
+        <span>.NET-native backend-as-a-service · pre-v0.1</span>
+      </a>
+      <h1 id="_top">Describe your backend in <span class="alvo-accent">one JSON file.</span></h1>
+      <p class="alvo-hero__lead">For .NET teams and their coding agents: get a secure, production-shaped API — standalone in Docker or embedded in your ASP.NET Core app.</p>
+    </div>
+    <div class="alvo-hero__actions">
+      <div class="alvo-cta-row">
+        <a class="alvo-btn alvo-btn--primary" href={quickStartHref}>Quick start <span aria-hidden="true">→</span></a>
+        <a class="alvo-btn alvo-btn--ghost" href={github}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"></path></svg>
+          GitHub
+        </a>
+      </div>
+      <div>
+        <p class="alvo-clone__label">Runs the published image — Docker and one file are all you need</p>
+        <div class="alvo-clone__box">
+          <code title={firstStep}><span class="alvo-clone__prompt" aria-hidden="true">$ </span>{firstStep}</code>
+          <button class="alvo-copy" type="button" data-copy={firstStep} aria-label="Copy the download command">
+            <svg class="alvo-copy__idle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg>
+            <svg class="alvo-copy__done" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5,12 10,17 19,7"></polyline></svg>
+          </button>
+          <span class="sr-only" role="status" data-copy-status></span>
+        </div>
+        <a class="alvo-textlink" href={quickStartHref}>4 more steps →</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="alvo-hero__card" role="group" aria-label="A descriptor and the API it becomes">
+    <div class="alvo-pane">
+      <div class="alvo-pane__head">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="14,3 14,9 20,9"></polyline></svg>
+        <span class="alvo-pane__file">helpdesk.alvo.json</span><span>· entities</span>
+        <span class="alvo-pane__end alvo-pane__ok">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5,12 10,17 19,7"></polyline></svg>valid
+        </span>
+      </div>
+      <div class="alvo-pane__body">
+        <JsonExcerpt code={helpdesk} pointer="/entities/tickets" frame="none" />
+      </div>
+    </div>
+    <div class="alvo-pane">
+      <div class="alvo-pane__head">
+        <span class="alvo-pane__file">the API it becomes</span>
+        <span class="alvo-pane__end alvo-pane__note">captured from a real run</span>
+      </div>
+      <div class="alvo-pane__body">
+        <Exchange name="landing/hero" form="http" steps={[0]} fields={['title', 'priority']} compact responseNote="← trimmed by the hook" />
+        <Exchange name="landing/hero" form="http" steps={[1]} fields={['type', 'detail']} compact requestNote="← no key: anonymous" />
+      </div>
+    </div>
+    <span class="alvo-hero__connector" aria-hidden="true"></span>
+    <span class="alvo-hero__chip" aria-hidden="true">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="13,6 19,12 13,18"></polyline></svg>
+    </span>
+  </div>
+
+  <ul class="alvo-proof" aria-label="At a glance">
+    <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="3"></ellipse><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"></path><path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"></path></svg>SQLite and PostgreSQL</li>
+    <li class="alvo-proof__sep" aria-hidden="true">·</li>
+    <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v16H4z"></path><path d="M8 9h8M8 13h5"></path></svg>OpenAPI and Scalar per descriptor</li>
+    <li class="alvo-proof__sep" aria-hidden="true">·</li>
+    <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H6a2 2 0 0 0-2 2v4l-2 3 2 3v4a2 2 0 0 0 2 2h2"></path><path d="M16 3h2a2 2 0 0 1 2 2v4l2 3-2 3v4a2 2 0 0 1-2 2h-2"></path></svg>JSON Schema for every key</li>
+    <li class="alvo-proof__sep" aria-hidden="true">·</li>
+    <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><line x1="6" y1="6" x2="18" y2="18"></line></svg>No generated code, no migrations to write</li>
+  </ul>
+</section>
+
+<script>
+  for (const button of document.querySelectorAll<HTMLButtonElement>('.alvo-copy[data-copy]')) {
+    button.addEventListener('click', async () => {
+      const status = button.parentElement?.querySelector('[data-copy-status]');
+      try {
+        await navigator.clipboard.writeText(button.dataset.copy ?? '');
+        button.setAttribute('data-copied', '');
+        if (status) status.textContent = 'Copied to the clipboard';
+        setTimeout(() => {
+          button.removeAttribute('data-copied');
+          if (status) status.textContent = '';
+        }, 1600);
+      } catch {
+        if (status) status.textContent = 'Copy failed: select the command and copy it by hand';
+      }
+    });
+  }
+</script>

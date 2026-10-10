@@ -5,7 +5,7 @@ namespace MMLib.Alvo.Api.Tests.Invariants;
 
 /// <summary>
 /// The generated OpenAPI document holds Alvo's contract for <em>every</em> descriptor — sixteen generated
-/// ones and four of the five the repository ships — and not only for the fixture the rules were written
+/// ones and five of the six the repository ships — and not only for the fixture the rules were written
 /// against.
 /// </summary>
 /// <remarks>
@@ -18,7 +18,7 @@ namespace MMLib.Alvo.Api.Tests.Invariants;
 /// </para>
 /// <para>
 /// The <c>examples/</c> descriptors are here for a second reason: spec §415 asks for the lint to run
-/// "against the demo's OpenAPI", and they are what the compose stacks actually serve. Four of the five
+/// "against the demo's OpenAPI", and they are what the compose stacks actually serve. Five of the six
 /// boot; <c>complex-crm</c> cannot be applied at all and is pinned as such below (#208).
 /// </para>
 /// </remarks>
@@ -32,7 +32,7 @@ public class DocumentContractTests
 
     /// <summary>The shipped descriptors, discovered from the repository rather than listed here.</summary>
     /// <remarks>
-    /// Discovered so that a fifth example cannot be added without this suite noticing it, and so that a
+    /// Discovered so that a seventh example cannot be added without this suite noticing it, and so that a
     /// renamed one fails loudly instead of quietly dropping out of the corpus.
     /// </remarks>
     public static TheoryData<string> Examples => [.. Shipped().Where(path => path != Unappliable)];
@@ -106,7 +106,7 @@ public class DocumentContractTests
 
     /// <summary>Every positive example the repository ships, discovered rather than listed.</summary>
     /// <remarks>
-    /// The count is pinned so a fifth example cannot be added without this suite noticing, and a renamed one
+    /// The count is pinned so a seventh example cannot be added without this suite noticing, and a renamed one
     /// fails loudly instead of quietly dropping out of the corpus.
     /// </remarks>
     private static List<string> Shipped()
@@ -118,8 +118,8 @@ public class DocumentContractTests
             .ToList();
 
         found.Count.ShouldBe(
-            5,
-            "the repository ships five positive examples, of which four are appliable; adjust this suite when that changes");
+            6,
+            "the repository ships six positive examples, of which five are appliable; adjust this suite when that changes");
 
         return found;
     }

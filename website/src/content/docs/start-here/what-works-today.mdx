@@ -1,0 +1,84 @@
+---
+title: "What works today"
+description: "Check what this pre-v0.1 build runs, what it accepts but does not run yet, what it refuses, and how fast it is."
+sidebar:
+  order: 7
+---
+
+This page says plainly what the current build does, so you can decide whether it does enough for you. The
+[Capabilities in this build](/MMLib.Alvo/reference/capabilities/) page is the authority: it is generated from the
+running framework's own answer, the same one the dashboard and the schema assistant read.
+
+## Status
+
+Alvo is **pre-v0.1**. The standalone image is published as `ghcr.io/burgyn/alvo:edge`, built from `main`, and runs
+with one downloaded compose file ([Quick start](/MMLib.Alvo/start-here/quick-start/)). No NuGet package is published
+yet: embedded, you reference the projects from a clone of the repository
+([Embed in ASP.NET Core](/MMLib.Alvo/start-here/embed/)). The descriptor format and the APIs may still change before
+v0.1, the first tagged release. [Roadmap and status](/MMLib.Alvo/project/roadmap/) lists what may change and what is
+stable.
+
+What you can use today:
+
+- The standalone host over PostgreSQL or SQLite, driven by one descriptor file.
+- The embedded mode: the same engine inside your ASP.NET Core app, extended with your own C# functions and endpoints.
+- A generated REST API per descriptor, with its own OpenAPI document, filtering, sorting, keyset paging, batches,
+  optimistic concurrency and idempotent writes.
+- Access rules, before-hooks, after-hooks that send e-mail and deliver webhooks, computed fields, rollups, audit
+  columns, indexes and multi-tenancy.
+- The Management API, with dry runs, revisions and rollback, and the admin dashboard with its schema assistant.
+
+## Honoured, warned, refused
+
+Every block of the descriptor format except `branding` falls into one of three groups. `branding` is accepted, but
+nothing renders it yet and nothing warns about it. Apart from that, Alvo never accepts a key and quietly does nothing
+with it without saying so.
+
+- **Honoured** blocks work as documented: `entities` (with their fields, rules, hooks, computed fields, rollups and
+  indexes), `auth`, `tenancy`, `access` and `formats`.
+- **Declared but not run in this build**: the descriptor applies, and the dashboard and the capabilities answer warn
+  that nothing runs. That covers `dynamicEntities`, `automation`, `functions`, sign-in providers other than `local`,
+  `entity.storage: dynamic`, `entity.realtime`, and the parts of `templates` and `webhooks` that only automation would
+  use. Webhook deliveries from after-hooks are made, but not signed yet.
+- **Refused at apply**: the descriptor is rejected with a reason and a fix, because accepting it would silently give
+  you something other than what it says. Examples: a field's `validation` expression, a `$cel` default, `softDelete`,
+  a rollup's `where` filter, JSONata transformations and the `function`, `http.call` and `entity.update` hook actions.
+
+**Dynamic entities**, record types your end users define at runtime in one shared store, are **planned** for a later
+phase: [Dynamic entities (planned)](/MMLib.Alvo/concepts/dynamic-entities/).
+
+## Limits
+
+Every size and count the API enforces is listed, with its value and how to change it, in
+[Limits and budgets](/MMLib.Alvo/reference/limits/). The three a first user meets: the page size of a list (a default,
+and a ceiling a larger `limit` is refused above, never silently capped), the size of a request body, and the number of
+rows in one batch.
+
+## Performance
+
+The published numbers, measured on 2 September 2026 over real PostgreSQL 16 with 200 000 rows, on an Apple M-series
+laptop with the load generator on the same machine:
+
+| Request | p95 |
+|---|---|
+| Read one row by id | 5.28 ms |
+| A filtered, sorted list on an indexed column, over 100 000 rows | 15.61 ms |
+| Create a row | 12.27 ms |
+
+They describe that machine, not a throughput claim; the full table, how it was measured and how to reproduce it are in
+[`docs/performance.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/performance.md).
+
+## Security posture
+
+- **Default-deny.** An entity operation without a rule is refused for everyone, and the Management API admits nobody
+  but the bootstrap administrator until the descriptor's `access` block grants a level.
+- **Rules filter in the database.** For `list`, `get`, `update` and `delete`, a rule is compiled to a parameterized
+  SQL predicate in the statement that reads or changes the rows, never a check on rows already loaded. On a `create`,
+  and for the check on the row an `update` stores, the same rule is evaluated in memory over that row, inside the
+  write's transaction. [CEL](/MMLib.Alvo/concepts/cel/#how-a-rule-becomes-sql) has the table.
+- **Hooks fail closed.** A before-hook runs inside the write's transaction; if a function in it fails, nothing is
+  written.
+- **No default credential.** The image ships no API key and no administrator password; each comes from your
+  configuration.
+
+The whole model is in [Security model](/MMLib.Alvo/concepts/security-model/).

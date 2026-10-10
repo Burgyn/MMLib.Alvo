@@ -1,0 +1,26 @@
+{
+  "descriptor": "website/src/snippets/coding-agents/01-base.alvo.json",
+  "keys": {
+    "admin": { "roles": ["admin", "authenticated"], "scopes": ["*:read", "*:write"], "secretVariable": "ALVO_ADMIN_KEY_SECRET" }
+  },
+  "steps": [
+    {
+      "key": "admin",
+      "method": "POST",
+      "path": "/management/projects/help-desk/cel/check",
+      "bodyFile": "website/src/snippets/coding-agents/02-add-field.alvo.json",
+      "bodyFileAs": "descriptorJson",
+      "body": { "path": "/entities/tickets/rules/update", "source": "'agnet' in @user.roles" },
+      "expect": 200
+    },
+    {
+      "key": "admin",
+      "method": "POST",
+      "path": "/management/projects/help-desk/cel/check",
+      "bodyFile": "website/src/snippets/coding-agents/02-add-field.alvo.json",
+      "bodyFileAs": "descriptorJson",
+      "body": { "path": "/entities/tickets/rules/update", "source": "'agent' in @user.roles || 'admin' in @user.roles" },
+      "expect": 200
+    }
+  ]
+}

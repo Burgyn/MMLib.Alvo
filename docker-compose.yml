@@ -1,5 +1,5 @@
 # The local stack the F3 demo runs on: the standalone host over real PostgreSQL, driven by the
-# vehicle-registry descriptor and nothing else. MinIO and MailHog are deliberately absent — object
+# vehicle-registry descriptor by default. MinIO and MailHog are deliberately absent — object
 # storage and email do not exist in F3, and the full stack is #24's remainder in F4.
 name: alvo
 
@@ -45,8 +45,12 @@ services:
     # README both use http://localhost:8080, and the healthcheck below runs inside the container.
     ports:
       - "127.0.0.1:8080:8080"
+    # ALVO_DESCRIPTOR picks the descriptor the stack runs; unset, it is vehicle-registry, which is what
+    # scripts/test-e2e and the README quick start assume. A dev key whose roles the chosen descriptor does
+    # not declare authenticates nothing, so a reader running their own descriptor adds keys in a
+    # docker-compose.override.yml (gitignored) — see the docs' "Run your own descriptor".
     volumes:
-      - ./examples/vehicle-registry/vehicles.alvo.json:/alvo/descriptor.json:ro
+      - ${ALVO_DESCRIPTOR:-./examples/vehicle-registry/vehicles.alvo.json}:/alvo/descriptor.json:ro
     # /health/ready, not /health/live: liveness evaluates no check at all and answers 200 for any
     # process that is up, so it is the wrong signal for "the backend is usable" even while the boot
     # happens to run before the socket binds. Readiness is 503 until Alvo's boot has applied the

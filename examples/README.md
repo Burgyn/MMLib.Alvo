@@ -11,39 +11,48 @@ Reference descriptors validated against `schema/project.schema.json`
 
 - **`simple-tasks/`** — the smallest real backend, and the one to start from:
   two owned entities (`projects`, `tasks`), ownership rules, an `enum`, `audit`,
-  one composite index. **Applies as it stands.** It used to carry a `count`
-  rollup, per-field `default`s and a `beforeUpdate` mutate; those were removed
-  when the apply-time refusals below landed, because an example that cannot be
-  applied is worse than a smaller one. (`rollup` is honoured as of #21; the
-  example was not put back, because the smallest starting point is the point.)
+  one composite index. **Applies as it stands.** It deliberately leaves out
+  rollups, defaults and hooks, because the smallest starting point is the point;
+  the other examples show those.
+- **`help-desk/`** — **applies as it stands.** A support desk's `tickets`: an `enum` priority and status
+  with literal `default`s, a `decimal` estimate and a `computed` field over it, `audit`, role-differentiated
+  rules, and two before-hooks (a `mutate` that trims the title with `trim`, a `reject` for a high-priority
+  ticket without a body). It declares the roles `admin` and `agent`. It is the end state of the docs
+  site's tutorial (*Tutorial: your first backend*) and the source of the README's "See it" section.
 - **`complex-crm/`** — **a format showcase, not a runnable backend** (see
-  `complex-crm/NOT-RUNNABLE.md`): the analysis §16 CRM adapted to v1, exercising
+  `complex-crm/NOT-RUNNABLE.md`): a CRM written in the v1 format, exercising
   most of the surface *including keys this build refuses*, which is exactly why
   applying it fails. It is the schema corpus's one full-surface fixture, covering
-  multi-tenancy (`tenancy.enabled` + a `global` číselník),
+  multi-tenancy (`tenancy.enabled` + a `global` lookup table),
   dynamic-entities governance (`dynamicEntities.defaultRules` + quotas),
   `rollup.via`, a `computed` field reading a `rollup` (`gross_total`),
   a declarative `formats` entry (`sk-ico`) referenced by a field,
   field-level per-role masking (`hidden` as CEL), tagged `{"$cel": …}` values,
   `renamedFrom`, `templates`, outbound `webhooks`, a `batch`-delivery
   automation rule, a scheduled rule delegating to a `function`, and `x-` keys.
-  It is a real **bundle** (D3): `crm.alvo.json` alongside
+  It is a real **bundle**: `crm.alvo.json` alongside
   `templates/invoice-issued.html` (referenced via `bodyFile`) and
   `functions/remind-stale-deals.csx` (referenced via `script`).
-- **`vehicle-registry/`** — **applies as it stands.** The #23 demo: owners, their vehicles, and
+- **`vehicle-registry/`** — **applies as it stands.** The demo the root `docker-compose.yml` serves: owners, their vehicles, and
   periodic roadworthiness inspections. Exercises two `ref` chains
   (`vehicles.owner_id` → `owners`, `inspections.vehicle_id` → `vehicles`,
   the latter `onDelete: cascade`), a composite index on each of `vehicles`
   and `inspections`, `audit` on both `owners` and `vehicles`, and a
-  `renamedFrom` on `vehicles.plate` (was `license_plate`). Doubles as the
-  fixture for the per-engine generated-SQL snapshot tests (the EF-drift
-  guard) in `MMLib.Alvo.Data.Sqlite.Tests` / `.Data.PostgreSql.Tests.Integration`.
+  `renamedFrom` on `vehicles.plate` (was `license_plate`).
 - **`bike-workshop/`** — **applies as it stands.** The admin dashboard's demo backend (see
   `bike-workshop/README.md`): a bicycle repair and rental workshop over eight entities, exercising every
   field type, declared `formats`, literal `default`s, all three `onDelete`s, `computed` fields (one reading
   a rollup), `count`/`sum` rollups, `hidden`/`readOnly` as CEL, before-hooks (`reject` and `mutate`),
   `email` and `webhook` after-hooks, `access` levels and role-differentiated rules. `scripts/demo-admin`
   starts the host over it and seeds realistic data from `bike-workshop/seed/` through the public API.
+- **`field-service/`** — **applies as it stands.** The runnable complex demo (see `field-service/README.md`)
+  and the fixture the `test/teapie-field-service` end-to-end suite drives: a multi-tenant field-service
+  dispatch backend over three entities — `regions` (`tenancy: global`, shared reference data) and the
+  tenant-scoped `customers` and `work_orders`. It exercises `tenancy`, `audit` on one entity and its
+  absence on another (so `If-Match` is honoured on one and refused with 412 on the other), `hidden` and
+  `readOnly` fields, role-differentiated and row-level rules, an operation with no rule at all, `ref` with
+  `onDelete: restrict`, one field of each type, and built-in and declared `formats`. Its own stack is
+  `docker-compose.field-service.yml`, with one dev key per role and tenant.
 - **`_negative/`** — descriptors that MUST be rejected, each proving one
   constraint (unknown property, `decimal` missing `scale`, the reserved
   `users` entity name, a wrong `apiVersion`). The test asserts they fail with
@@ -63,10 +72,11 @@ and the descriptor validator read:
 | `field.validation` | the expression is never evaluated, so a value it forbids is accepted — the field is not constrained at all | #22 (before-hooks) |
 | `field.default`, `$cel` half only | a CEL default needs the caller's context at insert time, which is the `computed` machinery — the value would be dropped and the field left null. **The literal half is honoured (#113):** it becomes a column `DEFAULT` and is filled into every whole-row write | #113 |
 | `entity.softDelete` | DELETE removes the row and reads do not exclude it — irrecoverable loss where the contract promises recovery | soft-delete issue |
-| `entity.hooks.*` | the hooks never run, so a write the author believes is vetted or patched is neither | #22 (hooks pipeline) |
 
-Hooks are refused **per hook point** (`beforeCreate`, `afterUpdate`, …) rather than as a block, so #22 can
-lift them one at a time as each starts working.
+Hooks used to be refused **per hook point** (`beforeCreate`, `afterUpdate`, …), so #22 could lift them one at a
+time; all six now run, so the table holds no hook entry. What a hook may still not do is refused per *action*: the
+`function`, `http.call` and `entity.update` actions, listed with every other refusal on the generated
+*Capabilities in this build* page.
 
 Writing `softDelete: false`, or an empty `beforeUpdate: []`, is **not** a declaration and maps normally —
 declining a feature is not asking for it.

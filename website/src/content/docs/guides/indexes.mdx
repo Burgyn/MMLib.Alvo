@@ -1,0 +1,117 @@
+---
+title: "Indexes and uniqueness"
+description: "Declare composite indexes for the queries you run most, make a combination of fields unique, and know which indexes Alvo already creates."
+sidebar:
+  order: 6
+---
+
+import { Code, Steps } from '@astrojs/starlight/components';
+import Exchange from '../../../components/Exchange.astro';
+import start from '../../../snippets/shell/indexes-start.sh?raw';
+import indexes from '../../../snippets/indexes/01-indexes.alvo.json?raw';
+
+:::tip[What you will achieve]
+Tickets indexed for "the open tickets of one queue", numbered uniquely within each queue, and filterable by assignee.
+About five minutes, starting from the stack in [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
+:::
+
+## Before you start
+
+- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), run from its `alvo-help-desk`
+  directory with `COMPOSE_FILE` and that page's secrets exported in this shell. This page uses the `agent` key (roles
+  `agent`, `authenticated`).
+- [Entities and fields](/MMLib.Alvo/guides/entities-and-fields/), for fields and `unique`.
+
+## Indexes Alvo creates for you
+
+Declare an index only beyond these, which every entity already has:
+
+- the primary key `id`;
+- every field with `"unique": true`;
+- every `ref` to a declared entity.
+
+A `ref` to the built-in `users` entity is **not** indexed by itself.
+
+## 1. Declare the indexes
+
+<Steps>
+
+1. Start the stack over this page's descriptor. The first command **deletes the stack's database**:
+
+   <Code code={start.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+2. The descriptor declares three indexes:
+
+   <Code code={indexes} lang="json" title="help-desk.alvo.json" ins={[21, { range: '23-26' }]} />
+
+   - `"index": true` on `assignee_id` is the one-field form. Use it for a single field, here a `ref` to `users`,
+     which gets no index otherwise.
+   - `{"fields": ["queue", "status"]}` is a composite index. List the fields in query order: callers filter on
+     `queue` first, then on `status`.
+   - `{"fields": ["queue", "number"], "unique": true}` makes the **combination** unique: one ticket per number within
+     each queue.
+
+</Steps>
+
+A plain index never refuses a write; it only makes reads faster. When the schema assistant (or any JSON Patch) adds
+the first index, it must add the whole `indexes` list: an `add` at `/indexes/-` on a list that does not exist yet is
+refused.
+
+## 2. Number tickets within each queue
+
+<Steps>
+
+1. Ticket 1 in `billing`, then ticket 1 in `hardware`. The same number in two queues is allowed:
+
+   <Exchange name="indexes/01-unique-per-queue" wrap steps={[0]} fields={["id", "queue", "number", "title"]} />
+
+   <Exchange name="indexes/01-unique-per-queue" wrap steps={[1]} fields={["id", "queue", "number", "title"]} />
+
+2. A second ticket 1 in `billing` collides with the first:
+
+   <Exchange name="indexes/01-unique-per-queue" wrap steps={[2]} />
+
+   Each field of the combination gets a violation with the code `unique`. The message is the one a single unique
+   field gets; the pointers name the combination.
+
+</Steps>
+
+## How it works
+
+A declared index becomes a database index when the descriptor is applied, and a unique one makes the database refuse a
+duplicate, which Alvo answers as 409 `conflict`. On a tenant-scoped entity, Alvo puts `tenant_id` first in every unique
+index, both a field's `unique` and a unique combination, so two tenants may hold the same value and neither learns
+that the other does. [Multi-tenancy](/MMLib.Alvo/guides/multi-tenancy/) covers tenant-scoped entities.
+
+## Options and variations
+
+| You want | Declare |
+|---|---|
+| One field unique across the entity | the field's [`unique`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.unique) |
+| A combination unique, such as one number per queue | an entry in [`indexes`](/MMLib.Alvo/reference/descriptor/entities-indexes/#entities.indexes) with [`unique`](/MMLib.Alvo/reference/descriptor/entities-indexes/#entities.indexes.unique) |
+| A faster filter on one field | the field's [`index`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.index) |
+| A faster filter on several fields together | an entry in `indexes` with its [`fields`](/MMLib.Alvo/reference/descriptor/entities-indexes/#entities.indexes.fields) in query order |
+
+A field's `unique` and a unique combination are different rules: `unique` on both `queue` and `number` would allow one
+ticket per queue in total.
+
+## What can go wrong
+
+| Status | Problem type | When | Fix | Returned by |
+|---|---|---|---|---|
+| 409 | [`conflict`](/MMLib.Alvo/reference/problem-types/#conflict) | A write would give two rows the same value of a unique field, or the same combination of a unique index (code `unique`). | Send a value, or a combination, that no other row holds. | every host |
+
+**A new unique index cannot be created while duplicate rows exist.** Before you add one to an entity that already
+holds data, remove or change the rows that share a value.
+
+## Reference
+
+- Descriptor keys: [`indexes`](/MMLib.Alvo/reference/descriptor/entities-indexes/),
+  [`index`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.index),
+  [`unique`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.unique).
+- Problem types: [`conflict`](/MMLib.Alvo/reference/problem-types/#conflict).
+
+## Next
+
+**[Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/)**: change a running backend safely, with dry
+runs, revisions and rollback.

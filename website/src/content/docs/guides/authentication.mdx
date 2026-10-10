@@ -1,0 +1,192 @@
+---
+title: "Authentication and API keys"
+description: "Give each caller an API key with a user, roles and scopes, and know exactly what Alvo answers when a key is missing, wrong or too narrow."
+sidebar:
+  order: 7
+---
+
+import { Code, Steps } from '@astrojs/starlight/components';
+import Exchange from '../../../components/Exchange.astro';
+import override from '../../../snippets/shell/authentication.compose.override.yml?raw';
+import start from '../../../snippets/shell/authentication-start.sh?raw';
+
+:::tip[What you will achieve]
+A read-only `reader` key beside the stack's keys, and the four answers a request can get because of its credential:
+served, anonymous, `401 unauthenticated` and `403 out-of-scope`. About ten minutes, starting from the stack in
+[Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
+:::
+
+## Before you start
+
+- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), serving `examples/help-desk`, run
+  from its `alvo-help-desk` directory with `COMPOSE_FILE` and that page's secrets exported in this shell.
+- This page adds a fourth key, `reader` (roles `agent`, `authenticated`; scope `*:read` only), and also uses `agent`
+  and the stack's own `demo` key.
+
+The responses below were captured from a real host when the site was built, so your ids will differ.
+
+## 1. Give a caller a key
+
+A key is configuration, not data: the host reads a fixed list from `Alvo:Auth:DevKeys`, and each entry names the user
+the key acts as, the roles it holds and the scopes it may use. This build has no endpoint that issues or revokes keys,
+so treat it as a development mechanism: the secret lives in the process's configuration, and when it is passed as an
+environment variable it is readable from a process listing and from `docker inspect`. Until a real issuance path
+lands ([#36](https://github.com/Burgyn/MMLib.Alvo/issues/36)) these keys are the only way to call a standalone host,
+so generate every secret, never reuse one across keys or environments, and prefer a configuration source that does
+not show up in `docker inspect`, such as a mounted file or a secret store.
+
+<Steps>
+
+1. Replace `docker-compose.override.yml` with this one. It keeps everything the first one sets, adds `reader`, and
+   gives the `demo` key a third role, `inspector`, which section 2 uses:
+
+   <Code code={override} lang="yaml" title="docker-compose.override.yml" ins={[10, { range: '25-30' }]} />
+
+2. Download it, generate the new secret and recreate the `alvo` container:
+
+   <Code code={start.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+   While this override is in place, every compose command reads it, so keep `ALVO_READER_KEY_SECRET` exported too.
+   A secret shorter than 32 characters is refused at startup, and the container does not come back.
+   `openssl rand -hex 16` produces exactly 32.
+
+3. A request carries the key in the `X-Alvo-Api-Key` header, as `<keyId>.<secret>`:
+
+   <Exchange name="authentication/01-keys" wrap steps={[0]} fields={["id", "title", "status"]} />
+
+</Steps>
+
+Every setting of a key:
+
+| Setting | What it decides |
+|---|---|
+| `KeyId` | The public half of the key. Unique, and without a `.`, because the header is split at the first `.`. |
+| `Secret` | The private half, at least 32 characters. Generate it; never choose it. |
+| `User` | The id the caller acts as: what a rule reads as `@user.id`, and what the audit columns record. Set it: a key without one has no identity, so a rule that reads `@user.id` refuses it with a 403 and the audit columns record `null`. |
+| `Roles` | What a rule tests, as in `'agent' in @user.roles`. Each role must be declared in the descriptor's [`auth.roles`](/MMLib.Alvo/reference/descriptor/auth/#auth.roles) or be built in (`anon`, `authenticated`, `admin`). `authenticated` is not added for you: list it. |
+| `Scopes` | Which entities the key may read or write, as `<entity\|*>:<read\|write>`. |
+| `Tenant` | The one tenant the key acts in; see [Multi-tenancy](/MMLib.Alvo/guides/multi-tenancy/). |
+| `ExpiresAt` | The instant after which the key is refused. Unset, it never expires. |
+
+In an environment variable each setting is indexed, as in the override above: `Alvo__Auth__DevKeys__3__Roles__0`.
+The full list is under [`Alvo:Auth`](/MMLib.Alvo/reference/configuration/#alvoauth).
+
+## 2. A request without a usable key
+
+Alvo tells three cases apart: no key, a key that cannot be used, and a key that may not do this.
+
+<Steps>
+
+1. **No key is not a 401.** A request without `X-Alvo-Api-Key` is an anonymous caller, who holds only the `anon`
+   role, and the rules decide what it gets. The help-desk `list` rule asks for `authenticated`, so the page is empty,
+   though the ticket from step 1 exists:
+
+   <Exchange name="authentication/01-keys" wrap steps={[1]} />
+
+   A rule that reads `@user.id` refuses an anonymous caller with 403 `forbidden` instead; see
+   [Access rules](/MMLib.Alvo/guides/access-rules/#3-know-when-alvo-answers-403).
+
+2. **A key that cannot be used is a 401.** Here the secret is wrong:
+
+   <Exchange name="authentication/01-keys" wrap steps={[2]} />
+
+3. The override gave the `demo` key the role `inspector`, which `help-desk` does not declare. One undeclared role is
+   enough for the whole key to authenticate nothing:
+
+   <Exchange name="authentication/01-keys" wrap steps={[3]} />
+
+   The answer is the same, word for word, for an unknown key, a wrong secret, an expired key, a key with an undeclared
+   role or no role at all, and a tenant header the key was not issued for. That is deliberate: a caller learns nothing
+   about which keys exist. The host's configuration is where to look.
+
+</Steps>
+
+## 3. Narrow a key with scopes
+
+Scopes belong to the key and are checked before any rule. `read` covers `list` and `get`; `write` covers `create`,
+`update` and `delete`, and does not include `read`. A key with no scopes may do nothing on the Data API.
+
+<Steps>
+
+1. `reader` holds `*:read` only, so its write is refused before Alvo looks at a rule or a row:
+
+   <Exchange name="authentication/01-keys" wrap steps={[4]} />
+
+2. The same key reads, within what the rules allow its roles:
+
+   <Exchange name="authentication/01-keys" wrap steps={[5]} />
+
+</Steps>
+
+A request has to pass both the key's scopes and the entity's [rules](/MMLib.Alvo/guides/access-rules/). Use scopes to
+limit what a credential may ever do, such as a key for a reporting job, and rules to decide what a user may do to
+which rows.
+
+Scopes govern the Data API only. The [Management API](/MMLib.Alvo/reference/management-api/) admits a caller by the
+descriptor's [`access`](/MMLib.Alvo/reference/descriptor/access/) block and the key's roles alone, so a key scoped to
+one entity still reaches management when its roles match an access level.
+
+## People sign in to the dashboard
+
+The dashboard at `/admin` does not take API keys. People sign in with an email address and a password that Alvo
+holds; this build has no other sign-in provider.
+
+- **The first administrator** comes from configuration: `Alvo__Admin__BootstrapEmail`, and
+  `Alvo__Admin__BootstrapPasswordFile`, the path of a mounted file that holds the password. The quick start's compose
+  file sets both, and turns `ALVO_ADMIN_PASSWORD` into that file. Passing the password itself in
+  `Alvo__Admin__BootstrapPassword` is refused at startup, because an environment variable shows up in a process
+  listing and in `docker inspect`. The account is created once; changing the file later does not change its password.
+- **Everyone else** is created by an administrator on the dashboard's *Access* screen, which issues a set-password
+  link. A link works once, for 24 hours by default (an embedded host can change this through
+  `DataProtectionTokenProviderOptions.TokenLifespan`), and the person then signs in as usual.
+- A password is 15 to 128 characters long and must not contain the email address (or the part before `@`, once that is
+  three characters or more) it signs in with. There are no composition rules.
+
+A dashboard session works only in the dashboard: it never turns a signed-in person into a Data API caller. An API key
+whose `User` is the bootstrap administrator's id is admitted to the Management API as an administrator, whatever the
+`access` block says. [The admin dashboard](/MMLib.Alvo/guides/admin-dashboard/) covers the screens.
+
+## Your own users, in an embedded host
+
+When Alvo is embedded in your ASP.NET Core app, your users already sign in to your app. Resolve them in your own
+endpoints and pass an `AlvoContext` with their id, roles and tenant to `IAlvoData`; Alvo's rules then apply to them
+exactly as they do to a key. [Use your own authentication](/MMLib.Alvo/guides/own-authentication/) shows how.
+
+Never read a credential from a cookie. `Alvo:Auth:HeaderName` and `Alvo:Auth:TenantHeaderName` may name any header
+except `Cookie`: a browser attaches cookies to cross-site requests by itself, which would make every Alvo route a
+cross-site request forgery target, so the host refuses that configuration at startup.
+
+:::caution[Not in this build]
+The descriptor's [`auth.providers`](/MMLib.Alvo/reference/descriptor/auth/#auth.providers) is parsed and warned
+about, not honoured: Google, Microsoft, GitHub, Apple and OIDC sign-in are tracked in
+[#36](https://github.com/Burgyn/MMLib.Alvo/issues/36)
+([Capabilities in this build](/MMLib.Alvo/reference/capabilities/#declared-but-not-run-in-this-build)). There is
+also no endpoint that issues, rotates or revokes an API key: keys come from configuration only.
+:::
+
+## What can go wrong
+
+| Status | Problem type | When | Fix | Returned by |
+|---|---|---|---|---|
+| 401 | [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | A key was sent and cannot be used: unknown, wrong secret, expired, a role the descriptor does not declare, no role, or an `X-Alvo-Tenant` the key was not issued for. | Check the key against the host's configuration and the descriptor's `auth.roles`. | every host |
+| 403 | [`out-of-scope`](/MMLib.Alvo/reference/problem-types/#out-of-scope) | The key's scopes do not cover this entity and operation. | Grant the key the scope it needs, such as `tickets:write`. | every host |
+| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | No key was sent, and the rule for this operation reads `@user.id`. | Send a key. | every host |
+
+If the container does not come back after you change a key, the end of `docker compose logs alvo` names the key and
+the setting: an empty or short `Secret`, a duplicate `KeyId`, a `KeyId` with a `.`, or a scope that does not parse.
+
+## Reference
+
+- Configuration: [`Alvo:Auth`](/MMLib.Alvo/reference/configuration/#alvoauth).
+- Descriptor keys: [`auth.roles`](/MMLib.Alvo/reference/descriptor/auth/#auth.roles),
+  [`auth.providers`](/MMLib.Alvo/reference/descriptor/auth/#auth.providers),
+  [`access`](/MMLib.Alvo/reference/descriptor/access/).
+- Problem types: [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated),
+  [`out-of-scope`](/MMLib.Alvo/reference/problem-types/#out-of-scope),
+  [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden).
+- Where scopes and rules are each decided:
+  [`docs/architecture/data-api.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md#the-decision-procedure-the-four-ways-a-caller-actually-gets-403).
+
+## Next
+
+**[Access rules](/MMLib.Alvo/guides/access-rules/)**: decide, per operation, which callers may reach which rows.

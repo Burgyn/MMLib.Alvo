@@ -1,0 +1,27 @@
+{
+  "descriptor": "website/src/snippets/apply-and-evolve/01-base.alvo.json",
+  "keys": {
+    "admin": {
+      "roles": [
+        "admin",
+        "authenticated"
+      ],
+      "scopes": [
+        "*:read",
+        "*:write"
+      ],
+      "secretVariable": "ALVO_ADMIN_KEY_SECRET"
+    }
+  },
+  "steps": [
+    {
+      "key": "admin",
+      "method": "PUT",
+      "path": "/management/projects/help-desk/descriptor",
+      "bodyFile": "website/src/snippets/apply-and-evolve/02-add-field.alvo.json",
+      "bodyFileAs": "descriptorJson",
+      "expect": 428,
+      "expectType": "precondition-required"
+    }
+  ]
+}

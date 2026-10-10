@@ -1,0 +1,1 @@
+echo "$ALVO_ADMIN_PASSWORD"

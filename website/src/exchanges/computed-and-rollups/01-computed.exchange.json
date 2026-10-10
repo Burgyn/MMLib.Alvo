@@ -1,0 +1,54 @@
+{
+  "descriptor": "website/src/snippets/computed-and-rollups/01-computed.alvo.json",
+  "keys": {
+    "admin": {
+      "roles": [
+        "admin",
+        "authenticated"
+      ],
+      "scopes": [
+        "*:read",
+        "*:write"
+      ],
+      "secretVariable": "ALVO_ADMIN_KEY_SECRET"
+    }
+  },
+  "steps": [
+    {
+      "key": "admin",
+      "method": "PUT",
+      "path": "/api/invoices/4c1d2b3a-6e5f-4a7b-8c9d-0e1f2a3b4c5d",
+      "body": {
+        "number": "2026-0042",
+        "vat_total": 11.5
+      },
+      "expect": 201
+    },
+    {
+      "key": "admin",
+      "method": "POST",
+      "path": "/api/invoice_lines",
+      "body": {
+        "invoice_id": "4c1d2b3a-6e5f-4a7b-8c9d-0e1f2a3b4c5d",
+        "description": "On-site support, hours",
+        "unit_price": 12.5,
+        "quantity": 4
+      },
+      "expect": 201
+    },
+    {
+      "key": "admin",
+      "method": "POST",
+      "path": "/api/invoice_lines",
+      "body": {
+        "invoice_id": "4c1d2b3a-6e5f-4a7b-8c9d-0e1f2a3b4c5d",
+        "description": "Travel",
+        "unit_price": 20,
+        "quantity": 1,
+        "line_total": 15
+      },
+      "expect": 403,
+      "expectType": "forbidden"
+    }
+  ]
+}

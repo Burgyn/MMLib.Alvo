@@ -3,7 +3,7 @@
 /// <summary>
 /// <b>The one operation surface for administering an Alvo project.</b> The admin dashboard resolves it from
 /// DI and calls it in-process; an agent, the CLI and a later MCP adapter reach the same members over HTTP.
-/// One path, two transports — spec §0.5 contract 4 forbids a divergent write <em>path</em>, not
+/// One path, two transports: a write never takes a divergent <em>path</em> depending on its caller, only a different
 /// serialisation.
 /// </summary>
 /// <remarks>

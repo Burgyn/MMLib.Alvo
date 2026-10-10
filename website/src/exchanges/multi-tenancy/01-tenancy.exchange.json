@@ -1,0 +1,121 @@
+{
+  "descriptor": "website/src/snippets/multi-tenancy/01-tenancy.alvo.json",
+  "keys": {
+    "acme": {
+      "roles": [
+        "agent",
+        "authenticated"
+      ],
+      "scopes": [
+        "*:read",
+        "*:write"
+      ],
+      "tenant": "0b8f3c2a-5d4e-4f6a-8b7c-1d2e3f4a5b6c",
+      "secretVariable": "ALVO_ACME_KEY_SECRET",
+      "user": "a1c3e5f7-2b4d-4c6e-8f0a-1b3d5f7a9c01"
+    },
+    "globex": {
+      "roles": [
+        "agent",
+        "authenticated"
+      ],
+      "scopes": [
+        "*:read",
+        "*:write"
+      ],
+      "tenant": "7e6d5c4b-3a29-4180-9f7e-6d5c4b3a2918",
+      "secretVariable": "ALVO_GLOBEX_KEY_SECRET",
+      "user": "b2d4f6a8-3c5e-4d7f-9a1b-2c4e6f8a0b02"
+    },
+    "admin": {
+      "roles": [
+        "admin",
+        "authenticated"
+      ],
+      "scopes": [
+        "*:read",
+        "*:write"
+      ],
+      "secretVariable": "ALVO_ADMIN_KEY_SECRET",
+      "user": "8d4e2a6c-1b3f-4c5d-8e7a-9f0b1c2d3e02"
+    }
+  },
+  "steps": [
+    {
+      "key": "admin",
+      "method": "PUT",
+      "path": "/api/categories/c4a7e1d2-9b3f-4e6a-8c5d-2f1e0d9c8b7a",
+      "body": {
+        "name": "Hardware"
+      },
+      "expect": 201
+    },
+    {
+      "key": "acme",
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": {
+        "title": "VPN drops every hour",
+        "tenant_id": "0b8f3c2a-5d4e-4f6a-8b7c-1d2e3f4a5b6c",
+        "category_id": "c4a7e1d2-9b3f-4e6a-8c5d-2f1e0d9c8b7a"
+      },
+      "expect": 201
+    },
+    {
+      "key": "acme",
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": {
+        "title": "Printer on fire"
+      },
+      "expect": 403,
+      "expectType": "forbidden"
+    },
+    {
+      "key": "globex",
+      "method": "GET",
+      "path": "/api/tickets",
+      "expect": 200
+    },
+    {
+      "key": "globex",
+      "method": "GET",
+      "path": "/api/tickets/{1.body.id}",
+      "expect": 404,
+      "expectType": "not-found"
+    },
+    {
+      "key": "globex",
+      "method": "GET",
+      "path": "/api/categories",
+      "expect": 200
+    },
+    {
+      "key": "acme",
+      "method": "PATCH",
+      "path": "/api/tickets/{1.body.id}",
+      "body": {
+        "tenant_id": "7e6d5c4b-3a29-4180-9f7e-6d5c4b3a2918"
+      },
+      "expect": 403,
+      "expectType": "forbidden"
+    },
+    {
+      "key": "admin",
+      "method": "GET",
+      "path": "/api/tickets",
+      "expect": 403,
+      "expectType": "forbidden"
+    },
+    {
+      "key": "acme",
+      "method": "GET",
+      "path": "/api/tickets",
+      "headers": {
+        "X-Alvo-Tenant": "7e6d5c4b-3a29-4180-9f7e-6d5c4b3a2918"
+      },
+      "expect": 401,
+      "expectType": "unauthenticated"
+    }
+  ]
+}

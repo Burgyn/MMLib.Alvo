@@ -772,9 +772,12 @@ read any row it could write through a no-op `PATCH`. Id-only rather than 403, in
 write passed its gate and has committed. This is the deliberate deviation from PostgreSQL RLS's `RETURNING`,
 which fails the statement instead.
 
-### `Idempotency-Key` is *ignored* on `PATCH` and `DELETE` — and that label must not overstate
+### `Idempotency-Key` was *ignored* on `PATCH` and `DELETE` — and that label must not overstate
 
-It is accepted and does nothing. Neither operation lists it as a parameter in the OpenAPI document, because
+**Superseded: #102 made the key honoured on both** (see the section above). The note is kept for the
+reasoning, which is why the key matters there at all.
+
+It was accepted and did nothing. Neither operation lists it as a parameter in the OpenAPI document, because
 a parameter is an invitation to send something; the prose says it is ignored.
 
 **The row's end state is unaffected. The outcome the client observes is not** — and an earlier version of

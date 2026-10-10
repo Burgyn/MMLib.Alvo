@@ -1,0 +1,123 @@
+---
+title: Quick start
+description: Start the published standalone image with one compose file, create a record and read it back, in five minutes.
+sidebar:
+  order: 2
+---
+
+import { Code } from '@astrojs/starlight/components';
+import Exchange from '../../../components/Exchange.astro';
+import quickStart from '../../../snippets/shell/quick-start.sh?raw';
+import tearDown from '../../../snippets/shell/quick-start-tear-down.sh?raw';
+
+:::tip[What you will achieve]
+A running Alvo backend over PostgreSQL, and a record you created through its API. About five minutes, starting from
+nothing but Docker and one downloaded file: no clone, no build.
+:::
+
+The stack runs the published image, `ghcr.io/burgyn/alvo` (for `linux/amd64` and `linux/arm64`). Its `edge` tag
+follows the repository's `main` branch; Alvo is pre-v0.1, so there is no release tag yet.
+
+## Before you start
+
+- Docker with Compose v2, `curl` and `openssl`.
+- Port 8080 free on this machine. The stack listens on `127.0.0.1:8080` only.
+
+## Run it
+
+<Code code={quickStart.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+Line by line: download the compose file; generate the secret of the stack's one API key and the dashboard
+administrator's password (compose refuses to start without either, because the image ships no credential); pull the
+images and start Alvo next to PostgreSQL, waiting up to 90 seconds until the descriptor is applied; list the owners,
+which is an empty page for now.
+
+**How long the first run takes.** The first run pulls two images, Alvo's and PostgreSQL's, about 700 MB on disk
+together (measured with a local `linux/arm64` build of the image), so it takes as long as your connection needs for
+that. With both images already pulled, the stack was ready about 5 seconds after `up` on an Apple M4 laptop with
+Docker Desktop. Later runs reuse the images.
+
+## Create, then list
+
+The stack's key is `demo`, with the built-in roles `admin` and `authenticated`; its secret is the
+`ALVO_DEMO_KEY_SECRET` you exported. Create an owner, then list the owners again:
+
+<Exchange name="quick-start/01-create-and-list" wrap />
+
+The `Location` header points at the new record, and the list now holds it. These responses were captured from a real
+run when the site was built, so your ids, timestamps and ETag will differ. Every write needs the
+`Content-Type: application/json` header as well as the key.
+
+## What just happened
+
+The stack serves [`examples/vehicle-registry`](https://github.com/Burgyn/MMLib.Alvo/blob/main/examples/vehicle-registry/vehicles.alvo.json),
+which the image carries at `/alvo/examples/vehicle-registry/vehicles.alvo.json`. The descriptor has three entities:
+`owners`, their `vehicles`, and the vehicles' `inspections`. From that one file Alvo created the tables in PostgreSQL and serves a REST API for each entity, with the access rules the descriptor declares:
+any authenticated caller may read owners, and only an `admin` may create one. Nobody wrote a controller, a migration or
+an authorization check.
+
+## Explore the API
+
+Each descriptor generates its own OpenAPI document. While the stack runs:
+
+- `http://localhost:8080/scalar` is an API browser over every route this descriptor produced.
+- `http://localhost:8080/openapi/v1.json` is the document itself, for a client generator or a coding agent.
+
+Both are readable without a key; every data route needs one.
+
+## Open the dashboard
+
+The same stack serves the admin dashboard at `http://localhost:8080/admin`. Sign in as `admin@alvo.local` with the
+password you exported in `ALVO_ADMIN_PASSWORD`; compose hands it to the host as a mounted file, and the account is
+created on the first start against an empty database. [The admin dashboard](/MMLib.Alvo/guides/admin-dashboard/)
+walks through its screens.
+
+## Serve another example
+
+The image carries every example that applies, under `/alvo/examples/<example>/<file>.alvo.json`.
+`ALVO_DESCRIPTOR` picks one, for example the smallest real backend, projects and their tasks:
+
+```sh
+docker compose -f docker-compose.quickstart.yml down --volumes
+ALVO_DESCRIPTOR=/alvo/examples/simple-tasks/tasks.alvo.json docker compose -f docker-compose.quickstart.yml up --wait
+```
+
+The `down --volumes` deletes the database first, because a database holds the schema of the descriptor it served and
+Alvo refuses to drop the old tables on its own. The demo key's roles are built in, so it authenticates against every
+example; what it may do there is that descriptor's rules. [Examples](/MMLib.Alvo/examples/) lists them all, and the
+header of `docker-compose.quickstart.yml` says what to add for the multi-tenant `field-service`.
+
+## Tear down
+
+Stop the stack and delete its database volume. Run it in the same shell, because compose reads
+`ALVO_DEMO_KEY_SECRET` for every command, `down` included:
+
+<Code code={tearDown.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+## What can go wrong
+
+| Status | Problem type | When | Fix | Returned by |
+|---|---|---|---|---|
+| 401 | [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | The `X-Alvo-Api-Key` header was sent but cannot be used: a typo, or a secret from another shell. | Send `demo.` followed by the secret the stack was started with. | every host |
+
+A request with no key at all is anonymous, not unauthenticated: it reads an empty page or is refused with 403
+[`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden), because no rule admits an anonymous caller.
+
+If `docker compose up` fails with `required variable ALVO_DEMO_KEY_SECRET is missing a value`, export the secret in
+this shell first, and `ALVO_ADMIN_PASSWORD` with it. If the stack serves another descriptor than the vehicle registry,
+`ALVO_DESCRIPTOR` is still exported in this shell: `unset ALVO_DESCRIPTOR`.
+
+## Reference
+
+- The descriptor: [`examples/vehicle-registry`](https://github.com/Burgyn/MMLib.Alvo/blob/main/examples/vehicle-registry/vehicles.alvo.json),
+  and the [API it generates](/MMLib.Alvo/data-api/conventions/).
+- Problem types: [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated),
+  [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden).
+- The compose file: [`docker-compose.quickstart.yml`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docker-compose.quickstart.yml),
+  whose header lists every variable it reads; the host in depth:
+  [`docs/architecture/host.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/host.md).
+
+## Next
+
+**[Tutorial: your first backend](/MMLib.Alvo/start-here/tutorial/)**: write a descriptor of your own, one step at a
+time. To serve a descriptor you already have, see [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).

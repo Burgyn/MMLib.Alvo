@@ -1,0 +1,134 @@
+---
+title: "Audit row changes"
+description: "Record on every row who created it, who last changed it and when, with values no caller can forge."
+sidebar:
+  order: 9
+---
+
+import { Code, Steps } from '@astrojs/starlight/components';
+import Exchange from '../../../components/Exchange.astro';
+import ThemedShot from '../../../components/ThemedShot.astro';
+import start from '../../../snippets/shell/audit-row-changes-start.sh?raw';
+import audit from '../../../snippets/audit-row-changes/01-audit.alvo.json?raw';
+import historyLight from '../../../assets/screenshots/history-light.png';
+import historyDark from '../../../assets/screenshots/history-dark.png';
+
+:::tip[What you will achieve]
+Tickets that record who created them, who last changed them and when, and that refuse an update made against an
+out-of-date copy. About five minutes, starting from the stack in
+[Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
+:::
+
+## Before you start
+
+- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), run from its `alvo-help-desk`
+  directory with `COMPOSE_FILE` and that page's secrets exported in this shell.
+- Two keys: `agent` (roles `agent`, `authenticated`) and `admin` (roles `admin`, `authenticated`). Each key's `User`
+  is the id the audit columns record.
+
+The responses below were captured from a real host when the site was built, so your ids and times will differ.
+
+## 1. Turn on audit
+
+`"audit": true` on an entity adds four columns, and Alvo fills them on every write: `created_at`, `created_by`,
+`updated_at` and `updated_by`.
+
+<Steps>
+
+1. Start the stack over this page's descriptor. The first command **deletes the stack's database**:
+
+   <Code code={start.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+2. One line turns the trait on:
+
+   <Code code={audit} lang="json" title="help-desk.alvo.json" ins={[{ range: '10' }]} />
+
+   Do not declare the four columns yourself: on an audited entity those names are the framework's, and declaring one
+   is refused.
+
+3. The agent files a ticket. A create stamps all four columns with the same instant and the same user:
+
+   <Exchange name="audit-row-changes/01-audit" wrap steps={[0]} />
+
+   The response also carries an `ETag`: `updated_at` is the row's version, and only an audited entity has one.
+
+</Steps>
+
+## 2. Record each change
+
+<Steps>
+
+1. The administrator closes the ticket, sending the version it read in `If-Match`. An update stamps `updated_at` and
+   `updated_by`, and leaves the creation record alone:
+
+   <Exchange name="audit-row-changes/01-audit" wrap steps={[1]} />
+
+2. The agent tries to update the ticket from the copy it read before the administrator's change. Its `If-Match` names
+   the old version, so nothing is written:
+
+   <Exchange name="audit-row-changes/01-audit" wrap steps={[2]} />
+
+   Read the row again and retry. [Write data safely](/MMLib.Alvo/guides/write-data/) covers `If-Match` in full.
+
+3. A caller cannot write the audit columns, so a row cannot claim someone else created it:
+
+   <Exchange name="audit-row-changes/01-audit" wrap steps={[3]} />
+
+</Steps>
+
+## What is recorded
+
+| Write | Stamped | Not touched |
+|---|---|---|
+| create | `created_at`, `created_by`, `updated_at`, `updated_by` | — |
+| update | `updated_at`, `updated_by` | `created_at`, `created_by` |
+| delete | nothing: the row is gone | — |
+
+- **The user** is the id the caller's key acts as. For an anonymous caller it is `null`: there is no identity to
+  record.
+- **The instant** is the write's own, in UTC: the same one `now()` returns in a [before-hook](/MMLib.Alvo/guides/before-hooks/)
+  and the same one the write's event carries.
+- **They are ordinary fields to read.** Filter and sort by them like any other field
+  ([Read data](/MMLib.Alvo/guides/read-data/)), and use `created_by` in a rule: `created_by == @user.id` is the
+  ownership pattern in [Access rules](/MMLib.Alvo/guides/access-rules/#2-let-callers-reach-only-their-own-rows).
+
+## What audit is not
+
+Audit records the latest change, not every change: the values a row held before are not kept. Two other things are
+easy to confuse with it.
+
+- **Descriptor history.** The dashboard's *Configuration history* lists every revision of the descriptor: who changed
+  what the backend is, when, and why. It records configuration, not rows. Rollback and revisions are in
+  [Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/).
+
+  <ThemedShot light={historyLight} dark={historyDark} alt="The dashboard's Configuration history screen for the bike-workshop project: one revision, r1 Initial descriptor, and a note that an audit trail of the data does not exist yet." />
+
+- **A change log.** Every write's event carries the row before and after (`data.old_record` and `data.record`). To
+  keep a full history, send those events to a store of your own with an
+  [after-hook webhook](/MMLib.Alvo/guides/after-hooks-and-webhooks/).
+
+:::caution[Not in this build]
+There is no per-row history of values, and `softDelete`, which would add `deleted_at` and keep deleted rows, is
+refused at apply because a delete would still remove the row
+([Capabilities in this build](/MMLib.Alvo/reference/capabilities/#refused-at-apply)).
+:::
+
+## What can go wrong
+
+| Status | Problem type | When | Fix | Returned by |
+|---|---|---|---|---|
+| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | The body names an audit column. | Remove it; Alvo writes those columns. | every host |
+| 412 | [`precondition-failed`](/MMLib.Alvo/reference/problem-types/#precondition-failed) | `If-Match` names a version the row no longer has, or the entity has no `audit` and so no version. | Read the row again and retry with its `ETag`; turn on `audit` to use `If-Match`. | every host |
+
+## Reference
+
+- Descriptor keys: [`audit`](/MMLib.Alvo/reference/descriptor/entities/#entities.audit),
+  [`softDelete`](/MMLib.Alvo/reference/descriptor/entities/#entities.softDelete).
+- Problem types: [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden),
+  [`precondition-failed`](/MMLib.Alvo/reference/problem-types/#precondition-failed).
+- Design note: [the framework-managed columns](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-path.md#the-framework-managed-columns-have-one-authority-and-the-framework-writes-them).
+
+## Next
+
+**[Read data: filter, sort, page](/MMLib.Alvo/guides/read-data/)**: query rows with filters, ordering and keyset
+pages.
