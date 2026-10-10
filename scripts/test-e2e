@@ -33,9 +33,11 @@ FIELD_SERVICE_REPORT_FILE="$REPORT_DIR/report-field-service.xml"
 
 # The default stack, named explicitly: compose would otherwise merge a reader's docker-compose.override.yml
 # (gitignored; the docs' "Run your own descriptor" creates one) and honour ALVO_DESCRIPTOR, and either would change
-# what this suite tests. CI has neither, so there this is the same stack as a bare `docker compose`.
+# what this suite tests. ALVO_DESCRIPTOR can come from the shell or from a root .env, so both are neutralised: the
+# variable is unset, and `--env-file /dev/null` stops compose reading .env. The suite needs nothing from .env — every
+# variable the stack interpolates is exported below. CI has none of these, so there this is a bare `docker compose`.
 unset ALVO_DESCRIPTOR
-MAIN_COMPOSE=(-f "$ROOT/docker-compose.yml")
+MAIN_COMPOSE=(--env-file /dev/null -f "$ROOT/docker-compose.yml")
 
 FIELD_SERVICE_COMPOSE=(
   --env-file "$ROOT/examples/field-service/demo-identities.env"
