@@ -69,8 +69,9 @@ A descriptor is checked in layers, and every finding names the place with a JSON
 it happens when the descriptor is applied, never when a request arrives: a rule naming a column that does not exist
 fails the apply, not the first caller.
 
-1. **The JSON Schema.** The shape: required keys, types, names, the facets each field type must carry. The schema sets
-   `additionalProperties: false` everywhere, so a misspelled key is an error, not a silently ignored one.
+1. **The JSON Schema.** The shape: required keys, types, names, the facets each field type must carry. The schema closes
+   every object (`additionalProperties: false`, with only `x-` extension keys admitted), so a misspelled key is an
+   error, not a silently ignored one.
 2. **The semantic checks.** What the schema cannot express: references to entities and fields that exist, reserved and
    framework-managed names, roles a rule names that `auth.roles` does not declare. Every rule, hook and computed
    expression is compiled in its [CEL profile](/MMLib.Alvo/concepts/cel/) against the entity it belongs to.

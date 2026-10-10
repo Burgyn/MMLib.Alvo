@@ -1,7 +1,7 @@
 {
   "descriptor": "examples/help-desk/help-desk.alvo.json",
   "keys": {
-    "agent": { "roles": ["agent", "authenticated"], "scopes": ["*:read", "*:write"], "secretVariable": "ALVO_AGENT_KEY_SECRET" }
+    "agent": { "roles": ["agent", "authenticated"], "scopes": ["*:read", "*:write"], "secretVariable": "ALVO_AGENT_KEY_SECRET", "user": "3f2b8c1e-7a4d-4e9b-9c21-5d6e7f8a9b01" }
   },
   "steps": [
     {

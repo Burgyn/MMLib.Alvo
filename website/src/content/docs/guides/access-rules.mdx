@@ -69,9 +69,10 @@ every rule with `'authenticated' in @user.roles` (or a narrower role) unless the
 
    <Exchange name="access-rules/01-roles" wrap steps={[3]} />
 
-6. Tickets have no `delete` rule at all, so even an administrator is refused, with a 403 that says why:
+6. Tickets have no `delete` rule at all. An agent files a ticket, and even an administrator is refused its delete,
+   with a 403 that says why:
 
-   <Exchange name="access-rules/01-roles" wrap steps={[5]} />
+   <Exchange name="access-rules/01-roles" wrap steps={[4, 5]} />
 
 </Steps>
 
@@ -87,7 +88,7 @@ writes `created_by` on every create, and a caller cannot set it, so it is a fiel
 <Steps>
 
 1. Turn on `audit` and make three of the rules ownership rules. Administrators keep reaching every row, and the
-   `access` block lets them use the Management API in step 5:
+   `access` block lets them use the Management API in [section 5](#5-test-a-rule-with-policysimulate):
 
    <Code code={ownership} lang="json" title="help-desk.alvo.json" ins={[{ range: '8-10' }, { range: '25' }, { range: '31-32' }, { range: '34' }]} />
 
@@ -154,9 +155,9 @@ millions. On PostgreSQL, `owner_id == @user.id` becomes:
 
 <SourceExcerpt code={sql} from="Rule: owner_id == @user.id," to="]" lang="txt" title="cel-to-sql-postgresql.verified.txt" />
 
-The `COALESCE(…, FALSE)` makes a comparison with `null` false rather than unknown, on every engine. Mind the
-negation: `!(owner_id == @user.id)` is true for a row whose `owner_id` is `null`, so a rule written as "everyone but
-the owner" also admits rows that have no owner.
+The `COALESCE(…, FALSE)` (`COALESCE(…, 0)` on SQLite) makes a comparison with `null` false rather than unknown, on
+every engine. Mind the negation: `!(owner_id == @user.id)` is true for a row whose `owner_id` is `null`, so a rule
+written as "everyone but the owner" also admits rows that have no owner.
 
 ## 5. Test a rule with `policy/simulate`
 
@@ -196,9 +197,9 @@ Each rule's slot is in the reference: [`list`](/MMLib.Alvo/reference/descriptor/
 [`create`](/MMLib.Alvo/reference/descriptor/entities-rules/#entities.rules.create),
 [`update`](/MMLib.Alvo/reference/descriptor/entities-rules/#entities.rules.update) and
 [`delete`](/MMLib.Alvo/reference/descriptor/entities-rules/#entities.rules.delete). A rule compares with `==`, `!=`,
-`<`, `<=`, `>`, `>=`, tests roles with `in`, tests presence with `has(field)`, and combines with `&&`, `||` and `!`. It
-has no arithmetic, no `old.` or `new.` and no `changed()`: those belong to
-[before-hooks](/MMLib.Alvo/guides/before-hooks/). The same expression language decides per caller whether a field is
+`<`, `<=`, `>`, `>=`, tests roles with `in`, tests presence with `has(field)`, and combines with `&&`, `||` and `!`.
+`<`, `<=`, `>`, `>=` take numbers and dates, not text; compare with `null` through `has(field)`, not `== null`. A rule
+has no arithmetic, no `old.` or `new.` and no `changed()`: those belong to [before-hooks](/MMLib.Alvo/guides/before-hooks/). The same expression language decides per caller whether a field is
 `hidden` or `readOnly`; see [Entities and fields](/MMLib.Alvo/guides/entities-and-fields/#3-decide-per-caller-readonly-and-hidden).
 
 :::caution[Not in this build]

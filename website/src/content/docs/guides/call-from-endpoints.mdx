@@ -27,9 +27,9 @@ in a minimal-API delegate like any service, and pass the caller you built. A rea
 
 <SourceExcerpt code={sampleHost} from="app.MapGet(" to=".RequireAuthorization();" dropComments={true} title="SampleHost.cs" />
 
-`QueryAsync` takes an `AlvoQuery`: the entity, and optionally a filter, a sort, a projection, a page size, a cursor
-and whether to count. It
-returns an `AlvoPage`, whose `Items` are records and whose `Values` hold each record's fields. The rows are the ones the
+`QueryAsync` takes an `AlvoQuery`: `Entity`, and optionally `Filter`, `Sort`, `Select`, `Limit`, `After` (a keyset
+cursor) or `Offset`, and `IncludeTotalCount`. It returns an `AlvoPage` with `Items`, `NextCursor` and `TotalCount`;
+its `Items` are records whose `Values` hold each record's fields. The rows are the ones the
 `list` rule admits for this caller; the endpoint filters nothing itself. In process, `Limit` may be left `null` to read
 the whole visible set, which the HTTP API never allows.
 
@@ -86,11 +86,13 @@ generated API answers for each:
 | `AlvoIdempotencyConflictException` | The idempotency key was used for a different request. | 409 `idempotency-conflict` |
 | `AlvoConstraintViolationException` | A `unique` value or a `restrict` reference is in the way. | 409 `conflict` |
 | `InvalidOperationException`, `ArgumentNullException` | An invariant inside Alvo, or your call, is broken. | 500 `internal`, with `AddAlvoProblemDetails()` |
+| `Exception` | A CEL function failed: a built-in refused its input, or a custom function threw. | 500 `function-failed`, with `AddAlvoProblemDetails()` |
 
 Catch the ones your endpoint can cause. The sample sends no precondition, no idempotency key and no unique field, so
 it catches three. Let `InvalidOperationException` and `ArgumentNullException` propagate: they mean a bug, and your
-logging needs the stack trace. A [custom CEL function](/MMLib.Alvo/guides/custom-cel-functions/) that throws during
-your write reaches you as a plain `Exception`, outside these families, and nothing is written.
+logging needs the stack trace. A CEL function that fails during your write (a built-in refusing its input, or a
+[custom function](/MMLib.Alvo/guides/custom-cel-functions/) that throws) reaches you as a plain `Exception`, outside
+these families, and nothing is written.
 
 The messages of `AlvoAuthorizationException` and `AlvoRecordNotFoundException` are safe to pass on: they never name
 the entity, the row or whether it exists.

@@ -136,8 +136,10 @@ holds; this build has no other sign-in provider.
   `Alvo__Admin__BootstrapPassword` is refused at startup, because an environment variable shows up in a process
   listing and in `docker inspect`. The account is created once; changing the file later does not change its password.
 - **Everyone else** is created by an administrator on the dashboard's *Access* screen, which issues a set-password
-  link. A link works once, for 24 hours, and the person then signs in as usual.
-- A password is 15 to 128 characters long, with no composition rules.
+  link. A link works once, for 24 hours by default (an embedded host can change this through
+  `DataProtectionTokenProviderOptions.TokenLifespan`), and the person then signs in as usual.
+- A password is 15 to 128 characters long and must not contain the email address (or the part before `@`, once that is
+  three characters or more) it signs in with. There are no composition rules.
 
 A dashboard session works only in the dashboard: it never turns a signed-in person into a Data API caller. An API key
 whose `User` is the bootstrap administrator's id is admitted to the Management API as an administrator, whatever the

@@ -51,7 +51,7 @@ falling back to a default.
 | | PostgreSQL | SQLite |
 |---|---|---|
 | Provider name | `postgresql` | `sqlite`, the default |
-| Connection string | `ConnectionStrings__Alvo`; without one the host refuses to start | optional; without one, a file inside the container at `/alvo/data/alvo.db` |
+| Connection string | `ConnectionStrings__Alvo`; without one the host refuses to start | optional: `ConnectionStrings__Alvo`, else `Alvo__Database__SqliteConnectionString`; the default is `Data Source=/alvo/data/alvo.db`, a file inside the container |
 | Published latency numbers | measured on it | not measured |
 
 Use PostgreSQL. The SQLite default exists so a first `docker run` needs nothing, and its file is lost with the

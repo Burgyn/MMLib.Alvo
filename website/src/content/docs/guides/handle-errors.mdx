@@ -68,8 +68,10 @@ violation's `code` is stable. Take the part after the last `/` and switch on it:
 | [`out-of-scope`](/MMLib.Alvo/reference/problem-types/#out-of-scope) | 403 | The key's scopes do not cover this. | Grant the key the scope. |
 | [`not-found`](/MMLib.Alvo/reference/problem-types/#not-found) | 404 | No such row, or your rules hide it. | Check the id and the rules. |
 | [`conflict`](/MMLib.Alvo/reference/problem-types/#conflict) | 409 | A `unique` value or a `restrict` reference is in the way. | Send another value, or remove the reference. |
+| [`destructive-change`](/MMLib.Alvo/reference/problem-types/#destructive-change) | 409 | A Management API apply would discard data. | Resend with `allowDestructive: true`, or keep what the plan drops. |
 | [`idempotency-conflict`](/MMLib.Alvo/reference/problem-types/#idempotency-conflict) | 409 | The `Idempotency-Key` was used for a different request. | Send a new key. |
 | [`precondition-failed`](/MMLib.Alvo/reference/problem-types/#precondition-failed) | 412 | The row changed since you read it. | Read it again, reapply, resend. |
+| [`precondition-required`](/MMLib.Alvo/reference/problem-types/#precondition-required) | 428 | A Management API write carried no `If-Match` revision. | Read the current revision and send it. |
 | [`unsupported-media-type`](/MMLib.Alvo/reference/problem-types/#unsupported-media-type) | 415 | The body was not declared as JSON. | Send `Content-Type: application/json`. |
 | [`unreadable-request`](/MMLib.Alvo/reference/problem-types/#unreadable-request) | 413, 408, 400 | The web server refused the body. | Send a smaller body, in one go. |
 | [`function-failed`](/MMLib.Alvo/reference/problem-types/#function-failed) | 500 | A CEL function failed while the write was checked; nothing was written. | Check the input the function reads. |

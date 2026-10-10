@@ -105,6 +105,66 @@ The sample runs from the clone. Give its dev key a secret, then start it:
 It listens on `http://localhost:5199` and keeps a SQLite file beside itself. The sample's README shows a request to each
 of its two surfaces under [*Try both*](https://github.com/Burgyn/MMLib.Alvo/tree/main/samples/MMLib.Alvo.Samples.EmbeddedHost#try-both).
 
+## Add the dashboard (optional)
+
+The admin dashboard and the schema assistant are three more packages: `MMLib.Alvo.Admin` (the dashboard, a
+server-interactive Blazor app), `MMLib.Alvo.Identity` (local accounts and the cookie sign-in) and `MMLib.Alvo.Ai` (the
+assistant). The embedded sample does not use them; the standalone image's
+[`AlvoHost.cs`](https://github.com/Burgyn/MMLib.Alvo/blob/main/src/MMLib.Alvo.Host/AlvoHost.cs) is the composition to
+copy. Its registration, beside `AddAlvo`:
+
+```csharp title="Program.cs"
+builder.Services.AddAlvoIdentity(
+    store => store.UseSqlite(builder.Configuration.GetConnectionString("AlvoIdentity")),
+    identity => builder.Configuration.GetSection(AlvoIdentity.ConfigurationSection).Bind(identity));
+builder.Services.AddAlvoIdentityCookieSignIn(AlvoAdmin.SignInPath);
+builder.Services.AddAlvoAdmin(admin =>
+    builder.Configuration.GetSection(AlvoAdmin.ConfigurationSection).Bind(admin));
+builder.Services.AddAlvoAi();
+builder.Services.AddScoped<IAlvoAdminCallerResolver, AdminCallerResolver>();
+```
+
+The dashboard references neither the identity package nor the core, so the host fills the one port between them,
+`IAlvoAdminCallerResolver`, which turns the signed-in operator into the caller Alvo authorizes. Over
+`MMLib.Alvo.Identity` it asks the identity package's own resolver, registered under `AlvoIdentity.ResolverKey`:
+
+```csharp title="AdminCallerResolver.cs"
+sealed class AdminCallerResolver(IServiceProvider services) : IAlvoAdminCallerResolver
+{
+    public ValueTask<AlvoPrincipal?> ResolveAsync(ClaimsPrincipal signedIn, CancellationToken cancellationToken)
+    {
+        var subject = signedIn.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (subject is not { Length: > 0 })
+        {
+            return ValueTask.FromResult<AlvoPrincipal?>(null);
+        }
+
+        var resolver = services.GetRequiredKeyedService<IAlvoContextResolver>(AlvoIdentity.ResolverKey);
+        return resolver.ResolveAsync(subject, requestedTenant: null, cancellationToken);
+    }
+}
+```
+
+`MapAlvoAdmin` maps the dashboard's components and nothing else. The middleware it needs is yours to order, before it:
+
+```csharp title="Program.cs"
+app.MapStaticAssets();
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseAntiforgery();
+
+app.MapAlvoAdmin();
+```
+
+Two pieces stay with the host. The sign-in, sign-out and set-password screens post to `AlvoAdmin.SignInEndpoint`,
+`AlvoAdmin.SignOutEndpoint` and `AlvoAdmin.SetPasswordEndpoint`, and no package maps those: map them over `AlvoSignIn`,
+validating the antiforgery token in each, as the standalone host's
+[`AlvoAdminSignIn.cs`](https://github.com/Burgyn/MMLib.Alvo/blob/main/src/MMLib.Alvo.Host/Internal/AlvoAdminSignIn.cs)
+does. A host with its own users skips `MMLib.Alvo.Identity` and implements `IAlvoAdminCallerResolver` over its own
+store instead. The packages' entry points are in the C# reference:
+[`MMLib.Alvo.Admin`](/MMLib.Alvo/reference/csharp/mmlib-alvo-admin/) and
+[`MMLib.Alvo.Identity`](/MMLib.Alvo/reference/csharp/mmlib-alvo-identity/).
+
 ## What your host still owns
 
 Alvo adds no authentication, authorization or routing middleware on your behalf. Three things stay yours:

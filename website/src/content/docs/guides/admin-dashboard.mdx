@@ -103,7 +103,8 @@ where it goes through the same preview.
 
 Change a rule and pause: after about 300 milliseconds the dashboard asks the Management API's `cel/check` what an
 apply would say about exactly that expression, in exactly that place, and shows the answer under the box. A typo in a
-role name is caught before you save, with the declared roles listed:
+role name is caught before you save, with the declared roles listed. The check needs the `developer` level; a
+`viewer` sees the rules and the simulator only:
 
 <ThemedShot light={checkLight} dark={checkDark} alt="A rule box holding 'amdin' in @user.roles, marked unsaved, with the check's answer underneath: 'amdin' is not a declared role, so this membership test can never match; did you mean 'admin', followed by the declared roles." />
 

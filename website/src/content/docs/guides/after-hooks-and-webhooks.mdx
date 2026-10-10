@@ -41,13 +41,13 @@ declared once, at the top of the descriptor.
 
 2. The descriptor declares the `ops-board` endpoint and the `ticket-closed` template, and two after-hooks use them:
 
-   <Code code={webhook} lang="json" title="help-desk.alvo.json" ins={[{ range: '7-22' }, { range: '37-50' }]} />
+   <Code code={webhook} lang="json" title="help-desk.alvo.json" ins={[{ range: '8-21' }, { range: '37-50' }]} />
 
    - An endpoint's `url` must be `https`; plain `http` is refused at apply, except for a loopback address such as
      `http://127.0.0.1:5081/hook`. The schema requires `secretRef`, but this build does not read it: deliveries are
      not signed (see *Not in this build* below).
-   - A template's `subject` and `body` take `{{…}}` placeholders over `new`, `old`, `event` and `@user.id`. A
-     placeholder that names a field the entity does not have is refused at apply, never rendered empty.
+   - A template's `subject` and `body` take `{{…}}` placeholders over `new.<field>`, `old.<field>`, `event.id`,
+     `event.type`, `event.time`, `event.subject` and `@user.id`. A placeholder that names a field the entity does not have is refused at apply, never rendered empty.
    - A condition reads `new.`, `old.`, `changed()` and `@user.id`. `@user.id` is the user who made the change.
      `@user.roles` and `@tenant.id` are refused in an after-hook condition, because the event does not record them.
 
@@ -96,6 +96,7 @@ placeholder, and the design note's wording is tracked in [#344](https://github.c
 | `correlationid` | The trace id of the request that made the change, or the event's own id when there was none. |
 | `data.record`, `data.old_record` | The row after and before the write. `old_record` is absent on a create, `record` on a delete. |
 | `data.changed` | The fields whose value moved. |
+| `specversion`, `source`, `datacontenttype`, `payloadversion`, `chaindepth`, `causationid` | CloudEvents and Alvo bookkeeping: `1.0`, `/alvo`, `application/json`, the payload schema version, the hook-chain depth, and the causing event's id when there is one. |
 
 **The record is complete.** It includes fields that are `hidden` from callers, because the endpoint is declared by
 the same author who declared the `hidden` rule. Treat the endpoint as a place that sees every field. A webhook's
@@ -109,6 +110,8 @@ write always has one. One background dispatcher then claims events in order and 
 
 - **Every failure is retried**, whatever it was: a 500, a 404, a timeout, a name that does not resolve. A redirect is
   a failure too; the client follows none. An endpoint that answers 2xx is done.
+- **Each attempt waits at most 10 seconds** for a 2xx; a slower endpoint counts as a failure. The body is sent as
+  `application/json`.
 - **Retries back off linearly:** the wait grows by one poll interval per attempt, so at the defaults ten attempts span
   at least 45 seconds. After [`Alvo:Events:MaxAttempts`](/MMLib.Alvo/reference/configuration/#alvoevents) (10) the
   event is left alone: it stays in the outbox table, undelivered, and the log has an error line naming it. Nothing
@@ -119,8 +122,8 @@ write always has one. One background dispatcher then claims events in order and 
   ([#150](https://github.com/Burgyn/MMLib.Alvo/issues/150)). With several replicas, set `Alvo:Events:Enabled` to
   `false` on all but one: writes still append events, and the one dispatcher delivers them.
 
-Alvo's own log lines name an endpoint by its name in the descriptor, never by its URL, because a URL can hold the only
-secret an unsigned endpoint has. The HTTP client's own logging does not hold to that yet; see the known issue below.
+Alvo's own log lines never write an endpoint's URL, because a URL can hold the only secret an unsigned endpoint has:
+a failed attempt names the event id and type, and the attached error names the endpoint by its descriptor name. The HTTP client's own logging does not hold to that yet; see the known issue below.
 
 ## 5. Allow an internal network
 

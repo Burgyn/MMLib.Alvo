@@ -1076,7 +1076,7 @@ internal static class DataApiEndpoints
     }
 
     /// <summary>
-    /// The header a caller makes a create retry-safe with — the one from the IETF
+    /// The header a caller makes a write retry-safe with — the one from the IETF
     /// <c>httpapi-idempotency-key-header</c> draft, spelled as every BaaS and payment API spells it.
     /// </summary>
     /// <remarks>
@@ -1089,33 +1089,10 @@ internal static class DataApiEndpoints
     /// name a second time.
     /// </para>
     /// <para>
-    /// <b>Read on the create only. On the other two write verbs it is accepted and <em>ignored</em> — a known
-    /// limitation, not a claim that nothing is lost.</b> An earlier version of this remark said an ignored key
-    /// "costs nothing" there, and that overstates it in a way worth correcting precisely, because the
-    /// difference is the whole retry story:
-    /// </para>
-    /// <para>
-    /// <b>The row's end state is unaffected; the outcome the client observes is not.</b> <c>UpdateAsync</c>
-    /// assigns absolute values to named fields and <c>DeleteAsync</c> removes one row, so applying either twice
-    /// leaves exactly the state applying it once leaves — no duplicate row exists to prevent, which is why this
-    /// is not the lost-update rule <see cref="EnsureUnconditional"/> enforces for a precondition. But consider
-    /// the case §2.1 wants keys for: a caller sends <c>PATCH … If-Match: "v1"</c>, <b>the 200 is lost</b> (a
-    /// dropped connection, a timeout), and they retry the identical request. The write landed, so the row is at
-    /// <c>v2</c>, so the retry is <b>412 — and the caller cannot attribute it</b>: "my own write landed" and
-    /// "somebody else changed the row" are the same answer. The usual resolution for a 412 is to re-read,
-    /// re-merge and re-apply, which in the second case clobbers a genuinely concurrent change. A key would have
-    /// answered "this is your own write, here is its result". <c>DELETE</c> has the same shape (404 or 412 on
-    /// the retry, indistinguishable from someone else's delete). So what is lost is exactly retrying without
-    /// knowing whether the first attempt landed.
-    /// </para>
-    /// <para>
-    /// <b>Why it is still ignored rather than refused or honoured.</b> Honouring it needs a third widening of
-    /// <c>IAlvoData</c> plus a stored <em>replayable result</em> for an update, which is not this PR's shape.
-    /// Refusing it would break the widespread client habit — Stripe's SDKs among them — of attaching the header
-    /// to every mutating request, and would refuse requests that are perfectly serviceable. Ignoring is the
-    /// least-bad third option, and it is only defensible <em>declared</em>: it is published in
-    /// <see cref="DataApiDocumentation"/>'s update and delete prose, in these words, and neither operation
-    /// lists the header as a parameter — a parameter is an invitation to send something.
+    /// <b>Honoured on every write</b> — create, replace, update, delete and the three batch verbs — and
+    /// accepted-and-ignored on the body-shaped read, where there is nothing to make idempotent. A key on an
+    /// update or a delete is what lets a caller whose 200 was lost retry the identical request and get its own
+    /// result back, instead of a 412 (or 404) it could not tell apart from somebody else's change.
     /// </para>
     /// </remarks>
     internal const string IdempotencyKeyHeader = "Idempotency-Key";

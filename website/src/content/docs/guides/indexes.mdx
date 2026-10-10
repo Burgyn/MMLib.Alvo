@@ -52,8 +52,9 @@ A `ref` to the built-in `users` entity is **not** indexed by itself.
 
 </Steps>
 
-A plain index never refuses a write; it only makes reads faster. To add an index to an entity that has no `indexes`
-list yet, add the whole list; an append to a list that does not exist is refused.
+A plain index never refuses a write; it only makes reads faster. When the schema assistant (or any JSON Patch) adds
+the first index, it must add the whole `indexes` list: an `add` at `/indexes/-` on a list that does not exist yet is
+refused.
 
 ## 2. Number tickets within each queue
 

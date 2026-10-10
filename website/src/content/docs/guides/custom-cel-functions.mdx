@@ -42,7 +42,7 @@ result may be `null`, from the nullable annotations. Everything is checked at th
 
 | What | Allowed |
 |---|---|
-| Name | A lower-case ASCII letter, then letters, digits or `_`; at most 64 characters; not a built-in function, a CEL keyword or macro, or a reserved name such as `has`, `now`, `old`, `new` or `math`. |
+| Name | A lower-case ASCII letter, then letters, digits or `_`; at most 64 characters; not a built-in function (such as `now`), a CEL keyword or macro, or a reserved name such as `has`, `changed`, `old`, `new` or `math`. |
 | Parameters | At most four, each `string`, `long`, `int`, `decimal`, `bool`, `DateTimeOffset` or `Guid`, or a nullable one of those. |
 | Result | One of the same types. |
 | Shape | A synchronous delegate: no `Task`, `ref`, `out` or `params`, and not a multicast delegate. |

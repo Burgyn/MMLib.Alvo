@@ -45,7 +45,8 @@ runs as a Docker container or as a library inside your own app.
 
 - **You need it in production today.** Alvo is pre-v0.1: no NuGet package or container image is published, and the
   format and APIs may still change. See [What works today](/MMLib.Alvo/start-here/what-works-today/).
-- **You need realtime subscriptions, file storage or event-driven automation.** None of them runs in this build.
+- **You need realtime subscriptions, file storage or automation rules (the `automation` block).** None of them runs in
+  this build; after-hooks that send e-mail and webhooks on a write do.
 - **You need sign-in through Google, Microsoft or another identity provider.** Only local accounts and API keys exist
   in this build; embedded, your app can bring its own authentication.
 - **Your logic does not fit declarative rules and hooks.** If most of your backend is custom code, the escape hatch is

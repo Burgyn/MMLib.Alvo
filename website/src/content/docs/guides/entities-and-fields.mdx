@@ -114,7 +114,7 @@ target does to this row.
 
 1. Add a `tickets` entity whose `customer_id` points at `customers`:
 
-   <Code code={withRef} lang="json" title="help-desk.alvo.json" ins={[{ range: '38-53' }]} />
+   <Code code={withRef} lang="json" title="help-desk.alvo.json" ins={[{ range: '38-54' }]} />
 
    `restrict` is the default for `onDelete`; it is written out here so you can see it. `assignee_id` points at
    `users`, the built-in auth entity, and holds a user's id.
@@ -205,7 +205,7 @@ Three keys the schema declares are refused when the descriptor is applied
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
 | 409 | [`conflict`](/MMLib.Alvo/reference/problem-types/#conflict) | Another row already holds a `unique` value (code `unique`), or a `restrict` reference refuses a delete (code `referenced`). | Send a different value, or delete or repoint the rows that reference this one. | every host |
-| 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | The body breaks a facet (`required`, `max-length`, `enum-value`, `format`, `precision`, `scale`), writes a field that is read-only for the caller (`read-only-field`), or references a row that cannot be resolved (`unresolved-reference`). | Follow each violation's `pointer` and `fixSuggestion`. | every host |
+| 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | The body breaks a facet (`required`, `max-length`, `enum-value`, `format`, `precision`, `scale`), writes a field that is read-only for the caller (`read-only-field`), references a row that cannot be resolved (`unresolved-reference`), names an undeclared field (`unknown-field`), sends a value the type cannot hold (`invalid-value`), cannot create because a required field is read-only for this caller (`read-only-required-field`), or a format check timed out (`format-not-evaluated`, retry). | Follow each violation's `pointer` and `fixSuggestion`. | every host |
 
 If the container does not come back after you change the descriptor, the new version was refused when it was
 applied: a facet on the wrong type, a reserved name, one of the keys above. The reason is at the end of

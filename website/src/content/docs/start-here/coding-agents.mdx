@@ -80,8 +80,8 @@ and a `fixSuggestion` an agent can act on.
 
 ## 5. Change a running backend
 
-The [Management API](/MMLib.Alvo/reference/management-api/) changes what the project is. Every route is closed until the
-descriptor's `access` block grants a level, so this descriptor, the help desk from the
+The [Management API](/MMLib.Alvo/reference/management-api/) changes what the project is. Every route is closed to every
+caller except the bootstrap administrator until the descriptor's `access` block grants a level, so this descriptor, the help desk from the
 [Tutorial](/MMLib.Alvo/start-here/tutorial/), adds one:
 
 <JsonExcerpt code={base} pointer="/access" title="help-desk.alvo.json" />

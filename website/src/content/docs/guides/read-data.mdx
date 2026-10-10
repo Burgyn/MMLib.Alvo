@@ -121,7 +121,8 @@ refused rather than quietly reduced ([Limits and budgets](/MMLib.Alvo/reference/
 <Exchange name="read-data/01-query" wrap steps={[9]} />
 
 On the last page `next` is `null`. Treat the cursor as an opaque string of at most 512 characters: it carries no data,
-and a stale or forged one returns an empty page. Cursor paging neither skips nor repeats a row while other callers
+and a stale or forged one returns an empty page; an empty one, or one over 512 characters, is refused
+(`invalid-cursor`). Cursor paging neither skips nor repeats a row while other callers
 write. `offset=<n>` is the alternative, but a request may not send both `after` and `offset`.
 
 ## 6. Count the matches
@@ -186,7 +187,7 @@ A malformed query is refused with every reason at once, each pointing at the par
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 422 | [`malformed-query`](/MMLib.Alvo/reference/problem-types/#malformed-query) | A parameter names no readable field, an operator does not fit the field's type, `limit` is over 200, `after` and `offset` are both sent, or a filter is deeper or wider than the [limits](/MMLib.Alvo/reference/limits/). | Fix the parameter each violation's `pointer` names. | every host |
+| 422 | [`malformed-query`](/MMLib.Alvo/reference/problem-types/#malformed-query) | A parameter names no readable field, an operator does not fit the field's type, `limit` is over 200, `after` and `offset` are both sent, `after` is empty or over 512 characters, or a filter is deeper or wider than the [limits](/MMLib.Alvo/reference/limits/). | Fix the parameter each violation's `pointer` names. | every host |
 | 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | The entity has no `list` rule, or the rule reads `@user.id` and the request carries no key. | Add the rule, or send a key. | every host |
 | 403 | [`out-of-scope`](/MMLib.Alvo/reference/problem-types/#out-of-scope) | The key's scopes do not cover reading this entity. | Grant the key a read scope. | every host |
 | 401 | [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | The key cannot be used. | See [Authentication and API keys](/MMLib.Alvo/guides/authentication/). | every host |

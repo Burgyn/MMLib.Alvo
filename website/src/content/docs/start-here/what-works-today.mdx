@@ -29,8 +29,9 @@ What you can use today:
 
 ## Honoured, warned, refused
 
-Every block of the descriptor format falls into one of three groups, and Alvo never accepts a key and quietly does
-nothing with it without saying so.
+Every block of the descriptor format except `branding` falls into one of three groups. `branding` is accepted, but
+nothing renders it yet and nothing warns about it. Apart from that, Alvo never accepts a key and quietly does nothing
+with it without saying so.
 
 - **Honoured** blocks work as documented: `entities` (with their fields, rules, hooks, computed fields, rollups and
   indexes), `auth`, `tenancy`, `access` and `formats`.

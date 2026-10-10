@@ -60,10 +60,12 @@ The same key with a different body is not a retry, and is refused rather than an
 
 <Exchange name="write-data/01-write" wrap steps={[4]} />
 
-Alvo stores only the created row's id under the key, scoped to the caller (their user and tenant), and on a replay
-reads the row again with the caller's current `get` rule; it never stores a response. A key is at most 255 UTF-8 bytes.
+Alvo stores only the ids of the rows the write touched under the key, scoped to the caller (their user and tenant),
+and on a replay reads the row again with the caller's current `get` rule; it never stores a response. A key is at most
+255 UTF-8 bytes.
 A caller without a key cannot use one, because every anonymous caller shares one identity, and is refused with a 422.
-The header is honoured on `POST`, `PUT` and the three batch verbs. A replayed `PUT` answers 200 without `Location`.
+The header is honoured on every write: `POST`, `PUT`, `PATCH`, `DELETE` and the three batch verbs. A replayed `PUT`
+answers 200 without `Location`.
 
 ## 3. Update only what you have seen: `ETag` and `If-Match`
 
@@ -156,18 +158,15 @@ answer carries only its `id`. [Security model](/MMLib.Alvo/concepts/security-mod
 | Create or replace under your id | `PUT /api/<entity>/<id>` | 201 on create, 200 on replace; needs `create` and `update`. |
 | Change some fields | `PATCH /api/<entity>/<id>` | Merges the fields you send into the row. |
 | Delete | `DELETE /api/<entity>/<id>` | 204 with no body. |
-| Retry safely | `Idempotency-Key: <your key>` | On `POST`, `PUT` and the batch verbs. |
+| Retry safely | `Idempotency-Key: <your key>` | On every write: `POST`, `PUT`, `PATCH`, `DELETE` and the batch verbs. |
 | Not overwrite a change | `If-Match: <ETag>` | On `PATCH`, `PUT` and `DELETE` of an audited entity. |
 | Write many rows | `POST`, `PATCH` or `DELETE /api/<entity>/batch` | All or nothing, up to 1000 rows. |
 
 Headers, statuses and route shapes are summarised in [Data API conventions](/MMLib.Alvo/data-api/conventions/).
 
 :::caution[Not in this build]
-`Idempotency-Key` is accepted and ignored on a single-row `PATCH` and `DELETE`. So if an update's 200 is lost and you
-retry it with the same `If-Match`, the retry gets a 412, and you cannot tell your own landed write from someone else's
-([#102](https://github.com/Burgyn/MMLib.Alvo/issues/102)). Stored keys never expire yet
-([#115](https://github.com/Burgyn/MMLib.Alvo/issues/115)). Neither is listed on
-[Capabilities in this build](/MMLib.Alvo/reference/capabilities/), which covers descriptor blocks only.
+Stored idempotency keys never expire yet ([#115](https://github.com/Burgyn/MMLib.Alvo/issues/115)). This is not
+listed on [Capabilities in this build](/MMLib.Alvo/reference/capabilities/), which covers descriptor blocks only.
 :::
 
 ## What can go wrong

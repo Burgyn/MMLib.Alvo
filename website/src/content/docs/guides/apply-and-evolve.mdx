@@ -53,7 +53,8 @@ history. They differ in who applies and what is recorded.
 - `Verify` refuses to start with a drifted schema and prints the steps it would take. Production should set it
   (`Alvo__Schema__Startup=Verify`) and apply the descriptor from one migration job: under `Apply`, every replica of a
   rolling deploy attempts the DDL and the application needs DDL rights on its own database.
-- `Skip` serves the schema as it is, and leaves it entirely to someone else.
+- `Skip` serves the schema as it is, does not even create it in an empty database, and leaves it entirely to someone
+  else.
 
 The rest of this page uses the Management API, which applies without a restart. The dashboard runs the same calls
 in-process, so it plans, refuses and records exactly the same way.
@@ -68,8 +69,8 @@ descriptor over the mounted file, so a restart serves it.
 
 ## 1. Give the API a way in
 
-Every Management API route is closed until the descriptor's `access` block grants a level. This descriptor grants
-`developer` to callers with the `admin` role:
+Every Management API route is closed to every caller except the bootstrap administrator until the descriptor's
+`access` block grants a level. This descriptor grants `developer` to callers with the `admin` role:
 
 <JsonExcerpt code={base} pointer="/access" title="help-desk.alvo.json" />
 
@@ -135,7 +136,7 @@ replay.
 4. If the response is lost, send the same request again with the same key. The answer is the revision the first
    request appended, with `replayed: true`, and the plan comes back empty, because this request ran nothing. Read
    what a revision applied from `GET …/revisions/{n}`. The key can only repeat that request: the same key with a
-   different body is refused.
+   different body is refused, as here:
 
    <Exchange name="apply-and-evolve/03-apply" wrap steps={[3]} form="http" requestBody={false} />
 

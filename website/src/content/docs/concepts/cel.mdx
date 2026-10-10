@@ -146,8 +146,8 @@ with the reason for each is in
 - string escapes are limited to `\n`, `\t`, `\r`, `\\`, `\'` and `\"`.
 
 **Function calls**: catalogued functions are called globally, `trim(new.title)` rather than `new.title.trim()`; a
-`null` argument makes the result `null`; decimals stay decimals (Alvo has no `double`), so `math.round` returns a
-decimal and takes an optional number of digits. The [CEL functions](/MMLib.Alvo/reference/cel-functions/) reference
+`null` argument makes the result `null`; decimals stay decimals (Alvo has no `double`): `math.round` returns the
+type it is given, and `math.round(x, digits)` takes a decimal and a number of digits from 0 to 28. The [CEL functions](/MMLib.Alvo/reference/cel-functions/) reference
 lists every function with its profiles.
 
 ## Put it to work

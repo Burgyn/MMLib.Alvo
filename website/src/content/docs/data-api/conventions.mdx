@@ -44,7 +44,7 @@ PostgREST's syntax, so that a client or an agent recognises it. One parameter pe
 | Form | Means |
 |---|---|
 | `{field}={op}.{value}` | A filter: `year=gte.2020`. The parameter name is a field; an unknown name is refused, never ignored. |
-| `not.{field}={op}.{value}` | The negated filter. One `not.` at most. |
+| `not.{field}={op}.{value}`, `not.or=(…)`, `not.and=(…)` | Negates the term or the group. One `not.` at most. |
 | `or=({term},{term},…)` | Any term holds. A term inside a group is `{field}.{op}.{value}`, optionally prefixed with `not.`. |
 | `and=({term},{term},…)` | Every term holds. A group nests with `=` inside it: `or=(a.eq.1,and=(b.eq.2,c.eq.3))`. |
 | `order={field}[.asc\|.desc][.nullsfirst\|.nullslast],…` | Sort keys, comma-separated. Ascending and nulls last unless stated. |
@@ -105,13 +105,14 @@ Sizes and budgets are in [Limits and budgets](/MMLib.Alvo/reference/limits/).
 | `Content-Type` | request | `application/json` or any `application/*+json`, on every request with a body. |
 | `If-Match` | request | The `ETag` a `PATCH`, `PUT` or `DELETE` expects the row to have. `*` asks only that the row exist. |
 | `If-None-Match` | request | On a read of one row, the `ETag` you hold; 304 when it is current. Refused on a write. |
-| `Idempotency-Key` | request | Makes a `POST`, `PUT` or batch request safe to retry; at most 255 UTF-8 bytes. Ignored on `PATCH` and `DELETE`. |
+| `Idempotency-Key` | request | Makes any write (`POST`, `PUT`, `PATCH`, `DELETE`, or a batch) safe to retry; at most 255 UTF-8 bytes. |
 | `Prefer` | request | `count=exact` fills the page's `count`. |
 | `ETag` | response | The row's version, on an entity with `audit`; strong, opaque. |
 | `Location` | response | On a 201, the new row's URL, including any path base or route-group prefix. |
 | `Preference-Applied` | response | Which preference was honoured, such as `count=exact`. |
 | `Accept-Post`, `Accept-Patch` | response | On a 415, the media types the route accepts. |
 | `Cache-Control` | response | `no-store`, on every response from a generated route. |
+| `WWW-Authenticate` | response | On a 401, the scheme and the header name the key must be sent in. |
 
 ## Versions and `If-Match`
 
@@ -139,7 +140,7 @@ or a 403 whose `violations` name each row a rule refused. A `409 conflict` names
 
 | Situation | Answer |
 |---|---|
-| A new key | The request runs, and the key is stored with the created row's id, scoped to the caller. |
+| A new key | The request runs, and the key is stored with the ids of the rows it wrote, scoped to the caller. |
 | The same key and the same request again | No second write; the original status, with the row read again under the caller's current rules. A replayed `PUT` answers 200 without `Location`. |
 | The same key with a different request | 409 `idempotency-conflict` |
 | A key from a caller without an API key | 422 `malformed-query` |

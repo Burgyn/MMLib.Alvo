@@ -132,7 +132,7 @@ protect: a cookie-authenticated `/app` route that changes data needs the same ca
 | 403 | none, your app's own | A rule or a before-hook refused (`AlvoAuthorizationException`); the sample renders it as a problem document with the exception's message. | Check the rule against the user's roles. | your endpoints |
 | 404 | none, your app's own | A rule excludes the row for this user (`AlvoRecordNotFoundException`). | Check the rule and the user's roles. | your endpoints |
 | 503 | none, your app's own | `DeclaredRoles` is `null`: no descriptor has been applied yet. | Wait for `/health/ready`; read the log if it never turns ready. | your endpoints |
-| none | none | The host stops at start: `Alvo:Auth:HeaderName` or `TenantHeaderName` is `Cookie`, or a dev key has no secret. | Use a header only script can set; supply the secret. | startup |
+| none | none | The host stops at start: `Alvo:Auth:HeaderName` or `TenantHeaderName` is `Cookie`, or a dev key's secret is missing or shorter than 32 characters. | Use a header only script can set; supply a secret of at least 32 characters (`openssl rand -hex 16`). | startup |
 
 ## Reference
 

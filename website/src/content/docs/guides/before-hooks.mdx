@@ -41,7 +41,7 @@ string, becomes the problem document's `detail`: write it for the person who wil
 
 2. This descriptor refuses to close a ticket that has no resolution:
 
-   <Code code={reject} lang="json" title="help-desk.alvo.json" ins={[{ range: '21-28' }]} />
+   <Code code={reject} lang="json" title="help-desk.alvo.json" ins={[{ range: '22-29' }]} />
 
 3. Create a ticket, then try to close it without saying how it was solved:
 
@@ -72,7 +72,7 @@ expression over `new`, the row as it will be stored.
 1. On create, trim the title, derive a slug from it and round the estimate to whole hours. On update, stamp
    `closed_at` when the status changes to `closed`:
 
-   <Code code={mutate} lang="json" title="help-desk.alvo.json" ins={[{ range: '14-17' }, { range: '26-36' }, { range: '41-44' }]} />
+   <Code code={mutate} lang="json" title="help-desk.alvo.json" ins={[{ range: '14-17' }, { range: '26-36' }, { range: '42-45' }]} />
 
 2. Apply it by recreating the `alvo` container. Adding fields discards nothing, so the restart applies it
    ([Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/) covers the other ways):

@@ -70,7 +70,7 @@ Location: /api/tickets/02ccad87-0d94-48b5-8ce2-e7c845bfb9d6
   "id": "02ccad87-0d94-48b5-8ce2-e7c845bfb9d6",
   "body": "Third floor.",
   "created_at": "2026-10-10T04:50:27.828107+00:00",
-  "created_by": "5abcf0d4-de29-b506-10f9-aa428f1eedba",
+  "created_by": "3f2b8c1e-7a4d-4e9b-9c21-5d6e7f8a9b01",
   "estimate_cost": null,
   "estimate_hours": null,
   "hourly_rate": null,
@@ -78,7 +78,7 @@ Location: /api/tickets/02ccad87-0d94-48b5-8ce2-e7c845bfb9d6
   "status": "open",
   "title": "Printer on fire",
   "updated_at": "2026-10-10T04:50:27.828107+00:00",
-  "updated_by": "5abcf0d4-de29-b506-10f9-aa428f1eedba"
+  "updated_by": "3f2b8c1e-7a4d-4e9b-9c21-5d6e7f8a9b01"
 }
 
 POST /api/tickets HTTP/1.1

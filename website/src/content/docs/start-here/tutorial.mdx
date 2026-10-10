@@ -145,9 +145,9 @@ A `computed` field is derived from the row's own fields, stored as a generated c
 
    <Code code={helpDesk} lang="json" title="help-desk.alvo.json" ins={[{ range: '18-19' }]} />
 
-   A computed expression may only combine the row's own fields. A numeric constant, as in `estimate_hours * 60`, is refused
-   when the descriptor is applied, because a generated column cannot take a parameter. Keep such a value in a field of
-   its own, as `hourly_rate` does here.
+   A computed expression combines the row's own fields. A number or other non-text constant, as in `estimate_hours * 60`,
+   is refused when the descriptor is applied, because a generated column cannot take a parameter (a text constant joined
+   to a field is allowed). Keep such a value in a field of its own, as `hourly_rate` does here.
 
 2. Apply it:
 
