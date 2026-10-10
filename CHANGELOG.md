@@ -650,6 +650,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Webhook deliveries no longer log the endpoint's URL** (#347, security). `IHttpClientFactory`'s default
+  logging handlers on the named webhook client wrote every delivery's full request URI, path included, at
+  `Information` under `System.Net.Http.HttpClient.MMLib.Alvo.Events.Webhook.*`, and a webhook URL's path is
+  often its only credential (a Slack incoming webhook's is). The library now registers that client with
+  `RemoveAllLoggers()`, so the fix holds in an embedded host as well as the standalone one, with no logging
+  configuration required; the `Logging__LogLevel__System.Net.Http.HttpClient=Warning` workaround is no longer
+  needed. Alvo's own lines still record each attempt by endpoint name. A host that wants transport logging
+  back adds its own logger to the client after `AddAlvo`, and owns its redaction.
+
 - **A `date` field now compares in memory** (#317). The CEL interpreter did not normalise a `DateOnly`, so every
   in-memory comparison involving a `date` field answered `false`. A `date` now compares as **midnight UTC**, the same
   rule the database uses. Guards that were silently dead start working on upgrade, in both directions:
