@@ -650,6 +650,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The dashboard works over PostgreSQL** (#339). Every screen showed *"Something went wrong"*, with EF's
+  *"a second operation was started on this context instance"* on the identity store. A Blazor circuit is one
+  DI scope for as long as the tab is open, and its components initialise concurrently — the overview, the
+  pending bar and the project switcher each resolve the signed-in operator at the same time — so the cookie
+  resolver's membership store shared one `DbContext` between overlapping queries. SQLite hid it, because its
+  reads complete synchronously and never interleave. The resolver now reads the store from a scope of its
+  own on every call, the rule the guarded user administration and the session revalidation already follow.
+  Caller resolution is otherwise unchanged: still re-read on every call, so a disable, a role revoke or a
+  tenant move still takes effect on the operator's next click.
+
 - **A `date` field now compares in memory** (#317). The CEL interpreter did not normalise a `DateOnly`, so every
   in-memory comparison involving a `date` field answered `false`. A `date` now compares as **midnight UTC**, the same
   rule the database uses. Guards that were silently dead start working on upgrade, in both directions:
