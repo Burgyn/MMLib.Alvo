@@ -22,11 +22,13 @@ checked, which you then review and apply. About ten minutes, starting from a run
 
 The assistant reads the project and runs dry runs. It **cannot apply anything**: there is no apply tool in its tool
 set, so no instruction, however it is phrased, gives it one. Every change it makes is a proposal you review and apply.
+The table is its complete tool set: five reads, two dry runs and two skill readers.
 
 | It may call | What for |
 |---|---|
 | `get_descriptor`, `get_schema` | the current descriptor and the revision a change must be written against, and the resolved schema |
 | `get_capabilities` | what this build honours, so it says "not in this build" instead of writing a key nothing runs |
+| `get_cel_functions` | the CEL functions this host knows, built in and registered by the host, with the profiles each works in |
 | `get_revisions` | what changed recently, and why |
 | `check_change`, `propose_change` | a dry run of a change: "would this apply?", and the only way a change becomes a proposal |
 | `load_skill`, `read_skill_resource` | the nine descriptor skills, and the schema slices they cite |
@@ -104,6 +106,9 @@ The standalone image includes the assistant. An embedded host adds the `MMLib.Al
 that wants only the Data API never acquires an agent runtime.
 
 ## What can go wrong
+
+The assistant and the dashboard call the Management API's operations in process, so they refuse for the same reasons;
+the table names the problem type the same refusal carries over HTTP.
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|

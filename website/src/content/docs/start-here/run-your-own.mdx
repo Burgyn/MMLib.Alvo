@@ -82,7 +82,9 @@ Edit the descriptor, then recreate the `alvo` container so it reads the file aga
 On start, Alvo compares the descriptor with the schema it applied before. A change that discards nothing (a new entity,
 a new field, a changed rule) is applied; one that would drop or narrow data is refused, and the container stops with
 the plan in its log. To apply without a restart, send the descriptor to the Management API instead; both paths, with
-dry runs, revisions and rollback, are in [Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/).
+dry runs, revisions and rollback, are in [Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/). In
+this build only rule and hook changes take effect that way at once: a new entity or field reaches the Data API after a
+restart ([#103](https://github.com/Burgyn/MMLib.Alvo/issues/103), [#353](https://github.com/Burgyn/MMLib.Alvo/issues/353)).
 
 ## Start from an example
 

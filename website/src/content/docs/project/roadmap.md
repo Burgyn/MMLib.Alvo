@@ -62,10 +62,11 @@ for the published packages appear only in tabs marked *available from v0.1*.
 
 ## Known issues
 
-Open defects the documentation pages point to. A fix is in progress for #339, #342, #347 and #349; none is released.
+Open defects the documentation pages point to. A fix is in progress for #339, #342, #347, #349 and #353; none is released.
 
 | Issue | What happens |
 |---|---|
+| [#103](https://github.com/Burgyn/MMLib.Alvo/issues/103) | An entity added through the Management API or the dashboard gets no Data API route until the host restarts. |
 | [#339](https://github.com/Burgyn/MMLib.Alvo/issues/339) | Over PostgreSQL, every dashboard screen can show "Something went wrong"; over SQLite it works. |
 | [#340](https://github.com/Burgyn/MMLib.Alvo/issues/340) | The standalone host exits with code 139 on an invalid descriptor, instead of the clean refusal and exit code 78. |
 | [#342](https://github.com/Burgyn/MMLib.Alvo/issues/342) | A caller can overwrite a rollup field with a `PATCH`. |
@@ -75,6 +76,7 @@ Open defects the documentation pages point to. A fix is in progress for #339, #3
 | [#347](https://github.com/Burgyn/MMLib.Alvo/issues/347) | Webhook delivery logs the full endpoint URL. |
 | [#349](https://github.com/Burgyn/MMLib.Alvo/issues/349) | A batch `PATCH` does not advance a row's version, so a stale `If-Match` can still succeed. |
 | [#350](https://github.com/Burgyn/MMLib.Alvo/issues/350) | Filter negation is spelled `not.field=op.value`, not PostgREST's `field=not.op.value`. |
+| [#353](https://github.com/Burgyn/MMLib.Alvo/issues/353) | A field added through the Management API or the dashboard is refused as `unknown-field` until the host restarts. |
 
 ## What comes after
 

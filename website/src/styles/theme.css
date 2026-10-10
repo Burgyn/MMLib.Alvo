@@ -440,8 +440,9 @@ footer .meta a { color: var(--dim); gap: 8px; }
 }
 
 /* Mermaid diagrams: rehype-mermaid-theme emits a light and a dark image; the site's theme shows one. */
-.alvo-mermaid { margin: 1.5rem 0; }
-.alvo-mermaid__img { display: block; width: 100%; height: auto; }
+.alvo-mermaid { margin: 1.5rem 0; overflow-x: auto; }
+.alvo-mermaid:focus-visible { outline: 2px solid var(--sl-color-accent); outline-offset: 2px; }
+.alvo-mermaid__img { display: block; width: 100%; height: auto; max-width: none; }
 .alvo-mermaid__img--dark { display: none; }
 :root[data-theme='dark'] .alvo-mermaid__img--dark { display: block; }
 :root[data-theme='dark'] .alvo-mermaid__img--light { display: none; }

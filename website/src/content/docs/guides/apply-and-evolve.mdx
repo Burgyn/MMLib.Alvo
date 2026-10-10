@@ -17,7 +17,8 @@ import rename from '../../../snippets/apply-and-evolve/04-rename.alvo.json?raw';
 
 :::tip[What you will achieve]
 A descriptor change applied to your running backend without a restart: previewed first, then applied against the
-revision you read and recorded with a reason. Then the rest of a change's lifecycle, each shown with a real response: a
+revision you read and recorded with a reason (in this build a new field or entity is served only after a restart; see
+the known issue below). Then the rest of a change's lifecycle, each shown with a real response: a
 lost race, a rename that keeps its data, a deliberate drop and a rollback. About fifteen minutes, starting from the
 stack in [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
 :::
@@ -56,6 +57,14 @@ history. They differ in who applies and what is recorded.
 
 The rest of this page uses the Management API, which applies without a restart. The dashboard runs the same calls
 in-process, so it plans, refuses and records exactly the same way.
+
+:::caution[Known issue in this build]
+A change applied through the Management API or the dashboard is recorded and migrated at once, but not all of it is
+served at once. Rule and hook changes take effect on the next request. A new entity gets no Data API route until the
+host restarts ([#103](https://github.com/Burgyn/MMLib.Alvo/issues/103)), and a write naming a new field is refused as
+`unknown-field` until then ([#353](https://github.com/Burgyn/MMLib.Alvo/issues/353)). The recipe below copies the new
+descriptor over the mounted file, so a restart serves it.
+:::
 
 ## 1. Give the API a way in
 

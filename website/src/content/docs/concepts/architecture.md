@@ -12,7 +12,7 @@ one process, in the standalone image and in your own ASP.NET Core host alike.
 ```mermaid
 flowchart TB
   accTitle: How Alvo fits together
-  accDescr: Control path, the dashboard and agents call the Management API, which, like the descriptor file, feeds the schema registry. Runtime path, an HTTP request passes authentication, the rules compiled to SQL, the before-hooks and the transaction with its outbox, then the after-hooks. The schema registry supplies the rules and the hooks.
+  accDescr: Control path, the dashboard and agents call the Management API, which, like the descriptor file, feeds the schema registry. Runtime path, an HTTP request passes authentication, the rules compiled to SQL, then a transaction that runs the before-hooks and writes the row with its outbox event, then the after-hooks. The schema registry supplies the rules and the hooks.
   subgraph Control
     direction LR
     clients["Dashboard · agents"] --> mgmt["Management API"]
@@ -23,12 +23,11 @@ flowchart TB
     direction TB
     request["HTTP request"] --> auth["Auth: API key → @user"]
     auth --> rules["Rules: CEL → SQL"]
-    rules --> before["Before-hooks"]
-    before --> tx["Transaction + outbox"]
+    rules --> tx["Transaction: before-hooks, row + outbox"]
     tx --> after["After-hooks"]
   end
-  registry -. "rules and hooks" .-> rules
-  registry -.-> before
+  registry -. "rules" .-> rules
+  registry -. "hooks" .-> tx
 ```
 
 ## The control path
@@ -48,8 +47,8 @@ dashboard, which calls the same API in process. Every door leads to the same ste
 The generated routes are built from the applied schema when the first request arrives, and then kept. A change to rules
 or hooks applied at runtime takes effect on the next request. A change to the **shape** applied at runtime does not
 reach the Data API until the process restarts: an entity added through the Management API or the dashboard gets no route
-([#103](https://github.com/Burgyn/MMLib.Alvo/issues/103)), and, measured on this build, a field added to an existing
-entity is refused as `unknown-field` until then.
+([#103](https://github.com/Burgyn/MMLib.Alvo/issues/103)), and a field added to an existing entity is refused as
+`unknown-field` until then ([#353](https://github.com/Burgyn/MMLib.Alvo/issues/353)).
 
 ## The runtime path
 
@@ -116,8 +115,9 @@ observable. A process killed mid-delivery repeats the action after a restart. Th
 every receiver must be idempotent: the event's `id` is the one value stable across redeliveries, and the key to
 deduplicate on. The envelope is CloudEvents 1.0.
 
-There is no global order. Events for one row are delivered in order while a single dispatcher runs; a second instance
-delivering events breaks that silently, so run one ([Running in production](/MMLib.Alvo/guides/production/#run-more-than-one-instance)).
+There is no global order. Events for one row are delivered in order only while a single dispatcher runs **and** no two
+events for that row are written within the same millisecond by different processes; a second instance delivering
+events breaks the order silently, so run one ([Running in production](/MMLib.Alvo/guides/production/#run-more-than-one-instance)).
 [After-hooks, events and webhooks](/MMLib.Alvo/guides/after-hooks-and-webhooks/) shows what a receiver gets.
 
 ## Packages

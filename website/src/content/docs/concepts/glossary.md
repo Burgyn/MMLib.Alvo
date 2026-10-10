@@ -45,8 +45,9 @@ last two steps. [Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-
 <dt id="before-hook">Before-hook</dt>
 <dd>
 
-A `reject` or `mutate` action that runs inside a write's transaction, before the row is stored. It cannot reach the
-network, and if it refuses or fails, nothing is written.
+A `reject` or `mutate` action that runs inside a write's transaction, before the row is stored. Nothing a descriptor
+can express in it reaches the network (a function a host registers in C# is host code and the exception), and if it
+refuses or fails, nothing is written.
 [Validate and transform writes (before-hooks)](/MMLib.Alvo/guides/before-hooks/)
 
 </dd>
@@ -202,7 +203,8 @@ as the change. [Computed fields and rollups](/MMLib.Alvo/guides/computed-and-rol
 <dd>
 
 A CEL expression per entity operation (`list`, `get`, `create`, `update`, `delete`) that decides which rows a caller may
-reach, compiled into the SQL of every request. An operation without one is refused.
+reach: rendered into the SQL that reads rows, and checked against the row a write would store. An operation
+without one is refused.
 [Access rules](/MMLib.Alvo/guides/access-rules/)
 
 </dd>

@@ -162,8 +162,8 @@ API browser at `/scalar` behind a path base has not been verified
 
 ## Run more than one instance
 
-- **One instance drains the outbox.** Per-row event order holds only while a single process delivers events, and no
-  lock enforces it: run one instance with [`Alvo:Events:Enabled`](/MMLib.Alvo/reference/configuration/#alvoevents) on
+- **One instance drains the outbox.** Per-row event order holds only while a single process delivers events (and no two
+  events for one row are written by different processes in the same millisecond), and no lock enforces it: run one instance with [`Alvo:Events:Enabled`](/MMLib.Alvo/reference/configuration/#alvoevents) on
   and the rest off. Switching it off stops delivery, never the recording of events.
 - **Keep the data-protection keys.** Dashboard sessions and set-password links are protected with keys the host keeps
   in its user's home directory, `/home/app`. A recreated container loses them, and every session and outstanding link
