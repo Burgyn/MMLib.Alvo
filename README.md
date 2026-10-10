@@ -23,7 +23,7 @@ Alvo is a .NET-native backend-as-a-service: one validated JSON descriptor — en
 fields and rollups — becomes a REST API with its own OpenAPI document. It is built for developers who work with coding
 agents, and for .NET teams that want a configurable backend inside their own app. Access rules are compiled into the
 SQL that reads the rows, the whole backend is one file an agent can validate and dry-run, and every refusal is a
-problem document with a pointer and a fix.
+problem document, with a pointer and a fix suggestion wherever the request can be repaired.
 
 ## See it
 
