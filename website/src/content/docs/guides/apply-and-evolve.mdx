@@ -262,9 +262,6 @@ records each decision.
   has at an older revision than the database, for example after a rollback through the API. Put the current
   descriptor back in the file. `AllowDestructive` alone does not make an older descriptor serve.
 
-Over the compose stack's PostgreSQL, the dashboard can answer every screen with "Something went wrong" while the API
-keeps working ([#339](https://github.com/Burgyn/MMLib.Alvo/issues/339)); over SQLite it works.
-
 ## Reference
 
 - [Management API](/MMLib.Alvo/reference/management-api/): every route and its body (`descriptorJson`,

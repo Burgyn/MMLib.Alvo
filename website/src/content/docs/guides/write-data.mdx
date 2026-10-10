@@ -118,16 +118,9 @@ a pointer into `rows`. Here the second row has no `year`:
 
 A row refused by a rule makes the whole batch a 403 whose `violations` name each refused row. A batch holds up to 1000
 rows ([Limits and budgets](/MMLib.Alvo/reference/limits/)), may not name one row twice, and takes no `If-Match`: one
-version cannot condition many rows. Every row written still emits its own event, so an after-hook or webhook runs once
+version cannot condition many rows. A batch update stamps each row's `updated_at` and `updated_by` as a single update
+does, so each row gets a new `ETag` and a tag taken before the batch no longer matches. Every row written still emits its own event, so an after-hook or webhook runs once
 per row ([#193](https://github.com/Burgyn/MMLib.Alvo/issues/193)).
-
-:::caution[Known issue in this build]
-A batch `PATCH` changes the rows but does not advance their `updated_at` and `updated_by`, so their `ETag` stays the
-same: in the response above, each row's `updated_at` still equals its `created_at`. A client still holding a tag from before the batch can then overwrite the batch's
-change with a single-row `PATCH` carrying that `If-Match`, and gets a 200 instead of a 412. Until it is fixed, read the
-rows again after a batch update before you condition a write on their tag
-([#349](https://github.com/Burgyn/MMLib.Alvo/issues/349)).
-:::
 
 ## 5. Send JSON, and say so
 

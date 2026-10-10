@@ -156,13 +156,11 @@ changes, only of configuration, and no automations or functions screen beyond th
 verified ([#344](https://github.com/Burgyn/MMLib.Alvo/issues/344)); a dashboard apply records the signed-in person.
 :::
 
-:::caution[Known issues in this build]
-- Over PostgreSQL, the dashboard can answer every screen with "Something went wrong" while the API keeps working
-  ([#339](https://github.com/Burgyn/MMLib.Alvo/issues/339)). Over SQLite, which the demo uses, it works as described.
-- A rule or hook you apply takes effect on the next request, but a new entity or field reaches the Data API only after
-  the host restarts. A new entity has no route until then ([#103](https://github.com/Burgyn/MMLib.Alvo/issues/103)),
-  and a write naming a new field is refused as `unknown-field`
-  ([#353](https://github.com/Burgyn/MMLib.Alvo/issues/353)).
+:::caution[Known issue in this build]
+A rule or hook you apply takes effect on the next request, but a new entity or field reaches the Data API only after
+the host restarts. A new entity has no route until then ([#103](https://github.com/Burgyn/MMLib.Alvo/issues/103)),
+and a write naming a new field is refused as `unknown-field`
+([#353](https://github.com/Burgyn/MMLib.Alvo/issues/353)).
 :::
 
 ## What can go wrong

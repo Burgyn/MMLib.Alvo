@@ -62,19 +62,15 @@ for the published packages appear only in tabs marked *available from v0.1*.
 
 ## Known issues
 
-Open defects the documentation pages point to. A fix is in progress for #339, #342, #347, #349 and #353; none is released.
+Open defects the documentation pages point to. A fix is in progress for #353.
 
 | Issue | What happens |
 |---|---|
 | [#103](https://github.com/Burgyn/MMLib.Alvo/issues/103) | An entity added through the Management API or the dashboard gets no Data API route until the host restarts. |
-| [#339](https://github.com/Burgyn/MMLib.Alvo/issues/339) | Over PostgreSQL, every dashboard screen can show "Something went wrong"; over SQLite it works. |
 | [#340](https://github.com/Burgyn/MMLib.Alvo/issues/340) | The standalone host exits with code 139 on an invalid descriptor, instead of the clean refusal and exit code 78. |
-| [#342](https://github.com/Burgyn/MMLib.Alvo/issues/342) | A caller can overwrite a rollup field with a `PATCH`. |
 | [#343](https://github.com/Burgyn/MMLib.Alvo/issues/343) | A dry run of a destructive change is refused like a real apply. |
 | [#344](https://github.com/Burgyn/MMLib.Alvo/issues/344) | Small inconsistencies: an unverified `author` on Management API revisions, different statuses for writes to derived fields. |
 | [#345](https://github.com/Burgyn/MMLib.Alvo/issues/345) | A before-hook may `mutate` a rollup or computed field, which the apply should refuse. |
-| [#347](https://github.com/Burgyn/MMLib.Alvo/issues/347) | Webhook delivery logs the full endpoint URL. |
-| [#349](https://github.com/Burgyn/MMLib.Alvo/issues/349) | A batch `PATCH` does not advance a row's version, so a stale `If-Match` can still succeed. |
 | [#350](https://github.com/Burgyn/MMLib.Alvo/issues/350) | Filter negation is spelled `not.field=op.value`, not PostgREST's `field=not.op.value`. |
 | [#351](https://github.com/Burgyn/MMLib.Alvo/issues/351) | A write to a child row recomputes the parent's rollups without advancing the parent's `ETag`, so an `If-Match` or `If-None-Match` taken before it still matches. |
 | [#353](https://github.com/Burgyn/MMLib.Alvo/issues/353) | A field added through the Management API or the dashboard is refused as `unknown-field` until the host restarts. |

@@ -63,7 +63,9 @@ column and keeps it current, and nobody writes it.
 ## 2. Roll up related rows
 
 A `rollup` aggregates the rows of another entity that point at this one. `from` names that entity, `op` the aggregate
-and `field` the child's field. Alvo recomputes it inside the same transaction as every write to a child row.
+and `field` the child's field. Alvo recomputes it inside the same transaction as every write to a child row, and
+only Alvo writes it: a body that names a rollup field is refused with the same 403 `forbidden` as one naming a computed
+field, on every write route and in every batch row.
 
 <Steps>
 
@@ -99,11 +101,7 @@ An update that moves a line to another invoice recomputes both invoices, and del
 With no lines left, `count` answers `0` and the other four aggregates answer `null`.
 
 :::caution[Known issue in this build]
-A `PATCH` that names a rollup field is accepted, and the stored aggregate is overwritten until the next write to a
-child row recomputes it ([#342](https://github.com/Burgyn/MMLib.Alvo/issues/342)). Never send a rollup field in a
-write.
-
-The recompute does not advance the parent's `ETag` either, so after a write to a line the invoice's totals are new
+The recompute does not advance the parent's `ETag`, so after a write to a line the invoice's totals are new
 but its tag is not: an `If-Match` taken before still succeeds, and `If-None-Match` still answers 304. Read the parent
 again after writing its children before you condition a write on its tag
 ([#351](https://github.com/Burgyn/MMLib.Alvo/issues/351)).
@@ -157,7 +155,7 @@ Aggregate every child row, or move the distinction into the model, for example a
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | The body names a computed field. | Remove the field from the body; its value follows from the fields its expression reads. | every host |
+| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | The body names a computed or rollup field. | Remove the field from the body; its value follows from the fields its expression reads, or from the child rows. | every host |
 | 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | The body breaks a facet of a field the expression reads, such as a missing required `unit_price`. | Follow the violation's `pointer` and `fixSuggestion`. | every host |
 
 An expression Alvo cannot store is refused when the descriptor is applied, and the container does not come back. The

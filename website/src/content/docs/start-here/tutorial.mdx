@@ -170,12 +170,6 @@ Sign in and open **Schema**, then **tickets**. The *Fields* tab lists the seven 
 marks `estimate_cost` as computed; *Rules* holds the five rules and *On write* the two before-hooks. **Data** browses
 the tickets you created through the API.
 
-:::caution[Known issue in this build]
-Over the compose stack's PostgreSQL, the dashboard can answer every screen with "Something went wrong" while the API
-keeps working ([#339](https://github.com/Burgyn/MMLib.Alvo/issues/339)). Over SQLite the dashboard renders as
-described: start it with the [*Without Docker*](/MMLib.Alvo/start-here/run-your-own/#without-docker) recipe.
-:::
-
 When you are done, go back to the demo: stop the stack, delete its database, and remove the override, the password
 file and `ALVO_DESCRIPTOR`, so a plain `docker compose up` serves the [Quick start](/MMLib.Alvo/start-here/quick-start/)'s
 vehicle registry again:

@@ -181,12 +181,6 @@ same machine: about 5 ms p95 to read one row, about 16 ms for a filtered, sorted
 [`docs/performance.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/performance.md). They describe that machine,
 not a throughput promise.
 
-:::caution[Known issue in this build]
-Over PostgreSQL the dashboard can answer every screen with "Something went wrong" while the API keeps working
-([#339](https://github.com/Burgyn/MMLib.Alvo/issues/339)). Until that fix ships, use the dashboard against a SQLite host
-or drive changes through the Management API.
-:::
-
 ## What can go wrong
 
 | Status | Problem type | When | Fix | Returned by |
