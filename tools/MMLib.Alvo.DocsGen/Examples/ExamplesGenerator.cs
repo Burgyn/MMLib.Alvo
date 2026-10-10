@@ -8,6 +8,10 @@ internal sealed partial class ExamplesGenerator : IPageGenerator
 {
     internal const string PageFile = "examples.md";
 
+    internal const string ImageExamplesRoot = "/alvo/examples";
+
+    private const string QuickStartCompose = "docker compose -f docker-compose.quickstart.yml";
+
     public Task<IReadOnlyList<GeneratedPage>> GenerateAsync(DocsGenContext context, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<GeneratedPage>>([Render(ExampleCatalog.Read(context.Paths.RepoRoot))]);
 
@@ -18,7 +22,9 @@ internal sealed partial class ExamplesGenerator : IPageGenerator
                 "Every example descriptor in the repository: what it shows, whether it applies, and how to run it.",
                 editSource: ExampleCatalog.ReadmePath))
             .Append("Each example lives under `examples/` in the repository and is validated against the descriptor schema on every build. ")
-            .Append("The ones that apply can be started with the standalone stack. Each summary comes from [`examples/README.md`](")
+            .Append("The ones that apply also ship inside the image, under `").Append(ImageExamplesRoot).Append("/`, so the [Quick start](")
+            .Append(SiteLinks.Page("start-here/quick-start")).Append(")'s compose file serves any of them with `ALVO_DESCRIPTOR` and no clone. ")
+            .Append("Each summary comes from [`examples/README.md`](")
             .Append(SiteLinks.RepoBlob(ExampleCatalog.ReadmePath)).Append("), which also lists the keys the schema declares but this build refuses at apply.\n");
         foreach (var example in examples.OrderByDescending(example => example.Runnable).ThenBy(example => example.Directory, StringComparer.Ordinal))
         {
@@ -39,13 +45,19 @@ internal sealed partial class ExamplesGenerator : IPageGenerator
             .Append("**Tenancy:** ").Append(example.MultiTenant ? "multi-tenant (`tenancy.enabled: true`)" : "single-tenant").Append("\n\n")
             .Append("**Descriptor:** [`").Append(directory).Append('/').Append(example.Descriptor).Append("`](")
             .Append(SiteLinks.RepoBlob($"{directory}/{example.Descriptor}")).Append(")\n");
-        if (example is { Runnable: true, OwnStack: { } stack })
+        if (!example.Runnable)
+        {
+            return;
+        }
+
+        AppendRun(page, example);
+        if (example.OwnStack is { } stack)
         {
             AppendOwnStack(page, stack, directory);
         }
-        else if (example.Runnable)
+        else
         {
-            AppendRun(page, example, directory);
+            AppendKeys(page);
         }
     }
 
@@ -67,16 +79,25 @@ internal sealed partial class ExamplesGenerator : IPageGenerator
     private static string Roles(Example example) =>
         example.Roles.Count == 0 ? "none declared; `authenticated` is enough" : string.Join(", ", example.Roles.Select(Md.Code));
 
-    private static void AppendOwnStack(StringBuilder page, ExampleStack stack, string directory) =>
-        page.Append("\nThis example has its own stack, `").Append(stack.ComposeFile).Append("`, with one dev key per role and tenant. ")
-            .Append("Generate a secret for each key and start it, as its [README](").Append(SiteLinks.RepoBlob($"{directory}/README.md"))
-            .Append(") describes:\n\n```sh\n").Append(stack.Command()).Append("\n```\n");
+    internal static string InImagePath(Example example) => $"{ImageExamplesRoot}/{example.Directory}/{example.Descriptor}";
 
-    private static void AppendRun(StringBuilder page, Example example, string directory) =>
-        page.Append("\nSet the key secret and declare keys with these roles as [Run your own descriptor](")
-            .Append(SiteLinks.Page("start-here/run-your-own")).Append(") shows, then start the stack over this descriptor:\n\n")
-            .Append("```sh\nALVO_DESCRIPTOR=./").Append(directory).Append('/').Append(example.Descriptor)
-            .Append(" docker compose up --build --wait\n```\n");
+    private static void AppendRun(StringBuilder page, Example example) =>
+        page.Append("\nIn the image at `").Append(InImagePath(example)).Append("`. Serve it with the quick start's compose file, ")
+            .Append("from the directory that holds it; the `down` deletes the database of the descriptor it served before:\n\n```sh\n")
+            .Append(QuickStartCompose).Append(" down --volumes\n")
+            .Append("ALVO_DESCRIPTOR=").Append(InImagePath(example)).Append(' ').Append(QuickStartCompose).Append(" up --wait\n```\n");
+
+    private static void AppendKeys(StringBuilder page) =>
+        page.Append("\nThe quick start's `demo` key holds only the built-in roles `admin` and `authenticated`, so it authenticates here; ")
+            .Append("for keys with this example's own roles, use an override as [Run your own descriptor](")
+            .Append(SiteLinks.Page("start-here/run-your-own")).Append(") shows.\n");
+
+    private static void AppendOwnStack(StringBuilder page, ExampleStack stack, string directory) =>
+        page.Append("\nThe quick start's `demo` key belongs to no tenant, so there only the entities marked `tenancy: global` answer; ")
+            .Append("the header of `docker-compose.quickstart.yml` says how to give the key a tenant. ")
+            .Append("The example's own stack, `").Append(stack.ComposeFile).Append("`, has one dev key per role and tenant and runs from a clone ")
+            .Append("of the repository. Generate a secret for each key and start it, as its [README](").Append(SiteLinks.RepoBlob($"{directory}/README.md"))
+            .Append(") describes:\n\n```sh\n").Append(stack.Command()).Append("\n```\n");
 
     [GeneratedRegex(@"\bapplies as it stands\.\s*", RegexOptions.IgnoreCase)]
     private static partial Regex AppliesAsItStands();

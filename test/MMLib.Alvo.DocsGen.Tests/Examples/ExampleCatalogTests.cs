@@ -40,10 +40,10 @@ public class ExampleCatalogTests
 
         page.ShouldStartWith("---\ntitle: \"Examples\"\n");
         page.IndexOf("## simple-tasks", StringComparison.Ordinal).ShouldBeLessThan(page.IndexOf("## complex-crm", StringComparison.Ordinal));
-        page.ShouldContain("ALVO_DESCRIPTOR=./examples/simple-tasks/tasks.alvo.json docker compose up --build --wait");
+        page.ShouldContain("ALVO_DESCRIPTOR=/alvo/examples/simple-tasks/tasks.alvo.json docker compose -f docker-compose.quickstart.yml up --wait");
         page.ShouldContain("**Roles a key needs:** none declared; `authenticated` is enough");
         page.ShouldContain("**Applies:** no — [why](https://github.com/Burgyn/MMLib.Alvo/blob/main/examples/complex-crm/NOT-RUNNABLE.md)");
-        page.ShouldNotContain("ALVO_DESCRIPTOR=./examples/complex-crm/");
+        page.ShouldNotContain("/alvo/examples/complex-crm/");
     }
 
     [Fact]
@@ -62,15 +62,16 @@ public class ExampleCatalogTests
     }
 
     [Fact]
-    public void The_page_runs_field_service_on_its_own_stack_and_says_it_is_multi_tenant()
+    public void The_page_runs_field_service_from_the_image_and_on_its_own_stack_and_says_it_is_multi_tenant()
     {
         var page = ExamplesGenerator.Render(ExampleCatalog.Read(_root)).Content;
         var start = page.IndexOf("## field-service", StringComparison.Ordinal);
         var section = page[start..page.IndexOf("\n## ", start, StringComparison.Ordinal)];
 
         section.ShouldContain("**Tenancy:** multi-tenant");
+        section.ShouldContain("ALVO_DESCRIPTOR=/alvo/examples/field-service/field-service.alvo.json docker compose -f docker-compose.quickstart.yml up --wait");
+        section.ShouldContain("tenancy: global");
         section.ShouldContain("-f docker-compose.field-service.yml up --build --wait");
-        section.ShouldNotContain("ALVO_DESCRIPTOR=");
     }
 
     [Fact]

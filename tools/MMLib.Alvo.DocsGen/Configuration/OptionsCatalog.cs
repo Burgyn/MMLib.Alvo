@@ -18,7 +18,7 @@ internal sealed record ConfigurationSection(string Name, string Scope, Type Opti
 
 internal static class OptionsCatalog
 {
-    internal const string HostScope = "Standalone host (the `mmlib/alvo` image)";
+    internal const string HostScope = "Standalone host (the `ghcr.io/burgyn/alvo` image)";
     internal const string HostBoundScope = "Bound by the standalone host; an embedded host configures it in code";
     internal const string CoreScope = "Any host (bound by the core)";
 
