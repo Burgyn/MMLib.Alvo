@@ -7,10 +7,8 @@
 /// </summary>
 /// <remarks>
 /// <para>
-/// The spelling is <c>Alvo:*</c>, not the <c>ALVO_*</c> the spec's environment table sketches, and that is a
-/// deliberate deviation (the F5 design's D2): <c>Alvo:Schema</c> and <c>Alvo:Events</c> already deviated the
-/// same way, and a third spelling would be worse than either. In an environment variable the key is
-/// <c>Alvo__Management__RoutePrefix</c>.
+/// The section is <c>Alvo:Management</c>, spelled like <c>Alvo:Schema</c> and <c>Alvo:Events</c>. In an
+/// environment variable the key is <c>Alvo__Management__RoutePrefix</c>.
 /// </para>
 /// <para>
 /// Public for the reason <see cref="Api.AlvoApiOptions"/> is: an embedded host mounts Alvo beside its own

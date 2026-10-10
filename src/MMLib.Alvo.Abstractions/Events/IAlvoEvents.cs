@@ -24,8 +24,8 @@ namespace MMLib.Alvo.Events;
 /// on it, carrying a partition key and provenance for a record nobody wrote.
 /// </para>
 /// <para>
-/// <b>Not transactional with anything.</b> The spec's "the event is published in the same transaction as the
-/// data change" is a guarantee about a <em>data</em> change, and a custom event has none — this appends with
+/// <b>Not transactional with anything.</b> "The event is published in the same transaction as the data
+/// change" is a guarantee about a <em>data</em> change, and a custom event has none — this appends with
 /// one autocommit statement. A host that needs its own write and its own event to commit together cannot get
 /// that here.
 /// </para>
