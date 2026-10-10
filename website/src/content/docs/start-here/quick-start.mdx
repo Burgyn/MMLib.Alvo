@@ -9,6 +9,7 @@ import { Code } from '@astrojs/starlight/components';
 import Exchange from '../../../components/Exchange.astro';
 import quickStart from '../../../snippets/shell/quick-start.sh?raw';
 import tearDown from '../../../snippets/shell/quick-start-tear-down.sh?raw';
+import claudePlugin from '../../../snippets/shell/claude-plugin.txt?raw';
 
 :::tip[What you will achieve]
 A running Alvo backend over PostgreSQL, and a record you created through its API. About five minutes, starting from
@@ -121,3 +122,12 @@ this shell first, and `ALVO_ADMIN_PASSWORD` with it. If the stack serves another
 
 **[Tutorial: your first backend](/start-here/tutorial/)**: write a descriptor of your own, one step at a
 time. To serve a descriptor you already have, see [Run your own descriptor](/start-here/run-your-own/).
+
+:::tip[With a coding agent]
+Give your agent the descriptor skills first, so it writes descriptors Alvo accepts. In Claude Code:
+
+<Code code={claudePlugin.trimEnd()} lang="txt" title="Claude Code" />
+
+[For coding agents](/start-here/coding-agents/#3-load-the-shared-skills) has the same skills for other agents, and the
+rest: the schema, dry runs and reading refusals.
+:::

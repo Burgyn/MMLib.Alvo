@@ -95,9 +95,10 @@ author, because a person decided to apply it, and you can roll it back from *Con
 
 The assistant learns the descriptor from nine skills: entities and fields, field types and formats, rules and CEL,
 hooks, computed fields and rollups, indexes, traits and tenancy, project access, and capabilities and limits. They are
-plain Markdown files in the repository, `.claude/skills/alvo-descriptor-*`, and the package embeds exactly those files,
-so the assistant and your coding agent learn the same rules from one source.
-[For coding agents](/start-here/coding-agents/#3-load-the-shared-skills) links each one.
+plain Markdown files in the repository, `plugins/alvo/skills/alvo-descriptor-*`, and the package embeds exactly those
+files, so the assistant and your coding agent learn the same rules from one source.
+[For coding agents](/start-here/coding-agents/#3-load-the-shared-skills) installs them as a Claude Code plugin, or into
+any agent's skills folder.
 
 ## In an embedded host
 

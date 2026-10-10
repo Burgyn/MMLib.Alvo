@@ -1,14 +1,16 @@
 ---
+import { Code } from '@astrojs/starlight/components';
 import JsonExcerpt from '../JsonExcerpt.astro';
 import Exchange from '../Exchange.astro';
 import { page } from '../../lib/links';
 import typo from '../../snippets/landing/typo/helpdesk.alvo.json?raw';
+import claudePlugin from '../../snippets/shell/claude-plugin.txt?raw';
 
 const points = [
   { lead: 'Problem documents, RFC 9457.', rest: 'An invalid descriptor or record names the JSON pointer and, where it can, a fix, keyed by a stable type.' },
   { lead: 'Dry runs and If-Match', rest: 'on the Management API: see the plan before anything is applied.' },
   { lead: 'Idempotency-Key on every write:', rest: 'retry without writing twice.' },
-  { lead: 'A JSON Schema with a description on every key,', rest: 'and the same descriptor skills the dashboard’s assistant loads.' },
+  { lead: 'A JSON Schema with a description on every key,', rest: 'so an editor checks the file as you or your agent type.' },
 ];
 ---
 <section class="alvo-section alvo-section--band" aria-labelledby="agent-title">
@@ -17,6 +19,10 @@ const points = [
       <p class="alvo-eyebrow">Agent-first</p>
       <h2 id="agent-title">Your coding agent can drive it.</h2>
       <p class="alvo-lede">The whole backend is one file an agent can validate and dry-run, and every refusal is something it can act on.</p>
+      <div class="alvo-agent__install">
+        <p><b>First, give it the skills.</b> The nine descriptor skills the dashboard’s assistant learns from are a Claude Code plugin; your agent loads each one when a task needs it. Another agent gets the same files from <a class="alvo-prose-link" href={page('/start-here/coding-agents/#3-load-the-shared-skills')}>one script</a>.</p>
+        <Code code={claudePlugin.trimEnd()} lang="txt" title="Claude Code" />
+      </div>
       <ul class="alvo-points">
         {points.map((point) => (
           <li><span><b>{point.lead}</b> {point.rest}</span></li>

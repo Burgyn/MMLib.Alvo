@@ -153,7 +153,7 @@ Next: [the 10-minute tutorial →](https://alvo.burgyn.online/start-here/tutoria
 - **[Hooks that fail closed](https://alvo.burgyn.online/guides/before-hooks/)** — before-hooks refuse or rewrite a write inside its transaction, with built-in functions and your own C# ones.
 - **[Events and webhooks](https://alvo.burgyn.online/guides/after-hooks-and-webhooks/)** — every write commits its event through an outbox; after-hooks send e-mail and deliver webhooks, with retries.
 - **[Audit](https://alvo.burgyn.online/guides/audit-row-changes/) and [history](https://alvo.burgyn.online/guides/apply-and-evolve/)** — audit columns per entity, and every applied descriptor kept as a revision you can roll back to.
-- **[Agent-first](https://alvo.burgyn.online/start-here/coding-agents/)** — problem documents with a pointer and a fix suggestion for invalid input, dry runs, `Idempotency-Key`, and `llms.txt`.
+- **[Agent-first](https://alvo.burgyn.online/start-here/coding-agents/)** — problem documents with a pointer and a fix suggestion for invalid input, dry runs, `Idempotency-Key`, `llms.txt`, and the descriptor skills as a Claude Code plugin: `/plugin marketplace add Burgyn/MMLib.Alvo`, then `/plugin install alvo@mmlib-alvo`.
 - **[Admin dashboard](https://alvo.burgyn.online/guides/admin-dashboard/)** — schema, rule and hook editors, a data browser, history and rollback, and a schema assistant.
 - **[Standalone or embedded](https://alvo.burgyn.online/concepts/modes/)** — the published Docker image, or a library in your ASP.NET Core host, on SQLite or PostgreSQL.
 

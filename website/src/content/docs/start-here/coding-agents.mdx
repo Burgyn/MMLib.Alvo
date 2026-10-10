@@ -13,6 +13,9 @@ import base from '../../../snippets/coding-agents/01-base.alvo.json?raw';
 import addField from '../../../snippets/coding-agents/02-add-field.alvo.json?raw';
 import setup from '../../../snippets/shell/coding-agents-setup.sh?raw';
 import dryRun from '../../../snippets/shell/coding-agents-dry-run.sh?raw';
+import installSkills from '../../../snippets/shell/install-agent-skills.sh?raw';
+import claudePlugin from '../../../snippets/shell/claude-plugin.txt?raw';
+import claudePluginShell from '../../../snippets/shell/claude-plugin-install.sh?raw';
 
 :::tip[What you will achieve]
 A coding agent that knows the descriptor format, edits a descriptor with the schema checking it, and applies a change
@@ -56,19 +59,42 @@ in any editor that maps JSON files to a schema. The schema is also published key
 ## 3. Load the shared skills
 
 The dashboard's schema assistant learns the descriptor from nine skills, and they are plain Markdown your agent can
-load too. Each one teaches one part of the format and the mistakes Alvo refuses:
+load too. Each one teaches one part of the format and the mistakes Alvo refuses.
 
-- [Entities and fields](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-entities-and-fields/SKILL.md)
-- [Field types and formats](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-field-types-and-formats/SKILL.md)
-- [Rules and CEL](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-rules-and-cel/SKILL.md)
-- [Hooks](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-hooks/SKILL.md)
-- [Computed fields and rollups](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-computed-and-rollups/SKILL.md)
-- [Indexes](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-indexes/SKILL.md)
-- [Traits and tenancy](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-traits-and-tenancy/SKILL.md)
-- [Project access](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-project-access/SKILL.md)
-- [Capabilities and limits](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-capabilities-and-limits/SKILL.md)
+**In Claude Code, install them as a plugin.** This repository is a plugin marketplace, and its `alvo` plugin carries
+the nine skills. In a session:
 
-In a clone of the repository they are under `.claude/skills/`, where Claude Code picks them up by itself.
+<Code code={claudePlugin.trimEnd()} lang="txt" title="Claude Code" />
+
+Or from your shell:
+
+<Code code={claudePluginShell.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+Claude Code then loads a skill by itself when a task matches its description, such as adding a rule or a hook, and you
+can call one directly as `/alvo:alvo-descriptor-rules-and-cel`. `/plugin` updates the plugin like any other.
+
+**For another agent, or a folder of your choice**, a script downloads the same nine files, no clone needed:
+
+<Code code={installSkills.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+It writes them to `.claude/skills/alvo-descriptor-*/SKILL.md` under the current directory and lists what it installed;
+any failed download stops it with an error. To put them elsewhere, such as your agent's own skills folder, pass the
+folder: `curl -fsSL https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/scripts/install-agent-skills | sh -s -- ~/.claude/skills`.
+Run it again to update them.
+
+To load them by hand instead, each skill is one file:
+
+- [Entities and fields](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/plugins/alvo/skills/alvo-descriptor-entities-and-fields/SKILL.md)
+- [Field types and formats](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/plugins/alvo/skills/alvo-descriptor-field-types-and-formats/SKILL.md)
+- [Rules and CEL](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/plugins/alvo/skills/alvo-descriptor-rules-and-cel/SKILL.md)
+- [Hooks](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/plugins/alvo/skills/alvo-descriptor-hooks/SKILL.md)
+- [Computed fields and rollups](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/plugins/alvo/skills/alvo-descriptor-computed-and-rollups/SKILL.md)
+- [Indexes](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/plugins/alvo/skills/alvo-descriptor-indexes/SKILL.md)
+- [Traits and tenancy](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/plugins/alvo/skills/alvo-descriptor-traits-and-tenancy/SKILL.md)
+- [Project access](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/plugins/alvo/skills/alvo-descriptor-project-access/SKILL.md)
+- [Capabilities and limits](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/plugins/alvo/skills/alvo-descriptor-capabilities-and-limits/SKILL.md)
+
+In the repository they live in `plugins/alvo/skills/`.
 
 ## 4. Read errors by their type
 
