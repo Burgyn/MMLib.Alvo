@@ -9,16 +9,17 @@ import JsonExcerpt from '../../../components/JsonExcerpt.astro';
 import start from '../../../snippets/shell/apply-and-evolve-start.sh?raw';
 import applyChange from '../../../snippets/shell/apply-a-change.sh?raw';
 import applyRecipe from '../../../snippets/shell/apply-and-evolve-apply.sh?raw';
+import restoreFile from '../../../snippets/shell/apply-and-evolve-restore-file.sh?raw';
 import base from '../../../snippets/apply-and-evolve/01-base.alvo.json?raw';
 import addField from '../../../snippets/apply-and-evolve/02-add-field.alvo.json?raw';
 import dropField from '../../../snippets/apply-and-evolve/03-drop-field.alvo.json?raw';
 import rename from '../../../snippets/apply-and-evolve/04-rename.alvo.json?raw';
 
 :::tip[What you will achieve]
-A descriptor change applied to a running backend without a restart: previewed first, applied against the revision you
-read, recorded with a reason, and rolled back when you change your mind. You also rename a field without losing its
-data and drop one on purpose. About fifteen minutes, starting from the stack in
-[Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
+A descriptor change applied to your running backend without a restart: previewed first, then applied against the
+revision you read and recorded with a reason. Then the rest of a change's lifecycle, each shown with a real response: a
+lost race, a rename that keeps its data, a deliberate drop and a rollback. About fifteen minutes, starting from the
+stack in [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
 :::
 
 ## Before you start
@@ -37,7 +38,7 @@ history. They differ in who applies and what is recorded.
 | Way | Who applies | What is recorded | What it refuses |
 |---|---|---|---|
 | **Edit the file and restart** the host | whoever deploys | a new revision, with no author and no reason | an invalid descriptor; a plan that discards data, unless `Alvo:Schema:AllowDestructive` is `true`; a descriptor older than the one the database holds |
-| **The [Management API](/MMLib.Alvo/reference/management-api/)**: `PUT …/descriptor` | a caller whose roles reach the `developer` level in `access`, or `admin` to change `access` itself | a new revision, with the `author` and `reason` the request sends | an invalid descriptor (422); no `If-Match` (428); a stale one (412); a plan that discards data, unless the body allows it (409) |
+| **The [Management API](/MMLib.Alvo/reference/management-api/)**: `PUT …/descriptor` | a caller whose roles reach the `developer` level in `access`, or `admin` to change `access` itself | a new revision, with the `author` (not verified, [#344](https://github.com/Burgyn/MMLib.Alvo/issues/344)) and `reason` the request sends | an invalid descriptor (422); no `If-Match` (428); a stale one (412); a plan that discards data, unless the body allows it (409) |
 | **The [admin dashboard](/MMLib.Alvo/guides/admin-dashboard/)**: *Schema*, then *Preview changes* | a signed-in person with the `developer` level | a new revision, authored by that person, with the reason typed under *Why* | what the API refuses; a plan that discards data asks you to type the project's name; if someone applied first, yours is refused rather than written over theirs |
 
 **On restart**, what the host does when the file no longer matches the database is the startup mode,
@@ -89,8 +90,12 @@ The change adds a `category` to tickets:
 
 </Steps>
 
-A dry run checks everything a real apply checks, refusals included, so a preview that passes is an apply that will
-pass, unless someone else applies first. A dry run takes no `Idempotency-Key`: it records nothing to replay.
+A dry run runs the same checks as a real apply, so a preview that passes is an apply that will pass, unless someone
+else applies first. Its refusals are the apply's too: in this build a dry run of a plan that discards data is refused
+like the apply itself unless the body carries `"allowDestructive": true`
+([#343](https://github.com/Burgyn/MMLib.Alvo/issues/343)), so to preview such a plan you send the allowance (step 6
+shows it). A dry run that carries an `Idempotency-Key` is refused: it appends no revision, so there is nothing to
+replay.
 
 ## 3. Apply it
 
@@ -118,12 +123,17 @@ pass, unless someone else applies first. A dry run takes no `Idempotency-Key`: i
 
    <Exchange name="apply-and-evolve/03-apply" wrap steps={[2]} form="http" />
 
-4. If the response is lost, send the same request again with the same key, and you get the first answer back with
-   `replayed: true`. The key can only repeat that request: the same key with a different body is refused.
+4. If the response is lost, send the same request again with the same key. The answer is the revision the first
+   request appended, with `replayed: true`, and the plan comes back empty, because this request ran nothing. Read
+   what a revision applied from `GET …/revisions/{n}`. The key can only repeat that request: the same key with a
+   different body is refused.
 
    <Exchange name="apply-and-evolve/03-apply" wrap steps={[3]} form="http" requestBody={false} />
 
 </Steps>
+
+From here on, each response was captured on a fresh host started from the descriptor the step names, so on the stack
+you have been using the revision numbers are higher. Always send the revision your own `GET` returned.
 
 ## 4. Lose a race safely
 
@@ -164,8 +174,9 @@ Removing a field drops its column and all its data. This descriptor removes `pri
 
    <Exchange name="apply-and-evolve/05-destructive" wrap steps={[1]} form="http" request={false} />
 
-2. To see what you would lose, preview it with `"allowDestructive": true` in the body. The destructive steps are
-   marked:
+2. To see what you would lose, preview it. In this build a dry run of a destructive plan is refused like the apply
+   unless it carries `"allowDestructive": true` too ([#343](https://github.com/Burgyn/MMLib.Alvo/issues/343)); a dry
+   run applies nothing either way. The destructive steps are marked:
 
    <Exchange name="apply-and-evolve/05-destructive" wrap steps={[2]} form="http" requestBody={false} />
 
@@ -185,7 +196,8 @@ A rollback restores an earlier revision's descriptor. It does not rewrite histor
 <Steps>
 
 1. Preview the rollback to revision 1. `If-Match` carries the current revision. Going back drops the `category` column
-   that revision 2 added, so the preview needs `"allowDestructive": true` too:
+   that revision 2 added, so in this build the preview is refused without `"allowDestructive": true`
+   ([#343](https://github.com/Burgyn/MMLib.Alvo/issues/343)):
 
    <Exchange name="apply-and-evolve/06-rollback" wrap steps={[2]} form="http" />
 
@@ -199,10 +211,14 @@ A rollback restores an earlier revision's descriptor. It does not rewrite histor
 
 </Steps>
 
-After a rollback through the API, copy the restored descriptor back over the mounted file, here
-`website/src/snippets/apply-and-evolve/01-base.alvo.json`. A host that restarts with a descriptor the history already
-holds at an older revision stands down instead of serving it. In the dashboard, *Configuration history* lists the same
-revisions, and *Plan the rollback* shows the same plan before you apply it.
+After a rollback through the API, put the restored descriptor back in the file the stack mounts, `help-desk.alvo.json`
+in the clone root. Here the restored revision is the page's first descriptor:
+
+<Code code={restoreFile.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+Otherwise the file still holds the descriptor you rolled back from, which the history now holds at an older revision,
+and a host that restarts with it stands down instead of serving it. In the dashboard, *Configuration history* lists
+the same revisions, and *Plan the rollback* shows the same plan before you apply it.
 
 ## How it works
 
@@ -258,5 +274,5 @@ keeps working ([#339](https://github.com/Burgyn/MMLib.Alvo/issues/339)); over SQ
 
 ## Next
 
-**[Access rules](/MMLib.Alvo/guides/access-rules/)**: decide who may list, read, create, update and delete the rows of
-each entity.
+**[Authentication and API keys](/MMLib.Alvo/guides/authentication/)**: decide who your callers are, the first step
+of securing what you modelled.

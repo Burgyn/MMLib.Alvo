@@ -100,7 +100,8 @@ With no lines left, `count` answers `0` and the other four aggregates answer `nu
 
 :::caution[Known issue in this build]
 A `PATCH` that names a rollup field is accepted, and the stored aggregate is overwritten until the next write to a
-child row recomputes it. Never send a rollup field in a write.
+child row recomputes it ([#342](https://github.com/Burgyn/MMLib.Alvo/issues/342)). Never send a rollup field in a
+write.
 :::
 
 ## How it works

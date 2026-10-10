@@ -47,7 +47,7 @@
     ],
     "fix": "Change the request so the rules admit it, or call with a role the rules grant. A rule's refusal never says which rule refused; a before-hook's `reject` puts its own message in `detail`, written for the caller.",
     "violationCodes": ["forbidden", "duplicate-row"],
-    "guides": ["guides/access-rules", "guides/before-hooks", "guides/handle-errors"],
+    "guides": ["guides/access-rules", "guides/before-hooks", "guides/computed-and-rollups", "guides/apply-and-evolve", "guides/handle-errors"],
     "needsProblemDetails": false
   },
   "out-of-scope": {
@@ -96,7 +96,7 @@
     ],
     "fix": "Send a fresh key with a different request; reuse a key only to retry the identical request.",
     "violationCodes": [],
-    "guides": ["guides/write-data"],
+    "guides": ["guides/write-data", "guides/apply-and-evolve"],
     "needsProblemDetails": false
   },
   "conflict": {
@@ -106,7 +106,7 @@
     ],
     "fix": "Send a value no other record holds, or delete or repoint the records that reference this one, then retry.",
     "violationCodes": ["unique", "referenced"],
-    "guides": ["guides/write-data", "guides/indexes"],
+    "guides": ["guides/write-data", "guides/entities-and-fields", "guides/indexes"],
     "needsProblemDetails": false
   },
   "destructive-change": {
