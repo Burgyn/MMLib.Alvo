@@ -13,6 +13,7 @@ import simpleTasks from '../../../snippets/shell/start-from-simple-tasks.sh?raw'
 import dotnetRun from '../../../snippets/shell/run-your-own-dotnet.sh?raw';
 import logs from '../../../snippets/shell/logs.sh?raw';
 import tearDown from '../../../snippets/shell/tear-down.sh?raw';
+import goBack from '../../../snippets/shell/go-back-to-demo.sh?raw';
 
 :::tip[What you will achieve]
 Your own descriptor behind the standalone stack (Alvo over PostgreSQL), with API keys that work for the roles it
@@ -35,23 +36,18 @@ nothing**: every request with it is a 401 `unauthenticated`. A key's roles must 
 `auth.roles` or be built in (`authenticated` and `admin` are). So declare keys for your own roles in a compose
 override.
 
-<Steps>
+Save this as `docker-compose.override.yml` in the clone root. Compose merges that file into `docker-compose.yml`
+automatically, and the repository ignores it, so your keys never show up in `git status`:
 
-1. Save this as `docker-compose.override.yml` in the clone root. Compose merges that file into `docker-compose.yml`
-   automatically, and the repository ignores it, so your keys never show up in `git status`:
+<Code code={override} lang="yaml" title="docker-compose.override.yml" />
 
-   <Code code={override} lang="yaml" title="docker-compose.override.yml" />
+It adds two keys for `help-desk`, whose `auth.roles` are `admin` and `agent`: `agent` (roles `agent`,
+`authenticated`) and `admin` (roles `admin`, `authenticated`). Change the `KeyId`s and roles to your
+descriptor's. Each secret is read from a variable, and the `:?` form makes compose refuse to start without it
+rather than invent one; a secret must be at least 32 characters.
 
-   It adds two keys for `help-desk`, whose `auth.roles` are `admin` and `agent`: `agent` (roles `agent`,
-   `authenticated`) and `admin` (roles `admin`, `authenticated`). Change the `KeyId`s and roles to your
-   descriptor's. Each secret is read from a variable, and the `:?` form makes compose refuse to start without it
-   rather than invent one; a secret must be at least 32 characters.
-
-2. The same file sets up the dashboard's bootstrap administrator, `admin@example.com`. Its password is read from a
-   mounted file, `.alvo-admin-password` in the clone root, never from a variable; the repository ignores that file
-   too.
-
-</Steps>
+The same file sets up the dashboard's bootstrap administrator, `admin@example.com`. Its password is read from a mounted
+file, `.alvo-admin-password` in the clone root, never from a variable; the repository ignores that file too.
 
 ## 2. Point the stack at your descriptor
 
@@ -73,8 +69,9 @@ override.
 </Steps>
 
 The API is at `http://localhost:8080/api/<entity>`, its OpenAPI document at `/openapi/v1.json`, an API browser at
-`/scalar`, and the dashboard at `/admin`. The [Tutorial](/MMLib.Alvo/start-here/tutorial/) walks through this exact
-stack one change at a time.
+`/scalar`, and the dashboard at `/admin` (over this stack's PostgreSQL the dashboard has a known issue,
+[#339](https://github.com/Burgyn/MMLib.Alvo/issues/339); [Without Docker](#without-docker) it works). The
+[Tutorial](/MMLib.Alvo/start-here/tutorial/) walks through this exact stack one change at a time.
 
 ## 3. Change it
 
@@ -94,12 +91,21 @@ them. Copy it, and from then on it is your descriptor:
 
 <Code code={simpleTasks.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
-The first line deletes the stack's database. A database holds the schema of the descriptor it served; starting a
+`my.alvo.json` in the clone root is ignored by the repository, like any `*.alvo.json` there. The first line deletes
+the stack's database. A database holds the schema of the descriptor it served; starting a
 different descriptor over it would drop the old tables, and Alvo refuses that (see [What can go wrong](#what-can-go-wrong)).
 
 `simple-tasks` declares no `auth.roles`, so of the override's keys only `admin` works there (its roles are both built
 in); the `agent` key answers 401 until you add `"roles": ["agent"]` to the descriptor's `auth` block, or remove `agent`
 from the key.
+
+## Go back to the demo
+
+The override, the password file and `ALVO_DESCRIPTOR` stay in effect for every compose command in the clone. To serve
+the [Quick start](/MMLib.Alvo/start-here/quick-start/)'s vehicle registry again, stop the stack, delete its database
+and remove all three:
+
+<Code code={goBack.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
 ## Without Docker
 
@@ -130,8 +136,13 @@ The end of the log says what to change. The common reasons:
 
 - **The descriptor is invalid.** The log shows `Descriptor validation failed:` and one line per problem: its JSON
   pointer, for example `/entities/tickets/fields/estimate_cost/computed`, what is wrong and how to fix it. Correct the
-  file and start again. (In this build the refusal arrives as an unhandled `DescriptorValidationException` and the
-  container exits with code 139, not as the clean exit 78 below.)
+  file and start again.
+
+  :::caution[Known issue in this build]
+  This refusal arrives as an unhandled `DescriptorValidationException`, and the container exits with code 139
+  instead of the clean exit 78 below ([#340](https://github.com/Burgyn/MMLib.Alvo/issues/340)). The messages are
+  the same.
+  :::
 - **The change would discard data.** The log says `Alvo cannot start:`, lists the plan with the destructive steps
   marked (such as `DropEntity tickets`), and the container exits with code 78. Keep what the descriptor dropped, or,
   if the data is disposable, start over with an empty database:

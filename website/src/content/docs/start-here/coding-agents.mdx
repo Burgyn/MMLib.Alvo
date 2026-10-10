@@ -11,6 +11,8 @@ import JsonExcerpt from '../../../components/JsonExcerpt.astro';
 import vscode from '../../../snippets/shell/vscode-settings.json?raw';
 import base from '../../../snippets/coding-agents/01-base.alvo.json?raw';
 import addField from '../../../snippets/coding-agents/02-add-field.alvo.json?raw';
+import setup from '../../../snippets/shell/coding-agents-setup.sh?raw';
+import dryRun from '../../../snippets/shell/coding-agents-dry-run.sh?raw';
 
 :::tip[What you will achieve]
 A coding agent that knows the descriptor format, edits a descriptor with the schema checking it, and applies a change
@@ -24,6 +26,7 @@ says what to fix, and every write to the configuration can be previewed and retr
 ## Before you start
 
 - A stack serving your descriptor: [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
+  `curl` and `jq` for the shell recipe.
 - An API key whose roles reach a management level in the descriptor's `access` block. This page uses `admin` (roles
   `admin`, `authenticated`; secret `ALVO_ADMIN_KEY_SECRET`) and grants that role the `developer` level.
 
@@ -83,6 +86,12 @@ descriptor's `access` block grants a level, so this descriptor, the help desk fr
 
 <JsonExcerpt code={base} pointer="/access" title="help-desk.alvo.json" />
 
+Add it to your own descriptor and recreate the container before you call the routes below; without a level, every
+management route answers 403 `forbidden`. On the [Tutorial](/MMLib.Alvo/start-here/tutorial/)'s stack, this copies
+the descriptor with the block in place and applies it:
+
+<Code code={setup.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
 The agent's change adds one field, `due_on`:
 
 <Code code={addField} lang="json" title="help-desk.alvo.json (the change)" ins={[23]} />
@@ -95,7 +104,7 @@ The agent's change adds one field, `due_on`:
 
    <Exchange name="coding-agents/01-check" wrap steps={[0]} form="http" requestBody={false} />
 
-   An expression that does not compile is a 200 with findings, not an error. The corrected expression comes back
+   An expression with a problem is a 200 with findings, not an error status. The corrected expression comes back
    clean:
 
    <Exchange name="coding-agents/01-check" wrap steps={[1]} form="http" request={false} />
@@ -106,6 +115,13 @@ The agent's change adds one field, `due_on`:
    <Exchange name="coding-agents/02-dry-run" wrap steps={[0]} form="http" fields={["project", "revision"]} />
 
    <Exchange name="coding-agents/02-dry-run" wrap steps={[1]} form="http" requestBody={false} />
+
+   The body is `{"descriptorJson": "<the whole file as one string>"}`. From a shell, `jq` builds it from the file,
+   and the current revision goes into `If-Match`:
+
+   <Code code={dryRun.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+   Drop `?dryRun=true` and add an `Idempotency-Key` header to apply it for real, as the next step does.
 
 3. **Apply it.** A write must say which revision it replaces, in `If-Match`. Without it, the API refuses rather than
    risk a lost update:

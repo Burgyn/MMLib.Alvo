@@ -46,8 +46,8 @@ Reference the projects in your clone directly. `ALVO_CLONE` is where you cloned 
 </TabItem>
 <TabItem label="Local package feed (today)">
 
-Pack the clone into a folder and install from it as from any feed. The packages carry a pre-release version, hence
-`--prerelease`:
+Pack the clone into a folder, register that folder as a package source in your project's `nuget.config` (so every
+later restore finds it), and install from it. The packages carry a pre-release version, hence `--prerelease`:
 
 <Code code={localFeed.trimEnd()} lang="sh" title="Terminal (in your project)" frame="terminal" />
 
@@ -92,9 +92,9 @@ Mapping is a separate step, so the routes land exactly where your pipeline wants
 
 <SourceExcerpt code={sampleHost} from="private static void MapAlvoEndpoints" to="app.MapAlvoDataApi().WithTags" dropComments={true} title="SampleHost.cs" />
 
-`MapAlvoHealth` maps `/health/live` and `/health/ready`, and comes first because `MapAlvoDataApi` refuses a host whose
-Data API services are absent. `MapAlvoDataApi` returns a convention builder over Alvo's generated routes and nothing
-else, so you can attach your own rate limiting, telemetry or tags to them.
+`MapAlvoHealth` maps `/health/live` and `/health/ready` on their own. `MapAlvoDataApi` returns a convention builder
+over Alvo's generated data routes and nothing else, so you can attach your own rate limiting, telemetry, tags or an
+authorization policy to them, and none of it ever reaches the probes, which a container calls without a credential.
 
 ## 4. Run it
 

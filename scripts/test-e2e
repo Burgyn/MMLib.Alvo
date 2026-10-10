@@ -31,6 +31,12 @@ ENV_FILE="$REPORT_DIR/env.json"
 REPORT_FILE="$REPORT_DIR/report.xml"
 FIELD_SERVICE_REPORT_FILE="$REPORT_DIR/report-field-service.xml"
 
+# The default stack, named explicitly: compose would otherwise merge a reader's docker-compose.override.yml
+# (gitignored; the docs' "Run your own descriptor" creates one) and honour ALVO_DESCRIPTOR, and either would change
+# what this suite tests. CI has neither, so there this is the same stack as a bare `docker compose`.
+unset ALVO_DESCRIPTOR
+MAIN_COMPOSE=(-f "$ROOT/docker-compose.yml")
+
 FIELD_SERVICE_COMPOSE=(
   --env-file "$ROOT/examples/field-service/demo-identities.env"
   -f "$ROOT/docker-compose.field-service.yml"
@@ -89,10 +95,10 @@ teardown() {
   trap - EXIT
   if [ "$status" != 0 ]; then
     echo "[e2e] FAILED — container logs follow" >&2
-    docker compose logs --no-color --tail 200 >&2 || true
+    docker compose "${MAIN_COMPOSE[@]}" logs --no-color --tail 200 >&2 || true
     docker compose "${FIELD_SERVICE_COMPOSE[@]}" logs --no-color --tail 200 >&2 || true
   fi
-  docker compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+  docker compose "${MAIN_COMPOSE[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
   docker compose "${FIELD_SERVICE_COMPOSE[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
   exit "$status"
 }
@@ -103,19 +109,19 @@ start_the_stacks() {
   # registry's single-owner count and every exact-set comparison in the field-service suite — could
   # not tell a row this run created from one it found. The field-service seed additionally reuses
   # fixed `reference` values, which are declared unique.
-  docker compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+  docker compose "${MAIN_COMPOSE[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
   docker compose "${FIELD_SERVICE_COMPOSE[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
 
   # Build and pull outside the timed window: §2.14's criterion is "a working backend within 60 s",
   # which is boot time, not compile time and not the speed of a registry. Both stacks build the same
   # image from the same context, so the second build is a cache hit.
   echo "[e2e] docker compose build"
-  docker compose build
+  docker compose "${MAIN_COMPOSE[@]}" build
   docker compose "${FIELD_SERVICE_COMPOSE[@]}" build
-  docker compose pull --quiet --ignore-buildable >/dev/null 2>&1 || true
+  docker compose "${MAIN_COMPOSE[@]}" pull --quiet --ignore-buildable >/dev/null 2>&1 || true
 
   echo "[e2e] docker compose up --wait (60s budget, from baas-analyza.md §2.14)"
-  docker compose up --detach --wait --wait-timeout 60
+  docker compose "${MAIN_COMPOSE[@]}" up --detach --wait --wait-timeout 60
 
   echo "[e2e] docker compose -f docker-compose.field-service.yml up --wait"
   docker compose "${FIELD_SERVICE_COMPOSE[@]}" up --detach --wait --wait-timeout 60
@@ -156,7 +162,7 @@ run_the_suites() {
 assert_the_row_reached_postgresql() {
   echo "[e2e] the owner TeaPie created is a row in the PostgreSQL compose started"
   local rows
-  rows="$(docker compose exec -T postgres \
+  rows="$(docker compose "${MAIN_COMPOSE[@]}" exec -T postgres \
     psql -U alvo -d alvo -v ON_ERROR_STOP=1 -tAc \
     "select count(*) from owners where name = 'TeaPie Ltd'" | tr -d '[:space:]')"
   if [ "$rows" != "1" ]; then

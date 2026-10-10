@@ -43,7 +43,8 @@ The stack's key is `demo`, with the roles `admin`, `authenticated` and `inspecto
 
 <Exchange name="quick-start/01-create-and-list" wrap />
 
-The `Location` header points at the new record, and the list now holds it. Every write needs the
+The `Location` header points at the new record, and the list now holds it. These responses were captured from a real
+run when the site was built, so your ids, timestamps and ETag will differ. Every write needs the
 `Content-Type: application/json` header as well as the key.
 
 ## What just happened
@@ -92,7 +93,9 @@ A request with no key at all is anonymous, not unauthenticated: it reads an empt
 [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden), because no rule admits an anonymous caller.
 
 If `docker compose up` fails with `required variable ALVO_DEMO_KEY_SECRET is missing a value`, export the secret in
-this shell first.
+this shell first. If it names `ALVO_AGENT_KEY_SECRET`, or the stack serves another descriptor than the vehicle
+registry, a `docker-compose.override.yml` or `ALVO_DESCRIPTOR` from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/#go-back-to-the-demo)
+is still in effect: go back to the demo as that page shows.
 
 ## Reference
 

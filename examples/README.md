@@ -74,10 +74,11 @@ and the descriptor validator read:
 | `field.validation` | the expression is never evaluated, so a value it forbids is accepted — the field is not constrained at all | #22 (before-hooks) |
 | `field.default`, `$cel` half only | a CEL default needs the caller's context at insert time, which is the `computed` machinery — the value would be dropped and the field left null. **The literal half is honoured (#113):** it becomes a column `DEFAULT` and is filled into every whole-row write | #113 |
 | `entity.softDelete` | DELETE removes the row and reads do not exclude it — irrecoverable loss where the contract promises recovery | soft-delete issue |
-| `entity.hooks.*` | the hooks never run, so a write the author believes is vetted or patched is neither | #22 (hooks pipeline) |
 
-Hooks are refused **per hook point** (`beforeCreate`, `afterUpdate`, …) rather than as a block, so #22 can
-lift them one at a time as each starts working.
+Hooks used to be refused **per hook point** (`beforeCreate`, `afterUpdate`, …), so #22 could lift them one at a
+time; all six now run, so the table holds no hook entry. What a hook may still not do is refused per *action*: the
+`function`, `http.call` and `entity.update` actions, listed with every other refusal on the generated
+*Capabilities in this build* page.
 
 Writing `softDelete: false`, or an empty `beforeUpdate: []`, is **not** a declaration and maps normally —
 declining a feature is not asking for it.
