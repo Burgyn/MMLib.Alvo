@@ -1,92 +1,217 @@
-# Alvo
+<p align="center"><img src="assets/alvo-logo.svg" width="128" alt="Alvo"></p>
 
-> **Alvo** · *Application Layer for Vision & Operations* · "Your intent, running in production."
+<h1 align="center">Alvo</h1>
 
-Alvo is a .NET-native Backend-as-a-Service framework for the agentic age, distributed as the
-`MMLib.Alvo.*` NuGet package family. It runs standalone (Docker) or embedded in an existing
-ASP.NET Core host — same code, two distributions.
+<p align="center"><strong>Describe your backend in one JSON file. Get a secure, production-shaped API — standalone in Docker or embedded in your ASP.NET Core app.</strong></p>
 
-The full delivery strategy and technical spec live in
-[`docs/product/alvo-specifikacia.md`](docs/product/alvo-specifikacia.md); the domain analysis
-behind it is in [`docs/product/baas-analyza.md`](docs/product/baas-analyza.md).
+<p align="center">
+  <a href="https://github.com/Burgyn/MMLib.Alvo/actions/workflows/ci.yml"><img src="https://github.com/Burgyn/MMLib.Alvo/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
+  <a href="https://dotnet.microsoft.com/download/dotnet/10.0"><img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10"></a>
+  <a href="https://burgyn.github.io/MMLib.Alvo/"><img src="https://img.shields.io/badge/docs-burgyn.github.io-2ea44f" alt="Documentation"></a>
+  <a href="https://burgyn.github.io/MMLib.Alvo/project/roadmap/"><img src="https://img.shields.io/badge/status-pre--v0.1-orange" alt="Status: pre-v0.1"></a>
+</p>
 
-## Run the demo backend (standalone)
+<p align="center">
+  <a href="https://burgyn.github.io/MMLib.Alvo/">Documentation</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="https://burgyn.github.io/MMLib.Alvo/start-here/tutorial/">Tutorial</a> ·
+  <a href="https://burgyn.github.io/MMLib.Alvo/reference/">Reference</a>
+</p>
+
+Alvo is a .NET-native backend-as-a-service: one validated JSON descriptor — entities, access rules, hooks, computed
+fields and rollups — becomes a REST API with its own OpenAPI document. It is built for developers who work with coding
+agents, and for .NET teams that want a configurable backend inside their own app. Access rules are compiled into the
+SQL that reads the rows, the whole backend is one file an agent can validate and dry-run, and every refusal is a
+problem document with a pointer and a fix.
+
+## See it
+
+The `tickets` entity of [`examples/help-desk`](examples/help-desk/help-desk.alvo.json): anyone authenticated may read,
+agents and admins may create, only an admin may delete, and two before-hooks trim the title and refuse a high-priority
+ticket without a body.
+
+[//]: # (excerpt: examples/help-desk/help-desk.alvo.json#/entities/tickets)
+```json
+{
+  "audit": true,
+  "fields": {
+    "title": { "type": "string", "required": true, "maxLength": 120 },
+    "body": { "type": "text" },
+    "priority": { "type": "enum", "values": ["low", "normal", "high"], "default": "normal" },
+    "status": { "type": "enum", "values": ["open", "closed"], "default": "open" },
+    "estimate_hours": { "type": "decimal", "precision": 5, "scale": 1 },
+    "hourly_rate": { "type": "decimal", "precision": 6, "scale": 2 },
+    "estimate_cost": { "type": "decimal", "precision": 12, "scale": 2, "computed": "estimate_hours * hourly_rate" }
+  },
+  "rules": {
+    "list": "'authenticated' in @user.roles",
+    "get": "'authenticated' in @user.roles",
+    "create": "'agent' in @user.roles || 'admin' in @user.roles",
+    "update": "'agent' in @user.roles || 'admin' in @user.roles",
+    "delete": "'admin' in @user.roles"
+  },
+  "hooks": {
+    "beforeCreate": [
+      { "action": { "mutate": { "title": { "$cel": "trim(new.title)" } } } },
+      {
+        "condition": "new.priority == 'high' && !has(new.body)",
+        "action": { "reject": "A high-priority ticket needs a body." }
+      }
+    ]
+  }
+}
+```
+
+An agent creates a ticket, then a high-priority one without a body. Both exchanges were captured from a real host:
+
+[//]: # (exchange: readme/see-it)
+```http
+POST /api/tickets HTTP/1.1
+X-Alvo-Api-Key: agent.$ALVO_AGENT_KEY_SECRET
+Content-Type: application/json
+
+{
+  "title": "  Printer on fire  ",
+  "body": "Third floor."
+}
+
+HTTP/1.1 201 Created
+Content-Type: application/json; charset=utf-8
+ETag: "639272046278281070"
+Location: /api/tickets/02ccad87-0d94-48b5-8ce2-e7c845bfb9d6
+
+{
+  "id": "02ccad87-0d94-48b5-8ce2-e7c845bfb9d6",
+  "body": "Third floor.",
+  "created_at": "2026-10-10T04:50:27.828107+00:00",
+  "created_by": "5abcf0d4-de29-b506-10f9-aa428f1eedba",
+  "estimate_cost": null,
+  "estimate_hours": null,
+  "hourly_rate": null,
+  "priority": "normal",
+  "status": "open",
+  "title": "Printer on fire",
+  "updated_at": "2026-10-10T04:50:27.828107+00:00",
+  "updated_by": "5abcf0d4-de29-b506-10f9-aa428f1eedba"
+}
+
+POST /api/tickets HTTP/1.1
+X-Alvo-Api-Key: agent.$ALVO_AGENT_KEY_SECRET
+Content-Type: application/json
+
+{
+  "title": "Server room is flooding",
+  "priority": "high"
+}
+
+HTTP/1.1 403 Forbidden
+Content-Type: application/problem+json
+
+{
+  "type": "https://alvo.dev/errors/forbidden",
+  "title": "Forbidden",
+  "status": 403,
+  "detail": "A high-priority ticket needs a body. (refused by the before-hook at '/entities/tickets/hooks/beforeCreate/1')"
+}
+```
+
+## Quick start
+
+You need Docker with Compose v2, git and `openssl`. Nothing is published yet, so the stack builds the image from the
+clone and serves the [`vehicle-registry`](examples/vehicle-registry/vehicles.alvo.json) example over PostgreSQL. The
+first build downloads the .NET and PostgreSQL images and takes a few minutes; later runs take seconds.
 
 ```bash
+git clone https://github.com/Burgyn/MMLib.Alvo && cd MMLib.Alvo
 export ALVO_DEMO_KEY_SECRET="$(openssl rand -hex 16)"
 docker compose up --build --wait --wait-timeout 60
-curl -sS http://localhost:8080/api/owners -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET"
+curl -s localhost:8080/api/owners -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET" \
+  -H "Content-Type: application/json" -d '{"name":"Ada Lovelace"}'
+curl -s localhost:8080/api/owners -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET"
 ```
 
-The backend is defined entirely by [`examples/vehicle-registry/vehicles.alvo.json`](examples/vehicle-registry/vehicles.alvo.json),
-mounted into the container — no code, no migrations, no clicking. Interactive docs:
-<http://localhost:8080/scalar>.
-
-The image ships no credential, so `ALVO_DEMO_KEY_SECRET` is required rather than defaulted: the stack refuses
-to start without it. Every compose command interpolates the file, `docker compose down` included, so keep the
-variable exported (or put it in a root `.env`) for the whole session. Tear down with
+The API browser is at `http://localhost:8080/scalar`. Keep the variable exported for the session; tear down with
 `docker compose down --volumes`.
 
-### The complex demo
+Next: [the 10-minute tutorial →](https://burgyn.github.io/MMLib.Alvo/start-here/tutorial/) · [run your own descriptor](https://burgyn.github.io/MMLib.Alvo/start-here/run-your-own/)
 
-`vehicle-registry` is deliberately small — three entities, no tenancy, no `audit`, no hidden fields.
-For the one that exercises the whole feature surface, see
-[`examples/field-service`](examples/field-service/README.md): two tenants, five keys differing only
-in role and tenant, an audited entity beside an unaudited one, hidden and `readOnly` fields, and
-rules that differ by role. It runs on `:8081` from its own compose file, and
-[`test/teapie-field-service`](test/teapie-field-service/README.md) drives it end to end.
-`scripts/test-e2e` runs both stacks and both suites — the same thing CI runs.
+## What you get
 
-### Alvo inside your own app
+- **[One validated descriptor](https://burgyn.github.io/MMLib.Alvo/concepts/descriptor/)** — entities, fields, rules, hooks, computed fields and rollups, checked by a JSON Schema and then semantically.
+- **[Rules in SQL](https://burgyn.github.io/MMLib.Alvo/guides/access-rules/)** — CEL access rules rendered as parameterised SQL predicates; an operation with no rule is refused.
+- **[Hooks that fail closed](https://burgyn.github.io/MMLib.Alvo/guides/before-hooks/)** — before-hooks refuse or rewrite a write inside its transaction, with built-in functions and your own C# ones.
+- **[Events and webhooks](https://burgyn.github.io/MMLib.Alvo/guides/after-hooks-and-webhooks/)** — every write commits its event through an outbox; after-hooks send e-mail and deliver webhooks, with retries.
+- **[Audit](https://burgyn.github.io/MMLib.Alvo/guides/audit-row-changes/) and [history](https://burgyn.github.io/MMLib.Alvo/guides/apply-and-evolve/)** — audit columns per entity, and every applied descriptor kept as a revision you can roll back to.
+- **[Agent-first](https://burgyn.github.io/MMLib.Alvo/start-here/coding-agents/)** — problem documents with a pointer and a fix suggestion, dry runs, `Idempotency-Key`, and `llms.txt`.
+- **[Admin dashboard](https://burgyn.github.io/MMLib.Alvo/guides/admin-dashboard/)** — schema, rule and hook editors, a data browser, history and rollback, and a schema assistant.
+- **[Standalone or embedded](https://burgyn.github.io/MMLib.Alvo/concepts/modes/)** — a Docker image built from this repository, or a library in your ASP.NET Core host, on SQLite or PostgreSQL.
 
-The standalone image above is one of Alvo's two distribution modes; the other is a NuGet package inside your
-own ASP.NET Core host. [`samples/MMLib.Alvo.Samples.EmbeddedHost`](samples/MMLib.Alvo.Samples.EmbeddedHost/README.md)
-is the runnable version of it — a fleet-desk app whose own cookie users reach Alvo through its own endpoints,
-with Alvo's generated Data API mounted beside them for agents:
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/rules-editor-dark-2x.png">
+  <img src="assets/screenshots/rules-editor-light-2x.png" width="960" alt="The admin dashboard's rule editor: the list rule of service_orders reads 'amdin' in @user.roles, and the editor flags it before saving: 'amdin' is not a declared role. Did you mean 'admin'?">
+</picture>
 
-```bash
-dotnet user-secrets --project samples/MMLib.Alvo.Samples.EmbeddedHost \
-  set "Alvo:Auth:DevKeys:0:Secret" "$(openssl rand -hex 16)"
-dotnet run --project samples/MMLib.Alvo.Samples.EmbeddedHost
+## How it fits together
+
+```mermaid
+flowchart TB
+  subgraph Control
+    direction LR
+    clients["Admin dashboard · agents"] --> management["Management API"] --> registry["Schema registry"]
+    descriptor["Descriptor (JSON)"] --> registry
+  end
+  subgraph Runtime
+    direction LR
+    request["HTTP request"] --> auth["Auth<br/>API key → @user"] --> policy["Rules<br/>CEL → SQL"]
+    policy --> tx["One transaction<br/>before-hooks · row + audit · outbox event"]
+    tx -- "after the commit" --> after["After-hooks<br/>e-mail · webhooks"]
+  end
+  Control -- "the registry's rules and hooks" --> Runtime
 ```
 
-It runs the **same** `vehicles.alvo.json` the compose stack above mounts, which is what lets its test suite
-assert that both modes generate the same backend.
-
-## Building & testing
-
-Requires the .NET SDK pinned in [`global.json`](global.json) (`10.0.100`).
-
-```bash
-dotnet build
-dotnet test
-```
-
-Tests run on **Microsoft.Testing.Platform (MTP)**, not VSTest (see the `test` section in
-`global.json`).
+A descriptor reaches the schema registry from a file at boot or through the Management API, which the dashboard and
+agents share. Every request then takes the runtime path: a read's rule is part of the SQL that reads, a write's
+before-hooks, row and outbox event share one transaction, and the after-hooks run after the commit.
+[Architecture](https://burgyn.github.io/MMLib.Alvo/concepts/architecture/) has the details.
 
 ## Packages
 
-Alvo ships as a family of focused NuGet packages, added as they're earned rather than assumed
-up front — see [`docs/architecture/package-boundary.md`](docs/architecture/package-boundary.md)
-for the rule and the current list. Today that list is:
+Nothing is on NuGet yet. Until v0.1, reference the projects from a clone, or pack them to a local feed —
+[Embed in ASP.NET Core](https://burgyn.github.io/MMLib.Alvo/start-here/embed/) shows both.
 
 | Package | Description |
 | --- | --- |
-| `MMLib.Alvo.Abstractions` | The interface-first root of the dependency graph: every port, and nothing that implements one. |
-| `MMLib.Alvo` | The core — schema registry, Data API, rule engine, events, management. One large package, deliberately. |
-| `MMLib.Alvo.Data.EntityFrameworkCore` | The relational adapter every engine driver is built on. |
-| `MMLib.Alvo.Data.Sqlite` | The SQLite driver. |
-| `MMLib.Alvo.Data.PostgreSql` | The PostgreSQL driver. |
-| `MMLib.Alvo.Identity` | ASP.NET Core Identity and its EF stores: administrator accounts, roles, the bootstrap administrator. |
-| `MMLib.Alvo.Admin` | The admin dashboard — Blazor components and the design system they ship with. |
-| `MMLib.Alvo.Ai` | The schema assistant: an agent that reads a project and proposes a descriptor, and cannot apply one. |
+| `MMLib.Alvo.Abstractions` | The interface-first root of the Alvo dependency graph: every port, and nothing that implements one. |
+| `MMLib.Alvo` | The Alvo core: schema registry, Data API, rule engine, events and management, registered with AddAlvo. |
+| `MMLib.Alvo.Data.EntityFrameworkCore` | The relational adapter every Alvo engine driver is built on. |
+| `MMLib.Alvo.Data.Sqlite` | The SQLite driver for Alvo, registered with UseSqlite. |
+| `MMLib.Alvo.Data.PostgreSql` | The PostgreSQL driver for Alvo, registered with UsePostgreSql. |
+| `MMLib.Alvo.Identity` | ASP.NET Core Identity for Alvo: administrator accounts, roles, cookie sign-in and the bootstrap administrator. |
+| `MMLib.Alvo.Admin` | The Alvo admin dashboard: server-interactive Blazor components and the design system they ship with. |
+| `MMLib.Alvo.Ai` | The Alvo schema assistant: an agent that reads a project and proposes a descriptor change, and cannot apply one. |
+
+The standalone host, `MMLib.Alvo.Host`, is not a package: it ships as the `mmlib/alvo` container image, which is not
+published yet either.
+
+## Status and roadmap
+
+Alvo is **pre-v0.1**. Everything above runs from a clone today and is tested on every change, but the descriptor format
+and the APIs may still change before the first tagged release. Some declared blocks parse without running yet, and
+dynamic entities — record types your end users define at runtime — are planned, not shipped.
+[What works today](https://burgyn.github.io/MMLib.Alvo/start-here/what-works-today/) says exactly what runs;
+[Roadmap and status](https://burgyn.github.io/MMLib.Alvo/project/roadmap/) and [`docs/PLAN.md`](docs/PLAN.md) say what
+comes next.
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the build/test workflow, coding conventions, and
-the pull request process (including the CLA).
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the build and test workflow, the coding conventions and the pull-request
+process, including the CLA.
 
 ## License
 
-Apache-2.0 — see [`LICENSE`](LICENSE).
+[Apache-2.0](LICENSE). The core is and will remain free and open source under Apache-2.0. Only enterprise add-ons and
+optional hosting may be commercial, as separate `Alvo.Enterprise.*` packages; later commercialisation means adding
+add-ons, never relicensing the core.
+
+Docs: https://burgyn.github.io/MMLib.Alvo/ · For agents: https://burgyn.github.io/MMLib.Alvo/llms.txt
