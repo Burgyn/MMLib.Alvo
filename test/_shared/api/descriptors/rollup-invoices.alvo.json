@@ -1,0 +1,53 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "rollup-invoices",
+  "description": "baas-analyza's invoice ladder, cut to the two rungs a caller must not be able to write: a rollup ('net_total', the sum of the items' amounts, maintained by Alvo) and a computed field that reads it ('gross_total'). Every rule is the constant true, so a refusal measured here is the write guard's and never a policy's (#342).",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["writer"]
+  },
+  "access": {
+    "viewer": "'writer' in @user.roles"
+  },
+  "entities": {
+    "invoices": {
+      "description": "An invoice; its totals follow from its items.",
+      "fields": {
+        "reference": { "type": "string", "maxLength": 32 },
+        "vat": { "type": "integer", "required": true },
+        "net_total": {
+          "type": "integer",
+          "description": "The sum of the items' amounts, maintained by Alvo.",
+          "rollup": { "from": "invoice_items", "op": "sum", "field": "amount" }
+        },
+        "gross_total": {
+          "type": "integer",
+          "description": "The rollup plus the VAT, computed by the database.",
+          "computed": "net_total + vat"
+        }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      }
+    },
+    "invoice_items": {
+      "description": "One line of an invoice.",
+      "fields": {
+        "invoice_id": { "type": "ref", "entity": "invoices", "required": true },
+        "amount": { "type": "integer", "required": true }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      }
+    }
+  }
+}

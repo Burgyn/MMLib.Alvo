@@ -21,7 +21,7 @@ public sealed class ApplyScenarios(AdminWorld world) : IClassFixture<AdminWorld>
         await session.Button("New entity", exact: true).ClickAsync();
         await session.Page.FillAsync("#new-entity-name", "tickets");
         await session.Page.Keyboard.PressAsync("Enter");
-        await session.Page.WaitForURLAsync("**/schema/tickets");
+        await session.Page.WaitForAddressAsync("**/schema/tickets");
         await session.PreviewPendingAsync();
         await session.Page.FillAsync("#apply-reason", "Add tickets");
 
@@ -87,7 +87,7 @@ public sealed class RefusedApplyScenarios(AdminWorld world) : IClassFixture<Admi
         await session.Button("New entity", exact: true).ClickAsync();
         await session.Page.FillAsync("#new-entity-name", "tickets");
         await session.Page.Keyboard.PressAsync("Enter");
-        await session.Page.WaitForURLAsync("**/schema/tickets");
+        await session.Page.WaitForAddressAsync("**/schema/tickets");
         await session.PreviewPendingAsync();
         (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0);
 

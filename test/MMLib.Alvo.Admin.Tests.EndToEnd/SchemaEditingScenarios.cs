@@ -598,7 +598,7 @@ public sealed class RenameScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await session.Page.FillAsync("#rename-entity-name", "service_areas");
         await session.Page.ClickAsync("[data-testid='rename-save']");
 
-        await session.Page.WaitForURLAsync("**/schema/service_areas");
+        await session.Page.WaitForAddressAsync("**/schema/service_areas");
 
         /* It plans cleanly: work_orders.region_id followed the rename, so the validator has no ref to an
            entity that is gone. */
@@ -713,7 +713,7 @@ public sealed class DiscardScenarios(AdminWorld world) : IClassFixture<AdminWorl
         await session.Page.Locator("[data-testid='discard']").First.ClickAsync();
         await session.Page.ClickAsync("[data-testid='discard-confirm']");
 
-        await session.Page.WaitForURLAsync("**/schema");
+        await session.Page.WaitForAddressAsync("**/schema");
 
         await session.GoAsync("/changes");
         await session.Page.GetByText("Nothing to apply").WaitForAsync();

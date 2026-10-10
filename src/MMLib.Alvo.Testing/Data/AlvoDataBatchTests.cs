@@ -313,6 +313,97 @@ public abstract class AlvoDataBatchTests : AlvoDataFixture
         stored.ShouldNotBeNull()["title"].ShouldBe("first", "a refused batch writes nothing");
     }
 
+    /// <summary>
+    /// A batch update advances every row's version, so a precondition minted before the batch is refused
+    /// afterwards — the lost update of issue #349, where the batch left <c>updated_at</c> untouched.
+    /// </summary>
+    /// <remarks>
+    /// Two rows rather than one, because a stamp applied to the first row only would pass a one-row fact. The
+    /// version each echoed row carries is asserted to be the stored one as well, because a tag minted from the
+    /// batch's answer is what a caller holds next.
+    /// </remarks>
+    [Fact]
+    public async Task A_batch_update_advances_every_rows_version_so_a_stale_precondition_is_refused()
+    {
+        var world = await AuditedWorldAsync();
+        var first = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
+        var second = await world.Data.CreateAsync(Orders, Payload("second"), world.Caller, cancellationToken: Ct);
+
+        var result = await world.Data.UpdateManyAsync(
+            Orders,
+            [new AlvoRowPatch(IdOf(first), Payload("first, batched")), new AlvoRowPatch(IdOf(second), Payload("second, batched"))],
+            world.Caller,
+            cancellationToken: Ct);
+
+        result.Succeeded.ShouldBeTrue();
+        foreach (var (before, echoed) in new[] { first, second }.Zip(result.Rows))
+        {
+            await ShouldHaveAdvancedAsync(world, before, echoed);
+        }
+    }
+
+    /// <summary>
+    /// The row moved past <paramref name="before"/>: a new version, echoed as stored, that refuses the old one.
+    /// </summary>
+    /// <param name="world">The running store.</param>
+    /// <param name="before">The row as it was read before the batch.</param>
+    /// <param name="echoed">The row as the batch answered it.</param>
+    private static async Task ShouldHaveAdvancedAsync(World world, AlvoRecord before, AlvoRecord echoed)
+    {
+        VersionOf(echoed).ShouldNotBe(VersionOf(before), "a batch write must advance each row's version");
+        var stored = await world.Data.GetAsync(Orders, IdOf(before), world.Caller, Ct);
+        VersionOf(stored.ShouldNotBeNull()).ShouldBe(VersionOf(echoed), "the echoed version is the stored one");
+        await Should.ThrowAsync<AlvoPreconditionFailedException>(() => world.Data.UpdateAsync(
+            Orders, IdOf(before), Payload("late"), world.Caller, new AlvoPrecondition(VersionOf(before)),
+            cancellationToken: Ct));
+        (await world.Data.GetAsync(Orders, IdOf(before), world.Caller, Ct)).ShouldNotBeNull()["title"]
+            .ShouldBe(echoed["title"], "the refused write must not have landed");
+    }
+
+    /// <summary>
+    /// A batch update stamps the updater exactly as a single update does, and leaves the creation record alone.
+    /// </summary>
+    [Fact]
+    public async Task A_batch_update_stamps_the_updater_and_never_rewrites_the_creator()
+    {
+        var world = await AuditedWorldAsync();
+        var created = await world.Data.CreateAsync(Orders, Payload("first"), world.Caller, cancellationToken: Ct);
+        var updater = new AlvoContext
+        {
+            User = UserId.New(),
+            Roles = new HashSet<Role> { Role.Authenticated },
+            Tenant = null,
+        };
+
+        var result = await world.Data.UpdateManyAsync(
+            Orders, [new AlvoRowPatch(IdOf(created), Payload("batched"))], updater, cancellationToken: Ct);
+
+        var updated = result.Rows.ShouldHaveSingleItem();
+        updated[AlvoManagedColumns.UpdatedBy].ShouldBe(updater.User.Value);
+        updated[AlvoManagedColumns.CreatedBy].ShouldBe(world.Caller.User.Value);
+        updated[AlvoManagedColumns.CreatedAt].ShouldBe(created[AlvoManagedColumns.CreatedAt]);
+        VersionOf(updated).ShouldBeGreaterThan(VersionOf(created));
+    }
+
+    /// <summary>A batch create stamps all four audit columns from the caller, exactly as a single create does.</summary>
+    [Fact]
+    public async Task A_batch_create_stamps_all_four_audit_columns()
+    {
+        var world = await AuditedWorldAsync();
+
+        var result = await world.Data.CreateManyAsync(
+            Orders, [Payload("a"), Payload("b")], world.Caller, cancellationToken: Ct);
+
+        result.Rows.Count.ShouldBe(2);
+        foreach (var row in result.Rows)
+        {
+            row[AlvoManagedColumns.CreatedBy].ShouldBe(world.Caller.User.Value);
+            row[AlvoManagedColumns.UpdatedBy].ShouldBe(world.Caller.User.Value);
+            row[AlvoManagedColumns.CreatedAt].ShouldNotBeNull();
+            row[AlvoManagedColumns.UpdatedAt].ShouldBe(row[AlvoManagedColumns.CreatedAt]);
+        }
+    }
+
     /// <summary>A batch delete naming one row twice is refused, so its count can never exceed the rows it removed.</summary>
     /// <remarks>
     /// Without this the second delete of a row affects zero rows, and the batch still reports it as affected
