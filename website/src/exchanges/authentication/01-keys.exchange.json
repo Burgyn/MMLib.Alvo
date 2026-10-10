@@ -1,0 +1,89 @@
+{
+  "descriptor": "examples/help-desk/help-desk.alvo.json",
+  "keys": {
+    "agent": {
+      "roles": [
+        "agent",
+        "authenticated"
+      ],
+      "scopes": [
+        "*:read",
+        "*:write"
+      ],
+      "secretVariable": "ALVO_AGENT_KEY_SECRET",
+      "user": "3f2b8c1e-7a4d-4e9b-9c21-5d6e7f8a9b01"
+    },
+    "demo": {
+      "roles": [
+        "admin",
+        "authenticated",
+        "inspector"
+      ],
+      "scopes": [
+        "*:read",
+        "*:write"
+      ],
+      "secretVariable": "ALVO_DEMO_KEY_SECRET",
+      "user": "6f9619ff-8b86-d011-b42d-00c04fc964ff"
+    },
+    "reader": {
+      "roles": [
+        "agent",
+        "authenticated"
+      ],
+      "scopes": [
+        "*:read"
+      ],
+      "secretVariable": "ALVO_READER_KEY_SECRET",
+      "user": "5a1d0c3e-2f4b-4a6c-9d8e-7f6a5b4c3d03"
+    }
+  },
+  "steps": [
+    {
+      "key": "agent",
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": {
+        "title": "Printer on fire"
+      },
+      "expect": 201
+    },
+    {
+      "key": null,
+      "method": "GET",
+      "path": "/api/tickets",
+      "expect": 200
+    },
+    {
+      "key": "agent",
+      "method": "GET",
+      "path": "/api/tickets",
+      "wrongSecret": true,
+      "expect": 401,
+      "expectType": "unauthenticated"
+    },
+    {
+      "key": "demo",
+      "method": "GET",
+      "path": "/api/tickets",
+      "expect": 401,
+      "expectType": "unauthenticated"
+    },
+    {
+      "key": "reader",
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": {
+        "title": "Printer on fire"
+      },
+      "expect": 403,
+      "expectType": "out-of-scope"
+    },
+    {
+      "key": "reader",
+      "method": "GET",
+      "path": "/api/tickets",
+      "expect": 200
+    }
+  ]
+}

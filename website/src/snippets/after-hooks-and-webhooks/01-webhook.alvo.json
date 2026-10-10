@@ -1,0 +1,53 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "help-desk",
+  "auth": {
+    "roles": ["admin", "agent"]
+  },
+  "webhooks": {
+    "endpoints": {
+      "ops-board": {
+        "url": "https://ops.example.com/hooks/alvo",
+        "secretRef": "ops-board-signing-key"
+      }
+    }
+  },
+  "templates": {
+    "ticket-closed": {
+      "subject": "Ticket closed: {{new.title}}",
+      "body": "The ticket '{{new.title}}' was closed.\n\nResolution: {{new.resolution}}"
+    }
+  },
+  "entities": {
+    "tickets": {
+      "audit": true,
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 120 },
+        "priority": { "type": "enum", "values": ["low", "normal", "high"], "default": "normal" },
+        "status": { "type": "enum", "values": ["open", "closed"], "default": "open" },
+        "resolution": { "type": "text" }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'agent' in @user.roles || 'admin' in @user.roles",
+        "update": "'agent' in @user.roles || 'admin' in @user.roles"
+      },
+      "hooks": {
+        "afterCreate": [
+          {
+            "condition": "new.priority == 'high'",
+            "action": { "type": "webhook", "endpoint": "ops-board" }
+          }
+        ],
+        "afterUpdate": [
+          {
+            "condition": "changed(status) && new.status == 'closed'",
+            "action": { "type": "email", "template": "ticket-closed", "to": "support-lead@example.com" }
+          }
+        ]
+      }
+    }
+  }
+}

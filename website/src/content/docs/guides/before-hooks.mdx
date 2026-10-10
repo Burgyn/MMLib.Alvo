@@ -1,8 +1,187 @@
 ---
-title: Before-hooks
-description: Reject or mutate a write before it is stored, with CEL conditions and built-in functions.
+title: "Before-hooks"
+description: "Validate and transform writes: refuse a write, or fill in a value, inside the write's own transaction."
 sidebar:
   order: 3
 ---
 
-{/* <!-- STUB-F6 --> */}
+import { Code, Steps } from '@astrojs/starlight/components';
+import Exchange from '../../../components/Exchange.astro';
+import start from '../../../snippets/shell/before-hooks-start.sh?raw';
+import step2 from '../../../snippets/shell/before-hooks-step-2.sh?raw';
+import reject from '../../../snippets/before-hooks/01-reject.alvo.json?raw';
+import mutate from '../../../snippets/before-hooks/02-mutate.alvo.json?raw';
+
+:::tip[What you will achieve]
+A ticket cannot be closed without a resolution, its title is stored trimmed, it gets a slug and a rounded estimate,
+and closing it stamps the time. About fifteen minutes, starting from the stack in
+[Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
+:::
+
+## Before you start
+
+- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), with `ALVO_AGENT_KEY_SECRET`
+  exported in this shell. This page uses the `agent` key (roles `agent`, `authenticated`).
+- [Access rules](/MMLib.Alvo/guides/access-rules/) for the entity: they decide who may write at all, and a hook never
+  widens them.
+
+The responses below were captured from a real host when the site was built, so your ids will differ.
+
+## 1. Refuse a write
+
+An entity's `hooks` hold lists under `beforeCreate`, `beforeUpdate` and `beforeDelete`. Each entry is an optional
+`condition` and one `action`. A `reject` action cancels the write when its condition is true, and its text, a plain
+string, becomes the problem document's `detail`: write it for the person who will read it.
+
+<Steps>
+
+1. Start the stack over this page's first descriptor. The first command **deletes the stack's database**:
+
+   <Code code={start.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+2. This descriptor refuses to close a ticket that has no resolution:
+
+   <Code code={reject} lang="json" title="help-desk.alvo.json" ins={[{ range: '21-28' }]} />
+
+3. Create a ticket, then try to close it without saying how it was solved:
+
+   <Exchange name="before-hooks/01-reject" wrap steps={[0]} fields={["id", "title", "status", "resolution"]} />
+
+   <Exchange name="before-hooks/01-reject" wrap steps={[1]} />
+
+   The detail ends with the hook's JSON pointer, so you can find the hook that refused.
+
+4. With a resolution, the same update goes through:
+
+   <Exchange name="before-hooks/01-reject" wrap steps={[2]} fields={["id", "status", "resolution", "updated_at"]} />
+
+</Steps>
+
+**A condition over a missing value does not fire.** A comparison with a `null` operand is false, and a function
+called with a `null` argument returns `null`, so `size(new.resolution) == 0` would let a ticket with no resolution
+through. Test
+presence with `has(new.resolution)`, as above.
+
+## 2. Fill in values
+
+A `mutate` action sets fields of the row about to be written. Each value is a JSON literal or `{"$cel": "…"}`, an
+expression over `new`, the row as it will be stored.
+
+<Steps>
+
+1. On create, trim the title, derive a slug from it and round the estimate to whole hours. On update, stamp
+   `closed_at` when the status changes to `closed`:
+
+   <Code code={mutate} lang="json" title="help-desk.alvo.json" ins={[{ range: '14-17' }, { range: '26-36' }, { range: '41-44' }]} />
+
+2. Apply it by recreating the `alvo` container. Adding fields discards nothing, so the restart applies it
+   ([Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/) covers the other ways):
+
+   <Code code={step2.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+3. Create a ticket with untidy whitespace and an estimate of 2.5 hours:
+
+   <Exchange name="before-hooks/02-mutate" wrap steps={[0]} fields={["id", "title", "slug", "estimate_hours", "closed_at"]} />
+
+4. Close it. The second `beforeUpdate` hook stamps the time:
+
+   <Exchange name="before-hooks/02-mutate" wrap steps={[1]} fields={["id", "status", "resolution", "closed_at"]} />
+
+</Steps>
+
+`now()` is the instant the write is stamped with, the same one its audit columns get. The slug is stamped once, when
+the ticket is created, so it stays stable when the title changes later; a value that must always follow other fields
+of the row belongs in a [computed field](/MMLib.Alvo/guides/computed-and-rollups/) instead.
+
+## 3. A value must fit its field
+
+A value a hook writes is checked against its field exactly like a value a caller sends: `maxLength`, enum values,
+`format`, `required`, decimal precision and scale. A long title makes a slug longer than its 40 characters:
+
+<Exchange name="before-hooks/02-mutate" wrap steps={[2]} />
+
+The refusal is a 403 `forbidden`, not a 422 `validation`, because the caller did not send the field and cannot fix it
+by changing the body. It names the hook, the field and the facet, never the value. To make the value fit, cut it:
+`substring(x, 0, math.least(size(x), 40))`, where `x` is the slug expression. A `substring` past the end of the text
+fails the write, which is why the cut needs `math.least`.
+
+## How it works
+
+Before-hooks run inside the write's own transaction, after the caller's body is checked and before the row is stored:
+on update and delete over the locked row as it was, so `old.` is exactly what will be replaced. After a `mutate`, the
+`create` or `update` rule is checked again over the changed row, so a hook can never place a row the rules refuse;
+a hook may, however, set a field that is read-only for callers. A refusal rolls everything back: no row, no event. A
+hook has no network access and no clock budget; its work is bounded by the expression language, which has no loops.
+[CEL in Alvo](/MMLib.Alvo/concepts/cel/) explains the profiles.
+
+## Options and variations
+
+**What a condition can read**, per hook point:
+
+| Hook point | `new.<field>` | `old.<field>` | `changed(<field>)` | `mutate` |
+|---|---|---|---|---|
+| [`beforeCreate`](/MMLib.Alvo/reference/descriptor/entities-hooks/#entities.hooks.beforeCreate) | yes | no | no | yes |
+| [`beforeUpdate`](/MMLib.Alvo/reference/descriptor/entities-hooks/#entities.hooks.beforeUpdate) | yes | yes | yes | yes |
+| [`beforeDelete`](/MMLib.Alvo/reference/descriptor/entities-hooks/#entities.hooks.beforeDelete) | no | yes | no | no, refused at apply |
+
+A condition may also test the caller, as in `'admin' in @user.roles`, and compare, combine and do arithmetic. A
+`mutate` value may not read `@user` or `@tenant` and has no comparison: let the condition compare, and the `mutate`
+write a literal.
+
+**Built-in functions.** Both a condition and a `mutate` value may call the built-ins, nested as deep as you need:
+text (`trim`, `lowerAscii`, `upperAscii`, `replace`, `substring`, `size`, `startsWith`, `endsWith`, `contains`),
+numbers (`math.round`, `math.floor`, `math.ceil`, `math.abs`, `math.least`, `math.greatest`, `int`), and conversions
+(`string`, `timestamp`). `now()` works in a `mutate` value only. Every signature is in the
+[CEL function catalog](/MMLib.Alvo/reference/cel-functions/), and an embedded host can add its own with
+[Custom CEL functions](/MMLib.Alvo/guides/custom-cel-functions/). Text tests compare characters exactly: compare
+`lowerAscii(new.title)` to ignore case.
+
+**Order.** Hooks run in the order they are declared, and each sees the row as the hooks before it left it, so a later
+hook's condition can read an earlier hook's value. Inside one `mutate`, every value is computed from the row as that
+hook received it. The facet check runs once, on the final row, and names the hook that last wrote the field.
+
+**Failing closed.** A function that cannot answer refuses the write and rolls it back: `int(new.code)` over a text
+that is not a whole number, a `substring` past the end, a division by zero. A call over constants that always fails,
+such as `timestamp('yesterday')`, is refused when the descriptor is applied instead.
+
+:::caution[Not in this build]
+A custom CEL function an embedded host registers runs synchronously with no time budget, so a slow one holds the
+write's transaction and its row locks ([#309](https://github.com/Burgyn/MMLib.Alvo/issues/309)). A before-hook cannot
+call the network, send mail or write another entity; that is what [after-hooks](/MMLib.Alvo/guides/after-hooks-and-webhooks/)
+are for. A hook that runs on a schedule is `automation`, which this build parses and does not run
+([Capabilities in this build](/MMLib.Alvo/reference/capabilities/#declared-but-not-run-in-this-build)).
+:::
+
+## What can go wrong
+
+| Status | Problem type | When | Fix | Returned by |
+|---|---|---|---|---|
+| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | A `reject` fired (its text is the `detail`), or a `mutate` value breaks a facet of the field it writes. | Send what the hook asks for; or make the hook's value fit, for example by cutting it. | every host |
+| 500 | [`function-failed`](/MMLib.Alvo/reference/problem-types/#function-failed) | A function failed while the write was evaluated: a built-in refused its input, or a custom function threw. Nothing was written. | Fix the input the function reads, or guard the call with a `condition`. | standalone; embedded only with `AddAlvoProblemDetails()` |
+
+A hook Alvo cannot compile is refused when the descriptor is applied, and the container does not come back: an
+`old.` reference in `beforeCreate`, a `mutate` in `beforeDelete`, an unknown field or function, `@user` in a `mutate`.
+The reason is at the end of `docker compose logs alvo`; in this build that refusal ends the process with exit code 139
+instead of 78 ([#340](https://github.com/Burgyn/MMLib.Alvo/issues/340)).
+
+:::tip
+Branch on the problem `type`, never on `detail`: the slug is the contract, and the sentence is for people.
+[Handle errors](/MMLib.Alvo/guides/handle-errors/) shows how.
+:::
+
+## Reference
+
+- Descriptor keys: [`hooks`](/MMLib.Alvo/reference/descriptor/entities-hooks/#entities.hooks),
+  [`condition`](/MMLib.Alvo/reference/descriptor/entities-hooks/#entities.hooks.beforeCreate.condition),
+  [`reject`](/MMLib.Alvo/reference/descriptor/entities-hooks/#entities.hooks.beforeCreate.action.reject),
+  [`mutate`](/MMLib.Alvo/reference/descriptor/entities-hooks/#entities.hooks.beforeCreate.action.mutate).
+- Functions: [the CEL function catalog](/MMLib.Alvo/reference/cel-functions/).
+- Problem types: [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden),
+  [`function-failed`](/MMLib.Alvo/reference/problem-types/#function-failed).
+- Design notes: [before-hooks](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/events.md#before-hooks)
+  and [the `Mutate` profile](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/cel.md#mutate-the-fourth-profile).
+
+## Next
+
+**[After-hooks, events and webhooks](/MMLib.Alvo/guides/after-hooks-and-webhooks/)**: react to a committed change,
+with a webhook or an email.

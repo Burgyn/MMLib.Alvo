@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 import { AxeBuilder } from '@axe-core/playwright';
 import { withPreview } from './preview-server.mjs';
 
-const pages = ['/', '/start-here/quick-start/', '/start-here/run-your-own/', '/start-here/tutorial/', '/start-here/coding-agents/', '/guides/access-rules/', '/guides/entities-and-fields/', '/guides/computed-and-rollups/', '/guides/indexes/', '/guides/apply-and-evolve/', '/reference/problem-types/', '/reference/cel-functions/', '/reference/data-api/', '/reference/data-api/operations/ownerslist/', '/reference/csharp/mmlib-alvo/', '/examples/', '/project/changelog/', '/project/license/'];
+const pages = ['/', '/start-here/quick-start/', '/start-here/run-your-own/', '/start-here/tutorial/', '/start-here/coding-agents/', '/guides/authentication/', '/guides/access-rules/', '/guides/multi-tenancy/', '/guides/before-hooks/', '/guides/after-hooks-and-webhooks/', '/guides/audit-row-changes/', '/guides/entities-and-fields/', '/guides/computed-and-rollups/', '/guides/indexes/', '/guides/apply-and-evolve/', '/reference/problem-types/', '/reference/cel-functions/', '/reference/data-api/', '/reference/data-api/operations/ownerslist/', '/reference/csharp/mmlib-alvo/', '/examples/', '/project/changelog/', '/project/license/'];
 const themes = ['light', 'dark'];
 
 await withPreview(async (baseUrl) => {

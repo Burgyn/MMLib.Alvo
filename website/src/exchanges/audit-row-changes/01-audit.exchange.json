@@ -1,0 +1,76 @@
+{
+  "descriptor": "website/src/snippets/audit-row-changes/01-audit.alvo.json",
+  "keys": {
+    "agent": {
+      "roles": [
+        "agent",
+        "authenticated"
+      ],
+      "scopes": [
+        "*:read",
+        "*:write"
+      ],
+      "secretVariable": "ALVO_AGENT_KEY_SECRET",
+      "user": "3f2b8c1e-7a4d-4e9b-9c21-5d6e7f8a9b01"
+    },
+    "admin": {
+      "roles": [
+        "admin",
+        "authenticated"
+      ],
+      "scopes": [
+        "*:read",
+        "*:write"
+      ],
+      "secretVariable": "ALVO_ADMIN_KEY_SECRET",
+      "user": "8d4e2a6c-1b3f-4c5d-8e7a-9f0b1c2d3e02"
+    }
+  },
+  "steps": [
+    {
+      "key": "agent",
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": {
+        "title": "Printer on fire"
+      },
+      "expect": 201
+    },
+    {
+      "key": "admin",
+      "method": "PATCH",
+      "path": "/api/tickets/{0.body.id}",
+      "body": {
+        "status": "closed"
+      },
+      "headers": {
+        "If-Match": "{0.header.ETag}"
+      },
+      "expect": 200
+    },
+    {
+      "key": "agent",
+      "method": "PATCH",
+      "path": "/api/tickets/{0.body.id}",
+      "body": {
+        "title": "Printer on fire again"
+      },
+      "headers": {
+        "If-Match": "{0.header.ETag}"
+      },
+      "expect": 412,
+      "expectType": "precondition-failed"
+    },
+    {
+      "key": "agent",
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": {
+        "title": "Backdated",
+        "created_by": "8d4e2a6c-1b3f-4c5d-8e7a-9f0b1c2d3e02"
+      },
+      "expect": 403,
+      "expectType": "forbidden"
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "help-desk",
+  "auth": {
+    "roles": ["admin", "agent"]
+  },
+  "entities": {
+    "queues": {
+      "fields": {
+        "name": { "type": "string", "required": true, "unique": true, "maxLength": 60 }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles",
+        "update": "'admin' in @user.roles",
+        "delete": "'admin' in @user.roles"
+      }
+    },
+    "tickets": {
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 120 },
+        "status": { "type": "enum", "values": ["open", "closed"], "default": "open" }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'agent' in @user.roles || 'admin' in @user.roles",
+        "update": "'agent' in @user.roles || 'admin' in @user.roles"
+      }
+    }
+  }
+}
