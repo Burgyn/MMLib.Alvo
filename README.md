@@ -23,7 +23,9 @@ curl -sS http://localhost:8080/api/owners -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KE
 
 API reference at <http://localhost:8080/scalar>; the dashboard at <http://localhost:8080/admin>, signed in as
 `admin@alvo.local` with `$ALVO_ADMIN_PASSWORD`. It serves the `vehicle-registry` example shipped inside the
-image; `ALVO_DESCRIPTOR` picks another one, or your own file — the compose file's header says how. `:edge`
+image. `ALVO_DESCRIPTOR` points it at another shipped example or at your own file; the demo key then
+still authenticates, but field-service needs a tenant on it and your own roles need adding — the compose
+file's header lists exactly what to change. `:edge`
 follows `main`; set `ALVO_IMAGE=ghcr.io/burgyn/alvo:<version>` for a release.
 
 ## Run the demo backend from a clone (standalone)

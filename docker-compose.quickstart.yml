@@ -17,24 +17,27 @@
 # more) is required by the secret that carries it. Every compose command interpolates this file, so
 # keep ALVO_DEMO_KEY_SECRET exported (or in a .env next to the file) for `down` as well.
 #
-# Which backend runs is ONE variable, ALVO_DESCRIPTOR — the descriptor's path inside the container:
+# Which backend runs is ONE variable, ALVO_DESCRIPTOR — the descriptor's path inside the container.
+# The demo key's roles are `admin` and `authenticated`, the two built-in roles every descriptor knows
+# (a key naming a role the running descriptor does not declare is refused whole, with a bare 401 —
+# #131), so the key authenticates against each of these. What it may then do is the descriptor's rules:
 #
 #   * an example shipped in the image (the default is the first):
-#       /alvo/examples/vehicle-registry/vehicles.alvo.json   owners, vehicles, inspections
-#       /alvo/examples/simple-tasks/tasks.alvo.json          projects and tasks
-#       /alvo/examples/bike-workshop/bike-workshop.alvo.json the dashboard's demo workshop
-#       /alvo/examples/field-service/field-service.alvo.json two tenants, role-differentiated rules
+#       /alvo/examples/vehicle-registry/vehicles.alvo.json   owners, vehicles, inspections — works as is
+#       /alvo/examples/simple-tasks/tasks.alvo.json          projects and tasks — works as is
+#       /alvo/examples/bike-workshop/bike-workshop.alvo.json the dashboard's demo workshop — works as is
+#       /alvo/examples/field-service/field-service.alvo.json two tenants. Without a tenant on the key only
+#           the global `regions` answer; `customers` and `work_orders` are 403. Add under `environment:`
+#             Alvo__Auth__DevKeys__0__Tenant: 7e9a1c00-0001-4000-8000-00000000000a
+#           (any UUID; that one is the repository's "north" tenant)
 #   * your own file: uncomment the `volumes:` entry under `alvo` below, then
 #       ALVO_DESCRIPTOR=/alvo/descriptor.json docker compose -f docker-compose.quickstart.yml up --wait
-#
-# The demo key carries the roles admin, authenticated and inspector — vehicle-registry's. Today a key
-# naming a role the running descriptor does not declare is refused as a whole, with a bare 401 (#131),
-# so with another descriptor edit the Alvo__Auth__DevKeys__0__Roles__* lines below to roles it declares
-# in `auth.roles` (`authenticated` is built in and always fits). The dashboard does not issue keys.
+#     A rule that names one of YOUR roles needs that role on a key: add a Roles__2 line naming a role
+#     your `auth.roles` declares. The dashboard does not issue keys.
 #
 # ALVO_IMAGE replaces the image, e.g. a release tag (ghcr.io/burgyn/alvo:0.1) instead of the moving
-# `edge` build of main, or a local build — .github/workflows/image.yml smoke-tests every PR's image
-# through this very file that way.
+# `edge` build of main, or a local build — scripts/test-quickstart drives this very file that way, and
+# .github/workflows/image.yml runs it over every image it builds.
 name: alvo-quickstart
 
 services:
@@ -68,13 +71,15 @@ services:
       Alvo__Auth__DevKeys__0__User: 6f9619ff-8b86-d011-b42d-00c04fc964ff
       Alvo__Auth__DevKeys__0__Roles__0: admin
       Alvo__Auth__DevKeys__0__Roles__1: authenticated
-      Alvo__Auth__DevKeys__0__Roles__2: inspector
       Alvo__Auth__DevKeys__0__Scopes__0: "*:read"
       Alvo__Auth__DevKeys__0__Scopes__1: "*:write"
       # The dashboard's bootstrap administrator. The host takes the password only as a mounted FILE —
       # an environment variable is readable from `docker inspect` and a process listing — so compose
       # turns ALVO_ADMIN_PASSWORD into one (the `secrets:` block at the bottom) and the host reads it
       # from there. Created on the first start against an empty database only.
+      # The demo key's secret above stays an environment variable on purpose: dev keys are bound from
+      # configuration only (no file form), exactly as in docker-compose.yml, and a throwaway demo key on a
+      # loopback-only port is a different risk from a human's long-lived password.
       Alvo__Admin__BootstrapEmail: ${ALVO_ADMIN_EMAIL:-admin@alvo.local}
       Alvo__Admin__BootstrapPasswordFile: /run/secrets/alvo_admin_password
     secrets:

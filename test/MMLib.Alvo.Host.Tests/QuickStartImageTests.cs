@@ -1,4 +1,5 @@
-﻿using System.Text.RegularExpressions;
+﻿using MMLib.Alvo.Descriptor;
+using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Host.Tests;
 
@@ -46,11 +47,58 @@ public sealed partial class QuickStartImageTests
         quick.Groups["name"].Value.ShouldBe(local.Groups["name"].Value);
     }
 
-    /// <summary>Loopback only, like the local stack: the demo key is admin + read + write.</summary>
+    /// <summary>
+    /// Loopback only, like the local stack: the demo key is admin + read + write. Every published port, not one
+    /// string somewhere in the file — a second <c>"8080:8080"</c> entry beside the loopback one would publish the
+    /// same key on every interface.
+    /// </summary>
     [Fact]
     public void The_quick_start_publishes_on_loopback_only()
     {
-        QuickStart.ShouldContain("\"127.0.0.1:8080:8080\"");
+        var mappings = PortsBlock().Matches(QuickStart)
+            .SelectMany(block => PortItem().Matches(block.Groups["items"].Value))
+            .Select(item => item.Groups["mapping"].Value)
+            .ToList();
+
+        mappings.ShouldBe(["127.0.0.1:8080:8080"], "the quick start publishes exactly one port, on loopback");
+    }
+
+    /// <summary>
+    /// The demo key authenticates against every example the image ships. A key naming one role the running
+    /// descriptor does not declare is refused as a whole with a bare 401 (#131), so each of its roles has to be
+    /// one the role catalogue of <em>every</em> shipped descriptor resolves — which today means the built-ins.
+    /// </summary>
+    [Fact]
+    public void The_demo_keys_roles_resolve_against_every_shipped_example()
+    {
+        var roles = DemoKeyRole().Matches(QuickStart).Select(match => match.Groups["role"].Value).ToList();
+        roles.ShouldNotBeEmpty("no Alvo__Auth__DevKeys__0__Roles__N line was found, so this fact would check nothing");
+
+        foreach (var example in ShippedExample().Matches(Dockerfile).Select(match => match.Groups["path"].Value))
+        {
+            var descriptor = AlvoDescriptor.Parse(File.ReadAllText(Path.Combine(Root, "examples", example)));
+            var catalog = RoleCatalog.FromDescriptor(descriptor);
+
+            roles.Where(role => !catalog.TryGet(role, out _)).ShouldBeEmpty(
+                $"the demo key would be refused whole (#131) by the shipped example {example}");
+        }
+    }
+
+    /// <summary>
+    /// The bootstrap administrator's password reaches the host as a file: the path the host is told is the mount
+    /// of the secret the service declares, and that secret is sourced from <c>ALVO_ADMIN_PASSWORD</c>.
+    /// </summary>
+    [Fact]
+    public void The_admin_password_is_wired_as_a_secret_file()
+    {
+        var path = BootstrapPasswordFile().Match(QuickStart);
+        path.Success.ShouldBeTrue("Alvo__Admin__BootstrapPasswordFile must point under /run/secrets/");
+        var name = path.Groups["name"].Value;
+
+        QuickStart.ShouldContain($"    secrets:\n      - {name}\n", Case.Sensitive, "the alvo service must mount that secret");
+        QuickStart.ShouldContain($"\nsecrets:\n  {name}:\n    environment: ALVO_ADMIN_PASSWORD\n", Case.Sensitive,
+            "the secret must be sourced from ALVO_ADMIN_PASSWORD, never a literal or a file in the repository");
+        QuickStart.ShouldNotContain("Alvo__Admin__BootstrapPassword:", Case.Sensitive, "the host refuses a password given as a value");
     }
 
     /// <summary>
@@ -93,4 +141,16 @@ public sealed partial class QuickStartImageTests
 
     [GeneratedRegex(@"Alvo__DescriptorPath: \$\{ALVO_DESCRIPTOR:-(?<path>[^}]+)\}")]
     private static partial Regex DefaultDescriptor();
+
+    [GeneratedRegex(@"^ +ports:\n(?<items>(?: +- .+\n)+)", RegexOptions.Multiline)]
+    private static partial Regex PortsBlock();
+
+    [GeneratedRegex(@"- ""?(?<mapping>[^""\n]+)""?\n")]
+    private static partial Regex PortItem();
+
+    [GeneratedRegex(@"^ +Alvo__Auth__DevKeys__0__Roles__\d+: (?<role>\S+)$", RegexOptions.Multiline)]
+    private static partial Regex DemoKeyRole();
+
+    [GeneratedRegex(@"^ +Alvo__Admin__BootstrapPasswordFile: /run/secrets/(?<name>\w+)$", RegexOptions.Multiline)]
+    private static partial Regex BootstrapPasswordFile();
 }

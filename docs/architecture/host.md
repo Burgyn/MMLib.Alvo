@@ -764,8 +764,8 @@ Measured rather than assumed. Without them the build **succeeds** but emits 17 w
 `Microsoft.Build.Tasks.Git`, 6× `Microsoft.SourceLink.Common`): none is promoted by `TreatWarningsAsErrors`,
 because that property governs the C# compiler and these are MSBuild *task* warnings. `-p:MinVerSkip=true` also
 builds clean and warns about nothing — but it leaves every assembly stamped `1.0.0`, a version this pre-1.0
-project has never released, so the version is stated instead of skipped. The `ARG` is how F4's publish
-pipeline hands in the real MinVer version once #24 ships an image.
+project has never released, so the version is stated instead of skipped. The `ARG` is where the publish
+workflow hands in the real MinVer version — see *The published image* below.
 
 ### The published image
 
@@ -790,8 +790,25 @@ marker `AlvoExamples.Runnable()` reads (`_negative/` and `complex-crm/` are out)
 holds the Dockerfile's list equal to it. Nothing here changes the credential contract: the image still ships
 no key and no bootstrap administrator, and the quick start demands both from the reader's shell —
 `ALVO_DEMO_KEY_SECRET` with `:?`, and `ALVO_ADMIN_PASSWORD` as a compose secret, because the host takes the
-bootstrap password only as a mounted file. Before any tag is pushed, the workflow runs `scripts/test-quickstart`
-against the freshly built image through that very compose file.
+bootstrap password only as a mounted file. The demo key carries only the built-in roles `admin` and
+`authenticated`, so it authenticates against every shipped example (`QuickStartImageTests` pins that against
+the default descriptor; #131 is why a key naming an undeclared role would not). The publish job runs only after
+`scripts/test-quickstart` passed over the **linux/amd64** build of the same commit through that very compose
+file; what it pushes is a two-arch rebuild from the same cache, and arm64 is not run in CI.
+
+**The name deviates from the spec on purpose.** The spec and the analysis name the image `mmlib/alvo` (Docker
+Hub); it is published as `ghcr.io/burgyn/alvo` instead, because GitHub Container Registry authenticates with
+the workflow's own `GITHUB_TOKEN` and needs neither a Docker Hub organisation nor a long-lived registry secret
+in the repository. Decided with the maintainer and tracked in #358; the spec and the analysis still say
+`mmlib/alvo`, and this paragraph is the record that the difference is a decision, not an oversight.
+
+**One manual step after the first publish.** GHCR creates the package on the first push from `main`, and
+creates it **private**, whatever the repository's visibility — the `source` label links the package to the
+repository for access, not for visibility. Until the maintainer opens the package (GitHub → Packages → `alvo` →
+Package settings), chooses *Change visibility → Public*, and confirms `docker pull ghcr.io/burgyn/alvo:edge`
+works logged out, the README's no-clone quick start answers `denied` to everyone else. If the package's
+settings do not list this repository under *Manage Actions access* with the **Write** role, later pushes from
+the workflow fail with 403; add it there.
 
 ## The compose stack
 
