@@ -52,7 +52,7 @@ public sealed class StagedFieldScenarios(AdminWorld world) : IClassFixture<Admin
         var editor = session.Dialog("new-entity");
         await editor.GetByRole(AriaRole.Textbox, new() { Name = "Name", Exact = true }).FillAsync("tickets");
         await editor.GetByRole(AriaRole.Button, new() { Name = "Add to the working copy" }).ClickAsync();
-        await session.Page.WaitForURLAsync("**/schema/tickets");
+        await session.Page.WaitForAddressAsync("**/schema/tickets");
 
         await session.GoAsync("/schema/customers");
         await session.Page.GetByTestId("add-field").ClickAsync();

@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Auth;
+﻿using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Auth;
 using MMLib.Alvo.Identity.Internal;
 using NSubstitute;
 
@@ -201,6 +202,8 @@ public class AlvoIdentityContextResolverTests
         var catalogue = Substitute.For<IRoleCatalogProvider>();
         catalogue.DeclaredRoles.Returns(declared);
 
-        return new AlvoIdentityContextResolver(users, catalogue);
+        var scopes = new ServiceCollection().AddSingleton(users).BuildServiceProvider()
+            .GetRequiredService<IServiceScopeFactory>();
+        return new AlvoIdentityContextResolver(scopes, catalogue);
     }
 }

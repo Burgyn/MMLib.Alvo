@@ -26,9 +26,26 @@ public class RecordingWorld : AdminWorld
         ManagementDecorator.Around(services, shipped => new Watching(shipped, this));
 
     /// <summary>The first verdict the dashboard was given for <paramref name="source"/>, waiting up to ten seconds for it.</summary>
+    /// <remarks>
+    /// A check is a 300 ms debounce and a few milliseconds of work, so ten seconds is ample, and the one CI failure here
+    /// was a lost keystroke rather than a slow check (the scenario took 11.4 s in all). On a timeout it says which sources
+    /// the dashboard did ask about, so a check that was never asked is told apart from one asked about other text.
+    /// </remarks>
     /// <param name="source">The exact expression text.</param>
     /// <returns>The verdict.</returns>
-    public Task<ManagementExpressionVerdict> CheckedAsync(string source) => Check(source).Task.WaitAsync(TimeSpan.FromSeconds(10));
+    public async Task<ManagementExpressionVerdict> CheckedAsync(string source)
+    {
+        try
+        {
+            return await Check(source).Task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        catch (TimeoutException timeout)
+        {
+            var asked = _checks.Where(check => check.Value.Task.IsCompleted).Select(check => $"'{check.Key}'");
+            throw new TimeoutException(
+                $"The dashboard never checked '{source}'. It checked: {string.Join(", ", asked)}.", timeout);
+        }
+    }
 
     /// <summary>Waits until more than <paramref name="seen"/> function-list requests have finished.</summary>
     /// <param name="seen">The count read before the step that should ask.</param>

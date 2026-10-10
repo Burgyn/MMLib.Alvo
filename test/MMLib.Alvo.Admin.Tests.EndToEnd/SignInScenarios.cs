@@ -108,7 +108,7 @@ public sealed class SignInScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await page.FillAsync("#email", AdminWorld.AdminEmail);
         await page.FillAsync("#password", "not-the-password");
         await page.ClickAsync("button[type=submit]");
-        await page.WaitForURLAsync($"**{AlvoAdmin.SignInPath}?**");
+        await page.WaitForAddressAsync($"**{AlvoAdmin.SignInPath}?**");
 
         var message = await page.GetByTestId("error-title").InnerTextAsync();
         message.ShouldContain("do not match");
@@ -128,7 +128,7 @@ public sealed class SignInScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await page.FillAsync("#email", "nobody@alvo.test");
         await page.FillAsync("#password", AdminWorld.AdminPassword);
         await page.ClickAsync("button[type=submit]");
-        await page.WaitForURLAsync($"**{AlvoAdmin.SignInPath}?**");
+        await page.WaitForAddressAsync($"**{AlvoAdmin.SignInPath}?**");
 
         (await page.GetByTestId("error-title").InnerTextAsync()).ShouldContain("do not match");
     }
@@ -204,12 +204,15 @@ public sealed class SignInScenarios(AdminWorld world) : IClassFixture<AdminWorld
             $"{world.BaseAddress}{AlvoAdmin.SignOutEndpoint}");
         byGet.Ok.ShouldBeFalse("a GET to the sign-out endpoint was accepted");
 
-        await session.Page.GotoAsync($"{world.BaseAddress}{AlvoAdmin.BasePath}");
+        /* GoAsync, which waits for the circuit and the shell: the account menu is a library menu the circuit opens, and a
+           click on the prerendered button before the circuit is up opens nothing (it timed out on CI waiting for the
+           Sign out item a click had never asked for). */
+        await session.GoAsync(string.Empty);
         session.Page.Url.ShouldEndWith(AlvoAdmin.BasePath);
 
         await session.Page.GetByTestId("account-menu").ClickAsync();
         await session.Page.GetByRole(AriaRole.Menuitem, new() { Name = "Sign out" }).ClickAsync();
-        await session.Page.WaitForURLAsync($"**{AlvoAdmin.SignInPath}");
+        await session.Page.WaitForAddressAsync($"**{AlvoAdmin.SignInPath}");
 
         await session.Page.GotoAsync($"{world.BaseAddress}{AlvoAdmin.BasePath}");
         session.Page.Url.ShouldContain(AlvoAdmin.SignInPath);

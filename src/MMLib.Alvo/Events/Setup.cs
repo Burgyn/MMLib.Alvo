@@ -36,6 +36,16 @@ internal static class EventsSetup
     /// (<c>WebhookEgressGuard</c>), and a finite per-attempt timeout (<c>WebhookDelivery.AttemptTimeout</c>).
     /// </para>
     /// <para>
+    /// <b>The named client carries none of <c>IHttpClientFactory</c>'s default logging handlers</b>
+    /// (<c>RemoveAllLoggers</c>). They write the full request URI, path included, at Information under
+    /// <c>System.Net.Http.HttpClient.{name}.*</c>, in the message, the structured state and a scope, and a
+    /// webhook URL's path is routinely its only credential (#347). Removing them here, where the library
+    /// registers the client, is what makes the guarantee hold in an embedded host whose logging configuration
+    /// Alvo does not own; the delivery is still logged, by Alvo's own lines, under the endpoint's name. The
+    /// removal is a configuration by name like any other, so it is order-sensitive: a host that wants transport
+    /// logging back adds its own logger to the client <em>after</em> <c>AddAlvo</c>, and owns its redaction.
+    /// </para>
+    /// <para>
     /// <b><see cref="IAlvoEvents"/> is a singleton over the same <see cref="IOutboxStore"/> the dispatcher
     /// drains</b>, so a host publishing a custom application event and the framework emitting a data event
     /// reach one queue — the ordering, the attempt ceiling and the lease are then properties of the queue
@@ -60,7 +70,7 @@ internal static class EventsSetup
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IValidateOptions<AlvoEventOptions>, AlvoEventOptionsConfiguration>(Create));
 
-        services.AddHttpClient(WebhookDelivery.HttpClientName);
+        services.AddHttpClient(WebhookDelivery.HttpClientName).RemoveAllLoggers();
         services.Configure<HttpClientFactoryOptions>(WebhookDelivery.HttpClientName, GuardedByDefault);
         services.TryAddSingleton(new WebhookHostResolver(Dns.GetHostAddressesAsync));
         services.TryAddSingleton<WebhookEgressGuard>();

@@ -122,13 +122,29 @@ public sealed class FunctionOfferScenarios(RecordingWorld world) : IClassFixture
         await session.Page.Locator("#hook-mutate-value-0").WaitForAsync();
     }
 
-    internal static Task MutateModeAsync(AdminSession session, int index, string mode) =>
-        session.Page.GetByTestId($"hook-mutate-mode-{index}").GetByRole(AriaRole.Radio, new() { Name = mode, Exact = true }).ClickAsync();
+    /// <summary>Switches row <paramref name="index"/> to <paramref name="mode"/>, and returns once the switch is drawn.</summary>
+    /// <remarks>
+    /// <b>Not once the value box is there</b>: a string field's literal box and its expression box share the id
+    /// <c>hook-mutate-value-{index}</c>, so a wait for the id answers at once, on the box the switch is replacing. A fill
+    /// then lands in that old box, its input event names a handler the circuit has already dropped, and the text is lost
+    /// — the check is never asked (FunctionListUnavailableScenarios failed so, 10 runs in 30 under load). The chip shows
+    /// as chosen in the same render that draws the new box; <c>MutateEditingScenarios.ExpressionModeAsync</c> waits the
+    /// same way for the same reason.
+    /// </remarks>
+    internal static Task MutateModeAsync(AdminSession session, int index, string mode)
+        => ChooseChipAsync(session.Page.GetByTestId($"hook-mutate-mode-{index}"), mode);
 
     internal static Task TextModeAsync(AdminSession session) => ConditionModeAsync(session, "Text");
 
-    internal static Task ConditionModeAsync(AdminSession session, string mode) =>
-        session.Page.GetByTestId("hook-condition-mode").GetByRole(AriaRole.Radio, new() { Name = mode, Exact = true }).ClickAsync();
+    /// <summary>Switches the condition to <paramref name="mode"/>, and returns once the switch is drawn, for <see cref="MutateModeAsync"/>'s reason.</summary>
+    internal static Task ConditionModeAsync(AdminSession session, string mode)
+        => ChooseChipAsync(session.Page.GetByTestId("hook-condition-mode"), mode);
+
+    private static async Task ChooseChipAsync(ILocator group, string chip)
+    {
+        await group.GetByRole(AriaRole.Radio, new() { Name = chip, Exact = true }).ClickAsync();
+        await group.GetByRole(AriaRole.Radio, new() { Name = chip, Exact = true, Checked = true }).WaitForAsync();
+    }
 
     internal static Task<string> Selection(AdminSession session) =>
         session.Page.EvaluateAsync<string>("() => { const e = document.activeElement; return e.value.substring(e.selectionStart, e.selectionEnd); }");
