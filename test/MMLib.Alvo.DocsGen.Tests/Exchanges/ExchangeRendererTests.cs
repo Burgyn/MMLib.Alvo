@@ -28,6 +28,11 @@ public class ExchangeRendererTests
             .ShouldBe("curl -sS -X GET 'http://localhost:8080/api/vehicles?or=(color.eq.red,color.eq.blue)&model=ilike.%25a%25'");
 
     [Fact]
+    public void Curl_escapes_a_single_quote_inside_a_quoted_url() =>
+        ExchangeRenderer.Curl(new CapturedRequest("GET", "/api/owners?name=eq.O'Brien", [], null))
+            .ShouldBe("curl -sS -X GET 'http://localhost:8080/api/owners?name=eq.O'\\''Brien'");
+
+    [Fact]
     public void The_request_is_an_http_message_with_indented_json() =>
         ExchangeRenderer.HttpRequest(_post).ShouldBe(
             "POST /api/tickets HTTP/1.1\nX-Alvo-Api-Key: agent.$ALVO_KEY_SECRET\nContent-Type: application/json\n\n{\n  \"title\": \"It's  late\"\n}");

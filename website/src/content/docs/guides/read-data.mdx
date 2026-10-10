@@ -1,8 +1,6 @@
 ---
 title: "Read data: filter, sort, page"
 description: "Filter, sort and page through rows with the Data API's PostgREST-style query string, count the matches, and send a long query as a JSON body."
-sidebar:
-  order: 14
 ---
 
 import { Code } from '@astrojs/starlight/components';
@@ -65,7 +63,8 @@ a URL, `%` is written `%25`:
 <Exchange name="read-data/01-query" wrap steps={[5]} />
 
 To negate a term, put `not.` in front of the parameter name (`not.make=eq.Skoda`) or in front of a group member
-(`or=(not.color.eq.red,…)`):
+(`or=(not.color.eq.red,…)`). PostgREST's spelling, `make=not.eq.Skoda`, is refused with `unknown-operator`
+([#350](https://github.com/Burgyn/MMLib.Alvo/issues/350)):
 
 <Exchange name="read-data/01-query" wrap steps={[14]} />
 
@@ -81,7 +80,10 @@ Each term takes one operator from this list, and the field's type decides which 
 
 A parameter that is not a field is refused, never ignored, so a typo such as `?oder=year` cannot quietly return rows in
 some other order. That is also why `order`, `limit`, `offset`, `after`, `select`, `or`, `and` and `not` are reserved:
-a descriptor cannot declare a field with one of those names.
+a descriptor cannot declare a field with one of those names. An operator the field's type does not take is refused
+too:
+
+<Exchange name="read-data/01-query" wrap steps={[13]} />
 
 ## 3. Sort, and choose where nulls go
 
@@ -188,6 +190,7 @@ A malformed query is refused with every reason at once, each pointing at the par
 | 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | The entity has no `list` rule, or the rule reads `@user.id` and the request carries no key. | Add the rule, or send a key. | every host |
 | 403 | [`out-of-scope`](/MMLib.Alvo/reference/problem-types/#out-of-scope) | The key's scopes do not cover reading this entity. | Grant the key a read scope. | every host |
 | 401 | [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | The key cannot be used. | See [Authentication and API keys](/MMLib.Alvo/guides/authentication/). | every host |
+| 404 | [`not-found`](/MMLib.Alvo/reference/problem-types/#not-found) | `GET /api/<entity>/<id>` names a row that does not exist, or the `get` rule hides it. | Check the id and the rule. | every host |
 | 414 | none | A proxy refused a URL that was too long, before Alvo saw it. | Send the query as a body to `POST …/query`. | a proxy, not Alvo |
 
 An empty page is not an error: either nothing matches, or your `list` rule excludes the rows.

@@ -10,7 +10,7 @@ lists them. The guides show them in use: [Read data](/MMLib.Alvo/guides/read-dat
 ## OpenAPI document
 
 Every descriptor generates its own OpenAPI document. The standalone host serves it at `GET /openapi/v1.json`, with an
-API browser at `/scalar`; both are readable without a key. [Data API: example](/MMLib.Alvo/reference/data-api/) is the
+API browser at `/scalar`, unless `Alvo:Docs:Enabled` is false; both are readable without a key. [Data API: example](/MMLib.Alvo/reference/data-api/) is the
 document for `examples/vehicle-registry`. An embedded host that calls ASP.NET Core's `AddOpenApi()` and `MapOpenApi()`
 gets Alvo's routes and schemas in its own document; Alvo does not add an OpenAPI document on its own.
 
@@ -58,7 +58,8 @@ Reserved, so no descriptor may declare a field with these names: `order`, `limit
 
 **Deviation from PostgREST:** a nested group is written `and=(…)` inside the outer group, where PostgREST writes
 `and(…)`, and negation is a prefix on the parameter name (`not.make=eq.Skoda`) rather than on the value
-(`make=not.eq.Skoda`, which is refused).
+(`make=not.eq.Skoda`, which is refused with `unknown-operator`;
+[#350](https://github.com/Burgyn/MMLib.Alvo/issues/350)).
 
 ### Operators per field type
 

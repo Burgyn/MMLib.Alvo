@@ -41,6 +41,21 @@ public class DocsSnippetTests
         }
     }
 
+    [Fact]
+    public void The_host_function_snippet_is_vehicle_registry_plus_one_hook_block()
+    {
+        var root = MMLib.Alvo.Testing.RepositoryRoot.Find();
+        var snippet = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(
+            Path.Combine(DocsSnippets.SnippetsDirectory, "custom-cel-functions", "host-only", "vehicles.alvo.json")))!;
+        var example = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(
+            Path.Combine(root, "examples", "vehicle-registry", "vehicles.alvo.json")))!;
+
+        snippet["entities"]!["vehicles"]!.AsObject().Remove("hooks").ShouldBeTrue();
+
+        System.Text.Json.Nodes.JsonNode.DeepEquals(snippet, example)
+            .ShouldBeTrue("the host-function snippet must stay examples/vehicle-registry plus /entities/vehicles/hooks");
+    }
+
     private static string Describe(DescriptorValidationResult result) =>
         string.Join("; ", result.Errors.Select(error => $"{error.Path}: {error.Message} {error.FixSuggestion}"));
 }

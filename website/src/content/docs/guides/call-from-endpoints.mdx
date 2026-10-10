@@ -115,8 +115,9 @@ render.
 | 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | `ArgumentException`: a value does not fit its field, or a field is unknown. | Map your DTO to the entity's declared fields and types. | every host |
 | 500 | [`internal`](/MMLib.Alvo/reference/problem-types/#internal) | `InvalidOperationException` or `ArgumentNullException`: a broken invariant. | Read the stack trace in your log. | standalone; embedded only with `AddAlvoProblemDetails()` |
 
-If the app stops at startup instead, `MapAlvoDataApi()` was called on a host whose Data API services are missing
-(call `AddAlvo` first), or a convention threw while the routes were built; the message names the call to fix.
+Two failures happen outside a request. `MapAlvoDataApi()` on a host whose Data API services are missing stops the app
+at startup; call `AddAlvo` first. A convention that throws while the routes are built does not stop the host: the
+route table stays empty, `/health/ready` reports the failure, and the log entry names `MapAlvoDataApi()`.
 
 ## Reference
 

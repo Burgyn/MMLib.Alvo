@@ -67,7 +67,7 @@ The header is honoured on `POST`, `PUT` and the three batch verbs. A replayed `P
 
 ## 3. Update only what you have seen: `ETag` and `If-Match`
 
-On an entity with `"audit": true`, every response carrying a row also carries an `ETag`, its version. Send it back as
+On an entity with `"audit": true`, every single-row response also carries an `ETag`, its version. Send it back as
 `If-Match` and the write happens only if nobody has changed the row since you read it. Update the vehicle from step 2
 with the `ETag` its create returned:
 
@@ -96,7 +96,7 @@ On a 412, read the row again, apply your change to what is stored now, and send 
 
 Update both, naming them by the ids the create returned:
 
-<Exchange name="write-data/01-write" wrap steps={[8]} fields={["affected"]} />
+<Exchange name="write-data/01-write" wrap steps={[8]} />
 
 And delete them. A batch delete answers 200 with `affected`, so a five-row delete can be told from a refusal:
 
@@ -114,9 +114,10 @@ per row ([#193](https://github.com/Burgyn/MMLib.Alvo/issues/193)).
 
 :::caution[Known issue in this build]
 A batch `PATCH` changes the rows but does not advance their `updated_at` and `updated_by`, so their `ETag` stays the
-same; the response above shows it. A client still holding a tag from before the batch can then overwrite the batch's
+same: in the response above, each row's `updated_at` still equals its `created_at`. A client still holding a tag from before the batch can then overwrite the batch's
 change with a single-row `PATCH` carrying that `If-Match`, and gets a 200 instead of a 412. Until it is fixed, read the
-rows again after a batch update before you condition a write on their tag.
+rows again after a batch update before you condition a write on their tag
+([#349](https://github.com/Burgyn/MMLib.Alvo/issues/349)).
 :::
 
 ## 5. Send JSON, and say so

@@ -85,7 +85,8 @@ against the public constants in `AlvoProblemTypes` instead of copying strings.
 The Data API's status catalogue names four causes of a 403, and three of them share the slug `forbidden`.
 
 **A rule refused.** The operation has no rule, the row a write would store fails the rule, or the rule reads `@user.id`
-or `@tenant.id` and the caller has neither. The `detail` never says which rule. This descriptor has no `delete` rule
+or `@tenant.id` and the caller has neither, or the entity is tenant-scoped and the caller has no tenant (refused before
+any rule runs). The `detail` never says which rule. This descriptor has no `delete` rule
 for tickets, so even an administrator is refused:
 
 <Exchange name="handle-errors/01-errors" wrap steps={[4]} />
@@ -154,8 +155,8 @@ requirement exists.
 
 ## 7. A 401 means the key, not the caller
 
-`unauthenticated` means a key was sent and cannot be used: a wrong secret, a revoked or expired key, or a key with a role
-the descriptor does not declare. A request without any key is not a 401; the rules judge it, as step 3 showed.
+`unauthenticated` means a key was sent and cannot be used: a wrong secret, a revoked or expired key, a key not issued for the
+requested tenant, or a key with a role the descriptor does not declare. A request without any key is not a 401; the rules judge it, as step 3 showed.
 
 <Exchange name="handle-errors/01-errors" wrap steps={[11]} />
 

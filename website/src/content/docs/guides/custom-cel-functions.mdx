@@ -1,8 +1,6 @@
 ---
 title: Custom CEL functions
 description: Register a function written in C# in your embedded host, and call it from your descriptor's hook conditions and mutate values.
-sidebar:
-  order: 4
 ---
 
 import { Code } from '@astrojs/starlight/components';
@@ -126,7 +124,7 @@ rules and computed fields are compiled to SQL, which is why they cannot.
 [CEL in Alvo](/MMLib.Alvo/concepts/cel/) explains the profiles.
 
 :::caution[Not in this build]
-A rule or a computed field cannot call a function, custom or built-in, because neither is translated to SQL yet. A
+Built-in functions are not translated to SQL yet; host functions never run in rules, computed fields or `access`. A
 custom function runs with no time budget and no cancellation, so a slow one holds the write's transaction and its row
 locks ([#309](https://github.com/Burgyn/MMLib.Alvo/issues/309)). The standalone image and `alvo validate` know the
 built-in functions only. See [Capabilities in this build](/MMLib.Alvo/reference/capabilities/) for the descriptor
