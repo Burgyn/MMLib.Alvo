@@ -17,6 +17,9 @@ on:
       - 'CHANGELOG.md'
       - 'CONTRIBUTING.md'
       - 'docker-compose.yml'
+      - 'Directory.Packages.props'
+      - 'Directory.Build.props'
+      - 'global.json'
       - '.claude/skills/alvo-descriptor-*/**'
       - 'test/_shared/docs/**'
       - 'test/MMLib.Alvo.DocsGen.Tests/**'
@@ -28,9 +31,10 @@ on:
 permissions:
   contents: read
 
+# A newer push supersedes a PR build, but a deploy of main is never cancelled half-way.
 concurrency:
   group: docs-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
