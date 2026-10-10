@@ -650,6 +650,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A rollup field is no longer caller-writable** (#342). A payload naming a `rollup` field was accepted and
+  stored: `PATCH /api/invoices/{id}` with `{"net_total": 1}` answered `200`, kept the `1`, and a computed field
+  reading the rollup followed the forged value until a later child write recomputed it. Every write path now
+  refuses it exactly like a write to a `computed` field — `403` with problem type `forbidden`, the detail naming
+  the field — on `POST`, `PUT` (both branches), `PATCH` and every batch row (code `forbidden` at
+  `/rows/{index}`), on SQLite and PostgreSQL alike; an explicit `null` is refused too. The framework's own
+  recompute is unaffected. A client that echoed a read row back into a write must now drop its rollup fields,
+  as it already had to for computed ones.
+
 - **The dashboard works over PostgreSQL** (#339). Every screen showed *"Something went wrong"*, with EF's
   *"a second operation was started on this context instance"* on the identity store. A Blazor circuit is one
   DI scope for as long as the tab is open, and its components initialise concurrently — the overview, the
