@@ -32,11 +32,11 @@ flowchart TB
 
 ## The control path
 
-A descriptor arrives from a file at boot, from the [Management API](/MMLib.Alvo/reference/management-api/), or from the
+A descriptor arrives from a file at boot, from the [Management API](/reference/management-api/), or from the
 dashboard, which calls the same API in process. Every door leads to the same steps:
 
 1. **Validate.** The JSON Schema, then the semantic checks, then every CEL expression compiled in its profile against
-   its entity ([The project descriptor](/MMLib.Alvo/concepts/descriptor/#how-a-descriptor-is-checked)).
+   its entity ([The project descriptor](/concepts/descriptor/#how-a-descriptor-is-checked)).
 2. **Plan.** The new schema is compared with the one applied last, recorded in the database, not re-read from live
    tables. A plan that would discard data stops here unless the apply allows it.
 3. **Apply and record.** The schema change and the new revision in the descriptor history are written as one unit, so a
@@ -66,7 +66,7 @@ Every generated route is a minimal-API endpoint, and every one takes the same st
 - **After the commit**, a background dispatcher delivers the event to the after-hooks.
 
 Your own endpoints in an embedded host enter at **Decide**: they call `IAlvoData` with the caller's context, and the
-same decision is made inside the port. [Security model](/MMLib.Alvo/concepts/security-model/) says what each step
+same decision is made inside the port. [Security model](/concepts/security-model/) says what each step
 guarantees.
 
 ## Ports and the provider model
@@ -94,7 +94,7 @@ point, `AddAlvo(alvo => alvo.UsePostgreSql(…))`. A new provider is a new packa
 The two database providers share one EF Core-based implementation and differ in their dialect. SQL generation for a
 rule is split the same way: the structure (`AND`, `OR`, `NOT`) is the core's, and everything a database spells
 differently goes through `IFieldSqlRenderer`. That split is what keeps rules, events and tenancy identical on SQLite
-and PostgreSQL, and it is where the planned [dynamic entities](/MMLib.Alvo/concepts/dynamic-entities/) will plug in a
+and PostgreSQL, and it is where the planned [dynamic entities](/concepts/dynamic-entities/) will plug in a
 renderer for a field stored as JSON.
 
 ## Events and the outbox
@@ -117,8 +117,8 @@ deduplicate on. The envelope is CloudEvents 1.0.
 
 There is no global order. Events for one row are delivered in order only while a single dispatcher runs **and** no two
 events for that row are written within the same millisecond by different processes; a second instance delivering
-events breaks the order silently, so run one ([Running in production](/MMLib.Alvo/guides/production/#run-more-than-one-instance)).
-[After-hooks, events and webhooks](/MMLib.Alvo/guides/after-hooks-and-webhooks/) shows what a receiver gets.
+events breaks the order silently, so run one ([Running in production](/guides/production/#run-more-than-one-instance)).
+[After-hooks, events and webhooks](/guides/after-hooks-and-webhooks/) shows what a receiver gets.
 
 ## Packages
 
@@ -128,23 +128,23 @@ feature rather than by technical layer.
 
 | Package | Holds |
 |---|---|
-| [`MMLib.Alvo.Abstractions`](/MMLib.Alvo/reference/csharp/mmlib-alvo-abstractions/) | the ports and the schema model; the root every other package depends on |
-| [`MMLib.Alvo`](/MMLib.Alvo/reference/csharp/mmlib-alvo/) | the core: descriptor, migrations, rule engine and CEL, events, the generated Data API and the Management API |
-| [`MMLib.Alvo.Data.EntityFrameworkCore`](/MMLib.Alvo/reference/csharp/mmlib-alvo-data-entityframeworkcore/) | the shared EF Core implementation of the data ports |
-| [`MMLib.Alvo.Data.Sqlite`](/MMLib.Alvo/reference/csharp/mmlib-alvo-data-sqlite/), [`MMLib.Alvo.Data.PostgreSql`](/MMLib.Alvo/reference/csharp/mmlib-alvo-data-postgresql/) | the two database providers |
-| [`MMLib.Alvo.Identity`](/MMLib.Alvo/reference/csharp/mmlib-alvo-identity/) | the people who sign in to the dashboard, and the bootstrap administrator |
-| [`MMLib.Alvo.Admin`](/MMLib.Alvo/reference/csharp/mmlib-alvo-admin/) | the admin dashboard, which reaches the core only through the Management API's port |
-| [`MMLib.Alvo.Ai`](/MMLib.Alvo/reference/csharp/mmlib-alvo-ai/) | the schema assistant, which also sees only the ports |
+| [`MMLib.Alvo.Abstractions`](/reference/csharp/mmlib-alvo-abstractions/) | the ports and the schema model; the root every other package depends on |
+| [`MMLib.Alvo`](/reference/csharp/mmlib-alvo/) | the core: descriptor, migrations, rule engine and CEL, events, the generated Data API and the Management API |
+| [`MMLib.Alvo.Data.EntityFrameworkCore`](/reference/csharp/mmlib-alvo-data-entityframeworkcore/) | the shared EF Core implementation of the data ports |
+| [`MMLib.Alvo.Data.Sqlite`](/reference/csharp/mmlib-alvo-data-sqlite/), [`MMLib.Alvo.Data.PostgreSql`](/reference/csharp/mmlib-alvo-data-postgresql/) | the two database providers |
+| [`MMLib.Alvo.Identity`](/reference/csharp/mmlib-alvo-identity/) | the people who sign in to the dashboard, and the bootstrap administrator |
+| [`MMLib.Alvo.Admin`](/reference/csharp/mmlib-alvo-admin/) | the admin dashboard, which reaches the core only through the Management API's port |
+| [`MMLib.Alvo.Ai`](/reference/csharp/mmlib-alvo-ai/) | the schema assistant, which also sees only the ports |
 
 The standalone host is not a package: it is the container image, composed from these with both database drivers and
 an API browser. Architecture tests keep the boundaries, for example that the dashboard holds no reference to the core.
 
 ## Put it to work
 
-- [Standalone and embedded](/MMLib.Alvo/concepts/modes/): the two ways to run the same engine.
-- [Embed in ASP.NET Core](/MMLib.Alvo/start-here/embed/): compose the packages in your own host.
-- [Call Alvo from your endpoints](/MMLib.Alvo/guides/call-from-endpoints/): use `IAlvoData` directly.
-- [C# API](/MMLib.Alvo/reference/csharp/): every public type.
+- [Standalone and embedded](/concepts/modes/): the two ways to run the same engine.
+- [Embed in ASP.NET Core](/start-here/embed/): compose the packages in your own host.
+- [Call Alvo from your endpoints](/guides/call-from-endpoints/): use `IAlvoData` directly.
+- [C# API](/reference/csharp/): every public type.
 - Design notes: [package boundary](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/package-boundary.md),
   [event backbone](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/events.md),
   [extensibility](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/extensibility.md).

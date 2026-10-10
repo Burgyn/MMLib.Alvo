@@ -18,15 +18,15 @@ You bring a descriptor and configuration; the image brings everything else.
 - **The image** reads the descriptor from `/alvo/descriptor.json`, runs on PostgreSQL or SQLite chosen by
   configuration, and listens on port 8080. It is published as `ghcr.io/burgyn/alvo`; pre-v0.1 it is tagged `edge`, built
   from `main`.
-- **The quick start's compose file** runs it over PostgreSQL 16: [Quick start](/MMLib.Alvo/start-here/quick-start/)
-  starts it, [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/) points it at yours.
-- **The dashboard** at `/admin`, with the [schema assistant](/MMLib.Alvo/guides/schema-assistant/) when a model is
+- **The quick start's compose file** runs it over PostgreSQL 16: [Quick start](/start-here/quick-start/)
+  starts it, [Run your own descriptor](/start-here/run-your-own/) points it at yours.
+- **The dashboard** at `/admin`, with the [schema assistant](/guides/schema-assistant/) when a model is
   connected, and people who sign in with a password.
 - **The API browser** at `/scalar`, over the OpenAPI document the descriptor generates at `/openapi/v1.json`.
 - **The Management API** at `/management`, for agents and scripts.
 
 Everything is configuration: API keys, the bootstrap administrator, the database, the startup mode.
-[Running in production](/MMLib.Alvo/guides/production/) covers what to set.
+[Running in production](/guides/production/) covers what to set.
 
 ## Embedded
 
@@ -34,15 +34,15 @@ Your app owns the process, and Alvo is a part of it.
 
 - **Packages**: `MMLib.Alvo` and one database provider, `MMLib.Alvo.Data.Sqlite` or `MMLib.Alvo.Data.PostgreSql`.
   They are not on NuGet before v0.1; today you reference the projects or pack them to a local feed
-  ([Embed in ASP.NET Core](/MMLib.Alvo/start-here/embed/)).
+  ([Embed in ASP.NET Core](/start-here/embed/)).
 - **Registration**: `AddAlvo(alvo => alvo.UseSqlite(…).FromDescriptor(path))`, then map what you want where you want
   it: the generated Data API under a prefix of your choice, the health probes, the Management API.
 - **Your authentication**: your users reach Alvo's data through your own endpoints, which pass Alvo the caller and let
-  the descriptor's rules decide ([Use your own authentication](/MMLib.Alvo/guides/own-authentication/)).
+  the descriptor's rules decide ([Use your own authentication](/guides/own-authentication/)).
 - **Your endpoints**: they call `IAlvoData` in process, under the same rules as the generated API
-  ([Call Alvo from your endpoints](/MMLib.Alvo/guides/call-from-endpoints/)).
+  ([Call Alvo from your endpoints](/guides/call-from-endpoints/)).
 - **Your C#**: functions a descriptor's hooks can call, registered with `AddCelFunction`
-  ([Custom CEL functions](/MMLib.Alvo/guides/custom-cel-functions/)).
+  ([Custom CEL functions](/guides/custom-cel-functions/)).
 
 The dashboard (`MMLib.Alvo.Admin`) and the schema assistant (`MMLib.Alvo.Ai`) are separate packages a host can add;
 the embedded sample uses neither.
@@ -78,7 +78,7 @@ functions, endpoints, identity or providers. That is an upgrade path, not a limi
 The error row matters for clients. Alvo's own endpoints answer their refusals as problem documents in both modes. The
 three types in that row are produced by Alvo's exception handler, which an embedded host opts into with
 `AddAlvoProblemDetails()`; without it, your host renders a request the web server refused, a failure inside Alvo, or a
-failing CEL function its own way. [Handle errors](/MMLib.Alvo/guides/handle-errors/#errors-in-an-embedded-host) shows
+failing CEL function its own way. [Handle errors](/guides/handle-errors/#errors-in-an-embedded-host) shows
 both.
 
 :::caution[Not in this build]
@@ -89,7 +89,7 @@ project ([#141](https://github.com/Burgyn/MMLib.Alvo/issues/141)).
 
 ## Put it to work
 
-- [Quick start](/MMLib.Alvo/start-here/quick-start/): the standalone stack in a few minutes.
-- [Embed in ASP.NET Core](/MMLib.Alvo/start-here/embed/): Alvo inside your app.
-- [Running in production](/MMLib.Alvo/guides/production/): configure the standalone host for real use.
-- [Architecture](/MMLib.Alvo/concepts/architecture/): the packages both modes are built from.
+- [Quick start](/start-here/quick-start/): the standalone stack in a few minutes.
+- [Embed in ASP.NET Core](/start-here/embed/): Alvo inside your app.
+- [Running in production](/guides/production/): configure the standalone host for real use.
+- [Architecture](/concepts/architecture/): the packages both modes are built from.

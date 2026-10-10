@@ -13,7 +13,7 @@ checked, which you then review and apply. About ten minutes, starting from a run
 
 ## Before you start
 
-- A running dashboard: [The admin dashboard](/MMLib.Alvo/guides/admin-dashboard/). Its demo asks for a model
+- A running dashboard: [The admin dashboard](/guides/admin-dashboard/). Its demo asks for a model
   connection when it starts; `--no-ai` is what skips it.
 - The `admin` management level to save a connection from the dashboard. Asking the assistant needs only what the
   question touches: it acts with your level, never more.
@@ -51,7 +51,7 @@ would be a way to change what the assistant believes with nothing guarding it.
 ## 1. Connect a model
 
 The connection is infrastructure, not part of the descriptor, so it lives in configuration or in the host's secret
-store. Four keys, under [`Alvo:Ai`](/MMLib.Alvo/reference/configuration/#alvoai):
+store. Four keys, under [`Alvo:Ai`](/reference/configuration/#alvoai):
 
 | Key | Value |
 |---|---|
@@ -61,7 +61,7 @@ store. Four keys, under [`Alvo:Ai`](/MMLib.Alvo/reference/configuration/#alvoai)
 | `Alvo__Ai__ApiKeySecretRef` | the **name** of the secret that holds the API key, such as `openai`; none for a local endpoint that needs no key |
 
 The key itself is a secret: `Alvo__Secrets__Values__openai`, from whatever configuration source your deployment keeps
-secrets in. [Running in production](/MMLib.Alvo/guides/production/#3-keep-every-secret-in-a-file) covers the secret
+secrets in. [Running in production](/guides/production/#3-keep-every-secret-in-a-file) covers the secret
 store.
 
 Or save the connection from the dashboard: **Settings**, then **Edit the connection** under *AI assistant*. That needs
@@ -89,7 +89,7 @@ your own, the dashboard asks before replacing them.
 
 The *Why* box is pre-filled with what you asked for; change it as you like. The revision records **you** as its
 author, because a person decided to apply it, and you can roll it back from *Configuration history* like any other.
-[The admin dashboard](/MMLib.Alvo/guides/admin-dashboard/#3-change-the-schema) covers Preview and Apply.
+[The admin dashboard](/guides/admin-dashboard/#3-change-the-schema) covers Preview and Apply.
 
 ## The skills it shares with coding agents
 
@@ -97,12 +97,12 @@ The assistant learns the descriptor from nine skills: entities and fields, field
 hooks, computed fields and rollups, indexes, traits and tenancy, project access, and capabilities and limits. They are
 plain Markdown files in the repository, `.claude/skills/alvo-descriptor-*`, and the package embeds exactly those files,
 so the assistant and your coding agent learn the same rules from one source.
-[For coding agents](/MMLib.Alvo/start-here/coding-agents/#3-load-the-shared-skills) links each one.
+[For coding agents](/start-here/coding-agents/#3-load-the-shared-skills) links each one.
 
 ## In an embedded host
 
 The standalone image includes the assistant. An embedded host adds the `MMLib.Alvo.Ai` package and registers it with
-`AddAlvoAi()` ([C# reference](/MMLib.Alvo/reference/csharp/mmlib-alvo-ai/)); the core never references it, so a host
+`AddAlvoAi()` ([C# reference](/reference/csharp/mmlib-alvo-ai/)); the core never references it, so a host
 that wants only the Data API never acquires an agent runtime.
 
 ## What can go wrong
@@ -112,8 +112,8 @@ the table names the problem type the same refusal carries over HTTP.
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | You save the AI connection without the `admin` level (`PUT …/ai/connection`), or ask about something your level may not read. | Ask an `admin`, or grant your role the level in `access`. | every host |
-| 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | Every draft in the turn was refused; the pane lists the refusals. | Rephrase or narrow the request, or make the change by hand following the refusal's fix. | every host |
+| 403 | [`forbidden`](/reference/problem-types/#forbidden) | You save the AI connection without the `admin` level (`PUT …/ai/connection`), or ask about something your level may not read. | Ask an `admin`, or grant your role the level in `access`. | every host |
+| 422 | [`validation`](/reference/problem-types/#validation) | Every draft in the turn was refused; the pane lists the refusals. | Rephrase or narrow the request, or make the change by hand following the refusal's fix. | every host |
 
 **No launcher appears.** No connection is configured: set `Alvo:Ai`, or save one from *Settings*.
 
@@ -123,15 +123,15 @@ the key.
 
 ## Reference
 
-- Configuration: [`Alvo:Ai`](/MMLib.Alvo/reference/configuration/#alvoai),
-  [`Alvo:Secrets`](/MMLib.Alvo/reference/configuration/#alvosecrets).
-- [Management API](/MMLib.Alvo/reference/management-api/): `GET …/info` and `PUT …/ai/connection`.
-- [`MMLib.Alvo.Ai`](/MMLib.Alvo/reference/csharp/mmlib-alvo-ai/).
-- Problem types: [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden),
-  [`validation`](/MMLib.Alvo/reference/problem-types/#validation).
+- Configuration: [`Alvo:Ai`](/reference/configuration/#alvoai),
+  [`Alvo:Secrets`](/reference/configuration/#alvosecrets).
+- [Management API](/reference/management-api/): `GET …/info` and `PUT …/ai/connection`.
+- [`MMLib.Alvo.Ai`](/reference/csharp/mmlib-alvo-ai/).
+- Problem types: [`forbidden`](/reference/problem-types/#forbidden),
+  [`validation`](/reference/problem-types/#validation).
 - Design note: [the package boundary](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/package-boundary.md).
 
 ## Next
 
-**[For coding agents](/MMLib.Alvo/start-here/coding-agents/)**: give your own agent the same skills, the schema and a
+**[For coding agents](/start-here/coding-agents/)**: give your own agent the same skills, the schema and a
 safe way to apply.

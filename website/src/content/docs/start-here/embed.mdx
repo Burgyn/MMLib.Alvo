@@ -24,14 +24,14 @@ the same descriptor the Docker image serves. About fifteen minutes, starting fro
 
 - The .NET 10 SDK and an ASP.NET Core project (`dotnet new web` is enough), plus a clone of the repository: Alvo is
   pre-v0.1 and **no package is on NuGet yet**.
-- A descriptor. The code below uses `examples/vehicle-registry`; [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/)
+- A descriptor. The code below uses `examples/vehicle-registry`; [Run your own descriptor](/start-here/run-your-own/)
   is the Docker-only way to try one first.
 
 ## 1. Reference the packages
 
 Two packages are the minimum: `MMLib.Alvo`, the core (schema registry, Data API, rule engine, events, management),
 and one database driver, `MMLib.Alvo.Data.Sqlite` or `MMLib.Alvo.Data.PostgreSql`. The core never references a driver;
-the driver you add is the one you select in code. Every package is listed in the [C# API reference](/MMLib.Alvo/reference/csharp/).
+the driver you add is the one you select in code. Every package is listed in the [C# API reference](/reference/csharp/).
 
 Today you either reference the projects in a clone or install from a local package feed you pack yourself;
 `dotnet add package` from NuGet works from v0.1.
@@ -162,8 +162,8 @@ validating the antiforgery token in each, as the standalone host's
 [`AlvoAdminSignIn.cs`](https://github.com/Burgyn/MMLib.Alvo/blob/main/src/MMLib.Alvo.Host/Internal/AlvoAdminSignIn.cs)
 does. A host with its own users skips `MMLib.Alvo.Identity` and implements `IAlvoAdminCallerResolver` over its own
 store instead. The packages' entry points are in the C# reference:
-[`MMLib.Alvo.Admin`](/MMLib.Alvo/reference/csharp/mmlib-alvo-admin/) and
-[`MMLib.Alvo.Identity`](/MMLib.Alvo/reference/csharp/mmlib-alvo-identity/).
+[`MMLib.Alvo.Admin`](/reference/csharp/mmlib-alvo-admin/) and
+[`MMLib.Alvo.Identity`](/reference/csharp/mmlib-alvo-identity/).
 
 ## What your host still owns
 
@@ -171,13 +171,13 @@ Alvo adds no authentication, authorization or routing middleware on your behalf.
 
 - **Authentication of your own users.** Alvo's generated API authenticates its own API keys. Your app's cookie or token
   users reach the same data through your own endpoints, which pass Alvo the caller and let the descriptor's rules
-  decide: [Use your own authentication](/MMLib.Alvo/guides/own-authentication/).
+  decide: [Use your own authentication](/guides/own-authentication/).
 - **Error rendering.** The sample deliberately does not call `AddAlvoProblemDetails()`, because an embedded host owns
   the shape of its error responses. Without it, Alvo's endpoints still answer their own refusals as problem documents,
   but three problem types are only produced with it: `unreadable-request`, `internal` and `function-failed`
-  ([Problem types](/MMLib.Alvo/reference/problem-types/)).
+  ([Problem types](/reference/problem-types/)).
 - **Your own endpoints.** They call Alvo in process through `IAlvoData`, with no HTTP round trip and no second
-  authorization model: [Call Alvo from your endpoints](/MMLib.Alvo/guides/call-from-endpoints/).
+  authorization model: [Call Alvo from your endpoints](/guides/call-from-endpoints/).
 
 :::caution[Not in this build]
 A host cannot yet publish its own signed-in user to the generated `/api/alvo` routes: they authenticate the API-key
@@ -190,21 +190,21 @@ target. The seam is planned for a later phase ([#210](https://github.com/Burgyn/
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 401 | [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | An API key was sent to `/api/alvo` and cannot be used: a wrong secret, or a role the descriptor does not declare. | Use the secret you configured; give the key only roles in `auth.roles` or built in. | every host |
+| 401 | [`unauthenticated`](/reference/problem-types/#unauthenticated) | An API key was sent to `/api/alvo` and cannot be used: a wrong secret, or a role the descriptor does not declare. | Use the secret you configured; give the key only roles in `auth.roles` or built in. | every host |
 
 If the app stops at startup instead, the message names the option it refused, such as a dev key with no secret, and
 what to set.
 
 ## Reference
 
-- Registration: [`MMLib.Alvo`](/MMLib.Alvo/reference/csharp/mmlib-alvo/),
-  [`MMLib.Alvo.Data.Sqlite`](/MMLib.Alvo/reference/csharp/mmlib-alvo-data-sqlite/),
-  [`MMLib.Alvo.Data.PostgreSql`](/MMLib.Alvo/reference/csharp/mmlib-alvo-data-postgresql/).
-- Configuration: [`Alvo:Auth`, `Alvo:Api` and every other key](/MMLib.Alvo/reference/configuration/).
+- Registration: [`MMLib.Alvo`](/reference/csharp/mmlib-alvo/),
+  [`MMLib.Alvo.Data.Sqlite`](/reference/csharp/mmlib-alvo-data-sqlite/),
+  [`MMLib.Alvo.Data.PostgreSql`](/reference/csharp/mmlib-alvo-data-postgresql/).
+- Configuration: [`Alvo:Auth`, `Alvo:Api` and every other key](/reference/configuration/).
 - The rules every extending package follows:
   [`docs/architecture/extensibility.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/extensibility.md).
 
 ## Next
 
-**[Call Alvo from your endpoints](/MMLib.Alvo/guides/call-from-endpoints/)**: read and write Alvo's data from your own
+**[Call Alvo from your endpoints](/guides/call-from-endpoints/)**: read and write Alvo's data from your own
 minimal-API routes, under your users' identity and the descriptor's rules.

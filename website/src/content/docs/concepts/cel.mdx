@@ -46,7 +46,7 @@ from the table compiles nowhere, not everywhere.
 | Conditional (`a ? b : c`) | ✗ | ✓ | ✗ | ✗ | ✗ |
 | `changed(field)` | ✗ | ✗ | ✓ | ✗ | ✗ |
 | `now()` | ✗ | ✗ | ✗ | ✓ | ✗ |
-| A [catalogued function](/MMLib.Alvo/reference/cel-functions/), built in or registered by the host | ✗ | ✗ | ✓ | ✓ | ✗ |
+| A [catalogued function](/reference/cel-functions/), built in or registered by the host | ✗ | ✗ | ✓ | ✓ | ✗ |
 
 Each function narrows that last row further with its own list of profiles. Where each profile applies, and what it must
 produce:
@@ -147,13 +147,13 @@ with the reason for each is in
 
 **Function calls**: catalogued functions are called globally, `trim(new.title)` rather than `new.title.trim()`; a
 `null` argument makes the result `null`; decimals stay decimals (Alvo has no `double`): `math.round` returns the
-type it is given, and `math.round(x, digits)` takes a decimal and a number of digits from 0 to 28. The [CEL functions](/MMLib.Alvo/reference/cel-functions/) reference
+type it is given, and `math.round(x, digits)` takes a decimal and a number of digits from 0 to 28. The [CEL functions](/reference/cel-functions/) reference
 lists every function with its profiles.
 
 ## Put it to work
 
-- [Access rules](/MMLib.Alvo/guides/access-rules/): the Rule profile, and what a caller sees when a rule excludes them.
-- [Validate and transform writes (before-hooks)](/MMLib.Alvo/guides/before-hooks/): the Condition and Mutate profiles.
-- [Computed fields and rollups](/MMLib.Alvo/guides/computed-and-rollups/): the Computed profile.
-- [Custom CEL functions](/MMLib.Alvo/guides/custom-cel-functions/): add a function from your own C# host.
-- [CEL functions](/MMLib.Alvo/reference/cel-functions/): the catalog.
+- [Access rules](/guides/access-rules/): the Rule profile, and what a caller sees when a rule excludes them.
+- [Validate and transform writes (before-hooks)](/guides/before-hooks/): the Condition and Mutate profiles.
+- [Computed fields and rollups](/guides/computed-and-rollups/): the Computed profile.
+- [Custom CEL functions](/guides/custom-cel-functions/): add a function from your own C# host.
+- [CEL functions](/reference/cel-functions/): the catalog.

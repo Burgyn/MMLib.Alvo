@@ -8,15 +8,15 @@
   <a href="https://github.com/Burgyn/MMLib.Alvo/actions/workflows/ci.yml"><img src="https://github.com/Burgyn/MMLib.Alvo/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
   <a href="https://dotnet.microsoft.com/download/dotnet/10.0"><img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10"></a>
-  <a href="https://burgyn.github.io/MMLib.Alvo/"><img src="https://img.shields.io/badge/docs-burgyn.github.io-2ea44f" alt="Documentation"></a>
-  <a href="https://burgyn.github.io/MMLib.Alvo/project/roadmap/"><img src="https://img.shields.io/badge/status-pre--v0.1-orange" alt="Status: pre-v0.1"></a>
+  <a href="https://alvo.burgyn.online/"><img src="https://img.shields.io/badge/docs-alvo.burgyn.online-2ea44f" alt="Documentation"></a>
+  <a href="https://alvo.burgyn.online/project/roadmap/"><img src="https://img.shields.io/badge/status-pre--v0.1-orange" alt="Status: pre-v0.1"></a>
 </p>
 
 <p align="center">
-  <a href="https://burgyn.github.io/MMLib.Alvo/">Documentation</a> ·
+  <a href="https://alvo.burgyn.online/">Documentation</a> ·
   <a href="#quick-start">Quick start</a> ·
-  <a href="https://burgyn.github.io/MMLib.Alvo/start-here/tutorial/">Tutorial</a> ·
-  <a href="https://burgyn.github.io/MMLib.Alvo/reference/">Reference</a>
+  <a href="https://alvo.burgyn.online/start-here/tutorial/">Tutorial</a> ·
+  <a href="https://alvo.burgyn.online/reference/">Reference</a>
 </p>
 
 Alvo is a .NET-native backend-as-a-service: one validated JSON descriptor — entities, access rules, hooks, computed
@@ -142,20 +142,20 @@ your own file; the demo key still authenticates, but field-service needs a tenan
 adding, and the compose file's header lists exactly what to change. `edge` follows `main`; `ALVO_IMAGE` pins
 another tag. Keep the variables exported for the session; tear down with
 `docker compose -f docker-compose.quickstart.yml down --volumes`. To build the image from source instead, see
-[Running in production](https://burgyn.github.io/MMLib.Alvo/guides/production/#1-get-the-image).
+[Running in production](https://alvo.burgyn.online/guides/production/#1-get-the-image).
 
-Next: [the 10-minute tutorial →](https://burgyn.github.io/MMLib.Alvo/start-here/tutorial/) · [run your own descriptor](https://burgyn.github.io/MMLib.Alvo/start-here/run-your-own/)
+Next: [the 10-minute tutorial →](https://alvo.burgyn.online/start-here/tutorial/) · [run your own descriptor](https://alvo.burgyn.online/start-here/run-your-own/)
 
 ## What you get
 
-- **[One validated descriptor](https://burgyn.github.io/MMLib.Alvo/concepts/descriptor/)** — entities, fields, rules, hooks, computed fields and rollups, checked by a JSON Schema and then semantically.
-- **[Rules in SQL](https://burgyn.github.io/MMLib.Alvo/guides/access-rules/)** — CEL access rules compiled into the SQL of every list, read, update and delete (a create's row is checked in the transaction); an operation with no rule is refused.
-- **[Hooks that fail closed](https://burgyn.github.io/MMLib.Alvo/guides/before-hooks/)** — before-hooks refuse or rewrite a write inside its transaction, with built-in functions and your own C# ones.
-- **[Events and webhooks](https://burgyn.github.io/MMLib.Alvo/guides/after-hooks-and-webhooks/)** — every write commits its event through an outbox; after-hooks send e-mail and deliver webhooks, with retries.
-- **[Audit](https://burgyn.github.io/MMLib.Alvo/guides/audit-row-changes/) and [history](https://burgyn.github.io/MMLib.Alvo/guides/apply-and-evolve/)** — audit columns per entity, and every applied descriptor kept as a revision you can roll back to.
-- **[Agent-first](https://burgyn.github.io/MMLib.Alvo/start-here/coding-agents/)** — problem documents with a pointer and a fix suggestion for invalid input, dry runs, `Idempotency-Key`, and `llms.txt`.
-- **[Admin dashboard](https://burgyn.github.io/MMLib.Alvo/guides/admin-dashboard/)** — schema, rule and hook editors, a data browser, history and rollback, and a schema assistant.
-- **[Standalone or embedded](https://burgyn.github.io/MMLib.Alvo/concepts/modes/)** — the published Docker image, or a library in your ASP.NET Core host, on SQLite or PostgreSQL.
+- **[One validated descriptor](https://alvo.burgyn.online/concepts/descriptor/)** — entities, fields, rules, hooks, computed fields and rollups, checked by a JSON Schema and then semantically.
+- **[Rules in SQL](https://alvo.burgyn.online/guides/access-rules/)** — CEL access rules compiled into the SQL of every list, read, update and delete (a create's row is checked in the transaction); an operation with no rule is refused.
+- **[Hooks that fail closed](https://alvo.burgyn.online/guides/before-hooks/)** — before-hooks refuse or rewrite a write inside its transaction, with built-in functions and your own C# ones.
+- **[Events and webhooks](https://alvo.burgyn.online/guides/after-hooks-and-webhooks/)** — every write commits its event through an outbox; after-hooks send e-mail and deliver webhooks, with retries.
+- **[Audit](https://alvo.burgyn.online/guides/audit-row-changes/) and [history](https://alvo.burgyn.online/guides/apply-and-evolve/)** — audit columns per entity, and every applied descriptor kept as a revision you can roll back to.
+- **[Agent-first](https://alvo.burgyn.online/start-here/coding-agents/)** — problem documents with a pointer and a fix suggestion for invalid input, dry runs, `Idempotency-Key`, and `llms.txt`.
+- **[Admin dashboard](https://alvo.burgyn.online/guides/admin-dashboard/)** — schema, rule and hook editors, a data browser, history and rollback, and a schema assistant.
+- **[Standalone or embedded](https://alvo.burgyn.online/concepts/modes/)** — the published Docker image, or a library in your ASP.NET Core host, on SQLite or PostgreSQL.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/rules-editor-dark-2x.png">
@@ -183,12 +183,12 @@ flowchart TB
 A descriptor reaches the schema registry from a file at boot or through the Management API, which the dashboard and
 agents share. Every request then takes the runtime path: a read's rule is part of the SQL that reads, a write's
 before-hooks, row and outbox event share one transaction, and the after-hooks run after the commit.
-[Architecture](https://burgyn.github.io/MMLib.Alvo/concepts/architecture/) has the details.
+[Architecture](https://alvo.burgyn.online/concepts/architecture/) has the details.
 
 ## Packages
 
 Nothing is on NuGet yet. Until v0.1, reference the projects from a clone, or pack them to a local feed —
-[Embed in ASP.NET Core](https://burgyn.github.io/MMLib.Alvo/start-here/embed/) shows both.
+[Embed in ASP.NET Core](https://alvo.burgyn.online/start-here/embed/) shows both.
 
 | Package | Description |
 | --- | --- |
@@ -209,8 +209,8 @@ from `main` as `edge` until the first release tag.
 Alvo is **pre-v0.1**. Everything above runs today and is tested on every change, but the descriptor format
 and the APIs may still change before the first tagged release. Some declared blocks parse without running yet, and
 dynamic entities — record types your end users define at runtime — are planned, not shipped.
-[What works today](https://burgyn.github.io/MMLib.Alvo/start-here/what-works-today/) says exactly what runs;
-[Roadmap and status](https://burgyn.github.io/MMLib.Alvo/project/roadmap/) and [`docs/PLAN.md`](docs/PLAN.md) say what
+[What works today](https://alvo.burgyn.online/start-here/what-works-today/) says exactly what runs;
+[Roadmap and status](https://alvo.burgyn.online/project/roadmap/) and [`docs/PLAN.md`](docs/PLAN.md) say what
 comes next.
 
 ## Contributing
@@ -224,4 +224,4 @@ process, including the CLA.
 optional hosting may be commercial, as separate `Alvo.Enterprise.*` packages; later commercialisation means adding
 add-ons, never relicensing the core.
 
-Docs: https://burgyn.github.io/MMLib.Alvo/ · For agents: https://burgyn.github.io/MMLib.Alvo/llms.txt
+Docs: https://alvo.burgyn.online/ · For agents: https://alvo.burgyn.online/llms.txt

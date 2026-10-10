@@ -1,7 +1,53 @@
 ---
 import Default from '@astrojs/starlight/components/Head.astro';
 import { Font } from 'astro:assets';
+
+// Preload only the two faces the first screen sets in text: body copy (400) and the headline (800), Latin only.
+// Every other weight and subset still loads on demand, with font-display: swap, so text never waits for a font.
+const preload = [{ weight: 400, subset: 'latin' }, { weight: 800, subset: 'latin' }];
+
+// Structured data for the landing only: the project, as a piece of software and as its source code.
+const { entry } = Astro.locals.starlightRoute;
+const home = entry.data.template === 'splash' && Astro.site ? new URL(import.meta.env.BASE_URL, Astro.site).href : null;
+const repository = 'https://github.com/Burgyn/MMLib.Alvo';
+const license = 'https://www.apache.org/licenses/LICENSE-2.0';
+const description = entry.data.description;
+const structured = home && {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'SoftwareApplication',
+      '@id': `${home}#software`,
+      name: 'Alvo',
+      alternateName: 'MMLib.Alvo',
+      description,
+      url: home,
+      applicationCategory: 'DeveloperApplication',
+      applicationSubCategory: 'Backend-as-a-Service',
+      operatingSystem: 'Linux, macOS, Windows (Docker image or .NET 10)',
+      softwareVersion: 'pre-v0.1',
+      license,
+      isAccessibleForFree: true,
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+      image: new URL('og.png', home).href,
+      author: { '@type': 'Person', name: 'Milan Martiniak', url: 'https://github.com/Burgyn' },
+    },
+    {
+      '@type': 'SoftwareSourceCode',
+      '@id': `${home}#source`,
+      name: 'MMLib.Alvo',
+      description,
+      url: home,
+      codeRepository: repository,
+      programmingLanguage: { '@type': 'ComputerLanguage', name: 'C#' },
+      runtimePlatform: '.NET 10',
+      license,
+      targetProduct: { '@id': `${home}#software` },
+    },
+  ],
+};
 ---
 <Default><slot /></Default>
-<Font cssVariable="--font-public-sans" preload />
+<Font cssVariable="--font-public-sans" preload={preload} />
 <Font cssVariable="--font-ibm-plex-mono" />
+{structured && <script type="application/ld+json" set:html={JSON.stringify(structured)} />}

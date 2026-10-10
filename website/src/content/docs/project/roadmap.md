@@ -30,15 +30,15 @@ the test gates. A release does not go out with a known hole.
 
 - **The parts of the descriptor format that are warned or refused.** A block this build parses and does not run, such
   as `automation`, `functions` or `dynamicEntities`, will start doing what it declares when its feature lands; a refused
-  key stops being refused. The list is [Capabilities in this build](/MMLib.Alvo/reference/capabilities/). Today's
+  key stops being refused. The list is [Capabilities in this build](/reference/capabilities/). Today's
   honoured behaviour is not what this item is about.
 - **The Management API's routes and bodies.** It has no OpenAPI document of its own yet; its reference here is generated
   from the running route table. Expect it to be described, and possibly reshaped, before it is frozen.
 - **The base URI of the problem types.** A refusal's `type` is `https://alvo.dev/errors/<slug>`, and that address does
   not resolve today. The base may move; the slug after it does not
-  ([Problem types](/MMLib.Alvo/reference/problem-types/) explains the mapping).
+  ([Problem types](/reference/problem-types/) explains the mapping).
 - **The schema's URL.** A descriptor's `$schema` and the schema's own `$id`, `https://alvo.dev/schema/v1/project.json`,
-  do not resolve either. This site serves a copy at `https://burgyn.github.io/MMLib.Alvo/schema/v1/project.json`; the
+  do not resolve either. This site serves a copy at `https://alvo.burgyn.online/schema/v1/project.json`; the
   canonical address may still change.
 - **The environment-variable names** of the container, which become a breaking change once a release tag of the image
   is published ([#233](https://github.com/Burgyn/MMLib.Alvo/issues/233)).
@@ -47,17 +47,17 @@ the test gates. A release does not go out with a known hole.
 
 - **The descriptor format version, `apiVersion: alvo.dev/v1`.** The schema's own rule: within v1 the format only grows;
   a breaking change becomes `alvo.dev/v2`.
-- **The problem-type slugs**, the fifteen in [Problem types](/MMLib.Alvo/reference/problem-types/). They are the
+- **The problem-type slugs**, the fifteen in [Problem types](/reference/problem-types/). They are the
   contract a client branches on, and `detail` is not.
 
 The Data API's URL grammar follows PostgREST on purpose, and its known deviations are documented
-([Data API conventions](/MMLib.Alvo/data-api/conventions/)), but no source declares it frozen before v0.1.
+([Data API conventions](/data-api/conventions/)), but no source declares it frozen before v0.1.
 
 ## What v0.1 means
 
 v0.1 is the first release: publishing the `MMLib.Alvo.*` packages on NuGet and a versioned tag of the standalone image,
-with this documentation. Until then, [Quick start](/MMLib.Alvo/start-here/quick-start/) runs the image's `edge` tag,
-built from `main`, and [Embed in ASP.NET Core](/MMLib.Alvo/start-here/embed/) references the projects or a local
+with this documentation. Until then, [Quick start](/start-here/quick-start/) runs the image's `edge` tag,
+built from `main`, and [Embed in ASP.NET Core](/start-here/embed/) references the projects or a local
 package feed. Install commands
 for the published packages appear only in tabs marked *available from v0.1*.
 
@@ -88,7 +88,7 @@ these candidates; none has a date:
   ([#36](https://github.com/Burgyn/MMLib.Alvo/issues/36)).
 - **Teams and permissions** on top of roles, and richer caller context in rules.
 - **Realtime** change notifications and **file storage**.
-- **[Dynamic entities](/MMLib.Alvo/concepts/dynamic-entities/)**: record types your own users define at runtime, in one
+- **[Dynamic entities](/concepts/dynamic-entities/)**: record types your own users define at runtime, in one
   shared store.
 - **An audit log of data changes**, beside today's history of configuration changes.
 

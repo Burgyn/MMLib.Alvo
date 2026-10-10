@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.DocsGen.Exchanges;
+using MMLib.Alvo.DocsGen.Markdown;
 using System.Globalization;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -8,7 +9,7 @@ namespace MMLib.Alvo.DocsGen.Tests.Readme;
 
 public partial class ReadmeTests
 {
-    private const string SiteUrl = "https://burgyn.github.io/MMLib.Alvo/";
+    private const string SiteUrl = SiteLinks.SiteUrl + SiteLinks.BasePath + "/";
     private static readonly string _root = RepositoryRoot.Find();
     private static readonly string _readme = Read("README.md");
 
@@ -155,6 +156,6 @@ public partial class ReadmeTests
     [GeneratedRegex(@"\{[^}/]+\}")]
     private static partial Regex Placeholder();
 
-    [GeneratedRegex(@"https://burgyn\.github\.io/MMLib\.Alvo/(?<path>[^\s)""'#]*)")]
+    [GeneratedRegex(@"https://alvo\.burgyn\.online/(?<path>[^\s)""'#]*)")]
     private static partial Regex SiteLink();
 }

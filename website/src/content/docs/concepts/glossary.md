@@ -12,7 +12,7 @@ The words these docs use with a precise meaning, in alphabetical order. Each lin
 
 One of three levels on the Management API and the dashboard: `viewer` reads, `developer` also applies and rolls back,
 `admin` also changes the `access` block, the people and the AI connection. The descriptor's `access` block maps roles to
-levels, and the highest match wins. [For coding agents](/MMLib.Alvo/start-here/coding-agents/#access-levels)
+levels, and the highest match wins. [For coding agents](/start-here/coding-agents/#access-levels)
 
 </dd>
 
@@ -20,7 +20,7 @@ levels, and the highest match wins. [For coding agents](/MMLib.Alvo/start-here/c
 <dd>
 
 The CEL profile of the `access` block's three levels: a boolean over `@user` alone, with no row and no tenant.
-[CEL in Alvo](/MMLib.Alvo/concepts/cel/#the-five-profiles)
+[CEL in Alvo](/concepts/cel/#the-five-profiles)
 
 </dd>
 
@@ -29,7 +29,7 @@ The CEL profile of the `access` block's three levels: a boolean over `@user` alo
 
 An action that runs after a write has committed, delivered from the outbox: a webhook or an e-mail. It may reach the
 network and is retried, so its receiver must tolerate a repeat.
-[After-hooks, events and webhooks](/MMLib.Alvo/guides/after-hooks-and-webhooks/)
+[After-hooks, events and webhooks](/guides/after-hooks-and-webhooks/)
 
 </dd>
 
@@ -38,7 +38,7 @@ network and is retried, so its receiver must tolerate a repeat.
 
 Making a descriptor the running one: validate it, plan the migration from the schema applied last, run it, and record a
 new revision. It happens on boot, through the Management API, or from the dashboard; a dry run does everything but the
-last two steps. [Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/)
+last two steps. [Apply and evolve your descriptor](/guides/apply-and-evolve/)
 
 </dd>
 
@@ -48,7 +48,7 @@ last two steps. [Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-
 A `reject` or `mutate` action that runs inside a write's transaction, before the row is stored. Nothing a descriptor
 can express in it reaches the network (a function a host registers in C# is host code and the exception), and if it
 refuses or fails, nothing is written.
-[Validate and transform writes (before-hooks)](/MMLib.Alvo/guides/before-hooks/)
+[Validate and transform writes (before-hooks)](/guides/before-hooks/)
 
 </dd>
 
@@ -57,7 +57,7 @@ refuses or fails, nothing is written.
 
 The first dashboard account, created once from configuration rather than from the descriptor. It always holds the
 `admin` level, so a project can never lock everyone out.
-[Authentication and API keys](/MMLib.Alvo/guides/authentication/#people-sign-in-to-the-dashboard)
+[Authentication and API keys](/guides/authentication/#people-sign-in-to-the-dashboard)
 
 </dd>
 
@@ -65,7 +65,7 @@ The first dashboard account, created once from configuration rather than from th
 <dd>
 
 The set of CEL constructs an expression may use, decided by where it stands in the descriptor. There are five: Rule,
-Computed, Condition, Mutate and Access. [CEL in Alvo](/MMLib.Alvo/concepts/cel/#the-five-profiles)
+Computed, Condition, Mutate and Access. [CEL in Alvo](/concepts/cel/#the-five-profiles)
 
 </dd>
 
@@ -73,7 +73,7 @@ Computed, Condition, Mutate and Access. [CEL in Alvo](/MMLib.Alvo/concepts/cel/#
 <dd>
 
 A field whose value the database derives from the same row, written in the **Computed** profile; callers cannot write
-it. [Computed fields and rollups](/MMLib.Alvo/guides/computed-and-rollups/)
+it. [Computed fields and rollups](/guides/computed-and-rollups/)
 
 </dd>
 
@@ -81,7 +81,7 @@ it. [Computed fields and rollups](/MMLib.Alvo/guides/computed-and-rollups/)
 <dd>
 
 The CEL profile of a `computed` field: a value the database computes from the same row, with no caller context, and the
-only profile with the `? :` conditional. [CEL in Alvo](/MMLib.Alvo/concepts/cel/#the-five-profiles)
+only profile with the `? :` conditional. [CEL in Alvo](/concepts/cel/#the-five-profiles)
 
 </dd>
 
@@ -89,7 +89,7 @@ only profile with the `? :` conditional. [CEL in Alvo](/MMLib.Alvo/concepts/cel/
 <dd>
 
 The CEL profile of a hook's `condition`: a boolean that sees the row before and after the write (`old.`, `new.`) and
-may call `changed(field)`. [CEL in Alvo](/MMLib.Alvo/concepts/cel/#the-five-profiles)
+may call `changed(field)`. [CEL in Alvo](/concepts/cel/#the-five-profiles)
 
 </dd>
 
@@ -97,7 +97,7 @@ may call `changed(field)`. [CEL in Alvo](/MMLib.Alvo/concepts/cel/#the-five-prof
 <dd>
 
 The one JSON document that defines a backend: entities, fields, rules, hooks, derived values and management access,
-never infrastructure or credentials. [The project descriptor](/MMLib.Alvo/concepts/descriptor/)
+never infrastructure or credentials. [The project descriptor](/concepts/descriptor/)
 
 </dd>
 
@@ -105,7 +105,7 @@ never infrastructure or credentials. [The project descriptor](/MMLib.Alvo/concep
 <dd>
 
 An apply that stops before changing anything (`?dryRun=true` on the Management API): it answers with the plan, or with
-the refusal a real apply would give. [Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/)
+the refusal a real apply would give. [Apply and evolve your descriptor](/guides/apply-and-evolve/)
 
 </dd>
 
@@ -113,7 +113,7 @@ the refusal a real apply would give. [Apply and evolve your descriptor](/MMLib.A
 <dd>
 
 Running Alvo as NuGet packages inside your own ASP.NET Core app, beside your own endpoints and users.
-[Standalone and embedded](/MMLib.Alvo/concepts/modes/)
+[Standalone and embedded](/concepts/modes/)
 
 </dd>
 
@@ -121,7 +121,7 @@ Running Alvo as NuGet packages inside your own ASP.NET Core app, beside your own
 <dd>
 
 One kind of record the descriptor declares, such as `tickets`: a table in the database and its own routes in the Data
-API. [Entities and fields](/MMLib.Alvo/guides/entities-and-fields/)
+API. [Entities and fields](/guides/entities-and-fields/)
 
 </dd>
 
@@ -129,7 +129,7 @@ API. [Entities and fields](/MMLib.Alvo/guides/entities-and-fields/)
 <dd>
 
 A descriptor block this build runs as documented. The others are warned or refused.
-[Capabilities in this build](/MMLib.Alvo/reference/capabilities/)
+[Capabilities in this build](/reference/capabilities/)
 
 </dd>
 
@@ -137,7 +137,7 @@ A descriptor block this build runs as documented. The others are warned or refus
 <dd>
 
 The CEL profile of a before-hook's `mutate` values: a value a field can hold, computed from the row, functions and
-arithmetic. [CEL in Alvo](/MMLib.Alvo/concepts/cel/#the-five-profiles)
+arithmetic. [CEL in Alvo](/concepts/cel/#the-five-profiles)
 
 </dd>
 
@@ -145,7 +145,7 @@ arithmetic. [CEL in Alvo](/MMLib.Alvo/concepts/cel/#the-five-profiles)
 <dd>
 
 In a hook, the row as it will be stored (`new.status`) and as it was before the write (`old.status`). Only the Condition
-and Mutate profiles can read them. [Validate and transform writes (before-hooks)](/MMLib.Alvo/guides/before-hooks/)
+and Mutate profiles can read them. [Validate and transform writes (before-hooks)](/guides/before-hooks/)
 
 </dd>
 
@@ -153,7 +153,7 @@ and Mutate profiles can read them. [Validate and transform writes (before-hooks)
 <dd>
 
 The table every write appends its event to, in the same transaction as the row, so there is no change without an event
-and no event without a change. After-hooks are delivered from it. [Architecture](/MMLib.Alvo/concepts/architecture/#events-and-the-outbox)
+and no event without a change. After-hooks are delivered from it. [Architecture](/concepts/architecture/#events-and-the-outbox)
 
 </dd>
 
@@ -161,7 +161,7 @@ and no event without a change. After-hooks are delivered from it. [Architecture]
 <dd>
 
 The slug at the end of a refusal's `type` (`https://alvo.dev/errors/forbidden`) that names its kind. Clients branch on
-it, never on the prose in `detail`. [Problem types](/MMLib.Alvo/reference/problem-types/)
+it, never on the prose in `detail`. [Problem types](/reference/problem-types/)
 
 </dd>
 
@@ -169,7 +169,7 @@ it, never on the prose in `detail`. [Problem types](/MMLib.Alvo/reference/proble
 <dd>
 
 A descriptor feature the schema allows but this build rejects at apply, with a reason and a fix, because accepting it
-would silently do something other than what it says. [Capabilities in this build](/MMLib.Alvo/reference/capabilities/#refused-at-apply)
+would silently do something other than what it says. [Capabilities in this build](/reference/capabilities/#refused-at-apply)
 
 </dd>
 
@@ -178,7 +178,7 @@ would silently do something other than what it says. [Capabilities in this build
 
 One entry in a project's append-only descriptor history: the descriptor, its number, who applied it, when and why.
 Every apply adds one, a rollback included, and none is rewritten. Do not confuse it with `apiVersion`, the format's
-version. [Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/)
+version. [Apply and evolve your descriptor](/guides/apply-and-evolve/)
 
 </dd>
 
@@ -187,7 +187,7 @@ version. [Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/
 
 A name a caller holds, such as `agent`, that rules test with `'agent' in @user.roles`. The descriptor declares its roles
 in `auth.roles`; `anon`, `authenticated` and `admin` are built in. A key carrying a role the descriptor does not declare
-authenticates nothing. [Authentication and API keys](/MMLib.Alvo/guides/authentication/)
+authenticates nothing. [Authentication and API keys](/guides/authentication/)
 
 </dd>
 
@@ -195,7 +195,7 @@ authenticates nothing. [Authentication and API keys](/MMLib.Alvo/guides/authenti
 <dd>
 
 A field that aggregates related rows, such as the sum of an order's lines, kept up to date inside the same transaction
-as the change. [Computed fields and rollups](/MMLib.Alvo/guides/computed-and-rollups/)
+as the change. [Computed fields and rollups](/guides/computed-and-rollups/)
 
 </dd>
 
@@ -205,7 +205,7 @@ as the change. [Computed fields and rollups](/MMLib.Alvo/guides/computed-and-rol
 A CEL expression per entity operation (`list`, `get`, `create`, `update`, `delete`) that decides which rows a caller may
 reach: rendered into the SQL that reads rows, and checked against the row a write would store. An operation
 without one is refused.
-[Access rules](/MMLib.Alvo/guides/access-rules/)
+[Access rules](/guides/access-rules/)
 
 </dd>
 
@@ -213,7 +213,7 @@ without one is refused.
 <dd>
 
 The CEL profile of rules and of `hidden` and `readOnly` flags: a boolean over the current row, `@user` and `@tenant`,
-with no arithmetic. [CEL in Alvo](/MMLib.Alvo/concepts/cel/#the-five-profiles)
+with no arithmetic. [CEL in Alvo](/concepts/cel/#the-five-profiles)
 
 </dd>
 
@@ -222,7 +222,7 @@ with no arithmetic. [CEL in Alvo](/MMLib.Alvo/concepts/cel/#the-five-profiles)
 
 A limit written on an API key, `<entity|*>:<read|write>`, that narrows what the key reaches on the Data API whatever the
 rules allow. Scopes do not limit the Management API, where a key reaches what its roles reach.
-[Authentication and API keys](/MMLib.Alvo/guides/authentication/#3-narrow-a-key-with-scopes)
+[Authentication and API keys](/guides/authentication/#3-narrow-a-key-with-scopes)
 
 </dd>
 
@@ -230,7 +230,7 @@ rules allow. Scopes do not limit the Management API, where a key reaches what it
 <dd>
 
 Running Alvo as a container image driven by a mounted descriptor, with the dashboard and an API browser included.
-[Standalone and embedded](/MMLib.Alvo/concepts/modes/)
+[Standalone and embedded](/concepts/modes/)
 
 </dd>
 
@@ -238,7 +238,7 @@ Running Alvo as a container image driven by a mounted descriptor, with the dashb
 <dd>
 
 The customer or organisation a caller acts for, at most one per caller. On a tenant-scoped entity every row belongs to
-one tenant, and `@tenant.id` is the caller's tenant in a rule. [Multi-tenancy](/MMLib.Alvo/guides/multi-tenancy/)
+one tenant, and `@tenant.id` is the caller's tenant in a rule. [Multi-tenancy](/guides/multi-tenancy/)
 
 </dd>
 
@@ -246,7 +246,7 @@ one tenant, and `@tenant.id` is the caller's tenant in a rule. [Multi-tenancy](/
 <dd>
 
 The caller in an expression: `@user.id` and `@user.roles`, and nothing else. An expression that reads `@user.id` refuses
-a caller with no identity. [Access rules](/MMLib.Alvo/guides/access-rules/)
+a caller with no identity. [Access rules](/guides/access-rules/)
 
 </dd>
 
@@ -254,7 +254,7 @@ a caller with no identity. [Access rules](/MMLib.Alvo/guides/access-rules/)
 <dd>
 
 A descriptor block this build parses and accepts but does not run. The apply succeeds, and the dashboard and the
-capabilities answer say what does not happen. [Capabilities in this build](/MMLib.Alvo/reference/capabilities/#declared-but-not-run-in-this-build)
+capabilities answer say what does not happen. [Capabilities in this build](/reference/capabilities/#declared-but-not-run-in-this-build)
 
 </dd>
 
@@ -262,7 +262,7 @@ capabilities answer say what does not happen. [Capabilities in this build](/MMLi
 <dd>
 
 The dashboard's one unapplied draft of the descriptor, which every screen and the schema assistant edit. Nothing changes
-until you preview and apply it. [The admin dashboard](/MMLib.Alvo/guides/admin-dashboard/#3-change-the-schema)
+until you preview and apply it. [The admin dashboard](/guides/admin-dashboard/#3-change-the-schema)
 
 </dd>
 

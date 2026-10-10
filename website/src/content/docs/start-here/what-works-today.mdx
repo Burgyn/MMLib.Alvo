@@ -6,16 +6,16 @@ sidebar:
 ---
 
 This page says plainly what the current build does, so you can decide whether it does enough for you. The
-[Capabilities in this build](/MMLib.Alvo/reference/capabilities/) page is the authority: it is generated from the
+[Capabilities in this build](/reference/capabilities/) page is the authority: it is generated from the
 running framework's own answer, the same one the dashboard and the schema assistant read.
 
 ## Status
 
 Alvo is **pre-v0.1**. The standalone image is published as `ghcr.io/burgyn/alvo:edge`, built from `main`, and runs
-with one downloaded compose file ([Quick start](/MMLib.Alvo/start-here/quick-start/)). No NuGet package is published
+with one downloaded compose file ([Quick start](/start-here/quick-start/)). No NuGet package is published
 yet: embedded, you reference the projects from a clone of the repository
-([Embed in ASP.NET Core](/MMLib.Alvo/start-here/embed/)). The descriptor format and the APIs may still change before
-v0.1, the first tagged release. [Roadmap and status](/MMLib.Alvo/project/roadmap/) lists what may change and what is
+([Embed in ASP.NET Core](/start-here/embed/)). The descriptor format and the APIs may still change before
+v0.1, the first tagged release. [Roadmap and status](/project/roadmap/) lists what may change and what is
 stable.
 
 What you can use today:
@@ -45,12 +45,12 @@ with it without saying so.
   a rollup's `where` filter, JSONata transformations and the `function`, `http.call` and `entity.update` hook actions.
 
 **Dynamic entities**, record types your end users define at runtime in one shared store, are **planned** for a later
-phase: [Dynamic entities (planned)](/MMLib.Alvo/concepts/dynamic-entities/).
+phase: [Dynamic entities (planned)](/concepts/dynamic-entities/).
 
 ## Limits
 
 Every size and count the API enforces is listed, with its value and how to change it, in
-[Limits and budgets](/MMLib.Alvo/reference/limits/). The three a first user meets: the page size of a list (a default,
+[Limits and budgets](/reference/limits/). The three a first user meets: the page size of a list (a default,
 and a ceiling a larger `limit` is refused above, never silently capped), the size of a request body, and the number of
 rows in one batch.
 
@@ -75,10 +75,10 @@ They describe that machine, not a throughput claim; the full table, how it was m
 - **Rules filter in the database.** For `list`, `get`, `update` and `delete`, a rule is compiled to a parameterized
   SQL predicate in the statement that reads or changes the rows, never a check on rows already loaded. On a `create`,
   and for the check on the row an `update` stores, the same rule is evaluated in memory over that row, inside the
-  write's transaction. [CEL](/MMLib.Alvo/concepts/cel/#how-a-rule-becomes-sql) has the table.
+  write's transaction. [CEL](/concepts/cel/#how-a-rule-becomes-sql) has the table.
 - **Hooks fail closed.** A before-hook runs inside the write's transaction; if a function in it fails, nothing is
   written.
 - **No default credential.** The image ships no API key and no administrator password; each comes from your
   configuration.
 
-The whole model is in [Security model](/MMLib.Alvo/concepts/security-model/).
+The whole model is in [Security model](/concepts/security-model/).

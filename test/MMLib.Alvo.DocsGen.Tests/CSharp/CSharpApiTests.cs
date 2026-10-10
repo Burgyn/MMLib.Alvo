@@ -162,7 +162,7 @@ public class CSharpApiTests
         index.Content.ShouldStartWith("---\ntitle: \"C# API\"\n");
         foreach (var (package, _) in ShippedPackages.All)
         {
-            index.Content.ShouldContain($"(/MMLib.Alvo/reference/csharp/{package.ToLowerInvariant().Replace('.', '-')}/)");
+            index.Content.ShouldContain($"(/reference/csharp/{package.ToLowerInvariant().Replace('.', '-')}/)");
         }
     }
 }

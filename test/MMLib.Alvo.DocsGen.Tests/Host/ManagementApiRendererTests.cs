@@ -63,7 +63,7 @@ public class ManagementApiRendererTests
         content.ShouldContain("`/management`");
         content.ShouldContain("AlvoManagementOptions.RoutePrefix");
         content.ShouldContain("not in the OpenAPI document");
-        content.ShouldContain("/MMLib.Alvo/start-here/coding-agents/");
+        content.ShouldContain("/start-here/coding-agents/");
     }
 
     [Fact]

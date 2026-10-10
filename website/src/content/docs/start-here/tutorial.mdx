@@ -27,8 +27,8 @@ and an empty directory: no clone, no build.
 ## Before you start
 
 - Docker with Compose v2, `curl` and `openssl`, and port 8080 free (stop the
-  [Quick start](/MMLib.Alvo/start-here/quick-start/)'s stack if it still runs). You run the published image the way
-  [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/) explains; this page gives you every command.
+  [Quick start](/start-here/quick-start/)'s stack if it still runs). You run the published image the way
+  [Run your own descriptor](/start-here/run-your-own/) explains; this page gives you every command.
 - Two API keys, declared by the override file the first step downloads: `agent` (roles `agent`, `authenticated`) and
   `admin` (roles `admin`, `authenticated`). Their secrets are the variables `ALVO_AGENT_KEY_SECRET` and
   `ALVO_ADMIN_KEY_SECRET`. Run every command on this page in the same shell and directory, so they stay exported.
@@ -85,7 +85,7 @@ every request, including a list that matches thousands of rows.
    <Code code={rules} lang="json" title="help-desk.alvo.json" ins={[{ range: '22-24' }]} />
 
 2. Apply it by recreating the `alvo` container. On start, Alvo applies a descriptor change that discards nothing, and
-   refuses one that would. ([Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/) covers the other
+   refuses one that would. ([Apply and evolve your descriptor](/guides/apply-and-evolve/) covers the other
    ways to apply a change, including the Management API without a restart.)
 
    <Code code={step2.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
@@ -98,7 +98,7 @@ every request, including a list that matches thousands of rows.
 
    A **404, not a 403**. A `delete` rule works like a row filter: a caller it excludes cannot see the row, and Alvo
    answers as if the row were not there, so nobody learns which rows exist that they may not touch.
-   [Access rules](/MMLib.Alvo/guides/access-rules/) lists exactly when Alvo answers 403 instead.
+   [Access rules](/guides/access-rules/) lists exactly when Alvo answers 403 instead.
 
 4. The `admin` key deletes the same ticket:
 
@@ -180,13 +180,13 @@ When you are done, stop the stack and delete its database. The files stay in `al
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 401 | [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | A key was sent and cannot be used: a wrong secret, or a role the descriptor does not declare. | Check that the secret variables are still exported in this shell, and that every role on the key is in `auth.roles` or built in. | every host |
-| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | The operation has no rule, a `create` rule refused the row, or a before-hook's `reject` fired. | Add or widen the rule, or send a row the hook's condition does not match. | every host |
-| 404 | [`not-found`](/MMLib.Alvo/reference/problem-types/#not-found) | The row does not exist, or the `get`, `update` or `delete` rule excludes it for this caller. | Check the rule for that operation. | every host |
-| 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | The body breaks the entity's declared shape, such as a missing required `title`. | Follow the violation's `pointer` and `fixSuggestion`. | every host |
+| 401 | [`unauthenticated`](/reference/problem-types/#unauthenticated) | A key was sent and cannot be used: a wrong secret, or a role the descriptor does not declare. | Check that the secret variables are still exported in this shell, and that every role on the key is in `auth.roles` or built in. | every host |
+| 403 | [`forbidden`](/reference/problem-types/#forbidden) | The operation has no rule, a `create` rule refused the row, or a before-hook's `reject` fired. | Add or widen the rule, or send a row the hook's condition does not match. | every host |
+| 404 | [`not-found`](/reference/problem-types/#not-found) | The row does not exist, or the `get`, `update` or `delete` rule excludes it for this caller. | Check the rule for that operation. | every host |
+| 422 | [`validation`](/reference/problem-types/#validation) | The body breaks the entity's declared shape, such as a missing required `title`. | Follow the violation's `pointer` and `fixSuggestion`. | every host |
 
 If `docker compose up` fails after you change the descriptor, the new version did not apply. The reason is at the end
-of `docker compose logs alvo`; see [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/#what-can-go-wrong).
+of `docker compose logs alvo`; see [Run your own descriptor](/start-here/run-your-own/#what-can-go-wrong).
 
 ## What you built
 
@@ -199,19 +199,19 @@ of `docker compose logs alvo`; see [Run your own descriptor](/MMLib.Alvo/start-h
 
 ## Reference
 
-- Descriptor keys: [`entities`](/MMLib.Alvo/reference/descriptor/entities/),
-  [fields](/MMLib.Alvo/reference/descriptor/entities-fields/),
-  [rules](/MMLib.Alvo/reference/descriptor/entities-rules/),
-  [hooks](/MMLib.Alvo/reference/descriptor/entities-hooks/),
-  [computed fields](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/),
-  [`auth`](/MMLib.Alvo/reference/descriptor/auth/).
-- CEL functions: `trim`, in the [CEL function catalog](/MMLib.Alvo/reference/cel-functions/).
-- Problem types: [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated),
-  [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden),
-  [`not-found`](/MMLib.Alvo/reference/problem-types/#not-found),
-  [`validation`](/MMLib.Alvo/reference/problem-types/#validation).
+- Descriptor keys: [`entities`](/reference/descriptor/entities/),
+  [fields](/reference/descriptor/entities-fields/),
+  [rules](/reference/descriptor/entities-rules/),
+  [hooks](/reference/descriptor/entities-hooks/),
+  [computed fields](/reference/descriptor/entities-computed-and-rollups/),
+  [`auth`](/reference/descriptor/auth/).
+- CEL functions: `trim`, in the [CEL function catalog](/reference/cel-functions/).
+- Problem types: [`unauthenticated`](/reference/problem-types/#unauthenticated),
+  [`forbidden`](/reference/problem-types/#forbidden),
+  [`not-found`](/reference/problem-types/#not-found),
+  [`validation`](/reference/problem-types/#validation).
 
 ## Next
 
-**[Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/)**: point the same stack at a file you wrote, with
+**[Run your own descriptor](/start-here/run-your-own/)**: point the same stack at a file you wrote, with
 keys for the roles it declares.

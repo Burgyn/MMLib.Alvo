@@ -17,12 +17,12 @@ import events from '../../../../../src/MMLib.Alvo.Abstractions/Events/IAlvoEvent
 :::tip[What you will achieve]
 A high-priority ticket is posted to your webhook, and closing a ticket sends a mail to the support lead. You will
 know what the receiver gets, when, how often it is retried, and which networks it may reach. About fifteen minutes,
-starting from the stack in [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
+starting from the stack in [Run your own descriptor](/start-here/run-your-own/).
 :::
 
 ## Before you start
 
-- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), run from its `alvo-help-desk`
+- The stack from [Run your own descriptor](/start-here/run-your-own/), run from its `alvo-help-desk`
   directory with `COMPOSE_FILE` and that page's secrets exported in this shell. This page uses the `agent` key (roles
   `agent`, `authenticated`).
 - An HTTPS endpoint you control, if you want to see a delivery arrive. The descriptor below points at
@@ -101,7 +101,7 @@ placeholder, and the design note's wording is tracked in [#344](https://github.c
 
 **The record is complete.** It includes fields that are `hidden` from callers, because the endpoint is declared by
 the same author who declared the `hidden` rule. Treat the endpoint as a place that sees every field. A webhook's
-optional [`payload`](/MMLib.Alvo/reference/descriptor/entities-hooks/#entities.hooks.afterCreate.action.payload) replaces
+optional [`payload`](/reference/descriptor/entities-hooks/#entities.hooks.afterCreate.action.payload) replaces
 the envelope with a `{{…}}` template you write, which must be JSON around its placeholders.
 
 ## 4. Delivery and retries
@@ -114,7 +114,7 @@ write always has one. One background dispatcher then claims events in order and 
 - **Each attempt waits at most 10 seconds** for a 2xx; a slower endpoint counts as a failure. The body is sent as
   `application/json`.
 - **Retries back off linearly:** the wait grows by one poll interval per attempt, so at the defaults ten attempts span
-  at least 45 seconds. After [`Alvo:Events:MaxAttempts`](/MMLib.Alvo/reference/configuration/#alvoevents) (10) the
+  at least 45 seconds. After [`Alvo:Events:MaxAttempts`](/reference/configuration/#alvoevents) (10) the
   event is left alone: it stays in the outbox table, undelivered, and the log has an error line naming it. Nothing
   deletes it, and nothing redelivers it.
 - **Retries are not in order.** An event whose delivery failed is tried again later, after events that came behind it,
@@ -136,7 +136,7 @@ to, when the connection opens, so a public-looking name that points inside your 
 allowed only when the URL names it literally, such as `127.0.0.1` or `localhost`.
 
 To deliver to a service on your own network, list its network in CIDR notation under
-[`Alvo:Events:WebhookAllowedNetworks`](/MMLib.Alvo/reference/configuration/#alvoevents), one entry per index:
+[`Alvo:Events:WebhookAllowedNetworks`](/reference/configuration/#alvoevents), one entry per index:
 `Alvo__Events__WebhookAllowedNetworks__0=10.20.0.0/16`. A listed network overrides every other refusal, so list the
 narrowest one that works. An entry that is not CIDR notation is refused at startup. A refused address is an ordinary
 failed delivery, retried like any other.
@@ -170,7 +170,7 @@ Know what a custom event is not, before you build on it:
 - **A dead-letter queue** with redelivery, and **retention** for the outbox table, which keeps every event's
   complete rows ([#154](https://github.com/Burgyn/MMLib.Alvo/issues/154)).
 
-[Capabilities in this build](/MMLib.Alvo/reference/capabilities/) lists each of these in the framework's own words.
+[Capabilities in this build](/reference/capabilities/) lists each of these in the framework's own words.
 :::
 
 If an email's `to` is a placeholder such as `{{new.contact_email}}`, anyone who can write the row chooses who
@@ -196,17 +196,17 @@ In this build that refusal ends the process with exit code 139 instead of 78
 
 ## Reference
 
-- Descriptor keys: [`webhooks`](/MMLib.Alvo/reference/descriptor/webhooks/),
-  [`templates`](/MMLib.Alvo/reference/descriptor/templates/),
-  [`afterCreate`](/MMLib.Alvo/reference/descriptor/entities-hooks/#entities.hooks.afterCreate),
-  [`afterUpdate`](/MMLib.Alvo/reference/descriptor/entities-hooks/#entities.hooks.afterUpdate),
-  [`afterDelete`](/MMLib.Alvo/reference/descriptor/entities-hooks/#entities.hooks.afterDelete).
-- Configuration: [`Alvo:Events`](/MMLib.Alvo/reference/configuration/#alvoevents).
-- C#: [`IAlvoEvents`](/MMLib.Alvo/reference/csharp/mmlib-alvo-abstractions/).
+- Descriptor keys: [`webhooks`](/reference/descriptor/webhooks/),
+  [`templates`](/reference/descriptor/templates/),
+  [`afterCreate`](/reference/descriptor/entities-hooks/#entities.hooks.afterCreate),
+  [`afterUpdate`](/reference/descriptor/entities-hooks/#entities.hooks.afterUpdate),
+  [`afterDelete`](/reference/descriptor/entities-hooks/#entities.hooks.afterDelete).
+- Configuration: [`Alvo:Events`](/reference/configuration/#alvoevents).
+- C#: [`IAlvoEvents`](/reference/csharp/mmlib-alvo-abstractions/).
 - Design notes: [the envelope](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/events.md#the-envelope),
   [after-hooks](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/events.md#after-hooks) and
   [the attempt ceiling](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/events.md#the-attempt-ceiling-is-the-dlq-stand-in-and-abandoned-is-observable).
 
 ## Next
 
-**[Audit row changes](/MMLib.Alvo/guides/audit-row-changes/)**: record who created and last changed each row.
+**[Audit row changes](/guides/audit-row-changes/)**: record who created and last changed each row.

@@ -32,7 +32,7 @@ public class SchemaReferenceRendererTests
         pages.ShouldAllBe(page => page.Root == OutputRoot.Reference);
         var index = Page(pages, "descriptor/index.md");
         index.ShouldContain("### `name`");
-        index.ShouldContain("/MMLib.Alvo/reference/descriptor/items/");
+        index.ShouldContain("/reference/descriptor/items/");
     }
 
     [Fact]
@@ -59,7 +59,7 @@ public class SchemaReferenceRendererTests
 
         var functions = Page(SchemaReferenceRenderer.Render(schema), "descriptor/functions.md");
 
-        functions.ShouldContain("**Not in this build:** see [What works today](/MMLib.Alvo/start-here/what-works-today/).");
+        functions.ShouldContain("**Not in this build:** see [What works today](/start-here/what-works-today/).");
     }
 
     [Fact]

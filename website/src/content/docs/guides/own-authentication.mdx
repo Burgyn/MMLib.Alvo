@@ -13,15 +13,15 @@ import cookie from '../../../snippets/shell/own-authentication-cookie.sh?raw';
 :::tip[What you will achieve]
 Your app's own signed-in users reach Alvo's data through your endpoints, and the descriptor's rules decide what each of
 them may do: an inspector repaints a vehicle, a clerk cannot. About fifteen minutes, starting from an app that embeds
-Alvo as in [Embed Alvo in ASP.NET Core](/MMLib.Alvo/start-here/embed/).
+Alvo as in [Embed Alvo in ASP.NET Core](/start-here/embed/).
 :::
 
 ## Before you start
 
-- The embedded sample from [Embed Alvo in ASP.NET Core](/MMLib.Alvo/start-here/embed/), run from a clone with the
+- The embedded sample from [Embed Alvo in ASP.NET Core](/start-here/embed/), run from a clone with the
   .NET 10 SDK, plus `curl` and `jq`. Its code is the pattern this page walks through.
 - Its descriptor, [`examples/vehicle-registry`](https://github.com/Burgyn/MMLib.Alvo/blob/main/examples/vehicle-registry/vehicles.alvo.json),
-  the same one [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/) serves from Docker. It lets `admin` and
+  the same one [Run your own descriptor](/start-here/run-your-own/) serves from Docker. It lets `admin` and
   `inspector` update a vehicle and every authenticated caller read one.
 
 ## 1. Two surfaces, one backend
@@ -70,9 +70,9 @@ Every `/app` endpoint wraps its work in one helper that builds the caller Alvo w
   which is a boot problem rather than a sign-in problem.
 - **No tenant here, because this descriptor declares no tenancy.** Over a tenant-scoped entity, set
   `AlvoContext.Tenant` from your user's tenant, or every request is refused before any rule runs
-  ([Multi-tenancy](/MMLib.Alvo/guides/multi-tenancy/)).
+  ([Multi-tenancy](/guides/multi-tenancy/)).
 
-[Call Alvo from your endpoints](/MMLib.Alvo/guides/call-from-endpoints/) shows the endpoints that use it.
+[Call Alvo from your endpoints](/guides/call-from-endpoints/) shows the endpoints that use it.
 
 ## 4. Try it
 
@@ -96,7 +96,7 @@ redirect to a sign-in page. Stop the sample with `kill %1`.
 `IAlvoData` takes the caller as an explicit `AlvoContext` parameter on every call, so your endpoint states who it acts
 as and Alvo enforces the rules inside the call, over the same compiled policy the generated API uses. The generated
 routes resolve their own caller from the API-key header and ignore whatever your middleware does.
-[Standalone and embedded](/MMLib.Alvo/concepts/modes/) compares the two modes.
+[Standalone and embedded](/concepts/modes/) compares the two modes.
 
 :::caution[Not in this build]
 A host cannot publish its own signed-in user to the generated `/api/alvo` routes. Each generated route resolves the
@@ -121,14 +121,14 @@ attach it to a cross-site request unless the user has signed in to that site wit
 cannot set it cross-origin without the server's consent.
 
 The JSON `Content-Type` requirement on every request with a body is the other half of that defence, and it has no
-switch ([Write data safely](/MMLib.Alvo/guides/write-data/#5-send-json-and-say-so)). Your own endpoints are yours to
+switch ([Write data safely](/guides/write-data/#5-send-json-and-say-so)). Your own endpoints are yours to
 protect: a cookie-authenticated `/app` route that changes data needs the same care as any other in your app.
 
 ## What can go wrong
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 401 | [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | An API key sent to `/api/alvo` cannot be used. | Use the configured secret; give the key only roles the descriptor declares. | every host |
+| 401 | [`unauthenticated`](/reference/problem-types/#unauthenticated) | An API key sent to `/api/alvo` cannot be used. | Use the configured secret; give the key only roles the descriptor declares. | every host |
 | 403 | none, your app's own | A rule or a before-hook refused (`AlvoAuthorizationException`); the sample renders it as a problem document with the exception's message. | Check the rule against the user's roles. | your endpoints |
 | 404 | none, your app's own | A rule excludes the row for this user (`AlvoRecordNotFoundException`). | Check the rule and the user's roles. | your endpoints |
 | 503 | none, your app's own | `DeclaredRoles` is `null`: no descriptor has been applied yet. | Wait for `/health/ready`; read the log if it never turns ready. | your endpoints |
@@ -136,10 +136,10 @@ protect: a cookie-authenticated `/app` route that changes data needs the same ca
 
 ## Reference
 
-- C# API: [`IAlvoData`](/MMLib.Alvo/reference/csharp/mmlib-alvo-abstractions/#ialvodata),
-  [`IAlvoContextAccessor`](/MMLib.Alvo/reference/csharp/mmlib-alvo-abstractions/#ialvocontextaccessor),
-  [`IAlvoContextResolver`](/MMLib.Alvo/reference/csharp/mmlib-alvo-abstractions/#ialvocontextresolver).
-- Configuration: [`Alvo:Auth`](/MMLib.Alvo/reference/configuration/#alvoauth).
+- C# API: [`IAlvoData`](/reference/csharp/mmlib-alvo-abstractions/#ialvodata),
+  [`IAlvoContextAccessor`](/reference/csharp/mmlib-alvo-abstractions/#ialvocontextaccessor),
+  [`IAlvoContextResolver`](/reference/csharp/mmlib-alvo-abstractions/#ialvocontextresolver).
+- Configuration: [`Alvo:Auth`](/reference/configuration/#alvoauth).
 - The sample: [`SampleHost.cs`](https://github.com/Burgyn/MMLib.Alvo/blob/main/samples/MMLib.Alvo.Samples.EmbeddedHost/SampleHost.cs)
   and [its README](https://github.com/Burgyn/MMLib.Alvo/tree/main/samples/MMLib.Alvo.Samples.EmbeddedHost).
 - Design notes: [the identity seam in `extensibility.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/extensibility.md#the-runnable-example)
@@ -147,5 +147,5 @@ protect: a cookie-authenticated `/app` route that changes data needs the same ca
 
 ## Next
 
-**[Call Alvo from your endpoints](/MMLib.Alvo/guides/call-from-endpoints/)**: the `/app` endpoints themselves, and how
+**[Call Alvo from your endpoints](/guides/call-from-endpoints/)**: the `/app` endpoints themselves, and how
 to mount the generated API beside them.
