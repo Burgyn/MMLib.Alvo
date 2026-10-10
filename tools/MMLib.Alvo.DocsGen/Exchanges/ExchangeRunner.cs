@@ -65,20 +65,26 @@ internal static class ExchangeRunner
         }
     }
 
-    private static async Task<string?> BodyOf(ExchangeStep step, string repoRoot, CancellationToken ct)
+    internal static async Task<string?> BodyOf(ExchangeStep step, string repoRoot, CancellationToken ct)
     {
-        if (step.Body is not null)
-        {
-            return step.Body.ToJsonString(ExchangeRenderer.Compact);
-        }
-
         if (step.BodyFile is null)
         {
-            return null;
+            return step.Body?.ToJsonString(ExchangeRenderer.Compact);
         }
 
         var text = (await File.ReadAllTextAsync(Path.Combine(repoRoot, step.BodyFile), ct).ConfigureAwait(false)).TrimEnd();
-        return step.BodyFileAs is null ? text : new JsonObject { [step.BodyFileAs] = text }.ToJsonString(ExchangeRenderer.Compact);
+        return step.BodyFileAs is null ? text : Wrapped(step.BodyFileAs, text, step.Body).ToJsonString(ExchangeRenderer.Compact);
+    }
+
+    private static JsonObject Wrapped(string member, string text, JsonNode? body)
+    {
+        var wrapped = new JsonObject { [member] = text };
+        foreach (var (name, value) in body?.AsObject() ?? [])
+        {
+            wrapped[name] = value?.DeepClone();
+        }
+
+        return wrapped;
     }
 
     private static async Task<CapturedResponse> SendAsync(BootedHost host, ExchangeStep step, CapturedRequest request, CancellationToken ct)

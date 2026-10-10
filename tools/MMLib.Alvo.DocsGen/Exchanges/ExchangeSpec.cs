@@ -67,6 +67,7 @@ internal sealed record ExchangeSpec(string Name, string Descriptor, IReadOnlyDic
             RefuseOwnedHeaders(headers, where);
             RefuseContentTypeWithoutBody(step, where);
             RefuseBodyFileAsWithoutBodyFile(step, where);
+            RefuseAmbiguousBody(step, where);
             return new ExchangeStep(
                 key, String(step, "method", where).ToUpperInvariant(), String(step, "path", where),
                 step["body"]?.DeepClone(), step["bodyFile"]?.GetValue<string>(), step["bodyFileAs"]?.GetValue<string>(), headers,
@@ -98,6 +99,21 @@ internal sealed record ExchangeSpec(string Name, string Descriptor, IReadOnlyDic
             if (step["bodyFileAs"] is not null && step["bodyFile"] is null)
             {
                 throw Fail($"{where} sets 'bodyFileAs' but names no 'bodyFile'");
+            }
+        }
+
+        private void RefuseAmbiguousBody(JsonObject step, string where)
+        {
+            if (step["body"] is null || step["bodyFile"] is null)
+            {
+                return;
+            }
+
+            var member = step["bodyFileAs"]?.GetValue<string>()
+                ?? throw Fail($"{where} sends both 'body' and 'bodyFile'; name the file's member with 'bodyFileAs' to merge them");
+            if (step["body"] is not JsonObject body || body.ContainsKey(member))
+            {
+                throw Fail($"{where} merges 'body' with 'bodyFile' as '{member}', so 'body' must be an object without that member");
             }
         }
 

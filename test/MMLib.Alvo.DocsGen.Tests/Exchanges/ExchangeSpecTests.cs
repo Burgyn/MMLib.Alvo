@@ -54,6 +54,22 @@ public class ExchangeSpecTests
             """)).Message.ShouldBe("fixture/noFile: step 0 sets 'bodyFileAs' but names no 'bodyFile'");
 
     [Fact]
+    public void A_body_beside_a_body_file_needs_a_member_to_merge_into() =>
+        Should.Throw<InvalidOperationException>(() => ExchangeSpec.Parse("fixture/both", """
+            { "descriptor": "d.alvo.json", "keys": {},
+              "steps": [ { "method": "POST", "path": "/api/x", "body": { "a": 1 }, "bodyFile": "f.json", "expect": 200 } ] }
+            """)).Message.ShouldBe("fixture/both: step 0 sends both 'body' and 'bodyFile'; name the file's member with 'bodyFileAs' to merge them");
+
+    [Theory]
+    [InlineData("""[1]""")]
+    [InlineData("""{ "descriptorJson": "x" }""")]
+    public void A_merged_body_must_be_an_object_without_the_file_member(string body) =>
+        Should.Throw<InvalidOperationException>(() => ExchangeSpec.Parse("fixture/clash", $$"""
+            { "descriptor": "d.alvo.json", "keys": {},
+              "steps": [ { "method": "POST", "path": "/api/x", "body": {{body}}, "bodyFile": "f.json", "bodyFileAs": "descriptorJson", "expect": 200 } ] }
+            """)).Message.ShouldContain("'body' must be an object without that member");
+
+    [Fact]
     public void A_missing_expectation_throws() =>
         Should.Throw<InvalidOperationException>(() => ExchangeSpec.Parse("fixture/missing", """
             { "descriptor": "d.alvo.json", "keys": {}, "steps": [ { "method": "GET", "path": "/api/x" } ] }

@@ -28,6 +28,23 @@ public class ExchangeRunnerTests
             .ShouldBe(("""{"type":"t"}""", """{"id":"a","traceId":"0HN"}"""));
 
     [Fact]
+    public async Task A_body_merges_into_the_wrapped_body_file()
+    {
+        var spec = ExchangeSpec.Parse("fixture/merge", """
+            { "descriptor": "d.alvo.json", "keys": {},
+              "steps": [ { "method": "POST", "path": "/x", "bodyFile": "website/src/snippets/shell/vscode-settings.json",
+                           "bodyFileAs": "descriptorJson", "body": { "path": "/a", "source": "'b'" }, "expect": 200 } ] }
+            """);
+
+        var body = await ExchangeRunner.BodyOf(spec.Steps[0], RepositoryRoot.Find(), TestContext.Current.CancellationToken);
+
+        var json = System.Text.Json.Nodes.JsonNode.Parse(body!)!.AsObject();
+        json.Select(member => member.Key).ShouldBe(["descriptorJson", "path", "source"]);
+        json["descriptorJson"]!.GetValue<string>().ShouldContain("json.schemas");
+        json["source"]!.GetValue<string>().ShouldBe("'b'");
+    }
+
+    [Fact]
     public async Task A_wrong_expectation_fails_the_run()
     {
         var spec = ExchangeSpec.Parse("fixture/wrong", """
