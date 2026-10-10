@@ -55,7 +55,7 @@ internal static partial class SchemaReferenceRenderer
 
     private static GeneratedPage DescriptorIndex(SchemaWalker walker, GuideLine guides)
     {
-        var page = new StringBuilder(Md.Frontmatter("Descriptor reference", FirstSentence(walker.Description), 0))
+        var page = new StringBuilder(Md.Frontmatter("Descriptor reference", FirstSentence(walker.Description), 0, editSource: SchemaPagesGenerator.SchemaRepoPath))
             .Append(guides.For(IndexSlug)).Append("\n\n")
             .Append(Md.Text(walker.Description)).Append("\n\n")
             .Append("## Top-level keys\n\nBlocks, each documented on its own page:\n\n");
@@ -111,7 +111,7 @@ internal static partial class SchemaReferenceRenderer
     private static GeneratedPage BlockPage(PageSpec spec, IReadOnlyList<SchemaKey> keys, GuideLine guides, string? siblings)
     {
         var description = keys.Count > 0 ? FirstSentence(keys[0].Description) : spec.Title;
-        var page = new StringBuilder(Md.Frontmatter(spec.Title, description, spec.Order, sidebarLabel: spec.Label, tocMaxHeadingLevel: 2))
+        var page = new StringBuilder(Md.Frontmatter(spec.Title, description, spec.Order, sidebarLabel: spec.Label, tocMaxHeadingLevel: 2, editSource: SchemaPagesGenerator.SchemaRepoPath))
             .Append(guides.For(spec.Slug)).Append("\n\n");
         if (siblings is not null)
         {

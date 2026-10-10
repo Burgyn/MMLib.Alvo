@@ -17,6 +17,10 @@ public class RemarksFilterTests
     [InlineData("See `docs/architecture/host.md` for the history.")]
     [InlineData("The plan 2026-10-09-f6-docs-site.md records it.")]
     [InlineData("Mirrors `AlvoIdentitySchema.Users` on purpose.")]
+    [InlineData("Not the `ALVO_*` the spec's environment table sketches.")]
+    [InlineData("A deliberate deviation (the F5 design's D2).")]
+    [InlineData("The same file the reference drawing uses (`docs/design/f5-admin`).")]
+    [InlineData("Lands with F7.")]
     public void A_paragraph_citing_contributor_material_is_dropped(string paragraph) =>
         RemarksFilter.ForReaders(paragraph, _internal).ShouldBeEmpty();
 

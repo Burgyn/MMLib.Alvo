@@ -5,6 +5,8 @@ namespace MMLib.Alvo.DocsGen.Schema;
 
 internal sealed class SchemaPagesGenerator : IPageGenerator
 {
+    internal const string SchemaRepoPath = "schema/project.schema.json";
+
     public async Task<IReadOnlyList<GeneratedPage>> GenerateAsync(DocsGenContext context, CancellationToken ct)
     {
         var schema = await LoadAsync(context.Paths, ct).ConfigureAwait(false);

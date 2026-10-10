@@ -26,10 +26,15 @@ public class MdTests
     [Fact]
     public void Frontmatter_quotes_yaml_and_orders_the_sidebar() =>
         Md.Frontmatter("A \"quoted\" title", "Desc: with colon", 3).ShouldBe(
-            "---\ntitle: \"A \\\"quoted\\\" title\"\ndescription: \"Desc: with colon\"\nsidebar:\n  order: 3\n---\n\n");
+            "---\ntitle: \"A \\\"quoted\\\" title\"\ndescription: \"Desc: with colon\"\neditUrl: false\nsidebar:\n  order: 3\n---\n\n");
+
+    [Fact]
+    public void Frontmatter_points_the_edit_link_at_the_source_file() =>
+        Md.Frontmatter("Changelog", "What changed.", editSource: "CHANGELOG.md").ShouldBe(
+            "---\ntitle: \"Changelog\"\ndescription: \"What changed.\"\neditUrl: \"https://github.com/Burgyn/MMLib.Alvo/edit/main/CHANGELOG.md\"\n---\n\n");
 
     [Fact]
     public void Frontmatter_sets_the_sidebar_label_and_caps_the_toc() =>
         Md.Frontmatter("entities.fields", "Fields.", 2, sidebarLabel: "entities · fields", tocMaxHeadingLevel: 2).ShouldBe(
-            "---\ntitle: \"entities.fields\"\ndescription: \"Fields.\"\nsidebar:\n  order: 2\n  label: \"entities · fields\"\ntableOfContents:\n  maxHeadingLevel: 2\n---\n\n");
+            "---\ntitle: \"entities.fields\"\ndescription: \"Fields.\"\neditUrl: false\nsidebar:\n  order: 2\n  label: \"entities · fields\"\ntableOfContents:\n  maxHeadingLevel: 2\n---\n\n");
 }

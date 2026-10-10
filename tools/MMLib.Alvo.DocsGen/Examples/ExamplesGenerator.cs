@@ -15,10 +15,11 @@ internal sealed partial class ExamplesGenerator : IPageGenerator
     {
         var page = new StringBuilder(Md.Frontmatter(
                 "Examples",
-                "Every example descriptor in the repository: what it shows, whether it applies, and how to run it."))
+                "Every example descriptor in the repository: what it shows, whether it applies, and how to run it.",
+                editSource: ExampleCatalog.ReadmePath))
             .Append("Each example lives under `examples/` in the repository and is validated against the descriptor schema on every build. ")
             .Append("The ones that apply can be started with the standalone stack. Each summary comes from [`examples/README.md`](")
-            .Append(SiteLinks.RepoBlob("examples/README.md")).Append("), which also lists the keys the schema declares but this build refuses at apply.\n");
+            .Append(SiteLinks.RepoBlob(ExampleCatalog.ReadmePath)).Append("), which also lists the keys the schema declares but this build refuses at apply.\n");
         foreach (var example in examples.OrderByDescending(example => example.Runnable).ThenBy(example => example.Directory, StringComparer.Ordinal))
         {
             AppendExample(page, example);

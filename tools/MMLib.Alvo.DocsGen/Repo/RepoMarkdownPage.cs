@@ -11,7 +11,7 @@ internal static partial class RepoMarkdownPage
     internal static string Render(string markdown, string title, string description, string sourcePath)
     {
         var body = RewriteLinks(WithoutTitle(markdown.Replace("\r\n", "\n", StringComparison.Ordinal)));
-        return new StringBuilder(Md.Frontmatter(title, description))
+        return new StringBuilder(Md.Frontmatter(title, description, editSource: sourcePath))
             .Append(body.Trim())
             .Append("\n\n---\n\n*This page is generated from [`").Append(sourcePath).Append("`](").Append(SiteLinks.RepoBlob(sourcePath)).Append(").*\n")
             .ToString();

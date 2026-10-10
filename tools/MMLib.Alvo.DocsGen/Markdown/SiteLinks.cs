@@ -11,4 +11,6 @@ internal static class SiteLinks
     internal static string Absolute(string slug) => SiteUrl + Page(slug);
 
     internal static string RepoBlob(string repoPath) => $"{Repository}/blob/main/{repoPath.TrimStart('/')}";
+
+    internal static string RepoEdit(string repoPath) => $"{Repository}/edit/main/{repoPath.TrimStart('/')}";
 }

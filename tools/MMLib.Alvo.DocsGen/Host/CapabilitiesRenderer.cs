@@ -119,7 +119,7 @@ internal static class CapabilitiesRenderer
     private static IEnumerable<Entry> Refused(JsonNode capabilities) =>
         capabilities["refused"]!.AsArray().Select(node => new Entry(Text(node!, "slot"), $"{Md.Text(Text(node!, "consequence"))} **Fix:** {Md.Text(Text(node!, "fix"))}"));
 
-    private static string Text(JsonNode node, string property) => node[property]!.GetValue<string>();
+    private static string Text(JsonNode node, string property) => PlannedWork.ForReaders(node[property]!.GetValue<string>());
 
     private sealed record Entry(string Name, string Text)
     {

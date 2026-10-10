@@ -24,7 +24,8 @@ public class RepoMarkdownPageTests
     {
         var page = RepoMarkdownPage.Render("# X\n\nBody.", "Changelog", "What changed.", "CHANGELOG.md");
 
-        page.ShouldStartWith("---\ntitle: \"Changelog\"\ndescription: \"What changed.\"\n---\n\n");
+        page.ShouldStartWith(
+            "---\ntitle: \"Changelog\"\ndescription: \"What changed.\"\neditUrl: \"https://github.com/Burgyn/MMLib.Alvo/edit/main/CHANGELOG.md\"\n---\n\n");
         page.ShouldEndWith("*This page is generated from [`CHANGELOG.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/CHANGELOG.md).*\n");
     }
 

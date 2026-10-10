@@ -15,6 +15,7 @@ internal sealed record Example(
 internal static class ExampleCatalog
 {
     internal const string NotRunnableMarker = "NOT-RUNNABLE.md";
+    internal const string ReadmePath = "examples/README.md";
 
     private const string NegativeDirectory = "_negative";
     private const string BulletStart = "- **`";

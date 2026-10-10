@@ -45,11 +45,18 @@ internal static partial class Md
     internal static string Yaml(string value) =>
         "\"" + value.Replace(@"\", @"\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
 
-    internal static string Frontmatter(string title, string description, int? order = null, string? sidebarLabel = null, int? tocMaxHeadingLevel = null)
+    /// <summary>
+    /// Every generated page is gitignored, so Starlight's default "Edit page" link (the page's own path under
+    /// <c>website/</c>) would 404. A page rendered from one repository file passes that file as
+    /// <paramref name="editSource"/> and its link opens the source; a page assembled from code gets no link.
+    /// </summary>
+    internal static string Frontmatter(
+        string title, string description, int? order = null, string? sidebarLabel = null, int? tocMaxHeadingLevel = null, string? editSource = null)
     {
         var builder = new StringBuilder("---\n")
             .Append("title: ").Append(Yaml(title)).Append('\n')
-            .Append("description: ").Append(Yaml(Whitespace().Replace(description, " ").Trim())).Append('\n');
+            .Append("description: ").Append(Yaml(Whitespace().Replace(description, " ").Trim())).Append('\n')
+            .Append("editUrl: ").Append(editSource is null ? "false" : Yaml(SiteLinks.RepoEdit(editSource))).Append('\n');
         AppendSidebar(builder, order, sidebarLabel);
         if (tocMaxHeadingLevel is { } level)
         {
