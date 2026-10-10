@@ -17,3 +17,5 @@ playground/
 !.claude/skills
 .claude/skills/*
 !.claude/skills/alvo-descriptor-*
+website/
+tools/
