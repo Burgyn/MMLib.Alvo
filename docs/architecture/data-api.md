@@ -1257,7 +1257,11 @@ Three properties of that data source are requirements rather than implementation
   Before this, every delegate closed over the boot-time `EntitySchema`: a field added at runtime was refused
   as `unknown-field` until a restart, a removed one was admitted here and refused by the port as `403`, and a
   narrowed `maxLength` or a newly `required` field was enforced by nothing. The snapshot (guards run, formats
-  compiled) is built once per `SchemaModel` instance, so a request costs two volatile reads and a lookup.
+  compiled) is built once per `SchemaModel` instance in the steady state (two requests first seeing a new
+  revision at once may each build it), so a request costs two volatile reads and a lookup. The seqlock relies
+  on **no `SchemaModel` instance ever being published twice**; every publisher maps a fresh one except a
+  rollback, which publishes a copy of the stored schema — the invariant and who keeps it are on
+  `PolicyCatalogProvider.SetCurrent`.
   Pinned on both engines by `DataApiEngineTests`' runtime-apply facts and, for the interleaving, by
   `AppliedSchemaViewTests`.
 - **`GetGroupedEndpoints` forwards to the nested sources** rather than using the base implementation,

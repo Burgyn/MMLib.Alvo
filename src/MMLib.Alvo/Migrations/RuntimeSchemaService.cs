@@ -242,9 +242,14 @@ public sealed class RuntimeSchemaService
         var plan = await _migrator.PlanAsync(currentVersion.Schema, target.Schema, options, ct).ConfigureAwait(false);
         Guard(project, plan, options);
 
-        var catalog = PolicyCatalog.Build(AlvoDescriptor.Parse(target.DescriptorJson), target.Schema, _compiler);
+        // A fresh instance, never the one the store handed back: a store may return the very object an earlier
+        // revision published (InMemoryDescriptorVersionStore does), and republishing it is an ABA for every
+        // reader that keys "the revision did not change" on the published instance — AppliedSchemaView's
+        // one-revision-per-request check, and the EF port's model token. See PolicyCatalogProvider.SetCurrent.
+        var restored = target.Schema with { };
+        var catalog = PolicyCatalog.Build(AlvoDescriptor.Parse(target.DescriptorJson), restored, _compiler);
         var candidate = new DescriptorVersion(
-            target.Schema, target.DescriptorJson, 0, DateTimeOffset.UtcNow,
+            restored, target.DescriptorJson, 0, DateTimeOffset.UtcNow,
             options.Author, options.Reason ?? $"Rollback to revision {targetRevision}", RolledBackFrom: targetRevision);
         var reverted = await _writer.ApplyAndAppendAsync(project, plan, candidate, currentVersion.Revision, options, ct).ConfigureAwait(false);
         _policyCatalogProvider.SetCurrent(project, catalog);

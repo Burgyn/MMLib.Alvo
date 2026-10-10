@@ -36,8 +36,8 @@ namespace MMLib.Alvo.Api.Internal;
 ///   </item>
 /// </list>
 /// <para>
-/// <b>Compiled once per applied revision.</b> <see cref="AppliedSchemaView"/> builds exactly one catalogue
-/// per applied <see cref="SchemaModel"/> instance and every endpoint reads it from there, so no request
+/// <b>Compiled once per applied revision in the steady state.</b> <see cref="AppliedSchemaView"/> builds one
+/// catalogue per applied <see cref="SchemaModel"/> instance and every endpoint reads it from there, so no request
 /// compiles a pattern and a format shared by twenty fields is one <see cref="Regex"/>. It is <em>not</em>
 /// captured for the lifetime of the endpoint table any more: a descriptor re-applied at runtime can add,
 /// change or remove a format, and the next request is validated against the revision it was authorized under
@@ -134,7 +134,7 @@ internal sealed class FormatCatalog
 
     /// <summary>Compiles every format the applied schema's fields name.</summary>
     /// <remarks>
-    /// Called once per applied revision, from <see cref="AppliedSchemaView"/>, beside the other schema guard —
+    /// Called once per applied revision in the steady state, from <see cref="AppliedSchemaView"/>, beside the other schema guard —
     /// so a pattern this build cannot compile is refused once per revision rather than per request. The
     /// descriptor path is refused earlier, at boot stage 0 and by the runtime apply's mapper.
     /// </remarks>

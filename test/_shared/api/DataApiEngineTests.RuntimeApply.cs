@@ -127,6 +127,55 @@ public abstract partial class DataApiEngineTests
         (await filtered.ReadViolationsAsync()).Select(violation => violation.Code).ShouldBe(["unavailable-field"]);
     }
 
+    /// <summary>
+    /// A field the previous revision never had, added already <c>readOnly</c>: the mask and the field set come from
+    /// the same revision, so the write is refused as read-only — not as unknown, and not admitted.
+    /// </summary>
+    [Fact]
+    public async Task A_field_added_at_runtime_as_read_only_is_refused_as_read_only_at_once()
+    {
+        await using var world = await StartRuntimeApplyAsync();
+        await ApplyRuntimeAsync(
+            world, fields => fields["priority"] = new JsonObject { ["type"] = "string", ["readOnly"] = true });
+
+        using var created = await world.SendAsync(
+            HttpMethod.Post, "/api/tickets", _editor,
+            body: new JsonObject { ["title"] = "Leak", ["priority"] = "urgent" });
+
+        created.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await created.ReadTextAsync());
+        (await created.ReadViolationsAsync()).ShouldBe([("/priority", "read-only-field")]);
+        (await world.CountRowsAsync("tickets")).ShouldBe(0);
+    }
+
+    /// <summary>
+    /// A field the previous revision never had, added already <c>hidden</c>: it is writable (hidden restricts
+    /// reading only), never returned, and refused as a filter exactly like an undeclared field.
+    /// </summary>
+    [Fact]
+    public async Task A_field_added_at_runtime_as_hidden_is_writable_but_neither_returned_nor_filterable_at_once()
+    {
+        await using var world = await StartRuntimeApplyAsync();
+        await ApplyRuntimeAsync(
+            world, fields => fields["internal_code"] = new JsonObject { ["type"] = "string", ["hidden"] = true });
+
+        using var created = await world.SendAsync(
+            HttpMethod.Post, "/api/tickets", _editor,
+            body: new JsonObject { ["title"] = "Vault", ["internal_code"] = "X-1" });
+        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.ReadTextAsync());
+        var body = await created.ReadJsonObjectAsync();
+        var id = body["id"]!.GetValue<string>();
+        body.ContainsKey("internal_code").ShouldBeFalse("nor echoed by the create");
+
+        using var read = await world.SendAsync(HttpMethod.Get, $"/api/tickets/{id}", _editor);
+        using var filtered = await world.SendAsync(HttpMethod.Get, "/api/tickets?internal_code=eq.X-1", _editor);
+
+        (await world.CountRowsAsync("tickets", "internal_code", "X-1")).ShouldBe(1, "the hidden value was stored");
+        read.StatusCode.ShouldBe(HttpStatusCode.OK, await read.ReadTextAsync());
+        (await read.ReadJsonObjectAsync()).ContainsKey("internal_code").ShouldBeFalse("a hidden field is never returned");
+        filtered.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await filtered.ReadTextAsync());
+        (await filtered.ReadViolationsAsync()).Select(violation => violation.Code).ShouldBe(["unavailable-field"]);
+    }
+
     [Fact]
     public async Task A_facet_narrowed_at_runtime_is_enforced_at_once()
     {

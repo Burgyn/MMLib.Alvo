@@ -28,14 +28,15 @@ namespace MMLib.Alvo.Api.Internal;
 /// writable and visible, which neither revision says.
 /// </para>
 /// <para>
-/// <b>Built once per applied revision, not per request.</b> The <see cref="Snapshot"/> is cached against the
+/// <b>Built once per applied revision in the steady state, not per request.</b> The <see cref="Snapshot"/> is cached against the
 /// <see cref="SchemaModel"/> instance it was built from — reference identity, the same signal the EF port's
 /// <c>AlvoDataContextFactory</c> keys its model on, because an apply replaces the model wholesale — so a
-/// format's <see cref="System.Text.RegularExpressions.Regex"/> is compiled once per revision and a request
-/// costs two volatile reads and a dictionary lookup.
+/// format's <see cref="System.Text.RegularExpressions.Regex"/> is compiled once per revision in the steady
+/// state (two requests that first see a new revision at the same moment may each build it; one copy wins) and
+/// a request costs two volatile reads and a dictionary lookup.
 /// </para>
 /// <para>
-/// <b>The two schema guards run once per revision, here.</b> <see cref="ReservedQueryKeys"/> and
+/// <b>The two schema guards run once per revision in the steady state, here.</b> <see cref="ReservedQueryKeys"/> and
 /// <see cref="FormatCatalog.Build"/> refuse a schema this API cannot serve. For the revision the endpoint table
 /// materialises with, the refusal is <see cref="AlvoEndpointDataSource"/>'s, exactly as before. A revision
 /// applied <em>later</em> reached the registry through <c>RuntimeSchemaService</c>, whose validator and mapper
@@ -73,8 +74,10 @@ internal sealed class AppliedSchemaView(EntityRouteCatalog catalog)
     /// decision, and the decision is retaken if an apply landed in between. <c>PolicyCatalogProvider</c> publishes
     /// the rules and the schema as one <see cref="Rules.PolicyCatalog"/> reference and serves
     /// <see cref="ISchemaRegistry.GetSchema"/> off that same reference, so an unchanged schema instance on both
-    /// sides means the catalogue the engine read in between carried it too (each apply maps a fresh
-    /// <see cref="SchemaModel"/>). With a host-substituted registry the guarantee narrows to "the schema did not
+    /// sides means the catalogue the engine read in between carried it too. That rests on an invariant the
+    /// publishers keep — <b>no <see cref="SchemaModel"/> instance is ever published twice</b> (A → B → A would
+    /// pass this check with B's decision and A's fields); it is written down, with who upholds it, on
+    /// <c>PolicyCatalogProvider.SetCurrent</c>. With a host-substituted registry the guarantee narrows to "the schema did not
     /// change while the decision was taken", which is all a registry that is not the policy catalogue can offer.
     /// </para>
     /// <para>

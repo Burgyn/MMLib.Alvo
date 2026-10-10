@@ -43,6 +43,25 @@ internal sealed class PolicyCatalogProvider : IPolicyCatalogProvider
     public SchemaModel GetSchema() => Current?.Schema ?? _unprimedSchema;
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <b>Invariant: every publication carries a <see cref="SchemaModel"/> instance no earlier publication
+    /// carried.</b> Readers key "the applied revision did not change" on the instance <see cref="GetSchema"/>
+    /// returns: <c>AppliedSchemaView</c> reads it before and after a policy decision and keeps the decision only if
+    /// it is the same object, and the EF port's <c>AlvoDataContextFactory</c> mints its model token from it.
+    /// Republishing an instance that was current before (A → B → A) would let a decision taken against B pass that
+    /// check against A's fields.
+    /// </para>
+    /// <para>
+    /// It is upheld by the callers rather than by copying here, because <c>GetSchema</c> returning the very schema
+    /// the catalog was built from is itself pinned (<c>PolicyCatalogProviderSchemaTests</c>). Every caller maps a
+    /// fresh model from a descriptor — the runtime apply, the re-apply priming, the boot plan and the code-first
+    /// runner — except a rollback, which restores a stored schema and therefore publishes a copy of it
+    /// (<c>RuntimeSchemaService.RollbackAsync</c>, pinned by
+    /// <c>Rollback_publishes_a_schema_instance_no_earlier_revision_published</c>). A new caller that publishes a
+    /// schema it did not map itself owes the same copy.
+    /// </para>
+    /// </remarks>
     public void SetCurrent(string project, PolicyCatalog catalog)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(project);
