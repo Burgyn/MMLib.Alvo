@@ -27,7 +27,7 @@ internal sealed class LlmsGenerator : IPageGenerator
 
     internal static IReadOnlyList<(string Name, string Description)> Skills(string repoRoot) =>
     [
-        .. Directory.EnumerateDirectories(Path.Combine(repoRoot, ".claude", "skills"), SkillPrefix + "*")
+        .. Directory.EnumerateDirectories(Path.Combine(repoRoot, "plugins", "alvo", "skills"), SkillPrefix + "*")
             .Select(directory => (Path.GetFileName(directory), DescriptionOf(Path.Combine(directory, "SKILL.md")))),
     ];
 

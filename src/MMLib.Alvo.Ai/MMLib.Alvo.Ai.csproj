@@ -34,13 +34,13 @@
     <EmbeddedResource Include="Instructions/schema-assistant.md" LogicalName="MMLib.Alvo.Ai.Instructions.schema-assistant.md" />
   </ItemGroup>
 
-  <!-- The descriptor skills (D33): one source, .claude/skills/alvo-descriptor-*, which Claude Code discovers in this
-       repository and this package embeds; never a copy. The schema is linked for the slices the skills cite (D26):
+  <!-- The descriptor skills (D33): one source, plugins/alvo/skills/alvo-descriptor-*, the Claude Code plugin this
+       repository's marketplace publishes and this package embeds; never a copy. The schema is linked for the slices the skills cite (D26):
        a linked file, not an assembly reference, so the boundary test still holds. %(RecursiveDir) starts at the skill
        directory and is backslashed on Windows, so the logical name is spelled with forward slashes here, and
        EmbeddedSkills normalises it again. -->
   <ItemGroup>
-    <AlvoDescriptorSkill Include="$(MSBuildThisFileDirectory)../../.claude/skills/alvo-descriptor-*/**/*.md" />
+    <AlvoDescriptorSkill Include="$(MSBuildThisFileDirectory)../../plugins/alvo/skills/alvo-descriptor-*/**/*.md" />
     <EmbeddedResource Include="@(AlvoDescriptorSkill)" LogicalName="MMLib.Alvo.Ai.Skills/$([System.String]::Copy('%(RecursiveDir)').Replace('\', '/'))%(Filename)%(Extension)" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../schema/project.schema.json" LogicalName="MMLib.Alvo.Ai.Schema/project.schema.json" />
   </ItemGroup>
@@ -49,7 +49,7 @@
        silently knows nothing; this makes it a build error instead. -->
   <Target Name="AlvoRequireDescriptorSkills" BeforeTargets="BeforeBuild">
     <Error Condition="'@(AlvoDescriptorSkill)' == ''"
-           Text="No .claude/skills/alvo-descriptor-*/SKILL.md was found next to the repository root. MMLib.Alvo.Ai embeds them (D33); a Docker build must copy .claude/skills/ into its context." />
+           Text="No plugins/alvo/skills/alvo-descriptor-*/SKILL.md was found next to the repository root. MMLib.Alvo.Ai embeds them (D33); a Docker build must copy plugins/alvo/skills/ into its context." />
   </Target>
 
 </Project>

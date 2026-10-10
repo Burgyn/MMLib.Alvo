@@ -20,7 +20,7 @@ on:
       - 'src/**'
       - 'schema/**'
       - 'examples/**'
-      - '.claude/skills/alvo-descriptor-*/**'
+      - 'plugins/alvo/**'
       - 'global.json'
       - 'Directory.Build.props'
       - 'Directory.Packages.props'

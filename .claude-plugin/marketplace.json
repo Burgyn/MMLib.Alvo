@@ -1,0 +1,15 @@
+{
+  "name": "mmlib-alvo",
+  "description": "Plugins for working with Alvo, the .NET-native backend-as-a-service driven by one JSON descriptor.",
+  "owner": {
+    "name": "Burgyn",
+    "url": "https://github.com/Burgyn"
+  },
+  "plugins": [
+    {
+      "name": "alvo",
+      "source": "./plugins/alvo",
+      "description": "Teaches your coding agent the Alvo descriptor: entities, fields, rules (CEL), hooks, rollups, indexes, tenancy, access, limits."
+    }
+  ]
+}

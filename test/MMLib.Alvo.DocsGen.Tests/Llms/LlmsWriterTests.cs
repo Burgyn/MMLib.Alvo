@@ -14,7 +14,7 @@ public class LlmsWriterTests
         index.ShouldStartWith("# Alvo\n\n> Describe your backend in one JSON file.");
         index.ShouldContain("## Guides\n\n- [X guide](https://alvo.burgyn.online/guides/x/): Does X.\n");
         index.ShouldContain("## Descriptor schema and skills\n\n- [Descriptor JSON Schema](https://alvo.burgyn.online/schema/v1/project.json)");
-        index.ShouldContain("- [alvo-descriptor-hooks](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-hooks/SKILL.md): Use when hooks.\n");
+        index.ShouldContain("- [alvo-descriptor-hooks](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/plugins/alvo/skills/alvo-descriptor-hooks/SKILL.md): Use when hooks.\n");
         index.ShouldContain("https://alvo.dev/errors/<slug>");
         index.ShouldContain("## Optional\n\n- [Full text](https://alvo.burgyn.online/llms-full.txt)");
         index[index.IndexOf("## Optional", StringComparison.Ordinal)..].ShouldNotContain("project.json");

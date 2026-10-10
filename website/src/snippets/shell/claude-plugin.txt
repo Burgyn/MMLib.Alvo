@@ -1,0 +1,2 @@
+/plugin marketplace add Burgyn/MMLib.Alvo
+/plugin install alvo@mmlib-alvo

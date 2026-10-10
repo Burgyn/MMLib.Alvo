@@ -12,10 +12,12 @@ eval/
 StrykerOutput/
 *.md
 playground/
-# Only the descriptor skills of .claude/ enter the context: MMLib.Alvo.Ai embeds them (D33).
-.claude/*
-!.claude/skills
-.claude/skills/*
-!.claude/skills/alvo-descriptor-*
+# Only the descriptor skills of plugins/alvo enter the context: MMLib.Alvo.Ai embeds them (D33).
+.claude/
+.claude-plugin/
+plugins/*
+!plugins/alvo
+plugins/alvo/*
+!plugins/alvo/skills
 website/
 tools/

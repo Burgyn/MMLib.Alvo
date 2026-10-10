@@ -20,7 +20,7 @@ on:
       - 'Directory.Packages.props'
       - 'Directory.Build.props'
       - 'global.json'
-      - '.claude/skills/alvo-descriptor-*/**'
+      - 'plugins/alvo/**'
       - 'test/_shared/docs/**'
       - 'test/MMLib.Alvo.DocsGen.Tests/**'
       - '.github/workflows/docs.yml'

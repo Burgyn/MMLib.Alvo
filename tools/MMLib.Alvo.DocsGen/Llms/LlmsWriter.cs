@@ -19,6 +19,7 @@ internal static class LlmsWriter
 
     private const string RawRepository = "https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main";
     private const string CodingAgentsSlug = "start-here/coding-agents";
+    internal const string InstallSkills = "curl -fsSL " + RawRepository + "/scripts/install-agent-skills | sh";
 
     private const string DataApiLine =
         "- [Data API — example (vehicle-registry)](" + SiteLinks.SiteUrl + SiteLinks.BasePath + "/reference/data-api/): "
@@ -94,10 +95,12 @@ internal static class LlmsWriter
                 $"validate every descriptor against it; also at {RawRepository}/schema/project.schema.json"));
         foreach (var (name, description) in skills.OrderBy(skill => skill.Name, StringComparer.Ordinal))
         {
-            index.Append(Line(name, $"{RawRepository}/.claude/skills/{name}/SKILL.md", description));
+            index.Append(Line(name, $"{RawRepository}/plugins/alvo/skills/{name}/SKILL.md", description));
         }
 
-        index.Append('\n');
+        index.Append("\nIn Claude Code they are the `alvo` plugin: `/plugin marketplace add Burgyn/MMLib.Alvo`, then `/plugin install alvo@mmlib-alvo`. ")
+            .Append("For another agent, install them into its skills folder (default `.claude/skills`; pass another as `sh -s -- <dir>`): `")
+            .Append(InstallSkills).Append("`\n\n");
     }
 
     private static List<(string Heading, List<ContentPage> Pages)> Sectioned(IReadOnlyList<ContentPage> pages)
