@@ -87,6 +87,13 @@ On a 412, read the row again, apply your change to what is stored now, and send 
   a 412.
 - On a read of one row, `If-None-Match` with the current tag answers 304 with no body.
 
+:::caution[Known issue in this build]
+A row with a rollup field changes when one of its child rows is written, but its `ETag` does not: the recompute does
+not advance the parent's version. An `If-Match` taken before the child write still succeeds, and `If-None-Match`
+still answers 304 over the old total. Read such a row again after writing its children before you condition a write
+on its tag ([#351](https://github.com/Burgyn/MMLib.Alvo/issues/351)).
+:::
+
 ## 4. Write many rows in one transaction
 
 `/api/<entity>/batch` takes `{"rows": [ … ]}` with three verbs: `POST` creates, `PATCH` updates (each row carries its

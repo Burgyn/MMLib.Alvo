@@ -102,6 +102,11 @@ With no lines left, `count` answers `0` and the other four aggregates answer `nu
 A `PATCH` that names a rollup field is accepted, and the stored aggregate is overwritten until the next write to a
 child row recomputes it ([#342](https://github.com/Burgyn/MMLib.Alvo/issues/342)). Never send a rollup field in a
 write.
+
+The recompute does not advance the parent's `ETag` either, so after a write to a line the invoice's totals are new
+but its tag is not: an `If-Match` taken before still succeeds, and `If-None-Match` still answers 304. Read the parent
+again after writing its children before you condition a write on its tag
+([#351](https://github.com/Burgyn/MMLib.Alvo/issues/351)).
 :::
 
 ## How it works

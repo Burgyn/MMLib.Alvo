@@ -76,7 +76,10 @@ Open defects the documentation pages point to. A fix is in progress for #339, #3
 | [#347](https://github.com/Burgyn/MMLib.Alvo/issues/347) | Webhook delivery logs the full endpoint URL. |
 | [#349](https://github.com/Burgyn/MMLib.Alvo/issues/349) | A batch `PATCH` does not advance a row's version, so a stale `If-Match` can still succeed. |
 | [#350](https://github.com/Burgyn/MMLib.Alvo/issues/350) | Filter negation is spelled `not.field=op.value`, not PostgREST's `field=not.op.value`. |
+| [#351](https://github.com/Burgyn/MMLib.Alvo/issues/351) | A write to a child row recomputes the parent's rollups without advancing the parent's `ETag`, so an `If-Match` or `If-None-Match` taken before it still matches. |
 | [#353](https://github.com/Burgyn/MMLib.Alvo/issues/353) | A field added through the Management API or the dashboard is refused as `unknown-field` until the host restarts. |
+| [#354](https://github.com/Burgyn/MMLib.Alvo/issues/354) | A request that races a runtime apply can be judged by the old policy and read with the new schema, so a field the apply just made `hidden` can be returned once. |
+| [#355](https://github.com/Burgyn/MMLib.Alvo/issues/355) | A write that reaches a database `NOT NULL` constraint the API did not check first answers 500 instead of a structured refusal. |
 
 ## What comes after
 
