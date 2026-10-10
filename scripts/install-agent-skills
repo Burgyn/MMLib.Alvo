@@ -1,0 +1,65 @@
+#!/bin/sh
+# install-agent-skills — give a coding agent the Alvo descriptor skills, without a clone.
+#
+# In Claude Code, prefer the plugin, which also keeps the skills updated:
+#   /plugin marketplace add Burgyn/MMLib.Alvo
+#   /plugin install alvo@mmlib-alvo
+# This script is for agents without plugin support, or for a folder of your choice:
+#
+#   curl -fsSL https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/scripts/install-agent-skills | sh
+#   curl -fsSL https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/scripts/install-agent-skills | sh -s -- ~/.claude/skills
+#
+# Downloads the nine alvo-descriptor-* skills (the same Markdown the dashboard's schema assistant loads, published as
+# the alvo plugin in plugins/alvo/skills) into <dir>/alvo-descriptor-*/SKILL.md. <dir> defaults to .claude/skills, a
+# project's own skills folder; pass ~/.claude/skills for every project, or another agent's skills folder. An existing
+# SKILL.md is replaced.
+# Any failed download stops the script with a non-zero exit, so a half-installed set never looks complete.
+#
+# ALVO_SKILLS_BASE overrides where the files come from (a branch, a tag, or a local file:// clone).
+# The list below must name every plugins/alvo/skills/alvo-descriptor-* directory; a DocsGen test keeps it complete.
+set -eu
+
+SKILLS="
+alvo-descriptor-capabilities-and-limits
+alvo-descriptor-computed-and-rollups
+alvo-descriptor-entities-and-fields
+alvo-descriptor-field-types-and-formats
+alvo-descriptor-hooks
+alvo-descriptor-indexes
+alvo-descriptor-project-access
+alvo-descriptor-rules-and-cel
+alvo-descriptor-traits-and-tenancy
+"
+
+base="${ALVO_SKILLS_BASE:-https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/plugins/alvo/skills}"
+dir="${1:-.claude/skills}"
+
+fail() {
+  printf 'install-agent-skills: %s\n' "$1" >&2
+  exit 1
+}
+
+if command -v curl >/dev/null 2>&1; then
+  fetch() { curl -fsSL "$1" -o "$2"; }
+elif command -v wget >/dev/null 2>&1; then
+  fetch() { wget -q -O "$2" "$1"; }
+else
+  fail 'needs curl or wget'
+fi
+
+count=0
+for skill in $SKILLS; do
+  mkdir -p "$dir/$skill" || fail "cannot create $dir/$skill"
+  target="$dir/$skill/SKILL.md"
+  partial="$target.partial"
+  if ! fetch "$base/$skill/SKILL.md" "$partial"; then
+    rm -f "$partial"
+    fail "download failed: $base/$skill/SKILL.md"
+  fi
+  [ -s "$partial" ] || { rm -f "$partial"; fail "empty download: $base/$skill/SKILL.md"; }
+  mv "$partial" "$target"
+  printf 'installed %s\n' "$target"
+  count=$((count + 1))
+done
+
+printf 'Installed %d Alvo skills into %s.\n' "$count" "$dir"

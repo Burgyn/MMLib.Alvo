@@ -2,8 +2,9 @@
 
 internal static class SiteLinks
 {
-    internal const string SiteUrl = "https://burgyn.github.io";
-    internal const string BasePath = "/MMLib.Alvo";
+    internal const string SiteUrl = "https://alvo.burgyn.online";
+    /// <summary>The site's path prefix: astro.config.mjs's <c>base</c> without its trailing slash, so empty for a site served at the root.</summary>
+    internal const string BasePath = "";
     internal const string Repository = "https://github.com/Burgyn/MMLib.Alvo";
 
     internal static string Page(string slug) => $"{BasePath}/{slug.Trim('/')}/";

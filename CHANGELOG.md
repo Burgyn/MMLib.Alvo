@@ -71,7 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `rack_tag` joined with `+`, the week discount on a rental rounded with `math.round(x, 2)`, and the workshop's own
     address refused on a customer with `endsWith`.
 
-- **A documentation site** at <https://burgyn.github.io/MMLib.Alvo/> (`website/`, Astro Starlight). Task-phrased
+- **A documentation site** at <https://alvo.burgyn.online/> (`website/`, Astro Starlight). Task-phrased
   guides — start here, data modelling, security, behaviour, API usage, C# extension, operations — sit beside a
   reference generated at build time by `tools/MMLib.Alvo.DocsGen`: the descriptor reference from
   `schema/project.schema.json`, the problem types, configuration keys and limits from the code, the Data API,

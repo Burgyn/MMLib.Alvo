@@ -1,5 +1,5 @@
 {
   "json.schemas": [
-    { "fileMatch": ["*.alvo.json"], "url": "https://burgyn.github.io/MMLib.Alvo/schema/v1/project.json" }
+    { "fileMatch": ["*.alvo.json"], "url": "https://alvo.burgyn.online/schema/v1/project.json" }
   ]
 }

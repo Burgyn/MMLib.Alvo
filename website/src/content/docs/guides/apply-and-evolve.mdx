@@ -20,12 +20,12 @@ A descriptor change applied to your running backend without a restart: previewed
 revision you read and recorded with a reason (in this build a new field or entity is served only after a restart; see
 the known issue below). Then the rest of a change's lifecycle, each shown with a real response: a
 lost race, a rename that keeps its data, a deliberate drop and a rollback. About fifteen minutes, starting from the
-stack in [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
+stack in [Run your own descriptor](/start-here/run-your-own/).
 :::
 
 ## Before you start
 
-- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), run from its `alvo-help-desk`
+- The stack from [Run your own descriptor](/start-here/run-your-own/), run from its `alvo-help-desk`
   directory with `COMPOSE_FILE` and that page's secrets exported in this shell, plus `curl` and `jq`.
 - The `admin` key (roles `admin`, `authenticated`). This page's descriptor grants that role the `developer` level of
   the Management API.
@@ -39,14 +39,14 @@ history. They differ in who applies and what is recorded.
 | Way | Who applies | What is recorded | What it refuses |
 |---|---|---|---|
 | **Edit the file and restart** the host | whoever deploys | a new revision, with no author and no reason | an invalid descriptor; a plan that discards data, unless `Alvo:Schema:AllowDestructive` is `true`; a descriptor older than the one the database holds |
-| **The [Management API](/MMLib.Alvo/reference/management-api/)**: `PUT …/descriptor` | a caller whose roles reach the `developer` level in `access`, or `admin` to change `access` itself | a new revision, with the `author` (not verified, [#344](https://github.com/Burgyn/MMLib.Alvo/issues/344)) and `reason` the request sends | an invalid descriptor (422); no `If-Match` (428); a stale one (412); a plan that discards data, unless the body allows it (409) |
-| **The [admin dashboard](/MMLib.Alvo/guides/admin-dashboard/)**: *Schema*, then *Preview changes* | a signed-in person with the `developer` level | a new revision, authored by that person, with the reason typed under *Why* | what the API refuses; a plan that discards data asks you to type the project's name; if someone applied first, yours is refused rather than written over theirs |
+| **The [Management API](/reference/management-api/)**: `PUT …/descriptor` | a caller whose roles reach the `developer` level in `access`, or `admin` to change `access` itself | a new revision, with the `author` (not verified, [#344](https://github.com/Burgyn/MMLib.Alvo/issues/344)) and `reason` the request sends | an invalid descriptor (422); no `If-Match` (428); a stale one (412); a plan that discards data, unless the body allows it (409) |
+| **The [admin dashboard](/guides/admin-dashboard/)**: *Schema*, then *Preview changes* | a signed-in person with the `developer` level | a new revision, authored by that person, with the reason typed under *Why* | what the API refuses; a plan that discards data asks you to type the project's name; if someone applied first, yours is refused rather than written over theirs |
 
 **On restart**, what the host does when the file no longer matches the database is the startup mode,
-[`Alvo:Schema:Startup`](/MMLib.Alvo/reference/configuration/#alvoschema):
+[`Alvo:Schema:Startup`](/reference/configuration/#alvoschema):
 
 - `Apply` (the default) applies the plan, still refusing any step that discards data. That is the loop
-  [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/) uses:
+  [Run your own descriptor](/start-here/run-your-own/) uses:
 
   <Code code={applyChange.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
@@ -79,7 +79,7 @@ Start the stack over it. The first command **deletes the stack's database**:
 <Code code={start.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
 A `developer` may apply and roll back, but not change the `access` block itself; that takes `admin`.
-[For coding agents](/MMLib.Alvo/start-here/coding-agents/#access-levels) lists the three levels.
+[For coding agents](/start-here/coding-agents/#access-levels) lists the three levels.
 
 ## 2. Preview a change
 
@@ -243,15 +243,15 @@ records each decision.
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | The caller's roles reach no level the route needs, or a `developer` changed the `access` block or rolled back to a revision whose block differs. | Grant the role a level in `access`; have an `admin` make access changes. | every host |
-| 409 | [`destructive-change`](/MMLib.Alvo/reference/problem-types/#destructive-change) | The plan would discard data, and the request did not allow it. | Keep what the plan drops, or preview with `"allowDestructive": true` and resend with it. | any host that maps the Management API |
-| 409 | [`idempotency-conflict`](/MMLib.Alvo/reference/problem-types/#idempotency-conflict) | The `Idempotency-Key` was already used by this caller for a different request. | Use a fresh key for a new request. | every host |
-| 412 | [`precondition-failed`](/MMLib.Alvo/reference/problem-types/#precondition-failed) | `If-Match` names a revision that is no longer current. | Read the descriptor again, redo your change on it, and send the new revision. | every host |
-| 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | The descriptor is refused: an expression that does not compile, a facet on the wrong type, a key this build refuses. Each violation's `pointer` names the place. | Fix what the violation's `fixSuggestion` says. | every host |
-| 428 | [`precondition-required`](/MMLib.Alvo/reference/problem-types/#precondition-required) | The write carried no `If-Match`. | Read the current revision and send it as `If-Match: "<revision>"`. | any host that maps the Management API |
+| 403 | [`forbidden`](/reference/problem-types/#forbidden) | The caller's roles reach no level the route needs, or a `developer` changed the `access` block or rolled back to a revision whose block differs. | Grant the role a level in `access`; have an `admin` make access changes. | every host |
+| 409 | [`destructive-change`](/reference/problem-types/#destructive-change) | The plan would discard data, and the request did not allow it. | Keep what the plan drops, or preview with `"allowDestructive": true` and resend with it. | any host that maps the Management API |
+| 409 | [`idempotency-conflict`](/reference/problem-types/#idempotency-conflict) | The `Idempotency-Key` was already used by this caller for a different request. | Use a fresh key for a new request. | every host |
+| 412 | [`precondition-failed`](/reference/problem-types/#precondition-failed) | `If-Match` names a revision that is no longer current. | Read the descriptor again, redo your change on it, and send the new revision. | every host |
+| 422 | [`validation`](/reference/problem-types/#validation) | The descriptor is refused: an expression that does not compile, a facet on the wrong type, a key this build refuses. Each violation's `pointer` names the place. | Fix what the violation's `fixSuggestion` says. | every host |
+| 428 | [`precondition-required`](/reference/problem-types/#precondition-required) | The write carried no `If-Match`. | Read the current revision and send it as `If-Match: "<revision>"`. | any host that maps the Management API |
 
 **The host does not come back after you edit the file.** The reason is at the end of `docker compose logs alvo`; see
-[Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/#what-can-go-wrong).
+[Run your own descriptor](/start-here/run-your-own/#what-can-go-wrong).
 
 - `Alvo cannot start:` with a plan whose steps are marked destructive, and exit code 78: the edit discards data.
   Keep what it drops, apply it through the API with `allowDestructive`, or set `Alvo__Schema__AllowDestructive=true`
@@ -264,22 +264,22 @@ records each decision.
 
 ## Reference
 
-- [Management API](/MMLib.Alvo/reference/management-api/): every route and its body (`descriptorJson`,
+- [Management API](/reference/management-api/): every route and its body (`descriptorJson`,
   `allowDestructive`, `author`, `reason`).
-- Configuration: [`Alvo:Schema:Startup` and `Alvo:Schema:AllowDestructive`](/MMLib.Alvo/reference/configuration/#alvoschema).
-- Descriptor keys: [`access`](/MMLib.Alvo/reference/descriptor/access/),
-  [a field's `renamedFrom`](/MMLib.Alvo/reference/descriptor/entities-fields/#entities.fields.renamedFrom),
-  [an entity's `renamedFrom`](/MMLib.Alvo/reference/descriptor/entities/#entities.renamedFrom).
-- Problem types: [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden),
-  [`destructive-change`](/MMLib.Alvo/reference/problem-types/#destructive-change),
-  [`idempotency-conflict`](/MMLib.Alvo/reference/problem-types/#idempotency-conflict),
-  [`precondition-failed`](/MMLib.Alvo/reference/problem-types/#precondition-failed),
-  [`precondition-required`](/MMLib.Alvo/reference/problem-types/#precondition-required),
-  [`validation`](/MMLib.Alvo/reference/problem-types/#validation).
+- Configuration: [`Alvo:Schema:Startup` and `Alvo:Schema:AllowDestructive`](/reference/configuration/#alvoschema).
+- Descriptor keys: [`access`](/reference/descriptor/access/),
+  [a field's `renamedFrom`](/reference/descriptor/entities-fields/#entities.fields.renamedFrom),
+  [an entity's `renamedFrom`](/reference/descriptor/entities/#entities.renamedFrom).
+- Problem types: [`forbidden`](/reference/problem-types/#forbidden),
+  [`destructive-change`](/reference/problem-types/#destructive-change),
+  [`idempotency-conflict`](/reference/problem-types/#idempotency-conflict),
+  [`precondition-failed`](/reference/problem-types/#precondition-failed),
+  [`precondition-required`](/reference/problem-types/#precondition-required),
+  [`validation`](/reference/problem-types/#validation).
 - The startup mode and production, in depth:
   [`docs/architecture/host.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/host.md#the-startup-mode-and-what-production-should-set).
 
 ## Next
 
-**[Authentication and API keys](/MMLib.Alvo/guides/authentication/)**: decide who your callers are, the first step
+**[Authentication and API keys](/guides/authentication/)**: decide who your callers are, the first step
 of securing what you modelled.

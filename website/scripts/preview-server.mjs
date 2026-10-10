@@ -3,7 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const port = 4329;
 const host = '127.0.0.1';
-const baseUrl = `http://${host}:${port}/MMLib.Alvo`;
+const baseUrl = `http://${host}:${port}`;
 
 export async function withPreview(fn) {
   const child = spawn('npx', ['astro', 'preview', '--port', String(port), '--host', host, '--ignore-lock'], {

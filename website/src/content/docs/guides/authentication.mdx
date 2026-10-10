@@ -13,12 +13,12 @@ import start from '../../../snippets/shell/authentication-start.sh?raw';
 :::tip[What you will achieve]
 A read-only `reader` key beside the stack's keys, and the four answers a request can get because of its credential:
 served, anonymous, `401 unauthenticated` and `403 out-of-scope`. About ten minutes, starting from the stack in
-[Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
+[Run your own descriptor](/start-here/run-your-own/).
 :::
 
 ## Before you start
 
-- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), serving `examples/help-desk`, run
+- The stack from [Run your own descriptor](/start-here/run-your-own/), serving `examples/help-desk`, run
   from its `alvo-help-desk` directory with `COMPOSE_FILE` and that page's secrets exported in this shell.
 - This page adds a fourth key, `reader` (roles `agent`, `authenticated`; scope `*:read` only), and also uses `agent`
   and the stack's own `demo` key.
@@ -63,13 +63,13 @@ Every setting of a key:
 | `KeyId` | The public half of the key. Unique, and without a `.`, because the header is split at the first `.`. |
 | `Secret` | The private half, at least 32 characters. Generate it; never choose it. |
 | `User` | The id the caller acts as: what a rule reads as `@user.id`, and what the audit columns record. Set it: a key without one has no identity, so a rule that reads `@user.id` refuses it with a 403 and the audit columns record `null`. |
-| `Roles` | What a rule tests, as in `'agent' in @user.roles`. Each role must be declared in the descriptor's [`auth.roles`](/MMLib.Alvo/reference/descriptor/auth/#auth.roles) or be built in (`anon`, `authenticated`, `admin`). `authenticated` is not added for you: list it. |
+| `Roles` | What a rule tests, as in `'agent' in @user.roles`. Each role must be declared in the descriptor's [`auth.roles`](/reference/descriptor/auth/#auth.roles) or be built in (`anon`, `authenticated`, `admin`). `authenticated` is not added for you: list it. |
 | `Scopes` | Which entities the key may read or write, as `<entity\|*>:<read\|write>`. |
-| `Tenant` | The one tenant the key acts in; see [Multi-tenancy](/MMLib.Alvo/guides/multi-tenancy/). |
+| `Tenant` | The one tenant the key acts in; see [Multi-tenancy](/guides/multi-tenancy/). |
 | `ExpiresAt` | The instant after which the key is refused. Unset, it never expires. |
 
 In an environment variable each setting is indexed, as in the override above: `Alvo__Auth__DevKeys__3__Roles__0`.
-The full list is under [`Alvo:Auth`](/MMLib.Alvo/reference/configuration/#alvoauth).
+The full list is under [`Alvo:Auth`](/reference/configuration/#alvoauth).
 
 ## 2. A request without a usable key
 
@@ -84,7 +84,7 @@ Alvo tells three cases apart: no key, a key that cannot be used, and a key that 
    <Exchange name="authentication/01-keys" wrap steps={[1]} />
 
    A rule that reads `@user.id` refuses an anonymous caller with 403 `forbidden` instead; see
-   [Access rules](/MMLib.Alvo/guides/access-rules/#3-know-when-alvo-answers-403).
+   [Access rules](/guides/access-rules/#3-know-when-alvo-answers-403).
 
 2. **A key that cannot be used is a 401.** Here the secret is wrong:
 
@@ -118,12 +118,12 @@ Scopes belong to the key and are checked before any rule. `read` covers `list` a
 
 </Steps>
 
-A request has to pass both the key's scopes and the entity's [rules](/MMLib.Alvo/guides/access-rules/). Use scopes to
+A request has to pass both the key's scopes and the entity's [rules](/guides/access-rules/). Use scopes to
 limit what a credential may ever do, such as a key for a reporting job, and rules to decide what a user may do to
 which rows.
 
-Scopes govern the Data API only. The [Management API](/MMLib.Alvo/reference/management-api/) admits a caller by the
-descriptor's [`access`](/MMLib.Alvo/reference/descriptor/access/) block and the key's roles alone, so a key scoped to
+Scopes govern the Data API only. The [Management API](/reference/management-api/) admits a caller by the
+descriptor's [`access`](/reference/descriptor/access/) block and the key's roles alone, so a key scoped to
 one entity still reaches management when its roles match an access level.
 
 ## People sign in to the dashboard
@@ -144,23 +144,23 @@ holds; this build has no other sign-in provider.
 
 A dashboard session works only in the dashboard: it never turns a signed-in person into a Data API caller. An API key
 whose `User` is the bootstrap administrator's id is admitted to the Management API as an administrator, whatever the
-`access` block says. [The admin dashboard](/MMLib.Alvo/guides/admin-dashboard/) covers the screens.
+`access` block says. [The admin dashboard](/guides/admin-dashboard/) covers the screens.
 
 ## Your own users, in an embedded host
 
 When Alvo is embedded in your ASP.NET Core app, your users already sign in to your app. Resolve them in your own
 endpoints and pass an `AlvoContext` with their id, roles and tenant to `IAlvoData`; Alvo's rules then apply to them
-exactly as they do to a key. [Use your own authentication](/MMLib.Alvo/guides/own-authentication/) shows how.
+exactly as they do to a key. [Use your own authentication](/guides/own-authentication/) shows how.
 
 Never read a credential from a cookie. `Alvo:Auth:HeaderName` and `Alvo:Auth:TenantHeaderName` may name any header
 except `Cookie`: a browser attaches cookies to cross-site requests by itself, which would make every Alvo route a
 cross-site request forgery target, so the host refuses that configuration at startup.
 
 :::caution[Not in this build]
-The descriptor's [`auth.providers`](/MMLib.Alvo/reference/descriptor/auth/#auth.providers) is parsed and warned
+The descriptor's [`auth.providers`](/reference/descriptor/auth/#auth.providers) is parsed and warned
 about, not honoured: Google, Microsoft, GitHub, Apple and OIDC sign-in are tracked in
 [#36](https://github.com/Burgyn/MMLib.Alvo/issues/36)
-([Capabilities in this build](/MMLib.Alvo/reference/capabilities/#declared-but-not-run-in-this-build)). There is
+([Capabilities in this build](/reference/capabilities/#declared-but-not-run-in-this-build)). There is
 also no endpoint that issues, rotates or revokes an API key: keys come from configuration only.
 :::
 
@@ -168,25 +168,25 @@ also no endpoint that issues, rotates or revokes an API key: keys come from conf
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 401 | [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | A key was sent and cannot be used: unknown, wrong secret, expired, a role the descriptor does not declare, no role, or an `X-Alvo-Tenant` the key was not issued for. | Check the key against the host's configuration and the descriptor's `auth.roles`. | every host |
-| 403 | [`out-of-scope`](/MMLib.Alvo/reference/problem-types/#out-of-scope) | The key's scopes do not cover this entity and operation. | Grant the key the scope it needs, such as `tickets:write`. | every host |
-| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | No key was sent, and the rule for this operation reads `@user.id`. | Send a key. | every host |
+| 401 | [`unauthenticated`](/reference/problem-types/#unauthenticated) | A key was sent and cannot be used: unknown, wrong secret, expired, a role the descriptor does not declare, no role, or an `X-Alvo-Tenant` the key was not issued for. | Check the key against the host's configuration and the descriptor's `auth.roles`. | every host |
+| 403 | [`out-of-scope`](/reference/problem-types/#out-of-scope) | The key's scopes do not cover this entity and operation. | Grant the key the scope it needs, such as `tickets:write`. | every host |
+| 403 | [`forbidden`](/reference/problem-types/#forbidden) | No key was sent, and the rule for this operation reads `@user.id`. | Send a key. | every host |
 
 If the container does not come back after you change a key, the end of `docker compose logs alvo` names the key and
 the setting: an empty or short `Secret`, a duplicate `KeyId`, a `KeyId` with a `.`, or a scope that does not parse.
 
 ## Reference
 
-- Configuration: [`Alvo:Auth`](/MMLib.Alvo/reference/configuration/#alvoauth).
-- Descriptor keys: [`auth.roles`](/MMLib.Alvo/reference/descriptor/auth/#auth.roles),
-  [`auth.providers`](/MMLib.Alvo/reference/descriptor/auth/#auth.providers),
-  [`access`](/MMLib.Alvo/reference/descriptor/access/).
-- Problem types: [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated),
-  [`out-of-scope`](/MMLib.Alvo/reference/problem-types/#out-of-scope),
-  [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden).
+- Configuration: [`Alvo:Auth`](/reference/configuration/#alvoauth).
+- Descriptor keys: [`auth.roles`](/reference/descriptor/auth/#auth.roles),
+  [`auth.providers`](/reference/descriptor/auth/#auth.providers),
+  [`access`](/reference/descriptor/access/).
+- Problem types: [`unauthenticated`](/reference/problem-types/#unauthenticated),
+  [`out-of-scope`](/reference/problem-types/#out-of-scope),
+  [`forbidden`](/reference/problem-types/#forbidden).
 - Where scopes and rules are each decided:
   [`docs/architecture/data-api.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md#the-decision-procedure-the-four-ways-a-caller-actually-gets-403).
 
 ## Next
 
-**[Access rules](/MMLib.Alvo/guides/access-rules/)**: decide, per operation, which callers may reach which rows.
+**[Access rules](/guides/access-rules/)**: decide, per operation, which callers may reach which rows.

@@ -4,20 +4,20 @@ description: "The routes, query grammar, paging, headers, statuses and problem d
 ---
 
 Every entity in an applied descriptor gets the same ten routes, the same query grammar and the same headers. This page
-lists them. The guides show them in use: [Read data](/MMLib.Alvo/guides/read-data/),
-[Write data safely](/MMLib.Alvo/guides/write-data/) and [Handle errors](/MMLib.Alvo/guides/handle-errors/).
+lists them. The guides show them in use: [Read data](/guides/read-data/),
+[Write data safely](/guides/write-data/) and [Handle errors](/guides/handle-errors/).
 
 ## OpenAPI document
 
 Every descriptor generates its own OpenAPI document. The standalone host serves it at `GET /openapi/v1.json`, with an
-API browser at `/scalar`, unless `Alvo:Docs:Enabled` is false; both are readable without a key. [Data API: example](/MMLib.Alvo/reference/data-api/) is the
+API browser at `/scalar`, unless `Alvo:Docs:Enabled` is false; both are readable without a key. [Data API: example](/reference/data-api/) is the
 document for `examples/vehicle-registry`. An embedded host that calls ASP.NET Core's `AddOpenApi()` and `MapOpenApi()`
 gets Alvo's routes and schemas in its own document; Alvo does not add an OpenAPI document on its own.
 
 ## Base path and routes
 
 The routes sit under `AlvoApiOptions.RoutePrefix` (configuration key
-[`Alvo:Api:RoutePrefix`](/MMLib.Alvo/reference/configuration/#alvoapi)), default `/api`; an empty prefix mounts them at
+[`Alvo:Api:RoutePrefix`](/reference/configuration/#alvoapi)), default `/api`; an empty prefix mounts them at
 the root. `{entity}` is the entity's name as the descriptor declares it, and `{id}` is a row's UUID.
 
 | Method and path | Does | Gated by the rule | Success |
@@ -94,13 +94,13 @@ A list always answers one page, as an object with exactly these members:
 The cursor carries no data; a stale, forged or foreign cursor returns an empty page. `count` covers only the rows the
 caller's rules admit, and is computed in a second statement, so a concurrent write can make it differ from the rows by
 one. `Prefer: count=planned` and `count=estimated` return the exact count; an unrecognised preference is ignored.
-Sizes and budgets are in [Limits and budgets](/MMLib.Alvo/reference/limits/).
+Sizes and budgets are in [Limits and budgets](/reference/limits/).
 
 ## Headers
 
 | Header | Direction | Meaning |
 |---|---|---|
-| `X-Alvo-Api-Key` | request | The API key, `<keyId>.<secret>`. The name is [`Alvo:Auth:HeaderName`](/MMLib.Alvo/reference/configuration/#alvoauth); `Cookie` is refused. |
+| `X-Alvo-Api-Key` | request | The API key, `<keyId>.<secret>`. The name is [`Alvo:Auth:HeaderName`](/reference/configuration/#alvoauth); `Cookie` is refused. |
 | `X-Alvo-Tenant` | request | The tenant the caller asks to act in. The name is `Alvo:Auth:TenantHeaderName`; `Cookie` is refused. |
 | `Content-Type` | request | `application/json` or any `application/*+json`, on every request with a body. |
 | `If-Match` | request | The `ETag` a `PATCH`, `PUT` or `DELETE` expects the row to have. `*` asks only that the row exist. |
@@ -169,7 +169,7 @@ or a 403 whose `violations` name each row a rule refused. A `409 conflict` names
 
 Every refusal is an RFC 9457 problem document, `application/problem+json`, with `type`, `title`, `status`, `detail`
 and, when there are reasons to itemise, `violations`: each with `pointer`, `code`, `message` and `fixSuggestion`. Branch
-on the slug at the end of `type`. Every slug, its causes and its fix are in [Problem types](/MMLib.Alvo/reference/problem-types/);
+on the slug at the end of `type`. Every slug, its causes and its fix are in [Problem types](/reference/problem-types/);
 `unreadable-request`, `internal` and `function-failed` come only from a host that called `AddAlvoProblemDetails()`,
 which the standalone host does.
 

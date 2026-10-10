@@ -4,7 +4,7 @@ import { withPreview } from './preview-server.mjs';
 const pages = ['/', '/start-here/quick-start/', '/start-here/run-your-own/', '/start-here/tutorial/', '/guides/entities-and-fields/', '/guides/computed-and-rollups/', '/guides/indexes/', '/guides/apply-and-evolve/', '/guides/access-rules/', '/guides/before-hooks/', '/guides/read-data/', '/guides/handle-errors/', '/data-api/conventions/', '/guides/production/', '/guides/admin-dashboard/', '/concepts/cel/', '/concepts/architecture/', '/concepts/glossary/', '/project/roadmap/', '/reference/cel-functions/', '/reference/data-api/operations/ownerslist/', '/examples/'];
 const viewports = [[390, 844], [768, 1024], [1024, 768], [1280, 800], [1440, 900]];
 const themes = ['light', 'dark'];
-const roadmap = '/MMLib.Alvo/project/roadmap/';
+const roadmap = '/project/roadmap/';
 const tapScopes = ['header.header', 'footer', '.pagination-links', '.sl-menu-button'];
 // Pages whose content is a code-led walkthrough: a missing code frame there is a regression, not a gap.
 const framedPages = new Set(['/start-here/quick-start/', '/start-here/run-your-own/', '/start-here/tutorial/', '/guides/entities-and-fields/', '/guides/computed-and-rollups/', '/guides/indexes/', '/guides/apply-and-evolve/', '/guides/access-rules/', '/guides/before-hooks/', '/guides/read-data/', '/guides/handle-errors/', '/guides/production/', '/guides/admin-dashboard/', '/examples/']);
@@ -116,7 +116,7 @@ async function landingMenu(page, fail) {
   await page.locator('.alvo-sheet-toggle').click();
   await page.waitForFunction(() => document.querySelector('#alvo-sheet')?.matches(':popover-open'));
   const wanted = [
-    ['the docs', '#alvo-sheet a[href="/MMLib.Alvo/start-here/why-alvo/"]'],
+    ['the docs', '#alvo-sheet a[href="/start-here/why-alvo/"]'],
     ['the roadmap', `#alvo-sheet a[href="${roadmap}"]`],
     ['GitHub', '#alvo-sheet a[href="https://github.com/Burgyn/MMLib.Alvo"]'],
     ['the theme control', '#alvo-sheet starlight-theme-select select'],

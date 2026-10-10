@@ -57,8 +57,8 @@ public class CelCatalogRendererTests
 
         content.ShouldStartWith("---\ntitle: \"CEL functions\"");
         content.ShouldContain("generated from `GET {management}/projects/{project}/cel/functions` on a host with no `AddCelFunction` registrations");
-        content.ShouldContain("/MMLib.Alvo/concepts/cel/");
-        content.ShouldContain("/MMLib.Alvo/guides/custom-cel-functions/");
+        content.ShouldContain("/concepts/cel/");
+        content.ShouldContain("/guides/custom-cel-functions/");
         content.ShouldContain("`?`");
     }
 

@@ -23,7 +23,7 @@ declares. A few minutes with Docker and three downloaded files: no clone, no bui
 ## Before you start
 
 - Docker with Compose v2, `curl` and `openssl`, and port 8080 free. If the
-  [Quick start](/MMLib.Alvo/start-here/quick-start/)'s stack is still running, stop it first: both listen on
+  [Quick start](/start-here/quick-start/)'s stack is still running, stop it first: both listen on
   `127.0.0.1:8080`.
 - A descriptor file. If you do not have one yet, the commands below use
   [`examples/help-desk`](https://github.com/Burgyn/MMLib.Alvo/blob/main/examples/help-desk/help-desk.alvo.json), and
@@ -68,7 +68,7 @@ side of that `volumes` line. `name: alvo-help-desk` gives this stack its own dat
 
 The API is at `http://localhost:8080/api/<entity>`, its OpenAPI document at `/openapi/v1.json`, an API browser at
 `/scalar`, and the dashboard at `/admin`, where you sign in as `admin@alvo.local` with `ALVO_ADMIN_PASSWORD`. The
-[Tutorial](/MMLib.Alvo/start-here/tutorial/) walks through this exact stack one change at a time.
+[Tutorial](/start-here/tutorial/) walks through this exact stack one change at a time.
 
 ## 3. Change it
 
@@ -79,7 +79,7 @@ Edit `help-desk.alvo.json`, then recreate the `alvo` container so it reads the f
 On start, Alvo compares the descriptor with the schema it applied before. A change that discards nothing (a new entity,
 a new field, a changed rule) is applied; one that would drop or narrow data is refused, and the container stops with
 the plan in its log. To apply without a restart, send the descriptor to the Management API instead; both paths, with
-dry runs, revisions and rollback, are in [Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/). In
+dry runs, revisions and rollback, are in [Apply and evolve your descriptor](/guides/apply-and-evolve/). In
 this build everything but a new entity takes effect that way at once; a new entity gets its Data API route after a
 restart ([#103](https://github.com/Burgyn/MMLib.Alvo/issues/103)).
 
@@ -124,7 +124,7 @@ the address the stack uses, so stop the stack first.
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 401 | [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | The key carries a role the descriptor does not declare (the `agent` key over a descriptor without `agent`), or the secret is wrong. | Give the key only declared or built-in roles; export the same secret the stack was started with. | every host |
+| 401 | [`unauthenticated`](/reference/problem-types/#unauthenticated) | The key carries a role the descriptor does not declare (the `agent` key over a descriptor without `agent`), or the secret is wrong. | Give the key only declared or built-in roles; export the same secret the stack was started with. | every host |
 
 **The stack does not start.** `docker compose up --wait` fails and the `alvo` container has exited. Read why:
 
@@ -152,15 +152,15 @@ The end of the log says what to change. The common reasons:
 
 ## Reference
 
-- Configuration: [`Alvo:Auth` dev keys and every other key](/MMLib.Alvo/reference/configuration/),
-  [the dev-key secret minimum](/MMLib.Alvo/reference/limits/).
-- Descriptor keys: [`auth.roles`](/MMLib.Alvo/reference/descriptor/auth/).
-- Problem types: [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated).
+- Configuration: [`Alvo:Auth` dev keys and every other key](/reference/configuration/),
+  [the dev-key secret minimum](/reference/limits/).
+- Descriptor keys: [`auth.roles`](/reference/descriptor/auth/).
+- Problem types: [`unauthenticated`](/reference/problem-types/#unauthenticated).
 - The compose file: [`docker-compose.quickstart.yml`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docker-compose.quickstart.yml);
   the host and the startup mode, in depth:
   [`docs/architecture/host.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/host.md).
 
 ## Next
 
-**[Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/)**: change a running backend safely, with dry
+**[Apply and evolve your descriptor](/guides/apply-and-evolve/)**: change a running backend safely, with dry
 runs, revisions and rollback.

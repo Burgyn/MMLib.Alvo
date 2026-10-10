@@ -1,4 +1,5 @@
 ---
+import { page } from '../lib/links';
 const isSplash = Astro.locals.starlightRoute.entry.data.template === 'splash';
 ---
 
@@ -6,6 +7,6 @@ const isSplash = Astro.locals.starlightRoute.entry.data.template === 'splash';
   <div class="alvo-banner" role="note" data-pagefind-ignore>
     <span class="alvo-banner__long">Alvo is pre-v0.1: the image runs from its edge tag, and no NuGet package or release is published yet.</span>
     <span class="alvo-banner__short">Pre-v0.1: no release yet.</span>
-    <a href="/MMLib.Alvo/project/roadmap/">Roadmap and status</a>
+    <a href={page('/project/roadmap/')}>Roadmap and status</a>
   </div>
 )}

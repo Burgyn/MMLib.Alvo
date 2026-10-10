@@ -19,17 +19,17 @@ runs as a Docker container or as a library inside your own app.
 
 - **One descriptor, the whole backend.** Entities, rules, hooks, computed fields, rollups, indexes, audit and webhooks
   live in one schema-validated JSON file, whether it sits in your repository or is edited in the dashboard.
-  [The project descriptor](/MMLib.Alvo/concepts/descriptor/)
+  [The project descriptor](/concepts/descriptor/)
 - **Security in the data layer.** Rules are CEL expressions compiled to parameterized SQL predicates, everything is
-  denied until a rule allows it, and hooks fail closed. [Security model](/MMLib.Alvo/concepts/security-model/)
+  denied until a rule allows it, and hooks fail closed. [Security model](/concepts/security-model/)
 - **Agent-first.** A JSON Schema with a description on every key, structured errors with fix suggestions, idempotent
-  operations, a Management API and `llms.txt`, so a coding agent can do the work. [For coding agents](/MMLib.Alvo/start-here/coding-agents/)
+  operations, a Management API and `llms.txt`, so a coding agent can do the work. [For coding agents](/start-here/coding-agents/)
 - **.NET-native, two modes.** The Docker image and the embedded library are one codebase; embedded, you extend it in
-  C# with your own functions and endpoints. [Standalone and embedded](/MMLib.Alvo/concepts/modes/)
+  C# with your own functions and endpoints. [Standalone and embedded](/concepts/modes/)
 - **An admin dashboard** with a schema editor, rule and hook editors, a data browser, history with rollback, and an AI
-  assistant that uses the same skills your agents can. [The admin dashboard](/MMLib.Alvo/guides/admin-dashboard/)
+  assistant that uses the same skills your agents can. [The admin dashboard](/guides/admin-dashboard/)
 - **Dynamic entities (planned).** Your end users define their own record types at runtime, in one shared store, in an
-  embedded host. Not in this build. [Dynamic entities (planned)](/MMLib.Alvo/concepts/dynamic-entities/)
+  embedded host. Not in this build. [Dynamic entities (planned)](/concepts/dynamic-entities/)
 
 ## When to use it
 
@@ -44,7 +44,7 @@ runs as a Docker container or as a library inside your own app.
 ## When not to use it
 
 - **You need it in production today.** Alvo is pre-v0.1: no NuGet package and no versioned image is released, and
-  the format and APIs may still change. See [What works today](/MMLib.Alvo/start-here/what-works-today/).
+  the format and APIs may still change. See [What works today](/start-here/what-works-today/).
 - **You need realtime subscriptions, file storage or automation rules (the `automation` block).** None of them runs in
   this build; after-hooks that send e-mail and webhooks on a write do.
 - **You need sign-in through Google, Microsoft or another identity provider.** Only local accounts and API keys exist
@@ -65,5 +65,5 @@ How Alvo answers the same questions as the platforms closest to it:
 
 ## Status
 
-Alvo is being built in the open, phase by phase. [Roadmap and status](/MMLib.Alvo/project/roadmap/) shows where it
+Alvo is being built in the open, phase by phase. [Roadmap and status](/project/roadmap/) shows where it
 is, what v0.1 brings, and what may change before then.

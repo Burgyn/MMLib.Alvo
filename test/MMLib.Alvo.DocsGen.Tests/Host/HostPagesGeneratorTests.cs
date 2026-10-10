@@ -62,7 +62,7 @@ public class HostPagesGeneratorTests
     {
         var docs = Path.Combine(RepositoryRoot.Find(), "website", "src", "content", "docs");
 
-        Should.Throw<InvalidOperationException>(() => HostPagesGenerator.RequireLinkTargets("see [x](/MMLib.Alvo/data-api/nowhere/)", docs))
+        Should.Throw<InvalidOperationException>(() => HostPagesGenerator.RequireLinkTargets("see [x](/data-api/nowhere/)", docs))
             .Message.ShouldContain("data-api/nowhere");
     }
 }
