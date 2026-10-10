@@ -1,5 +1,9 @@
 name: Release
 
+# NuGet only. The same v* tag also publishes the container image (ghcr.io/burgyn/alvo:<semver>,
+# :<major>.<minor>, :latest), and that is .github/workflows/image.yml's job alone — do not add an
+# image step here, or a tag would race two pushes of the same image.
+
 on:
   push:
     tags:

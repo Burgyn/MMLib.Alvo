@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The standalone image is published to GitHub Container Registry as `ghcr.io/burgyn/alvo`**, for
+  `linux/amd64` and `linux/arm64` (`.github/workflows/image.yml`). Every push to `main` publishes
+  `:edge` and `:sha-<7>`; a `v*` tag publishes `:<major>.<minor>.<patch>`, `:<major>.<minor>` and
+  `:latest`. The image now carries the runnable examples' descriptors under `/alvo/examples/` and OCI
+  labels (source, licence, version, revision); it still ships no credential. **`docker-compose.quickstart.yml`**
+  is the no-clone quick start: download that one file, export `ALVO_DEMO_KEY_SECRET` and
+  `ALVO_ADMIN_PASSWORD`, `docker compose -f docker-compose.quickstart.yml up --wait` — Alvo over
+  PostgreSQL on `127.0.0.1:8080`, serving the in-image `vehicle-registry` example (`ALVO_DESCRIPTOR`
+  picks another, or your own file mounted read-only), with `/scalar` and the dashboard at `/admin`.
+  Every image is smoke-tested through that file (`scripts/test-quickstart`) before anything is pushed.
+  The startup refusals that suggested `docker run … mmlib/alvo` now name the published image.
+
 - **CEL functions in hook conditions and before-hook `mutate` values** (slice C1). A host registers
   a typed C# function at startup with `AddCelFunction(name, delegate, summary)` on the Alvo builder.
   A descriptor's hook conditions and `mutate` values call it by name, and so can the built-ins. C1

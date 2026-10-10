@@ -92,7 +92,8 @@ compresses out. Violating one of these is a bug, not a style nit.
   `test/MMLib.Alvo.Ai.Eval.Tests`, is an ordinary ring0 module.
 - `.husky/` — Husky.Net git hooks (`pre-commit`, `commit-msg`) + `task-runner.json`; auto-installed on build.
 - `.github/` — CI workflows; the PR run (everything but mutation) plus
-  `mutation.yml`, which runs post-merge on `main`.
+  `mutation.yml`, which runs post-merge on `main`, and `image.yml`, the only publisher of the
+  container image (`ghcr.io/burgyn/alvo`; `release.yml` is NuGet-only).
 
 ## Build, test & rings
 
@@ -112,6 +113,7 @@ compresses out. Violating one of these is a bug, not a style nit.
 | prototype | `scripts/test-prototype` | in no ring — see below |
 | admin e2e | `scripts/test-admin-e2e` | in no ring — see below |
 | assistant eval | `scripts/eval-assistant` | in no ring — see below |
+| quick start | `scripts/test-quickstart` | in no ring — see below |
 
 Each ring wraps the previous one and adds a layer: ring1 adds architecture
 tests (already inside `dotnet test`) and, once it lands, public-API
@@ -154,6 +156,15 @@ the seventeen cases of `docs/superpowers/specs/2026-09-28-f5-assistant-reliabili
 plus the reply's wording, its language, and whether it loaded the skills its proposal needed; it costs tokens and measures a model, so it is run on demand and its table is to be published per
 model in `docs/assistant-evals.md` (created by the first real run). Every graded turn, passes included, is traced to `artifacts/eval-assistant/traces/`.
 The graders themselves are pure and tested in ring0 (`test/MMLib.Alvo.Ai.Eval.Tests`).
+
+**The image is published by `.github/workflows/image.yml`, and its quick start is in no ring.**
+`ghcr.io/burgyn/alvo`, amd64 + arm64: every push to `main` → `:edge` + `:sha-<7>`, a `v*` tag →
+`:<x.y.z>`, `:<x.y>`, `:latest`; on a PR touching the image's inputs it builds one arch and pushes
+nothing. Every run first smoke-tests the built image through `docker-compose.quickstart.yml` — the
+no-clone quick start, one file downloaded with curl — via `scripts/test-quickstart`
+(`ALVO_IMAGE=<tag> scripts/test-quickstart` locally). Paths-filtered and not folded into **Build &
+test**; the cheap half (the quick start names the published image and the same secret variable, and
+the Dockerfile ships exactly the runnable examples) is `QuickStartImageTests`, in ring0.
 
 ## Hard rules
 
