@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Auth;
+﻿using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Auth;
 
 namespace MMLib.Alvo.Identity.Internal;
 
@@ -30,11 +31,22 @@ namespace MMLib.Alvo.Identity.Internal;
 /// the same rule <c>TenantResolver</c> applies to an API key — see <see cref="Confirmed"/> for why
 /// the refusal is the whole principal rather than a principal with no tenant.
 /// </para>
+/// <para>
+/// <b>Every resolution reads the membership store from a scope of its own.</b> The dashboard resolves
+/// its caller from the Blazor circuit's scope, which lives as long as the tab, and its components
+/// initialise concurrently — the overview, the pending bar and the project switcher each resolve the
+/// operator while the others are still awaiting. A store resolved alongside this resolver shares one
+/// <c>DbContext</c> across all of them, and a <c>DbContext</c> refuses a second query while the first
+/// is in flight: over PostgreSQL every screen failed (#339), while SQLite, whose reads complete
+/// synchronously, never interleaved them and hid it. A scope per call is the rule
+/// <c>GuardedUserAdministration</c> and the session revalidation already follow, and it also means the
+/// answer is never one a long-lived change tracker could have kept: each read is the store as of the call.
+/// </para>
 /// </remarks>
-/// <param name="users">The membership store.</param>
+/// <param name="scopes">Creates the scope each resolution reads the membership store from.</param>
 /// <param name="roleCatalogProvider">The roles the applied descriptor declares.</param>
 internal sealed class AlvoIdentityContextResolver(
-    IAlvoUserStore users,
+    IServiceScopeFactory scopes,
     IRoleCatalogProvider roleCatalogProvider) : IAlvoContextResolver
 {
     /// <summary>
@@ -66,13 +78,31 @@ internal sealed class AlvoIdentityContextResolver(
             return null;
         }
 
-        var user = await users.FindAsync(subject, cancellationToken).ConfigureAwait(false);
+        var user = await FindAsync(subject, cancellationToken).ConfigureAwait(false);
         if (user is not { IsDisabled: false } signedIn)
         {
             return null;
         }
 
         return Confirmed(requestedTenant, signedIn.Tenant) ? Principal(signedIn, declared) : null;
+    }
+
+    /// <summary>Reads the stored user through a membership store resolved from a scope created for this call.</summary>
+    /// <remarks>
+    /// Awaited inside the scope rather than returned, so the store's <c>DbContext</c> is disposed after
+    /// the read it serves, never under it.
+    /// </remarks>
+    /// <param name="subject">The signed-in user.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The stored user, or <see langword="null"/> when there is none.</returns>
+    private async ValueTask<AlvoUser?> FindAsync(UserId subject, CancellationToken cancellationToken)
+    {
+        var scope = scopes.CreateAsyncScope();
+        await using (scope.ConfigureAwait(false))
+        {
+            var users = scope.ServiceProvider.GetRequiredService<IAlvoUserStore>();
+            return await users.FindAsync(subject, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
