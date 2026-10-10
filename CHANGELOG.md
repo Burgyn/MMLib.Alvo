@@ -650,6 +650,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A runtime apply now changes the Data API's fields at once, not after a restart** (#353). Every generated
+  endpoint used to keep the entity's fields from the moment its route was built. Rules followed a
+  `PUT …/descriptor` straight away, but the body reader, the validator and the query parser did not:
+  - a field added at runtime was refused with `422 unknown-field` until the host restarted;
+  - a removed field was let through here and then refused by the data port with a `403`;
+  - a shorter `maxLength` or a newly `required` field was not enforced at all.
+
+  Each request now reads the entity's fields, facets and formats from the revision its policy decision was
+  taken against. If an apply lands between the two reads, the decision is taken again. This holds on SQLite
+  and PostgreSQL. Route literals are still fixed at startup, so an entity *added* at runtime still has no
+  route until a restart (#103).
+
 - **A `date` field now compares in memory** (#317). The CEL interpreter did not normalise a `DateOnly`, so every
   in-memory comparison involving a `date` field answered `false`. A `date` now compares as **midnight UTC**, the same
   rule the database uses. Guards that were silently dead start working on upgrade, in both directions:
