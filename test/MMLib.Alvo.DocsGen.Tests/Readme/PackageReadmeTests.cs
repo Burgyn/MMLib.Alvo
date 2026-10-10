@@ -26,11 +26,15 @@ public partial class PackageReadmeTests
         text.ShouldNotContain("<picture", Case.Insensitive);
         text.ShouldNotContain(".svg", Case.Insensitive);
         text.ShouldNotContain("<!--");
+        RawHtml().IsMatch(text).ShouldBeFalse("nuget.org renders no raw HTML: keep the package readme plain Markdown");
         LinkTarget().Matches(text).Select(m => m.Groups["target"].Value)
             .ShouldAllBe(target => target.StartsWith("https://", StringComparison.Ordinal) || target.StartsWith('#'));
         ImgSource().Matches(text).Select(m => m.Groups["src"].Value)
             .ShouldAllBe(src => src.StartsWith("https://", StringComparison.Ordinal));
     }
+
+    [GeneratedRegex("<[A-Za-z/]")]
+    private static partial Regex RawHtml();
 
     [GeneratedRegex(@"\]\((?<target>[^)\s]+)")]
     private static partial Regex LinkTarget();

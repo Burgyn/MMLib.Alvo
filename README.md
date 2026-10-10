@@ -22,8 +22,8 @@
 Alvo is a .NET-native backend-as-a-service: one validated JSON descriptor — entities, access rules, hooks, computed
 fields and rollups — becomes a REST API with its own OpenAPI document. It is built for developers who work with coding
 agents, and for .NET teams that want a configurable backend inside their own app. Access rules are compiled into the
-SQL that reads the rows, the whole backend is one file an agent can validate and dry-run, and every refusal is a
-problem document, with a pointer and a fix suggestion wherever the request can be repaired.
+SQL that reads the rows, the whole backend is one file an agent can validate and dry-run, and every refusal is an
+RFC 9457 problem document: an invalid descriptor or record names the pointer and, where it can, suggests a fix.
 
 ## See it
 
@@ -116,6 +116,9 @@ Content-Type: application/problem+json
 }
 ```
 
+The title came back trimmed and `priority` defaulted to `normal`; the refusal's `detail` carries the hook's own message
+and names the hook that refused.
+
 ## Quick start
 
 You need Docker with Compose v2, git and `openssl`. Nothing is published yet, so the stack builds the image from the
@@ -139,11 +142,11 @@ Next: [the 10-minute tutorial →](https://burgyn.github.io/MMLib.Alvo/start-her
 ## What you get
 
 - **[One validated descriptor](https://burgyn.github.io/MMLib.Alvo/concepts/descriptor/)** — entities, fields, rules, hooks, computed fields and rollups, checked by a JSON Schema and then semantically.
-- **[Rules in SQL](https://burgyn.github.io/MMLib.Alvo/guides/access-rules/)** — CEL access rules rendered as parameterised SQL predicates; an operation with no rule is refused.
+- **[Rules in SQL](https://burgyn.github.io/MMLib.Alvo/guides/access-rules/)** — CEL access rules compiled into the SQL of every list, read, update and delete (a create's row is checked in the transaction); an operation with no rule is refused.
 - **[Hooks that fail closed](https://burgyn.github.io/MMLib.Alvo/guides/before-hooks/)** — before-hooks refuse or rewrite a write inside its transaction, with built-in functions and your own C# ones.
 - **[Events and webhooks](https://burgyn.github.io/MMLib.Alvo/guides/after-hooks-and-webhooks/)** — every write commits its event through an outbox; after-hooks send e-mail and deliver webhooks, with retries.
 - **[Audit](https://burgyn.github.io/MMLib.Alvo/guides/audit-row-changes/) and [history](https://burgyn.github.io/MMLib.Alvo/guides/apply-and-evolve/)** — audit columns per entity, and every applied descriptor kept as a revision you can roll back to.
-- **[Agent-first](https://burgyn.github.io/MMLib.Alvo/start-here/coding-agents/)** — problem documents with a pointer and a fix suggestion, dry runs, `Idempotency-Key`, and `llms.txt`.
+- **[Agent-first](https://burgyn.github.io/MMLib.Alvo/start-here/coding-agents/)** — problem documents with a pointer and a fix suggestion for invalid input, dry runs, `Idempotency-Key`, and `llms.txt`.
 - **[Admin dashboard](https://burgyn.github.io/MMLib.Alvo/guides/admin-dashboard/)** — schema, rule and hook editors, a data browser, history and rollback, and a schema assistant.
 - **[Standalone or embedded](https://burgyn.github.io/MMLib.Alvo/concepts/modes/)** — a Docker image built from this repository, or a library in your ASP.NET Core host, on SQLite or PostgreSQL.
 
@@ -163,9 +166,9 @@ flowchart TB
   end
   subgraph Runtime
     direction LR
-    request["HTTP request"] --> auth["Auth<br/>API key → @user"] --> policy["Rules<br/>CEL → SQL"]
-    policy --> tx["One transaction<br/>before-hooks · row + audit · outbox event"]
-    tx -- "after the commit" --> after["After-hooks<br/>e-mail · webhooks"]
+    request["Request"] --> auth["API key → @user"] --> policy["Rules: CEL → SQL"]
+    policy --> tx["Transaction<br/>hooks · row · outbox"]
+    tx -- "commit" --> after["After-hooks"]
   end
   Control -- "the registry's rules and hooks" --> Runtime
 ```

@@ -5,8 +5,8 @@
 Alvo is a .NET-native backend-as-a-service: one validated JSON descriptor — entities, access rules, hooks, computed
 fields and rollups — becomes a REST API with its own OpenAPI document. It is built for developers who work with coding
 agents, and for .NET teams that want a configurable backend inside their own app. Access rules are compiled into the
-SQL that reads the rows, the whole backend is one file an agent can validate and dry-run, and every refusal is a
-problem document, with a pointer and a fix suggestion wherever the request can be repaired.
+SQL that reads the rows, the whole backend is one file an agent can validate and dry-run, and every refusal is an
+RFC 9457 problem document: an invalid descriptor or record names the pointer and, where it can, suggests a fix.
 
 ![The admin dashboard's rule editor flagging an undeclared role before the rule is saved](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/assets/screenshots/rules-editor-light-2x.png)
 
@@ -100,6 +100,9 @@ Content-Type: application/problem+json
   "detail": "A high-priority ticket needs a body. (refused by the before-hook at '/entities/tickets/hooks/beforeCreate/1')"
 }
 ```
+
+The title came back trimmed and `priority` defaulted to `normal`; the refusal's `detail` carries the hook's own message
+and names the hook that refused.
 
 ## Quick start
 

@@ -43,8 +43,9 @@ Where the guarantees stop:
     UUID to ask;
   - a value a `unique` field already holds answers `409`, and that row may be one the caller cannot see: uniqueness is
     instance-wide on an entity that is not tenant-scoped, and tenant-wide on a scoped one;
-  - a delete refused because a `ref` with `onDelete: restrict` still points at the row answers `409` (`referenced`):
-    it tells the caller that some record references it, which the caller may not be allowed to read.
+  - a delete refused because a `ref` with `onDelete: restrict` still points at the row answers `409 conflict`
+    with violation code `referenced`: it tells the caller that some record references it, which the caller may not be
+    allowed to read.
 
   Do not make a guessable value, such as an e-mail address, `unique` if its existence is confidential.
 - **The schema's shape is public.** Which entities exist and their non-hidden fields are published by the routes and
