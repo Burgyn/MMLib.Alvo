@@ -78,7 +78,7 @@ public partial class RealSchemaTests
     public void No_page_exceeds_the_key_section_cap()
     {
         var oversized = DescriptorPages()
-            .Select(page => (page.RelativePath, Sections: KeySection().Matches(page.Content).Count))
+            .Select(page => (page.RelativePath, Sections: KeySection().Count(page.Content)))
             .Where(page => page.Sections > SchemaReferenceRenderer.MaxKeySectionsPerPage)
             .ToList();
 
