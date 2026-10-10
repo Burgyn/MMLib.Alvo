@@ -34,9 +34,14 @@ internal sealed class ExamplesGenerator : IPageGenerator
             .Append("**Applies:** ").Append(Applies(example, directory)).Append("\n\n")
             .Append("**Entities:** ").Append(string.Join(", ", example.Entities.Select(Md.Code))).Append("\n\n")
             .Append("**Roles a key needs:** ").Append(Roles(example)).Append("\n\n")
+            .Append("**Tenancy:** ").Append(example.MultiTenant ? "multi-tenant (`tenancy.enabled: true`)" : "single-tenant").Append("\n\n")
             .Append("**Descriptor:** [`").Append(directory).Append('/').Append(example.Descriptor).Append("`](")
             .Append(SiteLinks.RepoBlob($"{directory}/{example.Descriptor}")).Append(")\n");
-        if (example.Runnable)
+        if (example is { Runnable: true, OwnStack: { } stack })
+        {
+            AppendOwnStack(page, stack, directory);
+        }
+        else if (example.Runnable)
         {
             AppendRun(page, example, directory);
         }
@@ -53,6 +58,11 @@ internal sealed class ExamplesGenerator : IPageGenerator
 
     private static string Roles(Example example) =>
         example.Roles.Count == 0 ? "none declared; `authenticated` is enough" : string.Join(", ", example.Roles.Select(Md.Code));
+
+    private static void AppendOwnStack(StringBuilder page, ExampleStack stack, string directory) =>
+        page.Append("\nThis example has its own stack, `").Append(stack.ComposeFile).Append("`, with one dev key per role and tenant. ")
+            .Append("Generate a secret for each key and start it, as its [README](").Append(SiteLinks.RepoBlob($"{directory}/README.md"))
+            .Append(") describes:\n\n```sh\n").Append(stack.Command()).Append("\n```\n");
 
     private static void AppendRun(StringBuilder page, Example example, string directory) =>
         page.Append("\nSet the key secret and declare keys with these roles as [Run your own descriptor](")

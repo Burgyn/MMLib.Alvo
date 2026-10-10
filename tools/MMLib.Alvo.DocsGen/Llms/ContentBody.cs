@@ -147,16 +147,16 @@ internal static partial class ContentBody
     [GeneratedRegex(@"^[ \t]*import\s.*\sfrom\s.*\n?", RegexOptions.Multiline)]
     private static partial Regex ImportLine();
 
-    [GeneratedRegex(@"^[ \t]*<Code\s(?<attrs>.*?)/>[ \t]*$", RegexOptions.Multiline)]
+    [GeneratedRegex(@"^[ \t]*<Code\s(?<attrs>.*?)/>[ \t]*$", RegexOptions.Multiline | RegexOptions.Singleline)]
     private static partial Regex Code();
 
-    [GeneratedRegex(@"^[ \t]*<SourceExcerpt\s(?<attrs>.*?)/>[ \t]*$", RegexOptions.Multiline)]
+    [GeneratedRegex(@"^[ \t]*<SourceExcerpt\s(?<attrs>.*?)/>[ \t]*$", RegexOptions.Multiline | RegexOptions.Singleline)]
     private static partial Regex SourceExcerpt();
 
-    [GeneratedRegex(@"^[ \t]*<JsonExcerpt\s(?<attrs>.*?)/>[ \t]*$", RegexOptions.Multiline)]
+    [GeneratedRegex(@"^[ \t]*<JsonExcerpt\s(?<attrs>.*?)/>[ \t]*$", RegexOptions.Multiline | RegexOptions.Singleline)]
     private static partial Regex JsonExcerpt();
 
-    [GeneratedRegex(@"^[ \t]*<Exchange\s(?<attrs>.*?)/>[ \t]*$", RegexOptions.Multiline)]
+    [GeneratedRegex(@"^[ \t]*<Exchange\s(?<attrs>.*?)/>[ \t]*$", RegexOptions.Multiline | RegexOptions.Singleline)]
     private static partial Regex Exchange();
 
     [GeneratedRegex(@"code=\{(?<id>\w+)(?:\.\w+\(\))?\}")]

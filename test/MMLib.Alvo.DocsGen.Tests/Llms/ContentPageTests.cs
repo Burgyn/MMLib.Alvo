@@ -120,6 +120,17 @@ public class ContentPageTests
     }
 
     [Fact]
+    public void A_component_tag_may_span_several_lines()
+    {
+        var docs = Directory.CreateTempSubdirectory("llms-").FullName;
+        File.WriteAllText(Path.Combine(docs, "a.json"), "{}");
+        File.WriteAllText(Path.Combine(docs, "x.mdx"),
+            "---\ntitle: X\ndescription: D.\n---\nimport a from './a.json?raw';\n\nBefore.\n\n<Code\n  code={a}\n  title=\"a.json\"\n/>\n\nAfter.\n");
+
+        ContentPage.Read(Path.Combine(docs, "x.mdx"), docs, docs).Body.ShouldBe("Before.\n\n```json\n{}\n```\n\nAfter.");
+    }
+
+    [Fact]
     public void A_component_naming_an_unknown_import_fails()
     {
         var docs = Directory.CreateTempSubdirectory("llms-").FullName;

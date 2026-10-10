@@ -45,4 +45,30 @@ public class ExampleCatalogTests
         page.ShouldContain("**Applies:** no — [why](https://github.com/Burgyn/MMLib.Alvo/blob/main/examples/complex-crm/NOT-RUNNABLE.md)");
         page.ShouldNotContain("ALVO_DESCRIPTOR=./examples/complex-crm/");
     }
+
+    [Fact]
+    public void An_example_with_its_own_stack_runs_the_command_its_readme_gives()
+    {
+        var fieldService = ExampleCatalog.Read(_root).Single(e => e.Directory == "field-service");
+        var readme = File.ReadAllText(Path.Combine(_root, "examples", "field-service", "README.md"));
+        var exported = System.Text.RegularExpressions.Regex.Matches(readme, @"export (ALVO_FS_\w+_SECRET)=").Select(m => m.Groups[1].Value);
+
+        fieldService.MultiTenant.ShouldBeTrue();
+        fieldService.OwnStack.ShouldNotBeNull();
+        fieldService.OwnStack.SecretVariables.ShouldBe(exported);
+        fieldService.OwnStack.Command().ShouldEndWith(
+            "docker compose --env-file examples/field-service/demo-identities.env -f docker-compose.field-service.yml up --build --wait");
+        ExampleCatalog.Read(_root).Where(e => e.Directory != "field-service").ShouldAllBe(e => e.OwnStack == null);
+    }
+
+    [Fact]
+    public void The_page_runs_field_service_on_its_own_stack_and_says_it_is_multi_tenant()
+    {
+        var page = ExamplesGenerator.Render(ExampleCatalog.Read(_root)).Content;
+        var section = page[page.IndexOf("## field-service", StringComparison.Ordinal)..page.IndexOf("## simple-tasks", StringComparison.Ordinal)];
+
+        section.ShouldContain("**Tenancy:** multi-tenant");
+        section.ShouldContain("-f docker-compose.field-service.yml up --build --wait");
+        section.ShouldNotContain("ALVO_DESCRIPTOR=");
+    }
 }

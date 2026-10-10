@@ -76,7 +76,7 @@ internal sealed class CSharpApiGenerator : IPageGenerator
     {
         page.Append("\n### ").Append(Md.Code(TypeNames.Display(type, null))).Append("\n\n*").Append(KindOf(type)).Append("*\n");
         AppendParagraph(page, docs.Summary(DocId.Of(type)));
-        AppendParagraph(page, docs.Remarks(DocId.Of(type)));
+        AppendParagraph(page, RemarksFilter.ForReaders(docs.Remarks(DocId.Of(type))));
         foreach (var overloads in ApiScope.MembersOf(type).GroupBy(member => member.Name))
         {
             page.Append("\n#### ").Append(Md.Code(overloads.Key)).Append('\n');
@@ -92,7 +92,7 @@ internal sealed class CSharpApiGenerator : IPageGenerator
         var id = ApiScope.DocIdOf(member);
         page.Append("\n```csharp\n").Append(Signatures.Of(member)).Append("\n```\n");
         AppendParagraph(page, docs.Summary(id));
-        AppendParagraph(page, docs.Remarks(id));
+        AppendParagraph(page, RemarksFilter.ForReaders(docs.Remarks(id)));
         AppendParameters(page, member, id, docs);
         if (docs.Returns(id) is { Length: > 0 } returns)
         {

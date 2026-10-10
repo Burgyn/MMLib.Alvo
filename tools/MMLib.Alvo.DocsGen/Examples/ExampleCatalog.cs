@@ -8,7 +8,9 @@ internal sealed record Example(
     string Summary,
     bool Runnable,
     IReadOnlyList<string> Roles,
-    IReadOnlyList<string> Entities);
+    IReadOnlyList<string> Entities,
+    bool MultiTenant = false,
+    ExampleStack? OwnStack = null);
 
 internal static class ExampleCatalog
 {
@@ -26,7 +28,7 @@ internal static class ExampleCatalog
             .. Directory.EnumerateDirectories(examples)
                 .Where(directory => Path.GetFileName(directory) != NegativeDirectory)
                 .Order(StringComparer.Ordinal)
-                .Select(directory => ReadOne(directory, summaries)),
+                .Select(directory => ReadOne(directory, summaries) with { OwnStack = ExampleStack.Find(repoRoot, directory) }),
         ];
     }
 
@@ -42,7 +44,8 @@ internal static class ExampleCatalog
             summaries.GetValueOrDefault(name) ?? throw new InvalidOperationException($"examples/README.md has no '{BulletStart}{name}/`**' bullet."),
             !File.Exists(Path.Combine(directory, NotRunnableMarker)),
             Roles(root),
-            root.TryGetProperty("entities", out var entities) ? [.. entities.EnumerateObject().Select(entity => entity.Name)] : []);
+            root.TryGetProperty("entities", out var entities) ? [.. entities.EnumerateObject().Select(entity => entity.Name)] : [],
+            IsMultiTenant(root));
     }
 
     private static string SingleDescriptor(string directory)
@@ -52,6 +55,11 @@ internal static class ExampleCatalog
             ? descriptors[0]
             : throw new InvalidOperationException($"'{directory}' must hold exactly one *.alvo.json descriptor; it holds {descriptors.Length}.");
     }
+
+    private static bool IsMultiTenant(JsonElement root) =>
+        root.TryGetProperty("tenancy", out var tenancy)
+        && tenancy.TryGetProperty("enabled", out var enabled)
+        && enabled.ValueKind == JsonValueKind.True;
 
     private static List<string> Roles(JsonElement root) =>
         root.TryGetProperty("auth", out var auth) && auth.TryGetProperty("roles", out var roles)
