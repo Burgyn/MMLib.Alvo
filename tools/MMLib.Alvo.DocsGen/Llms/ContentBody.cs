@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.DocsGen.Markdown;
 using System.Globalization;
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -24,12 +25,68 @@ internal static partial class ContentBody
     internal static string Render(string body, string pageDirectory, string generatedDir)
     {
         var imports = RawImports(body, pageDirectory);
-        var text = WithoutTagsAndComments(WithoutImports(body));
+        return OutsideFences(body, prose => Prose(prose, imports, generatedDir)).Trim();
+    }
+
+    private static string Prose(string prose, Dictionary<string, (string Path, string Content)> imports, string generatedDir)
+    {
+        var text = AnchorOnlyLine().Replace(WithoutTagsAndComments(WithoutImports(prose)), string.Empty);
+        text = AbsoluteSiteLinks(text);
         text = Code().Replace(text, match => Fence(Language(match.Groups["attrs"].Value, imports), Raw(match, imports).Content.TrimEnd()));
         text = SourceExcerpt().Replace(text, match => Fence(Attribute(match.Groups["attrs"].Value, "lang") ?? "csharp", Slice(match, imports)));
         text = JsonExcerpt().Replace(text, match => Fence("json", JsonSubtree(match, imports)));
         text = Exchange().Replace(text, match => ExchangeSteps(RequiredAttribute(match, "name"), generatedDir));
-        return Collapse(AbsoluteSiteLinks(text));
+        return BlankLines().Replace(text, "\n\n");
+    }
+
+    private static string OutsideFences(string text, Func<string, string> transform)
+    {
+        var result = new StringBuilder();
+        var prose = new StringBuilder();
+        var inFence = false;
+        foreach (var line in text.Split('\n'))
+        {
+            var fence = IsFence(line);
+            if (!inFence && !fence)
+            {
+                prose.Append(line).Append('\n');
+                continue;
+            }
+
+            if (!inFence)
+            {
+                AppendProse(result, transform(prose.ToString()));
+                prose.Clear();
+            }
+
+            result.Append(line).Append('\n');
+            inFence = !inFence || !fence;
+        }
+
+        AppendProse(result, transform(prose.ToString()));
+        return result.ToString();
+    }
+
+    private static void AppendProse(StringBuilder result, string prose)
+    {
+        var trimmed = prose.Trim('\n');
+        if (trimmed.Length == 0)
+        {
+            return;
+        }
+
+        if (result.Length > 0)
+        {
+            result.Append('\n');
+        }
+
+        result.Append(trimmed).Append("\n\n");
+    }
+
+    private static bool IsFence(string line)
+    {
+        var trimmed = line.TrimStart();
+        return trimmed.StartsWith("```", StringComparison.Ordinal) || trimmed.StartsWith("~~~", StringComparison.Ordinal);
     }
 
     private static Dictionary<string, (string Path, string Content)> RawImports(string body, string pageDirectory) =>
@@ -122,8 +179,6 @@ internal static partial class ContentBody
     private static string WithoutTagsAndComments(string text) =>
         TagOnlyLine().Replace(Comment().Replace(text, string.Empty), string.Empty);
 
-    private static string Collapse(string text) => BlankLines().Replace(text, "\n\n").Trim();
-
     private static string Fence(string lang, string content)
     {
         var longest = Backticks().Matches(content).Select(run => run.Length).DefaultIfEmpty(0).Max();
@@ -167,6 +222,9 @@ internal static partial class ContentBody
 
     [GeneratedRegex(@"\{/\*.*?\*/\}|<!--.*?-->", RegexOptions.Singleline)]
     private static partial Regex Comment();
+
+    [GeneratedRegex(@"^[ \t]*<a id=""[^""]*""></a>[ \t]*\n?", RegexOptions.Multiline)]
+    private static partial Regex AnchorOnlyLine();
 
     [GeneratedRegex(@"\n{3,}")]
     private static partial Regex BlankLines();

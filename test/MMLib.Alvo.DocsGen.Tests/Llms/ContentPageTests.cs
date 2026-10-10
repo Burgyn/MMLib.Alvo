@@ -138,4 +138,15 @@ public class ContentPageTests
 
         Should.Throw<InvalidOperationException>(() => ContentPage.Read(Path.Combine(docs, "x.mdx"), docs, docs));
     }
+
+    [Fact]
+    public void Fenced_code_keeps_its_tags_and_comments()
+    {
+        var docs = Directory.CreateTempSubdirectory("llms-").FullName;
+        File.WriteAllText(Path.Combine(docs, "x.md"),
+            "---\ntitle: X\ndescription: D.\n---\n\n<a id=\"k\"></a>\n\nText.\n\n```xml\n<Project Sdk=\"Microsoft.NET.Sdk\">\n  <!-- keep -->\n  <PropertyGroup>\n  </PropertyGroup>\n</Project>\n```\n\n<!-- drop -->\nAfter.\n");
+
+        ContentPage.Read(Path.Combine(docs, "x.md"), docs, docs).Body.ShouldBe(
+            "Text.\n\n```xml\n<Project Sdk=\"Microsoft.NET.Sdk\">\n  <!-- keep -->\n  <PropertyGroup>\n  </PropertyGroup>\n</Project>\n```\n\nAfter.");
+    }
 }

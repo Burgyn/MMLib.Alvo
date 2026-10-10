@@ -71,4 +71,24 @@ public class ExampleCatalogTests
         section.ShouldContain("-f docker-compose.field-service.yml up --build --wait");
         section.ShouldNotContain("ALVO_DESCRIPTOR=");
     }
+
+    [Fact]
+    public void The_page_carries_no_contributor_references_or_internal_terms()
+    {
+        var page = ExamplesGenerator.Render(ExampleCatalog.Read(_root)).Content;
+
+        page.ShouldNotMatch(@"(?<![&\w])#\d+");
+        page.ShouldNotContain("§");
+        page.ShouldNotContain("číselník");
+        page.ShouldNotContain("(D3)");
+        page.ShouldNotContain("the analysis");
+        page.ShouldNotContain("applies as it stands", Case.Insensitive);
+    }
+
+    [Fact]
+    public void A_summary_loses_its_emphasis_markers_but_keeps_code()
+    {
+        ExamplesGenerator.Sentence("**applies as it stands.** a *format* showcase with `*:read` keys.")
+            .ShouldBe("A format showcase with `*:read` keys.");
+    }
 }

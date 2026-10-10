@@ -78,7 +78,7 @@ internal static class LlmsWriter
     {
         var full = new StringBuilder("# Alvo documentation, full text\n\n> ").Append(OneLiner).Append("\n\n")
             .Append(ProblemTypes).Append("\n\n---\n\n");
-        foreach (var page in Sectioned(pages).SelectMany(section => section.Pages).Where(InFullText))
+        foreach (var page in Sectioned(pages).SelectMany(section => section.Pages).Where(page => page.Body.Length > 0 && InFullText(page)))
         {
             full.Append("# ").Append(page.Title).Append("\n\nSource: ").Append(SiteLinks.Absolute(page.Slug)).Append("\n\n")
                 .Append(page.Body).Append("\n\n---\n\n");

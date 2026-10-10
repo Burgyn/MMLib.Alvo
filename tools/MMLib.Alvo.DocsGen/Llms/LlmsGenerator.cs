@@ -3,6 +3,7 @@
 internal sealed class LlmsGenerator : IPageGenerator
 {
     private const string SkillPrefix = "alvo-descriptor-";
+    private const string DescriptionKey = "description:";
 
     public Task<IReadOnlyList<GeneratedPage>> GenerateAsync(DocsGenContext context, CancellationToken ct)
     {
@@ -30,9 +31,17 @@ internal sealed class LlmsGenerator : IPageGenerator
             .Select(directory => (Path.GetFileName(directory), DescriptionOf(Path.Combine(directory, "SKILL.md")))),
     ];
 
-    private static string DescriptionOf(string skillFile) =>
-        File.ReadLines(skillFile).Skip(1).TakeWhile(line => line != "---")
-            .FirstOrDefault(line => line.StartsWith("description:", StringComparison.Ordinal)) is { } line
-            ? line["description:".Length..].Trim()
-            : throw new InvalidOperationException($"'{skillFile}' has no description in its frontmatter.");
+    internal static string DescriptionOf(string skillFile)
+    {
+        var front = File.ReadLines(skillFile).Skip(1).TakeWhile(line => line != "---").ToList();
+        var start = front.FindIndex(line => line.StartsWith(DescriptionKey, StringComparison.Ordinal));
+        var value = start < 0 ? string.Empty : front[start][DescriptionKey.Length..].Trim();
+        if (value.Length > 0 && value[0] is '>' or '|')
+        {
+            value = string.Join(' ', front.Skip(start + 1).TakeWhile(line => line.StartsWith(' ') || line.Length == 0).Select(line => line.Trim()).Where(line => line.Length > 0));
+        }
+
+        value = value.Trim('"', '\'');
+        return value.Length > 0 ? value : throw new InvalidOperationException($"'{skillFile}' has no description in its frontmatter.");
+    }
 }

@@ -91,4 +91,31 @@ public class LlmsWriterTests
         full.ShouldNotContain("# License\n");
         full.IndexOf("# X guide", StringComparison.Ordinal).ShouldBeLessThan(full.IndexOf("# entities", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void A_page_without_a_body_is_left_out_of_the_full_text() =>
+        LlmsWriter.Full([new ContentPage("guides/empty", "guides", "Empty", "E.", 1, string.Empty), _guide])
+            .ShouldNotContain("# Empty\n");
+
+    [Theory]
+    [InlineData("description: Plain text.\n", "Plain text.")]
+    [InlineData("description: \"Quoted text.\"\n", "Quoted text.")]
+    [InlineData("description: >\n  Folded\n  text.\n", "Folded text.")]
+    [InlineData("description: |\n  Literal\n  text.\n", "Literal text.")]
+    public void A_skill_description_is_read_from_plain_quoted_or_folded_yaml(string yaml, string expected)
+    {
+        var file = Path.Combine(Directory.CreateTempSubdirectory("skill-").FullName, "SKILL.md");
+        File.WriteAllText(file, "---\nname: s\n" + yaml + "---\n\nBody.\n");
+
+        LlmsGenerator.DescriptionOf(file).ShouldBe(expected);
+    }
+
+    [Fact]
+    public void A_skill_without_a_description_fails()
+    {
+        var file = Path.Combine(Directory.CreateTempSubdirectory("skill-").FullName, "SKILL.md");
+        File.WriteAllText(file, "---\nname: s\ndescription: >\n---\n");
+
+        Should.Throw<InvalidOperationException>(() => LlmsGenerator.DescriptionOf(file));
+    }
 }

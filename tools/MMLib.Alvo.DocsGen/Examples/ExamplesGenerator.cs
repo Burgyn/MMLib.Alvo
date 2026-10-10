@@ -1,9 +1,10 @@
 ﻿using MMLib.Alvo.DocsGen.Markdown;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.DocsGen.Examples;
 
-internal sealed class ExamplesGenerator : IPageGenerator
+internal sealed partial class ExamplesGenerator : IPageGenerator
 {
     internal const string PageFile = "examples.md";
 
@@ -47,9 +48,15 @@ internal sealed class ExamplesGenerator : IPageGenerator
         }
     }
 
-    private static string Sentence(string summary)
+    internal static string Sentence(string summary)
     {
-        var plain = summary.Replace("**", string.Empty, StringComparison.Ordinal);
+        var parts = summary.Split('`');
+        for (var index = 0; index < parts.Length; index += 2)
+        {
+            parts[index] = parts[index].Replace("*", string.Empty, StringComparison.Ordinal);
+        }
+
+        var plain = Spaces().Replace(AppliesAsItStands().Replace(string.Join('`', parts), string.Empty), " ").Trim();
         return plain.Length == 0 ? plain : char.ToUpperInvariant(plain[0]) + plain[1..];
     }
 
@@ -69,4 +76,10 @@ internal sealed class ExamplesGenerator : IPageGenerator
             .Append(SiteLinks.Page("start-here/run-your-own")).Append(") shows, then start the stack over this descriptor:\n\n")
             .Append("```sh\nALVO_DESCRIPTOR=./").Append(directory).Append('/').Append(example.Descriptor)
             .Append(" docker compose up --build --wait\n```\n");
+
+    [GeneratedRegex(@"\bapplies as it stands\.\s*", RegexOptions.IgnoreCase)]
+    private static partial Regex AppliesAsItStands();
+
+    [GeneratedRegex(" {2,}")]
+    private static partial Regex Spaces();
 }

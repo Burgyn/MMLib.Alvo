@@ -11,26 +11,24 @@ Reference descriptors validated against `schema/project.schema.json`
 
 - **`simple-tasks/`** — the smallest real backend, and the one to start from:
   two owned entities (`projects`, `tasks`), ownership rules, an `enum`, `audit`,
-  one composite index. **Applies as it stands.** It used to carry a `count`
-  rollup, per-field `default`s and a `beforeUpdate` mutate; those were removed
-  when the apply-time refusals below landed, because an example that cannot be
-  applied is worse than a smaller one. (`rollup` is honoured as of #21; the
-  example was not put back, because the smallest starting point is the point.)
+  one composite index. **Applies as it stands.** It deliberately leaves out
+  rollups, defaults and hooks, because the smallest starting point is the point;
+  the other examples show those.
 - **`complex-crm/`** — **a format showcase, not a runnable backend** (see
-  `complex-crm/NOT-RUNNABLE.md`): the analysis §16 CRM adapted to v1, exercising
+  `complex-crm/NOT-RUNNABLE.md`): a CRM written in the v1 format, exercising
   most of the surface *including keys this build refuses*, which is exactly why
   applying it fails. It is the schema corpus's one full-surface fixture, covering
-  multi-tenancy (`tenancy.enabled` + a `global` číselník),
+  multi-tenancy (`tenancy.enabled` + a `global` lookup table),
   dynamic-entities governance (`dynamicEntities.defaultRules` + quotas),
   `rollup.via`, a `computed` field reading a `rollup` (`gross_total`),
   a declarative `formats` entry (`sk-ico`) referenced by a field,
   field-level per-role masking (`hidden` as CEL), tagged `{"$cel": …}` values,
   `renamedFrom`, `templates`, outbound `webhooks`, a `batch`-delivery
   automation rule, a scheduled rule delegating to a `function`, and `x-` keys.
-  It is a real **bundle** (D3): `crm.alvo.json` alongside
+  It is a real **bundle**: `crm.alvo.json` alongside
   `templates/invoice-issued.html` (referenced via `bodyFile`) and
   `functions/remind-stale-deals.csx` (referenced via `script`).
-- **`vehicle-registry/`** — **applies as it stands.** The #23 demo: owners, their vehicles, and
+- **`vehicle-registry/`** — **applies as it stands.** The demo the root `docker-compose.yml` serves: owners, their vehicles, and
   periodic roadworthiness inspections. Exercises two `ref` chains
   (`vehicles.owner_id` → `owners`, `inspections.vehicle_id` → `vehicles`,
   the latter `onDelete: cascade`), a composite index on each of `vehicles`

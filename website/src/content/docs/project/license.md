@@ -3,7 +3,7 @@ title: License
 description: Alvo's core is licensed under Apache-2.0, and stays free and open source.
 ---
 
-Alvo is licensed under the [Apache License, Version 2.0](https://github.com/Burgyn/MMLib.Alvo/blob/main/LICENSE). The license has been in the repository since the first commit, and it covers every `MMLib.Alvo.*` package in it.
+Alvo is licensed under the [Apache License, Version 2.0](https://github.com/Burgyn/MMLib.Alvo/blob/main/LICENSE). The license has been in the repository since the first line of code, and it covers every `MMLib.Alvo.*` package in it.
 
 ## The open-core model
 
