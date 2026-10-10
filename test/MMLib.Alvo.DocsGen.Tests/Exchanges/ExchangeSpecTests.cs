@@ -76,6 +76,13 @@ public class ExchangeSpecTests
             """)).Message.ShouldContain("'expect'");
 
     [Fact]
+    public void A_wrong_secret_without_a_key_is_refused() =>
+        Should.Throw<InvalidOperationException>(() => ExchangeSpec.Parse("fixture/wrong", """
+            { "descriptor": "d.alvo.json", "keys": {},
+              "steps": [ { "method": "GET", "path": "/api/x", "wrongSecret": true, "expect": 401 } ] }
+            """)).Message.ShouldBe("fixture/wrong: step 0 sets 'wrongSecret' but names no 'key' to present it for");
+
+    [Fact]
     public void A_key_defaults_its_secret_variable()
     {
         var spec = ExchangeSpec.Parse("fixture/keys", """
@@ -86,8 +93,17 @@ public class ExchangeSpecTests
             """);
 
         spec.Keys["agent"].SecretVariable.ShouldBe("ALVO_KEY_SECRET");
+        spec.Keys["agent"].User.ShouldBeNull();
         spec.Keys["admin"].SecretVariable.ShouldBe("ALVO_ADMIN_KEY_SECRET");
     }
+
+    [Fact]
+    public void A_key_may_name_the_user_it_authenticates_as() =>
+        ExchangeSpec.Parse("fixture/user", """
+            { "descriptor": "d.alvo.json",
+              "keys": { "agent": { "roles": ["authenticated"], "scopes": ["*:read"], "user": "3f2b8c1e-7a4d-4e9b-9c21-5d6e7f8a9b01" } },
+              "steps": [] }
+            """).Keys["agent"].User.ShouldBe(Guid.Parse("3f2b8c1e-7a4d-4e9b-9c21-5d6e7f8a9b01"));
 
     [Fact]
     public void The_name_is_the_path_under_exchanges_without_the_suffix() =>

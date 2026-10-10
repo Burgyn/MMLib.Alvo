@@ -2,7 +2,7 @@
 
 namespace MMLib.Alvo.DocsGen.Exchanges;
 
-internal sealed record ExchangeKey(IReadOnlyList<string> Roles, IReadOnlyList<string> Scopes, Guid? Tenant, string SecretVariable)
+internal sealed record ExchangeKey(IReadOnlyList<string> Roles, IReadOnlyList<string> Scopes, Guid? Tenant, string SecretVariable, Guid? User = null)
 {
     internal const string DefaultSecretVariable = "ALVO_KEY_SECRET";
 }
@@ -18,15 +18,16 @@ internal sealed record ExchangeStep(
     string? ContentType,
     int Expect,
     string? ExpectType,
-    IReadOnlyList<string> ShowHeaders);
+    IReadOnlyList<string> ShowHeaders,
+    bool WrongSecret = false);
 
 internal sealed record ExchangeSpec(string Name, string Descriptor, IReadOnlyDictionary<string, ExchangeKey> Keys, IReadOnlyList<ExchangeStep> Steps)
 {
     private static readonly string[] _specMembers = ["descriptor", "keys", "steps"];
     private static readonly (string Header, string Member)[] _ownedHeaders = [("X-Alvo-Api-Key", "key"), ("Content-Type", "contentType")];
-    private static readonly string[] _keyMembers = ["roles", "scopes", "tenant", "secretVariable"];
+    private static readonly string[] _keyMembers = ["roles", "scopes", "tenant", "secretVariable", "user"];
     private static readonly string[] _stepMembers =
-        ["key", "method", "path", "body", "bodyFile", "bodyFileAs", "headers", "contentType", "expect", "expectType", "showHeaders"];
+        ["key", "method", "path", "body", "bodyFile", "bodyFileAs", "headers", "contentType", "expect", "expectType", "showHeaders", "wrongSecret"];
 
     internal static ExchangeSpec Parse(string name, string json)
     {
@@ -49,7 +50,8 @@ internal sealed record ExchangeSpec(string Name, string Descriptor, IReadOnlyDic
                 Strings(key["roles"]),
                 Strings(key["scopes"]),
                 key["tenant"] is { } tenant ? Guid.Parse(tenant.GetValue<string>()) : null,
-                key["secretVariable"]?.GetValue<string>() ?? ExchangeKey.DefaultSecretVariable);
+                key["secretVariable"]?.GetValue<string>() ?? ExchangeKey.DefaultSecretVariable,
+                key["user"] is { } user ? Guid.Parse(user.GetValue<string>()) : null);
         }
 
         internal ExchangeStep Step(int index, JsonNode? node, Dictionary<string, ExchangeKey> keys)
@@ -68,11 +70,21 @@ internal sealed record ExchangeSpec(string Name, string Descriptor, IReadOnlyDic
             RefuseContentTypeWithoutBody(step, where);
             RefuseBodyFileAsWithoutBodyFile(step, where);
             RefuseAmbiguousBody(step, where);
+            RefuseWrongSecretWithoutKey(step, key, where);
             return new ExchangeStep(
                 key, String(step, "method", where).ToUpperInvariant(), String(step, "path", where),
                 step["body"]?.DeepClone(), step["bodyFile"]?.GetValue<string>(), step["bodyFileAs"]?.GetValue<string>(), headers,
                 step["contentType"]?.GetValue<string>(), Required(step, "expect", where).GetValue<int>(),
-                step["expectType"]?.GetValue<string>(), Strings(step["showHeaders"]));
+                step["expectType"]?.GetValue<string>(), Strings(step["showHeaders"]),
+                step["wrongSecret"]?.GetValue<bool>() ?? false);
+        }
+
+        private void RefuseWrongSecretWithoutKey(JsonObject step, string? key, string where)
+        {
+            if (step["wrongSecret"] is not null && key is null)
+            {
+                throw Fail($"{where} sets 'wrongSecret' but names no 'key' to present it for");
+            }
         }
 
         private void RefuseOwnedHeaders(Dictionary<string, string> headers, string where)

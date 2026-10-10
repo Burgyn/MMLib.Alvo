@@ -108,7 +108,7 @@ internal static class HostBoot
     {
         settings[$"{prefix}:KeyId"] = id;
         settings[$"{prefix}:Secret"] = secret;
-        settings[$"{prefix}:User"] = UserOf(id).ToString();
+        settings[$"{prefix}:User"] = (key.User ?? UserOf(id)).ToString();
         AddList(settings, $"{prefix}:Roles", key.Roles);
         AddList(settings, $"{prefix}:Scopes", key.Scopes);
         if (key.Tenant is { } tenant)

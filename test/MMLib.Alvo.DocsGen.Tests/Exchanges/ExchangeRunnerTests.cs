@@ -45,6 +45,23 @@ public class ExchangeRunnerTests
     }
 
     [Fact]
+    public async Task A_wrong_secret_is_presented_and_shown_for_the_key()
+    {
+        var spec = ExchangeSpec.Parse("fixture/wrong-secret", """
+            { "descriptor": "website/src/snippets/landing/helpdesk.alvo.json",
+              "keys": { "agent": { "roles": ["authenticated"], "scopes": ["*:read"] } },
+              "steps": [ { "key": "agent", "method": "GET", "path": "/api/tickets", "wrongSecret": true, "expect": 401 },
+                         { "key": "agent", "method": "GET", "path": "/api/tickets", "expect": 200 } ] }
+            """);
+
+        var steps = await ExchangeRunner.RunAsync(spec, RepositoryRoot.Find(), TestContext.Current.CancellationToken);
+
+        steps.Select(s => s.Response.Status).ShouldBe([401, 200]);
+        steps[0].Request.Headers.ShouldContain(new KeyValuePair<string, string>("X-Alvo-Api-Key", $"agent.{ExchangeRunner.WrongSecret}"));
+        steps[1].Request.Headers.ShouldContain(new KeyValuePair<string, string>("X-Alvo-Api-Key", "agent.$ALVO_KEY_SECRET"));
+    }
+
+    [Fact]
     public async Task A_wrong_expectation_fails_the_run()
     {
         var spec = ExchangeSpec.Parse("fixture/wrong", """

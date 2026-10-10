@@ -10,6 +10,8 @@ internal static class ExchangeRunner
 {
     internal const string JsonContentType = "application/json";
 
+    internal const string WrongSecret = "this-is-not-the-secret-of-this-key";
+
     private const string TestServerBase = "http://localhost";
     private const string ProblemContentType = "application/problem+json";
     private const string TraceIdMember = "traceId";
@@ -47,7 +49,7 @@ internal static class ExchangeRunner
             var headers = new List<KeyValuePair<string, string>>();
             if (step.Key is not null)
             {
-                headers.Add(new(HostBoot.ApiKeyHeader, $"{step.Key}.${spec.Keys[step.Key].SecretVariable}"));
+                headers.Add(new(HostBoot.ApiKeyHeader, step.WrongSecret ? $"{step.Key}.{WrongSecret}" : $"{step.Key}.${spec.Keys[step.Key].SecretVariable}"));
             }
 
             headers.AddRange(step.Headers.Select(header => new KeyValuePair<string, string>(header.Key, Placeholders.Resolve(header.Value, earlier))));
@@ -89,8 +91,13 @@ internal static class ExchangeRunner
 
     private static async Task<CapturedResponse> SendAsync(BootedHost host, ExchangeStep step, CapturedRequest request, CancellationToken ct)
     {
-        using var client = host.Client(step.Key);
+        using var client = host.Client(step.WrongSecret ? null : step.Key);
         using var message = Message(request);
+        if (step.WrongSecret)
+        {
+            message.Headers.TryAddWithoutValidation(HostBoot.ApiKeyHeader, request.Headers.Single(header => header.Key == HostBoot.ApiKeyHeader).Value);
+        }
+
         using var response = await client.SendAsync(message, ct).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         var status = (int)response.StatusCode;
