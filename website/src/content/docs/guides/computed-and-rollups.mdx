@@ -1,8 +1,179 @@
 ---
-title: Computed fields and rollups
-description: Derive a field from its own row, or roll up values from related rows.
+title: "Computed fields and rollups"
+description: "Derive a field from the other fields of its row, or total up the rows that point at it, and let Alvo keep the value current."
 sidebar:
   order: 5
 ---
 
-{/* <!-- STUB-F6 --> */}
+import { Code, Steps } from '@astrojs/starlight/components';
+import Exchange from '../../../components/Exchange.astro';
+import start from '../../../snippets/shell/computed-and-rollups-start.sh?raw';
+import step2 from '../../../snippets/shell/computed-and-rollups-step-2.sh?raw';
+import computed from '../../../snippets/computed-and-rollups/01-computed.alvo.json?raw';
+import rollup from '../../../snippets/computed-and-rollups/02-rollup.alvo.json?raw';
+
+:::tip[What you will achieve]
+Invoice lines that compute their own total, and invoices that sum their lines, count them and add VAT, with no caller
+able to write any of those numbers. About ten minutes, starting from the stack in
+[Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
+:::
+
+## Before you start
+
+- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), with `ALVO_ADMIN_KEY_SECRET`
+  exported in this shell. This page uses the `admin` key (roles `admin`, `authenticated`).
+- [Entities and fields](/MMLib.Alvo/guides/entities-and-fields/), for fields, facets and references.
+
+Choose the lowest rung that expresses the value: a **computed** field for an expression over the same row, a
+**rollup** for an aggregate over related rows, and a [before-hook](/MMLib.Alvo/guides/before-hooks/) for a value
+decided when the row is written.
+
+## 1. Compute a value from the row
+
+A `computed` field is a CEL expression over the other fields of its own row. The database stores it as a generated
+column and keeps it current, and nobody writes it.
+
+<Steps>
+
+1. Start the stack over this page's first descriptor. The first command **deletes the stack's database**:
+
+   <Code code={start.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+2. `line_total` multiplies two fields of the same line:
+
+   <Code code={computed} lang="json" title="help-desk.alvo.json" ins={[{ range: '42-45' }]} />
+
+   A computed field is declared as the type it produces, here a `decimal` with room for the product.
+
+3. Create an invoice under an id you choose, then a line on it. The response carries `line_total`:
+
+   <Exchange name="computed-and-rollups/01-computed" wrap steps={[0]} fields={["id", "number"]} />
+
+   <Exchange name="computed-and-rollups/01-computed" wrap steps={[1]} />
+
+4. A body that names `line_total` is refused rather than quietly dropped, so a caller never gets a 201 that reports a
+   different number from the one it sent:
+
+   <Exchange name="computed-and-rollups/01-computed" wrap steps={[2]} />
+
+   The refusal is a 403 `forbidden`, not a 422 `validation`: the detail names the field to remove.
+
+</Steps>
+
+## 2. Roll up related rows
+
+A `rollup` aggregates the rows of another entity that point at this one. `from` names that entity, `op` the aggregate
+and `field` the child's field. Alvo recomputes it inside the same transaction as every write to a child row.
+
+<Steps>
+
+1. Give each invoice the sum of its line totals, the number of its lines, and a gross total computed over the rollup:
+
+   <Code code={rollup} lang="json" title="help-desk.alvo.json" ins={[{ range: '19-34' }]} />
+
+   `net_total` sums `line_total`, itself a computed field. `gross_total` is computed again, over `net_total`: a
+   computed field may read a rollup of its own row.
+
+2. Apply it by recreating the `alvo` container. Adding fields discards nothing, so the restart applies it
+   ([Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/) covers the other ways):
+
+   <Code code={step2.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+3. Create an invoice. Until a line is written for it, every rollup reads `null`, and so does a computed field over one:
+
+   <Exchange name="computed-and-rollups/02-rollup" wrap steps={[0]} />
+
+4. Add two lines:
+
+   <Exchange name="computed-and-rollups/02-rollup" wrap steps={[1]} fields={["id", "unit_price", "quantity", "line_total"]} />
+
+   <Exchange name="computed-and-rollups/02-rollup" wrap steps={[2]} fields={["id", "unit_price", "quantity", "line_total"]} />
+
+5. Read the invoice. Each line's write recomputed its totals:
+
+   <Exchange name="computed-and-rollups/02-rollup" wrap steps={[3]} />
+
+</Steps>
+
+An update that moves a line to another invoice recomputes both invoices, and deleting a line recomputes its invoice.
+With no lines left, `count` answers `0` and the other four aggregates answer `null`.
+
+:::caution[Known issue in this build]
+A `PATCH` that names a rollup field is accepted, and the stored aggregate is overwritten until the next write to a
+child row recomputes it. Never send a rollup field in a write.
+:::
+
+## How it works
+
+The two look alike in the descriptor and work differently underneath. A computed field is part of the table's
+definition, so the database itself refuses every write to it, from any source. A rollup is maintained by Alvo: it
+locks the parent row, then recomputes the aggregate from scratch, so concurrent writers cannot lose an update. A write
+that bypasses Alvo, such as a raw `INSERT` into the child table, leaves a rollup stale.
+[`docs/architecture/data-path.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-path.md#computed-is-the-engines-column-rollup-is-this-ports-statement-21)
+has the details.
+
+## Options and variations
+
+**Rollup aggregates** ([`op`](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup.op)):
+
+| `op` | Answers | Needs `field` |
+|---|---|---|
+| `sum` | the sum of the child field | yes |
+| `count` | the number of child rows | no |
+| `avg` | the average of the child field | yes |
+| `min`, `max` | the smallest or largest value of the child field | yes |
+
+When the child entity has more than one `ref` to this one, name the one to aggregate over with
+[`via`](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup.via).
+
+**What a computed expression may contain.** It is checked when the descriptor is applied, and every refusal says why.
+Computed fields admit no function call (see the profiles in the [CEL function catalog](/MMLib.Alvo/reference/cel-functions/)
+and [CEL in Alvo](/MMLib.Alvo/concepts/cel/)).
+
+| Allowed | Refused |
+|---|---|
+| Arithmetic `+ - * /` and unary `-` over numeric fields: `unit_price * quantity`, `net_total + vat_total` | A numeric constant: `unit_price * 1.2`. Keep the rate in a field of its own. |
+| `+` joining two strings: `first_name + ' ' + last_name`, where a text constant is in single quotes | Joining text and a number, `first_name + bikes_count`: there is no conversion. |
+| An optional field joined only inside the branch its own `has()` guards: `(has(middle_name) ? middle_name : '') + last_name` | An optional field joined directly, or a combined guard such as `has(a) && has(b) ? … : …` |
+| A ternary whose condition compares two fields of the row, or is `has(f)` or `!has(f)` | A boolean result: a comparison or `has()` may only be a ternary's condition. |
+| A rollup field of the same row | Another computed field, `@user`, `@tenant`, `now()` or any other function, `old.` or `new.` |
+
+A computed field that joins text must be a `string` or `text` field. A `maxLength` on it must hold the longest
+possible result; omitting `maxLength` is always accepted.
+
+:::caution[Not in this build]
+A rollup's `where`, which would aggregate only some child rows, is refused at apply, because the aggregate would
+silently include every row ([Capabilities in this build](/MMLib.Alvo/reference/capabilities/#refused-at-apply)).
+Aggregate every child row, or move the distinction into the model, for example a separate child entity.
+:::
+
+## What can go wrong
+
+| Status | Problem type | When | Fix | Returned by |
+|---|---|---|---|---|
+| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | The body names a computed field. | Remove the field from the body; its value follows from the fields its expression reads. | every host |
+| 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | The body breaks a facet of a field the expression reads, such as a missing required `unit_price`. | Follow the violation's `pointer` and `fixSuggestion`. | every host |
+
+An expression Alvo cannot store is refused when the descriptor is applied, and the container does not come back. The
+end of `docker compose logs alvo` names the field and the reason, for example a numeric constant; see
+[Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/#what-can-go-wrong). In this build that refusal ends the
+process with exit code 139 instead of 78 ([#340](https://github.com/Burgyn/MMLib.Alvo/issues/340)).
+
+On SQLite, a computed `decimal` is evaluated as a floating-point number, so `0.1 * 3` reads as `0.30000000000000004`
+where PostgreSQL answers `0.30` ([#162](https://github.com/Burgyn/MMLib.Alvo/issues/162)).
+
+## Reference
+
+- Descriptor keys: [`computed`](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/#entities.fields.computed),
+  [`rollup`](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup) and its
+  [`from`](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup.from),
+  [`op`](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup.op),
+  [`field`](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup.field) and
+  [`via`](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup.via).
+- Problem types: [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden),
+  [`validation`](/MMLib.Alvo/reference/problem-types/#validation).
+
+## Next
+
+**[Indexes and uniqueness](/MMLib.Alvo/guides/indexes/)**: speed up the queries you run most, and make a combination of
+fields unique.

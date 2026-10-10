@@ -1,0 +1,58 @@
+{
+  "descriptor": "website/src/snippets/apply-and-evolve/01-base.alvo.json",
+  "keys": {
+    "admin": {
+      "roles": [
+        "admin",
+        "authenticated"
+      ],
+      "scopes": [
+        "*:read",
+        "*:write"
+      ],
+      "secretVariable": "ALVO_ADMIN_KEY_SECRET"
+    }
+  },
+  "steps": [
+    {
+      "key": "admin",
+      "method": "GET",
+      "path": "/management/projects/help-desk/descriptor",
+      "expect": 200
+    },
+    {
+      "key": "admin",
+      "method": "PUT",
+      "path": "/management/projects/help-desk/descriptor",
+      "headers": {
+        "If-Match": "\"{0.body.revision}\"",
+        "Idempotency-Key": "help-desk-add-category"
+      },
+      "bodyFile": "website/src/snippets/apply-and-evolve/02-add-field.alvo.json",
+      "bodyFileAs": "descriptorJson",
+      "body": {
+        "reason": "Sort tickets by category."
+      },
+      "expect": 200
+    },
+    {
+      "key": "admin",
+      "method": "GET",
+      "path": "/management/projects/help-desk/revisions",
+      "expect": 200
+    },
+    {
+      "key": "admin",
+      "method": "PUT",
+      "path": "/management/projects/help-desk/descriptor",
+      "headers": {
+        "If-Match": "\"{0.body.revision}\"",
+        "Idempotency-Key": "help-desk-add-category"
+      },
+      "bodyFile": "website/src/snippets/apply-and-evolve/04-rename.alvo.json",
+      "bodyFileAs": "descriptorJson",
+      "expect": 409,
+      "expectType": "idempotency-conflict"
+    }
+  ]
+}

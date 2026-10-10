@@ -1,0 +1,36 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "help-desk",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["admin", "agent"]
+  },
+  "access": {
+    "developer": "'admin' in @user.roles"
+  },
+  "entities": {
+    "tickets": {
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 120 },
+        "details": { "type": "text" },
+        "priority": {
+          "type": "enum", "values": ["low", "normal", "high"],
+          "default": "normal"
+        },
+        "status": {
+          "type": "enum", "values": ["open", "closed"], "default": "open"
+        },
+        "category": {
+          "type": "enum", "values": ["question", "incident", "request"]
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'agent' in @user.roles || 'admin' in @user.roles",
+        "update": "'agent' in @user.roles || 'admin' in @user.roles"
+      }
+    }
+  }
+}

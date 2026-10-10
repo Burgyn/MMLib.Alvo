@@ -1,0 +1,56 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "help-desk",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["admin", "agent"]
+  },
+  "entities": {
+    "invoices": {
+      "fields": {
+        "number": {
+          "type": "string", "required": true, "unique": true, "maxLength": 20
+        },
+        "vat_total": {
+          "type": "decimal", "precision": 12, "scale": 2, "required": true,
+          "default": 0
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles",
+        "update": "'admin' in @user.roles"
+      }
+    },
+    "invoice_lines": {
+      "fields": {
+        "invoice_id": {
+          "type": "ref", "entity": "invoices", "required": true,
+          "onDelete": "cascade"
+        },
+        "description": {
+          "type": "string", "required": true, "maxLength": 200
+        },
+        "unit_price": {
+          "type": "decimal", "precision": 10, "scale": 2, "required": true
+        },
+        "quantity": {
+          "type": "decimal", "precision": 8, "scale": 2, "required": true
+        },
+        "line_total": {
+          "type": "decimal", "precision": 18, "scale": 2,
+          "computed": "unit_price * quantity"
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles",
+        "update": "'admin' in @user.roles",
+        "delete": "'admin' in @user.roles"
+      }
+    }
+  }
+}
