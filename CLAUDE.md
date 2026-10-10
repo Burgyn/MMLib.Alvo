@@ -162,6 +162,11 @@ plus the reply's wording, its language, and whether it loaded the skills its pro
 model in `docs/assistant-evals.md` (created by the first real run). Every graded turn, passes included, is traced to `artifacts/eval-assistant/traces/`.
 The graders themselves are pure and tested in ring0 (`test/MMLib.Alvo.Ai.Eval.Tests`).
 
+**The docs site is in no ring.** `.github/workflows/docs.yml` builds `website/` (`npm run build`:
+token sync, DocsGen with every captured exchange, Astro, link validation) plus the snippet tests on
+every PR that touches what it renders, and deploys `main` to GitHub Pages; it is **not** a required
+check.
+
 ## Hard rules
 
 - **NEVER merge or push directly to `main`.** Branch → PR → a human merges
