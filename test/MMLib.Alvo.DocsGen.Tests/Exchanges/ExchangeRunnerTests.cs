@@ -32,7 +32,7 @@ public class ExchangeRunnerTests
     {
         var spec = ExchangeSpec.Parse("fixture/merge", """
             { "descriptor": "d.alvo.json", "keys": {},
-              "steps": [ { "method": "POST", "path": "/x", "bodyFile": "website/src/snippets/shell/vscode-settings.json",
+              "steps": [ { "method": "POST", "path": "/x", "bodyFile": "test/MMLib.Alvo.DocsGen.Tests/Exchanges/merge-body.fixture.json",
                            "bodyFileAs": "descriptorJson", "body": { "path": "/a", "source": "'b'" }, "expect": 200 } ] }
             """);
 
@@ -40,7 +40,7 @@ public class ExchangeRunnerTests
 
         var json = System.Text.Json.Nodes.JsonNode.Parse(body!)!.AsObject();
         json.Select(member => member.Key).ShouldBe(["descriptorJson", "path", "source"]);
-        json["descriptorJson"]!.GetValue<string>().ShouldContain("json.schemas");
+        json["descriptorJson"]!.GetValue<string>().ShouldContain("merge-fixture");
         json["source"]!.GetValue<string>().ShouldBe("'b'");
     }
 

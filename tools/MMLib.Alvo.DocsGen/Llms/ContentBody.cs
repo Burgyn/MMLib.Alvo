@@ -35,7 +35,7 @@ internal static partial class ContentBody
         text = Code().Replace(text, match => Fence(Language(match.Groups["attrs"].Value, imports), Raw(match, imports).Content.TrimEnd()));
         text = SourceExcerpt().Replace(text, match => Fence(Attribute(match.Groups["attrs"].Value, "lang") ?? "csharp", Slice(match, imports)));
         text = JsonExcerpt().Replace(text, match => Fence("json", JsonSubtree(match, imports)));
-        text = Exchange().Replace(text, match => ExchangeSteps(RequiredAttribute(match, "name"), generatedDir));
+        text = Exchange().Replace(text, match => ExchangeText.Render(match.Groups["attrs"].Value, generatedDir));
         return BlankLines().Replace(text, "\n\n");
     }
 
@@ -160,26 +160,13 @@ internal static partial class ContentBody
         return key is null ? value : $"{JsonSerializer.Serialize(key, _indented)}: {value}";
     }
 
-    private static string ExchangeSteps(string name, string generatedDir)
-    {
-        var file = Path.Combine(generatedDir, "exchanges", name + ".json");
-        if (!File.Exists(file))
-        {
-            throw new InvalidOperationException($"Exchange \"{name}\" has not been captured: '{file}' does not exist.");
-        }
-
-        using var document = JsonDocument.Parse(File.ReadAllText(file));
-        return string.Join("\n\n", document.RootElement.GetProperty("steps").EnumerateArray().Select(step =>
-            Fence("sh", step.GetProperty("curl").GetString()!) + "\n\n" + Fence("http", step.GetProperty("httpResponse").GetString()!)));
-    }
-
     private static string AbsoluteSiteLinks(string text) =>
         text.Replace($"]({SiteLinks.BasePath}/", $"]({SiteLinks.SiteUrl}{SiteLinks.BasePath}/", StringComparison.Ordinal);
 
     private static string WithoutTagsAndComments(string text) =>
         TagOnlyLine().Replace(Comment().Replace(text, string.Empty), string.Empty);
 
-    private static string Fence(string lang, string content)
+    internal static string Fence(string lang, string content)
     {
         var longest = Backticks().Matches(content).Select(run => run.Length).DefaultIfEmpty(0).Max();
         var fence = new string('`', Math.Max(3, longest + 1));

@@ -66,6 +66,48 @@ public class ContentPageTests
     }
 
     [Fact]
+    public void An_exchange_honours_steps_fields_form_and_request_props()
+    {
+        var docs = Directory.CreateTempSubdirectory("llms-").FullName;
+        var generated = Path.Combine(docs, "..", "generated");
+        Directory.CreateDirectory(Path.Combine(generated, "exchanges", "g"));
+        Directory.CreateDirectory(Path.Combine(docs, "guides"));
+        File.WriteAllText(Path.Combine(generated, "exchanges", "g", "two.json"), """
+            { "steps": [
+              { "curl": "curl one", "httpRequest": "GET /one HTTP/1.1", "httpResponse": "HTTP/1.1 200 OK\n\n{}", "responseBody": {} },
+              { "curl": "curl two", "httpRequest": "POST /two HTTP/1.1\nX: y\n\n{\"a\":1}", "httpResponse": "HTTP/1.1 201 Created\nLocation: /two/1\n\n{\"id\":\"1\",\"a\":1}", "responseBody": { "id": "1", "a": 1 } } ] }
+            """);
+        File.WriteAllText(Path.Combine(docs, "guides", "w.mdx"), """
+            ---
+            title: W
+            description: Does W.
+            ---
+            <Exchange name="g/two" steps={[1]} form="http" requestBody={false} fields={["id"]} wrap />
+
+            <Exchange name="g/two" steps={[0]} request={false} />
+            """);
+
+        var page = ContentPage.Read(Path.Combine(docs, "guides", "w.mdx"), docs, generated);
+
+        page.Body.ShouldBe(
+            "```http\nPOST /two HTTP/1.1\nX: y\n```\n\n```http\nHTTP/1.1 201 Created\nLocation: /two/1\n\n{\n  \"id\": \"1\"\n}\n```\n\n"
+            + "```http\nHTTP/1.1 200 OK\n\n{}\n```");
+    }
+
+    [Fact]
+    public void An_exchange_step_out_of_range_fails() =>
+        Should.Throw<InvalidOperationException>(() => ExchangeText.Render("name=\"g/none\" steps={[3]}", WithOneStep())).Message.ShouldContain("has no step 3");
+
+    private static string WithOneStep()
+    {
+        var generated = Directory.CreateTempSubdirectory("llms-gen-").FullName;
+        Directory.CreateDirectory(Path.Combine(generated, "exchanges", "g"));
+        File.WriteAllText(Path.Combine(generated, "exchanges", "g", "none.json"),
+            "{ \"steps\": [ { \"curl\": \"c\", \"httpRequest\": \"GET / HTTP/1.1\", \"httpResponse\": \"HTTP/1.1 200 OK\" } ] }");
+        return generated;
+    }
+
+    [Fact]
     public void Source_excerpts_slice_between_anchors_and_dedent()
     {
         var docs = Directory.CreateTempSubdirectory("llms-").FullName;
