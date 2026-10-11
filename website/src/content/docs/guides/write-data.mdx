@@ -10,12 +10,12 @@ import start from '../../../snippets/shell/use-the-api-start.sh?raw';
 :::tip[What you will achieve]
 Writes that a network retry cannot duplicate, updates that refuse to overwrite a change you have not seen, and a batch
 that writes every row or none. About fifteen minutes, starting from the vehicle-registry stack of
-[Quick start](/MMLib.Alvo/start-here/quick-start/).
+[Quick start](/start-here/quick-start/).
 :::
 
 ## Before you start
 
-- The stack from [Quick start](/MMLib.Alvo/start-here/quick-start/), serving
+- The stack from [Quick start](/start-here/quick-start/), serving
   [`examples/vehicle-registry`](https://github.com/Burgyn/MMLib.Alvo/blob/main/examples/vehicle-registry/vehicles.alvo.json),
   run from the directory that holds `docker-compose.quickstart.yml`, with `ALVO_DEMO_KEY_SECRET` and
   `ALVO_ADMIN_PASSWORD` exported in this shell.
@@ -117,7 +117,7 @@ a pointer into `rows`. Here the second row has no `year`:
 <Exchange name="write-data/01-write" wrap steps={[10]} />
 
 A row refused by a rule makes the whole batch a 403 whose `violations` name each refused row. A batch holds up to 1000
-rows ([Limits and budgets](/MMLib.Alvo/reference/limits/)), may not name one row twice, and takes no `If-Match`: one
+rows ([Limits and budgets](/reference/limits/)), may not name one row twice, and takes no `If-Match`: one
 version cannot condition many rows. A batch update stamps each row's `updated_at` and `updated_by` as a single update
 does, so each row gets a new `ETag` and a tag taken before the batch no longer matches. Every row written still emits its own event, so an after-hook or webhook runs once
 per row ([#193](https://github.com/Burgyn/MMLib.Alvo/issues/193)).
@@ -137,11 +137,11 @@ never sends `application/json` that way.
 ## How it works
 
 Each write runs in one database transaction. Alvo checks the body against the entity's fields; then, over the locked
-row, it runs the [before-hooks](/MMLib.Alvo/guides/before-hooks/), checks the `create` or `update` rule against the row
+row, it runs the [before-hooks](/guides/before-hooks/), checks the `create` or `update` rule against the row
 it is about to store and compares `If-Match` with the row's version; it writes the row and records its event before it
 commits. A write
 answers with the row exactly as a `GET` by the same caller would show it; when the caller may not read that row, the
-answer carries only its `id`. [Security model](/MMLib.Alvo/concepts/security-model/) explains the order of the checks.
+answer carries only its `id`. [Security model](/concepts/security-model/) explains the order of the checks.
 
 ## Options and variations
 
@@ -155,11 +155,11 @@ answer carries only its `id`. [Security model](/MMLib.Alvo/concepts/security-mod
 | Not overwrite a change | `If-Match: <ETag>` | On `PATCH`, `PUT` and `DELETE` of an audited entity. |
 | Write many rows | `POST`, `PATCH` or `DELETE /api/<entity>/batch` | All or nothing, up to 1000 rows. |
 
-Headers, statuses and route shapes are summarised in [Data API conventions](/MMLib.Alvo/data-api/conventions/).
+Headers, statuses and route shapes are summarised in [Data API conventions](/data-api/conventions/).
 
 :::caution[Not in this build]
 Stored idempotency keys never expire yet ([#115](https://github.com/Burgyn/MMLib.Alvo/issues/115)). This is not
-listed on [Capabilities in this build](/MMLib.Alvo/reference/capabilities/), which covers descriptor blocks only.
+listed on [Capabilities in this build](/reference/capabilities/), which covers descriptor blocks only.
 :::
 
 ## What can go wrong
@@ -170,26 +170,26 @@ A value another row already holds on a `unique` field is a conflict only the dat
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 412 | [`precondition-failed`](/MMLib.Alvo/reference/problem-types/#precondition-failed) | `If-Match` names a version the row no longer has, or a precondition Alvo cannot evaluate. | Read the row again and retry with its `ETag`. | every host |
-| 409 | [`idempotency-conflict`](/MMLib.Alvo/reference/problem-types/#idempotency-conflict) | The `Idempotency-Key` was already used for a different request. | Send a new key. | every host |
-| 409 | [`conflict`](/MMLib.Alvo/reference/problem-types/#conflict) | A `unique` value another row holds, or a delete a `restrict` reference blocks. | Send a different value, or remove what references the row. | every host |
-| 415 | [`unsupported-media-type`](/MMLib.Alvo/reference/problem-types/#unsupported-media-type) | The body is not declared as JSON, or no `Content-Type` is sent. | Send `Content-Type: application/json`. | every host |
-| 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | A field is missing, too long, of the wrong type, unknown or read-only; a batch is empty or has too many rows. | Fix each field a violation points at. | every host |
-| 422 | [`malformed-query`](/MMLib.Alvo/reference/problem-types/#malformed-query) | An `Idempotency-Key` is longer than 255 bytes, or sent without an API key. | Shorten it, or authenticate. | every host |
-| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | A rule or a before-hook refused the write; in a batch, `violations` name each refused row. | Check the `create` or `update` rule and the hooks. | every host |
-| 404 | [`not-found`](/MMLib.Alvo/reference/problem-types/#not-found) | The row of a `PATCH` or `DELETE` does not exist, or your rule excludes it. | Check the id and the rule. | every host |
-| 413, 408, 400 | [`unreadable-request`](/MMLib.Alvo/reference/problem-types/#unreadable-request) | The web server refused the body before Alvo read it: too large, too slow, or broken framing. | Send a smaller body, or split a batch. | standalone; embedded only with `AddAlvoProblemDetails()` |
+| 412 | [`precondition-failed`](/reference/problem-types/#precondition-failed) | `If-Match` names a version the row no longer has, or a precondition Alvo cannot evaluate. | Read the row again and retry with its `ETag`. | every host |
+| 409 | [`idempotency-conflict`](/reference/problem-types/#idempotency-conflict) | The `Idempotency-Key` was already used for a different request. | Send a new key. | every host |
+| 409 | [`conflict`](/reference/problem-types/#conflict) | A `unique` value another row holds, or a delete a `restrict` reference blocks. | Send a different value, or remove what references the row. | every host |
+| 415 | [`unsupported-media-type`](/reference/problem-types/#unsupported-media-type) | The body is not declared as JSON, or no `Content-Type` is sent. | Send `Content-Type: application/json`. | every host |
+| 422 | [`validation`](/reference/problem-types/#validation) | A field is missing, too long, of the wrong type, unknown or read-only; a batch is empty or has too many rows. | Fix each field a violation points at. | every host |
+| 422 | [`malformed-query`](/reference/problem-types/#malformed-query) | An `Idempotency-Key` is longer than 255 bytes, or sent without an API key. | Shorten it, or authenticate. | every host |
+| 403 | [`forbidden`](/reference/problem-types/#forbidden) | A rule or a before-hook refused the write; in a batch, `violations` name each refused row. | Check the `create` or `update` rule and the hooks. | every host |
+| 404 | [`not-found`](/reference/problem-types/#not-found) | The row of a `PATCH` or `DELETE` does not exist, or your rule excludes it. | Check the id and the rule. | every host |
+| 413, 408, 400 | [`unreadable-request`](/reference/problem-types/#unreadable-request) | The web server refused the body before Alvo read it: too large, too slow, or broken framing. | Send a smaller body, or split a batch. | standalone; embedded only with `AddAlvoProblemDetails()` |
 
 ## Reference
 
-- [Data API conventions](/MMLib.Alvo/data-api/conventions/) and [Limits and budgets](/MMLib.Alvo/reference/limits/).
-- Descriptor keys: [`audit`](/MMLib.Alvo/reference/descriptor/entities/#entities.audit), which gives rows a version.
-- Problem types: [`precondition-failed`](/MMLib.Alvo/reference/problem-types/#precondition-failed),
-  [`idempotency-conflict`](/MMLib.Alvo/reference/problem-types/#idempotency-conflict),
-  [`conflict`](/MMLib.Alvo/reference/problem-types/#conflict),
-  [`unsupported-media-type`](/MMLib.Alvo/reference/problem-types/#unsupported-media-type),
-  [`validation`](/MMLib.Alvo/reference/problem-types/#validation),
-  [`unreadable-request`](/MMLib.Alvo/reference/problem-types/#unreadable-request).
+- [Data API conventions](/data-api/conventions/) and [Limits and budgets](/reference/limits/).
+- Descriptor keys: [`audit`](/reference/descriptor/entities/#entities.audit), which gives rows a version.
+- Problem types: [`precondition-failed`](/reference/problem-types/#precondition-failed),
+  [`idempotency-conflict`](/reference/problem-types/#idempotency-conflict),
+  [`conflict`](/reference/problem-types/#conflict),
+  [`unsupported-media-type`](/reference/problem-types/#unsupported-media-type),
+  [`validation`](/reference/problem-types/#validation),
+  [`unreadable-request`](/reference/problem-types/#unreadable-request).
 - Design notes: [optimistic concurrency](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md#optimistic-concurrency-a-strong-etag-over-the-row-version),
   [the batch](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md#the-batch-one-path-three-verbs-one-transaction-106),
   [`Idempotency-Key`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md#idempotency-key-what-is-stored-and-where-it-is-honoured),
@@ -198,4 +198,4 @@ A value another row already holds on a `unique` field is a conflict only the dat
 
 ## Next
 
-**[Handle errors](/MMLib.Alvo/guides/handle-errors/)**: read a problem document and branch on its type.
+**[Handle errors](/guides/handle-errors/)**: read a problem document and branch on its type.

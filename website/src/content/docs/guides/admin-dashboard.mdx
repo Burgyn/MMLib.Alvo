@@ -30,7 +30,7 @@ import historyDark from '../../../assets/screenshots/history-dark.png';
 :::tip[What you will achieve]
 A tour of the dashboard by doing: sign in, read what the backend is, change a rule with the dashboard checking it as
 you type, preview and apply the change, browse records as yourself, and roll the change back. About fifteen minutes,
-starting from the [Quick start](/MMLib.Alvo/start-here/quick-start/)'s compose file.
+starting from the [Quick start](/start-here/quick-start/)'s compose file.
 :::
 
 ## Before you start
@@ -41,7 +41,7 @@ starting from the [Quick start](/MMLib.Alvo/start-here/quick-start/)'s compose f
   `jq`.
 - An account with a management level. The bootstrap administrator has `admin`, whatever the descriptor says.
 
-The dashboard is a client of the [Management API](/MMLib.Alvo/reference/management-api/) and the Data API, never a
+The dashboard is a client of the [Management API](/reference/management-api/) and the Data API, never a
 second way in: every screen does what an agent could do over HTTP, under the same checks.
 
 ## 1. Sign in
@@ -64,7 +64,7 @@ administrator's address and a password for this run:
 
 The dashboard takes an address and a password, never an API key. The first administrator comes from configuration;
 everyone else is created on **Access**, which hands you a one-time set-password link to pass on, because this build
-sends no email. [Authentication and API keys](/MMLib.Alvo/guides/authentication/#people-sign-in-to-the-dashboard) covers
+sends no email. [Authentication and API keys](/guides/authentication/#people-sign-in-to-the-dashboard) covers
 both. What you may do once signed in is your management level, decided by the descriptor's `access` block from your
 roles: a `viewer` reads, a `developer` also applies and rolls back, an `admin` also changes `access`, the people and
 the AI connection.
@@ -78,7 +78,7 @@ and honoured blocks there are, and the latest configuration change.
 
 The panel *Declared, not honoured by this build* lists only the blocks your descriptor declares that this build parses
 and does not run, each with the framework's own sentence for what does not happen. It is the same answer
-[Capabilities in this build](/MMLib.Alvo/reference/capabilities/) is generated from. **Automations** and **Functions**
+[Capabilities in this build](/reference/capabilities/) is generated from. **Automations** and **Functions**
 in the navigation carry a *Not yet* badge for the same reason.
 
 ## 3. Change the schema
@@ -144,7 +144,7 @@ Select an older revision and choose **Plan the rollback** to see the reverse mig
 always asks you to type the project's name, because it replaces the whole configuration, and it warns when the reverse
 migration would discard data added since. It is appended as a new revision; nothing is erased. On a stack that serves
 a descriptor file, put the restored descriptor back in the file afterwards:
-[Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/) explains why.
+[Apply and evolve your descriptor](/guides/apply-and-evolve/) explains why.
 
 ## The other screens
 
@@ -153,14 +153,14 @@ a descriptor file, put the restored descriptor back in the file afterwards:
   never given to a signed-in person, so assigning one does nothing. Locked accounts can be unlocked here.
 - **Integrations**: the descriptor's webhook endpoints and templates, beside what this build does not run for them.
 - **Settings**: what is running and how it starts, where the API documentation is, and the
-  [schema assistant](/MMLib.Alvo/guides/schema-assistant/)'s connection.
+  [schema assistant](/guides/schema-assistant/)'s connection.
 - **Search** (Ctrl+K, ⌘K) jumps to any screen or entity.
 
 :::caution[Not in this build]
 There is no danger zone: deleting a project has no route. API keys are neither issued nor revoked here, because no
 endpoint does that yet ([#36](https://github.com/Burgyn/MMLib.Alvo/issues/36)). There is no audit trail of data
 changes, only of configuration, and no automations or functions screen beyond the *Not yet* placeholder
-([Capabilities in this build](/MMLib.Alvo/reference/capabilities/)). The *author* a Management API caller sends is not
+([Capabilities in this build](/reference/capabilities/)). The *author* a Management API caller sends is not
 verified ([#344](https://github.com/Burgyn/MMLib.Alvo/issues/344)); a dashboard apply records the signed-in person.
 :::
 
@@ -177,22 +177,22 @@ problem type the same refusal carries over HTTP.
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | Your roles reach no level the action needs, or a `developer` applies a change to `access`. | Ask an `admin` to grant the level, or to make the access change. | every host |
-| 412 | [`precondition-failed`](/MMLib.Alvo/reference/problem-types/#precondition-failed) | Somebody applied a revision after the one your working copy started from. | Start again from the new revision and redo your edits. | every host |
-| 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | The working copy would not apply, for example an expression that does not compile. | Follow the refusal's pointer and fix; the live check usually shows it before you save. | every host |
+| 403 | [`forbidden`](/reference/problem-types/#forbidden) | Your roles reach no level the action needs, or a `developer` applies a change to `access`. | Ask an `admin` to grant the level, or to make the access change. | every host |
+| 412 | [`precondition-failed`](/reference/problem-types/#precondition-failed) | Somebody applied a revision after the one your working copy started from. | Start again from the new revision and redo your edits. | every host |
+| 422 | [`validation`](/reference/problem-types/#validation) | The working copy would not apply, for example an expression that does not compile. | Follow the refusal's pointer and fix; the live check usually shows it before you save. | every host |
 
 ## Reference
 
-- [Management API](/MMLib.Alvo/reference/management-api/): the operations every screen calls, and their levels.
-- Descriptor keys: [`access`](/MMLib.Alvo/reference/descriptor/access/),
-  [`auth`](/MMLib.Alvo/reference/descriptor/auth/).
-- Configuration: [`Alvo:Admin`](/MMLib.Alvo/reference/configuration/#alvoadmin),
-  [`Alvo:Admin:Dashboard`](/MMLib.Alvo/reference/configuration/#alvoadmindashboard).
-- Problem types: [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden),
-  [`precondition-failed`](/MMLib.Alvo/reference/problem-types/#precondition-failed),
-  [`validation`](/MMLib.Alvo/reference/problem-types/#validation).
+- [Management API](/reference/management-api/): the operations every screen calls, and their levels.
+- Descriptor keys: [`access`](/reference/descriptor/access/),
+  [`auth`](/reference/descriptor/auth/).
+- Configuration: [`Alvo:Admin`](/reference/configuration/#alvoadmin),
+  [`Alvo:Admin:Dashboard`](/reference/configuration/#alvoadmindashboard).
+- Problem types: [`forbidden`](/reference/problem-types/#forbidden),
+  [`precondition-failed`](/reference/problem-types/#precondition-failed),
+  [`validation`](/reference/problem-types/#validation).
 
 ## Next
 
-**[The schema assistant](/MMLib.Alvo/guides/schema-assistant/)**: describe a change in words and review the proposal
+**[The schema assistant](/guides/schema-assistant/)**: describe a change in words and review the proposal
 the assistant checks for you.

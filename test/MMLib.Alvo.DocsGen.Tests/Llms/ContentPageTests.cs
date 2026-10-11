@@ -155,10 +155,10 @@ public class ContentPageTests
     public void Site_links_become_absolute_for_readers_outside_the_site()
     {
         var docs = Directory.CreateTempSubdirectory("llms-").FullName;
-        File.WriteAllText(Path.Combine(docs, "x.md"), "---\ntitle: X\ndescription: D.\n---\n\nSee [Run](/MMLib.Alvo/start-here/run-your-own/) and [anchor](#a).\n");
+        File.WriteAllText(Path.Combine(docs, "x.md"), "---\ntitle: X\ndescription: D.\n---\n\nSee [Run](/start-here/run-your-own/) and [anchor](#a).\n");
 
         ContentPage.Read(Path.Combine(docs, "x.md"), docs, docs).Body
-            .ShouldBe("See [Run](https://burgyn.github.io/MMLib.Alvo/start-here/run-your-own/) and [anchor](#a).");
+            .ShouldBe("See [Run](https://alvo.burgyn.online/start-here/run-your-own/) and [anchor](#a).");
     }
 
     [Fact]

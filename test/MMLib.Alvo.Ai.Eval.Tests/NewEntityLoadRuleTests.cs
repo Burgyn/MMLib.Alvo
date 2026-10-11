@@ -21,7 +21,7 @@ public sealed partial class NewEntityLoadRuleTests
 
     private static readonly string _instructions = Read("src", "MMLib.Alvo.Ai", "Instructions", "schema-assistant.md");
 
-    private static readonly string _rulesSkill = Read(".claude", "skills", "alvo-descriptor-rules-and-cel", "SKILL.md");
+    private static readonly string _rulesSkill = Read("plugins", "alvo", "skills", "alvo-descriptor-rules-and-cel", "SKILL.md");
 
     [Fact]
     public void The_new_entity_load_rule_names_what_the_grader_needs_for_the_whole_entity_example()

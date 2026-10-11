@@ -1,101 +1,119 @@
 ---
-import JsonExcerpt from '../JsonExcerpt.astro';
-import Exchange from '../Exchange.astro';
-import helpdesk from '../../snippets/landing/helpdesk.alvo.json?raw';
-import quickStart from '../../snippets/shell/quick-start.sh?raw';
+// The hero (design B2): the pitch on the left; on the right, four steps from a prompt to a running backend, lit in turn
+// by a CSS-only loop. The loop changes only colours and a transform, so it never moves the layout, and every card is
+// readable in every frame. Without motion (prefers-reduced-motion) it is the final frame: every card, the last lit.
+// The pause control is a checkbox, so it works without JavaScript (WCAG 2.2.2: the loop lasts longer than 5 s).
+import { page } from '../../lib/links';
+import descriptor from '../../snippets/landing/hero/help-desk.alvo.json?raw';
 
-const firstStep = quickStart.split('\n')[0];
-const quickStartHref = '/MMLib.Alvo/start-here/quick-start/';
-const github = 'https://github.com/Burgyn/MMLib.Alvo';
+type Tone = 'key' | 'str' | 'acc' | 'dim';
+type Token = { text: string; tone?: Tone };
+
+const tickets = JSON.parse(descriptor).entities.tickets;
+const onCreate = tickets.hooks.afterCreate[0];
+const q = (value: unknown) => JSON.stringify(value);
+const k = (key: string): Token => ({ text: q(key), tone: 'key' });
+const s = (value: string, tone: Tone = 'str'): Token => ({ text: q(value), tone });
+const t = (text: string): Token => ({ text });
+const inline = (value: Record<string, string>): Token[] => [
+  ...Object.entries(value).flatMap(([key, v], i) => [t(i ? ', ' : '{ '), k(key), t(': '), s(v)]),
+  t(' }'),
+];
+
+// The descriptor the prompt asks for, cut down to what the card has room for. Every key and value is read from the
+// snippet, which the rings validate against the schema and apply, so the card cannot drift from a descriptor that runs.
+const code: Token[][] = [
+  [k('tickets'), t(': {')],
+  [t('  '), k('audit'), t(`: ${tickets.audit},`)],
+  [t('  '), k('fields'), t(': { '), ...Object.keys(tickets.fields).flatMap((f, i) => [t(i ? ', ' : ''), k(f), t(': …')]), t(' },')],
+  [t('  '), k('rules'), t(': {')],
+  [t('    '), k('list'), t(': '), s(tickets.rules.list, 'acc'), t(',')],
+  [t('    '), k('create'), t(': '), s(tickets.rules.create), t(', …')],
+  [t('  },')],
+  [t('  '), k('hooks'), t(': { '), k('afterCreate'), t(': [{')],
+  [t('    '), k('condition'), t(': '), s(onCreate.condition), t(',')],
+  [t('    '), k('action'), t(': '), ...inline(onCreate.action), t(' }] }')],
+  [t('}')],
+];
+
+const tiles = [
+  { name: 'CRUD · batch · query', note: '/api/tickets' },
+  { name: 'filter · sort · page', note: 'PostgREST syntax' },
+  { name: 'access rules', note: 'in the SQL' },
+  { name: 'multi-tenancy', note: 'from the API key' },
+  { name: 'hooks · webhooks', note: 'via an outbox' },
+  { name: 'OpenAPI', note: '/scalar' },
+  { name: 'admin dashboard', note: '/admin' },
+  { name: 'revisions', note: 'roll back any time' },
+];
+
+// The candidates the roadmap page's "What comes after" names, in its words.
+const coming = ['automation', 'custom functions', 'sign-in providers', 'realtime', 'file storage', 'dynamic entities'];
 ---
-<section class="alvo-hero alvo-wrap" aria-labelledby="_top">
-  <div class="alvo-hero__intro">
-    <div>
-      <a class="alvo-pill" href="/MMLib.Alvo/project/roadmap/">
-        <span class="alvo-pill__dot" aria-hidden="true"></span>
-        <span>.NET-native backend-as-a-service · pre-v0.1</span>
-      </a>
-      <h1 id="_top">Describe your backend in <span class="alvo-accent">one JSON file.</span></h1>
-      <p class="alvo-hero__lead">For .NET teams and their coding agents: get a secure, production-shaped API — standalone in Docker or embedded in your ASP.NET Core app.</p>
-    </div>
-    <div class="alvo-hero__actions">
+<section class="alvo-hero" aria-labelledby="_top">
+  <div class="alvo-hero__grid alvo-wrap">
+    <div class="alvo-hero__pitch">
+      <p class="alvo-hero__eyebrow"><span>.NET-native backend-as-a-service</span> <span class="alvo-hero__status">· pre-v0.1</span></p>
+      <h1 id="_top">Write the schema. <span class="alvo-hero__accent">The backend is done.</span></h1>
+      <p class="alvo-hero__lead">
+        One JSON descriptor holds your entities, access rules, hooks and webhooks. You write it, or your coding agent
+        does: every refusal names the key at fault and, where it can, the fix. Apply it, and Alvo serves the whole
+        backend.
+      </p>
       <div class="alvo-cta-row">
-        <a class="alvo-btn alvo-btn--primary" href={quickStartHref}>Quick start <span aria-hidden="true">→</span></a>
-        <a class="alvo-btn alvo-btn--ghost" href={github}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"></path></svg>
-          GitHub
-        </a>
+        <a class="alvo-btn alvo-btn--primary" href={page('/start-here/quick-start/')}>Quick start <span aria-hidden="true">→</span></a>
+        <a class="alvo-btn alvo-btn--ghost" href={page('/start-here/coding-agents/')}>With a coding agent</a>
       </div>
-      <div>
-        <p class="alvo-clone__label">Runs the published image — Docker and one file are all you need</p>
-        <div class="alvo-clone__box">
-          <code title={firstStep}><span class="alvo-clone__prompt" aria-hidden="true">$ </span>{firstStep}</code>
-          <button class="alvo-copy" type="button" data-copy={firstStep} aria-label="Copy the download command">
-            <svg class="alvo-copy__idle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg>
-            <svg class="alvo-copy__done" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5,12 10,17 19,7"></polyline></svg>
-          </button>
-          <span class="sr-only" role="status" data-copy-status></span>
-        </div>
-        <a class="alvo-textlink" href={quickStartHref}>4 more steps →</a>
+      <p class="alvo-hero__foot">
+        <span>no controllers · no migrations to write · no queue code</span>
+        <span>docker compose up, or AddAlvo() in your host</span>
+      </p>
+    </div>
+
+    <div class="alvo-build">
+      <ol class="alvo-build__steps" aria-label="From a prompt to a running backend">
+        <li class="alvo-step alvo-step--1">
+          <p class="alvo-step__label"><span class="alvo-step__n" aria-hidden="true">1</span>you ask your agent</p>
+          <p class="alvo-step__prompt">“Build a help desk on Alvo: tickets with a title and a priority. Agents see only their own tickets. Post high-priority ones to our ops board.”</p>
+        </li>
+        <li class="alvo-step alvo-step--2">
+          <p class="alvo-step__label"><span class="alvo-step__n" aria-hidden="true">2</span>it writes one file · help-desk.alvo.json</p>
+          <pre class="alvo-step__code" tabindex="0" aria-label="An excerpt of help-desk.alvo.json"><code>{code.map((line) => (
+            <span class="alvo-step__line">{line.map((token) => token.tone ? <span class={`alvo-tk alvo-tk--${token.tone}`}>{token.text}</span> : token.text)}</span>
+          ))}</code></pre>
+        </li>
+        <li class="alvo-step alvo-step--3">
+          <p class="alvo-step__label"><span class="alvo-step__n" aria-hidden="true">3</span>apply · revision 1</p>
+          <pre class="alvo-step__code" tabindex="0" aria-label="What the apply does"><code><span class="alvo-step__line">CREATE TABLE "tickets" (…)</span><span class="alvo-step__line"><span class="alvo-tk alvo-tk--dim">-- and each rule compiled to a SQL predicate</span></span></code></pre>
+        </li>
+        <li class="alvo-step alvo-step--4">
+          <div class="alvo-step__head">
+            <p class="alvo-step__label"><span class="alvo-step__n" aria-hidden="true">4</span>running</p>
+            <p class="alvo-step__claim">A full REST API. A complete backend.</p>
+          </div>
+          <ul class="alvo-tiles">
+            {tiles.map((tile) => (
+              <li><span>{tile.name}</span><span class="alvo-tiles__note">{tile.note}</span></li>
+            ))}
+          </ul>
+        </li>
+      </ol>
+      <div class="alvo-coming">
+        <p class="alvo-coming__label">coming after v0.1</p>
+        <ul class="alvo-coming__list" aria-label="Planned after v0.1">
+          {coming.map((item) => <li>{item}</li>)}
+        </ul>
+        <a class="alvo-coming__link" href={page('/project/roadmap/')}>Roadmap <span aria-hidden="true">→</span></a>
+      </div>
+      <div class="alvo-build__bar">
+        <p class="alvo-build__note">An illustration. The descriptor lines are read from a descriptor the test suite applies.</p>
+        <input class="alvo-build__toggle sr-only" type="checkbox" id="alvo-build-pause" />
+        <label class="alvo-build__pause" for="alvo-build-pause">
+          <svg class="alvo-build__icon-pause" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="2" y="1.5" width="3" height="9" rx="0.5" fill="currentColor"></rect><rect x="7" y="1.5" width="3" height="9" rx="0.5" fill="currentColor"></rect></svg>
+          <svg class="alvo-build__icon-play" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 1.5 L10 6 L3 10.5 Z" fill="currentColor"></path></svg>
+          <span>Pause animation</span>
+        </label>
       </div>
     </div>
   </div>
-
-  <div class="alvo-hero__card" role="group" aria-label="A descriptor and the API it becomes">
-    <div class="alvo-pane">
-      <div class="alvo-pane__head">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="14,3 14,9 20,9"></polyline></svg>
-        <span class="alvo-pane__file">helpdesk.alvo.json</span><span>· entities</span>
-        <span class="alvo-pane__end alvo-pane__ok">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5,12 10,17 19,7"></polyline></svg>valid
-        </span>
-      </div>
-      <div class="alvo-pane__body">
-        <JsonExcerpt code={helpdesk} pointer="/entities/tickets" frame="none" />
-      </div>
-    </div>
-    <div class="alvo-pane">
-      <div class="alvo-pane__head">
-        <span class="alvo-pane__file">the API it becomes</span>
-        <span class="alvo-pane__end alvo-pane__note">captured from a real run</span>
-      </div>
-      <div class="alvo-pane__body">
-        <Exchange name="landing/hero" form="http" steps={[0]} fields={['title', 'priority']} compact responseNote="← trimmed by the hook" />
-        <Exchange name="landing/hero" form="http" steps={[1]} fields={['type', 'detail']} compact requestNote="← no key: anonymous" />
-      </div>
-    </div>
-    <span class="alvo-hero__connector" aria-hidden="true"></span>
-    <span class="alvo-hero__chip" aria-hidden="true">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="13,6 19,12 13,18"></polyline></svg>
-    </span>
-  </div>
-
-  <ul class="alvo-proof" aria-label="At a glance">
-    <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="3"></ellipse><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"></path><path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"></path></svg>SQLite and PostgreSQL</li>
-    <li class="alvo-proof__sep" aria-hidden="true">·</li>
-    <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v16H4z"></path><path d="M8 9h8M8 13h5"></path></svg>OpenAPI and Scalar per descriptor</li>
-    <li class="alvo-proof__sep" aria-hidden="true">·</li>
-    <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H6a2 2 0 0 0-2 2v4l-2 3 2 3v4a2 2 0 0 0 2 2h2"></path><path d="M16 3h2a2 2 0 0 1 2 2v4l2 3-2 3v4a2 2 0 0 1-2 2h-2"></path></svg>JSON Schema for every key</li>
-    <li class="alvo-proof__sep" aria-hidden="true">·</li>
-    <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><line x1="6" y1="6" x2="18" y2="18"></line></svg>No generated code, no migrations to write</li>
-  </ul>
 </section>
-
-<script>
-  for (const button of document.querySelectorAll<HTMLButtonElement>('.alvo-copy[data-copy]')) {
-    button.addEventListener('click', async () => {
-      const status = button.parentElement?.querySelector('[data-copy-status]');
-      try {
-        await navigator.clipboard.writeText(button.dataset.copy ?? '');
-        button.setAttribute('data-copied', '');
-        if (status) status.textContent = 'Copied to the clipboard';
-        setTimeout(() => {
-          button.removeAttribute('data-copied');
-          if (status) status.textContent = '';
-        }, 1600);
-      } catch {
-        if (status) status.textContent = 'Copy failed: select the command and copy it by hand';
-      }
-    });
-  }
-</script>

@@ -16,7 +16,7 @@ internal static partial class SkillCatalogue
 {
     internal const string Prefix = "alvo-descriptor-";
 
-    internal static string Root { get; } = Path.Combine(RepositoryRoot.Find(), ".claude", "skills");
+    internal static string Root { get; } = Path.Combine(RepositoryRoot.Find(), "plugins", "alvo", "skills");
 
     internal static IReadOnlyList<SkillOnDisk> All { get; } =
         [.. Directory.GetDirectories(Root, Prefix + "*").Order(StringComparer.Ordinal).Select(Read)];

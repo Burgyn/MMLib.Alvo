@@ -1,34 +1,35 @@
 ---
 import mark from '../../assets/alvo-mark-on-dark.svg';
+import { page } from '../../lib/links';
 
+const github = 'https://github.com/Burgyn/MMLib.Alvo';
 const links = [
-  { label: 'Docs', href: '/MMLib.Alvo/start-here/why-alvo/' },
-  { label: 'Reference', href: '/MMLib.Alvo/reference/' },
-  { label: 'Examples', href: '/MMLib.Alvo/examples/' },
-  { label: 'Roadmap', href: '/MMLib.Alvo/project/roadmap/' },
-  { label: 'License', href: '/MMLib.Alvo/project/license/' },
-  { label: 'For coding agents: llms.txt', href: '/MMLib.Alvo/llms.txt' },
-  { label: 'GitHub', href: 'https://github.com/Burgyn/MMLib.Alvo' },
+  { label: 'Docs', href: page('/start-here/why-alvo/') },
+  { label: 'Reference', href: page('/reference/') },
+  { label: 'Examples', href: page('/examples/') },
+  { label: 'Roadmap', href: page('/project/roadmap/') },
+  { label: 'License', href: page('/project/license/') },
+  { label: 'llms.txt', href: page('/llms.txt') },
+  { label: 'GitHub', href: github },
 ];
 ---
-<section class="alvo-close alvo-wrap" aria-labelledby="cta-title">
-  <div class="alvo-cta">
-    <div class="alvo-cta__copy">
-      <h2 id="cta-title">Ten minutes to a backend with rules and hooks.</h2>
-      <p>Alvo is pre-v0.1 and runs from source today. Nothing is on NuGet yet; packages and a published image are on the roadmap.</p>
+<section class="alvo-close" aria-labelledby="cta-title">
+  <div class="alvo-close__row alvo-wrap">
+    <div class="alvo-close__copy">
+      <h2 id="cta-title">Run it on your machine, or hand it to your agent.</h2>
+      <p>Alvo is pre-v0.1: the image runs from its <code>edge</code> tag, and no NuGet package or release is published yet. The descriptor format and the APIs may still change before v0.1.</p>
     </div>
     <div class="alvo-cta-row">
-      <a class="alvo-btn alvo-btn--primary" href="/MMLib.Alvo/start-here/tutorial/">Start the tutorial <span aria-hidden="true">→</span></a>
-      <a class="alvo-btn alvo-btn--ghost" href="/MMLib.Alvo/reference/">Read the reference</a>
+      <a class="alvo-btn alvo-btn--primary" href={page('/start-here/tutorial/')}>Start the tutorial <span aria-hidden="true">→</span></a>
+      <a class="alvo-btn alvo-btn--ghost" href={github}>Source on GitHub</a>
     </div>
   </div>
 </section>
 <footer class="alvo-footer">
   <div class="alvo-footer__row alvo-wrap">
-    <span class="alvo-footer__brand"><img src={mark.src} width="22" height="22" alt="" />Alvo · pre-v0.1 · Apache-2.0</span>
+    <span class="alvo-footer__brand"><img src={mark.src} width="22" height="22" alt="" />Alvo · Apache-2.0 · pre-v0.1</span>
     <nav class="alvo-footer__links" aria-label="Footer">
       {links.map((link) => <a href={link.href}>{link.label}</a>)}
     </nav>
-    <span class="alvo-footer__meta">Built with Starlight</span>
   </div>
 </footer>

@@ -63,7 +63,7 @@ public partial class ProblemTypesTests
             "**Causes**\n\n- A required field is missing.\n\n" +
             "**Fix:** Send every required field.\n\n" +
             "**Violation codes:** `required`, `max-length`\n\n" +
-            "**Guides:** [Write data safely](/MMLib.Alvo/guides/write-data/)\n");
+            "**Guides:** [Write data safely](/guides/write-data/)\n");
     }
 
     [Fact]

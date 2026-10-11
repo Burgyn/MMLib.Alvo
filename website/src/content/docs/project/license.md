@@ -13,4 +13,4 @@ Alvo is licensed under the [Apache License, Version 2.0](https://github.com/Burg
 
 ## Contributions
 
-Contributions are accepted under a Contributor License Agreement. You keep the copyright over your contribution; the terms, and why the project asks for them, are on the [Contributing](/MMLib.Alvo/project/contributing/) page.
+Contributions are accepted under a Contributor License Agreement. You keep the copyright over your contribution; the terms, and why the project asks for them, are on the [Contributing](/project/contributing/) page.

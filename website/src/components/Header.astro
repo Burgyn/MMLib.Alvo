@@ -6,15 +6,16 @@ import Search from 'virtual:starlight/components/Search';
 import SiteTitle from 'virtual:starlight/components/SiteTitle';
 import SocialIcons from 'virtual:starlight/components/SocialIcons';
 import ThemeSelect from 'virtual:starlight/components/ThemeSelect';
+import { page } from '../lib/links';
 
 const shouldRenderSearch =
   config.pagefind || config.components.Search !== '@astrojs/starlight/components/Search.astro';
 
 const primary = [
-  { label: 'Docs', href: '/MMLib.Alvo/start-here/why-alvo/' },
-  { label: 'Reference', href: '/MMLib.Alvo/reference/', group: 'Reference' },
-  { label: 'Examples', href: '/MMLib.Alvo/examples/' },
-  { label: 'Roadmap', href: '/MMLib.Alvo/project/roadmap/' },
+  { label: 'Docs', href: page('/start-here/why-alvo/') },
+  { label: 'Reference', href: page('/reference/'), group: 'Reference' },
+  { label: 'Examples', href: page('/examples/') },
+  { label: 'Roadmap', href: page('/project/roadmap/') },
 ];
 
 const { entry, sidebar } = Astro.locals.starlightRoute;

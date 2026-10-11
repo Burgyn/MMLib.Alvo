@@ -41,6 +41,6 @@ public class ReferenceIndexGeneratorTests
         var page = ReferenceIndexGenerator.Render([("problem-types", "Problem types", "Every type.")]);
 
         page.RelativePath.ShouldBe("index.md");
-        page.Content.ShouldContain("- [Problem types](/MMLib.Alvo/reference/problem-types/) — Every type.\n");
+        page.Content.ShouldContain("- [Problem types](/reference/problem-types/) — Every type.\n");
     }
 }

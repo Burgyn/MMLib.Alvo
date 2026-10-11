@@ -7,11 +7,11 @@ using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Ai.Internal;
 
-/// <summary>The descriptor skills (D33), embedded from <c>.claude/skills/alvo-descriptor-*</c> and fixed.</summary>
+/// <summary>The descriptor skills (D33), embedded from <c>plugins/alvo/skills/alvo-descriptor-*</c> and fixed.</summary>
 /// <remarks>
 /// <para>
 /// <b>Embedded rather than read from disk, for #29 §5's reason</b> (D23): a deployment must not be able to edit what
-/// the assistant believes. They are the same files Claude Code reads in this repository, so a rule the assistant
+/// the assistant believes. They are the same files the repository's Claude Code plugin (<c>alvo@mmlib-alvo</c>) ships, so a rule the assistant
 /// learns is one a developer's agent learns too.
 /// </para>
 /// <para>
@@ -42,7 +42,7 @@ internal static partial class EmbeddedSkills
 
     private static readonly Lazy<JsonNode> _schema = new(() => JsonNode.Parse(Read(SchemaResourceName))!);
 
-    /// <summary>Every embedded skill file, by its path under <c>.claude/skills/</c>, as LF text.</summary>
+    /// <summary>Every embedded skill file, by its path under <c>plugins/alvo/skills/</c>, as LF text.</summary>
     internal static IReadOnlyDictionary<string, string> Files { get; } = LoadFiles();
 
     /// <summary>The skills, one per <c>SKILL.md</c>, in path order.</summary>

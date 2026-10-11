@@ -13,7 +13,7 @@ internal sealed partial class HostPagesGenerator : IPageGenerator
     internal const string ExampleNotice =
         "The Data API Alvo generated for the vehicle-registry example descriptor. "
         + "Every descriptor generates its own document at `GET /openapi/v1.json` (with a UI at `/scalar`); "
-        + "see [Data API conventions](/MMLib.Alvo/data-api/conventions/).";
+        + "see [Data API conventions](" + SiteLinks.BasePath + "/data-api/conventions/).";
 
     internal const string ServerDescription = "The default address of a standalone host (docker compose, or the container image on port 8080).";
 

@@ -26,7 +26,7 @@ What Alvo guarantees, for every access that goes through it:
 - **Policy refusals disclose kinds, not data.** A refused read or write says what kind of refusal it is; a row a rule
   hides answers the same as a row that does not exist, except that a constraint conflict can reveal it (below).
 - **Every request is bounded**: page size, body size and depth, filter depth and width, batch rows. The values are in
-  [Limits and budgets](/MMLib.Alvo/reference/limits/).
+  [Limits and budgets](/reference/limits/).
 
 Where the guarantees stop:
 
@@ -74,7 +74,7 @@ Three parties shape a running backend, and each can do only what its channel all
 
 | Party | Changes it through | Can | Cannot |
 |---|---|---|---|
-| **Descriptor author**: a developer, an agent, a dashboard user with the `developer` level | the descriptor: a file, the Management API, the dashboard | declare entities, rules, hooks, derived values and who may manage the project | express a loop, a network call or file access; reach past the [CEL profiles](/MMLib.Alvo/concepts/cel/); grant itself `admin`: a change to `access` needs the `admin` level |
+| **Descriptor author**: a developer, an agent, a dashboard user with the `developer` level | the descriptor: a file, the Management API, the dashboard | declare entities, rules, hooks, derived values and who may manage the project | express a loop, a network call or file access; reach past the [CEL profiles](/concepts/cel/); grant itself `admin`: a change to `access` needs the `admin` level |
 | **Host developer** (embedded mode) | C# in the host application | register CEL functions with `AddCelFunction`, add endpoints that call Alvo's data port, decide who the caller is for those endpoints, attach middleware to the generated routes | change what the descriptor's rules decide: an endpoint calling `IAlvoData` is judged by the same rules, for the caller it passes. Choosing that caller correctly, and any direct database access, is the host's responsibility |
 | **API caller** | an HTTP request with an API key | what the descriptor's rules allow for the key's user, roles and tenant, narrowed further by the key's scopes | see or change rows a rule excludes, write a framework-managed column, choose a tenant the key was not issued for |
 
@@ -83,8 +83,8 @@ the bootstrap administrator, the AI connection. Credentials never enter the desc
 and reviewed without leaking one. **The bootstrap administrator** always holds the `admin` level, because a project
 that locked everyone out of its own `access` block would otherwise be unrecoverable.
 
-The two **escape hatches** are both the host developer's: a [custom CEL function](/MMLib.Alvo/guides/custom-cel-functions/)
-and a [custom endpoint](/MMLib.Alvo/guides/call-from-endpoints/). They let you outgrow the descriptor without leaving the
+The two **escape hatches** are both the host developer's: a [custom CEL function](/guides/custom-cel-functions/)
+and a [custom endpoint](/guides/call-from-endpoints/). They let you outgrow the descriptor without leaving the
 runtime, and they are as trustworthy as the code you write in them. A host function is not bounded by CEL's grammar:
 it runs inside the write's transaction with no time budget, can loop or block, and Alvo's tenant filter does not reach
 inside it, so a function that reads stored data must filter by the tenant itself. That is why only a host developer can
@@ -134,8 +134,8 @@ Values come in as bind parameters, never as SQL text. After a before-hook change
 the changed row, so a hook cannot place a row where the caller could not.
 
 The policy sits inside `IAlvoData`, the data port, not in front of it. Your own endpoints call the same port with the
-caller's context, and get the same answer the generated API gives. [Access rules](/MMLib.Alvo/guides/access-rules/)
-shows the rules at work, and [CEL in Alvo](/MMLib.Alvo/concepts/cel/#how-a-rule-becomes-sql) the SQL they become.
+caller's context, and get the same answer the generated API gives. [Access rules](/guides/access-rules/)
+shows the rules at work, and [CEL in Alvo](/concepts/cel/#how-a-rule-becomes-sql) the SQL they become.
 
 Rules also stand on applied facts rather than hopes: a role name a rule tests that `auth.roles` does not declare is
 refused at apply, because a misspelled role would silently admit nobody, or, negated, everybody.
@@ -182,8 +182,8 @@ reason a client could parse would hand back what the prose is written to withhol
 - **A `500 internal`** carries a constant message; the exception goes to the host's log only. The readiness probe
   answers with a bare phase word, never the failure's text, because it is unauthenticated.
 
-The problem types and when each is returned are in [Problem types](/MMLib.Alvo/reference/problem-types/), and how a
-client should branch on them in [Handle errors](/MMLib.Alvo/guides/handle-errors/).
+The problem types and when each is returned are in [Problem types](/reference/problem-types/), and how a
+client should branch on them in [Handle errors](/guides/handle-errors/).
 
 ## Credentials and requests
 
@@ -199,13 +199,13 @@ client should branch on them in [Handle errors](/MMLib.Alvo/guides/handle-errors
 PostgreSQL's native row-level security as a second line under Alvo's own rules, a change feed that records writes made
 outside Alvo, an audit log of data changes, issuing and revoking API keys
 ([#36](https://github.com/Burgyn/MMLib.Alvo/issues/36)), signed webhook deliveries, and rate limiting on the Data and
-Management APIs are not in this build ([Capabilities in this build](/MMLib.Alvo/reference/capabilities/)).
+Management APIs are not in this build ([Capabilities in this build](/reference/capabilities/)).
 :::
 
 ## Put it to work
 
-- [Access rules](/MMLib.Alvo/guides/access-rules/): write rules and see where a 403 comes from.
-- [Authentication and API keys](/MMLib.Alvo/guides/authentication/): keys, roles and scopes.
-- [Multi-tenancy](/MMLib.Alvo/guides/multi-tenancy/): isolation between tenants.
-- [Handle errors](/MMLib.Alvo/guides/handle-errors/): branch on the problem type.
-- [Running in production](/MMLib.Alvo/guides/production/): secrets, proxies and what to expose.
+- [Access rules](/guides/access-rules/): write rules and see where a 403 comes from.
+- [Authentication and API keys](/guides/authentication/): keys, roles and scopes.
+- [Multi-tenancy](/guides/multi-tenancy/): isolation between tenants.
+- [Handle errors](/guides/handle-errors/): branch on the problem type.
+- [Running in production](/guides/production/): secrets, proxies and what to expose.

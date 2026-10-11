@@ -122,9 +122,9 @@ curl -sS localhost:8080/api/owners -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRE
 
 ## Learn more
 
-- Documentation: https://burgyn.github.io/MMLib.Alvo/
-- Tutorial, your first backend in ten minutes: https://burgyn.github.io/MMLib.Alvo/start-here/tutorial/
-- Embed Alvo in ASP.NET Core: https://burgyn.github.io/MMLib.Alvo/start-here/embed/
-- For coding agents: https://burgyn.github.io/MMLib.Alvo/llms.txt
+- Documentation: https://alvo.burgyn.online/
+- Tutorial, your first backend in ten minutes: https://alvo.burgyn.online/start-here/tutorial/
+- Embed Alvo in ASP.NET Core: https://alvo.burgyn.online/start-here/embed/
+- For coding agents: https://alvo.burgyn.online/llms.txt
 - Source and issues: https://github.com/Burgyn/MMLib.Alvo
 - License: Apache-2.0, https://github.com/Burgyn/MMLib.Alvo/blob/main/LICENSE

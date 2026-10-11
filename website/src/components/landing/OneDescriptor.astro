@@ -1,0 +1,45 @@
+---
+// One entity of the descriptor the quick start serves, and what Alvo derives from it. The routes are read from the
+// OpenAPI document DocsGen captured from a real host over that descriptor; the query is a captured request.
+import JsonExcerpt from '../JsonExcerpt.astro';
+import { page } from '../../lib/links';
+import { requestLine } from '../../lib/exchanges';
+import vehicles from '../../../../examples/vehicle-registry/vehicles.alvo.json?raw';
+import openApi from '../../generated/openapi/data-api.json';
+
+const verbs = ['get', 'post', 'put', 'patch', 'delete'];
+const routes = Object.entries(openApi.paths as Record<string, Record<string, unknown>>)
+  .filter(([path]) => path === '/api/vehicles' || path.startsWith('/api/vehicles/'))
+  .map(([path, operations]) => ({ path, methods: verbs.filter((verb) => verb in operations).map((verb) => verb.toUpperCase()) }));
+if (routes.length === 0) throw new Error('OneDescriptor: the captured OpenAPI document has no /api/vehicles route');
+const query = requestLine('read-data/01-query', 2);
+---
+<section class="alvo-section alvo-section--band" aria-labelledby="one-title">
+  <div class="alvo-wrap">
+    <div class="alvo-head">
+      <p class="alvo-eyebrow">One descriptor</p>
+      <h2 id="one-title">One entity in. A table, its routes and their rules out.</h2>
+      <p class="alvo-lede">The <code>vehicles</code> entity of <code>examples/vehicle-registry</code>, the descriptor the quick start serves. It is checked against a JSON Schema and then semantically before anything is applied.</p>
+    </div>
+    <div class="alvo-one">
+      <div class="alvo-one__code">
+        <JsonExcerpt code={vehicles} pointer="/entities/vehicles" title="vehicles.alvo.json" />
+      </div>
+      <ul class="alvo-yields" aria-label="What Alvo derives from it">
+        <li>
+          <span class="alvo-yields__k">Routes</span>
+          <dl class="alvo-routes">
+            {routes.map((route) => (
+              <div><dt>{route.methods.join(' ')}</dt><dd>{route.path}</dd></div>
+            ))}
+          </dl>
+        </li>
+        <li><span class="alvo-yields__k">Schema</span><p>Unique <code>vin</code> and <code>plate</code>, a foreign key to <code>owners</code> that refuses to orphan a vehicle, two composite indexes. <code>renamedFrom</code> renames the column and keeps every value.</p></li>
+        <li><span class="alvo-yields__k">Audit</span><p><code>created_at</code>, <code>created_by</code>, <code>updated_at</code> and <code>updated_by</code> on every row, and an <code>ETag</code> for <code>If-Match</code>.</p></li>
+        <li><span class="alvo-yields__k">Rules</span><p>Each operation gated by its CEL rule. An operation without one is refused for everyone, administrators included.</p></li>
+        <li><span class="alvo-yields__k">Queries</span><p><code class="alvo-break">{query.method} {query.target}</code> PostgREST's syntax, with its deviations documented. <a class="alvo-prose-link" href={page('/guides/read-data/')}>Read data</a></p></li>
+        <li><span class="alvo-yields__k">Contract</span><p>Its own OpenAPI document at <code>/openapi/v1.json</code> and an API browser at <code>/scalar</code>.</p></li>
+      </ul>
+    </div>
+  </div>
+</section>

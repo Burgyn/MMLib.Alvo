@@ -19,9 +19,17 @@ const codeTheme = (name) =>
 
 const page = (label, slug) => ({ label, slug });
 
+// The one place the site's address lives. Pages, components (import.meta.env.BASE_URL), the sitemap, canonical
+// and Open Graph URLs all follow these two; DocsGen's SiteLinks mirrors them, and SiteLinksTests keeps the two equal.
+// Served from GitHub Pages under the custom domain in public/CNAME, at the root.
+const site = 'https://alvo.burgyn.online';
+const base = '/';
+const ogImage = new URL('og.png', new URL(base, site)).href;
+const ogImageAlt = 'Alvo: Write the schema. The backend is done. A .NET-native backend-as-a-service driven by one JSON descriptor.';
+
 export default defineConfig({
-  site: 'https://burgyn.github.io',
-  base: '/MMLib.Alvo',
+  site,
+  base,
   trailingSlash: 'always',
   fonts: [
     {
@@ -48,6 +56,17 @@ export default defineConfig({
       description,
       logo: { light: './src/assets/alvo-mark.svg', dark: './src/assets/alvo-mark-on-dark.svg', alt: 'Alvo' },
       favicon: '/favicon.svg',
+      // Every page shares one 1200×630 card (public/og.png, from scripts/og-image.mjs); Starlight adds the title,
+      // description, URL and summary_large_image per page.
+      head: [
+        { tag: 'meta', attrs: { property: 'og:image', content: ogImage } },
+        { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
+        { tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
+        { tag: 'meta', attrs: { property: 'og:image:type', content: 'image/png' } },
+        { tag: 'meta', attrs: { property: 'og:image:alt', content: ogImageAlt } },
+        { tag: 'meta', attrs: { name: 'twitter:image', content: ogImage } },
+        { tag: 'meta', attrs: { name: 'twitter:image:alt', content: ogImageAlt } },
+      ],
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/Burgyn/MMLib.Alvo' }],
       editLink: { baseUrl: 'https://github.com/Burgyn/MMLib.Alvo/edit/main/website/' },
       customCss: ['./src/styles/alvo-tokens.generated.css', './src/styles/theme.css'],
@@ -95,7 +114,7 @@ export default defineConfig({
             sidebar: { label: 'Data API — example (vehicle-registry)' },
           },
         ]),
-        starlightLinksValidator({ exclude: ['/MMLib.Alvo/reference/data-api/'] }),
+        starlightLinksValidator({ exclude: [`${base}reference/data-api/`] }),
       ],
       sidebar: [
         { label: 'Start here', items: [

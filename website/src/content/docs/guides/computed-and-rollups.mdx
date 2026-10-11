@@ -15,18 +15,18 @@ import rollup from '../../../snippets/computed-and-rollups/02-rollup.alvo.json?r
 :::tip[What you will achieve]
 Invoice lines that compute their own total, and invoices that sum their lines, count them and add VAT, with no caller
 able to write any of those numbers. About ten minutes, starting from the stack in
-[Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
+[Run your own descriptor](/start-here/run-your-own/).
 :::
 
 ## Before you start
 
-- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), run from its `alvo-help-desk`
+- The stack from [Run your own descriptor](/start-here/run-your-own/), run from its `alvo-help-desk`
   directory with `COMPOSE_FILE` and that page's secrets exported in this shell. This page uses the `admin` key (roles
   `admin`, `authenticated`).
-- [Entities and fields](/MMLib.Alvo/guides/entities-and-fields/), for fields, facets and references.
+- [Entities and fields](/guides/entities-and-fields/), for fields, facets and references.
 
 Choose the lowest rung that expresses the value: a **computed** field for an expression over the same row, a
-**rollup** for an aggregate over related rows, and a [before-hook](/MMLib.Alvo/guides/before-hooks/) for a value
+**rollup** for an aggregate over related rows, and a [before-hook](/guides/before-hooks/) for a value
 decided when the row is written.
 
 ## 1. Compute a value from the row
@@ -78,7 +78,7 @@ field, on every write route and in every batch row.
    computed field may read a rollup of its own row.
 
 2. Apply it by recreating the `alvo` container. Adding fields discards nothing, so the restart applies it
-   ([Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/) covers the other ways):
+   ([Apply and evolve your descriptor](/guides/apply-and-evolve/) covers the other ways):
 
    <Code code={step2.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
@@ -119,7 +119,7 @@ has the details.
 
 ## Options and variations
 
-**Rollup aggregates** ([`op`](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup.op)):
+**Rollup aggregates** ([`op`](/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup.op)):
 
 | `op` | Answers | Needs `field` |
 |---|---|---|
@@ -129,11 +129,11 @@ has the details.
 | `min`, `max` | the smallest or largest value of the child field | yes |
 
 When the child entity has more than one `ref` to this one, name the one to aggregate over with
-[`via`](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup.via).
+[`via`](/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup.via).
 
 **What a computed expression may contain.** It is checked when the descriptor is applied, and every refusal says why.
-Computed fields admit no function call (see the profiles in the [CEL function catalog](/MMLib.Alvo/reference/cel-functions/)
-and [CEL in Alvo](/MMLib.Alvo/concepts/cel/)).
+Computed fields admit no function call (see the profiles in the [CEL function catalog](/reference/cel-functions/)
+and [CEL in Alvo](/concepts/cel/)).
 
 | Allowed | Refused |
 |---|---|
@@ -148,7 +148,7 @@ possible result; omitting `maxLength` is always accepted.
 
 :::caution[Not in this build]
 A rollup's `where`, which would aggregate only some child rows, is refused at apply, because the aggregate would
-silently include every row ([Capabilities in this build](/MMLib.Alvo/reference/capabilities/#refused-at-apply)).
+silently include every row ([Capabilities in this build](/reference/capabilities/#refused-at-apply)).
 Aggregate every child row, or move the distinction into the model, for example a separate child entity.
 :::
 
@@ -156,12 +156,12 @@ Aggregate every child row, or move the distinction into the model, for example a
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | The body names a computed or rollup field. | Remove the field from the body; its value follows from the fields its expression reads, or from the child rows. | every host |
-| 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | The body breaks a facet of a field the expression reads, such as a missing required `unit_price`. | Follow the violation's `pointer` and `fixSuggestion`. | every host |
+| 403 | [`forbidden`](/reference/problem-types/#forbidden) | The body names a computed or rollup field. | Remove the field from the body; its value follows from the fields its expression reads, or from the child rows. | every host |
+| 422 | [`validation`](/reference/problem-types/#validation) | The body breaks a facet of a field the expression reads, such as a missing required `unit_price`. | Follow the violation's `pointer` and `fixSuggestion`. | every host |
 
 An expression Alvo cannot store is refused when the descriptor is applied, and the container does not come back. The
 end of `docker compose logs alvo` names the field and the reason, for example a numeric constant; see
-[Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/#what-can-go-wrong). In this build that refusal ends the
+[Run your own descriptor](/start-here/run-your-own/#what-can-go-wrong). In this build that refusal ends the
 process with exit code 139 instead of 78 ([#340](https://github.com/Burgyn/MMLib.Alvo/issues/340)).
 
 On SQLite, a computed `decimal` is evaluated as a floating-point number, so `0.1 * 3` reads as `0.30000000000000004`
@@ -169,16 +169,16 @@ where PostgreSQL answers `0.30` ([#162](https://github.com/Burgyn/MMLib.Alvo/iss
 
 ## Reference
 
-- Descriptor keys: [`computed`](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/#entities.fields.computed),
-  [`rollup`](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup) and its
-  [`from`](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup.from),
-  [`op`](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup.op),
-  [`field`](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup.field) and
-  [`via`](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup.via).
-- Problem types: [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden),
-  [`validation`](/MMLib.Alvo/reference/problem-types/#validation).
+- Descriptor keys: [`computed`](/reference/descriptor/entities-computed-and-rollups/#entities.fields.computed),
+  [`rollup`](/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup) and its
+  [`from`](/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup.from),
+  [`op`](/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup.op),
+  [`field`](/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup.field) and
+  [`via`](/reference/descriptor/entities-computed-and-rollups/#entities.fields.rollup.via).
+- Problem types: [`forbidden`](/reference/problem-types/#forbidden),
+  [`validation`](/reference/problem-types/#validation).
 
 ## Next
 
-**[Indexes and uniqueness](/MMLib.Alvo/guides/indexes/)**: speed up the queries you run most, and make a combination of
+**[Indexes and uniqueness](/guides/indexes/)**: speed up the queries you run most, and make a combination of
 fields unique.

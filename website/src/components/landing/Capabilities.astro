@@ -1,0 +1,106 @@
+---
+// Eight things a team would otherwise write by hand. Each card's code line is read from a validated snippet, an
+// example or a captured exchange, never typed here.
+import { page } from '../../lib/links';
+import { jsonExcerpt } from '../../lib/json-excerpt';
+import { capturedStep, requestLine } from '../../lib/exchanges';
+import { statusTone } from '../../lib/status';
+import ownership from '../../snippets/access-rules/02-ownership.alvo.json?raw';
+import hookReject from '../../snippets/landing/hook-reject.alvo.json?raw';
+import webhook from '../../snippets/after-hooks-and-webhooks/01-webhook.alvo.json?raw';
+import tenancy from '../../snippets/multi-tenancy/01-tenancy.alvo.json?raw';
+import helpDesk from '../../../../examples/help-desk/help-desk.alvo.json?raw';
+
+/** One JSON value on one line, spaced the way the snippets write it: `{ "type": "webhook" }`. */
+function line(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(line).join(', ')}]`;
+  if (value && typeof value === 'object') {
+    return `{ ${Object.entries(value).map(([key, member]) => `${JSON.stringify(key)}: ${line(member)}`).join(', ')} }`;
+  }
+  return JSON.stringify(value);
+}
+/** The member at a pointer as `"key": value` on one line; jsonExcerpt fails the build if the pointer misses. */
+function member(source: string, pointer: string): string {
+  const excerpt = jsonExcerpt(source, pointer);
+  const key = pointer.split('/').pop()!;
+  return `${JSON.stringify(key)}: ${line(JSON.parse(excerpt.slice(excerpt.indexOf(':') + 1)))}`;
+}
+const value = (source: string, pointer: string) => line(JSON.parse(jsonExcerpt(source, pointer)));
+
+const rejected = capturedStep('landing/hook-reject', 0);
+const dryRun = requestLine('landing/agent-dry-run', 1);
+const rollback = requestLine('landing/rollback', 2);
+const rolledBack = capturedStep('landing/rollback', 2);
+const paging = requestLine('read-data/01-query', 8);
+
+const cards = [
+  {
+    title: 'Rules in the SQL', code: member(ownership, '/entities/tickets/rules/list'),
+    text: 'A <code>list</code>, <code>get</code>, <code>update</code> or <code>delete</code> rule becomes a parameterised predicate in the statement that touches the rows. A <code>create</code> is checked over the new row inside its transaction. No rule, no access.',
+    href: '/guides/access-rules/', link: 'Access rules',
+  },
+  {
+    title: 'Hooks that fail closed', code: value(hookReject, '/entities/tickets/hooks/beforeCreate/1'),
+    status: rejected, statusNote: 'nothing written',
+    text: 'A before-hook refuses or rewrites a write inside its transaction. A refusal, a function that fails or a value its field cannot hold rolls the write back.',
+    href: '/guides/before-hooks/', link: 'Validate and transform writes',
+  },
+  {
+    title: 'Outbox, e-mail, webhooks', code: member(webhook, '/entities/tickets/hooks/afterCreate/0/action'),
+    text: 'Every write commits its event through an outbox. After-hooks send e-mail and deliver webhooks, with retries. Deliveries are not signed yet.',
+    href: '/guides/after-hooks-and-webhooks/', link: 'After-hooks and webhooks',
+  },
+  {
+    title: 'Multi-tenancy', code: member(tenancy, '/tenancy'),
+    text: 'The tenant comes from the API key, never from the request. Another tenant’s row answers 404, the same as a row that does not exist.',
+    href: '/guides/multi-tenancy/', link: 'Multi-tenancy',
+  },
+  {
+    title: 'Filter, sort, page', code: `${paging.method} ${paging.target}`,
+    text: 'A PostgREST-shaped query string, keyset paging with <code>after</code>, and the same query as a JSON body.',
+    href: '/guides/read-data/', link: 'Read data',
+  },
+  {
+    title: 'Computed fields, rollups', code: member(helpDesk, '/entities/tickets/fields/estimate_cost/computed'),
+    text: 'Derive a value from the row itself, or roll it up over related rows, without a client ever writing it.',
+    href: '/guides/computed-and-rollups/', link: 'Computed fields and rollups',
+  },
+  {
+    title: 'Revisions, rollback', code: `${rollback.method} ${rollback.target}`,
+    status: rolledBack, statusNote: `the rollback is revision ${(rolledBack.responseBody as { revision: number }).revision}`,
+    text: `Every applied descriptor is kept as a revision. Preview a change with <code>${dryRun.target.slice(dryRun.target.indexOf('?'))}</code>, apply it with <code>If-Match</code>, roll back to any revision.`,
+    href: '/guides/apply-and-evolve/', link: 'Apply and evolve',
+  },
+  {
+    title: 'Admin dashboard', code: 'http://localhost:8080/admin',
+    text: 'Schema, rule and hook editors, a data browser, history and rollback, and a schema assistant that proposes changes for you to review.',
+    href: '/guides/admin-dashboard/', link: 'The admin dashboard',
+  },
+];
+---
+<section class="alvo-section" aria-labelledby="caps-title">
+  <div class="alvo-wrap">
+    <div class="alvo-head">
+      <p class="alvo-eyebrow">In this build</p>
+      <h2 id="caps-title">What a team would otherwise write by hand.</h2>
+      <p class="alvo-lede">Each is a line in the descriptor. <a class="alvo-prose-link" href={page('/start-here/what-works-today/')}>What works today</a> lists what this pre-v0.1 build runs, warns about and refuses.</p>
+    </div>
+    <ul class="alvo-caps">
+      {cards.map((card, i) => (
+        <li class="alvo-cap">
+          <span class="alvo-cap__n" aria-hidden="true">{String(i + 1).padStart(2, '0')}</span>
+          <h3>{card.title}</h3>
+          <code class="alvo-cap__code">{card.code}</code>
+          {card.status && (
+            <p class="alvo-cap__status">
+              <span class={`alvo-status alvo-status--${statusTone(card.status.status)}`}>{card.status.status} {card.status.reason}</span>
+              <span>{card.statusNote}</span>
+            </p>
+          )}
+          <p set:html={card.text} />
+          <a class="alvo-textlink" href={page(card.href as `/${string}`)}>{card.link} <span aria-hidden="true">→</span></a>
+        </li>
+      ))}
+    </ul>
+  </div>
+</section>

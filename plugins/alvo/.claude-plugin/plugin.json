@@ -1,0 +1,13 @@
+{
+  "name": "alvo",
+  "version": "0.1.0-pre",
+  "description": "Teaches your coding agent the Alvo descriptor: entities, fields, rules (CEL), hooks, rollups, indexes, tenancy, access, limits.",
+  "author": {
+    "name": "Milan Martiniak",
+    "url": "https://github.com/Burgyn"
+  },
+  "homepage": "https://alvo.burgyn.online",
+  "repository": "https://github.com/Burgyn/MMLib.Alvo",
+  "license": "Apache-2.0",
+  "keywords": ["alvo", "backend-as-a-service", "dotnet", "json-schema", "cel"]
+}

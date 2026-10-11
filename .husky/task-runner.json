@@ -26,7 +26,7 @@
          "command": "scripts/test-ring0",
          "filteringRule": "staged",
          "//": "scripts/** and this file are in the list because they DECIDE what the local gate checks: a commit touching only test-ring0 used to run no hook task at all, so the one file that defines the gate was the one file outside it.",
-         "include": [ "**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "scripts/**", ".husky/task-runner.json", ".claude/skills/alvo-descriptor-*/**" ]
+         "include": [ "**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "scripts/**", ".husky/task-runner.json", "plugins/alvo/skills/**" ]
       }
    ]
 }

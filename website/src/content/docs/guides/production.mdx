@@ -21,8 +21,8 @@ twenty minutes, starting from the published image with Docker running.
 
 ## Before you start
 
-- Docker with Compose v2, `curl` and `openssl`: [Quick start](/MMLib.Alvo/start-here/quick-start/) and
-  [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/) show the compose file this page builds on.
+- Docker with Compose v2, `curl` and `openssl`: [Quick start](/start-here/quick-start/) and
+  [Run your own descriptor](/start-here/run-your-own/) show the compose file this page builds on.
 - The descriptor you will serve, already working on that stack. This page uses the quick start's default,
   `examples/vehicle-registry`, and its `demo` key (`ALVO_DEMO_KEY_SECRET`).
 
@@ -59,7 +59,7 @@ Then set `ALVO_IMAGE=alvo:local` for the compose commands below.
 ## 2. Choose the database
 
 The host registers exactly one database driver, chosen by name with
-[`Alvo:Database:Provider`](/MMLib.Alvo/reference/configuration/#alvo). An unknown name stops the host rather than
+[`Alvo:Database:Provider`](/reference/configuration/#alvo). An unknown name stops the host rather than
 falling back to a default.
 
 | | PostgreSQL | SQLite |
@@ -99,10 +99,10 @@ them:
 
 ## 4. Set the startup mode
 
-[`Alvo:Schema:Startup`](/MMLib.Alvo/reference/configuration/#alvoschema) decides what a boot does when the mounted
+[`Alvo:Schema:Startup`](/reference/configuration/#alvoschema) decides what a boot does when the mounted
 descriptor no longer matches the schema in the database. The default is `Apply`, which suits editing a descriptor and
 restarting. Production should set `Verify`, as the override does, and apply descriptor changes from one place: a single
-migration job, the [Management API](/MMLib.Alvo/guides/apply-and-evolve/) or the dashboard.
+migration job, the [Management API](/guides/apply-and-evolve/) or the dashboard.
 
 | Mode | When the descriptor has drifted | What it costs |
 |---|---|---|
@@ -151,7 +151,7 @@ When you are done, stop the stack and delete its volumes and the generated key f
 
 Two settings, both off by default:
 
-- [`Alvo:PathBase`](/MMLib.Alvo/reference/configuration/#alvo) serves the whole application under a prefix, for a proxy
+- [`Alvo:PathBase`](/reference/configuration/#alvo) serves the whole application under a prefix, for a proxy
   that does not strip it. The dashboard always lives at `/admin` under that base; it has no mount point of its own.
 - `Alvo:ForwardedHeaders:Enabled` honours `X-Forwarded-For`, `-Proto`, `-Host` and `-Prefix`. A created row's
   `Location` header is built from them. With it on, the host trusts those headers **from anyone**, because a container
@@ -166,20 +166,20 @@ API browser at `/scalar` behind a path base has not been verified
 ## 7. Decide what to expose
 
 - **The API's shape.** `/scalar` and `/openapi/v1.json` are anonymous. They publish which entities exist and their
-  non-hidden fields, never data. [`Alvo:Docs:Enabled`](/MMLib.Alvo/reference/configuration/#alvo) set to `false`
+  non-hidden fields, never data. [`Alvo:Docs:Enabled`](/reference/configuration/#alvo) set to `false`
   removes both routes, as the override does.
 - **The Management API** at `/management` is closed by default: until the descriptor's `access` block grants a level,
   only the bootstrap administrator gets in. Nothing logs or rate-limits it, so rate-limit it at the proxy (or, in an
   embedded host, on the routes you map).
 - **The dashboard** is on by default. `Alvo__Admin__Dashboard__Enabled=false` removes it, together with its sign-in and
   set-password endpoints. Both forms are rate-limited per subject and per client; the keys and defaults are in
-  [Configuration keys](/MMLib.Alvo/reference/configuration/#keys-read-outside-an-options-type). Behind a proxy without
+  [Configuration keys](/reference/configuration/#keys-read-outside-an-options-type). Behind a proxy without
   forwarded headers, every client shares the proxy's one budget.
 
 ## Run more than one instance
 
 - **One instance drains the outbox.** Per-row event order holds only while a single process delivers events (and no two
-  events for one row are written by different processes in the same millisecond), and no lock enforces it: run one instance with [`Alvo:Events:Enabled`](/MMLib.Alvo/reference/configuration/#alvoevents) on
+  events for one row are written by different processes in the same millisecond), and no lock enforces it: run one instance with [`Alvo:Events:Enabled`](/reference/configuration/#alvoevents) on
   and the rest off. Switching it off stops delivery, never the recording of events.
 - **Keep the data-protection keys.** Dashboard sessions and set-password links are protected with keys the host keeps
   in its user's home directory, `/home/app`. A recreated container loses them, and every session and outstanding link
@@ -201,7 +201,7 @@ not a throughput promise.
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 500 | [`internal`](/MMLib.Alvo/reference/problem-types/#internal) | Something Alvo relies on broke while it served a generated route. The answer carries a constant detail, never the exception. | Read the host's log, which has the exception and its stack trace. | standalone; embedded only with `AddAlvoProblemDetails()` |
+| 500 | [`internal`](/reference/problem-types/#internal) | Something Alvo relies on broke while it served a generated route. The answer carries a constant detail, never the exception. | Read the host's log, which has the exception and its stack trace. | standalone; embedded only with `AddAlvoProblemDetails()` |
 | 503 | — | `/health/ready` before the descriptor applied, while the database does not answer, or when the host holds a descriptor older than the database's history. | Read the log: it names the failure, or the two revisions. | every host |
 
 **The host refuses to start.** A configuration it cannot accept stops it with one sentence per problem on stderr and
@@ -215,15 +215,15 @@ Kerberos support, which the image does not carry; the host starts and serves nor
 
 ## Reference
 
-- Configuration: [`Alvo`](/MMLib.Alvo/reference/configuration/#alvo) (descriptor, database, path base, forwarded
-  headers, docs), [`Alvo:Schema`](/MMLib.Alvo/reference/configuration/#alvoschema),
-  [`Alvo:Secrets`](/MMLib.Alvo/reference/configuration/#alvosecrets),
-  [`Alvo:Events`](/MMLib.Alvo/reference/configuration/#alvoevents),
-  [keys read outside an options type](/MMLib.Alvo/reference/configuration/#keys-read-outside-an-options-type), and
-  [Limits and budgets](/MMLib.Alvo/reference/limits/).
-- Problem types: [`internal`](/MMLib.Alvo/reference/problem-types/#internal).
+- Configuration: [`Alvo`](/reference/configuration/#alvo) (descriptor, database, path base, forwarded
+  headers, docs), [`Alvo:Schema`](/reference/configuration/#alvoschema),
+  [`Alvo:Secrets`](/reference/configuration/#alvosecrets),
+  [`Alvo:Events`](/reference/configuration/#alvoevents),
+  [keys read outside an options type](/reference/configuration/#keys-read-outside-an-options-type), and
+  [Limits and budgets](/reference/limits/).
+- Problem types: [`internal`](/reference/problem-types/#internal).
 - Design note: [the standalone host](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/host.md).
 
 ## Next
 
-**[The admin dashboard](/MMLib.Alvo/guides/admin-dashboard/)**: sign in and manage the backend you just deployed.
+**[The admin dashboard](/guides/admin-dashboard/)**: sign in and manage the backend you just deployed.

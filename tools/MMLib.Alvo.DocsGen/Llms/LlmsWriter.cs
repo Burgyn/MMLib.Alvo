@@ -11,14 +11,15 @@ internal static class LlmsWriter
     private const string Overview =
         "Alvo is a .NET-native backend-as-a-service: one JSON descriptor (validated by a JSON Schema) defines entities, CEL access rules compiled to SQL, "
         + "hooks, computed fields and webhooks; it runs as a Docker image or embedded in ASP.NET Core. "
-        + "Status: pre-v0.1 — no NuGet package or image is published yet.";
+        + "Status: pre-v0.1 — the image runs from its edge tag (ghcr.io/burgyn/alvo:edge); no NuGet package or release is published yet.";
 
     private const string ProblemTypes =
         "Errors are RFC 9457 problem documents. Their `type` is `https://alvo.dev/errors/<slug>`; that domain does not resolve yet, "
-        + "so read `https://burgyn.github.io/MMLib.Alvo/reference/problem-types/#<slug>` instead. Branch on the slug, never on `detail`.";
+        + "so read `" + SiteLinks.SiteUrl + SiteLinks.BasePath + "/reference/problem-types/#<slug>` instead. Branch on the slug, never on `detail`.";
 
     private const string RawRepository = "https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main";
     private const string CodingAgentsSlug = "start-here/coding-agents";
+    internal const string InstallSkills = "curl -fsSL " + RawRepository + "/scripts/install-agent-skills | sh";
 
     private const string DataApiLine =
         "- [Data API — example (vehicle-registry)](" + SiteLinks.SiteUrl + SiteLinks.BasePath + "/reference/data-api/): "
@@ -94,10 +95,12 @@ internal static class LlmsWriter
                 $"validate every descriptor against it; also at {RawRepository}/schema/project.schema.json"));
         foreach (var (name, description) in skills.OrderBy(skill => skill.Name, StringComparer.Ordinal))
         {
-            index.Append(Line(name, $"{RawRepository}/.claude/skills/{name}/SKILL.md", description));
+            index.Append(Line(name, $"{RawRepository}/plugins/alvo/skills/{name}/SKILL.md", description));
         }
 
-        index.Append('\n');
+        index.Append("\nIn Claude Code they are the `alvo` plugin: `/plugin marketplace add Burgyn/MMLib.Alvo`, then `/plugin install alvo@mmlib-alvo`. ")
+            .Append("For another agent, install them into its skills folder (default `.claude/skills`; pass another as `sh -s -- <dir>`): `")
+            .Append(InstallSkills).Append("`\n\n");
     }
 
     private static List<(string Heading, List<ContentPage> Pages)> Sectioned(IReadOnlyList<ContentPage> pages)

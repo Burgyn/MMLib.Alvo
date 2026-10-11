@@ -14,17 +14,17 @@ import tenancy from '../../../snippets/multi-tenancy/01-tenancy.alvo.json?raw';
 :::tip[What you will achieve]
 Two customers, Acme and Globex, sharing one help desk: each sees only its own tickets, both read the same categories,
 and no request can move a row from one to the other. About fifteen minutes, starting from the stack in
-[Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
+[Run your own descriptor](/start-here/run-your-own/).
 :::
 
 ## Before you start
 
-- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), run from its `alvo-help-desk`
+- The stack from [Run your own descriptor](/start-here/run-your-own/), run from its `alvo-help-desk`
   directory with `COMPOSE_FILE` and that page's secrets exported in this shell. Step 1 adds `ALVO_ACME_KEY_SECRET` and
   `ALVO_GLOBEX_KEY_SECRET`; every compose command needs them too while this page's override is in place.
 - This page adds two keys that each belong to a tenant: `acme` and `globex` (roles `agent`, `authenticated`). It also
   uses `admin`, which belongs to no tenant.
-- [Access rules](/MMLib.Alvo/guides/access-rules/), for how rules filter rows.
+- [Access rules](/guides/access-rules/), for how rules filter rows.
 
 The responses below were captured from a real host when the site was built, so your ids will differ.
 
@@ -107,7 +107,7 @@ The tenant comes from the API key, never from the request or the descriptor. In 
    <Exchange name="multi-tenancy/01-tenancy" wrap steps={[8]} />
 
    The header is optional: without it the key's tenant applies. Its name is configurable as
-   [`Alvo:Auth:TenantHeaderName`](/MMLib.Alvo/reference/configuration/#alvoauth).
+   [`Alvo:Auth:TenantHeaderName`](/reference/configuration/#alvoauth).
 
 </Steps>
 
@@ -136,9 +136,9 @@ What isolation does not cover:
 
 - An after-hook's event carries no tenant ([#153](https://github.com/Burgyn/MMLib.Alvo/issues/153)), and the event
   queue holds every tenant's complete rows with no retention ([#154](https://github.com/Burgyn/MMLib.Alvo/issues/154)).
-  See [After-hooks, events and webhooks](/MMLib.Alvo/guides/after-hooks-and-webhooks/).
+  See [After-hooks, events and webhooks](/guides/after-hooks-and-webhooks/).
 - A custom CEL function that reads stored data does so outside Alvo's tenant filter: it must take the tenant as a
-  parameter and filter by it. See [Custom CEL functions](/MMLib.Alvo/guides/custom-cel-functions/).
+  parameter and filter by it. See [Custom CEL functions](/guides/custom-cel-functions/).
 
 :::caution[Not in this build]
 A key that may act across tenants, for example for a support team, is not available: a key without a tenant is
@@ -150,25 +150,25 @@ grant is tracked in [#42](https://github.com/Burgyn/MMLib.Alvo/issues/42).
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | A `POST` left out `tenant_id` or named another tenant; an update or a `PUT` sent `tenant_id`; the key has no tenant and the entity is scoped. | Echo the key's tenant on a `POST`, never send `tenant_id` otherwise, and use a key issued for a tenant. | every host |
-| 404 | [`not-found`](/MMLib.Alvo/reference/problem-types/#not-found) | The row belongs to another tenant, or does not exist. | Use a key of the tenant that owns the row. | every host |
-| 401 | [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | `X-Alvo-Tenant` names a tenant other than the key's own, or is not a valid id. | Drop the header, or send the key's own tenant. | every host |
-| 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | A `ref` points at a row in another tenant (code `unresolved-reference`). | Reference a row of your own tenant, or a global entity. | every host |
+| 403 | [`forbidden`](/reference/problem-types/#forbidden) | A `POST` left out `tenant_id` or named another tenant; an update or a `PUT` sent `tenant_id`; the key has no tenant and the entity is scoped. | Echo the key's tenant on a `POST`, never send `tenant_id` otherwise, and use a key issued for a tenant. | every host |
+| 404 | [`not-found`](/reference/problem-types/#not-found) | The row belongs to another tenant, or does not exist. | Use a key of the tenant that owns the row. | every host |
+| 401 | [`unauthenticated`](/reference/problem-types/#unauthenticated) | `X-Alvo-Tenant` names a tenant other than the key's own, or is not a valid id. | Drop the header, or send the key's own tenant. | every host |
+| 422 | [`validation`](/reference/problem-types/#validation) | A `ref` points at a row in another tenant (code `unresolved-reference`). | Reference a row of your own tenant, or a global entity. | every host |
 
 ## Reference
 
-- Descriptor keys: [`tenancy`](/MMLib.Alvo/reference/descriptor/tenancy/),
-  [`tenancy.enabled`](/MMLib.Alvo/reference/descriptor/tenancy/#tenancy.enabled), an entity's
-  [`tenancy`](/MMLib.Alvo/reference/descriptor/entities/#entities.tenancy).
-- Configuration: [`Alvo:Auth:DevKeys:{n}:Tenant` and `Alvo:Auth:TenantHeaderName`](/MMLib.Alvo/reference/configuration/#alvoauth).
-- Problem types: [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden),
-  [`not-found`](/MMLib.Alvo/reference/problem-types/#not-found),
-  [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated),
-  [`validation`](/MMLib.Alvo/reference/problem-types/#validation).
+- Descriptor keys: [`tenancy`](/reference/descriptor/tenancy/),
+  [`tenancy.enabled`](/reference/descriptor/tenancy/#tenancy.enabled), an entity's
+  [`tenancy`](/reference/descriptor/entities/#entities.tenancy).
+- Configuration: [`Alvo:Auth:DevKeys:{n}:Tenant` and `Alvo:Auth:TenantHeaderName`](/reference/configuration/#alvoauth).
+- Problem types: [`forbidden`](/reference/problem-types/#forbidden),
+  [`not-found`](/reference/problem-types/#not-found),
+  [`unauthenticated`](/reference/problem-types/#unauthenticated),
+  [`validation`](/reference/problem-types/#validation).
 - Design notes: [`tenant_id` on create and replace](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md#tenant_id-is-refused-on-both-branches-and-the-create-branch-stamps-it)
   and [unique per tenant](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md#a-unique-field-on-a-tenant-scoped-entity-was-a-cross-tenant-existence-oracle-137-fixed).
 
 ## Next
 
-**[Validate and transform writes](/MMLib.Alvo/guides/before-hooks/)**: refuse a write, or fill in a value, as a row is
+**[Validate and transform writes](/guides/before-hooks/)**: refuse a write, or fill in a value, as a row is
 stored.

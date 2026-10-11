@@ -17,15 +17,15 @@ import sql from '../../../../../test/MMLib.Alvo.Data.PostgreSql.Tests/cel-to-sql
 :::tip[What you will achieve]
 Queues that only administrators manage, tickets that each agent sees only when they filed them, and a clear rule for
 telling a refusal from an empty page. About fifteen minutes, starting from the stack in
-[Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
+[Run your own descriptor](/start-here/run-your-own/).
 :::
 
 ## Before you start
 
-- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), run from its `alvo-help-desk`
+- The stack from [Run your own descriptor](/start-here/run-your-own/), run from its `alvo-help-desk`
   directory with `COMPOSE_FILE` and that page's secrets exported in this shell.
 - Two keys: `agent` (roles `agent`, `authenticated`) and `admin` (roles `admin`, `authenticated`).
-  [Authentication and API keys](/MMLib.Alvo/guides/authentication/) explains where roles come from.
+  [Authentication and API keys](/guides/authentication/) explains where roles come from.
 
 The responses below were captured from a real host when the site was built, so your ids will differ.
 
@@ -93,7 +93,7 @@ writes `created_by` on every create, and a caller cannot set it, so it is a fiel
    <Code code={ownership} lang="json" title="help-desk.alvo.json" ins={[{ range: '8-10' }, { range: '25' }, { range: '31-32' }, { range: '34' }]} />
 
 2. Apply it by recreating the `alvo` container
-   ([Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/) covers the other ways):
+   ([Apply and evolve your descriptor](/guides/apply-and-evolve/) covers the other ways):
 
    <Code code={step2.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
@@ -121,7 +121,7 @@ To let a caller own rows someone else created, use a field that refers to `users
 of the same shape stops a caller from creating a row in somebody else's name.
 
 **Role names are checked when the descriptor is applied.** Each role a rule tests must be declared in
-[`auth.roles`](/MMLib.Alvo/reference/descriptor/auth/#auth.roles) or be built in (`anon`, `authenticated`, `admin`). A
+[`auth.roles`](/reference/descriptor/auth/#auth.roles) or be built in (`anon`, `authenticated`, `admin`). A
 typo such as `'amdin' in @user.roles` would otherwise match nobody, so the apply refuses it and suggests the role you
 meant.
 
@@ -137,15 +137,15 @@ surprise in the API, so here is the whole list:
 | The operation has no rule | 403 `forbidden`: *"No policy allows '…' on this entity."* |
 | The row a `create` writes fails the `create` rule | 403 `forbidden`: *"The write was rejected by policy."* |
 | The rule reads `@user.id` and the caller sent no key | 403 `forbidden` |
-| The entity is tenant-scoped and the caller has no tenant, or the rule reads `@tenant.id` and the caller has none | 403 `forbidden`; see [Multi-tenancy](/MMLib.Alvo/guides/multi-tenancy/) |
-| The key's scopes do not cover the operation | 403 `out-of-scope`; see [Authentication and API keys](/MMLib.Alvo/guides/authentication/#3-narrow-a-key-with-scopes) |
+| The entity is tenant-scoped and the caller has no tenant, or the rule reads `@tenant.id` and the caller has none | 403 `forbidden`; see [Multi-tenancy](/guides/multi-tenancy/) |
+| The key's scopes do not cover the operation | 403 `out-of-scope`; see [Authentication and API keys](/guides/authentication/#3-narrow-a-key-with-scopes) |
 
 So if you wrote a rule and a caller gets an empty page, it is your rule. If a caller gets a 403 on a read, it is one
 of the rows above and not the condition you wrote. A request without a key, against the ownership rules:
 
 <Exchange name="access-rules/02-ownership" wrap steps={[5]} />
 
-[Handle errors](/MMLib.Alvo/guides/handle-errors/) shows how a client should branch on these.
+[Handle errors](/guides/handle-errors/) shows how a client should branch on these.
 
 ## 4. See how a rule becomes SQL
 
@@ -192,19 +192,19 @@ through the Data API with that caller's key. The dashboard's rules screen runs t
 | Public or own | `is_public \|\| owner_id == @user.id` | A boolean field read as a condition. Because it reads `@user.id`, a caller without a key is refused with a 403 even for public rows. |
 | Combined | `created_by == @user.id \|\| 'admin' in @user.roles` | Keep earlier grants by adding a clause with `\|\|`. |
 
-Each rule's slot is in the reference: [`list`](/MMLib.Alvo/reference/descriptor/entities-rules/#entities.rules.list),
-[`get`](/MMLib.Alvo/reference/descriptor/entities-rules/#entities.rules.get),
-[`create`](/MMLib.Alvo/reference/descriptor/entities-rules/#entities.rules.create),
-[`update`](/MMLib.Alvo/reference/descriptor/entities-rules/#entities.rules.update) and
-[`delete`](/MMLib.Alvo/reference/descriptor/entities-rules/#entities.rules.delete). A rule compares with `==`, `!=`,
+Each rule's slot is in the reference: [`list`](/reference/descriptor/entities-rules/#entities.rules.list),
+[`get`](/reference/descriptor/entities-rules/#entities.rules.get),
+[`create`](/reference/descriptor/entities-rules/#entities.rules.create),
+[`update`](/reference/descriptor/entities-rules/#entities.rules.update) and
+[`delete`](/reference/descriptor/entities-rules/#entities.rules.delete). A rule compares with `==`, `!=`,
 `<`, `<=`, `>`, `>=`, tests roles with `in`, tests presence with `has(field)`, and combines with `&&`, `||` and `!`.
 `<`, `<=`, `>`, `>=` take numbers and dates, not text; compare with `null` through `has(field)`, not `== null`. A rule
-has no arithmetic, no `old.` or `new.` and no `changed()`: those belong to [before-hooks](/MMLib.Alvo/guides/before-hooks/). The same expression language decides per caller whether a field is
-`hidden` or `readOnly`; see [Entities and fields](/MMLib.Alvo/guides/entities-and-fields/#3-decide-per-caller-readonly-and-hidden).
+has no arithmetic, no `old.` or `new.` and no `changed()`: those belong to [before-hooks](/guides/before-hooks/). The same expression language decides per caller whether a field is
+`hidden` or `readOnly`; see [Entities and fields](/guides/entities-and-fields/#3-decide-per-caller-readonly-and-hidden).
 
 :::caution[Not in this build]
 A rule admits no function call, not even a built-in one such as `trim`: a rule is a SQL filter, and functions are not
-translated to SQL yet (the profiles are in the [CEL function catalog](/MMLib.Alvo/reference/cel-functions/)). To
+translated to SQL yet (the profiles are in the [CEL function catalog](/reference/cel-functions/)). To
 filter by a normalised value, store it with a before-hook `mutate` and compare that field. A rule also cannot read
 any attribute of the caller beyond `@user.id`, `@user.roles` and `@tenant.id`.
 :::
@@ -213,10 +213,10 @@ any attribute of the caller beyond `@user.id`, `@user.roles` and `@tenant.id`.
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | The operation has no rule; the row a `create` writes fails its rule; the caller lacks the identity or tenant the rule reads. | Add the rule, or send a key that carries what the rule reads. | every host |
-| 403 | [`out-of-scope`](/MMLib.Alvo/reference/problem-types/#out-of-scope) | The key's scopes do not cover this entity and operation. | Grant the key the scope. | every host |
-| 404 | [`not-found`](/MMLib.Alvo/reference/problem-types/#not-found) | The `get`, `update` or `delete` rule excludes the row, or the row does not exist. | Check the rule with `policy/simulate`, then the row with the caller's own key. | every host |
-| 401 | [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | The key cannot be used, for example because it holds a role the descriptor does not declare. | See [Authentication and API keys](/MMLib.Alvo/guides/authentication/). | every host |
+| 403 | [`forbidden`](/reference/problem-types/#forbidden) | The operation has no rule; the row a `create` writes fails its rule; the caller lacks the identity or tenant the rule reads. | Add the rule, or send a key that carries what the rule reads. | every host |
+| 403 | [`out-of-scope`](/reference/problem-types/#out-of-scope) | The key's scopes do not cover this entity and operation. | Grant the key the scope. | every host |
+| 404 | [`not-found`](/reference/problem-types/#not-found) | The `get`, `update` or `delete` rule excludes the row, or the row does not exist. | Check the rule with `policy/simulate`, then the row with the caller's own key. | every host |
+| 401 | [`unauthenticated`](/reference/problem-types/#unauthenticated) | The key cannot be used, for example because it holds a role the descriptor does not declare. | See [Authentication and API keys](/guides/authentication/). | every host |
 
 A rule Alvo cannot compile is refused when the descriptor is applied, and the container does not come back: an
 undeclared role, a field the entity does not have, a function call, or a rule wrapped in an extra pair of quotes
@@ -226,17 +226,17 @@ the end of `docker compose logs alvo`; in this build that refusal ends the proce
 
 ## Reference
 
-- Descriptor keys: [rules](/MMLib.Alvo/reference/descriptor/entities-rules/),
-  [`auth.roles`](/MMLib.Alvo/reference/descriptor/auth/#auth.roles), [`access`](/MMLib.Alvo/reference/descriptor/access/),
-  [`audit`](/MMLib.Alvo/reference/descriptor/entities/#entities.audit).
-- Management API: [`SimulatePolicyAsync`](/MMLib.Alvo/reference/management-api/).
-- Problem types: [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden),
-  [`out-of-scope`](/MMLib.Alvo/reference/problem-types/#out-of-scope),
-  [`not-found`](/MMLib.Alvo/reference/problem-types/#not-found),
-  [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated).
+- Descriptor keys: [rules](/reference/descriptor/entities-rules/),
+  [`auth.roles`](/reference/descriptor/auth/#auth.roles), [`access`](/reference/descriptor/access/),
+  [`audit`](/reference/descriptor/entities/#entities.audit).
+- Management API: [`SimulatePolicyAsync`](/reference/management-api/).
+- Problem types: [`forbidden`](/reference/problem-types/#forbidden),
+  [`out-of-scope`](/reference/problem-types/#out-of-scope),
+  [`not-found`](/reference/problem-types/#not-found),
+  [`unauthenticated`](/reference/problem-types/#unauthenticated).
 - Design notes: [the decision procedure](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md#the-decision-procedure-the-four-ways-a-caller-actually-gets-403)
   and [`USING`/`WITH CHECK` per operation](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/cel.md#usingwith-check-per-operation).
 
 ## Next
 
-**[Multi-tenancy](/MMLib.Alvo/guides/multi-tenancy/)**: keep each customer's rows apart in one database.
+**[Multi-tenancy](/guides/multi-tenancy/)**: keep each customer's rows apart in one database.

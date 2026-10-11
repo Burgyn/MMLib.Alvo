@@ -12,11 +12,11 @@ public class LlmsWriterTests
         var index = LlmsWriter.Index([_guide], [("alvo-descriptor-hooks", "Use when hooks.")]);
 
         index.ShouldStartWith("# Alvo\n\n> Describe your backend in one JSON file.");
-        index.ShouldContain("## Guides\n\n- [X guide](https://burgyn.github.io/MMLib.Alvo/guides/x/): Does X.\n");
-        index.ShouldContain("## Descriptor schema and skills\n\n- [Descriptor JSON Schema](https://burgyn.github.io/MMLib.Alvo/schema/v1/project.json)");
-        index.ShouldContain("- [alvo-descriptor-hooks](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-hooks/SKILL.md): Use when hooks.\n");
+        index.ShouldContain("## Guides\n\n- [X guide](https://alvo.burgyn.online/guides/x/): Does X.\n");
+        index.ShouldContain("## Descriptor schema and skills\n\n- [Descriptor JSON Schema](https://alvo.burgyn.online/schema/v1/project.json)");
+        index.ShouldContain("- [alvo-descriptor-hooks](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/plugins/alvo/skills/alvo-descriptor-hooks/SKILL.md): Use when hooks.\n");
         index.ShouldContain("https://alvo.dev/errors/<slug>");
-        index.ShouldContain("## Optional\n\n- [Full text](https://burgyn.github.io/MMLib.Alvo/llms-full.txt)");
+        index.ShouldContain("## Optional\n\n- [Full text](https://alvo.burgyn.online/llms-full.txt)");
         index[index.IndexOf("## Optional", StringComparison.Ordinal)..].ShouldNotContain("project.json");
     }
 
@@ -40,8 +40,8 @@ public class LlmsWriterTests
         string[] order = ["## Start here", "## Guides", "## Examples", "## Concepts", "## Reference", "## Project", "## Optional"];
         order.Select(heading => index.IndexOf(heading, StringComparison.Ordinal)).ShouldBeInOrder();
         index.IndexOf("[For coding agents]", StringComparison.Ordinal).ShouldBeLessThan(index.IndexOf("[Why Alvo]", StringComparison.Ordinal));
-        index.ShouldContain("- [Data API — example (vehicle-registry)](https://burgyn.github.io/MMLib.Alvo/reference/data-api/): ");
-        index.ShouldContain("- [Data API conventions](https://burgyn.github.io/MMLib.Alvo/data-api/conventions/): D.\n");
+        index.ShouldContain("- [Data API — example (vehicle-registry)](https://alvo.burgyn.online/reference/data-api/): ");
+        index.ShouldContain("- [Data API conventions](https://alvo.burgyn.online/data-api/conventions/): D.\n");
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public class LlmsWriterTests
     [Fact]
     public void The_full_text_carries_each_page_with_its_source_url() =>
         LlmsWriter.Full([_guide])
-            .ShouldContain("# X guide\n\nSource: https://burgyn.github.io/MMLib.Alvo/guides/x/\n\nIntro.\n");
+            .ShouldContain("# X guide\n\nSource: https://alvo.burgyn.online/guides/x/\n\nIntro.\n");
 
     [Fact]
     public void The_full_text_keeps_the_agent_reference_and_leaves_the_rest_to_the_index()
