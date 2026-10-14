@@ -13,6 +13,10 @@ public sealed record AlvoContext
 
     private readonly IReadOnlySet<Role> _roles = new HashSet<Role> { Role.Anon };
 
+    private readonly AlvoActorKind? _actorKind;
+
+    private readonly AlvoProvenance _provenance = AlvoProvenance.None;
+
     /// <summary>Gets the caller's internal identifier.</summary>
     public required UserId User { get; init; }
 
@@ -32,6 +36,25 @@ public sealed record AlvoContext
 
     /// <summary>Gets the tenant the caller acts in; <see langword="null"/> denies on a tenant-scoped entity.</summary>
     public TenantId? Tenant { get; init; }
+
+    /// <summary>
+    /// Gets how the caller authenticated. Unless set, it is derived from <see cref="User"/>: the anonymous caller is
+    /// <see cref="AlvoActorKind.Anonymous"/>, the system caller <see cref="AlvoActorKind.System"/>, and any other
+    /// <see cref="AlvoActorKind.ApiKey"/> — so a context a host builds by hand keeps the meaning it always had.
+    /// </summary>
+    public AlvoActorKind ActorKind
+    {
+        get => _actorKind ?? DerivedActorKind(User);
+        init => _actorKind = value;
+    }
+
+    /// <summary>Gets the flow this caller acts in; <see cref="AlvoProvenance.None"/> unless one is given.</summary>
+    /// <exception cref="ArgumentNullException">The value is <see langword="null"/>.</exception>
+    public AlvoProvenance Provenance
+    {
+        get => _provenance;
+        init => _provenance = value ?? throw new ArgumentNullException(nameof(Provenance));
+    }
 
     /// <summary>
     /// The anonymous caller: the reserved all-zero <see cref="UserId"/> — which means "no identity",
@@ -56,6 +79,11 @@ public sealed record AlvoContext
         Roles = new HashSet<Role> { Role.Admin },
         Tenant = tenant,
     };
+
+    private static AlvoActorKind DerivedActorKind(UserId user) =>
+        user == default ? AlvoActorKind.Anonymous
+        : user == _systemUser ? AlvoActorKind.System
+        : AlvoActorKind.ApiKey;
 
     /// <summary>Answers whether the caller holds a role.</summary>
     /// <param name="role">The role to test.</param>

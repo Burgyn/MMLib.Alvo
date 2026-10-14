@@ -132,9 +132,19 @@ namespace MMLib.Alvo.Ai
 }
 namespace MMLib.Alvo
 {
+    public enum AlvoActorKind
+    {
+        Unknown = 0,
+        Anonymous = 1,
+        System = 2,
+        ApiKey = 3,
+        User = 4,
+    }
     public sealed class AlvoContext : System.IEquatable<MMLib.Alvo.AlvoContext>
     {
         public AlvoContext() { }
+        public MMLib.Alvo.AlvoActorKind ActorKind { get; init; }
+        public MMLib.Alvo.AlvoProvenance Provenance { get; init; }
         public required System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Role> Roles { get; init; }
         public MMLib.Alvo.TenantId? Tenant { get; init; }
         public required MMLib.Alvo.UserId User { get; init; }
@@ -160,6 +170,16 @@ namespace MMLib.Alvo
         public MMLib.Alvo.AlvoMode Mode { get; set; }
         [System.ComponentModel.DataAnnotations.RegularExpression("^[a-z][a-z0-9_]{0,15}$", ErrorMessage="SchemaPrefix must be lower snake_case, 1–16 chars.")]
         public string SchemaPrefix { get; set; }
+    }
+    public sealed class AlvoProvenance : System.IEquatable<MMLib.Alvo.AlvoProvenance>
+    {
+        public AlvoProvenance() { }
+        public string? CausationId { get; init; }
+        public string? CorrelationId { get; init; }
+        public int Depth { get; init; }
+        public string? TraceParent { get; init; }
+        public string? TraceState { get; init; }
+        public static MMLib.Alvo.AlvoProvenance None { get; }
     }
     public sealed class AlvoUser : System.IEquatable<MMLib.Alvo.AlvoUser>
     {
