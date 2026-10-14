@@ -136,7 +136,7 @@ public static class AlvoEventProvenance
             using var document = JsonDocument.Parse(authClaims);
             return RoleNames(document.RootElement);
         }
-        catch (JsonException)
+        catch (Exception exception) when (exception is JsonException or ArgumentException)
         {
             return null;
         }

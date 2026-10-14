@@ -28,4 +28,8 @@ public class AuthClaimsTests
     [InlineData("""{"roles":["admin",1]}""")]
     public void Anything_but_a_list_of_role_names_reads_as_absent(string? claims)
         => AlvoEventProvenance.RolesIn(claims).ShouldBeNull();
+
+    [Fact]
+    public void A_claims_string_holding_a_lone_surrogate_reads_as_absent()
+        => AlvoEventProvenance.RolesIn("{\"roles\":[\"" + new string('\uD800', 1) + "\"]}").ShouldBeNull();
 }

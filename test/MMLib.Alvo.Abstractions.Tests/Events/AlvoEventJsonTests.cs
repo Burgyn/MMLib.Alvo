@@ -243,4 +243,12 @@ public class AlvoEventJsonTests
 
         (read.AuthClaims, read.TenantId, read.TraceParent, read.TraceState).ShouldBe((null, null, null, null));
     }
+
+    [Fact]
+    public void An_auth_type_no_build_wrote_reads_back_unchanged()
+    {
+        var foreign = AlvoEventJson.Write(Sample()).Replace("\"authtype\":\"api_key\"", "\"authtype\":\"oauth\"", StringComparison.Ordinal);
+
+        AlvoEventJson.Read(foreign).AuthType.ShouldBe("oauth");
+    }
 }
