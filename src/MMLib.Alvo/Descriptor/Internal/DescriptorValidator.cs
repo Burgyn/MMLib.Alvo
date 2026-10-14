@@ -549,6 +549,11 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         }
 
         var managed = ManagedColumnsOf(entity.Value, tenancyEnabled);
+        foreach (var error in EventExclusionErrors(entity, fields, managed))
+        {
+            yield return error;
+        }
+
         foreach (var field in fields.EnumerateObject())
         {
             foreach (var error in FieldSemanticErrors(
@@ -558,6 +563,54 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             }
         }
     }
+
+    private static IEnumerable<DescriptorValidationError> EventExclusionErrors(
+        JsonProperty entity, JsonElement fields, IReadOnlySet<string> managed)
+    {
+        if (!entity.Value.TryGetProperty("events", out var events) || events.ValueKind != JsonValueKind.Object
+            || !events.TryGetProperty("exclude", out var exclude) || exclude.ValueKind != JsonValueKind.Array)
+        {
+            yield break;
+        }
+
+        var index = 0;
+        foreach (var name in exclude.EnumerateArray())
+        {
+            var path = $"/entities/{entity.Name}/events/exclude/{index++}";
+            if (name.ValueKind == JsonValueKind.String
+                && ExclusionRefusal(entity.Name, name.GetString()!, fields, managed, path) is { } refusal)
+            {
+                yield return refusal;
+            }
+        }
+    }
+
+    private static DescriptorValidationError? ExclusionRefusal(
+        string entity, string name, JsonElement fields, IReadOnlySet<string> managed, string path) =>
+        IsEventKey(name, managed) ? KeysTheEvent(path, name)
+        : fields.TryGetProperty(name, out _) ? null
+        : ExcludesNothing(path, entity, name);
+
+    /// <summary>Whether <paramref name="name"/> keys the event: <c>id</c>, or a column this entity's traits manage.</summary>
+    /// <remarks>
+    /// The entity's <em>own</em> managed set (its traits), never the union: an entity without <c>audit</c> may declare an
+    /// ordinary <c>created_at</c> field (see <see cref="ManagedColumnsOf"/>), and excluding that field is legitimate.
+    /// </remarks>
+    private static bool IsEventKey(string name, IReadOnlySet<string> managed) =>
+        name == AlvoManagedColumns.Id || managed.Contains(name);
+
+    private static DescriptorValidationError KeysTheEvent(string path, string name) => new(
+        path,
+        $"'{name}' is a framework-managed column that keys the event — its subject, partition key or audit trail — so it "
+        + "cannot be left out of the event's images.",
+        $"Remove '{name}' from events.exclude.",
+        DescriptorValidationSeverity.Error);
+
+    private static DescriptorValidationError ExcludesNothing(string path, string entity, string name) => new(
+        path,
+        $"'{name}' is not a field of '{entity}', so leaving it out of the event's images would exclude nothing.",
+        $"Name a field '{entity}' declares, or remove the entry.",
+        DescriptorValidationSeverity.Error);
 
     /// <summary>
     /// The framework-managed columns this entity carries, read from its traits in the raw JSON.

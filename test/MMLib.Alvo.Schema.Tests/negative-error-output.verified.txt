@@ -17,6 +17,24 @@
     ]
   },
   {
+    file: events-exclude-duplicate.json,
+    failures: [
+      {
+        Pointer: #/entities/notes/events/exclude/0,
+        Message: Validation uniqueItems - duplicate items were found at indices innerIndex and 0.
+      }
+    ]
+  },
+  {
+    file: events-exclude-typo.json,
+    failures: [
+      {
+        Pointer: #/entities/notes/events/exclud,
+        Message: (schema keyword failure — validator emits no message)
+      }
+    ]
+  },
+  {
     file: format-without-pattern.json,
     failures: [
       {

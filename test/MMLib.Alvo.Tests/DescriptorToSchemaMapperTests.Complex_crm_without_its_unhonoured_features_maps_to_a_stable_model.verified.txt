@@ -360,6 +360,9 @@
           Nullable: true,
           Indexed: false
         }
+      ],
+      EventImageExclusions: [
+        commission_note
       ]
     },
     {

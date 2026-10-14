@@ -732,6 +732,7 @@ namespace MMLib.Alvo.Descriptor
         public EntityDescriptor() { }
         public bool? Audit { get; init; }
         public string? Description { get; init; }
+        public MMLib.Alvo.Descriptor.EntityEvents? Events { get; init; }
         [System.Text.Json.Serialization.JsonExtensionData]
         public System.Collections.Generic.IDictionary<string, System.Text.Json.JsonElement>? Extensions { get; set; }
         public required System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.FieldDescriptor> Fields { get; init; }
@@ -743,6 +744,11 @@ namespace MMLib.Alvo.Descriptor
         public bool? SoftDelete { get; init; }
         public MMLib.Alvo.Descriptor.StorageMode? Storage { get; init; }
         public MMLib.Alvo.Descriptor.EntityTenancy? Tenancy { get; init; }
+    }
+    public sealed class EntityEvents : System.IEquatable<MMLib.Alvo.Descriptor.EntityEvents>
+    {
+        public EntityEvents() { }
+        public System.Collections.Generic.IReadOnlyList<string>? Exclude { get; init; }
     }
     public sealed class EntityHooks : System.IEquatable<MMLib.Alvo.Descriptor.EntityHooks>
     {
@@ -1715,6 +1721,7 @@ namespace MMLib.Alvo.Schema
         public EntitySchema() { }
         public bool Audit { get; init; }
         public string? Description { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> EventImageExclusions { get; init; }
         public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.FieldSchema> Fields { get; init; }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.IndexSchema> Indexes { get; init; }
         public required string Name { get; init; }

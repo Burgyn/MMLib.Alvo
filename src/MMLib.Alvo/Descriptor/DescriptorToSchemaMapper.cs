@@ -219,6 +219,7 @@ internal static class DescriptorToSchemaMapper
             Audit = audit,
             Fields = fields,
             Indexes = indexes,
+            EventImageExclusions = e.Events?.Exclude ?? [],
         };
     }
 

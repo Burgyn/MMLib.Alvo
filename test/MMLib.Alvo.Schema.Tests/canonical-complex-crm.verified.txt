@@ -212,6 +212,11 @@
     "deals": {
       "audit": true,
       "description": "Sales opportunities.",
+      "events": {
+        "exclude": [
+          "commission_note"
+        ]
+      },
       "fields": {
         "amount": {
           "precision": 12,

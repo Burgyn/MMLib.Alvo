@@ -552,6 +552,22 @@
             }
           }
         },
+        "events": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What this entity's events carry. Every write appends one CloudEvents 1.0.2 event with the row after (`data.record`) and before (`data.old_record`) the change. `exclude` leaves the named fields out of both images \u2014 personal data, large columns \u2014 while `data.changed` still names them. `id`, `tenant_id` and the framework-managed columns key the event and cannot be excluded. Apply refuses an after-hook condition or template that reads an excluded field.",
+          "properties": {
+            "exclude": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,62}$"
+              },
+              "description": "Declared fields to leave out of both row images of every event this entity emits."
+            }
+          }
+        },
         "realtime": {
           "type": "boolean",
           "default": true,
