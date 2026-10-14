@@ -376,9 +376,12 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_replacement_that_created_the_row_emits_a_created_event() { }
         public System.Threading.Tasks.Task A_replacement_that_replaced_a_row_emits_an_updated_event_carrying_both_images() { }
         public System.Threading.Tasks.Task A_replayed_idempotent_create_emits_no_second_event() { }
+        public System.Threading.Tasks.Task A_scoped_write_reports_its_tenant_and_a_global_write_reports_none() { }
+        public System.Threading.Tasks.Task A_write_reports_the_chain_it_was_made_in() { }
         public System.Threading.Tasks.Task A_write_the_engine_refuses_leaves_no_outbox_row() { }
         public System.Threading.Tasks.Task A_write_whose_clock_lands_mid_microsecond_still_records_one_instant() { }
         public System.Threading.Tasks.Task An_events_record_carries_a_hidden_field_unmasked_and_that_is_the_documented_disclosure() { }
+        public System.Threading.Tasks.Task An_excluded_field_is_in_neither_image_and_still_named_as_changed() { }
         public System.Threading.Tasks.Task An_update_emits_exactly_one_event_carrying_both_images() { }
         public System.Threading.Tasks.Task Every_event_carries_the_caller_the_write_was_performed_as() { }
         public System.Threading.Tasks.Task The_events_time_equals_the_rows_own_audit_instant() { }

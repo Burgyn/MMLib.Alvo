@@ -388,6 +388,7 @@ public abstract class AlvoDataOutboxTests
         queued.AuthType.ShouldBe(AlvoEventAuthType.ApiKey);
         queued.AuthId.ShouldBe(Caller.User.Value.ToString());
         queued.CorrelationId.ShouldNotBeNullOrWhiteSpace();
+        queued.AuthClaims.ShouldBe("""{"roles":["authenticated"]}""");
     }
 
     /// <summary>A replacement that created the row emits a <c>created</c>, like any other create.</summary>
@@ -424,7 +425,70 @@ public abstract class AlvoDataOutboxTests
         updated.Data.Record!["make"].ShouldBe("audi");
     }
 
+    /// <summary>
+    /// A write to a <c>scoped</c> entity reports the tenant it was made in, and a write to a <c>global</c> one
+    /// reports none — a global row belongs to no tenant, whoever wrote it.
+    /// </summary>
+    [Fact]
+    public async Task A_scoped_write_reports_its_tenant_and_a_global_write_reports_none()
+    {
+        var world = await VehiclesWorldAsync();
+
+        await world.Data.CreateAsync(
+            TenantNotes,
+            new Dictionary<string, object?> { ["title"] = "t", ["tenant_id"] = SuiteTenant.Value },
+            TenantCaller,
+            cancellationToken: Ct);
+        await CreateVehicleAsync(world, make: "vw");
+
+        var events = await world.EventsAsync();
+        events.Single(queued => queued.Type == $"entity.{TenantNotes}.created").TenantId
+            .ShouldBe(SuiteTenant.ToString());
+        events.Single(queued => queued.Type == Created).TenantId.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// A field the entity excludes from its events is in neither image, yet <c>changed</c> still names it — a
+    /// subscriber learns <em>that</em> it moved, never what it held.
+    /// </summary>
+    [Fact]
+    public async Task An_excluded_field_is_in_neither_image_and_still_named_as_changed()
+    {
+        var world = await VehiclesWorldAsync();
+        var created = await world.Data.CreateAsync(
+            Vehicles,
+            new Dictionary<string, object?>(Payload("vw", vin: null)) { ["internal_memo"] = "before" },
+            Caller,
+            cancellationToken: Ct);
+
+        await world.Data.UpdateAsync(
+            Vehicles, IdOf(created), Patch(("internal_memo", "after")), Caller, cancellationToken: Ct);
+
+        var updated = (await world.EventsAsync())[^1];
+        updated.Data.Record!.Values.ShouldNotContainKey("internal_memo");
+        updated.Data.OldRecord!.Values.ShouldNotContainKey("internal_memo");
+        updated.Data.Changed.ShouldContain("internal_memo");
+    }
+
+    /// <summary>A write reports the causation chain its caller stated it was made in.</summary>
+    [Fact]
+    public async Task A_write_reports_the_chain_it_was_made_in()
+    {
+        var world = await VehiclesWorldAsync();
+        var inChain = Caller with
+        {
+            Provenance = new AlvoProvenance { Depth = 3, CorrelationId = "flow-1", CausationId = "cause-1" },
+        };
+
+        await world.Data.CreateAsync(Vehicles, Payload("vw", vin: null), inChain, cancellationToken: Ct);
+
+        var queued = (await world.EventsAsync()).ShouldHaveSingleItem();
+        (queued.ChainDepth, queued.CorrelationId, queued.CausationId).ShouldBe((3, "flow-1", "cause-1"));
+    }
+
     private const string Vehicles = "vehicles";
+
+    private const string TenantNotes = "tenant_notes";
 
     private const string Created = $"entity.{Vehicles}.created";
 
@@ -472,6 +536,15 @@ public abstract class AlvoDataOutboxTests
         Roles = new HashSet<Role> { Role.Authenticated },
     };
 
+    /// <summary>The tenant every scoped write here is made in.</summary>
+    private static TenantId SuiteTenant { get; } = new(Guid.Parse("cccccccc-0000-0000-0000-000000000001"));
+
+    /// <summary>
+    /// <see cref="Caller"/> acting in <see cref="SuiteTenant"/>. Expression-bodied so it reads <see cref="Caller"/>
+    /// on every call rather than once during static initialisation.
+    /// </summary>
+    private static AlvoContext TenantCaller => Caller with { Tenant = SuiteTenant };
+
     /// <summary>
     /// One entity with everything a fact here needs: <c>audit</c> (so an event's <c>time</c> has a stamp to
     /// equal), a <c>unique</c> field (so a write can be refused by the engine after policy has allowed it), a
@@ -493,6 +566,23 @@ public abstract class AlvoDataOutboxTests
                     ["color"] = new() { Type = DescField.String },
                     ["vin"] = new() { Type = DescField.String, Unique = true },
                     ["secret_note"] = new() { Type = DescField.String, Hidden = BoolOrCel.FromBoolean(true) },
+                    ["internal_memo"] = new() { Type = DescField.String },
+                },
+                Rules = new AccessRules
+                {
+                    List = AuthenticatedOnly,
+                    Get = AuthenticatedOnly,
+                    Create = AuthenticatedOnly,
+                    Update = AuthenticatedOnly,
+                    Delete = AuthenticatedOnly,
+                },
+            },
+            [TenantNotes] = new()
+            {
+                Tenancy = EntityTenancy.Scoped,
+                Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+                {
+                    ["title"] = new() { Type = DescField.String },
                 },
                 Rules = new AccessRules
                 {
@@ -520,6 +610,7 @@ public abstract class AlvoDataOutboxTests
             Name = Vehicles,
             Tenancy = TenancyMode.Global,
             Audit = true,
+            EventImageExclusions = ["internal_memo"],
             Fields =
             [
                 new FieldSchema { Name = AlvoManagedColumns.Id, Type = SchemaField.Uuid, Required = true },
@@ -530,12 +621,27 @@ public abstract class AlvoDataOutboxTests
                     Name = "vin", Type = SchemaField.String, Nullable = true, MaxLength = 40, Unique = true,
                 },
                 new FieldSchema { Name = "secret_note", Type = SchemaField.String, Nullable = true },
+                new FieldSchema { Name = "internal_memo", Type = SchemaField.String, Nullable = true },
 
                 // Last, exactly as the core's mapper appends its managed columns.
                 new FieldSchema { Name = AlvoManagedColumns.CreatedAt, Type = SchemaField.DateTime, Required = true },
                 new FieldSchema { Name = AlvoManagedColumns.CreatedBy, Type = SchemaField.Uuid, Nullable = true },
                 new FieldSchema { Name = AlvoManagedColumns.UpdatedAt, Type = SchemaField.DateTime, Required = true },
                 new FieldSchema { Name = AlvoManagedColumns.UpdatedBy, Type = SchemaField.Uuid, Nullable = true },
+            ],
+        },
+        new EntitySchema
+        {
+            Name = TenantNotes,
+            Tenancy = TenancyMode.Scoped,
+            Fields =
+            [
+                new FieldSchema { Name = AlvoManagedColumns.Id, Type = SchemaField.Uuid, Required = true },
+                new FieldSchema { Name = "title", Type = SchemaField.String, Nullable = true },
+                new FieldSchema
+                {
+                    Name = AlvoManagedColumns.TenantId, Type = SchemaField.Uuid, Required = true, Indexed = true,
+                },
             ],
         },
     ]);
