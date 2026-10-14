@@ -25,7 +25,7 @@ internal static class InternalMemberReferences
         "MMLib.Alvo.Rules.PolicyDecision::.ctor",
         "MMLib.Alvo.Rules.PolicyDecision::Allow",
         "MMLib.Alvo.Expressions.CompiledExpression::.ctor",
-        "MMLib.Alvo.Identity.Role::Application",
+        "MMLib.Alvo.Role::Application",
     ];
 
     /// <summary>

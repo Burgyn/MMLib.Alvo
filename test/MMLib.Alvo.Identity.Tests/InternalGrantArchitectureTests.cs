@@ -18,9 +18,10 @@ public sealed class InternalGrantArchitectureTests
     public void It_never_sets_the_ambient_flow()
         => InternalMemberReferences.FlowSetters.ShouldAllBe(member => !_referenced.Contains(member));
 
+    public static TheoryData<string> SecurityCoreMembers() => [.. InternalMemberReferences.SecurityCoreOnly];
+
     [Theory]
-    [InlineData("MMLib.Alvo.Rules.PolicyDecision::.ctor")]
-    [InlineData("MMLib.Alvo.Expressions.CompiledExpression::.ctor")]
+    [MemberData(nameof(SecurityCoreMembers))]
     public void It_never_reaches_a_security_core_member(string member)
         => _referenced.ShouldNotContain(member);
 }
