@@ -72,6 +72,7 @@ internal static class AfterHookCompiler
     private const string AfterUpdatePoint = "afterUpdate";
     private const string AfterDeletePoint = "afterDelete";
 
+    private const string ActionSegment = "/action";
     private const string BodyFileSlot = "bodyFile";
     private const string ConditionSlot = "condition";
     private const string EndpointSlot = "endpoint";
@@ -110,7 +111,7 @@ internal static class AfterHookCompiler
             return null;
         }
 
-        var action = CompileAction(hook.Action, $"{path}/action", scope);
+        var action = CompileAction(hook.Action, $"{path}{ActionSegment}", scope);
 
         return action is null
             ? null
@@ -264,7 +265,8 @@ internal static class AfterHookCompiler
         var templates = new Dictionary<string, AlvoTemplate>(StringComparer.Ordinal);
         var recipient = AddHeaderSlot(templates, ActionSlot.To, email.To, $"{path}/{ActionSlot.To}", scope);
         var data = RefuseEmailData(email.Data, $"{path}/{ActionSlot.Data}", scope);
-        var body = AddMessageTemplate(templates, email.Template, message, scope);
+        var reference = new TemplateReference(email.Template, path[..^ActionSegment.Length]);
+        var body = AddMessageTemplate(templates, message, reference, scope);
 
         return recipient && data && body ? new CompiledAction(email, templates, Endpoint: null, ActionType.NameOf(email)) : null;
     }
@@ -297,10 +299,16 @@ internal static class AfterHookCompiler
     /// Adds the referenced message template's <c>subject</c> and <c>body</c>, refusing a <c>bodyFile</c>
     /// because nothing in this build reads a path inside a descriptor bundle.
     /// </summary>
+    /// <remarks>
+    /// What the template's text gets wrong is reported at the template; what only the referencing hook's point makes
+    /// unrenderable — a row image that point lacks, a field the entity excludes — is reported at the hook, once per
+    /// placeholder across subject and body, because the same template can be referenced from another point where it
+    /// renders.
+    /// </remarks>
     private static bool AddMessageTemplate(
-        Dictionary<string, AlvoTemplate> templates, string name, MessageTemplate message, AfterHookScope scope)
+        Dictionary<string, AlvoTemplate> templates, MessageTemplate message, TemplateReference reference, AfterHookScope scope)
     {
-        var path = $"/templates/{name}";
+        var path = $"/templates/{reference.Name}";
         if (message.BodyFile is not null)
         {
             var refusal = UnhonouredFeatures.TemplateBodyFile;
@@ -308,9 +316,29 @@ internal static class AfterHookCompiler
             return false;
         }
 
-        var subject = AddHeaderSlot(templates, ActionSlot.Subject, message.Subject, $"{path}/{ActionSlot.Subject}", scope);
+        var subject = AddHeaderSlot(
+            templates, ActionSlot.Subject, message.Subject, $"{path}/{ActionSlot.Subject}", scope, reference);
+        var body = AddSugarSlot(templates, ActionSlot.Body, message.Body, $"{path}/{ActionSlot.Body}", scope, reference);
 
-        return AddSugarSlot(templates, ActionSlot.Body, message.Body, $"{path}/{ActionSlot.Body}", scope) && subject;
+        return subject && body && RendersForThisHook(templates, reference, scope);
+    }
+
+    private static bool RendersForThisHook(
+        Dictionary<string, AlvoTemplate> templates, TemplateReference reference, AfterHookScope scope)
+    {
+        var message = new AlvoTemplate(
+            [.. new[] { ActionSlot.Subject, ActionSlot.Body }
+                .Where(templates.ContainsKey)
+                .SelectMany(slot => templates[slot].Segments)]);
+        IReadOnlyList<DescriptorValidationError> refusals =
+        [
+            .. AfterImagePhase.Refusals(message, AfterImages.At(scope.Point), scope.Point, reference),
+            .. ExcludedPlaceholders(message, scope.Schema).Select(field => Error(
+                reference.Pointer, ExcludedReferencedPlaceholder(field, reference, scope), ExcludedReferencedFix(scope, field))),
+        ];
+        scope.Errors.AddRange(refusals);
+
+        return refusals.Count == 0;
     }
 
     /// <summary>
@@ -321,8 +349,13 @@ internal static class AfterHookCompiler
     /// placeholder-free value is a legitimate literal (a hard-coded address) rather than evidence of JSONata.
     /// </remarks>
     private static bool AddSugarSlot(
-        Dictionary<string, AlvoTemplate> templates, string slot, string? source, string path, AfterHookScope scope) =>
-        source is null || AddTemplate(templates, slot, source, path, scope);
+        Dictionary<string, AlvoTemplate> templates,
+        string slot,
+        string? source,
+        string path,
+        AfterHookScope scope,
+        TemplateReference? reference = null) =>
+        source is null || AddTemplate(templates, slot, source, path, scope, reference);
 
     /// <summary>
     /// A sugar slot that becomes a mail header — <c>email.to</c>, <c>templates.subject</c> — whose author-written
@@ -330,8 +363,13 @@ internal static class AfterHookCompiler
     /// one mailbox. What a row renders into it is checked again at delivery, by the same <see cref="MailHeaders"/>.
     /// </summary>
     private static bool AddHeaderSlot(
-        Dictionary<string, AlvoTemplate> templates, string slot, string? source, string path, AfterHookScope scope) =>
-        AddSugarSlot(templates, slot, source, path, scope) && HeaderIsSafe(templates, slot, path, scope);
+        Dictionary<string, AlvoTemplate> templates,
+        string slot,
+        string? source,
+        string path,
+        AfterHookScope scope,
+        TemplateReference? reference = null) =>
+        AddSugarSlot(templates, slot, source, path, scope, reference) && HeaderIsSafe(templates, slot, path, scope);
 
     private static bool HeaderIsSafe(
         Dictionary<string, AlvoTemplate> templates, string slot, string path, AfterHookScope scope)
@@ -376,7 +414,7 @@ internal static class AfterHookCompiler
 
         if (JsonataSlot.IsTemplate(source))
         {
-            return AddTemplate(templates, slot, source, path, scope);
+            return AddTemplate(templates, slot, source, path, scope, reference: null);
         }
 
         var refusal = UnhonouredFeatures.RawJsonata;
@@ -387,10 +425,16 @@ internal static class AfterHookCompiler
     /// <summary>
     /// Parses one template and resolves every placeholder in it against the entity's schema, the point's event
     /// images (#325) and the entity's <c>events.exclude</c>, so the compiled action carries only templates that are
-    /// known to render.
+    /// known to render. A slot of a named message template (<paramref name="reference"/> set) leaves the point-dependent
+    /// checks to <see cref="RendersForThisHook"/>, which reports them at the referencing hook.
     /// </summary>
     private static bool AddTemplate(
-        Dictionary<string, AlvoTemplate> templates, string slot, string source, string path, AfterHookScope scope)
+        Dictionary<string, AlvoTemplate> templates,
+        string slot,
+        string source,
+        string path,
+        AfterHookScope scope,
+        TemplateReference? reference)
     {
         if (!AlvoTemplate.TryParse(source, out var template, out var malformed))
         {
@@ -405,7 +449,7 @@ internal static class AfterHookCompiler
             return false;
         }
 
-        var unrenderable = Unrenderable(template!, path, scope);
+        var unrenderable = reference is null ? Unrenderable(template!, path, scope) : [];
         if (unrenderable.Count > 0)
         {
             scope.Errors.AddRange(unrenderable);
@@ -425,7 +469,7 @@ internal static class AfterHookCompiler
         [
             .. AfterImagePhase.Refusals(template, AfterImages.At(scope.Point), scope.Point, path),
             .. ExcludedPlaceholders(template, scope.Schema)
-                .Select(field => Error(path, ExcludedPlaceholder(field), ExcludedFix(scope, field))),
+                .Select(field => Error(path, ExcludedPlaceholder(field), ExcludedPlaceholderFix(scope, field))),
         ];
 
     private static IEnumerable<DescriptorValidationError> ExcludedFieldReads(
@@ -433,7 +477,7 @@ internal static class AfterHookCompiler
         FieldsRead(root)
             .Where(field => scope.Schema.EventImageExclusions.Contains(field, StringComparer.Ordinal))
             .Distinct(StringComparer.Ordinal)
-            .Select(field => Error(path, ExcludedCondition(field), ExcludedFix(scope, field)));
+            .Select(field => Error(path, ExcludedCondition(field), ExcludedConditionFix(scope, field)));
 
     private static IEnumerable<string> FieldsRead(CelNode node) =>
         (node is CelFieldRef reference ? [reference.FieldName] : Enumerable.Empty<string>())
@@ -456,9 +500,20 @@ internal static class AfterHookCompiler
         $"This template reads '{field}', which this entity leaves out of its event images (events.exclude), so it "
         + "would render empty on every delivery.";
 
-    private static string ExcludedFix(AfterHookScope scope, string field) =>
+    private static string ExcludedReferencedPlaceholder(string field, TemplateReference reference, AfterHookScope scope) =>
+        $"Template '{reference.Name}', which the '{scope.Point}' hook at {reference.HookPath} references, reads "
+        + $"'{field}', which this entity leaves out of its event images (events.exclude), so it would render empty on "
+        + "every delivery from this hook.";
+
+    private static string ExcludedConditionFix(AfterHookScope scope, string field) =>
         $"Remove '{field}' from {scope.EntityPath}/events/exclude, or stop reading it here; 'changed({field})' still "
         + "names an excluded field.";
+
+    private static string ExcludedPlaceholderFix(AfterHookScope scope, string field) =>
+        $"Remove '{field}' from {scope.EntityPath}/events/exclude, or stop reading it here.";
+
+    private static string ExcludedReferencedFix(AfterHookScope scope, string field) =>
+        $"Remove '{field}' from {scope.EntityPath}/events/exclude, or reference a template that does not read '{field}'.";
 
     private static IReadOnlyList<string> Refusals(AlvoTemplate template, EntitySchema entity) =>
         [.. template.Placeholders.Select(placeholder => Refusal(placeholder, entity)).OfType<string>()];

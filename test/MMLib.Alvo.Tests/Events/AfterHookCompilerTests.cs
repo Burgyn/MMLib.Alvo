@@ -138,11 +138,43 @@ public class AfterHookCompilerTests
         => CompileErrors(At("afterCreate", Email(to: "{{old.owner_email}}")))
             .ShouldHaveSingleItem().Path.ShouldBe("/entities/deals/hooks/afterCreate/0/action/to");
 
+    /// <summary>
+    /// A named template is shared, and only the referencing hook's point makes it unanswerable — so the refusal is the
+    /// hook's, at its own <c>action/template</c> pointer, once per placeholder across subject and body.
+    /// </summary>
     [Fact]
-    public void A_referenced_template_reading_the_post_image_of_a_delete_is_refused_on_the_templates_pointers()
-        => CompileErrors(At("afterDelete", Email()))
-            .Select(refusal => refusal.Path)
-            .ShouldBe(["/templates/deal-won/subject", "/templates/deal-won/body"], ignoreOrder: true);
+    public void A_referenced_template_reading_the_post_image_of_a_delete_is_refused_at_the_hooks_pointer()
+    {
+        var refusal = CompileErrors(At("afterDelete", Email())).ShouldHaveSingleItem();
+
+        refusal.Path.ShouldBe("/entities/deals/hooks/afterDelete/0/action/template");
+        refusal.Message.ShouldContain("'deal-won'");
+        refusal.Message.ShouldContain("'afterDelete'");
+        refusal.Message.ShouldContain("/entities/deals/hooks/afterDelete/0");
+        refusal.Message.ShouldContain("{{new.title}}");
+        refusal.FixSuggestion.ShouldNotBeNull().ShouldContain("reference a template that reads '{{old.title}}'");
+    }
+
+    [Fact]
+    public void A_template_shared_by_an_after_create_and_an_after_delete_hook_blames_only_the_hook_it_cannot_serve()
+    {
+        var hooks = new EntityHooks
+        {
+            AfterCreate = [new AfterHook { Action = Email() }],
+            AfterDelete = [new AfterHook { Action = Email() }],
+        };
+
+        CompileErrors(hooks).ShouldHaveSingleItem().Path.ShouldBe("/entities/deals/hooks/afterDelete/0/action/template");
+    }
+
+    [Fact]
+    public void A_referenced_template_with_two_missing_image_placeholders_is_refused_once_for_each()
+        => CompileErrors(At("afterCreate", Email()), body: "{{old.title}} was {{old.stage}}", subject: "Was {{old.title}}")
+            .Select(refusal => (refusal.Path, Named: refusal.Message.Contains("{{old.title}}", StringComparison.Ordinal)))
+            .ShouldBe([
+                ("/entities/deals/hooks/afterCreate/0/action/template", true),
+                ("/entities/deals/hooks/afterCreate/0/action/template", false),
+            ]);
 
     [Fact]
     public void Every_placeholder_reading_a_missing_image_is_refused_on_its_own()

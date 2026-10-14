@@ -64,16 +64,38 @@ internal static class AfterImagePhase
     internal static IReadOnlyList<DescriptorValidationError> Refusals(
         AlvoTemplate template, AfterImages images, string point, string path) =>
         [
-            .. template.Placeholders
-                .Select(TemplatePlaceholder.RowImageRead)
-                .OfType<(CelRecordState State, string Field)>()
-                .Where(read => !images.Carries(read.State))
-                .Distinct()
-                .Select(read => Error(
-                    path,
-                    MissingPlaceholderImage(read.State, read.Field, point),
-                    PlaceholderInstead(read.Field, read.State, images, point))),
+            .. MissingImagePlaceholders(template, images).Select(read => Error(
+                path,
+                MissingPlaceholderImage(read.State, read.Field, point),
+                PlaceholderInstead(read.Field, read.State, images, point))),
         ];
+
+    /// <summary>
+    /// The refusals for every placeholder in a named message template, as one hook references it, that reads an image
+    /// <paramref name="images"/> lacks — reported at the referencing hook's own pointer, because the template is
+    /// shared and only this hook's point makes it unanswerable.
+    /// </summary>
+    /// <param name="template">The template's subject and body, parsed together.</param>
+    /// <param name="images">The images the event behind <paramref name="point"/> carries.</param>
+    /// <param name="point">The referencing hook's point, quoted in each refusal.</param>
+    /// <param name="reference">The template's name and the hook that references it.</param>
+    /// <returns>One refusal per distinct offending placeholder, in source order.</returns>
+    internal static IReadOnlyList<DescriptorValidationError> Refusals(
+        AlvoTemplate template, AfterImages images, string point, TemplateReference reference) =>
+        [
+            .. MissingImagePlaceholders(template, images).Select(read => Error(
+                reference.Pointer,
+                MissingReferencedImage(read.State, read.Field, point, reference),
+                ReferencedInstead(read.Field, read.State, images, point, reference))),
+        ];
+
+    private static IEnumerable<(CelRecordState State, string Field)> MissingImagePlaceholders(
+        AlvoTemplate template, AfterImages images) =>
+        template.Placeholders
+            .Select(TemplatePlaceholder.RowImageRead)
+            .OfType<(CelRecordState State, string Field)>()
+            .Where(read => !images.Carries(read.State))
+            .Distinct();
 
     private static IEnumerable<DescriptorValidationError> MissingImageReads(
         CelNode root, AfterImages images, string point, string path) =>
@@ -101,6 +123,12 @@ internal static class AfterImagePhase
         $"This template reads '{Placeholder(state, field)}', which its event cannot answer: the event behind "
         + $"'{point}' carries no row from {Side(state)} the write, so the placeholder renders empty on every delivery.";
 
+    private static string MissingReferencedImage(
+        CelRecordState state, string field, string point, TemplateReference reference) =>
+        $"Template '{reference.Name}', which the '{point}' hook at {reference.HookPath} references, reads "
+        + $"'{Placeholder(state, field)}', which that hook's event cannot answer: the event behind '{point}' carries no "
+        + $"row from {Side(state)} the write, so the placeholder renders empty on every delivery from this hook.";
+
     private static string NoComparison(string field, AfterImages images, string point) =>
         $"This '{point}' condition calls 'changed({field})' (a 'changed(<field>)' call), which compares the row "
         + $"before the write with the row after it. The event behind '{point}' carries {Carried(images)}, so every "
@@ -117,6 +145,14 @@ internal static class AfterImagePhase
             ? $"Use '{Placeholder(Other(missing), field)}', the row from {Side(Other(missing))} the write, which the "
                 + $"event behind '{point}' carries."
             : $"Remove the placeholder: the event behind '{point}' carries no row to render it from.";
+
+    private static string ReferencedInstead(
+        string field, CelRecordState missing, AfterImages images, string point, TemplateReference reference) =>
+        images.Carries(Other(missing))
+            ? $"In template '{reference.Name}' use '{Placeholder(Other(missing), field)}', the row from "
+                + $"{Side(Other(missing))} the write, which the event behind '{point}' carries — or reference a template "
+                + $"that reads '{Placeholder(Other(missing), field)}' instead."
+            : $"Remove the placeholder from template '{reference.Name}', or reference a template that does not read it.";
 
     private static string CompareInstead(AfterImages images, string point) =>
         $"Compare the image '{point}' carries — {CarriedReads(images)} — or move the hook to 'afterUpdate', where "
@@ -163,4 +199,13 @@ internal static class AfterImagePhase
 
     private static DescriptorValidationError Error(string path, string message, string fix) =>
         new(path, message, fix, DescriptorValidationSeverity.Error);
+}
+
+/// <summary>A named message template as one after-hook references it.</summary>
+/// <param name="Name">The template's name under <c>templates</c>.</param>
+/// <param name="HookPath">The referencing hook's JSON pointer, such as <c>/entities/deals/hooks/afterDelete/0</c>.</param>
+internal readonly record struct TemplateReference(string Name, string HookPath)
+{
+    /// <summary>The hook's <c>action/template</c> slot, where a refusal only this hook causes is reported.</summary>
+    internal string Pointer => $"{HookPath}/action/template";
 }

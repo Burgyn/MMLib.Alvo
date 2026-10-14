@@ -126,17 +126,57 @@ public class EventImageExclusionTests
                 """{ "action": { "type": "webhook", "endpoint": "crm", "payload": "[\"{{new.title}}\", \"{{old.title}}\"]" } }"""))
             .IsValid.ShouldBeTrue();
 
-    private static string NotesWithHook(string hook, string exclude = """["salary"]""") => $$"""
+    [Fact]
+    public void A_has_test_on_an_excluded_field_is_refused()
+    {
+        var refusal = _validator.Validate(NotesWithHook("""{ "condition": "has(new.salary)", "action": { "type": "webhook", "endpoint": "crm" } }"""))
+            .Errors.ShouldHaveSingleItem();
+
+        refusal.Path.ShouldBe("/entities/notes/hooks/afterUpdate/0/condition");
+        refusal.Message.ShouldContain("events.exclude");
+    }
+
+    [Fact]
+    public void A_bare_and_a_new_read_of_one_excluded_field_are_one_refusal_for_that_field()
+        => _validator.Validate(NotesWithHook("""{ "condition": "salary > 1 && new.salary < 5", "action": { "type": "webhook", "endpoint": "crm" } }"""))
+            .Errors.ShouldHaveSingleItem().Message.ShouldContain("'salary'");
+
+    [Fact]
+    public void A_template_refusal_does_not_point_at_changed()
+        => _validator.Validate(NotesWithHook(
+                """{ "action": { "type": "webhook", "endpoint": "crm", "payload": "[\"{{new.salary}}\"]" } }"""))
+            .Errors.ShouldHaveSingleItem().FixSuggestion.ShouldNotBeNull().ShouldNotContain("changed(");
+
+    [Fact]
+    public void Excluded_fields_in_a_referenced_templates_subject_and_body_are_refused_at_the_hook()
+    {
+        var refusals = _validator.Validate(NotesWithHook(
+                """{ "action": { "type": "email", "template": "note-changed", "to": "ops@example.test" } }""",
+                exclude: """["salary", "bonus"]""",
+                subject: "Salary {{new.salary}}",
+                body: "Bonus {{old.bonus}}, salary {{old.salary}}"))
+            .Errors;
+
+        refusals.Count.ShouldBe(2);
+        refusals.ShouldAllBe(refusal => refusal.Path == "/entities/notes/hooks/afterUpdate/0/action/template");
+        refusals[0].Message.ShouldContain("'salary'");
+        refusals[0].Message.ShouldContain("'note-changed'");
+        refusals[1].Message.ShouldContain("'bonus'");
+        refusals[1].FixSuggestion.ShouldNotBeNull().ShouldContain("reference a template that does not read 'bonus'");
+    }
+
+    private static string NotesWithHook(
+        string hook, string exclude = """["salary"]""", string subject = "Changed", string body = "A note changed.") => $$$"""
         {
           "apiVersion": "alvo.dev/v1",
           "name": "exclusions",
           "webhooks": { "endpoints": { "crm": { "url": "https://crm.example.test/hook", "secretRef": "crm-secret" } } },
-          "templates": { "note-changed": { "subject": "Changed", "body": "A note changed." } },
+          "templates": { "note-changed": { "subject": "{{{subject}}}", "body": "{{{body}}}" } },
           "entities": {
             "notes": {
               "fields": { "title": { "type": "string" }, "salary": { "type": "integer" }, "bonus": { "type": "integer" } },
-              "events": { "exclude": {{exclude}} },
-              "hooks": { "afterUpdate": [ {{hook}} ] }
+              "events": { "exclude": {{{exclude}}} },
+              "hooks": { "afterUpdate": [ {{{hook}}} ] }
             }
           }
         }
