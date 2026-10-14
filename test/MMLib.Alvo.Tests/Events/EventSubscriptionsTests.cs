@@ -363,21 +363,20 @@ public sealed class EventSubscriptionsTests : IDisposable
 
     /// <summary>
     /// A condition's <c>@user.roles</c> are the roles the envelope's <c>authclaims</c> records — the caller's, as at
-    /// the event, never the dispatcher's. An empty role list is a readable answer, not an absent one.
+    /// the event, never the dispatcher's.
     /// </summary>
     /// <param name="claims">The envelope's <c>authclaims</c>.</param>
     /// <param name="selected">Whether <c>!('admin' in @user.roles)</c> fires.</param>
     [Theory]
     [InlineData("""{"roles":["admin","authenticated"]}""", false)]
     [InlineData("""{"roles":["authenticated"]}""", true)]
-    [InlineData("""{"roles":[]}""", true)]
     public void A_conditions_roles_are_the_ones_the_caller_held_at_the_event(string claims, bool selected)
         => Matching(CatalogConditionedOnAdmins, Event("entity.deals.updated", record: Record(), oldRecord: Record(), authClaims: claims))
             .Count.ShouldBe(selected ? 1 : 0);
 
     /// <summary>
-    /// An envelope without readable <c>authclaims</c> — absent on a row written before HX-01, or malformed — selects
-    /// no hook that reads <c>@user.roles</c>.
+    /// An envelope without readable <c>authclaims</c> — absent on a row written before HX-01, malformed, or naming no
+    /// role at all — selects no hook that reads <c>@user.roles</c>.
     /// </summary>
     /// <param name="claims">The envelope's <c>authclaims</c>.</param>
     [Theory]
@@ -387,6 +386,7 @@ public sealed class EventSubscriptionsTests : IDisposable
     [InlineData("""["admin"]""")]
     [InlineData("""{"roles":"admin"}""")]
     [InlineData("""{"roles":[1]}""")]
+    [InlineData("""{"roles":[]}""")]
     public void An_envelope_without_readable_claims_selects_no_hook_that_reads_roles(string? claims)
     {
         Matching(CatalogConditionedOnAdmins, Event("entity.deals.updated", record: Record(), oldRecord: Record(), authClaims: claims))

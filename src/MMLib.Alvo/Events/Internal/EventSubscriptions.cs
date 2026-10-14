@@ -87,35 +87,38 @@ internal static class EventSubscriptions
     /// <remarks>
     /// What the envelope does not record is left absent — the all-zero id, no tenant, only <see cref="Role.Anon"/> —
     /// and never borrowed from the dispatcher's own <see cref="AlvoContext.System"/> identity. <see cref="Selects"/>
-    /// is what keeps a condition reading an absent value from being decided against it.
+    /// is what keeps a condition reading an absent value from being decided against it. <c>authclaims</c> is parsed
+    /// once here, and whether it named any role travels with the context.
     /// </remarks>
-    private static AlvoContext CallerOf(AlvoEvent @event)
+    private static EventCaller CallerOf(AlvoEvent @event)
     {
         var actor = UserId.TryParse(@event.AuthId, CultureInfo.InvariantCulture, out var user) ? user : default;
         TenantId? tenant = TenantId.TryParse(@event.TenantId, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
+        var names = AlvoEventProvenance.RolesIn(@event.AuthClaims);
+        var roles = names is { Count: > 0 } ? RoleCatalog.Create(names).Resolve(names) : null;
 
-        return new AlvoContext { User = actor, Roles = RolesOf(@event), Tenant = tenant };
+        return new EventCaller(new AlvoContext { User = actor, Roles = roles ?? _noRoles, Tenant = tenant }, roles is not null);
     }
 
-    /// <summary>
-    /// The roles <see cref="AlvoEvent.AuthClaims"/> records, or only <see cref="Role.Anon"/> when it records none —
-    /// a caller always holds one, and a hook that reads roles off an envelope without readable claims is never
-    /// selected (<see cref="UnreadProvenance"/>).
-    /// </summary>
-    private static IReadOnlySet<Role> RolesOf(AlvoEvent @event) =>
-        AlvoEventProvenance.RolesIn(@event.AuthClaims) is { Count: > 0 } names
-            ? RoleCatalog.Create(names).Resolve(names)
-            : _noRoles;
+    /// <summary>One event's caller, and whether its <c>authclaims</c> named any role — parsed once per event.</summary>
+    /// <param name="Context">The caller conditions are evaluated against.</param>
+    /// <param name="CarriesRoles">Whether <see cref="AlvoContext.Roles"/> came from the envelope rather than standing in for none.</param>
+    private readonly record struct EventCaller(AlvoContext Context, bool CarriesRoles);
 
     private static readonly IReadOnlySet<Role> _noRoles = new HashSet<Role> { Role.Anon };
 
     /// <summary>
-    /// The reference <paramref name="hook"/>'s condition reads and <paramref name="event"/> does not carry, or
+    /// The reference <paramref name="hook"/>'s condition reads and the event does not carry, or
     /// <see langword="null"/> when it carries everything the condition reads.
     /// </summary>
-    private static string? UnreadProvenance(CompiledAfterHook hook, AlvoEvent @event, AlvoContext caller) =>
-        hook.Required.TenantIdMissingFrom(caller) ? TenantReference
-        : hook.ReadsRoles && AlvoEventProvenance.RolesIn(@event.AuthClaims) is null ? RolesReference
+    /// <remarks>
+    /// An <c>authclaims</c> naming no role at all is unreadable as well as an absent or malformed one: Alvo never
+    /// writes an empty role list, and the <see cref="Role.Anon"/> the context holds in its place is a stand-in a
+    /// condition must not be decided against.
+    /// </remarks>
+    private static string? UnreadProvenance(CompiledAfterHook hook, EventCaller caller) =>
+        hook.Required.TenantIdMissingFrom(caller.Context) ? TenantReference
+        : hook.ReadsRoles && !caller.CarriesRoles ? RolesReference
         : null;
 
     private const string TenantReference = "@tenant.id";
@@ -143,7 +146,7 @@ internal static class EventSubscriptions
         CompiledAfterHook hook,
         AlvoEvent @event,
         IPredicateEvaluator evaluator,
-        AlvoContext context,
+        EventCaller caller,
         ILogger logger)
     {
         if (hook.Condition is null)
@@ -151,7 +154,7 @@ internal static class EventSubscriptions
             return true;
         }
 
-        if (!CarriesWhatItReads(hook, @event, context, logger))
+        if (!CarriesWhatItReads(hook, @event, caller, logger))
         {
             return false;
         }
@@ -159,7 +162,7 @@ internal static class EventSubscriptions
         try
         {
             return evaluator.Evaluate(
-                hook.Condition, @event.Data.Record ?? AlvoRecord.Empty, @event.Data.OldRecord, context);
+                hook.Condition, @event.Data.Record ?? AlvoRecord.Empty, @event.Data.OldRecord, caller.Context);
         }
         catch (CelFunctionException failure)
         {
@@ -178,15 +181,15 @@ internal static class EventSubscriptions
     /// Whether <paramref name="event"/> carries every caller value <paramref name="hook"/>'s condition reads; when it
     /// does not, the hook is not selected and the missing reference is recorded at Debug.
     /// </summary>
-    private static bool CarriesWhatItReads(CompiledAfterHook hook, AlvoEvent @event, AlvoContext context, ILogger logger)
+    private static bool CarriesWhatItReads(CompiledAfterHook hook, AlvoEvent @event, EventCaller caller, ILogger logger)
     {
-        if (hook.Required.UserIdMissingFrom(context))
+        if (hook.Required.UserIdMissingFrom(caller.Context))
         {
             EventLog.ConditionHasNoActorToRead(logger, hook.Path, @event.Id);
             return false;
         }
 
-        if (UnreadProvenance(hook, @event, context) is { } reference)
+        if (UnreadProvenance(hook, caller) is { } reference)
         {
             EventLog.ConditionHasNoProvenanceToRead(logger, hook.Path, reference, @event.Id);
             return false;

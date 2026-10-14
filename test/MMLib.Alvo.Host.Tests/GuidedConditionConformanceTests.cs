@@ -99,7 +99,7 @@ public sealed class GuidedConditionConformanceTests
     [InlineData("afterDelete", "new.text_opt == 'x'", "'new.<field>'")]
     [InlineData("afterCreate", "changed(text_opt)", "'changed(<field>)'")]
     [InlineData("afterDelete", "changed(text_opt)", "'changed(<field>)'")]
-    public void What_the_table_withholds_before_the_commit_or_from_an_envelope_apply_refuses(string point, string condition, string refusal)
+    public void What_the_table_withholds_before_the_commit_apply_refuses(string point, string condition, string refusal)
     {
         ErrorsAt(point, condition).ShouldContain(error => error.Message.Contains(refusal, StringComparison.Ordinal), $"{condition} at {point}");
         ConditionText.Recognize(condition, point, Scope(point)).ShouldBeNull("the form never offers it");

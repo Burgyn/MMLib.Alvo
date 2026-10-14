@@ -120,7 +120,10 @@ internal enum OperandKind
 /// <param name="Kinds">The field kinds it applies to; empty for a role row.</param>
 /// <param name="NullableOnly">Whether it is offered only on a field that may be empty.</param>
 /// <param name="UpdateOnly">Whether it is offered only where a write has both images.</param>
-/// <param name="BeforeOnly">Whether it is offered only before the commit (an event envelope carries no roles).</param>
+/// <param name="BeforeOnly">
+/// Whether it is offered only before the commit. An event envelope carries the writer's roles since #153 and apply
+/// accepts a role condition after the commit; the form keeps role rows before the commit only.
+/// </param>
 /// <param name="WhenEmpty">What it evaluates to when the field is empty — the hint the form shows.</param>
 /// <param name="ReadsImage">
 /// Whether its CEL names an image (<c>new.</c> or <c>old.</c>); <c>changed</c> and the role rows do not, so the form asks for
