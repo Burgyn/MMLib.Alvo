@@ -130,7 +130,7 @@ internal static partial class ConditionText
                 : null;
         }
 
-        if (scope.Field(match.Groups["field"].Value) is not { } field || !ConditionTable.Allows(spec, point, field.Kind, field.Nullable))
+        if (scope.Field(match.Groups["field"].Value) is not { } field || !ConditionTable.Allows(spec, point, field))
         {
             return null;
         }

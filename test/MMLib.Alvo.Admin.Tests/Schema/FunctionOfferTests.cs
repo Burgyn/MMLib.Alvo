@@ -89,6 +89,18 @@ public class FunctionOfferTests
         FunctionOffer.FirstArgument(normalize, point, new FieldSchema { Name = "code", Type = type }).ShouldBe(expected);
     }
 
+    /// <summary>An after-point's <c>new.</c> is the event's image, which leaves an excluded field out (HX-01); a before-point reads the row.</summary>
+    [Theory]
+    [InlineData("afterCreate", null)]
+    [InlineData("afterUpdate", null)]
+    [InlineData("beforeCreate", "new.code")]
+    public void A_field_left_out_of_event_images_is_never_prefilled_after_the_commit(string point, string? expected)
+    {
+        var normalize = Offered("normalizeFrameNumber");
+
+        FunctionOffer.FirstArgument(normalize, point, new FieldSchema { Name = "code", Type = FieldType.String }, ["code"]).ShouldBe(expected);
+    }
+
     [Fact]
     public void No_field_chosen_gives_no_first_argument()
     {

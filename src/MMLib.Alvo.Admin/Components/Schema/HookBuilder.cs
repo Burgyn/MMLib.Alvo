@@ -112,6 +112,20 @@ internal sealed partial class HookBuilder
     /// <summary>A condition that is valid at this point, for the placeholder.</summary>
     public string Example => ConditionTable.Example(Point);
 
+    /// <summary>A payload that renders at this point, for the placeholder: it reads only the image the point's event carries.</summary>
+    /// <remarks>
+    /// <see cref="Images"/>'s reason, for templates: apply refuses <c>{{old.…}}</c> at <c>afterCreate</c> and
+    /// <c>{{new.…}}</c> at <c>afterDelete</c>, because the placeholder would render empty on every delivery.
+    /// </remarks>
+    public string PayloadExample => $"[\"{Placeholder("order_number")}\", {Placeholder("total")}]";
+
+    /// <summary>A recipient placeholder that renders at this point.</summary>
+    public string RecipientExample => Placeholder("contact_email");
+
+    /// <summary>A <c>{{…}}</c> placeholder reading the field from the image this point's event carries.</summary>
+    /// <param name="field">The field.</param>
+    public string Placeholder(string field) => "{{" + ConditionTable.PlaceholderImage(Point) + "." + field + "}}";
+
     /// <summary>Whether anything has been typed — what closing a new hook's editor would lose.</summary>
     /// <remarks>The point and the kind are not counted, for the reason <c>HooksTab.Dirty</c> gives.</remarks>
     public bool HasInput => Condition.Length > 0 || RejectMessage.Length > 0 || Endpoint.Length > 0 || Payload.Length > 0

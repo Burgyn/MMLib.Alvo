@@ -84,7 +84,8 @@ internal static class FunctionOffer
 
     /// <summary>
     /// <c>new.{field}</c> when a mutate row's field can be the function's first argument: the point has a <c>new.</c>
-    /// image and some overload's first parameter takes the field's CEL type (an Int also fills a Decimal, C1 F7).
+    /// image that carries the field — after the commit, not one the entity leaves out of its event images — and some
+    /// overload's first parameter takes the field's CEL type (an Int also fills a Decimal, C1 F7).
     /// </summary>
     /// <remarks>
     /// Any overload decides, not only the one the template spells (Ruling W-D, a deviation from spec §9.2): the template
@@ -100,9 +101,13 @@ internal static class FunctionOffer
     /// <param name="function">The function.</param>
     /// <param name="point">The hook's point.</param>
     /// <param name="field">The row's field, or <see langword="null"/> when none is chosen.</param>
+    /// <param name="excludedFromEvents">The entity's <c>events.exclude</c>; none when omitted.</param>
     /// <returns>The argument, or <see langword="null"/>.</returns>
-    public static string? FirstArgument(OfferedFunction function, string point, FieldSchema? field) =>
-        field is not null && ConditionTable.HasNew(point) && function.FirstParameterTypes.Any(type => Takes(type, CelFieldType.Of(field)))
+    public static string? FirstArgument(
+        OfferedFunction function, string point, FieldSchema? field, IReadOnlyCollection<string>? excludedFromEvents = null) =>
+        field is not null && ConditionTable.HasNew(point)
+            && (HookBuilder.IsBefore(point) || excludedFromEvents?.Contains(field.Name, StringComparer.Ordinal) is not true)
+            && function.FirstParameterTypes.Any(type => Takes(type, CelFieldType.Of(field)))
             ? $"new.{field.Name}"
             : null;
 

@@ -104,6 +104,20 @@ public class HookBuilderTests
         hook.Images.ShouldBe(images);
     }
 
+    /// <summary>Apply refuses <c>{{old.…}}</c> at afterCreate and <c>{{new.…}}</c> at afterDelete (HX-01), so the examples never write one.</summary>
+    [Theory]
+    [InlineData("afterCreate", "[\"{{new.order_number}}\", {{new.total}}]", "{{new.contact_email}}")]
+    [InlineData("afterUpdate", "[\"{{new.order_number}}\", {{new.total}}]", "{{new.contact_email}}")]
+    [InlineData("afterDelete", "[\"{{old.order_number}}\", {{old.total}}]", "{{old.contact_email}}")]
+    public void The_placeholder_examples_read_only_an_image_the_point_s_event_carries(string point, string payload, string recipient)
+    {
+        var hook = new HookBuilder();
+        hook.Choose(point);
+
+        hook.PayloadExample.ShouldBe(payload);
+        hook.RecipientExample.ShouldBe(recipient);
+    }
+
     [Fact]
     public void Clearing_keeps_the_point_and_the_kind_for_the_next_hook()
     {

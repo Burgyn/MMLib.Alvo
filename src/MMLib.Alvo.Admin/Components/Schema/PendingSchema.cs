@@ -67,7 +67,14 @@ internal static class PendingSchema
         Audit = Flag(declared, "audit"),
         SoftDelete = Flag(declared, "softDelete"),
         Fields = Fields(declared),
+        EventImageExclusions = Exclusions(declared),
     };
+
+    /// <summary>The entity's <c>events.exclude</c>: the fields its event images leave out, so an after-hook cannot read them.</summary>
+    private static IReadOnlyList<string> Exclusions(JsonElement entity)
+        => entity.TryGetProperty("events", out var events) && events.ValueKind == JsonValueKind.Object
+            ? Values(events, "exclude") ?? []
+            : [];
 
     /// <summary>
     /// The entities a working document declares with <c>storage: dynamic</c> — which this build never creates, so the
@@ -235,8 +242,10 @@ internal static class PendingSchema
                     : OnDelete.Restrict)
             : null;
 
-    private static IReadOnlyList<string>? Values(JsonElement field)
-        => field.TryGetProperty("values", out var values) && values.ValueKind == JsonValueKind.Array
+    private static IReadOnlyList<string>? Values(JsonElement field) => Values(field, "values");
+
+    private static IReadOnlyList<string>? Values(JsonElement owner, string name)
+        => owner.TryGetProperty(name, out var values) && values.ValueKind == JsonValueKind.Array
             ? [.. values.EnumerateArray()
                 .Where(value => value.ValueKind == JsonValueKind.String)
                 .Select(value => value.GetString()!)]

@@ -168,11 +168,11 @@
     private bool OffersWriter => ConditionTable.ForWriter(Point).Count > 0 && _scope.Roles.Count > 0;
 
     private IEnumerable<ConditionField> OfferedFields
-        => _scope.Fields.Where(candidate => ConditionTable.For(Point, candidate.Kind, candidate.Nullable).Count > 0);
+        => _scope.Fields.Where(candidate => ConditionTable.For(Point, candidate).Count > 0);
 
     private IReadOnlyList<OperatorSpec> OperatorsFor(Draft row) => row.Field == ConditionTable.Writer
         ? ConditionTable.ForWriter(Point)
-        : _scope.Field(row.Field) is { } field ? ConditionTable.For(Point, field.Kind, field.Nullable) : [];
+        : _scope.Field(row.Field) is { } field ? ConditionTable.For(Point, field) : [];
 
     /// <summary>The images this point has, as the chips name them — from the table, never a fixed pair.</summary>
     private string[] ImageWords => [.. ConditionTable.ImagesAt(Point).Select(WordOf)];
