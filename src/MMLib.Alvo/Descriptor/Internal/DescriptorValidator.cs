@@ -591,7 +591,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         : fields.TryGetProperty(name, out _) ? null
         : ExcludesNothing(path, entity, name);
 
-    /// <summary>Whether <paramref name="name"/> keys the event: <c>id</c>, or a column this entity's traits manage.</summary>
+    /// <summary>Whether <paramref name="name"/> is a column the event relies on: <c>id</c>, or a column this entity's traits manage.</summary>
     /// <remarks>
     /// The entity's <em>own</em> managed set (its traits), never the union: an entity without <c>audit</c> may declare an
     /// ordinary <c>created_at</c> field (see <see cref="ManagedColumnsOf"/>), and excluding that field is legitimate.
@@ -601,8 +601,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
 
     private static DescriptorValidationError KeysTheEvent(string path, string name) => new(
         path,
-        $"'{name}' is a framework-managed column that keys the event — its subject, partition key or audit trail — so it "
-        + "cannot be left out of the event's images.",
+        $"'{name}' is a framework-managed column the event relies on, so it cannot be left out of the event's images.",
         $"Remove '{name}' from events.exclude.",
         DescriptorValidationSeverity.Error);
 

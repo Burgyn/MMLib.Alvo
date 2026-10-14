@@ -34,6 +34,21 @@ public class EventImageExclusionTests
         refusal.FixSuggestion.ShouldNotBeNullOrEmpty();
     }
 
+    [Theory]
+    [InlineData("\"tenancy\": \"scoped\",", "tenant_id")]
+    [InlineData("\"audit\": true,", "created_at")]
+    public void A_column_the_entitys_traits_manage_is_refused_as_framework_managed(string trait, string column)
+    {
+        var refusal = _validator.Validate(Notes($"""["{column}"]""").Replace(
+                "\"notes\": {", $"\"notes\": {{ {trait}", StringComparison.Ordinal)
+            .Replace("\"entities\":", "\"tenancy\": { \"enabled\": true },\n  \"entities\":", StringComparison.Ordinal))
+            .Errors.ShouldHaveSingleItem();
+
+        refusal.Path.ShouldBe("/entities/notes/events/exclude/0");
+        refusal.Message.ShouldContain($"'{column}' is a framework-managed column");
+        refusal.FixSuggestion.ShouldBe($"Remove '{column}' from events.exclude.");
+    }
+
     [Fact]
     public void An_ordinary_field_named_like_an_audit_column_can_be_excluded_on_an_entity_without_audit()
         => _validator.Validate(Notes("""["created_at"]""").Replace(
