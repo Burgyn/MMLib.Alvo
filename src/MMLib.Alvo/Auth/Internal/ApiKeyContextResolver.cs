@@ -132,6 +132,7 @@ internal sealed class ApiKeyContextResolver(
                 User = record.User,
                 Roles = roles,
                 Tenant = tenant,
+                ActorKind = AlvoActorKind.ApiKey,
             },
             Scopes = record.Scopes,
             KeyId = record.KeyId,
