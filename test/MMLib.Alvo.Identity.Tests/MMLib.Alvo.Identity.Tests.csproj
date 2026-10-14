@@ -24,4 +24,8 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/InternalMemberReferences.cs" Link="_shared/InternalMemberReferences.cs" />
+  </ItemGroup>
+
 </Project>

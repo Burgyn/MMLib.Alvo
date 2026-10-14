@@ -26,4 +26,8 @@ public sealed class InternalGrantArchitectureTests
         InternalMemberReferences.SecurityCoreOnly.ShouldContain(member);
         _referenced.ShouldNotContain(member);
     }
+
+    [Fact]
+    public void It_never_sets_the_ambient_flow()
+        => InternalMemberReferences.FlowSetters.ShouldAllBe(member => !_referenced.Contains(member));
 }
