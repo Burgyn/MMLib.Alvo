@@ -119,6 +119,15 @@ namespace MMLib.Alvo.Events
         public System.Collections.Generic.IList<string> WebhookAllowedNetworks { get; }
     }
 }
+namespace MMLib.Alvo.Extensions
+{
+    public sealed class AlvoExtensionOptions
+    {
+        public const string SectionName = "Alvo:Extensions";
+        public AlvoExtensionOptions() { }
+        public int MaxDepth { get; set; }
+    }
+}
 namespace MMLib.Alvo.Management
 {
     public sealed class AlvoManagementOptions

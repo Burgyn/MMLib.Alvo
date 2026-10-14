@@ -11,6 +11,7 @@ using MMLib.Alvo.Auth;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Internal;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Migrations;
@@ -71,6 +72,7 @@ public static class AlvoServiceCollectionExtensions
         services.AddAlvoExpressions();
         services.AddAlvoRules();
         services.AddAlvoManagement();
+        services.AddAlvoExtensions();
         services.AddAlvoEvents();
         services.AddAlvoApi();
 
