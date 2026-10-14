@@ -617,6 +617,13 @@ namespace MMLib.Alvo.Testing.Events
         public string MeterName { get; init; }
         public MMLib.Alvo.Schema.SchemaModel Schema { get; init; }
     }
+    public abstract class AlvoEventTenancyTests
+    {
+        protected AlvoEventTenancyTests() { }
+        protected static MMLib.Alvo.Testing.Events.AlvoEventProject Project { get; }
+        public System.Threading.Tasks.Task A_cross_tenant_condition_never_fires_and_its_mirror_fires_for_each_tenant() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Events.IAlvoEventWorld> WorldAsync(MMLib.Alvo.Testing.Events.AlvoEventProject project);
+    }
     public sealed class AlvoOutboxTally : System.IEquatable<MMLib.Alvo.Testing.Events.AlvoOutboxTally>
     {
         public AlvoOutboxTally(int Pending, int Retired) { }
@@ -630,6 +637,7 @@ namespace MMLib.Alvo.Testing.Events
     public interface IAlvoEventWorld : System.IAsyncDisposable
     {
         System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Testing.Events.AlvoEventLogEntry> ActionLogEntries { get; }
+        MMLib.Alvo.Data.IAlvoData Data { get; }
         System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Testing.Events.AlvoEventDelivery> Deliveries { get; }
         MMLib.Alvo.Testing.Events.IAlvoEventMeter Metrics { get; }
         System.Threading.Tasks.Task<System.Guid> CreateAsync(string status);

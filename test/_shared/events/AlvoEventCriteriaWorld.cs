@@ -67,6 +67,9 @@ internal sealed class AlvoEventCriteriaWorld : IAlvoEventWorld
     }
 
     /// <inheritdoc/>
+    public IAlvoData Data => _data;
+
+    /// <inheritdoc/>
     public IReadOnlyList<AlvoEventDelivery> Deliveries => _receiver.Deliveries;
 
     /// <inheritdoc/>
