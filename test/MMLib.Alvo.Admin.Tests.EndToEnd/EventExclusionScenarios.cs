@@ -50,6 +50,37 @@ public sealed class EventExclusionScenarios(AdminWorld world) : IClassFixture<Ad
         session.AssertConsoleClean();
     }
 
+    /// <summary>
+    /// A new field's tick survives the sheet's parent redrawing under it — another tab of the same operator staging an edit
+    /// redraws the entity screen, which sets the sheet's parameters again (Task 16 review, fix round 1).
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_new_fields_exclusion_survives_another_tab_staging_an_edit()
+    {
+        var cancel = TestContext.Current.CancellationToken;
+        await using var adding = await world.SignInAsync(cancel);
+        await adding.GoAsync("/schema/regions");
+        await adding.Page.GetByTestId("add-field").ClickAsync();
+        var sheet = adding.Dialog("field-sheet");
+        await sheet.GetByRole(AriaRole.Textbox, new() { Name = "Name", Exact = true }).FillAsync("notes");
+        await ToggleIn(adding).CheckAsync();
+
+        await using var other = await world.SignInAsync(cancel);
+        await other.GoAsync("/schema/regions");
+        await other.Page.GetByTestId("add-field").ClickAsync();
+        await other.Dialog("field-sheet").GetByRole(AriaRole.Textbox, new() { Name = "Name", Exact = true }).FillAsync("zone");
+        await other.Page.GetByTestId("field-save").ClickAsync();
+
+        await adding.Page.GetByTestId("field-row-zone").WaitForAsync(new() { State = WaitForSelectorState.Attached });
+        await adding.Page.GetByTestId("field-save").ClickAsync();
+        await adding.SnackbarAsync("Field notes added to the working copy");
+
+        await adding.Page.GetByTestId("edit-field-notes").ClickAsync();
+        (await ToggleIn(adding).IsCheckedAsync()).ShouldBeTrue("a redraw of the entity screen must not untick the new field's exclusion");
+        adding.AssertConsoleClean();
+        other.AssertConsoleClean();
+    }
+
     private static async Task ExcludeAsync(AdminSession session, string field)
     {
         await session.GoAsync("/schema/regions");

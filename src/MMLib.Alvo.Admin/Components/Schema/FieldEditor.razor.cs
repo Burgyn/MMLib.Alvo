@@ -242,7 +242,8 @@ public partial class FieldEditor
     protected override void OnParametersSet()
     {
         /* Prefilled only when the target changes: re-reading the parameters on every render would overwrite
-           what the operator is in the middle of typing with what the document still says. */
+           what the operator is in the middle of typing with what the document still says — a new field's
+           exclusion included, which is reset only on the edit-to-new transition. */
         var prefilledNow = false;
         if (IsEditing && _prefilled != Editing)
         {
@@ -253,7 +254,7 @@ public partial class FieldEditor
             ForgetNumbers();
             prefilledNow = true;
         }
-        else if (!IsEditing)
+        else if (!IsEditing && _prefilled is not null)
         {
             _prefilled = null;
             _excludedFromEvents = false;

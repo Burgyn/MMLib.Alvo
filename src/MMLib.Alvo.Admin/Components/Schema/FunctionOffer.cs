@@ -101,7 +101,11 @@ internal static class FunctionOffer
     /// <param name="function">The function.</param>
     /// <param name="point">The hook's point.</param>
     /// <param name="field">The row's field, or <see langword="null"/> when none is chosen.</param>
-    /// <param name="excludedFromEvents">The entity's <c>events.exclude</c>; none when omitted.</param>
+    /// <param name="excludedFromEvents">
+    /// The entity's <c>events.exclude</c>; none when omitted. Defensive: the only caller is the mutate row, and mutate is a
+    /// before-point kind, which reads the row rather than an event image — so today it never removes a prefill. It keeps
+    /// this method's after-point answer true to what apply accepts, should an after-point caller appear.
+    /// </param>
     /// <returns>The argument, or <see langword="null"/>.</returns>
     public static string? FirstArgument(
         OfferedFunction function, string point, FieldSchema? field, IReadOnlyCollection<string>? excludedFromEvents = null) =>

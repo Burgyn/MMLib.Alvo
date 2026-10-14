@@ -48,8 +48,10 @@
             @_fields.Under(TemplateDraft.SubjectField, () => _subjectBox!.FocusAsync())
         </ChildContent>
         <Hint>
-            One line. Placeholders such as <code class="a-mono">{{new.order_number}}</code> over <code class="a-mono">new</code>,
-            <code class="a-mono">old</code>, <code class="a-mono">event</code> and <code class="a-mono">@@user.id</code>.
+            One line. <code class="a-mono">{{…}}</code> placeholders over <code class="a-mono">new</code>,
+            <code class="a-mono">old</code>, <code class="a-mono">event</code> and <code class="a-mono">@@user.id</code> — the hook that
+            sends it decides which row images exist: <code class="a-mono">afterCreate</code> has only <code class="a-mono">new</code>,
+            <code class="a-mono">afterDelete</code> only <code class="a-mono">old</code>.
         </Hint>
     </Field>
 
