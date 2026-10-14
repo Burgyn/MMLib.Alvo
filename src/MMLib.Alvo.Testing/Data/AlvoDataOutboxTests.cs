@@ -429,6 +429,11 @@ public abstract class AlvoDataOutboxTests
     /// A write to a <c>scoped</c> entity reports the tenant it was made in, and a write to a <c>global</c> one
     /// reports none — a global row belongs to no tenant, whoever wrote it.
     /// </summary>
+    /// <remarks>
+    /// Both writes are made by the same tenant-bound caller, so the global half measures the entity's tenancy
+    /// rather than an absent tenant on the caller: an envelope that reported the caller's tenant on every write
+    /// would fail it.
+    /// </remarks>
     [Fact]
     public async Task A_scoped_write_reports_its_tenant_and_a_global_write_reports_none()
     {
@@ -439,7 +444,7 @@ public abstract class AlvoDataOutboxTests
             new Dictionary<string, object?> { ["title"] = "t", ["tenant_id"] = SuiteTenant.Value },
             TenantCaller,
             cancellationToken: Ct);
-        await CreateVehicleAsync(world, make: "vw");
+        await world.Data.CreateAsync(Vehicles, Payload("vw", vin: null), TenantCaller, cancellationToken: Ct);
 
         var events = await world.EventsAsync();
         events.Single(queued => queued.Type == $"entity.{TenantNotes}.created").TenantId
@@ -465,6 +470,7 @@ public abstract class AlvoDataOutboxTests
             Vehicles, IdOf(created), Patch(("internal_memo", "after")), Caller, cancellationToken: Ct);
 
         var updated = (await world.EventsAsync())[^1];
+        updated.Type.ShouldBe(Updated);
         updated.Data.Record!.Values.ShouldNotContainKey("internal_memo");
         updated.Data.OldRecord!.Values.ShouldNotContainKey("internal_memo");
         updated.Data.Changed.ShouldContain("internal_memo");
@@ -546,9 +552,11 @@ public abstract class AlvoDataOutboxTests
     private static AlvoContext TenantCaller => Caller with { Tenant = SuiteTenant };
 
     /// <summary>
-    /// One entity with everything a fact here needs: <c>audit</c> (so an event's <c>time</c> has a stamp to
-    /// equal), a <c>unique</c> field (so a write can be refused by the engine after policy has allowed it), a
-    /// <c>hidden</c> field (so the unmasked record is observable) and a rule no anonymous caller satisfies.
+    /// Two entities. <c>vehicles</c> is global and has everything most facts here need: <c>audit</c> (so an
+    /// event's <c>time</c> has a stamp to equal), a <c>unique</c> field (so a write can be refused by the engine
+    /// after policy has allowed it), a <c>hidden</c> field (so the unmasked record is observable), a field its
+    /// events exclude (<c>internal_memo</c>, so the trimmed images are observable) and a rule no anonymous caller
+    /// satisfies. <c>tenant_notes</c> is <c>scoped</c>, so an event has a tenant to report.
     /// </summary>
     private static AlvoDescriptor Descriptor => new()
     {
@@ -568,6 +576,7 @@ public abstract class AlvoDataOutboxTests
                     ["secret_note"] = new() { Type = DescField.String, Hidden = BoolOrCel.FromBoolean(true) },
                     ["internal_memo"] = new() { Type = DescField.String },
                 },
+                Events = new EntityEvents { Exclude = ["internal_memo"] },
                 Rules = new AccessRules
                 {
                     List = AuthenticatedOnly,
