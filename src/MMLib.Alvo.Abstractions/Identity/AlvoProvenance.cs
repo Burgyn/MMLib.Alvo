@@ -6,7 +6,7 @@
 /// </summary>
 /// <remarks>
 /// Carried explicitly on <see cref="AlvoContext.Provenance"/> and ambiently by the framework's own pumps; a port entry
-/// merges the two with <c>AlvoEventProvenance.Effective</c>, where depth is the larger of the two, so code can raise
+/// merges the two with <see cref="Events.AlvoEventProvenance.Effective(AlvoContext)"/>, where depth is the larger of the two, so code can raise
 /// the depth it reports and never lower it.
 /// </remarks>
 public sealed record AlvoProvenance

@@ -369,6 +369,12 @@ namespace MMLib.Alvo.Data
         public static MMLib.Alvo.Data.AlvoBatchResult Refused(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRowRefusal> refusals) { }
         public static MMLib.Alvo.Data.AlvoBatchResult Wrote(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord> rows, int affected) { }
     }
+    public sealed class AlvoChainDepthExceededException : System.Exception
+    {
+        public AlvoChainDepthExceededException() { }
+        public AlvoChainDepthExceededException(string message) { }
+        public AlvoChainDepthExceededException(string message, System.Exception innerException) { }
+    }
     public sealed class AlvoComparison : MMLib.Alvo.Data.AlvoFilter, System.IEquatable<MMLib.Alvo.Data.AlvoComparison>
     {
         public AlvoComparison(string Field, MMLib.Alvo.Data.AlvoFilterOperator Operator, object? Value) { }
@@ -1055,6 +1061,7 @@ namespace MMLib.Alvo.Events
         public static string? AuthIdOf(MMLib.Alvo.AlvoContext context) { }
         public static string AuthTypeOf(MMLib.Alvo.AlvoContext context) { }
         public static string CorrelationIdOf(System.Guid eventId) { }
+        public static MMLib.Alvo.AlvoProvenance Effective(MMLib.Alvo.AlvoContext context) { }
     }
     public sealed class AlvoMailMessage : System.IEquatable<MMLib.Alvo.Events.AlvoMailMessage>
     {

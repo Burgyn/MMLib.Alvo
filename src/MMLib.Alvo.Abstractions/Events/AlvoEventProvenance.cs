@@ -63,6 +63,32 @@ public static class AlvoEventProvenance
     public static string CorrelationIdOf(Guid eventId) =>
         Activity.Current?.TraceId.ToString() ?? eventId.ToString();
 
+    /// <summary>
+    /// The provenance an operation reports: <paramref name="context"/>'s own, merged with the ambient flow's.
+    /// </summary>
+    /// <param name="context">The caller.</param>
+    /// <returns>
+    /// Depth is the larger of the two, so code can raise the depth it reports and never lower it; correlation and
+    /// causation are the explicit ones when set and the ambient ones otherwise; the trace context travels as a pair from
+    /// whichever side names a <c>traceparent</c>.
+    /// </returns>
+    public static AlvoProvenance Effective(AlvoContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var stated = context.Provenance;
+        var ambient = AlvoFlow.Provenance ?? AlvoProvenance.None;
+        var trace = stated.TraceParent is not null ? stated : ambient;
+
+        return new AlvoProvenance
+        {
+            CorrelationId = stated.CorrelationId ?? ambient.CorrelationId,
+            CausationId = stated.CausationId ?? ambient.CausationId,
+            Depth = Math.Max(stated.Depth, ambient.Depth),
+            TraceParent = trace.TraceParent,
+            TraceState = trace.TraceState,
+        };
+    }
+
     /// <inheritdoc cref="AuthTypeOf"/>
     private static readonly UserId _anonymousUser = AlvoContext.Anonymous.User;
 
