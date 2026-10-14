@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+﻿using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Events;
 
@@ -10,7 +10,7 @@ namespace MMLib.Alvo.Events;
 /// Internal: two copies of this derivation are how a system-made change comes to be reported differently on one path
 /// than on the other, which is the reason <see cref="AlvoEventProvenance"/> exists at all.
 /// </remarks>
-internal sealed record AlvoEnvelopeStamp(
+internal sealed partial record AlvoEnvelopeStamp(
     string AuthType,
     string? AuthId,
     string? AuthClaims,
@@ -28,20 +28,39 @@ internal sealed record AlvoEnvelopeStamp(
     internal static AlvoEnvelopeStamp Of(AlvoContext context, Guid eventId, TenantId? tenant)
     {
         var provenance = AlvoEventProvenance.Effective(context);
-        var activity = Activity.Current is { IdFormat: ActivityIdFormat.W3C } current ? current : null;
+        var activity = AlvoEventProvenance.AmbientW3CActivity;
         var fromActivity = provenance.TraceParent is null && activity is not null;
+        var traceParent = fromActivity ? activity!.Id : provenance.TraceParent;
 
         return new AlvoEnvelopeStamp(
             AlvoEventProvenance.AuthTypeOf(context),
             AlvoEventProvenance.AuthIdOf(context),
             AlvoEventProvenance.AuthClaimsOf(context),
             tenant?.ToString(),
-            provenance.CorrelationId ?? AlvoEventProvenance.CorrelationIdOf(eventId),
+            provenance.CorrelationId ?? TraceIdOf(traceParent) ?? AlvoEventProvenance.CorrelationIdOf(eventId),
             provenance.CausationId,
             provenance.Depth,
-            fromActivity ? activity!.Id : provenance.TraceParent,
+            traceParent,
             fromActivity ? activity!.TraceStateString : provenance.TraceState);
     }
+
+    /// <summary>
+    /// The trace-id segment of a valid W3C <c>traceparent</c>, or <see langword="null"/> when there is none — so the
+    /// correlation id and the trace context an envelope carries name one flow, never two.
+    /// </summary>
+    private static string? TraceIdOf(string? traceParent) =>
+        traceParent is not null
+        && TraceParentRegex().Match(traceParent) is { Success: true } match
+        && match.Groups[TraceIdGroup].Value != InvalidTraceId
+            ? match.Groups[TraceIdGroup].Value
+            : null;
+
+    private const string TraceIdGroup = "traceid";
+
+    private const string InvalidTraceId = "00000000000000000000000000000000";
+
+    [GeneratedRegex("^00-(?<traceid>[0-9a-f]{32})-[0-9a-f]{16}-[0-9a-f]{2}$", RegexOptions.CultureInvariant)]
+    private static partial Regex TraceParentRegex();
 
     /// <summary><paramref name="event"/> with every attribute of this stamp that is not a required member.</summary>
     internal AlvoEvent Onto(AlvoEvent @event) => @event with

@@ -67,13 +67,23 @@ public static class AlvoEventProvenance
     /// </summary>
     /// <param name="eventId">The event's own <see cref="AlvoEvent.Id"/>, used when no trace is ambient.</param>
     /// <remarks>
+    /// <para>
     /// <see cref="Activity"/> is in the BCL, so this needs no dependency, and the trace id is exactly what the
     /// specification's end-to-end trace asks for. It falls back to the event's own id rather than to
     /// <see langword="null"/> because the attribute is required — an event with no ambient trace still belongs
     /// to a flow, namely its own.
+    /// </para>
+    /// <para>
+    /// Only a W3C-format activity counts: a hierarchical one has no trace id, and its all-zero placeholder would put
+    /// every such event in one flow.
+    /// </para>
     /// </remarks>
     public static string CorrelationIdOf(Guid eventId) =>
-        Activity.Current?.TraceId.ToString() ?? eventId.ToString();
+        AmbientW3CActivity?.TraceId.ToString() ?? eventId.ToString();
+
+    /// <summary>The ambient <see cref="Activity"/> when it is in W3C format, the only one that carries a trace context.</summary>
+    internal static Activity? AmbientW3CActivity =>
+        Activity.Current is { IdFormat: ActivityIdFormat.W3C } current ? current : null;
 
     /// <summary>
     /// The provenance an operation reports: <paramref name="context"/>'s own, merged with the ambient flow's.

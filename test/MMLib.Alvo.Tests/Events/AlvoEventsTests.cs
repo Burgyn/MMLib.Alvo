@@ -285,6 +285,18 @@ public sealed class AlvoEventsTests
         (appended.ChainDepth, appended.CausationId).ShouldBe((2, "cause"));
     }
 
+    /// <summary>A custom event published as the tenantless system caller reports no tenant.</summary>
+    [Fact]
+    public async Task A_tenantless_system_publish_carries_no_tenant()
+    {
+        var store = new RecordingOutboxStore();
+
+        await Publisher(store).PublishAsync(
+            "orders.approved", "orders/1", null, AlvoContext.System(tenant: null), TestContext.Current.CancellationToken);
+
+        store.Appended.ShouldHaveSingleItem().TenantId.ShouldBeNull();
+    }
+
     /// <summary>
     /// <b>Two event types about one subject share a partition, because ordering is promised per subject.</b>
     /// </summary>

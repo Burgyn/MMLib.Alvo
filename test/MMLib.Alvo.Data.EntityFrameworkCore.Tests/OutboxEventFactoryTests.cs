@@ -219,6 +219,81 @@ public partial class OutboxEventFactoryTests
         @event.CorrelationId.ShouldBe(activity.TraceId.ToString());
     }
 
+    /// <summary>A stated <c>traceparent</c> with no stated correlation makes its trace id the correlation id.</summary>
+    [Fact]
+    public void A_stated_traceparent_without_a_correlation_names_the_flow()
+    {
+        var caller = Caller with { Provenance = new AlvoProvenance { TraceParent = StatedTraceParent } };
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, caller, Now, PostImage, null);
+
+        (@event.TraceParent, @event.CorrelationId).ShouldBe((StatedTraceParent, StatedTraceId));
+    }
+
+    /// <summary>A stated <c>traceparent</c> that is not valid W3C names no flow, so the event's own id does.</summary>
+    /// <param name="traceParent">A malformed or all-zero traceparent.</param>
+    [Theory]
+    [InlineData("not-a-traceparent")]
+    [InlineData("01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")]
+    [InlineData("00-4BF92F3577B34DA6A3CE929D0E0E4736-00f067aa0ba902b7-01")]
+    [InlineData("00-00000000000000000000000000000000-00f067aa0ba902b7-01")]
+    public void An_invalid_stated_traceparent_falls_back_to_the_events_own_id(string traceParent)
+    {
+        var caller = Caller with { Provenance = new AlvoProvenance { TraceParent = traceParent } };
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, caller, Now, PostImage, null);
+
+        @event.CorrelationId.ShouldBe(@event.Id.ToString());
+    }
+
+    /// <summary>A stated trace context is the caller's own word and beats whatever W3C activity happens to be ambient.</summary>
+    [Fact]
+    public void A_stated_traceparent_beats_an_ambient_w3c_activity()
+    {
+        using var activity = new System.Diagnostics.Activity("write").SetIdFormat(System.Diagnostics.ActivityIdFormat.W3C).Start();
+        activity.TraceStateString = "ambient=1";
+        var caller = Caller with { Provenance = new AlvoProvenance { TraceParent = StatedTraceParent, TraceState = "stated=1" } };
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, caller, Now, PostImage, null);
+
+        (@event.TraceParent, @event.TraceState, @event.CorrelationId).ShouldBe((StatedTraceParent, "stated=1", StatedTraceId));
+    }
+
+    /// <summary>
+    /// A hierarchical activity has no trace id; its all-zero placeholder must never become a correlation id that would
+    /// put every such event in one flow.
+    /// </summary>
+    [Fact]
+    public void A_hierarchical_activity_is_no_trace_context()
+    {
+        using var activity = new System.Diagnostics.Activity("write").SetIdFormat(System.Diagnostics.ActivityIdFormat.Hierarchical).Start();
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, Caller, Now, PostImage, null);
+
+        (@event.TraceParent, @event.CorrelationId).ShouldBe((null, @event.Id.ToString()));
+    }
+
+    /// <summary>An exclusion holds when the operation has only one image: the post-image of a create, the pre-image of a delete.</summary>
+    [Fact]
+    public void Excluded_fields_leave_the_single_image_of_a_create_and_a_delete()
+    {
+        var entity = Vehicles with { EventImageExclusions = ["color"] };
+
+        var created = OutboxEventFactory.For(entity, OutboxOperation.Created, Caller, Now, PostImage, null);
+        var deleted = OutboxEventFactory.For(entity, OutboxOperation.Deleted, Caller, Now, null, PreImage);
+
+        created.Data.Record!.Values.ShouldNotContainKey("color");
+        created.Data.OldRecord.ShouldBeNull();
+        deleted.Data.OldRecord!.Values.ShouldNotContainKey("color");
+        deleted.Data.Record.ShouldBeNull();
+        created.Data.Changed.ShouldContain("color");
+        deleted.Data.Changed.ShouldContain("color");
+    }
+
+    private const string StatedTraceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+
+    private const string StatedTraceParent = $"00-{StatedTraceId}-00f067aa0ba902b7-01";
+
     /// <summary>
     /// The anonymous caller's reserved all-zero id means "no identity", so reporting it would assert that an
     /// identified caller made the change.
