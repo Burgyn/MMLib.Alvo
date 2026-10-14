@@ -91,7 +91,7 @@ internal static class AfterHookCompiler
         var compiled = new List<CompiledAfterHook>(declared.Count);
         for (var index = 0; index < declared.Count; index++)
         {
-            var hook = CompileHook(declared[index], $"{scope.EntityPath}/hooks/{point}/{index}", scope);
+            var hook = CompileHook(declared[index], point, $"{scope.EntityPath}/hooks/{point}/{index}", scope);
             if (hook is not null)
             {
                 compiled.Add(hook);
@@ -101,9 +101,9 @@ internal static class AfterHookCompiler
         return compiled;
     }
 
-    private static CompiledAfterHook? CompileHook(AfterHook hook, string path, AfterHookScope scope)
+    private static CompiledAfterHook? CompileHook(AfterHook hook, string point, string path, AfterHookScope scope)
     {
-        var condition = CompileCondition(hook.Condition, $"{path}/{ConditionSlot}", scope);
+        var condition = CompileCondition(hook.Condition, point, $"{path}/{ConditionSlot}", scope);
         if (hook.Condition is not null && condition is null)
         {
             return null;
@@ -119,9 +119,11 @@ internal static class AfterHookCompiler
     /// <summary>
     /// Compiles a hook condition in the <see cref="CelProfile.Condition"/> profile — the only profile where
     /// <c>old.</c>, <c>new.</c> and <c>changed(field)</c> are legal, which is what an after-hook condition is
-    /// written in — and then refuses the two caller references the <em>envelope</em> cannot answer.
+    /// written in — and then refuses the two caller references the <em>envelope</em> cannot answer and, through
+    /// <see cref="AfterImagePhase"/>, any row image the point's event does not carry (#325).
     /// </summary>
-    private static CompiledExpression? CompileCondition(string? source, string path, AfterHookScope scope)
+    private static CompiledExpression? CompileCondition(
+        string? source, string point, string path, AfterHookScope scope)
     {
         if (source is null)
         {
@@ -135,7 +137,11 @@ internal static class AfterHookCompiler
             return null;
         }
 
-        return HonoursTheEnvelope(result.Expression!, path, scope) ? result.Expression : null;
+        var expression = result.Expression!;
+        var refusals = AfterImagePhase.Refusals(expression.Root, AfterImages.At(point), point, path);
+        scope.Errors.AddRange(refusals);
+
+        return HonoursTheEnvelope(expression, path, scope) && refusals.Count == 0 ? expression : null;
     }
 
     /// <summary>

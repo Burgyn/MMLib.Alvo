@@ -49,8 +49,8 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
     }
 
     // Observed apply behaviour that may surprise, pinned here as AGREEMENT between check and apply, not as an
-    // endorsement of the outcome: `old.` is accepted in an afterCreate condition (while @user.roles and
-    // @tenant.id are refused there). An empty source and one over 2000 characters are refused by the SCHEMA pass
+    // endorsement of the outcome: `old.` in an afterCreate condition is refused since #325 (as @user.roles
+    // and @tenant.id are refused there). An empty source and one over 2000 characters are refused by the SCHEMA pass
     // (minLength / maxLength), whose paths read `#/entities/…`; for a mutate value that refusal is reported on the
     // action above the slot (a oneOf), which the check reports at the slot.
     private static readonly (string Kind, string Pointer, string Source)[] _cases =

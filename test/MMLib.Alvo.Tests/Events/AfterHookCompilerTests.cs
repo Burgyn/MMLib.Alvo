@@ -58,6 +58,32 @@ public class AfterHookCompilerTests
         => Compile(AfterUpdate(Webhook())).AfterUpdate.ShouldHaveSingleItem().Condition.ShouldBeNull();
 
     /// <summary>
+    /// #325: an after-point refuses a reference to a row image its event does not carry — at apply, at the condition's
+    /// pointer, with a fix — because the reference would read null and the filter would pass every event.
+    /// </summary>
+    [Theory]
+    [InlineData("afterCreate", "old.stage == 'won'", "'old.<field>'")]
+    [InlineData("afterCreate", "changed(stage)", "'changed(<field>)'")]
+    [InlineData("afterDelete", "new.stage == 'won'", "'new.<field>'")]
+    [InlineData("afterDelete", "stage == 'won'", "'new.<field>'")]
+    [InlineData("afterDelete", "changed(stage)", "'changed(<field>)'")]
+    public void An_after_point_refuses_an_image_its_event_does_not_carry(string point, string condition, string named)
+    {
+        var refusal = CompileErrors(At(point, Webhook(), condition)).ShouldHaveSingleItem();
+
+        refusal.Path.ShouldBe($"/entities/deals/hooks/{point}/0/condition");
+        refusal.Message.ShouldContain(named);
+        refusal.FixSuggestion.ShouldNotBeNullOrEmpty();
+    }
+
+    [Theory]
+    [InlineData("afterCreate", "new.stage == 'won' && stage != 'lost'")]
+    [InlineData("afterUpdate", "changed(stage) && old.stage != new.stage")]
+    [InlineData("afterDelete", "old.stage == 'won'")]
+    public void An_image_the_point_carries_still_applies(string point, string condition)
+        => Point(Compile(At(point, Webhook(), condition)), point).ShouldHaveSingleItem().Condition.ShouldNotBeNull();
+
+    /// <summary>
     /// All three points are compiled, and each lands on its own list — so an <c>afterDelete</c> hook cannot be
     /// silently filed under <c>afterCreate</c> and run on the wrong operation.
     /// </summary>
