@@ -113,14 +113,14 @@ internal static class AfterHookCompiler
 
         return action is null
             ? null
-            : new CompiledAfterHook(path, condition, ActorRead(condition), action);
+            : new CompiledAfterHook(path, condition, ProvenanceRead(condition), action, RolesRead(condition));
     }
 
     /// <summary>
     /// Compiles a hook condition in the <see cref="CelProfile.Condition"/> profile — the only profile where
     /// <c>old.</c>, <c>new.</c> and <c>changed(field)</c> are legal, which is what an after-hook condition is
-    /// written in — and then refuses the two caller references the <em>envelope</em> cannot answer and, through
-    /// <see cref="AfterImagePhase"/>, any row image the point's event does not carry (#325).
+    /// written in — and then refuses, through <see cref="AfterImagePhase"/>, any row image the point's event does not
+    /// carry (#325).
     /// </summary>
     private static CompiledExpression? CompileCondition(
         string? source, string point, string path, AfterHookScope scope)
@@ -141,83 +141,26 @@ internal static class AfterHookCompiler
         var refusals = AfterImagePhase.Refusals(expression.Root, AfterImages.At(point), point, path);
         scope.Errors.AddRange(refusals);
 
-        return HonoursTheEnvelope(expression, path, scope) && refusals.Count == 0 ? expression : null;
+        return refusals.Count == 0 ? expression : null;
     }
 
-    /// <summary>
-    /// Refuses <c>@tenant.id</c> and <c>@user.roles</c> in an after-hook condition, by name, exactly as
-    /// <see cref="TemplatePlaceholder"/> refuses them in a template.
-    /// </summary>
+    /// <summary>Which caller values the condition reads that an envelope may lack, so the dispatcher can gate on them.</summary>
     /// <remarks>
-    /// <para>
-    /// <b>This closes an asymmetry rather than documenting one.</b> Both names compile in the
-    /// <see cref="CelProfile.Condition"/> profile and both resolve against a post-commit context that cannot
-    /// answer them, in opposite and equally silent directions. <c>@tenant.id</c> resolves to
-    /// <see langword="null"/>, and the interpreter's null rule collapses <em>every</em> comparison — including
-    /// <c>!=</c> — to <see langword="false"/>, so <c>changed(status) &amp;&amp; !(@tenant.id == 'internal')</c>
-    /// reads as "every tenant except ours" and fires for <b>every</b> tenant, delivering the unmasked row to an
-    /// external endpoint. <c>@user.roles</c> resolves to a non-null value and is worse for it: it answers with
-    /// the <em>dispatcher's</em> role set, so <c>'admin' in @user.roles</c> is true for every event whoever
-    /// wrote the row.
-    /// </para>
-    /// <para>
-    /// <b>It is refused here and not in <see cref="CelTypeChecker"/>'s profile table</b>, because the reason is
-    /// the envelope's and not the profile's: PR5b's before-hooks compile in the same profile and run inside the
-    /// request, where both names have a real caller to resolve against. A profile-level ban would forbid them
-    /// there too, for a reason that does not apply.
-    /// </para>
+    /// <c>@tenant.id</c> and <c>@user.roles</c> compile since #153, because the envelope carries <c>tenantid</c> and
+    /// <c>authclaims</c>. They are not refused here, and not in <see cref="CelTypeChecker"/>'s profile table either:
+    /// what an envelope may lack is a per-event fact, so the dispatcher refuses to <em>select</em> a hook whose
+    /// event does not carry what its condition reads — the same <see cref="RequiredContext"/> gate the policy engine
+    /// applies to a rule, because a negated comparison against an absent value passes every event.
     /// </remarks>
-    private static bool HonoursTheEnvelope(CompiledExpression condition, string path, AfterHookScope scope)
-    {
-        var refusals = _unanswerable
-            .Where(reference => PolicyCatalogBuilder.ReferencesContextValue(condition.Root, reference.Value))
-            .Select(reference => Error(path, Unanswerable(reference), reference.Fix))
-            .ToList();
-
-        scope.Errors.AddRange(refusals);
-
-        return refusals.Count == 0;
-    }
-
-    private static string Unanswerable(UnanswerableReference reference) =>
-        $"This after-hook condition reads '{reference.Name}', which an after-hook cannot answer: "
-        + $"{reference.Why}. The condition is evaluated after the write has committed, against the event "
-        + "envelope, so a comparison against it is decided by the absence of the value rather than by the "
-        + "value — silently, and not always in the denying direction.";
-
-    /// <summary>
-    /// The two caller references an event envelope cannot answer, with the words
-    /// <see cref="EnvelopeProvenance"/> holds for both this refusal and the template one.
-    /// </summary>
-    private static readonly UnanswerableReference[] _unanswerable =
-    [
-        new(
-            CelContextValue.TenantId,
-            "@tenant.id",
-            EnvelopeProvenance.NoTenant,
-            EnvelopeProvenance.InsteadOfTenant($"new.{AlvoManagedColumns.TenantId}")),
-        new(
-            CelContextValue.UserRoles,
-            "@user.roles",
-            EnvelopeProvenance.NoRoles,
-            EnvelopeProvenance.InsteadOfRoles),
-    ];
-
-    /// <summary>
-    /// Which caller values the condition reads, so the dispatcher can refuse to select a hook whose condition
-    /// needs an actor the envelope did not carry.
-    /// </summary>
-    /// <remarks>
-    /// Only <c>@user.id</c> can survive <see cref="HonoursTheEnvelope"/>, so this is the same
-    /// <see cref="RequiredContext"/> gate the policy engine applies to a rule — one shape for "this predicate
-    /// reads an operand the caller may not have", rather than a second ad-hoc check.
-    /// </remarks>
-    private static RequiredContext ActorRead(CompiledExpression? condition) =>
+    private static RequiredContext ProvenanceRead(CompiledExpression? condition) =>
         condition is null
             ? RequiredContext.None
             : new RequiredContext(
-                TenantId: false,
+                TenantId: PolicyCatalogBuilder.ReferencesContextValue(condition.Root, CelContextValue.TenantId),
                 UserId: PolicyCatalogBuilder.ReferencesContextValue(condition.Root, CelContextValue.UserId));
+
+    private static bool RolesRead(CompiledExpression? condition) =>
+        condition is not null && PolicyCatalogBuilder.ReferencesContextValue(condition.Root, CelContextValue.UserRoles);
 
     private static CompiledAction? CompileAction(AutomationAction action, string path, AfterHookScope scope) =>
         action switch
@@ -549,17 +492,3 @@ internal sealed record AfterHookScope(
     string EntityPath,
     List<DescriptorValidationError> Errors);
 
-/// <summary>
-/// One caller reference an after-hook condition may name and an event envelope cannot answer, and the words
-/// its refusal is built from.
-/// </summary>
-/// <remarks>
-/// A table rather than two <c>if</c> blocks for the reason <see cref="UnhonouredFeatures"/> is a table: the
-/// wording, the detection and the fix belong to one entry, so a third unanswerable reference cannot be added
-/// to the walk without the message that explains it.
-/// </remarks>
-/// <param name="Value">The compiled node kind the walk looks for.</param>
-/// <param name="Name">How the reference is spelled in CEL, for the message an author reads.</param>
-/// <param name="Why">Why the envelope cannot answer it — <see cref="EnvelopeProvenance"/>'s words.</param>
-/// <param name="Fix">What to do instead, and where a real answer is tracked.</param>
-internal sealed record UnanswerableReference(CelContextValue Value, string Name, string Why, string Fix);

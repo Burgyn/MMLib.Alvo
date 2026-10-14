@@ -80,8 +80,8 @@ public sealed class GuidedConditionConformanceTests
     }
 
     /// <summary>
-    /// The four refusal classes of spec §7.4: <c>old.</c> before a create, <c>new.</c> before a delete, <c>changed</c> at a
-    /// create or delete before-point, and a role row at an after-point.
+    /// The refusal classes of spec §7.4: <c>old.</c> before a create, <c>new.</c> before a delete and <c>changed</c> at a
+    /// create or delete before-point. Its fourth, a role row at an after-point, applies since #153 and is the theory below.
     /// </summary>
     /// <remarks>
     /// The after-commit images the table withholds (<c>old.</c> at afterCreate, <c>new.</c> at afterDelete) and
@@ -99,14 +99,27 @@ public sealed class GuidedConditionConformanceTests
     [InlineData("afterDelete", "new.text_opt == 'x'", "'new.<field>'")]
     [InlineData("afterCreate", "changed(text_opt)", "'changed(<field>)'")]
     [InlineData("afterDelete", "changed(text_opt)", "'changed(<field>)'")]
-    [InlineData("afterCreate", "'clerk' in @user.roles", "'@user.roles'")]
-    [InlineData("afterUpdate", "!('clerk' in @user.roles)", "'@user.roles'")]
-    [InlineData("afterDelete", "'clerk' in @user.roles", "'@user.roles'")]
-    [InlineData("afterDelete", "!('clerk' in @user.roles)", "'@user.roles'")]
     public void What_the_table_withholds_before_the_commit_or_from_an_envelope_apply_refuses(string point, string condition, string refusal)
     {
         ErrorsAt(point, condition).ShouldContain(error => error.Message.Contains(refusal, StringComparison.Ordinal), $"{condition} at {point}");
         ConditionText.Recognize(condition, point, Scope(point)).ShouldBeNull("the form never offers it");
+    }
+
+    /// <summary>
+    /// Where the table is narrower than apply, recorded: a role row after the commit. Apply reads it from the envelope's
+    /// <c>authclaims</c> since #153; the guided form still offers role rows before the commit only.
+    /// </summary>
+    /// <param name="point">The after-point.</param>
+    /// <param name="condition">The role condition the form does not offer there.</param>
+    [Theory]
+    [InlineData("afterCreate", "'clerk' in @user.roles")]
+    [InlineData("afterUpdate", "!('clerk' in @user.roles)")]
+    [InlineData("afterDelete", "'clerk' in @user.roles")]
+    [InlineData("afterDelete", "!('clerk' in @user.roles)")]
+    public void What_the_table_withholds_after_the_commit_apply_accepts(string point, string condition)
+    {
+        Errors(point, condition).ShouldBeEmpty($"{condition} at {point}");
+        ConditionText.Recognize(condition, point, Scope(point)).ShouldBeNull("the form offers no role row after the commit");
     }
 
     public static TheoryData<string> Points() => [.. HookBuilder.Points];

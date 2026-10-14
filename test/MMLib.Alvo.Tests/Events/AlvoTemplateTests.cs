@@ -42,12 +42,11 @@ public class AlvoTemplateTests
         => AlvoTemplate.Parse(template).Render(SampleEvent()).ShouldBe(expected);
 
     /// <summary>
-    /// <c>@tenant</c> is absent on purpose, and that is the deviation this list exists to make visible: the
-    /// addendum's table promises it, and the envelope carries no tenant attribute to answer it with.
+    /// <c>@tenant</c> joined with #153, when the envelope gained <c>tenantid</c> to answer it with.
     /// </summary>
     [Fact]
     public void The_roots_are_exactly_the_ones_the_envelope_can_answer()
-        => TemplatePlaceholder.Roots.ShouldBe(["new", "old", "event", "@user"]);
+        => TemplatePlaceholder.Roots.ShouldBe(["new", "old", "event", "@user", "@tenant"]);
 
     /// <summary>
     /// Deviation 64: an unresolvable placeholder is refused at apply, never rendered to empty.
@@ -56,7 +55,7 @@ public class AlvoTemplateTests
     /// Rendering <c>{{@user.email}}</c> to <c>""</c> yields <c>To: ""</c> — a mail failure that looks like a
     /// broken SMTP server, which is the same misattribution <c>UnhonouredSubsystems</c> exists to prevent.
     /// <c>AlvoContext</c> carries <c>User</c>, <c>Roles</c> and <c>Tenant</c> and no email address, and the
-    /// envelope narrows that further: it carries <c>authid</c> and no roles at all.
+    /// envelope narrows that further: it carries <c>authid</c> and <c>authclaims</c>, and no email address.
     /// </remarks>
     [Fact]
     public void The_shipped_examples_unresolvable_recipient_is_refused_and_the_message_names_what_exists()
@@ -69,24 +68,43 @@ public class AlvoTemplateTests
     }
 
     /// <summary>
-    /// The second name the addendum promises and the envelope cannot answer. It is refused <em>by name</em>
-    /// rather than as an unknown root, because <c>@tenant.id</c> is a real Alvo CEL context reference — an
-    /// author who knows the rule language will write it, and "unknown root" would misdescribe why it fails.
+    /// The two names the addendum promises resolve since #153: <c>@tenant.id</c> from the envelope's <c>tenantid</c>
+    /// and <c>@user.roles</c> from its <c>authclaims</c>, comma-joined in the ordinal order the claim carries them.
     /// </summary>
     /// <remarks>
-    /// Resolving it from the row's own <c>tenant_id</c> was considered and rejected: <c>@tenant.id</c> asks
-    /// which tenant the <em>caller</em> was in, and a write made as <c>AlvoContext.System</c> has no tenant
-    /// while the row it wrote has one. Answering a different question with a non-blank value is the exact
-    /// defect deviation 64 exists to prevent.
+    /// An author-declared <c>{{@user.roles}}</c> in a webhook payload or an email body is allowed: it is explicit and
+    /// visible in the descriptor. Only the <em>default</em> webhook body strips <c>authclaims</c>.
     /// </remarks>
     [Fact]
-    public void The_tenant_root_is_refused_by_name_and_the_message_names_the_row_field_instead()
+    public void The_tenant_and_roles_placeholders_resolve_and_render_from_the_envelope()
     {
-        TemplatePlaceholder.TryResolve("@tenant.id", Deals, out var refusal).ShouldBeFalse();
+        TemplatePlaceholder.TryResolve("@tenant.id", Deals, out var tenantRefusal).ShouldBeTrue(tenantRefusal);
+        TemplatePlaceholder.TryResolve("@user.roles", Deals, out var rolesRefusal).ShouldBeTrue(rolesRefusal);
 
-        refusal.ShouldNotBeNull();
-        refusal.ShouldContain("@tenant.id");
-        refusal.ShouldContain("new.tenant_id");
+        AlvoTemplate.Parse("{{@tenant.id}}|{{@user.roles}}")
+            .Render(SampleEvent() with { TenantId = "t-1", AuthClaims = """{"roles":["admin","authenticated"]}""" })
+            .ShouldBe("t-1|admin,authenticated");
+    }
+
+    /// <summary>
+    /// An envelope written before HX-01 carries neither attribute, and renders both as empty — as <c>@user.id</c>
+    /// renders for an anonymous write. A malformed <c>authclaims</c> reads as absent rather than throwing.
+    /// </summary>
+    /// <param name="claims">The envelope's <c>authclaims</c>.</param>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("not json")]
+    public void An_envelope_written_before_hx_01_renders_tenant_and_roles_as_empty(string? claims)
+        => AlvoTemplate.Parse("[{{@tenant.id}}][{{@user.roles}}]")
+            .Render(SampleEvent() with { AuthClaims = claims })
+            .ShouldBe("[][]");
+
+    [Fact]
+    public void Any_other_tenant_member_is_refused()
+    {
+        TemplatePlaceholder.TryResolve("@tenant.name", Deals, out var refusal).ShouldBeFalse();
+
+        refusal.ShouldNotBeNull().ShouldContain("@tenant.id");
     }
 
     [Fact]
@@ -259,7 +277,7 @@ public class AlvoTemplateTests
     [Fact]
     public void Rendering_a_placeholder_apply_time_would_have_refused_throws_rather_than_renders_empty()
         => Should.Throw<InvalidOperationException>(
-            () => AlvoTemplate.Parse("{{@tenant.id}}").Render(SampleEvent()));
+            () => AlvoTemplate.Parse("{{@tenant.name}}").Render(SampleEvent()));
 
     private static EntitySchema Deals { get; } = new()
     {

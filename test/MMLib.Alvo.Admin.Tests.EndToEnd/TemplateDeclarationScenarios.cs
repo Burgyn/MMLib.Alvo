@@ -10,7 +10,7 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 public sealed class TemplateDeclarationScenarios(BikeWorkshopWorld world) : IClassFixture<BikeWorkshopWorld>
 {
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task A_template_with_a_broken_subject_or_a_tenant_placeholder_is_refused_at_its_fields()
+    public async Task A_template_with_a_broken_subject_or_an_unknown_root_is_refused_at_its_fields()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/integrations");
@@ -18,12 +18,12 @@ public sealed class TemplateDeclarationScenarios(BikeWorkshopWorld world) : ICla
 
         await session.Page.FillAsync("#template-name", "broken-template");
         await session.Page.FillAsync("#template-subject", "Ready\u2028now");
-        await session.Page.FillAsync("#template-body", "Hi {{@tenant.id}}");
+        await session.Page.FillAsync("#template-body", "Hi {{customer.name}}");
         await editor.GetByTestId("template-save").ClickAsync();
 
         await session.WaitForFocusOnAsync("template-subject");
         (await session.Page.Locator("#template-subject-problem").InnerTextAsync()).ShouldContain("one line");
-        (await session.Page.Locator("#template-body-problem").InnerTextAsync()).ShouldContain("carries no tenant");
+        (await session.Page.Locator("#template-body-problem").InnerTextAsync()).ShouldContain("names no root");
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]

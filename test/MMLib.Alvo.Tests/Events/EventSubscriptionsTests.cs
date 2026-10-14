@@ -308,6 +308,93 @@ public sealed class EventSubscriptionsTests : IDisposable
             .ShouldHaveSingleItem().Path.ShouldContain("afterUpdate");
 
     /// <summary>
+    /// A condition's <c>@tenant.id</c> is the tenant the envelope's <c>tenantid</c> records — the writer's, as at the
+    /// event (#153). Both directions of a negated comparison are asserted from one row.
+    /// </summary>
+    /// <param name="rowTenant">The row's own <c>tenant_id</c>.</param>
+    /// <param name="envelopeTenant">The envelope's <c>tenantid</c>.</param>
+    /// <param name="selected">Whether the hook fires.</param>
+    [Theory]
+    [InlineData(TenantA, TenantA, false)]
+    [InlineData(TenantA, TenantB, true)]
+    public void A_conditions_tenant_is_the_envelopes_tenant(string rowTenant, string envelopeTenant, bool selected)
+        => Matching(CatalogConditionedOnAnotherTenant, Event(
+                "entity.deals.updated",
+                record: Record(("tenant_id", Guid.Parse(rowTenant))),
+                oldRecord: Record(("tenant_id", Guid.Parse(rowTenant))),
+                tenantId: envelopeTenant))
+            .Count.ShouldBe(selected ? 1 : 0);
+
+    /// <summary>
+    /// An envelope without <c>tenantid</c> — a global row, a tenantless system write, an outbox row written before
+    /// HX-01 — selects no hook that reads <c>@tenant.id</c>, rather than comparing against an absent value.
+    /// </summary>
+    [Fact]
+    public void An_envelope_without_a_tenant_selects_no_hook_that_reads_one()
+    {
+        var @event = Event("entity.deals.updated", record: Record(("tenant_id", Guid.Parse(TenantA))), oldRecord: Record());
+
+        Matching(CatalogConditionedOnAnotherTenant, @event).ShouldBeEmpty("a negated comparison against an absent tenant would otherwise pass every tenant");
+        var line = _logger.Entries.ShouldHaveSingleItem();
+        line.Level.ShouldBe(LogLevel.Debug);
+        line.Message.ShouldContain("@tenant.id");
+        line.Message.ShouldContain(@event.Id.ToString());
+    }
+
+    /// <summary>
+    /// A <c>tenantid</c> that is not a tenant id — foreign text, or the reserved all-zero "no tenant" — reads as
+    /// absent, and fails closed the same way.
+    /// </summary>
+    /// <param name="tenantId">The envelope's <c>tenantid</c>.</param>
+    [Theory]
+    [InlineData("acme")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public void An_envelope_whose_tenant_is_not_an_id_selects_no_hook_that_reads_one(string tenantId)
+    {
+        var @event = Event(
+            "entity.deals.updated",
+            record: Record(("tenant_id", Guid.Parse(TenantA))),
+            oldRecord: Record(),
+            tenantId: tenantId);
+
+        Matching(CatalogConditionedOnAnotherTenant, @event).ShouldBeEmpty();
+        _logger.Entries.ShouldHaveSingleItem().Message.ShouldContain("@tenant.id");
+    }
+
+    /// <summary>
+    /// A condition's <c>@user.roles</c> are the roles the envelope's <c>authclaims</c> records — the caller's, as at
+    /// the event, never the dispatcher's. An empty role list is a readable answer, not an absent one.
+    /// </summary>
+    /// <param name="claims">The envelope's <c>authclaims</c>.</param>
+    /// <param name="selected">Whether <c>!('admin' in @user.roles)</c> fires.</param>
+    [Theory]
+    [InlineData("""{"roles":["admin","authenticated"]}""", false)]
+    [InlineData("""{"roles":["authenticated"]}""", true)]
+    [InlineData("""{"roles":[]}""", true)]
+    public void A_conditions_roles_are_the_ones_the_caller_held_at_the_event(string claims, bool selected)
+        => Matching(CatalogConditionedOnAdmins, Event("entity.deals.updated", record: Record(), oldRecord: Record(), authClaims: claims))
+            .Count.ShouldBe(selected ? 1 : 0);
+
+    /// <summary>
+    /// An envelope without readable <c>authclaims</c> — absent on a row written before HX-01, or malformed — selects
+    /// no hook that reads <c>@user.roles</c>.
+    /// </summary>
+    /// <param name="claims">The envelope's <c>authclaims</c>.</param>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not json")]
+    [InlineData("""["admin"]""")]
+    [InlineData("""{"roles":"admin"}""")]
+    [InlineData("""{"roles":[1]}""")]
+    public void An_envelope_without_readable_claims_selects_no_hook_that_reads_roles(string? claims)
+    {
+        Matching(CatalogConditionedOnAdmins, Event("entity.deals.updated", record: Record(), oldRecord: Record(), authClaims: claims))
+            .ShouldBeEmpty("'!(admin in roles)' against no roles at all would fire for every event, the admin's included");
+        _logger.Entries.ShouldHaveSingleItem().Message.ShouldContain("@user.roles");
+    }
+
+    /// <summary>
     /// <b>An event a host published selects no after-hook, and that is what the publish-time namespace guard
     /// buys.</b>
     /// </summary>
@@ -401,6 +488,19 @@ public sealed class EventSubscriptionsTests : IDisposable
         AfterUpdate = [Hook("new.owner_id != @user.id")],
     });
 
+    private static PolicyCatalog CatalogConditionedOnAnotherTenant => Catalog(new EntityHooks
+    {
+        AfterUpdate = [Hook("new.tenant_id != @tenant.id")],
+    });
+
+    private static PolicyCatalog CatalogConditionedOnAdmins => Catalog(new EntityHooks
+    {
+        AfterUpdate = [Hook("!('admin' in @user.roles)")],
+    });
+
+    private const string TenantA = "0b0a0000-0000-4000-8000-00000000000a";
+    private const string TenantB = "0b0b0000-0000-4000-8000-00000000000b";
+
     private static AfterHook Hook(string? condition = null) =>
         new() { Condition = condition, Action = new WebhookAction { Endpoint = "crm-sync" } };
 
@@ -446,6 +546,7 @@ public sealed class EventSubscriptionsTests : IDisposable
             new FieldSchema { Name = "note", Type = FieldType.String, MaxLength = 200, Nullable = true },
             new FieldSchema { Name = "qty", Type = FieldType.Integer, Nullable = true },
             new FieldSchema { Name = "zero", Type = FieldType.Integer, Nullable = true },
+            new FieldSchema { Name = "tenant_id", Type = FieldType.Uuid, Nullable = true },
         ],
     };
 
@@ -469,7 +570,9 @@ public sealed class EventSubscriptionsTests : IDisposable
         AlvoRecord? record = null,
         AlvoRecord? oldRecord = null,
         IReadOnlyList<string>? changed = null,
-        string? authId = null) => new()
+        string? authId = null,
+        string? tenantId = null,
+        string? authClaims = null) => new()
         {
             Id = Guid.Parse("019000aa-0000-7000-8000-0000000000d1"),
             Source = AlvoEvent.DefaultSource,
@@ -479,6 +582,8 @@ public sealed class EventSubscriptionsTests : IDisposable
             PartitionKey = "deals:019000aa-0000-7000-8000-0000000000ff",
             AuthType = AlvoEventAuthType.ApiKey,
             AuthId = authId,
+            TenantId = tenantId,
+            AuthClaims = authClaims,
             CorrelationId = "019000aa-0000-7000-8000-0000000000c0",
             Data = new AlvoEventData
             {

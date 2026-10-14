@@ -43,9 +43,10 @@ public class TemplateDraftTests
 
     [Theory]
     [InlineData("Hello {{new.contact_email}}, {{old.status}} {{event.type}} {{@user.id}}", true)]
-    [InlineData("Hi {{@tenant.id}}", false)]
-    [InlineData("Hi {{ @tenant.id }}", false)]
-    [InlineData("Roles {{@user.roles}}", false)]
+    [InlineData("Hi {{@tenant.id}}", true)]
+    [InlineData("Hi {{ @tenant.id }}", true)]
+    [InlineData("Roles {{@user.roles}}", true)]
+    [InlineData("Hi {{@tenant.name}}", false)]
     [InlineData("Hi {{customer.name}}", false)]
     [InlineData("", false)]
     [InlineData("   ", false)]
@@ -53,8 +54,8 @@ public class TemplateDraftTests
         => (TemplateDraft.BodyRefusal(body) is null).ShouldBe(accepted);
 
     [Fact]
-    public void A_tenant_placeholder_is_refused_with_the_reason()
-        => TemplateDraft.BodyRefusal("Hi {{@tenant.id}}").ShouldNotBeNull().ShouldContain("carries no tenant");
+    public void A_tenant_member_other_than_id_is_refused_with_the_reason()
+        => TemplateDraft.BodyRefusal("Hi {{@tenant.name}}").ShouldNotBeNull().ShouldContain("@tenant.id");
 
     [Fact]
     public void An_edit_loads_the_subject_and_body_and_does_not_refuse_its_own_name()

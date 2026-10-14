@@ -279,54 +279,31 @@ public class AfterHookCompilerTests
     }
 
     /// <summary>
-    /// The two caller references an event envelope cannot answer are refused <b>by name</b> in an after-hook
-    /// condition, exactly as a template refuses them.
+    /// #153: the envelope now carries <c>tenantid</c> and <c>authclaims</c>, so both references compile — and the hook
+    /// records which ones it reads, so the dispatcher can refuse to select it for an envelope that lacks them.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// <b>The positive form and the negated one are both asserted, because they failed in opposite directions
-    /// and only one of them looked like a denial.</b> <c>@tenant.id</c> resolved to <see langword="null"/> for
-    /// the dispatcher, and the interpreter's null rule collapses every comparison — <c>!=</c> included — to
-    /// <see langword="false"/>, so <c>!(@tenant.id == 'x')</c> was <b>true</b>: a hook reading "every tenant
-    /// except ours" delivered every tenant's unmasked row to an external endpoint. <c>@user.roles</c> resolved to
-    /// a value and was worse for it: the dispatcher's own <c>admin</c> role, so <c>'admin' in @user.roles</c> was
-    /// true for every event whoever wrote the row.
-    /// </para>
-    /// <para>
-    /// A refusal at apply is the fix rather than a documented caveat, and it is the call issue #153 already made
-    /// for the template half. <c>@user.id</c> is deliberately <em>not</em> refused: the envelope carries
-    /// <c>authid</c>, so it can be answered — resolve what you can answer, refuse what you cannot.
-    /// </para>
-    /// <para>
-    /// <b>The <c>@tenant.id</c> cases compare against a <em>column</em> and not a string literal, because a
-    /// literal is unreachable:</b> <c>@tenant.id</c> is typed <c>Uuid</c>, so <c>@tenant.id == 'acme'</c> is
-    /// already refused by the CEL type checker as <c>Cannot compare String to Uuid</c> and never reaches this
-    /// refusal at all. The reachable — and realistic — shape is a row's own tenant column against the caller's,
-    /// which is exactly how a rule writes it.
-    /// </para>
+    /// The positive and the negated form are both asserted because a negation is where an absent operand turns into
+    /// "every event": the refusal that used to stand here existed for exactly that, and it is now the dispatcher's
+    /// gate (<c>EventSubscriptionsTests</c>) that keeps it from happening, which needs the read recorded here.
     /// </remarks>
     [Theory]
-    [InlineData("new.tenant_id == @tenant.id", "@tenant.id")]
-    [InlineData("!(new.tenant_id == @tenant.id)", "@tenant.id")]
-    [InlineData("'admin' in @user.roles", "@user.roles")]
-    [InlineData("!('admin' in @user.roles)", "@user.roles")]
-    public void A_condition_naming_provenance_the_envelope_lacks_is_refused_at_apply(string condition, string name)
+    [InlineData("new.tenant_id == @tenant.id", true, false)]
+    [InlineData("!(new.tenant_id == @tenant.id)", true, false)]
+    [InlineData("'admin' in @user.roles", false, true)]
+    [InlineData("!('admin' in @user.roles)", false, true)]
+    public void A_condition_reading_tenant_or_roles_applies_and_records_what_it_reads(string condition, bool tenant, bool roles)
     {
-        var error = CompileErrors(AfterUpdate(Webhook(), condition)).ShouldHaveSingleItem();
+        var hook = Compile(AfterUpdate(Webhook(), condition)).AfterUpdate.ShouldHaveSingleItem();
 
-        error.Path.ShouldBe("/entities/deals/hooks/afterUpdate/0/condition");
-        error.Message.ShouldContain(name);
-        error.FixSuggestion.ShouldNotBeNull().ShouldNotBeEmpty();
+        hook.Required.TenantId.ShouldBe(tenant);
+        hook.ReadsRoles.ShouldBe(roles);
     }
 
     /// <summary>
-    /// The non-vacuity control for the refusal above: <c>@user.id</c> <b>is</b> answerable from the envelope's
-    /// <c>authid</c>, so a condition reading it compiles and is carried with its actor requirement recorded.
+    /// <c>@user.id</c> is answered from the envelope's <c>authid</c>, so a condition reading it compiles and is carried
+    /// with its actor requirement recorded — and with no tenant or roles requirement it does not have.
     /// </summary>
-    /// <remarks>
-    /// Without this, "provenance is refused" would also hold for a build that refused every <c>@</c> reference in
-    /// a condition — which would delete the most useful after-hook condition there is.
-    /// </remarks>
     [Fact]
     public void A_condition_reading_user_id_compiles_and_records_that_it_needs_an_actor()
     {
