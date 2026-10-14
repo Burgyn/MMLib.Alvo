@@ -71,6 +71,9 @@ internal sealed class EfAlvoData : IAlvoData
     private readonly string _idempotencyTable;
     private readonly string _outboxTable;
 
+    /// <summary>The causation-chain limit every write face enforces before it reads or writes a row.</summary>
+    private readonly AlvoChainDepthLimit _depthLimit;
+
     internal EfAlvoData(
         IPolicyEngine policy,
         IPredicateEvaluator evaluator,
@@ -80,7 +83,8 @@ internal sealed class EfAlvoData : IAlvoData
         IAlvoSqlDialect dialect,
         AlvoDataContextFactory contexts,
         TimeProvider time,
-        AlvoOptions options)
+        AlvoOptions options,
+        AlvoChainDepthLimit depthLimit)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(evaluator);
@@ -91,6 +95,7 @@ internal sealed class EfAlvoData : IAlvoData
         ArgumentNullException.ThrowIfNull(contexts);
         ArgumentNullException.ThrowIfNull(time);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(depthLimit);
         _policy = policy;
         _evaluator = evaluator;
         _hooks = hooks;
@@ -101,6 +106,7 @@ internal sealed class EfAlvoData : IAlvoData
         _time = time;
         _idempotencyTable = IdempotencyTable.NameFor(options.SchemaPrefix);
         _outboxTable = OutboxTable.NameFor(options.SchemaPrefix);
+        _depthLimit = depthLimit;
     }
 
     /// <inheritdoc/>
@@ -230,6 +236,7 @@ internal sealed class EfAlvoData : IAlvoData
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
+        _depthLimit.EnsureWithin(context);
 
         var decision = Resolve(entity, DataOperation.Create, context);
 
@@ -1066,6 +1073,7 @@ internal sealed class EfAlvoData : IAlvoData
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
+        _depthLimit.EnsureWithin(context);
 
         var decision = Resolve(entity, DataOperation.Update, context);
 
@@ -1239,6 +1247,7 @@ internal sealed class EfAlvoData : IAlvoData
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
+        _depthLimit.EnsureWithin(context);
 
         var branches = new ReplaceDecisions(
             Resolve(entity, DataOperation.Create, context), Resolve(entity, DataOperation.Update, context));
@@ -1651,6 +1660,7 @@ internal sealed class EfAlvoData : IAlvoData
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(context);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
+        _depthLimit.EnsureWithin(context);
 
         var decision = Resolve(entity, DataOperation.Delete, context);
 
@@ -2340,6 +2350,7 @@ internal sealed class EfAlvoData : IAlvoData
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(context);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
+        _depthLimit.EnsureWithin(context);
         EnsureBatchIsNotEmpty(rowCount);
 
         return Resolve(entity, operation, context);

@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Events;
+﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
 
 using System.Globalization;
@@ -360,7 +361,18 @@ public sealed class AlvoEventsTests
         };
     }
 
-    private static AlvoEvents Publisher(IOutboxStore store) => new(store, TimeProvider.System);
+    [Fact]
+    public async Task Publishing_deeper_than_the_chain_limit_is_refused_and_appends_nothing()
+    {
+        var store = new RecordingOutboxStore();
+
+        await Should.ThrowAsync<AlvoChainDepthExceededException>(() => Publisher(store).PublishAsync(
+            "orders.approved", "orders/1", null, Caller with { Provenance = new AlvoProvenance { Depth = 9 } }, TestContext.Current.CancellationToken));
+
+        store.Appended.ShouldBeEmpty();
+    }
+
+    private static AlvoEvents Publisher(IOutboxStore store) => new(store, TimeProvider.System, AlvoChainDepthLimit.Default);
 
     private static AlvoContext Caller { get; } = new()
     {

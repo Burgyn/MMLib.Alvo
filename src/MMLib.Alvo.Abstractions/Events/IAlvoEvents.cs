@@ -57,6 +57,7 @@ public interface IAlvoEvents
     /// <paramref name="type"/> is blank, sits in a reserved namespace, or is not a well-formed event name;
     /// or <paramref name="data"/> carries a value the envelope cannot express.
     /// </exception>
+    /// <exception cref="Data.AlvoChainDepthExceededException">The effective chain depth of <paramref name="context"/> is greater than the configured limit.</exception>
     Task PublishAsync(
         string type,
         string subject,

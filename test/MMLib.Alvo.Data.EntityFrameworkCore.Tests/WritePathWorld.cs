@@ -115,7 +115,8 @@ internal sealed class WritePathWorld : IAsyncDisposable
             new SqliteTestDialect(),
             contexts,
             TimeProvider.System,
-            new AlvoOptions());
+            new AlvoOptions(),
+            AlvoChainDepthLimit.Default);
 
     private static async Task CreateTablesAsync(AlvoDataContextFactory contexts)
     {

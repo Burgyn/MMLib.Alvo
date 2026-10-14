@@ -36,7 +36,7 @@ namespace MMLib.Alvo.Data;
 /// all. Neither exception's message names the entity, the row id, or whether the row exists.
 /// </para>
 /// <para>
-/// <b>Six exception families, and the boundary between them is the contract — not a detail.</b> A layer
+/// <b>Seven exception families, and the boundary between them is the contract — not a detail.</b> A layer
 /// above this port (PR3's RFC 7807 problem-details layer) has nothing but the exception type to map a status
 /// code from, so an implementation must place every refusal in exactly one of these:
 /// </para>
@@ -120,6 +120,15 @@ namespace MMLib.Alvo.Data;
 ///     <c>id</c> or <c>tenant_id</c>, so a conflict on those alone is an invariant the implementation relies
 ///     on, and it belongs below with its stack trace intact.
 ///     </para>
+///     </description>
+///   </item>
+///   <item>
+///     <term><see cref="AlvoChainDepthExceededException"/></term>
+///     <description>
+///     <b>The operation is deeper in one causation chain than the configured limit allows</b> — a hook, handler or
+///     timer writing in a loop. Decided from the effective provenance (<c>AlvoEventProvenance.Effective</c>) before any
+///     row is read or written, on every write face and batch. Neither the payload nor the caller's permissions is at
+///     fault and the same request fails again at the same depth. Render 508 <c>chain-depth-exceeded</c>, non-retryable.
 ///     </description>
 ///   </item>
 ///   <item>

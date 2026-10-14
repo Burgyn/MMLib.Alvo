@@ -335,7 +335,7 @@ public sealed class EventSubscriptionsTests : IDisposable
     public async Task An_event_a_host_published_selects_no_after_hook()
     {
         var store = new CapturingOutboxStore();
-        await new AlvoEvents(store, TimeProvider.System).PublishAsync(
+        await new AlvoEvents(store, TimeProvider.System, AlvoChainDepthLimit.Default).PublishAsync(
             "crm.deals.updated", "deals/42", null, AlvoContext.Anonymous, TestContext.Current.CancellationToken);
 
         Matching(CatalogWithAHookOnEveryPoint, store.Published.ShouldHaveSingleItem()).ShouldBeEmpty();

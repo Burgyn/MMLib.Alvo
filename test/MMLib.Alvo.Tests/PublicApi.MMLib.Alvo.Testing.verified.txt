@@ -107,6 +107,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_user_filter_cannot_widen_the_policy_predicate() { }
         public System.Threading.Tasks.Task A_uuid_rule_over_a_dynamic_entity_matches_rows_on_every_engine() { }
         public System.Threading.Tasks.Task A_well_formed_filter_over_the_same_fields_still_answers() { }
+        public System.Threading.Tasks.Task A_write_at_the_chain_limit_is_accepted() { }
         public System.Threading.Tasks.Task A_write_by_a_caller_no_get_rule_admits_answers_with_the_id_alone() { }
         public System.Threading.Tasks.Task A_write_the_caller_may_read_back_answers_with_the_row_masked_as_a_get_would() { }
         public System.Threading.Tasks.Task A_write_to_a_read_only_field_is_rejected_rather_than_silently_dropped() { }
@@ -123,6 +124,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Create_that_would_place_the_row_outside_the_callers_scope_is_denied() { }
         public System.Threading.Tasks.Task Cross_tenant_get_by_id_is_indistinguishable_from_absent() { }
         public System.Threading.Tasks.Task Delete_of_another_users_row_reports_not_found_and_does_not_delete() { }
+        public System.Threading.Tasks.Task Every_write_face_refuses_a_write_deeper_than_the_chain_limit_and_writes_nothing() { }
         public System.Threading.Tasks.Task Get_of_another_users_row_is_indistinguishable_from_absent() { }
         public System.Threading.Tasks.Task List_returns_only_the_callers_own_rows() { }
         public System.Threading.Tasks.Task Same_suite_passes_over_a_dynamic_entity() { }
