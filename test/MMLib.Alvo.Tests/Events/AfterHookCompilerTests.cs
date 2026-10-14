@@ -84,6 +84,96 @@ public class AfterHookCompilerTests
         => Point(Compile(At(point, Webhook(), condition)), point).ShouldHaveSingleItem().Condition.ShouldNotBeNull();
 
     /// <summary>
+    /// #325's wording is derived from the point: an afterCreate refusal never talks about a delete, an afterDelete one
+    /// never about a create, and the fix names the image the point does carry.
+    /// </summary>
+    [Theory]
+    [InlineData("afterCreate", "old.stage == 'won'", "delete", "'new.stage'")]
+    [InlineData("afterDelete", "new.stage == 'won'", "create", "'old.stage'")]
+    [InlineData("afterDelete", "stage == 'won'", "create", "'old.stage'")]
+    [InlineData("afterCreate", "changed(stage)", "delete", "'new.<field>'")]
+    [InlineData("afterDelete", "changed(stage)", "create", "'old.<field>'")]
+    public void A_missing_image_refusal_speaks_about_its_own_point(
+        string point, string condition, string otherOperation, string carried)
+    {
+        var refusal = CompileErrors(At(point, Webhook(), condition)).ShouldHaveSingleItem();
+
+        refusal.Message.ShouldContain($"'{point}'");
+        refusal.Message.ShouldNotContain(otherOperation);
+        refusal.FixSuggestion.ShouldNotBeNull().ShouldContain(carried);
+    }
+
+    [Fact]
+    public void Every_reference_to_a_missing_image_is_refused_on_its_own()
+    {
+        var refusals = CompileErrors(At("afterDelete", Webhook(), "new.stage == 'won' && title != 'x' && changed(owner_id)"));
+
+        refusals.ShouldAllBe(refusal => refusal.Path == "/entities/deals/hooks/afterDelete/0/condition");
+        refusals.Select(refusal => refusal.Message).ShouldSatisfyAllConditions(
+            messages => messages.Count().ShouldBe(3),
+            messages => messages.ShouldContain(message => message.Contains("'new.stage'", StringComparison.Ordinal)),
+            messages => messages.ShouldContain(message => message.Contains("'title'", StringComparison.Ordinal)),
+            messages => messages.ShouldContain(message => message.Contains("'changed(owner_id)'", StringComparison.Ordinal)));
+    }
+
+    /// <summary>
+    /// #325 for templates: a placeholder reading an image the point's event lacks would render empty on every delivery,
+    /// so it is refused at apply at the slot's pointer — the same rule a condition gets.
+    /// </summary>
+    [Theory]
+    [InlineData("afterCreate", "{{old.title}}", "{{new.title}}")]
+    [InlineData("afterDelete", "{{new.title}}", "{{old.title}}")]
+    public void A_payload_placeholder_reading_an_image_the_point_lacks_is_refused(string point, string payload, string carried)
+    {
+        var refusal = CompileErrors(At(point, Webhook(payload: payload))).ShouldHaveSingleItem();
+
+        refusal.Path.ShouldBe($"/entities/deals/hooks/{point}/0/action/payload");
+        refusal.Message.ShouldContain(payload);
+        refusal.Message.ShouldContain($"'{point}'");
+        refusal.FixSuggestion.ShouldNotBeNull().ShouldContain(carried);
+    }
+
+    [Fact]
+    public void A_recipient_placeholder_reading_the_pre_image_of_a_create_is_refused_at_its_pointer()
+        => CompileErrors(At("afterCreate", Email(to: "{{old.owner_email}}")))
+            .ShouldHaveSingleItem().Path.ShouldBe("/entities/deals/hooks/afterCreate/0/action/to");
+
+    [Fact]
+    public void A_referenced_template_reading_the_post_image_of_a_delete_is_refused_on_the_templates_pointers()
+        => CompileErrors(At("afterDelete", Email()))
+            .Select(refusal => refusal.Path)
+            .ShouldBe(["/templates/deal-won/subject", "/templates/deal-won/body"], ignoreOrder: true);
+
+    [Fact]
+    public void Every_placeholder_reading_a_missing_image_is_refused_on_its_own()
+    {
+        var refusals = CompileErrors(At("afterCreate", Webhook(payload: "[\"{{old.title}}\", \"{{old.stage}}\", \"{{new.title}}\"]")));
+
+        refusals.Count.ShouldBe(2);
+        refusals.ShouldAllBe(refusal => refusal.Path == "/entities/deals/hooks/afterCreate/0/action/payload");
+        refusals[0].Message.ShouldContain("{{old.title}}");
+        refusals[1].Message.ShouldContain("{{old.stage}}");
+    }
+
+    [Theory]
+    [InlineData("afterCreate", "{{new.title}}")]
+    [InlineData("afterUpdate", "[\"{{old.title}}\", \"{{new.title}}\"]")]
+    [InlineData("afterDelete", "{{old.title}}")]
+    public void A_placeholder_reading_an_image_the_point_carries_applies(string point, string payload)
+        => Point(Compile(At(point, Webhook(payload: payload))), point).ShouldHaveSingleItem()
+            .Action.Templates.ShouldContainKey("payload");
+
+    [Fact]
+    public void An_after_update_carries_both_images()
+        => AfterImages.At("afterUpdate").ShouldBe(new AfterImages(Pre: true, Post: true));
+
+    [Theory]
+    [InlineData("beforeCreate")]
+    [InlineData("")]
+    public void A_name_that_is_not_an_after_point_has_no_images(string point)
+        => Should.Throw<ArgumentOutOfRangeException>(() => AfterImages.At(point));
+
+    /// <summary>
     /// All three points are compiled, and each lands on its own list — so an <c>afterDelete</c> hook cannot be
     /// silently filed under <c>afterCreate</c> and run on the wrong operation.
     /// </summary>

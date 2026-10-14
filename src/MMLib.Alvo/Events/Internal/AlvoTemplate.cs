@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Internal;
+﻿using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Internal;
 using MMLib.Alvo.Schema;
 
 using System.Globalization;
@@ -233,6 +234,26 @@ internal static class TemplatePlaceholder
             : NotARootAndMember(placeholder);
 
         return refusal is null;
+    }
+
+    /// <summary>Which row image <paramref name="placeholder"/> reads, and which field of it.</summary>
+    /// <param name="placeholder">A placeholder's inner text, such as <c>old.title</c>.</param>
+    /// <returns>
+    /// <see cref="CelRecordState.Old"/> for an <c>old.</c> placeholder, <see cref="CelRecordState.New"/> for a
+    /// <c>new.</c> one, and <see langword="null"/> for a placeholder that reads no row image.
+    /// </returns>
+    internal static (CelRecordState State, string Field)? RowImageRead(string placeholder)
+    {
+        ArgumentNullException.ThrowIfNull(placeholder);
+
+        return !TrySplit(placeholder, out var root, out var member)
+            ? null
+            : root switch
+            {
+                NewRoot => (CelRecordState.New, member),
+                OldRoot => (CelRecordState.Old, member),
+                _ => null,
+            };
     }
 
     /// <summary>One placeholder's value, read off an event at delivery time.</summary>

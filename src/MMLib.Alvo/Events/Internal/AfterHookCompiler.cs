@@ -89,9 +89,10 @@ internal static class AfterHookCompiler
         }
 
         var compiled = new List<CompiledAfterHook>(declared.Count);
+        var pointScope = scope with { Point = point };
         for (var index = 0; index < declared.Count; index++)
         {
-            var hook = CompileHook(declared[index], point, $"{scope.EntityPath}/hooks/{point}/{index}", scope);
+            var hook = CompileHook(declared[index], $"{scope.EntityPath}/hooks/{point}/{index}", pointScope);
             if (hook is not null)
             {
                 compiled.Add(hook);
@@ -101,9 +102,9 @@ internal static class AfterHookCompiler
         return compiled;
     }
 
-    private static CompiledAfterHook? CompileHook(AfterHook hook, string point, string path, AfterHookScope scope)
+    private static CompiledAfterHook? CompileHook(AfterHook hook, string path, AfterHookScope scope)
     {
-        var condition = CompileCondition(hook.Condition, point, $"{path}/{ConditionSlot}", scope);
+        var condition = CompileCondition(hook.Condition, $"{path}/{ConditionSlot}", scope);
         if (hook.Condition is not null && condition is null)
         {
             return null;
@@ -120,10 +121,9 @@ internal static class AfterHookCompiler
     /// Compiles a hook condition in the <see cref="CelProfile.Condition"/> profile — the only profile where
     /// <c>old.</c>, <c>new.</c> and <c>changed(field)</c> are legal, which is what an after-hook condition is
     /// written in — and then refuses, through <see cref="AfterImagePhase"/>, any row image the point's event does not
-    /// carry (#325).
+    /// carry (#325), and any field the entity leaves out of its event images (<c>events.exclude</c>).
     /// </summary>
-    private static CompiledExpression? CompileCondition(
-        string? source, string point, string path, AfterHookScope scope)
+    private static CompiledExpression? CompileCondition(string? source, string path, AfterHookScope scope)
     {
         if (source is null)
         {
@@ -138,7 +138,11 @@ internal static class AfterHookCompiler
         }
 
         var expression = result.Expression!;
-        var refusals = AfterImagePhase.Refusals(expression.Root, AfterImages.At(point), point, path);
+        IReadOnlyList<DescriptorValidationError> refusals =
+        [
+            .. AfterImagePhase.Refusals(expression.Root, AfterImages.At(scope.Point), scope.Point, path),
+            .. ExcludedFieldReads(expression.Root, path, scope),
+        ];
         scope.Errors.AddRange(refusals);
 
         return refusals.Count == 0 ? expression : null;
@@ -381,8 +385,9 @@ internal static class AfterHookCompiler
     }
 
     /// <summary>
-    /// Parses one template and resolves every placeholder in it against the entity's schema, so the compiled
-    /// action carries only templates that are known to render.
+    /// Parses one template and resolves every placeholder in it against the entity's schema, the point's event
+    /// images (#325) and the entity's <c>events.exclude</c>, so the compiled action carries only templates that are
+    /// known to render.
     /// </summary>
     private static bool AddTemplate(
         Dictionary<string, AlvoTemplate> templates, string slot, string source, string path, AfterHookScope scope)
@@ -400,9 +405,60 @@ internal static class AfterHookCompiler
             return false;
         }
 
+        var unrenderable = Unrenderable(template!, path, scope);
+        if (unrenderable.Count > 0)
+        {
+            scope.Errors.AddRange(unrenderable);
+            return false;
+        }
+
         templates[slot] = template!;
         return true;
     }
+
+    /// <summary>
+    /// Every placeholder that resolves against the schema but reads a row image the point's event lacks, or a field
+    /// the entity leaves out of its event images — each would render empty on every delivery.
+    /// </summary>
+    private static IReadOnlyList<DescriptorValidationError> Unrenderable(
+        AlvoTemplate template, string path, AfterHookScope scope) =>
+        [
+            .. AfterImagePhase.Refusals(template, AfterImages.At(scope.Point), scope.Point, path),
+            .. ExcludedPlaceholders(template, scope.Schema)
+                .Select(field => Error(path, ExcludedPlaceholder(field), ExcludedFix(scope, field))),
+        ];
+
+    private static IEnumerable<DescriptorValidationError> ExcludedFieldReads(
+        CelNode root, string path, AfterHookScope scope) =>
+        FieldsRead(root)
+            .Where(field => scope.Schema.EventImageExclusions.Contains(field, StringComparer.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .Select(field => Error(path, ExcludedCondition(field), ExcludedFix(scope, field)));
+
+    private static IEnumerable<string> FieldsRead(CelNode node) =>
+        (node is CelFieldRef reference ? [reference.FieldName] : Enumerable.Empty<string>())
+            .Concat(CelTree.Children(node).SelectMany(FieldsRead));
+
+    private static IEnumerable<string> ExcludedPlaceholders(AlvoTemplate template, EntitySchema entity) =>
+        template.Placeholders
+            .Select(TemplatePlaceholder.RowImageRead)
+            .OfType<(CelRecordState State, string Field)>()
+            .Select(read => read.Field)
+            .Where(field => entity.EventImageExclusions.Contains(field, StringComparer.Ordinal))
+            .Distinct(StringComparer.Ordinal);
+
+    private static string ExcludedCondition(string field) =>
+        $"This after-hook condition reads '{field}', which this entity leaves out of its event images "
+        + "(events.exclude), so the reference would read null on every event and the comparison would be decided by "
+        + "its absence — silently, and not always in the denying direction.";
+
+    private static string ExcludedPlaceholder(string field) =>
+        $"This template reads '{field}', which this entity leaves out of its event images (events.exclude), so it "
+        + "would render empty on every delivery.";
+
+    private static string ExcludedFix(AfterHookScope scope, string field) =>
+        $"Remove '{field}' from {scope.EntityPath}/events/exclude, or stop reading it here; 'changed({field})' still "
+        + "names an excluded field.";
 
     private static IReadOnlyList<string> Refusals(AlvoTemplate template, EntitySchema entity) =>
         [.. template.Placeholders.Select(placeholder => Refusal(placeholder, entity)).OfType<string>()];
@@ -490,5 +546,12 @@ internal sealed record AfterHookScope(
     IReadOnlyDictionary<string, MessageTemplate> Templates,
     IReadOnlyDictionary<string, WebhookEndpoint> Endpoints,
     string EntityPath,
-    List<DescriptorValidationError> Errors);
+    List<DescriptorValidationError> Errors)
+{
+    /// <summary>
+    /// The after-point being compiled, such as <c>afterCreate</c>; set per point by the compiler, and it decides which
+    /// row images a condition or template may read (<see cref="AfterImages.At"/>).
+    /// </summary>
+    internal string Point { get; init; } = string.Empty;
+}
 
