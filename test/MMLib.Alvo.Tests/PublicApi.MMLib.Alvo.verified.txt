@@ -43,6 +43,7 @@ namespace MMLib.Alvo.Api
     public static class AlvoProblemTypes
     {
         public const string BaseUri = "https://alvo.dev/errors/";
+        public const string ChainDepthExceeded = "chain-depth-exceeded";
         public const string Conflict = "conflict";
         public const string DestructiveChange = "destructive-change";
         public const string Forbidden = "forbidden";

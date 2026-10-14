@@ -282,6 +282,21 @@ internal static class ProblemResultFactory
         Problem(StatusCodes.Status500InternalServerError, AlvoProblemTypes.FunctionFailed, detail);
 
     /// <summary>
+    /// A causation chain deeper than the limit (508): a loop. Carries <c>"retryable": false</c>, because the same request
+    /// arrives at the same depth and is refused the same way every time.
+    /// </summary>
+    /// <param name="detail">The port's message, which names the depth and the limit and nothing caller-supplied.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult ChainDepthExceeded(string detail) =>
+        Problem(
+            StatusCodes.Status508LoopDetected,
+            AlvoProblemTypes.ChainDepthExceeded,
+            detail,
+            new Dictionary<string, object?>(StringComparer.Ordinal) { [RetryableMember] = false });
+
+    private const string RetryableMember = "retryable";
+
+    /// <summary>
     /// The refusal for a request the web server would not read — rendered at <em>its</em> status, not 500.
     /// </summary>
     /// <remarks>
@@ -465,6 +480,10 @@ internal static class ProblemResultFactory
         {
             return Conflict(exception);
         }
+        catch (AlvoChainDepthExceededException exception)
+        {
+            return ChainDepthExceeded(exception.Message);
+        }
         catch (ArgumentException exception) when (exception is not ArgumentNullException)
         {
             // Last, because it is the widest of the five: the malformed-query/payload channel.
@@ -576,11 +595,11 @@ internal static class ProblemResultFactory
             statusCode,
             type,
             string.Join(" ", violations.Select(violation => violation.Message).Distinct(StringComparer.Ordinal)),
-            violations);
+            new Dictionary<string, object?>(StringComparer.Ordinal) { ["violations"] = violations });
     }
 
     private static IResult Problem(int statusCode, string type, string detail) =>
-        Problem(statusCode, type, detail, violations: null);
+        Problem(statusCode, type, detail, extensions: null);
 
     /// <summary>
     /// The one call to <see cref="Results.Problem(string?, string?, int?, string?, string?, IDictionary{string, object?})"/>
@@ -594,14 +613,12 @@ internal static class ProblemResultFactory
     /// catalogue, is what makes that impossible to forget at a call site.
     /// </remarks>
     private static IResult Problem(
-        int statusCode, string type, string detail, IReadOnlyList<AlvoViolation>? violations) =>
+        int statusCode, string type, string detail, IDictionary<string, object?>? extensions) =>
         Results.Problem(
             detail: detail,
             statusCode: statusCode,
             type: AlvoProblemTypes.UriOf(type),
-            extensions: violations is null
-                ? null
-                : new Dictionary<string, object?>(StringComparer.Ordinal) { ["violations"] = violations });
+            extensions: extensions);
 
     /// <summary>
     /// A problem response plus the <c>WWW-Authenticate</c> challenge RFC 7235 requires on a 401. A
