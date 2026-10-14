@@ -94,7 +94,7 @@ internal sealed class AlvoEvents(IOutboxStore outbox, TimeProvider clock) : IAlv
         Time = DateTimeOffset.UnixEpoch,
         Subject = ProbeSubject,
         PartitionKey = ProbeSubject,
-        AuthType = AlvoEventAuthType.Anonymous,
+        AuthType = AlvoEventAuthType.Unauthenticated,
         CorrelationId = string.Empty,
         Data = new AlvoEventData { Record = new AlvoRecord(data) },
     };

@@ -139,7 +139,7 @@ public partial class OutboxEventFactoryTests
 
     public static TheoryData<AlvoContext, string> Callers => new()
     {
-        { AlvoContext.Anonymous, AlvoEventAuthType.Anonymous },
+        { AlvoContext.Anonymous, AlvoEventAuthType.Unauthenticated },
         { AlvoContext.System(tenant: null), AlvoEventAuthType.System },
         { Caller, AlvoEventAuthType.ApiKey },
     };

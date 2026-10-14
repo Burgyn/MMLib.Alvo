@@ -183,7 +183,7 @@ public class AlvoTemplateTests
     /// </summary>
     [Fact]
     public void An_anonymous_events_user_id_renders_as_empty_because_no_credential_acted()
-        => AlvoTemplate.Parse("[{{@user.id}}]").Render(SampleEvent() with { AuthType = AlvoEventAuthType.Anonymous, AuthId = null })
+        => AlvoTemplate.Parse("[{{@user.id}}]").Render(SampleEvent() with { AuthType = AlvoEventAuthType.Unauthenticated, AuthId = null })
             .ShouldBe("[]");
 
     /// <summary>

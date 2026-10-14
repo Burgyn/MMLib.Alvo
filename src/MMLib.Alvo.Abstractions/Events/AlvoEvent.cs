@@ -99,7 +99,7 @@ public sealed record AlvoEvent
     /// </remarks>
     public required string PartitionKey { get; init; }
 
-    /// <summary>Gets how the caller authenticated — one of <see cref="AlvoEventAuthType"/>'s three values.</summary>
+    /// <summary>Gets how the caller authenticated — one of <see cref="AlvoEventAuthType"/>'s five values.</summary>
     /// <remarks>
     /// <b>Provenance.</b> <c>authtype</c>/<c>authid</c> are the community's Auth Context extension names,
     /// and they are <em>not</em> in the v1.0.2 registry — that lists exactly five known extensions
@@ -132,8 +132,8 @@ public sealed record AlvoEvent
 
     /// <summary>Gets how many events deep the causation chain is; <c>0</c> for a direct caller change.</summary>
     /// <remarks>
-    /// Always <c>0</c> in this build, because nothing yet runs a data action <em>because of</em> an event.
-    /// The member exists now so that the wire shape does not change when automation starts setting it.
+    /// Taken from <see cref="AlvoEventProvenance.Effective"/>: the larger of the depth the caller stated and the
+    /// depth of the ambient flow, so a change made <em>because of</em> an event reports one more than its cause.
     /// </remarks>
     public int ChainDepth { get; init; }
 
@@ -142,11 +142,29 @@ public sealed record AlvoEvent
 
     /// <summary>Gets the id of this event's immediate cause, when it had one.</summary>
     /// <remarks>
-    /// <see langword="null"/> in this build, for the same reason <see cref="ChainDepth"/> is <c>0</c>. It is
+    /// Taken from <see cref="AlvoEventProvenance.Effective"/>, like <see cref="ChainDepth"/>. It is
     /// never defaulted to <see cref="Id"/>: an event with no cause must read as having none, or a consumer
     /// walking the chain finds a self-reference.
     /// </remarks>
     public string? CausationId { get; init; }
+
+    /// <summary>Gets the caller's authorization claims, <c>{"roles":[…]}</c>, or <see langword="null"/> on an envelope written before HX-01.</summary>
+    /// <remarks>
+    /// <b>Provenance.</b> The authcontext extension's <c>authclaims</c> (post-1.0.2). It lets an after-hook condition
+    /// read <c>@user.roles</c> as the caller held them <em>at the event</em>. Stripped from the default webhook body.
+    /// </remarks>
+    public string? AuthClaims { get; init; }
+
+    /// <summary>Gets the tenant the write was made in, or <see langword="null"/> for a global row or a tenantless system write.</summary>
+    /// <remarks><b>Provenance.</b> Alvo's own extension, legal by the naming rule.</remarks>
+    public string? TenantId { get; init; }
+
+    /// <summary>Gets the W3C <c>traceparent</c> the change ran under, when one was ambient.</summary>
+    /// <remarks><b>Provenance.</b> The Distributed Tracing extension, registered in v1.0.2.</remarks>
+    public string? TraceParent { get; init; }
+
+    /// <summary>Gets the W3C <c>tracestate</c> that accompanies <see cref="TraceParent"/>.</summary>
+    public string? TraceState { get; init; }
 
     /// <summary>Gets the payload: the row images and the list of fields whose value moved.</summary>
     public required AlvoEventData Data { get; init; }

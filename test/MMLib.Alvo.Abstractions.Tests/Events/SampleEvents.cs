@@ -27,6 +27,10 @@ internal static class SampleEvents
         AuthId = "key-42",
         CorrelationId = "4bf92f3577b34da6a3ce929d0e0e4736",
         CausationId = "00f067aa0ba902b7",
+        AuthClaims = """{"roles":["agent","authenticated"]}""",
+        TenantId = "8d0c9f2e-1111-4c4c-9a9a-000000000001",
+        TraceParent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        TraceState = "alvo=1",
         Data = new AlvoEventData
         {
             Record = Record(("status", "approved"), ("make", "vw")),

@@ -83,6 +83,11 @@ public class CloudEventsConformanceTests
         => AlvoEventAttributes.Extensions.ShouldNotContain(name => AlvoEventAttributes.Standard.Contains(name));
 
     [Fact]
+    public void The_envelope_now_carries_tenant_claims_and_trace_context_as_extensions()
+        => AlvoEventAttributes.Extensions.ShouldBe(
+            ["partitionkey", "payloadversion", "chaindepth", "authtype", "authid", "authclaims", "tenantid", "correlationid", "causationid", "traceparent", "tracestate"]);
+
+    [Fact]
     public Task One_real_envelope_is_pinned_verbatim() => Verify(AlvoEventJson.Write(SampleEnvelope()));
 
     private static AlvoEvent SampleEnvelope() => new()
@@ -96,6 +101,12 @@ public class CloudEventsConformanceTests
         AuthType = AlvoEventAuthType.ApiKey,
         AuthId = "key-42",
         CorrelationId = "4bf92f3577b34da6a3ce929d0e0e4736",
+        ChainDepth = 2,
+        CausationId = "019fc77e-be7b-72e8-b7fd-ffd6f6306e3d",
+        AuthClaims = """{"roles":["agent","authenticated"]}""",
+        TenantId = "8d0c9f2e-1111-4c4c-9a9a-000000000001",
+        TraceParent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        TraceState = "alvo=1",
         Data = new AlvoEventData
         {
             Record = new AlvoRecord(new Dictionary<string, object?>(StringComparer.Ordinal)

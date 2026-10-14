@@ -990,6 +990,7 @@ namespace MMLib.Alvo.Events
         public const string DefaultSource = "/alvo";
         public const string SpecVersion = "1.0";
         public AlvoEvent() { }
+        public string? AuthClaims { get; init; }
         public string? AuthId { get; init; }
         public required string AuthType { get; init; }
         public string? CausationId { get; init; }
@@ -1001,11 +1002,15 @@ namespace MMLib.Alvo.Events
         public int PayloadVersion { get; init; }
         public required string Source { get; init; }
         public required string Subject { get; init; }
+        public string? TenantId { get; init; }
         public required System.DateTimeOffset Time { get; init; }
+        public string? TraceParent { get; init; }
+        public string? TraceState { get; init; }
         public required string Type { get; init; }
     }
     public static class AlvoEventAttributes
     {
+        public const string AuthClaims = "authclaims";
         public const string AuthId = "authid";
         public const string AuthType = "authtype";
         public const string CausationId = "causationid";
@@ -1019,16 +1024,21 @@ namespace MMLib.Alvo.Events
         public const string Source = "source";
         public const string SpecVersion = "specversion";
         public const string Subject = "subject";
+        public const string TenantId = "tenantid";
         public const string Time = "time";
+        public const string TraceParent = "traceparent";
+        public const string TraceState = "tracestate";
         public const string Type = "type";
         public static System.Collections.Generic.IReadOnlyList<string> Extensions { get; }
         public static System.Collections.Generic.IReadOnlyList<string> Standard { get; }
     }
     public static class AlvoEventAuthType
     {
-        public const string Anonymous = "anon";
-        public const string ApiKey = "apikey";
+        public const string ApiKey = "api_key";
         public const string System = "system";
+        public const string Unauthenticated = "unauthenticated";
+        public const string Unknown = "unknown";
+        public const string User = "user";
     }
     public sealed class AlvoEventData : System.IEquatable<MMLib.Alvo.Events.AlvoEventData>
     {

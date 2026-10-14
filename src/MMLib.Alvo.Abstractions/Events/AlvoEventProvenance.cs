@@ -1,4 +1,7 @@
-﻿using System.Diagnostics;
+﻿using System.Buffers;
+using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
 
 namespace MMLib.Alvo.Events;
 
@@ -19,20 +22,29 @@ namespace MMLib.Alvo.Events;
 /// <para>
 /// <b>Authentication, never authorization.</b> A role is not an answer here — a subscriber has to tell "the
 /// framework did this" from "the originator did this", and a role says neither. It is also why an envelope
-/// carries no role list at all; see <c>docs/architecture/events.md</c>.
+/// carries the role set only as <c>authclaims</c>, a snapshot for after-hook conditions; see
+/// <c>docs/architecture/events.md</c>.
 /// </para>
 /// </remarks>
 public static class AlvoEventProvenance
 {
+    private const string RolesClaim = "roles";
+
     /// <summary>How <paramref name="context"/> authenticated, as <see cref="AlvoEvent.AuthType"/> spells it.</summary>
     /// <param name="context">The caller the event is emitted for.</param>
     /// <returns>One of the <see cref="AlvoEventAuthType"/> values.</returns>
     public static string AuthTypeOf(AlvoContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return context.User == _anonymousUser ? AlvoEventAuthType.Anonymous
-            : context.User == _systemUser ? AlvoEventAuthType.System
-            : AlvoEventAuthType.ApiKey;
+
+        return context.ActorKind switch
+        {
+            AlvoActorKind.Anonymous => AlvoEventAuthType.Unauthenticated,
+            AlvoActorKind.System => AlvoEventAuthType.System,
+            AlvoActorKind.ApiKey => AlvoEventAuthType.ApiKey,
+            AlvoActorKind.User => AlvoEventAuthType.User,
+            _ => AlvoEventAuthType.Unknown,
+        };
     }
 
     /// <summary>
@@ -46,7 +58,7 @@ public static class AlvoEventProvenance
     public static string? AuthIdOf(AlvoContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return context.User == _anonymousUser ? null : context.User.Value.ToString();
+        return context.User == default ? null : context.User.Value.ToString();
     }
 
     /// <summary>
@@ -89,14 +101,52 @@ public static class AlvoEventProvenance
         };
     }
 
-    /// <inheritdoc cref="AuthTypeOf"/>
-    private static readonly UserId _anonymousUser = AlvoContext.Anonymous.User;
+    /// <summary>The caller's roles as the authcontext <c>authclaims</c> JSON string, in ordinal order.</summary>
+    internal static string AuthClaimsOf(AlvoContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            writer.WriteStartArray(RolesClaim);
+            foreach (var role in context.Roles.Select(role => role.Name).Order(StringComparer.Ordinal))
+            {
+                writer.WriteStringValue(role);
+            }
 
-    /// <inheritdoc cref="AuthTypeOf"/>
-    /// <remarks>
-    /// Read off <see cref="AlvoContext.System"/> rather than restated, so the reserved id has one authority:
-    /// a second copy of that <see cref="Guid"/> would let the port move it and leave every system-made change
-    /// reported as an ordinary caller's.
-    /// </remarks>
-    private static readonly UserId _systemUser = AlvoContext.System(tenant: null).User;
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+
+        return Encoding.UTF8.GetString(buffer.WrittenSpan);
+    }
+
+    /// <summary>The role names an <c>authclaims</c> string carries, or <see langword="null"/> when it carries none readably.</summary>
+    /// <remarks>Tolerant on purpose: a dispatcher must treat a foreign or damaged value as absent — fail-closed — never throw.</remarks>
+    internal static IReadOnlyList<string>? RolesIn(string? authClaims)
+    {
+        if (string.IsNullOrWhiteSpace(authClaims))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(authClaims);
+            return RoleNames(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static List<string>? RoleNames(JsonElement root) =>
+        root.ValueKind == JsonValueKind.Object
+        && root.TryGetProperty(RolesClaim, out var roles)
+        && roles.ValueKind == JsonValueKind.Array
+        && roles.EnumerateArray().All(role => role.ValueKind == JsonValueKind.String)
+            ? [.. roles.EnumerateArray().Select(role => role.GetString()!)]
+            : null;
 }

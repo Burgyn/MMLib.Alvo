@@ -201,4 +201,46 @@ public class AlvoEventJsonTests
         ("moment", FixedTime),
         ("day", new DateOnly(2026, 8, 3)),
         ("nothing", null));
+
+    [Fact]
+    public void Every_new_provenance_attribute_round_trips_as_a_flat_member()
+    {
+        var stamped = Sample() with
+        {
+            AuthClaims = """{"roles":["agent","authenticated"]}""",
+            TenantId = "8d0c9f2e-1111-4c4c-9a9a-000000000001",
+            TraceParent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            TraceState = "alvo=1",
+        };
+
+        var written = AlvoEventJson.Write(stamped);
+
+        using var document = JsonDocument.Parse(written);
+        foreach (var attribute in new[] { "authclaims", "tenantid", "traceparent", "tracestate" })
+        {
+            document.RootElement.TryGetProperty(attribute, out _).ShouldBeTrue(attribute);
+        }
+
+        AlvoEventJson.Read(written).ShouldBe(stamped);
+    }
+
+    [Theory]
+    [InlineData("apikey", "api_key")]
+    [InlineData("anon", "unauthenticated")]
+    [InlineData("system", "system")]
+    public void A_legacy_auth_type_reads_back_normalised(string written, string expected)
+    {
+        var legacy = AlvoEventJson.Write(Sample()).Replace("\"authtype\":\"api_key\"", $"\"authtype\":\"{written}\"", StringComparison.Ordinal);
+
+        AlvoEventJson.Read(legacy).AuthType.ShouldBe(expected);
+    }
+
+    [Fact]
+    public void An_envelope_written_before_the_new_attributes_reads_them_as_absent()
+    {
+        var legacy = Sample() with { AuthClaims = null, TenantId = null, TraceParent = null, TraceState = null };
+        var read = AlvoEventJson.Read(AlvoEventJson.Write(legacy));
+
+        (read.AuthClaims, read.TenantId, read.TraceParent, read.TraceState).ShouldBe((null, null, null, null));
+    }
 }
