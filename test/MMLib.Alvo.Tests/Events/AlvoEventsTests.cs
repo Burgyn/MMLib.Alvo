@@ -267,6 +267,25 @@ public sealed class AlvoEventsTests
     }
 
     /// <summary>
+    /// A custom event is stamped exactly as a data event is: the caller's tenant, its roles as <c>authclaims</c>, and
+    /// its effective provenance.
+    /// </summary>
+    [Fact]
+    public async Task A_published_event_carries_the_callers_tenant_claims_and_provenance()
+    {
+        var store = new RecordingOutboxStore();
+        var tenant = TenantId.New();
+        var caller = Caller with { Tenant = tenant, Provenance = new AlvoProvenance { Depth = 2, CausationId = "cause" } };
+
+        await Publisher(store).PublishAsync("orders.approved", "orders/1", null, caller, TestContext.Current.CancellationToken);
+
+        var appended = store.Appended.ShouldHaveSingleItem();
+        appended.TenantId.ShouldBe(tenant.ToString());
+        appended.AuthClaims.ShouldBe(AlvoEventProvenance.AuthClaimsOf(caller));
+        (appended.ChainDepth, appended.CausationId).ShouldBe((2, "cause"));
+    }
+
+    /// <summary>
     /// <b>Two event types about one subject share a partition, because ordering is promised per subject.</b>
     /// </summary>
     /// <remarks>

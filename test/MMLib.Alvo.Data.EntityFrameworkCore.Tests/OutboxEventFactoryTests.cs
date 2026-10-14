@@ -142,7 +142,82 @@ public partial class OutboxEventFactoryTests
         { AlvoContext.Anonymous, AlvoEventAuthType.Unauthenticated },
         { AlvoContext.System(tenant: null), AlvoEventAuthType.System },
         { Caller, AlvoEventAuthType.ApiKey },
+        { Caller with { ActorKind = AlvoActorKind.User }, AlvoEventAuthType.User },
     };
+
+    /// <summary>
+    /// <c>tenantid</c> is the write's tenant: the caller's on a tenant-scoped entity, and absent on a global row or a
+    /// tenantless system write, where there is no tenant to report.
+    /// </summary>
+    [Fact]
+    public void A_scoped_write_carries_the_callers_tenant_and_a_global_one_carries_none()
+    {
+        var tenant = TenantId.New();
+        var caller = Caller with { Tenant = tenant };
+
+        OutboxEventFactory.For(Vehicles with { Tenancy = TenancyMode.Scoped }, OutboxOperation.Created, caller, Now, PostImage, null)
+            .TenantId.ShouldBe(tenant.ToString());
+        OutboxEventFactory.For(Vehicles, OutboxOperation.Created, caller, Now, PostImage, null).TenantId.ShouldBeNull();
+        OutboxEventFactory.For(Vehicles with { Tenancy = TenancyMode.Scoped }, OutboxOperation.Created, AlvoContext.System(tenant: null), Now, PostImage, null)
+            .TenantId.ShouldBeNull("a tenantless system write has no tenant to report");
+    }
+
+    /// <summary>
+    /// <c>events.exclude</c> takes a field out of both images, but <c>changed</c> is computed from the full images,
+    /// so it still says the field moved.
+    /// </summary>
+    [Fact]
+    public void Excluded_fields_leave_both_images_and_stay_named_in_changed()
+    {
+        var @event = OutboxEventFactory.For(
+            Vehicles with { EventImageExclusions = ["color"] }, OutboxOperation.Updated, Caller, Now, PostImage, PreImage);
+
+        @event.Data.Record!.Values.ShouldNotContainKey("color");
+        @event.Data.OldRecord!.Values.ShouldNotContainKey("color");
+        @event.Data.Record!["make"].ShouldBe("vw");
+        @event.Data.Changed.ShouldContain("color");
+    }
+
+    /// <summary>The caller's stated provenance — depth, correlation and causation — is what the envelope reports.</summary>
+    [Fact]
+    public void The_effective_provenance_is_stamped_on_the_event()
+    {
+        var caller = Caller with { Provenance = new AlvoProvenance { Depth = 3, CorrelationId = "flow-1", CausationId = "cause-1" } };
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, caller, Now, PostImage, null);
+
+        (@event.ChainDepth, @event.CorrelationId, @event.CausationId).ShouldBe((3, "flow-1", "cause-1"));
+    }
+
+    /// <summary>A write inside a deeper framework flow reports that flow's depth, never the shallower caller's.</summary>
+    [Fact]
+    public void An_ambient_flow_deeper_than_the_caller_sets_the_events_depth()
+    {
+        using var _ = AlvoFlow.Enter(new AlvoProvenance { Depth = 4, CausationId = "event-7" });
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, Caller, Now, PostImage, null);
+
+        (@event.ChainDepth, @event.CausationId).ShouldBe((4, "event-7"));
+    }
+
+    /// <summary>The caller's roles travel as <c>authclaims</c>, for after-hook conditions.</summary>
+    [Fact]
+    public void The_callers_roles_travel_as_auth_claims()
+        => OutboxEventFactory.For(Vehicles, OutboxOperation.Created, Caller, Now, PostImage, null)
+            .AuthClaims.ShouldBe(AlvoEventProvenance.AuthClaimsOf(Caller));
+
+    /// <summary>With no stated trace, the ambient W3C activity is the envelope's trace context and its correlation.</summary>
+    [Fact]
+    public void The_ambient_w3c_activity_is_the_events_trace_context()
+    {
+        using var activity = new System.Diagnostics.Activity("write").SetIdFormat(System.Diagnostics.ActivityIdFormat.W3C).Start();
+        activity.TraceStateString = "alvo=1";
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, Caller, Now, PostImage, null);
+
+        (@event.TraceParent, @event.TraceState).ShouldBe((activity.Id, "alvo=1"));
+        @event.CorrelationId.ShouldBe(activity.TraceId.ToString());
+    }
 
     /// <summary>
     /// The anonymous caller's reserved all-zero id means "no identity", so reporting it would assert that an

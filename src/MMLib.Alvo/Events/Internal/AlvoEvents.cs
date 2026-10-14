@@ -163,8 +163,9 @@ internal sealed class AlvoEvents(IOutboxStore outbox, TimeProvider clock) : IAlv
     {
         var now = clock.GetUtcNow();
         var id = AlvoEventId.Create(now);
+        var stamp = AlvoEnvelopeStamp.Of(context, id, context.Tenant);
 
-        return new AlvoEvent
+        return stamp.Onto(new AlvoEvent
         {
             Id = id,
             Source = AlvoEvent.DefaultSource,
@@ -172,10 +173,9 @@ internal sealed class AlvoEvents(IOutboxStore outbox, TimeProvider clock) : IAlv
             Time = now,
             Subject = subject,
             PartitionKey = PartitionKeyFor(subject),
-            AuthType = AlvoEventProvenance.AuthTypeOf(context),
-            AuthId = AlvoEventProvenance.AuthIdOf(context),
-            CorrelationId = AlvoEventProvenance.CorrelationIdOf(id),
+            AuthType = stamp.AuthType,
+            CorrelationId = stamp.CorrelationId,
             Data = new AlvoEventData { Record = data is null ? null : new AlvoRecord(data) },
-        };
+        });
     }
 }
