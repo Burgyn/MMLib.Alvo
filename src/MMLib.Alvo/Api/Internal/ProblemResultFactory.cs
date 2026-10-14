@@ -43,6 +43,9 @@ internal static class ProblemResultFactory
     /// </remarks>
     private const string ApiKeyScheme = "AlvoApiKey";
 
+    /// <summary>The extension member that marks a refusal no retry of the same request can get past.</summary>
+    private const string RetryableMember = "retryable";
+
     /// <summary>
     /// The 401 for a credential that was presented and cannot be used — unknown, revoked, expired,
     /// malformed, or naming a tenant it was not issued for. One wording for all of them, because
@@ -293,8 +296,6 @@ internal static class ProblemResultFactory
             AlvoProblemTypes.ChainDepthExceeded,
             detail,
             new Dictionary<string, object?>(StringComparer.Ordinal) { [RetryableMember] = false });
-
-    private const string RetryableMember = "retryable";
 
     /// <summary>
     /// The refusal for a request the web server would not read — rendered at <em>its</em> status, not 500.

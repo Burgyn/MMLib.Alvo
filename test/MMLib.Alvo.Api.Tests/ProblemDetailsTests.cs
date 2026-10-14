@@ -389,6 +389,22 @@ public sealed class ProblemDetailsTests
     }
 
     /// <summary>
+    /// Only the chain-depth refusal carries <c>retryable</c>: every other problem the factory can render leaves it out,
+    /// because its absence makes no claim and a stray <c>false</c> would tell an agent to give up on a retryable refusal.
+    /// </summary>
+    [Fact]
+    public async Task Only_a_chain_depth_refusal_claims_to_be_non_retryable()
+    {
+        foreach (var result in EveryFactoryResult())
+        {
+            var (status, document) = await DocumentWrittenByAsync(result);
+
+            document.ContainsKey("retryable").ShouldBe(
+                status == StatusCodes.Status508LoopDetected, $"a {status} problem must not claim retryability either way");
+        }
+    }
+
+    /// <summary>
     /// Every slug the Data API can answer with today <b>is</b> answered with, over a real endpoint — and the
     /// one that is not yet reachable is named, so the task that makes it reachable has to come back here.
     /// </summary>
@@ -740,6 +756,21 @@ public sealed class ProblemDetailsTests
         {
             return await SlugWrittenByAsync(result, services);
         }
+    }
+
+    /// <summary>The status and document <paramref name="result"/> writes.</summary>
+    private static async Task<(int Status, JsonObject Document)> DocumentWrittenByAsync(IResult result)
+    {
+        await using var services = new ServiceCollection().AddLogging().AddProblemDetails().BuildServiceProvider();
+        var context = new DefaultHttpContext { RequestServices = services };
+        using var body = new MemoryStream();
+        context.Response.Body = body;
+
+        await result.ExecuteAsync(context);
+
+        body.Position = 0;
+        var document = await JsonSerializer.DeserializeAsync<JsonObject>(body, cancellationToken: TestContext.Current.CancellationToken);
+        return (context.Response.StatusCode, document!);
     }
 
     private static async Task<string> SlugWrittenByAsync(IResult result, IServiceProvider services)

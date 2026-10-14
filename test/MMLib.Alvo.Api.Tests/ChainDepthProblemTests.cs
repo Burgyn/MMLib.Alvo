@@ -24,15 +24,6 @@ public class ChainDepthProblemTests
         document["detail"]!.GetValue<string>().ShouldBe("too deep");
     }
 
-    [Fact]
-    public async Task No_other_refusal_claims_to_be_non_retryable()
-    {
-        var (_, document) = await WrittenAsync(
-            await ProblemResultFactory.GuardAsync(() => throw new AlvoPreconditionFailedException("stale")));
-
-        document.ContainsKey("retryable").ShouldBeFalse();
-    }
-
     private static async Task<(int Status, JsonObject Document)> WrittenAsync(IResult result)
     {
         await using var services = new ServiceCollection().AddLogging().AddProblemDetails().BuildServiceProvider();
