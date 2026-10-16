@@ -68,8 +68,12 @@ One real envelope, pinned verbatim by
 {"specversion":"1.0","id":"019fc77e-be7b-72e8-b7fd-ffd6f6306e3e","source":"/alvo",
  "type":"entity.vehicles.updated","time":"2026-08-03T09:30:00.0000000\u002B00:00",
  "subject":"vehicles/3f2504e0-4f89-41d3-9a0c-0305e82c3301","datacontenttype":"application/json",
- "partitionkey":"vehicles:3f2504e0-4f89-41d3-9a0c-0305e82c3301","payloadversion":1,"chaindepth":0,
- "authtype":"apikey","authid":"key-42","correlationid":"4bf92f3577b34da6a3ce929d0e0e4736",
+ "partitionkey":"vehicles:3f2504e0-4f89-41d3-9a0c-0305e82c3301","payloadversion":1,"chaindepth":2,
+ "authtype":"api_key","authid":"key-42",
+ "authclaims":"{\u0022roles\u0022:[\u0022agent\u0022,\u0022authenticated\u0022]}",
+ "tenantid":"8d0c9f2e-1111-4c4c-9a9a-000000000001","correlationid":"4bf92f3577b34da6a3ce929d0e0e4736",
+ "causationid":"019fc77e-be7b-72e8-b7fd-ffd6f6306e3d",
+ "traceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01","tracestate":"alvo=1",
  "data":{"record":{…},"old_record":{…},"changed":["status"]}}
 ```
 
@@ -77,8 +81,8 @@ One real envelope, pinned verbatim by
 carries both images in full. Note the `\u002B` escape where the timestamp's `+` sits: the default HTML-safe
 `System.Text.Json` encoder is kept, so `<`, `>`, `&` and `+` are escaped and a stored payload rendered
 into a dashboard — or posted as a webhook body — is safe by default. The escaping is lossless, a named
-fact says so, and the visible cost is exactly that timestamp. `causationid` is absent rather than `null`,
-which is how the writer spells every absent optional attribute.)
+fact says so, and the visible cost is exactly that timestamp — and the quotes inside the `authclaims` string. An
+absent optional attribute, such as `causationid` on a direct write, is omitted rather than written as `null`.)
 
 ### Three rules decide every name and every type
 
@@ -112,13 +116,16 @@ the naming rule, and the table below is the third reader.
 | `datacontenttype` | standard | `application/json` | v1.0.2 |
 | `partitionkey` | extension | `{entity}:{rowId}` | **registered in v1.0.2** — the Partitioning extension |
 | `payloadversion` | extension | `1` | Alvo's, legal by the naming rule (14 chars) |
-| `chaindepth` | extension | `0` in this build | Alvo's |
-| `authtype` | extension | `apikey` \| `system` \| `anon` | **post-1.0.2** — `extensions/authcontext.md` on `main` |
+| `chaindepth` | extension | the write's effective depth (`AlvoEventProvenance.Effective`); refused past `Alvo:Extensions:MaxDepth` (see *Chain depth*) | Alvo's |
+| `authtype` | extension | `api_key` \| `user` \| `system` \| `unauthenticated` \| `unknown`, from `AlvoContext.ActorKind`; legacy `apikey`/`anon` normalised on read | **post-1.0.2** — `extensions/authcontext.md` on `main` |
 | `authid` | extension | the credential's id; **absent** for an anonymous caller | **post-1.0.2** — `extensions/authcontext.md` |
-| `correlationid` | extension | the ambient W3C trace id, else the event's own id | **post-1.0.2** — `extensions/correlation.md` |
-| `causationid` | extension | **always absent** in this build | **post-1.0.2** — `extensions/correlation.md` |
-| `data.record` | payload | the post-image, **unmasked**; absent on a delete | Alvo's |
-| `data.old_record` | payload | the pre-image, **unmasked**; absent on a create | Alvo's |
+| `authclaims` | extension | the caller's roles as a JSON string, `{"roles":[…]}`, ordinal order; **stripped from the default webhook body** | **post-1.0.2** — `extensions/authcontext.md` |
+| `tenantid` | extension | the write's tenant; **absent** for a global row and a tenantless system write | Alvo's |
+| `correlationid` | extension | the stated correlation id, else the trace id of the stated or ambient W3C `traceparent`, else the event's own id | **post-1.0.2** — `extensions/correlation.md` |
+| `causationid` | extension | from the effective provenance; absent for a direct write | **post-1.0.2** — `extensions/correlation.md` |
+| `traceparent`, `tracestate` | extension | the stated W3C trace context, else the ambient W3C `Activity`'s; absent when there is none | **registered in v1.0.2** — the Distributed Tracing extension |
+| `data.record` | payload | the post-image, **unmasked**, minus the entity's `events.exclude` fields; absent on a delete | Alvo's |
+| `data.old_record` | payload | the pre-image, **unmasked**, minus the entity's `events.exclude` fields; absent on a create | Alvo's |
 | `data.changed` | payload | the fields whose value moved, ordinally ordered | Alvo's |
 
 **The provenance split matters for citation, not for style.** In v1.0.2, `documented-extensions.md`
@@ -589,6 +596,13 @@ bounded by who declares what. An after-hook `webhook` delivers hidden fields to 
 the same descriptor by the same author** as the `hidden` rule. Per-endpoint field projection retires
 exactly this half and leaves the two above untouched.
 
+**`events.exclude` is a different tool, and it narrows the envelope itself** (HX-01). An entity may name fields its
+event images leave out — personal data, large columns — so they never reach the outbox at all
+(`EntitySchema.EventImageExclusions`). It does not contradict the two reasons above, because it is the author's
+explicit trade: `data.changed` still names an excluded field, so `changed(field)` keeps measuring a move, and apply
+refuses an after-hook condition or template that would read the field's absent value. `id`, `tenant_id` and the
+framework-managed columns key the event and cannot be excluded.
+
 `webhooks.endpoints` is **never caller-supplied** — that sentence is about the webhook endpoint and about
 nothing else in the action set. It is *not* true of `email.to`: that slot takes `{{...}}` placeholders and
 `AlvoTemplate`'s own remarks suggest `{{new.owner_email}}`, so **anyone who can write a record chooses the
@@ -789,8 +803,8 @@ mechanism that covers a process that died.
 **There is no dispatcher-wide caller, and the claim that there was one was wrong in both directions.** A
 hook condition's `@user.id` is resolved **per event, from the envelope's own `authid`**
 (`EventSubscriptions.CallerOf`), because the actor an author means is the credential that made the change
-and not whoever happens to be draining the queue. The two references an envelope cannot answer are refused
-when the hook is compiled. What a shared `AlvoContext.System(tenant: null)` actually did:
+and not whoever happens to be draining the queue. Since HX-01, `@tenant.id` and `@user.roles` are resolved
+the same way, from `tenantid` and `authclaims` (below). What a shared `AlvoContext.System(tenant: null)` actually did:
 
 | Reference | Resolved to | Consequence |
 |---|---|---|
@@ -807,10 +821,24 @@ null for *every* operator, and `Not` negates the collapsed boolean — so
 `Uuid`, so the CEL type checker refuses the string comparison first. The reachable shape is a row's own
 tenant column, which is how a rule writes it anyway.)
 
-So `AfterHookCompiler` now refuses `@tenant.id` and `@user.roles` in an after-hook condition **by name**,
-in the same words `TemplatePlaceholder` refuses them in a template — one authority,
+So PR5a made `AfterHookCompiler` refuse `@tenant.id` and `@user.roles` in an after-hook condition **by name**,
+in the same words `TemplatePlaceholder` refused them in a template — one authority,
 `EnvelopeProvenance`. The rule is symmetric and states itself: **resolve what the envelope can answer,
-refuse what it cannot.** The refusal lives at the *after-hook* compile site and **not** in
+refuse what it cannot.**
+
+**HX-01 (2026-10-14) gave the envelope both values, so the refusal is gone (#153).** `tenantid` carries the
+write's tenant and `authclaims` the caller's roles, and `EventSubscriptions.CallerOf` resolves `@tenant.id` and
+`@user.roles` from them, as the writer held them *at the event*. The rule above still decides what happens when an
+envelope cannot answer — now per event rather than per hook: a hook whose condition reads `@tenant.id` is **not
+selected** for an event without `tenantid` (a global row, a tenantless system write, an envelope written before
+HX-01), and one reading `@user.roles` is not selected when `authclaims` is absent, unreadable, or names no role at
+all (Alvo never writes an empty list, so `{"roles":[]}` is treated as unreadable). The gate is the same
+`RequiredContext` shape as for `@user.id`, recorded at Debug. A template renders either value empty on such an
+envelope, as `{{@user.id}}` does for an anonymous write; `{{@user.roles}}` renders the names comma-joined in
+ordinal order. An author-declared template may render `{{@user.roles}}`; only the **default** webhook body strips
+`authclaims`, because nobody chose to post it.
+
+The PR5a refusal lived at the *after-hook* compile site and **not** in
 `CelTypeChecker`'s profile table, because the reason belongs to the envelope and not to the profile: PR5b's
 before-hooks compile in the same `Condition` profile and run inside the request, where both names have a
 real caller to resolve against.
@@ -885,6 +913,38 @@ duplicate delivery per tick rather than at-least-once delivery. Every options re
 configuration key, its `Alvo__…` environment spelling, and a value that would have worked;
 `ValidateDataAnnotations()` is deliberately **not** used, because a `[Range]` message names the property
 rather than the key and would add a second, worse message to every refusal.
+
+## Chain depth
+
+**One counter bounds every loop a hook, handler or timer can start** (HX-01, spec 2026-10-14 X3). Every write and
+every publish reports a depth — `chaindepth` on its event — and it is the larger of what the caller states in
+`AlvoContext.Provenance.Depth` and what the ambient `AlvoFlow` carries (`AlvoEventProvenance.Effective`), so code can
+raise the depth it reports and never lower it. A depth **greater than** `Alvo:Extensions:MaxDepth`
+(`AlvoExtensionOptions.MaxDepth`, default **8**, validated at start-up to be at least 1) is refused with
+`AlvoChainDepthExceededException` before anything is read or written; a depth equal to the limit is allowed. The
+default fits the longest legitimate chain the design names (hook → write → hook → event → handler → write uses 5).
+
+**Where it is enforced in HX-01.** One internal authority, `AlvoChainDepthLimit`, built by the core from the options
+and resolved by the drivers:
+
+- the EF driver's write entry points — `CreateAsync`, `UpdateAsync`, `ReplaceAsync`, `DeleteAsync` and the batch
+  writes — in `EfAlvoData`;
+- `InMemoryAlvoData`, which has no configuration to read and enforces the default (8);
+- `IAlvoEvents.PublishAsync`, after the name guard and before an id is minted, so a refused publish leaves no trace.
+
+The provider contract suite (`AlvoDataAdversarialTests`) asserts the refusal on every write face, so an `IAlvoData`
+implementer owes it too: it is the port's seventh exception family.
+
+**The answer is `508 chain-depth-exceeded`, and it is never retryable.** `ProblemResultFactory.GuardAsync`, where the
+Data API maps every `IAlvoData` family, and `AlvoExceptionHandler`, for a refusal escaping an Alvo route, both answer
+through `ProblemResultFactory.ChainDepthExceeded`; the document carries `"retryable": false`, the only problem that
+carries the member. A host's own route keeps its own 500, as for every other family. Over HTTP the refusal is
+reachable today only through an explicitly stated `Provenance.Depth`: HX-01 ships no production caller of
+`AlvoFlow.Enter` — HX-03 (deliveries) and HX-07 (the write unit) add them.
+
+**The limit, stated: depth follows the execution context.** `AlvoFlow` is an `AsyncLocal`. Work a host hands to its
+own queue or background loop, or runs with execution-context flow suppressed, leaves its reach and starts again at
+the depth its `AlvoContext` states — the same boundary `Activity.Current` has.
 
 ## Publishing a custom application event
 
@@ -977,12 +1037,10 @@ premise of refusing a host the `entity.` namespace, so the two must not be able 
   creates. Note also that a *duplicate publish* is a different problem from *duplicate delivery*: delivery is
   at-least-once by design and the envelope's `id` is the consumer's dedup key, which does not help when the
   two events have different ids. Whoever gives `PublishAsync` an idempotency key owes #115 with it.
-- **It carries no tenant, and that quietly enlarges #153.** `PublishAsync` takes an `AlvoContext` — which
-  *does* carry `Tenant` — and never reads it, because the envelope has nowhere to put it. That is the same
-  gap the wildcard ruling is built on, so it is consistent rather than new; the consequence worth recording is
-  that **#153 now has two emit paths to populate, not one.** Whoever gives the envelope a tenant must thread
-  it through here as well, or this becomes the single path whose events stay unattributed — and it would stay
-  that way silently, because nothing subscribes to a custom event to notice.
+- **It carries the caller's tenant as `tenantid`.** (Until HX-01 it carried none, and this bullet recorded
+  that #153 had two emit paths to populate.) Both paths now build their provenance through one
+  `AlvoEnvelopeStamp`, so a custom event's `authtype`, `authclaims`, `tenantid`, correlation and depth are
+  derived exactly as a data event's are.
 - **It is not ordered per entity key.** The key is `custom.event:{subject}` — a **fixed** marker, not the
   event's type — so every event about one subject shares one partition, which is the per-subject ordering
   this API promises, under the same one-dispatcher, one-millisecond conditions as everything else. An earlier
@@ -1013,13 +1071,10 @@ isolation of rules a watch-out. This document set the two against each other and
 them one way or the other: implement the matcher **with every subscription scoped to the envelope's tenant
 and a named adversarial cross-tenant fact**, or refuse `*` at apply until that exists.
 
-**The first branch is unavailable, and that is measured rather than argued.** `AlvoEvent` carries `authid`
-and **no tenant attribute** — `AlvoContext` has a `Tenant`, so the tenant is known at *emit* and dropped at
-the envelope boundary, which makes it unknowable at *delivery*, the only place a subscription is evaluated.
-So a matcher shipped today could be scoped by nothing, and the adversarial fact the ruling demands would have
-no tenant on either side of its comparison: it would assert nothing while looking like coverage. Giving the
-envelope a tenant is a public-API and wire-format change with a compatibility question for the outbox
-payloads this build already wrote — **#153** owns exactly that.
+**The first branch is still unavailable.** The envelope now carries `tenantid` (HX-01), but the scoped matcher
+and its adversarial cross-tenant suite are not built — **#372** owns both, and until then `*` stays refused.
+(When PR5a took this ruling the envelope had no tenant at all, so a matcher could have been scoped by nothing;
+#153 owned that half, and HX-01 closed it.)
 
 **So `*` is refused at apply**, in both slots the schema types as `$defs/eventPattern`
 (`automation.*.trigger.event`, `functions.*.trigger.event`), on both passes: the typed pass in
@@ -1062,7 +1117,7 @@ Each line with the issue or the PR that owns it.
 | **Before-hooks in `InMemoryAlvoData`** | **not built** — the public in-memory reference runs the policy engine but no hook pipeline, so a host testing against the double sees a `reject` not refuse and a `mutate` not apply. Deliberate (the contract suite is inherited by the two relational drivers, which have a transaction to run a hook in), and recorded as an **owed obligation** rather than a mere absence: deviation 85 |
 | **Automation** (`event` + `schedule` triggers), cron, and cron's distributed lock | PR5b's automation half — still open (the lock: deviation 74) |
 | ~~**`Publish`** (custom application events) and its security ruling~~ | **done** — PR5b-2; see *Publishing a custom application event* above |
-| ~~**Wildcard subscription** (`entity.orders.*`) and its tenant scoping~~ | **ruled** — PR5b-2 refuses `*` at apply; the matcher itself waits on **#153**, see *The wildcard ruling* above |
+| ~~**Wildcard subscription** (`entity.orders.*`) and its tenant scoping~~ | **ruled** — PR5b-2 refuses `*` at apply; the matcher itself waits on **#372** (the tenant half, #153, landed in HX-01), see *The wildcard ruling* above |
 | **HMAC signing / `secretRef`** on a delivery | 7.1 (webhook management) |
 | **SMTP**, and a mail service in compose | not scheduled; `email` is console-only in F3 |
 | **A DLQ and a redelivery UI** | 7.1 |
@@ -1111,30 +1166,20 @@ these live.
   subscribe to `order.approved`, and the right fix is a **designed namespace**, once. PR5b-2 shipped the
   guarantee without the namespace, deliberately.
 - ~~**Wildcard subscription.**~~ **Ruled — PR5b-2 took the second branch.** `*` is refused at apply, on both
-  passes, because the first branch was unavailable: `AlvoEvent` carries no tenant attribute, so nothing at
+  passes, because the first branch was unavailable: `AlvoEvent` carried no tenant attribute then, so nothing at
   delivery could scope a subscription and the adversarial cross-tenant fact would have had no tenant on
-  either side of its comparison. The matcher itself waits on **#153**, which is also the bullet below. See
+  either side of its comparison. HX-01 added `tenantid`; the matcher and its cross-tenant suite are **#372**'s. See
   *The wildcard ruling* above, and deviation 86 for why this refuses a descriptor that is merely ahead of the
   build.
-- **`@tenant.id` and `@user.roles` cannot resolve in a template, and the addendum's own table promises
-  `@tenant.id`.** Measured: `AlvoEvent` carries `authid` and *no* tenant attribute and *no* roles, so
-  `TemplatePlaceholder.Roots` is `new`/`old`/`event`/`@user` and both names are refused **by name**
-  rather than as an unknown root — they are real Alvo CEL context references, so "unknown root" would
-  misdescribe why they fail. `@tenant.id` is refused because answering it from the row's own `tenant_id`
-  would answer a **different question** (which tenant the *row* belongs to, not which tenant the *caller*
-  was in — and an `AlvoContext.System` write has no tenant at all). `@user.roles` is refused because the
-  envelope carries authentication and never authorization. Giving `@tenant.id` a real answer is a
-  **public-API and wire-format** change — a new attribute on `AlvoEvent`, its `AlvoEventJson` member, and
-  compatibility for the outbox payloads this build already wrote — so it is deliberately not a PR5a fix,
-  and whoever takes it owns that compatibility question. Filed as **#153**; the identity-claim half
-  (`@user.claims`, which is what an `email` recipient actually needs) is the capability question **#146**
-  raises and **#37** (RBAC) owns. One adjacent consequence is recorded there too: an after-hook **CEL
-  condition** *may* name `@tenant.id`, and against the dispatcher's tenant-less context the interpreter's
-  null rule makes every comparison against it `false` — so such a hook never fires. Fail-closed, and silent.
-- **`AlvoContext` and provenance.** `chaindepth` is `0` and `causationid` is absent in PR5a because
-  nothing yet runs a data action *because of* an event. PR5b needs a way to thread both into an
-  `entity.update` action's write, which is either an `AlvoContext` change (a public type in
-  `Abstractions`) or a distinct provenance parameter. That shape is PR5b's decision.
+- ~~**`@tenant.id` and `@user.roles` cannot resolve in a template or an after-hook condition.**~~ **Done — HX-01
+  (#153).** `@tenant.id` and `@user.roles` resolve from the envelope (`tenantid`, `authclaims`) since HX-01; a
+  hook reading one that its envelope lacks is not selected, and a template renders it empty. The identity-claim
+  half (`@user.claims`, which an `email` recipient actually needs) is still the capability question **#146**
+  raises and **#37** (RBAC) owns.
+- ~~**`AlvoContext` and provenance.**~~ **Done — HX-01.** See spec
+  `docs/superpowers/specs/2026-10-14-host-extensibility-design.md` §4.6: `AlvoContext.Provenance`
+  (`AlvoProvenance`), `AlvoContext.ActorKind`, the ambient `AlvoFlow`, and one depth counter, merged by
+  `AlvoEventProvenance.Effective`.
 - **Do not derive an idempotency key per event id.** Data actions' keys were to be *"derived from the
   event id"*, but nothing prunes `alvo_idempotency` (**#115**), so the table would grow with **event**
   volume rather than with keyed creates. `AlvoIdempotency` is also honoured on create only and an
@@ -1229,10 +1274,11 @@ adapter implements the queue, not the dispatcher.
 
 | Assembly | Files |
 |---|---|
-| `MMLib.Alvo.Abstractions/Events/` | `AlvoEvent`, `AlvoEventId`, `AlvoEventAttributes`, `AlvoEventJson`, `IOutboxStore`, `IEmailSender` — all public |
+| `MMLib.Alvo.Abstractions/Events/` | `AlvoEvent`, `AlvoEventId`, `AlvoEventAttributes`, `AlvoEventJson`, `AlvoEventProvenance`, `IOutboxStore`, `IEmailSender` — all public; `AlvoEnvelopeStamp`, the one derivation of an envelope's provenance both emit paths share — internal |
+| `MMLib.Alvo.Abstractions/Data/` | `AlvoChainDepthLimit` — internal, the one depth limit every write and publish face enforces |
 | `MMLib.Alvo.Abstractions/Rules/` | `IBeforeHookRunner` — public, the port a storage driver calls in-transaction |
 | `MMLib.Alvo.Data.EntityFrameworkCore/` | `Internal/OutboxTable`, `Internal/OutboxEventFactory`, `EfCoreOutboxStore`; the four before-hook call sites in `Internal/EfAlvoData` |
-| `MMLib.Alvo/Events/` | `AlvoEventOptions`, `Setup`; and `Internal/`: `OutboxDispatcher`, `EventSubscriptions`, `EventActionExecutor`, `WebhookDelivery`, `ConsoleEmailSender`, `AlvoTemplate`, `JsonataSlot`, `AfterHookCompiler`, `ActionVocabulary`, `AlvoEventMetrics`, `EventLog`, `AlvoEventOptionsConfiguration` |
+| `MMLib.Alvo/Events/` | `AlvoEventOptions`, `Setup`; and `Internal/`: `OutboxDispatcher`, `EventSubscriptions`, `EventActionExecutor`, `WebhookDelivery`, `ConsoleEmailSender`, `AlvoTemplate`, `JsonataSlot`, `AfterHookCompiler`, `AfterImagePhase` (#325: the row-image rule for after-hook conditions and templates), `ActionVocabulary`, `AlvoEventMetrics`, `EventLog`, `AlvoEventOptionsConfiguration` |
 | `MMLib.Alvo/Rules/` | `BeforeHooks` (`EntityBeforeHooks`, `CompiledBeforeHook`, `CompiledMutation`) and `Internal/`: `BeforeHookCompiler`, `BeforeHookRunner` — all `internal` |
 | `MMLib.Alvo.Testing/Events/` | `OutboxStoreContractTests` + `IOutboxStoreWorld`, `AlvoEventCriteriaTests` + `IAlvoEventWorld` — the suites a provider inherits |
 | `MMLib.Alvo.Testing/Data/` | `AlvoDataBeforeHookTests` + `IAlvoDataBeforeHookWorld` — the before-hook suite every engine inherits |
@@ -1268,7 +1314,7 @@ line, and the failure would surface as missing downstream state rather than as a
 | kill between commit and publish → delivered after restart; kill mid-action → the action repeats | `KilledHostRecoveryTests`, against a real child process, exit code **137** on Unix / **-1** on Windows — neither reachable by the host's own exits (0, 78) |
 | what the in-process harness does **not** prove | `OutboxRecoveryTests`' own name and remarks; the two files exist separately so neither can be mistaken for the other |
 | **no log line carries a webhook URL** that could be a secret | `EventActionExecutorTests.No_log_line_carries_a_webhook_url_that_could_be_a_secret` — the absence is asserted only after the same run proved the secret-shaped segment was on the wire, over the message **and** the attached exception; the transport's own lines (`System.Net.Http.HttpClient.*`) by `WebhookClientLoggingTests`, over the real registration at `Trace` — messages, structured state and scopes |
-| **`@tenant.id`/`@user.roles` are refused** in an after-hook condition, positive and negated form alike | `AfterHookCompilerTests.A_condition_naming_provenance_the_envelope_lacks_is_refused_at_apply`, with `A_condition_reading_user_id_compiles_and_records_that_it_needs_an_actor` as the control that keeps it from being "refuse every `@`" |
+| **`@tenant.id`/`@user.roles` resolve from the envelope** (HX-01, #153; until then they were refused at apply), and an envelope lacking the value selects no hook that reads it | `AfterHookCompilerTests.A_condition_reading_tenant_or_roles_applies_and_records_what_it_reads`; `EventSubscriptionsTests.A_conditions_tenant_is_the_envelopes_tenant`, `An_envelope_without_a_tenant_selects_no_hook_that_reads_one`, `A_conditions_roles_are_the_ones_the_caller_held_at_the_event`, `An_envelope_without_readable_claims_selects_no_hook_that_reads_roles`; `AlvoTemplateTests.The_tenant_and_roles_placeholders_resolve_and_render_from_the_envelope` |
 | a condition's **`@user.id` is the envelope's actor**, and an actorless event selects no hook that reads it | `EventSubscriptionsTests` — three facts, including the non-vacuity control that a hook reading no caller value is still selected |
 | **`email.data` is refused** whatever it carries | `UnhonouredJsonataTests.An_email_data_slot_is_refused_at_apply_whatever_it_carries` (both spellings) + the `UnhonouredFeatures` slot baseline |
 | an endpoint **URL is validated at apply**: absolute, and `https` unless loopback | `AfterHookCompilerTests`, two theories — the refusals and the deliverable-shapes control |
