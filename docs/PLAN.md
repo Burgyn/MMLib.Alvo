@@ -81,6 +81,9 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   `entity_records` store that lets ERP end-users create their own record
   types at runtime without a table per entity (spec §2.1).
   ([milestone #8](https://github.com/Burgyn/MMLib.Alvo/milestone/8))
+  **Host extensibility** — host C# in the write pipeline, events, commands, time and reads, as a linear stack
+  HX-01…HX-19 ([epic #370](https://github.com/Burgyn/MMLib.Alvo/issues/370)), designed in
+  `docs/superpowers/specs/2026-10-14-host-extensibility-design.md`. HX-01 (envelope provenance) is the first PR.
 
 ## 3a. What closed F4
 

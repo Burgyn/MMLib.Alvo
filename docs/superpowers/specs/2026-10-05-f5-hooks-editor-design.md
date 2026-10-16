@@ -347,6 +347,12 @@ phase rule for `changed`. The form offers none of these, and
 accepts them. Apply's laxness is a core defect, filed as #325: such a filter reads an image the event lacks, so it passes
 every event without a word.
 
+> **Update 2026-10-14 — fixed by HX-01.** Apply now refuses all four (and the same image rule for template
+> placeholders), so the conformance fact moved: those rows sit in
+> `What_the_table_withholds_before_the_commit_apply_refuses`, and the after-point theory,
+> `What_the_table_withholds_after_the_commit_apply_accepts`, now pins role rows after the commit, which apply accepts
+> since #153. The text above is the record of what was measured on 2026-10-05.
+
 ### 7.2 Generator
 
 `ConditionText.Generate(GuidedCondition)` substitutes each row into its table format and joins rows with ` && ` (all)
@@ -712,7 +718,7 @@ Controller rulings and implementation findings:
 - **Conformance:** no cell of the table was refused, so nothing was narrowed. One finding: **the after-points are laxer
   than the table.** Apply accepts `old.` at afterCreate, `new.` at afterDelete, and `changed(f)` at both. The form
   never offers them, `What_the_table_withholds_after_the_commit_apply_still_accepts` pins that apply still accepts them,
-  and the core defect is **#325** (§7.1).
+  and the core defect is **#325** (§7.1). *(Fixed by HX-01, 2026-10-14 — see the note in §7.1.)*
 
 ### Follow-ups still open
 
@@ -721,7 +727,7 @@ Controller rulings and implementation findings:
 - Enum membership at apply, **#308**. It is fixed on `feat/cel-functions`. When that reaches this code, add the
   both-refuse fact (C7) and re-run W1.
 - Object payloads, **#311**.
-- After-hook conditions that read an image the point lacks, **#325** (new, core).
+- ~~After-hook conditions that read an image the point lacks, **#325** (new, core).~~ Fixed by HX-01 (2026-10-14).
 - A `Position` caret for the check (slice A deferral); field-to-field rows in the guided form; functions in the guided
   table once Condition admits calls (slice C).
 

@@ -505,6 +505,37 @@ carry the attributes (closes #153); an envelope without them still answers "abse
   (`email.to`/`subject`/`body`, webhook `payload`) that reads an excluded field via `new.`/`old.`; the default
   webhook body simply omits the fields. HX-04 adds the same refusal for extensions (E7).
 
+*Rulings taken while HX-01 was built (2026-10-14), recorded so a later reader can tell them from oversights:*
+- **`events.exclude` items** use the field-name grammar `^[a-z][a-z0-9_]{0,62}$`, not `$defs/identifier`, whose `-`
+  no field can hold. The descriptor model gains public `EntityDescriptor.Events` + `EntityEvents { Exclude }` (§5).
+  Excluded-field refusals dedupe by field: one refusal per field per slot.
+- **Correlation id.** When a caller states a W3C `traceparent` but no correlation id, `correlationid` is that
+  `traceparent`'s trace id, so the correlation and the trace context an envelope carries name one flow. A non-W3C
+  ambient `Activity` is ignored (its placeholder trace id would put every such event in one flow).
+- **`{{@user.roles}}` in an author-declared template is allowed** (a webhook `payload`, an email template); only the
+  **default** webhook body strips `authclaims`, because nobody chose to post it.
+- **Templates.** `{{@tenant.id}}` renders `tenantid`; `{{@user.roles}}` renders the role names comma-joined in
+  ordinal order; both render empty on an envelope without them, as `{{@user.id}}` does for an anonymous write.
+- **An empty `{"roles":[]}` is unreadable** and fails closed like an absent or malformed `authclaims`: Alvo never
+  writes an empty role list, and the context's stand-in role must not decide a condition.
+- **The #325 image rule covers template placeholders as well as conditions** (`email.to`, a named template's
+  `subject`/`body`, webhook `payload`). A shared named template is checked against each referencing hook's point and
+  blamed at that hook's `/action/template` pointer, because only that hook's point makes it unanswerable.
+- **508 mapping sites.** `ProblemResultFactory.GuardAsync` (where the Data API maps every `IAlvoData` family) and
+  `AlvoExceptionHandler` (a refusal escaping an Alvo route) both answer through
+  `ProblemResultFactory.ChainDepthExceeded`. A host's own route keeps its own 500, as for every other family
+  (`FailedInsideAlvo`). The document carries `"retryable": false`; no other problem carries the member. The slug is
+  reachable over HTTP today only through an explicit `Provenance.Depth`.
+- **`InMemoryAlvoData`** enforces the default limit (8); it has no configuration to read.
+- **Assistant awareness** of `events.exclude` and of `@tenant.id`/`@user.roles` in after-hooks (the
+  `alvo-descriptor-*` skills) is HX-04's, with the catalog and the `alvo-descriptor-hooks` region it already owns
+  (§4.13).
+- **Cross-tenant suite (HX-01 acceptance 6)** covers each tenant writing its own rows, with a mirror hook proving
+  `@tenant.id` resolves; a tenantless system write cannot be added there, because the scoped entity's tenant guard
+  refuses it before any event exists.
+- **Follow-up, not in HX-01:** an apply-time warning when a hook on a **global** entity reads `@tenant.id` — its
+  events never carry `tenantid`, so the hook can never fire.
+
 ### 4.8 Delivery model
 
 **Tables** (identical DDL; created by the PR named):
@@ -744,7 +775,7 @@ Roslyn dependency is needed.
 | `AlvoEventProvenance.Effective(AlvoContext)` | Abstractions / Events | 01 | reads internal `AlvoFlow` |
 | `AlvoChainDepthExceededException` | Abstractions / Data | 01 | seventh `IAlvoData` exception family → 508 |
 | `AlvoExtensionOptions` (`Alvo:Extensions`: `MaxDepth`; `ExposeTypeNames` added in 04) | core / `MMLib.Alvo.Extensions` | 01 | sealed class, validated at start |
-| `EntitySchema.EventImageExclusions` | Abstractions / Schema | 01 | init, default `[]` |
+| `EntitySchema.EventImageExclusions` | Abstractions / Schema | 01 | init, default `[]`; descriptor model `EntityDescriptor.Events` + `EntityEvents { Exclude }` (Abstractions / Descriptor), init |
 | `AlvoProblemTypes.ChainDepthExceeded` | core / Api | 01 | 508, non-retryable; `AlvoEventAuthType` normalised legacy reader |
 | `AlvoTestHost`, `AlvoHookRecorder`, `AlvoDrainNotQuiescentException` | TestHost | 02 | new package |
 | `IAlvoEventPump`, `AlvoDrainResult`, `AlvoEventDispatchMode`, `AlvoEventOptions.DispatchMode` | core / Events | 02 | |
