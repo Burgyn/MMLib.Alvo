@@ -118,7 +118,7 @@ the naming rule, and the table below is the third reader.
 | `payloadversion` | extension | `1` | Alvo's, legal by the naming rule (14 chars) |
 | `chaindepth` | extension | the write's effective depth (`AlvoEventProvenance.Effective`); refused past `Alvo:Extensions:MaxDepth` (see *Chain depth*) | Alvo's |
 | `authtype` | extension | `api_key` \| `user` \| `system` \| `unauthenticated` \| `unknown`, from `AlvoContext.ActorKind`; legacy `apikey`/`anon` normalised on read | **post-1.0.2** — `extensions/authcontext.md` on `main` |
-| `authid` | extension | the credential's id; **absent** for an anonymous caller | **post-1.0.2** — `extensions/authcontext.md` |
+| `authid` | extension | the id of the user the caller acts as (`AlvoContext.User`), not the API key's id (#344); **absent** for an anonymous caller | **post-1.0.2** — `extensions/authcontext.md` |
 | `authclaims` | extension | the caller's roles as a JSON string, `{"roles":[…]}`, ordinal order; **stripped from the default webhook body** | **post-1.0.2** — `extensions/authcontext.md` |
 | `tenantid` | extension | the write's tenant; **absent** for a global row and a tenantless system write | Alvo's |
 | `correlationid` | extension | the stated correlation id, else the trace id of the stated or ambient W3C `traceparent`, else the event's own id | **post-1.0.2** — `extensions/correlation.md` |

@@ -127,16 +127,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `apikey`. A webhook receiver or an `IOutboxStore` consumer comparing the old strings must update. Rows already in
   the outbox keep their bytes and are normalised when read. Code comparing `AlvoEventAuthType.Anonymous` no longer
   compiles — use `Unauthenticated`.
-- **After-hook conditions refuse a row image their event lacks** (#325). Such a condition used to pass every event,
-  because a missing image reads null and `changed()` reports every field as moved:
+- **After-hook conditions refuse a row image their event lacks** (#325). A missing image reads null, so a positive
+  comparison against it never matched, while a negated one (`!=`, `!(…)`) matched every event, and `changed()`
+  reported every field that held a value as moved — the filter silently decided by an absent row:
   - `old.<field>` in `afterCreate` — read `new.<field>`;
   - `new.<field>` or a bare field in `afterDelete` — read `old.<field>`;
   - `changed(<field>)` in `afterCreate` or `afterDelete` — compare the image the point has, or move the hook to
     `afterUpdate`.
 
-  This is refused at apply **and at boot**: a stored or file descriptor that applied before now leaves the project
-  `Failed` at start-up (readiness answers 503), with the condition's JSON pointer and a fix in the log; a dashboard or
-  Management API apply is refused the same way.
+  This is refused at apply **and at boot**. A host reading a descriptor file (`Alvo:DescriptorPath`, `FromDescriptor`)
+  that carries one refuses to start, with the condition's JSON pointer and a fix in the log (in the standalone image
+  that exit is still code 139, #340). A stored descriptor that applied before leaves its project `Failed` at start-up:
+  the process stays up and readiness answers 503. A dashboard or Management API apply is refused the same way.
 - **After-hook templates refuse a row image their event lacks** (#325, same reach). A placeholder reading
   `{{new.<field>}}` in an `afterDelete` hook or `{{old.<field>}}` in an `afterCreate` hook — in `email.to`, a named
   template's `subject` or `body`, or a webhook's `payload` — used to render empty on every delivery and is now

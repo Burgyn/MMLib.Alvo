@@ -102,7 +102,7 @@ placeholder, and the design note's wording is tracked in [#344](https://github.c
 | `authtype`, `authid` | `api_key`, `user`, `system`, `unauthenticated` or `unknown`, and the id of the user who made the change (absent for an anonymous caller). |
 | `authclaims` | The caller's roles, `{"roles":[…]}`, for after-hook conditions. The sample is the event as stored: the default webhook body leaves `authclaims` out, while a `payload` you write may still render `{{@user.roles}}`. |
 | `tenantid` | The tenant the write was made in; absent on a global entity. |
-| `correlationid` | The trace id of the request that made the change, or the event's own id when there was none. |
+| `correlationid` | The correlation id the caller stated, else the trace id of the request that made the change, else the event's own id. |
 | `traceparent`, `tracestate` | The W3C trace context of the write, when one was active. |
 | `data.record`, `data.old_record` | The row after and before the write, minus the entity's [`events.exclude`](/extending/event-envelope/#keep-fields-out-of-the-images) fields. `old_record` is absent on a create, `record` on a delete. |
 | `data.changed` | The fields whose value moved. |

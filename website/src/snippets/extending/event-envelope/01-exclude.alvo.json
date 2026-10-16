@@ -2,7 +2,7 @@
   "$schema": "https://alvo.dev/schema/v1/project.json",
   "apiVersion": "alvo.dev/v1",
   "name": "help-desk",
-  "auth": { "roles": ["admin", "agent"] },
+  "auth": { "roles": ["agent"] },
   "tenancy": { "enabled": true },
   "webhooks": {
     "endpoints": {
