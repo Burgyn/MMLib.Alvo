@@ -34,7 +34,10 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// changes nothing); otherwise it compares the previous and current values of <c>f</c> with a
 /// null-safe equality distinct from the comparison null rule above — <see langword="null"/> versus
 /// <see langword="null"/> is unchanged, <see langword="null"/> versus a value is changed. Two present
-/// values it cannot compare fail closed on the hook path, the only profile <c>changed</c> compiles in.
+/// values it cannot compare fail closed on the hook path, the only profile <c>changed</c> compiles in. An
+/// after-hook is the one exception: it is handed its event's <c>data.changed</c> list, and <c>changed(f)</c> is
+/// answered from that list rather than from the images, because <c>events.exclude</c> strips a field from both
+/// images while the list still names it (spec E7).
 /// </para>
 /// <para>
 /// <b>Numeric widening.</b> A record's values arrive weakly typed, so a numeric comparison widens
@@ -104,7 +107,30 @@ internal static class CelInterpreter
     /// <c>old.</c> field references and <c>changed(...)</c>.
     /// </param>
     /// <param name="context">The caller/tenant context <c>@user</c>/<c>@tenant</c> resolve against.</param>
-    public static bool EvaluatePredicate(CompiledExpression expression, AlvoRecord current, AlvoRecord? previous, AlvoContext context)
+    public static bool EvaluatePredicate(CompiledExpression expression, AlvoRecord current, AlvoRecord? previous, AlvoContext context) =>
+        EvaluateVerdict(expression, current, previous, context, changed: null);
+
+    /// <summary>
+    /// Evaluates an after-hook condition's boolean verdict exactly as <see cref="EvaluatePredicate"/> does, except
+    /// that <c>changed(f)</c> is answered from the event's own <c>data.changed</c> list rather than from a
+    /// comparison of the two images.
+    /// </summary>
+    /// <param name="expression">The compiled Condition expression.</param>
+    /// <param name="current">The event's post-image.</param>
+    /// <param name="previous">The event's pre-image, or <see langword="null"/> on a create.</param>
+    /// <param name="context">The caller/tenant context <c>@user</c>/<c>@tenant</c> resolve against.</param>
+    /// <param name="changed">The fields the event names as moved. With no <paramref name="previous"/> row,
+    /// <c>changed(f)</c> is <see langword="false"/> regardless.</param>
+    internal static bool EvaluateCondition(
+        CompiledExpression expression, AlvoRecord current, AlvoRecord? previous, AlvoContext context, IReadOnlyCollection<string> changed)
+    {
+        ArgumentNullException.ThrowIfNull(changed);
+
+        return EvaluateVerdict(expression, current, previous, context, changed);
+    }
+
+    private static bool EvaluateVerdict(
+        CompiledExpression expression, AlvoRecord current, AlvoRecord? previous, AlvoContext context, IReadOnlyCollection<string>? changed)
     {
         ArgumentNullException.ThrowIfNull(expression);
         ArgumentNullException.ThrowIfNull(current);
@@ -112,7 +138,7 @@ internal static class CelInterpreter
 
         try
         {
-            var state = new EvalState(current, previous, context, failClosed: FailsClosed(expression));
+            var state = new EvalState(current, previous, context, failClosed: FailsClosed(expression), changed: changed);
             return Truth(Evaluate(expression.Root, state), WholeCondition, state.FailClosed, WholeConditionReason);
         }
 #pragma warning disable CA1031
@@ -448,7 +474,9 @@ internal static class CelInterpreter
             return false;
         }
 
-        return !ValuesEqual(state.Previous[changed.FieldName], state.Current[changed.FieldName], state.FailClosed);
+        return state.Changed is { } moved
+            ? moved.Contains(changed.FieldName, StringComparer.Ordinal)
+            : !ValuesEqual(state.Previous[changed.FieldName], state.Current[changed.FieldName], state.FailClosed);
     }
 
     private static bool AsBoolean(object? value) => value is true;
@@ -779,7 +807,12 @@ internal static class CelInterpreter
         : null;
 
     private readonly struct EvalState(
-        AlvoRecord current, AlvoRecord? previous, AlvoContext? context, DateTimeOffset? now = null, bool failClosed = false)
+        AlvoRecord current,
+        AlvoRecord? previous,
+        AlvoContext? context,
+        DateTimeOffset? now = null,
+        bool failClosed = false,
+        IReadOnlyCollection<string>? changed = null)
     {
         public AlvoRecord Current { get; } = current;
 
@@ -803,5 +836,11 @@ internal static class CelInterpreter
         /// point that does not ask for it — <see cref="EvaluateScalar"/>, <see cref="EvaluateMask"/> — cannot throw.
         /// </summary>
         public bool FailClosed { get; } = failClosed;
+
+        /// <summary>
+        /// Gets the fields an after-hook's event names as moved, or <see langword="null"/> on every other entry point,
+        /// where <c>changed(f)</c> compares the two images instead.
+        /// </summary>
+        public IReadOnlyCollection<string>? Changed { get; } = changed;
     }
 }

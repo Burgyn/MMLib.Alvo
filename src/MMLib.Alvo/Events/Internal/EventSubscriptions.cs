@@ -161,8 +161,7 @@ internal static class EventSubscriptions
 
         try
         {
-            return evaluator.Evaluate(
-                hook.Condition, @event.Data.Record ?? AlvoRecord.Empty, @event.Data.OldRecord, caller.Context);
+            return Holds(hook.Condition, @event.Data, evaluator, caller.Context);
         }
         catch (CelFunctionException failure)
         {
@@ -176,6 +175,23 @@ internal static class EventSubscriptions
             return false;
         }
     }
+
+    /// <summary>
+    /// Evaluates <paramref name="condition"/> over the event's images, answering <c>changed(f)</c> from
+    /// <see cref="AlvoEventData.Changed"/> whenever the evaluator can (spec E7).
+    /// </summary>
+    /// <remarks>
+    /// The list is the envelope's one account of what moved: it is computed from the full images before
+    /// <c>events.exclude</c> strips them, so it still names an excluded field the stripped images would read as
+    /// <see langword="null"/> on both sides — which would make <c>changed(f)</c> never hold and its negation hold on
+    /// every update. An evaluator that cannot take the list (a host's own <see cref="IPredicateEvaluator"/>) compares
+    /// the images, exactly as the published port documents.
+    /// </remarks>
+    private static bool Holds(
+        CompiledExpression condition, AlvoEventData data, IPredicateEvaluator evaluator, AlvoContext context) =>
+        evaluator is IChangeListPredicateEvaluator changeAware
+            ? changeAware.Evaluate(condition, data.Record ?? AlvoRecord.Empty, data.OldRecord, data.Changed, context)
+            : evaluator.Evaluate(condition, data.Record ?? AlvoRecord.Empty, data.OldRecord, context);
 
     /// <summary>
     /// Whether <paramref name="event"/> carries every caller value <paramref name="hook"/>'s condition reads; when it

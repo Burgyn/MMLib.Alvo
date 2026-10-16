@@ -95,6 +95,40 @@ public sealed class EventSubscriptionsTests : IDisposable
         => Matching(CatalogConditionedOnWinning, Updated(stage: "won", was: "won")).ShouldBeEmpty(
             "changed(stage) must be false when the stage did not move");
 
+    /// <summary>
+    /// A field <c>events.exclude</c> keeps out of both images is still named by <c>data.changed</c>, and
+    /// <c>changed(...)</c> is answered from that list (spec E7), so it measures the move the images no longer show.
+    /// </summary>
+    /// <remarks>
+    /// Diffing the stripped images would read the field as <see langword="null"/> on both sides: <c>changed</c>
+    /// would never hold, and its negation would hold on every update — the #325 failure class.
+    /// </remarks>
+    [Theory]
+    [InlineData("changed(salary)", true)]
+    [InlineData("!changed(salary)", false)]
+    public void An_excluded_field_the_change_list_names_reads_as_changed(string condition, bool selected)
+        => Matching(Catalog(new EntityHooks { AfterUpdate = [Hook(condition)] }), Unimaged(changed: ["salary"]))
+            .Count.ShouldBe(selected ? 1 : 0);
+
+    /// <summary>The mirror: the change list omits the excluded field, so it reads as unchanged.</summary>
+    [Theory]
+    [InlineData("changed(salary)", false)]
+    [InlineData("!changed(salary)", true)]
+    public void An_excluded_field_the_change_list_omits_reads_as_unchanged(string condition, bool selected)
+        => Matching(Catalog(new EntityHooks { AfterUpdate = [Hook(condition)] }), Unimaged(changed: []))
+            .Count.ShouldBe(selected ? 1 : 0);
+
+    /// <summary>
+    /// A field both images carry is answered from the change list too: the list is the envelope's one account of
+    /// what moved, and the images agree with it on every event the driver writes.
+    /// </summary>
+    [Theory]
+    [InlineData("changed(stage)", true)]
+    [InlineData("!changed(stage)", false)]
+    public void A_field_the_images_carry_is_answered_from_the_change_list(string condition, bool selected)
+        => Matching(Catalog(new EntityHooks { AfterUpdate = [Hook(condition)] }), Updated(stage: "won", was: "lead"))
+            .Count.ShouldBe(selected ? 1 : 0);
+
     [Fact]
     public void A_hook_with_no_condition_is_always_selected()
         => Matching(CatalogWithAHookOnEveryPoint, Event("entity.deals.updated")).ShouldHaveSingleItem();
@@ -546,6 +580,7 @@ public sealed class EventSubscriptionsTests : IDisposable
             new FieldSchema { Name = "note", Type = FieldType.String, MaxLength = 200, Nullable = true },
             new FieldSchema { Name = "qty", Type = FieldType.Integer, Nullable = true },
             new FieldSchema { Name = "zero", Type = FieldType.Integer, Nullable = true },
+            new FieldSchema { Name = "salary", Type = FieldType.Integer, Nullable = true },
             new FieldSchema { Name = "tenant_id", Type = FieldType.Uuid, Nullable = true },
         ],
     };
@@ -564,6 +599,13 @@ public sealed class EventSubscriptionsTests : IDisposable
         record: Record(("stage", stage)),
         oldRecord: Record(("stage", was)),
         changed: string.Equals(stage, was, StringComparison.Ordinal) ? [] : ["stage"]);
+
+    /// <summary>One update of a deal whose images lack <c>salary</c>, as <c>events.exclude</c> writes them.</summary>
+    private static AlvoEvent Unimaged(IReadOnlyList<string> changed) => Event(
+        "entity.deals.updated",
+        record: Record(("stage", "lead")),
+        oldRecord: Record(("stage", "lead")),
+        changed: changed);
 
     private static AlvoEvent Event(
         string type,

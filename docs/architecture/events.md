@@ -599,8 +599,8 @@ exactly this half and leaves the two above untouched.
 **`events.exclude` is a different tool, and it narrows the envelope itself** (HX-01). An entity may name fields its
 event images leave out — personal data, large columns — so they never reach the outbox at all
 (`EntitySchema.EventImageExclusions`). It does not contradict the two reasons above, because it is the author's
-explicit trade: `data.changed` still names an excluded field, so `changed(field)` keeps measuring a move, and apply
-refuses an after-hook condition or template that would read the field's absent value. `id`, `tenant_id` and the
+explicit trade: `data.changed` still names an excluded field, and an after-hook's `changed(field)` is answered from that
+list rather than from the images, so it keeps measuring a move; apply refuses an after-hook condition or template that would read the field's absent value. `id`, `tenant_id` and the
 framework-managed columns key the event and cannot be excluded.
 
 `webhooks.endpoints` is **never caller-supplied** — that sentence is about the webhook endpoint and about

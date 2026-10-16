@@ -60,6 +60,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingEventLog.cs" Link="_shared/RecordingEventLog.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingMeterListener.cs" Link="_shared/RecordingMeterListener.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingWebhookReceiver.cs" Link="_shared/RecordingWebhookReceiver.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/AlvoEventExclusionDispatchTests.cs" Link="_shared/AlvoEventExclusionDispatchTests.cs" />
   </ItemGroup>
 
   <!-- The 10 000-event chaos criterion, shared with MMLib.Alvo.Data.Sqlite.Tests — see the same link there. The
