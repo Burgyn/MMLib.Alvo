@@ -599,8 +599,10 @@ exactly this half and leaves the two above untouched.
 **`events.exclude` is a different tool, and it narrows the envelope itself** (HX-01). An entity may name fields its
 event images leave out — personal data, large columns — so they never reach the outbox at all
 (`EntitySchema.EventImageExclusions`). It does not contradict the two reasons above, because it is the author's
-explicit trade: `data.changed` still names an excluded field, and an after-hook's `changed(field)` is answered from that
-list rather than from the images, so it keeps measuring a move; apply refuses an after-hook condition or template that would read the field's absent value. `id`, `tenant_id` and the
+explicit trade: `data.changed` still names an excluded field, and the built-in evaluator answers an after-hook's
+`changed(field)` from that list rather than from the images, so it keeps measuring a move (a host that replaces
+`IPredicateEvaluator` still gets the image diff, #398); apply refuses an after-hook condition or template that would
+read the field's absent value. `id`, `tenant_id` and the
 framework-managed columns key the event and cannot be excluded. The exclusion is applied when the event is written:
 an event already in the outbox when `events.exclude` is applied — still queued, or waiting out a retry backoff — keeps
 the fields it was written with and is delivered with them.

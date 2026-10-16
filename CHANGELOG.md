@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of `data.record` and `data.old_record`, for personal data or large columns; `data.changed` still names them. Every
   name must be a declared field, and `id`, `tenant_id` and the framework-managed columns are refused. Apply refuses an
   after-hook condition or template that reads an excluded field (one refusal per field; `changed(field)` stays
-  allowed, and is answered from `data.changed`). The exclusion applies to events written after the apply; an event
+  allowed, and the built-in evaluator answers it from `data.changed`; #398 tracks a host-replaced `IPredicateEvaluator`). The exclusion applies to events written after the apply; an event
   already in the outbox keeps the fields it was written with. The dashboard's field editor sets it with *exclude from
   event images*.
 - **A causation-chain limit: `508 chain-depth-exceeded`.** A write or publish deeper than `Alvo:Extensions:MaxDepth`
