@@ -54,6 +54,9 @@ working:
 condition or template that reads an excluded field — it would read null on every event. In the dashboard, the field
 editor's **exclude from event images** checkbox, under *Events*, sets the same list.
 
+The exclusion is applied when an event is written. An event already in the outbox when you apply `events.exclude` —
+still queued, or waiting to retry a failed delivery — keeps the fields it was written with, and is delivered with them.
+
 ## Older envelopes
 
 Events written before this release say `apikey` and `anon`; they are read as `api_key` and `unauthenticated`, and they

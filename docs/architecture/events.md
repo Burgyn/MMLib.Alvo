@@ -601,7 +601,9 @@ event images leave out — personal data, large columns — so they never reach 
 (`EntitySchema.EventImageExclusions`). It does not contradict the two reasons above, because it is the author's
 explicit trade: `data.changed` still names an excluded field, and an after-hook's `changed(field)` is answered from that
 list rather than from the images, so it keeps measuring a move; apply refuses an after-hook condition or template that would read the field's absent value. `id`, `tenant_id` and the
-framework-managed columns key the event and cannot be excluded.
+framework-managed columns key the event and cannot be excluded. The exclusion is applied when the event is written:
+an event already in the outbox when `events.exclude` is applied — still queued, or waiting out a retry backoff — keeps
+the fields it was written with and is delivered with them.
 
 `webhooks.endpoints` is **never caller-supplied** — that sentence is about the webhook endpoint and about
 nothing else in the action set. It is *not* true of `email.to`: that slot takes `{{...}}` placeholders and
