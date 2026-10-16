@@ -1,0 +1,31 @@
+---
+title: Extending in code
+description: When the descriptor cannot say it, write C# in your host — through the same pipeline and guarantees the descriptor's own hooks use. What exists today, and what lands next.
+sidebar:
+  order: 0
+---
+
+Alvo's descriptor covers most backend logic: rules, computed fields, rollups, before- and after-hooks. When it cannot
+express something, an embedded host writes C# — and that code joins the **same write pipeline, events and guarantees**
+the descriptor's hooks use.
+
+Start with [Where logic goes](/extending/where-logic-goes/): the first question is not *how*, but *where*.
+
+## What exists in this build
+
+- [Custom CEL functions](/guides/custom-cel-functions/) — pure, synchronous, in the write's transaction.
+- [Call Alvo from your endpoints](/guides/call-from-endpoints/) — `IAlvoData` and `IAlvoEvents.PublishAsync`.
+- [The event envelope](/extending/event-envelope/) — what every event carries: who acted, in which tenant and flow,
+  and which fields it leaves out.
+
+## What lands next
+
+Event handlers, write hooks in three phases, commands, timers and schedules arrive one release at a time; each page
+appears here when its feature ships. The design is public:
+[host extensibility](https://github.com/Burgyn/MMLib.Alvo/issues/370).
+
+## One limit already enforced
+
+Every write and every published event counts how deep it sits in one causation chain. Past
+[`Alvo:Extensions:MaxDepth`](/reference/configuration/#alvoextensions) (default 8) it is refused with
+[`508 chain-depth-exceeded`](/reference/problem-types/#chain-depth-exceeded), which is never worth retrying.

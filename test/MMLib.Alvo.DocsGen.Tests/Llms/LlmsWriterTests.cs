@@ -32,12 +32,13 @@ public class LlmsWriterTests
             new("examples", string.Empty, "Examples", "E.", int.MaxValue, "."),
             new("concepts/cel", "concepts", "CEL in Alvo", "C.", int.MaxValue, "."),
             new("data-api/conventions", "data-api", "Data API conventions", "D.", 1, "."),
+            new("extending/event-envelope", "extending", "The event envelope", "Ev.", 2, "."),
             _guide,
         ];
 
         var index = LlmsWriter.Index(pages, []);
 
-        string[] order = ["## Start here", "## Guides", "## Examples", "## Concepts", "## Reference", "## Project", "## Optional"];
+        string[] order = ["## Start here", "## Guides", "## Extending in code", "## Examples", "## Concepts", "## Reference", "## Project", "## Optional"];
         order.Select(heading => index.IndexOf(heading, StringComparison.Ordinal)).ShouldBeInOrder();
         index.IndexOf("[For coding agents]", StringComparison.Ordinal).ShouldBeLessThan(index.IndexOf("[Why Alvo]", StringComparison.Ordinal));
         index.ShouldContain("- [Data API — example (vehicle-registry)](https://alvo.burgyn.online/reference/data-api/): ");

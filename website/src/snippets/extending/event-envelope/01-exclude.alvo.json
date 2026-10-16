@@ -1,0 +1,37 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "help-desk",
+  "auth": { "roles": ["admin", "agent"] },
+  "tenancy": { "enabled": true },
+  "webhooks": {
+    "endpoints": {
+      "ops-board": { "url": "https://ops.example.com/hooks/alvo", "secretRef": "ops-board-signing-key" }
+    }
+  },
+  "entities": {
+    "tickets": {
+      "audit": true,
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 120 },
+        "status": { "type": "enum", "values": ["open", "closed"], "default": "open" },
+        "reporter_phone": { "type": "string", "maxLength": 40 }
+      },
+      "events": { "exclude": ["reporter_phone"] },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'agent' in @user.roles",
+        "update": "'agent' in @user.roles"
+      },
+      "hooks": {
+        "afterUpdate": [
+          {
+            "condition": "changed(status) && new.status == 'closed' && !('admin' in @user.roles)",
+            "action": { "type": "webhook", "endpoint": "ops-board" }
+          }
+        ]
+      }
+    }
+  }
+}

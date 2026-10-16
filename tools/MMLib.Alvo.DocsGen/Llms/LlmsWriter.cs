@@ -29,6 +29,7 @@ internal static class LlmsWriter
     [
         ("Start here", ["start-here"]),
         ("Guides", ["guides"]),
+        ("Extending in code", ["extending"]),
         ("Examples", ["examples"]),
         ("Concepts", ["concepts"]),
         ("Reference", ["reference", "data-api"]),
@@ -45,7 +46,7 @@ internal static class LlmsWriter
         "data-api/conventions",
     ];
 
-    private static readonly string[] _fullTextSections = ["start-here", "guides", "examples", "concepts"];
+    private static readonly string[] _fullTextSections = ["start-here", "guides", "extending", "examples", "concepts"];
 
     internal static string Index(IReadOnlyList<ContentPage> pages, IReadOnlyList<(string Name, string Description)> skills)
     {
@@ -71,7 +72,7 @@ internal static class LlmsWriter
 
         return index.Append("## Optional\n\n")
             .Append(Line("Full text", $"{SiteLinks.SiteUrl}{SiteLinks.BasePath}/llms-full.txt",
-                "The start-here, guide, example and concept pages plus the descriptor, CEL, problem-type, capability, configuration and limits reference as one file."))
+                "The start-here, guide, extending, example and concept pages plus the descriptor, CEL, problem-type, capability, configuration and limits reference as one file."))
             .ToString();
     }
 
