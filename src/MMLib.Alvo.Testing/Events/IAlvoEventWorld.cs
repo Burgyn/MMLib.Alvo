@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Descriptor;
+﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Testing.Events;
@@ -24,6 +25,9 @@ namespace MMLib.Alvo.Testing.Events;
 /// </remarks>
 public interface IAlvoEventWorld : IAsyncDisposable
 {
+    /// <summary>The data port the backend writes through, for a suite that writes as several callers.</summary>
+    IAlvoData Data { get; }
+
     /// <summary>Creates one row through the data port, and answers its id.</summary>
     /// <param name="status">The row's initial <c>status</c>.</param>
     Task<Guid> CreateAsync(string status);

@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Event envelopes carry provenance** (HX-01, #378). Every event now carries `authclaims` (the caller's roles,
+  `{"roles":[…]}`), `tenantid` (the write's tenant; absent for global rows and tenantless system writes), and
+  `traceparent`/`tracestate` when a valid W3C trace is active (a value outside the W3C grammar, or a `tracestate` over
+  512 characters, is left out); `chaindepth` and `causationid` come from the new
+  `AlvoContext.Provenance`, merged with the framework's ambient flow by `AlvoEventProvenance.Effective`. When a caller
+  states a `traceparent` but no correlation id, `correlationid` is that trace's id. A custom event published through
+  `IAlvoEvents` carries the same attributes, `tenantid` included. `AlvoContext.ActorKind` says how the caller
+  authenticated; `MMLib.Alvo.Identity` sets it to `User` for a signed-in person.
+- **After-hook conditions and templates read `@tenant.id` and `@user.roles`** (#153), resolved from the envelope's
+  `tenantid` and `authclaims` as the writer held them at the event. A hook whose condition reads one its event lacks
+  — a global row, a tenantless system write, an event written before this release, an `authclaims` that is absent,
+  unreadable or names no role — is not selected (fail closed). `{{@tenant.id}}` and `{{@user.roles}}` (role names
+  comma-joined, ordinal order) render in templates, empty on such an envelope. The default webhook body leaves
+  `authclaims` out; a `payload` the author writes may render `{{@user.roles}}`.
+- **`events.exclude` keeps fields out of event images.** `entities.<e>.events.exclude` (descriptor model
+  `EntityDescriptor.Events` / `EntityEvents`, schema model `EntitySchema.EventImageExclusions`) leaves named fields out
+  of `data.record` and `data.old_record`, for personal data or large columns; `data.changed` still names them. Every
+  name must be a declared field, and `id`, `tenant_id` and the framework-managed columns are refused. Apply refuses an
+  after-hook condition or template that reads an excluded field (one refusal per field; `changed(field)` stays
+  allowed, and the built-in evaluator answers it from `data.changed`; #398 tracks a host-replaced `IPredicateEvaluator`). The exclusion applies to events written after the apply; an event
+  already in the outbox keeps the fields it was written with. The dashboard's field editor sets it with *exclude from
+  event images*.
+- **A causation-chain limit: `508 chain-depth-exceeded`.** A write or publish deeper than `Alvo:Extensions:MaxDepth`
+  (default 8, at least 1; new `AlvoExtensionOptions`) is refused with `AlvoChainDepthExceededException`, answered as
+  `508` problem type `chain-depth-exceeded` with `"retryable": false`. Enforced by the EF driver's write entry points,
+  `InMemoryAlvoData` (at the default) and `IAlvoEvents.PublishAsync`.
+- **Docs: *Extending in code*** — where host logic goes, and the event envelope attribute by attribute.
+
 - **The standalone image is published to GitHub Container Registry as `ghcr.io/burgyn/alvo`**, for
   `linux/amd64` and `linux/arm64` (`.github/workflows/image.yml`). Every push to `main` publishes
   `:edge` and `:sha-<7>`; a `v*` tag publishes `:<major>.<minor>.<patch>`, `:<major>.<minor>` and
@@ -95,6 +123,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the docs site's tutorial and the source of the README's "See it" section.
 
 ### Changed (breaking)
+
+- **`authtype` speaks the CloudEvents authcontext vocabulary** (HX-01). `AlvoEventAuthType.ApiKey` is now `api_key`
+  (was `apikey`), `Unauthenticated` (`unauthenticated`) replaces the removed `Anonymous` (`anon`), and `User` (`user`)
+  and `Unknown` (`unknown`) are new; a person signed in through `MMLib.Alvo.Identity` is now reported as `user`, not
+  `apikey`. A webhook receiver or an `IOutboxStore` consumer comparing the old strings must update. Rows already in
+  the outbox keep their bytes and are normalised when read. Code comparing `AlvoEventAuthType.Anonymous` no longer
+  compiles — use `Unauthenticated`.
+- **After-hook conditions refuse a row image their event lacks** (#325). A missing image reads null, so a positive
+  comparison against it never matched, while a negation (`!(…)`) matched every event, and `changed()`
+  reported every field that held a value as moved — the filter silently decided by an absent row:
+  - `old.<field>` in `afterCreate` — read `new.<field>`;
+  - `new.<field>` or a bare field in `afterDelete` — read `old.<field>`;
+  - `changed(<field>)` in `afterCreate` or `afterDelete` — compare the image the point has, or move the hook to
+    `afterUpdate`.
+
+  This is refused at apply **and at boot**. A host reading a descriptor file (`Alvo:DescriptorPath`, `FromDescriptor`)
+  that carries one refuses to start, with the condition's JSON pointer and a fix in the log (in the standalone image
+  that exit is still code 139, #340). A stored descriptor that applied before leaves its project `Failed` at start-up:
+  the process stays up and readiness answers 503. A dashboard or Management API apply is refused the same way.
+- **After-hook templates refuse a row image their event lacks** (#325, same reach). A placeholder reading
+  `{{new.<field>}}` in an `afterDelete` hook or `{{old.<field>}}` in an `afterCreate` hook — in `email.to`, a named
+  template's `subject` or `body`, or a webhook's `payload` — used to render empty on every delivery and is now
+  refused. A named template shared by several hooks is checked against each, and the refusal is reported at the
+  referencing hook's `/action/template` pointer.
+- **`IAlvoData` has a seventh exception family**, `AlvoChainDepthExceededException`. An implementer of the port must
+  refuse a write whose effective depth exceeds the limit (the provider contract suite now asserts it).
 
 - **`IAlvoManagement` gains `GetCelFunctionsAsync`** (slice C1). A caller is unaffected. An
   implementer or decorator of the interface must add the member, for example by delegating to the
@@ -312,6 +366,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the warning is dropped silently — a startup crash traded for a silent drop.
 
 ### Changed
+
+- **The #325 refusal reports each offending reference on its own, in new words.** One refusal per distinct row-image
+  reference and per distinct `changed()` call, each naming the point and the image it lacks; anything matching the
+  old error text must update.
 
 - **The README is rewritten, and NuGet packages carry a readme of their own.** The repository `README.md` now
   leads with what Alvo is, a runnable example and links into the docs site. nuget.org renders no Mermaid,
@@ -693,6 +751,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comment-style rules).
 
 ### Fixed
+
+- **The architecture guard's banned-member list named a type that does not exist** (#397). The application-role ban
+  named `MMLib.Alvo.Identity.Role`, so every suite asserting it passed vacuously. Each banned name is now resolved
+  against Abstractions by reflection, and the Identity and Testing suites run the whole security-core list.
 
 - **A runtime apply now changes the Data API's fields at once, not after a restart** (#353). Every generated
   endpoint used to keep the entity's fields from the moment its route was built. Rules followed a

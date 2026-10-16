@@ -14,7 +14,7 @@ namespace MMLib.Alvo.Admin.Components.Schema;
 /// name, an index over a missing column. The <see cref="EntityReferences"/> pattern, one level down.
 /// </para>
 /// <para>
-/// <b>The places, from the frozen schema:</b> the entity's <c>indexes[].fields</c>; its <c>rules</c>; its fields'
+/// <b>The places, from the frozen schema:</b> the entity's <c>indexes[].fields</c>; its <c>events.exclude</c>; its <c>rules</c>; its fields'
 /// <c>computed</c>, <c>hidden</c>/<c>readOnly</c>/<c>validation</c> CEL and <c>default.$cel</c>; its hooks'
 /// <c>condition</c>, <c>mutate</c> keys and <c>$cel</c> values, and the <c>{{new.…}}</c>/<c>{{old.…}}</c>
 /// placeholders of its after-actions; and every rollup whose <c>from</c> is this entity — its <c>field</c>,
@@ -48,6 +48,7 @@ internal static class FieldReferences
         if (entities[entity] is JsonObject declared)
         {
             Indexes(declared, at);
+            EventExclusions(declared, at);
             Rules(declared, at);
             FieldExpressions(declared, at);
             Hooks(declared, at);
@@ -71,6 +72,16 @@ internal static class FieldReferences
                 Replace(fields, at);
                 at.Add(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{at.Entity}.indexes[{i}]"), blocks: true);
             }
+        }
+    }
+
+    /// <summary>The entity's <c>events.exclude</c>: carried by a rename, and blocking a removal (apply refuses a name that is no field).</summary>
+    private static void EventExclusions(JsonObject declared, Site at)
+    {
+        if (declared["events"]?["exclude"] is JsonArray excluded && excluded.Any(name => Is(name, at.Field)))
+        {
+            Replace(excluded, at);
+            at.Add($"{at.Entity}.events.exclude", blocks: true);
         }
     }
 

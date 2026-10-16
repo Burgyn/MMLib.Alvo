@@ -139,10 +139,213 @@ public partial class OutboxEventFactoryTests
 
     public static TheoryData<AlvoContext, string> Callers => new()
     {
-        { AlvoContext.Anonymous, AlvoEventAuthType.Anonymous },
+        { AlvoContext.Anonymous, AlvoEventAuthType.Unauthenticated },
         { AlvoContext.System(tenant: null), AlvoEventAuthType.System },
         { Caller, AlvoEventAuthType.ApiKey },
+        { Caller with { ActorKind = AlvoActorKind.User }, AlvoEventAuthType.User },
     };
+
+    /// <summary>
+    /// <c>tenantid</c> is the write's tenant: the caller's on a tenant-scoped entity, and absent on a global row or a
+    /// tenantless system write, where there is no tenant to report.
+    /// </summary>
+    [Fact]
+    public void A_scoped_write_carries_the_callers_tenant_and_a_global_one_carries_none()
+    {
+        var tenant = TenantId.New();
+        var caller = Caller with { Tenant = tenant };
+
+        OutboxEventFactory.For(Vehicles with { Tenancy = TenancyMode.Scoped }, OutboxOperation.Created, caller, Now, PostImage, null)
+            .TenantId.ShouldBe(tenant.ToString());
+        OutboxEventFactory.For(Vehicles, OutboxOperation.Created, caller, Now, PostImage, null).TenantId.ShouldBeNull();
+        OutboxEventFactory.For(Vehicles with { Tenancy = TenancyMode.Scoped }, OutboxOperation.Created, AlvoContext.System(tenant: null), Now, PostImage, null)
+            .TenantId.ShouldBeNull("a tenantless system write has no tenant to report");
+    }
+
+    /// <summary>
+    /// <c>events.exclude</c> takes a field out of both images, but <c>changed</c> is computed from the full images,
+    /// so it still says the field moved.
+    /// </summary>
+    [Fact]
+    public void Excluded_fields_leave_both_images_and_stay_named_in_changed()
+    {
+        var @event = OutboxEventFactory.For(
+            Vehicles with { EventImageExclusions = ["color"] }, OutboxOperation.Updated, Caller, Now, PostImage, PreImage);
+
+        @event.Data.Record!.Values.ShouldNotContainKey("color");
+        @event.Data.OldRecord!.Values.ShouldNotContainKey("color");
+        @event.Data.Record!["make"].ShouldBe("vw");
+        @event.Data.Changed.ShouldContain("color");
+    }
+
+    /// <summary>The caller's stated provenance — depth, correlation and causation — is what the envelope reports.</summary>
+    [Fact]
+    public void The_effective_provenance_is_stamped_on_the_event()
+    {
+        var caller = Caller with { Provenance = new AlvoProvenance { Depth = 3, CorrelationId = "flow-1", CausationId = "cause-1" } };
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, caller, Now, PostImage, null);
+
+        (@event.ChainDepth, @event.CorrelationId, @event.CausationId).ShouldBe((3, "flow-1", "cause-1"));
+    }
+
+    /// <summary>A write inside a deeper framework flow reports that flow's depth, never the shallower caller's.</summary>
+    [Fact]
+    public void An_ambient_flow_deeper_than_the_caller_sets_the_events_depth()
+    {
+        using var _ = AlvoFlow.Enter(new AlvoProvenance { Depth = 4, CausationId = "event-7" });
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, Caller, Now, PostImage, null);
+
+        (@event.ChainDepth, @event.CausationId).ShouldBe((4, "event-7"));
+    }
+
+    /// <summary>The caller's roles travel as <c>authclaims</c>, for after-hook conditions.</summary>
+    [Fact]
+    public void The_callers_roles_travel_as_auth_claims()
+        => OutboxEventFactory.For(Vehicles, OutboxOperation.Created, Caller, Now, PostImage, null)
+            .AuthClaims.ShouldBe(AlvoEventProvenance.AuthClaimsOf(Caller));
+
+    /// <summary>With no stated trace, the ambient W3C activity is the envelope's trace context and its correlation.</summary>
+    [Fact]
+    public void The_ambient_w3c_activity_is_the_events_trace_context()
+    {
+        using var activity = new System.Diagnostics.Activity("write").SetIdFormat(System.Diagnostics.ActivityIdFormat.W3C).Start();
+        activity.TraceStateString = "alvo=1";
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, Caller, Now, PostImage, null);
+
+        (@event.TraceParent, @event.TraceState).ShouldBe((activity.Id, "alvo=1"));
+        @event.CorrelationId.ShouldBe(activity.TraceId.ToString());
+    }
+
+    /// <summary>A stated <c>traceparent</c> with no stated correlation makes its trace id the correlation id.</summary>
+    [Fact]
+    public void A_stated_traceparent_without_a_correlation_names_the_flow()
+    {
+        var caller = Caller with { Provenance = new AlvoProvenance { TraceParent = StatedTraceParent } };
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, caller, Now, PostImage, null);
+
+        (@event.TraceParent, @event.CorrelationId).ShouldBe((StatedTraceParent, StatedTraceId));
+    }
+
+    /// <summary>A stated <c>traceparent</c> that is not valid W3C names no flow, so the event's own id does.</summary>
+    /// <param name="traceParent">A malformed or all-zero traceparent.</param>
+    [Theory]
+    [InlineData("not-a-traceparent")]
+    [InlineData("01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")]
+    [InlineData("00-4BF92F3577B34DA6A3CE929D0E0E4736-00f067aa0ba902b7-01")]
+    [InlineData("00-00000000000000000000000000000000-00f067aa0ba902b7-01")]
+    public void An_invalid_stated_traceparent_falls_back_to_the_events_own_id(string traceParent)
+    {
+        var caller = Caller with { Provenance = new AlvoProvenance { TraceParent = traceParent } };
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, caller, Now, PostImage, null);
+
+        @event.CorrelationId.ShouldBe(@event.Id.ToString());
+    }
+
+    /// <summary>A stated trace context is the caller's own word and beats whatever W3C activity happens to be ambient.</summary>
+    [Fact]
+    public void A_stated_traceparent_beats_an_ambient_w3c_activity()
+    {
+        using var activity = new System.Diagnostics.Activity("write").SetIdFormat(System.Diagnostics.ActivityIdFormat.W3C).Start();
+        activity.TraceStateString = "ambient=1";
+        var caller = Caller with { Provenance = new AlvoProvenance { TraceParent = StatedTraceParent, TraceState = "stated=1" } };
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, caller, Now, PostImage, null);
+
+        (@event.TraceParent, @event.TraceState, @event.CorrelationId).ShouldBe((StatedTraceParent, "stated=1", StatedTraceId));
+    }
+
+    /// <summary>
+    /// A stated <c>traceparent</c> outside the W3C grammar is dropped, and its <c>tracestate</c> with it — W3C discards
+    /// the state of a parent it cannot read — rather than becoming the registered extension's value.
+    /// </summary>
+    /// <param name="traceParent">A malformed, all-zero, unknown-version or newline-terminated traceparent.</param>
+    [Theory]
+    [InlineData("not-a-traceparent")]
+    [InlineData("01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")]
+    [InlineData("00-00000000000000000000000000000000-00f067aa0ba902b7-01")]
+    [InlineData($"{StatedTraceParent}\n")]
+    public void An_invalid_stated_traceparent_is_dropped_with_its_tracestate(string traceParent)
+    {
+        var caller = Caller with { Provenance = new AlvoProvenance { TraceParent = traceParent, TraceState = "stated=1" } };
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, caller, Now, PostImage, null);
+
+        (@event.TraceParent, @event.TraceState, @event.CorrelationId).ShouldBe((null, null, @event.Id.ToString()));
+    }
+
+    /// <summary>A stated <c>tracestate</c> outside the list grammar, or over the cap, is dropped; its valid parent stays.</summary>
+    /// <param name="traceState">A malformed, newline-carrying or oversize tracestate.</param>
+    [Theory]
+    [InlineData("not a list member")]
+    [InlineData("stated=1\n")]
+    [InlineData("stated=1\r\nX-Injected: yes")]
+    [MemberData(nameof(OversizeTraceState))]
+    public void An_invalid_stated_tracestate_is_dropped_and_its_parent_kept(string traceState)
+    {
+        var caller = Caller with { Provenance = new AlvoProvenance { TraceParent = StatedTraceParent, TraceState = traceState } };
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, caller, Now, PostImage, null);
+
+        (@event.TraceParent, @event.TraceState, @event.CorrelationId).ShouldBe((StatedTraceParent, null, StatedTraceId));
+    }
+
+    /// <summary>An ambient activity's <c>tracestate</c> — the inbound header — is held to the same grammar and cap.</summary>
+    [Fact]
+    public void An_oversize_ambient_tracestate_is_dropped_and_the_activity_kept()
+    {
+        using var activity = new System.Diagnostics.Activity("write").SetIdFormat(System.Diagnostics.ActivityIdFormat.W3C).Start();
+        activity.TraceStateString = Oversize;
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, Caller, Now, PostImage, null);
+
+        (@event.TraceParent, @event.TraceState).ShouldBe((activity.Id, null));
+    }
+
+    /// <summary>The oversize tracestate, as theory data.</summary>
+    public static TheoryData<string> OversizeTraceState => [Oversize];
+
+    /// <summary>A well-formed tracestate one character over <see cref="W3CTraceContext.MaxTraceStateLength"/>.</summary>
+    private static string Oversize => $"k={new string('v', 255)},j={new string('w', 253)}";
+
+    /// <summary>
+    /// A hierarchical activity has no trace id; its all-zero placeholder must never become a correlation id that would
+    /// put every such event in one flow.
+    /// </summary>
+    [Fact]
+    public void A_hierarchical_activity_is_no_trace_context()
+    {
+        using var activity = new System.Diagnostics.Activity("write").SetIdFormat(System.Diagnostics.ActivityIdFormat.Hierarchical).Start();
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, Caller, Now, PostImage, null);
+
+        (@event.TraceParent, @event.CorrelationId).ShouldBe((null, @event.Id.ToString()));
+    }
+
+    /// <summary>An exclusion holds when the operation has only one image: the post-image of a create, the pre-image of a delete.</summary>
+    [Fact]
+    public void Excluded_fields_leave_the_single_image_of_a_create_and_a_delete()
+    {
+        var entity = Vehicles with { EventImageExclusions = ["color"] };
+
+        var created = OutboxEventFactory.For(entity, OutboxOperation.Created, Caller, Now, PostImage, null);
+        var deleted = OutboxEventFactory.For(entity, OutboxOperation.Deleted, Caller, Now, null, PreImage);
+
+        created.Data.Record!.Values.ShouldNotContainKey("color");
+        created.Data.OldRecord.ShouldBeNull();
+        deleted.Data.OldRecord!.Values.ShouldNotContainKey("color");
+        deleted.Data.Record.ShouldBeNull();
+        created.Data.Changed.ShouldContain("color");
+        deleted.Data.Changed.ShouldContain("color");
+    }
+
+    private const string StatedTraceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+
+    private const string StatedTraceParent = $"00-{StatedTraceId}-00f067aa0ba902b7-01";
 
     /// <summary>
     /// The anonymous caller's reserved all-zero id means "no identity", so reporting it would assert that an

@@ -31,6 +31,7 @@ public class EfAlvoDataArgumentGuardTests : IDisposable
     [InlineData("contexts")]
     [InlineData("time")]
     [InlineData("options")]
+    [InlineData("depthLimit")]
     public void A_null_dependency_is_refused_and_named(string dependency) =>
         Should.Throw<ArgumentNullException>(() => Construct(dependency)).ParamName.ShouldBe(dependency);
 
@@ -90,7 +91,8 @@ public class EfAlvoDataArgumentGuardTests : IDisposable
         nulled == "dialect" ? null! : new TestSqlDialect(),
         nulled == "contexts" ? null! : Contexts(),
         nulled == "time" ? null! : TimeProvider.System,
-        nulled == "options" ? null! : new AlvoOptions());
+        nulled == "options" ? null! : new AlvoOptions(),
+        nulled == "depthLimit" ? null! : AlvoChainDepthLimit.Default);
 
     private T Unless<T>(string? nulled, string parameter)
         where T : class => nulled == parameter ? null! : _services.GetRequiredService<T>();

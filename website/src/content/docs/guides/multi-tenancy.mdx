@@ -134,9 +134,9 @@ has the details.
 
 What isolation does not cover:
 
-- An after-hook's event carries no tenant ([#153](https://github.com/Burgyn/MMLib.Alvo/issues/153)), and the event
-  queue holds every tenant's complete rows with no retention ([#154](https://github.com/Burgyn/MMLib.Alvo/issues/154)).
-  See [After-hooks, events and webhooks](/guides/after-hooks-and-webhooks/).
+- An after-hook's event carries the writer's `tenantid`, and a condition can compare against `@tenant.id`; the event
+  queue still holds every tenant's complete rows with no retention
+  ([#154](https://github.com/Burgyn/MMLib.Alvo/issues/154)). See [The event envelope](/extending/event-envelope/).
 - A custom CEL function that reads stored data does so outside Alvo's tenant filter: it must take the tenant as a
   parameter and filter by it. See [Custom CEL functions](/guides/custom-cel-functions/).
 

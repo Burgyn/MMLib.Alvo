@@ -45,7 +45,12 @@ internal sealed record GuidedCondition(bool All, IReadOnlyList<ConditionRow> Row
 /// <param name="Kind">What it is.</param>
 /// <param name="Nullable">Whether it may be empty.</param>
 /// <param name="Values">An enum's declared values; empty otherwise.</param>
-internal sealed record ConditionField(string Name, ConditionFieldKind Kind, bool Nullable, IReadOnlyList<string> Values);
+/// <param name="ExcludedFromEvents">
+/// Whether the entity leaves it out of its event images (<c>events.exclude</c>), so an after-hook may name it in
+/// <c>changed</c> but never read it (<see cref="ConditionTable.Allows(OperatorSpec, string, ConditionField)"/>).
+/// </param>
+internal sealed record ConditionField(
+    string Name, ConditionFieldKind Kind, bool Nullable, IReadOnlyList<string> Values, bool ExcludedFromEvents = false);
 
 /// <summary>What a condition may name on one entity: its stored fields and the declared roles.</summary>
 /// <param name="Fields">The fields, computed and rollup ones excluded (a before-hook's image does not carry them).</param>
@@ -60,7 +65,12 @@ internal sealed record ConditionScope(IReadOnlyList<ConditionField> Fields, IRea
             ? []
             : [.. entity.Fields
                 .Where(field => field.ComputedExpression is null && field.Rollup is null)
-                .Select(field => new ConditionField(field.Name, ConditionTable.KindOf(field.Type), field.Nullable, field.EnumValues ?? Array.Empty<string>()))],
+                .Select(field => new ConditionField(
+                    field.Name,
+                    ConditionTable.KindOf(field.Type),
+                    field.Nullable,
+                    field.EnumValues ?? Array.Empty<string>(),
+                    entity.EventImageExclusions.Contains(field.Name, StringComparer.Ordinal)))],
         roles);
 
     /// <summary>

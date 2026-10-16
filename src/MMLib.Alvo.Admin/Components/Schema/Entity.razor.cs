@@ -391,6 +391,8 @@ public partial class Entity
             _arrived = new Arrival(added.Name, _arrived.Attempt + 1);
         }
 
+        Copy.ExcludeFromEvents(EntityName, added.Name, added.ExcludedFromEvents);
+
         if (!added.KeepOpen)
         {
             CloseEditor();

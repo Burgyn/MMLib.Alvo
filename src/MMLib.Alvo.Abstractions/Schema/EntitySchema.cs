@@ -3,6 +3,8 @@
 /// <summary>Describes an entity in the schema model.</summary>
 public sealed record EntitySchema
 {
+    private readonly IReadOnlyList<string> _eventImageExclusions = [];
+
     /// <summary>Gets the entity name.</summary>
     public required string Name { get; init; }
 
@@ -38,4 +40,14 @@ public sealed record EntitySchema
 
     /// <summary>Gets the indexes on this entity.</summary>
     public IReadOnlyList<IndexSchema> Indexes { get; init; } = [];
+
+    /// <summary>
+    /// Gets the fields left out of <c>data.record</c> and <c>data.old_record</c> of every event this entity emits
+    /// (descriptor <c>events.exclude</c>); <c>data.changed</c> still names them. Empty unless declared.
+    /// </summary>
+    public IReadOnlyList<string> EventImageExclusions
+    {
+        get => _eventImageExclusions;
+        init => _eventImageExclusions = value ?? [];
+    }
 }

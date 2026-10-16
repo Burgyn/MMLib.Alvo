@@ -1927,7 +1927,8 @@
               "https://alvo.dev/errors/unreadable-request",
               "https://alvo.dev/errors/unsupported-media-type",
               "https://alvo.dev/errors/internal",
-              "https://alvo.dev/errors/function-failed"
+              "https://alvo.dev/errors/function-failed",
+              "https://alvo.dev/errors/chain-depth-exceeded"
             ],
             "type": "string",
             "description": "The classification to branch on. Every value is listed here, so a client needs no prose: the namespace is `https://alvo.dev/errors/` and the slug names the kind of refusal.",
@@ -1952,6 +1953,10 @@
               "$ref": "#/components/schemas/problemViolation"
             },
             "description": "Every itemised reason the request was refused, not only the first — so one round trip is enough to repair it. Present on a refusal that has itemised reasons (a malformed query string, a body the entity's declared shape refuses) and absent on one that does not."
+          },
+          "retryable": {
+            "type": "boolean",
+            "description": "Present, and `false`, on a refusal the same request can never get past — such as `chain-depth-exceeded`. Absent everywhere else; absence makes no claim either way."
           }
         },
         "description": "An RFC 9457 problem document. Branch on `type`; `detail` is prose and, per §3.1.1, ought not be parsed. A `type` keys on the *kind* of refusal and never on its reason — one value covers every policy refusal, and one covers both an absent row and a row the caller may not see."

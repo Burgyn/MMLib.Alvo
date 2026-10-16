@@ -141,10 +141,9 @@ internal static class BeforeHookCompiler
     /// legal at all — and then refuses the references <em>this phase</em> cannot answer.
     /// </summary>
     /// <remarks>
-    /// <c>@user</c> and <c>@tenant</c> are not refused here, unlike in an after-hook condition: a before-hook
-    /// runs inside the request, so there is a real caller for both to resolve against. That asymmetry is stated
-    /// at <c>AfterHookCompiler.HonoursTheEnvelope</c>, which is where the refusal that does not apply here
-    /// lives.
+    /// <c>@user</c> and <c>@tenant</c> are not refused here: a before-hook runs inside the request, so there is a
+    /// real caller for both to resolve against. An after-hook reads them from the event envelope instead, and its
+    /// dispatcher declines to select a hook whose envelope lacks them (<c>EventSubscriptions</c>).
     /// </remarks>
     private static CompiledExpression? CompileCondition(
         string? source, BeforeHookPoint point, string path, BeforeHookScope scope)

@@ -81,7 +81,7 @@ internal sealed class EventActionExecutor(
 
     /// <summary>
     /// The request body: the action's rendered <c>payload</c> when it declares one, and otherwise the
-    /// canonical envelope exactly as the outbox stored it.
+    /// canonical envelope as the outbox stored it, minus <c>authclaims</c>.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -96,9 +96,15 @@ internal sealed class EventActionExecutor(
     /// </para>
     /// </remarks>
     private static string BodyOf(CompiledAfterHook hook, AlvoEvent @event) =>
-        !hook.Action.Templates.TryGetValue(ActionSlot.Payload, out var payload) ? AlvoEventJson.Write(@event)
+        !hook.Action.Templates.TryGetValue(ActionSlot.Payload, out var payload) ? AlvoEventJson.Write(WithoutClaims(@event))
         : JsonPayload.TryRender(payload, @event, out var body) ? body
         : throw NotJson(hook);
+
+    /// <summary>
+    /// The envelope a receiver gets by default: everything the outbox stored except <c>authclaims</c>, which exists for
+    /// after-hook conditions and is the caller's authorization — not something to post to a third party.
+    /// </summary>
+    private static AlvoEvent WithoutClaims(AlvoEvent @event) => @event with { AuthClaims = null };
 
     /// <summary>
     /// The message, refused before it reaches the port when a rendered header is not one — a recipient that is

@@ -153,18 +153,15 @@ internal static class UnhonouredFeatures
     /// <b>Why the wildcard and not the whole pattern.</b> An exact pattern names one entity, so whatever
     /// scoping the rule engine gains later applies to it unchanged; a wildcard is the shape whose meaning
     /// silently widens when a tenant is added, and it is the shape <c>baas-analyza.md:657</c> warns about. The
-    /// matcher itself is not built because it cannot be built correctly yet:
-    /// <see cref="Events.AlvoEvent"/> carries no tenant attribute, so nothing at delivery could scope a
-    /// subscription to the envelope's tenant, and the adversarial cross-tenant fact that ruling requires would
-    /// have no tenant on either side of its comparison. Giving the envelope one is issue <b>#153</b>.
+    /// matcher itself is not built yet: the envelope now carries <c>tenantid</c>, but the scoped matcher and the
+    /// adversarial cross-tenant fact the ruling demands are not built — <b>#372</b>.
     /// </para>
     /// </remarks>
     internal static UnhonouredSlot WildcardSubscription { get; } = new(
         "trigger.event",
-        "A wildcard event subscription is not matched yet: no rule fires for it today, and on the build that "
-        + "does implement matching it would subscribe to every entity or every operation of every tenant at "
-        + "once — a cross-tenant fan-out nobody re-reads this descriptor to catch, because the event envelope "
-        + "carries no tenant for a subscription to be scoped by (#153).",
+        "A wildcard event subscription is not matched yet: no rule fires for it today, and a matcher that fires it must "
+        + "scope every match to the envelope's tenant and pass a cross-tenant adversarial suite first — a fan-out across "
+        + "every tenant is the failure it would otherwise ship (#372).",
         "Name the entity and the operation exactly — 'entity.orders.created' rather than 'entity.orders.*' — "
         + "and declare one rule per pair. Wildcards are refused rather than accepted-and-ignored because a "
         + "descriptor outlives the build that applied it: accepted today, it becomes the fan-out above on the "

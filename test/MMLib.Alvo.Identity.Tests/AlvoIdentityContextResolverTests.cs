@@ -206,4 +206,16 @@ public class AlvoIdentityContextResolverTests
             .GetRequiredService<IServiceScopeFactory>();
         return new AlvoIdentityContextResolver(scopes, catalogue);
     }
+
+    [Fact]
+    public async Task A_signed_in_person_is_reported_as_a_user_on_every_event()
+    {
+        var resolver = Resolver(stored: User(_eva), declared: RoleCatalog.Create(["editor"]));
+
+        var context = (await resolver.ResolveAsync(_eva.ToString(), null, TestContext.Current.CancellationToken))
+            .ShouldNotBeNull().Context;
+
+        context.ActorKind.ShouldBe(AlvoActorKind.User);
+        MMLib.Alvo.Events.AlvoEventProvenance.AuthTypeOf(context).ShouldBe("user");
+    }
 }

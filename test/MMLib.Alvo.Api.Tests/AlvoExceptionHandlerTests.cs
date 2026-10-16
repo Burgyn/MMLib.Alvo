@@ -179,6 +179,23 @@ public class AlvoExceptionHandlerTests
         logs.Logged.ShouldContain((LogLevel.Error, original));
     }
 
+    /// <summary>A chain-depth refusal escaping an Alvo route is a 508 the caller is told not to retry, never a 500.</summary>
+    [Fact]
+    public async Task A_chain_depth_refusal_escaping_an_alvo_route_is_508_and_non_retryable()
+    {
+        var logs = new RecordingLoggerProvider();
+        var context = Context(aborted: false, _alvoEndpoint);
+
+        await Handle(logs, context, new MMLib.Alvo.Data.AlvoChainDepthExceededException("too deep"));
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status508LoopDetected);
+        context.Response.Body.Position = 0;
+        var body = await new StreamReader(context.Response.Body).ReadToEndAsync(TestContext.Current.CancellationToken);
+        body.ShouldContain("chain-depth-exceeded");
+        body.ShouldContain("\"retryable\":false");
+        logs.Records.ShouldNotContain(LogLevel.Error, "a loop refusal is the caller's, not an operator's 500");
+    }
+
     /// <summary>
     /// Invokes the handler exactly the way <c>ExceptionHandlerMiddleware</c> does: the matched endpoint
     /// recorded onto <see cref="IExceptionHandlerFeature"/>, and then cleared off the context.

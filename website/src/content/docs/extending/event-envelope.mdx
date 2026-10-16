@@ -1,0 +1,63 @@
+---
+title: The event envelope
+description: What every Alvo event carries — who acted and how, in which tenant and flow — and how to keep fields out of it.
+sidebar:
+  order: 2
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import envelope from '../../../../../test/MMLib.Alvo.Tests/CloudEventsConformanceTests.One_real_envelope_is_pinned_verbatim.verified.txt?raw';
+import exclude from '../../../snippets/extending/event-envelope/01-exclude.alvo.json?raw';
+
+Every write appends one [CloudEvents 1.0.2](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md)
+event to the outbox, in the same transaction, and so does every `IAlvoEvents.PublishAsync`. After-hooks and webhooks
+read that envelope today; host event handlers will read the same one.
+
+<SourceExcerpt code={envelope} from="specversion" to="specversion" lang="json" title="An entity.vehicles.updated event" wrap />
+
+## Who acted, and in which tenant
+
+| Attribute | Holds |
+|---|---|
+| `authtype` | How the caller authenticated: `api_key`, `user` (a person signed in through Alvo's identity), `system` (Alvo itself), `unauthenticated` or `unknown` — the CloudEvents authcontext values. |
+| `authid` | The id of the user who acted; absent for an unauthenticated caller. |
+| `authclaims` | The caller's roles at the moment of the write, as a JSON string: `{"roles":["agent","authenticated"]}`. Read by after-hook conditions and templates; **left out** of a default webhook body. |
+| `tenantid` | The tenant the write was made in; absent on a global entity and for a system write with no tenant. |
+
+An after-hook condition or template reads them as `@user.id`, `@user.roles` and `@tenant.id`. An event that does not
+carry the value a condition reads — a global row's tenant, an event written before this release, an `authclaims` that
+names no role — selects no hook: the comparison is never made against an empty value. A template renders a missing
+value empty, as `{{@user.id}}` already did for an anonymous write.
+
+## Which flow it belongs to
+
+| Attribute | Holds |
+|---|---|
+| `correlationid` | The id shared by one end-to-end flow: the one the caller stated, else the trace id of the W3C trace the write ran under, else the event's own id. |
+| `causationid` | The event that caused this change, when one did. |
+| `chaindepth` | How many hops deep the causation chain is; `0` for a caller acting directly. Past `Alvo:Extensions:MaxDepth` (8) the write is refused with `508 chain-depth-exceeded`. |
+| `traceparent`, `tracestate` | The W3C trace context of the write, when one was active (the registered Distributed Tracing extension). A value outside the W3C grammar, or a `tracestate` over 512 characters, is left out. |
+
+An embedded host states a flow through `AlvoContext.Provenance`. Depth can only grow along a chain: the deeper of the
+stated and the ambient depth wins.
+
+## Keep fields out of the images
+
+`data.record` and `data.old_record` hold the whole row — `hidden` fields included. `events.exclude` leaves named fields
+out of both images, for personal data or large columns; `data.changed` still names them, so `changed(field)` keeps
+working:
+
+<Code code={exclude} lang="json" title="help-desk.alvo.json" mark={[20]} />
+
+`id`, `tenant_id` and the framework-managed columns key the event and cannot be excluded. Apply refuses an after-hook
+condition or template that reads an excluded field — it would read null on every event. In the dashboard, the field
+editor's **exclude from event images** checkbox, under *Events*, sets the same list.
+
+The exclusion is applied when an event is written. An event already in the outbox when you apply `events.exclude` —
+still queued, or waiting to retry a failed delivery — keeps the fields it was written with, and is delivered with them.
+
+## Older envelopes
+
+Events written before this release say `apikey` and `anon`; they are read as `api_key` and `unauthenticated`, and they
+carry no `authclaims` or `tenantid`. The stored rows are never rewritten.

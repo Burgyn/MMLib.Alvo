@@ -33,7 +33,8 @@ internal static class OutboxEventFactory
     /// <param name="postImage">The row after the change, <b>unmasked</b>; <see langword="null"/> on a delete.</param>
     /// <param name="preImage">The row before the change, <b>unmasked</b>; <see langword="null"/> on a create.</param>
     /// <remarks>
-    /// Both images are unmasked on purpose (and that is a disclosure worth naming): an after-hook condition
+    /// Both images are unmasked — minus the entity's <c>events.exclude</c> fields; <c>changed</c> is computed from the
+    /// full images, so it still names them — on purpose (and that is a disclosure worth naming): an after-hook condition
     /// reading <c>old.commission_note</c> or <c>changed(commission_note)</c> has to see every field, and
     /// <c>hidden</c> is a per-caller <em>read</em> mask rather than a data classification. A masked
     /// post-image would be worse than incomplete — every masked field would read as moved on every update,
@@ -54,7 +55,9 @@ internal static class OutboxEventFactory
         var rowId = RowIdOf(postImage ?? preImage);
         var id = AlvoEventId.Create(now);
 
-        return new AlvoEvent
+        var stamp = AlvoEnvelopeStamp.Of(context, id, TenantOf(entity, context));
+
+        return stamp.Onto(new AlvoEvent
         {
             Id = id,
             Source = AlvoEvent.DefaultSource,
@@ -62,17 +65,28 @@ internal static class OutboxEventFactory
             Time = now,
             Subject = $"{entity.Name}/{rowId}",
             PartitionKey = PartitionKeyFor(entity.Name, rowId),
-            AuthType = AlvoEventProvenance.AuthTypeOf(context),
-            AuthId = AlvoEventProvenance.AuthIdOf(context),
-            CorrelationId = AlvoEventProvenance.CorrelationIdOf(id),
+            AuthType = stamp.AuthType,
+            CorrelationId = stamp.CorrelationId,
             Data = new AlvoEventData
             {
-                Record = postImage,
-                OldRecord = preImage,
+                Record = Without(postImage, entity.EventImageExclusions),
+                OldRecord = Without(preImage, entity.EventImageExclusions),
                 Changed = ChangedFields(postImage, preImage),
             },
-        };
+        });
     }
+
+    /// <summary>The tenant a data event reports: the caller's, on a tenant-scoped entity only.</summary>
+    private static TenantId? TenantOf(EntitySchema entity, AlvoContext context) =>
+        entity.Tenancy == TenancyMode.Scoped ? context.Tenant : null;
+
+    /// <summary><paramref name="image"/> without the fields the entity excludes from its events (<c>events.exclude</c>).</summary>
+    private static AlvoRecord? Without(AlvoRecord? image, IReadOnlyList<string> excluded) =>
+        image is null || excluded.Count == 0
+            ? image
+            : new AlvoRecord(image.Values
+                .Where(field => !excluded.Contains(field.Key, StringComparer.Ordinal))
+                .ToDictionary(field => field.Key, field => field.Value, StringComparer.Ordinal));
 
     /// <summary>The key every event for one row shares.</summary>
     /// <param name="entity">The entity's name.</param>

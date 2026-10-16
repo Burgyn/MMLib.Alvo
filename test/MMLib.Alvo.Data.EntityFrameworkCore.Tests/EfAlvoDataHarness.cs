@@ -103,7 +103,8 @@ internal sealed class EfAlvoDataHarness : IDisposable
         new TestSqlDialect(),
         new AlvoDataContextFactory(new FixedSchemaRegistry(applied), ConfigureProvider),
         TimeProvider.System,
-        new AlvoOptions());
+        new AlvoOptions(),
+        AlvoChainDepthLimit.Default);
 
     private void ConfigureProvider(DbContextOptionsBuilder options) =>
         options.UseSqlite(_connection, static sqlite => sqlite.UseRelationalNulls());

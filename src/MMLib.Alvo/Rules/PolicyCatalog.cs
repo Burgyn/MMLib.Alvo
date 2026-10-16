@@ -224,17 +224,21 @@ internal sealed record EntityAfterHooks(
 /// it declares none and therefore always fires.
 /// </param>
 /// <param name="Required">
-/// Which caller values <paramref name="Condition"/> reads, measured once at apply. Only <c>@user.id</c> can
-/// appear — <c>@tenant.id</c> and <c>@user.roles</c> are refused for an after-hook, because the envelope
-/// carries neither — so this is the gate for "the condition asks who acted and this event records nobody",
-/// which resolves the reference to the reserved all-zero id and would otherwise compare a row against it.
+/// Which of <c>@tenant.id</c> and <c>@user.id</c> <paramref name="Condition"/> reads, measured once at apply — the
+/// gate for "the condition asks for a value this event does not record", which would otherwise compare a row
+/// against an absent tenant or the reserved all-zero id.
 /// </param>
 /// <param name="Action">The compiled action, with every template already parsed and validated.</param>
+/// <param name="ReadsRoles">
+/// Whether <paramref name="Condition"/> reads <c>@user.roles</c>, which only an envelope carrying <c>authclaims</c> can
+/// answer.
+/// </param>
 internal sealed record CompiledAfterHook(
     string Path,
     CompiledExpression? Condition,
     RequiredContext Required,
-    CompiledAction Action);
+    CompiledAction Action,
+    bool ReadsRoles = false);
 
 /// <summary>
 /// One compiled action: the parsed descriptor action, plus every <c>{{…}}</c> template it declares, already

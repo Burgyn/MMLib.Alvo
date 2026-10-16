@@ -27,6 +27,7 @@ public partial class FieldEditor
     private MudBlazor.MudTextField<string>? _nameField;
     private readonly RefusalState<string> _refusal = new();
     private string? _prefilled;
+    private bool _excludedFromEvents;
     private string _opened = string.Empty;
     private readonly SubmitGate _another = new();
 
@@ -107,6 +108,10 @@ public partial class FieldEditor
         /// <summary>Whether the operator asked for another field after this one, so the sheet stays open.</summary>
         /// <remarks>Internal: it passes between two screens of this assembly and is nobody else's to read.</remarks>
         internal bool KeepOpen { get; init; }
+
+        /// <summary>Whether the operator left this field out of the entity's event images.</summary>
+        /// <remarks>Internal for <see cref="KeepOpen"/>'s reason: it passes between two screens of this assembly.</remarks>
+        internal bool ExcludedFromEvents { get; init; }
     }
 
     /// <summary>
@@ -237,19 +242,22 @@ public partial class FieldEditor
     protected override void OnParametersSet()
     {
         /* Prefilled only when the target changes: re-reading the parameters on every render would overwrite
-           what the operator is in the middle of typing with what the document still says. */
+           what the operator is in the middle of typing with what the document still says — a new field's
+           exclusion included, which is reset only on the edit-to-new transition. */
         var prefilledNow = false;
         if (IsEditing && _prefilled != Editing)
         {
             _prefilled = Editing;
             _refusal.Clear();
             _facets = FieldFacets.Prefill(Editing!, EditingJson);
+            _excludedFromEvents = Copy?.IsExcludedFromEvents(Entity, Editing!) is true;
             ForgetNumbers();
             prefilledNow = true;
         }
-        else if (!IsEditing)
+        else if (!IsEditing && _prefilled is not null)
         {
             _prefilled = null;
+            _excludedFromEvents = false;
         }
 
         _facets.Sources = Sources ?? [];
@@ -269,7 +277,7 @@ public partial class FieldEditor
     /// </remarks>
     private string Fingerprint()
         => string.Join('|', _facets.Name, _facets.Build(Editing, EditingJson, Siblings, out _)?.ToJsonString()
-            ?? string.Join('|', "unbuilt", _facets.Kind, _facets.Type, _facets.Values, _facets.Computed));
+            ?? string.Join('|', "unbuilt", _facets.Kind, _facets.Type, _facets.Values, _facets.Computed), _excludedFromEvents);
 
     /// <summary>Switches the kind; a computed column keeps a type it can be, and decimal otherwise.</summary>
     private void ChooseKind(FieldKind kind)
@@ -376,6 +384,7 @@ public partial class FieldEditor
             if (await StageAsync(keepOpen: true))
             {
                 _facets = new FieldFacets { Type = _facets.Type, Kind = _facets.Kind, Sources = _facets.Sources };
+                _excludedFromEvents = false;
                 _ = CheckComputedAsync();
                 ForgetNumbers();
                 _opened = Fingerprint();
@@ -407,7 +416,7 @@ public partial class FieldEditor
             return false;
         }
 
-        await OnAdd.InvokeAsync(new NewField(_facets.Name, facets) { KeepOpen = keepOpen });
+        await OnAdd.InvokeAsync(new NewField(_facets.Name, facets) { KeepOpen = keepOpen, ExcludedFromEvents = _excludedFromEvents });
         return true;
     }
 }

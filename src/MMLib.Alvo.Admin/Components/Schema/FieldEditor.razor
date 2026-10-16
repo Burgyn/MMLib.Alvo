@@ -123,6 +123,19 @@
             }
         </div>
 
+        <div class="a-field">
+            <span class="a-label" id="field-events">Events</span>
+            <div class="a-row" role="group" aria-labelledby="field-events">
+                <MudCheckBox T="bool" Value="_excludedFromEvents" ValueChanged="on => _excludedFromEvents = on"
+                             Label="exclude from event images" data-testid="field-exclude-events" />
+            </div>
+            <span class="a-hint">
+                Left out of <code class="a-mono">record</code> and <code class="a-mono">old_record</code> in every event
+                this entity emits — for personal data or large columns. <code class="a-mono">changed</code> still names it;
+                an after-hook may not read it.
+            </span>
+        </div>
+
         @if (_facets.Kind != FieldKind.Rollup)
         {
             @switch (_facets.Type)

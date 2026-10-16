@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Expressions.Internal;
 
 namespace MMLib.Alvo.Api.Internal;
@@ -79,6 +80,12 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
         if (exception is BadHttpRequestException client)
         {
             await RefuseAsync(httpContext, client).ConfigureAwait(false);
+            return;
+        }
+
+        if (exception is AlvoChainDepthExceededException loop)
+        {
+            await ProblemResultFactory.ChainDepthExceeded(loop.Message).ExecuteAsync(httpContext).ConfigureAwait(false);
             return;
         }
 

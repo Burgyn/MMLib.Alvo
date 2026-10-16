@@ -24,6 +24,10 @@ namespace MMLib.Alvo.Testing.Data;
 /// caller's own <see cref="AlvoQuery.Filter"/> in addition to the resolved policy predicate, never
 /// instead of it, so a caller-supplied filter can only narrow an already-visible result, never
 /// widen it.
+/// <para>
+/// This store enforces the default chain-depth limit of 8 on every write face, at the same point a real
+/// provider enforces its configured one; no configuration reaches it, so the limit is fixed here.
+/// </para>
 /// </remarks>
 public sealed class InMemoryAlvoData : IAlvoData
 {
@@ -147,6 +151,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
+        AlvoChainDepthLimit.Default.EnsureWithin(context);
         cancellationToken.ThrowIfCancellationRequested();
 
         var decision = _policy.Resolve(entity, DataOperation.Create, context);
@@ -345,6 +350,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
+        AlvoChainDepthLimit.Default.EnsureWithin(context);
         cancellationToken.ThrowIfCancellationRequested();
 
         var decision = _policy.Resolve(entity, DataOperation.Update, context);
@@ -395,6 +401,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
+        AlvoChainDepthLimit.Default.EnsureWithin(context);
         cancellationToken.ThrowIfCancellationRequested();
 
         var create = Allowed(entity, DataOperation.Create, context);
@@ -661,6 +668,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(context);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
+        AlvoChainDepthLimit.Default.EnsureWithin(context);
         cancellationToken.ThrowIfCancellationRequested();
 
         var decision = _policy.Resolve(entity, DataOperation.Delete, context);
@@ -1287,6 +1295,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(context);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
+        AlvoChainDepthLimit.Default.EnsureWithin(context);
         EnsureBatchIsNotEmpty(rowCount);
         cancellationToken.ThrowIfCancellationRequested();
 

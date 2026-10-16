@@ -42,6 +42,8 @@ public static class AlvoEventJson
     private const string ChangedMember = "changed";
     private const string RoundTripFormat = "O";
     private const string DateFormat = "yyyy-MM-dd";
+    private const string LegacyApiKey = "apikey";
+    private const string LegacyAnonymous = "anon";
 
     /// <summary>Writes <paramref name="event"/> as a CloudEvents JSON document.</summary>
     /// <param name="event">The event to write.</param>
@@ -99,8 +101,12 @@ public static class AlvoEventJson
         writer.WriteNumber(AlvoEventAttributes.ChainDepth, @event.ChainDepth);
         writer.WriteString(AlvoEventAttributes.AuthType, @event.AuthType);
         WriteOptional(writer, AlvoEventAttributes.AuthId, @event.AuthId);
+        WriteOptional(writer, AlvoEventAttributes.AuthClaims, @event.AuthClaims);
+        WriteOptional(writer, AlvoEventAttributes.TenantId, @event.TenantId);
         writer.WriteString(AlvoEventAttributes.CorrelationId, @event.CorrelationId);
         WriteOptional(writer, AlvoEventAttributes.CausationId, @event.CausationId);
+        WriteOptional(writer, AlvoEventAttributes.TraceParent, @event.TraceParent);
+        WriteOptional(writer, AlvoEventAttributes.TraceState, @event.TraceState);
     }
 
     private static void WriteOptional(Utf8JsonWriter writer, string attribute, string? value)
@@ -221,13 +227,28 @@ public static class AlvoEventJson
             DateTimeStyles.RoundtripKind),
         Subject = RequiredString(root, AlvoEventAttributes.Subject),
         PartitionKey = RequiredString(root, AlvoEventAttributes.PartitionKey),
-        AuthType = RequiredString(root, AlvoEventAttributes.AuthType),
+        AuthType = NormalisedAuthType(RequiredString(root, AlvoEventAttributes.AuthType)),
         CorrelationId = RequiredString(root, AlvoEventAttributes.CorrelationId),
         PayloadVersion = RequiredInt32(root, AlvoEventAttributes.PayloadVersion),
         ChainDepth = RequiredInt32(root, AlvoEventAttributes.ChainDepth),
         AuthId = OptionalString(root, AlvoEventAttributes.AuthId),
         CausationId = OptionalString(root, AlvoEventAttributes.CausationId),
+        AuthClaims = OptionalString(root, AlvoEventAttributes.AuthClaims),
+        TenantId = OptionalString(root, AlvoEventAttributes.TenantId),
+        TraceParent = OptionalString(root, AlvoEventAttributes.TraceParent),
+        TraceState = OptionalString(root, AlvoEventAttributes.TraceState),
         Data = ReadData(root),
+    };
+
+    /// <summary>
+    /// The current spelling of an <c>authtype</c> an older build wrote, so a row already in the outbox reads as one
+    /// written today; the row itself is never rewritten.
+    /// </summary>
+    private static string NormalisedAuthType(string written) => written switch
+    {
+        LegacyApiKey => AlvoEventAuthType.ApiKey,
+        LegacyAnonymous => AlvoEventAuthType.Unauthenticated,
+        _ => written,
     };
 
     private static AlvoEventData ReadData(JsonElement root)

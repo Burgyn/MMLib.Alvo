@@ -1391,6 +1391,51 @@ public abstract class AlvoDataAdversarialTests
     [Fact(Skip = "Dynamic driver lands in F7 — uuid JSON-path normalisation reserved (spike X2).")]
     public Task A_uuid_rule_over_a_dynamic_entity_matches_rows_on_every_engine() => Task.CompletedTask;
 
+    /// <summary>
+    /// The seventh exception family: a write deeper in one causation chain than the limit (8) is refused on every write
+    /// face before anything is written — acceptance 4 and 5b of spec 2026-10-14 HX-01.
+    /// </summary>
+    [Fact]
+    public async Task Every_write_face_refuses_a_write_deeper_than_the_chain_limit_and_writes_nothing()
+    {
+        var fixture = await NotesFixtureAsync();
+        var deep = fixture.Alice with { Provenance = new AlvoProvenance { Depth = 9 } };
+        var row = NotePayload(fixture);
+
+        await Should.ThrowAsync<AlvoChainDepthExceededException>(() => fixture.Data.CreateAsync("notes", row, deep));
+        await Should.ThrowAsync<AlvoChainDepthExceededException>(() => fixture.Data.UpdateAsync("notes", fixture.AliceRow1Id, Title("x"), deep));
+        await Should.ThrowAsync<AlvoChainDepthExceededException>(() => fixture.Data.ReplaceAsync("notes", fixture.AliceRow1Id, row, deep));
+        await Should.ThrowAsync<AlvoChainDepthExceededException>(() => fixture.Data.DeleteAsync("notes", fixture.AliceRow1Id, deep));
+        await Should.ThrowAsync<AlvoChainDepthExceededException>(() => fixture.Data.CreateManyAsync("notes", [row], deep));
+        await Should.ThrowAsync<AlvoChainDepthExceededException>(
+            () => fixture.Data.UpdateManyAsync("notes", [new AlvoRowPatch(fixture.AliceRow1Id, Title("x"))], deep));
+        await Should.ThrowAsync<AlvoChainDepthExceededException>(() => fixture.Data.DeleteManyAsync("notes", [fixture.AliceRow1Id], deep));
+
+        var titles = (await fixture.Data.QueryAsync(new AlvoQuery { Entity = "notes" }, fixture.Alice)).Items.Select(note => note["title"]);
+        titles.ShouldBe(["Alice-1", "Alice-2"], ignoreOrder: true);
+    }
+
+    /// <summary>The boundary of the same family: a write exactly at the limit is an ordinary write.</summary>
+    [Fact]
+    public async Task A_write_at_the_chain_limit_is_accepted()
+    {
+        var fixture = await NotesFixtureAsync();
+
+        var created = await fixture.Data.CreateAsync(
+            "notes", NotePayload(fixture), fixture.Alice with { Provenance = new AlvoProvenance { Depth = 8 } });
+
+        created["title"].ShouldBe("deep but allowed");
+    }
+
+    private static Dictionary<string, object?> NotePayload(NotesFixture fixture) => new()
+    {
+        ["owner_id"] = fixture.Alice.User.Value,
+        ["tenant_id"] = fixture.Tenant.Value,
+        ["title"] = "deep but allowed",
+    };
+
+    private static Dictionary<string, object?> Title(string title) => new() { ["title"] = title };
+
     private sealed record NotesFixture(IAlvoData Data, AlvoContext Alice, AlvoContext Bob, TenantId Tenant, Guid AliceRow1Id, Guid AliceRow2Id, Guid BobRowId);
 
     private sealed record DocumentsFixture(

@@ -175,6 +175,14 @@ public static class AlvoProblemTypes
     /// </remarks>
     public const string FunctionFailed = "function-failed";
 
+    /// <summary>The operation sits deeper in one causation chain than the configured limit allows — a loop (508).</summary>
+    /// <remarks>
+    /// RFC 5842's registered meaning for 508. The document carries <c>"retryable": false</c>: the same request arrives
+    /// at the same depth, so an agent must not retry it. Raised from <c>AlvoChainDepthExceededException</c>; the fix is
+    /// to break the loop, or raise <c>Alvo:Extensions:MaxDepth</c> when a chain that long is intended.
+    /// </remarks>
+    public const string ChainDepthExceeded = "chain-depth-exceeded";
+
     /// <summary>
     /// Every slug this catalogue declares. Enumerated rather than discovered by reflection so a fact can
     /// assert the catalogue and the code agree without the assertion being satisfied by its own subject.
@@ -196,6 +204,7 @@ public static class AlvoProblemTypes
         UnsupportedMediaType,
         Internal,
         FunctionFailed,
+        ChainDepthExceeded,
     ];
 
     /// <summary>The full problem <c>type</c> URI for one slug.</summary>

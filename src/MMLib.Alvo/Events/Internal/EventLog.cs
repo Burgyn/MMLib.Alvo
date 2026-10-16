@@ -193,6 +193,22 @@ internal static partial class EventLog
             + "the event records no actor, so the comparison has no caller to resolve against.")]
     internal static partial void ConditionHasNoActorToRead(ILogger logger, string hook, Guid eventId);
 
+    /// <summary>A hook not selected because its condition reads provenance the event does not carry.</summary>
+    /// <remarks>
+    /// <c>@tenant.id</c> on an envelope without <c>tenantid</c> (a global row, a tenantless system write, a row written
+    /// before HX-01) and <c>@user.roles</c> without readable <c>authclaims</c>. Refused upstream for the reason
+    /// <see cref="ConditionHasNoActorToRead"/> gives: a negated comparison against an absent value passes every event.
+    /// </remarks>
+    /// <param name="logger">The logger the dispatcher writes through.</param>
+    /// <param name="hook">The hook's own JSON pointer.</param>
+    /// <param name="reference">The context reference the event cannot answer, as CEL spells it.</param>
+    /// <param name="eventId">The event whose subscription was being decided.</param>
+    [LoggerMessage(
+        Level = LogLevel.Debug,
+        Message = "Alvo did not select after-hook {Hook} for event {EventId}: its condition reads '{Reference}' and "
+            + "the event does not carry it, so the comparison has nothing to resolve against.")]
+    internal static partial void ConditionHasNoProvenanceToRead(ILogger logger, string hook, string reference, Guid eventId);
+
     /// <summary>The development mail provider's envelope line: the recipient, the subject and the body's size.</summary>
     /// <remarks>
     /// The word <em>development</em> is load-bearing and pinned by a fact: the failure mode this provider has

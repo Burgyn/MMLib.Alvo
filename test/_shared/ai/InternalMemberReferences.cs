@@ -25,8 +25,14 @@ internal static class InternalMemberReferences
         "MMLib.Alvo.Rules.PolicyDecision::.ctor",
         "MMLib.Alvo.Rules.PolicyDecision::Allow",
         "MMLib.Alvo.Expressions.CompiledExpression::.ctor",
-        "MMLib.Alvo.Identity.Role::Application",
+        "MMLib.Alvo.Role::Application",
     ];
+
+    /// <summary>
+    /// The setter of the ambient flow (spec 2026-10-14 §4.6, R-9): only <c>MMLib.Alvo</c> and the EF driver may call it,
+    /// so no other granted product assembly can forge the chain depth or causation a write reports.
+    /// </summary>
+    internal static IReadOnlyList<string> FlowSetters { get; } = ["MMLib.Alvo.AlvoFlow::Enter"];
 
     internal static IReadOnlySet<string> Of(Assembly assembly)
     {

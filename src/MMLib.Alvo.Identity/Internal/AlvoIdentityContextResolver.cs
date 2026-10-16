@@ -152,6 +152,7 @@ internal sealed class AlvoIdentityContextResolver(
             User = user.Id,
             Roles = Minted(user, declared),
             Tenant = user.Tenant,
+            ActorKind = AlvoActorKind.User,
         },
         Scopes = _sessionScopes,
         KeyId = SessionKeyId(user.Id),

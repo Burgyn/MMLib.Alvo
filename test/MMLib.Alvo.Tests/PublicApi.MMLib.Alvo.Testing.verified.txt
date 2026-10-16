@@ -107,6 +107,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_user_filter_cannot_widen_the_policy_predicate() { }
         public System.Threading.Tasks.Task A_uuid_rule_over_a_dynamic_entity_matches_rows_on_every_engine() { }
         public System.Threading.Tasks.Task A_well_formed_filter_over_the_same_fields_still_answers() { }
+        public System.Threading.Tasks.Task A_write_at_the_chain_limit_is_accepted() { }
         public System.Threading.Tasks.Task A_write_by_a_caller_no_get_rule_admits_answers_with_the_id_alone() { }
         public System.Threading.Tasks.Task A_write_the_caller_may_read_back_answers_with_the_row_masked_as_a_get_would() { }
         public System.Threading.Tasks.Task A_write_to_a_read_only_field_is_rejected_rather_than_silently_dropped() { }
@@ -123,6 +124,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Create_that_would_place_the_row_outside_the_callers_scope_is_denied() { }
         public System.Threading.Tasks.Task Cross_tenant_get_by_id_is_indistinguishable_from_absent() { }
         public System.Threading.Tasks.Task Delete_of_another_users_row_reports_not_found_and_does_not_delete() { }
+        public System.Threading.Tasks.Task Every_write_face_refuses_a_write_deeper_than_the_chain_limit_and_writes_nothing() { }
         public System.Threading.Tasks.Task Get_of_another_users_row_is_indistinguishable_from_absent() { }
         public System.Threading.Tasks.Task List_returns_only_the_callers_own_rows() { }
         public System.Threading.Tasks.Task Same_suite_passes_over_a_dynamic_entity() { }
@@ -376,9 +378,12 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_replacement_that_created_the_row_emits_a_created_event() { }
         public System.Threading.Tasks.Task A_replacement_that_replaced_a_row_emits_an_updated_event_carrying_both_images() { }
         public System.Threading.Tasks.Task A_replayed_idempotent_create_emits_no_second_event() { }
+        public System.Threading.Tasks.Task A_scoped_write_reports_its_tenant_and_a_global_write_reports_none() { }
+        public System.Threading.Tasks.Task A_write_reports_the_chain_it_was_made_in() { }
         public System.Threading.Tasks.Task A_write_the_engine_refuses_leaves_no_outbox_row() { }
         public System.Threading.Tasks.Task A_write_whose_clock_lands_mid_microsecond_still_records_one_instant() { }
         public System.Threading.Tasks.Task An_events_record_carries_a_hidden_field_unmasked_and_that_is_the_documented_disclosure() { }
+        public System.Threading.Tasks.Task An_excluded_field_is_in_neither_image_and_still_named_as_changed() { }
         public System.Threading.Tasks.Task An_update_emits_exactly_one_event_carrying_both_images() { }
         public System.Threading.Tasks.Task Every_event_carries_the_caller_the_write_was_performed_as() { }
         public System.Threading.Tasks.Task The_events_time_equals_the_rows_own_audit_instant() { }
@@ -612,6 +617,13 @@ namespace MMLib.Alvo.Testing.Events
         public string MeterName { get; init; }
         public MMLib.Alvo.Schema.SchemaModel Schema { get; init; }
     }
+    public abstract class AlvoEventTenancyTests
+    {
+        protected AlvoEventTenancyTests() { }
+        protected static MMLib.Alvo.Testing.Events.AlvoEventProject Project { get; }
+        public System.Threading.Tasks.Task A_cross_tenant_condition_never_fires_and_its_mirror_fires_for_each_tenant() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Events.IAlvoEventWorld> WorldAsync(MMLib.Alvo.Testing.Events.AlvoEventProject project);
+    }
     public sealed class AlvoOutboxTally : System.IEquatable<MMLib.Alvo.Testing.Events.AlvoOutboxTally>
     {
         public AlvoOutboxTally(int Pending, int Retired) { }
@@ -625,6 +637,7 @@ namespace MMLib.Alvo.Testing.Events
     public interface IAlvoEventWorld : System.IAsyncDisposable
     {
         System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Testing.Events.AlvoEventLogEntry> ActionLogEntries { get; }
+        MMLib.Alvo.Data.IAlvoData Data { get; }
         System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Testing.Events.AlvoEventDelivery> Deliveries { get; }
         MMLib.Alvo.Testing.Events.IAlvoEventMeter Metrics { get; }
         System.Threading.Tasks.Task<System.Guid> CreateAsync(string status);

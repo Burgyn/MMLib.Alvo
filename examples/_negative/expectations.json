@@ -1,5 +1,7 @@
 {
   "decimal-without-scale.json": { "pointer": "#/entities/orders/fields/total", "messageContains": "scale" },
+  "events-exclude-duplicate.json": { "pointer": "#/entities/notes/events/exclude/0", "messageContains": "uniqueItems" },
+  "events-exclude-typo.json": { "pointer": "#/entities/notes/events/exclud" },
   "format-without-pattern.json": { "pointer": "#/formats/slug", "messageContains": "pattern" },
   "reserved-users-entity.json": { "pointer": "#/entities/users" },
   "typo-property.json": { "pointer": "#/entities/widgets/fields/name/requird" },

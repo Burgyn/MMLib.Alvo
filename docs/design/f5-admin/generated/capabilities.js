@@ -71,7 +71,7 @@ export const CAPABILITIES = {
     },
     {
       "slot": "trigger.event",
-      "consequence": "A wildcard event subscription is not matched yet: no rule fires for it today, and on the build that does implement matching it would subscribe to every entity or every operation of every tenant at once — a cross-tenant fan-out nobody re-reads this descriptor to catch, because the event envelope carries no tenant for a subscription to be scoped by (#153).",
+      "consequence": "A wildcard event subscription is not matched yet: no rule fires for it today, and a matcher that fires it must scope every match to the envelope's tenant and pass a cross-tenant adversarial suite first — a fan-out across every tenant is the failure it would otherwise ship (#372).",
       "fix": "Name the entity and the operation exactly — 'entity.orders.created' rather than 'entity.orders.*' — and declare one rule per pair. Wildcards are refused rather than accepted-and-ignored because a descriptor outlives the build that applied it: accepted today, it becomes the fan-out above on the day matching lands, with nothing between it and delivery."
     },
     {

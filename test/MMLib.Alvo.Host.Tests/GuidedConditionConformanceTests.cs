@@ -80,9 +80,13 @@ public sealed class GuidedConditionConformanceTests
     }
 
     /// <summary>
-    /// The four refusal classes of spec §7.4: <c>old.</c> before a create, <c>new.</c> before a delete, <c>changed</c> at a
-    /// create or delete before-point, and a role row at an after-point.
+    /// The refusal classes of spec §7.4: <c>old.</c> before a create, <c>new.</c> before a delete and <c>changed</c> at a
+    /// create or delete before-point. Its fourth, a role row at an after-point, applies since #153 and is the theory below.
     /// </summary>
+    /// <remarks>
+    /// The after-commit images the table withholds (<c>old.</c> at afterCreate, <c>new.</c> at afterDelete) and
+    /// <c>changed</c> at a create or delete after-point: apply refuses them since #325, so they sit here too.
+    /// </remarks>
     /// <param name="point">The hook point.</param>
     /// <param name="condition">The condition the table withholds there.</param>
     /// <param name="refusal">What the core's refusal names — its class, so an unrelated error cannot stand in for it.</param>
@@ -91,36 +95,31 @@ public sealed class GuidedConditionConformanceTests
     [InlineData("beforeDelete", "new.text_opt == 'x'", "'new.<field>'")]
     [InlineData("beforeCreate", "changed(text_opt)", "'changed(<field>)'")]
     [InlineData("beforeDelete", "changed(text_opt)", "'changed(<field>)'")]
-    [InlineData("afterCreate", "'clerk' in @user.roles", "'@user.roles'")]
-    [InlineData("afterUpdate", "!('clerk' in @user.roles)", "'@user.roles'")]
-    [InlineData("afterDelete", "'clerk' in @user.roles", "'@user.roles'")]
-    [InlineData("afterDelete", "!('clerk' in @user.roles)", "'@user.roles'")]
-    public void What_the_table_withholds_before_the_commit_or_from_an_envelope_apply_refuses(string point, string condition, string refusal)
+    [InlineData("afterCreate", "old.text_opt == 'x'", "'old.<field>'")]
+    [InlineData("afterDelete", "new.text_opt == 'x'", "'new.<field>'")]
+    [InlineData("afterCreate", "changed(text_opt)", "'changed(<field>)'")]
+    [InlineData("afterDelete", "changed(text_opt)", "'changed(<field>)'")]
+    public void What_the_table_withholds_before_the_commit_apply_refuses(string point, string condition, string refusal)
     {
         ErrorsAt(point, condition).ShouldContain(error => error.Message.Contains(refusal, StringComparison.Ordinal), $"{condition} at {point}");
         ConditionText.Recognize(condition, point, Scope(point)).ShouldBeNull("the form never offers it");
     }
 
     /// <summary>
-    /// Where the table is narrower than apply — recorded, so the spec §7.1 "unverified" becomes a measured fact. If apply
-    /// starts refusing these, move them to the theory above and drop the sentence from the spec.
+    /// Where the table is narrower than apply, recorded: a role row after the commit. Apply reads it from the envelope's
+    /// <c>authclaims</c> since #153; the guided form still offers role rows before the commit only.
     /// </summary>
-    /// <remarks>
-    /// The after-commit images (<c>old.</c> at afterCreate, <c>new.</c> at afterDelete) and <c>changed</c> at a create or
-    /// delete after-point: apply has no phase check for an after-hook, which is tracked as issue #325 (core). The form
-    /// offers none of them.
-    /// </remarks>
-    /// <param name="point">The hook point.</param>
-    /// <param name="condition">The condition the table withholds there.</param>
+    /// <param name="point">The after-point.</param>
+    /// <param name="condition">The role condition the form does not offer there.</param>
     [Theory]
-    [InlineData("afterCreate", "old.text_opt == 'x'")]
-    [InlineData("afterDelete", "new.text_opt == 'x'")]
-    [InlineData("afterCreate", "changed(text_opt)")]
-    [InlineData("afterDelete", "changed(text_opt)")]
-    public void What_the_table_withholds_after_the_commit_apply_still_accepts(string point, string condition)
+    [InlineData("afterCreate", "'clerk' in @user.roles")]
+    [InlineData("afterUpdate", "!('clerk' in @user.roles)")]
+    [InlineData("afterDelete", "'clerk' in @user.roles")]
+    [InlineData("afterDelete", "!('clerk' in @user.roles)")]
+    public void What_the_table_withholds_after_the_commit_apply_accepts(string point, string condition)
     {
         Errors(point, condition).ShouldBeEmpty($"{condition} at {point}");
-        ConditionText.Recognize(condition, point, Scope(point)).ShouldBeNull("the form never offers an image the point lacks");
+        ConditionText.Recognize(condition, point, Scope(point)).ShouldBeNull("the form offers no role row after the commit");
     }
 
     public static TheoryData<string> Points() => [.. HookBuilder.Points];

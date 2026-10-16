@@ -72,6 +72,7 @@ internal static class AfterHookCompiler
     private const string AfterUpdatePoint = "afterUpdate";
     private const string AfterDeletePoint = "afterDelete";
 
+    private const string ActionSegment = "/action";
     private const string BodyFileSlot = "bodyFile";
     private const string ConditionSlot = "condition";
     private const string EndpointSlot = "endpoint";
@@ -89,9 +90,10 @@ internal static class AfterHookCompiler
         }
 
         var compiled = new List<CompiledAfterHook>(declared.Count);
+        var pointScope = scope with { Point = point };
         for (var index = 0; index < declared.Count; index++)
         {
-            var hook = CompileHook(declared[index], $"{scope.EntityPath}/hooks/{point}/{index}", scope);
+            var hook = CompileHook(declared[index], $"{scope.EntityPath}/hooks/{point}/{index}", pointScope);
             if (hook is not null)
             {
                 compiled.Add(hook);
@@ -109,17 +111,18 @@ internal static class AfterHookCompiler
             return null;
         }
 
-        var action = CompileAction(hook.Action, $"{path}/action", scope);
+        var action = CompileAction(hook.Action, $"{path}{ActionSegment}", scope);
 
         return action is null
             ? null
-            : new CompiledAfterHook(path, condition, ActorRead(condition), action);
+            : new CompiledAfterHook(path, condition, ProvenanceRead(condition), action, RolesRead(condition));
     }
 
     /// <summary>
     /// Compiles a hook condition in the <see cref="CelProfile.Condition"/> profile — the only profile where
     /// <c>old.</c>, <c>new.</c> and <c>changed(field)</c> are legal, which is what an after-hook condition is
-    /// written in — and then refuses the two caller references the <em>envelope</em> cannot answer.
+    /// written in — and then refuses, through <see cref="AfterImagePhase"/>, any row image the point's event does not
+    /// carry (#325), and any field the entity leaves out of its event images (<c>events.exclude</c>).
     /// </summary>
     private static CompiledExpression? CompileCondition(string? source, string path, AfterHookScope scope)
     {
@@ -135,83 +138,34 @@ internal static class AfterHookCompiler
             return null;
         }
 
-        return HonoursTheEnvelope(result.Expression!, path, scope) ? result.Expression : null;
-    }
-
-    /// <summary>
-    /// Refuses <c>@tenant.id</c> and <c>@user.roles</c> in an after-hook condition, by name, exactly as
-    /// <see cref="TemplatePlaceholder"/> refuses them in a template.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>This closes an asymmetry rather than documenting one.</b> Both names compile in the
-    /// <see cref="CelProfile.Condition"/> profile and both resolve against a post-commit context that cannot
-    /// answer them, in opposite and equally silent directions. <c>@tenant.id</c> resolves to
-    /// <see langword="null"/>, and the interpreter's null rule collapses <em>every</em> comparison — including
-    /// <c>!=</c> — to <see langword="false"/>, so <c>changed(status) &amp;&amp; !(@tenant.id == 'internal')</c>
-    /// reads as "every tenant except ours" and fires for <b>every</b> tenant, delivering the unmasked row to an
-    /// external endpoint. <c>@user.roles</c> resolves to a non-null value and is worse for it: it answers with
-    /// the <em>dispatcher's</em> role set, so <c>'admin' in @user.roles</c> is true for every event whoever
-    /// wrote the row.
-    /// </para>
-    /// <para>
-    /// <b>It is refused here and not in <see cref="CelTypeChecker"/>'s profile table</b>, because the reason is
-    /// the envelope's and not the profile's: PR5b's before-hooks compile in the same profile and run inside the
-    /// request, where both names have a real caller to resolve against. A profile-level ban would forbid them
-    /// there too, for a reason that does not apply.
-    /// </para>
-    /// </remarks>
-    private static bool HonoursTheEnvelope(CompiledExpression condition, string path, AfterHookScope scope)
-    {
-        var refusals = _unanswerable
-            .Where(reference => PolicyCatalogBuilder.ReferencesContextValue(condition.Root, reference.Value))
-            .Select(reference => Error(path, Unanswerable(reference), reference.Fix))
-            .ToList();
-
+        var expression = result.Expression!;
+        IReadOnlyList<DescriptorValidationError> refusals =
+        [
+            .. AfterImagePhase.Refusals(expression.Root, AfterImages.At(scope.Point), scope.Point, path),
+            .. ExcludedFieldReads(expression.Root, path, scope),
+        ];
         scope.Errors.AddRange(refusals);
 
-        return refusals.Count == 0;
+        return refusals.Count == 0 ? expression : null;
     }
 
-    private static string Unanswerable(UnanswerableReference reference) =>
-        $"This after-hook condition reads '{reference.Name}', which an after-hook cannot answer: "
-        + $"{reference.Why}. The condition is evaluated after the write has committed, against the event "
-        + "envelope, so a comparison against it is decided by the absence of the value rather than by the "
-        + "value — silently, and not always in the denying direction.";
-
-    /// <summary>
-    /// The two caller references an event envelope cannot answer, with the words
-    /// <see cref="EnvelopeProvenance"/> holds for both this refusal and the template one.
-    /// </summary>
-    private static readonly UnanswerableReference[] _unanswerable =
-    [
-        new(
-            CelContextValue.TenantId,
-            "@tenant.id",
-            EnvelopeProvenance.NoTenant,
-            EnvelopeProvenance.InsteadOfTenant($"new.{AlvoManagedColumns.TenantId}")),
-        new(
-            CelContextValue.UserRoles,
-            "@user.roles",
-            EnvelopeProvenance.NoRoles,
-            EnvelopeProvenance.InsteadOfRoles),
-    ];
-
-    /// <summary>
-    /// Which caller values the condition reads, so the dispatcher can refuse to select a hook whose condition
-    /// needs an actor the envelope did not carry.
-    /// </summary>
+    /// <summary>Which caller values the condition reads that an envelope may lack, so the dispatcher can gate on them.</summary>
     /// <remarks>
-    /// Only <c>@user.id</c> can survive <see cref="HonoursTheEnvelope"/>, so this is the same
-    /// <see cref="RequiredContext"/> gate the policy engine applies to a rule — one shape for "this predicate
-    /// reads an operand the caller may not have", rather than a second ad-hoc check.
+    /// <c>@tenant.id</c> and <c>@user.roles</c> compile since #153, because the envelope carries <c>tenantid</c> and
+    /// <c>authclaims</c>. They are not refused here, and not in <see cref="CelTypeChecker"/>'s profile table either:
+    /// what an envelope may lack is a per-event fact, so the dispatcher refuses to <em>select</em> a hook whose
+    /// event does not carry what its condition reads — the same <see cref="RequiredContext"/> gate the policy engine
+    /// applies to a rule, because a negated comparison against an absent value passes every event.
     /// </remarks>
-    private static RequiredContext ActorRead(CompiledExpression? condition) =>
+    private static RequiredContext ProvenanceRead(CompiledExpression? condition) =>
         condition is null
             ? RequiredContext.None
             : new RequiredContext(
-                TenantId: false,
+                TenantId: PolicyCatalogBuilder.ReferencesContextValue(condition.Root, CelContextValue.TenantId),
                 UserId: PolicyCatalogBuilder.ReferencesContextValue(condition.Root, CelContextValue.UserId));
+
+    private static bool RolesRead(CompiledExpression? condition) =>
+        condition is not null && PolicyCatalogBuilder.ReferencesContextValue(condition.Root, CelContextValue.UserRoles);
 
     private static CompiledAction? CompileAction(AutomationAction action, string path, AfterHookScope scope) =>
         action switch
@@ -311,7 +265,8 @@ internal static class AfterHookCompiler
         var templates = new Dictionary<string, AlvoTemplate>(StringComparer.Ordinal);
         var recipient = AddHeaderSlot(templates, ActionSlot.To, email.To, $"{path}/{ActionSlot.To}", scope);
         var data = RefuseEmailData(email.Data, $"{path}/{ActionSlot.Data}", scope);
-        var body = AddMessageTemplate(templates, email.Template, message, scope);
+        var reference = new TemplateReference(email.Template, path[..^ActionSegment.Length]);
+        var body = AddMessageTemplate(templates, message, reference, scope);
 
         return recipient && data && body ? new CompiledAction(email, templates, Endpoint: null, ActionType.NameOf(email)) : null;
     }
@@ -344,10 +299,16 @@ internal static class AfterHookCompiler
     /// Adds the referenced message template's <c>subject</c> and <c>body</c>, refusing a <c>bodyFile</c>
     /// because nothing in this build reads a path inside a descriptor bundle.
     /// </summary>
+    /// <remarks>
+    /// What the template's text gets wrong is reported at the template; what only the referencing hook's point makes
+    /// unrenderable — a row image that point lacks, a field the entity excludes — is reported at the hook, once per
+    /// placeholder across subject and body, because the same template can be referenced from another point where it
+    /// renders.
+    /// </remarks>
     private static bool AddMessageTemplate(
-        Dictionary<string, AlvoTemplate> templates, string name, MessageTemplate message, AfterHookScope scope)
+        Dictionary<string, AlvoTemplate> templates, MessageTemplate message, TemplateReference reference, AfterHookScope scope)
     {
-        var path = $"/templates/{name}";
+        var path = $"/templates/{reference.Name}";
         if (message.BodyFile is not null)
         {
             var refusal = UnhonouredFeatures.TemplateBodyFile;
@@ -355,9 +316,29 @@ internal static class AfterHookCompiler
             return false;
         }
 
-        var subject = AddHeaderSlot(templates, ActionSlot.Subject, message.Subject, $"{path}/{ActionSlot.Subject}", scope);
+        var subject = AddHeaderSlot(
+            templates, ActionSlot.Subject, message.Subject, $"{path}/{ActionSlot.Subject}", scope, reference);
+        var body = AddSugarSlot(templates, ActionSlot.Body, message.Body, $"{path}/{ActionSlot.Body}", scope, reference);
 
-        return AddSugarSlot(templates, ActionSlot.Body, message.Body, $"{path}/{ActionSlot.Body}", scope) && subject;
+        return subject && body && RendersForThisHook(templates, reference, scope);
+    }
+
+    private static bool RendersForThisHook(
+        Dictionary<string, AlvoTemplate> templates, TemplateReference reference, AfterHookScope scope)
+    {
+        var message = new AlvoTemplate(
+            [.. new[] { ActionSlot.Subject, ActionSlot.Body }
+                .Where(templates.ContainsKey)
+                .SelectMany(slot => templates[slot].Segments)]);
+        IReadOnlyList<DescriptorValidationError> refusals =
+        [
+            .. AfterImagePhase.Refusals(message, AfterImages.At(scope.Point), scope.Point, reference),
+            .. ExcludedPlaceholders(message, scope.Schema).Select(field => Error(
+                reference.Pointer, ExcludedReferencedPlaceholder(field, reference, scope), ExcludedReferencedFix(scope, field))),
+        ];
+        scope.Errors.AddRange(refusals);
+
+        return refusals.Count == 0;
     }
 
     /// <summary>
@@ -368,8 +349,13 @@ internal static class AfterHookCompiler
     /// placeholder-free value is a legitimate literal (a hard-coded address) rather than evidence of JSONata.
     /// </remarks>
     private static bool AddSugarSlot(
-        Dictionary<string, AlvoTemplate> templates, string slot, string? source, string path, AfterHookScope scope) =>
-        source is null || AddTemplate(templates, slot, source, path, scope);
+        Dictionary<string, AlvoTemplate> templates,
+        string slot,
+        string? source,
+        string path,
+        AfterHookScope scope,
+        TemplateReference? reference = null) =>
+        source is null || AddTemplate(templates, slot, source, path, scope, reference);
 
     /// <summary>
     /// A sugar slot that becomes a mail header — <c>email.to</c>, <c>templates.subject</c> — whose author-written
@@ -377,8 +363,13 @@ internal static class AfterHookCompiler
     /// one mailbox. What a row renders into it is checked again at delivery, by the same <see cref="MailHeaders"/>.
     /// </summary>
     private static bool AddHeaderSlot(
-        Dictionary<string, AlvoTemplate> templates, string slot, string? source, string path, AfterHookScope scope) =>
-        AddSugarSlot(templates, slot, source, path, scope) && HeaderIsSafe(templates, slot, path, scope);
+        Dictionary<string, AlvoTemplate> templates,
+        string slot,
+        string? source,
+        string path,
+        AfterHookScope scope,
+        TemplateReference? reference = null) =>
+        AddSugarSlot(templates, slot, source, path, scope, reference) && HeaderIsSafe(templates, slot, path, scope);
 
     private static bool HeaderIsSafe(
         Dictionary<string, AlvoTemplate> templates, string slot, string path, AfterHookScope scope)
@@ -423,7 +414,7 @@ internal static class AfterHookCompiler
 
         if (JsonataSlot.IsTemplate(source))
         {
-            return AddTemplate(templates, slot, source, path, scope);
+            return AddTemplate(templates, slot, source, path, scope, reference: null);
         }
 
         var refusal = UnhonouredFeatures.RawJsonata;
@@ -432,11 +423,18 @@ internal static class AfterHookCompiler
     }
 
     /// <summary>
-    /// Parses one template and resolves every placeholder in it against the entity's schema, so the compiled
-    /// action carries only templates that are known to render.
+    /// Parses one template and resolves every placeholder in it against the entity's schema, the point's event
+    /// images (#325) and the entity's <c>events.exclude</c>, so the compiled action carries only templates that are
+    /// known to render. A slot of a named message template (<paramref name="reference"/> set) leaves the point-dependent
+    /// checks to <see cref="RendersForThisHook"/>, which reports them at the referencing hook.
     /// </summary>
     private static bool AddTemplate(
-        Dictionary<string, AlvoTemplate> templates, string slot, string source, string path, AfterHookScope scope)
+        Dictionary<string, AlvoTemplate> templates,
+        string slot,
+        string source,
+        string path,
+        AfterHookScope scope,
+        TemplateReference? reference)
     {
         if (!AlvoTemplate.TryParse(source, out var template, out var malformed))
         {
@@ -451,9 +449,71 @@ internal static class AfterHookCompiler
             return false;
         }
 
+        var unrenderable = reference is null ? Unrenderable(template!, path, scope) : [];
+        if (unrenderable.Count > 0)
+        {
+            scope.Errors.AddRange(unrenderable);
+            return false;
+        }
+
         templates[slot] = template!;
         return true;
     }
+
+    /// <summary>
+    /// Every placeholder that resolves against the schema but reads a row image the point's event lacks, or a field
+    /// the entity leaves out of its event images — each would render empty on every delivery.
+    /// </summary>
+    private static IReadOnlyList<DescriptorValidationError> Unrenderable(
+        AlvoTemplate template, string path, AfterHookScope scope) =>
+        [
+            .. AfterImagePhase.Refusals(template, AfterImages.At(scope.Point), scope.Point, path),
+            .. ExcludedPlaceholders(template, scope.Schema)
+                .Select(field => Error(path, ExcludedPlaceholder(field), ExcludedPlaceholderFix(scope, field))),
+        ];
+
+    private static IEnumerable<DescriptorValidationError> ExcludedFieldReads(
+        CelNode root, string path, AfterHookScope scope) =>
+        FieldsRead(root)
+            .Where(field => scope.Schema.EventImageExclusions.Contains(field, StringComparer.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .Select(field => Error(path, ExcludedCondition(field), ExcludedConditionFix(scope, field)));
+
+    private static IEnumerable<string> FieldsRead(CelNode node) =>
+        (node is CelFieldRef reference ? [reference.FieldName] : Enumerable.Empty<string>())
+            .Concat(CelTree.Children(node).SelectMany(FieldsRead));
+
+    private static IEnumerable<string> ExcludedPlaceholders(AlvoTemplate template, EntitySchema entity) =>
+        template.Placeholders
+            .Select(TemplatePlaceholder.RowImageRead)
+            .OfType<(CelRecordState State, string Field)>()
+            .Select(read => read.Field)
+            .Where(field => entity.EventImageExclusions.Contains(field, StringComparer.Ordinal))
+            .Distinct(StringComparer.Ordinal);
+
+    private static string ExcludedCondition(string field) =>
+        $"This after-hook condition reads '{field}', which this entity leaves out of its event images "
+        + "(events.exclude), so the reference would read null on every event and the comparison would be decided by "
+        + "its absence — silently, and not always in the denying direction.";
+
+    private static string ExcludedPlaceholder(string field) =>
+        $"This template reads '{field}', which this entity leaves out of its event images (events.exclude), so it "
+        + "would render empty on every delivery.";
+
+    private static string ExcludedReferencedPlaceholder(string field, TemplateReference reference, AfterHookScope scope) =>
+        $"Template '{reference.Name}', which the '{scope.Point}' hook at {reference.HookPath} references, reads "
+        + $"'{field}', which this entity leaves out of its event images (events.exclude), so it would render empty on "
+        + "every delivery from this hook.";
+
+    private static string ExcludedConditionFix(AfterHookScope scope, string field) =>
+        $"Remove '{field}' from {scope.EntityPath}/events/exclude, or stop reading it here; 'changed({field})' still "
+        + "names an excluded field.";
+
+    private static string ExcludedPlaceholderFix(AfterHookScope scope, string field) =>
+        $"Remove '{field}' from {scope.EntityPath}/events/exclude, or stop reading it here.";
+
+    private static string ExcludedReferencedFix(AfterHookScope scope, string field) =>
+        $"Remove '{field}' from {scope.EntityPath}/events/exclude, or reference a template that does not read '{field}'.";
 
     private static IReadOnlyList<string> Refusals(AlvoTemplate template, EntitySchema entity) =>
         [.. template.Placeholders.Select(placeholder => Refusal(placeholder, entity)).OfType<string>()];
@@ -541,19 +601,12 @@ internal sealed record AfterHookScope(
     IReadOnlyDictionary<string, MessageTemplate> Templates,
     IReadOnlyDictionary<string, WebhookEndpoint> Endpoints,
     string EntityPath,
-    List<DescriptorValidationError> Errors);
+    List<DescriptorValidationError> Errors)
+{
+    /// <summary>
+    /// The after-point being compiled, such as <c>afterCreate</c>; set per point by the compiler, and it decides which
+    /// row images a condition or template may read (<see cref="AfterImages.At"/>).
+    /// </summary>
+    internal string Point { get; init; } = string.Empty;
+}
 
-/// <summary>
-/// One caller reference an after-hook condition may name and an event envelope cannot answer, and the words
-/// its refusal is built from.
-/// </summary>
-/// <remarks>
-/// A table rather than two <c>if</c> blocks for the reason <see cref="UnhonouredFeatures"/> is a table: the
-/// wording, the detection and the fix belong to one entry, so a third unanswerable reference cannot be added
-/// to the walk without the message that explains it.
-/// </remarks>
-/// <param name="Value">The compiled node kind the walk looks for.</param>
-/// <param name="Name">How the reference is spelled in CEL, for the message an author reads.</param>
-/// <param name="Why">Why the envelope cannot answer it — <see cref="EnvelopeProvenance"/>'s words.</param>
-/// <param name="Fix">What to do instead, and where a real answer is tracked.</param>
-internal sealed record UnanswerableReference(CelContextValue Value, string Name, string Why, string Fix);

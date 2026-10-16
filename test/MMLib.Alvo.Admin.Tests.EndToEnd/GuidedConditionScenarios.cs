@@ -91,7 +91,7 @@ public sealed class GuidedConditionScenarios(BikeWorkshopWorld world) : IClassFi
 
         await Combobox(session, "Condition 1 field").ClickAsync();
         await Option(session, "brand").WaitForAsync();
-        (await Option(session, "The person writing").CountAsync()).ShouldBe(0, "an event envelope carries no roles");
+        (await Option(session, "The person writing").CountAsync()).ShouldBe(0, "the form keeps role rows before the commit only, though the envelope carries the roles since #153");
         (await Option(session, "brand").CountAsync()).ShouldBe(1);
     }
 

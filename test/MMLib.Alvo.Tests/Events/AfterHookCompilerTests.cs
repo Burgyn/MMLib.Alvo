@@ -58,6 +58,154 @@ public class AfterHookCompilerTests
         => Compile(AfterUpdate(Webhook())).AfterUpdate.ShouldHaveSingleItem().Condition.ShouldBeNull();
 
     /// <summary>
+    /// #325: an after-point refuses a reference to a row image its event does not carry — at apply, at the condition's
+    /// pointer, with a fix — because the reference would read null and the filter would pass every event.
+    /// </summary>
+    [Theory]
+    [InlineData("afterCreate", "old.stage == 'won'", "'old.<field>'")]
+    [InlineData("afterCreate", "changed(stage)", "'changed(<field>)'")]
+    [InlineData("afterDelete", "new.stage == 'won'", "'new.<field>'")]
+    [InlineData("afterDelete", "stage == 'won'", "'new.<field>'")]
+    [InlineData("afterDelete", "changed(stage)", "'changed(<field>)'")]
+    public void An_after_point_refuses_an_image_its_event_does_not_carry(string point, string condition, string named)
+    {
+        var refusal = CompileErrors(At(point, Webhook(), condition)).ShouldHaveSingleItem();
+
+        refusal.Path.ShouldBe($"/entities/deals/hooks/{point}/0/condition");
+        refusal.Message.ShouldContain(named);
+        refusal.FixSuggestion.ShouldNotBeNullOrEmpty();
+    }
+
+    [Theory]
+    [InlineData("afterCreate", "new.stage == 'won' && stage != 'lost'")]
+    [InlineData("afterUpdate", "changed(stage) && old.stage != new.stage")]
+    [InlineData("afterDelete", "old.stage == 'won'")]
+    public void An_image_the_point_carries_still_applies(string point, string condition)
+        => Point(Compile(At(point, Webhook(), condition)), point).ShouldHaveSingleItem().Condition.ShouldNotBeNull();
+
+    /// <summary>
+    /// #325's wording is derived from the point: an afterCreate refusal never talks about a delete, an afterDelete one
+    /// never about a create, and the fix names the image the point does carry.
+    /// </summary>
+    [Theory]
+    [InlineData("afterCreate", "old.stage == 'won'", "delete", "'new.stage'")]
+    [InlineData("afterDelete", "new.stage == 'won'", "create", "'old.stage'")]
+    [InlineData("afterDelete", "stage == 'won'", "create", "'old.stage'")]
+    [InlineData("afterCreate", "changed(stage)", "delete", "'new.<field>'")]
+    [InlineData("afterDelete", "changed(stage)", "create", "'old.<field>'")]
+    public void A_missing_image_refusal_speaks_about_its_own_point(
+        string point, string condition, string otherOperation, string carried)
+    {
+        var refusal = CompileErrors(At(point, Webhook(), condition)).ShouldHaveSingleItem();
+
+        refusal.Message.ShouldContain($"'{point}'");
+        refusal.Message.ShouldNotContain(otherOperation);
+        refusal.FixSuggestion.ShouldNotBeNull().ShouldContain(carried);
+    }
+
+    [Fact]
+    public void Every_reference_to_a_missing_image_is_refused_on_its_own()
+    {
+        var refusals = CompileErrors(At("afterDelete", Webhook(), "new.stage == 'won' && title != 'x' && changed(owner_id)"));
+
+        refusals.ShouldAllBe(refusal => refusal.Path == "/entities/deals/hooks/afterDelete/0/condition");
+        refusals.Select(refusal => refusal.Message).ShouldSatisfyAllConditions(
+            messages => messages.Count().ShouldBe(3),
+            messages => messages.ShouldContain(message => message.Contains("'new.stage'", StringComparison.Ordinal)),
+            messages => messages.ShouldContain(message => message.Contains("'title'", StringComparison.Ordinal)),
+            messages => messages.ShouldContain(message => message.Contains("'changed(owner_id)'", StringComparison.Ordinal)));
+    }
+
+    /// <summary>
+    /// #325 for templates: a placeholder reading an image the point's event lacks would render empty on every delivery,
+    /// so it is refused at apply at the slot's pointer — the same rule a condition gets.
+    /// </summary>
+    [Theory]
+    [InlineData("afterCreate", "{{old.title}}", "{{new.title}}")]
+    [InlineData("afterDelete", "{{new.title}}", "{{old.title}}")]
+    public void A_payload_placeholder_reading_an_image_the_point_lacks_is_refused(string point, string payload, string carried)
+    {
+        var refusal = CompileErrors(At(point, Webhook(payload: payload))).ShouldHaveSingleItem();
+
+        refusal.Path.ShouldBe($"/entities/deals/hooks/{point}/0/action/payload");
+        refusal.Message.ShouldContain(payload);
+        refusal.Message.ShouldContain($"'{point}'");
+        refusal.FixSuggestion.ShouldNotBeNull().ShouldContain(carried);
+    }
+
+    [Fact]
+    public void A_recipient_placeholder_reading_the_pre_image_of_a_create_is_refused_at_its_pointer()
+        => CompileErrors(At("afterCreate", Email(to: "{{old.owner_email}}")))
+            .ShouldHaveSingleItem().Path.ShouldBe("/entities/deals/hooks/afterCreate/0/action/to");
+
+    /// <summary>
+    /// A named template is shared, and only the referencing hook's point makes it unanswerable — so the refusal is the
+    /// hook's, at its own <c>action/template</c> pointer, once per placeholder across subject and body.
+    /// </summary>
+    [Fact]
+    public void A_referenced_template_reading_the_post_image_of_a_delete_is_refused_at_the_hooks_pointer()
+    {
+        var refusal = CompileErrors(At("afterDelete", Email())).ShouldHaveSingleItem();
+
+        refusal.Path.ShouldBe("/entities/deals/hooks/afterDelete/0/action/template");
+        refusal.Message.ShouldContain("'deal-won'");
+        refusal.Message.ShouldContain("'afterDelete'");
+        refusal.Message.ShouldContain("/entities/deals/hooks/afterDelete/0");
+        refusal.Message.ShouldContain("{{new.title}}");
+        refusal.FixSuggestion.ShouldNotBeNull().ShouldContain("reference a template that reads '{{old.title}}'");
+    }
+
+    [Fact]
+    public void A_template_shared_by_an_after_create_and_an_after_delete_hook_blames_only_the_hook_it_cannot_serve()
+    {
+        var hooks = new EntityHooks
+        {
+            AfterCreate = [new AfterHook { Action = Email() }],
+            AfterDelete = [new AfterHook { Action = Email() }],
+        };
+
+        CompileErrors(hooks).ShouldHaveSingleItem().Path.ShouldBe("/entities/deals/hooks/afterDelete/0/action/template");
+    }
+
+    [Fact]
+    public void A_referenced_template_with_two_missing_image_placeholders_is_refused_once_for_each()
+        => CompileErrors(At("afterCreate", Email()), body: "{{old.title}} was {{old.stage}}", subject: "Was {{old.title}}")
+            .Select(refusal => (refusal.Path, Named: refusal.Message.Contains("{{old.title}}", StringComparison.Ordinal)))
+            .ShouldBe([
+                ("/entities/deals/hooks/afterCreate/0/action/template", true),
+                ("/entities/deals/hooks/afterCreate/0/action/template", false),
+            ]);
+
+    [Fact]
+    public void Every_placeholder_reading_a_missing_image_is_refused_on_its_own()
+    {
+        var refusals = CompileErrors(At("afterCreate", Webhook(payload: "[\"{{old.title}}\", \"{{old.stage}}\", \"{{new.title}}\"]")));
+
+        refusals.Count.ShouldBe(2);
+        refusals.ShouldAllBe(refusal => refusal.Path == "/entities/deals/hooks/afterCreate/0/action/payload");
+        refusals[0].Message.ShouldContain("{{old.title}}");
+        refusals[1].Message.ShouldContain("{{old.stage}}");
+    }
+
+    [Theory]
+    [InlineData("afterCreate", "{{new.title}}")]
+    [InlineData("afterUpdate", "[\"{{old.title}}\", \"{{new.title}}\"]")]
+    [InlineData("afterDelete", "{{old.title}}")]
+    public void A_placeholder_reading_an_image_the_point_carries_applies(string point, string payload)
+        => Point(Compile(At(point, Webhook(payload: payload))), point).ShouldHaveSingleItem()
+            .Action.Templates.ShouldContainKey("payload");
+
+    [Fact]
+    public void An_after_update_carries_both_images()
+        => AfterImages.At("afterUpdate").ShouldBe(new AfterImages(Pre: true, Post: true));
+
+    [Theory]
+    [InlineData("beforeCreate")]
+    [InlineData("")]
+    public void A_name_that_is_not_an_after_point_has_no_images(string point)
+        => Should.Throw<ArgumentOutOfRangeException>(() => AfterImages.At(point));
+
+    /// <summary>
     /// All three points are compiled, and each lands on its own list — so an <c>afterDelete</c> hook cannot be
     /// silently filed under <c>afterCreate</c> and run on the wrong operation.
     /// </summary>
@@ -253,54 +401,31 @@ public class AfterHookCompilerTests
     }
 
     /// <summary>
-    /// The two caller references an event envelope cannot answer are refused <b>by name</b> in an after-hook
-    /// condition, exactly as a template refuses them.
+    /// #153: the envelope now carries <c>tenantid</c> and <c>authclaims</c>, so both references compile — and the hook
+    /// records which ones it reads, so the dispatcher can refuse to select it for an envelope that lacks them.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// <b>The positive form and the negated one are both asserted, because they failed in opposite directions
-    /// and only one of them looked like a denial.</b> <c>@tenant.id</c> resolved to <see langword="null"/> for
-    /// the dispatcher, and the interpreter's null rule collapses every comparison — <c>!=</c> included — to
-    /// <see langword="false"/>, so <c>!(@tenant.id == 'x')</c> was <b>true</b>: a hook reading "every tenant
-    /// except ours" delivered every tenant's unmasked row to an external endpoint. <c>@user.roles</c> resolved to
-    /// a value and was worse for it: the dispatcher's own <c>admin</c> role, so <c>'admin' in @user.roles</c> was
-    /// true for every event whoever wrote the row.
-    /// </para>
-    /// <para>
-    /// A refusal at apply is the fix rather than a documented caveat, and it is the call issue #153 already made
-    /// for the template half. <c>@user.id</c> is deliberately <em>not</em> refused: the envelope carries
-    /// <c>authid</c>, so it can be answered — resolve what you can answer, refuse what you cannot.
-    /// </para>
-    /// <para>
-    /// <b>The <c>@tenant.id</c> cases compare against a <em>column</em> and not a string literal, because a
-    /// literal is unreachable:</b> <c>@tenant.id</c> is typed <c>Uuid</c>, so <c>@tenant.id == 'acme'</c> is
-    /// already refused by the CEL type checker as <c>Cannot compare String to Uuid</c> and never reaches this
-    /// refusal at all. The reachable — and realistic — shape is a row's own tenant column against the caller's,
-    /// which is exactly how a rule writes it.
-    /// </para>
+    /// The positive and the negated form are both asserted because a negation is where an absent operand turns into
+    /// "every event": the refusal that used to stand here existed for exactly that, and it is now the dispatcher's
+    /// gate (<c>EventSubscriptionsTests</c>) that keeps it from happening, which needs the read recorded here.
     /// </remarks>
     [Theory]
-    [InlineData("new.tenant_id == @tenant.id", "@tenant.id")]
-    [InlineData("!(new.tenant_id == @tenant.id)", "@tenant.id")]
-    [InlineData("'admin' in @user.roles", "@user.roles")]
-    [InlineData("!('admin' in @user.roles)", "@user.roles")]
-    public void A_condition_naming_provenance_the_envelope_lacks_is_refused_at_apply(string condition, string name)
+    [InlineData("new.tenant_id == @tenant.id", true, false)]
+    [InlineData("!(new.tenant_id == @tenant.id)", true, false)]
+    [InlineData("'admin' in @user.roles", false, true)]
+    [InlineData("!('admin' in @user.roles)", false, true)]
+    public void A_condition_reading_tenant_or_roles_applies_and_records_what_it_reads(string condition, bool tenant, bool roles)
     {
-        var error = CompileErrors(AfterUpdate(Webhook(), condition)).ShouldHaveSingleItem();
+        var hook = Compile(AfterUpdate(Webhook(), condition)).AfterUpdate.ShouldHaveSingleItem();
 
-        error.Path.ShouldBe("/entities/deals/hooks/afterUpdate/0/condition");
-        error.Message.ShouldContain(name);
-        error.FixSuggestion.ShouldNotBeNull().ShouldNotBeEmpty();
+        hook.Required.TenantId.ShouldBe(tenant);
+        hook.ReadsRoles.ShouldBe(roles);
     }
 
     /// <summary>
-    /// The non-vacuity control for the refusal above: <c>@user.id</c> <b>is</b> answerable from the envelope's
-    /// <c>authid</c>, so a condition reading it compiles and is carried with its actor requirement recorded.
+    /// <c>@user.id</c> is answered from the envelope's <c>authid</c>, so a condition reading it compiles and is carried
+    /// with its actor requirement recorded — and with no tenant or roles requirement it does not have.
     /// </summary>
-    /// <remarks>
-    /// Without this, "provenance is refused" would also hold for a build that refused every <c>@</c> reference in
-    /// a condition — which would delete the most useful after-hook condition there is.
-    /// </remarks>
     [Fact]
     public void A_condition_reading_user_id_compiles_and_records_that_it_needs_an_actor()
     {
