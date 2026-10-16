@@ -478,7 +478,7 @@ keeps rows already in `alvo_outbox` readable.
 | Attribute | Today | After HX-01 |
 |---|---|---|
 | `authtype` | `apikey`/`system`/`anon` | from `ActorKind`; authcontext values `api_key`/`user`/`system`/`unauthenticated`/`unknown`; consts `ApiKey = "api_key"`, `User`, `System`, `Unauthenticated`, `Unknown`; `Anonymous` **removed** so stale compiled comparisons fail at build |
-| `authclaims` | — | authcontext attribute; JSON string `{"roles":[…]}`; stripped from outbound webhook bodies |
+| `authclaims` | — | authcontext attribute; JSON string `{"roles":[…]}`; stripped from the **default** webhook body (an author template carries roles only through an explicit `{{@user.roles}}`) |
 | `tenantid` | — | Alvo extension; the write's tenant; absent for global rows / tenantless system writes |
 | `causationid`, `chaindepth` | absent / 0 | from effective provenance |
 | `traceparent`, `tracestate` | — | Distributed Tracing extension (registered in 1.0.2) |
@@ -888,7 +888,7 @@ by exactly the PR it is listed under.**
   after-hook conditions/templates reading excluded fields; `AlvoChainDepthExceededException` at the EF write
   entry points and `IAlvoEvents.PublishAsync`, mirrored in `InMemoryAlvoData` and a provider-contract row;
   `AlvoExtensionOptions`; `ActorKind` derivation and the normalising legacy reader (§4.7 *HX-01 settled
-  details*); webhook bodies strip `authclaims`; arch fact on `AlvoFlow` setters; `docs/PLAN.md` gains a *Host
+  details*); the default webhook body strips `authclaims`; arch fact on `AlvoFlow` setters; `docs/PLAN.md` gains a *Host
   extensibility* line under F7 linking this spec. `AlvoFlow` has no production setter yet (HX-03/HX-07 add
   them); its rows are unit tests setting it through the IVT grant.
 - **Docs:** *Extending in code* landing, *Where logic goes* (the page's decision table), envelope reference
