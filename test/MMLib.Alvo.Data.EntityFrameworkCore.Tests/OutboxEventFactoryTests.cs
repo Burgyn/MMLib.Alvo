@@ -260,6 +260,59 @@ public partial class OutboxEventFactoryTests
     }
 
     /// <summary>
+    /// A stated <c>traceparent</c> outside the W3C grammar is dropped, and its <c>tracestate</c> with it — W3C discards
+    /// the state of a parent it cannot read — rather than becoming the registered extension's value.
+    /// </summary>
+    /// <param name="traceParent">A malformed, all-zero, unknown-version or newline-terminated traceparent.</param>
+    [Theory]
+    [InlineData("not-a-traceparent")]
+    [InlineData("01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")]
+    [InlineData("00-00000000000000000000000000000000-00f067aa0ba902b7-01")]
+    [InlineData($"{StatedTraceParent}\n")]
+    public void An_invalid_stated_traceparent_is_dropped_with_its_tracestate(string traceParent)
+    {
+        var caller = Caller with { Provenance = new AlvoProvenance { TraceParent = traceParent, TraceState = "stated=1" } };
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, caller, Now, PostImage, null);
+
+        (@event.TraceParent, @event.TraceState, @event.CorrelationId).ShouldBe((null, null, @event.Id.ToString()));
+    }
+
+    /// <summary>A stated <c>tracestate</c> outside the list grammar, or over the cap, is dropped; its valid parent stays.</summary>
+    /// <param name="traceState">A malformed, newline-carrying or oversize tracestate.</param>
+    [Theory]
+    [InlineData("not a list member")]
+    [InlineData("stated=1\n")]
+    [InlineData("stated=1\r\nX-Injected: yes")]
+    [MemberData(nameof(OversizeTraceState))]
+    public void An_invalid_stated_tracestate_is_dropped_and_its_parent_kept(string traceState)
+    {
+        var caller = Caller with { Provenance = new AlvoProvenance { TraceParent = StatedTraceParent, TraceState = traceState } };
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, caller, Now, PostImage, null);
+
+        (@event.TraceParent, @event.TraceState, @event.CorrelationId).ShouldBe((StatedTraceParent, null, StatedTraceId));
+    }
+
+    /// <summary>An ambient activity's <c>tracestate</c> — the inbound header — is held to the same grammar and cap.</summary>
+    [Fact]
+    public void An_oversize_ambient_tracestate_is_dropped_and_the_activity_kept()
+    {
+        using var activity = new System.Diagnostics.Activity("write").SetIdFormat(System.Diagnostics.ActivityIdFormat.W3C).Start();
+        activity.TraceStateString = Oversize;
+
+        var @event = OutboxEventFactory.For(Vehicles, OutboxOperation.Created, Caller, Now, PostImage, null);
+
+        (@event.TraceParent, @event.TraceState).ShouldBe((activity.Id, null));
+    }
+
+    /// <summary>The oversize tracestate, as theory data.</summary>
+    public static TheoryData<string> OversizeTraceState => [Oversize];
+
+    /// <summary>A well-formed tracestate one character over <see cref="W3CTraceContext.MaxTraceStateLength"/>.</summary>
+    private static string Oversize => $"k={new string('v', 255)},j={new string('w', 253)}";
+
+    /// <summary>
     /// A hierarchical activity has no trace id; its all-zero placeholder must never become a correlation id that would
     /// put every such event in one flow.
     /// </summary>

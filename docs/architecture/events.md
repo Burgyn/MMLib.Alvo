@@ -123,7 +123,7 @@ the naming rule, and the table below is the third reader.
 | `tenantid` | extension | the write's tenant; **absent** for a global row and a tenantless system write | Alvo's |
 | `correlationid` | extension | the stated correlation id, else the trace id of the stated or ambient W3C `traceparent`, else the event's own id | **post-1.0.2** — `extensions/correlation.md` |
 | `causationid` | extension | from the effective provenance; absent for a direct write | **post-1.0.2** — `extensions/correlation.md` |
-| `traceparent`, `tracestate` | extension | the stated W3C trace context, else the ambient W3C `Activity`'s; absent when there is none | **registered in v1.0.2** — the Distributed Tracing extension |
+| `traceparent`, `tracestate` | extension | the stated W3C trace context, else the ambient W3C `Activity`'s; absent when there is none. Each is held to the W3C grammar (`traceparent` version `00` only; `tracestate` at most 32 members and 512 characters) and dropped when it fails — an invalid `traceparent` takes its `tracestate` with it | **registered in v1.0.2** — the Distributed Tracing extension |
 | `data.record` | payload | the post-image, **unmasked**, minus the entity's `events.exclude` fields; absent on a delete | Alvo's |
 | `data.old_record` | payload | the pre-image, **unmasked**, minus the entity's `events.exclude` fields; absent on a create | Alvo's |
 | `data.changed` | payload | the fields whose value moved, ordinally ordered | Alvo's |

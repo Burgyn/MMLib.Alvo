@@ -37,7 +37,7 @@ value empty, as `{{@user.id}}` already did for an anonymous write.
 | `correlationid` | The id shared by one end-to-end flow: the one the caller stated, else the trace id of the W3C trace the write ran under, else the event's own id. |
 | `causationid` | The event that caused this change, when one did. |
 | `chaindepth` | How many hops deep the causation chain is; `0` for a caller acting directly. Past `Alvo:Extensions:MaxDepth` (8) the write is refused with `508 chain-depth-exceeded`. |
-| `traceparent`, `tracestate` | The W3C trace context of the write, when one was active (the registered Distributed Tracing extension). |
+| `traceparent`, `tracestate` | The W3C trace context of the write, when one was active (the registered Distributed Tracing extension). A value outside the W3C grammar, or a `tracestate` over 512 characters, is left out. |
 
 An embedded host states a flow through `AlvoContext.Provenance`. Depth can only grow along a chain: the deeper of the
 stated and the ambient depth wins.

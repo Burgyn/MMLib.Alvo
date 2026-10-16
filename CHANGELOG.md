@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Event envelopes carry provenance** (HX-01, #378). Every event now carries `authclaims` (the caller's roles,
   `{"roles":[…]}`), `tenantid` (the write's tenant; absent for global rows and tenantless system writes), and
-  `traceparent`/`tracestate` when a W3C trace is active; `chaindepth` and `causationid` come from the new
+  `traceparent`/`tracestate` when a valid W3C trace is active (a value outside the W3C grammar, or a `tracestate` over
+  512 characters, is left out); `chaindepth` and `causationid` come from the new
   `AlvoContext.Provenance`, merged with the framework's ambient flow by `AlvoEventProvenance.Effective`. When a caller
   states a `traceparent` but no correlation id, `correlationid` is that trace's id. A custom event published through
   `IAlvoEvents` carries the same attributes, `tenantid` included. `AlvoContext.ActorKind` says how the caller
