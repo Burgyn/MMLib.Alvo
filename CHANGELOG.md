@@ -128,7 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the outbox keep their bytes and are normalised when read. Code comparing `AlvoEventAuthType.Anonymous` no longer
   compiles — use `Unauthenticated`.
 - **After-hook conditions refuse a row image their event lacks** (#325). A missing image reads null, so a positive
-  comparison against it never matched, while a negated one (`!=`, `!(…)`) matched every event, and `changed()`
+  comparison against it never matched, while a negation (`!(…)`) matched every event, and `changed()`
   reported every field that held a value as moved — the filter silently decided by an absent row:
   - `old.<field>` in `afterCreate` — read `new.<field>`;
   - `new.<field>` or a bare field in `afterDelete` — read `old.<field>`;
