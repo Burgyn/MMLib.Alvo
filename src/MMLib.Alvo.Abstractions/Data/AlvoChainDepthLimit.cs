@@ -15,11 +15,17 @@ internal sealed class AlvoChainDepthLimit
     /// <summary>The default limit (spec 2026-10-14 X3): a legitimate hook→write→hook→event→handler→write chain uses 5.</summary>
     internal const int DefaultMaxDepth = 8;
 
+    /// <summary>
+    /// The smallest limit, and the one floor <c>Alvo:Extensions:MaxDepth</c> is validated against: below it every write
+    /// an event handler or a timer makes would be refused as a loop.
+    /// </summary>
+    internal const int MinimumMaxDepth = 1;
+
     /// <summary>Initializes a limit that allows chains up to <paramref name="maxDepth"/> hops deep.</summary>
-    /// <param name="maxDepth">The deepest chain still allowed.</param>
+    /// <param name="maxDepth">The deepest chain still allowed; at least <see cref="MinimumMaxDepth"/>.</param>
     internal AlvoChainDepthLimit(int maxDepth)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(maxDepth);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxDepth, MinimumMaxDepth);
         MaxDepth = maxDepth;
     }
 

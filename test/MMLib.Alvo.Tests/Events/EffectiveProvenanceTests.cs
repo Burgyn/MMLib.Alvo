@@ -118,7 +118,14 @@ public class EffectiveProvenanceTests
         AlvoFlow.Provenance.ShouldBeNull();
     }
 
+    /// <summary>The limit's floor is the options' floor: a maximum below one is refused however it is built.</summary>
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(0)]
+    public void A_maximum_below_one_is_refused(int maxDepth)
+        => Should.Throw<ArgumentOutOfRangeException>(() => new AlvoChainDepthLimit(maxDepth));
+
     [Fact]
-    public void A_negative_maximum_is_refused()
-        => Should.Throw<ArgumentOutOfRangeException>(() => new AlvoChainDepthLimit(-1));
+    public void A_maximum_of_one_is_the_floor()
+        => new AlvoChainDepthLimit(AlvoChainDepthLimit.MinimumMaxDepth).MaxDepth.ShouldBe(1);
 }

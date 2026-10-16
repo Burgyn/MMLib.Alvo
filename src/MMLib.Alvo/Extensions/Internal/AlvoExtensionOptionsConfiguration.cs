@@ -1,6 +1,8 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 
+using MMLib.Alvo.Data;
+
 namespace MMLib.Alvo.Extensions.Internal;
 
 /// <summary>Binds <see cref="AlvoExtensionOptions"/> from its section and refuses an unusable value at start.</summary>
@@ -10,7 +12,7 @@ internal sealed class AlvoExtensionOptionsConfiguration(IConfiguration? configur
 {
     internal const string MaxDepthKey = $"{AlvoExtensionOptions.SectionName}:{nameof(AlvoExtensionOptions.MaxDepth)}";
 
-    private const int MinimumMaxDepth = 1;
+    private const int MinimumMaxDepth = AlvoChainDepthLimit.MinimumMaxDepth;
 
     public void Configure(AlvoExtensionOptions options)
     {

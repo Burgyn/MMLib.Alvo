@@ -38,6 +38,15 @@ public class AlvoExtensionOptionsTests
         refused.Message.ShouldContain("Alvo__Extensions__MaxDepth");
     }
 
+    /// <summary>The smallest limit the options accept is one the limit itself accepts, so the two floors are one.</summary>
+    [Fact]
+    public void The_smallest_accepted_limit_builds_a_limit()
+    {
+        using var services = Container(new() { ["Alvo:Extensions:MaxDepth"] = $"{AlvoChainDepthLimit.MinimumMaxDepth}" });
+
+        services.GetRequiredService<AlvoChainDepthLimit>().MaxDepth.ShouldBe(AlvoChainDepthLimit.MinimumMaxDepth);
+    }
+
     private static ServiceProvider Container(Dictionary<string, string?> settings) => new ServiceCollection()
         .AddSingleton<IConfiguration>(new ConfigurationBuilder().AddInMemoryCollection(settings).Build())
         .AddAlvoExtensions()
