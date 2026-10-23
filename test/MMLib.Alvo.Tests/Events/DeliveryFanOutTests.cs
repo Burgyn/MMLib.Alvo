@@ -22,7 +22,7 @@ public sealed class DeliveryFanOutTests : IDisposable
     private readonly ILoggerFactory _loggers;
     private readonly FakeDeliveryStore _store = new(new ManualClock(new DateTimeOffset(2026, 10, 23, 9, 0, 0, TimeSpan.Zero)));
 
-    public DeliveryFanOutTests() => _loggers = LoggerFactory.Create(builder => builder.AddProvider(_logs));
+    public DeliveryFanOutTests() => _loggers = LoggerFactory.Create(builder => builder.AddProvider(_logs).SetMinimumLevel(LogLevel.Debug));
 
     public void Dispose()
     {
@@ -57,7 +57,8 @@ public sealed class DeliveryFanOutTests : IDisposable
         var row = _store.Rows.ShouldHaveSingleItem();
         row.Status.ShouldBe("dead");
         row.LastErrorType.ShouldBe("when-failed");
-        _logs.Entries.ShouldContain(entry => entry.EventName == "HandlerConditionFailed" && entry.Level == LogLevel.Warning);
+        _logs.Entries.ShouldContain(entry => entry.EventName == "HandlerConditionFailed" && entry.Level == LogLevel.Warning
+            && entry.Message.Contains("Exception)", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -78,6 +79,10 @@ public sealed class DeliveryFanOutTests : IDisposable
         }
     }
 
+    /// <summary>Pins the outcome only: the interpreter's null rule already makes this comparison false, gate or not.</summary>
+    /// <remarks>
+    /// <see cref="A_condition_reading_a_caller_value_the_event_lacks_fans_out_nothing"/> is the fact that needs the gate.
+    /// </remarks>
     [Fact]
     public async Task A_condition_reading_a_tenant_the_event_lacks_fans_out_nothing()
     {
@@ -101,6 +106,7 @@ public sealed class DeliveryFanOutTests : IDisposable
         (await fanOut.FanOutAsync(Event("entity.tickets.created", Record(("id", Guid.NewGuid()))), _catalog, Ct)).ShouldBe(0);
 
         _store.Rows.ShouldBeEmpty();
+        _logs.Entries.ShouldContain(entry => entry.EventName == "HandlerConditionUnread" && entry.Level == LogLevel.Debug);
     }
 
     [Fact]
@@ -156,6 +162,75 @@ public sealed class DeliveryFanOutTests : IDisposable
 
         _store.Rows.ShouldHaveSingleItem().TenantId.ShouldBe(tenant);
     }
+
+    /// <summary>
+    /// A dead delivery is announced when its row is written: an outbox retry re-fans the event out into rows that already
+    /// exist, so it adds no second Error line and no second <c>alvo.delivery.dead</c> increment.
+    /// </summary>
+    [Fact]
+    public async Task A_retried_fan_out_announces_a_dead_delivery_once()
+    {
+        var subscriber = UniqueId("loop");
+        using var dead = new DeadDeliveries(subscriber);
+        var fanOut = FanOut(alvo => alvo.Entity("tickets", t => t.OnCreated(subscriber, OnCreated)));
+        var deep = Event("entity.tickets.created", Record(), depth: AlvoChainDepthLimit.DefaultMaxDepth);
+
+        (await fanOut.FanOutAsync(deep, _catalog, Ct)).ShouldBe(1);
+        (await fanOut.FanOutAsync(deep, _catalog, Ct)).ShouldBe(1, "a retry still counts the event as fanned out");
+
+        _store.Rows.ShouldHaveSingleItem().Status.ShouldBe("dead");
+        _logs.Entries.Count(entry => entry.EventName == "ChainDepthExceeded").ShouldBe(1);
+        dead.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_dead_delivery_whose_insert_failed_is_not_announced()
+    {
+        var subscriber = UniqueId("unwritten");
+        using var dead = new DeadDeliveries(subscriber);
+        var fanOut = FanOut(alvo => alvo.Entity("tickets", t => t.OnCreated(subscriber, OnCreated, when: "int(new.code) > 0")));
+        _store.FanOutFailures = 1;
+
+        await Should.ThrowAsync<InvalidOperationException>(() => fanOut.FanOutAsync(Event("entity.tickets.created", Record(("code", "x"))), _catalog, Ct));
+
+        _logs.Entries.ShouldNotContain(entry => entry.EventName == "HandlerConditionFailed");
+        dead.Count.ShouldBe(0);
+    }
+
+    /// <summary>The loop signal wins: a condition that throws on an event at the limit records the depth, not the condition.</summary>
+    [Fact]
+    public async Task The_depth_limit_outranks_a_condition_that_throws()
+    {
+        var fanOut = FanOut(alvo => alvo.Entity("tickets", t => t.OnCreated("by-code", OnCreated, when: "int(new.code) > 0")));
+
+        await fanOut.FanOutAsync(Event("entity.tickets.created", Record(("code", "x")), depth: AlvoChainDepthLimit.DefaultMaxDepth), _catalog, Ct);
+
+        _store.Rows.ShouldHaveSingleItem().LastErrorType.ShouldBe("chain-depth-exceeded");
+    }
+
+    [Fact]
+    public async Task A_condition_that_does_not_hold_records_nothing_at_any_depth()
+    {
+        var fanOut = FanOut(alvo => alvo.Entity("tickets", t => t.OnCreated("never", OnCreated, when: "new.code == 'y'")));
+
+        (await fanOut.FanOutAsync(Event("entity.tickets.created", Record(("code", "x")), depth: AlvoChainDepthLimit.DefaultMaxDepth), _catalog, Ct))
+            .ShouldBe(0);
+
+        _store.Rows.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("entity.tickets.created", true)]
+    [InlineData("entity.tickets.updated", true)]
+    [InlineData("entity.tickets.deleted", false)]
+    public void Saved_selects_creates_and_updates(string type, bool selected) =>
+        HandlerSources.Selects(new EntityEvents(["tickets"], HandlerVerb.Saved), type).Selected.ShouldBe(selected);
+
+    [Fact]
+    public void A_verb_this_build_does_not_know_selects_nothing() =>
+        HandlerSources.Selects(new EntityEvents(["tickets"], (HandlerVerb)99), "entity.tickets.created").Selected.ShouldBeFalse();
+
+    private static string UniqueId(string prefix) => $"{prefix}-{Guid.NewGuid():N}";
 
     private DeliveryFanOut FanOut(Action<IAlvoBuilder> configure) => new(
         _store,

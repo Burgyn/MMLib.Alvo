@@ -12,9 +12,23 @@ namespace MMLib.Alvo.Events.Internal;
 /// actions run, so their failure cannot keep a handler from its work (spec 2026-10-14 §4.8, M1).
 /// </summary>
 /// <remarks>
+/// <para>
 /// The store's uniqueness on (event, subscriber) makes a second fan-out of one event a no-op, which is what lets the outbox
 /// retry an entry whose actions failed. Only a storage failure escapes; the dispatcher then holds the record's later events
 /// back.
+/// </para>
+/// <para>
+/// <b>A dead delivery is announced once, when its row is written.</b> Its log line and its <c>alvo.delivery.dead</c>
+/// increment wait for the insert and are emitted only when the store reports new rows — so a failed insert announces
+/// nothing, and a retried entry (whose rows all exist) announces nothing again. The store writes a fan-out all together
+/// or not at all, so "new rows" means this call's rows; the one residue is a catalog change between two attempts that
+/// adds a handler, which makes the retry's insert partial and re-announces the earlier dead rows.
+/// </para>
+/// <para>
+/// <b>The depth limit outranks a failed condition.</b> A handler whose condition holds — or threw, so it cannot be said
+/// not to — on an event already at the limit is recorded <c>chain-depth-exceeded</c>, the loop signal, rather than
+/// <c>when-failed</c>; a condition that does not hold records nothing at any depth.
+/// </para>
 /// </remarks>
 internal sealed class DeliveryFanOut(
     IDeliveryStore store,
@@ -23,60 +37,67 @@ internal sealed class DeliveryFanOut(
     AlvoChainDepthLimit depth,
     ILogger<DeliveryFanOut> logger)
 {
+    /// <summary>Records the event's deliveries.</summary>
+    /// <returns>How many deliveries the event fans out to, recorded now or by an earlier attempt — dead ones included.</returns>
     internal async Task<int> FanOutAsync(AlvoEvent @event, PolicyCatalog catalog, CancellationToken cancellationToken)
     {
-        var requests = RequestsFor(@event, binder.For(catalog));
-        if (requests.Count > 0)
+        var plan = Plan(@event, binder.For(catalog));
+        if (plan.Requests.Count > 0
+            && await store.FanOutAsync(plan.Requests, cancellationToken).ConfigureAwait(false) > 0)
         {
-            await store.FanOutAsync(requests, cancellationToken).ConfigureAwait(false);
+            plan.Announcements.ForEach(announce => announce());
         }
 
-        return requests.Count;
+        return plan.Requests.Count;
     }
 
-    private List<DeliveryRequest> RequestsFor(AlvoEvent @event, ExtensionBindings bindings)
+    private FanOutPlan Plan(AlvoEvent @event, ExtensionBindings bindings)
     {
         var caller = EnvelopeReading.CallerOf(@event);
-        var requests = new List<DeliveryRequest>();
+        var plan = new FanOutPlan();
         foreach (var (handler, condition) in bindings.Selecting(@event))
         {
-            if (Request(@event, handler, HandlerCondition.Judge(condition, @event, evaluator, caller)) is { } request)
-            {
-                requests.Add(request);
-            }
+            Add(plan, @event, handler, HandlerCondition.Judge(condition, @event, evaluator, caller));
         }
 
-        requests.AddRange(bindings.UnboundSelecting(@event).Select(handler => Unbound(@event, handler)));
+        foreach (var handler in bindings.UnboundSelecting(@event))
+        {
+            plan.Dead(Request(@event, handler.Id), DeliveryRequest.UnboundReason, () => { });
+        }
 
-        return requests;
+        return plan;
     }
 
-    private DeliveryRequest? Request(AlvoEvent @event, BoundHandler handler, HandlerVerdict verdict) => verdict switch
+    private void Add(FanOutPlan plan, AlvoEvent @event, BoundHandler handler, HandlerJudgement judgement)
     {
-        HandlerVerdict.NoMatch => null,
-        HandlerVerdict.Failed => WhenFailed(@event, handler),
-        _ when @event.ChainDepth + 1 > depth.MaxDepth => TooDeep(@event, handler),
-        _ => Pending(@event, handler),
-    };
-
-    private DeliveryRequest WhenFailed(AlvoEvent @event, BoundHandler handler)
-    {
-        DeliveryLog.HandlerConditionFailed(logger, handler.Id, @event.Id);
-        AlvoDeliveryMetrics.DeadRecorded(handler.Id, DeliveryErrors.WhenFailed);
-
-        return Pending(@event, handler) with { DeadReason = DeliveryErrors.WhenFailed };
+        var request = Request(@event, handler.Id);
+        if (judgement.Verdict is HandlerVerdict.NoMatch)
+        {
+            Unread(@event, handler, judgement);
+        }
+        else if (@event.ChainDepth + 1 > depth.MaxDepth)
+        {
+            plan.Dead(request, DeliveryErrors.ChainDepthExceeded, () => DeliveryLog.ChainDepthExceeded(
+                logger, handler.Id, @event.Id, @event.ChainDepth, @event.ChainDepth + 1, depth.MaxDepth));
+        }
+        else if (judgement.Verdict is HandlerVerdict.Failed)
+        {
+            plan.Dead(request, DeliveryErrors.WhenFailed, () => DeliveryLog.HandlerConditionFailed(
+                logger, handler.Id, @event.Id, judgement.ErrorType ?? nameof(Exception)));
+        }
+        else
+        {
+            plan.Requests.Add(request);
+        }
     }
 
-    private DeliveryRequest TooDeep(AlvoEvent @event, BoundHandler handler)
+    private void Unread(AlvoEvent @event, BoundHandler handler, HandlerJudgement judgement)
     {
-        DeliveryLog.ChainDepthExceeded(logger, handler.Id, @event.Id, @event.ChainDepth, @event.ChainDepth + 1, depth.MaxDepth);
-        AlvoDeliveryMetrics.DeadRecorded(handler.Id, DeliveryErrors.ChainDepthExceeded);
-
-        return Pending(@event, handler) with { DeadReason = DeliveryErrors.ChainDepthExceeded };
+        if (judgement.Unread is { } reference)
+        {
+            DeliveryLog.HandlerConditionUnread(logger, handler.Id, @event.Id, reference);
+        }
     }
-
-    private static DeliveryRequest Pending(AlvoEvent @event, BoundHandler handler) =>
-        Request(@event, handler.Id);
 
     private static DeliveryRequest Request(AlvoEvent @event, string subscriber) => new()
     {
@@ -87,10 +108,21 @@ internal sealed class DeliveryFanOut(
         Kind = DeliveryKind.Handler,
     };
 
-    private static DeliveryRequest Unbound(AlvoEvent @event, HandlerRegistration handler)
+    /// <summary>One event's requests, and what to announce once they are written.</summary>
+    private sealed class FanOutPlan
     {
-        AlvoDeliveryMetrics.DeadRecorded(handler.Id, DeliveryRequest.UnboundReason);
+        internal List<DeliveryRequest> Requests { get; } = [];
 
-        return Request(@event, handler.Id) with { DeadReason = DeliveryRequest.UnboundReason };
+        internal List<Action> Announcements { get; } = [];
+
+        internal void Dead(DeliveryRequest request, string reason, Action log)
+        {
+            Requests.Add(request with { DeadReason = reason });
+            Announcements.Add(() =>
+            {
+                log();
+                AlvoDeliveryMetrics.DeadRecorded(request.Subscriber, reason);
+            });
+        }
     }
 }

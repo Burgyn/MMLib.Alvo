@@ -29,6 +29,7 @@ internal static class HandlerSources
         HandlerVerb.Created => operation == DataOperation.Create,
         HandlerVerb.Updated => operation == DataOperation.Update,
         HandlerVerb.Deleted => operation == DataOperation.Delete,
-        _ => operation is DataOperation.Create or DataOperation.Update,
+        HandlerVerb.Saved => operation is DataOperation.Create or DataOperation.Update,
+        _ => false,
     };
 }
