@@ -15,6 +15,9 @@ namespace MMLib.Alvo.Data;
 /// <para>
 /// The exceptions are <see cref="IAlvoData"/>'s, family for family.
 /// </para>
+/// <para>
+/// Alvo implements this interface and may add members to it; it is not meant to be implemented by host code.
+/// </para>
 /// </remarks>
 public interface IAlvoSession
 {
