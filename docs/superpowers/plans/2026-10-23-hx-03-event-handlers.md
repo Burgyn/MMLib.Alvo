@@ -1481,7 +1481,7 @@ public sealed class FakeDeliveryStoreTests : DeliveryStoreContractTests
 - [ ] **Step 4: Run, then accept the two baselines**
 
 Run: `dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs src/MMLib.Alvo.Testing/Events/IDeliveryStoreWorld.cs src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStoreTests.cs`, then `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*FakeDeliveryStoreTests' --filter-class '*SqlTextConfinedToRendererArchitectureTests'`
-Expected: 24 contract facts PASS (fix the fake, never the suite, if one fails — the suite is the contract). Then `dotnet test --project test/MMLib.Alvo.Abstractions.Tests --filter-class '*PublicApiApprovalTests'` and `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*PublicApiApprovalTests'`: each diff adds exactly the port + five records (Abstractions) and `DeliveryStoreContractTests` + `IDeliveryStoreWorld` (Testing); accept both, re-run, PASS.
+Expected: 24 contract facts PASS (fix the fake, never the suite, if one fails — the suite is the contract). Then `dotnet test --project test/MMLib.Alvo.Abstractions.Tests --filter-class '*PublicApiApprovalTests'` and `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*TestingLibraryPublicApiTests'` (the Testing baseline's own class — `*PublicApiApprovalTests` in that project covers the core's baseline, not this one): each diff adds exactly the port + five records (Abstractions) and `DeliveryStoreContractTests` + `IDeliveryStoreWorld` (Testing); accept both, re-run, PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -9162,7 +9162,7 @@ Each is recorded in the spec amendment (Task 14 Step 5) so a later reader can te
 
 | HX-03 criterion | Task(s) | Test |
 |---|---|---|
-| (1) contract suite, both engines: claim, lane order, re-fan-out no-op, `not_before`, dead at attempt 7, lease-expiry reclaim | 3, 4 | `DeliveryStoreContractTests` (24 facts, incl. the cross-batch and last-attempt lane facts) via `FakeDeliveryStoreTests`, `SqliteDeliveryStoreTests`, `PostgreSqlDeliveryStoreTests` (+ the two-claimant race) |
+| (1) contract suite, both engines: claim, lane order, re-fan-out no-op, `not_before`, dead at attempt 7, lease-expiry reclaim | 3, 4 | `DeliveryStoreContractTests` (33 facts, incl. the cross-batch and last-attempt lane facts) via `FakeDeliveryStoreTests`, `SqliteDeliveryStoreTests`, `PostgreSqlDeliveryStoreTests` (+ the two-claimant race) |
 | (2) kill mid-delivery: runs again after restart with the same `EventId` | 12 | `A_handler_killed_mid_delivery_runs_again_with_the_same_event_and_the_late_finisher_changes_nothing` (both engines; ruling 1) |
 | (3) a 10 000-event chaos run loses nothing | 13 | `DeliveryChaosCriteriaTests.Ten_thousand_events_reach_their_handler_in_order_and_none_is_lost` (SQLite + PostgreSQL, ring2) |
 | (4) an unmatched `when` creates no delivery row | 8, 12 | `A_matching_handler_gets_one_pending_delivery_and_an_unmatched_one_none`; `An_unmatched_condition_records_no_delivery` |
