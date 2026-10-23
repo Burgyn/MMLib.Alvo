@@ -309,7 +309,41 @@ public sealed class AlvoBootServiceStoredDescriptorTests
 
         world.State.Phase.ShouldBe(AlvoBootPhase.Failed);
         world.State.Failure.ShouldNotBeNull().ShouldContain("'old-sync'");
-        world.Log.ShouldContain(entry => entry.Level == LogLevel.Critical);
+        world.Log.ShouldContain(entry => entry.EventName == "BootRefused" && entry.Message.Contains("'old-sync'"));
+    }
+
+    /// <summary>
+    /// A refused start changes nothing: a build that retires one id and forgets another refuses before it ends the first
+    /// id's work, so the rollback that follows finds that work where it left it.
+    /// </summary>
+    [Theory]
+    [InlineData("file")]
+    [InlineData("stored")]
+    [InlineData("awaiting")]
+    public async Task A_refused_start_applies_no_retirement(string shape)
+    {
+        using var world = Shaped(shape);
+        world.Registrations = HandlerCatalog.Registry(alvo => alvo.AddRetiredExtension("old-sync", AlvoRetirement.DeadLetter));
+        await PendingAsync(world, "old-sync");
+        await PendingAsync(world, "forgotten");
+
+        (await world.BootAsync()).ShouldBeOfType<AlvoStartupRefusedException>().Message.ShouldContain("'forgotten'");
+
+        world.Deliveries.Rows.ShouldAllBe(row => row.Status == "pending");
+        world.Log.ShouldNotContain(entry => entry.EventName == "ExtensionRetired");
+    }
+
+    /// <summary>On the file path the refusal comes before stage 2 applies anything: the refused build migrates nothing.</summary>
+    [Fact]
+    public async Task A_file_boot_refused_over_orphaned_work_leaves_the_schema_untouched()
+    {
+        using var world = new BootServiceWorld().BootingFrom(BootServiceWorld.City);
+        await PendingAsync(world, "old-sync");
+
+        (await world.BootAsync()).ShouldBeOfType<AlvoStartupRefusedException>();
+
+        world.RecordedRevisions().ShouldBeEmpty();
+        world.PrimedEntities.ShouldBeEmpty();
     }
 
     /// <summary>Every shape that reaches Ready applies the retirements before it publishes Ready.</summary>

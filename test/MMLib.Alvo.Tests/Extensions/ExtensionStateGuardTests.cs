@@ -35,7 +35,7 @@ public sealed class ExtensionStateGuardTests : IDisposable
     {
         await PendingAsync("old-sync");
 
-        var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(() => Guard(alvo => { }).SettleAsync(Ct));
+        var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(() => Guard(alvo => { }).RefuseOrphansAsync(Ct));
 
         refusal.Message.ShouldContain("'old-sync'");
         refusal.FixSuggestion.ShouldContain("AddRetiredExtension(\"old-sync\", AlvoRetirement.DeadLetter)");
@@ -48,7 +48,7 @@ public sealed class ExtensionStateGuardTests : IDisposable
         await PendingAsync("old-sync");
         await PendingAsync("old-audit");
 
-        var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(() => Guard(alvo => { }).SettleAsync(Ct));
+        var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(() => Guard(alvo => { }).RefuseOrphansAsync(Ct));
 
         refusal.Message.ShouldContain("'old-audit', 'old-sync'");
         refusal.FixSuggestion.ShouldContain("AddRetiredExtension(\"old-audit\", AlvoRetirement.DeadLetter)");
@@ -60,7 +60,7 @@ public sealed class ExtensionStateGuardTests : IDisposable
     {
         await PendingAsync("on-created");
 
-        await Guard(alvo => alvo.Entity("tickets", t => t.OnCreated("on-created", OnCreated))).SettleAsync(Ct);
+        await Guard(alvo => alvo.Entity("tickets", t => t.OnCreated("on-created", OnCreated))).RefuseOrphansAsync(Ct);
 
         _store.Rows.ShouldHaveSingleItem().Status.ShouldBe("pending");
     }
@@ -70,7 +70,7 @@ public sealed class ExtensionStateGuardTests : IDisposable
     {
         await PendingAsync("old-sync");
 
-        await Guard(alvo => alvo.AddRetiredExtension("old-sync", AlvoRetirement.DeadLetter)).SettleAsync(Ct);
+        await Guard(alvo => alvo.AddRetiredExtension("old-sync", AlvoRetirement.DeadLetter)).RetireAsync(Ct);
 
         var row = _store.Rows.ShouldHaveSingleItem();
         row.Status.ShouldBe("dead");
@@ -83,7 +83,7 @@ public sealed class ExtensionStateGuardTests : IDisposable
     {
         await PendingAsync("old-sync");
 
-        await Guard(alvo => alvo.AddRetiredExtension("old-sync", AlvoRetirement.Discard)).SettleAsync(Ct);
+        await Guard(alvo => alvo.AddRetiredExtension("old-sync", AlvoRetirement.Discard)).RetireAsync(Ct);
 
         _store.Rows.ShouldHaveSingleItem().Status.ShouldBe("cancelled");
     }
@@ -95,7 +95,45 @@ public sealed class ExtensionStateGuardTests : IDisposable
             [new DeliveryRequest { EventId = Guid.NewGuid(), Subscriber = "old-sync", PartitionKey = "tickets:1", Kind = "handler", DeadReason = "when-failed" }],
             Ct);
 
-        await Guard(alvo => { }).SettleAsync(Ct);
+        await Guard(alvo => { }).RefuseOrphansAsync(Ct);
+    }
+
+    [Fact]
+    public async Task A_running_delivery_is_unfinished_work()
+    {
+        await PendingAsync("old-sync");
+        (await _store.ClaimAsync(ClaimOf("old-sync"), Ct)).ShouldHaveSingleItem();
+
+        _store.Rows.ShouldHaveSingleItem().Status.ShouldBe("running");
+        await Should.ThrowAsync<AlvoStartupRefusedException>(() => Guard(alvo => { }).RefuseOrphansAsync(Ct));
+    }
+
+    [Fact]
+    public async Task A_retrying_delivery_is_unfinished_work()
+    {
+        await PendingAsync("old-sync");
+        var claimed = (await _store.ClaimAsync(ClaimOf("old-sync"), Ct)).ShouldHaveSingleItem();
+        (await _store.FailAsync(
+            new DeliveryAttempt { Delivery = claimed, Claimant = "guard-tests", StartedAt = DateTimeOffset.UnixEpoch, Duration = TimeSpan.Zero },
+            new DeliveryFailure { ErrorType = "InvalidOperationException", RetryAfter = TimeSpan.FromMinutes(1), MaxAttempts = 7 },
+            Ct)).ShouldBeTrue();
+
+        _store.Rows.ShouldHaveSingleItem().Status.ShouldBe("retrying");
+        await Should.ThrowAsync<AlvoStartupRefusedException>(() => Guard(alvo => { }).RefuseOrphansAsync(Ct));
+    }
+
+    [Fact]
+    public async Task The_orphan_check_only_reads_even_beside_a_retirement()
+    {
+        await PendingAsync("old-sync");
+        await PendingAsync("forgotten");
+
+        var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(
+            () => Guard(alvo => alvo.AddRetiredExtension("old-sync", AlvoRetirement.DeadLetter)).RefuseOrphansAsync(Ct));
+
+        refusal.Message.ShouldContain("'forgotten'");
+        refusal.Message.ShouldNotContain("'old-sync'");
+        _store.Rows.ShouldAllBe(row => row.Status == "pending");
     }
 
     [Fact]
@@ -112,6 +150,17 @@ public sealed class ExtensionStateGuardTests : IDisposable
 
     private ExtensionStateGuard Guard(Action<IAlvoBuilder> configure) =>
         new(Registry(configure), _store, _loggers.CreateLogger<ExtensionStateGuard>());
+
+    private static DeliveryClaim ClaimOf(string subscriber) => new()
+    {
+        Claimant = "guard-tests",
+        Ordered = [],
+        Unordered = [subscriber],
+        BatchSize = 1,
+        Lease = TimeSpan.FromMinutes(1),
+        OutboxMaxAttempts = 5,
+        OutboxClaimLease = TimeSpan.FromMinutes(1),
+    };
 
     private Task<int> PendingAsync(string subscriber) =>
         _store.FanOutAsync([new DeliveryRequest { EventId = Guid.NewGuid(), Subscriber = subscriber, PartitionKey = "tickets:1", Kind = "handler" }], Ct);

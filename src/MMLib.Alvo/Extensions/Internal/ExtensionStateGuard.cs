@@ -13,47 +13,45 @@ namespace MMLib.Alvo.Extensions.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>A step of the boot, not a service of its own.</b> <c>AlvoBootService</c> runs it after the schema is converged and
-/// before it publishes Ready, on every boot shape that gets there — a file descriptor, a stored one, or a
-/// stored-descriptor host still awaiting its first. Nothing waits on another service, so no host shape can hang on it,
-/// and a host whose boot never runs never runs it. A boot that refused or stood down never reaches it either, and nothing
-/// in that process delivers.
+/// <b>Two steps of the boot, not a service of its own.</b> <c>AlvoBootService</c> runs <see cref="RefuseOrphansAsync"/>
+/// as soon as stage 1 has brought the system tables up — the delivery tables among them — and before anything is
+/// converged, on every boot shape that is going to reach Ready; it runs <see cref="RetireAsync"/> last, just before it
+/// publishes Ready. Nothing waits on another service, so no host shape can hang on either, and a host whose boot never
+/// runs never runs them.
 /// </para>
 /// <para>
-/// <b>Its refusal stops the process, on every shape.</b> The fix is a code change — register the id again, or retire it
-/// — which the running process cannot take; the boot records it before the throw, as it does every code-level refusal.
+/// <b>A refused start changes nothing.</b> The check only reads, and it comes first: a build that retires one id and
+/// forgets another must not end the first id's work and then refuse, or the rollback that follows a refused deploy would
+/// find its handler's lanes already ended by a build that never served. Its refusal stops the process on every shape,
+/// because the fix is a code change — register the id again, or retire it — which the running process cannot take.
 /// </para>
 /// </remarks>
 internal sealed class ExtensionStateGuard(ExtensionRegistry registry, IDeliveryStore store, ILogger<ExtensionStateGuard> logger)
 {
-    /// <summary>Brings the delivery store up, applies every retirement, then refuses any work nobody owns.</summary>
-    /// <param name="cancellationToken">Cancels the step, failing the boot.</param>
+    /// <summary>Refuses the start when unfinished work belongs to an id this host neither registers nor retires; reads only.</summary>
+    /// <param name="cancellationToken">Cancels the check, failing the boot.</param>
     /// <exception cref="AlvoStartupRefusedException">Unfinished work belongs to an id neither registered nor retired.</exception>
-    internal async Task SettleAsync(CancellationToken cancellationToken)
+    internal async Task RefuseOrphansAsync(CancellationToken cancellationToken)
     {
-        await store.EnsureAsync(cancellationToken).ConfigureAwait(false);
-        await RetireAsync(cancellationToken).ConfigureAwait(false);
-        await RefuseOrphansAsync(cancellationToken).ConfigureAwait(false);
+        var known = registry.All.Select(registration => registration.Id).ToHashSet(StringComparer.Ordinal);
+        var orphans = (await store.PendingSubscribersAsync(cancellationToken).ConfigureAwait(false))
+            .Where(id => !known.Contains(id)).ToList();
+        if (orphans.Count > 0)
+        {
+            throw Orphaned(orphans);
+        }
     }
 
-    private async Task RetireAsync(CancellationToken ct)
+    /// <summary>Applies every <c>AddRetiredExtension</c>: dead-letters or cancels the id's unfinished deliveries.</summary>
+    /// <param name="cancellationToken">Cancels the step, failing the boot.</param>
+    internal async Task RetireAsync(CancellationToken cancellationToken)
     {
         foreach (var retired in registry.Retired)
         {
             var ended = retired.Retirement is AlvoRetirement.Discard
-                ? await store.CancelPendingAsync(retired.Id, ct).ConfigureAwait(false)
-                : await store.DeadLetterPendingAsync(retired.Id, DeliveryErrors.Retired, ct).ConfigureAwait(false);
+                ? await store.CancelPendingAsync(retired.Id, cancellationToken).ConfigureAwait(false)
+                : await store.DeadLetterPendingAsync(retired.Id, DeliveryErrors.Retired, cancellationToken).ConfigureAwait(false);
             ExtensionLog.ExtensionRetired(logger, retired.Id, retired.Retirement.ToString(), ended);
-        }
-    }
-
-    private async Task RefuseOrphansAsync(CancellationToken ct)
-    {
-        var known = registry.All.Select(registration => registration.Id).ToHashSet(StringComparer.Ordinal);
-        var orphans = (await store.PendingSubscribersAsync(ct).ConfigureAwait(false)).Where(id => !known.Contains(id)).ToList();
-        if (orphans.Count > 0)
-        {
-            throw Orphaned(orphans);
         }
     }
 

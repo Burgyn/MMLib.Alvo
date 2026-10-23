@@ -201,7 +201,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
             return;
         }
 
-        await SettleExtensionStateAsync(project, ct).ConfigureAwait(false);
+        await _extensionState.RetireAsync(ct).ConfigureAwait(false);
         _state.Ready(project, revision);
         RecordWhatTheBootDid(project, outcome, revision);
     }
@@ -235,7 +235,8 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         var stored = await _history.GetCurrentAsync(project, ct).ConfigureAwait(false);
         if (stored is null)
         {
-            await SettleExtensionStateAsync(project, ct).ConfigureAwait(false);
+            await RefuseOrphanedWorkAsync(project, ct).ConfigureAwait(false);
+            await _extensionState.RetireAsync(ct).ConfigureAwait(false);
             _state.Ready(project, appliedRevision: null);
             RecordWhatTheBootDid(project, SchemaStartupOutcome.Awaiting, revision: null);
 
@@ -247,9 +248,10 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
             return;
         }
 
+        await RefuseOrphanedWorkAsync(project, ct).ConfigureAwait(false);
         _ = Prime(boot, stored.Revision);
 
-        await SettleExtensionStateAsync(project, ct).ConfigureAwait(false);
+        await _extensionState.RetireAsync(ct).ConfigureAwait(false);
         _state.Ready(project, stored.Revision);
         RecordWhatTheBootDid(project, SchemaStartupOutcome.Unchanged, stored.Revision);
     }
@@ -557,6 +559,11 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     {
         var applied = await ReadAppliedSchemaAsync(boot.Descriptor.Name, ct).ConfigureAwait(false);
         var decision = await DecideAsync(boot, applied, ct).ConfigureAwait(false);
+        if (decision.Outcome is not (SchemaStartupOutcome.Refuse or SchemaStartupOutcome.StandDown))
+        {
+            await RefuseOrphanedWorkAsync(boot.Descriptor.Name, ct).ConfigureAwait(false);
+        }
+
         var revision = await CarryOutAsync(boot, applied, decision, ct).ConfigureAwait(false);
 
         return new BootOutcome(decision.Outcome, revision);
@@ -685,20 +692,28 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     }
 
     /// <summary>
-    /// The last step before Ready, on every shape that gets there: retirements applied, and a start refused over
-    /// unfinished work no registration owns.
+    /// Refuses the start over unfinished work no registration owns, on every shape that is going to reach Ready.
     /// </summary>
     /// <remarks>
-    /// After the schema, because the delivery tables are brought up by <see cref="ExtensionStateGuard"/> itself; before
-    /// Ready, so the delivery dispatcher — which waits for Ready — cannot claim work a retirement is about to end. Thrown
-    /// even by a dashboard-first host, like <see cref="RefuseUnregistrableExtensions"/>: only a redeploy cures it.
-    /// Recorded first, because <see cref="StartingAsync"/> rethrows an <see cref="AlvoStartupRefusedException"/> untouched.
+    /// <para>
+    /// <b>After stage 1, before anything changes.</b> Stage 1 has brought the system tables up — the delivery tables
+    /// among them — so the check can read; it runs before stage 2 applies anything and before the retirements are
+    /// applied, so a refused build leaves the database exactly as it found it, and the rollback that follows a refused
+    /// deploy finds neither a migrated schema nor ended work. On the file path it waits for stage 2's decision, so a boot
+    /// that refuses its schema or stands down says that instead. The retirements themselves run last, just before Ready,
+    /// because the delivery dispatcher waits for Ready and so cannot claim work a retirement is about to end.
+    /// </para>
+    /// <para>
+    /// Thrown even by a dashboard-first host, like <see cref="RefuseUnregistrableExtensions"/>: only a redeploy cures
+    /// it. Recorded first, because <see cref="StartingAsync"/> rethrows an <see cref="AlvoStartupRefusedException"/>
+    /// untouched.
+    /// </para>
     /// </remarks>
-    private async Task SettleExtensionStateAsync(string project, CancellationToken ct)
+    private async Task RefuseOrphanedWorkAsync(string project, CancellationToken ct)
     {
         try
         {
-            await _extensionState.SettleAsync(ct).ConfigureAwait(false);
+            await _extensionState.RefuseOrphansAsync(ct).ConfigureAwait(false);
         }
         catch (AlvoStartupRefusedException refusal)
         {
