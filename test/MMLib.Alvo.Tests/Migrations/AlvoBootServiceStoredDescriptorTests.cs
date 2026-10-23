@@ -1,5 +1,10 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Tests.Extensions;
 
 namespace MMLib.Alvo.Tests.Migrations;
 
@@ -205,6 +210,38 @@ public sealed class AlvoBootServiceStoredDescriptorTests
     }
 
     /// <summary>A dashboard-first host: no descriptor source, and a project name instead.</summary>
+    /// <summary>A host whose handlers do not fit the stored descriptor stays up, not ready, with the reason published.</summary>
+    [Fact]
+    public async Task Handlers_that_do_not_fit_a_stored_descriptor_stand_the_host_up_not_ready()
+    {
+        using var world = Dashboard().StoredVerbatim(BootServiceWorld.City);
+        world.Extensions = MisfitHandlers();
+
+        (await world.BootAsync()).ShouldBeNull("a stored-descriptor refusal never stops the process");
+
+        world.State.Phase.ShouldBe(AlvoBootPhase.Failed);
+        world.State.Failure.ShouldNotBeNull().ShouldContain("'orphan-handler'");
+        world.PrimedEntities.ShouldBeEmpty();
+        world.Log.ShouldContain(entry => entry.Level == LogLevel.Critical);
+    }
+
+    /// <summary>The same handlers on a code-first boot refuse the start: the file is the host's, and so is the fix.</summary>
+    [Fact]
+    public async Task Handlers_that_do_not_fit_a_descriptor_file_refuse_the_start()
+    {
+        using var world = new BootServiceWorld { Extensions = MisfitHandlers() }.BootingFrom(BootServiceWorld.City);
+
+        (await world.BootAsync()).ShouldBeOfType<AlvoStartupRefusedException>().Message.ShouldContain("'orphan-handler'");
+        world.State.Phase.ShouldBe(AlvoBootPhase.Failed);
+        world.PrimedEntities.ShouldBeEmpty();
+    }
+
+    private static ExtensionBinder MisfitHandlers() => new(
+        HandlerCatalog.Registry(alvo => alvo.Entity("no-such-entity", e => e.OnCreated("orphan-handler", HandlerCatalog.OnCreated))),
+        new CelCompiler(),
+        HandlerCatalog.EveryService(),
+        NullLogger<ExtensionBinder>.Instance);
+
     private static BootServiceWorld Dashboard()
     {
         var world = new BootServiceWorld();

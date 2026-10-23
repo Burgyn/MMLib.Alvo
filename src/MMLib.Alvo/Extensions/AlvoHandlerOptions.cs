@@ -24,7 +24,10 @@ public sealed class AlvoHandlerOptions
         }
     }
 
-    /// <summary>Gets or sets how long one attempt may run before it is cancelled and counted as failed; default 30 seconds.</summary>
+    /// <summary>
+    /// Gets or sets how long one attempt may run before it is cancelled and counted as failed; default 30 seconds, at most
+    /// 1 hour — a longer or non-positive timeout refuses the start.
+    /// </summary>
     public TimeSpan Timeout { get; set; } = DefaultTimeout;
 
     /// <summary>Gets or sets who the handler acts as; default <see cref="AlvoRunAs.System"/>.</summary>
@@ -43,4 +46,6 @@ public sealed class AlvoHandlerOptions
     internal bool OrderStated { get; private set; }
 
     internal static TimeSpan DefaultTimeout { get; } = TimeSpan.FromSeconds(30);
+
+    internal static TimeSpan MaxTimeout { get; } = TimeSpan.FromHours(1);
 }

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Migrations.Internal;
 using MMLib.Alvo.Rules.Internal;
@@ -117,6 +118,9 @@ internal sealed class BootServiceWorld : IDisposable
 
     /// <summary>The descriptor source a code-first host attaches, or <see langword="null"/> for dashboard-first.</summary>
     internal IDescriptorSource? Source { get; set; }
+
+    /// <summary>The binder stage 0 checks the host's handler registrations with, or <see langword="null"/> for none.</summary>
+    internal ExtensionBinder? Extensions { get; set; }
 
     /// <summary>What the introspector reports — read only when no applied snapshot was recorded.</summary>
     internal SchemaModel LiveSchema { get; set; } = new([]);
@@ -235,7 +239,7 @@ internal sealed class BootServiceWorld : IDisposable
     ];
 
     private DescriptorBootPlan Plan() =>
-        new(Source, new DescriptorValidator(), new CelCompiler(), _loggers.CreateLogger<DescriptorBootPlan>());
+        new(Source, new DescriptorValidator(), new CelCompiler(), _loggers.CreateLogger<DescriptorBootPlan>(), Extensions);
 
     private ConflictingRuntimeSchemaWriter Writer() =>
         new ConflictingRuntimeSchemaWriter(

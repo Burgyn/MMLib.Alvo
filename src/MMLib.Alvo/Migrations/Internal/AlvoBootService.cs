@@ -276,44 +276,59 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     private bool TryPlanTheStoredDescriptor(
         string project, DescriptorVersion stored, [NotNullWhen(true)] out BootPlan? boot)
     {
+        boot = null;
+        string reason;
         try
         {
-            boot = _bootPlan.Plan(stored.DescriptorJson);
+            var plan = _bootPlan.Plan(stored.DescriptorJson);
+            _bootPlan.EnsureBindable(plan.Catalog);
+            if (string.Equals(plan.Descriptor.Name, project, StringComparison.Ordinal))
+            {
+                boot = plan;
+
+                return true;
+            }
+
+            reason = NameMismatch(project, plan.Descriptor.Name);
+        }
+        catch (AlvoStartupRefusedException refused)
+        {
+            reason = UnfitExtensions(project, stored.Revision, refused.Message);
         }
         catch (Exception refused) when (refused is DescriptorValidationException or InvalidOperationException)
         {
-            boot = null;
-            var reason =
-                $"Alvo cannot serve project '{project}': the descriptor stored at revision {stored.Revision} "
-                + $"is one this build refuses — {refused.Message} The process is staying up, reporting not "
-                + "ready and serving nothing, so the descriptor can be corrected through the dashboard or the "
-                + "Management API; it does not live in a file this host can edit.";
-
-            _state.Failed(project, reason);
-            BootRefused(_logger, reason);
-
-            return false;
+            reason = RefusedDescriptor(project, stored.Revision, refused.Message);
         }
 
-        if (!string.Equals(boot.Descriptor.Name, project, StringComparison.Ordinal))
-        {
-            var mismatch =
-                $"Alvo cannot serve project '{project}': the descriptor stored under that key declares the "
-                + $"name '{boot.Descriptor.Name}'. Priming would publish the policy catalog under one name "
-                + "while the boot state and the version history use the other, and the next runtime apply "
-                + "would then be refused for a project that was 'already primed' as something else. Check "
-                + $"{AlvoSchemaOptions.ProjectEnvironmentVariable}, or the caller that appended a version "
-                + "under a key the descriptor does not match.";
+        _state.Failed(project, reason);
+        BootRefused(_logger, reason);
 
-            boot = null;
-            _state.Failed(project, mismatch);
-            BootRefused(_logger, mismatch);
-
-            return false;
-        }
-
-        return true;
+        return false;
     }
+
+    private static string RefusedDescriptor(string project, int revision, string refusal) =>
+        $"Alvo cannot serve project '{project}': the descriptor stored at revision {revision} "
+        + $"is one this build refuses — {refusal} The process is staying up, reporting not "
+        + "ready and serving nothing, so the descriptor can be corrected through the dashboard or the "
+        + "Management API; it does not live in a file this host can edit.";
+
+    /// <summary>
+    /// The reason a dashboard-first boot stands down when the host's handler registrations do not fit the stored
+    /// descriptor — recorded rather than thrown, like every other stored-descriptor refusal: the process stays up so
+    /// the descriptor can still be corrected through the dashboard.
+    /// </summary>
+    private static string UnfitExtensions(string project, int revision, string refusal) =>
+        $"Alvo cannot serve project '{project}': the extensions this host registers do not fit the descriptor stored "
+        + $"at revision {revision} — {refusal} The process is staying up, reporting not ready and "
+        + "serving nothing; fix the registrations and redeploy the host, or apply a descriptor they fit.";
+
+    private static string NameMismatch(string project, string declared) =>
+        $"Alvo cannot serve project '{project}': the descriptor stored under that key declares the "
+        + $"name '{declared}'. Priming would publish the policy catalog under one name "
+        + "while the boot state and the version history use the other, and the next runtime apply "
+        + "would then be refused for a project that was 'already primed' as something else. Check "
+        + $"{AlvoSchemaOptions.ProjectEnvironmentVariable}, or the caller that appended a version "
+        + "under a key the descriptor does not match.";
 
     /// <summary>
     /// The project a dashboard-first boot operates on, or the refusal that names both ways to supply one.
@@ -388,7 +403,10 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     {
         try
         {
-            return await _bootPlan.LoadAsync(ct).ConfigureAwait(false);
+            var boot = await _bootPlan.LoadAsync(ct).ConfigureAwait(false);
+            _bootPlan.EnsureBindable(boot.Catalog);
+
+            return boot;
         }
         catch (AlvoStartupRefusedException refusal)
         {

@@ -12,6 +12,7 @@ using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Extensions;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Internal;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Migrations;
@@ -100,7 +101,8 @@ public static class AlvoServiceCollectionExtensions
             provider.GetService<IDescriptorSource>(),
             provider.GetRequiredService<IDescriptorValidator>(),
             provider.GetRequiredService<ICelCompiler>(),
-            provider.GetRequiredService<ILogger<DescriptorBootPlan>>()));
+            provider.GetRequiredService<ILogger<DescriptorBootPlan>>(),
+            provider.GetRequiredService<ExtensionBinder>()));
 
     /// <summary>
     /// Registers the boot: the state a readiness probe reads, the hosted lifecycle service that fills it in

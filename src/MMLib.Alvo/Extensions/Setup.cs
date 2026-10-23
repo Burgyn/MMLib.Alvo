@@ -28,6 +28,7 @@ internal static class ExtensionsSetup
         services.TryAddSingleton(DepthLimit);
         services.TryAddSingleton<IAlvoSessions, AlvoSessions>();
         services.TryAddSingleton(provider => new ExtensionRegistry(provider.GetServices<ExtensionRegistration>()));
+        services.TryAddSingleton<ExtensionBinder>();
 
         return services;
 
