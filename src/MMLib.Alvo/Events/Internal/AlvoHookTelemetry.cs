@@ -14,7 +14,8 @@ namespace MMLib.Alvo.Events.Internal;
 /// </para>
 /// <para>
 /// Free when nobody listens: <see cref="ActivitySource.StartActivity(string, ActivityKind)"/> answers
-/// <see langword="null"/> without a sampling listener, and both members accept that.
+/// <see langword="null"/> without a sampling listener, and both members accept that; a span sampled for propagation
+/// only (<see cref="Activity.IsAllDataRequested"/> false) gets no display name or tags either.
 /// </para>
 /// </remarks>
 internal static class AlvoHookTelemetry
@@ -34,9 +35,9 @@ internal static class AlvoHookTelemetry
     internal static Activity? StartDelivery(string subscriber, AlvoEvent @event)
     {
         var delivery = _source.StartActivity(DeliveryName, ActivityKind.Consumer);
-        if (delivery is null)
+        if (delivery is not { IsAllDataRequested: true })
         {
-            return null;
+            return delivery;
         }
 
         delivery.DisplayName = $"{DeliveryName} {subscriber}";
@@ -50,7 +51,7 @@ internal static class AlvoHookTelemetry
     /// <summary>Records how the run ended; a failed run also marks the span's status as an error.</summary>
     internal static void Finish(Activity? delivery, string outcome)
     {
-        if (delivery is null)
+        if (delivery is not { IsAllDataRequested: true })
         {
             return;
         }

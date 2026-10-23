@@ -319,7 +319,8 @@ internal sealed class OutboxDispatcher(
     /// <summary>Runs one hook's action under its <c>alvo.delivery</c> span, recording how it ended.</summary>
     /// <remarks>
     /// The failure is rethrown untouched: the span observes it, the entry's release still decides it. A cancellation
-    /// while the host stops is neither outcome, exactly as <see cref="DispatchAsync"/> does not count it as an attempt.
+    /// while the host stops is neither outcome, exactly as <see cref="DispatchAsync"/> does not count it as an attempt
+    /// (a cancellation landing between the two filters reads as failed here only, which is harmless).
     /// </remarks>
     private async Task RunAsync(CompiledAfterHook hook, AlvoEvent @event, CancellationToken stoppingToken)
     {

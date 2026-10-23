@@ -16,15 +16,17 @@ public sealed partial class OutboxDispatcherTests
     public async Task Each_after_hook_run_is_one_delivery_span_tagged_with_its_subscriber()
     {
         using var spans = new DeliverySpans();
-        var pump = Subject(StoreWith(WonDeal()), Ready);
+        var deal = WonDeal();
+        var pump = Subject(StoreWith(deal), Ready);
 
         await spans.WithinAsync(() => pump.PumpOneBatchAsync(Cancellation));
 
         var span = spans.Recorded.ShouldHaveSingleItem();
-        span.OperationName.ShouldBe(AlvoHookTelemetry.DeliveryName);
+        span.OperationName.ShouldBe("alvo.delivery");
         span.DisplayName.ShouldBe($"alvo.delivery {DealsHook}");
         span.Kind.ShouldBe(ActivityKind.Consumer);
         span.GetTagItem("alvo.subscriber").ShouldBe(DealsHook);
+        span.GetTagItem("alvo.event.id").ShouldBe(deal.Id.ToString());
         span.GetTagItem("alvo.event.type").ShouldBe("entity.deals.updated");
         span.GetTagItem("alvo.outcome").ShouldBe("succeeded");
     }
@@ -40,6 +42,29 @@ public sealed partial class OutboxDispatcherTests
         var span = spans.Recorded.ShouldHaveSingleItem();
         span.GetTagItem("alvo.outcome").ShouldBe("failed");
         span.Status.ShouldBe(ActivityStatusCode.Error);
+    }
+
+    /// <summary>
+    /// A run cut short by the host stopping is neither outcome: the dispatcher does not count a shutdown as a failed
+    /// attempt, and the span the hook recorder reads must not either.
+    /// </summary>
+    [Fact]
+    public async Task A_run_cut_short_by_shutdown_carries_no_outcome()
+    {
+        using var spans = new DeliverySpans();
+        var store = StoreWith(WonDeal());
+        var blocked = new TaskCompletionSource();
+
+        await spans.WithinAsync(async () =>
+        {
+            await using var pump = await StartAsync(store, Ready, blockDeliveriesOn: blocked);
+            await UntilAsync(() => store.ClaimCount > 0, "the delivery to be in flight");
+            await pump.MeasureStopAsync();
+        });
+
+        var span = spans.Recorded.ShouldHaveSingleItem();
+        span.GetTagItem("alvo.outcome").ShouldBeNull();
+        span.Status.ShouldBe(ActivityStatusCode.Unset);
     }
 
     [Fact]
