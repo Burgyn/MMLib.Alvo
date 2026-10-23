@@ -85,6 +85,7 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton<IAlvoData>(CreateData);
         builder.Services.TryAddSingleton<IAlvoDataReachability>(CreateReachability);
         builder.Services.TryAddSingleton<IOutboxStore>(CreateOutboxStore);
+        builder.Services.TryAddSingleton<IDeliveryStore>(CreateDeliveryStore);
         AddSecretStore(builder.Services);
 
         return builder;
@@ -159,6 +160,11 @@ public static class AlvoEfCoreProvider
             provider.GetRequiredService<IOptions<AlvoSecretOptions>>().Value.EncryptionKeyFile);
 
     private static EfCoreOutboxStore CreateOutboxStore(IServiceProvider services) => new(
+        services.GetRequiredService<RelationalConnectionFactory>(),
+        services.GetRequiredService<IOptions<AlvoOptions>>().Value,
+        services.GetRequiredService<TimeProvider>());
+
+    private static EfCoreDeliveryStore CreateDeliveryStore(IServiceProvider services) => new(
         services.GetRequiredService<RelationalConnectionFactory>(),
         services.GetRequiredService<IOptions<AlvoOptions>>().Value,
         services.GetRequiredService<TimeProvider>());

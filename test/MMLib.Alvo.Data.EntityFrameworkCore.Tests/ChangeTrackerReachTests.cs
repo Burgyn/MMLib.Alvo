@@ -136,6 +136,8 @@ public class ChangeTrackerReachTests
     /// <c>SecretsTable</c> and <c>EfCoreSecretStore</c> read and write only the framework's secrets table,
     /// binding the secret's name — a value already validated against <c>SecretName</c>'s grammar — and never
     /// an entity table, so there is no row a policy predicate could be missing from;
+    /// <c>DeliveryTable</c> and <c>EfCoreDeliveryStore</c> read and write only the delivery tables and read the outbox,
+    /// binding every value, and never an entity table;
     /// <c>RelationalReachability</c> executes one <c>const</c> of its own (<c>SELECT 1</c>) that names no
     /// table, carries no <c>WHERE</c> and binds no parameter, so there is nothing in it a caller could
     /// influence and nothing for a policy predicate to be missing from; and
@@ -193,10 +195,12 @@ public class ChangeTrackerReachTests
     /// semantics natively; this fact is what stops the next edit from reaching for
     /// <c>Where(entry =&gt; entry.ClaimedAt != stale)</c> and silently changing the predicate's meaning.
     /// </remarks>
-    /// <param name="file">The outbox source file the rule covers.</param>
+    /// <param name="file">The outbox or delivery source file the rule covers.</param>
     [Theory]
     [InlineData("OutboxTable.cs")]
     [InlineData("EfCoreOutboxStore.cs")]
+    [InlineData("DeliveryTable.cs")]
+    [InlineData("EfCoreDeliveryStore.cs")]
     public void The_outbox_claim_is_raw_sql_and_never_linq_over_the_context(string file)
     {
         var source = ReadSource(file);
@@ -222,7 +226,9 @@ public class ChangeTrackerReachTests
     /// <summary>The files permitted to compose SQL text or construct a <c>DbCommand</c> inside a data package.</summary>
     private static readonly string[] _sqlComposingFiles =
     [
+        "DeliveryTable.cs",
         "EfAlvoData.cs",
+        "EfCoreDeliveryStore.cs",
         "EfCoreDescriptorVersionStore.cs",
         "EfCoreOutboxStore.cs",
         "EfCoreRuntimeSchemaWriter.cs",

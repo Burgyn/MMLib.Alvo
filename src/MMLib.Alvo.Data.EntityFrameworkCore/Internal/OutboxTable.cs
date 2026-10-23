@@ -350,5 +350,13 @@ internal static class OutboxTable
         $"UPDATE {tableName} SET claimed_at = @claimed_at, claimed_by = NULL WHERE id = @id";
 
     /// <summary>How many delivery attempts a freshly written event has had.</summary>
+    /// <summary>
+    /// <see cref="ReleaseSql"/> that also gives the claim's attempt back, for an entry held behind a failed earlier entry
+    /// of its key and never tried itself. Floored at zero, so a hold-back of an entry nobody claimed spends nothing it
+    /// did not count.
+    /// </summary>
+    internal static string HoldBackSql(string tableName) =>
+        $"UPDATE {tableName} SET claimed_at = @claimed_at, claimed_by = NULL, attempts = attempts - 1 WHERE id = @id AND attempts > 0";
+
     private const int UndeliveredAttempts = 0;
 }

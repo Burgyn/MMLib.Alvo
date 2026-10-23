@@ -437,5 +437,8 @@ public sealed class AlvoEventsTests
 
         public Task ReleaseAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+
+        public Task HoldBackAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 }

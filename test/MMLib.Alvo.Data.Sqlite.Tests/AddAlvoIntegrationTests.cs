@@ -331,6 +331,22 @@ public sealed class AddAlvoIntegrationTests : IDisposable
         AFrameworkTableSurvivesIntrospectionAsync("alvo_outbox");
 
     /// <summary>
+    /// The same for the delivery table: a planned <c>DROP</c> discards every pending handler delivery and the dead
+    /// ones an operator still has to look at.
+    /// </summary>
+    [Fact]
+    public Task A_framework_bookkeeping_table_is_never_planned_for_a_drop_deliveries() =>
+        AFrameworkTableSurvivesIntrospectionAsync("alvo_deliveries");
+
+    /// <summary>
+    /// The same for the delivery attempts, which have no row key of their own — the shape that breaks the model build
+    /// outright when the name is missing from the reserved set.
+    /// </summary>
+    [Fact]
+    public Task A_framework_bookkeeping_table_is_never_planned_for_a_drop_delivery_attempts() =>
+        AFrameworkTableSurvivesIntrospectionAsync("alvo_delivery_attempts");
+
+    /// <summary>
     /// Applies the real descriptor, then reproduces the runner's own no-snapshot fallback — introspect the live
     /// database and diff it against the applied schema — and requires that <paramref name="tableName"/> appears
     /// neither as an introspected entity nor in any step of the resulting plan.

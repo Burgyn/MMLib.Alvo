@@ -193,4 +193,19 @@ public interface IOutboxStore
     /// </para>
     /// </remarks>
     Task ReleaseAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Hands <paramref name="id"/> back <b>without counting its claim as an attempt</b>: it was held behind an earlier entry
+    /// of its partition key whose processing failed, and was never tried itself.
+    /// </summary>
+    /// <param name="id">The entry's id.</param>
+    /// <param name="retryAfter">How long the entry stays unclaimable — the backoff of the entry it waits behind.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>A task that completes when the entry is handed back.</returns>
+    /// <remarks>
+    /// <see cref="ReleaseAsync"/> keeps the attempt, which is right for an entry that failed. An entry that only waited
+    /// must not walk to the attempt ceiling behind one that keeps failing: past the ceiling it is never claimed again.
+    /// One statement, on the port's standing rule.
+    /// </remarks>
+    Task HoldBackAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default);
 }

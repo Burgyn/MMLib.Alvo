@@ -51,6 +51,12 @@ internal static class AlvoFrameworkTables
     /// <summary>The suffix of the table holding this deployment's encrypted secrets.</summary>
     internal const string SecretsSuffix = "_secrets";
 
+    /// <summary>The suffix of the table holding one row per (event, subscriber) delivery.</summary>
+    internal const string DeliveriesSuffix = "_deliveries";
+
+    /// <summary>The suffix of the table holding one row per delivery attempt.</summary>
+    internal const string DeliveryAttemptsSuffix = "_delivery_attempts";
+
     /// <summary>The suffix of the table holding administrator accounts.</summary>
     internal const string IdentityUsersSuffix = "_identity_users";
 
@@ -111,6 +117,8 @@ internal static class AlvoFrameworkTables
             schemaPrefix + IdempotencySuffix,
             schemaPrefix + OutboxSuffix,
             schemaPrefix + SecretsSuffix,
+            schemaPrefix + DeliveriesSuffix,
+            schemaPrefix + DeliveryAttemptsSuffix,
             .. IdentitySuffixes.Select(suffix => schemaPrefix + suffix),
         ];
     }

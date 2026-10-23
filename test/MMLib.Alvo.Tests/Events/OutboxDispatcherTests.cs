@@ -609,6 +609,8 @@ public sealed partial class OutboxDispatcherTests : IDisposable
         private readonly List<Guid> _dispatched = [];
         private readonly List<Guid> _released = [];
         private readonly List<TimeSpan> _backoffs = [];
+        private readonly List<Guid> _heldBack = [];
+        private readonly List<TimeSpan> _heldBackFor = [];
         private readonly Lock _gate = new();
         private int _ensureCount;
 
@@ -627,6 +629,10 @@ public sealed partial class OutboxDispatcherTests : IDisposable
 
         /// <summary>The backoff each release was given, in order — the retry spacing the dispatcher chose.</summary>
         internal IReadOnlyList<TimeSpan> Backoffs => Snapshot(_backoffs);
+
+        internal IReadOnlyList<Guid> HeldBackIds => Snapshot(_heldBack);
+
+        internal IReadOnlyList<TimeSpan> HeldBackFor => Snapshot(_heldBackFor);
 
         /// <summary>The only entry, for the facts that queue exactly one.</summary>
         internal FakeEntry OnlyEntry
@@ -713,6 +719,20 @@ public sealed partial class OutboxDispatcherTests : IDisposable
                 _entries.Single(candidate => candidate.Id == id).Claimed = false;
                 _released.Add(id);
                 _backoffs.Add(retryAfter);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task HoldBackAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default)
+        {
+            lock (_gate)
+            {
+                var entry = _entries.Single(candidate => candidate.Id == id);
+                entry.Claimed = false;
+                entry.Attempts--;
+                _heldBack.Add(id);
+                _heldBackFor.Add(retryAfter);
             }
 
             return Task.CompletedTask;

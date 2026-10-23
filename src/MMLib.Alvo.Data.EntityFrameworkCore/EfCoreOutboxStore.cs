@@ -148,6 +148,19 @@ public sealed class EfCoreOutboxStore : IOutboxStore
             cancellationToken);
     }
 
+    /// <inheritdoc/>
+    public Task HoldBackAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(retryAfter.Ticks);
+
+        return ExecuteAsync(
+            OutboxTable.HoldBackSql(_tableName),
+            command => RelationalSqlBatch.AddParameter(
+                command, "@claimed_at", StoredInstant.Text(_time.GetUtcNow() + retryAfter)),
+            id,
+            cancellationToken);
+    }
+
     private async Task<IReadOnlyList<OutboxEntry>> ClaimBatchAsync(
         string claimant, int batchSize, int maxAttempts, TimeSpan lease, CancellationToken ct)
     {

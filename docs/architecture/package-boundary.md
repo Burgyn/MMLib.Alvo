@@ -268,6 +268,18 @@ left to be discovered by a third party.
   of the **implicit** provider contract that startup-lifecycle deviation 60 recorded for
   `IRuntimeSchemaWriter`, and stated here in the same words for the same reason. Details in
   [`events.md`](./events.md), *What a provider owes*.
+- **`IDeliveryStore` is mandatory from HX-03, over the same database as `IOutboxStore`.** The core's
+  `DeliveryDispatcher`, `DeliveryFanOut` and boot guard take it as a constructor dependency and are always registered,
+  so a provider without it cannot boot — even a host with no event handler, because the boot refuses pending work an
+  unregistered subscriber left behind. A claim returns each delivery's envelope from the outbox, which is why the two
+  ports share one store. `AddRelationalProvider` registers it (the internal `EfCoreDeliveryStore`), so no shipped
+  provider is affected; `DeliveryStoreContractTests` is what a third-party provider inherits. **The registration is
+  `TryAdd`, and `AddRelationalProvider` registers `EfCoreDeliveryStore` for every relational dialect**, whose claim is
+  SQLite/PostgreSQL SQL (`ON CONFLICT`, `LIMIT`, `RETURNING`). A dialect that cannot run it — a T-SQL provider — must
+  register its own `IDeliveryStore` before calling `AddRelationalProvider`, so its registration wins; the same holds for
+  the outbox store. Expect the port to grow before 1.0 (HX-06 reads, HX-13 job kinds, HX-14 steps). **The first boot
+  after upgrading builds a partial index on `alvo_outbox`**; on PostgreSQL that `CREATE INDEX` blocks outbox writes while
+  it builds — noted in the CHANGELOG.
 - **`IEmailSender` is not mandatory**, and it is the counter-example worth naming: the core registers
   `ConsoleEmailSender` with `TryAddSingleton`, so a host boots without a mail provider and a host
   that has one takes mail over. A port is only a boot obligation when the core has no honest default
