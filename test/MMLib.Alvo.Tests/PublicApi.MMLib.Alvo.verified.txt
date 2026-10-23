@@ -186,6 +186,21 @@ namespace MMLib.Alvo.Extensions
         public AlvoDeliveryOptions() { }
         public int MaxConcurrency { get; set; }
     }
+    public sealed class AlvoEntityBuilder
+    {
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder OnCreated(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder OnCreated<THandler>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoCreated<MMLib.Alvo.Data.AlvoRecord>> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder OnDeleted(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder OnDeleted<THandler>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoDeleted<MMLib.Alvo.Data.AlvoRecord>> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder OnSaved(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder OnSaved<THandler>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoSaved<MMLib.Alvo.Data.AlvoRecord>> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder OnUpdated(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder OnUpdated<THandler>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoUpdated<MMLib.Alvo.Data.AlvoRecord>> { }
+    }
     public sealed class AlvoExtensionOptions
     {
         public const string SectionName = "Alvo:Extensions";
@@ -320,6 +335,15 @@ namespace Microsoft.Extensions.DependencyInjection
     public static class AlvoDescriptorApplyExtensions
     {
         public static System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationResult> ApplyAlvoDescriptorAsync(this System.IServiceProvider services, MMLib.Alvo.Migrations.MigrationOptions? options = null, System.Threading.CancellationToken ct = default) { }
+    }
+    public static class AlvoExtensionBuilderExtensions
+    {
+        public static MMLib.Alvo.IAlvoBuilder AddEventHandler(this MMLib.Alvo.IAlvoBuilder builder, string id, string eventType, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
+        public static MMLib.Alvo.IAlvoBuilder AddEventHandler<THandler>(this MMLib.Alvo.IAlvoBuilder builder, string id, string eventType, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Data.AlvoRecord> { }
+        public static MMLib.Alvo.IAlvoBuilder AddRetiredExtension(this MMLib.Alvo.IAlvoBuilder builder, string id, MMLib.Alvo.Extensions.AlvoRetirement retirement) { }
+        public static MMLib.Alvo.IAlvoBuilder Entities(this MMLib.Alvo.IAlvoBuilder builder, System.Collections.Generic.IEnumerable<string> entities, System.Action<MMLib.Alvo.Extensions.AlvoEntityBuilder> configure) { }
+        public static MMLib.Alvo.IAlvoBuilder Entity(this MMLib.Alvo.IAlvoBuilder builder, string entity, System.Action<MMLib.Alvo.Extensions.AlvoEntityBuilder> configure) { }
     }
     public static class AlvoProblemDetailsExtensions
     {

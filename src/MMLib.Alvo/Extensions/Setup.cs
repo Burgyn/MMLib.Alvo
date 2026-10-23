@@ -27,6 +27,7 @@ internal static class ExtensionsSetup
             ServiceDescriptor.Singleton<IValidateOptions<AlvoDeliveryOptions>, AlvoDeliveryOptionsConfiguration>(Deliveries));
         services.TryAddSingleton(DepthLimit);
         services.TryAddSingleton<IAlvoSessions, AlvoSessions>();
+        services.TryAddSingleton(provider => new ExtensionRegistry(provider.GetServices<ExtensionRegistration>()));
 
         return services;
 
