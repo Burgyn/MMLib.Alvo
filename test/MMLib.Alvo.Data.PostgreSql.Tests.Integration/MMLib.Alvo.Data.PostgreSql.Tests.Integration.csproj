@@ -19,6 +19,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../src/MMLib.Alvo.TestHost/MMLib.Alvo.TestHost.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/testhost/*.cs" Link="_shared/testhost/%(Filename)%(Extension)" />
+    <None Include="$(MSBuildThisFileDirectory)../_shared/testhost/descriptors/*.alvo.json" Link="descriptors/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Testcontainers.PostgreSql" />
     <PackageReference Include="Verify.XunitV3" />
     <PackageReference Include="CsCheck" />
