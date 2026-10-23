@@ -80,6 +80,7 @@ namespace MMLib.Alvo.Events.Internal;
 /// <param name="catalogs">The primed policy catalog every subscription is decided against.</param>
 /// <param name="evaluator">The evaluator every hook condition is judged by.</param>
 /// <param name="executor">Runs one matched hook's action; it decides nothing and catches nothing.</param>
+/// <param name="fanOut">Records the deliveries each claimed event fans out to, before its actions run.</param>
 /// <param name="options">The validated poll interval, batch size, attempt ceiling and lease.</param>
 /// <param name="time">The clock the idle wait is measured on, so a test clock can drive the pump.</param>
 /// <param name="logger">Where a failed attempt, an abandoned event and a stopped pump are recorded.</param>
@@ -89,6 +90,7 @@ internal sealed class OutboxDispatcher(
     IPolicyCatalogProvider catalogs,
     IPredicateEvaluator evaluator,
     EventActionExecutor executor,
+    DeliveryFanOut fanOut,
     IOptions<AlvoEventOptions> options,
     TimeProvider time,
     ILogger<OutboxDispatcher> logger) : BackgroundService
@@ -189,10 +191,11 @@ internal sealed class OutboxDispatcher(
             .ClaimAsync(_claimant, settings.BatchSize, settings.MaxAttempts, settings.ClaimLease, stoppingToken)
             .ConfigureAwait(false);
         var round = new DrainRound();
+        var stopped = new Dictionary<string, TimeSpan>(StringComparer.Ordinal);
 
         foreach (var entry in claimed)
         {
-            await DispatchAsync(entry, round, stoppingToken).ConfigureAwait(false);
+            await DispatchAsync(entry, round, stopped, stoppingToken).ConfigureAwait(false);
         }
 
         return round.Result(claimed.Count);
@@ -264,16 +267,30 @@ internal sealed class OutboxDispatcher(
     /// affected by it.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The filter is what keeps a shutdown a shutdown: a cancelled token means the host is stopping, and
     /// swallowing that would leave the pump looping until the 30 s <c>ShutdownTimeout</c> expired.
     /// <c>WebhookDelivery</c> converts its own timeout into a <see cref="TimeoutException"/> for the same
     /// reason — a slow receiver must not read as a shutdown.
+    /// </para>
+    /// <para>
+    /// An entry whose partition key a failed fan-out stopped earlier in this batch is held back untried
+    /// (<see cref="IOutboxStore.HoldBackAsync"/>): handed back for as long as the failed one waits, without spending an
+    /// attempt, so no later event of a record is fanned out before an earlier one.
+    /// </para>
     /// </remarks>
-    private async Task DispatchAsync(OutboxEntry entry, DrainRound round, CancellationToken stoppingToken)
+    private async Task DispatchAsync(
+        OutboxEntry entry, DrainRound round, Dictionary<string, TimeSpan> stopped, CancellationToken stoppingToken)
     {
+        if (stopped.TryGetValue(entry.PartitionKey, out var heldFor))
+        {
+            await store.HoldBackAsync(entry.Id, heldFor, stoppingToken).ConfigureAwait(false);
+            return;
+        }
+
         try
         {
-            await DeliverAsync(entry, round, stoppingToken).ConfigureAwait(false);
+            await DeliverAsync(entry, round, stopped, stoppingToken).ConfigureAwait(false);
         }
         catch (Exception failure) when (!stoppingToken.IsCancellationRequested)
         {
@@ -301,11 +318,19 @@ internal sealed class OutboxDispatcher(
     /// second piece of mutable state per entry to keep consistent with the row, which buys nothing a dedup key
     /// does not already buy.
     /// </para>
+    /// <para>
+    /// <b>Fan-out runs first.</b> A failing action re-runs the actions on the next attempt; the deliveries already
+    /// recorded are not touched, and a second fan-out of the event records nothing. An event that produced a delivery —
+    /// even a dead one — counts as dispatched, never filtered.
+    /// </para>
     /// </remarks>
-    private async Task DeliverAsync(OutboxEntry entry, DrainRound round, CancellationToken stoppingToken)
+    private async Task DeliverAsync(
+        OutboxEntry entry, DrainRound round, Dictionary<string, TimeSpan> stopped, CancellationToken stoppingToken)
     {
         var @event = AlvoEventJson.Read(entry.Payload);
-        var hooks = EventSubscriptions.Matching(Catalog, @event, evaluator, logger);
+        var catalog = Catalog;
+        var deliveries = await FanOutAsync(entry, @event, catalog, stopped, stoppingToken).ConfigureAwait(false);
+        var hooks = EventSubscriptions.Matching(catalog, @event, evaluator, logger);
 
         foreach (var hook in hooks)
         {
@@ -315,7 +340,29 @@ internal sealed class OutboxDispatcher(
 
         await store.MarkDispatchedAsync(entry.Id, stoppingToken).ConfigureAwait(false);
 
-        Counted(hooks.Count).Add(1);
+        Counted(hooks.Count + deliveries).Add(1);
+    }
+
+    /// <summary>
+    /// Fans the event out; a storage failure holds back every later entry of the batch with the same partition key, for
+    /// as long as this one waits, so no later event of the record can be fanned out first (spec 2026-10-14 §4.8).
+    /// </summary>
+    private async Task<int> FanOutAsync(
+        OutboxEntry entry,
+        AlvoEvent @event,
+        PolicyCatalog catalog,
+        Dictionary<string, TimeSpan> stopped,
+        CancellationToken stoppingToken)
+    {
+        try
+        {
+            return await fanOut.FanOutAsync(@event, catalog, stoppingToken).ConfigureAwait(false);
+        }
+        catch (Exception) when (!stoppingToken.IsCancellationRequested)
+        {
+            stopped[entry.PartitionKey] = RetryAfter(entry);
+            throw;
+        }
     }
 
     /// <summary>Runs one hook's action under its <c>alvo.delivery</c> span, recording how it ended.</summary>

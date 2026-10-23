@@ -5,11 +5,13 @@ using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Tests.Expressions;
+using MMLib.Alvo.Tests.Extensions;
 
 using System.Globalization;
 using System.Net;
@@ -427,7 +429,8 @@ public sealed partial class OutboxDispatcherTests : IDisposable
         Guid? refuseBodiesNaming = null,
         TaskCompletionSource? blockDeliveriesOn = null,
         IPolicyCatalogProvider? catalogs = null,
-        AlvoBootState? boot = null)
+        AlvoBootState? boot = null,
+        DeliveryFanOut? fanOut = null)
     {
         var options = new AlvoEventOptions { PollInterval = _pollInterval };
         configure?.Invoke(options);
@@ -445,10 +448,19 @@ public sealed partial class OutboxDispatcherTests : IDisposable
                     new StubWebhookReceiver(status, refuseBodiesNaming, blockDeliveriesOn))),
                 new DiscardingEmailSender(),
                 _loggers.CreateLogger<EventActionExecutor>()),
+            fanOut ?? NoHandlers(),
             Options.Create(options),
             TimeProvider.System,
             _loggers.CreateLogger<OutboxDispatcher>());
     }
+
+    /// <summary>A fan-out with no handler registered: every pre-HX-03 fact here keeps its meaning.</summary>
+    private DeliveryFanOut NoHandlers() => new(
+        new FakeDeliveryStore(TimeProvider.System),
+        new ExtensionBinder(ExtensionRegistry.Empty, CelFixtures.Compiler, HandlerCatalog.EveryService(), _loggers.CreateLogger<ExtensionBinder>()),
+        CelFixtures.Evaluator,
+        AlvoChainDepthLimit.Default,
+        _loggers.CreateLogger<DeliveryFanOut>());
 
     /// <summary>Polls <paramref name="condition"/> until it holds, and throws rather than giving up quietly.</summary>
     private static async Task UntilAsync(Func<bool> condition, string what)

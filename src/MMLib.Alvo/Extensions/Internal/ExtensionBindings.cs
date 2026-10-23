@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Events.Internal;
+﻿using MMLib.Alvo.Events;
+using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
 
@@ -33,6 +34,14 @@ internal sealed record BoundHandler(
     internal string Id => Registration.Id;
 
     internal HandlerSettings Settings => Registration.Settings;
+
+    /// <summary>The condition this handler judges <paramref name="event"/> by, or <see langword="null"/> when its source does not select it.</summary>
+    internal BoundCondition? Selects(AlvoEvent @event) => HandlerSources.Selects(Registration.Source, @event.Type) switch
+    {
+        (false, _) => null,
+        (true, { } entity) when Registration.Source is EntityEvents { IsAll: false } => Conditions.GetValueOrDefault(entity),
+        _ => Fallback,
+    };
 }
 
 /// <summary>Every handler bound to one catalog, by <c>Order</c> and then registration order.</summary>
@@ -57,4 +66,20 @@ internal sealed class ExtensionBindings
     internal TimeSpan LongestTimeout => Handlers.Count == 0 ? TimeSpan.Zero : Handlers.Max(handler => handler.Settings.Timeout);
 
     internal BoundHandler? Handler(string id) => _byId.GetValueOrDefault(id);
+
+    /// <summary>The bound handlers whose source selects <paramref name="event"/>, in order, each with the condition to judge.</summary>
+    internal IEnumerable<(BoundHandler Handler, BoundCondition Condition)> Selecting(AlvoEvent @event)
+    {
+        foreach (var handler in Handlers)
+        {
+            if (handler.Selects(@event) is { } condition)
+            {
+                yield return (handler, condition);
+            }
+        }
+    }
+
+    /// <summary>The unbound registrations whose source selects <paramref name="event"/>; no <c>when</c> is judged.</summary>
+    internal IEnumerable<HandlerRegistration> UnboundSelecting(AlvoEvent @event) =>
+        Unbound.Where(handler => HandlerSources.Selects(handler.Source, @event.Type).Selected);
 }

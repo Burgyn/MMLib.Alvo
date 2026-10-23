@@ -80,6 +80,7 @@ internal static class EventsSetup
         services.TryAddSingleton<EventActionExecutor>();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IAlvoEvents, AlvoEvents>();
+        services.TryAddSingleton<DeliveryFanOut>();
         services.TryAddSingleton<OutboxDispatcher>();
         services.TryAddSingleton<IAlvoEventPump, EventPump>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, OutboxDispatcher>(
