@@ -30,7 +30,7 @@ const shaped = (part: string[]) => dedent(dropComments ? withoutComments(part) :
 const picked = (part: string[]) => {
   if (!pick) return part;
   const values = part.map((line) => pick.exec(line)?.[1]).filter((value): value is string => value !== undefined);
-  if (values.length === 0) throw new Error(`SourceExcerpt: ${pick} matches no line between "${from}" and "${to}"`);
+  if (values.length === 0) throw new Error(`SourceExcerpt: ${pick} matches no line between "${from}" and "${to ?? 'the end'}"`);
   return values;
 };
 const parts = [shaped(slice({ from, to }))];

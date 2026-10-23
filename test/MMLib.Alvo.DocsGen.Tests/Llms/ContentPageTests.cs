@@ -146,6 +146,18 @@ public class ContentPageTests
     }
 
     [Fact]
+    public void A_source_excerpt_whose_to_is_not_double_quoted_is_refused()
+    {
+        var docs = Directory.CreateTempSubdirectory("llms-").FullName;
+        File.WriteAllText(Path.Combine(docs, "P.cs"), "class P\n{\n    void A()\n    {\n    }\n}\n");
+        File.WriteAllText(Path.Combine(docs, "x.mdx"),
+            "---\ntitle: X\ndescription: D.\n---\nimport p from './P.cs?raw';\n\n<SourceExcerpt code={p} from=\"class P\" to='void A()' />\n");
+
+        Should.Throw<InvalidOperationException>(() => ContentPage.Read(Path.Combine(docs, "x.mdx"), docs, docs))
+            .Message.ShouldContain("to=\"…\"");
+    }
+
+    [Fact]
     public void An_index_page_takes_its_directory_slug()
     {
         var docs = Directory.CreateTempSubdirectory("llms-").FullName;
