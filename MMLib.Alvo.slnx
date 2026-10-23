@@ -35,6 +35,7 @@
     <Project Path="test/MMLib.Alvo.Data.Sqlite.Tests.Integration/MMLib.Alvo.Data.Sqlite.Tests.Integration.csproj" />
     <Project Path="test/MMLib.Alvo.Data.Sqlite.Tests/MMLib.Alvo.Data.Sqlite.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.DocsGen.Tests/MMLib.Alvo.DocsGen.Tests.csproj" />
+    <Project Path="test/MMLib.Alvo.DocsSnippets.Tests/MMLib.Alvo.DocsSnippets.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Host.Tests.Integration/MMLib.Alvo.Host.Tests.Integration.csproj" />
     <Project Path="test/MMLib.Alvo.Host.Tests/MMLib.Alvo.Host.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Identity.Tests/MMLib.Alvo.Identity.Tests.csproj" />

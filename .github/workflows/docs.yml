@@ -23,6 +23,7 @@ on:
       - 'plugins/alvo/**'
       - 'test/_shared/docs/**'
       - 'test/MMLib.Alvo.DocsGen.Tests/**'
+      - 'test/MMLib.Alvo.DocsSnippets.Tests/**'
       - '.github/workflows/docs.yml'
   push:
     branches: [main]
@@ -86,6 +87,9 @@ jobs:
 
       - name: Apply runnable snippets
         run: dotnet test --project test/MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj --filter-class "MMLib.Alvo.Tests.Descriptor.DocsSnippetTests"
+
+      - name: Compile and run the C# snippets
+        run: dotnet test --project test/MMLib.Alvo.DocsSnippets.Tests/MMLib.Alvo.DocsSnippets.Tests.csproj
 
       - name: Upload Pages artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
