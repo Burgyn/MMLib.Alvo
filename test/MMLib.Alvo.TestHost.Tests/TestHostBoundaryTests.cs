@@ -9,8 +9,8 @@ namespace MMLib.Alvo.TestHost.Tests;
 /// no internals granted to or by it, and the four references it declares.
 /// </summary>
 /// <remarks>
-/// The provider and <c>InternalsVisibleTo</c> facts read the loaded assemblies, because an assembly names what was
-/// linked. The reference set is read off the project file instead: <c>Microsoft.Extensions.TimeProvider.Testing</c>
+/// The provider and <c>InternalsVisibleTo</c> facts read assemblies, because an assembly names what was linked; the
+/// grant-to fact reads every family assembly deployed beside the tests, not only the ones TestHost links directly. The reference set is read off the project file instead: <c>Microsoft.Extensions.TimeProvider.Testing</c>
 /// is carried for the package's consumers and no TestHost code uses it, so the compiler drops it from the assembly's
 /// references and only the project file still names it.
 /// </remarks>
@@ -37,10 +37,11 @@ public sealed class TestHostBoundaryTests
         _testHost.GetCustomAttributes<InternalsVisibleToAttribute>().ShouldBeEmpty();
 
     [Fact]
-    public void No_assembly_it_references_grants_it_internals()
+    public void No_family_assembly_grants_it_internals()
     {
-        var family = _testHost.GetReferencedAssemblies()
-            .Where(reference => reference.Name!.StartsWith("MMLib.Alvo", StringComparison.Ordinal))
+        var family = Directory.GetFiles(AppContext.BaseDirectory, "MMLib.Alvo*.dll")
+            .Select(System.Reflection.AssemblyName.GetAssemblyName)
+            .Where(name => name.Name != AssemblyName && !name.Name!.Contains(".Tests", StringComparison.Ordinal))
             .Select(Assembly.Load)
             .ToList();
 
