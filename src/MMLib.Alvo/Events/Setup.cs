@@ -53,11 +53,12 @@ internal static class EventsSetup
     /// publishing is an event-subsystem concern: it never touches a driver, a schema or a policy.
     /// </para>
     /// <para>
-    /// <b>The dispatcher is an <see cref="IHostedService"/> through <c>TryAddEnumerable</c></b>, so a host that
-    /// called <c>AddAlvo</c> twice still drains the queue once — two dispatchers in one process would break
-    /// per-entity-key ordering exactly as two replicas do. Registration order says nothing about when it runs:
-    /// on .NET 10 <c>ExecuteAsync</c> runs entirely off the startup thread, so the readiness gate is an await on
-    /// <c>AlvoBootState</c> inside the service itself.
+    /// <b>The dispatcher is one singleton, hosted through <c>TryAddEnumerable</c> with a typed factory, and the one
+    /// <see cref="IAlvoEventPump"/> drives that same instance.</b> A host that called <c>AddAlvo</c> twice still runs
+    /// one dispatcher, and a manual round and the hosted loop can never be two instances: two dispatchers in one
+    /// process would break per-entity-key ordering exactly as two replicas do. Registration order says nothing about
+    /// when it runs: on .NET 10 <c>ExecuteAsync</c> runs entirely off the startup thread, so the readiness gate is an
+    /// await on <c>AlvoBootState</c> inside the service itself.
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection to add the event services to.</param>
@@ -79,7 +80,10 @@ internal static class EventsSetup
         services.TryAddSingleton<EventActionExecutor>();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IAlvoEvents, AlvoEvents>();
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, OutboxDispatcher>());
+        services.TryAddSingleton<OutboxDispatcher>();
+        services.TryAddSingleton<IAlvoEventPump, EventPump>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, OutboxDispatcher>(
+            provider => provider.GetRequiredService<OutboxDispatcher>()));
 
         return services;
 

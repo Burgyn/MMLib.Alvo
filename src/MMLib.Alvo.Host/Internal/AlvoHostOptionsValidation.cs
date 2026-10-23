@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Events;
 using MMLib.Alvo.Identity;
 
 namespace MMLib.Alvo.Host.Internal;
@@ -74,11 +75,30 @@ internal sealed class AlvoHostOptionsValidation(IConfiguration configuration, IO
             yield return database;
         }
 
+        if (ManualDispatch() is { } manual)
+        {
+            yield return manual;
+        }
+
         foreach (var bootstrap in BootstrapFailures())
         {
             yield return bootstrap;
         }
     }
+
+    /// <summary>Whether the operator put the standalone host in the manual dispatch mode, which nothing here drives.</summary>
+    /// <remarks>
+    /// Read off configuration rather than off <see cref="AlvoEventOptions"/>, so a misspelled value is left to that
+    /// type's own refusal and this one fires only for the mode it is about.
+    /// </remarks>
+    private string? ManualDispatch() =>
+        Enum.TryParse<AlvoEventDispatchMode>(configuration[ManualDispatchKey], ignoreCase: true, out var mode)
+        && mode is AlvoEventDispatchMode.Manual
+            ? AlvoHostConfiguration.ManualDispatchMode()
+            : null;
+
+    private const string ManualDispatchKey =
+        $"{AlvoEventOptions.SectionName}:{nameof(AlvoEventOptions.DispatchMode)}";
 
     /// <summary>
     /// Every way the bootstrap administrator is misconfigured, rather than the first — the same rule

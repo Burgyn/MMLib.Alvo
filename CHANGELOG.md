@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`MMLib.Alvo.TestHost`, a real backend inside a test** (HX-02, #379). `AlvoTestHost.StartAsync(b => b.FromDescriptor(…))`
+  starts the production pipeline over a private in-memory SQLite database (or the builder's own `UsePostgreSql`), with
+  `Data` (behaving exactly as the host's `IAlvoData`), `AlvoTestHost.Caller(roles)`, an optional `TimeProvider`,
+  `DrainEventsAsync` (delivers the outbox round by round until quiet, and after 100 rounds throws
+  `AlvoDrainNotQuiescentException` naming the subscribers of the last 10) and `Hooks.AssertRan(id, times)`. Webhooks go
+  to a handler the test passes, and never to the network. The core gains `AlvoEventOptions.DispatchMode`
+  (`Alvo:Events:DispatchMode`: `Background` by default, or `Manual`, which the standalone host refuses) and the public
+  `IAlvoEventPump.DrainAsync()`, which runs one dispatch round and reports it as an `AlvoDrainResult`; every descriptor
+  after-hook action is now an `alvo.delivery` activity on the `MMLib.Alvo.Hooks` source. Docs: *Testing your backend*,
+  whose C# is compiled and run by the new `test/MMLib.Alvo.DocsSnippets.Tests`.
 - **Event envelopes carry provenance** (HX-01, #378). Every event now carries `authclaims` (the caller's roles,
   `{"roles":[…]}`), `tenantid` (the write's tenant; absent for global rows and tenantless system writes), and
   `traceparent`/`tracestate` when a valid W3C trace is active (a value outside the W3C grammar, or a `tracestate` over

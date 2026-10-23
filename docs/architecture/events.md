@@ -853,6 +853,32 @@ condition reads `@user.id` is **not selected** for such an event, gated by the s
 the policy engine applies to a rule, and recorded at Debug (`ConditionHasNoActorToRead`) — refuse upstream
 rather than fold an absent operand into a verdict.
 
+### Manual dispatch — the test host's mode
+
+`Alvo:Events:DispatchMode` (`AlvoEventOptions.DispatchMode`) is `Background` by default: the hosted loop polls. In
+`Manual` the loop logs `DispatcherManual` (Information) and returns, and the public `IAlvoEventPump.DrainAsync()` runs
+**one round** of every dispatcher — today, through the internal `EventPump`, exactly one tick of this loop
+(`OutboxDispatcher.ManualRoundAsync` runs the same `RoundAsync` the loop's `PumpOneBatchAsync` does): claim what is
+due, run the hooks, retire or release under the usual backoff — and reports it as an `AlvoDrainResult` (`Claimed`,
+`Failed`, `Subscribers`). HX-03's delivery dispatcher and HX-13's pumps become further steps of the same round. The
+dispatcher is one singleton, hosted and driven by the pump as the same instance. The standalone host refuses `Manual`
+at startup — nothing in it drains by hand, so it would deliver nothing. A round is refused, before anything is
+claimed, unless the mode is `Manual` and `Enabled` is on (two drivers of one outbox break per-key ordering, as two
+replicas do), and unless the boot is `Ready` with a primed catalog (the same gate the loop keeps: an event judged
+against an unprimed catalog is retired as delivered); each of the four causes is refused in its own words, naming its
+fix. Concurrent rounds are serialised, and the gate is not re-entrant — a subscriber must never drain.
+`MMLib.Alvo.TestHost` runs in this mode and loops rounds until one is quiet, giving up after 100 (spec 2026-10-14
+§4.15).
+
+### One span per after-hook action
+
+Every after-hook action the dispatcher runs is one consumer activity on the `MMLib.Alvo.Hooks` source (spec 2026-10-14
+§4.14): `alvo.delivery`, displayed `alvo.delivery {subscriber}`, tagged `alvo.subscriber` (the hook's JSON pointer),
+`alvo.event.id`, `alvo.event.type` and `alvo.outcome` (`succeeded` | `failed`, status `Error` when failed; none when
+the host stopped mid-run, which is not an attempt) — ids only, the rule the log lines keep. It costs nothing without a
+listener. The test host's `Hooks.AssertRan` reads it; HX-03 puts handler deliveries on the same source and links each
+span to the envelope's `traceparent`.
+
 ### The execution log is logs plus metrics, not a table
 
 The criterion is *"a filtered-out event produces no execution log, only a counter"*. A durable, queryable
@@ -1118,7 +1144,7 @@ Each line with the issue or the PR that owns it.
 | ~~**Before-hooks**, the `CelProfile.Mutate` profile~~ | **done** — PR5b (#114); see *Before-hooks* above |
 | **Batch event coalescing** — one event for a batch rather than one per row | **#193** (see below) |
 | **The budget-overrun rollback** | **not built, and not scheduled**: there is no wall-clock budget to overrun — the bound is the grammar (deviation 81, and *What bounds a hook's execution time* above) |
-| **Before-hooks in `InMemoryAlvoData`** | **not built** — the public in-memory reference runs the policy engine but no hook pipeline, so a host testing against the double sees a `reject` not refuse and a `mutate` not apply. Deliberate (the contract suite is inherited by the two relational drivers, which have a transaction to run a hook in), and recorded as an **owed obligation** rather than a mere absence: deviation 85 |
+| **Before-hooks in `InMemoryAlvoData`** | **discharged differently (HX-02, spec 2026-10-14 X11)** — a host testing its backend uses `MMLib.Alvo.TestHost`, which runs the real pipeline over real SQLite; `InMemoryAlvoData` stays the provider-contract policy double, runs no hooks, and says so in its remarks. A second in-memory pipeline would be a second security core. Deviation 85 is closed by this ruling, not by building it. |
 | **Automation** (`event` + `schedule` triggers), cron, and cron's distributed lock | PR5b's automation half — still open (the lock: deviation 74) |
 | ~~**`Publish`** (custom application events) and its security ruling~~ | **done** — PR5b-2; see *Publishing a custom application event* above |
 | ~~**Wildcard subscription** (`entity.orders.*`) and its tenant scoping~~ | **ruled** — PR5b-2 refuses `*` at apply; the matcher itself waits on **#372** (the tenant half, #153, landed in HX-01), see *The wildcard ruling* above |
@@ -1211,8 +1237,8 @@ these live.
 - ~~**The three remaining hook refusals.**~~ **Gone — PR5b-1 lifted all three**, so
   `UnhonouredFeatures` now carries no hook entry at all (#114). Deviation 75's structural problem was solved
   as it predicted: one pipeline behind a port, injected into the driver, with `AuthorizedCandidate` moved
-  inside the transaction. The `InMemoryAlvoData` half is still owed — deviation 85, and its own row in the
-  table above.
+  inside the transaction. The `InMemoryAlvoData` half was discharged by HX-02 (X11): the test host, not the double, runs
+  hooks.
 - **F7's partitioned claim** (**#150**, which also carries Q1's same-millisecond finding and the
   cross-process half `AlvoEventId` does not close), and **`dataref`** (**#151**).
 - **Six things recorded and deliberately not fixed**, each because the fix is larger than the PR that found
@@ -1282,12 +1308,13 @@ adapter implements the queue, not the dispatcher.
 | `MMLib.Alvo.Abstractions/Data/` | `AlvoChainDepthLimit` — internal, the one depth limit every write and publish face enforces |
 | `MMLib.Alvo.Abstractions/Rules/` | `IBeforeHookRunner` — public, the port a storage driver calls in-transaction |
 | `MMLib.Alvo.Data.EntityFrameworkCore/` | `Internal/OutboxTable`, `Internal/OutboxEventFactory`, `EfCoreOutboxStore`; the four before-hook call sites in `Internal/EfAlvoData` |
-| `MMLib.Alvo/Events/` | `AlvoEventOptions`, `Setup`; and `Internal/`: `OutboxDispatcher`, `EventSubscriptions`, `EventActionExecutor`, `WebhookDelivery`, `ConsoleEmailSender`, `AlvoTemplate`, `JsonataSlot`, `AfterHookCompiler`, `AfterImagePhase` (#325: the row-image rule for after-hook conditions and templates), `ActionVocabulary`, `AlvoEventMetrics`, `EventLog`, `AlvoEventOptionsConfiguration` |
+| `MMLib.Alvo/Events/` | `AlvoEventOptions`, `AlvoEventDispatchMode`, `IAlvoEventPump`, `AlvoDrainResult`, `Setup`; and `Internal/`: `OutboxDispatcher`, `EventSubscriptions`, `EventActionExecutor`, `WebhookDelivery`, `ConsoleEmailSender`, `AlvoTemplate`, `JsonataSlot`, `AfterHookCompiler`, `AfterImagePhase` (#325: the row-image rule for after-hook conditions and templates), `ActionVocabulary`, `AlvoEventMetrics`, `EventLog`, `AlvoEventOptionsConfiguration`, `EventPump` and `DrainRound` (manual rounds), `AlvoHookTelemetry` (the `MMLib.Alvo.Hooks` source) |
 | `MMLib.Alvo/Rules/` | `BeforeHooks` (`EntityBeforeHooks`, `CompiledBeforeHook`, `CompiledMutation`) and `Internal/`: `BeforeHookCompiler`, `BeforeHookRunner` — all `internal` |
 | `MMLib.Alvo.Testing/Events/` | `OutboxStoreContractTests` + `IOutboxStoreWorld`, `AlvoEventCriteriaTests` + `IAlvoEventWorld` — the suites a provider inherits |
 | `MMLib.Alvo.Testing/Data/` | `AlvoDataBeforeHookTests` + `IAlvoDataBeforeHookWorld` — the before-hook suite every engine inherits |
 
-Only `AlvoEventOptions`, the three ports and the four envelope types are public; everything else in the
+Only `AlvoEventOptions`, the manual-dispatch surface (`AlvoEventDispatchMode`, `IAlvoEventPump`, `AlvoDrainResult`),
+the three ports and the four envelope types are public; everything else in the
 core is `internal`.
 
 ## A replacement emits its branch's own event (#105)

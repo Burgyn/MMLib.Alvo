@@ -200,6 +200,7 @@ Nothing is on NuGet yet. Until v0.1, reference the projects from a clone, or pac
 | `MMLib.Alvo.Identity` | ASP.NET Core Identity for Alvo: administrator accounts, roles, cookie sign-in and the bootstrap administrator. |
 | `MMLib.Alvo.Admin` | The Alvo admin dashboard: server-interactive Blazor components and the design system they ship with. |
 | `MMLib.Alvo.Ai` | The Alvo schema assistant: an agent that reads a project and proposes a descriptor change, and cannot apply one. |
+| `MMLib.Alvo.TestHost` | A real Alvo backend for tests: the production pipeline over an in-memory SQLite database, with events delivered when the test says so. |
 
 The standalone host, `MMLib.Alvo.Host`, is not a package: it ships as the `ghcr.io/burgyn/alvo` container image, published
 from `main` as `edge` until the first release tag.

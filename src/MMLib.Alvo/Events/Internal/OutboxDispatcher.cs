@@ -66,6 +66,12 @@ namespace MMLib.Alvo.Events.Internal;
 /// deviation 60 states <c>IRuntimeSchemaWriter</c>'s widening, so a later provider author reads it as an
 /// obligation rather than discovering it as a DI failure at startup.
 /// </para>
+/// <para>
+/// <b>The same tick runs by hand in the manual dispatch mode.</b> In <see cref="AlvoEventDispatchMode.Manual"/> the loop
+/// logs that it stood down and returns; <see cref="EventPump"/> then calls <see cref="ManualRoundAsync"/>, which keeps
+/// the loop's own gates (the mode, and a Ready boot with a primed catalog) and runs one <see cref="PumpOneBatchAsync"/>
+/// tick.
+/// </para>
 /// </remarks>
 /// <param name="store">The queue: claim under a lease, mark dispatched, release.</param>
 /// <param name="boot">The readiness signal this service waits on before it claims anything.</param>
@@ -114,6 +120,12 @@ internal sealed class OutboxDispatcher(
             return;
         }
 
+        if (options.Value.DispatchMode is AlvoEventDispatchMode.Manual)
+        {
+            EventLog.DispatcherManual(logger);
+            return;
+        }
+
         if (await boot.SettledAsync(stoppingToken).ConfigureAwait(false) is not AlvoBootPhase.Ready)
         {
             return;
@@ -154,20 +166,96 @@ internal sealed class OutboxDispatcher(
     /// poll interval and hoping. A drain that polls is a fact that passes when the pump is broken and the
     /// timeout is generous.
     /// </remarks>
-    internal async Task<int> PumpOneBatchAsync(CancellationToken stoppingToken)
+    internal async Task<int> PumpOneBatchAsync(CancellationToken stoppingToken) =>
+        (await RoundAsync(stoppingToken).ConfigureAwait(false)).Claimed;
+
+    /// <summary>One tick on the caller's schedule, behind the same gates the loop keeps.</summary>
+    /// <exception cref="InvalidOperationException">Not in the manual mode, events disabled, or the boot not Ready.</exception>
+    internal async Task<AlvoDrainResult> ManualRoundAsync(CancellationToken cancellationToken)
+    {
+        EnsureManual();
+        await EnsureReadyAsync(cancellationToken).ConfigureAwait(false);
+
+        return await RoundAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>One tick: claim what is due, dispatch every entry, and say what happened.</summary>
+    private async Task<AlvoDrainResult> RoundAsync(CancellationToken stoppingToken)
     {
         var settings = options.Value;
         var claimed = await store
             .ClaimAsync(_claimant, settings.BatchSize, settings.MaxAttempts, settings.ClaimLease, stoppingToken)
             .ConfigureAwait(false);
+        var round = new DrainRound();
 
         foreach (var entry in claimed)
         {
-            await DispatchAsync(entry, stoppingToken).ConfigureAwait(false);
+            await DispatchAsync(entry, round, stoppingToken).ConfigureAwait(false);
         }
 
-        return claimed.Count;
+        return round.Result(claimed.Count);
     }
+
+    /// <summary>Refuses a manual round unless this process is configured to be driven by hand, with events on.</summary>
+    private void EnsureManual()
+    {
+        if (options.Value.DispatchMode is not AlvoEventDispatchMode.Manual)
+        {
+            throw NotManual(options.Value);
+        }
+
+        if (!options.Value.Enabled)
+        {
+            throw EventsDisabled();
+        }
+    }
+
+    /// <summary>
+    /// Refuses a round before the boot has primed a catalog — the same gate the loop keeps — and brings the store up
+    /// once. Callers are serialised by <see cref="EventPump"/>, so the flag needs no lock.
+    /// </summary>
+    private async Task EnsureReadyAsync(CancellationToken cancellationToken)
+    {
+        if (boot.Phase is not AlvoBootPhase.Ready)
+        {
+            throw NotReady();
+        }
+
+        if (catalogs.Current is null)
+        {
+            throw Unprimed();
+        }
+
+        if (!_storeReady)
+        {
+            await store.EnsureAsync(cancellationToken).ConfigureAwait(false);
+            _storeReady = true;
+        }
+    }
+
+    private static InvalidOperationException NotManual(AlvoEventOptions configured) => new(
+        "A manual dispatch round was refused before anything was claimed: this process drains its outbox with the "
+        + "background loop, and two drivers of one outbox break per-entity-key ordering. Set "
+        + $"{AlvoEventOptionsConfiguration.DispatchModeKey} to '{AlvoEventDispatchMode.Manual}' and "
+        + $"{AlvoEventOptions.SectionName}:{nameof(AlvoEventOptions.Enabled)} to true to drive it with "
+        + $"IAlvoEventPump.DrainAsync. Configured: mode '{configured.DispatchMode}', enabled {configured.Enabled}.");
+
+    private static InvalidOperationException EventsDisabled() => new(
+        "A manual dispatch round was refused before anything was claimed: the dispatch mode is manual, but events are "
+        + $"switched off ({AlvoEventOptions.SectionName}:{nameof(AlvoEventOptions.Enabled)} = false), so there is "
+        + $"nothing to drive. Set {AlvoEventOptions.SectionName}:{nameof(AlvoEventOptions.Enabled)} to true to drive "
+        + "the outbox with IAlvoEventPump.DrainAsync.");
+
+    private static InvalidOperationException NotReady() => new(
+        "A manual dispatch round was refused before anything was claimed: the boot has not reached Ready, and an event "
+        + "judged against an unprimed catalog would match no hook and be retired as delivered. Start the host and let "
+        + "its boot finish first.");
+
+    private static InvalidOperationException Unprimed() => new(
+        "A manual dispatch round was refused before anything was claimed: the boot is Ready but primed no schema, "
+        + "because the project has no descriptor applied yet, and an event judged against an unprimed catalog would "
+        + "match no hook and be retired as delivered. Apply a descriptor to the project first; if it should already "
+        + $"have one, check {AlvoSchemaOptions.ProjectEnvironmentVariable}.");
 
     /// <summary>
     /// Delivers one entry, containing whatever it throws so neither the rest of the batch nor the host is
@@ -179,14 +267,15 @@ internal sealed class OutboxDispatcher(
     /// <c>WebhookDelivery</c> converts its own timeout into a <see cref="TimeoutException"/> for the same
     /// reason — a slow receiver must not read as a shutdown.
     /// </remarks>
-    private async Task DispatchAsync(OutboxEntry entry, CancellationToken stoppingToken)
+    private async Task DispatchAsync(OutboxEntry entry, DrainRound round, CancellationToken stoppingToken)
     {
         try
         {
-            await DeliverAsync(entry, stoppingToken).ConfigureAwait(false);
+            await DeliverAsync(entry, round, stoppingToken).ConfigureAwait(false);
         }
         catch (Exception failure) when (!stoppingToken.IsCancellationRequested)
         {
+            round.Failed();
             await AbandonAttemptAsync(entry, failure, stoppingToken).ConfigureAwait(false);
         }
     }
@@ -211,19 +300,41 @@ internal sealed class OutboxDispatcher(
     /// does not already buy.
     /// </para>
     /// </remarks>
-    private async Task DeliverAsync(OutboxEntry entry, CancellationToken stoppingToken)
+    private async Task DeliverAsync(OutboxEntry entry, DrainRound round, CancellationToken stoppingToken)
     {
         var @event = AlvoEventJson.Read(entry.Payload);
         var hooks = EventSubscriptions.Matching(Catalog, @event, evaluator, logger);
 
         foreach (var hook in hooks)
         {
-            await executor.ExecuteAsync(hook, @event, stoppingToken).ConfigureAwait(false);
+            round.Ran(hook.Path);
+            await RunAsync(hook, @event, stoppingToken).ConfigureAwait(false);
         }
 
         await store.MarkDispatchedAsync(entry.Id, stoppingToken).ConfigureAwait(false);
 
         Counted(hooks.Count).Add(1);
+    }
+
+    /// <summary>Runs one hook's action under its <c>alvo.delivery</c> span, recording how it ended.</summary>
+    /// <remarks>
+    /// The failure is rethrown untouched: the span observes it, the entry's release still decides it. A cancellation
+    /// while the host stops is neither outcome, exactly as <see cref="DispatchAsync"/> does not count it as an attempt
+    /// (a cancellation landing between the two filters reads as failed here only, which is harmless).
+    /// </remarks>
+    private async Task RunAsync(CompiledAfterHook hook, AlvoEvent @event, CancellationToken stoppingToken)
+    {
+        using var delivery = AlvoHookTelemetry.StartDelivery(hook.Path, @event);
+        try
+        {
+            await executor.ExecuteAsync(hook, @event, stoppingToken).ConfigureAwait(false);
+            AlvoHookTelemetry.Finish(delivery, AlvoHookTelemetry.Succeeded);
+        }
+        catch when (!stoppingToken.IsCancellationRequested)
+        {
+            AlvoHookTelemetry.Finish(delivery, AlvoHookTelemetry.Failed);
+            throw;
+        }
     }
 
     /// <summary>
@@ -307,6 +418,8 @@ internal sealed class OutboxDispatcher(
             + "publish Ready before it claims anything, and the boot primes the catalog before publishing, so "
             + "this is an invariant rather than a configuration mistake. Nothing was retired: an event judged "
             + "against an unprimed catalog would match no hook and be retired as delivered.");
+
+    private bool _storeReady;
 
     /// <summary>
     /// Who this process claims as, recorded on every entry it takes so an abandoned claim is attributable to a

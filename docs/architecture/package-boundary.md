@@ -92,6 +92,21 @@
   (a heavy dependency an embedded host that wants only the Data API must not acquire) and **(b)**
   (identity is a real swap point — `samples/MMLib.Alvo.Samples.EmbeddedHost` already replaces it).
   Referenced by `MMLib.Alvo.Host` only.
+- `src/MMLib.Alvo.TestHost` — the testing kit (`AlvoTestHost`): a real backend over a private in-memory SQLite
+  database, with the outbox drained on the test's schedule (spec 2026-10-14 §4.15). **Earned by rule (a)**: it drags
+  a database driver (`MMLib.Alvo.Data.Sqlite`, and through it EF Core's SQLite provider), and it carries
+  `Microsoft.Extensions.TimeProvider.Testing` for its consumers — no TestHost code needs it, a test that pins the clock
+  does; neither belongs in an embedded host's production closure.
+  `MMLib.Alvo.Testing` cannot carry it: that library is Abstractions-only so that a provider author whose store is
+  not EF-backed can inherit its contract suites (spec 2026-10-14 C1). **It is the one shipped package that depends on
+  a provider** — the stated exception to "no package depends on another port's provider" below: a kit whose job is to
+  run the production pipeline needs a production engine, and SQLite in memory is the one that needs no container. It
+  takes no second driver (a parity run brings `UsePostgreSql` through its own reference), and no `InternalsVisibleTo`
+  is granted by it or to it. It takes `Microsoft.AspNetCore.App` as a framework reference for the generic host, the
+  configuration and the HTTP client factory, as the core does, and declares nothing beyond those four references.
+  `TestHostBoundaryTests` measures each of these: its three public types, the one provider, internals in neither
+  direction, and the reference set.
+  Referenced by test projects, and by `tools/MMLib.Alvo.DocsGen`, which documents it (not a package).
 - `samples/MMLib.Alvo.Samples.EmbeddedHost` — the runnable embedded-mode example
   (spec §2.14 mode 2, #24): an ASP.NET Core app that mounts Alvo with
   `AddAlvo`/`MapAlvoDataApi` over `examples/vehicle-registry/vehicles.alvo.json`,
@@ -195,7 +210,8 @@ calling `MapAlvo()`, which is a hosting decision in the one project that is `IsP
   whether or not it maps the Data API. That is the price of principle 8, and it is
   why the *ports* were kept free of it — a non-ASP.NET host implements
   `IAlvoData` against `Abstractions` alone.
-- **No package depends on another port's provider.**
+- **No package depends on another port's provider** — with one stated exception, `MMLib.Alvo.TestHost`, whose whole
+  job is to run the real pipeline on a real engine (see its entry above).
 - Lockstep SemVer: everything is versioned and released together as one version.
 
 ## What a database provider must implement to boot

@@ -140,6 +140,19 @@ internal static partial class EventLog
             + "pump starts on the next boot that primes.")]
     internal static partial void DispatcherStoodDownUnprimed(ILogger logger);
 
+    /// <summary>The loop stood down because the host drives the dispatcher by hand.</summary>
+    /// <remarks>
+    /// Information rather than Warning: it is every test host's normal start. A real host in this mode delivers nothing,
+    /// which is why the standalone host refuses the mode at startup and why this line names the setting.
+    /// </remarks>
+    /// <param name="logger">The logger the dispatcher writes through.</param>
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Alvo's outbox dispatcher is in the manual dispatch mode (Alvo:Events:DispatchMode = Manual): its "
+            + "background loop claims nothing, and no event is delivered until IAlvoEventPump.DrainAsync is called. "
+            + "Remove the setting to deliver in the background.")]
+    internal static partial void DispatcherManual(ILogger logger);
+
     /// <summary>A hook's condition threw, so the hook was not selected.</summary>
     /// <remarks>
     /// Debug, because the loud version of this is one line per event and per hook — exactly the noise the

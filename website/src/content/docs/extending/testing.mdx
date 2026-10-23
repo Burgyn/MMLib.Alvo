@@ -1,0 +1,88 @@
+---
+title: Testing your backend
+description: Run your descriptor — rules, hooks and webhooks — through the real Alvo pipeline inside a unit test, with event delivery on your schedule.
+sidebar:
+  order: 3
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import tests from '../../../snippets/extending/testing/HelpDeskTests.cs?raw';
+import opsBoard from '../../../snippets/extending/testing/OpsBoard.cs?raw';
+import descriptor from '../../../snippets/extending/testing/help-desk.alvo.json?raw';
+
+`MMLib.Alvo.TestHost` starts a real Alvo backend inside a test: the production write pipeline, rules, before-hooks,
+after-hooks and outbox, over a private SQLite database in memory. Nothing above the database is faked, so a test that
+passes here describes what your deployed backend does.
+
+## The descriptor under test
+
+A help desk where an agent may not close a ticket without a resolution, and a high-priority ticket notifies the ops
+board:
+
+<Code code={descriptor} lang="json" title="help-desk.alvo.json" />
+
+## Start a host and write through it
+
+Reference `MMLib.Alvo.TestHost` from your test project. `AlvoTestHost.StartAsync` takes the same builder as `AddAlvo`
+and returns once the descriptor is applied; `Data` behaves exactly as your host's own `IAlvoData`, and
+`AlvoTestHost.Caller` builds a caller — a new user each time — holding the roles you name plus `authenticated`:
+
+<SourceExcerpt code={tests} from="A_ticket_cannot_be_closed_without_a_resolution()" to="cancellationToken: ct));" title="HelpDeskTests.cs" />
+
+The `reject` refuses exactly as it does over HTTP, and the row is left as it was. Each host gets its own in-memory
+database, dropped when the host is disposed (a provider you register yourself is
+[yours to clean up](#run-the-same-test-on-postgresql)); after that, `Data`, `Services`, `Hooks` and `DrainEventsAsync` throw
+`ObjectDisposedException`.
+
+## Deliver events when you say so
+
+A test host never delivers on its own. `DrainEventsAsync` runs the production dispatcher round after round until
+nothing is due — including the events the deliveries themselves cause — and returns what it did: entries claimed,
+entries whose delivery failed, subscribers attempted. Webhooks go to the handler you pass as `webhooks`:
+
+<SourceExcerpt code={tests} from="A_high_priority_ticket_notifies_the_ops_board()" to="alvo.Hooks.AssertRan" title="HelpDeskTests.cs" />
+
+<SourceExcerpt code={opsBoard} from="public sealed class OpsBoard" title="OpsBoard.cs" />
+
+- **No network, ever.** Without `webhooks`, every webhook attempt fails, and its entry is counted once in the result's
+  `Failed`; it never leaves the process. The host does not dispose your handler, so one handler can serve several hosts.
+- **`Hooks.AssertRan(id, times)`** counts the runs of a hook inside this host's drains. A descriptor after-hook's id is
+  its JSON pointer, `/entities/tickets/hooks/afterCreate/0`. A failed attempt is not a run, and neither is one cut
+  short by the host stopping. On a mismatch it throws, listing every run it recorded. Hosts running side by side never
+  see each other's runs.
+- **Loops are refused.** A subscriber that writes to what it subscribes to — a webhook receiver writing back — keeps
+  the queue busy forever. After 100 rounds `DrainEventsAsync` throws `AlvoDrainNotQuiescentException`, naming the
+  subscribers that ran in the last 10 rounds. The limit counts rounds, not cycles: a backlog larger than 100 rounds of
+  [`Alvo:Events:BatchSize`](/reference/configuration/#alvoevents) entries is refused the same way, though nothing
+  loops — drain before it grows that large.
+- **An in-process receiver runs inside the delivery.** Your `webhooks` handler is called on the dispatcher's own async
+  flow, so anything it does inherits that flow (the trace, and — as host-code hooks arrive — the causation chain). A
+  receiver that writes back should do it as a real one would, outside that flow:
+  `using (ExecutionContext.SuppressFlow()) { await Task.Run(writeBack); }`. Never drain from inside a receiver: a round
+  waits for the round it is in.
+
+The test host runs the dispatcher with `Alvo:Events:DispatchMode` set to `Manual`, and each round is one call to the
+public `IAlvoEventPump.DrainAsync()`. An embedded host of your own can do the same; the standalone `MMLib.Alvo.Host`
+refuses `Manual` at startup, because nothing in it drains by hand.
+
+## Pin the clock
+
+Pass a `FakeTimeProvider` (from `Microsoft.Extensions.TimeProvider.Testing`, which the package brings) as `time`, and
+every timestamp the backend writes — `created_at`, `updated_at` — reads it. A failed delivery waits out its retry
+backoff on that clock: advance it and drain again to retry. **Pass one whenever a delivery can fail**: under the system
+clock, a drain that outlasts the backoff retries the delivery a number of times that depends on the machine.
+
+## Run the same test on PostgreSQL
+
+Register a provider in the builder and it replaces the in-memory database:
+`AlvoTestHost.StartAsync(b => b.UsePostgreSql(connectionString).FromDescriptor(path))`, with a reference to
+`MMLib.Alvo.Data.PostgreSql`. Give each test its own database, and drop it when the test is done: disposing the host
+stops it but leaves a database it did not create.
+
+## What it is not
+
+- `InMemoryAlvoData` in `MMLib.Alvo.Testing` is the double the provider contract suites run against; it enforces rules
+  but runs no hooks. To test your backend's behaviour, use `AlvoTestHost`.
+- Event handlers, write hooks and timers in C# arrive one release at a time; each joins the test host — and
+  `Hooks.AssertRan` — as it ships.

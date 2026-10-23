@@ -46,6 +46,10 @@ internal sealed class AlvoEventOptionsConfiguration(IConfiguration? configuratio
     /// <summary>The configuration key of <see cref="AlvoEventOptions.ClaimLease"/>.</summary>
     internal const string ClaimLeaseKey = $"{AlvoEventOptions.SectionName}:{nameof(AlvoEventOptions.ClaimLease)}";
 
+    /// <summary>The configuration key of <see cref="AlvoEventOptions.DispatchMode"/>.</summary>
+    internal const string DispatchModeKey =
+        $"{AlvoEventOptions.SectionName}:{nameof(AlvoEventOptions.DispatchMode)}";
+
     /// <summary>The configuration key of <see cref="AlvoEventOptions.WebhookAllowedNetworks"/>.</summary>
     internal const string WebhookAllowedNetworksKey =
         $"{AlvoEventOptions.SectionName}:{nameof(AlvoEventOptions.WebhookAllowedNetworks)}";
@@ -58,7 +62,30 @@ internal sealed class AlvoEventOptionsConfiguration(IConfiguration? configuratio
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        configuration?.GetSection(AlvoEventOptions.SectionName).Bind(options);
+        if (configuration?.GetSection(AlvoEventOptions.SectionName) is not { } section)
+        {
+            return;
+        }
+
+        EnsureModeIsNamed(section[nameof(AlvoEventOptions.DispatchMode)]);
+        section.Bind(options);
+    }
+
+    /// <summary>
+    /// Refuses a mode no member is named, before the binder does — the binder's own refusal is a type-conversion
+    /// message that names neither the environment variable nor the two values that would work.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Enum.TryParse{TEnum}(string, bool, out TEnum)"/> also accepts a number, so <c>7</c> passes here and
+    /// is refused by <see cref="Validate"/> with the same sentence.
+    /// </remarks>
+    private static void EnsureModeIsNamed(string? configured)
+    {
+        if (configured is not null && !Enum.TryParse<AlvoEventDispatchMode>(configured, ignoreCase: true, out _))
+        {
+            throw new OptionsValidationException(
+                Options.DefaultName, typeof(AlvoEventOptions), [DispatchModeRefusal(configured)]);
+        }
     }
 
     /// <inheritdoc/>
@@ -66,10 +93,18 @@ internal sealed class AlvoEventOptionsConfiguration(IConfiguration? configuratio
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        List<string> refusals = [.. Refusals(options), .. NetworkRefusals(options.WebhookAllowedNetworks)];
+        List<string> refusals =
+        [
+            .. Refusals(options),
+            .. ModeRefusals(options.DispatchMode),
+            .. NetworkRefusals(options.WebhookAllowedNetworks),
+        ];
 
         return refusals.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(refusals);
     }
+
+    private static IEnumerable<string> ModeRefusals(AlvoEventDispatchMode mode) =>
+        Enum.IsDefined(mode) ? [] : [DispatchModeRefusal(mode.ToString())];
 
     private static IEnumerable<string> NetworkRefusals(IList<string> networks) =>
         networks
@@ -144,6 +179,11 @@ internal sealed class AlvoEventOptionsConfiguration(IConfiguration? configuratio
         + "'00:05:00': the lease is how long a claim holds, so one shorter than the interval re-claims an entry "
         + "that is still in flight on the very next tick — a duplicate delivery per tick rather than "
         + "at-least-once delivery.";
+
+    private static string DispatchModeRefusal(string configured) =>
+        $"'{configured}' is not a usable {DispatchModeKey}. Set it (as an environment variable, "
+        + $"{EnvironmentVariable(DispatchModeKey)}) to '{AlvoEventDispatchMode.Background}' or "
+        + $"'{AlvoEventDispatchMode.Manual}': a mode nothing recognises would leave nobody draining the outbox.";
 
     private static string AllowedNetworkRefusal(string configured, int index) =>
         $"'{configured}' is not a usable {WebhookAllowedNetworksKey}:{index}. Set it (as an environment variable, "

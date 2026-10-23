@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AlvoSharedArchTests>false</AlvoSharedArchTests>
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+    <ExtendingSnippets>$(MSBuildThisFileDirectory)../../website/src/snippets/extending</ExtendingSnippets>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Remove="Xunit" />
+    <Using Remove="Shouldly" />
+    <Using Remove="MMLib.Alvo.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MMLib.Alvo.TestHost/MMLib.Alvo.TestHost.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="$(ExtendingSnippets)/**/*.cs" Link="Snippets/%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="$(ExtendingSnippets)/**/*.alvo.json" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

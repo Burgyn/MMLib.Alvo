@@ -61,6 +61,12 @@ internal static class AlvoHostConfiguration
         "  Mount one:  docker run -v ./project.alvo.json:/alvo/descriptor.json ghcr.io/burgyn/alvo",
         $"  Or set:     {DescriptorPathVariable}=/path/to/descriptor.json");
 
+    /// <summary>The refusal for the manual dispatch mode, which only a host that drains by hand can use.</summary>
+    internal static string ManualDispatchMode() => Sentence(
+        "Alvo cannot start: Alvo__Events__DispatchMode is 'Manual', and this host never calls "
+        + "IAlvoEventPump.DrainAsync, so no webhook or mail would ever be delivered.",
+        "  Remove it, or set: Alvo__Events__DispatchMode=Background");
+
     /// <summary>The refusal for a driver name this host does not ship.</summary>
     /// <param name="configured">The name configuration asked for.</param>
     internal static string UnknownProvider(string? configured) => Sentence(

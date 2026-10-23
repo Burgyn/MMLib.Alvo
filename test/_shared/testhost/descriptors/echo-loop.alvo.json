@@ -1,0 +1,28 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "echo-loop",
+  "auth": { "roles": ["agent"] },
+  "webhooks": {
+    "endpoints": {
+      "echo": { "url": "https://echo.example.test/hooks/alvo", "secretRef": "echo-signing-key" }
+    }
+  },
+  "entities": {
+    "echoes": {
+      "fields": {
+        "note": { "type": "string", "maxLength": 40 }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'agent' in @user.roles"
+      },
+      "hooks": {
+        "afterCreate": [
+          { "action": { "type": "webhook", "endpoint": "echo" } }
+        ]
+      }
+    }
+  }
+}

@@ -124,16 +124,20 @@ internal static partial class ContentBody
     {
         var lines = Raw(match, imports).Content.Split('\n');
         var from = RequiredAttribute(match, "from");
-        var to = RequiredAttribute(match, "to");
+        var to = OptionalAttribute(match, "to");
         var start = Array.FindIndex(lines, line => line.Contains(from, StringComparison.Ordinal));
-        var end = start < 0 ? -1 : Array.FindIndex(lines, start, line => line.Contains(to, StringComparison.Ordinal));
+        var end = start < 0 ? -1 : End(lines, start, to);
         if (end < 0)
         {
-            throw new InvalidOperationException($"SourceExcerpt anchors not found (from \"{from}\", to \"{to}\").");
+            throw new InvalidOperationException($"SourceExcerpt anchors not found (from \"{from}\", to \"{to ?? "the end"}\").");
         }
 
         return Dedent(lines[start..(end + 1)]);
     }
+
+    private static int End(string[] lines, int start, string? to) => to is null
+        ? Array.FindLastIndex(lines, line => line.Trim().Length > 0)
+        : Array.FindIndex(lines, start, line => line.Contains(to, StringComparison.Ordinal));
 
     private static string Dedent(IReadOnlyList<string> lines)
     {
@@ -176,6 +180,15 @@ internal static partial class ContentBody
     private static string RequiredAttribute(Match match, string name) =>
         Attribute(match.Groups["attrs"].Value, name)
         ?? throw new InvalidOperationException($"'{match.Value.Trim()}' has no {name}=\"…\" attribute.");
+
+    private static string? OptionalAttribute(Match match, string name)
+    {
+        var attrs = match.Groups["attrs"].Value;
+        var value = Attribute(attrs, name);
+        return value is not null || !Regex.IsMatch(attrs, $"(?:^|\\s){Regex.Escape(name)}=")
+            ? value
+            : throw new InvalidOperationException($"'{match.Value.Trim()}' has a {name}= attribute that is not double-quoted; write it as {name}=\"…\".");
+    }
 
     private static string? Attribute(string attrs, string name)
     {
