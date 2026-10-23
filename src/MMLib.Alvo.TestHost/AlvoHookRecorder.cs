@@ -15,8 +15,8 @@ namespace MMLib.Alvo.TestHost;
 /// stopping (no outcome) is not either, and any other outcome — a write hook that rejects, from HX-09 on — is.
 /// </para>
 /// <para>
-/// The activity source is process-wide, so the recorder keeps only what ran inside its own host's drains: several hosts
-/// in one test run never see each other's runs.
+/// The activity source is process-wide, so the recorder samples and keeps only what runs inside its own host's drains:
+/// several hosts in one test run never see each other's runs, and a span outside them is left to whoever else listens.
 /// </para>
 /// </remarks>
 #pragma warning disable CA1001 // The owning AlvoTestHost stops the listener on dispose; a public Dispose would let a test stop it early.
@@ -40,7 +40,9 @@ public sealed class AlvoHookRecorder
         _listener = new ActivityListener
         {
             ShouldListenTo = source => source.Name is HooksSourceName or DrainSourceName,
-            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            Sample = (ref ActivityCreationOptions<ActivityContext> options) => _drains.ContainsKey(options.TraceId)
+                ? ActivitySamplingResult.AllDataAndRecorded
+                : ActivitySamplingResult.None,
             ActivityStopped = Record,
         };
         ActivitySource.AddActivityListener(_listener);

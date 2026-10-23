@@ -15,8 +15,8 @@ namespace MMLib.Alvo.TestHost;
 /// <b>Nothing above the database is faked.</b> <see cref="Data"/> behaves exactly as the host's own <c>IAlvoData</c>:
 /// a descriptor <c>reject</c> refuses, a <c>mutate</c> applies and a rule hides rows as in production. Write through
 /// <see cref="Data"/> rather than through <see cref="Services"/>: from write hooks on, it is what scopes a write's hooks
-/// to <see cref="Hooks"/>. Unless the builder registers a provider of its own — <c>UsePostgreSql</c>, for parity runs — each host gets a fresh SQLite database in
-/// memory, private to it and dropped when the host is disposed.
+/// to <see cref="Hooks"/>. Unless the builder registers a provider of its own — <c>UsePostgreSql</c>, for parity runs —
+/// each host gets a fresh SQLite database in memory, private to it and dropped when the host is disposed.
 /// </para>
 /// <para>
 /// <b>Events wait for the test.</b> The dispatcher runs in the manual dispatch mode, so nothing is delivered until the
@@ -181,8 +181,8 @@ public sealed class AlvoTestHost : IAsyncDisposable
     private Activity? StartDrain()
     {
         var root = new ActivityContext(ActivityTraceId.CreateRandom(), ActivitySpanId.CreateRandom(), ActivityTraceFlags.Recorded);
-        var drain = _drainSource.StartActivity(DrainActivityName, ActivityKind.Internal, root);
         _hooks.Track(root.TraceId);
+        var drain = _drainSource.StartActivity(DrainActivityName, ActivityKind.Internal, root);
 
         return drain;
     }
