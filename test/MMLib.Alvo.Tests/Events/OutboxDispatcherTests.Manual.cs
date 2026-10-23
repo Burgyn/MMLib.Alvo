@@ -1,7 +1,13 @@
-﻿using MMLib.Alvo.Events;
+﻿using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
+using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Rules.Internal;
 
+using NSubstitute;
+
+using System.Diagnostics;
 using System.Net;
 
 namespace MMLib.Alvo.Tests.Events;
@@ -169,7 +175,64 @@ public sealed partial class OutboxDispatcherTests
         (await round).Claimed.ShouldBe(1, "a host stopping under a round must not replace its outcome with a disposal error");
     }
 
-    private static EventPump Pump(OutboxDispatcher dispatcher) => new(dispatcher);
+    /// <summary>
+    /// The host stopping under a round driven with no token of its own — a test host disposed mid-drain, or an embedded
+    /// host whose caller passed <see cref="CancellationToken.None"/> — is a shutdown, exactly as it is for the loop.
+    /// </summary>
+    [Fact]
+    public async Task A_host_stopping_under_a_manual_round_is_a_shutdown_not_a_failed_attempt()
+    {
+        using var spans = new DeliverySpans();
+        using var stopping = new CancellationTokenSource();
+        var store = StoreWith(WonDeal());
+        using var pump = Pump(Subject(store, Ready, Manual, blockDeliveriesOn: new TaskCompletionSource()), stopping);
+
+        await spans.WithinAsync(async () =>
+        {
+            var round = pump.DrainAsync(CancellationToken.None);
+            await UntilAsync(() => store.ClaimCount == 1, "the round to claim");
+            await stopping.CancelAsync();
+            await Should.ThrowAsync<OperationCanceledException>(round.WaitAsync(_waitBudget, Cancellation));
+        });
+
+        LeftClaimedAndUncounted(store, spans);
+    }
+
+    [Fact]
+    public async Task Cancelling_a_manual_round_leaves_its_work_claimed_and_uncounted()
+    {
+        using var spans = new DeliverySpans();
+        using var caller = CancellationTokenSource.CreateLinkedTokenSource(Cancellation);
+        var store = StoreWith(WonDeal());
+        using var pump = Pump(Subject(store, Ready, Manual, blockDeliveriesOn: new TaskCompletionSource()));
+
+        await spans.WithinAsync(async () =>
+        {
+            var round = pump.DrainAsync(caller.Token);
+            await UntilAsync(() => store.ClaimCount == 1, "the round to claim");
+            await caller.CancelAsync();
+            await Should.ThrowAsync<OperationCanceledException>(round.WaitAsync(_waitBudget, Cancellation));
+        });
+
+        LeftClaimedAndUncounted(store, spans);
+    }
+
+    private void LeftClaimedAndUncounted(FakeOutboxStore store, DeliverySpans spans)
+    {
+        store.ReleasedIds.ShouldBeEmpty("a cut-short round is not a failed attempt, so nothing is handed back");
+        store.OnlyEntry.Dispatched.ShouldBeFalse();
+        _logs.Entries.ShouldNotContain(entry => entry.Level >= LogLevel.Warning);
+        var span = spans.Recorded.ShouldHaveSingleItem();
+        span.GetTagItem("alvo.outcome").ShouldBeNull();
+        span.Status.ShouldBe(ActivityStatusCode.Unset);
+    }
+
+    private static EventPump Pump(OutboxDispatcher dispatcher, CancellationTokenSource? stopping = null)
+    {
+        var lifetime = Substitute.For<IHostApplicationLifetime>();
+        lifetime.ApplicationStopping.Returns(stopping?.Token ?? CancellationToken.None);
+        return new(dispatcher, lifetime);
+    }
 
     private static void Manual(AlvoEventOptions options) => options.DispatchMode = AlvoEventDispatchMode.Manual;
 

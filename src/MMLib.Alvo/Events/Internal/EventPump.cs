@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Events.Internal;
+﻿using Microsoft.Extensions.Hosting;
+
+namespace MMLib.Alvo.Events.Internal;
 
 /// <summary>
 /// The one <see cref="IAlvoEventPump"/>: a manual round of every event dispatcher this build runs, one round at a time.
@@ -15,7 +17,8 @@
 /// </para>
 /// </remarks>
 /// <param name="outbox">The outbox dispatcher, whose manual round checks the mode and the boot before it claims.</param>
-internal sealed class EventPump(OutboxDispatcher outbox) : IAlvoEventPump, IDisposable
+/// <param name="lifetime">The host's lifetime, whose stopping token ends a round the way it ends the loop's.</param>
+internal sealed class EventPump(OutboxDispatcher outbox, IHostApplicationLifetime lifetime) : IAlvoEventPump, IDisposable
 {
     private readonly SemaphoreSlim _rounds = new(1, 1);
 
@@ -23,12 +26,19 @@ internal sealed class EventPump(OutboxDispatcher outbox) : IAlvoEventPump, IDisp
     internal OutboxDispatcher Outbox => outbox;
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// The round runs under the caller's token linked with <see cref="IHostApplicationLifetime.ApplicationStopping"/>,
+    /// so a host stopping under a round the caller did not cancel — a test host disposed mid-drain, or a caller that
+    /// passed <see cref="CancellationToken.None"/> — is a shutdown, as it is for the background loop: no failed span,
+    /// no failed attempt, and the work in flight left claimed.
+    /// </remarks>
     public async Task<AlvoDrainResult> DrainAsync(CancellationToken cancellationToken = default)
     {
-        await _rounds.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var round = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.ApplicationStopping);
+        await _rounds.WaitAsync(round.Token).ConfigureAwait(false);
         try
         {
-            return await outbox.ManualRoundAsync(cancellationToken).ConfigureAwait(false);
+            return await outbox.ManualRoundAsync(round.Token).ConfigureAwait(false);
         }
         finally
         {

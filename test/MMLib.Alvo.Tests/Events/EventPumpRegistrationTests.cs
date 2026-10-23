@@ -34,6 +34,7 @@ public sealed class EventPumpRegistrationTests
     {
         var collection = new ServiceCollection();
         collection.AddSingleton(Substitute.For<IOutboxStore>());
+        collection.AddSingleton(Substitute.For<IHostApplicationLifetime>());
         for (var call = 0; call < times; call++)
         {
             collection.AddAlvo();

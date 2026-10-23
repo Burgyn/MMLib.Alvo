@@ -21,7 +21,8 @@ public interface IAlvoEventPump
 {
     /// <summary>Runs one dispatch round.</summary>
     /// <param name="cancellationToken">
-    /// Cancels the round; work in flight is left claimed, and its lease returns it to the queue.
+    /// Cancels the round, as the host stopping does; work in flight is left claimed, and its lease returns it to the
+    /// queue.
     /// </param>
     /// <returns>What the round claimed, which subscribers it ran and how many attempts failed.</returns>
     /// <exception cref="InvalidOperationException">
