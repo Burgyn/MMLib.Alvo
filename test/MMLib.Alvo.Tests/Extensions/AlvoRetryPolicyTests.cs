@@ -24,6 +24,9 @@ public sealed class AlvoRetryPolicyTests
         AlvoRetryPolicy.Default.DelayAfter(attempt).ShouldBe(TimeSpan.FromSeconds(seconds));
 
     [Fact]
+    public void There_is_no_wait_before_the_first_attempt() => AlvoRetryPolicy.Default.DelayAfter(0).ShouldBeNull();
+
+    [Fact]
     public void There_is_no_wait_after_the_last_attempt() => AlvoRetryPolicy.Default.DelayAfter(7).ShouldBeNull();
 
     [Fact]
@@ -40,4 +43,17 @@ public sealed class AlvoRetryPolicyTests
     [Fact]
     public void A_negative_delay_is_refused() =>
         Should.Throw<ArgumentOutOfRangeException>(() => AlvoRetryPolicy.From(TimeSpan.FromSeconds(-1)));
+
+    [Fact]
+    public void A_delay_of_seven_days_is_the_longest_accepted() =>
+        AlvoRetryPolicy.From(TimeSpan.FromDays(7)).Delays.ShouldBe([TimeSpan.FromDays(7)]);
+
+    [Fact]
+    public void A_delay_beyond_seven_days_is_refused_naming_the_cap()
+    {
+        var refused = Should.Throw<ArgumentOutOfRangeException>(() => AlvoRetryPolicy.From(TimeSpan.FromDays(7) + TimeSpan.FromTicks(1)));
+
+        refused.ParamName.ShouldBe("delays");
+        refused.Message.ShouldContain("7 days");
+    }
 }

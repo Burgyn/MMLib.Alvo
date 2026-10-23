@@ -10,8 +10,9 @@ public sealed class AlvoHandlerOptions
     public string? Description { get; set; }
 
     /// <summary>
-    /// Gets or sets where the handler sits among those of the same entity and operation; lower first, then registration
-    /// order. Deliveries of different handlers still run independently — this orders their fan-out and their listing.
+    /// Gets or sets where the handler sits among those of the same entity and operation, or of the same application event
+    /// name; lower first, then registration order. Deliveries of different handlers still run independently — this orders
+    /// their fan-out and their listing.
     /// </summary>
     public int Order
     {

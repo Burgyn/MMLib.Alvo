@@ -52,7 +52,7 @@ internal static class OptionsCatalog
         [typeof(SqliteProviderOptions)] = "Set in code by `UseSqlite(…)`; its connection string comes from `ConnectionStrings:Alvo`, listed below.",
         [typeof(PostgreSqlProviderOptions)] = "Set in code by `UsePostgreSql(…)`; its connection string comes from `ConnectionStrings:Alvo`, listed below.",
         [typeof(MigrationOptions)] = "A per-call argument to the schema migrator, not a configuration section; the `Alvo:Schema` keys decide what start-up passes it.",
-        [typeof(AlvoHandlerOptions)] = "Set per event handler by the `configure` argument of `AddEventHandler(…)`; it is not a configuration section.",
+        [typeof(AlvoHandlerOptions)] = "Set per event handler by the `configure` argument of `AddEventHandler(…)` or of an entity's `OnCreated`, `OnUpdated`, `OnDeleted` and `OnSaved`; it is not a configuration section.",
     };
 
     internal static IReadOnlyList<ConfigurationSection> Read(IEnumerable<Assembly> assemblies, XmlDocs docs)
