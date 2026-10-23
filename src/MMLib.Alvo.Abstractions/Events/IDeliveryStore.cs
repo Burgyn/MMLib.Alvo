@@ -7,6 +7,12 @@
 /// </remarks>
 public sealed record DeliveryRequest
 {
+    /// <summary>
+    /// The dead reason of a delivery whose handler was not bound when its event was fanned out: a record of missed work,
+    /// replayed explicitly, which — unlike any other dead delivery — does not hold its lane back.
+    /// </summary>
+    public const string UnboundReason = "unbound";
+
     /// <summary>Gets the outbox entry the delivery is for; its envelope stays in the outbox.</summary>
     public required Guid EventId { get; init; }
 
@@ -37,14 +43,15 @@ public sealed record DeliveryClaim
 
     /// <summary>
     /// Gets the subscribers whose lanes are ordered: a delivery is claimable only when no earlier delivery of its lane is
-    /// unfinished or dead, and no earlier outbox entry of its partition key is still waiting to be fanned out.
+    /// unfinished or dead — a delivery dead with <see cref="DeliveryRequest.UnboundReason"/> excepted — and no earlier
+    /// outbox entry of its partition key is still waiting to be fanned out.
     /// </summary>
     public required IReadOnlyCollection<string> Ordered { get; init; }
 
     /// <summary>Gets the subscribers that opted out of per-record order; their deliveries are claimable whatever came before.</summary>
     public IReadOnlyCollection<string> Unordered { get; init; } = [];
 
-    /// <summary>Gets the most deliveries this claim takes.</summary>
+    /// <summary>Gets the most deliveries this claim takes; a store refuses zero or less with <see cref="ArgumentOutOfRangeException"/>.</summary>
     public required int BatchSize { get; init; }
 
     /// <summary>Gets how long the claim holds before another claimant may take the delivery back.</summary>
@@ -125,16 +132,16 @@ public sealed record DeliveryFailure
 /// an implementation serves this port and <see cref="IOutboxStore"/> over one store.
 /// </para>
 /// <para>
-/// <b>Each member is one statement, or a write-first transaction</b> — never a read followed by a write in one
-/// transaction, the shape <see cref="IOutboxStore"/> measured to fail on SQLite. A claim is a single conditional update
+/// <b>Never a read followed by a write in one transaction</b> — the shape <see cref="IOutboxStore"/> measured to fail on
+/// SQLite; a member that writes more than once opens its transaction with the write. A claim is a single conditional update
 /// whose outer condition repeats the claimability test, so a second claimant blocked behind the first claims nothing
 /// rather than the same rows.
 /// </para>
 /// <para>
 /// <b>Lanes.</b> A delivery is claimable when it is pending, or retrying and due, or running with its lease expired; its
 /// subscriber is one the claim names; and — for an ordered subscriber — no delivery of the same subscriber and partition
-/// key with an earlier event id is pending, running, retrying or dead — except a delivery dead with the reason
-/// <c>unbound</c>, a record of work missed while its handler did not fit the schema, which is replayed explicitly and does
+/// key with an earlier event id is pending, running, retrying or dead — except a delivery dead with
+/// <see cref="DeliveryRequest.UnboundReason"/>, a record of work missed while its handler did not fit the schema, which is replayed explicitly and does
 /// not hold the lane — <b>and no outbox entry of the same partition key with an earlier id is still undispatched, either
 /// below the outbox's attempt ceiling or under a claim younger than the outbox's claim lease</b>. The second half is what
 /// keeps a record's order across outbox batches, a failed fan-out and a dispatcher that died between claiming an entry and
@@ -143,8 +150,9 @@ public sealed record DeliveryFailure
 /// </para>
 /// <para>
 /// <b>Fencing.</b> <see cref="CompleteAsync"/> and <see cref="FailAsync"/> change the row only while it is still running
-/// under the same claimant and the same attempt count, and answer whether they did. A late finisher whose lease was
-/// reclaimed changes nothing.
+/// under the same claimant and the same attempt count, and answer whether they did — <see langword="false"/>, never an
+/// exception, when the claim no longer holds. A late finisher whose lease was reclaimed, a second answer for one attempt,
+/// and an answer for a delivery retired while it ran all change nothing.
 /// </para>
 /// </remarks>
 public interface IDeliveryStore
@@ -160,10 +168,14 @@ public interface IDeliveryStore
     /// <returns>How many rows were new.</returns>
     Task<int> FanOutAsync(IReadOnlyList<DeliveryRequest> requests, CancellationToken cancellationToken = default);
 
-    /// <summary>Claims up to <see cref="DeliveryClaim.BatchSize"/> lane heads for the claimant.</summary>
+    /// <summary>
+    /// Claims up to <see cref="DeliveryClaim.BatchSize"/> claimable deliveries for the claimant — the head of each ordered
+    /// lane, any due delivery of an unordered subscriber.
+    /// </summary>
     /// <param name="claim">Whose deliveries, how many, for how long.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The claimed deliveries, ascending by event id and then subscriber.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="DeliveryClaim.BatchSize"/> is zero or less.</exception>
     Task<IReadOnlyList<ClaimedDelivery>> ClaimAsync(DeliveryClaim claim, CancellationToken cancellationToken = default);
 
     /// <summary>Marks the attempt succeeded and records it, if the claimant still holds the delivery.</summary>
@@ -182,19 +194,22 @@ public interface IDeliveryStore
     /// <returns>Whether the claim still held; <see langword="false"/> changed nothing.</returns>
     Task<bool> FailAsync(DeliveryAttempt attempt, DeliveryFailure failure, CancellationToken cancellationToken = default);
 
-    /// <summary>The subscribers with work left — a delivery pending, running or retrying — in ordinal order.</summary>
+    /// <summary>The subscribers with work left — a delivery pending, running or retrying — in no promised order.</summary>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The subscriber ids.</returns>
     Task<IReadOnlyList<string>> PendingSubscribersAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Ends a subscriber's unfinished deliveries as dead with <paramref name="reason"/>, so they stay inspectable.</summary>
+    /// <summary>
+    /// Ends a subscriber's unfinished deliveries — a running one included, whose late answer then changes nothing — as dead
+    /// with <paramref name="reason"/>, so they stay inspectable.
+    /// </summary>
     /// <param name="subscriber">The subscriber id.</param>
     /// <param name="reason">The reason recorded as each delivery's error type.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>How many deliveries were ended.</returns>
     Task<int> DeadLetterPendingAsync(string subscriber, string reason, CancellationToken cancellationToken = default);
 
-    /// <summary>Cancels a subscriber's unfinished deliveries.</summary>
+    /// <summary>Cancels a subscriber's unfinished deliveries — a running one included, whose late answer then changes nothing.</summary>
     /// <param name="subscriber">The subscriber id.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>How many deliveries were cancelled.</returns>

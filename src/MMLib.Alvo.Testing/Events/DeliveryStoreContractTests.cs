@@ -17,6 +17,7 @@ public abstract class DeliveryStoreContractTests
     private const string Claimant = "worker-1";
     private const string Confirm = "send-confirmation";
     private const string Audit = "audit-trail";
+    private const string OtherClaimant = "worker-2";
     private const string KeyA = "tickets:a";
     private const string KeyB = "tickets:b";
     private const int MaxAttempts = 7;
@@ -279,7 +280,7 @@ public abstract class DeliveryStoreContractTests
         var @event = await world.AppendEventAsync(KeyA);
         await world.Store.FanOutAsync([Request(@event, Confirm, KeyA), Request(@event, Audit, KeyA)], Ct);
 
-        (await world.Store.PendingSubscribersAsync(Ct)).ShouldBe([Audit, Confirm]);
+        (await world.Store.PendingSubscribersAsync(Ct)).ShouldBe([Audit, Confirm], ignoreOrder: true);
         (await world.Store.DeadLetterPendingAsync(Confirm, "retired", Ct)).ShouldBe(1);
         (await world.Store.CancelPendingAsync(Audit, Ct)).ShouldBe(1);
 
@@ -338,7 +339,8 @@ public abstract class DeliveryStoreContractTests
 
     /// <summary>
     /// An earlier event on its <b>last</b> attempt is already counted at the ceiling while it is being fanned out; under a
-    /// live claim it still holds the lane, or its own delivery could land after a later one ran.
+    /// live claim it still holds the lane, or its own delivery could land after a later one ran. The claim is the outbox's,
+    /// so it lives as long as the outbox's lease, not the delivery lease.
     /// </summary>
     [Fact]
     public async Task An_earlier_event_on_its_last_attempt_under_a_live_claim_holds_the_lane()
@@ -348,6 +350,8 @@ public abstract class DeliveryStoreContractTests
         await world.AppendUnfannedEventAsync(KeyA, attempts: OutboxCeiling, claimed: true);
         var later = await world.AppendEventAsync(KeyA);
         await world.Store.FanOutAsync([Request(later, Confirm, KeyA)], Ct);
+
+        world.Advance(_lease + TimeSpan.FromSeconds(1));
 
         (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldBeEmpty();
     }
@@ -367,7 +371,7 @@ public abstract class DeliveryStoreContractTests
         (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldHaveSingleItem().EventId.ShouldBe(later);
     }
 
-    /// <summary>A dead <c>unbound</c> delivery records missed work; it is replayed explicitly and does not hold its lane (N6).</summary>
+    /// <summary>A dead <c>unbound</c> delivery records missed work; it is replayed explicitly and does not hold its lane.</summary>
     [Fact]
     public async Task A_dead_unbound_delivery_does_not_block_its_lane()
     {
@@ -375,7 +379,7 @@ public abstract class DeliveryStoreContractTests
         await using var world = await WorldAsync();
         var missed = await world.AppendEventAsync(KeyA);
         var later = await world.AppendEventAsync(KeyA);
-        await world.Store.FanOutAsync([Request(missed, Confirm, KeyA) with { DeadReason = "unbound" }], Ct);
+        await world.Store.FanOutAsync([Request(missed, Confirm, KeyA) with { DeadReason = DeliveryRequest.UnboundReason }], Ct);
         await world.Store.FanOutAsync([Request(later, Confirm, KeyA)], Ct);
 
         (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldHaveSingleItem().EventId.ShouldBe(later);
@@ -418,6 +422,152 @@ public abstract class DeliveryStoreContractTests
 
         (await world.Store.FanOutAsync([Request(@event, Confirm, KeyA)], Ct)).ShouldBe(0);
         (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldBeEmpty();
+    }
+
+    /// <summary>A lane is one subscriber's: a dead delivery of one subscriber holds back no other subscriber of the same record.</summary>
+    [Fact]
+    public async Task A_lane_is_one_subscriber_s_and_blocks_no_other_subscriber_of_the_record()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var first = await world.AppendEventAsync(KeyA);
+        var second = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(first, Audit, KeyA) with { DeadReason = "when-failed" }], Ct);
+        await world.Store.FanOutAsync([Request(second, Confirm, KeyA), Request(second, Audit, KeyA)], Ct);
+
+        var claimed = (await world.Store.ClaimAsync(Claim(Confirm, Audit), Ct)).ShouldHaveSingleItem();
+
+        claimed.Subscriber.ShouldBe(Confirm);
+        claimed.EventId.ShouldBe(second);
+    }
+
+    /// <summary>An attempt is answered for once, and only by the claimant holding it: another claimant's answer and a second answer change nothing.</summary>
+    [Fact]
+    public async Task An_attempt_is_answered_for_once_and_only_by_its_claimant()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var @event = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(@event, Confirm, KeyA)], Ct);
+        var claimed = (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldHaveSingleItem();
+
+        (await world.Store.CompleteAsync(Attempt(claimed) with { Claimant = OtherClaimant }, Ct)).ShouldBeFalse("another claimant does not hold it");
+        (await world.Store.CompleteAsync(Attempt(claimed), Ct)).ShouldBeTrue();
+        (await world.Store.CompleteAsync(Attempt(claimed), Ct)).ShouldBeFalse("the attempt is already answered for");
+        (await world.Store.FailAsync(Attempt(claimed), Failure("boom", _retry), Ct)).ShouldBeFalse("a second answer does not flip the first");
+
+        world.Advance(_retry + TimeSpan.FromSeconds(1));
+        (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldBeEmpty("it succeeded, and stays succeeded");
+        (await world.Store.PendingSubscribersAsync(Ct)).ShouldBeEmpty();
+    }
+
+    /// <summary>A delivery cancelled while it runs stays cancelled: its handler's late answer changes nothing.</summary>
+    [Fact]
+    public async Task A_delivery_cancelled_while_it_runs_is_not_revived_by_its_late_answer()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var @event = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(@event, Confirm, KeyA)], Ct);
+        var claimed = (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldHaveSingleItem();
+
+        (await world.Store.CancelPendingAsync(Confirm, Ct)).ShouldBe(1, "a running delivery is unfinished work too");
+        (await world.Store.FailAsync(Attempt(claimed), Failure("boom", _retry), Ct)).ShouldBeFalse();
+        (await world.Store.CompleteAsync(Attempt(claimed), Ct)).ShouldBeFalse();
+
+        world.Advance(_retry + TimeSpan.FromSeconds(1));
+        (await world.Store.PendingSubscribersAsync(Ct)).ShouldBeEmpty();
+        (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldBeEmpty();
+    }
+
+    /// <summary>A delivery dead-lettered while it runs stays dead: a late success does not free the lane it holds.</summary>
+    [Fact]
+    public async Task A_delivery_dead_lettered_while_it_runs_is_not_revived_by_its_late_answer()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var @event = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(@event, Confirm, KeyA)], Ct);
+        var claimed = (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldHaveSingleItem();
+
+        (await world.Store.DeadLetterPendingAsync(Confirm, "retired", Ct)).ShouldBe(1);
+        (await world.Store.CompleteAsync(Attempt(claimed), Ct)).ShouldBeFalse();
+        var later = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(later, Confirm, KeyA)], Ct);
+
+        (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldBeEmpty("the dead delivery still holds its lane");
+    }
+
+    /// <summary>
+    /// Only an <b>earlier</b> outbox entry holds a lane back: the delivery's own entry, still undispatched while it is being
+    /// fanned out, and any later entry of the same record do not.
+    /// </summary>
+    [Fact]
+    public async Task An_undispatched_entry_at_or_after_the_delivery_s_own_event_holds_nothing_back()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var own = await world.AppendUnfannedEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(own, Confirm, KeyA)], Ct);
+        await world.AppendUnfannedEventAsync(KeyA);
+
+        (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldHaveSingleItem().EventId.ShouldBe(own);
+    }
+
+    /// <summary>An unclaimed earlier entry one attempt below the outbox ceiling may still be fanned out, so it holds the lane.</summary>
+    [Fact]
+    public async Task An_earlier_event_one_attempt_below_the_outbox_ceiling_holds_the_lane()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        await world.AppendUnfannedEventAsync(KeyA, attempts: OutboxCeiling - 1);
+        var later = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(later, Confirm, KeyA)], Ct);
+
+        (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldBeEmpty();
+    }
+
+    /// <summary>A request repeated within one fan-out is recorded once: the (event, subscriber) pair is unique there too.</summary>
+    [Fact]
+    public async Task A_request_repeated_within_one_fan_out_is_recorded_once()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var @event = await world.AppendEventAsync(KeyA);
+
+        (await world.Store.FanOutAsync([Request(@event, Confirm, KeyA), Request(@event, Confirm, KeyA)], Ct)).ShouldBe(1);
+
+        (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldHaveSingleItem();
+    }
+
+    /// <summary>A claim for no deliveries is refused rather than answered with nothing.</summary>
+    [Fact]
+    public async Task A_claim_for_no_deliveries_is_refused()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(async () => await world.Store.ClaimAsync(Claim(Confirm) with { BatchSize = 0 }, Ct));
+    }
+
+    /// <summary>Two claimants claiming at once take disjoint deliveries, and between them every lane head.</summary>
+    [Fact]
+    public async Task Two_claimants_claiming_at_once_take_disjoint_deliveries()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        foreach (var key in Enumerable.Range(1, 6).Select(index => $"tickets:{index}"))
+        {
+            await world.Store.FanOutAsync([Request(await world.AppendEventAsync(key), Confirm, key)], Ct);
+        }
+
+        var claims = await Task.WhenAll(
+            world.Store.ClaimAsync(Claim(Confirm), Ct),
+            world.Store.ClaimAsync(Claim(Confirm) with { Claimant = OtherClaimant }, Ct));
+
+        var claimed = claims.SelectMany(batch => batch).Select(delivery => delivery.Id).ToList();
+        claimed.ShouldBeUnique();
+        claimed.Count.ShouldBe(6);
     }
 
     private static DeliveryRequest Request(Guid @event, string subscriber, string key) =>

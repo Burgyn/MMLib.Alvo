@@ -1138,6 +1138,7 @@ namespace MMLib.Alvo.Events
     }
     public sealed class DeliveryRequest : System.IEquatable<MMLib.Alvo.Events.DeliveryRequest>
     {
+        public const string UnboundReason = "unbound";
         public DeliveryRequest() { }
         public string? DeadReason { get; init; }
         public required System.Guid EventId { get; init; }

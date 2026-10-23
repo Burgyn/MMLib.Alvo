@@ -70,7 +70,9 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
                 throw new InvalidOperationException("The fake delivery store refused this fan-out.");
             }
 
-            var fresh = requests.Where(request => !_rows.Exists(row => row.EventId == request.EventId && row.Subscriber == request.Subscriber)).ToList();
+            var fresh = requests.DistinctBy(request => (request.EventId, request.Subscriber))
+                .Where(request => !_rows.Exists(row => row.EventId == request.EventId && row.Subscriber == request.Subscriber))
+                .ToList();
             _rows.AddRange(fresh.Select(NewRow));
 
             return Task.FromResult(fresh.Count);
@@ -79,6 +81,8 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
 
     public Task<IReadOnlyList<ClaimedDelivery>> ClaimAsync(DeliveryClaim claim, CancellationToken cancellationToken = default)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(claim.BatchSize);
+
         lock (_gate)
         {
             var now = time.GetUtcNow();
@@ -93,7 +97,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     }
 
     public Task<bool> CompleteAsync(DeliveryAttempt attempt, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Answer(attempt, row => row.Status = "succeeded", "succeeded"));
+        Task.FromResult(Answer(attempt, Succeed, "succeeded"));
 
     public Task<bool> FailAsync(DeliveryAttempt attempt, DeliveryFailure failure, CancellationToken cancellationToken = default)
     {
@@ -127,6 +131,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         Status = request.DeadReason is null ? "pending" : "dead",
         LastErrorType = request.DeadReason,
         NotBefore = time.GetUtcNow(),
+        CompletedAt = request.DeadReason is null ? null : time.GetUtcNow(),
     };
 
     private bool Claimable(Row row, DeliveryClaim claim, DateTimeOffset now) =>
@@ -144,7 +149,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
             && earlier.PartitionKey == row.PartitionKey
             && Before(earlier.EventId, row.EventId)
             && _blocking.Contains(earlier.Status)
-            && earlier.LastErrorType != "unbound")
+            && earlier.LastErrorType != DeliveryRequest.UnboundReason)
         || _outbox.Any(entry =>
             entry.Value.Key == row.PartitionKey
             && Before(entry.Key, row.EventId)
@@ -192,11 +197,19 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         }
     }
 
+    private void Succeed(Row row)
+    {
+        row.Status = "succeeded";
+        row.LastErrorType = null;
+        row.CompletedAt = time.GetUtcNow();
+    }
+
     private void Fail(Row row, DeliveryFailure failure, bool dead)
     {
         row.Status = dead ? "dead" : "retrying";
         row.LastErrorType = failure.ErrorType;
         row.NotBefore = time.GetUtcNow() + (failure.RetryAfter ?? TimeSpan.Zero);
+        row.CompletedAt = dead ? time.GetUtcNow() : null;
     }
 
     private int End(string subscriber, string status, string reason)
@@ -209,6 +222,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
                 row.Status = status;
                 row.LastErrorType = reason;
                 row.LeaseUntil = null;
+                row.CompletedAt = time.GetUtcNow();
             }
 
             return ended.Count;
@@ -238,6 +252,8 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         public string? ClaimedBy { get; set; }
 
         public string? LastErrorType { get; set; }
+
+        public DateTimeOffset? CompletedAt { get; set; }
     }
 }
 
