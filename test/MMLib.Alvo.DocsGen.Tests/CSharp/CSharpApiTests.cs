@@ -145,6 +145,14 @@ public class CSharpApiTests
     }
 
     [Fact]
+    public void The_test_host_is_in_scope()
+    {
+        var testHost = ShippedPackages.All.Single(p => p.Package == "MMLib.Alvo.TestHost").Assembly;
+
+        ApiScope.TypesOf(testHost).Select(type => type.Name).ShouldContain("AlvoTestHost");
+    }
+
+    [Fact]
     public void A_package_without_host_facing_types_says_so()
     {
         var page = CSharpApiGenerator.RenderPackage("Fixture", "A fixture package.", [], XmlDocs.Parse("<doc><members/></doc>"), 20);

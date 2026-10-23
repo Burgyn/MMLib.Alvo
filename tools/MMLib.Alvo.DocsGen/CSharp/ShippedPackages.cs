@@ -14,6 +14,7 @@ internal static class ShippedAssemblies
         typeof(MMLib.Alvo.Admin.AlvoAdmin).Assembly,
         typeof(Microsoft.Extensions.DependencyInjection.AlvoAiServiceCollectionExtensions).Assembly,
         typeof(MMLib.Alvo.Identity.AlvoIdentity).Assembly,
+        typeof(MMLib.Alvo.TestHost.AlvoTestHost).Assembly,
     ];
 
     internal static Assembly Host => typeof(MMLib.Alvo.Host.AlvoHost).Assembly;

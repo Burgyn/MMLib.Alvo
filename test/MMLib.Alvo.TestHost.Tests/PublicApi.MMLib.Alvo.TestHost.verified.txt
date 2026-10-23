@@ -1,0 +1,13 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace MMLib.Alvo.TestHost
+{
+    public sealed class AlvoTestHost : System.IAsyncDisposable
+    {
+        public MMLib.Alvo.Data.IAlvoData Data { get; }
+        public System.IServiceProvider Services { get; }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        public static MMLib.Alvo.AlvoContext Caller(params string[] roles) { }
+        public static System.Threading.Tasks.Task<MMLib.Alvo.TestHost.AlvoTestHost> StartAsync(System.Action<MMLib.Alvo.IAlvoBuilder> configure, System.TimeProvider? time = null, System.Net.Http.HttpMessageHandler? webhooks = null, System.Threading.CancellationToken cancellationToken = default) { }
+    }
+}

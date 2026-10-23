@@ -14,6 +14,7 @@
     <Project Path="src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
     <Project Path="src/MMLib.Alvo.Host/MMLib.Alvo.Host.csproj" />
     <Project Path="src/MMLib.Alvo.Identity/MMLib.Alvo.Identity.csproj" />
+    <Project Path="src/MMLib.Alvo.TestHost/MMLib.Alvo.TestHost.csproj" />
     <Project Path="src/MMLib.Alvo.Testing.EntityFrameworkCore/MMLib.Alvo.Testing.EntityFrameworkCore.csproj" />
     <Project Path="src/MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj" />
     <Project Path="src/MMLib.Alvo/MMLib.Alvo.csproj" />
@@ -39,6 +40,7 @@
     <Project Path="test/MMLib.Alvo.Identity.Tests/MMLib.Alvo.Identity.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Samples.EmbeddedHost.Tests.Integration/MMLib.Alvo.Samples.EmbeddedHost.Tests.Integration.csproj" />
     <Project Path="test/MMLib.Alvo.Schema.Tests/MMLib.Alvo.Schema.Tests.csproj" />
+    <Project Path="test/MMLib.Alvo.TestHost.Tests/MMLib.Alvo.TestHost.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
