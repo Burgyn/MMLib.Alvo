@@ -13,8 +13,9 @@
 /// <para>
 /// <b>Refused unless the dispatchers are manual.</b> Two drivers of one queue break per-entity-key ordering the way two
 /// dispatching replicas do, so in the background mode a round throws instead of racing the loops. Rounds called
-/// concurrently run one after the other; a round called from inside a round would wait for itself, so a subscriber
-/// must never drain.
+/// concurrently run one after the other; a round called from inside a round — by a subscriber that drains — is refused
+/// with an <see cref="InvalidOperationException"/>, because it would wait for itself. The refusal finds the round by its
+/// execution context, so code that suppresses execution-context flow before it drains escapes the check and waits.
 /// </para>
 /// </remarks>
 public interface IAlvoEventPump
@@ -27,7 +28,11 @@ public interface IAlvoEventPump
     /// <returns>What the round claimed, which subscribers it attempted and how many claimed entries failed.</returns>
     /// <exception cref="InvalidOperationException">
     /// The dispatch mode is not <see cref="AlvoEventDispatchMode.Manual"/>, <see cref="AlvoEventOptions.Enabled"/> is
-    /// off, or the boot has not primed a schema; nothing was claimed.
+    /// off, or the boot has not primed a schema; nothing was claimed — or the call was made from inside a round.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="cancellationToken"/> was cancelled, or the host is stopping — including a call made once it has begun
+    /// to stop, which is refused before anything is claimed.
     /// </exception>
     Task<AlvoDrainResult> DrainAsync(CancellationToken cancellationToken = default);
 }

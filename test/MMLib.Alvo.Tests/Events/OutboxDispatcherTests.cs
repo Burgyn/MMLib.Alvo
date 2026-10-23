@@ -1,10 +1,12 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
+using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
@@ -12,6 +14,8 @@ using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Tests.Expressions;
 using MMLib.Alvo.Tests.Extensions;
+
+using NSubstitute;
 
 using System.Globalization;
 using System.Net;
@@ -475,6 +479,31 @@ public sealed partial class OutboxDispatcherTests : IDisposable
         CelFixtures.Evaluator,
         AlvoChainDepthLimit.Default,
         _loggers.CreateLogger<DeliveryFanOut>());
+
+    /// <summary>A delivery dispatcher with no handler registered, for the pump the manual-round facts drive.</summary>
+    private DeliveryDispatcher NoDeliveries()
+    {
+        var store = new FakeDeliveryStore(TimeProvider.System);
+        var runner = new DeliveryRunner(
+            store,
+            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            new AlvoSessions(Substitute.For<IAlvoData>()),
+            PrimedCatalogs,
+            new DeliveryBackoff(() => 0.5),
+            TimeProvider.System,
+            _loggers.CreateLogger<DeliveryRunner>());
+
+        return new DeliveryDispatcher(
+            store,
+            new AlvoBootState(),
+            PrimedCatalogs,
+            new ExtensionBinder(ExtensionRegistry.Empty, CelFixtures.Compiler, HandlerCatalog.EveryService(), _loggers.CreateLogger<ExtensionBinder>()),
+            runner,
+            Options.Create(new AlvoEventOptions { DispatchMode = AlvoEventDispatchMode.Manual }),
+            Options.Create(new AlvoDeliveryOptions()),
+            TimeProvider.System,
+            _loggers.CreateLogger<DeliveryDispatcher>());
+    }
 
     /// <summary>Polls <paramref name="condition"/> until it holds, and throws rather than giving up quietly.</summary>
     private static async Task UntilAsync(Func<bool> condition, string what)

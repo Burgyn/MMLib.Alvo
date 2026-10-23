@@ -199,6 +199,19 @@ public sealed partial class OutboxDispatcherTests
     }
 
     [Fact]
+    public async Task A_round_asked_for_once_the_host_is_stopping_is_cancelled_before_it_claims()
+    {
+        using var stopping = new CancellationTokenSource();
+        await stopping.CancelAsync();
+        var store = StoreWith(WonDeal());
+        using var pump = Pump(Subject(store, Ready, Manual), stopping);
+
+        await Should.ThrowAsync<OperationCanceledException>(pump.DrainAsync(Cancellation));
+
+        store.ClaimCount.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task Cancelling_a_manual_round_leaves_its_work_claimed_and_uncounted()
     {
         using var spans = new DeliverySpans();
@@ -227,11 +240,11 @@ public sealed partial class OutboxDispatcherTests
         span.Status.ShouldBe(ActivityStatusCode.Unset);
     }
 
-    private static EventPump Pump(OutboxDispatcher dispatcher, CancellationTokenSource? stopping = null)
+    private EventPump Pump(OutboxDispatcher dispatcher, CancellationTokenSource? stopping = null)
     {
         var lifetime = Substitute.For<IHostApplicationLifetime>();
         lifetime.ApplicationStopping.Returns(stopping?.Token ?? CancellationToken.None);
-        return new(dispatcher, lifetime);
+        return new(dispatcher, NoDeliveries(), lifetime);
     }
 
     private static void Manual(AlvoEventOptions options) => options.DispatchMode = AlvoEventDispatchMode.Manual;

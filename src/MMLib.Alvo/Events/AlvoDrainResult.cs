@@ -15,7 +15,8 @@ public sealed record AlvoDrainResult
     /// <summary>
     /// Gets the subscribers the round attempted, each once, in the order they were first attempted — a subscriber that
     /// threw is listed too, and the work item it failed is counted once in <see cref="Failed"/>. A descriptor
-    /// after-hook is named by its JSON pointer, such as <c>/entities/tickets/hooks/afterCreate/0</c>.
+    /// after-hook is named by its JSON pointer, such as <c>/entities/tickets/hooks/afterCreate/0</c>. An event handler is
+    /// named by its registered id.
     /// </summary>
     public required IReadOnlyList<string> Subscribers { get; init; }
 

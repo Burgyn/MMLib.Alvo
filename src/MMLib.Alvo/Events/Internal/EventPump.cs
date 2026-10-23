@@ -7,23 +7,30 @@ namespace MMLib.Alvo.Events.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// In this build the outbox dispatcher is the only one. HX-03 adds the delivery dispatcher as a second step of the same
-/// round and HX-13 the timer and schedule pumps (spec 2026-10-14 §4.15: outbox → fan-out → deliveries → due timers);
-/// the public port and its result do not change, and the results of the steps are summed.
+/// A round is the outbox dispatcher's tick (claim, fan out, run the declarative actions) followed by the delivery
+/// dispatcher's (claim the lane heads now due, run them); HX-13 adds the timer and schedule steps. The public port and its
+/// result do not change; the steps' results are summed.
 /// </para>
 /// <para>
-/// The gate serialises rounds and is not re-entrant: a round called from inside a round waits for itself, which is why
-/// the port says a subscriber must never drain.
+/// The gate serialises rounds. A round called from inside a round — a subscriber that drains — is <b>refused</b> rather than
+/// left to wait for itself: the round marks its execution flow, and a nested call finds the mark. Code that suppresses
+/// execution-context flow escapes the mark and would wait; nothing can see it.
 /// </para>
 /// </remarks>
 /// <param name="outbox">The outbox dispatcher, whose manual round checks the mode and the boot before it claims.</param>
+/// <param name="deliveries">The delivery dispatcher, whose manual round runs the handler deliveries now due.</param>
 /// <param name="lifetime">The host's lifetime, whose stopping token ends a round the way it ends the loop's.</param>
-internal sealed class EventPump(OutboxDispatcher outbox, IHostApplicationLifetime lifetime) : IAlvoEventPump, IDisposable
+internal sealed class EventPump(OutboxDispatcher outbox, DeliveryDispatcher deliveries, IHostApplicationLifetime lifetime)
+    : IAlvoEventPump, IDisposable
 {
     private readonly SemaphoreSlim _rounds = new(1, 1);
+    private readonly AsyncLocal<bool> _inRound = new();
 
     /// <summary>Gets the outbox dispatcher this pump drives — the same instance the host runs.</summary>
     internal OutboxDispatcher Outbox => outbox;
+
+    /// <summary>Gets the delivery dispatcher this pump drives — the same instance the host runs.</summary>
+    internal DeliveryDispatcher Deliveries => deliveries;
 
     /// <inheritdoc/>
     /// <remarks>
@@ -34,20 +41,42 @@ internal sealed class EventPump(OutboxDispatcher outbox, IHostApplicationLifetim
     /// </remarks>
     public async Task<AlvoDrainResult> DrainAsync(CancellationToken cancellationToken = default)
     {
+        if (_inRound.Value)
+        {
+            throw ReEntered();
+        }
+
         using var round = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.ApplicationStopping);
         await _rounds.WaitAsync(round.Token).ConfigureAwait(false);
         try
         {
-            return await outbox.ManualRoundAsync(round.Token).ConfigureAwait(false);
+            _inRound.Value = true;
+            var fannedOut = await outbox.ManualRoundAsync(round.Token).ConfigureAwait(false);
+            var delivered = await deliveries.ManualRoundAsync(round.Token).ConfigureAwait(false);
+
+            return Sum(fannedOut, delivered);
         }
         finally
         {
+            _inRound.Value = false;
             EndRound();
         }
     }
 
     /// <inheritdoc/>
     public void Dispose() => _rounds.Dispose();
+
+    private static AlvoDrainResult Sum(AlvoDrainResult first, AlvoDrainResult second) => new()
+    {
+        Claimed = first.Claimed + second.Claimed,
+        Failed = first.Failed + second.Failed,
+        Subscribers = [.. first.Subscribers.Concat(second.Subscribers).Distinct(StringComparer.Ordinal)],
+    };
+
+    private static InvalidOperationException ReEntered() => new(
+        "A dispatch round was refused: it was called from inside a round — a subscriber (an event handler, or a webhook "
+        + "receiver running in this process) drained the pump. A round waits for the round it is in, so this would never "
+        + "return. Return from the subscriber and drain from the code that wrote the event.");
 
     /// <summary>Opens the gate for the next round, unless the container has already disposed it.</summary>
     /// <remarks>

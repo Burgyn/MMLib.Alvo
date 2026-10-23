@@ -47,4 +47,31 @@ internal static partial class DeliveryLog
         Message = "Alvo's attempt {Attempt} of delivery {DeliveryId} for {Subscriber} was answered as timed out while its "
             + "handler still ran, ignoring its cancellation; the handler later failed ({ErrorType}). Nothing was recorded for it.")]
     internal static partial void AbandonedHandlerFailed(ILogger logger, Guid deliveryId, string subscriber, int attempt, string errorType);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Alvo's delivery dispatcher is in the manual dispatch mode (Alvo:Events:DispatchMode = Manual): its "
+            + "background loop does not run, and deliveries run only in IAlvoEventPump.DrainAsync rounds.")]
+    internal static partial void DeliveryDispatcherManual(ILogger logger);
+
+    /// <summary>The backstop outside the rounds — the boot wait itself; a failed round is <see cref="DeliveryDispatcherRoundFailed"/>.</summary>
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "Alvo's delivery dispatcher stopped and will not restart in this process; no event handler runs until it is restarted.")]
+    internal static partial void DeliveryDispatcherStopped(ILogger logger, Exception failure);
+
+    /// <summary>
+    /// A round failed — the queue unreachable, a claim refused by a deadlock — and the loop waits, then claims again. The
+    /// type name only: a provider's exception message can carry a connection string.
+    /// </summary>
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "Alvo's delivery dispatcher could not finish a round ({ErrorType}). It keeps running and tries again in "
+            + "{RetryIn}; a delivery it could not answer for returns when its lease ends.")]
+    internal static partial void DeliveryDispatcherRoundFailed(ILogger logger, string errorType, TimeSpan retryIn);
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "Alvo could not answer for delivery {DeliveryId} of {Subscriber} ({ErrorType}); its lease returns it to the queue.")]
+    internal static partial void DeliveryRunFailed(ILogger logger, Guid deliveryId, string subscriber, string errorType);
 }

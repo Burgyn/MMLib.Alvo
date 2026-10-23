@@ -2,9 +2,11 @@
 
 /// <summary>
 /// The tally one dispatch round keeps while it runs: which subscribers it attempted, and how many claimed entries failed.
+/// Deliveries of one round run concurrently, so the tally locks.
 /// </summary>
 internal sealed class DrainRound
 {
+    private readonly Lock _gate = new();
     private readonly List<string> _subscribers = [];
     private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
     private int _failed;
@@ -12,20 +14,35 @@ internal sealed class DrainRound
     /// <summary>Records that <paramref name="subscriber"/> ran, keeping first-run order and naming it once.</summary>
     internal void Ran(string subscriber)
     {
-        if (_seen.Add(subscriber))
+        lock (_gate)
         {
-            _subscribers.Add(subscriber);
+            if (_seen.Add(subscriber))
+            {
+                _subscribers.Add(subscriber);
+            }
         }
     }
 
     /// <summary>Records one claimed entry whose attempt failed, however many of its subscribers it had run.</summary>
-    internal void Failed() => _failed++;
+    internal void Failed()
+    {
+        lock (_gate)
+        {
+            _failed++;
+        }
+    }
 
     /// <summary>The round's result once every claimed entry has been dispatched.</summary>
-    internal AlvoDrainResult Result(int claimed) => new()
+    internal AlvoDrainResult Result(int claimed)
     {
-        Claimed = claimed,
-        Failed = _failed,
-        Subscribers = [.. _subscribers],
-    };
+        lock (_gate)
+        {
+            return new()
+            {
+                Claimed = claimed,
+                Failed = _failed,
+                Subscribers = [.. _subscribers],
+            };
+        }
+    }
 }

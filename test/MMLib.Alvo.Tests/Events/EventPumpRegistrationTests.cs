@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
 
@@ -30,11 +31,26 @@ public sealed class EventPumpRegistrationTests
     public void Registering_alvo_twice_still_hosts_one_dispatcher() =>
         HostedDispatchers(Registered(times: 2)).Count.ShouldBe(1);
 
+    [Fact]
+    public void The_pump_drives_the_one_hosted_delivery_dispatcher()
+    {
+        var collection = Registered(times: 2);
+        using var services = collection.BuildServiceProvider();
+
+        var hosted = collection.Where(descriptor => descriptor.ServiceType == typeof(IHostedService)
+            && descriptor.ImplementationFactory?.Method.ReturnType == typeof(DeliveryDispatcher)).ToList();
+
+        hosted.Count.ShouldBe(1);
+        services.GetRequiredService<IAlvoEventPump>().ShouldBeOfType<EventPump>().Deliveries
+            .ShouldBeSameAs(hosted[0].ImplementationFactory!(services));
+    }
+
     private static ServiceCollection Registered(int times)
     {
         var collection = new ServiceCollection();
         collection.AddSingleton(Substitute.For<IOutboxStore>());
         collection.AddSingleton(Substitute.For<IDeliveryStore>());
+        collection.AddSingleton(Substitute.For<IAlvoData>());
         collection.AddSingleton(Substitute.For<IHostApplicationLifetime>());
         for (var call = 0; call < times; call++)
         {
