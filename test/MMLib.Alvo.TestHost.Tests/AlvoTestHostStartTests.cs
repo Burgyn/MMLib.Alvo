@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
@@ -65,6 +66,27 @@ public sealed class AlvoTestHostStartTests
         await Should.NotThrowAsync(async () => await alvo.DisposeAsync());
     }
 
+    /// <summary>
+    /// A service whose stop throws still has its container disposed — asynchronously, or an async-only singleton would
+    /// make the container's synchronous dispose throw instead.
+    /// </summary>
+    [Fact]
+    public async Task A_failing_stop_still_disposes_the_host_asynchronously()
+    {
+        var service = new AsyncOnlyFailingStop();
+        var alvo = await AlvoTestHost.StartAsync(
+            builder =>
+            {
+                builder.FromDescriptor(HelpDesk);
+                builder.Services.AddHostedService(_ => service);
+            },
+            cancellationToken: Ct);
+
+        await Should.ThrowAsync<Exception>(async () => await alvo.DisposeAsync());
+
+        service.IsDisposed.ShouldBeTrue("the stop failed, and the host was disposed all the same");
+    }
+
     [Fact]
     public void A_caller_carries_authenticated_and_the_named_roles()
     {
@@ -101,4 +123,21 @@ public sealed class AlvoTestHostStartTests
         alvo => alvo.UseSqlite($"Data Source={file}").FromDescriptor(HelpDesk), cancellationToken: Ct);
 
     private static Dictionary<string, object?> Title(string title) => new(StringComparer.Ordinal) { ["title"] = title };
+
+    private sealed class AsyncOnlyFailingStop : IHostedService, IAsyncDisposable
+    {
+        internal bool IsDisposed { get; private set; }
+
+        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("The stop failed.");
+
+        public ValueTask DisposeAsync()
+        {
+            IsDisposed = true;
+
+            return ValueTask.CompletedTask;
+        }
+    }
 }

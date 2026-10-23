@@ -96,16 +96,49 @@ internal sealed class TestHostComposition : IAsyncDisposable
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
+        try
+        {
+            await StopAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            await DisposeHostAndDatabaseAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async Task StopAsync()
+    {
         if (_started)
         {
             await Host.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
+    }
+
+    private async Task DisposeHostAndDatabaseAsync()
+    {
+        try
+        {
+            await DisposeHostAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            if (_database is not null)
+            {
+                await _database.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    private ValueTask DisposeHostAsync()
+    {
+        if (Host is IAsyncDisposable host)
+        {
+            return host.DisposeAsync();
+        }
 
         Host.Dispose();
-        if (_database is not null)
-        {
-            await _database.DisposeAsync().ConfigureAwait(false);
-        }
+
+        return ValueTask.CompletedTask;
     }
 
     private static bool HasProvider(IServiceCollection services) =>

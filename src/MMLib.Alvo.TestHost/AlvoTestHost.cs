@@ -86,7 +86,10 @@ public sealed class AlvoTestHost : IAsyncDisposable
     /// <summary>
     /// A caller holding <c>authenticated</c> plus <paramref name="roles"/>, as a new user each time.
     /// </summary>
-    /// <param name="roles">The application roles the caller holds, as the descriptor's rules name them.</param>
+    /// <param name="roles">
+    /// The application roles the caller holds, as the descriptor's rules name them. A name the descriptor never declares
+    /// is accepted as given and simply fails every rule that asks for a declared role.
+    /// </param>
     /// <returns>The caller context to pass to <see cref="Data"/>.</returns>
     public static AlvoContext Caller(params string[] roles)
     {
