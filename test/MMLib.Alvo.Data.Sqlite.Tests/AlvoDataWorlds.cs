@@ -21,7 +21,8 @@ namespace MMLib.Alvo.Data.Sqlite.Tests;
 /// </remarks>
 internal static class AlvoDataWorlds
 {
-    internal static async Task<DataWorld> NotesAsync(SqliteAlvoDataFixture fixture, bool includeNullTitleRow = false)
+    internal static async Task<DataWorld> NotesAsync(
+        SqliteAlvoDataFixture fixture, bool includeNullTitleRow = false, Action<IServiceCollection>? configure = null)
     {
         var tenant = TenantId.New();
         var alice = Caller(tenant);
@@ -56,7 +57,7 @@ internal static class AlvoDataWorlds
                 Guid.NewGuid(), ("owner_id", alice.User.Value), ("tenant_id", tenant.Value), ("title", null), ("label", "a3")));
         }
 
-        var host = await StartAsync(fixture, "notes", fields, EntityTenancy.Scoped, rules, Seed("notes", rows));
+        var host = await StartAsync(fixture, "notes", fields, EntityTenancy.Scoped, rules, Seed("notes", rows), configure);
         return new DataWorld(host)
         {
             Alice = alice,
@@ -240,10 +241,11 @@ internal static class AlvoDataWorlds
         Dictionary<string, FieldDescriptor> fields,
         EntityTenancy tenancy,
         AccessRules rules,
-        Dictionary<string, IReadOnlyList<AlvoRecord>> seed)
+        Dictionary<string, IReadOnlyList<AlvoRecord>> seed,
+        Action<IServiceCollection>? configure = null)
     {
         var (descriptor, schema) = Build(entity, fields, tenancy, rules);
-        var host = await fixture.StartAsync(schema, descriptor);
+        var host = await fixture.StartAsync(schema, descriptor, configure: configure);
         await SeedAsync(host, seed);
         return host;
     }
@@ -334,6 +336,9 @@ internal sealed class DataWorld(AlvoDataHost host)
     /// below, which supply the ambient test cancellation token in one place.
     /// </summary>
     internal IAlvoData Data => host.Data;
+
+    /// <summary>The container the port was resolved from, for a fact about another service wired beside it.</summary>
+    internal IServiceProvider Services => host.Services;
 
     /// <summary>
     /// The page's rows alone, for the many facts here that only assert on the returned set. A test that

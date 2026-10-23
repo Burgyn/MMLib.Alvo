@@ -36,6 +36,9 @@ public sealed record EntityDescriptor
     /// <summary>Lifecycle hooks (before* in-transaction, after* post-commit).</summary>
     public EntityHooks? Hooks { get; init; }
 
+    /// <summary>What the entity's events carry; <see langword="null"/> when it declares nothing.</summary>
+    public EntityEvents? Events { get; init; }
+
     /// <summary>Whether changes publish over the realtime channel; defaults to <see langword="true"/> when omitted.</summary>
     public bool? Realtime { get; init; }
 
@@ -55,6 +58,13 @@ public sealed record EntityIndex
 
     /// <summary>Whether the index enforces uniqueness across the covered fields.</summary>
     public bool? Unique { get; init; }
+}
+
+/// <summary>What an entity's events carry (schema <c>entity.events</c>).</summary>
+public sealed record EntityEvents
+{
+    /// <summary>Declared fields left out of both row images of every event the entity emits; <c>changed</c> still names them.</summary>
+    public IReadOnlyList<string>? Exclude { get; init; }
 }
 
 /// <summary>

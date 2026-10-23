@@ -80,6 +80,13 @@ internal static class ProblemComponents
                     + "authorization on some paths and would otherwise be the cheapest oracle in the API.",
             },
             ["violations"] = Violations(document),
+            ["retryable"] = new OpenApiSchema
+            {
+                Type = JsonSchemaType.Boolean,
+                Description =
+                    "Present, and `false`, on a refusal the same request can never get past — such as "
+                    + "`chain-depth-exceeded`. Absent everywhere else; absence makes no claim either way.",
+            },
         },
         Required = new HashSet<string>(StringComparer.Ordinal) { "type", "title", "status", "detail" },
     };

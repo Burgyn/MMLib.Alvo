@@ -13,10 +13,9 @@ namespace MMLib.Alvo.Tests.Descriptor;
 /// <c>alvo-specifikacia.md:141</c> makes the wildcard a hard guarantee and <c>baas-analyza.md:657</c> makes
 /// tenant isolation of rules a watch-out; <c>docs/architecture/events.md</c> resolves the pair by requiring
 /// either a matcher with every subscription scoped to the envelope's tenant <em>and</em> a named adversarial
-/// cross-tenant fact, or a refusal at apply until that exists. The first branch is unavailable — an
-/// <c>AlvoEvent</c> carries no tenant attribute at all (#153), so nothing at delivery could scope a
-/// subscription and the adversarial fact would have no tenant on either side of its comparison. These facts
-/// hold the second branch.
+/// cross-tenant fact, or a refusal at apply until that exists. The first branch is not built yet — the
+/// envelope now carries <c>tenantid</c>, but the scoped matcher and the adversarial fact the ruling demands
+/// are not built (#372). These facts hold the second branch.
 /// </para>
 /// <para>
 /// <b>Both passes are asserted from one descriptor string</b>, because the two exist to catch the same
@@ -27,6 +26,15 @@ namespace MMLib.Alvo.Tests.Descriptor;
 /// </remarks>
 public sealed class WildcardSubscriptionTests
 {
+    [Fact]
+    public void The_wildcard_refusal_names_the_issue_that_owns_the_matcher_and_no_longer_the_envelope_gap()
+    {
+        var consequence = UnhonouredFeatures.WildcardSubscription.Consequence;
+
+        consequence.ShouldContain(MMLib.Alvo.Events.Internal.EnvelopeProvenance.PatternSubscriptionsIssue);
+        consequence.ShouldNotContain("#153");
+    }
+
     [Theory]
     [InlineData("entity.orders.*")]
     [InlineData("entity.*.created")]

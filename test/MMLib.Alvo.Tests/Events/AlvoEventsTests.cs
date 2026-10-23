@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Events;
+﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
 
 using System.Globalization;
@@ -267,6 +268,37 @@ public sealed class AlvoEventsTests
     }
 
     /// <summary>
+    /// A custom event is stamped exactly as a data event is: the caller's tenant, its roles as <c>authclaims</c>, and
+    /// its effective provenance.
+    /// </summary>
+    [Fact]
+    public async Task A_published_event_carries_the_callers_tenant_claims_and_provenance()
+    {
+        var store = new RecordingOutboxStore();
+        var tenant = TenantId.New();
+        var caller = Caller with { Tenant = tenant, Provenance = new AlvoProvenance { Depth = 2, CausationId = "cause" } };
+
+        await Publisher(store).PublishAsync("orders.approved", "orders/1", null, caller, TestContext.Current.CancellationToken);
+
+        var appended = store.Appended.ShouldHaveSingleItem();
+        appended.TenantId.ShouldBe(tenant.ToString());
+        appended.AuthClaims.ShouldBe(AlvoEventProvenance.AuthClaimsOf(caller));
+        (appended.ChainDepth, appended.CausationId).ShouldBe((2, "cause"));
+    }
+
+    /// <summary>A custom event published as the tenantless system caller reports no tenant.</summary>
+    [Fact]
+    public async Task A_tenantless_system_publish_carries_no_tenant()
+    {
+        var store = new RecordingOutboxStore();
+
+        await Publisher(store).PublishAsync(
+            "orders.approved", "orders/1", null, AlvoContext.System(tenant: null), TestContext.Current.CancellationToken);
+
+        store.Appended.ShouldHaveSingleItem().TenantId.ShouldBeNull();
+    }
+
+    /// <summary>
     /// <b>Two event types about one subject share a partition, because ordering is promised per subject.</b>
     /// </summary>
     /// <remarks>
@@ -329,7 +361,18 @@ public sealed class AlvoEventsTests
         };
     }
 
-    private static AlvoEvents Publisher(IOutboxStore store) => new(store, TimeProvider.System);
+    [Fact]
+    public async Task Publishing_deeper_than_the_chain_limit_is_refused_and_appends_nothing()
+    {
+        var store = new RecordingOutboxStore();
+
+        await Should.ThrowAsync<AlvoChainDepthExceededException>(() => Publisher(store).PublishAsync(
+            "orders.approved", "orders/1", null, Caller with { Provenance = new AlvoProvenance { Depth = 9 } }, TestContext.Current.CancellationToken));
+
+        store.Appended.ShouldBeEmpty();
+    }
+
+    private static AlvoEvents Publisher(IOutboxStore store) => new(store, TimeProvider.System, AlvoChainDepthLimit.Default);
 
     private static AlvoContext Caller { get; } = new()
     {

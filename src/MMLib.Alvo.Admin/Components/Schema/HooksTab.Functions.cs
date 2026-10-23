@@ -70,7 +70,7 @@ public partial class HooksTab
         }
 
         var row = Current.MutateRows[index];
-        var first = string.IsNullOrWhiteSpace(row.Text) ? FunctionOffer.FirstArgument(function, Current.Point, FieldOf(row)) : null;
+        var first = string.IsNullOrWhiteSpace(row.Text) ? FunctionOffer.FirstArgument(function, Current.Point, FieldOf(row), Copy?.ExcludedFromEvents(Entity)) : null;
         var inserted = await InsertAsync(MutateValueId(index), row.Text, FunctionOffer.Template(function, first));
         var now = Current.MutateRows.IndexOf(row);
         if (now < 0)

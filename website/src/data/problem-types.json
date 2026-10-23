@@ -164,5 +164,14 @@
     "violationCodes": [],
     "guides": ["guides/custom-cel-functions", "guides/handle-errors"],
     "needsProblemDetails": true
+  },
+  "chain-depth-exceeded": {
+    "causes": [
+      "A write or a publish sat deeper in one causation chain than `Alvo:Extensions:MaxDepth` (default 8) allows: a hook, handler or timer is writing in a loop. Nothing was written."
+    ],
+    "fix": "Break the loop — a handler that writes the entity it reacts to needs a condition that stops it. Raise `Alvo:Extensions:MaxDepth` only when a chain that long is intended. The document carries `\"retryable\": false`: retrying cannot succeed.",
+    "violationCodes": [],
+    "guides": ["guides/handle-errors", "guides/after-hooks-and-webhooks"],
+    "needsProblemDetails": false
   }
 }

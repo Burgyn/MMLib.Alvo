@@ -76,6 +76,7 @@ violation's `code` is stable. Take the part after the last `/` and switch on it:
 | [`unreadable-request`](/reference/problem-types/#unreadable-request) | 413, 408, 400 | The web server refused the body. | Send a smaller body, in one go. |
 | [`function-failed`](/reference/problem-types/#function-failed) | 500 | A CEL function failed while the write was checked; nothing was written. | Check the input the function reads. |
 | [`internal`](/reference/problem-types/#internal) | 500 | Something inside Alvo broke. | Nothing in the request is at fault; the host's log has the details. |
+| [`chain-depth-exceeded`](/reference/problem-types/#chain-depth-exceeded) | 508 | A loop of hooks, handlers or timers went deeper than the chain limit; nothing was written. | Never retry it (`retryable: false`); break the loop. |
 
 The `type` URIs do not resolve yet. Each slug is an anchor on the [Problem types](/reference/problem-types/)
 page: `https://alvo.dev/errors/forbidden` is
@@ -194,6 +195,7 @@ how to render them.
 | 413, 408, 400 | [`unreadable-request`](/reference/problem-types/#unreadable-request) | The web server refused the body before Alvo read it. | Send a smaller body, in one go. | standalone; embedded only with `AddAlvoProblemDetails()` |
 | 500 | [`function-failed`](/reference/problem-types/#function-failed) | A CEL function failed during a write. | Check the function's input; the exception is in the host's log. | standalone; embedded only with `AddAlvoProblemDetails()` |
 | 500 | [`internal`](/reference/problem-types/#internal) | An invariant inside Alvo broke. | Read the host's log. | standalone; embedded only with `AddAlvoProblemDetails()` |
+| 508 | [`chain-depth-exceeded`](/reference/problem-types/#chain-depth-exceeded) | A loop of hooks, handlers or timers went deeper than `Alvo:Extensions:MaxDepth`. | Never retry it (`retryable: false`); break the loop. | every host |
 
 ## Reference
 

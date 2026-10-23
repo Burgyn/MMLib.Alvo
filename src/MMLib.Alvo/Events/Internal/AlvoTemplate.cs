@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Internal;
+﻿using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Internal;
 using MMLib.Alvo.Schema;
 
 using System.Globalization;
@@ -194,17 +195,15 @@ internal readonly record struct AlvoTemplateSegment(string Text, bool IsPlacehol
 /// cannot be missing from the message that lists them.
 /// </para>
 /// <para>
-/// <b>Two names the design's own table promises and this build refuses</b>, in the words
-/// <see cref="EnvelopeProvenance"/> holds for both halves of the rule. The addendum lists <c>@user.id</c> and
-/// <c>@tenant.id</c> as "the provenance the envelope carries", and the envelope carries only the first:
-/// <see cref="AlvoEvent"/> has <c>authid</c> and no tenant attribute at all. So <c>@tenant.id</c> is refused
-/// <em>by name</em> — it is a real Alvo CEL context reference, so "unknown root" would misdescribe why it
-/// fails. Resolving it from the row's own <c>tenant_id</c> was rejected: <c>@tenant.id</c> asks which tenant
-/// the <em>caller</em> was in, and a write made as <c>AlvoContext.System</c> has no tenant while the row it
-/// wrote has one — answering a different question with a plausible value is the defect this refusal exists to
-/// prevent. <c>@user.roles</c> is refused for the same reason and one more: the envelope carries
-/// authentication, never authorization. <see cref="AfterHookCompiler"/> refuses the same two names in a CEL
-/// condition, for the same reasons and out of the same constants.
+/// <c>@tenant.id</c> and <c>@user.roles</c> resolve from the envelope's <c>tenantid</c> and <c>authclaims</c> (#153);
+/// an envelope written before HX-01 renders both empty, as <c>@user.id</c> renders for an anonymous write.
+/// <c>@user.roles</c> renders as the role names comma-joined in the order the claim carries them — ordinal, as Alvo
+/// writes it.
+/// </para>
+/// <para>
+/// <b>An author-declared <c>{{@user.roles}}</c> is allowed in a webhook payload and in an email template.</b> It is
+/// explicit and visible in the descriptor, so the disclosure is the author's decision; only the <em>default</em>
+/// webhook body — the one no author wrote — strips <c>authclaims</c>.
 /// </para>
 /// <para>
 /// <b>Where the two halves differ.</b> <see cref="TryResolve"/> sees the schema, so it can tell an
@@ -216,7 +215,7 @@ internal readonly record struct AlvoTemplateSegment(string Text, bool IsPlacehol
 internal static class TemplatePlaceholder
 {
     /// <summary>The placeholder roots that resolve, and the list every refusal message names.</summary>
-    internal static IReadOnlyList<string> Roots { get; } = [NewRoot, OldRoot, EventRoot, UserRoot];
+    internal static IReadOnlyList<string> Roots { get; } = [NewRoot, OldRoot, EventRoot, UserRoot, TenantRoot];
 
     /// <summary>
     /// Whether <paramref name="placeholder"/> resolves against <paramref name="entity"/>, and why not when
@@ -235,6 +234,26 @@ internal static class TemplatePlaceholder
             : NotARootAndMember(placeholder);
 
         return refusal is null;
+    }
+
+    /// <summary>Which row image <paramref name="placeholder"/> reads, and which field of it.</summary>
+    /// <param name="placeholder">A placeholder's inner text, such as <c>old.title</c>.</param>
+    /// <returns>
+    /// <see cref="CelRecordState.Old"/> for an <c>old.</c> placeholder, <see cref="CelRecordState.New"/> for a
+    /// <c>new.</c> one, and <see langword="null"/> for a placeholder that reads no row image.
+    /// </returns>
+    internal static (CelRecordState State, string Field)? RowImageRead(string placeholder)
+    {
+        ArgumentNullException.ThrowIfNull(placeholder);
+
+        return !TrySplit(placeholder, out var root, out var member)
+            ? null
+            : root switch
+            {
+                NewRoot => (CelRecordState.New, member),
+                OldRoot => (CelRecordState.Old, member),
+                _ => null,
+            };
     }
 
     /// <summary>One placeholder's value, read off an event at delivery time.</summary>
@@ -262,6 +281,8 @@ internal static class TemplatePlaceholder
             OldRoot => @event.Data.OldRecord?[member],
             EventRoot => EventAttribute(placeholder, member, @event),
             UserRoot when member == IdMember => @event.AuthId,
+            UserRoot when member == RolesMember => RolesText(@event),
+            TenantRoot when member == IdMember => @event.TenantId,
             _ => throw Unresolvable(placeholder),
         };
     }
@@ -298,7 +319,7 @@ internal static class TemplatePlaceholder
             NewRoot or OldRoot => UnknownField(placeholder, member, entity),
             EventRoot => UnknownEventAttribute(placeholder, member),
             UserRoot => UnknownUserMember(placeholder, member),
-            TenantRoot => TenantIsNotOnTheEnvelope(placeholder),
+            TenantRoot => member == IdMember ? null : UnknownTenantMember(placeholder),
             _ => UnknownRoot(placeholder),
         };
 
@@ -355,22 +376,25 @@ internal static class TemplatePlaceholder
     private static string? UnknownUserMember(string placeholder, string member) => member switch
     {
         IdMember => null,
-        RolesMember => RolesAreNotOnTheEnvelope(placeholder),
-        _ => $"{Quoted(placeholder)} cannot be resolved: an event carries only the id of the credential "
-            + $"that acted, so '{UserRoot}{RootSeparator}{IdMember}' is the one '{UserRoot}' member a "
-            + "template can read. For a recipient, use a field on the record such as "
+        RolesMember => null,
+        _ => $"{Quoted(placeholder)} cannot be resolved: an event carries the id of the credential that acted "
+            + $"and the roles it held, so '{UserRoot}{RootSeparator}{IdMember}' and "
+            + $"'{UserRoot}{RootSeparator}{RolesMember}' are the '{UserRoot}' members a template can read. For a recipient, use a field on the record such as "
             + $"{Quoted($"{NewRoot}{RootSeparator}owner_email")} — which makes the recipient "
             + "caller-controlled; Alvo refuses a rendered value that is not exactly one mailbox (see MailHeaders); an "
             + "identity claim Alvo does not yet carry is tracked in issue #37.",
     };
 
-    private static string RolesAreNotOnTheEnvelope(string placeholder) =>
-        $"{Quoted(placeholder)} cannot be resolved: {EnvelopeProvenance.NoRoles}. "
-        + EnvelopeProvenance.InsteadOfRoles;
+    /// <summary>
+    /// The roles the caller held at the event, comma-joined in the order the claim carries them; empty on an envelope
+    /// without readable claims.
+    /// </summary>
+    private static string? RolesText(AlvoEvent @event) =>
+        AlvoEventProvenance.RolesIn(@event.AuthClaims) is { } roles ? string.Join(',', roles) : null;
 
-    private static string TenantIsNotOnTheEnvelope(string placeholder) =>
-        $"{Quoted(placeholder)} cannot be resolved: {EnvelopeProvenance.NoTenant}. "
-        + EnvelopeProvenance.InsteadOfTenant($"{NewRoot}{RootSeparator}{AlvoManagedColumns.TenantId}");
+    private static string UnknownTenantMember(string placeholder) =>
+        $"{Quoted(placeholder)} cannot be resolved: '{TenantRoot}{RootSeparator}{IdMember}' is the one '{TenantRoot}' "
+        + "member an event carries.";
 
     private static string UnknownRoot(string placeholder) =>
         $"{Quoted(placeholder)} names no root Alvo can resolve. {AvailableRoots}";

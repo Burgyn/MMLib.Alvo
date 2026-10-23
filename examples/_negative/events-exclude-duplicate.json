@@ -1,0 +1,10 @@
+{
+  "apiVersion": "alvo.dev/v1",
+  "name": "events-exclude-duplicate",
+  "entities": {
+    "notes": {
+      "fields": { "title": { "type": "string" } },
+      "events": { "exclude": ["title", "title"] }
+    }
+  }
+}

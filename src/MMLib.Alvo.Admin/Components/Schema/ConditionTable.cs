@@ -120,7 +120,10 @@ internal enum OperandKind
 /// <param name="Kinds">The field kinds it applies to; empty for a role row.</param>
 /// <param name="NullableOnly">Whether it is offered only on a field that may be empty.</param>
 /// <param name="UpdateOnly">Whether it is offered only where a write has both images.</param>
-/// <param name="BeforeOnly">Whether it is offered only before the commit (an event envelope carries no roles).</param>
+/// <param name="BeforeOnly">
+/// Whether it is offered only before the commit. An event envelope carries the writer's roles since #153 and apply
+/// accepts a role condition after the commit; the form keeps role rows before the commit only.
+/// </param>
 /// <param name="WhenEmpty">What it evaluates to when the field is empty — the hint the form shows.</param>
 /// <param name="ReadsImage">
 /// Whether its CEL names an image (<c>new.</c> or <c>old.</c>); <c>changed</c> and the role rows do not, so the form asks for
@@ -271,6 +274,31 @@ internal static class ConditionTable
     public static IReadOnlyList<OperatorSpec> For(string point, ConditionFieldKind kind, bool nullable)
         => [.. Rows.Where(spec => Allows(spec, point, kind, nullable))];
 
+    /// <summary>
+    /// Whether a relation is offered on this field at this point: <see cref="Allows(OperatorSpec, string, ConditionFieldKind, bool)"/>,
+    /// less any relation that reads an image of a field the entity leaves out of its event images after the commit.
+    /// </summary>
+    /// <remarks>
+    /// An after-hook reads the event's images, which leave an excluded field out, so apply refuses the read
+    /// (<c>AfterHookCompiler.ExcludedFieldReads</c>); <c>changed</c> names the field without reading an image and stays.
+    /// </remarks>
+    /// <param name="spec">The relation.</param>
+    /// <param name="point">The hook point.</param>
+    /// <param name="field">The field.</param>
+    public static bool Allows(OperatorSpec spec, string point, ConditionField field)
+        => Allows(spec, point, field.Kind, field.Nullable) && (!spec.ReadsImage || Readable(point, field));
+
+    /// <summary>The relations offered on this field at this point, in the table's order.</summary>
+    /// <param name="point">The hook point.</param>
+    /// <param name="field">The field.</param>
+    public static IReadOnlyList<OperatorSpec> For(string point, ConditionField field)
+        => [.. Rows.Where(spec => Allows(spec, point, field))];
+
+    /// <summary>Whether a hook at this point may read the field from a row image: always before the commit, after it only when its events carry it.</summary>
+    /// <param name="point">The hook point.</param>
+    /// <param name="field">The field.</param>
+    public static bool Readable(string point, ConditionField field) => HookBuilder.IsBefore(point) || !field.ExcludedFromEvents;
+
     /// <summary>The role relations offered at this point — none after the commit.</summary>
     /// <param name="point">The hook point.</param>
     public static IReadOnlyList<OperatorSpec> ForWriter(string point)
@@ -284,6 +312,10 @@ internal static class ConditionTable
     /// <param name="point">The hook point.</param>
     public static string ImagesMarkup(string point)
         => string.Join(", ", ImagesAt(point).Select(image => $"<code class=\"a-mono\">{Prefix(image)}</code>"));
+
+    /// <summary>The image an example placeholder at this point reads: <c>new</c> wherever the point has it, <c>old</c> at a delete.</summary>
+    /// <param name="point">The hook point.</param>
+    public static string PlaceholderImage(string point) => Prefix(HasNew(point) ? RowImage.New : RowImage.Old);
 
     /// <summary>A condition valid at this point, for the placeholder.</summary>
     /// <param name="point">The hook point.</param>

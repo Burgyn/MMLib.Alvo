@@ -7,9 +7,18 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// registered so no consumer needs assembly-level access to the core's internal interpreter to
 /// evaluate a policy predicate against a row.
 /// </summary>
-internal sealed class PredicateEvaluator : IPredicateEvaluator
+internal sealed class PredicateEvaluator : IPredicateEvaluator, IChangeListPredicateEvaluator
 {
     /// <inheritdoc/>
     public bool Evaluate(CompiledExpression expression, AlvoRecord current, AlvoRecord? previous, AlvoContext context) =>
         CelInterpreter.EvaluatePredicate(expression, current, previous, context);
+
+    /// <inheritdoc/>
+    public bool Evaluate(
+        CompiledExpression expression,
+        AlvoRecord current,
+        AlvoRecord? previous,
+        IReadOnlyCollection<string> changed,
+        AlvoContext context)
+        => CelInterpreter.EvaluateCondition(expression, current, previous, context, changed);
 }

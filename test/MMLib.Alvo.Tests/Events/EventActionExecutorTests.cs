@@ -66,6 +66,23 @@ public sealed class EventActionExecutorTests : IDisposable
     }
 
     /// <summary>
+    /// <c>authclaims</c> is the caller's authorization, kept for after-hook conditions — the default body a third
+    /// party receives is the envelope without it.
+    /// </summary>
+    [Fact]
+    public async Task The_default_webhook_body_never_carries_the_callers_claims()
+    {
+        var receiver = new RecordingWebhookReceiver();
+        var @event = SampleEvent(Record(("title", "Big deal"))) with { AuthClaims = """{"roles":["admin"]}""" };
+
+        await Subject(receiver).ExecuteAsync(WebhookHook(), @event, Cancellation);
+
+        var body = receiver.Bodies.ShouldHaveSingleItem();
+        body.ShouldNotContain("authclaims");
+        AlvoEventJson.Read(body).ShouldBe(@event with { AuthClaims = null });
+    }
+
+    /// <summary>
     /// A whole-body placeholder posts the JSON string <c>"Big deal"</c>, not the raw text <c>Big deal</c>: the
     /// body goes out as <c>application/json</c>, and a bare placeholder renders as one JSON value.
     /// </summary>

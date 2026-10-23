@@ -147,7 +147,10 @@ export default defineConfig({
           page('Write data safely', 'guides/write-data'),
           page('Handle errors', 'guides/handle-errors'),
         ] },
-        { label: 'Extend in C#', collapsed: true, items: [
+        { label: 'Extending in code', collapsed: true, items: [
+          page('Extending in code', 'extending'),
+          page('Where logic goes', 'extending/where-logic-goes'),
+          page('The event envelope', 'extending/event-envelope'),
           page('Use your own authentication', 'guides/own-authentication'),
           page('Call Alvo from your endpoints', 'guides/call-from-endpoints'),
           page('Custom CEL functions', 'guides/custom-cel-functions'),

@@ -1,0 +1,30 @@
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
+using MMLib.Alvo.Data;
+using MMLib.Alvo.Extensions.Internal;
+
+namespace MMLib.Alvo.Extensions;
+
+/// <summary>Registers the validated <see cref="AlvoExtensionOptions"/> and the depth limit every store resolves.</summary>
+internal static class ExtensionsSetup
+{
+    internal static IServiceCollection AddAlvoExtensions(this IServiceCollection services)
+    {
+        services.AddOptions<AlvoExtensionOptions>().ValidateOnStart();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IConfigureOptions<AlvoExtensionOptions>, AlvoExtensionOptionsConfiguration>(Create));
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<AlvoExtensionOptions>, AlvoExtensionOptionsConfiguration>(Create));
+        services.TryAddSingleton(DepthLimit);
+
+        return services;
+
+        static AlvoExtensionOptionsConfiguration Create(IServiceProvider provider) =>
+            new(provider.GetService<IConfiguration>());
+
+        static AlvoChainDepthLimit DepthLimit(IServiceProvider provider) =>
+            new(provider.GetRequiredService<IOptions<AlvoExtensionOptions>>().Value.MaxDepth);
+    }
+}

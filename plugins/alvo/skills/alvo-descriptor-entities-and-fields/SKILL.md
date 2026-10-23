@@ -11,7 +11,7 @@ snake_case. Pointers are RFC 6901 and operations RFC 6902 JSON Patch.
 An entity takes these keys:
 
 <!-- gen:entity-keys -->
-`description` `renamedFrom` `storage` `tenancy` `softDelete` `audit` `fields` `rules` `hooks` `realtime` `indexes`
+`description` `renamedFrom` `storage` `tenancy` `softDelete` `audit` `fields` `rules` `hooks` `events` `realtime` `indexes`
 <!-- /gen:entity-keys -->
 
 A field takes these keys:

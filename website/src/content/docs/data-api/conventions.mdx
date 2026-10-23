@@ -164,6 +164,7 @@ or a 403 whose `violations` name each row a rule refused. A `409 conflict` names
 | 422 | A malformed body (`validation`) or query (`malformed-query`). |
 | 413, 408, 400 | The web server refused the request before Alvo read it (`unreadable-request`). |
 | 500 | `internal` or `function-failed`. |
+| 508 | A loop of hooks, handlers or timers went deeper than the chain limit (`chain-depth-exceeded`); never retry it (`"retryable": false`). |
 
 ## Problem documents
 

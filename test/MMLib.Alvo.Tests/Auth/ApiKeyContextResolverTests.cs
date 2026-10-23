@@ -254,4 +254,16 @@ public class ApiKeyContextResolverTests
 
         resolver.TenantResolver.ShouldBeSameAs(registeredTenantResolver);
     }
+
+    [Fact]
+    public async Task A_key_is_reported_as_an_api_key_on_every_event()
+    {
+        var context = (await Resolver().ResolveAsync(PresentedKey, requestedTenant: null, TestContext.Current.CancellationToken))
+            .ShouldNotBeNull().Context;
+
+        context.ActorKind.ShouldBe(AlvoActorKind.ApiKey);
+        MMLib.Alvo.Events.AlvoEventProvenance.AuthTypeOf(context).ShouldBe("api_key");
+        (context with { User = AlvoContext.System(tenant: null).User }).ActorKind.ShouldBe(
+            AlvoActorKind.ApiKey, "only an explicitly set kind survives a change of user; a derived one would read System");
+    }
 }

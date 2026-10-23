@@ -481,7 +481,7 @@ else
         <Field Label="Payload (optional)" For="hook-payload">
             <ChildContent>
                 <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-payload" Class="a-mono" Lines="4"
-                              autocomplete="off" spellcheck="false" Placeholder="[&quot;{{new.order_number}}&quot;, {{new.total}}]"
+                              autocomplete="off" spellcheck="false" Placeholder="@Current.PayloadExample"
                               aria-describedby="@PayloadDescribedBy" Value="Current.Payload" ValueChanged="TypePayload" />
                 @PayloadNotes
                 @Findings("hook-payload")
@@ -489,9 +489,9 @@ else
             <Hint>
                 Left empty, the endpoint receives the CloudEvents envelope: the whole row, <code class="a-mono">hidden</code>
                 fields included. A payload is JSON around <code class="a-mono">{{…}}</code> placeholders over
-                <code class="a-mono">new</code>, <code class="a-mono">old</code>, <code class="a-mono">event</code> and
-                <code class="a-mono">@@user.id</code> — in quotes for text (<code class="a-mono">"{{new.order_number}}"</code>),
-                bare for a value (<code class="a-mono">[{{new.total}}]</code>). This build reads a <code class="a-mono">{</code>
+                @((MarkupString)Current.Images), <code class="a-mono">event</code> and
+                <code class="a-mono">@@user.id</code> — in quotes for text (<code class="a-mono">"@Current.Placeholder("order_number")"</code>),
+                bare for a value (<code class="a-mono">[@Current.Placeholder("total")]</code>). This build reads a <code class="a-mono">{</code>
                 or <code class="a-mono">}</code> outside a placeholder as JSONata and refuses it, so an object payload is
                 refused today — write an array.
                 @ChordHint.Of(_editing is null ? "adds the hook to the working copy" : "saves the hook to the working copy")
@@ -532,13 +532,13 @@ else
         <Field Label="To" For="hook-to">
             <ChildContent>
                 <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-to" Class="a-mono" autocomplete="off"
-                              Placeholder="{{new.contact_email}}" aria-describedby="@Described("hook-to")"
+                              Placeholder="@Current.RecipientExample" aria-describedby="@Described("hook-to")"
                               Value="Current.To" ValueChanged="TypeTo" />
                 @Findings("hook-to")
             </ChildContent>
             <Hint>
                 One address, or a <code class="a-mono">{{…}}</code> placeholder such as
-                <code class="a-mono">{{new.contact_email}}</code>, on one line. Checked once a declared template is chosen.
+                <code class="a-mono">@Current.RecipientExample</code>, on one line. Checked once a declared template is chosen.
             </Hint>
         </Field>
     </text>;

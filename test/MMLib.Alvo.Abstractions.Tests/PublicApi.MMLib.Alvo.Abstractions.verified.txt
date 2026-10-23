@@ -132,9 +132,19 @@ namespace MMLib.Alvo.Ai
 }
 namespace MMLib.Alvo
 {
+    public enum AlvoActorKind
+    {
+        Unknown = 0,
+        Anonymous = 1,
+        System = 2,
+        ApiKey = 3,
+        User = 4,
+    }
     public sealed class AlvoContext : System.IEquatable<MMLib.Alvo.AlvoContext>
     {
         public AlvoContext() { }
+        public MMLib.Alvo.AlvoActorKind ActorKind { get; init; }
+        public MMLib.Alvo.AlvoProvenance Provenance { get; init; }
         public required System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Role> Roles { get; init; }
         public MMLib.Alvo.TenantId? Tenant { get; init; }
         public required MMLib.Alvo.UserId User { get; init; }
@@ -160,6 +170,16 @@ namespace MMLib.Alvo
         public MMLib.Alvo.AlvoMode Mode { get; set; }
         [System.ComponentModel.DataAnnotations.RegularExpression("^[a-z][a-z0-9_]{0,15}$", ErrorMessage="SchemaPrefix must be lower snake_case, 1–16 chars.")]
         public string SchemaPrefix { get; set; }
+    }
+    public sealed class AlvoProvenance : System.IEquatable<MMLib.Alvo.AlvoProvenance>
+    {
+        public AlvoProvenance() { }
+        public string? CausationId { get; init; }
+        public string? CorrelationId { get; init; }
+        public int Depth { get; init; }
+        public string? TraceParent { get; init; }
+        public string? TraceState { get; init; }
+        public static MMLib.Alvo.AlvoProvenance None { get; }
     }
     public sealed class AlvoUser : System.IEquatable<MMLib.Alvo.AlvoUser>
     {
@@ -348,6 +368,12 @@ namespace MMLib.Alvo.Data
         public bool Succeeded { get; }
         public static MMLib.Alvo.Data.AlvoBatchResult Refused(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRowRefusal> refusals) { }
         public static MMLib.Alvo.Data.AlvoBatchResult Wrote(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord> rows, int affected) { }
+    }
+    public sealed class AlvoChainDepthExceededException : System.Exception
+    {
+        public AlvoChainDepthExceededException() { }
+        public AlvoChainDepthExceededException(string message) { }
+        public AlvoChainDepthExceededException(string message, System.Exception innerException) { }
     }
     public sealed class AlvoComparison : MMLib.Alvo.Data.AlvoFilter, System.IEquatable<MMLib.Alvo.Data.AlvoComparison>
     {
@@ -706,6 +732,7 @@ namespace MMLib.Alvo.Descriptor
         public EntityDescriptor() { }
         public bool? Audit { get; init; }
         public string? Description { get; init; }
+        public MMLib.Alvo.Descriptor.EntityEvents? Events { get; init; }
         [System.Text.Json.Serialization.JsonExtensionData]
         public System.Collections.Generic.IDictionary<string, System.Text.Json.JsonElement>? Extensions { get; set; }
         public required System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.FieldDescriptor> Fields { get; init; }
@@ -717,6 +744,11 @@ namespace MMLib.Alvo.Descriptor
         public bool? SoftDelete { get; init; }
         public MMLib.Alvo.Descriptor.StorageMode? Storage { get; init; }
         public MMLib.Alvo.Descriptor.EntityTenancy? Tenancy { get; init; }
+    }
+    public sealed class EntityEvents : System.IEquatable<MMLib.Alvo.Descriptor.EntityEvents>
+    {
+        public EntityEvents() { }
+        public System.Collections.Generic.IReadOnlyList<string>? Exclude { get; init; }
     }
     public sealed class EntityHooks : System.IEquatable<MMLib.Alvo.Descriptor.EntityHooks>
     {
@@ -964,6 +996,7 @@ namespace MMLib.Alvo.Events
         public const string DefaultSource = "/alvo";
         public const string SpecVersion = "1.0";
         public AlvoEvent() { }
+        public string? AuthClaims { get; init; }
         public string? AuthId { get; init; }
         public required string AuthType { get; init; }
         public string? CausationId { get; init; }
@@ -975,11 +1008,15 @@ namespace MMLib.Alvo.Events
         public int PayloadVersion { get; init; }
         public required string Source { get; init; }
         public required string Subject { get; init; }
+        public string? TenantId { get; init; }
         public required System.DateTimeOffset Time { get; init; }
+        public string? TraceParent { get; init; }
+        public string? TraceState { get; init; }
         public required string Type { get; init; }
     }
     public static class AlvoEventAttributes
     {
+        public const string AuthClaims = "authclaims";
         public const string AuthId = "authid";
         public const string AuthType = "authtype";
         public const string CausationId = "causationid";
@@ -993,16 +1030,21 @@ namespace MMLib.Alvo.Events
         public const string Source = "source";
         public const string SpecVersion = "specversion";
         public const string Subject = "subject";
+        public const string TenantId = "tenantid";
         public const string Time = "time";
+        public const string TraceParent = "traceparent";
+        public const string TraceState = "tracestate";
         public const string Type = "type";
         public static System.Collections.Generic.IReadOnlyList<string> Extensions { get; }
         public static System.Collections.Generic.IReadOnlyList<string> Standard { get; }
     }
     public static class AlvoEventAuthType
     {
-        public const string Anonymous = "anon";
-        public const string ApiKey = "apikey";
+        public const string ApiKey = "api_key";
         public const string System = "system";
+        public const string Unauthenticated = "unauthenticated";
+        public const string Unknown = "unknown";
+        public const string User = "user";
     }
     public sealed class AlvoEventData : System.IEquatable<MMLib.Alvo.Events.AlvoEventData>
     {
@@ -1035,6 +1077,7 @@ namespace MMLib.Alvo.Events
         public static string? AuthIdOf(MMLib.Alvo.AlvoContext context) { }
         public static string AuthTypeOf(MMLib.Alvo.AlvoContext context) { }
         public static string CorrelationIdOf(System.Guid eventId) { }
+        public static MMLib.Alvo.AlvoProvenance Effective(MMLib.Alvo.AlvoContext context) { }
     }
     public sealed class AlvoMailMessage : System.IEquatable<MMLib.Alvo.Events.AlvoMailMessage>
     {
@@ -1678,6 +1721,7 @@ namespace MMLib.Alvo.Schema
         public EntitySchema() { }
         public bool Audit { get; init; }
         public string? Description { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> EventImageExclusions { get; init; }
         public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.FieldSchema> Fields { get; init; }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.IndexSchema> Indexes { get; init; }
         public required string Name { get; init; }

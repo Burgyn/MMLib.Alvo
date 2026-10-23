@@ -49,8 +49,8 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
     }
 
     // Observed apply behaviour that may surprise, pinned here as AGREEMENT between check and apply, not as an
-    // endorsement of the outcome: `old.` is accepted in an afterCreate condition (while @user.roles and
-    // @tenant.id are refused there). An empty source and one over 2000 characters are refused by the SCHEMA pass
+    // endorsement of the outcome: `old.` and `changed()` are refused in an afterCreate condition (#325);
+    // `@user.roles` and `@tenant.id` apply there (#153). An empty source and one over 2000 characters are refused by the SCHEMA pass
     // (minLength / maxLength), whose paths read `#/entities/…`; for a mutate value that refusal is reported on the
     // action above the slot (a oneOf), which the check reports at the slot.
     private static readonly (string Kind, string Pointer, string Source)[] _cases =
@@ -253,20 +253,23 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
 
     /// <summary>
     /// Agreement is not correctness (both sides share the validator), so pin what an after-hook refuses and why:
-    /// a call reads exactly what its arguments read, so the refusal names the one context value inside it.
+    /// a reference to a row image its event lacks. A call reads exactly what its arguments read, so a call over
+    /// <c>@tenant.id</c> or <c>@user.roles</c> applies like the bare reference does (#153).
     /// </summary>
     /// <param name="source">The after-hook condition.</param>
-    /// <param name="refusedFor">The one context value the refusal names, or null when the condition is valid.</param>
+    /// <param name="refusedFor">The one reference the refusal names, or null when the condition is valid.</param>
     /// <returns>A task that completes when the check has answered.</returns>
     [Theory]
     [InlineData("normalizePhone(new.note) == 'x'", null)]
     [InlineData("size(new.note) > 3", null)]
     [InlineData("isMe(@user.id)", null)]
-    [InlineData("isMe(@tenant.id)", "@tenant.id")]
-    [InlineData("yes(isMe(@tenant.id))", "@tenant.id")]
-    [InlineData("yes('owner' in @user.roles)", "@user.roles")]
-    [InlineData("!yes('owner' in @user.roles)", "@user.roles")]
-    [InlineData("new.quantity > 1 && yes('owner' in @user.roles)", "@user.roles")]
+    [InlineData("isMe(@tenant.id)", null)]
+    [InlineData("yes(isMe(@tenant.id))", null)]
+    [InlineData("yes('owner' in @user.roles)", null)]
+    [InlineData("!yes('owner' in @user.roles)", null)]
+    [InlineData("new.quantity > 1 && yes('owner' in @user.roles)", null)]
+    [InlineData("old.quantity > 1", "old.<field>")]
+    [InlineData("changed(quantity)", "changed(<field>)")]
     public async Task An_after_hook_call_reads_only_the_context_its_arguments_name(string source, string? refusedFor)
     {
         var management = fixture.Management();
@@ -280,7 +283,7 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         var reason = verdict.Findings.Where(f => f.Severity == DescriptorValidationSeverity.Error).ToList();
         if (refusedFor is not null)
         {
-            reason.ShouldHaveSingleItem(messages).Message.ShouldStartWith($"This after-hook condition reads '{refusedFor}'");
+            reason.ShouldHaveSingleItem(messages).Message.ShouldContain($"'{refusedFor}'");
         }
     }
 

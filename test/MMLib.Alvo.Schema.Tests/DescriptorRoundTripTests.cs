@@ -63,7 +63,11 @@ public class DescriptorRoundTripTests
         AssertAutomationSurvives(descriptor);
         AssertWebhooksAndFunctionsSurvive(descriptor);
         AssertRenameAndRollupViaSurvive(descriptor);
+        AssertEventExclusionsSurvive(descriptor);
     }
+
+    private static void AssertEventExclusionsSurvive(AlvoDescriptor descriptor)
+        => descriptor.Entities["deals"].Events.ShouldNotBeNull().Exclude.ShouldBe(["commission_note"]);
 
     private static void AssertExtensionKeysSurvive(AlvoDescriptor descriptor)
     {

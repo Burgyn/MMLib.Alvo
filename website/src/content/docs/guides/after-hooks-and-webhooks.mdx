@@ -48,9 +48,15 @@ declared once, at the top of the descriptor.
      `http://127.0.0.1:5081/hook`. The schema requires `secretRef`, but this build does not read it: deliveries are
      not signed (see *Not in this build* below).
    - A template's `subject` and `body` take `{{…}}` placeholders over `new.<field>`, `old.<field>`, `event.id`,
-     `event.type`, `event.time`, `event.subject` and `@user.id`. A placeholder that names a field the entity does not have is refused at apply, never rendered empty.
-   - A condition reads `new.`, `old.`, `changed()` and `@user.id`. `@user.id` is the user who made the change.
-     `@user.roles` and `@tenant.id` are refused in an after-hook condition, because the event does not record them.
+     `event.type`, `event.time`, `event.subject`, `@user.id`, `@user.roles` (the role names, comma-joined) and
+     `@tenant.id`. A placeholder that names a field the entity does not have is refused at apply, never rendered empty.
+   - A condition reads `new.`, `old.`, `changed()`, `@user.id`, `@user.roles` and `@tenant.id` — the caller as at the
+     event, read from its [envelope](/extending/event-envelope/). An event that lacks the value a condition reads (a
+     global row's tenant, an event written before this release) selects no hook.
+   - Both read only the row images the event has. `old.` on `afterCreate`, `new.` or a bare field on `afterDelete`,
+     and `changed()` on either are refused at apply, in a condition and in a template placeholder (`email.to`, a
+     template's `subject` and `body`, a webhook's `payload`). A named template is checked against every hook that
+     uses it, and the refusal points at that hook's `/action/template`.
 
 </Steps>
 
@@ -93,14 +99,18 @@ placeholder, and the design note's wording is tracked in [#344](https://github.c
 | `type` | `entity.<entity>.created`, `.updated` or `.deleted`. |
 | `subject`, `partitionkey` | The row: `<entity>/<id>` and `<entity>:<id>`. |
 | `time` | The instant of the write, the same one its audit columns record, in UTC. |
-| `authtype`, `authid` | `apikey`, `system` or `anon`, and the id of the user who made the change (absent for an anonymous caller). |
-| `correlationid` | The trace id of the request that made the change, or the event's own id when there was none. |
-| `data.record`, `data.old_record` | The row after and before the write. `old_record` is absent on a create, `record` on a delete. |
+| `authtype`, `authid` | `api_key`, `user`, `system`, `unauthenticated` or `unknown`, and the id of the user who made the change (absent for an anonymous caller). |
+| `authclaims` | The caller's roles, `{"roles":[…]}`, for after-hook conditions. The sample is the event as stored: the default webhook body leaves `authclaims` out, while a `payload` you write may still render `{{@user.roles}}`. |
+| `tenantid` | The tenant the write was made in; absent on a global entity. |
+| `correlationid` | The correlation id the caller stated, else the trace id of the request that made the change, else the event's own id. |
+| `traceparent`, `tracestate` | The W3C trace context of the write, when one was active. |
+| `data.record`, `data.old_record` | The row after and before the write, minus the entity's [`events.exclude`](/extending/event-envelope/#keep-fields-out-of-the-images) fields. `old_record` is absent on a create, `record` on a delete. |
 | `data.changed` | The fields whose value moved. |
 | `specversion`, `source`, `datacontenttype`, `payloadversion`, `chaindepth`, `causationid` | CloudEvents and Alvo bookkeeping: `1.0`, `/alvo`, `application/json`, the payload schema version, the hook-chain depth, and the causing event's id when there is one. |
 
 **The record is complete.** It includes fields that are `hidden` from callers, because the endpoint is declared by
-the same author who declared the `hidden` rule. Treat the endpoint as a place that sees every field. A webhook's
+the same author who declared the `hidden` rule. Treat the endpoint as a place that sees every field, unless the entity
+leaves it out with [`events.exclude`](/extending/event-envelope/#keep-fields-out-of-the-images). A webhook's
 optional [`payload`](/reference/descriptor/entities-hooks/#entities.hooks.afterCreate.action.payload) replaces
 the envelope with a `{{…}}` template you write, which must be JSON around its placeholders.
 
@@ -154,7 +164,8 @@ Know what a custom event is not, before you build on it:
 - **Nothing subscribes to it yet.** No after-hook can name it, so the dispatcher records it and runs nothing.
 - **It is not part of your transaction.** It is appended on its own, so it can commit when your write does not.
 - **A retried publish appends a second event**, with a new `id`.
-- **It carries no tenant.**
+
+Its envelope carries the publisher's provenance exactly as a data event's does, `tenantid` included.
 
 :::caution[Not in this build]
 - **Signing.** No delivery is signed: `secretRef` is not read and no Standard Webhooks `webhook-signature` header is
@@ -187,7 +198,8 @@ wrong shows up when the descriptor is applied, or in the log:
 | Apply | The endpoint's URL is relative, or `http` to a host that is not loopback. | Use an absolute `https` URL. |
 | Apply | A placeholder names a field the entity does not have, or a hook names an endpoint or a template that is not declared. | Correct the name; the refusal points at the hook. |
 | Apply | The action is `function`, `entity.update` or `http.call`, or `payload` holds JSONata. | Use `webhook` or `email`, and a `{{…}}` template. |
-| Apply | An after-hook condition reads `@user.roles` or `@tenant.id`. | Read the row's own fields, or `@user.id`. |
+| Apply | A condition or placeholder reads a row the event lacks: `old.` on `afterCreate`, `new.` or a bare field on `afterDelete`, or `changed()` on either. | Read the image the point has, or move the hook to `afterUpdate`. |
+| Apply | A condition or placeholder reads a field listed in `events.exclude`. | Stop reading it, or remove it from `events.exclude`. `changed(field)` is still allowed. |
 | Log | *failed to deliver … on attempt N* | Check the endpoint; a non-public address needs `Alvo:Events:WebhookAllowedNetworks`. |
 
 An apply refusal stops the container from coming back, and the reason is at the end of `docker compose logs alvo`.

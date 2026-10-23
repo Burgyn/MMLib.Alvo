@@ -9,7 +9,9 @@ namespace MMLib.Alvo.Admin.Components.Integrations;
 /// <remarks>
 /// Subject and body only: <c>bodyFile</c> is refused by this build and has no control here. A placeholder's field is judged
 /// on apply, against the entity of each email hook that sends the template; what is refused here is what no entity changes —
-/// a line break in the subject header, a root an event envelope cannot answer.
+/// a line break in the subject header, a member an event envelope does not carry. An author-declared <c>{{@user.roles}}</c>
+/// is accepted: it is explicit and visible in the descriptor, unlike the default webhook body, which strips
+/// <c>authclaims</c>.
 /// </remarks>
 internal sealed partial class TemplateDraft
 {
@@ -23,7 +25,7 @@ internal sealed partial class TemplateDraft
     public const string BodyField = "template-body";
 
     /// <summary>Gets the placeholder roots an email can resolve — <c>TemplatePlaceholder.Roots</c>, pinned by Host.Tests.</summary>
-    public static IReadOnlyList<string> Roots { get; } = ["new", "old", "event", "@user"];
+    public static IReadOnlyList<string> Roots { get; } = ["new", "old", "event", "@user", "@tenant"];
 
     /// <summary>Gets or sets the template's name — its key under <c>templates</c>.</summary>
     public string Name { get; set; } = string.Empty;
@@ -101,10 +103,9 @@ internal sealed partial class TemplateDraft
         foreach (Match match in Placeholder().Matches(text))
         {
             var inner = match.Groups[1].Value.Trim();
-            if (inner.StartsWith("@tenant", StringComparison.Ordinal) || inner == "@user.roles")
+            if (inner.StartsWith("@tenant", StringComparison.Ordinal) && inner != "@tenant.id")
             {
-                return $"'{{{{{inner}}}}}' cannot be answered by an email: the event it is sent from carries no tenant and no roles. "
-                    + "Read a field of the row instead, such as new.tenant_id.";
+                return $"'{{{{{inner}}}}}' cannot be answered by an email: '@tenant.id' is the one tenant member an event carries.";
             }
 
             if (!Roots.Contains(inner.Split('.', 2)[0], StringComparer.Ordinal))

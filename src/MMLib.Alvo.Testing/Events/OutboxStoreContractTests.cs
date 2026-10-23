@@ -294,7 +294,7 @@ public abstract class OutboxStoreContractTests
             Time = now,
             Subject = "orders/42",
             PartitionKey = "crm.orders.approved:orders/42",
-            AuthType = AlvoEventAuthType.Anonymous,
+            AuthType = AlvoEventAuthType.Unauthenticated,
             CorrelationId = id.ToString(),
             Data = new AlvoEventData(),
         };

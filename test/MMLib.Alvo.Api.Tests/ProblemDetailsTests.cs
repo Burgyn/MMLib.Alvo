@@ -1,7 +1,10 @@
 ﻿using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Auth;
+using MMLib.Alvo.Auth.Internal;
 using MMLib.Alvo.Data;
 using System.Net;
 using System.Text.Json;
@@ -386,6 +389,22 @@ public sealed class ProblemDetailsTests
     }
 
     /// <summary>
+    /// Only the chain-depth refusal carries <c>retryable</c>: every other problem the factory can render leaves it out,
+    /// because its absence makes no claim and a stray <c>false</c> would tell an agent to give up on a retryable refusal.
+    /// </summary>
+    [Fact]
+    public async Task Only_a_chain_depth_refusal_claims_to_be_non_retryable()
+    {
+        foreach (var result in EveryFactoryResult())
+        {
+            var (status, document) = await DocumentWrittenByAsync(result);
+
+            document.ContainsKey("retryable").ShouldBe(
+                status == StatusCodes.Status508LoopDetected, $"a {status} problem must not claim retryability either way");
+        }
+    }
+
+    /// <summary>
     /// Every slug the Data API can answer with today <b>is</b> answered with, over a real endpoint — and the
     /// one that is not yet reachable is named, so the task that makes it reachable has to come back here.
     /// </summary>
@@ -427,6 +446,7 @@ public sealed class ProblemDetailsTests
         reached.Add(await UnreadableSlugAnsweredByABodyTheServerRefusesAsync());
         reached.Add(await UnsupportedMediaTypeSlugAnsweredByANonJsonBodyAsync(world));
         reached.AddRange(await ManagementSlugsAnsweredByTheDescriptorWriteAsync());
+        reached.Add(await ChainDepthSlugAnsweredByACallerDeepInAChainAsync());
 
         reached.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ShouldBe(
             AlvoProblemTypes.All.Except(PendingUntilALaterTask, StringComparer.Ordinal).Order(StringComparer.Ordinal),
@@ -483,6 +503,38 @@ public sealed class ProblemDetailsTests
 
     /// <summary>A caller <c>managed-fleet</c>'s <c>access</c> block admits at <c>developer</c>.</summary>
     private static readonly TestApiKey _developer = new("problems-dev", ["dispatcher"], ["*:write"]);
+
+    /// <summary>
+    /// The <c>chain-depth-exceeded</c> slug's probe: a host resolver that decorates the dev-key one and hands every caller
+    /// an explicit depth of 9, then one ordinary Data API write — the real request path through <c>GuardAsync</c>, the
+    /// store's entry check and the problem writer, so the arm's position before the malformed-request arm is measured.
+    /// </summary>
+    private static async Task<string> ChainDepthSlugAnsweredByACallerDeepInAChainAsync()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin],
+            new AlvoApiWorldSetup(ConfigureServicesAfterAlvo: services => services.Replace(
+                ServiceDescriptor.Singleton<IAlvoContextResolver>(provider =>
+                    new DeepInAChainResolver(ActivatorUtilities.CreateInstance<ApiKeyContextResolver>(provider))))));
+
+        using var response = await world.SendAsync(
+            HttpMethod.Post, "/api/owners", _admin, body: new JsonObject { ["name"] = "Ada" });
+
+        ((int)response.StatusCode).ShouldBe(StatusCodes.Status508LoopDetected, "or this probe reached some other refusal");
+        var document = await response.ReadJsonObjectAsync();
+        document["retryable"]!.GetValue<bool>().ShouldBeFalse();
+        return document["type"]!.GetValue<string>()[AlvoProblemTypes.BaseUri.Length..];
+    }
+
+    /// <summary>Every caller the inner resolver admits, nine hops deep in one causation chain.</summary>
+    private sealed class DeepInAChainResolver(IAlvoContextResolver inner) : IAlvoContextResolver
+    {
+        public async ValueTask<AlvoPrincipal?> ResolveAsync(
+            string? presentedKey, string? requestedTenant, CancellationToken cancellationToken) =>
+            await inner.ResolveAsync(presentedKey, requestedTenant, cancellationToken) is { } principal
+                ? principal with { Context = principal.Context with { Provenance = new AlvoProvenance { Depth = 9 } } }
+                : null;
+    }
 
     /// <summary>
     /// The <c>function-failed</c> slug's probe: its own world, because only a host that registered a throwing CEL
@@ -669,6 +721,7 @@ public sealed class ProblemDetailsTests
         ProblemResultFactory.Unauthenticated("X-Alvo-Api-Key"),
         ProblemResultFactory.Internal(),
         ProblemResultFactory.FunctionFailed("A CEL function failed."),
+        ProblemResultFactory.ChainDepthExceeded("too deep"),
         ProblemResultFactory.Unreadable(StatusCodes.Status413PayloadTooLarge),
         ProblemResultFactory.UnsupportedMediaType(HttpMethods.Post),
         ProblemResultFactory.PreconditionRequired("send If-Match"),
@@ -681,6 +734,7 @@ public sealed class ProblemDetailsTests
         Guarded(new AlvoPreconditionFailedException("stale")),
         Guarded(new AlvoIdempotencyConflictException("reused")),
         Guarded(new AlvoConstraintViolationException(AlvoConstraintKind.Unique, ["email"])),
+        Guarded(new AlvoChainDepthExceededException("too deep")),
         Guarded(new ArgumentException("malformed")),
     ];
 
@@ -702,6 +756,21 @@ public sealed class ProblemDetailsTests
         {
             return await SlugWrittenByAsync(result, services);
         }
+    }
+
+    /// <summary>The status and document <paramref name="result"/> writes.</summary>
+    private static async Task<(int Status, JsonObject Document)> DocumentWrittenByAsync(IResult result)
+    {
+        await using var services = new ServiceCollection().AddLogging().AddProblemDetails().BuildServiceProvider();
+        var context = new DefaultHttpContext { RequestServices = services };
+        using var body = new MemoryStream();
+        context.Response.Body = body;
+
+        await result.ExecuteAsync(context);
+
+        body.Position = 0;
+        var document = await JsonSerializer.DeserializeAsync<JsonObject>(body, cancellationToken: TestContext.Current.CancellationToken);
+        return (context.Response.StatusCode, document!);
     }
 
     private static async Task<string> SlugWrittenByAsync(IResult result, IServiceProvider services)
