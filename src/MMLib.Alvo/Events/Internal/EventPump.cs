@@ -14,7 +14,9 @@ namespace MMLib.Alvo.Events.Internal;
 /// <para>
 /// The gate serialises rounds. A round called from inside a round — a subscriber that drains — is <b>refused</b> rather than
 /// left to wait for itself: the round marks its execution flow, and a nested call finds the mark. Code that suppresses
-/// execution-context flow escapes the mark and would wait; nothing can see it.
+/// execution-context flow escapes the mark and would wait; nothing can see it. The mark travels with the flow, so work a
+/// round starts and does not await — a handler's fire-and-forget task, an abandoned handler — carries it after the round
+/// has ended, and a drain from there is refused although it would not wait: a false refusal, never a hang.
 /// </para>
 /// </remarks>
 /// <param name="outbox">The outbox dispatcher, whose manual round checks the mode and the boot before it claims.</param>

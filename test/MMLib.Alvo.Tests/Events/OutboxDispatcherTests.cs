@@ -481,23 +481,28 @@ public sealed partial class OutboxDispatcherTests : IDisposable
         _loggers.CreateLogger<DeliveryFanOut>());
 
     /// <summary>A delivery dispatcher with no handler registered, for the pump the manual-round facts drive.</summary>
-    private DeliveryDispatcher NoDeliveries()
+    private DeliveryDispatcher NoDeliveries() =>
+        DeliveriesOver(new FakeDeliveryStore(TimeProvider.System), ExtensionRegistry.Empty, PrimedCatalogs);
+
+    /// <summary>A manual delivery dispatcher over <paramref name="store"/>, with a Ready boot, for the pump's delivery step.</summary>
+    private DeliveryDispatcher DeliveriesOver(FakeDeliveryStore store, ExtensionRegistry registry, IPolicyCatalogProvider catalogs)
     {
-        var store = new FakeDeliveryStore(TimeProvider.System);
         var runner = new DeliveryRunner(
             store,
             new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             new AlvoSessions(Substitute.For<IAlvoData>()),
-            PrimedCatalogs,
+            catalogs,
             new DeliveryBackoff(() => 0.5),
             TimeProvider.System,
             _loggers.CreateLogger<DeliveryRunner>());
+        var boot = new AlvoBootState();
+        Ready(boot);
 
         return new DeliveryDispatcher(
             store,
-            new AlvoBootState(),
-            PrimedCatalogs,
-            new ExtensionBinder(ExtensionRegistry.Empty, CelFixtures.Compiler, HandlerCatalog.EveryService(), _loggers.CreateLogger<ExtensionBinder>()),
+            boot,
+            catalogs,
+            new ExtensionBinder(registry, CelFixtures.Compiler, HandlerCatalog.EveryService(), _loggers.CreateLogger<ExtensionBinder>()),
             runner,
             Options.Create(new AlvoEventOptions { DispatchMode = AlvoEventDispatchMode.Manual }),
             Options.Create(new AlvoDeliveryOptions()),

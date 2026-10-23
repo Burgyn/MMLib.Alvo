@@ -173,14 +173,17 @@ internal sealed class DeliveryRunner(
         }
     }
 
-    /// <summary>Observes an abandoned handler's later failure and logs its type — never its message — since nothing records it.</summary>
-    private void Abandon(Task invocation, ClaimedDelivery delivery) =>
+    /// <summary>Counts an abandoned handler, and observes its later failure and logs its type — never its message — since nothing records it.</summary>
+    private void Abandon(Task invocation, ClaimedDelivery delivery)
+    {
+        AlvoDeliveryMetrics.AbandonedRecorded(delivery.Subscriber);
         _ = invocation.ContinueWith(
             ended => DeliveryLog.AbandonedHandlerFailed(
                 logger, delivery.Id, delivery.Subscriber, delivery.Attempts, TypeOf(ended.Exception!.InnerException ?? ended.Exception)),
             CancellationToken.None,
             TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
+    }
 
     private static AttemptVerdict VerdictOf(Exception failure) =>
         IsDepthRefusal(failure) ? AttemptVerdict.Dead(DeliveryErrors.ChainDepthExceeded) : AttemptVerdict.Retry(TypeOf(failure));

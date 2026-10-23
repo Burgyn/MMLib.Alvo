@@ -34,7 +34,16 @@ namespace MMLib.Alvo.Events.Internal;
 /// <para>
 /// <b>No claimed delivery waits for a slot.</b> The loop claims only free slots, and a manual round claims at most
 /// <see cref="AlvoDeliveryOptions.MaxConcurrency"/> deliveries at a time, runs them and claims again, so no lease runs
-/// while its delivery queues. A handler abandoned past its timeout holds no slot: the runner has answered for it.
+/// while its delivery queues. A handler abandoned past its timeout holds no slot: the runner has answered for it. The
+/// consequence is deliberate: the handler <em>code</em> running at once is unbounded across deliveries — a handler that
+/// ignores its token can leave up to <see cref="AlvoDeliveryOptions.MaxConcurrency"/> abandoned tasks behind per timeout
+/// and settle grace, each delivery bounded only by its retry policy. They are counted
+/// (<see cref="AlvoDeliveryMetrics.AbandonedName"/>) so the leak is visible.
+/// </para>
+/// <para>
+/// <b>A shutdown waits for the runner, never for a handler.</b> The loop always awaits its in-flight deliveries before it
+/// ends — also when the stop lands mid-claim — so an answer already being written is not raced against a disposed store.
+/// On a stop the runner cancels the handler and answers nothing; the lease returns the delivery.
 /// </para>
 /// <para>
 /// <b>The claimant is per instance</b> (<c>{machine}:{pid}:{instance}</c>): two dispatchers in one process — two test hosts
@@ -62,29 +71,27 @@ internal sealed class DeliveryDispatcher(
     TimeProvider time,
     ILogger<DeliveryDispatcher> logger) : BackgroundService
 {
-    private static readonly AlvoDrainResult _quiet = new() { Claimed = 0, Failed = 0, Subscribers = [] };
-
     private readonly string _claimant = $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
     private bool _storeReady;
 
     /// <summary>
-    /// One round on the caller's schedule; the pump calls it after the outbox step passed the shared gates. It claims at most
+    /// One round on the caller's schedule, behind the loop's gates (the manual mode, events on, a Ready boot with a primed
+    /// catalog), which it checks itself rather than trusting the order of the pump's steps. It claims at most
     /// <see cref="AlvoDeliveryOptions.MaxConcurrency"/> lane heads at a time, runs them, and claims again — until nothing is
-    /// due, <see cref="AlvoEventOptions.BatchSize"/> deliveries were claimed in the round, or it is cancelled.
+    /// due or <see cref="AlvoEventOptions.BatchSize"/> deliveries were claimed in the round.
     /// </summary>
+    /// <exception cref="InvalidOperationException">A gate is shut; nothing was claimed.</exception>
+    /// <exception cref="OperationCanceledException">The round was cancelled; what it claimed is left to its lease.</exception>
     internal async Task<AlvoDrainResult> ManualRoundAsync(CancellationToken cancellationToken)
     {
-        if (catalogs.Current is not { } catalog)
-        {
-            return _quiet;
-        }
-
+        var catalog = EnsureManualGates();
         await EnsureStoreAsync(cancellationToken).ConfigureAwait(false);
         var bindings = binder.For(catalog);
         var round = new DrainRound();
         var claimedInRound = 0;
-        while (claimedInRound < events.Value.BatchSize && !cancellationToken.IsCancellationRequested)
+        while (claimedInRound < events.Value.BatchSize)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var slots = Math.Min(deliveries.Value.MaxConcurrency, events.Value.BatchSize - claimedInRound);
             var claimed = await ClaimAsync(bindings, slots, cancellationToken).ConfigureAwait(false);
             if (claimed.Count == 0)
@@ -94,15 +101,34 @@ internal sealed class DeliveryDispatcher(
 
             claimedInRound += claimed.Count;
             await Task.WhenAll(claimed.Select(delivery => RunContainedAsync(delivery, bindings, round, cancellationToken))).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
         }
 
         return round.Result(claimedInRound);
     }
 
+    private PolicyCatalog EnsureManualGates()
+    {
+        var settings = events.Value;
+        if (settings.DispatchMode is not AlvoEventDispatchMode.Manual || !settings.Enabled)
+        {
+            throw new InvalidOperationException(
+                "A manual delivery round was refused before anything was claimed: the dispatch mode is not manual, or events "
+                + $"are off. Configured: mode '{settings.DispatchMode}', enabled {settings.Enabled}.");
+        }
+
+        return boot.Phase is AlvoBootPhase.Ready && catalogs.Current is { } catalog
+            ? catalog
+            : throw new InvalidOperationException(
+                "A manual delivery round was refused before anything was claimed: the boot has not primed a schema, so no "
+                + "handler can be bound. Start the host, let its boot finish, and apply a descriptor first.");
+    }
+
     /// <inheritdoc/>
     /// <remarks>
-    /// The cancellation arm is the host stopping. The other arm is the backstop for a failure outside the rounds — the boot
-    /// wait itself — since every round contains its own failure.
+    /// The first arm is the host stopping: whatever a stop interrupts — a claim cancelled mid-statement, a store already
+    /// going away — is the shutdown, not a failure, and is not logged. The other arm is the backstop for a failure outside
+    /// the rounds — the boot wait itself — since every round contains its own failure.
     /// </remarks>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -110,7 +136,7 @@ internal sealed class DeliveryDispatcher(
         {
             await PumpUntilStoppedAsync(stoppingToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        catch (Exception) when (stoppingToken.IsCancellationRequested)
         {
         }
         catch (Exception failure)
@@ -128,13 +154,18 @@ internal sealed class DeliveryDispatcher(
 
         var running = new List<Task>();
         var failing = TimeSpan.Zero;
-        while (!stop.IsCancellationRequested)
+        try
         {
-            running.RemoveAll(task => task.IsCompleted);
-            failing = await TickAsync(running, failing, stop).ConfigureAwait(false);
+            while (!stop.IsCancellationRequested)
+            {
+                running.RemoveAll(task => task.IsCompleted);
+                failing = await TickAsync(running, failing, stop).ConfigureAwait(false);
+            }
         }
-
-        await Task.WhenAll(running).ConfigureAwait(false);
+        finally
+        {
+            await Task.WhenAll(running).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
     }
 
     /// <summary>

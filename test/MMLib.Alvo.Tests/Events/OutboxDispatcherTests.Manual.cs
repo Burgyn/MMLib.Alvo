@@ -1,9 +1,12 @@
-﻿using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Rules.Internal;
+using MMLib.Alvo.Tests.Extensions;
 
 using NSubstitute;
 
@@ -212,6 +215,22 @@ public sealed partial class OutboxDispatcherTests
     }
 
     [Fact]
+    public async Task Cancelling_a_round_during_its_delivery_step_throws_and_leaves_the_delivery_claimed()
+    {
+        using var caller = CancellationTokenSource.CreateLinkedTokenSource(Cancellation);
+        var deliveries = new FakeDeliveryStore(TimeProvider.System);
+        using var pump = Pump(Subject(StoreWith(), Ready, Manual), deliveries: await BlockingDeliveryAsync(deliveries));
+
+        var round = pump.DrainAsync(caller.Token);
+        await UntilAsync(() => deliveries.Rows.Single().Status == "running", "the delivery step to claim");
+        await caller.CancelAsync();
+
+        await Should.ThrowAsync<OperationCanceledException>(round.WaitAsync(_waitBudget, Cancellation));
+        deliveries.Rows.Single().Status.ShouldBe("running");
+        deliveries.Attempts.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Cancelling_a_manual_round_leaves_its_work_claimed_and_uncounted()
     {
         using var spans = new DeliverySpans();
@@ -240,11 +259,38 @@ public sealed partial class OutboxDispatcherTests
         span.Status.ShouldBe(ActivityStatusCode.Unset);
     }
 
-    private EventPump Pump(OutboxDispatcher dispatcher, CancellationTokenSource? stopping = null)
+    private EventPump Pump(OutboxDispatcher dispatcher, CancellationTokenSource? stopping = null, DeliveryDispatcher? deliveries = null)
     {
         var lifetime = Substitute.For<IHostApplicationLifetime>();
         lifetime.ApplicationStopping.Returns(stopping?.Token ?? CancellationToken.None);
-        return new(dispatcher, NoDeliveries(), lifetime);
+        return new(dispatcher, deliveries ?? NoDeliveries(), lifetime);
+    }
+
+    /// <summary>A delivery dispatcher with one pending delivery whose handler waits for its token.</summary>
+    private async Task<DeliveryDispatcher> BlockingDeliveryAsync(FakeDeliveryStore store)
+    {
+        var catalogs = new PolicyCatalogProvider();
+        catalogs.SetCurrent(Project, HandlerCatalog.Catalog());
+        var registry = HandlerCatalog.Registry(alvo => alvo.Entity("tickets", tickets => tickets.OnCreated(
+            "waits", (AlvoCreated<AlvoRecord> _, CancellationToken ct) => Task.Delay(Timeout.InfiniteTimeSpan, ct))));
+        var @event = new AlvoEvent
+        {
+            Id = AlvoEventId.Create(DateTimeOffset.UtcNow),
+            Source = AlvoEvent.DefaultSource,
+            Type = "entity.tickets.created",
+            Time = DateTimeOffset.UtcNow,
+            Subject = "tickets/1",
+            PartitionKey = "tickets:1",
+            AuthType = AlvoEventAuthType.ApiKey,
+            CorrelationId = "c",
+            Data = new AlvoEventData { Record = AlvoRecord.Empty },
+        };
+        store.Publish(@event);
+        await store.FanOutAsync(
+            [new DeliveryRequest { EventId = @event.Id, Subscriber = "waits", PartitionKey = "tickets:1", Kind = DeliveryKind.Handler }],
+            Cancellation);
+
+        return DeliveriesOver(store, registry, catalogs);
     }
 
     private static void Manual(AlvoEventOptions options) => options.DispatchMode = AlvoEventDispatchMode.Manual;

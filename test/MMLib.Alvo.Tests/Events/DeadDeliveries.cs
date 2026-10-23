@@ -5,7 +5,8 @@ using System.Diagnostics.Metrics;
 namespace MMLib.Alvo.Tests.Events;
 
 /// <summary>
-/// Counts <c>alvo.delivery.dead</c> increments for one subscriber. The meter is static and shared by every fact running
+/// Counts <c>alvo.delivery.dead</c> increments — or another delivery counter's, such as <c>alvo.delivery.abandoned</c> —
+/// for one subscriber. The meter is static and shared by every fact running
 /// in parallel, so the count is filtered on a subscriber id the fact owns.
 /// </summary>
 internal sealed class DeadDeliveries : IDisposable
@@ -14,12 +15,12 @@ internal sealed class DeadDeliveries : IDisposable
     private readonly string _subscriber;
     private long _count;
 
-    internal DeadDeliveries(string subscriber)
+    internal DeadDeliveries(string subscriber, string instrumentName = AlvoDeliveryMetrics.DeadName)
     {
         _subscriber = subscriber;
         _listener.InstrumentPublished = (instrument, listener) =>
         {
-            if (instrument.Meter.Name == AlvoEventMetrics.MeterName && instrument.Name == AlvoDeliveryMetrics.DeadName)
+            if (instrument.Meter.Name == AlvoEventMetrics.MeterName && instrument.Name == instrumentName)
             {
                 listener.EnableMeasurementEvents(instrument);
             }

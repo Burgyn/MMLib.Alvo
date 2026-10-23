@@ -99,7 +99,48 @@ public sealed class DeliveryDispatcherTests : IDisposable
 
         store.Rows.Single().LeaseUntil.ShouldBe(_clock.GetUtcNow() + TimeSpan.FromSeconds(80), "20 s timeout + 30 s grace + 30 s settle margin");
         await stop.CancelAsync();
-        await round;
+        await Should.ThrowAsync<OperationCanceledException>(round);
+    }
+
+    [Fact]
+    public async Task A_cancelled_manual_round_throws_and_leaves_its_claim_to_the_lease()
+    {
+        var store = new FakeDeliveryStore(_clock);
+        var dispatcher = Dispatcher(store, (AlvoCreated<AlvoRecord> _, CancellationToken ct) => Task.Delay(Timeout.InfiniteTimeSpan, ct));
+        await FanOutAsync(store, Handler, "tickets:1");
+        using var stop = new CancellationTokenSource();
+
+        var round = dispatcher.ManualRoundAsync(stop.Token);
+        await UntilAsync(() => store.Rows.Single().Status == "running", "the delivery to be claimed");
+        await stop.CancelAsync();
+
+        await Should.ThrowAsync<OperationCanceledException>(round);
+        store.Rows.Single().Status.ShouldBe("running");
+        store.Attempts.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_manual_round_is_refused_in_the_background_mode()
+    {
+        var store = new FakeDeliveryStore(_clock);
+        var dispatcher = Dispatcher(store, (AlvoCreated<AlvoRecord> _) => Task.CompletedTask, mode: AlvoEventDispatchMode.Background);
+        await FanOutAsync(store, Handler, "tickets:1");
+
+        await Should.ThrowAsync<InvalidOperationException>(dispatcher.ManualRoundAsync(Ct));
+
+        store.Rows.Single().Status.ShouldBe("pending");
+    }
+
+    [Fact]
+    public async Task A_manual_round_is_refused_before_the_boot_is_ready()
+    {
+        var store = new FakeDeliveryStore(_clock);
+        var dispatcher = Dispatcher(store, (AlvoCreated<AlvoRecord> _) => Task.CompletedTask, ready: false);
+        await FanOutAsync(store, Handler, "tickets:1");
+
+        await Should.ThrowAsync<InvalidOperationException>(dispatcher.ManualRoundAsync(Ct));
+
+        store.Rows.Single().Status.ShouldBe("pending");
     }
 
     [Fact]
@@ -182,6 +223,8 @@ public sealed class DeliveryDispatcherTests : IDisposable
     [Fact]
     public async Task An_abandoned_handler_does_not_hold_a_slot_of_the_background_loop()
     {
+        const string Abandons = "abandons-its-slot";
+        using var abandoned = new DeadDeliveries(Abandons, AlvoDeliveryMetrics.AbandonedName);
         var store = new FakeDeliveryStore(TimeProvider.System);
         var stuck = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var calls = 0;
@@ -192,8 +235,9 @@ public sealed class DeliveryDispatcherTests : IDisposable
             concurrency: 1,
             mode: AlvoEventDispatchMode.Background,
             time: TimeProvider.System,
-            settle: TimeSpan.FromMilliseconds(50));
-        await FanOutAsync(store, Handler, "tickets:1", "tickets:2");
+            settle: TimeSpan.FromMilliseconds(50),
+            id: Abandons);
+        await FanOutAsync(store, Abandons, "tickets:1", "tickets:2");
 
         await dispatcher.StartAsync(Ct);
         await UntilAsync(() => store.Rows.Any(row => row.Status == "succeeded"), "the second delivery to run beside the abandoned one");
@@ -201,6 +245,34 @@ public sealed class DeliveryDispatcherTests : IDisposable
         await dispatcher.StopAsync(Ct);
 
         store.Rows.Select(row => row.Status).Order(StringComparer.Ordinal).ShouldBe(["retrying", "succeeded"]);
+        abandoned.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_stop_during_a_claim_still_waits_for_the_answer_being_written()
+    {
+        var store = new FakeDeliveryStore(TimeProvider.System);
+        var gated = new AnswerGatedStore(store);
+        var dispatcher = Dispatcher(
+            store,
+            (AlvoCreated<AlvoRecord> _) => Task.CompletedTask,
+            mode: AlvoEventDispatchMode.Background,
+            time: TimeProvider.System,
+            port: gated);
+        await FanOutAsync(store, Handler, "tickets:1");
+
+        await dispatcher.StartAsync(Ct);
+        await gated.Answering.Task.WaitAsync(_waitBudget, Ct);
+        await UntilAsync(() => gated.ClaimsWaiting == 1, "the next claim to be in flight");
+        var stopping = dispatcher.StopAsync(Ct);
+        await Task.Delay(TimeSpan.FromMilliseconds(100), Ct);
+
+        dispatcher.ExecuteTask!.IsCompleted.ShouldBeFalse("the answer being written is awaited before the loop ends");
+        gated.Answer.SetResult();
+        await stopping;
+
+        store.Rows.Single().Status.ShouldBe("succeeded");
+        _logs.Entries.ShouldNotContain(entry => entry.Level >= LogLevel.Error);
     }
 
     [Fact]
@@ -252,16 +324,22 @@ public sealed class DeliveryDispatcherTests : IDisposable
         TimeProvider? time = null,
         int batchSize = 100,
         TimeSpan? settle = null,
-        IDeliveryStore? port = null)
+        IDeliveryStore? port = null,
+        string id = Handler,
+        bool ready = true)
     {
         var clock = time ?? _clock;
         var deliveries = port ?? store;
-        var registry = HandlerCatalog.Registry(alvo => alvo.Entity("tickets", t => t.OnCreated(Handler, handle, configure: configure)));
+        var registry = HandlerCatalog.Registry(alvo => alvo.Entity("tickets", t => t.OnCreated(id, handle, configure: configure)));
         var binder = new ExtensionBinder(registry, CelFixtures.Compiler, HandlerCatalog.EveryService(), _loggers.CreateLogger<ExtensionBinder>());
         var catalogs = new PolicyCatalogProvider();
         catalogs.SetCurrent("handlers", _catalog);
         var boot = new AlvoBootState();
-        boot.Ready("handlers", appliedRevision: 1);
+        if (ready)
+        {
+            boot.Ready("handlers", appliedRevision: 1);
+        }
+
         var runner = new DeliveryRunner(
             deliveries,
             new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
@@ -338,6 +416,58 @@ public sealed class DeliveryDispatcherTests : IDisposable
 
             await Task.Delay(TimeSpan.FromMilliseconds(10), Ct);
         }
+    }
+
+    /// <summary>
+    /// The in-memory store whose first claim passes, whose answers wait for <see cref="Answer"/>, and whose later claims
+    /// wait for the stop — a stop that lands mid-claim while an answer is being written.
+    /// </summary>
+    private sealed class AnswerGatedStore(FakeDeliveryStore inner) : IDeliveryStore
+    {
+        private int _claims;
+        private int _waiting;
+
+        internal TaskCompletionSource Answering { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal TaskCompletionSource Answer { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal int ClaimsWaiting => Volatile.Read(ref _waiting);
+
+        public Task EnsureAsync(CancellationToken cancellationToken = default) => inner.EnsureAsync(cancellationToken);
+
+        public Task<int> FanOutAsync(IReadOnlyList<DeliveryRequest> requests, CancellationToken cancellationToken = default) =>
+            inner.FanOutAsync(requests, cancellationToken);
+
+        public async Task<IReadOnlyList<ClaimedDelivery>> ClaimAsync(DeliveryClaim claim, CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _claims) == 1)
+            {
+                return await inner.ClaimAsync(claim, cancellationToken);
+            }
+
+            Interlocked.Increment(ref _waiting);
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return [];
+        }
+
+        public async Task<bool> CompleteAsync(DeliveryAttempt attempt, CancellationToken cancellationToken = default)
+        {
+            Answering.TrySetResult();
+            await Answer.Task;
+            return await inner.CompleteAsync(attempt, cancellationToken);
+        }
+
+        public Task<bool> FailAsync(DeliveryAttempt attempt, DeliveryFailure failure, CancellationToken cancellationToken = default) =>
+            inner.FailAsync(attempt, failure, cancellationToken);
+
+        public Task<IReadOnlyList<string>> PendingSubscribersAsync(CancellationToken cancellationToken = default) =>
+            inner.PendingSubscribersAsync(cancellationToken);
+
+        public Task<int> DeadLetterPendingAsync(string subscriber, string reason, CancellationToken cancellationToken = default) =>
+            inner.DeadLetterPendingAsync(subscriber, reason, cancellationToken);
+
+        public Task<int> CancelPendingAsync(string subscriber, CancellationToken cancellationToken = default) =>
+            inner.CancelPendingAsync(subscriber, cancellationToken);
     }
 
     /// <summary>The in-memory store whose first claims fail the way a database under a deadlock or a restart refuses one.</summary>

@@ -12,6 +12,7 @@ internal static class AlvoDeliveryMetrics
     internal const string AttemptsName = "alvo.delivery.attempts";
     internal const string LagName = "alvo.delivery.lag";
     internal const string OutcomeTag = "alvo.outcome";
+    internal const string AbandonedName = "alvo.delivery.abandoned";
 
     private static readonly Meter _meter = new(AlvoEventMetrics.MeterName);
 
@@ -20,6 +21,12 @@ internal static class AlvoDeliveryMetrics
 
     internal static void DeadRecorded(string subscriber, string reason) =>
         Dead.Add(1, new KeyValuePair<string, object?>(SubscriberTag, subscriber), new KeyValuePair<string, object?>(ReasonTag, reason));
+
+    internal static Counter<long> Abandoned { get; } = _meter.CreateCounter<long>(
+        AbandonedName, "{handler}", "Handlers still running past their timeout and settle grace, left running unawaited.");
+
+    internal static void AbandonedRecorded(string subscriber) =>
+        Abandoned.Add(1, new KeyValuePair<string, object?>(SubscriberTag, subscriber));
 
     internal static Histogram<double> Durations { get; } = _meter.CreateHistogram<double>(
         DurationName, "ms", "How long one delivery attempt ran.");
