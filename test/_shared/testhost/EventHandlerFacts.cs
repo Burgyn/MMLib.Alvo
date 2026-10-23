@@ -24,6 +24,19 @@ public abstract class EventHandlerFacts
     protected const string TenantDesk = "tenant-desk.alvo.json";
     protected const string Tickets = "tickets";
 
+    private static readonly TimeSpan _handlerTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>The margin the dispatcher adds to the longest handler timeout (<c>DeliveryRunner.LeaseGrace</c>).</summary>
+    private static readonly TimeSpan _leaseGrace = TimeSpan.FromSeconds(30);
+
+    /// <summary>The time a cancelled handler is given to stop, also covered by the lease (<c>DeliveryRunner.SettleGrace</c>).</summary>
+    private static readonly TimeSpan _settleGrace = TimeSpan.FromSeconds(30);
+
+    /// <summary>A delivery claim's lease: the longest handler timeout + lease grace + settle grace.</summary>
+    private static readonly TimeSpan _claimLease = _handlerTimeout + _leaseGrace + _settleGrace;
+
+    private static readonly DateTimeOffset _start = new(2026, 10, 23, 9, 0, 0, TimeSpan.Zero);
+
     private const string ForeignTraceId = "4bf92f3577b34da6a3ce929d0e0e4736";
     private const string ForeignTrace = $"00-{ForeignTraceId}-00f067aa0ba902b7-01";
 
@@ -174,28 +187,18 @@ public abstract class EventHandlerFacts
         var database = await DatabaseAsync();
         var tenantA = Guid.NewGuid();
         var tenantB = Guid.NewGuid();
-        var foreign = Guid.Empty;
-        var seen = new ConcurrentDictionary<Guid, (bool ReadForeign, int Listed, bool WriteRefused)>();
+        var peek = new TenantPeek(tenantA, tenantB);
         await using var alvo = await StartAsync(database, TenantDesk, builder => builder.Entity("notes", n => n.OnCreated(
-            "tenant-peek",
-            async (AlvoCreated<AlvoRecord> _, AlvoEventContext context, CancellationToken ct) =>
-            {
-                var own = context.Caller.Tenant!.Value.Value;
-                var read = await context.Data.GetAsync("notes", foreign, ct);
-                var listed = await context.Data.QueryAsync(new AlvoQuery { Entity = "notes" }, ct);
-                var other = own == tenantA ? tenantB : tenantA;
-                var smuggled = await Record.ExceptionAsync(() => context.Data.CreateAsync("notes", Values(("text", "smuggled"), ("tenant_id", other)), ct));
-                seen[own] = (read is not null, listed.Items.Count, smuggled is not null);
-            },
-            configure: options => options.RunAs = AlvoRunAs.System)));
-        var noteB = await alvo.Data.CreateAsync("notes", Values(("text", "b"), ("tenant_id", tenantB)), Agent with { Tenant = new TenantId(tenantB) }, cancellationToken: Ct);
-        foreign = (Guid)noteB[AlvoManagedColumns.Id]!;
-        await alvo.Data.CreateAsync("notes", Values(("text", "a"), ("tenant_id", tenantA)), Agent with { Tenant = new TenantId(tenantA) }, cancellationToken: Ct);
+            "tenant-peek", peek.RunAsync, configure: options => options.RunAs = AlvoRunAs.System)));
+        peek.Foreign = (Guid)(await CreateNoteAsync(alvo, tenantB, "b"))[AlvoManagedColumns.Id]!;
+        await CreateNoteAsync(alvo, tenantA, "a");
 
         await alvo.DrainEventsAsync(Ct);
 
-        seen[tenantA].ShouldBe((false, 1, true), "tenant A's handler sees tenant A's one note, not tenant B's, and cannot write into tenant B");
-        seen[tenantB].WriteRefused.ShouldBeTrue("tenant B's handler cannot write into tenant A either");
+        var seenA = peek.Seen[tenantA];
+        (seenA.ReadForeign, seenA.Listed).ShouldBe((false, 1), "tenant A's handler sees tenant A's one note, and tenant B's note is not found");
+        ShouldBeTenantScopeRefusal(seenA.WriteRefusal);
+        ShouldBeTenantScopeRefusal(peek.Seen[tenantB].WriteRefusal);
         (await alvo.Data.QueryAsync(new AlvoQuery { Entity = "notes" }, Agent with { Tenant = new TenantId(tenantB) }, Ct)).Items.Count.ShouldBe(1);
     }
 
@@ -220,7 +223,10 @@ public abstract class EventHandlerFacts
 
         alvo.Hooks.AssertRan("tenantless-reach", times: 1);
         refusals.Count.ShouldBe(2);
-        refusals.ShouldAllBe(refusal => refusal is AlvoAuthorizationException && refusal.Message.Contains("tenant"), "the tenant guard denies before any rule");
+        foreach (var refusal in refusals)
+        {
+            ShouldBeTenantRefusal(refusal);
+        }
     }
 
     /// <summary>
@@ -354,35 +360,24 @@ public abstract class EventHandlerFacts
     public async Task A_handler_killed_mid_delivery_runs_again_with_the_same_event_and_the_late_finisher_changes_nothing()
     {
         var database = await DatabaseAsync();
-        var start = new DateTimeOffset(2026, 10, 23, 9, 0, 0, TimeSpan.Zero);
         var entered = new TaskCompletionSource<Guid>(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        Guid? rerun = null;
-        var first = await StartAsync(database, HandlerDesk, builder => builder.Entity(Tickets, t => t.OnCreated(
-            "slow",
-            async (AlvoCreated<AlvoRecord> _, AlvoEventContext context) =>
-            {
-                entered.TrySetResult(context.EventId);
-                await release.Task;
-            })), new FakeTimeProvider(start));
+        var first = await StartBlockedHostAsync(database, entered, release);
         await CreateTicketAsync(first, "Printer jam");
         var abandoned = first.DrainEventsAsync(Ct);
         var original = await entered.Task.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+        (await SingleDeliveryAsync(database)).Status.ShouldBe("running", "the first process holds the claim it will never answer for in time");
 
-        (await DeliveryRows.ReadAsync(database.Connect, Ct)).ShouldHaveSingleItem().Status.ShouldBe("running", "the first process holds the claim it will never answer for in time");
-
-        await using (var restarted = await StartAsync(database, HandlerDesk, builder => builder.Entity(Tickets, t => t.OnCreated(
-            "slow", (AlvoCreated<AlvoRecord> _, AlvoEventContext context) => { rerun = context.EventId; })), new FakeTimeProvider(start + TimeSpan.FromSeconds(91))))
-        {
-            await restarted.DrainEventsAsync(Ct);
-        }
+        (await RestartAndDrainAsync(database, _start + _claimLease - TimeSpan.FromSeconds(1))).ShouldBeNull("the lease has not run out yet");
+        (await SingleDeliveryAsync(database)).Status.ShouldBe("running");
+        var rerun = await RestartAndDrainAsync(database, _start + _claimLease + TimeSpan.FromSeconds(1));
 
         release.SetResult();
         await abandoned;
         await first.DisposeAsync();
 
         rerun.ShouldBe(original, "at least once, and with the same event id every time");
-        var row = (await DeliveryRows.ReadAsync(database.Connect, Ct)).ShouldHaveSingleItem();
+        var row = await SingleDeliveryAsync(database);
         row.Status.ShouldBe("succeeded");
         row.Attempts.ShouldBe(2);
         (await DeliveryRows.AttemptCountAsync(database.Connect, Ct)).ShouldBe(1, "the late finisher was fenced out and recorded nothing");
@@ -408,10 +403,14 @@ public abstract class EventHandlerFacts
 
         await alvo.DrainEventsAsync(Ct);
         seen.ShouldBeEmpty("event 1 is not fanned out yet, so its record's later deliveries wait");
+        var early = await DeliveryRows.ReadAsync(database.Connect, Ct);
+        early.Select(row => row.Status).ShouldBe(["pending", "pending"], "events 2 and 3 were fanned out in batches of their own");
         clock.Advance(TimeSpan.FromMinutes(1));
         await alvo.DrainEventsAsync(Ct);
 
         seen.ShouldBe(["first", "second", "third"]);
+        var firstEvent = (await DeliveryRows.ReadAsync(database.Connect, Ct))[0].EventId;
+        early.ShouldNotContain(row => row.EventId == firstEvent, "event 1 had no delivery row while the others waited");
     }
 
     /// <summary>
@@ -509,6 +508,45 @@ public abstract class EventHandlerFacts
         }
     }
 
+    private static Task<AlvoRecord> CreateNoteAsync(AlvoTestHost alvo, Guid tenant, string text) =>
+        alvo.Data.CreateAsync("notes", Values(("text", text), ("tenant_id", tenant)), Agent with { Tenant = new TenantId(tenant) }, cancellationToken: Ct);
+
+    private static void ShouldBeTenantRefusal(Exception? refusal) =>
+        refusal.ShouldBeOfType<AlvoAuthorizationException>().Message.ShouldContain("tenant");
+
+    /// <summary>
+    /// The synthesized tenant scope's refusal. Its message names no tenant on purpose, and tenant-desk's create rule admits
+    /// the system caller's <c>admin</c> role, so the tenant scope is the only predicate left that can refuse.
+    /// </summary>
+    private static void ShouldBeTenantScopeRefusal(Exception? refusal) =>
+        refusal.ShouldBeOfType<AlvoAuthorizationException>().Message.ShouldBe(AlvoAuthorizationException.WriteRejectedByPolicy);
+
+    private static async Task<DeliveryRow> SingleDeliveryAsync(HandlerDatabase database) =>
+        (await DeliveryRows.ReadAsync(database.Connect, Ct)).ShouldHaveSingleItem();
+
+    private static Task<AlvoTestHost> StartBlockedHostAsync(HandlerDatabase database, TaskCompletionSource<Guid> entered, TaskCompletionSource release) =>
+        StartAsync(database, HandlerDesk, builder => builder.Entity(Tickets, t => t.OnCreated(
+            "slow",
+            async (AlvoCreated<AlvoRecord> _, AlvoEventContext context) =>
+            {
+                entered.TrySetResult(context.EventId);
+                await release.Task;
+            },
+            configure: options => options.Timeout = _handlerTimeout)), new FakeTimeProvider(_start));
+
+    /// <summary>Starts a second host over the same database on a clock at <paramref name="now"/>, drains it, and answers the event it ran.</summary>
+    private static async Task<Guid?> RestartAndDrainAsync(HandlerDatabase database, DateTimeOffset now)
+    {
+        Guid? rerun = null;
+        await using var restarted = await StartAsync(database, HandlerDesk, builder => builder.Entity(Tickets, t => t.OnCreated(
+            "slow",
+            (AlvoCreated<AlvoRecord> _, AlvoEventContext context) => { rerun = context.EventId; },
+            configure: options => options.Timeout = _handlerTimeout)), new FakeTimeProvider(now));
+        await restarted.DrainEventsAsync(Ct);
+
+        return rerun;
+    }
+
     private static ActivityListener DeliverySpans(ConcurrentQueue<Activity> spans)
     {
         var listener = new ActivityListener
@@ -575,6 +613,24 @@ public abstract class EventHandlerFacts
         await CreateTicketAsync(before, "left behind");
         await before.DrainEventsAsync(Ct);
         (await DeliveryRows.ReadAsync(database.Connect, Ct)).ShouldHaveSingleItem().Status.ShouldBe("retrying");
+    }
+
+    /// <summary>A system handler that peeks across tenants: reads a foreign row, lists, and tries to write into the other tenant.</summary>
+    private sealed class TenantPeek(Guid tenantA, Guid tenantB)
+    {
+        public Guid Foreign { get; set; }
+
+        public ConcurrentDictionary<Guid, (bool ReadForeign, int Listed, Exception? WriteRefusal)> Seen { get; } = new();
+
+        public async Task RunAsync(AlvoCreated<AlvoRecord> _, AlvoEventContext context, CancellationToken ct)
+        {
+            var own = context.Caller.Tenant!.Value.Value;
+            var read = await context.Data.GetAsync("notes", Foreign, ct);
+            var listed = await context.Data.QueryAsync(new AlvoQuery { Entity = "notes" }, ct);
+            var other = own == tenantA ? tenantB : tenantA;
+            var refusal = await Record.ExceptionAsync(() => context.Data.CreateAsync("notes", Values(("text", "smuggled"), ("tenant_id", other)), ct));
+            Seen[own] = (read is not null, listed.Items.Count, refusal);
+        }
     }
 
     /// <summary>How a leg hands a fact its database: the builder registration, and a raw connection to read the tables.</summary>
