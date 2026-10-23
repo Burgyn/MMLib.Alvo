@@ -16,6 +16,9 @@ public abstract class AlvoTestHostFacts
     protected const string HelpDesk = "help-desk.alvo.json";
     protected const string Tickets = "tickets";
     protected const string TicketsWebhook = "/entities/tickets/hooks/afterCreate/0";
+    protected const string EchoLoop = "echo-loop.alvo.json";
+    protected const string Echoes = "echoes";
+    protected const string EchoesWebhook = "/entities/echoes/hooks/afterCreate/0";
 
     private static readonly DateTimeOffset _stamped = new(2026, 1, 15, 9, 30, 0, TimeSpan.Zero);
 
@@ -45,6 +48,37 @@ public abstract class AlvoTestHostFacts
         var ticket = await alvo.Data.CreateAsync(Tickets, Values(("title", "Printer jam")), Agent, cancellationToken: Ct);
 
         ticket[AlvoManagedColumns.CreatedAt].ShouldBe(_stamped);
+    }
+
+    [Fact]
+    public async Task Draining_delivers_a_declarative_webhook_after_hook_to_the_receiver()
+    {
+        var receiver = new StubWebhookReceiver();
+        await using var alvo = await StartAsync(HelpDesk, webhooks: receiver);
+        await alvo.Data.CreateAsync(Tickets, Values(("title", "Server down"), ("priority", "high")), Agent, cancellationToken: Ct);
+        await alvo.Data.CreateAsync(Tickets, Values(("title", "Mouse"), ("priority", "low")), Agent, cancellationToken: Ct);
+
+        var drained = await alvo.DrainEventsAsync(Ct);
+
+        receiver.Deliveries.ShouldHaveSingleItem().ShouldContain("Server down");
+        drained.Claimed.ShouldBe(2, "both writes emitted an event; only the high-priority one matched the hook");
+        drained.Failed.ShouldBe(0);
+        drained.Subscribers.ShouldBe([TicketsWebhook]);
+    }
+
+    [Fact]
+    public async Task A_receiver_that_writes_back_is_reported_as_a_loop()
+    {
+        var receiver = new StubWebhookReceiver();
+        await using var alvo = await StartAsync(EchoLoop, webhooks: receiver);
+        receiver.OnDelivery = () => alvo.Data.CreateAsync(Echoes, Values(("note", "again")), Agent, cancellationToken: Ct);
+        await alvo.Data.CreateAsync(Echoes, Values(("note", "first")), Agent, cancellationToken: Ct);
+
+        var loop = await Should.ThrowAsync<AlvoDrainNotQuiescentException>(() => alvo.DrainEventsAsync(Ct));
+
+        loop.Rounds.ShouldBe(100);
+        loop.Subscribers.ShouldBe([EchoesWebhook]);
+        loop.Message.ShouldContain(EchoesWebhook);
     }
 
     /// <summary>Registers this leg's database on the builder; the SQLite leg registers nothing and gets the default.</summary>

@@ -2,11 +2,20 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace MMLib.Alvo.TestHost
 {
+    public sealed class AlvoDrainNotQuiescentException : System.Exception
+    {
+        public AlvoDrainNotQuiescentException() { }
+        public AlvoDrainNotQuiescentException(string message) { }
+        public AlvoDrainNotQuiescentException(string message, System.Exception innerException) { }
+        public int Rounds { get; }
+        public System.Collections.Generic.IReadOnlyList<string> Subscribers { get; }
+    }
     public sealed class AlvoTestHost : System.IAsyncDisposable
     {
         public MMLib.Alvo.Data.IAlvoData Data { get; }
         public System.IServiceProvider Services { get; }
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Events.AlvoDrainResult> DrainEventsAsync(System.Threading.CancellationToken cancellationToken = default) { }
         public static MMLib.Alvo.AlvoContext Caller(params string[] roles) { }
         public static System.Threading.Tasks.Task<MMLib.Alvo.TestHost.AlvoTestHost> StartAsync(System.Action<MMLib.Alvo.IAlvoBuilder> configure, System.TimeProvider? time = null, System.Net.Http.HttpMessageHandler? webhooks = null, System.Threading.CancellationToken cancellationToken = default) { }
     }
