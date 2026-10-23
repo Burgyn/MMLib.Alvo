@@ -308,12 +308,32 @@ internal sealed class OutboxDispatcher(
         foreach (var hook in hooks)
         {
             round.Ran(hook.Path);
-            await executor.ExecuteAsync(hook, @event, stoppingToken).ConfigureAwait(false);
+            await RunAsync(hook, @event, stoppingToken).ConfigureAwait(false);
         }
 
         await store.MarkDispatchedAsync(entry.Id, stoppingToken).ConfigureAwait(false);
 
         Counted(hooks.Count).Add(1);
+    }
+
+    /// <summary>Runs one hook's action under its <c>alvo.delivery</c> span, recording how it ended.</summary>
+    /// <remarks>
+    /// The failure is rethrown untouched: the span observes it, the entry's release still decides it. A cancellation
+    /// while the host stops is neither outcome, exactly as <see cref="DispatchAsync"/> does not count it as an attempt.
+    /// </remarks>
+    private async Task RunAsync(CompiledAfterHook hook, AlvoEvent @event, CancellationToken stoppingToken)
+    {
+        using var delivery = AlvoHookTelemetry.StartDelivery(hook.Path, @event);
+        try
+        {
+            await executor.ExecuteAsync(hook, @event, stoppingToken).ConfigureAwait(false);
+            AlvoHookTelemetry.Finish(delivery, AlvoHookTelemetry.Succeeded);
+        }
+        catch when (!stoppingToken.IsCancellationRequested)
+        {
+            AlvoHookTelemetry.Finish(delivery, AlvoHookTelemetry.Failed);
+            throw;
+        }
     }
 
     /// <summary>
