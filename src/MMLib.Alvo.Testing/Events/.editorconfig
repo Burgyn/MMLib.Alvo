@@ -1,4 +1,4 @@
-﻿# OutboxStoreContractTests, AlvoEventCriteriaTests and AlvoEventTenancyTests are xUnit test code even though they
+﻿# OutboxStoreContractTests, DeliveryStoreContractTests, AlvoEventCriteriaTests and AlvoEventTenancyTests are xUnit test code even though they
 # live in src/, not test/ — each is inherited by every implementation's own test project, so their [Fact] methods
 # follow the same descriptive snake_case convention as test/.editorconfig, for the same reason
 # src/MMLib.Alvo.Testing/Migrations/.editorconfig does for DescriptorVersionStoreContractTests. Scoped to those
@@ -11,4 +11,7 @@ dotnet_diagnostic.CA1707.severity = none
 dotnet_diagnostic.CA1707.severity = none
 
 [AlvoEventTenancyTests.cs]
+dotnet_diagnostic.CA1707.severity = none
+
+[DeliveryStoreContractTests.cs]
 dotnet_diagnostic.CA1707.severity = none
