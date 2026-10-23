@@ -101,9 +101,11 @@
   not EF-backed can inherit its contract suites (spec 2026-10-14 C1). **It is the one shipped package that depends on
   a provider** — the stated exception to "no package depends on another port's provider" below: a kit whose job is to
   run the production pipeline needs a production engine, and SQLite in memory is the one that needs no container. It
-  takes no second driver (a parity run brings `UsePostgreSql` through its own reference) and grants no
-  `InternalsVisibleTo`; `TestHostBoundaryTests` measures all three. It takes `Microsoft.AspNetCore.App` as a
-  framework reference for the generic host, the configuration and the HTTP client factory, as the core does.
+  takes no second driver (a parity run brings `UsePostgreSql` through its own reference), and no `InternalsVisibleTo`
+  is granted by it or to it. It takes `Microsoft.AspNetCore.App` as a framework reference for the generic host, the
+  configuration and the HTTP client factory, as the core does, and declares nothing beyond those four references.
+  `TestHostBoundaryTests` measures each of these: its three public types, the one provider, internals in neither
+  direction, and the reference set.
   Referenced by test projects, and by `tools/MMLib.Alvo.DocsGen`, which documents it (not a package).
 - `samples/MMLib.Alvo.Samples.EmbeddedHost` — the runnable embedded-mode example
   (spec §2.14 mode 2, #24): an ASP.NET Core app that mounts Alvo with
