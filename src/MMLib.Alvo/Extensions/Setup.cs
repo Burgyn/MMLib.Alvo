@@ -18,6 +18,7 @@ internal static class ExtensionsSetup
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IValidateOptions<AlvoExtensionOptions>, AlvoExtensionOptionsConfiguration>(Create));
         services.TryAddSingleton(DepthLimit);
+        services.TryAddSingleton<IAlvoSessions, AlvoSessions>();
 
         return services;
 
