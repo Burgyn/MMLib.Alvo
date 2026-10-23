@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Extensions.Internal;
@@ -8,8 +9,9 @@ using MMLib.Alvo.Extensions.Internal;
 namespace MMLib.Alvo.Extensions;
 
 /// <summary>
-/// Registers the validated <see cref="AlvoExtensionOptions"/> and <see cref="AlvoDeliveryOptions"/>, and the depth limit
-/// every store resolves.
+/// Registers the validated <see cref="AlvoExtensionOptions"/> and <see cref="AlvoDeliveryOptions"/>, the depth limit
+/// every store resolves, and the <see cref="ExtensionStateGuard"/> — after the boot service, which <c>AddAlvo</c>
+/// registers first.
 /// </summary>
 internal static class ExtensionsSetup
 {
@@ -29,6 +31,7 @@ internal static class ExtensionsSetup
         services.TryAddSingleton<IAlvoSessions, AlvoSessions>();
         services.TryAddSingleton(provider => new ExtensionRegistry(provider.GetServices<ExtensionRegistration>()));
         services.TryAddSingleton<ExtensionBinder>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, ExtensionStateGuard>());
 
         return services;
 
