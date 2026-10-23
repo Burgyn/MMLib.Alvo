@@ -29,8 +29,8 @@ public class OptionsCatalogTests
     public void The_sections_are_exactly_what_discovery_finds() =>
         _sections.Select(s => s.Name).ShouldBe(
         [
-            "Alvo", "Alvo:Admin", "Alvo:Admin:Dashboard", "Alvo:Ai", "Alvo:Api", "Alvo:Auth", "Alvo:Events", "Alvo:Extensions",
-            "Alvo:Management", "Alvo:Schema", "Alvo:Secrets",
+            "Alvo", "Alvo:Admin", "Alvo:Admin:Dashboard", "Alvo:Ai", "Alvo:Api", "Alvo:Auth", "Alvo:Deliveries", "Alvo:Events",
+            "Alvo:Extensions", "Alvo:Management", "Alvo:Schema", "Alvo:Secrets",
         ]);
 
     [Fact]
