@@ -151,6 +151,7 @@ export default defineConfig({
           page('Extending in code', 'extending'),
           page('Where logic goes', 'extending/where-logic-goes'),
           page('The event envelope', 'extending/event-envelope'),
+          page('Testing your backend', 'extending/testing'),
           page('Use your own authentication', 'guides/own-authentication'),
           page('Call Alvo from your endpoints', 'guides/call-from-endpoints'),
           page('Custom CEL functions', 'guides/custom-cel-functions'),

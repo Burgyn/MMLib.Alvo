@@ -124,16 +124,20 @@ internal static partial class ContentBody
     {
         var lines = Raw(match, imports).Content.Split('\n');
         var from = RequiredAttribute(match, "from");
-        var to = RequiredAttribute(match, "to");
+        var to = Attribute(match.Groups["attrs"].Value, "to");
         var start = Array.FindIndex(lines, line => line.Contains(from, StringComparison.Ordinal));
-        var end = start < 0 ? -1 : Array.FindIndex(lines, start, line => line.Contains(to, StringComparison.Ordinal));
+        var end = start < 0 ? -1 : End(lines, start, to);
         if (end < 0)
         {
-            throw new InvalidOperationException($"SourceExcerpt anchors not found (from \"{from}\", to \"{to}\").");
+            throw new InvalidOperationException($"SourceExcerpt anchors not found (from \"{from}\", to \"{to ?? "the end"}\").");
         }
 
         return Dedent(lines[start..(end + 1)]);
     }
+
+    private static int End(string[] lines, int start, string? to) => to is null
+        ? Array.FindLastIndex(lines, line => line.Trim().Length > 0)
+        : Array.FindIndex(lines, start, line => line.Contains(to, StringComparison.Ordinal));
 
     private static string Dedent(IReadOnlyList<string> lines)
     {

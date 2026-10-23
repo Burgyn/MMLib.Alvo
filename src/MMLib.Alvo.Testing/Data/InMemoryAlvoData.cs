@@ -28,6 +28,12 @@ namespace MMLib.Alvo.Testing.Data;
 /// This store enforces the default chain-depth limit of 8 on every write face, at the same point a real
 /// provider enforces its configured one; no configuration reaches it, so the limit is fixed here.
 /// </para>
+/// <para>
+/// <b>It runs no hook — no <c>reject</c>, no <c>mutate</c>, no after-hook — and that is a ruling, not a gap.</b> This is
+/// the double the provider contract suites run against; a host testing its own backend's behaviour uses
+/// <c>MMLib.Alvo.TestHost</c>, which runs the production pipeline over a real SQLite database. A second, in-memory hook
+/// pipeline would be a second security core to keep identical to the first.
+/// </para>
 /// </remarks>
 public sealed class InMemoryAlvoData : IAlvoData
 {

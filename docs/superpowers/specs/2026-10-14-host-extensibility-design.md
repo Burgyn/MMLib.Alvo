@@ -99,7 +99,7 @@ assistant as metadata:
 | C5 | function `invoices.issue` | `$defs/identifier` = `^[a-z][a-z0-9_-]{0,62}$` | function names are identifiers: `issue-invoice` |
 | C6 | function `"input": {…}` | `input` is `$defs/jsonata` (string) | HX-15 widens it (X12) |
 | C7 | `.Hooks(…)` sketch at "spec:157" | it is `alvo-specifikacia.md:74` (and `baas-analyza.md:1304`) | cited in X2 |
-| C8 | "every snippet is tested" | only `*.alvo.json` snippets are validated; C# under `website/src/snippets/embed/**` is compiled by nothing | `test/MMLib.Alvo.DocsSnippets.Tests` (HX-02) |
+| C8 | "every snippet is tested" | only `*.alvo.json` snippets are validated; C# under `website/src/snippets/embed/**` is compiled by nothing | `test/MMLib.Alvo.DocsSnippets.Tests` (HX-02) for `extending/**`; `embed/**` is #405 (§4.15 *HX-02 settled details*) |
 | C9 | the envelope has an actor | `authtype` ∈ {`apikey`,`system`,`anon`} — not authcontext values — and identity users are reported `apikey` (`AlvoEventProvenance.AuthTypeOf`) | HX-01 aligns values, adds `AlvoContext.ActorKind` |
 | C10 | `IAlvoData` has transactions | each `EfAlvoData` write creates its own `DbContext` + transaction | HX-07 introduces the internal write unit |
 | C11 | step key `(event id, step)` | two handlers of one event may share step names | `(event id, subscriber, step)` |
@@ -760,6 +760,61 @@ AddBookingExtensions(this IAlvoBuilder alvo)`), never top-level `Program.cs`; ea
 runs its snippet through `AlvoTestHost`. Pages excerpt them with the existing `SourceExcerpt` anchors. No
 Roslyn dependency is needed.
 
+**HX-02 settled details.**
+- **A round.** `IAlvoEventPump.DrainAsync()` runs one round of every dispatcher and returns `AlvoDrainResult { Claimed,
+  Failed, Subscribers, IsQuiet }`; neither public type names a dispatcher. The one implementation is the internal
+  `EventPump`, which in HX-02 runs one tick of `OutboxDispatcher` (`ManualRoundAsync`); HX-03 and HX-13 add their
+  dispatchers as further steps of the same round and sum the results — a step, not a second public seam. A round
+  refuses, claiming nothing, unless `DispatchMode == Manual` and `Enabled`, and unless the boot is `Ready` with a primed
+  catalog; rounds are serialised and the gate is not re-entrant (a subscriber must never drain). In `Manual` the loop
+  logs `DispatcherManual`; `MMLib.Alvo.Host` refuses `Manual` at startup with the fix. A misspelled mode is refused
+  before the binder sees it, with the same sentence as an undefined number.
+- **An in-process stub receiver writes back outside the dispatcher's flow.** `StubWebhookReceiver` runs its write-back
+  under `ExecutionContext.SuppressFlow()`, as an out-of-process receiver writing over HTTP would. From HX-03 the
+  dispatchers set the ambient depth (§4.6) for each run; a write-back inheriting it would be refused at depth 9 and the
+  R-12 loop fact would go quiet while the real loop is infinite. HX-03 must keep the suppression, not delete the fact.
+- **The source exists from HX-02.** `MMLib.Alvo.Hooks` carries one `alvo.delivery` consumer span per descriptor
+  after-hook action (tags `alvo.subscriber` = the hook's JSON pointer, `alvo.event.id`, `alvo.event.type`,
+  `alvo.outcome`), because `AlvoHookRecorder` (a §5 HX-02 row) needs something to read; HX-03 adds handler deliveries
+  and the `traceparent` link (its acceptance (13)), HX-09 the write-hook spans. A descriptor after-hook's id is its JSON
+  pointer.
+- **The recorder** counts every run whose outcome is present and not `failed` (a run cut short by shutdown carries no
+  outcome; HX-09's `rejected` counts as ran) and throws `InvalidOperationException` listing every run on a mismatch. It
+  keeps only activities whose trace is one of its host's drains (each drain is a root activity `alvo.test.drain` on
+  source `MMLib.Alvo.TestHost` with a fresh trace id), so parallel hosts never see each other's runs. HX-09's write
+  hooks, which run outside a drain, will need the host to scope its `Data` calls the same way — which is why no fact
+  pins `Data`'s identity and the docs say only that it behaves as the host's `IAlvoData`; writes made through
+  `Services.GetRequiredService<IAlvoData>()` stay outside the recorder's reach.
+- **`AlvoTestHost` members:** `StartAsync(configure, time = null, webhooks = null, cancellationToken)`, `Data`,
+  `Services`, `Hooks`, static `Caller(params string[] roles)`, `DrainEventsAsync` (returns the summed
+  `AlvoDrainResult`), `DisposeAsync`. Default clock = system clock (`FakeTimeProvider` reaches tests transitively).
+  Without `webhooks`, a refusing handler fails every webhook attempt; a caller's handler is never disposed. Loop naming
+  = the distinct subscribers of the last 10 rounds.
+- **PostgreSQL parity** = a provider registered in `configure` (detected by its `ISchemaMigrator` registration)
+  replaces the in-memory database. The PostgreSQL leg links the shared facts into
+  `MMLib.Alvo.Data.PostgreSql.Tests.Integration` (ring2) instead of creating a project. Reading of acceptance (4): the
+  facts that carry an acceptance criterion or touch the engine (reject, clock, delivery, loop) run on both engines; the
+  package's engine-agnostic facts (isolation, recorder scoping, no-network default, receiver lifetime, start refusal)
+  run on SQLite only.
+- **Package boundary.** `MMLib.Alvo.TestHost` is the one shipped package that depends on a provider (stated in
+  `package-boundary.md`), takes `Microsoft.AspNetCore.App` as a framework reference, and grants no
+  `InternalsVisibleTo`; the webhook client name and the source name are literals pinned by behavioural facts. DocsGen
+  lists it from HX-02 — `CSharpApiTests.The_package_list_is_every_packable_src_project` requires every packable
+  project — with `AlvoTestHost` in `ApiScope.Ports`.
+- **Harness conventions.** Each snippet `.cs` declares a type named after its file (`SnippetCoverageTests` proves the
+  glob compiled them), descriptor snippets are copied flat to the output and so carry page-unique names, the project
+  opts out of the shared architecture tests and removes the test-wide global usings. Acceptance (6) holds by
+  construction: a snippet is a source file of a ring0 project. `CA1707` is off for the harness project, because
+  `test/.editorconfig`'s relaxation does not reach files under `website/`. "Each page has one fact that runs its
+  snippet" stays a convention while there is one page; a fact enforcing it is worth adding at the third.
+  `SourceExcerpt`'s `to` became optional (omitted, the excerpt runs to the file's last non-blank line), in the Astro
+  component and in DocsGen's `llms-full.txt` renderer alike, so a whole snippet class renders through the component
+  that strips the BOM and CRLF rather than through a bare `<Code>` on a raw import.
+- **C8 is half discharged, deliberately.** C8 names `website/src/snippets/embed/**` (four top-level `Program.cs`
+  files) as compiled by nothing; §4.15 scopes the harness to `extending/**`, whose snippets are classes. Top-level
+  programs cannot share one assembly, so compiling them needs one project per snippet (or a Roslyn compile step §4.15
+  rules out); HX-02 leaves them out and files the follow-up issue #405.
+
 ---
 
 ## 5. Public API (complete approval list)
@@ -1101,7 +1156,7 @@ by exactly the PR it is listed under.**
 - **Scope:** incremental generator in `MMLib.Alvo.Analyzers` reading `AdditionalFiles` with
   `AlvoDescriptor="true"`: `sealed partial class` wrappers (X18), enums, role constants, `Patch`; boot check
   for fields missing from the live schema; generation from a Management API snapshot (dashboard-first);
-  DocsGen adds `MMLib.Alvo.TestHost` and all new public types to the C# reference.
+  DocsGen adds all new public types to the C# reference (`MMLib.Alvo.TestHost` itself is listed from HX-02).
 - **Docs:** *Generated types*. **Dashboard:** none (build-time).
 - **Acceptance:** (1) Verify snapshots over `examples/*`. (2) A wrapper round-trips unknown fields. (3) A
   removed field is reported at boot. (4) `OnSaved` on a generated type: `e.Old is null` on create compiles and

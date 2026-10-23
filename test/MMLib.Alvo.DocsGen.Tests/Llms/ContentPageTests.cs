@@ -134,6 +134,18 @@ public class ContentPageTests
     }
 
     [Fact]
+    public void A_source_excerpt_without_to_runs_to_the_last_line()
+    {
+        var docs = Directory.CreateTempSubdirectory("llms-").FullName;
+        File.WriteAllText(Path.Combine(docs, "P.cs"), "using X;\r\n\r\nclass P\r\n{\r\n    void A()\r\n    {\r\n    }\r\n}\r\n\r\n");
+        File.WriteAllText(Path.Combine(docs, "x.mdx"),
+            "---\ntitle: X\ndescription: D.\n---\nimport p from './P.cs?raw';\n\n<SourceExcerpt code={p} from=\"class P\" />\n");
+
+        ContentPage.Read(Path.Combine(docs, "x.mdx"), docs, docs).Body
+            .ShouldBe("```csharp\nclass P\n{\n    void A()\n    {\n    }\n}\n```");
+    }
+
+    [Fact]
     public void An_index_page_takes_its_directory_slug()
     {
         var docs = Directory.CreateTempSubdirectory("llms-").FullName;

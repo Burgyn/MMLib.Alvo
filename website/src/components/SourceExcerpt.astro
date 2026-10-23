@@ -1,16 +1,17 @@
 ---
 import { Code } from '@astrojs/starlight/components';
-interface Range { from: string; to: string }
+interface Range { from: string; to?: string }
 interface Props {
-  code: string; from: string; to: string; lang?: string; title?: string;
+  code: string; from: string; to?: string; lang?: string; title?: string;
   dropComments?: boolean; then?: Range; pick?: RegExp; frame?: 'auto' | 'code' | 'terminal' | 'none'; wrap?: boolean;
 }
 const { code, from, to, lang = 'csharp', title, dropComments = false, then, pick, frame, wrap } = Astro.props;
 const lines = code.replace(/^﻿/, '').replace(/\r\n/g, '\n').split('\n');
 const slice = ({ from, to }: Range) => {
   const start = lines.findIndex((line) => line.includes(from));
-  const end = start < 0 ? -1 : lines.findIndex((line, i) => i >= start && line.includes(to));
-  if (start < 0 || end < 0) throw new Error(`SourceExcerpt: anchors not found (from "${from}", to "${to}")`);
+  const last = lines.findLastIndex((line) => line.trim());
+  const end = start < 0 ? -1 : to === undefined ? last : lines.findIndex((line, i) => i >= start && line.includes(to));
+  if (start < 0 || end < 0) throw new Error(`SourceExcerpt: anchors not found (from "${from}", to "${to ?? 'the end'}")`);
   return lines.slice(start, end + 1);
 };
 const blank = (line: string | undefined) => line === undefined || !line.trim();
