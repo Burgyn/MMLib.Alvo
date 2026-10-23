@@ -93,16 +93,39 @@ internal sealed class TestHostComposition : IAsyncDisposable
         }
     }
 
-    /// <inheritdoc/>
+    /// <summary>Stops the host, then disposes it and its database whether or not the stop succeeded.</summary>
+    /// <exception cref="AggregateException">The stop and the disposal both failed; the stop's failure comes first.</exception>
+    /// <returns>A task that completes when everything is disposed.</returns>
     public async ValueTask DisposeAsync()
     {
         try
         {
             await StopAsync().ConfigureAwait(false);
         }
-        finally
+        catch (Exception stopFailure)
         {
-            await DisposeHostAndDatabaseAsync().ConfigureAwait(false);
+            await After(stopFailure, DisposeHostAndDatabaseAsync).ConfigureAwait(false);
+            throw;
+        }
+
+        await DisposeHostAndDatabaseAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Disposes after <paramref name="failure"/>; if disposing fails too, both surface together, the original first,
+    /// so a cleanup failure never hides why the host was being torn down.
+    /// </summary>
+    internal Task DisposeAfterAsync(Exception failure) => After(failure, () => DisposeAsync().AsTask());
+
+    private static async Task After(Exception failure, Func<Task> cleanup)
+    {
+        try
+        {
+            await cleanup().ConfigureAwait(false);
+        }
+        catch (Exception cleanupFailure)
+        {
+            throw new AggregateException(failure, cleanupFailure);
         }
     }
 

@@ -88,6 +88,36 @@ public sealed class AlvoTestHostStartTests
     }
 
     [Fact]
+    public async Task A_failing_dispose_does_not_hide_the_failing_stop()
+    {
+        var service = new AsyncOnlyFailingStop { DisposeFails = true };
+        var alvo = await AlvoTestHost.StartAsync(
+            builder =>
+            {
+                builder.FromDescriptor(HelpDesk);
+                builder.Services.AddHostedService(_ => service);
+            },
+            cancellationToken: Ct);
+
+        var failure = await Should.ThrowAsync<AggregateException>(async () => await alvo.DisposeAsync());
+
+        failure.InnerExceptions.Count.ShouldBe(2, "the stop's failure first, then the dispose's");
+        failure.InnerExceptions[0].ToString().ShouldContain("The stop failed.");
+        failure.InnerExceptions[1].ToString().ShouldContain("The dispose failed.");
+    }
+
+    [Fact]
+    public async Task A_disposed_host_refuses_to_drain_or_hand_out_its_ports()
+    {
+        var alvo = await AlvoTestHost.StartAsync(builder => builder.FromDescriptor(HelpDesk), cancellationToken: Ct);
+        await alvo.DisposeAsync();
+
+        Should.Throw<ObjectDisposedException>(() => alvo.Data);
+        Should.Throw<ObjectDisposedException>(() => alvo.Services);
+        await Should.ThrowAsync<ObjectDisposedException>(() => alvo.DrainEventsAsync(Ct));
+    }
+
+    [Fact]
     public void A_caller_carries_authenticated_and_the_named_roles()
     {
         var first = AlvoTestHost.Caller("agent", "lead");
@@ -128,6 +158,8 @@ public sealed class AlvoTestHostStartTests
     {
         internal bool IsDisposed { get; private set; }
 
+        internal bool DisposeFails { get; init; }
+
         public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
         public Task StopAsync(CancellationToken cancellationToken) =>
@@ -137,7 +169,9 @@ public sealed class AlvoTestHostStartTests
         {
             IsDisposed = true;
 
-            return ValueTask.CompletedTask;
+            return DisposeFails
+                ? ValueTask.FromException(new InvalidOperationException("The dispose failed."))
+                : ValueTask.CompletedTask;
         }
     }
 }

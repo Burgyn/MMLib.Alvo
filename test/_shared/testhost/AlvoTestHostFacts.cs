@@ -71,7 +71,8 @@ public abstract class AlvoTestHostFacts
     {
         var receiver = new StubWebhookReceiver();
         await using var alvo = await StartAsync(EchoLoop, webhooks: receiver);
-        receiver.OnDelivery = () => alvo.Data.CreateAsync(Echoes, Values(("note", "again")), Agent, cancellationToken: Ct);
+        var ct = Ct;
+        receiver.OnDelivery = () => alvo.Data.CreateAsync(Echoes, Values(("note", "again")), Agent, cancellationToken: ct);
         await alvo.Data.CreateAsync(Echoes, Values(("note", "first")), Agent, cancellationToken: Ct);
 
         var loop = await Should.ThrowAsync<AlvoDrainNotQuiescentException>(() => alvo.DrainEventsAsync(Ct));

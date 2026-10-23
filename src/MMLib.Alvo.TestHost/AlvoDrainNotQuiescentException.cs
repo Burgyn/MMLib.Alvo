@@ -46,9 +46,17 @@ public sealed class AlvoDrainNotQuiescentException : Exception
     internal static AlvoDrainNotQuiescentException After(int rounds, IReadOnlyList<string> subscribers) =>
         new(rounds, subscribers);
 
+    private const string NoSubscriber =
+        "No subscriber ran in the last rounds, so this is not a hook writing back: either something outside the "
+        + "dispatchers keeps writing while the test drains, or more events were queued than the round limit can claim "
+        + "— drain before the backlog grows that large.";
+
     private static string Describe(int rounds, IReadOnlyList<string> subscribers) =>
         $"The event queue was still busy after {rounds} drain rounds, so the drain gave up instead of running forever. "
-        + $"Still running at the end: {string.Join(", ", subscribers)}. A subscriber that writes to the entity it "
+        + (subscribers.Count == 0 ? NoSubscriber : Loop(subscribers));
+
+    private static string Loop(IReadOnlyList<string> subscribers) =>
+        $"Still running at the end: {string.Join(", ", subscribers)}. A subscriber that writes to the entity it "
         + "subscribes to — a webhook receiver writing back, for example — produces a new event on every delivery; give "
         + "it a condition its own writes do not match.";
 }

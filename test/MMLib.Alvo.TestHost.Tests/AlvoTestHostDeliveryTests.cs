@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Events;
 
 namespace MMLib.Alvo.TestHost.Tests;
 
@@ -64,7 +65,7 @@ public sealed class AlvoTestHostDeliveryTests
             await first.DrainEventsAsync(Ct);
         }
 
-        receiver.IsDisposed.ShouldBeFalse("the host owns the factory's handler, never the caller's");
+        receiver.IsDisposed.ShouldBeFalse("disposing the host never disposes the caller's handler");
 
         await using var second = await StartAsync(receiver);
         await CreateHighPriorityAsync(second);
@@ -84,12 +85,40 @@ public sealed class AlvoTestHostDeliveryTests
         drained.Subscribers.ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// The round limit counts rounds, not cycles: a backlog no hook answers is refused too, and the message does not
+    /// blame a subscriber that never ran.
+    /// </summary>
+    [Fact]
+    public async Task A_backlog_beyond_the_round_limit_is_refused_without_blaming_a_subscriber()
+    {
+        await using var alvo = await AlvoTestHost.StartAsync(
+            builder =>
+            {
+                builder.FromDescriptor(HelpDesk);
+                builder.Services.PostConfigure<AlvoEventOptions>(events => events.BatchSize = 1);
+            },
+            cancellationToken: Ct);
+        for (var ticket = 0; ticket <= 100; ticket++)
+        {
+            await CreateAsync(alvo, "low");
+        }
+
+        var refusal = await Should.ThrowAsync<AlvoDrainNotQuiescentException>(() => alvo.DrainEventsAsync(Ct));
+
+        refusal.Subscribers.ShouldBeEmpty();
+        refusal.Message.ShouldContain("No subscriber ran");
+        refusal.Message.ShouldNotContain("Still running at the end");
+    }
+
     private static Task<AlvoTestHost> StartAsync(HttpMessageHandler? webhooks, TimeProvider? time = null) =>
         AlvoTestHost.StartAsync(alvo => alvo.FromDescriptor(HelpDesk), time, webhooks, Ct);
 
-    private static Task<AlvoRecord> CreateHighPriorityAsync(AlvoTestHost alvo) => alvo.Data.CreateAsync(
+    private static Task<AlvoRecord> CreateHighPriorityAsync(AlvoTestHost alvo) => CreateAsync(alvo, "high");
+
+    private static Task<AlvoRecord> CreateAsync(AlvoTestHost alvo, string priority) => alvo.Data.CreateAsync(
         "tickets",
-        new Dictionary<string, object?>(StringComparer.Ordinal) { ["title"] = "Server down", ["priority"] = "high" },
+        new Dictionary<string, object?>(StringComparer.Ordinal) { ["title"] = "Server down", ["priority"] = priority },
         AlvoTestHost.Caller("agent"),
         cancellationToken: Ct);
 }

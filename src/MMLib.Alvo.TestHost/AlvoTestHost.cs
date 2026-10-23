@@ -29,20 +29,39 @@ public sealed class AlvoTestHost : IAsyncDisposable
 
     private readonly TestHostComposition _composition;
     private readonly IAlvoEventPump _pump;
+    private readonly IAlvoData _data;
     private bool _disposed;
 
     private AlvoTestHost(TestHostComposition composition)
     {
         _composition = composition;
         _pump = composition.Host.Services.GetRequiredService<IAlvoEventPump>();
-        Data = composition.Host.Services.GetRequiredService<IAlvoData>();
+        _data = composition.Host.Services.GetRequiredService<IAlvoData>();
     }
 
     /// <summary>Gets the data port, behaving exactly as the host's own endpoints and services reach it.</summary>
-    public IAlvoData Data { get; }
+    /// <exception cref="ObjectDisposedException">The host was disposed.</exception>
+    public IAlvoData Data
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            return _data;
+        }
+    }
 
     /// <summary>Gets the host's services, for any other Alvo port a test needs, such as <c>IAlvoEvents</c>.</summary>
-    public IServiceProvider Services => _composition.Host.Services;
+    /// <exception cref="ObjectDisposedException">The host was disposed.</exception>
+    public IServiceProvider Services
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            return _composition.Host.Services;
+        }
+    }
 
     /// <summary>Starts a backend and waits until its descriptor is applied.</summary>
     /// <param name="configure">
@@ -74,9 +93,9 @@ public sealed class AlvoTestHost : IAsyncDisposable
         {
             await composition.StartAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch
+        catch (Exception failure)
         {
-            await composition.DisposeAsync().ConfigureAwait(false);
+            await composition.DisposeAfterAsync(failure).ConfigureAwait(false);
             throw;
         }
 
@@ -110,13 +129,18 @@ public sealed class AlvoTestHost : IAsyncDisposable
     /// Each round is one tick of the production dispatchers: the same hooks, the same retry backoff on the host's clock.
     /// Under a <c>FakeTimeProvider</c> a failed attempt waits out its backoff, so the drain returns with it counted in
     /// <see cref="AlvoDrainResult.Failed"/>; advance the clock and drain again to retry it. Under the system clock a drain
-    /// that runs longer than the backoff retries it again — pass a fake clock whenever a delivery can fail.
+    /// that runs longer than the backoff retries it again — pass a fake clock whenever a delivery can fail. The limit
+    /// counts rounds, not cycles: a backlog larger than 100 rounds of <c>Alvo:Events:BatchSize</c> entries is refused
+    /// the same way, though nothing loops.
     /// </remarks>
     /// <param name="cancellationToken">Cancels the drain between or inside rounds.</param>
     /// <returns>Every non-quiet round summed: entries claimed, attempts failed, subscribers run.</returns>
     /// <exception cref="AlvoDrainNotQuiescentException">The queue was still busy after 100 rounds.</exception>
+    /// <exception cref="ObjectDisposedException">The host was disposed.</exception>
     public async Task<AlvoDrainResult> DrainEventsAsync(CancellationToken cancellationToken = default)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
         var progress = new DrainProgress();
         for (var round = 0; round < MaxRounds; round++)
         {
