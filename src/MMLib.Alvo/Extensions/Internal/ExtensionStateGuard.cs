@@ -1,6 +1,4 @@
-﻿using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
+﻿using Microsoft.Extensions.Logging;
 
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
@@ -9,63 +7,34 @@ using MMLib.Alvo.Migrations;
 namespace MMLib.Alvo.Extensions.Internal;
 
 /// <summary>
-/// At start-up, decides what becomes of durable work keyed by an id this host no longer registers (spec 2026-10-14 E3):
-/// a declared retirement dead-letters or discards it; anything else refuses the start, because that work would never run
-/// and, with per-record order, the lanes behind it would wait forever.
+/// Decides what becomes of durable work keyed by an id this host no longer registers (spec 2026-10-14 E3): a declared
+/// retirement dead-letters or discards it; anything else refuses the start, because that work would never run and, with
+/// per-record order, the lanes behind it would wait forever.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Registered after the boot service, and awaiting its settlement when the host starts services concurrently, so it runs
-/// against the primed, migrated database, and
-/// in <see cref="StartingAsync"/>, so it finishes before any <see cref="IHostedService.StartAsync"/> — the delivery
-/// dispatcher cannot claim work a retirement is about to end.
+/// <b>A step of the boot, not a service of its own.</b> <c>AlvoBootService</c> runs it after the schema is converged and
+/// before it publishes Ready, on every boot shape that gets there — a file descriptor, a stored one, or a
+/// stored-descriptor host still awaiting its first. Nothing waits on another service, so no host shape can hang on it,
+/// and a host whose boot never runs never runs it. A boot that refused or stood down never reaches it either, and nothing
+/// in that process delivers.
 /// </para>
 /// <para>
-/// <b>The same on every boot shape that reaches ready</b> — a file descriptor, a stored one, or a stored-descriptor host
-/// still awaiting its first: the fix is a code change (register the id again, or retire it), which the running process
-/// cannot take, so the refusal throws like <c>ExtensionBinder.EnsureRegistrable</c> rather than recording a 503 the way
-/// a descriptor a dashboard can replace does. The refusal is published on <see cref="AlvoBootState"/> before the throw. A
-/// boot that refused has already said why, and a host with no boot at all serves nothing; in neither does anything
-/// deliver, so the guard checks nothing.
+/// <b>Its refusal stops the process, on every shape.</b> The fix is a code change — register the id again, or retire it
+/// — which the running process cannot take; the boot records it before the throw, as it does every code-level refusal.
 /// </para>
 /// </remarks>
-internal sealed class ExtensionStateGuard(
-    AlvoBootState boot,
-    ExtensionRegistry registry,
-    IDeliveryStore store,
-    IOptions<HostOptions> host,
-    ILogger<ExtensionStateGuard> logger)
-    : IHostedLifecycleService
+internal sealed class ExtensionStateGuard(ExtensionRegistry registry, IDeliveryStore store, ILogger<ExtensionStateGuard> logger)
 {
-    public async Task StartingAsync(CancellationToken cancellationToken)
+    /// <summary>Brings the delivery store up, applies every retirement, then refuses any work nobody owns.</summary>
+    /// <param name="cancellationToken">Cancels the step, failing the boot.</param>
+    /// <exception cref="AlvoStartupRefusedException">Unfinished work belongs to an id neither registered nor retired.</exception>
+    internal async Task SettleAsync(CancellationToken cancellationToken)
     {
-        if (await BootPhaseAsync(cancellationToken).ConfigureAwait(false) is not AlvoBootPhase.Ready)
-        {
-            return;
-        }
-
         await store.EnsureAsync(cancellationToken).ConfigureAwait(false);
         await RetireAsync(cancellationToken).ConfigureAwait(false);
         await RefuseOrphansAsync(cancellationToken).ConfigureAwait(false);
     }
-
-    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-
-    public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-
-    public Task StoppingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-
-    public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-
-    /// <summary>
-    /// The phase the boot settled on: awaited when the host starts its services concurrently, read when it starts them in
-    /// order — the boot's <see cref="IHostedLifecycleService.StartingAsync"/> has then already returned, and a phase still
-    /// pending means no boot ran in this host, which waiting would turn into a start that never finishes.
-    /// </summary>
-    private async Task<AlvoBootPhase> BootPhaseAsync(CancellationToken ct) =>
-        host.Value.ServicesStartConcurrently ? await boot.SettledAsync(ct).ConfigureAwait(false) : boot.Phase;
 
     private async Task RetireAsync(CancellationToken ct)
     {
@@ -84,9 +53,7 @@ internal sealed class ExtensionStateGuard(
         var orphans = (await store.PendingSubscribersAsync(ct).ConfigureAwait(false)).Where(id => !known.Contains(id)).ToList();
         if (orphans.Count > 0)
         {
-            var refusal = Orphaned(orphans);
-            boot.Failed(refusal.Message);
-            throw refusal;
+            throw Orphaned(orphans);
         }
     }
 

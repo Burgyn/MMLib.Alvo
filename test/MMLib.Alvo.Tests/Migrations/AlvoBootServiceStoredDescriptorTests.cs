@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Tests.Extensions;
@@ -290,6 +291,71 @@ public sealed class AlvoBootServiceStoredDescriptorTests
 
         world.Log.Count(entry => entry.EventName == "ExtensionOrderTie").ShouldBe(1);
     }
+
+    /// <summary>
+    /// Unfinished work no registration owns refuses the start on every shape that reaches Ready — a dashboard-first host
+    /// included, because only a redeploy can register or retire the id — and the refusal is recorded first.
+    /// </summary>
+    [Theory]
+    [InlineData("file")]
+    [InlineData("stored")]
+    [InlineData("awaiting")]
+    public async Task Orphaned_work_refuses_the_start_on_every_shape_that_reaches_ready(string shape)
+    {
+        using var world = Shaped(shape);
+        await PendingAsync(world, "old-sync");
+
+        (await world.BootAsync()).ShouldBeOfType<AlvoStartupRefusedException>().Message.ShouldContain("'old-sync'");
+
+        world.State.Phase.ShouldBe(AlvoBootPhase.Failed);
+        world.State.Failure.ShouldNotBeNull().ShouldContain("'old-sync'");
+        world.Log.ShouldContain(entry => entry.Level == LogLevel.Critical);
+    }
+
+    /// <summary>Every shape that reaches Ready applies the retirements before it publishes Ready.</summary>
+    [Theory]
+    [InlineData("file")]
+    [InlineData("stored")]
+    [InlineData("awaiting")]
+    public async Task Every_shape_that_reaches_ready_applies_the_retirements_first(string shape)
+    {
+        using var world = Shaped(shape);
+        world.Registrations = HandlerCatalog.Registry(alvo => alvo.AddRetiredExtension("old-sync", AlvoRetirement.DeadLetter));
+        await PendingAsync(world, "old-sync");
+
+        await world.BootOrFailAsync();
+
+        world.State.Phase.ShouldBe(AlvoBootPhase.Ready);
+        var row = world.Deliveries.Rows.ShouldHaveSingleItem();
+        row.Status.ShouldBe("dead");
+        row.LastErrorType.ShouldBe("retired");
+    }
+
+    /// <summary>A boot that stood down never reaches the guard: nothing in that process delivers, so nothing is decided.</summary>
+    [Fact]
+    public async Task A_stored_descriptor_refusal_decides_nothing_about_pending_work()
+    {
+        using var world = Dashboard().StoredVerbatim(BootServiceWorld.City);
+        world.Extensions = MisfitHandlers();
+        world.Registrations = HandlerCatalog.Registry(alvo => alvo.AddRetiredExtension("old-sync", AlvoRetirement.Discard));
+        await PendingAsync(world, "old-sync");
+
+        (await world.BootAsync()).ShouldBeNull();
+
+        world.State.Phase.ShouldBe(AlvoBootPhase.Failed);
+        world.Deliveries.Rows.ShouldHaveSingleItem().Status.ShouldBe("pending");
+    }
+
+    private static BootServiceWorld Shaped(string shape) => shape switch
+    {
+        "file" => new BootServiceWorld().BootingFrom(BootServiceWorld.City),
+        "stored" => Dashboard().StoredVerbatim(BootServiceWorld.City),
+        _ => Dashboard(),
+    };
+
+    private static Task<int> PendingAsync(BootServiceWorld world, string subscriber) => world.Deliveries.FanOutAsync(
+        [new MMLib.Alvo.Events.DeliveryRequest { EventId = Guid.NewGuid(), Subscriber = subscriber, PartitionKey = "depots:1", Kind = "handler" }],
+        TestContext.Current.CancellationToken);
 
     private static ExtensionBinder MisfitHandlers() => new(
         HandlerCatalog.Registry(alvo => alvo.Entity("no-such-entity", e => e.OnCreated("orphan-handler", HandlerCatalog.OnCreated))),

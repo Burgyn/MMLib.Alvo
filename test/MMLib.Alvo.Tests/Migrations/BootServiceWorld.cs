@@ -9,6 +9,7 @@ using MMLib.Alvo.Migrations.Internal;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Migrations;
+using MMLib.Alvo.Tests.Events;
 
 namespace MMLib.Alvo.Tests.Migrations;
 
@@ -19,7 +20,7 @@ namespace MMLib.Alvo.Tests.Migrations;
 /// <para>
 /// <b>No host, and that is the point.</b> <c>AlvoBootService</c> is an <c>IHostedLifecycleService</c>, so
 /// <c>StartingAsync</c> is a method with arguments like any other — every boot decision it makes is reachable
-/// by constructing it with its ten ports and calling that method. Booting a web host to reach the same
+/// by constructing it with its eleven ports and calling that method. Booting a web host to reach the same
 /// decisions costs a server, a socket and a SQLite file for facts that are about none of those things; the
 /// end-to-end guarantees that <em>are</em> about them (the server is not listening yet, the process exits)
 /// stay in <c>MMLib.Alvo.Host.Tests</c>, which is where they can be observed at all.
@@ -130,6 +131,12 @@ internal sealed class BootServiceWorld : IDisposable
         Tests.Extensions.HandlerCatalog.EveryService(),
         _loggers.CreateLogger<ExtensionBinder>());
 
+    /// <summary>The registrations the extension state guard judges the delivery store's work against.</summary>
+    internal ExtensionRegistry Registrations { get; set; } = ExtensionRegistry.Empty;
+
+    /// <summary>The delivery store the extension state guard reads and ends work in.</summary>
+    internal FakeDeliveryStore Deliveries { get; } = new(new ManualClock(new DateTimeOffset(2026, 10, 23, 9, 0, 0, TimeSpan.Zero)));
+
     /// <summary>What the introspector reports — read only when no applied snapshot was recorded.</summary>
     internal SchemaModel LiveSchema { get; set; } = new([]);
 
@@ -227,10 +234,11 @@ internal sealed class BootServiceWorld : IDisposable
             _catalog,
             State,
             new OptionsWrapper<AlvoSchemaOptions>(Options),
+            ExtensionState(),
             _loggers.CreateLogger<AlvoBootService>());
 
     /// <summary>
-    /// The same ten ports <see cref="Build"/> passes, positionally — for the facts that null one of them.
+    /// The same eleven ports <see cref="Build"/> passes, positionally — for the facts that null one of them.
     /// </summary>
     internal object?[] Ports() =>
     [
@@ -243,8 +251,12 @@ internal sealed class BootServiceWorld : IDisposable
         _catalog,
         State,
         new OptionsWrapper<AlvoSchemaOptions>(Options),
+        ExtensionState(),
         _loggers.CreateLogger<AlvoBootService>(),
     ];
+
+    private ExtensionStateGuard ExtensionState() =>
+        new(Registrations, Deliveries, _loggers.CreateLogger<ExtensionStateGuard>());
 
     private DescriptorBootPlan Plan() =>
         new(Source, new DescriptorValidator(), new CelCompiler(), _loggers.CreateLogger<DescriptorBootPlan>(), Extensions);

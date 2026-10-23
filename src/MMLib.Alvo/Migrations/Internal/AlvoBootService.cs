@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 using System.Data.Common;
@@ -72,6 +73,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     private readonly IPolicyCatalogProvider _policyCatalogProvider;
     private readonly AlvoBootState _state;
     private readonly IOptions<AlvoSchemaOptions> _options;
+    private readonly ExtensionStateGuard _extensionState;
     private readonly ILogger<AlvoBootService> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="AlvoBootService"/> class.</summary>
@@ -87,6 +89,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// <param name="policyCatalogProvider">Where stage 3 publishes the compiled catalog.</param>
     /// <param name="state">What the boot publishes for a readiness probe to read.</param>
     /// <param name="options">The startup mode and destructive allowance, already validated by the host.</param>
+    /// <param name="extensionState">Retires and refuses the durable work of ids this host no longer registers.</param>
     /// <param name="logger">Records what the boot decided, so a restart's no-op is visible.</param>
     public AlvoBootService(
         DescriptorBootPlan bootPlan,
@@ -98,6 +101,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         IPolicyCatalogProvider policyCatalogProvider,
         AlvoBootState state,
         IOptions<AlvoSchemaOptions> options,
+        ExtensionStateGuard extensionState,
         ILogger<AlvoBootService> logger)
     {
         ArgumentNullException.ThrowIfNull(bootPlan);
@@ -109,6 +113,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         ArgumentNullException.ThrowIfNull(policyCatalogProvider);
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(extensionState);
         ArgumentNullException.ThrowIfNull(logger);
 
         _bootPlan = bootPlan;
@@ -120,6 +125,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         _policyCatalogProvider = policyCatalogProvider;
         _state = state;
         _options = options;
+        _extensionState = extensionState;
         _logger = logger;
     }
 
@@ -195,6 +201,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
             return;
         }
 
+        await SettleExtensionStateAsync(project, ct).ConfigureAwait(false);
         _state.Ready(project, revision);
         RecordWhatTheBootDid(project, outcome, revision);
     }
@@ -228,6 +235,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         var stored = await _history.GetCurrentAsync(project, ct).ConfigureAwait(false);
         if (stored is null)
         {
+            await SettleExtensionStateAsync(project, ct).ConfigureAwait(false);
             _state.Ready(project, appliedRevision: null);
             RecordWhatTheBootDid(project, SchemaStartupOutcome.Awaiting, revision: null);
 
@@ -241,6 +249,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
 
         _ = Prime(boot, stored.Revision);
 
+        await SettleExtensionStateAsync(project, ct).ConfigureAwait(false);
         _state.Ready(project, stored.Revision);
         RecordWhatTheBootDid(project, SchemaStartupOutcome.Unchanged, stored.Revision);
     }
@@ -673,6 +682,31 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         BootRefused(_logger, refusal);
 
         throw new AlvoStartupRefusedException(refusal, decision.Fix ?? string.Empty);
+    }
+
+    /// <summary>
+    /// The last step before Ready, on every shape that gets there: retirements applied, and a start refused over
+    /// unfinished work no registration owns.
+    /// </summary>
+    /// <remarks>
+    /// After the schema, because the delivery tables are brought up by <see cref="ExtensionStateGuard"/> itself; before
+    /// Ready, so the delivery dispatcher — which waits for Ready — cannot claim work a retirement is about to end. Thrown
+    /// even by a dashboard-first host, like <see cref="RefuseUnregistrableExtensions"/>: only a redeploy cures it.
+    /// Recorded first, because <see cref="StartingAsync"/> rethrows an <see cref="AlvoStartupRefusedException"/> untouched.
+    /// </remarks>
+    private async Task SettleExtensionStateAsync(string project, CancellationToken ct)
+    {
+        try
+        {
+            await _extensionState.SettleAsync(ct).ConfigureAwait(false);
+        }
+        catch (AlvoStartupRefusedException refusal)
+        {
+            _state.Failed(project, refusal.Message);
+            BootRefused(_logger, refusal.Message);
+
+            throw;
+        }
     }
 
     /// <summary>
