@@ -17,6 +17,12 @@ namespace MMLib.Alvo.Events.Internal;
 /// <see langword="null"/> without a sampling listener, and both members accept that; a span sampled for propagation
 /// only (<see cref="Activity.IsAllDataRequested"/> false) gets no display name or tags either.
 /// </para>
+/// <para>
+/// Every <c>alvo.delivery</c> span keeps the ambient parent — the test host's drain, or nothing under the background
+/// loop — and carries the envelope's <c>traceparent</c> as a <b>link</b>, the messaging convention for a consumer that
+/// runs later than its producer. Parenting it on the envelope would move a test host's runs out of the drain trace its
+/// recorder scopes by.
+/// </para>
 /// </remarks>
 internal static class AlvoHookTelemetry
 {
@@ -26,15 +32,19 @@ internal static class AlvoHookTelemetry
     internal const string EventIdTag = "alvo.event.id";
     internal const string EventTypeTag = "alvo.event.type";
     internal const string OutcomeTag = "alvo.outcome";
+    internal const string AttemptTag = "alvo.delivery.attempt";
     internal const string Succeeded = "succeeded";
     internal const string Failed = "failed";
 
     private static readonly ActivitySource _source = new(SourceName);
 
-    /// <summary>Starts the span for one run of <paramref name="subscriber"/> over <paramref name="event"/>.</summary>
-    internal static Activity? StartDelivery(string subscriber, AlvoEvent @event)
+    /// <summary>
+    /// Starts the span for one run of <paramref name="subscriber"/> over <paramref name="event"/>, under whatever is ambient,
+    /// linked — never parented — to the envelope's own trace context.
+    /// </summary>
+    internal static Activity? StartDelivery(string subscriber, AlvoEvent @event, int? attempt = null)
     {
-        var delivery = _source.StartActivity(DeliveryName, ActivityKind.Consumer);
+        var delivery = _source.StartActivity(DeliveryName, ActivityKind.Consumer, parentContext: default, links: LinkTo(@event));
         if (delivery is not { IsAllDataRequested: true })
         {
             return delivery;
@@ -44,6 +54,10 @@ internal static class AlvoHookTelemetry
         delivery.SetTag(SubscriberTag, subscriber);
         delivery.SetTag(EventIdTag, @event.Id.ToString());
         delivery.SetTag(EventTypeTag, @event.Type);
+        if (attempt is { } number)
+        {
+            delivery.SetTag(AttemptTag, number);
+        }
 
         return delivery;
     }
@@ -62,4 +76,9 @@ internal static class AlvoHookTelemetry
             delivery.SetStatus(ActivityStatusCode.Error);
         }
     }
+
+    private static ActivityLink[]? LinkTo(AlvoEvent @event) =>
+        @event.TraceParent is { } traceParent && ActivityContext.TryParse(traceParent, @event.TraceState, isRemote: true, out var origin)
+            ? [new ActivityLink(origin)]
+            : null;
 }
