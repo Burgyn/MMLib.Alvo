@@ -1,6 +1,8 @@
 ﻿namespace MMLib.Alvo.Events.Internal;
 
-/// <summary>The tally one dispatch round keeps while it runs: which subscribers ran, and how many attempts failed.</summary>
+/// <summary>
+/// The tally one dispatch round keeps while it runs: which subscribers it attempted, and how many claimed entries failed.
+/// </summary>
 internal sealed class DrainRound
 {
     private readonly List<string> _subscribers = [];
@@ -16,7 +18,7 @@ internal sealed class DrainRound
         }
     }
 
-    /// <summary>Records one failed attempt.</summary>
+    /// <summary>Records one claimed entry whose attempt failed, however many of its subscribers it had run.</summary>
     internal void Failed() => _failed++;
 
     /// <summary>The round's result once every claimed entry has been dispatched.</summary>

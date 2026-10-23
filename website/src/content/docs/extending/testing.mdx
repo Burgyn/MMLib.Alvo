@@ -30,22 +30,23 @@ and returns once the descriptor is applied; `Data` behaves exactly as your host'
 
 <SourceExcerpt code={tests} from="A_ticket_cannot_be_closed_without_a_resolution()" to="cancellationToken: ct));" title="HelpDeskTests.cs" />
 
-The `reject` refuses exactly as it does over HTTP, and the row is left as it was. Each host gets its own database,
-dropped when the host is disposed; after that, `Data`, `Services`, `Hooks` and `DrainEventsAsync` throw
+The `reject` refuses exactly as it does over HTTP, and the row is left as it was. Each host gets its own in-memory
+database, dropped when the host is disposed (a provider you register yourself is
+[yours to clean up](#run-the-same-test-on-postgresql)); after that, `Data`, `Services`, `Hooks` and `DrainEventsAsync` throw
 `ObjectDisposedException`.
 
 ## Deliver events when you say so
 
 A test host never delivers on its own. `DrainEventsAsync` runs the production dispatcher round after round until
 nothing is due — including the events the deliveries themselves cause — and returns what it did: entries claimed,
-attempts failed, subscribers run. Webhooks go to the handler you pass as `webhooks`:
+entries whose delivery failed, subscribers attempted. Webhooks go to the handler you pass as `webhooks`:
 
 <SourceExcerpt code={tests} from="A_high_priority_ticket_notifies_the_ops_board()" to="alvo.Hooks.AssertRan" title="HelpDeskTests.cs" />
 
 <SourceExcerpt code={opsBoard} from="public sealed class OpsBoard" title="OpsBoard.cs" />
 
-- **No network, ever.** Without `webhooks`, every webhook attempt fails and is counted in the result's `Failed`; it
-  never leaves the process. The host does not dispose your handler, so one handler can serve several hosts.
+- **No network, ever.** Without `webhooks`, every webhook attempt fails, and its entry is counted once in the result's
+  `Failed`; it never leaves the process. The host does not dispose your handler, so one handler can serve several hosts.
 - **`Hooks.AssertRan(id, times)`** counts the runs of a hook inside this host's drains. A descriptor after-hook's id is
   its JSON pointer, `/entities/tickets/hooks/afterCreate/0`. A failed attempt is not a run, and neither is one cut
   short by the host stopping. On a mismatch it throws, listing every run it recorded. Hosts running side by side never
@@ -76,7 +77,8 @@ clock, a drain that outlasts the backoff retries the delivery a number of times 
 
 Register a provider in the builder and it replaces the in-memory database:
 `AlvoTestHost.StartAsync(b => b.UsePostgreSql(connectionString).FromDescriptor(path))`, with a reference to
-`MMLib.Alvo.Data.PostgreSql`. Give each test its own database.
+`MMLib.Alvo.Data.PostgreSql`. Give each test its own database, and drop it when the test is done: disposing the host
+stops it but leaves a database it did not create.
 
 ## What it is not
 

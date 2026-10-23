@@ -94,9 +94,16 @@ public sealed class AlvoTestHost : IAsyncDisposable
     /// several hosts. Without one, every webhook attempt fails.
     /// </param>
     /// <param name="cancellationToken">Cancels the start.</param>
-    /// <returns>The started host; dispose it to stop the host and drop its database.</returns>
+    /// <returns>
+    /// The started host; dispose it to stop the host and, unless the builder registered a provider of its own, drop its
+    /// in-memory database.
+    /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="configure"/> is <see langword="null"/>.</exception>
     /// <exception cref="Migrations.AlvoStartupRefusedException">The boot refused the descriptor or its database.</exception>
+    /// <exception cref="InvalidOperationException">The host started, but its boot did not reach <c>Ready</c>.</exception>
+    /// <exception cref="AggregateException">
+    /// The start failed and tearing the half-started host down failed too; the start's own failure comes first.
+    /// </exception>
     public static async Task<AlvoTestHost> StartAsync(
         Action<IAlvoBuilder> configure,
         TimeProvider? time = null,
@@ -151,7 +158,9 @@ public sealed class AlvoTestHost : IAsyncDisposable
     /// the same way, though nothing loops.
     /// </remarks>
     /// <param name="cancellationToken">Cancels the drain between or inside rounds.</param>
-    /// <returns>Every non-quiet round summed: entries claimed, attempts failed, subscribers run.</returns>
+    /// <returns>
+    /// Every non-quiet round summed: entries claimed, entries whose delivery failed, and the subscribers attempted.
+    /// </returns>
     /// <exception cref="AlvoDrainNotQuiescentException">The queue was still busy after 100 rounds.</exception>
     /// <exception cref="ObjectDisposedException">The host was disposed.</exception>
     public async Task<AlvoDrainResult> DrainEventsAsync(CancellationToken cancellationToken = default)
@@ -187,7 +196,10 @@ public sealed class AlvoTestHost : IAsyncDisposable
         return drain;
     }
 
-    /// <summary>Stops the host and drops its database. Safe to call more than once.</summary>
+    /// <summary>
+    /// Stops the host and, unless the builder registered a provider of its own, drops its in-memory database. Safe to
+    /// call more than once.
+    /// </summary>
     /// <returns>A task that completes when the host has stopped.</returns>
     public async ValueTask DisposeAsync()
     {

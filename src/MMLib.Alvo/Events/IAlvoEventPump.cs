@@ -24,7 +24,7 @@ public interface IAlvoEventPump
     /// Cancels the round, as the host stopping does; work in flight is left claimed, and its lease returns it to the
     /// queue.
     /// </param>
-    /// <returns>What the round claimed, which subscribers it ran and how many attempts failed.</returns>
+    /// <returns>What the round claimed, which subscribers it attempted and how many claimed entries failed.</returns>
     /// <exception cref="InvalidOperationException">
     /// The dispatch mode is not <see cref="AlvoEventDispatchMode.Manual"/>, <see cref="AlvoEventOptions.Enabled"/> is
     /// off, or the boot has not primed a schema; nothing was claimed.
