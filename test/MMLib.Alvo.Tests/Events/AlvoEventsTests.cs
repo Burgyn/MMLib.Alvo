@@ -31,6 +31,8 @@ public sealed class AlvoEventsTests
     [InlineData("entity.deals.created")]
     [InlineData("auth.user.login")]
     [InlineData("storage.file.uploaded")]
+    [InlineData("alvo.schedule.roll_slots")]
+    [InlineData("alvo.command.issue_invoice.completed")]
     public async Task Publish_refuses_a_reserved_namespace(string type)
     {
         var store = new RecordingOutboxStore();
@@ -44,7 +46,24 @@ public sealed class AlvoEventsTests
     }
 
     /// <summary>
-    /// A name outside the three namespaces is published, so the guard refuses the forgery and not the feature.
+    /// A framework event cannot be published by a host (spec 2026-10-14 E12): it would start every handler of a schedule or
+    /// a command as though it had really run.
+    /// </summary>
+    [Fact]
+    public async Task Publish_refuses_a_framework_event_naming_what_it_would_forge()
+    {
+        var store = new RecordingOutboxStore();
+
+        var refusal = await Should.ThrowAsync<ArgumentException>(() => Publisher(store).PublishAsync(
+            "alvo.schedule.x", "jobs/1", null, Caller, TestContext.Current.CancellationToken));
+
+        refusal.Message.ShouldContain("reserved 'alvo' namespace");
+        refusal.Message.ShouldContain("schedule");
+        store.Appended.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A name outside the reserved namespaces is published, so the guard refuses the forgery and not the feature.
     /// </summary>
     [Fact]
     public async Task Publish_appends_one_entry_carrying_the_guarded_name()

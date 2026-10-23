@@ -986,7 +986,7 @@ IAlvoEvents.PublishAsync(type, subject, data, context)
         │
         ├─ AlvoEventName.EnsureCustom(type)   ← refuses first, before the clock is read
         │     1. blank
-        │     2. first segment in AlvoEventName.ReservedNamespaces  (entity | auth | storage)
+        │     2. first segment in AlvoEventName.ReservedNamespaces  (entity | auth | storage | alvo)
         │     3. not two or more lower-case dot-separated segments
         │
         ├─ AlvoEventId.Create(now) · AlvoEvent.DefaultSource · AlvoEventProvenance.*
@@ -1117,10 +1117,13 @@ The frozen grammar has **two** authorities, split along the two contracts it ser
 `HasWildcard` for this refusal (a *descriptor* question — what a rule may subscribe to), and `AlvoEventName`
 owns `ReservedNamespaces` for the publish guard (a *wire* question — which names Alvo emits, so which a host
 may not mint). They live in different assemblies for that reason, and
-`EventPatternTests.The_reserved_namespaces_are_the_schema_s_own`
+`EventPatternTests.The_reserved_namespaces_are_the_schema_s_own_plus_the_framework_s`
 reads the alternation out of `schema/project.schema.json` itself, so the schema stays the authority over the
 authority. A segment is a wildcard only when it is *entirely* `*`, because the grammar admits it nowhere else;
-the cheap `pattern.Contains('*')` passes every other fact and is killed by its own.
+the cheap `pattern.Contains('*')` passes every other fact and is killed by its own. `alvo` is reserved beside
+the schema's three (HX-03, spec 2026-10-14 E12): the framework mints `alvo.schedule.<id>` and
+`alvo.command.<name>.completed` there, a host may not, and `$defs/eventPattern` does not admit it — framework
+events reach host handlers only.
 
 **This refuses a descriptor whose only defect is being ahead of the build, against `UnhonouredSubsystems`'
 own line** — refuse what silently produces wrong data, warn what is observably absent. It is taken anyway

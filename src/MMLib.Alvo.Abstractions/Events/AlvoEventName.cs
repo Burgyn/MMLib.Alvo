@@ -37,14 +37,17 @@ public static partial class AlvoEventName
     public const char Separator = '.';
 
     /// <summary>
-    /// The namespaces Alvo emits into, and therefore the ones a host may never mint an event into.
+    /// The namespaces only Alvo itself emits into: the three the descriptor's event grammar subscribes to, and
+    /// <c>alvo</c>, where the framework mints the events a registration produces.
     /// </summary>
     /// <remarks>
     /// <para>
     /// These are exactly the namespaces the frozen <c>$defs/eventPattern</c> grammar admits as a
     /// subscription's first segment — asserted against <c>schema/project.schema.json</c> itself by
-    /// <c>EventPatternTests.The_reserved_namespaces_are_the_schema_s_own</c>, because a hand-copied
-    /// alternation that drifts from the schema does not fail, it silently reserves the wrong names.
+    /// <c>EventPatternTests.The_reserved_namespaces_are_the_schema_s_own_plus_the_framework_s</c>, because a
+    /// hand-copied alternation that drifts from the schema does not fail, it silently reserves the wrong names.
+    /// <c>alvo</c> is the one addition: a schedule's run and a command's completion are minted there, so a host
+    /// must not mint them, and no descriptor rule can subscribe to them.
     /// </para>
     /// <para>
     /// <b>A <see cref="FrozenSet{T}"/>, and the type is load-bearing rather than a micro-optimisation.</b>
@@ -57,7 +60,14 @@ public static partial class AlvoEventName
     /// </para>
     /// </remarks>
     public static FrozenSet<string> ReservedNamespaces { get; } =
-        new[] { "entity", "auth", "storage" }.ToFrozenSet(StringComparer.Ordinal);
+        new[] { "entity", "auth", "storage", FrameworkNamespace }.ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>The namespace of the events Alvo mints from a registration — a schedule's run, a command's completion.</summary>
+    internal const string FrameworkNamespace = "alvo";
+
+    /// <summary>Whether <paramref name="type"/> is two or more lower-case dot-separated segments, and nothing else.</summary>
+    /// <param name="type">The event name to check.</param>
+    internal static bool IsWellFormed(string type) => CustomName().IsMatch(type);
 
     /// <summary>Whether <paramref name="segment"/> is one of the framework's own namespaces.</summary>
     /// <param name="segment">One event-name segment, normally the first.</param>
@@ -90,21 +100,30 @@ public static partial class AlvoEventName
         }
 
         throw new ArgumentException(
-            $"Event name '{type}' is in the framework's reserved '{first}' namespace, which only Alvo itself "
-            + $"may publish into. A published '{first}.' event would be indistinguishable from a real data "
-            + "change: every descriptor rule and after-hook subscribing to that name would fire on it, with a "
-            + "partition key and provenance for a record nobody wrote. Publish it under a name of your own — "
-            + $"'orders.approved' rather than '{type}' — and note that no descriptor rule can subscribe to "
-            + "such a name yet, because $defs/eventPattern is frozen to the reserved namespaces.",
+            first == FrameworkNamespace ? FrameworkNamespaceRefusal(type) : DataNamespaceRefusal(type, first),
             parameterName);
     }
+
+    private static string DataNamespaceRefusal(string type, string first) =>
+        $"Event name '{type}' is in the framework's reserved '{first}' namespace, which only Alvo itself "
+        + $"may publish into. A published '{first}.' event would be indistinguishable from a real data "
+        + "change: every descriptor rule and after-hook subscribing to that name would fire on it, with a "
+        + "partition key and provenance for a record nobody wrote. Publish it under a name of your own — "
+        + $"'orders.approved' rather than '{type}' — and note that no descriptor rule can subscribe to "
+        + "such a name yet, because $defs/eventPattern is frozen to the reserved namespaces.";
+
+    private static string FrameworkNamespaceRefusal(string type) =>
+        $"Event name '{type}' is in the framework's reserved '{FrameworkNamespace}' namespace, where Alvo mints the "
+        + "events a registration produces — a schedule's run, a command's completion. A published "
+        + $"'{FrameworkNamespace}.' event would start every handler of that schedule or command as though it had "
+        + $"really run. Publish it under a name of your own — 'orders.approved' rather than '{type}'.";
 
     /// <summary>The name is at least two lower-case dot-separated segments, and nothing else.</summary>
     /// <param name="type">The event name the host asked to publish.</param>
     /// <param name="parameterName">The caller's own parameter name.</param>
     private static void EnsureWellFormed(string type, string parameterName)
     {
-        if (CustomName().IsMatch(type))
+        if (IsWellFormed(type))
         {
             return;
         }
