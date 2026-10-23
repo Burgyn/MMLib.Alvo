@@ -451,6 +451,92 @@ public sealed class DeliveryRunnerTests : IDisposable
         current.ShouldBe(spans.Recorded.ShouldHaveSingleItem().SpanId);
     }
 
+    [Fact]
+    public async Task A_handler_s_own_timeout_exception_is_recorded_by_its_type_not_as_the_runner_s_timeout()
+    {
+        var (runner, handler) = Arrange((AlvoCreated<AlvoRecord> _) => Task.FromException(new TimeoutException()));
+
+        await runner.RunAsync(await ClaimedAsync(), handler, Claimant, Ct);
+
+        _store.Rows.ShouldHaveSingleItem().LastErrorType.ShouldBe(typeof(TimeoutException).FullName);
+    }
+
+    [Fact]
+    public void A_handler_that_ended_by_the_time_its_deadline_is_handled_is_answered_by_its_own_result()
+    {
+        DeliveryRunner.Ended(Task.CompletedTask).Succeeded.ShouldBeTrue("a handler that finished at the deadline succeeded");
+        DeliveryRunner.Ended(Task.FromException(new InvalidOperationException())).ErrorType.ShouldBe(typeof(InvalidOperationException).FullName);
+        DeliveryRunner.Ended(Task.FromException(AlvoChainDepthExceededException.At(9, 8))).ShouldBe(new DeliveryRunner.AttemptVerdict("chain-depth-exceeded", false));
+        DeliveryRunner.Ended(Task.FromCanceled(new CancellationToken(canceled: true))).ErrorType.ShouldBe(typeof(TaskCanceledException).FullName);
+    }
+
+    [Fact]
+    public async Task The_store_answers_for_each_attempt_outside_the_handler_s_flow()
+    {
+        var (runner, handler) = Arrange((AlvoCreated<AlvoRecord> _) => Task.FromException(new InvalidOperationException()));
+        var (_, succeeding) = Arrange((AlvoCreated<AlvoRecord> _) => Task.CompletedTask);
+
+        await runner.RunAsync((await ClaimedEventAsync(chainDepth: 3)).Delivery, handler, Claimant, Ct);
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        await runner.RunAsync((await ClaimedEventAsync(chainDepth: 3)).Delivery, succeeding, Claimant, Ct);
+
+        _store.AnswerFlows.Count.ShouldBe(2);
+        _store.AnswerFlows.ShouldAllBe(flow => flow == null, "recording an attempt is the runner's work, not the handler's next hop");
+    }
+
+    [Fact]
+    public async Task An_abandoned_handler_s_later_failure_is_logged_by_its_type_only()
+    {
+        var release = new TaskCompletionSource();
+        var (runner, handler) = Arrange(
+            async (AlvoCreated<AlvoRecord> _) =>
+            {
+                await release.Task;
+                throw new InvalidOperationException("card 4111-1111");
+            },
+            options => options.Timeout = TimeSpan.FromMilliseconds(50),
+            time: TimeProvider.System,
+            settle: TimeSpan.FromMilliseconds(50));
+
+        await runner.RunAsync(await ClaimedAsync(), handler, Claimant, Ct);
+        release.SetResult();
+        var line = await LoggedAsync("AbandonedHandlerFailed");
+
+        line.Level.ShouldBe(LogLevel.Warning);
+        line.Message.ShouldContain(typeof(InvalidOperationException).FullName!);
+        line.Message.ShouldNotContain("4111");
+        _store.Attempts.Count.ShouldBe(1, "the abandoned handler's failure records nothing");
+    }
+
+    [Fact]
+    public async Task A_late_finisher_s_span_says_its_lease_was_lost_not_that_it_succeeded()
+    {
+        using var spans = new Spans();
+        var (runner, handler) = Arrange((AlvoCreated<AlvoRecord> _) => Task.CompletedTask);
+        var late = (await ClaimedEventAsync(traceParent: TraceParent)).Delivery;
+        _clock.Advance(TimeSpan.FromMinutes(2));
+        await _store.ClaimAsync(Claim(), Ct);
+
+        await spans.WithinAsync(() => runner.RunAsync(late, handler, Claimant, Ct));
+
+        spans.Recorded.ShouldHaveSingleItem().GetTagItem("alvo.outcome").ShouldBe("lease-lost");
+    }
+
+    private async Task<CapturedLogEntry> LoggedAsync(string eventName)
+    {
+        for (var wait = 0; wait < 500; wait++)
+        {
+            if (_logs.Entries.FirstOrDefault(entry => entry.EventName == eventName) is { } line)
+            {
+                return line;
+            }
+
+            await Task.Delay(10, Ct);
+        }
+
+        throw new ShouldAssertException($"Nothing was logged as {eventName} within 5 s.");
+    }
+
     private (DeliveryRunner Runner, BoundHandler Handler) Arrange(
         Delegate handle,
         Action<AlvoHandlerOptions>? configure = null,

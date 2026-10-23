@@ -21,7 +21,8 @@ namespace MMLib.Alvo.Events.Internal;
 /// Every <c>alvo.delivery</c> span keeps the ambient parent — the test host's drain, or nothing under the background
 /// loop — and carries the envelope's <c>traceparent</c> as a <b>link</b>, the messaging convention for a consumer that
 /// runs later than its producer. Parenting it on the envelope would move a test host's runs out of the drain trace its
-/// recorder scopes by.
+/// recorder scopes by. The link is parsed only for a span that records data, so the envelope's trace context costs
+/// nothing when nobody listens.
 /// </para>
 /// </remarks>
 internal static class AlvoHookTelemetry
@@ -35,6 +36,7 @@ internal static class AlvoHookTelemetry
     internal const string AttemptTag = "alvo.delivery.attempt";
     internal const string Succeeded = "succeeded";
     internal const string Failed = "failed";
+    internal const string LeaseLost = "lease-lost";
 
     private static readonly ActivitySource _source = new(SourceName);
 
@@ -44,10 +46,15 @@ internal static class AlvoHookTelemetry
     /// </summary>
     internal static Activity? StartDelivery(string subscriber, AlvoEvent @event, int? attempt = null)
     {
-        var delivery = _source.StartActivity(DeliveryName, ActivityKind.Consumer, parentContext: default, links: LinkTo(@event));
+        var delivery = _source.StartActivity(DeliveryName, ActivityKind.Consumer);
         if (delivery is not { IsAllDataRequested: true })
         {
             return delivery;
+        }
+
+        if (LinkTo(@event) is { } origin)
+        {
+            delivery.AddLink(origin);
         }
 
         delivery.DisplayName = $"{DeliveryName} {subscriber}";
@@ -77,8 +84,8 @@ internal static class AlvoHookTelemetry
         }
     }
 
-    private static ActivityLink[]? LinkTo(AlvoEvent @event) =>
+    private static ActivityLink? LinkTo(AlvoEvent @event) =>
         @event.TraceParent is { } traceParent && ActivityContext.TryParse(traceParent, @event.TraceState, isRemote: true, out var origin)
-            ? [new ActivityLink(origin)]
+            ? new ActivityLink(origin)
             : null;
 }

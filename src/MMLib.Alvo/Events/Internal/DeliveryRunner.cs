@@ -6,7 +6,6 @@ using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
 
-using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 
@@ -38,7 +37,12 @@ internal enum DeliveryRunOutcome
 /// thread cannot hold the runner past its timeout; the runner then cancels the handler's token, gives it
 /// <see cref="SettleGrace"/> to stop, and answers <c>timeout</c>. A handler still running then is abandoned — .NET has no
 /// thread abort — and its late completion is never recorded: the store's fence on (claimant, attempt) answers for each
-/// attempt once.
+/// attempt once. Should such a handler fail later, its exception's type is logged, never its message.
+/// </para>
+/// <para>
+/// <b>The span answers for the attempt as recorded.</b> It ends after the store has answered, so a handler that finished
+/// after its lease was taken over is <c>lease-lost</c>, not <c>succeeded</c>; the store calls run outside the handler's
+/// flow, at the event's own depth.
 /// </para>
 /// <para>
 /// <b>Fail closed on the envelope.</b> A payload that is no longer an Alvo envelope, or whose present <c>tenantid</c> —
@@ -55,10 +59,17 @@ internal sealed class DeliveryRunner(
     TimeProvider time,
     ILogger<DeliveryRunner> logger)
 {
-    /// <summary>What a claim's lease adds to the longest handler timeout, and how long a timed-out handler is given to stop.</summary>
+    /// <summary>
+    /// The margin a claim's lease adds to the longest handler timeout beside <see cref="SettleGrace"/>: the lease is the
+    /// longest timeout + <see cref="LeaseGrace"/> + <see cref="SettleGrace"/>, so an attempt is answered — timed out and
+    /// settled — with this much to spare for its scope and its payload read.
+    /// </summary>
     internal static TimeSpan LeaseGrace { get; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>Gets how long a timed-out handler is given to observe its token; <see cref="LeaseGrace"/> except in tests.</summary>
+    /// <summary>
+    /// Gets how long a timed-out handler is given to observe its token before it is abandoned — 30 s except in tests; a
+    /// claim's lease must cover it on top of the timeout and <see cref="LeaseGrace"/>.
+    /// </summary>
     internal TimeSpan SettleGrace { get; init; } = LeaseGrace;
 
     internal async Task<DeliveryRunOutcome> RunAsync(
@@ -66,57 +77,55 @@ internal sealed class DeliveryRunner(
     {
         var startedAt = time.GetUtcNow();
         var started = time.GetTimestamp();
-        if (await AttemptAsync(delivery, handler, stopping).ConfigureAwait(false) is not { } verdict)
+        var (@event, refusal) = Admit(delivery, handler);
+        using var span = @event is null ? null : AlvoHookTelemetry.StartDelivery(delivery.Subscriber, @event, delivery.Attempts);
+        var verdict = @event is null ? refusal : await AttemptAsync(@event, delivery, handler, stopping).ConfigureAwait(false);
+        if (verdict is not { } answered)
         {
             return DeliveryRunOutcome.Shutdown;
         }
 
         var attempt = new DeliveryAttempt { Delivery = delivery, Claimant = claimant, StartedAt = startedAt, Duration = time.GetElapsedTime(started) };
-        var outcome = await RecordAsync(attempt, handler.Settings.Retry, verdict).ConfigureAwait(false);
+        var outcome = await RecordAsync(attempt, handler.Settings.Retry, answered).ConfigureAwait(false);
+        AlvoHookTelemetry.Finish(span, SpanOutcome(outcome));
         AlvoDeliveryMetrics.Recorded(attempt, outcome);
 
         return outcome;
     }
 
-    private async Task<AttemptVerdict?> AttemptAsync(ClaimedDelivery delivery, BoundHandler handler, CancellationToken stopping)
+    /// <summary>The verdict of a handler that has ended — its own result, whatever the runner's deadline did meanwhile.</summary>
+    internal static AttemptVerdict Ended(Task invocation) =>
+        invocation.IsCompletedSuccessfully ? AttemptVerdict.Success
+        : invocation.Exception is { } failure ? VerdictOf(failure.InnerException ?? failure)
+        : AttemptVerdict.Retry(typeof(TaskCanceledException).FullName!);
+
+    private static (AlvoEvent? Event, AttemptVerdict? Refusal) Admit(ClaimedDelivery delivery, BoundHandler handler) =>
+        delivery.Payload is null ? (null, AttemptVerdict.Dead(DeliveryErrors.EventMissing))
+        : delivery.Attempts > handler.Settings.Retry.MaxAttempts ? (null, AttemptVerdict.Dead(DeliveryErrors.LeaseExpired))
+        : ReadableEvent(delivery.Payload, handler.Settings.RunAs) is { } @event ? (@event, null)
+        : (null, AttemptVerdict.Dead(DeliveryErrors.EventUnreadable));
+
+    /// <summary>Runs the handler in its event's flow; the flow ends here, so the store calls that answer for it run outside it.</summary>
+    private async Task<AttemptVerdict?> AttemptAsync(AlvoEvent @event, ClaimedDelivery delivery, BoundHandler handler, CancellationToken stopping)
     {
-        if (delivery.Payload is null)
-        {
-            return AttemptVerdict.Dead(DeliveryErrors.EventMissing);
-        }
-
-        if (delivery.Attempts > handler.Settings.Retry.MaxAttempts)
-        {
-            return AttemptVerdict.Dead(DeliveryErrors.LeaseExpired);
-        }
-
-        if (ReadableEvent(delivery.Payload, handler.Settings.RunAs) is not { } @event)
-        {
-            return AttemptVerdict.Dead(DeliveryErrors.EventUnreadable);
-        }
-
         using var flow = AlvoFlow.Enter(FlowOf(@event));
-        using var span = AlvoHookTelemetry.StartDelivery(delivery.Subscriber, @event, delivery.Attempts);
         AlvoDeliveryMetrics.Lagged(delivery.Subscriber, time.GetUtcNow() - @event.Time);
-
-        return await InvokeObservedAsync(@event, delivery, handler, span, stopping).ConfigureAwait(false);
-    }
-
-    private async Task<AttemptVerdict?> InvokeObservedAsync(
-        AlvoEvent @event, ClaimedDelivery delivery, BoundHandler handler, Activity? span, CancellationToken stopping)
-    {
         try
         {
-            var verdict = await InvokeAsync(@event, delivery, handler, stopping).ConfigureAwait(false);
-            AlvoHookTelemetry.Finish(span, verdict.Succeeded ? AlvoHookTelemetry.Succeeded : AlvoHookTelemetry.Failed);
-
-            return verdict;
+            return await InvokeAsync(@event, delivery, handler, stopping).ConfigureAwait(false);
         }
         catch (Exception) when (stopping.IsCancellationRequested)
         {
             return null;
         }
     }
+
+    private static string SpanOutcome(DeliveryRunOutcome outcome) => outcome switch
+    {
+        DeliveryRunOutcome.Succeeded => AlvoHookTelemetry.Succeeded,
+        DeliveryRunOutcome.LeaseLost => AlvoHookTelemetry.LeaseLost,
+        _ => AlvoHookTelemetry.Failed,
+    };
 
     private async Task<AttemptVerdict> InvokeAsync(AlvoEvent @event, ClaimedDelivery delivery, BoundHandler handler, CancellationToken stopping)
     {
@@ -127,23 +136,32 @@ internal sealed class DeliveryRunner(
             await invocation.WaitAsync(handler.Settings.Timeout, time, stopping).ConfigureAwait(false);
             return AttemptVerdict.Success;
         }
-        catch (TimeoutException) when (!invocation.IsCompleted && !stopping.IsCancellationRequested)
+        catch (TimeoutException) when (!stopping.IsCancellationRequested)
         {
-            await cancel.CancelAsync().ConfigureAwait(false);
-            await SettleAsync(invocation, stopping).ConfigureAwait(false);
-            return AttemptVerdict.Retry(DeliveryErrors.Timeout);
-        }
-        catch (Exception failure) when (!stopping.IsCancellationRequested && IsDepthRefusal(failure))
-        {
-            return AttemptVerdict.Dead(DeliveryErrors.ChainDepthExceeded);
+            return invocation.IsCompleted
+                ? Ended(invocation)
+                : await TimedOutAsync(invocation, cancel, delivery, stopping).ConfigureAwait(false);
         }
         catch (Exception failure) when (!stopping.IsCancellationRequested)
         {
-            return AttemptVerdict.Retry(failure.GetType().FullName ?? failure.GetType().Name);
+            return VerdictOf(failure);
         }
     }
 
-    /// <summary>Gives a timed-out handler <see cref="SettleGrace"/> to observe its token; past that it is abandoned.</summary>
+    /// <summary>Cancels a handler past its timeout, gives it <see cref="SettleGrace"/> to stop, and abandons it if it does not.</summary>
+    private async Task<AttemptVerdict> TimedOutAsync(
+        Task invocation, CancellationTokenSource cancel, ClaimedDelivery delivery, CancellationToken stopping)
+    {
+        await cancel.CancelAsync().ConfigureAwait(false);
+        await SettleAsync(invocation, stopping).ConfigureAwait(false);
+        if (!invocation.IsCompleted)
+        {
+            Abandon(invocation, delivery);
+        }
+
+        return AttemptVerdict.Retry(DeliveryErrors.Timeout);
+    }
+
     private async Task SettleAsync(Task invocation, CancellationToken stopping)
     {
         try
@@ -154,6 +172,20 @@ internal sealed class DeliveryRunner(
         {
         }
     }
+
+    /// <summary>Observes an abandoned handler's later failure and logs its type — never its message — since nothing records it.</summary>
+    private void Abandon(Task invocation, ClaimedDelivery delivery) =>
+        _ = invocation.ContinueWith(
+            ended => DeliveryLog.AbandonedHandlerFailed(
+                logger, delivery.Id, delivery.Subscriber, delivery.Attempts, TypeOf(ended.Exception!.InnerException ?? ended.Exception)),
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+    private static AttemptVerdict VerdictOf(Exception failure) =>
+        IsDepthRefusal(failure) ? AttemptVerdict.Dead(DeliveryErrors.ChainDepthExceeded) : AttemptVerdict.Retry(TypeOf(failure));
+
+    private static string TypeOf(Exception failure) => failure.GetType().FullName ?? failure.GetType().Name;
 
     private static bool IsDepthRefusal(Exception failure) => failure switch
     {
@@ -244,7 +276,7 @@ internal sealed class DeliveryRunner(
         return DeliveryRunOutcome.LeaseLost;
     }
 
-    private readonly record struct AttemptVerdict(string? ErrorType, bool Retryable)
+    internal readonly record struct AttemptVerdict(string? ErrorType, bool Retryable)
     {
         internal static AttemptVerdict Success => new(null, false);
 

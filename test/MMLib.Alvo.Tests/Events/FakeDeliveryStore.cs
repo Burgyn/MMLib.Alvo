@@ -1,5 +1,7 @@
 ﻿using MMLib.Alvo.Events;
 
+using System.Collections.Concurrent;
+
 namespace MMLib.Alvo.Tests.Events;
 
 /// <summary>
@@ -18,6 +20,9 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     private readonly List<(Guid Delivery, int Attempt, string Outcome)> _attempts = [];
 
     internal int FanOutFailures { get; set; }
+
+    /// <summary>The ambient <see cref="AlvoFlow"/> at each answer for an attempt — what a write the store made there would carry.</summary>
+    internal ConcurrentQueue<AlvoProvenance?> AnswerFlows { get; } = new();
 
     internal IReadOnlyList<Row> Rows
     {
@@ -186,6 +191,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
 
     private bool Answer(DeliveryAttempt attempt, Action<Row> change, string outcome)
     {
+        AnswerFlows.Enqueue(AlvoFlow.Provenance);
         lock (_gate)
         {
             var row = _rows.SingleOrDefault(candidate => candidate.Id == attempt.Delivery.Id

@@ -4,7 +4,8 @@
 /// <remarks>Each wait is spread by up to a fifth either way, so many deliveries failing together do not retry together.</remarks>
 public sealed class AlvoRetryPolicy
 {
-    private static readonly TimeSpan _longestDelay = TimeSpan.FromDays(7);
+    /// <summary>Gets the longest wait a policy may hold — and, once spread, the longest any retry waits.</summary>
+    internal static TimeSpan LongestDelay { get; } = TimeSpan.FromDays(7);
 
     private AlvoRetryPolicy(IReadOnlyList<TimeSpan> delays) => Delays = delays;
 
@@ -32,7 +33,7 @@ public sealed class AlvoRetryPolicy
         foreach (var delay in delays)
         {
             ArgumentOutOfRangeException.ThrowIfLessThan(delay, TimeSpan.Zero, nameof(delays));
-            if (delay > _longestDelay)
+            if (delay > LongestDelay)
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(delays), delay, "A retry wait can be at most 7 days; shorten it, or handle a longer wait in the handler itself.");

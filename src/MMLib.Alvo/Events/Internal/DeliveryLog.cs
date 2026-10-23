@@ -41,4 +41,10 @@ internal static partial class DeliveryLog
             + "with per-record order it holds back this handler's later events of the same record until it is redelivered "
             + "or retired.")]
     internal static partial void DeliveryDead(ILogger logger, Guid deliveryId, string subscriber, int attempt, string errorType);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Alvo's attempt {Attempt} of delivery {DeliveryId} for {Subscriber} was answered as timed out while its "
+            + "handler still ran, ignoring its cancellation; the handler later failed ({ErrorType}). Nothing was recorded for it.")]
+    internal static partial void AbandonedHandlerFailed(ILogger logger, Guid deliveryId, string subscriber, int attempt, string errorType);
 }

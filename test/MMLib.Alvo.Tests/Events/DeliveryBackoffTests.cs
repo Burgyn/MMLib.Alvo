@@ -17,6 +17,10 @@ public sealed class DeliveryBackoffTests
         new DeliveryBackoff(() => 0.5).After(7, AlvoRetryPolicy.Default).ShouldBeNull();
 
     [Fact]
+    public void A_spread_wait_never_passes_the_policy_s_7_day_ceiling() =>
+        new DeliveryBackoff(() => 1.0).After(1, AlvoRetryPolicy.From(TimeSpan.FromDays(7))).ShouldBe(TimeSpan.FromDays(7));
+
+    [Fact]
     public void The_shared_sampler_stays_within_a_fifth_of_the_policy_s_wait()
     {
         var backoff = new DeliveryBackoff();
