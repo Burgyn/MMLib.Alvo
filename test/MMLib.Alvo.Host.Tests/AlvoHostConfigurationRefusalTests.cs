@@ -84,6 +84,23 @@ public class AlvoHostConfigurationRefusalTests
     }
 
     /// <summary>
+    /// The manual dispatch mode is refused: the standalone host never calls <c>IAlvoEventPump.DrainAsync</c>, so in
+    /// that mode no webhook and no mail would ever leave it, and nothing would say why.
+    /// </summary>
+    [Fact]
+    public async Task The_manual_dispatch_mode_is_refused_with_the_fix()
+    {
+        var refusal = await Should.ThrowAsync<OptionsValidationException>(
+            () => AlvoHostWorld.StartAsync(overrides: new Dictionary<string, string?>(StringComparer.Ordinal)
+            {
+                ["Alvo:Events:DispatchMode"] = "Manual",
+            }));
+
+        refusal.Message.ShouldContain("Alvo__Events__DispatchMode");
+        refusal.Message.ShouldContain("Background");
+    }
+
+    /// <summary>
     /// A configuration refusal leaves the database exactly as it found it.
     /// </summary>
     /// <remarks>
