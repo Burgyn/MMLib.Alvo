@@ -37,6 +37,11 @@ public sealed class ExtensionRegistrationTests
     }
 
     [Fact]
+    public void An_entity_named_twice_is_refused_at_the_call() =>
+        Should.Throw<ArgumentException>(() => Registered(alvo => alvo.Entities(["orders", "orders"], e => e.OnCreated<NoOpCreated>("audit"))))
+            .Message.ShouldContain("'orders' is named twice");
+
+    [Fact]
     public void The_star_binds_every_entity() =>
         ((EntityEvents)Registered(alvo => alvo.Entity("*", all => all.OnSaved<NoOpSaved>("audit-all")))
             .Handlers.Single().Source).IsAll.ShouldBeTrue();

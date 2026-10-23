@@ -43,6 +43,12 @@ public static class AlvoExtensionBuilderExtensions
             throw new ArgumentException("Name at least one entity, and no blank one.", nameof(entities));
         }
 
+        var repeated = names.GroupBy(name => name, StringComparer.Ordinal).FirstOrDefault(group => group.Count() > 1);
+        if (repeated is not null)
+        {
+            throw new ArgumentException($"'{repeated.Key}' is named twice; name each entity once.", nameof(entities));
+        }
+
         configure(new AlvoEntityBuilder(builder.Services, names));
 
         return builder;

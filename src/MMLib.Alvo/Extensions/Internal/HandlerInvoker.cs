@@ -4,6 +4,7 @@ using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
 
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 
 namespace MMLib.Alvo.Extensions.Internal;
@@ -40,10 +41,11 @@ internal sealed class HandlerInvoker
     internal static HandlerInvoker FromDelegate(Delegate handler, Type messageType)
     {
         ArgumentNullException.ThrowIfNull(handler);
-        EnsureReturnsTask(handler.Method);
+        EnsureReturnsTask(handler);
+        EnsureOnlyItsOwnMessage(handler, messageType);
         var parameters = handler.Method.GetParameters();
-        EnsureOnlyItsOwnMessage(parameters, messageType);
-        IReadOnlyList<Type> services = [.. parameters.Select(parameter => parameter.ParameterType).Where(type => !IsSupplied(type, messageType))];
+        IReadOnlyList<Type> services =
+            [.. parameters.Where(parameter => !parameter.HasDefaultValue).Select(parameter => parameter.ParameterType).Where(type => !IsSupplied(type, messageType))];
 
         return new HandlerInvoker(
             messageType,
@@ -53,31 +55,50 @@ internal sealed class HandlerInvoker
 
     internal static HandlerInvoker FromClass<THandler, TMessage>()
         where THandler : class, IAlvoEventHandler<TMessage>
-        where TMessage : class =>
-        new(typeof(TMessage), InvokeClassAsync<THandler, TMessage>, isService => ClassUnresolvable(typeof(THandler), isService));
-
-    private static void EnsureReturnsTask(MethodInfo method)
+        where TMessage : class
     {
+        if (typeof(THandler).IsAbstract)
+        {
+            throw new ArgumentException(
+                $"{Display(typeof(THandler))} is abstract, so Alvo cannot build it for a delivery; register a concrete handler class.",
+                nameof(THandler));
+        }
+
+        return new(typeof(TMessage), InvokeClassAsync<THandler, TMessage>, isService => ClassUnresolvable(typeof(THandler), isService));
+    }
+
+    private static void EnsureReturnsTask(Delegate handler)
+    {
+        var method = handler.Method;
         var returns = method.ReturnType;
-        if (returns == typeof(void) || returns == typeof(ValueTask) || typeof(Task).IsAssignableFrom(returns))
+        if (returns == typeof(void) && method.IsDefined(typeof(AsyncStateMachineAttribute), inherit: false))
+        {
+            throw new ArgumentException(
+                $"Handler '{method.Name}' is async void: Alvo could not wait for it or see it fail, so the delivery would "
+                + "succeed before the work ends. Make it return Task.",
+                nameof(handler));
+        }
+
+        if (returns == typeof(void) || returns == typeof(Task) || returns == typeof(ValueTask))
         {
             return;
         }
 
         throw new ArgumentException(
-            $"A handler delegate returns Task, ValueTask or nothing; this one returns {returns.Name}, which Alvo would discard.",
-            nameof(method));
+            $"A handler delegate returns Task, ValueTask or nothing; this one returns {Display(returns)}, whose result Alvo "
+            + "would discard.",
+            nameof(handler));
     }
 
-    private static void EnsureOnlyItsOwnMessage(ParameterInfo[] parameters, Type messageType)
+    private static void EnsureOnlyItsOwnMessage(Delegate handler, Type messageType)
     {
-        var other = parameters.FirstOrDefault(parameter => IsMessage(parameter.ParameterType) && parameter.ParameterType != messageType);
+        var other = handler.Method.GetParameters().FirstOrDefault(parameter => IsMessage(parameter.ParameterType) && parameter.ParameterType != messageType);
         if (other is not null)
         {
             throw new ArgumentException(
                 $"This registration hands its delegate {Display(messageType)}; parameter '{other.Name}' asks for "
                 + $"{Display(other.ParameterType)}, which it would never be given.",
-                nameof(parameters));
+                nameof(handler));
         }
     }
 
@@ -93,7 +114,7 @@ internal sealed class HandlerInvoker
     private static async Task InvokeDelegateAsync(
         Delegate handler, ParameterInfo[] parameters, IServiceProvider services, object message, AlvoEventContext context, CancellationToken ct)
     {
-        var arguments = parameters.Select(parameter => Argument(parameter.ParameterType, services, message, context, ct)).ToArray();
+        var arguments = parameters.Select(parameter => Argument(parameter, services, message, context, ct)).ToArray();
         switch (Invoke(handler, arguments))
         {
             case Task task:
@@ -105,11 +126,17 @@ internal sealed class HandlerInvoker
         }
     }
 
-    private static object? Argument(Type type, IServiceProvider services, object message, AlvoEventContext context, CancellationToken ct) =>
-        type == typeof(CancellationToken) ? ct
-        : type == typeof(AlvoEventContext) ? context
-        : type.IsInstanceOfType(message) && IsMessage(type) ? message
-        : services.GetRequiredService(type);
+    private static object? Argument(
+        ParameterInfo parameter, IServiceProvider services, object message, AlvoEventContext context, CancellationToken ct)
+    {
+        var type = parameter.ParameterType;
+
+        return type == typeof(CancellationToken) ? ct
+            : type == typeof(AlvoEventContext) ? context
+            : type.IsInstanceOfType(message) && IsMessage(type) ? message
+            : parameter.HasDefaultValue ? services.GetService(type) ?? parameter.DefaultValue
+            : services.GetRequiredService(type);
+    }
 
     private static object? Invoke(Delegate handler, object?[] arguments)
     {
@@ -165,12 +192,22 @@ internal sealed class HandlerInvoker
             return [];
         }
 
-        var constructor = handler.GetConstructors().OrderByDescending(candidate => candidate.GetParameters().Length).FirstOrDefault();
+        var constructors = handler.GetConstructors();
+        var marked = constructors.FirstOrDefault(constructor => constructor.IsDefined(typeof(ActivatorUtilitiesConstructorAttribute), false));
+        if (marked is not null)
+        {
+            return Missing(marked, isService);
+        }
 
-        return constructor is null
-            ? [handler]
-            : [.. constructor.GetParameters()
-                .Where(parameter => !parameter.HasDefaultValue && !isService.IsService(parameter.ParameterType))
-                .Select(parameter => parameter.ParameterType)];
+        var candidates = constructors.OrderByDescending(constructor => constructor.GetParameters().Length).ToList();
+
+        return candidates.Count == 0 ? [handler]
+            : candidates.Any(constructor => Missing(constructor, isService).Count == 0) ? []
+            : Missing(candidates[0], isService);
     }
+
+    private static IReadOnlyList<Type> Missing(ConstructorInfo constructor, IServiceProviderIsService isService) =>
+        [.. constructor.GetParameters()
+            .Where(parameter => !parameter.HasDefaultValue && !isService.IsService(parameter.ParameterType))
+            .Select(parameter => parameter.ParameterType)];
 }

@@ -48,14 +48,62 @@ public sealed class HandlerInvokerTests
     }
 
     [Fact]
-    public void A_delegate_that_returns_a_value_is_refused() =>
-        Should.Throw<ArgumentException>(() => HandlerInvoker.FromDelegate((AlvoCreated<AlvoRecord> _) => 42, typeof(AlvoCreated<AlvoRecord>)))
-            .Message.ShouldContain("Task");
+    public void A_delegate_that_returns_a_value_is_refused()
+    {
+        var refusal = Should.Throw<ArgumentException>(() => HandlerInvoker.FromDelegate((AlvoCreated<AlvoRecord> _) => 42, typeof(AlvoCreated<AlvoRecord>)));
+
+        refusal.Message.ShouldContain("Task");
+        refusal.ParamName.ShouldBe("handler");
+    }
 
     [Fact]
-    public void A_delegate_asking_for_another_verb_s_message_is_refused() =>
-        Should.Throw<ArgumentException>(() => HandlerInvoker.FromDelegate((AlvoUpdated<AlvoRecord> _) => Task.CompletedTask, typeof(AlvoCreated<AlvoRecord>)))
-            .Message.ShouldContain("AlvoCreated");
+    public void A_task_or_value_task_with_a_result_is_refused_by_its_readable_name()
+    {
+        Should.Throw<ArgumentException>(() => HandlerInvoker.FromDelegate((AlvoCreated<AlvoRecord> _) => Task.FromResult(1), typeof(AlvoCreated<AlvoRecord>)))
+            .Message.ShouldContain("Task<Int32>");
+        Should.Throw<ArgumentException>(() => HandlerInvoker.FromDelegate((AlvoCreated<AlvoRecord> _) => ValueTask.FromResult(1), typeof(AlvoCreated<AlvoRecord>)))
+            .Message.ShouldContain("ValueTask<Int32>");
+    }
+
+    [Fact]
+    public void An_async_void_method_is_refused()
+    {
+        Action<AlvoCreated<AlvoRecord>> asyncVoid = AsyncVoidHandler;
+
+        var refusal = Should.Throw<ArgumentException>(() => HandlerInvoker.FromDelegate(asyncVoid, typeof(AlvoCreated<AlvoRecord>)));
+
+        refusal.Message.ShouldContain("async void");
+        refusal.ParamName.ShouldBe("handler");
+    }
+
+    [Fact]
+    public void A_delegate_asking_for_another_verb_s_message_is_refused()
+    {
+        var refusal = Should.Throw<ArgumentException>(() =>
+            HandlerInvoker.FromDelegate((AlvoUpdated<AlvoRecord> _) => Task.CompletedTask, typeof(AlvoCreated<AlvoRecord>)));
+
+        refusal.Message.ShouldContain("AlvoCreated");
+        refusal.ParamName.ShouldBe("handler");
+    }
+
+    [Fact]
+    public async Task A_parameter_with_a_default_is_optional_and_gets_its_default_when_the_service_is_missing()
+    {
+        Clock? seen = new();
+        var invoker = HandlerInvoker.FromDelegate(
+            (AlvoCreated<AlvoRecord> _, Clock? clock = null) =>
+            {
+                seen = clock;
+                return Task.CompletedTask;
+            },
+            typeof(AlvoCreated<AlvoRecord>));
+        using var services = new ServiceCollection().BuildServiceProvider();
+
+        invoker.Unresolvable(IsService()).ShouldBeEmpty();
+        await invoker.InvokeAsync(services, _message, Context(), Ct);
+
+        seen.ShouldBeNull();
+    }
 
     [Fact]
     public async Task The_handler_s_own_exception_escapes_unwrapped()
@@ -78,18 +126,52 @@ public sealed class HandlerInvokerTests
     [Fact]
     public async Task A_handler_class_is_built_per_delivery_and_disposed_when_it_was_not_registered()
     {
-        using var services = new ServiceCollection().AddSingleton<Clock>().BuildServiceProvider();
-        var invoker = HandlerInvoker.FromClass<CountingHandler, AlvoCreated<AlvoRecord>>();
+        var journal = new Journal();
+        using var services = new ServiceCollection().AddSingleton(journal).BuildServiceProvider();
+        var invoker = HandlerInvoker.FromClass<JournalHandler, AlvoCreated<AlvoRecord>>();
 
         await invoker.InvokeAsync(services, _message, Context(), Ct);
+        await invoker.InvokeAsync(services, _message, Context(), Ct);
 
-        CountingHandler.Handled.ShouldBeGreaterThanOrEqualTo(1);
-        CountingHandler.Disposed.ShouldBeGreaterThanOrEqualTo(1);
+        journal.Handled.Distinct().Count().ShouldBe(2);
+        journal.Disposed.ShouldBe(journal.Handled);
+    }
+
+    [Fact]
+    public async Task A_registered_handler_class_comes_from_the_container_and_is_not_disposed_by_alvo()
+    {
+        var journal = new Journal();
+        using var services = new ServiceCollection().AddSingleton(journal).AddSingleton<JournalHandler>().BuildServiceProvider();
+        var invoker = HandlerInvoker.FromClass<JournalHandler, AlvoCreated<AlvoRecord>>();
+
+        await invoker.InvokeAsync(services, _message, Context(), Ct);
+        await invoker.InvokeAsync(services, _message, Context(), Ct);
+
+        journal.Handled.ShouldBe([services.GetRequiredService<JournalHandler>().Id, services.GetRequiredService<JournalHandler>().Id]);
+        journal.Disposed.ShouldBeEmpty();
     }
 
     [Fact]
     public void A_handler_class_reports_the_constructor_dependencies_the_container_cannot_resolve() =>
-        HandlerInvoker.FromClass<CountingHandler, AlvoCreated<AlvoRecord>>().Unresolvable(IsService()).ShouldBe([typeof(Clock)]);
+        HandlerInvoker.FromClass<JournalHandler, AlvoCreated<AlvoRecord>>().Unresolvable(IsService()).ShouldBe([typeof(Journal)]);
+
+    [Fact]
+    public async Task A_handler_class_with_a_constructor_the_container_can_satisfy_is_resolvable_and_built_with_it()
+    {
+        var invoker = HandlerInvoker.FromClass<TwoConstructorHandler, AlvoCreated<AlvoRecord>>();
+        using var services = new ServiceCollection().BuildServiceProvider();
+
+        invoker.Unresolvable(IsService()).ShouldBeEmpty();
+        await invoker.InvokeAsync(services, _message, Context(), Ct);
+    }
+
+    [Fact]
+    public void A_marked_constructor_is_the_one_checked() =>
+        HandlerInvoker.FromClass<MarkedConstructorHandler, AlvoCreated<AlvoRecord>>().Unresolvable(IsService()).ShouldBe([typeof(Clock)]);
+
+    [Fact]
+    public void An_abstract_handler_class_is_refused_at_the_call() =>
+        Should.Throw<ArgumentException>(() => HandlerInvoker.FromClass<AbstractHandler, AlvoCreated<AlvoRecord>>()).Message.ShouldContain("abstract");
 
     private static AlvoEventContext Context() => new(
         new AlvoEvent
@@ -118,22 +200,72 @@ public sealed class HandlerInvokerTests
 
     internal sealed class Clock;
 
-    private sealed class CountingHandler(Clock clock) : IAlvoEventHandler<AlvoCreated<AlvoRecord>>, IDisposable
+    private static async void AsyncVoidHandler(AlvoCreated<AlvoRecord> message) => await Task.Yield();
+
+    internal sealed class Journal
     {
-        private static int _handled;
-        private static int _disposed;
+        private readonly List<Guid> _handled = [];
+        private readonly List<Guid> _disposed = [];
 
-        internal static int Handled => Volatile.Read(ref _handled);
+        internal IReadOnlyList<Guid> Handled { get { lock (_handled) { return [.. _handled]; } } }
 
-        internal static int Disposed => Volatile.Read(ref _disposed);
+        internal IReadOnlyList<Guid> Disposed { get { lock (_disposed) { return [.. _disposed]; } } }
+
+        internal void Handle(Guid id)
+        {
+            lock (_handled)
+            {
+                _handled.Add(id);
+            }
+        }
+
+        internal void Dispose(Guid id)
+        {
+            lock (_disposed)
+            {
+                _disposed.Add(id);
+            }
+        }
+    }
+
+    internal sealed class JournalHandler(Journal journal) : IAlvoEventHandler<AlvoCreated<AlvoRecord>>, IDisposable
+    {
+        internal Guid Id { get; } = Guid.NewGuid();
 
         public Task HandleAsync(AlvoCreated<AlvoRecord> message, AlvoEventContext context, CancellationToken cancellationToken)
         {
-            ArgumentNullException.ThrowIfNull(clock);
-            Interlocked.Increment(ref _handled);
+            journal.Handle(Id);
             return Task.CompletedTask;
         }
 
-        public void Dispose() => Interlocked.Increment(ref _disposed);
+        public void Dispose() => journal.Dispose(Id);
+    }
+
+    private sealed class TwoConstructorHandler : IAlvoEventHandler<AlvoCreated<AlvoRecord>>
+    {
+        public TwoConstructorHandler()
+        {
+        }
+
+        public TwoConstructorHandler(Clock clock) => ArgumentNullException.ThrowIfNull(clock);
+
+        public Task HandleAsync(AlvoCreated<AlvoRecord> message, AlvoEventContext context, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class MarkedConstructorHandler : IAlvoEventHandler<AlvoCreated<AlvoRecord>>
+    {
+        public MarkedConstructorHandler()
+        {
+        }
+
+        [ActivatorUtilitiesConstructor]
+        public MarkedConstructorHandler(Clock clock) => ArgumentNullException.ThrowIfNull(clock);
+
+        public Task HandleAsync(AlvoCreated<AlvoRecord> message, AlvoEventContext context, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private abstract class AbstractHandler : IAlvoEventHandler<AlvoCreated<AlvoRecord>>
+    {
+        public abstract Task HandleAsync(AlvoCreated<AlvoRecord> message, AlvoEventContext context, CancellationToken cancellationToken);
     }
 }
