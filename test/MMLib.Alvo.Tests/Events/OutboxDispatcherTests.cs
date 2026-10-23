@@ -354,28 +354,42 @@ public sealed partial class OutboxDispatcherTests : IDisposable
     }
 
     /// <summary>
-    /// A failure that is nobody's event in particular — the queue itself being unreachable — is contained too:
-    /// the pump stops with one Error line and <c>ExecuteAsync</c> completes, so the host keeps serving.
+    /// A failure that is nobody's event in particular — the queue itself being unreachable — fails one round, not the
+    /// pump: one Error line naming the exception's type, a backoff, and the next round delivers.
     /// </summary>
     /// <remarks>
-    /// Nothing restarts the pump, and that is the honest answer without a supervision policy: the Error line is
-    /// the notification, and its wording says the process serves requests and delivers no events until it is
-    /// restarted.
+    /// A pump that ended here delivered nothing until the process restarted, over what is usually a restarting
+    /// database. The line carries the type name only, never the message, which a provider may fill with a connection
+    /// string.
     /// </remarks>
     [Fact]
-    public async Task A_queue_that_cannot_be_reached_stops_the_pump_loudly_without_faulting_the_host()
+    public async Task A_queue_that_cannot_be_reached_fails_a_round_and_the_pump_keeps_delivering()
     {
-        var store = new FakeOutboxStore { ClaimThrows = new InvalidOperationException("the database is gone") };
+        var store = StoreWith(WonDeal());
+        store.ClaimFailures = 1;
         await using var pump = await StartAsync(store, Ready);
 
-        await UntilAsync(() => pump.Service.ExecuteTask!.IsCompleted, "the pump to end");
+        await UntilAsync(() => store.DispatchedIds.Count == 1, "the event to be delivered after the failed round");
 
-        pump.Service.ExecuteTask!.IsCompletedSuccessfully.ShouldBeTrue(
-            "an escaping failure would take down a host serving HTTP, because "
-            + "BackgroundServiceExceptionBehavior defaults to StopHost");
-        Errors.ShouldHaveSingleItem().Message.ShouldContain("stopped");
-        Errors[0].Exception.ShouldNotBeNull().Message.ShouldBe("the database is gone");
+        pump.Service.ExecuteTask!.IsCompleted.ShouldBeFalse("a failed round must not end the pump");
+        var error = Errors.ShouldHaveSingleItem();
+        error.Message.ShouldContain(nameof(InvalidOperationException));
+        error.Message.ShouldNotContain(FakeOutboxStore.ClaimFailure);
+        error.Exception.ShouldBeNull("the type name is logged, never the exception and its message");
     }
+
+    [Theory]
+    [InlineData(0, 20)]
+    [InlineData(20, 40)]
+    [InlineData(40_000, 60_000)]
+    [InlineData(60_000, 60_000)]
+    public void A_failed_round_waits_double_the_last_wait_up_to_a_minute(int previousMs, int expectedMs) =>
+        OutboxDispatcher.NextBackoff(TimeSpan.FromMilliseconds(previousMs), _pollInterval)
+            .ShouldBe(TimeSpan.FromMilliseconds(expectedMs));
+
+    [Fact]
+    public void A_poll_interval_longer_than_a_minute_is_its_own_ceiling() =>
+        OutboxDispatcher.NextBackoff(TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(2)).ShouldBe(TimeSpan.FromMinutes(2));
 
     private const string Project = "test";
     private const string EndpointName = "crm-sync";
@@ -626,8 +640,13 @@ public sealed partial class OutboxDispatcherTests : IDisposable
         private readonly Lock _gate = new();
         private int _ensureCount;
 
-        /// <summary>What <see cref="ClaimAsync"/> throws instead of answering, when it throws.</summary>
-        internal Exception? ClaimThrows { get; init; }
+        internal const string ClaimFailure = "the database is gone";
+
+        /// <summary>How many of the next claims throw instead of answering.</summary>
+        internal int ClaimFailures { get; set; }
+
+        /// <summary>Whether <see cref="HoldBackAsync"/> throws instead of handing the entry back.</summary>
+        internal bool HoldBackThrows { get; set; }
 
         internal int EnsureCount => Volatile.Read(ref _ensureCount);
 
@@ -672,7 +691,7 @@ public sealed partial class OutboxDispatcherTests : IDisposable
         {
             lock (_gate)
             {
-                _entries.Add(new FakeEntry(@event.Id, @event.Type, AlvoEventJson.Write(@event)));
+                _entries.Add(new FakeEntry(@event.Id, @event.Type, @event.PartitionKey, AlvoEventJson.Write(@event)));
             }
         }
 
@@ -704,11 +723,14 @@ public sealed partial class OutboxDispatcherTests : IDisposable
             lock (_gate)
             {
                 _claims.Add(new ClaimRequest(claimant, batchSize, maxAttempts, lease));
+                if (ClaimFailures > 0)
+                {
+                    ClaimFailures--;
+                    return Task.FromException<IReadOnlyList<OutboxEntry>>(new InvalidOperationException(ClaimFailure));
+                }
             }
 
-            return ClaimThrows is not null
-                ? Task.FromException<IReadOnlyList<OutboxEntry>>(ClaimThrows)
-                : Task.FromResult(Claimed(claimant, batchSize, maxAttempts));
+            return Task.FromResult(Claimed(claimant, batchSize, maxAttempts));
         }
 
         public Task MarkDispatchedAsync(Guid id, CancellationToken cancellationToken = default)
@@ -738,6 +760,11 @@ public sealed partial class OutboxDispatcherTests : IDisposable
 
         public Task HoldBackAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default)
         {
+            if (HoldBackThrows)
+            {
+                return Task.FromException(new InvalidOperationException("the hand-back was refused"));
+            }
+
             lock (_gate)
             {
                 var entry = _entries.Single(candidate => candidate.Id == id);
@@ -769,7 +796,7 @@ public sealed partial class OutboxDispatcherTests : IDisposable
             entry.ClaimedBy = claimant;
             entry.Attempts++;
 
-            return new OutboxEntry(entry.Id, entry.Type, "deals:1", entry.Payload, entry.Attempts);
+            return new OutboxEntry(entry.Id, entry.Type, entry.PartitionKey, entry.Payload, entry.Attempts);
         }
 
         private IReadOnlyList<T> Snapshot<T>(List<T> values)
@@ -782,11 +809,13 @@ public sealed partial class OutboxDispatcherTests : IDisposable
     }
 
     /// <summary>One queued entry's mutable state, exactly the columns a fact reads.</summary>
-    private sealed class FakeEntry(Guid id, string type, string payload)
+    private sealed class FakeEntry(Guid id, string type, string partitionKey, string payload)
     {
         internal Guid Id => id;
 
         internal string Type => type;
+
+        internal string PartitionKey => partitionKey;
 
         internal string Payload => payload;
 

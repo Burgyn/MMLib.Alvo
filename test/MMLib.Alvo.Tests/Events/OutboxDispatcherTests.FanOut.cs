@@ -78,10 +78,76 @@ public sealed partial class OutboxDispatcherTests
         deliveries.Rows.ShouldHaveSingleItem();
     }
 
-    private DeliveryFanOut FanOutTo(FakeDeliveryStore deliveries) => new(
+    /// <summary>A stopped key holds back only its own record: an entry of another key in the same batch is delivered.</summary>
+    [Fact]
+    public async Task Another_record_flows_while_one_is_held_back()
+    {
+        var deliveries = new FakeDeliveryStore(TimeProvider.System) { FanOutFailures = 1 };
+        var (first, second, other) = (WonDeal(), WonDeal(), OtherRecord());
+        var store = StoreWith(first, second, other);
+
+        await Subject(store, Ready, fanOut: FanOutTo(deliveries)).PumpOneBatchAsync(Cancellation);
+
+        store.HeldBackIds.ShouldBe([second.Id]);
+        store.DispatchedIds.ShouldBe([other.Id]);
+        deliveries.Rows.ShouldHaveSingleItem().EventId.ShouldBe(other.Id);
+    }
+
+    /// <summary>A hand-back the store refuses is contained to its entry: the rest of the batch is still delivered.</summary>
+    [Fact]
+    public async Task A_hand_back_the_store_refuses_does_not_stop_the_batch()
+    {
+        var deliveries = new FakeDeliveryStore(TimeProvider.System) { FanOutFailures = 1 };
+        var (first, second, other) = (WonDeal(), WonDeal(), OtherRecord());
+        var store = StoreWith(first, second, other);
+        store.HoldBackThrows = true;
+
+        await Subject(store, Ready, fanOut: FanOutTo(deliveries)).PumpOneBatchAsync(Cancellation);
+
+        store.DispatchedIds.ShouldBe([other.Id]);
+        store.EntryOf(second.Id).Claimed.ShouldBeTrue("it stays claimed until its lease ends, so nothing overtakes it");
+        _logs.Entries.ShouldContain(entry => entry.EventName == "HoldBackFailed" && entry.Level == LogLevel.Warning);
+    }
+
+    /// <summary>
+    /// The entry is retried because its webhook failed; the retry re-fans it out into the row that already exists, so the
+    /// dead delivery is recorded and counted once.
+    /// </summary>
+    [Fact]
+    public async Task A_retried_entry_leaves_one_dead_delivery_counted_once()
+    {
+        var handler = $"loop-{Guid.NewGuid():N}";
+        using var dead = new DeadDeliveries(handler);
+        var deliveries = new FakeDeliveryStore(TimeProvider.System);
+        var store = StoreWith(WonDeal() with { ChainDepth = AlvoChainDepthLimit.DefaultMaxDepth });
+        var pump = Subject(store, Ready, status: HttpStatusCode.InternalServerError, fanOut: FanOutTo(deliveries, handler));
+
+        await pump.PumpOneBatchAsync(Cancellation);
+        await pump.PumpOneBatchAsync(Cancellation);
+
+        store.ReleasedIds.Count.ShouldBe(2, "both attempts ran");
+        deliveries.Rows.ShouldHaveSingleItem().LastErrorType.ShouldBe("chain-depth-exceeded");
+        dead.Count.ShouldBe(1);
+    }
+
+    /// <summary>Ruling 21: an event whose only reach is a dead delivery is dispatched, not filtered.</summary>
+    [Theory]
+    [InlineData(0, 0, false)]
+    [InlineData(0, 1, true)]
+    [InlineData(1, 0, true)]
+    public void An_event_is_counted_dispatched_when_it_reached_a_hook_or_any_delivery(int hooks, int deliveries, bool dispatched) =>
+        OutboxDispatcher.Counted(hooks, deliveries).ShouldBeSameAs(dispatched ? AlvoEventMetrics.Dispatched : AlvoEventMetrics.Filtered);
+
+    private static AlvoEvent OtherRecord() => WonDeal() with
+    {
+        Subject = "deals/019000aa-0000-7000-8000-0000000000ee",
+        PartitionKey = "deals:019000aa-0000-7000-8000-0000000000ee",
+    };
+
+    private DeliveryFanOut FanOutTo(FakeDeliveryStore deliveries, string handler = DealHandler) => new(
         deliveries,
         new ExtensionBinder(
-            HandlerCatalog.Registry(alvo => alvo.Entity("deals", d => d.OnUpdated(DealHandler, (AlvoUpdated<AlvoRecord> _) => Task.CompletedTask))),
+            HandlerCatalog.Registry(alvo => alvo.Entity("deals", d => d.OnUpdated(handler, (AlvoUpdated<AlvoRecord> _) => Task.CompletedTask))),
             CelFixtures.Compiler,
             HandlerCatalog.EveryService(),
             _loggers.CreateLogger<ExtensionBinder>()),

@@ -33,6 +33,13 @@ namespace MMLib.Alvo.Events.Internal;
 /// backstop rather than the mechanism.
 /// </para>
 /// <para>
+/// <b>A failed round does not end the loop.</b> A claim, a release or a hand-back the store refuses — an outage, a
+/// restarting database — fails the round, not the pump: it is logged (<see cref="EventLog.DispatcherRoundFailed"/>, the
+/// exception's type name only) and the next round waits a backoff that doubles from the poll interval up to
+/// <see cref="MaxRoundBackoff"/>, reset by a round that succeeds. Nothing it claimed was retired, so a claim it
+/// could not answer for returns when its lease ends.
+/// </para>
+/// <para>
 /// <b>The loop observes its token, because the host blocks in <c>StopAsync</c> waiting for it</b> with a 30 s
 /// <c>ShutdownTimeout</c>. Every await here takes the stopping token, and
 /// the idle wait is a <see cref="Task.Delay(TimeSpan, TimeProvider, CancellationToken)"/> rather than a sleep,
@@ -151,16 +158,61 @@ internal sealed class OutboxDispatcher(
             return;
         }
 
-        await store.EnsureAsync(stoppingToken).ConfigureAwait(false);
-
+        var failing = TimeSpan.Zero;
         while (!stoppingToken.IsCancellationRequested)
         {
-            if (await PumpOneBatchAsync(stoppingToken).ConfigureAwait(false) == 0)
-            {
-                await Task.Delay(options.Value.PollInterval, time, stoppingToken).ConfigureAwait(false);
-            }
+            failing = await TickAsync(failing, stoppingToken).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// One round of the loop and the wait after it: none after a full batch, the poll interval after an empty one, and
+    /// a growing backoff after a failed one.
+    /// </summary>
+    /// <param name="failing">The backoff the previous round left; <see cref="TimeSpan.Zero"/> when it succeeded.</param>
+    /// <param name="stoppingToken">The host's stopping token.</param>
+    /// <returns>The backoff the next round starts from.</returns>
+    private async Task<TimeSpan> TickAsync(TimeSpan failing, CancellationToken stoppingToken)
+    {
+        TimeSpan wait;
+        try
+        {
+            await EnsureStoreAsync(stoppingToken).ConfigureAwait(false);
+            var claimed = await PumpOneBatchAsync(stoppingToken).ConfigureAwait(false);
+            failing = TimeSpan.Zero;
+            wait = claimed == 0 ? options.Value.PollInterval : TimeSpan.Zero;
+        }
+        catch (Exception failure) when (!stoppingToken.IsCancellationRequested)
+        {
+            failing = wait = NextBackoff(failing, options.Value.PollInterval);
+            EventLog.DispatcherRoundFailed(logger, failure.GetType().Name, wait);
+        }
+
+        if (wait > TimeSpan.Zero)
+        {
+            await Task.Delay(wait, time, stoppingToken).ConfigureAwait(false);
+        }
+
+        return failing;
+    }
+
+    /// <summary>The wait after a failed round: the poll interval first, then double the last, up to <see cref="MaxRoundBackoff"/>.</summary>
+    /// <param name="previous">The wait after the previous failed round; <see cref="TimeSpan.Zero"/> when it succeeded.</param>
+    /// <param name="pollInterval">The configured poll interval — also the ceiling when it is longer than a minute.</param>
+    internal static TimeSpan NextBackoff(TimeSpan previous, TimeSpan pollInterval)
+    {
+        if (previous <= TimeSpan.Zero)
+        {
+            return pollInterval;
+        }
+
+        var ceiling = pollInterval > MaxRoundBackoff ? pollInterval : MaxRoundBackoff;
+
+        return previous >= ceiling / 2 ? ceiling : previous * 2;
+    }
+
+    /// <summary>The longest a failed round makes the loop wait, unless the poll interval itself is longer.</summary>
+    internal static TimeSpan MaxRoundBackoff { get; } = TimeSpan.FromMinutes(1);
 
     /// <summary>Claims one batch and dispatches every entry in it.</summary>
     /// <param name="stoppingToken">The host's stopping token.</param>
@@ -231,6 +283,15 @@ internal sealed class OutboxDispatcher(
             throw Unprimed();
         }
 
+        await EnsureStoreAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Brings the store up once per process; a failure is retried by the next round. The loop and the manual rounds never
+    /// run in one process together, so the flag needs no lock.
+    /// </summary>
+    private async Task EnsureStoreAsync(CancellationToken cancellationToken)
+    {
         if (!_storeReady)
         {
             await store.EnsureAsync(cancellationToken).ConfigureAwait(false);
@@ -284,7 +345,7 @@ internal sealed class OutboxDispatcher(
     {
         if (stopped.TryGetValue(entry.PartitionKey, out var heldFor))
         {
-            await store.HoldBackAsync(entry.Id, heldFor, stoppingToken).ConfigureAwait(false);
+            await HoldBackAsync(entry, heldFor, stoppingToken).ConfigureAwait(false);
             return;
         }
 
@@ -340,7 +401,23 @@ internal sealed class OutboxDispatcher(
 
         await store.MarkDispatchedAsync(entry.Id, stoppingToken).ConfigureAwait(false);
 
-        Counted(hooks.Count + deliveries).Add(1);
+        Counted(hooks.Count, deliveries).Add(1);
+    }
+
+    /// <summary>
+    /// Hands a held-back entry back untried; when the store refuses, the entry stays claimed and undispatched — so the
+    /// lane condition still keeps its record's later deliveries behind it — and its claim lease returns it.
+    /// </summary>
+    private async Task HoldBackAsync(OutboxEntry entry, TimeSpan heldFor, CancellationToken stoppingToken)
+    {
+        try
+        {
+            await store.HoldBackAsync(entry.Id, heldFor, stoppingToken).ConfigureAwait(false);
+        }
+        catch (Exception failure) when (!stoppingToken.IsCancellationRequested)
+        {
+            EventLog.HoldBackFailed(logger, entry.Id, failure.GetType().Name);
+        }
     }
 
     /// <summary>
@@ -439,8 +516,12 @@ internal sealed class OutboxDispatcher(
     /// </remarks>
     private TimeSpan RetryAfter(OutboxEntry entry) => entry.Attempts * options.Value.PollInterval;
 
-    private static Counter<long> Counted(int matchedHooks) =>
-        matchedHooks == 0 ? AlvoEventMetrics.Filtered : AlvoEventMetrics.Dispatched;
+    /// <summary>
+    /// The counter one retired event increments: <c>alvo.events.dispatched</c> when it matched a hook or fanned out to any
+    /// delivery — a dead one included — and <c>alvo.events.filtered</c> only when it reached nothing at all.
+    /// </summary>
+    internal static Counter<long> Counted(int matchedHooks, int deliveries) =>
+        matchedHooks == 0 && deliveries == 0 ? AlvoEventMetrics.Filtered : AlvoEventMetrics.Dispatched;
 
     /// <summary>
     /// The primed catalog, or a refusal — never an empty one.
