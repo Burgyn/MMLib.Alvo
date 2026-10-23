@@ -145,9 +145,23 @@ public sealed class AlvoEventsTests
     [InlineData("entity.orders.updated")]
     [InlineData("auth.user.login")]
     [InlineData("storage.file.uploaded")]
+    [InlineData("alvo.schedule.roll_slots")]
+    [InlineData("alvo.command.issue_invoice.completed")]
     public void The_only_door_into_the_queue_refuses_a_reserved_name(string type)
         => Should.Throw<ArgumentException>(() => AlvoCustomEvent.Create(Forged(type)))
             .Message.ShouldContain("reserved");
+
+    /// <summary>
+    /// A look-alike of the framework namespace — upper-case, or with a Cyrillic <c>а</c> — is not reserved by the
+    /// ordinal set, so the door must still refuse it, as malformed: the ASCII-only name shape is what closes it.
+    /// </summary>
+    /// <param name="type">A name that would read as <c>alvo.</c> to a person but not to the ordinal set.</param>
+    [Theory]
+    [InlineData("ALVO.schedule.x")]
+    [InlineData("аlvo.schedule.x")]
+    public void The_only_door_into_the_queue_refuses_a_framework_look_alike_as_malformed(string type)
+        => Should.Throw<ArgumentException>(() => AlvoCustomEvent.Create(Forged(type)))
+            .Message.ShouldContain("not a well-formed event name");
 
     /// <summary>
     /// <b>The reserved set cannot be emptied through the interface it is handed out as.</b>

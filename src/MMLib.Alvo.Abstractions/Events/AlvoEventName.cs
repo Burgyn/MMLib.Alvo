@@ -42,8 +42,8 @@ public static partial class AlvoEventName
     /// </summary>
     /// <remarks>
     /// <para>
-    /// These are exactly the namespaces the frozen <c>$defs/eventPattern</c> grammar admits as a
-    /// subscription's first segment — asserted against <c>schema/project.schema.json</c> itself by
+    /// There are four: exactly the three namespaces the frozen <c>$defs/eventPattern</c> grammar admits as a
+    /// subscription's first segment, plus <c>alvo</c> — asserted against <c>schema/project.schema.json</c> itself by
     /// <c>EventPatternTests.The_reserved_namespaces_are_the_schema_s_own_plus_the_framework_s</c>, because a
     /// hand-copied alternation that drifts from the schema does not fail, it silently reserves the wrong names.
     /// <c>alvo</c> is the one addition: a schedule's run and a command's completion are minted there, so a host

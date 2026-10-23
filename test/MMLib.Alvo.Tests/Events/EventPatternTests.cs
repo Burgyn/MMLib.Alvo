@@ -38,6 +38,10 @@ public sealed class EventPatternTests
                 "A host is refused the namespaces $defs/eventPattern admits, so it cannot forge an event a descriptor "
                 + "rule subscribes to, and 'alvo', where the framework mints schedule runs and command completions");
 
+    /// <summary>
+    /// <b>The framework namespace is reserved for publishing but not subscribable from a descriptor</b> — the frozen
+    /// grammar does not admit <c>alvo</c>, so framework events reach host handlers only.
+    /// </summary>
     [Fact]
     public void No_descriptor_rule_can_subscribe_to_the_framework_namespace()
         => NamespacesTheSchemaAdmits().ShouldNotContain(

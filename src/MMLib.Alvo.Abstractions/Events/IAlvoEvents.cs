@@ -9,8 +9,8 @@ namespace MMLib.Alvo.Events;
 /// <remarks>
 /// <para>
 /// <b>This is the publish half of publish–subscribe, and today it has no subscribe half.</b>
-/// <c>$defs/eventPattern</c> — the frozen grammar every descriptor subscription is typed by — admits only the
-/// three namespaces <see cref="PublishAsync"/> refuses, so a name this API accepts is a name no automation
+/// <c>$defs/eventPattern</c> — the frozen grammar every descriptor subscription is typed by — admits only
+/// namespaces <see cref="PublishAsync"/> refuses, so a name this API accepts is a name no automation
 /// rule and no after-hook can name. A published event is therefore durable, ordered and inspectable in the
 /// outbox, and delivered to nothing: the dispatcher claims it, matches no subscription, counts it as filtered
 /// and marks it dispatched. That is deliberate and recorded (<c>docs/architecture/events.md</c>); the
