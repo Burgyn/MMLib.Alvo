@@ -137,7 +137,7 @@ internal static class DeliveryTable
             $"NOT EXISTS (SELECT 1 FROM {table} earlier WHERE earlier.subscriber = {table}.subscriber "
             + $"AND earlier.partition_key = {table}.partition_key AND earlier.event_id < {table}.event_id "
             + "AND (earlier.status IN ('pending', 'running', 'retrying') "
-            + "OR (earlier.status = 'dead' AND earlier.last_error_type <> 'unbound')))";
+            + "OR (earlier.status = 'dead' AND COALESCE(earlier.last_error_type, '') <> 'unbound')))";
         var noUnfanned =
             $"NOT EXISTS (SELECT 1 FROM {outbox} unfanned WHERE unfanned.partition_key = {table}.partition_key "
             + $"AND unfanned.id < {table}.event_id AND unfanned.dispatched_at IS NULL "

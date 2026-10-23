@@ -730,7 +730,7 @@ public sealed partial class OutboxDispatcherTests : IDisposable
             {
                 var entry = _entries.Single(candidate => candidate.Id == id);
                 entry.Claimed = false;
-                entry.Attempts--;
+                entry.Attempts = Math.Max(0, entry.Attempts - 1);
                 _heldBack.Add(id);
                 _heldBackFor.Add(retryAfter);
             }

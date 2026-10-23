@@ -51,6 +51,16 @@ public sealed class DeliveryTableTests
         DeliveryTable.ClaimSql(Table, Outbox, ordered: 1, unordered: 0)
             .ShouldContain("unfanned.claimed_at >= @outbox_stale_before");
 
+    /// <summary>
+    /// Only an <c>unbound</c> dead delivery stops holding its lane. A dead row with no reason recorded must still hold
+    /// it, and a bare <c>&lt;&gt; 'unbound'</c> is NULL — not true — for that row. No writer records one today, so the
+    /// world cannot express it and the statement's shape is pinned instead.
+    /// </summary>
+    [Fact]
+    public void A_dead_delivery_with_no_recorded_reason_still_holds_its_lane() =>
+        DeliveryTable.ClaimSql(Table, Outbox, ordered: 1, unordered: 0)
+            .ShouldContain("COALESCE(earlier.last_error_type, '') <> 'unbound'");
+
     [Fact]
     public void The_unfanned_index_is_partial_on_undispatched_entries() =>
         DeliveryTable.OutboxUnfannedIndexDdl(Outbox).ShouldEndWith("(partition_key, id) WHERE dispatched_at IS NULL");

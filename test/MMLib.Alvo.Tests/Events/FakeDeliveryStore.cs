@@ -14,7 +14,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     private readonly Lock _gate = new();
     private readonly List<Row> _rows = [];
     private readonly Dictionary<Guid, string> _payloads = [];
-    private readonly Dictionary<Guid, (string Key, bool Dispatched, int Attempts, DateTimeOffset? ClaimedAt)> _outbox = [];
+    private readonly Dictionary<Guid, (string Key, bool Dispatched, int Attempts, DateTimeOffset? ClaimedAt, bool Held)> _outbox = [];
     private readonly List<(Guid Delivery, int Attempt, string Outcome)> _attempts = [];
 
     internal int FanOutFailures { get; set; }
@@ -46,7 +46,15 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         lock (_gate)
         {
             _payloads[@event.Id] = AlvoEventJson.Write(@event);
-            _outbox[@event.Id] = (@event.PartitionKey, dispatched, attempts, claimedAt);
+            _outbox[@event.Id] = (@event.PartitionKey, dispatched, attempts, claimedAt, claimedAt is not null);
+        }
+    }
+
+    internal void ReleaseOutboxEntry(Guid eventId, DateTimeOffset retryAt)
+    {
+        lock (_gate)
+        {
+            _outbox[eventId] = _outbox[eventId] with { ClaimedAt = retryAt, Held = false };
         }
     }
 
@@ -154,7 +162,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
             entry.Value.Key == row.PartitionKey
             && Before(entry.Key, row.EventId)
             && !entry.Value.Dispatched
-            && (entry.Value.Attempts < claim.OutboxMaxAttempts || entry.Value.ClaimedAt >= now - claim.OutboxClaimLease));
+            && (entry.Value.Attempts < claim.OutboxMaxAttempts || (entry.Value.Held && entry.Value.ClaimedAt >= now - claim.OutboxClaimLease)));
 
     private static bool Before(Guid earlier, Guid later) => string.CompareOrdinal(earlier.ToString(), later.ToString()) < 0;
 

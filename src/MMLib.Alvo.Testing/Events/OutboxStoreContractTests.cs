@@ -189,6 +189,24 @@ public abstract class OutboxStoreContractTests
     }
 
     /// <summary>
+    /// A hold-back of an entry with no attempt to give back still hands it back for its backoff: the attempt count is
+    /// floored at zero, and the release itself is not skipped.
+    /// </summary>
+    [Fact]
+    public async Task A_held_back_entry_with_no_attempt_spent_still_waits_its_backoff()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var ids = await world.SeedAsync(count: 1);
+
+        await world.Store.HoldBackAsync(ids[0], TimeSpan.FromSeconds(5), Ct);
+
+        (await world.Store.ClaimAsync(Claimant, batchSize: 1, MaxAttempts, _lease, Ct)).ShouldBeEmpty("it waits its backoff");
+        world.Advance(TimeSpan.FromSeconds(6));
+        (await world.Store.ClaimAsync(Claimant, batchSize: 1, MaxAttempts, _lease, Ct)).ShouldHaveSingleItem().Attempts.ShouldBe(1);
+    }
+
+    /// <summary>
     /// This build's stand-in for a DLQ is an attempt ceiling plus a loud log: past the ceiling the entry
     /// stops being claimed, so one poison event cannot occupy the pump forever.
     /// </summary>

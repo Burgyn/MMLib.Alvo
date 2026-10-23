@@ -21,7 +21,8 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
     private const string SchemaPrefix = "alvo";
 
     private static readonly DateTimeOffset _start = new(2026, 10, 23, 9, 0, 0, TimeSpan.Zero);
-    private static readonly TimeSpan _blockObservationWindow = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan _blockDeadline = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _blockPollInterval = TimeSpan.FromMilliseconds(20);
 
     private readonly Func<DbConnection> _connect;
     private readonly WorldClock _clock = new(_start);
@@ -98,6 +99,8 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
     /// <summary>
     /// Two claimants racing one lane head with no <c>SKIP LOCKED</c>: A claims inside an open transaction, B's claim
     /// blocks on A's row lock, A commits, and B — which re-checks only the outer condition — must then claim nothing.
+    /// PostgreSQL only: A commits only once a third connection sees B's backend waiting on a lock, so the race is
+    /// constructed every run rather than whenever B happens to reach the row in time.
     /// </summary>
     internal async Task<(int First, int Second)> TwoConcurrentClaimsAsync(string subscriber)
     {
@@ -107,18 +110,24 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
             var loser = _connect();
             await using (loser.ConfigureAwait(false))
             {
-                await winner.OpenAsync(Ct);
-                await loser.OpenAsync(Ct);
+                var observer = _connect();
+                await using (observer.ConfigureAwait(false))
+                {
+                    await winner.OpenAsync(Ct);
+                    await loser.OpenAsync(Ct);
+                    await observer.OpenAsync(Ct);
 
-                return await RaceAsync(winner, loser, subscriber);
+                    return await RaceAsync(winner, loser, observer, subscriber);
+                }
             }
         }
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    private async Task<(int First, int Second)> RaceAsync(DbConnection winner, DbConnection loser, string subscriber)
+    private async Task<(int First, int Second)> RaceAsync(DbConnection winner, DbConnection loser, DbConnection observer, string subscriber)
     {
+        var loserBackend = await ScalarAsync(loser, "SELECT pg_backend_pid()", backend: null);
         var winning = await winner.BeginTransactionAsync(Ct);
         await using (winning.ConfigureAwait(false))
         {
@@ -127,18 +136,42 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
             await using (losing.ConfigureAwait(false))
             {
                 var blocked = ClaimOnAsync(loser, losing, subscriber);
-                await Task.Delay(_blockObservationWindow, Ct);
-                if (blocked.IsCompleted)
-                {
-                    throw new InvalidOperationException("The second claimant finished before the first committed; no race was constructed.");
-                }
-
+                await WaitUntilBlockedAsync(observer, loserBackend, blocked);
                 await winning.CommitAsync(Ct);
                 var second = await blocked;
                 await losing.CommitAsync(Ct);
 
                 return (first, second);
             }
+        }
+    }
+
+    private static async Task WaitUntilBlockedAsync(DbConnection observer, object backend, Task blocked)
+    {
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        while (Convert.ToInt64(await ScalarAsync(observer, "SELECT COUNT(*) FROM pg_stat_activity WHERE pid = @backend AND wait_event_type = 'Lock'", backend), CultureInfo.InvariantCulture) == 0)
+        {
+            if (blocked.IsCompleted || waited.Elapsed > _blockDeadline)
+            {
+                throw new InvalidOperationException("The second claimant never waited on the first's row lock; no race was constructed.");
+            }
+
+            await Task.Delay(_blockPollInterval, Ct);
+        }
+    }
+
+    private static async Task<object> ScalarAsync(DbConnection connection, string sql, object? backend)
+    {
+        var command = connection.CreateCommand();
+        await using (command.ConfigureAwait(false))
+        {
+            command.CommandText = sql;
+            if (backend is not null)
+            {
+                RelationalSqlBatch.AddParameter(command, "@backend", backend);
+            }
+
+            return await command.ExecuteScalarAsync(Ct) ?? throw new InvalidOperationException($"No value from: {sql}");
         }
     }
 
