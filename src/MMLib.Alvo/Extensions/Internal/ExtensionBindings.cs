@@ -1,6 +1,6 @@
-﻿using MMLib.Alvo.Expressions;
+﻿using MMLib.Alvo.Events.Internal;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
-using MMLib.Alvo.Rules.Internal;
 
 namespace MMLib.Alvo.Extensions.Internal;
 
@@ -9,6 +9,9 @@ internal sealed record ExtensionProblem(string Id, string Kind, string Locator, 
 
 /// <summary>Two or more registrations stating one <c>Order</c> on one target.</summary>
 internal sealed record OrderTie(string Target, int Order, IReadOnlyList<string> Ids);
+
+/// <summary>What checking a registry without any catalog produced: the problems no descriptor can cure, and the ties.</summary>
+internal sealed record ExtensionRegistrationResult(IReadOnlyList<ExtensionProblem> Problems, IReadOnlyList<OrderTie> Ties);
 
 /// <summary>What binding a registry against one catalog produced.</summary>
 internal sealed record ExtensionBindingResult(
@@ -19,12 +22,8 @@ internal sealed record BoundCondition(CompiledExpression? Expression, RequiredCo
 {
     internal static BoundCondition Always { get; } = new(null, RequiredContext.None, false);
 
-    internal static BoundCondition Of(CompiledExpression expression) => new(
-        expression,
-        new RequiredContext(
-            TenantId: PolicyCatalogBuilder.ReferencesContextValue(expression.Root, CelContextValue.TenantId),
-            UserId: PolicyCatalogBuilder.ReferencesContextValue(expression.Root, CelContextValue.UserId)),
-        PolicyCatalogBuilder.ReferencesContextValue(expression.Root, CelContextValue.UserRoles));
+    internal static BoundCondition Of(CompiledExpression expression) =>
+        new(expression, EventConditionReads.Required(expression), EventConditionReads.ReadsRoles(expression));
 }
 
 /// <summary>A registration bound to one catalog: its condition per entity, or one for every event it selects.</summary>

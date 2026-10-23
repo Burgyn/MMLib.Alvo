@@ -122,6 +122,14 @@ internal sealed class BootServiceWorld : IDisposable
     /// <summary>The binder stage 0 checks the host's handler registrations with, or <see langword="null"/> for none.</summary>
     internal ExtensionBinder? Extensions { get; set; }
 
+    /// <summary>A binder over <paramref name="configure"/>'s registrations that logs into <see cref="Log"/>.</summary>
+    /// <param name="configure">The handler registrations.</param>
+    internal ExtensionBinder Binder(Action<IAlvoBuilder> configure) => new(
+        Tests.Extensions.HandlerCatalog.Registry(configure),
+        new CelCompiler(),
+        Tests.Extensions.HandlerCatalog.EveryService(),
+        _loggers.CreateLogger<ExtensionBinder>());
+
     /// <summary>What the introspector reports — read only when no applied snapshot was recorded.</summary>
     internal SchemaModel LiveSchema { get; set; } = new([]);
 

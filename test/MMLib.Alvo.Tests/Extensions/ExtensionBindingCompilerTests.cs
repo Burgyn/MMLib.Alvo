@@ -172,9 +172,54 @@ public sealed class ExtensionBindingCompilerTests
             .Problems.ShouldBeEmpty();
 
     [Fact]
-    public void A_star_condition_calling_changed_is_refused() =>
-        Compile(alvo => alvo.Entity("*", all => all.OnUpdated("audit-all", OnUpdated, when: "changed(title)")))
-            .Problems.ShouldNotBeEmpty();
+    public void A_star_condition_calling_changed_is_refused()
+    {
+        var problems = Compile(alvo => alvo.Entity("*", all => all.OnUpdated("audit-all", OnUpdated, when: "changed(title)"))).Problems;
+
+        problems.ShouldNotBeEmpty();
+        problems.ShouldAllBe(problem => problem.Locator == "extensions/audit-all/when" && problem.Fix.Contains("@user and @tenant"));
+    }
+
+    [Fact]
+    public void A_presence_test_of_a_field_left_out_of_the_event_images_is_refused() =>
+        Compile(alvo => alvo.Entity("tickets", t => t.OnCreated("on-it", OnCreated, when: "has(new.secret)")))
+            .Problems.ShouldHaveSingleItem().Message.ShouldContain("events.exclude");
+
+    [Fact]
+    public void A_fieldless_condition_reading_the_tenant_requires_it_of_every_event() =>
+        Compile(alvo => alvo.AddEventHandler("on-approved", "orders.approved", OnRecord, when: "@tenant.id == @user.id"))
+            .Bindings.Handler("on-approved").ShouldNotBeNull().Fallback.Required.ShouldBe(new(TenantId: true, UserId: true));
+
+    [Fact]
+    public void Every_handler_in_a_collision_is_unbound()
+    {
+        var result = Compile(alvo => alvo.Entity("tickets", t => t.OnCreated("a_b", OnCreated).OnCreated("a-b", OnCreated)));
+
+        result.Problems.Where(problem => problem.Message.Contains("event-name segment")).Select(problem => problem.Id)
+            .ShouldBe(["a_b", "a-b"], ignoreOrder: true);
+        result.Bindings.Handlers.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void The_catalog_free_check_reports_what_no_descriptor_can_cure_and_nothing_else()
+    {
+        var result = ExtensionBindingCompiler.Check(
+            Registry(alvo => alvo
+                .Entity("tikets", t => t.OnCreated("unknown-entity", OnCreated))
+                .Entity("*", all => all.OnSaved("audit-all", OnSaved, when: "new.title == 'x'"))
+                .Entity("tickets", t => t.OnCreated("Bad_Id", OnCreated))),
+            MMLib.Alvo.Tests.Expressions.CelFixtures.Compiler,
+            EveryService());
+
+        result.Problems.Select(problem => problem.Id).Distinct().ShouldBe(["audit-all", "Bad_Id"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public void A_tie_names_only_handlers_that_bind() =>
+        Compile(alvo => alvo.Entity("tickets", t => t
+                .OnCreated("first", OnCreated, configure: o => o.Order = 5)
+                .OnCreated("broken", OnCreated, when: "old.status == 'open'", configure: o => o.Order = 5)))
+            .Ties.ShouldBeEmpty();
 
     [Fact]
     public void A_deleted_condition_reading_an_excluded_field_through_the_pre_image_is_refused() =>

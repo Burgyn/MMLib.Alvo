@@ -175,6 +175,8 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// </remarks>
     private async Task BootAsync(CancellationToken ct)
     {
+        RefuseUnregistrableExtensions();
+
         if (!_bootPlan.HasSource)
         {
             await BootFromTheStoredDescriptorAsync(ct).ConfigureAwait(false);
@@ -281,15 +283,17 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         try
         {
             var plan = _bootPlan.Plan(stored.DescriptorJson);
-            _bootPlan.EnsureBindable(plan.Catalog);
-            if (string.Equals(plan.Descriptor.Name, project, StringComparison.Ordinal))
+            if (!string.Equals(plan.Descriptor.Name, project, StringComparison.Ordinal))
             {
+                reason = NameMismatch(project, plan.Descriptor.Name);
+            }
+            else
+            {
+                _bootPlan.EnsureBindable(plan.Catalog);
                 boot = plan;
 
                 return true;
             }
-
-            reason = NameMismatch(project, plan.Descriptor.Name);
         }
         catch (AlvoStartupRefusedException refused)
         {
@@ -329,6 +333,31 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         + "would then be refused for a project that was 'already primed' as something else. Check "
         + $"{AlvoSchemaOptions.ProjectEnvironmentVariable}, or the caller that appended a version "
         + "under a key the descriptor does not match.";
+
+    /// <summary>
+    /// Refuses the start, on every boot shape and before any database is touched, when a handler registration is wrong
+    /// whatever the descriptor says.
+    /// </summary>
+    /// <remarks>
+    /// <b>Thrown even by a dashboard-first host, unlike a stored-descriptor refusal.</b> Standing down keeps the
+    /// process up so the dashboard can correct the descriptor; no descriptor can correct a bad id, a missing service or
+    /// a <c>"*"</c> condition that reads a field — only redeploying the host can. Recorded first, because
+    /// <see cref="StartingAsync"/> rethrows an <see cref="AlvoStartupRefusedException"/> untouched.
+    /// </remarks>
+    private void RefuseUnregistrableExtensions()
+    {
+        try
+        {
+            _bootPlan.EnsureRegistrable();
+        }
+        catch (AlvoStartupRefusedException refusal)
+        {
+            _state.Failed(refusal.Message);
+            BootRefused(_logger, refusal.Message);
+
+            throw;
+        }
+    }
 
     /// <summary>
     /// The project a dashboard-first boot operates on, or the refusal that names both ways to supply one.

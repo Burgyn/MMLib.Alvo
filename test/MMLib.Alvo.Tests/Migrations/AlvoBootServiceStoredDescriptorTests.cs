@@ -6,6 +6,8 @@ using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Tests.Extensions;
 
+using NSubstitute;
+
 namespace MMLib.Alvo.Tests.Migrations;
 
 /// <summary>
@@ -209,7 +211,6 @@ public sealed class AlvoBootServiceStoredDescriptorTests
         world.Log.ShouldContain(entry => entry.Level == LogLevel.Critical);
     }
 
-    /// <summary>A dashboard-first host: no descriptor source, and a project name instead.</summary>
     /// <summary>A host whose handlers do not fit the stored descriptor stays up, not ready, with the reason published.</summary>
     [Fact]
     public async Task Handlers_that_do_not_fit_a_stored_descriptor_stand_the_host_up_not_ready()
@@ -236,12 +237,82 @@ public sealed class AlvoBootServiceStoredDescriptorTests
         world.PrimedEntities.ShouldBeEmpty();
     }
 
+    /// <summary>A stored descriptor under the wrong key is refused for the key first, whatever the handlers say.</summary>
+    [Fact]
+    public async Task A_stored_descriptor_under_another_name_is_refused_for_the_name_before_the_handlers()
+    {
+        using var world = Dashboard().StoredVerbatim(BootServiceWorld.NamedWarehouses);
+        world.Extensions = MisfitHandlers();
+
+        (await world.BootAsync()).ShouldBeNull();
+
+        world.State.Failure.ShouldNotBeNull().ShouldContain("warehouses");
+        world.State.Failure.ShouldNotContain("orphan-handler");
+    }
+
+    /// <summary>
+    /// A host awaiting its first descriptor still refuses to start on a registration no descriptor can cure: there is
+    /// nothing for the dashboard to repair, only the host to redeploy.
+    /// </summary>
+    [Theory]
+    [InlineData("bad-id", "extensions/Bad_Id/id")]
+    [InlineData("missing-service", "extensions/needs-a-clock/handler")]
+    [InlineData("star-reads-a-field", "extensions/audit-all/when")]
+    public async Task A_host_awaiting_its_descriptor_refuses_a_registration_no_descriptor_can_cure(string shape, string locator)
+    {
+        using var world = Dashboard();
+        world.Extensions = Uncurable(shape);
+
+        (await world.BootAsync()).ShouldBeOfType<AlvoStartupRefusedException>().Message.ShouldContain(locator);
+
+        world.State.Phase.ShouldBe(AlvoBootPhase.Failed);
+        world.Log.ShouldContain(entry => entry.Level == LogLevel.Critical);
+    }
+
+    /// <summary>Every boot shape runs the catalog-free check exactly once: its order tie is logged once.</summary>
+    [Theory]
+    [InlineData("file")]
+    [InlineData("stored")]
+    [InlineData("awaiting")]
+    public async Task Every_boot_shape_checks_the_registrations_once(string shape)
+    {
+        using var world = shape switch
+        {
+            "file" => new BootServiceWorld().BootingFrom(BootServiceWorld.City),
+            "stored" => Dashboard().StoredVerbatim(BootServiceWorld.City),
+            _ => Dashboard(),
+        };
+        world.Extensions = world.Binder(alvo => alvo.Entity("depots", e => e
+            .OnCreated("first", HandlerCatalog.OnCreated, configure: o => o.Order = 1)
+            .OnCreated("second", HandlerCatalog.OnCreated, configure: o => o.Order = 1)));
+
+        (await world.BootAsync()).ShouldBeNull();
+
+        world.Log.Count(entry => entry.EventName == "ExtensionOrderTie").ShouldBe(1);
+    }
+
     private static ExtensionBinder MisfitHandlers() => new(
         HandlerCatalog.Registry(alvo => alvo.Entity("no-such-entity", e => e.OnCreated("orphan-handler", HandlerCatalog.OnCreated))),
         new CelCompiler(),
         HandlerCatalog.EveryService(),
         NullLogger<ExtensionBinder>.Instance);
 
+    private static ExtensionBinder Uncurable(string shape)
+    {
+        var services = Substitute.For<IServiceProviderIsService>();
+        services.IsService(Arg.Any<Type>()).Returns(call => call.Arg<Type>() != typeof(TimeProvider));
+        Action<IAlvoBuilder> configure = shape switch
+        {
+            "bad-id" => alvo => alvo.Entity("depots", e => e.OnCreated("Bad_Id", HandlerCatalog.OnCreated)),
+            "missing-service" => alvo => alvo.Entity("depots", e => e.OnCreated(
+                "needs-a-clock", (MMLib.Alvo.Events.AlvoCreated<MMLib.Alvo.Data.AlvoRecord> _, TimeProvider clock) => Task.CompletedTask)),
+            _ => alvo => alvo.Entity("*", all => all.OnSaved("audit-all", HandlerCatalog.OnSaved, when: "new.title == 'x'")),
+        };
+
+        return new(HandlerCatalog.Registry(configure), new CelCompiler(), services, NullLogger<ExtensionBinder>.Instance);
+    }
+
+    /// <summary>A dashboard-first host: no descriptor source, and a project name instead.</summary>
     private static BootServiceWorld Dashboard()
     {
         var world = new BootServiceWorld();

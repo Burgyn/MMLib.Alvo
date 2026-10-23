@@ -46,10 +46,23 @@ public sealed class ExtensionBinderTests : IDisposable
             .OnCreated("first", OnCreated, configure: o => o.Order = 1)
             .OnCreated("second", OnCreated, configure: o => o.Order = 1)));
 
+        binder.EnsureRegistrable();
         binder.EnsureBindable(Catalog());
 
-        _logs.Entries.ShouldContain(entry => entry.EventName == "ExtensionOrderTie" && entry.Message.Contains("first, second"));
+        _logs.Entries.Where(entry => entry.EventName == "ExtensionOrderTie").ShouldHaveSingleItem().Message.ShouldContain("first, second");
     }
+
+    [Fact]
+    public void A_registration_no_descriptor_can_cure_is_refused_without_a_catalog()
+    {
+        var binder = Binder(alvo => alvo.Entity("*", all => all.OnSaved("audit-all", OnSaved, when: "new.title == 'x'")));
+
+        Should.Throw<AlvoStartupRefusedException>(binder.EnsureRegistrable).Message.ShouldContain("extensions/audit-all/when");
+    }
+
+    [Fact]
+    public void A_registration_with_only_catalog_problems_passes_the_catalog_free_check() =>
+        Should.NotThrow(Binder(alvo => alvo.Entity("tikets", t => t.OnCreated("misspelled", OnCreated))).EnsureRegistrable);
 
     [Fact]
     public void One_catalog_is_bound_once()

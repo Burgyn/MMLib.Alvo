@@ -1,13 +1,16 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Migrations.Internal;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Migrations;
+using MMLib.Alvo.Tests.Extensions;
 using NSubstitute;
 using NSubstitute.Core;
 using FieldType = MMLib.Alvo.Schema.FieldType;
@@ -262,6 +265,34 @@ public sealed class SchemaMigrationRunnerTests
                 Shouldly.Case.Sensitive,
                 "the descriptor declares 'webhooks' and this build honours it nowhere; a warning that does not "
                 + "name the block leaves the author debugging the endpoint they think is down");
+    }
+
+    /// <summary>
+    /// <c>ApplyAlvoDescriptorAsync</c> binds leniently, like a runtime apply: a handler that does not fit the applied
+    /// descriptor is left unbound and its events recorded dead — the apply is never refused for it.
+    /// </summary>
+    [Fact]
+    public async Task Applying_a_descriptor_a_handler_does_not_fit_succeeds_and_leaves_the_handler_unbound()
+    {
+        _store.GetCurrentAsync("fleet", Arg.Any<CancellationToken>()).Returns((AppliedSchema?)null);
+        _introspector.IntrospectAsync(Arg.Any<CancellationToken>()).Returns(new SchemaModel([]));
+        var binder = new ExtensionBinder(
+            HandlerCatalog.Registry(alvo => alvo.Entity("no-such-entity", e => e.OnCreated("orphan-handler", HandlerCatalog.OnCreated))),
+            new CelCompiler(),
+            HandlerCatalog.EveryService(),
+            NullLogger<ExtensionBinder>.Instance);
+        var catalogs = new PolicyCatalogProvider();
+        var runner = new SchemaMigrationRunner(
+            new DescriptorBootPlan(_source, new DescriptorValidator(), new CelCompiler(), NullLogger<DescriptorBootPlan>.Instance, binder),
+            _migrator,
+            _introspector,
+            _store,
+            catalogs);
+
+        var result = await runner.RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken);
+
+        result.Applied.ShouldBeTrue();
+        binder.For(catalogs.Current.ShouldNotBeNull()).Unbound.ShouldHaveSingleItem().Id.ShouldBe("orphan-handler");
     }
 
     private static SchemaModel MapFleetDescriptor()

@@ -9,21 +9,20 @@ using System.Runtime.CompilerServices;
 namespace MMLib.Alvo.Extensions.Internal;
 
 /// <summary>
-/// Binds the registry to each primed catalog once: strictly at boot (<see cref="EnsureBindable"/> refuses every problem
-/// at once), leniently afterwards (<see cref="For"/> binds what fits and logs the rest once per catalog).
+/// Checks the registry once at boot (<see cref="EnsureRegistrable"/>, every boot shape), binds it to the boot's catalog
+/// strictly (<see cref="EnsureBindable"/>), and to every later catalog leniently (<see cref="For"/> binds what fits
+/// and logs the rest once per catalog). Each catalog is bound once.
 /// </summary>
 internal sealed class ExtensionBinder(
     ExtensionRegistry registry, ICelCompiler compiler, IServiceProviderIsService services, ILogger<ExtensionBinder> logger)
 {
-    private static readonly object _reportedMark = new();
+    private readonly ConditionalWeakTable<PolicyCatalog, CatalogBinding> _bindings = new();
 
-    private readonly ConditionalWeakTable<PolicyCatalog, ExtensionBindingResult> _results = new();
-    private readonly ConditionalWeakTable<PolicyCatalog, object> _reported = new();
-    private readonly Lock _gate = new();
-
-    internal void EnsureBindable(PolicyCatalog catalog)
+    /// <summary>Refuses every problem no descriptor can cure, at once, and logs the order ties.</summary>
+    /// <exception cref="Migrations.AlvoStartupRefusedException">A registration is wrong whatever the descriptor says.</exception>
+    internal void EnsureRegistrable()
     {
-        var result = Result(catalog);
+        var result = ExtensionBindingCompiler.Check(registry, compiler, services);
         foreach (var tie in result.Ties)
         {
             ExtensionLog.ExtensionOrderTie(logger, tie.Target, tie.Order, string.Join(", ", tie.Ids));
@@ -33,53 +32,51 @@ internal sealed class ExtensionBinder(
         {
             throw ExtensionRefusal.Of(result.Problems);
         }
-
-        MarkReported(catalog);
     }
 
+    /// <summary>Refuses every registration that does not fit <paramref name="catalog"/>, at once.</summary>
+    /// <param name="catalog">The catalog the boot is about to prime.</param>
+    /// <exception cref="Migrations.AlvoStartupRefusedException">A registration does not fit the catalog.</exception>
+    internal void EnsureBindable(PolicyCatalog catalog)
+    {
+        var binding = Binding(catalog);
+        if (binding.Result.Problems.Count > 0)
+        {
+            throw ExtensionRefusal.Of(binding.Result.Problems);
+        }
+
+        binding.MarkReported();
+    }
+
+    /// <summary>The handlers bound to <paramref name="catalog"/>; the first call per catalog logs each unbound one.</summary>
+    /// <param name="catalog">The catalog now serving.</param>
     internal ExtensionBindings For(PolicyCatalog catalog)
     {
-        var result = Result(catalog);
-        if (MarkReported(catalog))
+        var binding = Binding(catalog);
+        if (binding.MarkReported())
         {
-            foreach (var problems in result.Problems.GroupBy(problem => problem.Id, StringComparer.Ordinal))
+            foreach (var problems in binding.Result.Problems.GroupBy(problem => problem.Id, StringComparer.Ordinal))
             {
                 ExtensionLog.ExtensionUnbound(logger, problems.Key, Described(problems));
             }
         }
 
-        return result.Bindings;
+        return binding.Result.Bindings;
     }
 
     private static string Described(IEnumerable<ExtensionProblem> problems) =>
         string.Join("; ", problems.Select(problem => $"{problem.Locator}: {problem.Message}"));
 
-    private ExtensionBindingResult Result(PolicyCatalog catalog)
+    private CatalogBinding Binding(PolicyCatalog catalog) =>
+        _bindings.GetValue(catalog, primed => new(ExtensionBindingCompiler.Compile(registry, primed, compiler, services)));
+
+    /// <summary>One catalog's binding, and whether its unbound handlers were reported.</summary>
+    private sealed class CatalogBinding(ExtensionBindingResult result)
     {
-        lock (_gate)
-        {
-            if (!_results.TryGetValue(catalog, out var result))
-            {
-                result = ExtensionBindingCompiler.Compile(registry, catalog, compiler, services);
-                _results.Add(catalog, result);
-            }
+        private int _reported;
 
-            return result;
-        }
-    }
+        internal ExtensionBindingResult Result { get; } = result;
 
-    private bool MarkReported(PolicyCatalog catalog)
-    {
-        lock (_gate)
-        {
-            if (_reported.TryGetValue(catalog, out _))
-            {
-                return false;
-            }
-
-            _reported.Add(catalog, _reportedMark);
-
-            return true;
-        }
+        internal bool MarkReported() => Interlocked.Exchange(ref _reported, 1) == 0;
     }
 }
