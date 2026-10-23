@@ -6,8 +6,9 @@ using System.Globalization;
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
 /// <summary>
-/// The relational <see cref="IDeliveryStore"/>: one connection per call, one statement — or, to answer for an attempt, a
-/// write-first transaction (the fenced update, then the attempt row) — over <see cref="DeliveryTable"/>'s SQL.
+/// The relational <see cref="IDeliveryStore"/>: one connection per call, one statement — or a write-first transaction: the
+/// claim's one <c>UPDATE … RETURNING</c> (<see cref="RelationalSqlBatch.ReadWrittenRowsAsync"/>), or, to answer for an
+/// attempt, the fenced update then the attempt row — over <see cref="DeliveryTable"/>'s SQL.
 /// </summary>
 /// <remarks>
 /// <b>Internal</b>: unlike <see cref="EfCoreOutboxStore"/> it is not part of what a host resolves by type; the port is the
@@ -125,14 +126,18 @@ internal sealed class EfCoreDeliveryStore : IDeliveryStore
 
     private async Task<List<ClaimedDelivery>> ClaimRowsAsync(DeliveryClaim claim, CancellationToken ct)
     {
-        var claimed = new List<ClaimedDelivery>();
-        await ReadAsync(
-            DeliveryTable.ClaimSql(_table, _outbox, claim.Ordered.Count, claim.Unordered.Count),
-            command => BindClaim(command, claim),
-            reader => claimed.Add(ReadClaimed(reader)),
-            ct).ConfigureAwait(false);
+        var connection = _connections.Create();
+        await using (connection.ConfigureAwait(false))
+        {
+            await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
 
-        return claimed;
+            return await RelationalSqlBatch.ReadWrittenRowsAsync(
+                connection,
+                DeliveryTable.ClaimSql(_table, _outbox, claim.Ordered.Count, claim.Unordered.Count),
+                command => BindClaim(command, claim),
+                ReadClaimed,
+                ct).ConfigureAwait(false);
+        }
     }
 
     private void BindClaim(DbCommand command, DeliveryClaim claim)
