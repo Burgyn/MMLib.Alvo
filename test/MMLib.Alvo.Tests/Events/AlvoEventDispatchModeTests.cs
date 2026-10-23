@@ -32,13 +32,15 @@ public sealed class AlvoEventDispatchModeTests
         Configuration(null).Validate(null, options).Succeeded.ShouldBeTrue();
     }
 
-    [Fact]
-    public void A_misspelled_mode_is_refused_naming_the_key_and_both_choices()
+    [Theory]
+    [InlineData("Manul")]
+    [InlineData("")]
+    public void A_misspelled_mode_is_refused_naming_the_key_and_both_choices(string configured)
     {
         var refusal = Should.Throw<OptionsValidationException>(
-            () => Bound(new() { [AlvoEventOptionsConfiguration.DispatchModeKey] = "Manul" }));
+            () => Bound(new() { [AlvoEventOptionsConfiguration.DispatchModeKey] = configured }));
 
-        refusal.Message.ShouldContain("'Manul'");
+        refusal.Message.ShouldContain($"'{configured}'");
         ShouldNameTheFix(refusal.Message);
     }
 
