@@ -83,11 +83,11 @@ public sealed class AlvoEventOptions
     /// </summary>
     /// <remarks>
     /// <see cref="AlvoEventDispatchMode.Manual"/> stops the background loop and leaves every round to an explicit
-    /// <c>IAlvoEventPump.DrainAsync</c> call — the mode <c>MMLib.Alvo.TestHost</c> runs in, so a test decides when
-    /// events are delivered instead of sleeping past a poll interval. It changes who drains, never what a round does:
-    /// the same claim, the same hooks, the same backoff and the same attempt ceiling. <see cref="Enabled"/> still has to
-    /// be on for a manual round to run. The loop logs that it stood down; the standalone host refuses the mode, because
-    /// nothing in it drains by hand.
+    /// <see cref="IAlvoEventPump.DrainAsync"/> call — the mode <c>MMLib.Alvo.TestHost</c> runs in, so a test decides
+    /// when events are delivered instead of sleeping past a poll interval. It changes who drains, never what a round
+    /// does: the same claim, the same hooks, the same backoff and the same attempt ceiling. <see cref="Enabled"/> still
+    /// has to be on for a manual round to run. The loop logs that it stood down; the standalone host refuses the mode,
+    /// because nothing in it drains by hand.
     /// </remarks>
     public AlvoEventDispatchMode DispatchMode { get; set; } = AlvoEventDispatchMode.Background;
 

@@ -40,7 +40,7 @@ namespace MMLib.Alvo.Tests.Events;
 /// or is a fixed span of many poll intervals in the facts that assert nothing happened.
 /// </para>
 /// </remarks>
-public sealed class OutboxDispatcherTests : IDisposable
+public sealed partial class OutboxDispatcherTests : IDisposable
 {
     /// <inheritdoc/>
     public void Dispose()

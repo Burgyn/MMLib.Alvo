@@ -7,8 +7,8 @@ public enum AlvoEventDispatchMode
     Background = 0,
 
     /// <summary>
-    /// The dispatchers never poll; each call to <c>IAlvoEventPump.DrainAsync</c> runs one round. For tests and tools that
-    /// must decide exactly when events are delivered — a standalone host refuses it.
+    /// The dispatchers never poll; each call to <see cref="IAlvoEventPump.DrainAsync"/> runs one round. For tests and
+    /// tools that must decide exactly when events are delivered — a standalone host refuses it.
     /// </summary>
     Manual = 1,
 }
