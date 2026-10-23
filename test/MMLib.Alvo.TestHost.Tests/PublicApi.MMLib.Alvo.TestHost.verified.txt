@@ -10,9 +10,14 @@ namespace MMLib.Alvo.TestHost
         public int Rounds { get; }
         public System.Collections.Generic.IReadOnlyList<string> Subscribers { get; }
     }
+    public sealed class AlvoHookRecorder
+    {
+        public void AssertRan(string id, int times = 1) { }
+    }
     public sealed class AlvoTestHost : System.IAsyncDisposable
     {
         public MMLib.Alvo.Data.IAlvoData Data { get; }
+        public MMLib.Alvo.TestHost.AlvoHookRecorder Hooks { get; }
         public System.IServiceProvider Services { get; }
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Events.AlvoDrainResult> DrainEventsAsync(System.Threading.CancellationToken cancellationToken = default) { }

@@ -1,8 +1,8 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
-
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.TestHost.Internal;
+using System.Diagnostics;
 
 namespace MMLib.Alvo.TestHost;
 
@@ -13,23 +13,28 @@ namespace MMLib.Alvo.TestHost;
 /// <remarks>
 /// <para>
 /// <b>Nothing above the database is faked.</b> <see cref="Data"/> behaves exactly as the host's own <c>IAlvoData</c>:
-/// a descriptor <c>reject</c> refuses, a <c>mutate</c> applies and a rule hides rows as in production. Unless the builder
-/// registers a provider of its own — <c>UsePostgreSql</c>, for parity runs — each host gets a fresh SQLite database in
+/// a descriptor <c>reject</c> refuses, a <c>mutate</c> applies and a rule hides rows as in production. Write through
+/// <see cref="Data"/> rather than through <see cref="Services"/>: from write hooks on, it is what scopes a write's hooks
+/// to <see cref="Hooks"/>. Unless the builder registers a provider of its own — <c>UsePostgreSql</c>, for parity runs — each host gets a fresh SQLite database in
 /// memory, private to it and dropped when the host is disposed.
 /// </para>
 /// <para>
 /// <b>Events wait for the test.</b> The dispatcher runs in the manual dispatch mode, so nothing is delivered until the
 /// test drains. Webhooks go to the handler passed as <c>webhooks</c>; without one, every webhook attempt fails without
-/// touching the network.
+/// touching the network. <see cref="Hooks"/> records which hooks ran inside this host's drains.
 /// </para>
 /// </remarks>
 public sealed class AlvoTestHost : IAsyncDisposable
 {
     private const int MaxRounds = 100;
+    private const string DrainActivityName = "alvo.test.drain";
+
+    private static readonly ActivitySource _drainSource = new(AlvoHookRecorder.DrainSourceName);
 
     private readonly TestHostComposition _composition;
     private readonly IAlvoEventPump _pump;
     private readonly IAlvoData _data;
+    private readonly AlvoHookRecorder _hooks = new();
     private bool _disposed;
 
     private AlvoTestHost(TestHostComposition composition)
@@ -60,6 +65,18 @@ public sealed class AlvoTestHost : IAsyncDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
 
             return _composition.Host.Services;
+        }
+    }
+
+    /// <summary>Gets the record of which hooks and subscribers ran in this host's drains.</summary>
+    /// <exception cref="ObjectDisposedException">The host was disposed.</exception>
+    public AlvoHookRecorder Hooks
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            return _hooks;
         }
     }
 
@@ -141,6 +158,7 @@ public sealed class AlvoTestHost : IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        using var drain = StartDrain();
         var progress = new DrainProgress();
         for (var round = 0; round < MaxRounds; round++)
         {
@@ -156,6 +174,19 @@ public sealed class AlvoTestHost : IAsyncDisposable
         throw AlvoDrainNotQuiescentException.After(MaxRounds, progress.Recent());
     }
 
+    /// <summary>
+    /// Opens the drain's root activity on a fresh trace and hands its id to <see cref="Hooks"/>, so the runs inside it —
+    /// and only those — are this host's.
+    /// </summary>
+    private Activity? StartDrain()
+    {
+        var root = new ActivityContext(ActivityTraceId.CreateRandom(), ActivitySpanId.CreateRandom(), ActivityTraceFlags.Recorded);
+        var drain = _drainSource.StartActivity(DrainActivityName, ActivityKind.Internal, root);
+        _hooks.Track(root.TraceId);
+
+        return drain;
+    }
+
     /// <summary>Stops the host and drops its database. Safe to call more than once.</summary>
     /// <returns>A task that completes when the host has stopped.</returns>
     public async ValueTask DisposeAsync()
@@ -166,6 +197,7 @@ public sealed class AlvoTestHost : IAsyncDisposable
         }
 
         _disposed = true;
+        _hooks.Stop();
         await _composition.DisposeAsync().ConfigureAwait(false);
     }
 }

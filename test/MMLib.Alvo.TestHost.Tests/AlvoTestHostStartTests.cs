@@ -114,6 +114,7 @@ public sealed class AlvoTestHostStartTests
 
         Should.Throw<ObjectDisposedException>(() => alvo.Data);
         Should.Throw<ObjectDisposedException>(() => alvo.Services);
+        Should.Throw<ObjectDisposedException>(() => alvo.Hooks);
         await Should.ThrowAsync<ObjectDisposedException>(() => alvo.DrainEventsAsync(Ct));
     }
 

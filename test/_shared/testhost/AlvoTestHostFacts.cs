@@ -64,6 +64,7 @@ public abstract class AlvoTestHostFacts
         drained.Claimed.ShouldBe(2, "both writes emitted an event; only the high-priority one matched the hook");
         drained.Failed.ShouldBe(0);
         drained.Subscribers.ShouldBe([TicketsWebhook]);
+        alvo.Hooks.AssertRan(TicketsWebhook, times: 1);
     }
 
     [Fact]
