@@ -77,6 +77,7 @@ public sealed partial class OutboxDispatcherTests
         var refusal = await Should.ThrowAsync<InvalidOperationException>(() => pump.DrainAsync(Cancellation));
 
         refusal.Message.ShouldContain("Alvo:Events:Enabled");
+        refusal.Message.ShouldNotContain("background loop", Case.Insensitive, "the mode is manual; nothing drains at all");
         store.ClaimCount.ShouldBe(0);
     }
 
@@ -99,8 +100,11 @@ public sealed partial class OutboxDispatcherTests
         var store = StoreWith(WonDeal());
         using var pump = Pump(Subject(store, Ready, Manual, catalogs: new PolicyCatalogProvider()));
 
-        await Should.ThrowAsync<InvalidOperationException>(() => pump.DrainAsync(Cancellation));
+        var refusal = await Should.ThrowAsync<InvalidOperationException>(() => pump.DrainAsync(Cancellation));
 
+        refusal.Message.ShouldContain("Apply a descriptor");
+        refusal.Message.ShouldContain("Alvo__Schema__Project");
+        refusal.Message.ShouldNotContain("boot finish", Case.Insensitive, "the boot did finish; it primed nothing");
         store.ClaimCount.ShouldBe(0, "an event judged against an unprimed catalog would be retired as delivered");
         store.DispatchedIds.ShouldBeEmpty();
     }

@@ -10,8 +10,9 @@ public sealed record AlvoDrainResult
     public required int Failed { get; init; }
 
     /// <summary>
-    /// Gets the subscribers the round ran, each once, in the order they first ran. A descriptor after-hook is named by
-    /// its JSON pointer, such as <c>/entities/tickets/hooks/afterCreate/0</c>.
+    /// Gets the subscribers the round attempted, each once, in the order they were first attempted — a subscriber that
+    /// threw is listed too, and its failure is counted in <see cref="Failed"/>. A descriptor after-hook is named by its
+    /// JSON pointer, such as <c>/entities/tickets/hooks/afterCreate/0</c>.
     /// </summary>
     public required IReadOnlyList<string> Subscribers { get; init; }
 
