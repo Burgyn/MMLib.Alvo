@@ -42,7 +42,9 @@ namespace MMLib.Alvo.Events.Internal;
 /// </para>
 /// <para>
 /// <b>No transaction is opened here, and adding one would break the dispatcher on SQLite.</b> Claim, mark and
-/// release are one autocommit statement each through <see cref="IOutboxStore"/>. Measured (spike Q5): a
+/// release are one statement each through <see cref="IOutboxStore"/>: mark and release on autocommit, and the claim
+/// in a write-first transaction of its own inside the store (on SQLite <c>BEGIN IMMEDIATE</c>), because an
+/// autocommit <c>UPDATE … RETURNING</c> commits inside the row read, where a busy lock is not retried. Measured (spike Q5): a
 /// transaction that reads and then writes is the single shape that fails unretryably with
 /// <c>SQLITE_BUSY_SNAPSHOT</c> after burning the whole 30-second retry loop under WAL, and fails the
 /// <em>request path</em> instead under the shipped journal mode. Wrapping two store calls in a transaction to be

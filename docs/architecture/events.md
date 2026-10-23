@@ -36,7 +36,7 @@ application event* plus *The wildcard ruling* by PR5b-2.
 | Stage | Where it runs | What it is |
 |---|---|---|
 | **emit** | `EfAlvoData`'s four write sites, **on the caller's own `DbTransaction`** | `OutboxEventFactory.For(...)` builds the envelope, `OutboxTable.InsertAsync` appends one row on the same transaction and the same connection as the data change |
-| **claim** | `OutboxDispatcher` → `IOutboxStore.ClaimAsync` | one portable `UPDATE … RETURNING` on an autocommit connection: take the oldest claimable entries, stamp `claimed_at`/`claimed_by`, increment `attempts` |
+| **claim** | `OutboxDispatcher` → `IOutboxStore.ClaimAsync` | one portable `UPDATE … RETURNING`, alone in a write-first transaction of its own (`BEGIN IMMEDIATE` on SQLite): take the oldest claimable entries, stamp `claimed_at`/`claimed_by`, increment `attempts` |
 | **deliver** | `EventSubscriptions` then `EventActionExecutor` | pick the after-hooks this event is subscribed to (the CEL condition is part of the *subscription*), run each hook's `webhook`/`email` action |
 | **mark** | `IOutboxStore.MarkDispatchedAsync` | one statement stamping `dispatched_at`, **after** the last action, so "dispatched" means every matched hook ran |
 | **retire** | the counter, and the row that stays | `alvo.events.dispatched` (or `alvo.events.filtered`) is incremented **after** the mark. The row is never deleted or moved — an abandoned event is still countable and inspectable |
@@ -295,8 +295,14 @@ holds the line, and `OutboxTable.cs`/`EfCoreOutboxStore.cs` are both in
 `ChangeTrackerReachTests._sqlComposingFiles`. This is why `data-path.md`'s prediction that *"PR5 adds
 LINQ to this package"* was corrected rather than left standing: it did not.
 
-**Why no transaction is opened around the claim, and why adding one would break SQLite.** Claim, mark
-and release are one autocommit statement each. Q5 measured that a transaction which **reads and then
+**Why no transaction spans two store calls, and why adding one would break SQLite.** Claim, mark
+and release are one statement each. Mark and release run on autocommit; the claim's one statement runs
+in a write-first transaction of its own (`RelationalSqlBatch.ReadWrittenRowsAsync` — the provider's
+default transaction, `BEGIN IMMEDIATE` on SQLite, read committed on PostgreSQL). It has to: on autocommit an
+`UPDATE … RETURNING` commits on its *last* step, inside `DbDataReader.Read`, where `Microsoft.Data.Sqlite`
+does not retry a busy lock, so a claim that met a concurrent reader threw `database is locked` at once.
+Both `BEGIN IMMEDIATE`, which takes the write lock up front, and `COMMIT` go through the retried path,
+and the write is the transaction's first and only statement, so it is not the shape Q5 refused. Q5 measured that a transaction which **reads and then
 writes** is the single shape that fails unretryably with `SQLITE_BUSY_SNAPSHOT` (`Extended=517`) after
 burning the whole 30-second retry loop under WAL — and fails the *request path* instead under the
 shipped journal mode. Wrapping two store calls in a transaction "to be tidy" is the edit that would undo

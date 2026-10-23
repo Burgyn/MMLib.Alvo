@@ -169,7 +169,6 @@ public sealed class EfCoreOutboxStore : IOutboxStore
     private async Task<IReadOnlyList<OutboxEntry>> ClaimBatchAsync(
         string claimant, int batchSize, int maxAttempts, TimeSpan lease, CancellationToken ct)
     {
-        var now = _time.GetUtcNow();
         var connection = _connections.Create();
         await using (connection.ConfigureAwait(false))
         {
@@ -178,18 +177,24 @@ public sealed class EfCoreOutboxStore : IOutboxStore
             return await RelationalSqlBatch.ReadWrittenRowsAsync(
                 connection,
                 OutboxTable.ClaimSql(_tableName),
-                command =>
-                {
-                    RelationalSqlBatch.AddParameter(command, "@claimed_at", StoredInstant.Text(now));
-                    RelationalSqlBatch.AddParameter(command, "@claimed_by", claimant);
-                    RelationalSqlBatch.AddParameter(command, "@now", StoredInstant.Text(now));
-                    RelationalSqlBatch.AddParameter(command, "@stale_before", StoredInstant.Text(now - lease));
-                    RelationalSqlBatch.AddParameter(command, "@max_attempts", maxAttempts);
-                    RelationalSqlBatch.AddParameter(command, "@batch", batchSize);
-                },
+                command => BindClaim(command, claimant, batchSize, maxAttempts, lease),
                 ReadEntry,
                 ct).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Binds the claim's parameters; it runs after the write lock is held, so the instant it stamps excludes the wait.
+    /// </summary>
+    private void BindClaim(DbCommand command, string claimant, int batchSize, int maxAttempts, TimeSpan lease)
+    {
+        var now = _time.GetUtcNow();
+        RelationalSqlBatch.AddParameter(command, "@claimed_at", StoredInstant.Text(now));
+        RelationalSqlBatch.AddParameter(command, "@claimed_by", claimant);
+        RelationalSqlBatch.AddParameter(command, "@now", StoredInstant.Text(now));
+        RelationalSqlBatch.AddParameter(command, "@stale_before", StoredInstant.Text(now - lease));
+        RelationalSqlBatch.AddParameter(command, "@max_attempts", maxAttempts);
+        RelationalSqlBatch.AddParameter(command, "@batch", batchSize);
     }
 
     private static OutboxEntry ReadEntry(DbDataReader reader) => new(

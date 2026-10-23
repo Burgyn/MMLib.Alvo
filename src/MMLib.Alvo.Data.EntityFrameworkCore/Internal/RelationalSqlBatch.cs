@@ -3,7 +3,10 @@ using System.Data.Common;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
-/// <summary>Runs an ordered list of SQL commands, either in a caller's transaction or in its own.</summary>
+/// <summary>
+/// Runs an ordered list of SQL commands, either in a caller's transaction or in its own, reads the rows a statement
+/// returns, and binds parameters — the driver's shared raw-SQL plumbing.
+/// </summary>
 internal static class RelationalSqlBatch
 {
     /// <summary>Opens <paramref name="connection"/>, runs <paramref name="sql"/> in one transaction, and commits.</summary>
@@ -101,8 +104,15 @@ internal static class RelationalSqlBatch
         }
     }
 
-    private static async Task<List<T>> ReadRowsAsync<T>(
-        DbConnection connection, DbTransaction transaction, string sql, Action<DbCommand> bind, Func<DbDataReader, T> read, CancellationToken ct)
+    /// <summary>Runs <paramref name="sql"/> on the open <paramref name="connection"/> and maps every row it returns.</summary>
+    /// <param name="connection">An open connection.</param>
+    /// <param name="transaction">The transaction to run in, or <see langword="null"/> for autocommit.</param>
+    /// <param name="sql">The statement.</param>
+    /// <param name="bind">Binds its parameters.</param>
+    /// <param name="read">Maps one row.</param>
+    /// <param name="ct">A cancellation token.</param>
+    public static async Task<List<T>> ReadRowsAsync<T>(
+        DbConnection connection, DbTransaction? transaction, string sql, Action<DbCommand> bind, Func<DbDataReader, T> read, CancellationToken ct)
     {
         var command = connection.CreateCommand();
         await using (command.ConfigureAwait(false))

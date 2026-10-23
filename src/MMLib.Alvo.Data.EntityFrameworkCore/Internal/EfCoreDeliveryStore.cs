@@ -97,11 +97,8 @@ internal sealed class EfCoreDeliveryStore : IDeliveryStore
 
     public async Task<IReadOnlyList<string>> PendingSubscribersAsync(CancellationToken cancellationToken = default)
     {
-        var subscribers = new List<string>();
-        await ReadAsync(DeliveryTable.PendingSubscribersSql(_table), _ => { }, reader => subscribers.Add(reader.GetString(0)), cancellationToken)
+        return await ReadAsync(DeliveryTable.PendingSubscribersSql(_table), _ => { }, reader => reader.GetString(0), cancellationToken)
             .ConfigureAwait(false);
-
-        return subscribers;
     }
 
     public Task<int> DeadLetterPendingAsync(string subscriber, string reason, CancellationToken cancellationToken = default) =>
@@ -167,19 +164,18 @@ internal sealed class EfCoreDeliveryStore : IDeliveryStore
 
     private async Task<Dictionary<Guid, string>> PayloadsAsync(IReadOnlyList<Guid> events, CancellationToken ct)
     {
-        var payloads = new Dictionary<Guid, string>();
         if (events.Count == 0)
         {
-            return payloads;
+            return [];
         }
 
-        await ReadAsync(
+        var payloads = await ReadAsync(
             DeliveryTable.PayloadsSql(_outbox, events.Count),
             command => BindEvents(command, events),
-            reader => payloads[Guid.Parse(reader.GetString(0), CultureInfo.InvariantCulture)] = reader.GetString(1),
+            reader => (Id: Guid.Parse(reader.GetString(0), CultureInfo.InvariantCulture), Payload: reader.GetString(1)),
             ct).ConfigureAwait(false);
 
-        return payloads;
+        return payloads.ToDictionary(payload => payload.Id, payload => payload.Payload);
     }
 
     private static void BindEvents(DbCommand command, IReadOnlyList<Guid> events)
@@ -302,31 +298,14 @@ internal sealed class EfCoreDeliveryStore : IDeliveryStore
         }
     }
 
-    private async Task ReadAsync(string sql, Action<DbCommand> bind, Action<DbDataReader> row, CancellationToken ct)
+    private async Task<List<T>> ReadAsync<T>(string sql, Action<DbCommand> bind, Func<DbDataReader, T> read, CancellationToken ct)
     {
         var connection = _connections.Create();
         await using (connection.ConfigureAwait(false))
         {
             await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
-            var command = connection.CreateCommand();
-            await using (command.ConfigureAwait(false))
-            {
-                command.CommandText = sql;
-                bind(command);
-                await ReadRowsAsync(command, row, ct).ConfigureAwait(false);
-            }
-        }
-    }
 
-    private static async Task ReadRowsAsync(DbCommand command, Action<DbDataReader> row, CancellationToken ct)
-    {
-        var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        await using (reader.ConfigureAwait(false))
-        {
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                row(reader);
-            }
+            return await RelationalSqlBatch.ReadRowsAsync(connection, transaction: null, sql, bind, read, ct).ConfigureAwait(false);
         }
     }
 
