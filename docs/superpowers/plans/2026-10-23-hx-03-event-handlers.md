@@ -459,8 +459,8 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 - Baselines: `test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt`, `test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.Testing.verified.txt`
 
 **Interfaces:**
-- Produces (public, `MMLib.Alvo.Events`) — every record is `sealed` with `required init` properties, never positional, so a field can be added without breaking a provider that builds or reads one: `DeliveryRequest { required Guid EventId; required string Subscriber; required string PartitionKey; string? TenantId; required string Kind; string? DeadReason }`; `DeliveryClaim { required string Claimant; required IReadOnlyCollection<string> Ordered; IReadOnlyCollection<string> Unordered = []; required int BatchSize; required TimeSpan Lease; required int OutboxMaxAttempts }`; `ClaimedDelivery { required Guid Id; required Guid EventId; required string Subscriber; required string PartitionKey; required int Attempts; string? Payload }`; `DeliveryAttempt { required ClaimedDelivery Delivery; required string Claimant; required DateTimeOffset StartedAt; required TimeSpan Duration }`; `DeliveryFailure { required string ErrorType; TimeSpan? RetryAfter; required int MaxAttempts }`; `IDeliveryStore { EnsureAsync; Task<int> FanOutAsync(IReadOnlyList<DeliveryRequest>, ct); Task<IReadOnlyList<ClaimedDelivery>> ClaimAsync(DeliveryClaim, ct); Task<bool> CompleteAsync(DeliveryAttempt, ct); Task<bool> FailAsync(DeliveryAttempt, DeliveryFailure, ct); Task<IReadOnlyList<string>> PendingSubscribersAsync(ct); Task<int> DeadLetterPendingAsync(string subscriber, string reason, ct); Task<int> CancelPendingAsync(string subscriber, ct) }`.
-- Produces (public, `MMLib.Alvo.Testing.Events`): `IDeliveryStoreWorld { IDeliveryStore Store; void Advance(TimeSpan); Task<Guid> AppendEventAsync(string partitionKey); Task<Guid> AppendUnfannedEventAsync(string partitionKey, int attempts = 0); Task MarkDispatchedAsync(Guid eventId); }`, `abstract class DeliveryStoreContractTests { protected abstract Task<IDeliveryStoreWorld> WorldAsync(); protected virtual void EnsureEngineAvailable(); }`.
+- Produces (public, `MMLib.Alvo.Events`) — every record is `sealed` with `required init` properties, never positional, so a field can be added without breaking a provider that builds or reads one: `DeliveryRequest { required Guid EventId; required string Subscriber; required string PartitionKey; string? TenantId; required string Kind; string? DeadReason }`; `DeliveryClaim { required string Claimant; required IReadOnlyCollection<string> Ordered; IReadOnlyCollection<string> Unordered = []; required int BatchSize; required TimeSpan Lease; required int OutboxMaxAttempts; required TimeSpan OutboxClaimLease }`; `ClaimedDelivery { required Guid Id; required Guid EventId; required string Subscriber; required string PartitionKey; required int Attempts; string? Payload }`; `DeliveryAttempt { required ClaimedDelivery Delivery; required string Claimant; required DateTimeOffset StartedAt; required TimeSpan Duration }`; `DeliveryFailure { required string ErrorType; TimeSpan? RetryAfter; required int MaxAttempts }`; `IDeliveryStore { EnsureAsync; Task<int> FanOutAsync(IReadOnlyList<DeliveryRequest>, ct); Task<IReadOnlyList<ClaimedDelivery>> ClaimAsync(DeliveryClaim, ct); Task<bool> CompleteAsync(DeliveryAttempt, ct); Task<bool> FailAsync(DeliveryAttempt, DeliveryFailure, ct); Task<IReadOnlyList<string>> PendingSubscribersAsync(ct); Task<int> DeadLetterPendingAsync(string subscriber, string reason, ct); Task<int> CancelPendingAsync(string subscriber, ct) }`.
+- Produces (public, `MMLib.Alvo.Testing.Events`): `IDeliveryStoreWorld { IDeliveryStore Store; void Advance(TimeSpan); Task<Guid> AppendEventAsync(string partitionKey); Task<Guid> AppendUnfannedEventAsync(string partitionKey, int attempts = 0, bool claimed = false); Task MarkDispatchedAsync(Guid eventId); }`, `abstract class DeliveryStoreContractTests { protected abstract Task<IDeliveryStoreWorld> WorldAsync(); protected virtual void EnsureEngineAvailable(); }`.
 - Produces (test-internal, `MMLib.Alvo.Tests.Events`): `FakeDeliveryStore(TimeProvider time)` implementing the port, plus `void Publish(AlvoEvent @event, bool dispatched = true, int attempts = 0)`, `void MarkDispatched(Guid eventId)`, `int FanOutFailures { get; set; }` (throw that many times), `IReadOnlyList<FakeDeliveryStore.Row> Rows`, `IReadOnlyList<(Guid Delivery, int Attempt, string Outcome)> Attempts`; `ManualClock : TimeProvider` with `Advance(TimeSpan)`.
 
 - [ ] **Step 1: Write the port** (the contract suite needs it to compile)
@@ -525,6 +525,13 @@ public sealed record DeliveryClaim
     /// holds an ordered lane back.
     /// </summary>
     public required int OutboxMaxAttempts { get; init; }
+
+    /// <summary>
+    /// Gets the outbox's claim lease: an earlier entry under a claim younger than this is still being processed — even on
+    /// its last attempt, whose claim already counted it at the ceiling — so it holds an ordered lane back until it is
+    /// dispatched or its claim goes stale.
+    /// </summary>
+    public required TimeSpan OutboxClaimLease { get; init; }
 }
 
 /// <summary>One claimed delivery, with the envelope it is for.</summary>
@@ -596,11 +603,13 @@ public sealed record DeliveryFailure
 /// <para>
 /// <b>Lanes.</b> A delivery is claimable when it is pending, or retrying and due, or running with its lease expired; its
 /// subscriber is one the claim names; and — for an ordered subscriber — no delivery of the same subscriber and partition
-/// key with an earlier event id is pending, running, retrying or dead, <b>and no outbox entry of the same partition key
-/// with an earlier id is still undispatched below the outbox's attempt ceiling</b>. The second half is what keeps a record's
-/// order across outbox batches, a failed fan-out and a dispatcher that died between claiming an entry and fanning it out:
-/// a later event's delivery cannot overtake an earlier event that has not been fanned out yet. A dead delivery blocks its
-/// lane until it is redelivered or retired.
+/// key with an earlier event id is pending, running, retrying or dead — except a delivery dead with the reason
+/// <c>unbound</c>, a record of work missed while its handler did not fit the schema, which is replayed explicitly and does
+/// not hold the lane — <b>and no outbox entry of the same partition key with an earlier id is still undispatched, either
+/// below the outbox's attempt ceiling or under a claim younger than the outbox's claim lease</b>. The second half is what
+/// keeps a record's order across outbox batches, a failed fan-out and a dispatcher that died between claiming an entry and
+/// fanning it out: a later event's delivery cannot overtake an earlier event that has not been fanned out yet. Any other
+/// dead delivery blocks its lane until it is redelivered or retired.
 /// </para>
 /// <para>
 /// <b>Fencing.</b> <see cref="CompleteAsync"/> and <see cref="FailAsync"/> change the row only while it is still running
@@ -696,8 +705,9 @@ public interface IDeliveryStoreWorld : IAsyncDisposable
     /// </summary>
     /// <param name="partitionKey">The entry's partition key.</param>
     /// <param name="attempts">How many times the outbox already claimed it.</param>
+    /// <param name="claimed">Whether a claimant holds it now, claimed at the world's current instant.</param>
     /// <returns>The event id.</returns>
-    Task<Guid> AppendUnfannedEventAsync(string partitionKey, int attempts = 0);
+    Task<Guid> AppendUnfannedEventAsync(string partitionKey, int attempts = 0, bool claimed = false);
 
     /// <summary>Marks an outbox entry dispatched, as the outbox does once it fanned the entry out.</summary>
     /// <param name="eventId">The entry's id.</param>
@@ -734,6 +744,7 @@ public abstract class DeliveryStoreContractTests
     private const int OutboxCeiling = 10;
 
     private static readonly TimeSpan _lease = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan _outboxLease = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan _retry = TimeSpan.FromSeconds(5);
 
     /// <summary>Builds a store over fresh, already-created storage.</summary>
@@ -833,7 +844,7 @@ public abstract class DeliveryStoreContractTests
         await world.Store.FanOutAsync([Request(dead, Confirm, KeyA) with { DeadReason = "when-failed" }], Ct);
         await world.Store.FanOutAsync([Request(later, Confirm, KeyA)], Ct);
 
-        var claim = new DeliveryClaim { Claimant = Claimant, Ordered = [], Unordered = [Confirm], BatchSize = 10, Lease = _lease, OutboxMaxAttempts = OutboxCeiling };
+        var claim = new DeliveryClaim { Claimant = Claimant, Ordered = [], Unordered = [Confirm], BatchSize = 10, Lease = _lease, OutboxMaxAttempts = OutboxCeiling, OutboxClaimLease = _outboxLease };
 
         (await world.Store.ClaimAsync(claim, Ct)).ShouldHaveSingleItem().EventId.ShouldBe(later);
     }
@@ -1046,6 +1057,51 @@ public abstract class DeliveryStoreContractTests
         (await world.Store.ClaimAsync(claim, Ct)).ShouldHaveSingleItem().EventId.ShouldBe(later);
     }
 
+    /// <summary>
+    /// An earlier event on its <b>last</b> attempt is already counted at the ceiling while it is being fanned out; under a
+    /// live claim it still holds the lane, or its own delivery could land after a later one ran.
+    /// </summary>
+    [Fact]
+    public async Task An_earlier_event_on_its_last_attempt_under_a_live_claim_holds_the_lane()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        await world.AppendUnfannedEventAsync(KeyA, attempts: OutboxCeiling, claimed: true);
+        var later = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(later, Confirm, KeyA)], Ct);
+
+        (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldBeEmpty();
+    }
+
+    /// <summary>The same entry, once its claim is stale, was abandoned at the ceiling: it will never be fanned out, so it stops blocking.</summary>
+    [Fact]
+    public async Task An_earlier_event_at_the_ceiling_under_a_stale_claim_holds_no_lane_back()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        await world.AppendUnfannedEventAsync(KeyA, attempts: OutboxCeiling, claimed: true);
+        var later = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(later, Confirm, KeyA)], Ct);
+
+        world.Advance(_outboxLease + TimeSpan.FromSeconds(1));
+
+        (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldHaveSingleItem().EventId.ShouldBe(later);
+    }
+
+    /// <summary>A dead <c>unbound</c> delivery records missed work; it is replayed explicitly and does not hold its lane (N6).</summary>
+    [Fact]
+    public async Task A_dead_unbound_delivery_does_not_block_its_lane()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var missed = await world.AppendEventAsync(KeyA);
+        var later = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(missed, Confirm, KeyA) with { DeadReason = "unbound" }], Ct);
+        await world.Store.FanOutAsync([Request(later, Confirm, KeyA)], Ct);
+
+        (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldHaveSingleItem().EventId.ShouldBe(later);
+    }
+
     /// <summary>A delivery whose envelope the outbox no longer holds is still claimed — with no payload, for the runner to dead-letter.</summary>
     [Fact]
     public async Task A_delivery_whose_outbox_entry_is_gone_is_claimed_without_a_payload()
@@ -1089,7 +1145,7 @@ public abstract class DeliveryStoreContractTests
         new() { EventId = @event, Subscriber = subscriber, PartitionKey = key, Kind = Kind };
 
     private static DeliveryClaim Claim(params string[] ordered) =>
-        new() { Claimant = Claimant, Ordered = ordered, BatchSize = 10, Lease = _lease, OutboxMaxAttempts = OutboxCeiling };
+        new() { Claimant = Claimant, Ordered = ordered, BatchSize = 10, Lease = _lease, OutboxMaxAttempts = OutboxCeiling, OutboxClaimLease = _outboxLease };
 
     private static DeliveryAttempt Attempt(ClaimedDelivery delivery) =>
         new() { Delivery = delivery, Claimant = Claimant, StartedAt = DateTimeOffset.UnixEpoch, Duration = TimeSpan.FromMilliseconds(5) };
@@ -1124,7 +1180,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     private readonly Lock _gate = new();
     private readonly List<Row> _rows = [];
     private readonly Dictionary<Guid, string> _payloads = [];
-    private readonly Dictionary<Guid, (string Key, bool Dispatched, int Attempts)> _outbox = [];
+    private readonly Dictionary<Guid, (string Key, bool Dispatched, int Attempts, DateTimeOffset? ClaimedAt)> _outbox = [];
     private readonly List<(Guid Delivery, int Attempt, string Outcome)> _attempts = [];
 
     internal int FanOutFailures { get; set; }
@@ -1151,12 +1207,12 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         }
     }
 
-    internal void Publish(AlvoEvent @event, bool dispatched = true, int attempts = 0)
+    internal void Publish(AlvoEvent @event, bool dispatched = true, int attempts = 0, DateTimeOffset? claimedAt = null)
     {
         lock (_gate)
         {
             _payloads[@event.Id] = AlvoEventJson.Write(@event);
-            _outbox[@event.Id] = (@event.PartitionKey, dispatched, attempts);
+            _outbox[@event.Id] = (@event.PartitionKey, dispatched, attempts, claimedAt);
         }
     }
 
@@ -1242,23 +1298,24 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     private bool Claimable(Row row, DeliveryClaim claim, DateTimeOffset now) =>
         (claim.Ordered.Contains(row.Subscriber) || claim.Unordered.Contains(row.Subscriber))
         && Due(row, now)
-        && (claim.Unordered.Contains(row.Subscriber) || !Blocked(row, claim));
+        && (claim.Unordered.Contains(row.Subscriber) || !Blocked(row, claim, now));
 
     private static bool Due(Row row, DateTimeOffset now) =>
         (row.Status is "pending" or "retrying" && row.NotBefore <= now)
         || (row.Status == "running" && row.LeaseUntil < now);
 
-    private bool Blocked(Row row, DeliveryClaim claim) =>
+    private bool Blocked(Row row, DeliveryClaim claim, DateTimeOffset now) =>
         _rows.Exists(earlier =>
             earlier.Subscriber == row.Subscriber
             && earlier.PartitionKey == row.PartitionKey
             && Before(earlier.EventId, row.EventId)
-            && _blocking.Contains(earlier.Status))
+            && _blocking.Contains(earlier.Status)
+            && earlier.LastErrorType != "unbound")
         || _outbox.Any(entry =>
             entry.Value.Key == row.PartitionKey
             && Before(entry.Key, row.EventId)
             && !entry.Value.Dispatched
-            && entry.Value.Attempts < claim.OutboxMaxAttempts);
+            && (entry.Value.Attempts < claim.OutboxMaxAttempts || entry.Value.ClaimedAt >= now - claim.OutboxClaimLease));
 
     private static bool Before(Guid earlier, Guid later) => string.CompareOrdinal(earlier.ToString(), later.ToString()) < 0;
 
@@ -1386,9 +1443,10 @@ public sealed class FakeDeliveryStoreTests : DeliveryStoreContractTests
 
         public void Advance(TimeSpan duration) => _clock.Advance(duration);
 
-        public Task<Guid> AppendEventAsync(string partitionKey) => AppendAsync(partitionKey, dispatched: true, attempts: 0);
+        public Task<Guid> AppendEventAsync(string partitionKey) => AppendAsync(partitionKey, dispatched: true, attempts: 0, claimed: false);
 
-        public Task<Guid> AppendUnfannedEventAsync(string partitionKey, int attempts = 0) => AppendAsync(partitionKey, dispatched: false, attempts);
+        public Task<Guid> AppendUnfannedEventAsync(string partitionKey, int attempts = 0, bool claimed = false) =>
+            AppendAsync(partitionKey, dispatched: false, attempts, claimed);
 
         public Task MarkDispatchedAsync(Guid eventId)
         {
@@ -1396,7 +1454,7 @@ public sealed class FakeDeliveryStoreTests : DeliveryStoreContractTests
             return Task.CompletedTask;
         }
 
-        private Task<Guid> AppendAsync(string partitionKey, bool dispatched, int attempts)
+        private Task<Guid> AppendAsync(string partitionKey, bool dispatched, int attempts, bool claimed)
         {
             var @event = new AlvoEvent
             {
@@ -1410,7 +1468,7 @@ public sealed class FakeDeliveryStoreTests : DeliveryStoreContractTests
                 CorrelationId = "4bf92f3577b34da6a3ce929d0e0e4736",
                 Data = new AlvoEventData { Record = AlvoRecord.Empty },
             };
-            _store.Publish(@event, dispatched, attempts);
+            _store.Publish(@event, dispatched, attempts, claimed ? _clock.GetUtcNow() : null);
 
             return Task.FromResult(@event.Id);
         }
@@ -1423,7 +1481,7 @@ public sealed class FakeDeliveryStoreTests : DeliveryStoreContractTests
 - [ ] **Step 4: Run, then accept the two baselines**
 
 Run: `dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs src/MMLib.Alvo.Testing/Events/IDeliveryStoreWorld.cs src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStoreTests.cs`, then `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*FakeDeliveryStoreTests' --filter-class '*SqlTextConfinedToRendererArchitectureTests'`
-Expected: 21 contract facts PASS (fix the fake, never the suite, if one fails — the suite is the contract). Then `dotnet test --project test/MMLib.Alvo.Abstractions.Tests --filter-class '*PublicApiApprovalTests'` and `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*PublicApiApprovalTests'`: each diff adds exactly the port + five records (Abstractions) and `DeliveryStoreContractTests` + `IDeliveryStoreWorld` (Testing); accept both, re-run, PASS.
+Expected: 24 contract facts PASS (fix the fake, never the suite, if one fails — the suite is the contract). Then `dotnet test --project test/MMLib.Alvo.Abstractions.Tests --filter-class '*PublicApiApprovalTests'` and `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*PublicApiApprovalTests'`: each diff adds exactly the port + five records (Abstractions) and `DeliveryStoreContractTests` + `IDeliveryStoreWorld` (Testing); accept both, re-run, PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -1448,7 +1506,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 **Interfaces:**
 - Consumes: Task 3's port and suite.
-- Produces: `internal const string AlvoFrameworkTables.DeliveriesSuffix = "_deliveries"`, `DeliveryAttemptsSuffix = "_delivery_attempts"`; `internal static class DeliveryTable` (`NameFor`, `AttemptsNameFor`, `EnsureAsync(DbConnection, string table, string attempts, string outbox, ct)`, `ClaimSql(string table, string outbox, int ordered, int unordered)`, `OutboxKeyIndexDdl(string outbox)`, the status constants); `internal sealed class EfCoreDeliveryStore(RelationalConnectionFactory, AlvoOptions, TimeProvider) : IDeliveryStore` registered `TryAddSingleton<IDeliveryStore>` by every relational provider.
+- Produces: `internal const string AlvoFrameworkTables.DeliveriesSuffix = "_deliveries"`, `DeliveryAttemptsSuffix = "_delivery_attempts"`; `internal static class DeliveryTable` (`NameFor`, `AttemptsNameFor`, `EnsureAsync(DbConnection, string table, string attempts, string outbox, ct)`, `ClaimSql(string table, string outbox, int ordered, int unordered)`, `OutboxUnfannedIndexDdl(string outbox)`, the status constants); `internal sealed class EfCoreDeliveryStore(RelationalConnectionFactory, AlvoOptions, TimeProvider) : IDeliveryStore` registered `TryAddSingleton<IDeliveryStore>` by every relational provider.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1517,6 +1575,15 @@ public sealed class DeliveryTableTests
             .ShouldContain($"FROM {Outbox} unfanned WHERE unfanned.partition_key = {Table}.partition_key");
 
     [Fact]
+    public void An_earlier_entry_under_a_live_claim_blocks_even_at_the_ceiling() =>
+        DeliveryTable.ClaimSql(Table, Outbox, ordered: 1, unordered: 0)
+            .ShouldContain("unfanned.claimed_at >= @outbox_stale_before");
+
+    [Fact]
+    public void The_unfanned_index_is_partial_on_undispatched_entries() =>
+        DeliveryTable.OutboxUnfannedIndexDdl(Outbox).ShouldEndWith("(partition_key, id) WHERE dispatched_at IS NULL");
+
+    [Fact]
     public void A_claim_with_no_unordered_subscriber_orders_every_lane() =>
         DeliveryTable.ClaimSql(Table, Outbox, ordered: 1, unordered: 0).ShouldNotContain("OR (NOT EXISTS");
 }
@@ -1581,7 +1648,7 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
         return id;
     }
 
-    public async Task<Guid> AppendUnfannedEventAsync(string partitionKey, int attempts = 0)
+    public async Task<Guid> AppendUnfannedEventAsync(string partitionKey, int attempts = 0, bool claimed = false)
     {
         var id = AlvoEventId.Create(_clock.GetUtcNow());
         var connection = _connect();
@@ -1590,6 +1657,11 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
             await connection.OpenAsync(Ct);
             await OutboxTable.InsertAsync(connection, transaction: null, _outbox, EventWith(id, partitionKey), Ct);
             await ExecuteAsync(connection, $"UPDATE {_outbox} SET attempts = @value WHERE id = @id", id, attempts);
+            if (claimed)
+            {
+                await ExecuteAsync(connection, $"UPDATE {_outbox} SET claimed_by = @value WHERE id = @id", id, "dead-dispatcher");
+                await ExecuteAsync(connection, $"UPDATE {_outbox} SET claimed_at = @value WHERE id = @id", id, StoredInstant.Text(_clock.GetUtcNow()));
+            }
         }
 
         return id;
@@ -1676,6 +1748,7 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
             RelationalSqlBatch.AddParameter(command, "@claimed_by", "racer");
             RelationalSqlBatch.AddParameter(command, "@batch", 10);
             RelationalSqlBatch.AddParameter(command, "@outbox_max_attempts", 10);
+            RelationalSqlBatch.AddParameter(command, "@outbox_stale_before", StoredInstant.Text(_clock.GetUtcNow() - TimeSpan.FromMinutes(5)));
             RelationalSqlBatch.AddParameter(command, "@s0", subscriber);
 
             return await CountRowsAsync(command);
@@ -1932,14 +2005,17 @@ internal static class DeliveryTable
         """;
 
     /// <summary>
-    /// An index on the outbox's (partition key, id), so the lane condition's look at earlier undispatched entries of a key
-    /// is a seek — an index, not an <c>ALTER</c> of <c>alvo_outbox</c> (spec E10).
+    /// A <b>partial</b> index on the outbox's undispatched entries, (partition key, id), so the lane condition's look at
+    /// earlier undispatched entries of a key is a seek over the few that are still waiting, not a scan of the key's whole
+    /// history — the outbox is never purged. Both engines use it because the query carries the same
+    /// <c>dispatched_at IS NULL</c> term verbatim (SQLite requires that). An index, not an <c>ALTER</c> of
+    /// <c>alvo_outbox</c> (spec E10).
     /// </summary>
-    internal static string OutboxKeyIndexDdl(string outbox) =>
-        $"CREATE INDEX IF NOT EXISTS ix_{outbox}_key ON {outbox} (partition_key, id)";
+    internal static string OutboxUnfannedIndexDdl(string outbox) =>
+        $"CREATE INDEX IF NOT EXISTS ix_{outbox}_unfanned ON {outbox} (partition_key, id) WHERE dispatched_at IS NULL";
 
     internal static IReadOnlyList<string> Statements(string table, string attempts, string outbox) =>
-        [Ddl(table), ClaimIndexDdl(table), LaneIndexDdl(table), AttemptsDdl(attempts), OutboxKeyIndexDdl(outbox)];
+        [Ddl(table), ClaimIndexDdl(table), LaneIndexDdl(table), AttemptsDdl(attempts), OutboxUnfannedIndexDdl(outbox)];
 
     internal static async Task EnsureAsync(DbConnection connection, string table, string attempts, string outbox, CancellationToken ct)
     {
@@ -1987,11 +2063,13 @@ internal static class DeliveryTable
         var noEarlier =
             $"NOT EXISTS (SELECT 1 FROM {table} earlier WHERE earlier.subscriber = {table}.subscriber "
             + $"AND earlier.partition_key = {table}.partition_key AND earlier.event_id < {table}.event_id "
-            + "AND earlier.status IN ('pending', 'running', 'retrying', 'dead'))";
+            + "AND (earlier.status IN ('pending', 'running', 'retrying') "
+            + "OR (earlier.status = 'dead' AND earlier.last_error_type <> 'unbound')))";
         var noUnfanned =
             $"NOT EXISTS (SELECT 1 FROM {outbox} unfanned WHERE unfanned.partition_key = {table}.partition_key "
             + $"AND unfanned.id < {table}.event_id AND unfanned.dispatched_at IS NULL "
-            + "AND unfanned.attempts < @outbox_max_attempts)";
+            + "AND (unfanned.attempts < @outbox_max_attempts "
+            + "OR (unfanned.claimed_by IS NOT NULL AND unfanned.claimed_at >= @outbox_stale_before)))";
         var laneHead = $"{noEarlier} AND {noUnfanned}";
 
         return unordered == 0 ? laneHead : $"(subscriber IN ({Parameters(ordered, unordered)}) OR ({laneHead}))";
@@ -2176,6 +2254,7 @@ internal sealed class EfCoreDeliveryStore : IDeliveryStore
         RelationalSqlBatch.AddParameter(command, "@claimed_by", claim.Claimant);
         RelationalSqlBatch.AddParameter(command, "@batch", claim.BatchSize);
         RelationalSqlBatch.AddParameter(command, "@outbox_max_attempts", claim.OutboxMaxAttempts);
+        RelationalSqlBatch.AddParameter(command, "@outbox_stale_before", StoredInstant.Text(now - claim.OutboxClaimLease));
         var index = 0;
         foreach (var subscriber in claim.Ordered.Concat(claim.Unordered))
         {
@@ -2380,7 +2459,7 @@ set them in the constructor (`_deliveriesTableName = DeliveryTable.NameFor(schem
         await CreateIfMissingAsync(
             _deliveryAttemptsTableName, DeliveryTable.AttemptsDdl(_deliveryAttemptsTableName), ct).ConfigureAwait(false);
         await CreateIfMissingAsync(
-            _outboxTableName, DeliveryTable.OutboxKeyIndexDdl(_outboxTableName), ct).ConfigureAwait(false);
+            _outboxTableName, DeliveryTable.OutboxUnfannedIndexDdl(_outboxTableName), ct).ConfigureAwait(false);
 ```
 
 `AlvoEfCoreProvider.cs`: after `builder.Services.TryAddSingleton<IOutboxStore>(CreateOutboxStore);` add `builder.Services.TryAddSingleton<IDeliveryStore>(CreateDeliveryStore);` and beside `CreateOutboxStore`:
@@ -2404,7 +2483,9 @@ set them in the constructor (`_deliveriesTableName = DeliveryTable.NameFor(schem
   `TryAdd`, and `AddRelationalProvider` registers `EfCoreDeliveryStore` for every relational dialect**, whose claim is
   SQLite/PostgreSQL SQL (`ON CONFLICT`, `LIMIT`, `RETURNING`). A dialect that cannot run it — a T-SQL provider — must
   register its own `IDeliveryStore` before calling `AddRelationalProvider`, so its registration wins; the same holds for
-  the outbox store. Expect the port to grow before 1.0 (HX-06 reads, HX-13 job kinds, HX-14 steps).
+  the outbox store. Expect the port to grow before 1.0 (HX-06 reads, HX-13 job kinds, HX-14 steps). **The first boot
+  after upgrading builds a partial index on `alvo_outbox`**; on PostgreSQL that `CREATE INDEX` blocks outbox writes while
+  it builds — noted in the CHANGELOG.
 ```
 
 - [ ] **Step 4: Run all four suites**
@@ -4868,7 +4949,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 ## Task 8: Fan-out first — handler selection on the outbox dispatcher (M1, X6, R-M5, R-M6) **[slice end]**
 
 **Files:**
-- Create: `src/MMLib.Alvo/Events/Internal/EnvelopeReading.cs`, `HandlerCondition.cs`, `DeliveryVocabulary.cs`, `DeliveryLog.cs`, `AlvoDeliveryMetrics.cs`, `DeliveryFanOut.cs`
+- Create: `src/MMLib.Alvo/Events/Internal/EnvelopeReading.cs`, `HandlerCondition.cs`, `DeliveryVocabulary.cs`, `DeliveryLog.cs`, `AlvoDeliveryMetrics.cs`, `DeliveryFanOut.cs`; `src/MMLib.Alvo/Extensions/Internal/HandlerSources.cs`
 - Modify: `src/MMLib.Alvo/Events/Internal/EventSubscriptions.cs` (members move to `EnvelopeReading`), `src/MMLib.Alvo/Extensions/Internal/ExtensionBindings.cs` (selection), `src/MMLib.Alvo/Events/Internal/OutboxDispatcher.cs`, `src/MMLib.Alvo/Events/Setup.cs`
 - Modify (I6, the hold-back release): `src/MMLib.Alvo.Abstractions/Events/IOutboxStore.cs` (`HoldBackAsync`), `src/MMLib.Alvo.Data.EntityFrameworkCore/EfCoreOutboxStore.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/OutboxTable.cs`, `src/MMLib.Alvo.Testing/Events/OutboxStoreContractTests.cs` (one fact), and the three test doubles implementing the port: `test/MMLib.Alvo.Tests/Events/AlvoEventsTests.cs` (`RecordingOutboxStore`), `test/MMLib.Alvo.Tests/Events/EventSubscriptionsTests.cs` (`CapturingOutboxStore`), `FakeOutboxStore` in `OutboxDispatcherTests.cs`
 - Modify: `test/MMLib.Alvo.Tests/Events/OutboxDispatcherTests.cs` (`Subject` takes a fan-out), `test/MMLib.Alvo.Tests/Events/EventPumpRegistrationTests.cs` (a delivery-store substitute)
@@ -5111,7 +5192,11 @@ public sealed partial class OutboxDispatcherTests
 
         await pump.PumpOneBatchAsync(Cancellation);
 
-        var claim = new DeliveryClaim { Claimant = "worker", Ordered = [DealHandler], BatchSize = 10, Lease = TimeSpan.FromMinutes(1), OutboxMaxAttempts = 10 };
+        var claim = new DeliveryClaim
+        {
+            Claimant = "worker", Ordered = [DealHandler], BatchSize = 10, Lease = TimeSpan.FromMinutes(1), OutboxMaxAttempts = 10,
+            OutboxClaimLease = TimeSpan.FromMinutes(5),
+        };
         (await deliveries.ClaimAsync(claim, Cancellation)).ShouldHaveSingleItem().EventId
             .ShouldBe(first.Id, "event 2 of the same record is not delivered before event 1");
     }
@@ -5719,7 +5804,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 **Behaviour:** the runner enters `AlvoFlow` with `{ CorrelationId = event's, CausationId = event id, Depth = chaindepth + 1 }` — so a handler writing through `ctx.Data` **or** a DI-injected `IAlvoData` with a fresh `AlvoContext.System(tenant)` writes one hop deeper (B2, R-M2) — and with **no** `TraceParent`, so writes made in the handler are traced under the delivery span. The span keeps the ambient parent and links the envelope's `traceparent`. The handler runs in its own DI scope as `AlvoContext.System(event tenant)` (`AlvoRunAs.System`) or the envelope's actor (`AlvoRunAs.EventActor`, E8: `authid`, `tenantid`, the `authclaims` roles still declared — an undeclared name is dropped, none left means `anon`). Outcomes: success → fenced complete; `AlvoChainDepthExceededException` — thrown, or wrapped as an inner exception — → dead `chain-depth-exceeded`, never retried; an envelope whose `tenantid` (or, for `EventActor`, `authid`) is present but unreadable → dead `event-unreadable`, never run as a tenantless or anonymous caller (M10); timeout → failed `timeout`, **enforced, not cooperative** (I4): the runner awaits the handler with `WaitAsync(Timeout)`, then cancels its token and waits up to `LeaseGrace` (30 s) for it to stop; any other exception → failed with its type's full name; a retry waits `AlvoRetryPolicy` ±20 %; a failure at the policy's last attempt is dead; the host stopping → nothing recorded, the claim left for its lease; a delivery whose envelope is gone → dead `event-missing`; a reclaimed delivery already past the ceiling (a process that died in it every time) → dead `lease-expired`, not run; a completion whose fence no longer holds → `LeaseLost`, logged, nothing changed.
 
-**The fencing rule (I4).** The runner answers for an attempt exactly once, and no later than `Timeout + LeaseGrace` after it started — inside the claim's own lease (`longest Timeout + LeaseGrace` from the claim), so no other claimant can start the same delivery while this attempt is still unanswered. A handler still running when the runner answers — it ignored its token for 30 s — is abandoned to the background (.NET has no thread abort, spec X15): it may overlap the retry, its completion is never recorded, and **a handler must therefore be idempotent on `EventId`**, which at-least-once requires anyway. A handler that blocks its thread synchronously holds that thread until it returns. The pool slot is freed when the runner answers, so an ignoring handler cannot starve the dispatcher.
+**The fencing rule (I4, N4).** The runner answers for an attempt exactly once — the `(claimed_by, attempts)` fence enforces "once", not the lease — no later than `Timeout + SettleGrace` (+ the write) after it started. The claim's lease is `longest Timeout + LeaseGrace + SettleGrace`, so that answer lands with `LeaseGrace` (30 s) to spare for scope creation and the payload read, and no other claimant can start the same delivery while this attempt is still unanswered; should it still land late, the fence makes it `LeaseLost` and records nothing. A handler still running when the runner answers — it ignored its token for 30 s — is abandoned to the background (.NET has no thread abort, spec X15): it may overlap the retry, its completion is never recorded, and **a handler must therefore be idempotent on `EventId`**, which at-least-once requires anyway. A handler that blocks its thread synchronously holds that thread until it returns. The pool slot is freed when the runner answers, so an ignoring handler cannot starve the dispatcher; abandoned handler tasks are **not** counted against `MaxConcurrency` — bounded per delivery by its retry policy, unbounded across deliveries, which is the X15 limit stated.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -6144,7 +6229,7 @@ public sealed class DeliveryRunnerTests : IDisposable
     }
 
     private static DeliveryClaim Claim() =>
-        new() { Claimant = Claimant, Ordered = [Handler], BatchSize = 10, Lease = TimeSpan.FromMinutes(1), OutboxMaxAttempts = 10 };
+        new() { Claimant = Claimant, Ordered = [Handler], BatchSize = 10, Lease = TimeSpan.FromMinutes(1), OutboxMaxAttempts = 10, OutboxClaimLease = TimeSpan.FromMinutes(5) };
 
     /// <summary>Listens to the hook source under one fact's own root trace.</summary>
     private sealed class Spans : IDisposable
@@ -6670,7 +6755,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 - Consumes: `DeliveryRunner.RunAsync`, `DeliveryRunOutcome` (Task 9); `ExtensionBinder.For`, `ExtensionBindings.Handlers/Handler/LongestTimeout` (Task 7); `AlvoDeliveryOptions.MaxConcurrency` (Task 5); `IDeliveryStore.ClaimAsync`, `DeliveryClaim` (Task 3).
 - Produces (internal): `sealed class DeliveryDispatcher(IDeliveryStore, AlvoBootState, IPolicyCatalogProvider, ExtensionBinder, DeliveryRunner, IOptions<AlvoEventOptions>, IOptions<AlvoDeliveryOptions>, TimeProvider, ILogger<DeliveryDispatcher>) : BackgroundService { Task<AlvoDrainResult> ManualRoundAsync(CancellationToken) }` (the lease grace is `DeliveryRunner.LeaseGrace`, Task 9); `EventPump(OutboxDispatcher, DeliveryDispatcher, IHostApplicationLifetime)` with `Deliveries`; `DeliveryLog.DeliveryDispatcherManual / DeliveryDispatcherStopped / DeliveryRunFailed`.
 
-**Behaviour (spec §4.8 *Claim*, *Worker model*):** the claim names exactly the handlers bound to the current catalog (`subscriber IN`), ordered or not by their `Ordering`, with a lease of the longest registered timeout + 30 s (one statement claims a batch, so the lease is the batch's — never shorter than any row's `timeout + 30 s`). The background loop keeps at most `MaxConcurrency` deliveries running, claims only free slots, and idles on the poll interval or the first finishing delivery; it keeps the outbox loop's gates (enabled, background mode, boot `Ready`, primed catalog). A manual round claims up to `Alvo:Events:BatchSize` lane heads (M5: a fixed 16 would make the test host report a false loop on a backlog of more than 1 600 deliveries — 100 rounds × 16), runs them at most `MaxConcurrency` at a time and returns when all have ended; rounds are serialised, so nothing else in the process claims while a queued delivery waits for a slot. The claimant is `{machine}:{pid}:{instance}`, so two dispatchers in one process — two test hosts over one database — are two claimants. **A round called from inside a round is refused** (the controller's carry): `EventPump` marks its flow and a nested `DrainAsync` throws `InvalidOperationException` at once instead of waiting forever on its own gate; code that suppresses flow escapes the mark, and the docs say so.
+**Behaviour (spec §4.8 *Claim*, *Worker model*):** the claim names exactly the handlers bound to the current catalog (`subscriber IN`), ordered or not by their `Ordering`, with a lease of the longest registered timeout + `LeaseGrace` (30 s) + `SettleGrace` (30 s) — one statement claims a batch, so the lease is the batch's, never shorter than any row's; the settle margin is what lets the runner's answer, which can come `Timeout + SettleGrace` after the attempt started, land inside the lease (N4). The background loop keeps at most `MaxConcurrency` deliveries running, claims only free slots, and idles on the poll interval or the first finishing delivery; it keeps the outbox loop's gates (enabled, background mode, boot `Ready`, primed catalog). A manual round claims at most `MaxConcurrency` lane heads at a time, runs them, and claims again — until nothing is due or `Alvo:Events:BatchSize` deliveries were claimed in the round (M5, N5): a fixed 16 would make the test host report a false loop on a backlog of more than 1 600 deliveries, and claiming the whole batch up front would let a queued delivery's lease run while it waits for a slot (another test host over the same database could then reclaim it). A later event of a lane whose head just finished is claimable in the same round. The claimant is `{machine}:{pid}:{instance}`, so two dispatchers in one process — two test hosts over one database — are two claimants. **A round called from inside a round is refused** (the controller's carry): `EventPump` marks its flow and a nested `DrainAsync` throws `InvalidOperationException` at once instead of waiting forever on its own gate; code that suppresses flow escapes the mark, and the docs say so.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -6766,7 +6851,7 @@ public sealed class DeliveryDispatcherTests : IDisposable
     }
 
     [Fact]
-    public async Task A_claim_holds_for_the_longest_handler_timeout_and_thirty_seconds()
+    public async Task A_claim_holds_for_the_longest_handler_timeout_its_grace_and_its_settle_margin()
     {
         var store = new FakeDeliveryStore(_clock);
         var dispatcher = Dispatcher(store, (AlvoCreated<AlvoRecord> _, CancellationToken ct) => Task.Delay(Timeout.InfiniteTimeSpan, ct), options => options.Timeout = TimeSpan.FromSeconds(20));
@@ -6776,7 +6861,7 @@ public sealed class DeliveryDispatcherTests : IDisposable
         var round = dispatcher.ManualRoundAsync(stop.Token);
         await UntilAsync(() => store.Rows.Single().Status == "running", "the delivery to be claimed");
 
-        store.Rows.Single().LeaseUntil.ShouldBe(_clock.GetUtcNow() + TimeSpan.FromSeconds(50));
+        store.Rows.Single().LeaseUntil.ShouldBe(_clock.GetUtcNow() + TimeSpan.FromSeconds(80), "20 s timeout + 30 s grace + 30 s settle margin");
         await stop.CancelAsync();
         await round;
     }
@@ -7065,13 +7150,22 @@ internal sealed class DeliveryDispatcher(
 
         await EnsureStoreAsync(cancellationToken).ConfigureAwait(false);
         var bindings = binder.For(catalog);
-        var claimed = await ClaimAsync(bindings, events.Value.BatchSize, cancellationToken).ConfigureAwait(false);
         var round = new DrainRound();
-        var slots = new ParallelOptions { MaxDegreeOfParallelism = deliveries.Value.MaxConcurrency };
-        await Parallel.ForEachAsync(claimed, slots, async (delivery, _) =>
-            await RunContainedAsync(delivery, bindings, round, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+        var claimedInRound = 0;
+        while (claimedInRound < events.Value.BatchSize && !cancellationToken.IsCancellationRequested)
+        {
+            var slots = Math.Min(deliveries.Value.MaxConcurrency, events.Value.BatchSize - claimedInRound);
+            var claimed = await ClaimAsync(bindings, slots, cancellationToken).ConfigureAwait(false);
+            if (claimed.Count == 0)
+            {
+                break;
+            }
 
-        return round.Result(claimed.Count);
+            claimedInRound += claimed.Count;
+            await Task.WhenAll(claimed.Select(delivery => RunContainedAsync(delivery, bindings, round, cancellationToken))).ConfigureAwait(false);
+        }
+
+        return round.Result(claimedInRound);
     }
 
     /// <inheritdoc/>
@@ -7150,8 +7244,9 @@ internal sealed class DeliveryDispatcher(
         Ordered = [.. bindings.Handlers.Where(handler => handler.Settings.Ordering is AlvoOrdering.PerRecord).Select(handler => handler.Id)],
         Unordered = [.. bindings.Handlers.Where(handler => handler.Settings.Ordering is AlvoOrdering.None).Select(handler => handler.Id)],
         BatchSize = batchSize,
-        Lease = bindings.LongestTimeout + DeliveryRunner.LeaseGrace,
+        Lease = bindings.LongestTimeout + DeliveryRunner.LeaseGrace + runner.SettleGrace,
         OutboxMaxAttempts = events.Value.MaxAttempts,
+        OutboxClaimLease = events.Value.ClaimLease,
     };
 
     private async Task RunContainedAsync(ClaimedDelivery delivery, ExtensionBindings bindings, DrainRound? round, CancellationToken stop)
@@ -8396,6 +8491,7 @@ public abstract class DeliveryChaosCriteriaTests
         BatchSize = 1,
         Lease = TimeSpan.FromMinutes(1),
         OutboxMaxAttempts = 10,
+        OutboxClaimLease = TimeSpan.FromMinutes(5),
     };
 
     private static void AssertNothingIsLost(HashSet<string> seeded, ChaosSink sink, IReadOnlyList<DeliveryRow> rows, ChaosRun run)
@@ -8831,7 +8927,9 @@ updated).
   `chain-depth-exceeded`, never run. The chain follows .NET's execution context: work you hand to your own queue
   leaves it.
 - **A handler that no longer fits the descriptor** — after an apply removed what its condition reads, say — is not
-  skipped silently: every event it would have handled is recorded as a dead delivery with the reason `unbound`.
+  skipped silently: every event it would have handled is recorded as a dead delivery with the reason `unbound`. These
+  rows do not hold the record's later events back: once the handler fits again, new events flow, and the missed ones
+  wait to be replayed (a later release; until then they are listed in `alvo_deliveries`).
 - **`EventActor` uses today's roles by name.** A role the descriptor redefined since the event grants its rules as they
   are now; a role it dropped is not held. A handler on an event the system made runs as `admin`, as the event did.
 - **Nothing sensitive is stored.** A delivery records ids, statuses, times and an error **type** — never a body, a URL
@@ -8930,9 +9028,9 @@ catalog (`ExtensionBinder`) and refuses all problems at once. The mechanism — 
 
 `docs/architecture/events.md`:
 - Add a section `## Event handlers and deliveries` before `## Chain depth`, with these paragraphs:
-  - **Fan-out runs first.** For each claimed outbox entry, in id order, `DeliveryFanOut` judges every handler bound to the current catalog (`ExtensionBinder.For`) and inserts one `alvo_deliveries` row per match before the declarative actions run; `UNIQUE (event_id, subscriber)` makes a second fan-out a no-op. A `when` that throws is a `dead` `when-failed` row; a matching handler on an envelope whose `chaindepth + 1 > MaxDepth` is a `dead` `chain-depth-exceeded` row and an Error `ChainDepthExceeded`; a condition reading a caller value the envelope lacks matches nothing. A storage failure of the insert releases the entry and every later entry of the batch with the same partition key, unprocessed, with the same backoff. A failing action no longer touches deliveries already recorded.
+  - **Fan-out runs first.** For each claimed outbox entry, in id order, `DeliveryFanOut` judges every handler bound to the current catalog (`ExtensionBinder.For`) and inserts one `alvo_deliveries` row per match before the declarative actions run; `UNIQUE (event_id, subscriber)` makes a second fan-out a no-op. A `when` that throws is a `dead` `when-failed` row; a matching handler on an envelope whose `chaindepth + 1 > MaxDepth` is a `dead` `chain-depth-exceeded` row and an Error `ChainDepthExceeded`; a condition reading a caller value the envelope lacks matches nothing. A storage failure of the insert releases the entry and holds back every later entry of the batch with the same partition key, unprocessed, without spending their attempts (`HoldBackAsync`). A failing action no longer touches deliveries already recorded.
   - **The tables.** `alvo_deliveries` and `alvo_delivery_attempts` (identical DDL, `SystemSchemaInitializer`, names from `AlvoFrameworkTables`); no body, URL or exception message is stored; the envelope stays in `alvo_outbox`, which a claim reads it from — so `IDeliveryStore` and `IOutboxStore` share one database.
-  - **The claim.** One `UPDATE … RETURNING` with the outbox's EvalPlanQual-safe shape, restricted to the handlers this process binds, due (`pending`, `retrying` past `not_before`, or `running` past its lease), and — for an ordered handler — no earlier delivery of the same subscriber and partition key pending, running, retrying or dead, **and no earlier outbox entry of the same partition key still undispatched below `Alvo:Events:MaxAttempts`** (an index on the outbox's `(partition_key, id)` keeps that a seek). The second half is what keeps a record's order across outbox batches, a failed fan-out and a dispatcher that died between claiming an entry and fanning it out; it also means a descriptor action that keeps failing on event 1 holds the record's later handler deliveries back until it succeeds or reaches the outbox ceiling (HX-15 moves actions onto deliveries and removes that coupling). A same-key entry held back behind a failed fan-out is handed back with `IOutboxStore.HoldBackAsync`, which does not spend its attempt. The lease is the longest registered timeout + 30 s; the runner answers for an attempt within it (it waits a timed-out handler at most 30 s), so no second claim starts a delivery whose attempt is still unanswered. Completion and failure are fenced on `(claimed_by, attempts)`: a late finisher changes nothing and logs `DeliveryLeaseLost`. The claimant is per dispatcher instance.
+  - **The claim.** One `UPDATE … RETURNING` with the outbox's EvalPlanQual-safe shape, restricted to the handlers this process binds, due (`pending`, `retrying` past `not_before`, or `running` past its lease), and — for an ordered handler — no earlier delivery of the same subscriber and partition key pending, running, retrying or dead, **and no earlier outbox entry of the same partition key still undispatched below `Alvo:Events:MaxAttempts`** — or still under a claim younger than `Alvo:Events:ClaimLease`, which covers an entry being fanned out on its last attempt — (a partial index on the outbox's undispatched `(partition_key, id)` keeps that a seek). The second half is what keeps a record's order across outbox batches, a failed fan-out and a dispatcher that died between claiming an entry and fanning it out; it also means a descriptor action that keeps failing on event 1 holds the record's later handler deliveries back until it succeeds or reaches the outbox ceiling (HX-15 moves actions onto deliveries and removes that coupling). A same-key entry held back behind a failed fan-out is handed back with `IOutboxStore.HoldBackAsync`, which does not spend its attempt. The lease is the longest registered timeout + 30 s grace + 30 s settle margin; the runner answers for an attempt within `Timeout + 30 s` of its start, so the answer lands inside the lease and no second claim starts a delivery whose attempt is still unanswered (the fence keeps it at most once regardless). Completion and failure are fenced on `(claimed_by, attempts)`: a late finisher changes nothing and logs `DeliveryLeaseLost`. The claimant is per dispatcher instance.
   - **A delivery.** `DeliveryRunner` enters `AlvoFlow` (`Depth = chaindepth + 1`, `CausationId = event id`, no trace parent) — the first production caller of `AlvoFlow.Enter` — and runs the handler in its own DI scope, as `System(event tenant)` or the event's actor, under its timeout. Retries follow `AlvoRetryPolicy` ±20 % (default X5: dead after attempt 7); `AlvoChainDepthExceededException` is dead at once; a host stopping records nothing; a delivery reclaimed past its ceiling is dead `lease-expired` without running; an envelope gone from the outbox is dead `event-missing`.
   - **Worker model.** `DeliveryDispatcher` keeps at most `Alvo:Deliveries:MaxConcurrency` (16) deliveries running; in the manual mode it is the second step of a pump round, and a round called from inside a round is refused. The job pool for schedules and migrations arrives with them (HX-13).
   - **Boot.** Every registration is bound when the boot plan compiles the catalog; all problems refuse the start at once. `ExtensionStateGuard` then applies `AddRetiredExtension` and refuses a start over unfinished work of an id nobody registers.
@@ -8969,6 +9067,10 @@ and under `### Changed` (create the heading if absent):
 - **A database provider must supply `IDeliveryStore`** over the same database as `IOutboxStore` (HX-03); both shipped
   providers do. The outbox dispatcher fans each event out to its handler deliveries before running the descriptor's
   after-hook actions. Expect `IDeliveryStore` to grow before 1.0 (reads, job kinds, steps).
+- **Upgrade: the first boot builds an index on `alvo_outbox`** (HX-03, `ix_alvo_outbox_unfanned`, partial on undispatched
+  entries). On a large outbox this takes a while, and on PostgreSQL a plain `CREATE INDEX` blocks outbox writes while it
+  builds (identical DDL on both engines rules out `CONCURRENTLY`); plan the first deploy for a quiet moment, or create
+  the index by hand beforehand with the same name.
 - **`IOutboxStore` gains `HoldBackAsync`** (HX-03): an entry held behind a failed earlier entry of its key is handed back
   without spending an attempt. A third-party implementation of the port must add it.
 ```
@@ -8976,7 +9078,7 @@ and under `### Changed` (create the heading if absent):
 `docs/PLAN.md`, the *Host extensibility* line: replace "HX-02 (`MMLib.Alvo.TestHost` and the docs-snippet harness) the second." with "HX-02 (`MMLib.Alvo.TestHost` and the docs-snippet harness) the second; HX-03 (event handlers on the delivery engine) the third."
 
 Spec amendment — `docs/superpowers/specs/2026-10-14-host-extensibility-design.md`:
-- After §4.8's *Operations (HX-06)* table add a paragraph **"HX-03 settled details."** with one bullet per ruling, verbatim from this plan's *Rulings and deviations* section below (items 1–31); in §4.8 *Fan-out* replace "later entries of the same key are released with it" with "later entries of the same key are held back without spending an attempt, and an ordered delivery is not claimable while an earlier entry of its key is undispatched below the outbox ceiling", and replace "Per-record order holds under the outbox's own condition: one outbox dispatcher and one emitting process per millisecond (#150 still applies)" with "Per-record order holds across batches, failed fan-outs and dispatcher crashes; #150's id condition still applies (two emitting processes within one millisecond)" — a recorded deviation from S:557-560, whose in-batch stop alone did not keep order (review B1).
+- After §4.8's *Operations (HX-06)* table add a paragraph **"HX-03 settled details."** with one bullet per ruling, verbatim from this plan's *Rulings and deviations* section below (items 1–31); in §4.8 *Fan-out* replace "later entries of the same key are released with it" with "later entries of the same key are held back without spending an attempt, and an ordered delivery is not claimable while an earlier entry of its key is undispatched below the outbox ceiling", and replace "Per-record order holds under the outbox's own condition: one outbox dispatcher and one emitting process per millisecond (#150 still applies)" with "Per-record order holds across batches, failed fan-outs and dispatcher crashes; #150's id condition still applies (two emitting processes within one millisecond)" — a recorded deviation from S:557-560, whose in-batch stop alone did not keep order (review B1). Record also, as a deliberate trade-off until HX-15 moves declarative actions onto deliveries: **acceptance (6) holds for the failing event's own delivery; a later delivery of the same record waits behind an event whose action keeps failing — about `attempts × PollInterval` per failing event (≈ 45 s at the defaults), bounded by the outbox ceiling** — so with a webhook endpoint down, a record with *n* quick updates reaches its handler after ≈ *n* × 45 s. If that bites before HX-15, decouple "fanned out" from `dispatched_at` with a per-event fan-out marker in `alvo_deliveries` (no `ALTER` of the outbox).
 - §5: in the HX-03 core/`MMLib.Alvo.Extensions` row remove `AlvoHookOptions` (it ships with its first user, HX-09 — add it to the HX-09 row); in the HX-03 core/Events row remove `EventCondition<T>`, `AlvoEventAttribute` and `AddEventHandler<TMessage,THandler>` from the DI row (typed layer — add them to the HX-05 row) and add `AddEventHandler<THandler>(id, eventType, …)` over `AlvoRecord`; in the `IDeliveryStore` row add "with `DeliveryRequest`, `DeliveryClaim`, `ClaimedDelivery`, `DeliveryAttempt`, `DeliveryFailure`; the EF implementation is internal".
 - §7 *HX-03* scope: after "`DeliveryDispatcher` (pools, …)" add "(the handler pool; the job pool arrives with its first job kind, HX-13)".
 
@@ -9027,7 +9129,7 @@ Each is recorded in the spec amendment (Task 14 Step 5) so a later reader can te
 3. **(15) is reachable in HX-03 through `AddRetiredExtension`,** whose id may follow any catalog grammar (a retired command or function name may hold `_`); handler ids cannot, so `a-b` beside a retired `a_b` is the live collision. The injective check runs over every id in the namespace; in HX-03 no event name is minted from an id yet, so it protects what HX-08 (command completions) and HX-13 (schedule runs) mint.
 4. **A re-entrant drain is refused**, not documented: `EventPump` marks its execution flow, and a nested `DrainAsync` throws `InvalidOperationException` at once. Code that suppresses flow escapes the mark (stated).
 5. **Delivery spans keep the ambient parent and link the envelope's trace;** the delivery flow carries no `TraceParent`, so a handler's writes are traced under its delivery span.
-6. **Binding is strict at boot, visible after.** The pass runs where the boot plan compiles the catalog (`DescriptorBootPlan`, through `ExtensionBinder`), not inside the public `PolicyCatalog.Build`, which keeps its seven call sites. A code-first boot refuses to start; a stored-descriptor boot records the project `Failed` and stays up (I7). A catalog the boot plan did not bind — a runtime apply, `ApplyAlvoDescriptorAsync` (`SchemaMigrationRunner`), the first catalog of a dashboard-first host that booted `Awaiting` — binds what fits, never a stale catalog, logs `ExtensionUnbound` once, and records a **dead `unbound` delivery** for every event an unbound handler's source selects (I3): visible, replayable by HX-06, never a silent drop. HX-04's apply guard then refuses such an apply; until it does, acceptance (7) holds for a dashboard-first host only in that form.
+6. **Binding is strict at boot, visible after.** The pass runs where the boot plan compiles the catalog (`DescriptorBootPlan`, through `ExtensionBinder`), not inside the public `PolicyCatalog.Build`, which keeps its seven call sites. A code-first boot refuses to start; a stored-descriptor boot records the project `Failed` and stays up (I7). A catalog the boot plan did not bind — a runtime apply, `ApplyAlvoDescriptorAsync` (`SchemaMigrationRunner`), the first catalog of a dashboard-first host that booted `Awaiting` — binds what fits, never a stale catalog, logs `ExtensionUnbound` once, and records a **dead `unbound` delivery** for every event an unbound handler's source selects (I3): visible, replayable by HX-06, never a silent drop. **An `unbound` row does not block its (handler, record) lane** (N6): it is a record of missed work, selected without `when`, so it may name records the condition would never have matched; once the handler rebinds, later events flow, and the missed ones are replayed explicitly — a deliberate order trade-off. HX-04's apply guard then refuses such an apply; until it does, acceptance (7) holds for a dashboard-first host only in that form.
 7. **`changed()` on an excluded field is refused in a handler's `when`** (stricter than after-hooks), so #398 cannot reach handlers; #399 is inherited through the shared `EnvelopeReading` and noted on the issue.
 8. **`OnSaved` carries only the post-image:** its `when` may not read `old.` or call `changed()` (the #325 rule); use `OnUpdated` for a condition on the change.
 9. **A `"*"` or application-event handler's `when` tests only `@user`/`@tenant`** — compiled against a fieldless schema; an application event's payload declares no fields to check.
@@ -9041,16 +9143,16 @@ Each is recorded in the spec amendment (Task 14 Step 5) so a later reader can te
 17. **`AlvoRunAs.EventActor`** resolves the envelope's role names against the roles the descriptor still declares; an undeclared name is dropped, none left is `anon`.
 18. **"Pending state" for the E3 boot check** is pending, running or retrying; a dead delivery is history and does not block a start. A handler re-using a retired id is a duplicate.
 19. **`ON CONFLICT … DO NOTHING`** is SQLite's and PostgreSQL's spelling, like the outbox's `LIMIT`/`RETURNING`; Alvo's own tables on T-SQL belong to #92.
-20. **Lane order is event-id order, kept across batches and crashes** (B1): an ordered delivery is not claimable while an earlier outbox entry of its key is undispatched below the outbox ceiling, so a failed or abandoned fan-out holds the record's later deliveries back; an entry past the ceiling stops blocking (it is lost to after-hooks as well — the outbox's own DLQ stand-in). The outbox claim is unchanged. A same-key entry held behind a failed fan-out is handed back with `HoldBackAsync`, **without spending an attempt** (I6). What remains of #150 is its id condition.
+20. **Lane order is event-id order, kept across batches and crashes** (B1): an ordered delivery is not claimable while an earlier outbox entry of its key is undispatched below the outbox ceiling, so a failed or abandoned fan-out holds the record's later deliveries back; an entry past the ceiling stops blocking (it is lost to after-hooks as well — the outbox's own DLQ stand-in). The outbox claim is unchanged. An entry under a claim younger than the outbox's claim lease blocks even at the ceiling (N1): its last attempt's claim already counted it there while it is being fanned out; once that claim is stale it was abandoned and stops blocking. A same-key entry held behind a failed fan-out is handed back with `HoldBackAsync`, **without spending an attempt** (I6). `HoldBackAsync` is an abstract interface member, not a default one: a default falling back to `ReleaseAsync` would silently burn attempts for every third-party store (the repo's `DecodeConstraintViolation` precedent). `HoldBackSql`, like `ReleaseSql`, is not fenced on `claimed_by` — sound under #150's one dispatcher. What remains of #150 is its id condition.
 21. **An event that produced only dead deliveries** counts as `alvo.events.dispatched`, not `filtered`.
 22. **`IAlvoSession` writes carry no idempotency key** (a handler deduplicates on `EventId`) and no batch verbs (HX-07's `IAlvoTransaction` has them).
 23. **The port's records are `required init`, never positional** (I5), so HX-06/13/14 can add members without breaking a provider.
-24. **A timeout is enforced** (I4): the runner awaits the handler with `WaitAsync(Timeout)`, cancels, waits at most 30 s, then answers — exactly once, inside the claim's lease, so no second claim runs the delivery while its attempt is unanswered. A handler that ignores its token is abandoned to the background (X15), may overlap its retry, and must be idempotent.
+24. **A timeout is enforced** (I4, N4): the runner awaits the handler with `WaitAsync(Timeout)`, cancels, waits at most `SettleGrace` (30 s), then answers — exactly once by the fence; the lease is `longest Timeout + LeaseGrace + SettleGrace`, so the answer lands inside it with 30 s to spare and no second claim runs the delivery while its attempt is unanswered. Abandoned handler tasks do not count against `MaxConcurrency`. A handler that ignores its token is abandoned to the background (X15), may overlap its retry, and must be idempotent.
 25. **A malformed `tenantid` (or, for `EventActor`, `authid`) fails closed** (M10): the delivery is dead `event-unreadable`, never run as a tenantless system or an anonymous caller.
-26. **A manual round claims up to `Alvo:Events:BatchSize` deliveries** and runs at most `MaxConcurrency` at a time (M5), so the test host does not report a false loop on a backlog.
+26. **A manual round loops its claims** (M5, N5): at most `MaxConcurrency` at a time, claim again until nothing is due or `Alvo:Events:BatchSize` deliveries were claimed in the round — no false loop on a backlog, and no claimed delivery waits for a slot with its lease running (ruling 11's premise holds in both modes).
 27. **E4 holds by construction** (M4): `PolicyCatalogProvider` primes one project per host, and handlers bind to that catalog only.
 28. **`DeliveryRunFailed` logs the exception's type name, not the exception** (M9).
-29. **A dead delivery blocks its (handler, record) lane until HX-06's redeliver** (M11); the docs give the manual remedy — set the row `cancelled`, or retire the handler.
+29. **A dead delivery — other than `unbound` — blocks its (handler, record) lane until HX-06's redeliver** (M11); the docs give the manual remedy — set the row `cancelled`, or retire the handler.
 30. **`EventActor` resolves roles by name against today's declaration** (M16): a role redefined since grants today's rules; a system-originated event runs its actor handler as `admin`.
 31. **Rejected: a contract fact for fan-out atomicity** (M8, one item of four) — a partial insert cannot be forced through the port portably; the EF store's single multi-row statement is atomic by construction. The other three M8 facts ship.
 
@@ -9060,7 +9162,7 @@ Each is recorded in the spec amendment (Task 14 Step 5) so a later reader can te
 
 | HX-03 criterion | Task(s) | Test |
 |---|---|---|
-| (1) contract suite, both engines: claim, lane order, re-fan-out no-op, `not_before`, dead at attempt 7, lease-expiry reclaim | 3, 4 | `DeliveryStoreContractTests` (21 facts, incl. the cross-batch lane facts) via `FakeDeliveryStoreTests`, `SqliteDeliveryStoreTests`, `PostgreSqlDeliveryStoreTests` (+ the two-claimant race) |
+| (1) contract suite, both engines: claim, lane order, re-fan-out no-op, `not_before`, dead at attempt 7, lease-expiry reclaim | 3, 4 | `DeliveryStoreContractTests` (24 facts, incl. the cross-batch and last-attempt lane facts) via `FakeDeliveryStoreTests`, `SqliteDeliveryStoreTests`, `PostgreSqlDeliveryStoreTests` (+ the two-claimant race) |
 | (2) kill mid-delivery: runs again after restart with the same `EventId` | 12 | `A_handler_killed_mid_delivery_runs_again_with_the_same_event_and_the_late_finisher_changes_nothing` (both engines; ruling 1) |
 | (3) a 10 000-event chaos run loses nothing | 13 | `DeliveryChaosCriteriaTests.Ten_thousand_events_reach_their_handler_in_order_and_none_is_lost` (SQLite + PostgreSQL, ring2) |
 | (4) an unmatched `when` creates no delivery row | 8, 12 | `A_matching_handler_gets_one_pending_delivery_and_an_unmatched_one_none`; `An_unmatched_condition_records_no_delivery` |
