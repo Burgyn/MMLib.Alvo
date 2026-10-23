@@ -108,8 +108,13 @@
          System.Security.Cryptography.Xml 9.0.0, which carries a known-high NuGet
          audit advisory (GHSA-23rf-6693-g89p et al., CVE-2026-50648, a DoS in
          EncryptedXml). Same central transitive-pinning trick as SQLitePCLRaw
-         above: pin the patched version so it wins over the transitive one. -->
-    <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.10" />
+         above: pin the patched version so it wins over the transitive one.
+         10.0.13 is the first version past the 2026-10-13 advisories on both Xml
+         (GHSA-7hqp-7c5m-4vq6, GHSA-c399-9853-6jmj, GHSA-r955-8q5j-3h83) and its
+         dependency System.Security.Cryptography.Pkcs (GHSA-846f-f764-76mx,
+         GHSA-2fmv-rv2c-59x7), so Pkcs is pinned beside it to the same version. -->
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.13" />
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
     <!-- The admin dashboard's component library (docs/superpowers/specs/2026-09-24-f5-admin-mudblazor-design.md,
          D1). MIT, stable on net10.0, plain HTML, so Playwright's role locators work (study §5.1). Built with 0
          warnings under this repository's analyzers in the spike. Pinned EXACTLY: minors land every 2-5 weeks and
