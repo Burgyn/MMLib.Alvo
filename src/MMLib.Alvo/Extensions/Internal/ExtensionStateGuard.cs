@@ -65,7 +65,7 @@ internal sealed class ExtensionStateGuard(ExtensionRegistry registry, IDeliveryS
             var ended = retired.Retirement is AlvoRetirement.Discard
                 ? await store.CancelPendingAsync(retired.Id, cancellationToken).ConfigureAwait(false)
                 : await store.DeadLetterPendingAsync(retired.Id, DeliveryErrors.Retired, cancellationToken).ConfigureAwait(false);
-            ExtensionLog.ExtensionRetired(logger, retired.Id, retired.Retirement.ToString(), ended);
+            ExtensionLog.ExtensionRetired(logger, retired.Id, retired.Retirement, ended);
         }
     }
 

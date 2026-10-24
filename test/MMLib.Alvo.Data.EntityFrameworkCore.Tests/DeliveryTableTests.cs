@@ -34,8 +34,8 @@ public sealed class DeliveryTableTests
     {
         var sql = DeliveryTable.ClaimSql(Table, Outbox, ordered: 2, unordered: 1);
 
-        Regex.Matches(sql, Regex.Escape("status IN ('pending', 'retrying')"), RegexOptions.None, _matchTimeout).Count.ShouldBe(2);
-        Regex.Matches(sql, "NOT EXISTS", RegexOptions.None, _matchTimeout).Count.ShouldBe(4, "two lane checks in each half");
+        Regex.Count(sql, Regex.Escape("status IN ('pending', 'retrying')"), RegexOptions.None, _matchTimeout).ShouldBe(2);
+        Regex.Count(sql, "NOT EXISTS", RegexOptions.None, _matchTimeout).ShouldBe(4, "two lane checks in each half");
         sql.ShouldContain("subscriber IN (@s0, @s1, @s2)");
         sql.ShouldContain("subscriber IN (@s2) OR (NOT EXISTS");
         sql.ShouldContain("LIMIT @batch");

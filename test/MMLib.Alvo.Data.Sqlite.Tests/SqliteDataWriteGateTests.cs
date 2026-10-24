@@ -34,6 +34,10 @@ public sealed class SqliteDataWriteGateTests : IAsyncDisposable
     [Fact]
     public async Task Concurrent_data_writers_on_threads_queue_at_the_gate_one_at_a_time()
     {
+        Assert.SkipWhen(
+            OperatingSystem.IsWindows(),
+            "A Windows runner's per-write cost (~1.3 s a write on CI) outlasts the busy timeout under this load; tracked by #410, held on Linux and macOS.");
+
         var (data, gate) = await StartAsync();
 
         var written = await Task.WhenAll(Enumerable.Range(0, Writers).Select(index => Task.Run(() => CreateAsync(data, $"note {index}"), Ct)));
