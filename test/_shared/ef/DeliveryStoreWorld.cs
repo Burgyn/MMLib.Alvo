@@ -125,6 +125,57 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
+    /// <summary>
+    /// The engine's plan for the claim of one ordered subscriber, every row and column of <paramref name="explain"/>'s
+    /// output joined into one text, after <paramref name="setup"/> runs on the same connection.
+    /// </summary>
+    internal async Task<string> ExplainClaimAsync(string explain, params string[] setup)
+    {
+        var connection = _connect();
+        await using (connection.ConfigureAwait(false))
+        {
+            await connection.OpenAsync(Ct);
+            foreach (var statement in setup)
+            {
+                await ScalarOrNothingAsync(connection, statement);
+            }
+
+            var command = connection.CreateCommand();
+            await using (command.ConfigureAwait(false))
+            {
+                command.CommandText = $"{explain} {DeliveryTable.ClaimSql(_table, _outbox, ordered: 1, unordered: 0)}";
+                BindClaim(command, "explain", "send-confirmation");
+
+                return await PlanTextAsync(command);
+            }
+        }
+    }
+
+    private static async Task ScalarOrNothingAsync(DbConnection connection, string sql)
+    {
+        var command = connection.CreateCommand();
+        await using (command.ConfigureAwait(false))
+        {
+            command.CommandText = sql;
+            await command.ExecuteNonQueryAsync(Ct);
+        }
+    }
+
+    private static async Task<string> PlanTextAsync(DbCommand command)
+    {
+        var lines = new List<string>();
+        var reader = await command.ExecuteReaderAsync(Ct);
+        await using (reader.ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(Ct))
+            {
+                lines.Add(string.Join(" ", Enumerable.Range(0, reader.FieldCount).Select(column => Convert.ToString(reader.GetValue(column), CultureInfo.InvariantCulture))));
+            }
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
     private async Task<(int First, int Second)> RaceAsync(DbConnection winner, DbConnection loser, DbConnection observer, string subscriber)
     {
         var loserBackend = await ScalarAsync(loser, "SELECT pg_backend_pid()", backend: null);
@@ -182,16 +233,21 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
         {
             command.Transaction = transaction;
             command.CommandText = DeliveryTable.ClaimSql(_table, _outbox, ordered: 1, unordered: 0);
-            RelationalSqlBatch.AddParameter(command, "@now", StoredInstant.Text(_clock.GetUtcNow()));
-            RelationalSqlBatch.AddParameter(command, "@lease_until", StoredInstant.Text(_clock.GetUtcNow() + TimeSpan.FromMinutes(1)));
-            RelationalSqlBatch.AddParameter(command, "@claimed_by", "racer");
-            RelationalSqlBatch.AddParameter(command, "@batch", 10);
-            RelationalSqlBatch.AddParameter(command, "@outbox_max_attempts", 10);
-            RelationalSqlBatch.AddParameter(command, "@outbox_stale_before", StoredInstant.Text(_clock.GetUtcNow() - TimeSpan.FromMinutes(5)));
-            RelationalSqlBatch.AddParameter(command, "@s0", subscriber);
+            BindClaim(command, "racer", subscriber);
 
             return await CountRowsAsync(command);
         }
+    }
+
+    private void BindClaim(DbCommand command, string claimant, string subscriber)
+    {
+        RelationalSqlBatch.AddParameter(command, "@now", StoredInstant.Text(_clock.GetUtcNow()));
+        RelationalSqlBatch.AddParameter(command, "@lease_until", StoredInstant.Text(_clock.GetUtcNow() + TimeSpan.FromMinutes(1)));
+        RelationalSqlBatch.AddParameter(command, "@claimed_by", claimant);
+        RelationalSqlBatch.AddParameter(command, "@batch", 10);
+        RelationalSqlBatch.AddParameter(command, "@outbox_max_attempts", 10);
+        RelationalSqlBatch.AddParameter(command, "@outbox_stale_before", StoredInstant.Text(_clock.GetUtcNow() - TimeSpan.FromMinutes(5)));
+        RelationalSqlBatch.AddParameter(command, "@s0", subscriber);
     }
 
     private static async Task<int> CountRowsAsync(DbCommand command)

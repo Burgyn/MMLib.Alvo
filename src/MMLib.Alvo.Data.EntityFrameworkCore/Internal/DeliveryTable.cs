@@ -32,6 +32,8 @@ internal static class DeliveryTable
 
     private const string Unfinished = "status IN ('pending', 'running', 'retrying')";
 
+    private const string LaneBlocking = "status IN ('pending', 'running', 'retrying', 'dead')";
+
     private const string Fence = "id = @id AND claimed_by = @claimed_by AND attempts = @attempts AND status = 'running'";
 
     internal static string NameFor(string schemaPrefix) => schemaPrefix + AlvoFrameworkTables.DeliveriesSuffix;
@@ -64,6 +66,16 @@ internal static class DeliveryTable
     internal static string LaneIndexDdl(string table) =>
         $"CREATE INDEX IF NOT EXISTS ix_{table}_lane ON {table} (subscriber, partition_key, event_id)";
 
+    /// <summary>
+    /// A <b>partial</b> index on the deliveries that can still hold a lane back — (subscriber, partition key, event id)
+    /// over the pending, running, retrying and dead rows — so the claim's look at a lane head's earlier deliveries is a
+    /// seek over the few that are unfinished, not a walk through the lane's whole succeeded history, which is never
+    /// purged. The claim carries the index's <c>status IN (…)</c> term verbatim, which is what lets SQLite (and
+    /// PostgreSQL's predicate proof) use it. An addition beside the spec's <c>ix_&lt;table&gt;_lane</c>, not a change of it.
+    /// </summary>
+    internal static string OpenLaneIndexDdl(string table) =>
+        $"CREATE INDEX IF NOT EXISTS ix_{table}_lane_open ON {table} (subscriber, partition_key, event_id) WHERE {LaneBlocking}";
+
     internal static string AttemptsDdl(string attempts) =>
         $"""
         CREATE TABLE IF NOT EXISTS {attempts} (
@@ -88,7 +100,7 @@ internal static class DeliveryTable
         $"CREATE INDEX IF NOT EXISTS ix_{outbox}_unfanned ON {outbox} (partition_key, id) WHERE dispatched_at IS NULL";
 
     internal static IReadOnlyList<string> Statements(string table, string attempts, string outbox) =>
-        [Ddl(table), ClaimIndexDdl(table), LaneIndexDdl(table), AttemptsDdl(attempts), OutboxUnfannedIndexDdl(outbox)];
+        [Ddl(table), ClaimIndexDdl(table), LaneIndexDdl(table), OpenLaneIndexDdl(table), AttemptsDdl(attempts), OutboxUnfannedIndexDdl(outbox)];
 
     internal static async Task EnsureAsync(DbConnection connection, string table, string attempts, string outbox, CancellationToken ct)
     {
@@ -136,6 +148,7 @@ internal static class DeliveryTable
         var noEarlier =
             $"NOT EXISTS (SELECT 1 FROM {table} earlier WHERE earlier.subscriber = {table}.subscriber "
             + $"AND earlier.partition_key = {table}.partition_key AND earlier.event_id < {table}.event_id "
+            + $"AND earlier.{LaneBlocking} "
             + "AND (earlier.status IN ('pending', 'running', 'retrying') "
             + "OR (earlier.status = 'dead' AND COALESCE(earlier.last_error_type, '') <> 'unbound')))";
         var noUnfanned =

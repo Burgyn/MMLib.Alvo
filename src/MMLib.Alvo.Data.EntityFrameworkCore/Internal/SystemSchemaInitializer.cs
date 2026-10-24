@@ -117,6 +117,7 @@ internal sealed partial class SystemSchemaInitializer
             _deliveriesTableName, DeliveryTable.Ddl(_deliveriesTableName), ct).ConfigureAwait(false);
         await CreateIndexIfMissingAsync(DeliveryTable.ClaimIndexDdl(_deliveriesTableName), ct).ConfigureAwait(false);
         await CreateIndexIfMissingAsync(DeliveryTable.LaneIndexDdl(_deliveriesTableName), ct).ConfigureAwait(false);
+        await CreateIndexIfMissingAsync(DeliveryTable.OpenLaneIndexDdl(_deliveriesTableName), ct).ConfigureAwait(false);
         await CreateIfMissingAsync(
             _deliveryAttemptsTableName, DeliveryTable.AttemptsDdl(_deliveryAttemptsTableName), ct).ConfigureAwait(false);
         await CreateIndexIfMissingAsync(DeliveryTable.OutboxUnfannedIndexDdl(_outboxTableName), ct).ConfigureAwait(false);

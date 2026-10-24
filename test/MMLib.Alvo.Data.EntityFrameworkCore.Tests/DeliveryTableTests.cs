@@ -65,6 +65,16 @@ public sealed class DeliveryTableTests
     public void The_unfanned_index_is_partial_on_undispatched_entries() =>
         DeliveryTable.OutboxUnfannedIndexDdl(Outbox).ShouldEndWith("(partition_key, id) WHERE dispatched_at IS NULL");
 
+    /// <summary>SQLite uses a partial index only for a query that carries the index's predicate verbatim.</summary>
+    [Fact]
+    public void The_lane_check_carries_the_open_lane_index_s_predicate_verbatim()
+    {
+        const string Predicate = "status IN ('pending', 'running', 'retrying', 'dead')";
+
+        DeliveryTable.OpenLaneIndexDdl(Table).ShouldEndWith($"(subscriber, partition_key, event_id) WHERE {Predicate}");
+        DeliveryTable.ClaimSql(Table, Outbox, ordered: 1, unordered: 0).ShouldContain($"AND earlier.{Predicate} ");
+    }
+
     [Fact]
     public void A_claim_with_no_unordered_subscriber_orders_every_lane() =>
         DeliveryTable.ClaimSql(Table, Outbox, ordered: 1, unordered: 0).ShouldNotContain("OR (NOT EXISTS");

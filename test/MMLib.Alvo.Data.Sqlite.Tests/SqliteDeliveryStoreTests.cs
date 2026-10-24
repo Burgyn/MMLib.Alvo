@@ -43,6 +43,20 @@ public sealed class SqliteDeliveryStoreTests : DeliveryStoreContractTests, IDisp
         ids.Count.ShouldBe(Lanes);
     }
 
+    /// <summary>
+    /// The claim's look at a lane head's earlier deliveries seeks the partial index over the unfinished and dead rows, so a
+    /// lane's succeeded history — never purged — is not walked on every claim of its head.
+    /// </summary>
+    [Fact]
+    public async Task The_lane_check_seeks_the_partial_index_over_unfinished_deliveries()
+    {
+        await using var world = await DeliveryStoreWorld.StartAsync(Connect);
+
+        var plan = await world.ExplainClaimAsync("EXPLAIN QUERY PLAN");
+
+        plan.ShouldContain("SEARCH earlier USING INDEX ix_alvo_deliveries_lane_open (subscriber=? AND partition_key=? AND event_id<?)");
+    }
+
     protected override async Task<IDeliveryStoreWorld> WorldAsync() => await DeliveryStoreWorld.StartAsync(Connect);
 
     public void Dispose()
