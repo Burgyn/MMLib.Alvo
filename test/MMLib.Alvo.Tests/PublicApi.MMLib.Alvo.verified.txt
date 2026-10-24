@@ -131,6 +131,14 @@ namespace MMLib.Alvo.Data
         public static T As<T>(this MMLib.Alvo.Data.AlvoRecord record)
             where T :  class { }
     }
+    public sealed class AlvoTranslationException : System.Exception
+    {
+        public AlvoTranslationException() { }
+        public AlvoTranslationException(string message) { }
+        public AlvoTranslationException(string message, System.Exception innerException) { }
+        public AlvoTranslationException(string message, string fixSuggestion) { }
+        public string FixSuggestion { get; }
+    }
     public interface IAlvoEntity
     {
         MMLib.Alvo.Data.AlvoRecord Record { get; }
