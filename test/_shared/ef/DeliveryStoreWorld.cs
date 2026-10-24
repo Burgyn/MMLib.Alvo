@@ -28,6 +28,7 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
     private readonly WorldClock _clock = new(_start);
     private readonly string _outbox = OutboxTable.NameFor(SchemaPrefix);
     private readonly string _table = DeliveryTable.NameFor(SchemaPrefix);
+    private readonly string _attempts = DeliveryTable.AttemptsNameFor(SchemaPrefix);
 
     private DeliveryStoreWorld(Func<DbConnection> connect, IRelationalWriteGate? writeGate)
     {
@@ -81,6 +82,39 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
         {
             await connection.OpenAsync(Ct);
             await ExecuteAsync(connection, $"UPDATE {_outbox} SET dispatched_at = @value WHERE id = @id", eventId, StoredInstant.Text(_clock.GetUtcNow()));
+        }
+    }
+
+    /// <summary>Puts a delivery back to pending with its claim count at zero, as an operator's redeliver does.</summary>
+    internal async Task ResetAsync(Guid delivery)
+    {
+        var connection = _connect();
+        await using (connection.ConfigureAwait(false))
+        {
+            await connection.OpenAsync(Ct);
+            await ExecuteAsync(
+                connection,
+                $"UPDATE {_table} SET status = 'pending', attempts = @value, claimed_by = NULL, lease_until = NULL WHERE id = @id",
+                delivery,
+                0);
+        }
+    }
+
+    /// <summary>The attempt numbers the history holds for one delivery, ascending.</summary>
+    internal async Task<IReadOnlyList<int>> AttemptNumbersAsync(Guid delivery)
+    {
+        var connection = _connect();
+        await using (connection.ConfigureAwait(false))
+        {
+            await connection.OpenAsync(Ct);
+
+            return await RelationalSqlBatch.ReadRowsAsync(
+                connection,
+                transaction: null,
+                $"SELECT attempt FROM {_attempts} WHERE delivery_id = @id ORDER BY attempt",
+                command => RelationalSqlBatch.AddParameter(command, "@id", delivery.ToString()),
+                reader => Convert.ToInt32(reader.GetValue(0), CultureInfo.InvariantCulture),
+                Ct);
         }
     }
 

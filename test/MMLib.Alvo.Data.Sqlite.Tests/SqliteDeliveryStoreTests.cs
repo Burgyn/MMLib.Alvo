@@ -61,6 +61,27 @@ public sealed class SqliteDeliveryStoreTests : DeliveryStoreContractTests, IDisp
         plan.ShouldContain("SEARCH earlier USING INDEX ix_alvo_deliveries_lane_open (subscriber=? AND partition_key=? AND event_id<?)");
     }
 
+    /// <summary>
+    /// A delivery put back to pending restarts its claim count at one, and the attempt that follows is recorded after the
+    /// ones already in its history — not as attempt 1 again, which the history's primary key would refuse.
+    /// </summary>
+    [Fact]
+    public async Task An_attempt_after_a_reset_is_numbered_after_the_last_one()
+    {
+        await using var world = await DeliveryStoreWorld.StartAsync(Connect);
+        var @event = await world.AppendEventAsync("tickets:a");
+        await world.Store.FanOutAsync([new DeliveryRequest { EventId = @event, Subscriber = Subscriber, PartitionKey = "tickets:a", Kind = "handler" }], Ct);
+        var first = (await world.Store.ClaimAsync(ClaimFor("worker-1"), Ct)).ShouldHaveSingleItem();
+        (await world.Store.FailAsync(AttemptOf(first, "worker-1"), new DeliveryFailure { ErrorType = "Boom", MaxAttempts = 1 }, Ct)).ShouldBeTrue();
+
+        await world.ResetAsync(first.Id);
+        var second = (await world.Store.ClaimAsync(ClaimFor("worker-1"), Ct)).ShouldHaveSingleItem();
+
+        second.Attempts.ShouldBe(1, "the claim count restarts with the reset");
+        (await world.Store.CompleteAsync(AttemptOf(second, "worker-1"), Ct)).ShouldBeTrue();
+        (await world.AttemptNumbersAsync(first.Id)).ShouldBe([1, 2]);
+    }
+
     protected override async Task<IDeliveryStoreWorld> WorldAsync() => await DeliveryStoreWorld.StartAsync(Connect);
 
     public void Dispose()

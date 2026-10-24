@@ -381,6 +381,16 @@ public sealed class AddAlvoIntegrationTests : IDisposable
     public Task A_framework_bookkeeping_table_is_never_planned_for_a_drop_delivery_attempts() =>
         AFrameworkTableSurvivesIntrospectionAsync("alvo_delivery_attempts");
 
+    /// <summary>The pause control survives introspection like every framework table (HX-06).</summary>
+    [Fact]
+    public Task A_framework_bookkeeping_table_is_never_planned_for_a_drop_subscriber_controls() =>
+        AFrameworkTableSurvivesIntrospectionAsync("alvo_subscriber_controls");
+
+    /// <summary>The operations log survives introspection like every framework table (HX-06, E11).</summary>
+    [Fact]
+    public Task A_framework_bookkeeping_table_is_never_planned_for_a_drop_operations_log() =>
+        AFrameworkTableSurvivesIntrospectionAsync("alvo_operations_log");
+
     /// <summary>
     /// Applies the real descriptor, then reproduces the runner's own no-snapshot fallback — introspect the live
     /// database and diff it against the applied schema — and requires that <paramref name="tableName"/> appears

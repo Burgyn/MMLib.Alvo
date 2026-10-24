@@ -16,6 +16,11 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// ANSI.</b> The outbox already spells its claim the same way; the T-SQL dialect question for Alvo's own tables belongs
 /// to the Azure SQL provider (#92).
 /// </para>
+/// <para>
+/// <b>An attempt is numbered after the delivery's last recorded one.</b> The row's <c>attempts</c> counts claims since the
+/// delivery was last put back to pending — what the retry policy and the attempt ceiling read — while the history numbers
+/// every attempt the delivery ever had, so a redelivered row neither collides with its own history nor loses it.
+/// </para>
 /// </remarks>
 internal static class DeliveryTable
 {
@@ -181,7 +186,7 @@ internal static class DeliveryTable
     internal static string AttemptSql(string attempts) =>
         $"""
         INSERT INTO {attempts} (delivery_id, attempt, started_at, duration_ms, outcome, error_type)
-        VALUES (@id, @attempts, @started_at, @duration_ms, @outcome, @error_type)
+        SELECT @id, COALESCE(MAX(attempt), 0) + 1, @started_at, @duration_ms, @outcome, @error_type FROM {attempts} WHERE delivery_id = @id
         """;
 
     internal static string PendingSubscribersSql(string table) =>

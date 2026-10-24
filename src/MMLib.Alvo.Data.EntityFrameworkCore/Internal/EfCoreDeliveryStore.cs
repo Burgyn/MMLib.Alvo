@@ -21,13 +21,15 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// contract, and a provider author implements that.
 /// </para>
 /// </remarks>
-internal sealed class EfCoreDeliveryStore : IDeliveryStore
+internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
 {
     private readonly RelationalConnectionFactory _connections;
     private readonly TimeProvider _time;
     private readonly string _table;
     private readonly string _attempts;
     private readonly string _outbox;
+    private readonly string _controls;
+    private readonly string _log;
 
     internal EfCoreDeliveryStore(RelationalConnectionFactory connections, AlvoOptions options, TimeProvider time)
     {
@@ -40,6 +42,8 @@ internal sealed class EfCoreDeliveryStore : IDeliveryStore
         _table = DeliveryTable.NameFor(options.SchemaPrefix);
         _attempts = DeliveryTable.AttemptsNameFor(options.SchemaPrefix);
         _outbox = OutboxTable.NameFor(options.SchemaPrefix);
+        _controls = DeliveryOperationsTable.ControlsNameFor(options.SchemaPrefix);
+        _log = DeliveryOperationsTable.LogNameFor(options.SchemaPrefix);
     }
 
     public async Task EnsureAsync(CancellationToken cancellationToken = default)
@@ -52,6 +56,8 @@ internal sealed class EfCoreDeliveryStore : IDeliveryStore
             {
                 await OutboxTable.EnsureAsync(connection, _outbox, cancellationToken).ConfigureAwait(false);
                 await DeliveryTable.EnsureAsync(connection, _table, _attempts, _outbox, cancellationToken).ConfigureAwait(false);
+                await RelationalSqlBatch.ExecuteAsync(
+                    connection, DeliveryOperationsTable.Statements(_controls, _log), transaction: null, cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -293,7 +299,6 @@ internal sealed class EfCoreDeliveryStore : IDeliveryStore
             command.Transaction = transaction;
             command.CommandText = DeliveryTable.AttemptSql(_attempts);
             RelationalSqlBatch.AddParameter(command, "@id", attempt.Delivery.Id.ToString());
-            RelationalSqlBatch.AddParameter(command, "@attempts", attempt.Delivery.Attempts);
             RelationalSqlBatch.AddParameter(command, "@started_at", StoredInstant.Text(attempt.StartedAt));
             RelationalSqlBatch.AddParameter(command, "@duration_ms", (int)Math.Min(int.MaxValue, attempt.Duration.TotalMilliseconds));
             RelationalSqlBatch.AddParameter(command, "@outcome", outcome);

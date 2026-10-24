@@ -78,4 +78,17 @@ public sealed class DeliveryTableTests
     [Fact]
     public void A_claim_with_no_unordered_subscriber_orders_every_lane() =>
         DeliveryTable.ClaimSql(Table, Outbox, ordered: 1, unordered: 0).ShouldNotContain("OR (NOT EXISTS");
+
+    /// <summary>
+    /// An attempt is numbered after the delivery's last recorded one, not by the row's claim count: a redelivered row
+    /// restarts its count at one while its history keeps every earlier attempt (spec 2026-10-14 HX-06, Ruling 2).
+    /// </summary>
+    [Fact]
+    public void An_attempt_is_numbered_after_the_delivery_s_last_recorded_one()
+    {
+        var sql = DeliveryTable.AttemptSql("alvo_delivery_attempts");
+
+        sql.ShouldContain("COALESCE(MAX(attempt), 0) + 1");
+        sql.ShouldNotContain("@attempts");
+    }
 }
