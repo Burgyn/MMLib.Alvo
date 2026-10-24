@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# The pre-commit hook's `dotnet format --verify-no-changes`, scoped to what the commit stages.
+#
+# CI runs the unscoped `dotnet format --verify-no-changes` over the whole solution
+# (.github/workflows/ci.yml), so nothing here narrows what a PR proves. It narrows only
+# the local gate, which used to verify every document in the solution on every commit:
+# ~50 s on an idle machine and up to 17 min on a loaded one, for a commit touching one file.
+#
+#   - Staged .cs files only: `--include` them, so whitespace, style and analyzers judge
+#     only those documents. When they all belong to one project, the workspace is that
+#     project rather than the solution, which halves the load (measured ~11 s vs ~25 s).
+#   - A staged .csproj/.props/.targets/.editorconfig can change the rules or the
+#     analyzers every document is judged by, so it falls back to the full run.
+#
+# The staged list is read from git here rather than taken from Husky.Net's `${staged}`:
+# for a partially staged file Husky passes a temp copy of the staged blob
+# (`<hash>_Name.cs`, written next to the original), which lands inside the project's
+# compile glob, and the check would judge a duplicate document instead of the file.
+# Like the full run before it, this checks the working-tree content of each staged file.
+#
+# Usage: scripts/format-staged        (in the hook; also by hand, over what is staged)
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$DIR/.." && pwd)"
+cd "$ROOT"
+
+# Deletions count for the full-check test (removing a .props changes the rules too), never
+# for the file list below. core.quotePath=false keeps non-ASCII paths unquoted.
+staged="$(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR)"
+staged_any="$(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMRD)"
+
+if grep -qE '(\.csproj|\.props|\.targets|(^|/)\.editorconfig)$' <<< "$staged_any"; then
+  echo "[format-staged] a staged build or style file can change how every document is judged: full solution"
+  exec dotnet format --verify-no-changes
+fi
+
+files=()
+while IFS= read -r path; do
+  if [ -n "$path" ] && [ -f "$path" ]; then
+    files+=("$path")
+  fi
+done < <(grep -E '\.cs$' <<< "$staged" || true)
+
+if [ "${#files[@]}" -eq 0 ]; then
+  echo "[format-staged] no staged C# file: nothing to verify"
+  exit 0
+fi
+
+# The project registered in the solution that owns <path>: the nearest ancestor directory
+# holding a registered .csproj. Prints nothing for a file outside every project
+# (test/_shared/** is compiled in by link, so only the solution workspace sees it).
+owner_of() {
+  local dir
+  dir="$(dirname "$1")"
+  while [ "$dir" != "." ] && [ "$dir" != "/" ]; do
+    if grep -qF "Project Path=\"$dir/$(basename "$dir").csproj\"" MMLib.Alvo.slnx; then
+      printf '%s/%s.csproj\n' "$dir" "$(basename "$dir")"
+      return
+    fi
+    dir="$(dirname "$dir")"
+  done
+}
+
+owners="$(for f in "${files[@]}"; do owner="$(owner_of "$f")"; echo "${owner:-(none)}"; done | sort -u)"
+if [ "$(grep -c . <<< "$owners")" = 1 ] && [ "$owners" != "(none)" ]; then
+  echo "[format-staged] ${#files[@]} staged C# file(s) in $owners"
+  exec dotnet format "$owners" --verify-no-changes --include "${files[@]}"
+fi
+
+echo "[format-staged] ${#files[@]} staged C# file(s), not all in one project: solution workspace"
+exec dotnet format --verify-no-changes --include "${files[@]}"

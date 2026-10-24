@@ -15,17 +15,18 @@
       {
          "name": "dotnet-format",
          "group": "pre-commit",
-         "command": "dotnet",
-         "args": [ "format", "--verify-no-changes" ],
+         "command": "scripts/format-staged",
          "filteringRule": "staged",
-         "include": [ "**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets" ]
+         "//": "Verifies only the staged .cs files (in their one project's workspace when they share one); a staged .csproj/.props/.targets/.editorconfig runs the full solution check. CI runs the full check on every PR. scripts/format-staged reads the staged list from git, not from ${staged}: see its header.",
+         "include": [ "**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/.editorconfig" ]
       },
       {
          "name": "ring0-tests",
          "group": "pre-commit",
          "command": "scripts/test-ring0",
+         "args": [ "--staged" ],
          "filteringRule": "staged",
-         "//": "scripts/** and this file are in the list because they DECIDE what the local gate checks: a commit touching only test-ring0 used to run no hook task at all, so the one file that defines the gate was the one file outside it.",
+         "//": "--staged builds the whole solution, then runs only the fast test modules the staged change can affect (scripts/ring0-scope), and every module whenever it cannot decide — scripts/**, .husky/**, test/_shared/**, the shared build files, src/MMLib.Alvo.Abstractions, or any file outside a project. scripts/test-ring0 run by hand, ring1/ring2 and CI run every module. scripts/** and this file are in the list because they DECIDE what the local gate checks: a commit touching only test-ring0 used to run no hook task at all, so the one file that defines the gate was the one file outside it.",
          "include": [ "**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "scripts/**", ".husky/task-runner.json", "plugins/alvo/skills/**" ]
       }
    ]

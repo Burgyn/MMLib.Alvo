@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
@@ -285,11 +286,21 @@ public sealed class DeliveryDispatcherTests : IDisposable
         _logs.Entries.Single(entry => entry.EventName == "HandlerStoodDown").Level.ShouldBe(LogLevel.Warning);
     }
 
+    /// <summary>
+    /// The handler's timeout, its settle grace and the store's retry delay all run on a <see cref="FakeTimeProvider"/> the fact
+    /// moves by hand; only the loop's idle poll runs on the system clock. On the system clock this fact was load-sensitive
+    /// in two ways: under a loaded machine the second delivery's thread-pool start alone could outlast the 50 ms timeout, so
+    /// it was abandoned too and retried 5 s later; and a run slower than the first delivery's 5 s retry delay ran that
+    /// delivery again. Either way the two successes never showed together within the wait budget. Here the clock moves
+    /// only until the handler stands down, and then stands still: the later deliveries cannot time out and the retried one
+    /// is never due, however slow the machine is.
+    /// </summary>
     [Fact]
     public async Task A_stood_down_handler_is_claimed_for_again_once_its_abandoned_invocation_ends()
     {
         const string Blocks = "ignores-its-token";
-        var store = new FakeDeliveryStore(TimeProvider.System);
+        var handlerTime = new FakeTimeProvider(_clock.GetUtcNow());
+        var store = new FakeDeliveryStore(handlerTime);
         var stuck = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var dispatcher = Dispatcher(
             store,
@@ -299,11 +310,12 @@ public sealed class DeliveryDispatcherTests : IDisposable
             mode: AlvoEventDispatchMode.Background,
             time: TimeProvider.System,
             settle: TimeSpan.FromMilliseconds(50),
-            id: Blocks);
+            id: Blocks,
+            runnerTime: handlerTime);
         await FanOutAsync(store, Blocks, "tickets:1", "tickets:2", "tickets:3");
 
         await dispatcher.StartAsync(Ct);
-        await UntilAsync(() => _logs.Entries.Any(entry => entry.EventName == "HandlerStoodDown"), "the handler to stand down");
+        await UntilAsync(() => StoodDown(handlerTime), "the handler to stand down");
         stuck.SetResult();
         await UntilAsync(() => Statuses(store, Blocks).Count(status => status == "succeeded") == 2, "the remaining deliveries to run");
         await dispatcher.StopAsync(Ct);
@@ -427,7 +439,8 @@ public sealed class DeliveryDispatcherTests : IDisposable
         string id = Handler,
         bool ready = true,
         string? alongside = null,
-        bool primed = true)
+        bool primed = true,
+        TimeProvider? runnerTime = null)
     {
         var clock = time ?? _clock;
         var deliveries = port ?? store;
@@ -461,7 +474,7 @@ public sealed class DeliveryDispatcherTests : IDisposable
             catalogs,
             new DeliveryBackoff(() => 0.5),
             abandoned,
-            clock,
+            runnerTime ?? clock,
             _loggers.CreateLogger<DeliveryRunner>())
         {
             SettleGrace = settle ?? DeliveryRunner.LeaseGrace,
@@ -509,6 +522,21 @@ public sealed class DeliveryDispatcherTests : IDisposable
         store.Publish(@event);
 
         return Task.FromResult(@event.Id);
+    }
+
+    /// <summary>
+    /// Whether the handler has stood down; until it has, moves <paramref name="handlerTime"/> on by the 50 ms timeout and
+    /// settle grace, so each poll of the wait fires whichever of the two the runner is waiting on.
+    /// </summary>
+    private bool StoodDown(FakeTimeProvider handlerTime)
+    {
+        if (_logs.Entries.Any(entry => entry.EventName == "HandlerStoodDown"))
+        {
+            return true;
+        }
+
+        handlerTime.Advance(TimeSpan.FromMilliseconds(50));
+        return false;
     }
 
     private static List<string> Statuses(FakeDeliveryStore store, string subscriber) =>

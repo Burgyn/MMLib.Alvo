@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <PackageReference Include="CsCheck" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="NSubstitute" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <!-- The CloudEvents conformance oracle, test-only by design: see Directory.Packages.props. -->
