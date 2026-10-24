@@ -11,8 +11,15 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// attempt, the fenced update then the attempt row — over <see cref="DeliveryTable"/>'s SQL.
 /// </summary>
 /// <remarks>
+/// <para>
+/// <b>Every write waits its turn at the database's <see cref="RelationalConnectionFactory.WriteGate"/> first</b> — the
+/// claim, each answer, the fan-out, the end of a retired subscriber's work and the table set-up; the reads do not. On
+/// SQLite that turns the dispatcher's concurrent answers into a queue instead of busy locks the provider sleeps through.
+/// </para>
+/// <para>
 /// <b>Internal</b>: unlike <see cref="EfCoreOutboxStore"/> it is not part of what a host resolves by type; the port is the
 /// contract, and a provider author implements that.
+/// </para>
 /// </remarks>
 internal sealed class EfCoreDeliveryStore : IDeliveryStore
 {
@@ -41,8 +48,11 @@ internal sealed class EfCoreDeliveryStore : IDeliveryStore
         await using (connection.ConfigureAwait(false))
         {
             await RelationalSqlBatch.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
-            await OutboxTable.EnsureAsync(connection, _outbox, cancellationToken).ConfigureAwait(false);
-            await DeliveryTable.EnsureAsync(connection, _table, _attempts, _outbox, cancellationToken).ConfigureAwait(false);
+            using (await _connections.WriteGate.EnterAsync(cancellationToken).ConfigureAwait(false))
+            {
+                await OutboxTable.EnsureAsync(connection, _outbox, cancellationToken).ConfigureAwait(false);
+                await DeliveryTable.EnsureAsync(connection, _table, _attempts, _outbox, cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 
@@ -127,13 +137,15 @@ internal sealed class EfCoreDeliveryStore : IDeliveryStore
         await using (connection.ConfigureAwait(false))
         {
             await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
-
-            return await RelationalSqlBatch.ReadWrittenRowsAsync(
-                connection,
-                DeliveryTable.ClaimSql(_table, _outbox, claim.Ordered.Count, claim.Unordered.Count),
-                command => BindClaim(command, claim),
-                ReadClaimed,
-                ct).ConfigureAwait(false);
+            using (await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false))
+            {
+                return await RelationalSqlBatch.ReadWrittenRowsAsync(
+                    connection,
+                    DeliveryTable.ClaimSql(_table, _outbox, claim.Ordered.Count, claim.Unordered.Count),
+                    command => BindClaim(command, claim),
+                    ReadClaimed,
+                    ct).ConfigureAwait(false);
+            }
         }
     }
 
@@ -224,19 +236,28 @@ internal sealed class EfCoreDeliveryStore : IDeliveryStore
         await using (connection.ConfigureAwait(false))
         {
             await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
-            var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-            await using (transaction.ConfigureAwait(false))
+            using (await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false))
             {
-                var held = await FencedUpdateAsync(connection, transaction, sql, bind, attempt, ct).ConfigureAwait(false) == 1;
-                if (held)
-                {
-                    await InsertAttemptAsync(connection, transaction, attempt, outcome, errorType, ct).ConfigureAwait(false);
-                }
-
-                await transaction.CommitAsync(ct).ConfigureAwait(false);
-
-                return held;
+                return await AnswerInTransactionAsync(connection, sql, bind, attempt, outcome, errorType, ct).ConfigureAwait(false);
             }
+        }
+    }
+
+    private async Task<bool> AnswerInTransactionAsync(
+        DbConnection connection, string sql, Action<DbCommand> bind, DeliveryAttempt attempt, string outcome, string? errorType, CancellationToken ct)
+    {
+        var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+        await using (transaction.ConfigureAwait(false))
+        {
+            var held = await FencedUpdateAsync(connection, transaction, sql, bind, attempt, ct).ConfigureAwait(false) == 1;
+            if (held)
+            {
+                await InsertAttemptAsync(connection, transaction, attempt, outcome, errorType, ct).ConfigureAwait(false);
+            }
+
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
+
+            return held;
         }
     }
 
@@ -287,13 +308,16 @@ internal sealed class EfCoreDeliveryStore : IDeliveryStore
         await using (connection.ConfigureAwait(false))
         {
             await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
-            var command = connection.CreateCommand();
-            await using (command.ConfigureAwait(false))
+            using (await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false))
             {
-                command.CommandText = sql;
-                bind(command);
+                var command = connection.CreateCommand();
+                await using (command.ConfigureAwait(false))
+                {
+                    command.CommandText = sql;
+                    bind(command);
 
-                return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                    return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                }
             }
         }
     }

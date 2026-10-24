@@ -67,7 +67,10 @@ public sealed class EfCoreOutboxStore : IOutboxStore
         await using (connection.ConfigureAwait(false))
         {
             await RelationalSqlBatch.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
-            await OutboxTable.EnsureAsync(connection, _tableName, cancellationToken).ConfigureAwait(false);
+            using (await _connections.WriteGate.EnterAsync(cancellationToken).ConfigureAwait(false))
+            {
+                await OutboxTable.EnsureAsync(connection, _tableName, cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 
@@ -119,9 +122,12 @@ public sealed class EfCoreOutboxStore : IOutboxStore
         await using (connection.ConfigureAwait(false))
         {
             await RelationalSqlBatch.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
-            await OutboxTable
-                .InsertAsync(connection, transaction: null, _tableName, customEvent.Envelope, cancellationToken)
-                .ConfigureAwait(false);
+            using (await _connections.WriteGate.EnterAsync(cancellationToken).ConfigureAwait(false))
+            {
+                await OutboxTable
+                    .InsertAsync(connection, transaction: null, _tableName, customEvent.Envelope, cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
     }
 
@@ -173,13 +179,15 @@ public sealed class EfCoreOutboxStore : IOutboxStore
         await using (connection.ConfigureAwait(false))
         {
             await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
-
-            return await RelationalSqlBatch.ReadWrittenRowsAsync(
-                connection,
-                OutboxTable.ClaimSql(_tableName),
-                command => BindClaim(command, claimant, batchSize, maxAttempts, lease),
-                ReadEntry,
-                ct).ConfigureAwait(false);
+            using (await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false))
+            {
+                return await RelationalSqlBatch.ReadWrittenRowsAsync(
+                    connection,
+                    OutboxTable.ClaimSql(_tableName),
+                    command => BindClaim(command, claimant, batchSize, maxAttempts, lease),
+                    ReadEntry,
+                    ct).ConfigureAwait(false);
+            }
         }
     }
 
@@ -211,14 +219,17 @@ public sealed class EfCoreOutboxStore : IOutboxStore
         await using (connection.ConfigureAwait(false))
         {
             await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
-            var command = connection.CreateCommand();
-            await using (command.ConfigureAwait(false))
+            using (await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false))
             {
-                command.CommandText = sql;
-                bind(command);
-                RelationalSqlBatch.AddParameter(command, "@id", id.ToString());
+                var command = connection.CreateCommand();
+                await using (command.ConfigureAwait(false))
+                {
+                    command.CommandText = sql;
+                    bind(command);
+                    RelationalSqlBatch.AddParameter(command, "@id", id.ToString());
 
-                await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                    await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                }
             }
         }
     }

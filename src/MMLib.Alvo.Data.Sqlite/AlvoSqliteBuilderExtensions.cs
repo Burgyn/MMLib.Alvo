@@ -5,9 +5,11 @@ using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 using Microsoft.EntityFrameworkCore.Sqlite.Scaffolding.Internal;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo;
 using MMLib.Alvo.Data.EntityFrameworkCore;
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Data.Sqlite;
 
 namespace Microsoft.Extensions.DependencyInjection;
@@ -139,8 +141,19 @@ public static class AlvoSqliteBuilderExtensions
     /// against SQL semantics. EF's own docs put it plainly: "your LINQ queries no longer have the same meaning
     /// as they do in C#".
     /// </summary>
-    private static IAlvoBuilder AddSqliteProvider(IAlvoBuilder builder) =>
-        builder.AddRelationalProvider(new RelationalProviderRegistration
+    /// <remarks>
+    /// The database's <see cref="SqliteWriteGates">write gate</see> is registered first, so the driver's
+    /// <c>TryAdd</c> default — no gate, for an engine that runs concurrent writers — does not replace it.
+    /// </remarks>
+    private static IAlvoBuilder AddSqliteProvider(IAlvoBuilder builder)
+    {
+        builder.Services.TryAddSingleton<IRelationalWriteGate>(services => SqliteWriteGates.For(ResolveConnectionString(services)));
+
+        return builder.AddRelationalProvider(Registration());
+    }
+
+    private static RelationalProviderRegistration Registration() =>
+        new()
         {
             ConnectionString = ResolveConnectionString,
             ConfigureProvider = static (options, connectionString) => options
@@ -151,7 +164,7 @@ public static class AlvoSqliteBuilderExtensions
             CreateConnection = static connectionString => new SqliteConnection(WithoutPooling(connectionString)),
             Fields = new SqliteFieldSqlRenderer(),
             Dialect = new SqliteSqlDialect(),
-        });
+        };
 
     private static string ResolveConnectionString(IServiceProvider services)
     {

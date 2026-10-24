@@ -68,6 +68,7 @@ public static class AlvoEfCoreProvider
         // IAlvoBuilder — a provider must not assume a particular caller.
         builder.Services.AddOptions<AlvoOptions>();
 
+        builder.Services.TryAddSingleton<IRelationalWriteGate>(NoRelationalWriteGate.Instance);
         builder.Services.TryAddSingleton(sp => CreateConnectionFactory(sp, registration));
         builder.Services.TryAddSingleton<ISchemaMigrator>(sp => CreateMigrator(sp, registration));
         builder.Services.TryAddSingleton<ISchemaIntrospector>(sp => CreateIntrospector(sp, registration));
@@ -172,7 +173,8 @@ public static class AlvoEfCoreProvider
     private static RelationalConnectionFactory CreateConnectionFactory(IServiceProvider services, RelationalProviderRegistration registration)
     {
         var connectionString = registration.ConnectionString(services);
-        return new RelationalConnectionFactory(() => registration.CreateConnection(connectionString));
+        return new RelationalConnectionFactory(
+            () => registration.CreateConnection(connectionString), services.GetRequiredService<IRelationalWriteGate>());
     }
 
     private static EfCoreSchemaMigrator CreateMigrator(IServiceProvider services, RelationalProviderRegistration registration)

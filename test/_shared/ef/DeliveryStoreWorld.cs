@@ -29,17 +29,17 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
     private readonly string _outbox = OutboxTable.NameFor(SchemaPrefix);
     private readonly string _table = DeliveryTable.NameFor(SchemaPrefix);
 
-    private DeliveryStoreWorld(Func<DbConnection> connect)
+    private DeliveryStoreWorld(Func<DbConnection> connect, IRelationalWriteGate? writeGate)
     {
         _connect = connect;
-        Store = new EfCoreDeliveryStore(new RelationalConnectionFactory(connect), new AlvoOptions { SchemaPrefix = SchemaPrefix }, _clock);
+        Store = new EfCoreDeliveryStore(new RelationalConnectionFactory(connect, writeGate), new AlvoOptions { SchemaPrefix = SchemaPrefix }, _clock);
     }
 
     public IDeliveryStore Store { get; }
 
-    internal static async Task<DeliveryStoreWorld> StartAsync(Func<DbConnection> connect)
+    internal static async Task<DeliveryStoreWorld> StartAsync(Func<DbConnection> connect, IRelationalWriteGate? writeGate = null)
     {
-        var world = new DeliveryStoreWorld(connect);
+        var world = new DeliveryStoreWorld(connect, writeGate);
         await world.Store.EnsureAsync(Ct);
 
         return world;
