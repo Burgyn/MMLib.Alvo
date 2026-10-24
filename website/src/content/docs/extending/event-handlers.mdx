@@ -153,8 +153,8 @@ claims it. Its earlier attempts are gone from the history; HX-06's redeliver wil
 `IAlvoEventHandler<AlvoRecord>` class, and `AddEventHandler<TMessage, THandler>(id)` an `IAlvoEventHandler<TMessage>`
 over your own payload class, its event type named by `[AlvoEvent("orders.approved")]`. Its condition — a CEL string —
 tests only `@user` and `@tenant`; check the payload inside the handler. A payload declares no fields, so a payload class
-is checked only for what no descriptor can cure; a payload lacking a field it maps fails that attempt with an
-`InvalidOperationException` naming the field, and is retried like any failure. The `alvo.` namespace is reserved for events Alvo mints itself, and a host cannot publish into it.
+is checked only for what no descriptor can cure; a payload lacking a field it maps makes the delivery dead
+with `record-unreadable`, never retried (see above). The `alvo.` namespace is reserved for events Alvo mints itself, and a host cannot publish into it.
 
 ## Rename or remove a handler
 

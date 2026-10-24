@@ -20,8 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   query). A typed record that does not fit the descriptor refuses start-up (`extensions/<id>/record`) and the apply
   that would break it; `AlvoEventContext.Create` and `AlvoTestHost.EventContext` call a class handler in a unit test.
   A typed handler's message is built from the event's images (or payload) at delivery: one that cannot be built — an
-  application-event payload lacking a field its class maps, or an enum value no member names — fails that attempt
-  with an `InvalidOperationException` naming the field and is retried by the handler's policy. Conditions and queries
+  application-event payload lacking a field its class maps, or an enum value no member names — is dead at once
+  with `record-unreadable` (never retried; the `DeliveryRecordUnreadable` log names the class and field). Conditions and queries
   keep CEL's and SQL's null semantics, not C#'s. Docs: *Typed or CEL*; the *extending* examples now show the lambda
   form first. No breaking change.
 
