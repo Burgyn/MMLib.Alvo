@@ -27,18 +27,18 @@
 - C# style: `alvo-dotnet-conventions` — no inline comments, methods ≲ 25 lines, English only, `ConfigureAwait(false)` in `src/`, never in tests (xUnit1030); every test call passes `TestContext.Current.CancellationToken` (xUnit1051). `.cs` files are **UTF-8 with BOM + CRLF**: after creating or editing `.cs` files run `dotnet format whitespace MMLib.Alvo.slnx --include <file> <file> …` (file paths, never a directory).
 - Single-test runs: `dotnet test --project <test project> --filter-class '*<ClassName>'` (MTP). Public-API baselines: `*PublicApiApprovalTests` (`test/MMLib.Alvo.Tests` for the core, `test/MMLib.Alvo.TestHost.Tests` for the TestHost). Rings: `scripts/test-ring0` after every task, `scripts/test-ring1` after each task marked **[slice end]**, `scripts/test-ring2` before the PR.
 - A grown `PublicApi.*.verified.txt` or a new `*.verified.*` trips the turn-review gate: dispatch `alvo-snapshot-judge`, and justify each added public symbol against `alvo-architecture-rules` (*public is the contract*) and the public-surface list above.
-- **CI parity:** rings are Debug on the local SDK; CI builds Release with `TreatWarningsAsErrors`, `AnalysisLevel=latest-recommended` and `EnforceCodeStyleInBuild`. Translation-only members throw `NotSupportedException` (allowed in getters by CA1065). Task 13 runs the Release build in the CI SDK container before anything is pushed.
+- **CI parity:** rings are Debug on the local SDK; CI builds Release with `TreatWarningsAsErrors`, `AnalysisLevel=latest-recommended` and `EnforceCodeStyleInBuild`. Translation-only members throw `NotSupportedException` (allowed in getters by CA1065). Task 14 runs the Release build in the CI SDK container before anything is pushed.
 - **C# 14 first-class spans:** `array.Contains(x)` in an expression tree binds to `MemoryExtensions.Contains(ReadOnlySpan<T>, T[, IEqualityComparer<T>?])` with the array wrapped in an `op_Implicit` call or a `Convert`; both translators accept that shape (`LambdaShape.IsContains`), as EF Core 10 does.
-- **Security core:** §6.2 lists HX-05 — `alvo-security-core-review` checklist, a labelled `/security-review` substitute and the `needs-deep-review` label (Task 13).
+- **Security core:** §6.2 lists HX-05 — `alvo-security-core-review` checklist, a labelled `/security-review` substitute and the `needs-deep-review` label (Task 14).
 - Commits: Conventional Commits, one per task, each message ending with `Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB`. No `Closes` keyword in a commit message; the PR body carries `Closes #382` once.
 
 ## Review Focus
 
-1. **A nullable enum property compared with a member** (`e.New.Previous == OrderStatus.InReview`, compiled as `Convert(member, int?) == Constant(1, int?)`) must translate to the member's declared value, not to `1` — rows `nullable enum` in `ConditionTranslationTests` (Task 4) and `nullable enum` in `FilterTranslationTests` (Task 5).
-2. **`array.Contains(x)` bound by C# 14 to `MemoryExtensions.Contains` through an implicit span conversion** must translate like `Enumerable.Contains`, for a `static readonly` enum array, an inline string array and a captured `long[]` — rows `list of enum members`, `list of texts` (Task 4), `constant enum list`, `inline text list`, `too many candidates` (Task 5).
-3. **A string constant whose escaped text pushes the condition past `CelParser.MaxSourceLength` (2 000)** must be refused at registration with a translation message, not reach the boot as a `CelSyntaxException` — fact `A_condition_longer_than_cel_allows_is_refused_at_registration` (Task 4).
+1. **A nullable enum property compared with a member** (`e.New.Previous == OrderStatus.InReview`, compiled as `Equal(Convert(member, Int32?), Convert(Constant(InReview, OrderStatus), Int32?))`; a non-nullable enum compiles as `Equal(Convert(member, Int32), Constant(1, Int32))`) must translate to the member's declared value, not to `1` — rows `nullable enum` in `ConditionTranslationTests` (Task 5) and `nullable enum` in `FilterTranslationTests` (Task 6).
+2. **`array.Contains(x)` bound by C# 14 to `MemoryExtensions.Contains` through an implicit span conversion** must translate like `Enumerable.Contains`, for a `static readonly` enum array, an inline string array and a captured `long[]` — facts in `LambdaShapeTests` (Task 4), rows `list of enum members`, `list of texts` (Task 5), `constant enum list`, `inline text list`, `too many candidates` (Task 6).
+3. **A string constant whose escaped text pushes the condition past `CelParser.MaxSourceLength` (2 000), or a lambda nested past `CelParser.MaxDepth` (32)** must be refused at registration with a translation message, not reach the boot as a `CelSyntaxException` — facts `A_condition_longer_than_cel_allows_is_refused_at_registration` and `A_condition_nested_deeper_than_cel_allows_is_refused_at_registration` (Task 5).
 4. **A whole decimal in an event image** (`12.00` arrives as the JSON number `12`, read back as a `long`) must fill a `decimal` property, and a `Guid`, a date and an instant arriving as strings must fill theirs — facts `A_whole_decimal_read_back_as_an_integer_fills_a_decimal_property` and `A_record_fills_every_mapped_property` (Task 3).
-5. **A typed query called twice with a changed captured variable** must send the new value the second time — no cache keyed by the expression's shape may freeze the first — fact `A_captured_value_is_read_again_on_every_call` (Task 8).
+5. **A typed query called twice with a changed captured variable** must send the new value the second time — no cache keyed by the expression's shape may freeze the first — fact `A_captured_value_is_read_again_on_every_call` (Task 9).
 
 ---
 
@@ -56,13 +56,13 @@ Created:
 | `src/MMLib.Alvo/Extensions/AlvoEntityBuilder{T}.cs` | typed registrations |
 | `src/MMLib.Alvo/Extensions/Internal/ConditionTranslator.cs`, `TypedHandler.cs` | `when` → CEL; shape + typed message factory |
 | `test/MMLib.Alvo.Tests/Expressions/CelTextTests.cs` | writer facts and the round-trip properties (acceptance (3)) |
-| `test/MMLib.Alvo.Tests/Data/TypedFixtures.cs`, `RecordShapeTests.cs`, `AlvoRecordAsTests.cs`, `FilterText.cs`, `FilterTranslationTests.cs`, `TypedReadTests.cs` | shapes, `As<T>()` (acceptance (7)), the query half of acceptance (1) |
+| `test/MMLib.Alvo.Tests/Data/TypedFixtures.cs`, `RecordShapeTests.cs`, `AlvoRecordAsTests.cs`, `LambdaShapeTests.cs`, `FilterText.cs`, `FilterTranslationTests.cs`, `TypedReadTests.cs` | shapes, `As<T>()` (acceptance (7)), the query half of acceptance (1) |
 | `test/MMLib.Alvo.Tests/Extensions/ConditionTranslationTests.cs`, `TypedRegistrationTests.cs`, `TypedBindingTests.cs` | the `when` half of acceptance (1), (4), (6), (5) unit |
 | `test/MMLib.Alvo.Tests/Events/AlvoEventContextTests.cs`, `test/MMLib.Alvo.TestHost.Tests/AlvoTestHostEventContextTests.cs` | the unit-test seam (HX-03 (53)) |
 | `test/_shared/testhost/TypedLayerFacts.cs`, `test/_shared/testhost/descriptors/typed-desk.alvo.json`, `test/MMLib.Alvo.TestHost.Tests/SqliteTypedLayerTests.cs`, `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlTypedLayerTests.cs` | both engines: typed handlers, boot refusal (acceptance (5)), typed reads, two tenants, acceptance (2) |
 | `website/src/content/docs/extending/typed-or-cel.mdx`; `website/src/snippets/extending/typed/{BookingDeskHandlers.cs,BookingDeskHandlersTests.cs,booking-desk.alvo.json}` | *Typed or CEL* |
 
-Modified: `src/MMLib.Alvo/Extensions/AlvoExtensionBuilderExtensions.cs`; `src/MMLib.Alvo/Extensions/Internal/{ExtensionRegistration.cs,ExtensionRegistrations.cs,HandlerBinding.cs,ExtensionApplyRefusals.cs}`; `src/MMLib.Alvo/Events/AlvoEventContext.cs`, `Events/Internal/{HandlerMessage.cs,DeliveryRunner.cs}`; `src/MMLib.Alvo.TestHost/AlvoTestHost.cs`; `test/MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj`, `test/MMLib.Alvo.TestHost.Tests/MMLib.Alvo.TestHost.Tests.csproj`; `test/MMLib.Alvo.Tests/Extensions/ExtensionApplyGuardTests.cs`; `test/MMLib.Alvo.Admin.Tests.EndToEnd/{ExtensionWorld.cs,ExtensionScenarios.cs}`; the core and TestHost `PublicApi.*.verified.txt`; docs per Task 12.
+Modified: `src/MMLib.Alvo/Extensions/AlvoExtensionBuilderExtensions.cs`; `src/MMLib.Alvo/Extensions/Internal/{ExtensionRegistration.cs,ExtensionRegistrations.cs,HandlerBinding.cs,ExtensionApplyRefusals.cs}`; `src/MMLib.Alvo/Events/AlvoEventContext.cs`, `Events/Internal/{HandlerMessage.cs,DeliveryRunner.cs}`; `src/MMLib.Alvo.TestHost/AlvoTestHost.cs`; `test/MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj`, `test/MMLib.Alvo.TestHost.Tests/MMLib.Alvo.TestHost.Tests.csproj`; `test/MMLib.Alvo.Tests/Extensions/ExtensionApplyGuardTests.cs`; `test/MMLib.Alvo.Admin.Tests.EndToEnd/{ExtensionWorld.cs,ExtensionScenarios.cs}`; the core and TestHost `PublicApi.*.verified.txt`; docs per Task 13.
 
 ---
 
@@ -75,7 +75,7 @@ Modified: `src/MMLib.Alvo/Extensions/AlvoExtensionBuilderExtensions.cs`; `src/MM
 
 **Interfaces:**
 - Consumes: `CelNode` records (`CelLiteral`, `CelFieldRef`, `CelContextRef`, `CelUnary`, `CelBinary`, `CelHas`, `CelChanged`) and the internal `CelCall(string Name, IReadOnlyList<CelNode> Arguments)`; `CelParser.Parse(string)`, `CelParser.MaxSourceLength` (2000); `LiteralText.Any(int maxPieces = 24)` (`MMLib.Alvo.Tests.Data`).
-- Produces: `internal static class CelText` with `string Write(CelNode node)` and `string StringLiteral(string value)`. A `CelLiteral` of type `Uuid`, `Null` or `Timestamp`, or a `CelConditional`, throws `ArgumentException` (the translator never hands one over); `long.MinValue` throws `ArgumentOutOfRangeException`.
+- Produces: `internal static class CelText` with `string Write(CelNode node)`, `string StringLiteral(string value)` and `bool IsFieldName(string name)` (the lexer's identifier grammar — a letter or `_` first, then letters, digits and `_` — and not `old`, `new`, `true`, `false`, `null`, `in` or `has`). A field or `changed()` name that is not a field name, a `CelLiteral` of type `Uuid`, `Null` or `Timestamp`, or a `CelConditional`, throws `ArgumentException` (the translator never hands one over — it refuses such a name first); `long.MinValue` throws `ArgumentOutOfRangeException`. Field names are the one part of the text no literal escape covers, so the writer refuses what it cannot spell rather than letting a name re-parse as a different tree (§6.2, "one literal writer").
 
 - [ ] **Step 1: Link the literal space and write the failing tests**
 
@@ -156,6 +156,19 @@ public sealed class CelTextTests
     public void A_canonical_condition_is_written_back_as_itself(string condition) =>
         CelText.Write(CelParser.Parse(condition)).ShouldBe(condition);
 
+    [Theory]
+    [InlineData("a == 'x' || true")]
+    [InlineData("old")]
+    [InlineData("in")]
+    [InlineData("1st")]
+    [InlineData("")]
+    public void A_field_name_that_is_not_a_cel_identifier_is_refused(string name)
+    {
+        CelText.IsFieldName(name).ShouldBeFalse();
+        Should.Throw<ArgumentException>(() => CelText.Write(new CelFieldRef(name, CelValueType.Null, CelRecordState.New)));
+        Should.Throw<ArgumentException>(() => CelText.Write(new CelChanged(name)));
+    }
+
     [Fact]
     public void A_decimal_always_carries_a_point_so_it_never_reads_back_as_an_integer() =>
         CelText.Write(new CelLiteral(CelValueType.Decimal, 10m)).ShouldBe("10.0");
@@ -206,6 +219,8 @@ internal static class CelText
     private const int UnaryLevel = 6;
     private const int PrimaryLevel = 7;
 
+    private static readonly HashSet<string> _reserved = ["old", "new", "true", "false", "null", "in", "has"];
+
     /// <summary>The canonical text of <paramref name="node"/>.</summary>
     /// <param name="node">A tree of literals, field and context references, operators, <c>has</c>, <c>changed</c> and calls.</param>
     /// <returns>The text <see cref="CelParser"/> reads back as the same tree.</returns>
@@ -231,6 +246,19 @@ internal static class CelText
         return builder.Append('\'').ToString();
     }
 
+    /// <summary>Whether <paramref name="name"/> can stand as a field in CEL text: the lexer's identifier grammar, and neither an image nor a keyword.</summary>
+    /// <param name="name">A field name.</param>
+    /// <returns><see langword="true"/> when it reads back as the same field.</returns>
+    internal static bool IsFieldName(string name) =>
+        name.Length > 0 && (char.IsLetter(name[0]) || name[0] == '_') && name.All(character => char.IsLetterOrDigit(character) || character == '_')
+        && !_reserved.Contains(name);
+
+    private static string Name(string name) => IsFieldName(name)
+        ? name
+        : throw new ArgumentException(
+            $"'{name}' is not a CEL field name: it must start with a letter or '_', hold only letters, digits and '_', and be neither old, new nor a keyword.",
+            nameof(name));
+
     private static string Escaped(char character) => character switch
     {
         '\\' => @"\\",
@@ -247,7 +275,7 @@ internal static class CelText
         CelFieldRef field => Field(field),
         CelContextRef context => Context(context.Value),
         CelHas has => $"has({Field(has.Field)})",
-        CelChanged changed => $"changed({changed.FieldName})",
+        CelChanged changed => $"changed({Name(changed.FieldName)})",
         CelCall call => $"{call.Name}({string.Join(", ", call.Arguments.Select(Text))})",
         CelUnary unary => (unary.Operator == CelUnaryOperator.Not ? "!" : "-") + Child(unary.Operand, UnaryLevel, rightOfSame: false),
         CelBinary binary => Binary(binary),
@@ -299,9 +327,9 @@ internal static class CelText
 
     private static string Field(CelFieldRef field) => field.State switch
     {
-        CelRecordState.New => "new." + field.FieldName,
-        CelRecordState.Old => "old." + field.FieldName,
-        _ => field.FieldName,
+        CelRecordState.New => "new." + Name(field.FieldName),
+        CelRecordState.Old => "old." + Name(field.FieldName),
+        _ => Name(field.FieldName),
     };
 
     private static string Context(CelContextValue value) => value switch
@@ -361,7 +389,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
   - `sealed class RecordShape` — `static RecordShape Of(Type type)` (cached per type); `Type Type`; `string Name` (the type's name); `string? Entity` (`[AlvoEntity]`); `string? EventType` (`[AlvoEvent]`); `bool IsWrapper` (implements `IAlvoEntity`); `IReadOnlyList<MappedProperty> Properties`; `ConstructorInfo? Constructor`; `IReadOnlyList<ShapeProblem> Problems`; `MappedProperty? Mapped(MemberInfo member)`; `static MappedProperty? ParameterProperty(ParameterInfo parameter, IReadOnlyList<MappedProperty> properties)`.
   - `sealed record MappedProperty(PropertyInfo Property, string Field, Type ValueType, bool AcceptsNull, EnumMap? Enum)`.
   - `sealed class EnumMap` — `static EnumMap Of(Type type)`; `Type Type`; `IReadOnlyList<EnumMember> Members`; `bool IsFlags`; `string? ValueOf(object member)`; `object? MemberOf(string value)`; `sealed record EnumMember(string Name, string Value, object Member)`.
-  - `sealed record ShapeProblem(string Message, string Fix)`; `static class ShapeProblems` with `IReadOnlyList<ShapeProblem> Of(RecordShape shape)`.
+  - `sealed record ShapeProblem(string Message, string Fix)`; `static class ShapeProblems` with `IReadOnlyList<ShapeProblem> Of(RecordShape shape)` — no callable constructor, a field name that is not a CEL identifier (`CelText.IsFieldName`, Task 1), one field mapped twice, a value no field holds, a `[Flags]` enum, two members sharing a value.
 - Produces (tests, `MMLib.Alvo.Tests.Data`): `Order`, `OrderStatus`, `OrderView`, `OrderLine`, `TypedTicket`, `TicketStatus`, the misfit types, `TicketEscalated`, `TypedTicketResolved`, `EscalationHandler`, `TypedFixtures.OrdersSchema`, `TypedFixtures.OrderRecord(...)`, `TypedFixtures.Absent`.
 
 - [ ] **Step 1: Write the fixtures and the failing tests**
@@ -498,6 +526,12 @@ public sealed class Unmarked
 public sealed class Uncallable(int seed)
 {
     public string? Title { get; init; } = seed.ToString(System.Globalization.CultureInfo.InvariantCulture);
+}
+
+public sealed class BadFieldName
+{
+    [AlvoField("not a name")]
+    public string? Title { get; init; }
 }
 
 public sealed class TwoNames
@@ -673,6 +707,7 @@ public sealed class RecordShapeTests
     [InlineData(typeof(Uncallable), "Uncallable has no public constructor Alvo can call")]
     [InlineData(typeof(TwoNames), "TwoNames.Title and TwoNames.Heading map the same field 'title'.")]
     [InlineData(typeof(WithFlags), "Flagged is a [Flags] enum")]
+    [InlineData(typeof(BadFieldName), "BadFieldName.Title maps to 'not a name', which is not a field name")]
     public void A_type_no_descriptor_can_map_carries_its_problem(Type type, string problem) =>
         RecordShape.Of(type).Problems.ShouldContain(candidate => candidate.Message.StartsWith(problem, StringComparison.Ordinal));
 
@@ -899,6 +934,8 @@ internal sealed record MappedProperty(PropertyInfo Property, string Field, Type 
 `src/MMLib.Alvo/Data/Internal/ShapeProblems.cs`:
 
 ```csharp
+using MMLib.Alvo.Expressions.Internal;
+
 namespace MMLib.Alvo.Data.Internal;
 
 /// <summary>One thing wrong with a host type or its mapping, and how to fix it.</summary>
@@ -911,7 +948,7 @@ internal static class ShapeProblems
         [typeof(string), typeof(long), typeof(int), typeof(decimal), typeof(bool), typeof(Guid), typeof(DateOnly), typeof(DateTimeOffset)];
 
     internal static IReadOnlyList<ShapeProblem> Of(RecordShape shape) =>
-        [.. Construction(shape), .. SharedFields(shape), .. shape.Properties.SelectMany(property => Values(shape, property))];
+        [.. Construction(shape), .. FieldNames(shape), .. SharedFields(shape), .. shape.Properties.SelectMany(property => Values(shape, property))];
 
     private static IEnumerable<ShapeProblem> Construction(RecordShape shape)
     {
@@ -925,6 +962,11 @@ internal static class ShapeProblems
             : new($"{shape.Name} has no public constructor Alvo can call: none is parameterless, and none takes only properties it maps.",
                 "Add a parameterless constructor, or make it a positional record over the mapped properties.");
     }
+
+    private static IEnumerable<ShapeProblem> FieldNames(RecordShape shape) =>
+        shape.Properties.Where(property => !CelText.IsFieldName(property.Field)).Select(property => new ShapeProblem(
+            $"{shape.Name}.{property.Property.Name} maps to '{property.Field}', which is not a field name: a field name starts with a letter or '_' and holds only letters, digits and '_'.",
+            "Name the field as the descriptor declares it: [AlvoField(\"…\")]."));
 
     private static IEnumerable<ShapeProblem> SharedFields(RecordShape shape) =>
         shape.Properties
@@ -1448,249 +1490,134 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 4: `EventCondition<T>` and the `when` translator
+## Task 4: Translation groundwork — `AlvoTranslationException`, `LambdaShape`, `LambdaValues`, `TranslationRefusal`
 
 **Files:**
-- Create: `src/MMLib.Alvo/Events/EventCondition.cs`, `src/MMLib.Alvo/Events/AlvoConditionCaller.cs`, `src/MMLib.Alvo/Data/AlvoTranslationException.cs`, `src/MMLib.Alvo/Data/Internal/LambdaShape.cs`, `LambdaValues.cs`, `TranslationRefusal.cs`, `src/MMLib.Alvo/Extensions/Internal/ConditionTranslator.cs`
-- Test: `test/MMLib.Alvo.Tests/Extensions/ConditionTranslationTests.cs`
+- Create: `src/MMLib.Alvo/Data/AlvoTranslationException.cs`, `src/MMLib.Alvo/Data/Internal/LambdaShape.cs`, `LambdaValues.cs`, `TranslationRefusal.cs`
+- Test: `test/MMLib.Alvo.Tests/Data/LambdaShapeTests.cs`
 - Baseline: `test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.verified.txt`
 
 **Interfaces:**
-- Consumes: `CelText.Write` (Task 1); `RecordShape.Of`, `.Mapped`, `.IsWrapper`, `.Name`, `EnumMap.Of`, `.ValueOf` (Task 2); `HandlerVerb` (`Created`, `Updated`, `Deleted`, `Saved`); `CelParser.MaxSourceLength`; `ICelCompiler.Compile(string, CelProfile, EntitySchema)` and `CelFixtures.Compiler` (tests).
+- Consumes: `AlvoRecord` (its indexer); test fixtures `Order`, `OrderStatus` (Task 2).
 - Produces:
-  - Public `EventCondition<T>`, `AlvoConditionCaller`, `AlvoTranslationException` (Global Constraints).
-  - `internal static class LambdaShape` — `bool Touches(Expression node, ParameterExpression parameter)`; `Expression? FindClock(Expression node)`; `bool IsClock(Expression node)`; `Expression Unwrapped(Expression node)` (strips `Quote` and transparent `Convert`: nullable lift, numeric widening, to `object`, between reference types, enum ↔ underlying — never a narrowing conversion); `Type? EnumBehind(Expression node)`; `bool IsNullable(Expression? node)`; `Type Underlying(Type type)`; `string? RecordKey(MethodCallExpression call)` (`AlvoRecord`'s indexer with a constant key); `bool IsContains(MethodCallExpression call, out Expression? source, out Expression? value)`.
+  - Public `AlvoTranslationException` (Global Constraints).
+  - `internal static class LambdaShape` — `bool Touches(Expression node, ParameterExpression parameter)`; `Expression? FindClock(Expression node)`; `bool IsClock(Expression node)`; `Expression Unwrapped(Expression node)` (strips `Quote` and transparent `Convert`: nullable lift, numeric widening, to `object`, between reference types, enum ↔ underlying — never a narrowing conversion); `Type? EnumBehind(Expression node)`; `bool IsNullable(Expression? node)`; `Type Underlying(Type type)`; `string? RecordKey(MethodCallExpression call)` (`AlvoRecord`'s indexer with a constant key); `bool IsContains(MethodCallExpression call, out Expression? source, out Expression? value)` (`Enumerable.Contains`, `MemoryExtensions.Contains` over `op_Implicit` with or without a `null` comparer, an instance `Contains` on a non-string sequence).
   - `internal static class LambdaValues` — `bool TryConstant(Expression node, out object? value, out string reason)` (strict: a constant, a `static readonly` or `const` field, a conversion or negation of one, an array initializer of them); `object? Evaluate(Expression node)` (per call).
   - `internal static class TranslationRefusal` — `const string WhenFix`, `const string QueryFix`; `AlvoTranslationException When(string id, Expression node, string reason, string fix = WhenFix)`; `AlvoTranslationException Query(string entity, Expression node, string reason, string fix = QueryFix)`.
-  - `internal sealed class ConditionTranslator` — `static string Translate<T>(Expression<Func<EventCondition<T>, bool>> when, string id, HandlerVerb verb) where T : class`.
 
-- [ ] **Step 1: Write the failing table suite**
+- [ ] **Step 1: Write the failing tests**
 
-Create `test/MMLib.Alvo.Tests/Extensions/ConditionTranslationTests.cs`:
+Create `test/MMLib.Alvo.Tests/Data/LambdaShapeTests.cs`:
 
 ```csharp
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Data.Internal;
-using MMLib.Alvo.Events;
-using MMLib.Alvo.Expressions;
-using MMLib.Alvo.Expressions.Internal;
-using MMLib.Alvo.Extensions.Internal;
-using MMLib.Alvo.Tests.Data;
-using MMLib.Alvo.Tests.Expressions;
 
+using System.Collections;
 using System.Linq.Expressions;
 
-namespace MMLib.Alvo.Tests.Extensions;
+namespace MMLib.Alvo.Tests.Data;
 
-/// <summary>
-/// The <c>when</c> column of spec 2026-10-14 §4.3 as data (HX-05 acceptance (1)): each lambda's CEL, which reads back as
-/// itself and compiles against the entity; every refused construct throws naming the extension and a fix (acceptance (4)).
-/// </summary>
-public sealed class ConditionTranslationTests
+/// <summary>What both translators ask of a lambda's tree (spec 2026-10-14 §4.3): conversions, the three Contains shapes, constants, the refusal's shape.</summary>
+public sealed class LambdaShapeTests
 {
-    private const decimal Ceiling = 1000m;
+    private static readonly long[] Numbers = [1, 2];
+    private static readonly OrderStatus[] Statuses = [OrderStatus.Draft];
+    private static readonly decimal Limit = 5m;
 
-    private static readonly Guid Fleet = Guid.Parse("3fa85f64-5717-4562-b3fc-2c963f66afa6");
-    private static readonly DateTimeOffset Cutoff = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
-    private static readonly decimal Threshold = 250.5m;
-    private static readonly OrderStatus[] Open = [OrderStatus.Draft, OrderStatus.InReview];
-    private static readonly string[] NoNotes = [];
-    private static readonly string LongNote = new('x', CelParser.MaxSourceLength);
-
-    public static TheoryData<string, string, Expression<Func<EventCondition<Order>, bool>>, string> Translated()
+    [Fact]
+    public void A_lifting_or_widening_conversion_is_seen_through()
     {
-        const long limit = 99;
+        Expression<Func<Order, long?>> lifted = x => x.Rank;
 
-        return new()
+        LambdaShape.Unwrapped(lifted.Body).ShouldBeAssignableTo<MemberExpression>();
+    }
+
+    [Fact]
+    public void A_narrowing_conversion_is_kept()
+    {
+        Expression<Func<Order, int>> narrowed = x => (int)x.Total;
+
+        LambdaShape.Unwrapped(narrowed.Body).NodeType.ShouldBe(ExpressionType.Convert);
+    }
+
+    [Fact]
+    public void Every_contains_shape_names_its_list_and_its_value()
+    {
+        Expression<Func<Order, bool>>[] shapes =
+        [
+            x => Numbers.Contains(x.Quantity),
+            x => Statuses.Contains(x.Status),
+            x => new List<string> { "a" }.Contains(x.Note),
+        ];
+
+        foreach (var shape in shapes)
         {
-            { "snake_case field", "Updated", e => e.New.Note == "x", "new.note == 'x'" },
-            { "[AlvoField] name", "Updated", e => e.New.Reference == "R-1", "new.ref_no == 'R-1'" },
-            { "both images", "Updated", e => e.Old.Quantity < e.New.Quantity, "old.quantity < new.quantity" },
-            { "changed, several", "Updated", e => e.Changed(x => x.Status, x => x.Total), "changed(status) || changed(total)" },
-            { "changed and a value", "Updated", e => e.Changed(x => x.Status) && e.New.Status == OrderStatus.Approved, "changed(status) && new.status == 'ok'" },
-            { "changed inside and", "Updated", e => e.Changed(x => x.Status, x => x.Total) && e.New.IsPaid, "(changed(status) || changed(total)) && new.is_paid" },
-            { "relations", "Updated", e => e.New.Total >= 10m && e.New.Quantity != 3, "new.total >= 10.0 && new.quantity != 3" },
-            { "negation", "Updated", e => !e.New.IsPaid || e.New.Total > 0.5m, "!new.is_paid || new.total > 0.5" },
-            { "negated group", "Updated", e => !(e.New.IsPaid && e.New.Quantity > 1), "!(new.is_paid && new.quantity > 1)" },
-            { "arithmetic", "Updated", e => e.New.Quantity + 1 > 5 && e.New.Total * 2m > 100m, "new.quantity + 1 > 5 && new.total * 2.0 > 100.0" },
-            { "arithmetic precedence", "Updated", e => (e.New.Quantity + 1) * 2 > 10, "(new.quantity + 1) * 2 > 10" },
-            { "null test", "Updated", e => e.New.Code == null, "!has(new.code)" },
-            { "not-null tests", "Updated", e => e.New.Code != null && e.New.DueAt.HasValue, "has(new.code) && has(new.due_at)" },
-            { "null on the left", "Updated", e => null == e.New.Code, "!has(new.code)" },
-            { "text tests", "Updated", e => e.New.Note.StartsWith("ab") || e.New.Note.EndsWith("yz", StringComparison.Ordinal) || e.New.Note.Contains("mid"), "startsWith(new.note, 'ab') || endsWith(new.note, 'yz') || contains(new.note, 'mid')" },
-            { "list of enum members", "Updated", e => Open.Contains(e.New.Status), "new.status == 'draft' || new.status == 'in_review'" },
-            { "list of texts", "Updated", e => new[] { "a", "b" }.Contains(e.New.Note), "new.note == 'a' || new.note == 'b'" },
-            { "enum member", "Updated", e => e.New.Status != OrderStatus.Draft, "new.status != 'draft'" },
-            { "nullable enum", "Updated", e => e.New.Previous == OrderStatus.InReview, "new.previous == 'in_review'" },
-            { "enum images", "Updated", e => e.Old.Status != e.New.Status, "old.status != new.status" },
-            { "role", "Updated", e => e.Caller.HasRole("manager"), "'manager' in @user.roles" },
-            { "caller id", "Updated", e => e.New.OwnerId == e.Caller.User, "new.owner_id == @user.id" },
-            { "static readonly and const", "Updated", e => e.New.Total > Threshold && e.New.Total < Ceiling, "new.total > 250.5 && new.total < 1000.0" },
-            { "local const", "Updated", e => e.New.Quantity < limit, "new.quantity < 99" },
-            { "id constant", "Updated", e => e.New.OwnerId == Fleet, "string(new.owner_id) == '3fa85f64-5717-4562-b3fc-2c963f66afa6'" },
-            { "instant constant", "Updated", e => e.New.DueAt < Cutoff, "new.due_at < timestamp('2026-01-01T00:00:00Z')" },
-            { "escaped text", "Updated", e => e.New.Note == "it's \\ \"quoted\"\n", @"new.note == 'it\'s \\ ""quoted""\n'" },
-            { "negative constant", "Updated", e => e.New.Quantity > -5, "new.quantity > -5" },
-            { "bool literal", "Updated", e => e.New.IsPaid == true, "new.is_paid == true" },
-            { "value of a nullable", "Updated", e => e.New.Rank!.Value > 2, "new.rank > 2" },
-            { "created", "Created", e => e.New.Total > 0m, "new.total > 0.0" },
-            { "deleted", "Deleted", e => e.Old.IsPaid, "old.is_paid" },
-            { "saved", "Saved", e => e.New.Quantity >= 1, "new.quantity >= 1" },
-        };
-    }
-
-    public static TheoryData<string, string, Expression<Func<EventCondition<Order>, bool>>, string> Refused()
-    {
-        var threshold = 5m;
-
-        return new()
-        {
-            { "method on a field", "Updated", e => e.New.Note.GetHashCode() == 1, "method 'GetHashCode' has no CEL equivalent" },
-            { "clock", "Updated", e => e.New.DueAt < DateTimeOffset.UtcNow, "conditions have no clock yet" },
-            { "local clock", "Updated", e => e.New.DueAt < DateTime.Now, "conditions have no clock yet" },
-            { "captured variable", "Updated", e => e.New.Total > threshold, "'threshold' is a captured variable" },
-            { "static property", "Updated", e => e.New.Note == Environment.NewLine, "'NewLine' is a static property" },
-            { "pre-image on create", "Created", e => e.Old.Total > 0m, "carries no record before the write" },
-            { "post-image on delete", "Deleted", e => e.New.Total > 0m, "carries no record after the write" },
-            { "changed on save", "Saved", e => e.Changed(x => x.Status), "changed() compares the record before and after the write" },
-            { "culture comparison", "Updated", e => e.New.Note.StartsWith("a", StringComparison.OrdinalIgnoreCase), "only the ordinal comparison translates" },
-            { "conditional", "Updated", e => (e.New.IsPaid ? 1 : 0) == 1, "a conditional (?:) has no CEL equivalent" },
-            { "relational enum", "Updated", e => e.New.Status > OrderStatus.Draft, "an enum field compares with == and != only" },
-            { "smallest long", "Updated", e => e.New.Quantity > long.MinValue, "long.MinValue has no CEL literal" },
-            { "unmapped property", "Updated", e => e.New.Summary == "x", "Order.Summary maps to no field" },
-            { "empty list", "Updated", e => NoNotes.Contains(e.New.Note), "an empty list matches nothing" },
-            { "computed constant", "Updated", e => e.New.Note == "a".Trim(), "it is computed when the condition runs" },
-        };
-    }
-
-    [Theory]
-    [MemberData(nameof(Translated))]
-    public void A_condition_translates_to_its_cel(string row, string verb, Expression<Func<EventCondition<Order>, bool>> when, string cel)
-    {
-        var text = ConditionTranslator.Translate(when, "row-handler", Enum.Parse<HandlerVerb>(verb));
-
-        text.ShouldBe(cel, row);
-        CelText.Write(CelParser.Parse(text)).ShouldBe(text, $"{row}: the writer's text reads back as itself");
-        CelFixtures.Compiler.Compile(text, CelProfile.Condition, TypedFixtures.OrdersSchema).IsSuccess.ShouldBeTrue($"{row}: {text} compiles");
-    }
-
-    [Theory]
-    [MemberData(nameof(Refused))]
-    public void A_construct_with_no_cel_equivalent_is_refused_naming_the_extension_and_a_fix(
-        string row, string verb, Expression<Func<EventCondition<Order>, bool>> when, string reason)
-    {
-        var refusal = Should.Throw<AlvoTranslationException>(() => ConditionTranslator.Translate(when, "row-handler", Enum.Parse<HandlerVerb>(verb)));
-
-        refusal.Message.ShouldContain("in extension 'row-handler' (when): ", customMessage: row);
-        refusal.Message.ShouldContain(reason, customMessage: row);
-        refusal.Message.ShouldContain(". Fix: ", customMessage: row);
-        refusal.FixSuggestion.ShouldNotBeNullOrWhiteSpace(row);
+            LambdaShape.IsContains((MethodCallExpression)shape.Body, out var source, out var value).ShouldBeTrue(shape.ToString());
+            typeof(IEnumerable).IsAssignableFrom(source!.Type).ShouldBeTrue(shape.ToString());
+            LambdaShape.Touches(source, shape.Parameters[0]).ShouldBeFalse(shape.ToString());
+            value.ShouldBeAssignableTo<MemberExpression>(shape.ToString());
+        }
     }
 
     [Fact]
-    public void The_refusal_names_the_construct_the_extension_and_the_fix()
+    public void A_text_s_own_contains_is_not_a_list()
     {
-        var refusal = Should.Throw<AlvoTranslationException>(() =>
-            ConditionTranslator.Translate<Order>(e => e.New.Note.GetHashCode() == 1, "send-confirmation", HandlerVerb.Updated));
+        Expression<Func<Order, bool>> text = x => x.Note.Contains("a");
 
-        refusal.Message.ShouldBe(
-            "Cannot translate 'e.New.Note.GetHashCode()' in extension 'send-confirmation' (when): method 'GetHashCode' has no CEL "
-            + "equivalent. Fix: write the condition as a CEL string — when: \"…\" — or move the check into the handler body.");
-        refusal.FixSuggestion.ShouldBe(TranslationRefusal.WhenFix);
+        LambdaShape.IsContains((MethodCallExpression)text.Body, out _, out _).ShouldBeFalse();
     }
 
     [Fact]
-    public void A_condition_longer_than_cel_allows_is_refused_at_registration() =>
-        Should.Throw<AlvoTranslationException>(() => ConditionTranslator.Translate<Order>(e => e.New.Note == LongNote, "long", HandlerVerb.Updated))
-            .Message.ShouldContain($"past the {CelParser.MaxSourceLength} a condition may hold");
+    public void A_constant_is_a_literal_a_static_readonly_field_or_an_array_of_them()
+    {
+        Expression<Func<decimal>> field = () => Limit;
+        Expression<Func<long[]>> array = () => new[] { 1L, 2L };
+
+        LambdaValues.TryConstant(field.Body, out var limit, out _).ShouldBeTrue();
+        limit.ShouldBe(5m);
+        LambdaValues.TryConstant(array.Body, out var items, out _).ShouldBeTrue();
+        items.ShouldBe(new object?[] { 1L, 2L });
+    }
 
     [Fact]
-    public void A_wrapper_reads_any_field_through_its_record() =>
-        ConditionTranslator.Translate<OrderView>(e => (string?)e.New.Record["legacy_code"] == "L-9" && e.New.Note != null, "row", HandlerVerb.Updated)
-            .ShouldBe("new.legacy_code == 'L-9' && has(new.note)");
+    public void A_captured_variable_or_a_static_property_is_not_a_constant_and_says_why()
+    {
+        var captured = 3m;
+        Expression<Func<decimal>> local = () => captured;
+        Expression<Func<string>> property = () => Environment.NewLine;
+
+        LambdaValues.TryConstant(local.Body, out _, out var why).ShouldBeFalse();
+        why.ShouldContain("'captured' is a captured variable");
+        LambdaValues.TryConstant(property.Body, out _, out why).ShouldBeFalse();
+        why.ShouldContain("'NewLine' is a static property");
+    }
+
+    [Fact]
+    public void A_clock_is_found_anywhere_in_a_value()
+    {
+        Expression<Func<DateTimeOffset>> later = () => DateTimeOffset.UtcNow.AddDays(1);
+
+        LambdaShape.FindClock(later.Body).ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void A_refusal_names_the_construct_where_it_was_written_why_and_the_fix()
+    {
+        var refusal = TranslationRefusal.Query("orders", Expression.Constant(1), "because");
+
+        refusal.Message.ShouldBe("Cannot translate '1' in a typed query on 'orders': because. Fix: " + TranslationRefusal.QueryFix);
+        refusal.FixSuggestion.ShouldBe(TranslationRefusal.QueryFix);
+    }
 }
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*ConditionTranslationTests'`
-Expected: FAIL — compile errors (`EventCondition<T>`, `ConditionTranslator`, `AlvoTranslationException` do not exist).
+Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*LambdaShapeTests'`
+Expected: FAIL — compile errors (`LambdaShape`, `LambdaValues`, `TranslationRefusal` do not exist).
 
-- [ ] **Step 3: Write the public types**
-
-`src/MMLib.Alvo/Events/EventCondition.cs`:
-
-```csharp
-using System.Linq.Expressions;
-
-namespace MMLib.Alvo.Events;
-
-/// <summary>
-/// What a typed handler's <c>when</c> lambda reads. Alvo translates the lambda into a CEL condition when the handler is
-/// registered and never runs it, so every member throws if called.
-/// </summary>
-/// <typeparam name="T">The record type the handler is registered for.</typeparam>
-/// <remarks>
-/// A condition compares mapped properties of <see cref="New"/> and <see cref="Old"/> — as the verb's event carries them —
-/// with each other, with constants, <c>static readonly</c> fields and enum members; it may call <see cref="Changed"/> on
-/// an update, test <see cref="Caller"/>, use comparisons, <c>&amp;&amp;</c>, <c>||</c>, <c>!</c>, arithmetic,
-/// <c>== null</c>, <c>HasValue</c>, the ordinal <c>StartsWith</c>, <c>EndsWith</c> and <c>Contains</c>, and
-/// <c>Contains</c> over a constant list. Anything else is refused with an
-/// <see cref="Data.AlvoTranslationException"/> when the handler is registered.
-/// </remarks>
-public sealed class EventCondition<T>
-    where T : class
-{
-    private const string TranslationOnly = "An EventCondition is read by Alvo's translator and never run: pass the lambda to when:.";
-
-    private EventCondition()
-    {
-    }
-
-    /// <summary>Gets the record after the write (<c>new.</c>); a delete carries none.</summary>
-    public T New => throw new NotSupportedException(TranslationOnly);
-
-    /// <summary>Gets the record before the write (<c>old.</c>); an update and a delete carry it.</summary>
-    public T Old => throw new NotSupportedException(TranslationOnly);
-
-    /// <summary>Gets who caused the event.</summary>
-    public AlvoConditionCaller Caller => throw new NotSupportedException(TranslationOnly);
-
-    /// <summary>Whether any of <paramref name="fields"/> changed in the write (<c>changed(field)</c>); on an update only.</summary>
-    /// <param name="fields">Mapped properties of the record, such as <c>x =&gt; x.Status</c>.</param>
-    /// <returns>Never returns: the call is translated.</returns>
-    public bool Changed(params Expression<Func<T, object?>>[] fields) => throw new NotSupportedException(TranslationOnly);
-}
-```
-
-`src/MMLib.Alvo/Events/AlvoConditionCaller.cs`:
-
-```csharp
-namespace MMLib.Alvo.Events;
-
-/// <summary>The caller a typed condition tests — translated into <c>@user</c> and <c>@tenant</c>, never run.</summary>
-public sealed class AlvoConditionCaller
-{
-    private const string TranslationOnly = "An AlvoConditionCaller is read by Alvo's translator and never run: pass the lambda to when:.";
-
-    private AlvoConditionCaller()
-    {
-    }
-
-    /// <summary>Gets the caller's user id (<c>@user.id</c>).</summary>
-    public Guid? User => throw new NotSupportedException(TranslationOnly);
-
-    /// <summary>Gets the caller's tenant id (<c>@tenant.id</c>).</summary>
-    public Guid? Tenant => throw new NotSupportedException(TranslationOnly);
-
-    /// <summary>Whether the caller holds <paramref name="role"/> (<c>'role' in @user.roles</c>).</summary>
-    /// <param name="role">A role the descriptor declares, as a constant.</param>
-    /// <returns>Never returns: the call is translated.</returns>
-    public bool HasRole(string role) => throw new NotSupportedException(TranslationOnly);
-}
-```
-
-If a build reports CA1822 on these members, add `[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "A translation-only member is an instance member so that e.New and e.Caller read as member accesses.")]` on both classes.
+- [ ] **Step 3: Write the exception**
 
 `src/MMLib.Alvo/Data/AlvoTranslationException.cs`:
 
@@ -1735,6 +1662,7 @@ public sealed class AlvoTranslationException : Exception
 ```
 
 - [ ] **Step 4: Write what both translators share**
+
 
 `src/MMLib.Alvo/Data/Internal/TranslationRefusal.cs`:
 
@@ -1815,7 +1743,7 @@ internal static class LambdaShape
             { Method.Name: "Contains", Object: null, Arguments: [var items, var item] } when IsSequence(call.Method.DeclaringType) => (Spanless(items), item),
             { Method.Name: "Contains", Object: null, Arguments: [var items, var item, ConstantExpression { Value: null }] } when call.Method.DeclaringType == typeof(MemoryExtensions) => (Spanless(items), item),
             { Method.Name: "Contains", Object: { } items, Arguments: [var item] } when items.Type != typeof(string) && typeof(IEnumerable).IsAssignableFrom(items.Type) => (items, item),
-            _ => (null, null),
+            _ => ((Expression?)null, (Expression?)null),
         };
 
         return source is not null;
@@ -1971,7 +1899,293 @@ internal static class LambdaValues
 }
 ```
 
-- [ ] **Step 5: Write the `when` translator**
+- [ ] **Step 5: Run the tests to verify they pass**
+
+Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*LambdaShapeTests'`
+Expected: PASS (8). `Every_contains_shape_names_its_list_and_its_value` covers the three shapes C# 14 emits (checked against SDK 10.0.100): a `long[]` binds to the two-argument `MemoryExtensions.Contains` over `op_Implicit`, an enum array to the three-argument overload with a `Constant(null)` comparer, a `List<T>` to its instance method.
+
+- [ ] **Step 6: Approve the core baseline**
+
+Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*PublicApiApprovalTests'`
+Expected: FAIL; the received diff adds exactly `AlvoTranslationException` (four constructors, `FixSuggestion`) in `MMLib.Alvo.Data`. Accept, re-run (PASS), dispatch `alvo-snapshot-judge`.
+
+- [ ] **Step 7: Format, ring0, commit**
+
+```bash
+dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo/Data/AlvoTranslationException.cs src/MMLib.Alvo/Data/Internal/LambdaShape.cs src/MMLib.Alvo/Data/Internal/LambdaValues.cs src/MMLib.Alvo/Data/Internal/TranslationRefusal.cs test/MMLib.Alvo.Tests/Data/LambdaShapeTests.cs
+scripts/test-ring0
+git add src/MMLib.Alvo/Data/AlvoTranslationException.cs src/MMLib.Alvo/Data/Internal/LambdaShape.cs src/MMLib.Alvo/Data/Internal/LambdaValues.cs src/MMLib.Alvo/Data/Internal/TranslationRefusal.cs test/MMLib.Alvo.Tests/Data/LambdaShapeTests.cs test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.verified.txt
+git commit -m "feat(data): groundwork for translating typed lambdas
+
+Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
+```
+
+---
+
+## Task 5: `EventCondition<T>` and the `when` translator
+
+**Files:**
+- Create: `src/MMLib.Alvo/Events/EventCondition.cs`, `src/MMLib.Alvo/Events/AlvoConditionCaller.cs`, `src/MMLib.Alvo/Extensions/Internal/ConditionTranslator.cs`
+- Test: `test/MMLib.Alvo.Tests/Extensions/ConditionTranslationTests.cs`
+- Baseline: `test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.verified.txt`
+
+**Interfaces:**
+- Consumes: `CelText.Write`, `CelText.IsFieldName` (Task 1); `RecordShape.Of`, `.Mapped`, `.IsWrapper`, `.Name`, `EnumMap.Of`, `.ValueOf` (Task 2); `AlvoTranslationException`, `LambdaShape`, `LambdaValues`, `TranslationRefusal` (Task 4); `HandlerVerb` (`Created`, `Updated`, `Deleted`, `Saved`); `CelParser.Parse`, `CelParser.MaxSourceLength`, `CelParser.MaxDepth`, `CelSyntaxException`; `ICelCompiler.Compile(string, CelProfile, EntitySchema)` and `CelFixtures.Compiler` (tests).
+- Produces:
+  - Public `EventCondition<T>`, `AlvoConditionCaller` (Global Constraints).
+  - `internal sealed class ConditionTranslator` — `static string Translate<T>(Expression<Func<EventCondition<T>, bool>> when, string id, HandlerVerb verb) where T : class`; the text it returns has been parsed back once (length and depth checked), and every refusal is an `AlvoTranslationException` naming `id`.
+
+- [ ] **Step 1: Write the failing table suite**
+
+Create `test/MMLib.Alvo.Tests/Extensions/ConditionTranslationTests.cs`:
+
+```csharp
+using MMLib.Alvo.Data;
+using MMLib.Alvo.Data.Internal;
+using MMLib.Alvo.Events;
+using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Tests.Data;
+using MMLib.Alvo.Tests.Expressions;
+
+using System.Linq.Expressions;
+
+namespace MMLib.Alvo.Tests.Extensions;
+
+/// <summary>
+/// The <c>when</c> column of spec 2026-10-14 §4.3 as data (HX-05 acceptance (1)): each lambda's CEL, which reads back as
+/// itself and compiles against the entity; every refused construct throws naming the extension and a fix (acceptance (4)).
+/// </summary>
+public sealed class ConditionTranslationTests
+{
+    private const decimal Ceiling = 1000m;
+
+    private static readonly Guid Fleet = Guid.Parse("3fa85f64-5717-4562-b3fc-2c963f66afa6");
+    private static readonly DateTimeOffset Cutoff = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+    private static readonly decimal Threshold = 250.5m;
+    private static readonly OrderStatus[] Open = [OrderStatus.Draft, OrderStatus.InReview];
+    private static readonly string[] NoNotes = [];
+    private static readonly HashSet<string> Tags = ["a", "b"];
+    private static readonly string LongNote = new('x', CelParser.MaxSourceLength);
+
+    public static TheoryData<string, string, Expression<Func<EventCondition<Order>, bool>>, string> Translated()
+    {
+        const long limit = 99;
+
+        return new()
+        {
+            { "snake_case field", "Updated", e => e.New.Note == "x", "new.note == 'x'" },
+            { "[AlvoField] name", "Updated", e => e.New.Reference == "R-1", "new.ref_no == 'R-1'" },
+            { "both images", "Updated", e => e.Old.Quantity < e.New.Quantity, "old.quantity < new.quantity" },
+            { "changed, several", "Updated", e => e.Changed(x => x.Status, x => x.Total), "changed(status) || changed(total)" },
+            { "changed and a value", "Updated", e => e.Changed(x => x.Status) && e.New.Status == OrderStatus.Approved, "changed(status) && new.status == 'ok'" },
+            { "changed inside and", "Updated", e => e.Changed(x => x.Status, x => x.Total) && e.New.IsPaid, "(changed(status) || changed(total)) && new.is_paid" },
+            { "relations", "Updated", e => e.New.Total >= 10m && e.New.Quantity != 3, "new.total >= 10.0 && new.quantity != 3" },
+            { "negation", "Updated", e => !e.New.IsPaid || e.New.Total > 0.5m, "!new.is_paid || new.total > 0.5" },
+            { "negated group", "Updated", e => !(e.New.IsPaid && e.New.Quantity > 1), "!(new.is_paid && new.quantity > 1)" },
+            { "arithmetic", "Updated", e => e.New.Quantity + 1 > 5 && e.New.Total * 2m > 100m, "new.quantity + 1 > 5 && new.total * 2.0 > 100.0" },
+            { "arithmetic precedence", "Updated", e => (e.New.Quantity + 1) * 2 > 10, "(new.quantity + 1) * 2 > 10" },
+            { "null test", "Updated", e => e.New.Code == null, "!has(new.code)" },
+            { "not-null tests", "Updated", e => e.New.Code != null && e.New.DueAt.HasValue, "has(new.code) && has(new.due_at)" },
+            { "null on the left", "Updated", e => null == e.New.Code, "!has(new.code)" },
+            { "text tests", "Updated", e => e.New.Note.StartsWith("ab") || e.New.Note.EndsWith("yz", StringComparison.Ordinal) || e.New.Note.Contains("mid"), "startsWith(new.note, 'ab') || endsWith(new.note, 'yz') || contains(new.note, 'mid')" },
+            { "list of enum members", "Updated", e => Open.Contains(e.New.Status), "new.status == 'draft' || new.status == 'in_review'" },
+            { "list of texts", "Updated", e => new[] { "a", "b" }.Contains(e.New.Note), "new.note == 'a' || new.note == 'b'" },
+            { "enum member", "Updated", e => e.New.Status != OrderStatus.Draft, "new.status != 'draft'" },
+            { "nullable enum", "Updated", e => e.New.Previous == OrderStatus.InReview, "new.previous == 'in_review'" },
+            { "enum images", "Updated", e => e.Old.Status != e.New.Status, "old.status != new.status" },
+            { "role", "Updated", e => e.Caller.HasRole("manager"), "'manager' in @user.roles" },
+            { "caller id", "Updated", e => e.New.OwnerId == e.Caller.User, "new.owner_id == @user.id" },
+            { "static readonly and const", "Updated", e => e.New.Total > Threshold && e.New.Total < Ceiling, "new.total > 250.5 && new.total < 1000.0" },
+            { "local const", "Updated", e => e.New.Quantity < limit, "new.quantity < 99" },
+            { "id constant", "Updated", e => e.New.OwnerId == Fleet, "string(new.owner_id) == '3fa85f64-5717-4562-b3fc-2c963f66afa6'" },
+            { "instant constant", "Updated", e => e.New.DueAt < Cutoff, "new.due_at < timestamp('2026-01-01T00:00:00Z')" },
+            { "escaped text", "Updated", e => e.New.Note == "it's \\ \"quoted\"\n", @"new.note == 'it\'s \\ ""quoted""\n'" },
+            { "negative constant", "Updated", e => e.New.Quantity > -5, "new.quantity > -5" },
+            { "bool literal", "Updated", e => e.New.IsPaid == true, "new.is_paid == true" },
+            { "value of a nullable", "Updated", e => e.New.Rank!.Value > 2, "new.rank > 2" },
+            { "created", "Created", e => e.New.Total > 0m, "new.total > 0.0" },
+            { "deleted", "Deleted", e => e.Old.IsPaid, "old.is_paid" },
+            { "saved", "Saved", e => e.New.Quantity >= 1, "new.quantity >= 1" },
+        };
+    }
+
+    public static TheoryData<string, string, Expression<Func<EventCondition<Order>, bool>>, string> Refused()
+    {
+        var threshold = 5m;
+
+        return new()
+        {
+            { "method on a field", "Updated", e => e.New.Note.GetHashCode() == 1, "method 'GetHashCode' has no CEL equivalent" },
+            { "clock", "Updated", e => e.New.DueAt < DateTimeOffset.UtcNow, "conditions have no clock yet" },
+            { "local clock", "Updated", e => e.New.DueAt < DateTime.Now, "conditions have no clock yet" },
+            { "captured variable", "Updated", e => e.New.Total > threshold, "'threshold' is a captured variable" },
+            { "static property", "Updated", e => e.New.Note == Environment.NewLine, "'NewLine' is a static property" },
+            { "pre-image on create", "Created", e => e.Old.Total > 0m, "carries no record before the write" },
+            { "post-image on delete", "Deleted", e => e.New.Total > 0m, "carries no record after the write" },
+            { "changed on save", "Saved", e => e.Changed(x => x.Status), "changed() compares the record before and after the write" },
+            { "culture comparison", "Updated", e => e.New.Note.StartsWith("a", StringComparison.OrdinalIgnoreCase), "only the ordinal comparison translates" },
+            { "conditional", "Updated", e => (e.New.IsPaid ? 1 : 0) == 1, "a conditional (?:) has no CEL equivalent" },
+            { "relational enum", "Updated", e => e.New.Status > OrderStatus.Draft, "an enum field compares with == and != only" },
+            { "smallest long", "Updated", e => e.New.Quantity > long.MinValue, "long.MinValue has no CEL literal" },
+            { "unmapped property", "Updated", e => e.New.Summary == "x", "Order.Summary maps to no field" },
+            { "empty list", "Updated", e => NoNotes.Contains(e.New.Note), "an empty list matches nothing" },
+            { "computed constant", "Updated", e => e.New.Note == "a".Trim(), "it is computed when the condition runs" },
+            { "unordered set", "Updated", e => Tags.Contains(e.New.Note), "has no fixed order" },
+        };
+    }
+
+    [Theory]
+    [MemberData(nameof(Translated))]
+    public void A_condition_translates_to_its_cel(string row, string verb, Expression<Func<EventCondition<Order>, bool>> when, string cel)
+    {
+        var text = ConditionTranslator.Translate(when, "row-handler", Enum.Parse<HandlerVerb>(verb));
+
+        text.ShouldBe(cel, row);
+        CelText.Write(CelParser.Parse(text)).ShouldBe(text, $"{row}: the writer's text reads back as itself");
+        CelFixtures.Compiler.Compile(text, CelProfile.Condition, TypedFixtures.OrdersSchema).IsSuccess.ShouldBeTrue($"{row}: {text} compiles");
+    }
+
+    [Theory]
+    [MemberData(nameof(Refused))]
+    public void A_construct_with_no_cel_equivalent_is_refused_naming_the_extension_and_a_fix(
+        string row, string verb, Expression<Func<EventCondition<Order>, bool>> when, string reason)
+    {
+        var refusal = Should.Throw<AlvoTranslationException>(() => ConditionTranslator.Translate(when, "row-handler", Enum.Parse<HandlerVerb>(verb)));
+
+        refusal.Message.ShouldContain("in extension 'row-handler' (when): ", customMessage: row);
+        refusal.Message.ShouldContain(reason, customMessage: row);
+        refusal.Message.ShouldContain(". Fix: ", customMessage: row);
+        refusal.FixSuggestion.ShouldNotBeNullOrWhiteSpace(row);
+    }
+
+    [Fact]
+    public void The_refusal_names_the_construct_the_extension_and_the_fix()
+    {
+        var refusal = Should.Throw<AlvoTranslationException>(() =>
+            ConditionTranslator.Translate<Order>(e => e.New.Note.GetHashCode() == 1, "send-confirmation", HandlerVerb.Updated));
+
+        refusal.Message.ShouldBe(
+            "Cannot translate 'e.New.Note.GetHashCode()' in extension 'send-confirmation' (when): method 'GetHashCode' has no CEL "
+            + "equivalent. Fix: write the condition as a CEL string — when: \"…\" — or move the check into the handler body.");
+        refusal.FixSuggestion.ShouldBe(TranslationRefusal.WhenFix);
+    }
+
+    [Fact]
+    public void A_condition_longer_than_cel_allows_is_refused_at_registration() =>
+        Should.Throw<AlvoTranslationException>(() => ConditionTranslator.Translate<Order>(e => e.New.Note == LongNote, "long", HandlerVerb.Updated))
+            .Message.ShouldContain($"past the {CelParser.MaxSourceLength} a condition may hold");
+
+    [Fact]
+    public void A_condition_nested_deeper_than_cel_allows_is_refused_at_registration()
+    {
+        var e = Expression.Parameter(typeof(EventCondition<Order>), "e");
+        Expression paid = Expression.Property(Expression.Property(e, nameof(EventCondition<Order>.New)), nameof(Order.IsPaid));
+        var body = paid;
+        for (var level = 0; level <= CelParser.MaxDepth; level++)
+        {
+            body = Expression.Not(Expression.AndAlso(paid, body));
+        }
+
+        Should.Throw<AlvoTranslationException>(() => ConditionTranslator.Translate(Expression.Lambda<Func<EventCondition<Order>, bool>>(body, e), "deep", HandlerVerb.Updated))
+            .Message.ShouldContain("its CEL does not parse back");
+    }
+
+    [Fact]
+    public void A_record_key_that_is_not_a_field_name_is_refused() =>
+        Should.Throw<AlvoTranslationException>(() => ConditionTranslator.Translate<OrderView>(e => (string?)e.New.Record["a == 'x' || true"] == "y", "row", HandlerVerb.Updated))
+            .Message.ShouldContain("is not a field name a condition can spell");
+
+    [Fact]
+    public void A_wrapper_reads_any_field_through_its_record() =>
+        ConditionTranslator.Translate<OrderView>(e => (string?)e.New.Record["legacy_code"] == "L-9" && e.New.Note != null, "row", HandlerVerb.Updated)
+            .ShouldBe("new.legacy_code == 'L-9' && has(new.note)");
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*ConditionTranslationTests'`
+Expected: FAIL — compile errors (`EventCondition<T>`, `AlvoConditionCaller`, `ConditionTranslator` do not exist).
+
+- [ ] **Step 3: Write the public types**
+
+`src/MMLib.Alvo/Events/EventCondition.cs`:
+
+```csharp
+using System.Linq.Expressions;
+
+namespace MMLib.Alvo.Events;
+
+/// <summary>
+/// What a typed handler's <c>when</c> lambda reads. Alvo translates the lambda into a CEL condition when the handler is
+/// registered and never runs it, so every member throws if called.
+/// </summary>
+/// <typeparam name="T">The record type the handler is registered for.</typeparam>
+/// <remarks>
+/// A condition compares mapped properties of <see cref="New"/> and <see cref="Old"/> — as the verb's event carries them —
+/// with each other, with constants, <c>static readonly</c> fields and enum members; it may call <see cref="Changed"/> on
+/// an update, test <see cref="Caller"/>, use comparisons, <c>&amp;&amp;</c>, <c>||</c>, <c>!</c>, arithmetic,
+/// <c>== null</c>, <c>HasValue</c>, the ordinal <c>StartsWith</c>, <c>EndsWith</c> and <c>Contains</c>, and
+/// <c>Contains</c> over a constant list. Anything else is refused with an
+/// <see cref="Data.AlvoTranslationException"/> when the handler is registered.
+/// </remarks>
+public sealed class EventCondition<T>
+    where T : class
+{
+    private const string TranslationOnly = "An EventCondition is read by Alvo's translator and never run: pass the lambda to when:.";
+
+    private EventCondition()
+    {
+    }
+
+    /// <summary>Gets the record after the write (<c>new.</c>); a delete carries none.</summary>
+    public T New => throw new NotSupportedException(TranslationOnly);
+
+    /// <summary>Gets the record before the write (<c>old.</c>); an update and a delete carry it.</summary>
+    public T Old => throw new NotSupportedException(TranslationOnly);
+
+    /// <summary>Gets who caused the event.</summary>
+    public AlvoConditionCaller Caller => throw new NotSupportedException(TranslationOnly);
+
+    /// <summary>Whether any of <paramref name="fields"/> changed in the write (<c>changed(field)</c>); on an update only.</summary>
+    /// <param name="fields">Mapped properties of the record, such as <c>x =&gt; x.Status</c>.</param>
+    /// <returns>Never returns: the call is translated.</returns>
+    public bool Changed(params Expression<Func<T, object?>>[] fields) => throw new NotSupportedException(TranslationOnly);
+}
+```
+
+`src/MMLib.Alvo/Events/AlvoConditionCaller.cs`:
+
+```csharp
+namespace MMLib.Alvo.Events;
+
+/// <summary>The caller a typed condition tests — translated into <c>@user</c> and <c>@tenant</c>, never run.</summary>
+public sealed class AlvoConditionCaller
+{
+    private const string TranslationOnly = "An AlvoConditionCaller is read by Alvo's translator and never run: pass the lambda to when:.";
+
+    private AlvoConditionCaller()
+    {
+    }
+
+    /// <summary>Gets the caller's user id (<c>@user.id</c>).</summary>
+    public Guid? User => throw new NotSupportedException(TranslationOnly);
+
+    /// <summary>Gets the caller's tenant id (<c>@tenant.id</c>).</summary>
+    public Guid? Tenant => throw new NotSupportedException(TranslationOnly);
+
+    /// <summary>Whether the caller holds <paramref name="role"/> (<c>'role' in @user.roles</c>).</summary>
+    /// <param name="role">A role the descriptor declares, as a constant.</param>
+    /// <returns>Never returns: the call is translated.</returns>
+    public bool HasRole(string role) => throw new NotSupportedException(TranslationOnly);
+}
+```
+
+If a build reports CA1822 on these members, add `[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "A translation-only member is an instance member so that e.New and e.Caller read as member accesses.")]` on both classes.
+
+- [ ] **Step 4: Write the `when` translator**
 
 `src/MMLib.Alvo/Extensions/Internal/ConditionTranslator.cs`:
 
@@ -2041,10 +2255,25 @@ internal sealed class ConditionTranslator
         ArgumentNullException.ThrowIfNull(when);
         var translator = new ConditionTranslator(when.Parameters[0], id, verb, RecordShape.Of(typeof(T)));
         var text = CelText.Write(translator.Predicate(when.Body));
+        if (text.Length > CelParser.MaxSourceLength)
+        {
+            throw translator.Refuse(when.Body, $"it translates to {text.Length} characters of CEL, past the {CelParser.MaxSourceLength} a condition may hold", "shorten it, or move part of the check into the handler body.");
+        }
 
-        return text.Length <= CelParser.MaxSourceLength
-            ? text
-            : throw translator.Refuse(when.Body, $"it translates to {text.Length} characters of CEL, past the {CelParser.MaxSourceLength} a condition may hold", "shorten it, or move part of the check into the handler body.");
+        translator.EnsureParses(when.Body, text);
+        return text;
+    }
+
+    private void EnsureParses(Expression body, string text)
+    {
+        try
+        {
+            CelParser.Parse(text);
+        }
+        catch (CelSyntaxException failure)
+        {
+            throw Refuse(body, $"its CEL does not parse back: {failure.Message}", "split the condition, or move part of the check into the handler body.");
+        }
     }
 
     private CelNode Predicate(Expression node) => node switch
@@ -2161,7 +2390,7 @@ internal sealed class ConditionTranslator
         {
             MemberExpression { Member.Name: "Value" } value when LambdaShape.IsNullable(value.Expression) => Field(value.Expression!),
             MemberExpression member when Image(member.Expression) is { } state => MappedField(member, state),
-            MethodCallExpression call when LambdaShape.RecordKey(call) is { } key && RecordImage(call.Object!) is { } state => new CelFieldRef(key, CelValueType.Null, state),
+            MethodCallExpression call when LambdaShape.RecordKey(call) is { } key && RecordImage(call.Object!) is { } state => new CelFieldRef(FieldName(call, key), CelValueType.Null, state),
             _ => throw Refuse(unwrapped, Describe(unwrapped), TranslationRefusal.WhenFix),
         };
     }
@@ -2191,8 +2420,12 @@ internal sealed class ConditionTranslator
     private CelRecordState? RecordImage(Expression record) =>
         Image(record) ?? (record is MemberExpression { Member.Name: nameof(IAlvoEntity.Record) } wrapped && _shape.IsWrapper ? Image(wrapped.Expression) : null);
 
+    private string FieldName(Expression node, string name) => CelText.IsFieldName(name)
+        ? name
+        : throw Refuse(node, $"'{name}' is not a field name a condition can spell", "name a declared field: letters, digits and '_', starting with a letter or '_'.");
+
     private CelFieldRef MappedField(MemberExpression member, CelRecordState state) => _shape.Mapped(member.Member) is { } mapped
-        ? new CelFieldRef(mapped.Field, CelValueType.Null, state)
+        ? new CelFieldRef(FieldName(member, mapped.Field), CelValueType.Null, state)
         : throw Refuse(member, $"{_shape.Name}.{member.Member.Name} maps to no field: it has neither a public setter nor [AlvoField]", TranslationRefusal.WhenFix);
 
     private CelNode Call(MethodCallExpression call) => call switch
@@ -2225,7 +2458,7 @@ internal sealed class ConditionTranslator
         var body = LambdaShape.Unwrapped(argument) is LambdaExpression lambda ? LambdaShape.Unwrapped(lambda.Body) : null;
 
         return body is MemberExpression { Expression: ParameterExpression } member && _shape.Mapped(member.Member) is { } mapped
-            ? new CelChanged(mapped.Field)
+            ? new CelChanged(FieldName(argument, mapped.Field))
             : throw Refuse(argument, "changed() takes a mapped property of the record, such as x => x.Status", TranslationRefusal.WhenFix);
     }
 
@@ -2252,9 +2485,14 @@ internal sealed class ConditionTranslator
             throw Refuse(call, "Contains translates only as a constant list containing a field", TranslationRefusal.WhenFix);
         }
 
-        if (!LambdaValues.TryConstant(source, out var items, out var reason) || items is not IEnumerable list)
+        if (!LambdaValues.TryConstant(source, out var items, out var reason))
         {
-            throw Refuse(source, reason.Length > 0 ? reason : "the list is null", ConstantFix);
+            throw Refuse(source, reason, ConstantFix);
+        }
+
+        if (items is not IList list)
+        {
+            throw Refuse(source, items is null ? "the list is null" : $"a {items.GetType().Name} has no fixed order, so the condition's text would change from run to run", "use an array or a List<T>.");
         }
 
         var tests = list.Cast<object?>().Select(item => Typed(call, CelBinaryOperator.Equal, Operand(value), Literal(source, item))).ToList();
@@ -2311,22 +2549,22 @@ internal sealed class ConditionTranslator
 }
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*ConditionTranslationTests'`
-Expected: PASS (33 translated rows, 15 refused rows, 3 facts). Diagnose by the row label. Two traps the rows are built to catch: an enum comparison arriving as `Convert(member, Int32) == Constant(2)` (the `nullable enum` row as `Convert(member, Int32?)`), handled by `EnumComparison` before the general path; and `Open.Contains(…)`/`new[] { … }.Contains(…)` arriving as `MemoryExtensions.Contains` over `op_Implicit(…)`, possibly with a third `null` argument — `LambdaShape.IsContains` must accept both. If `CelFixtures.Compiler.Compile(...)` rejects a translated text, fix the translator, never the row: the row is legal Alvo CEL by construction. The `instant constant` row depends on `.FFFFFFF` dropping the period with a zero fraction — the same format `CelBuiltInFunctions.StringOf` uses for `string(timestamp)`.
+Expected: PASS (33 translated rows, 16 refused rows, 5 facts). Diagnose by the row label. Two traps the rows are built to catch: an enum comparison, which the compiler emits as `Equal(Convert(member, Int32), Constant(1, Int32))` for a non-nullable enum (the member converted, the constant folded to an int) and as `Equal(Convert(member, Int32?), Convert(Constant(InReview, OrderStatus), Int32?))` for a nullable one — `EnumComparison` handles both before the general path, `Unwrapped` seeing through the enum→int conversion and `Enum.ToObject` turning the raw value back into the member; and `Open.Contains(…)`/`new[] { … }.Contains(…)` arriving as `MemoryExtensions.Contains` over `op_Implicit(…)`, possibly with a third `null` argument — `LambdaShape.IsContains` must accept both. If `CelFixtures.Compiler.Compile(...)` rejects a translated text, fix the translator, never the row: the row is legal Alvo CEL by construction. The `instant constant` row depends on `.FFFFFFF` dropping the period with a zero fraction — the same format `CelBuiltInFunctions.StringOf` uses for `string(timestamp)`.
 
-- [ ] **Step 7: Approve the core baseline**
+- [ ] **Step 6: Approve the core baseline**
 
 Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*PublicApiApprovalTests'`
-Expected: FAIL; the received diff adds exactly `AlvoTranslationException` (four constructors, `FixSuggestion`) in `MMLib.Alvo.Data`, and `EventCondition<T>` (`New`, `Old`, `Caller`, `Changed`) and `AlvoConditionCaller` (`User`, `Tenant`, `HasRole`) in `MMLib.Alvo.Events`. Accept, re-run (PASS), dispatch `alvo-snapshot-judge`.
+Expected: FAIL; the received diff adds exactly `EventCondition<T>` (`New`, `Old`, `Caller`, `Changed`) and `AlvoConditionCaller` (`User`, `Tenant`, `HasRole`) in `MMLib.Alvo.Events`. Accept, re-run (PASS), dispatch `alvo-snapshot-judge`.
 
-- [ ] **Step 8: Format, ring0, commit**
+- [ ] **Step 7: Format, ring0, commit**
 
 ```bash
-dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo/Events/EventCondition.cs src/MMLib.Alvo/Events/AlvoConditionCaller.cs src/MMLib.Alvo/Data/AlvoTranslationException.cs src/MMLib.Alvo/Data/Internal/LambdaShape.cs src/MMLib.Alvo/Data/Internal/LambdaValues.cs src/MMLib.Alvo/Data/Internal/TranslationRefusal.cs src/MMLib.Alvo/Extensions/Internal/ConditionTranslator.cs test/MMLib.Alvo.Tests/Extensions/ConditionTranslationTests.cs
+dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo/Events/EventCondition.cs src/MMLib.Alvo/Events/AlvoConditionCaller.cs src/MMLib.Alvo/Extensions/Internal/ConditionTranslator.cs test/MMLib.Alvo.Tests/Extensions/ConditionTranslationTests.cs
 scripts/test-ring0
-git add src/MMLib.Alvo/Events/EventCondition.cs src/MMLib.Alvo/Events/AlvoConditionCaller.cs src/MMLib.Alvo/Data/AlvoTranslationException.cs src/MMLib.Alvo/Data/Internal/LambdaShape.cs src/MMLib.Alvo/Data/Internal/LambdaValues.cs src/MMLib.Alvo/Data/Internal/TranslationRefusal.cs src/MMLib.Alvo/Extensions/Internal/ConditionTranslator.cs test/MMLib.Alvo.Tests/Extensions/ConditionTranslationTests.cs test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.verified.txt
+git add src/MMLib.Alvo/Events/EventCondition.cs src/MMLib.Alvo/Events/AlvoConditionCaller.cs src/MMLib.Alvo/Extensions/Internal/ConditionTranslator.cs test/MMLib.Alvo.Tests/Extensions/ConditionTranslationTests.cs test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.verified.txt
 git commit -m "feat(extensions): translate a typed handler's when into CEL
 
 Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
@@ -2334,7 +2572,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 5: The query translator
+## Task 6: The query translator
 
 **Files:**
 - Create: `src/MMLib.Alvo/Data/Internal/FilterTranslator.cs`
@@ -2342,7 +2580,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 **Interfaces:**
 - Consumes: `LambdaShape`, `LambdaValues`, `TranslationRefusal` (Task 4); `RecordShape`, `EnumMap` (Task 2); `AlvoFilter`, `AlvoComparison`, `AlvoAnd`, `AlvoOr`, `AlvoNot`, `AlvoFilterOperator`, `AlvoFilter.MaxInCandidates` (1000).
-- Produces: `internal sealed class FilterTranslator` — `static AlvoFilter Translate<T>(Expression<Func<T, bool>> where, string entity) where T : class`. Captured values are evaluated on every call; an enum value becomes its declared text; `&&`/`||` chains are flattened into one `AlvoAnd`/`AlvoOr`; an empty list is `new AlvoOr([])` (matches nothing). Test helper `FilterText.Of(AlvoFilter)`.
+- Produces: `internal sealed class FilterTranslator` — `static AlvoFilter Translate<T>(Expression<Func<T, bool>> where, string entity) where T : class`. Captured values are evaluated on every call; an enum value becomes its declared text; an integral value (and each `in` candidate) is widened to `long`, the CLR type of an `integer` field (`AlvoComparison`'s value must match its field's type); `&&`/`||` chains are flattened into one `AlvoAnd`/`AlvoOr`; an empty list is `new AlvoOr([])` (matches nothing). Test helper `FilterText.Of(AlvoFilter)`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2402,6 +2640,7 @@ public sealed class FilterTranslationTests
     private static readonly string[] NoNotes = [];
     private static readonly DateTimeOffset Cutoff = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
     private static readonly DateOnly Day = new(2026, 11, 2);
+    private static readonly int[] Ranks = [1, 2];
 
     public static TheoryData<string, Expression<Func<Order, bool>>, string> Translated()
     {
@@ -2476,6 +2715,14 @@ public sealed class FilterTranslationTests
     }
 
     [Fact]
+    public void An_integral_value_is_widened_to_the_long_an_integer_field_holds()
+    {
+        FilterTranslator.Translate<Order>(x => x.Rank < 9, "orders").ShouldBeOfType<AlvoComparison>().Value.ShouldBeOfType<long>();
+        var membership = FilterTranslator.Translate<Order>(x => Ranks.Contains(x.Rank!.Value), "orders").ShouldBeOfType<AlvoComparison>();
+        ((IEnumerable<object?>)membership.Value!).ShouldAllBe(candidate => candidate is long);
+    }
+
+    [Fact]
     public void A_wrapper_filters_any_field_through_its_record() =>
         FilterText.Of(FilterTranslator.Translate<OrderView>(x => (string?)x.Record["legacy_code"] == "L-9", "orders")).ShouldBe("legacy_code eq 'L-9'");
 }
@@ -2493,6 +2740,7 @@ Expected: FAIL — compile error (`FilterTranslator` does not exist).
 ```csharp
 using System.Collections;
 using System.Collections.Frozen;
+using System.Globalization;
 using System.Linq.Expressions;
 
 namespace MMLib.Alvo.Data.Internal;
@@ -2604,8 +2852,11 @@ internal sealed class FilterTranslator
         null => null,
         Enum member => EnumValue(member, node),
         _ when enumType is not null => EnumValue((Enum)Enum.ToObject(enumType, raw), node),
-        _ => raw,
+        _ => Widened(raw),
     };
+
+    private static object Widened(object raw) =>
+        raw is sbyte or byte or short or ushort or int or uint ? Convert.ToInt64(raw, CultureInfo.InvariantCulture) : raw;
 
     private string EnumValue(Enum member, Expression node) => EnumMap.Of(member.GetType()).ValueOf(member)
         ?? throw Refuse(node, $"{member.GetType().Name} has no member {member}");
@@ -2677,7 +2928,7 @@ internal sealed class FilterTranslator
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*FilterTranslationTests'`
-Expected: PASS (19 translated rows, 8 refused rows, 2 facts).
+Expected: PASS (19 translated rows, 8 refused rows, 3 facts).
 
 - [ ] **Step 5: Format, ring0, commit**
 
@@ -2692,7 +2943,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 6: Typed registration — `Entity<T>`, `AlvoEntityBuilder<T>`, `AddEventHandler<TMessage, THandler>`
+## Task 7: Typed registration — `Entity<T>`, `AlvoEntityBuilder<T>`, `AddEventHandler<TMessage, THandler>`
 
 **Files:**
 - Create: `src/MMLib.Alvo/Extensions/AlvoEntityBuilder{T}.cs`, `src/MMLib.Alvo/Extensions/Internal/TypedHandler.cs`
@@ -2701,7 +2952,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 - Baseline: `test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.verified.txt`
 
 **Interfaces:**
-- Consumes: `ConditionTranslator.Translate<T>` (Task 4); `RecordShape.Of`, `.Entity`, `.EventType`, `.Materialize<T>` (Tasks 2–3); `ExtensionRegistrations.AddHandler`, `HandlerInvoker.FromDelegate(Delegate, Type)`, `HandlerInvoker.FromClass<THandler, TMessage>()`, `HandledEventType.Ensure(string)`, `EntityEvents`, `NamedEvent`, `HandlerVerb`; `HandlerCatalog.Registry(Action<IAlvoBuilder>)` and `HandlerCatalog.OnUpdated` (tests); `ExtensionCatalog(ExtensionRegistry, IOptions<AlvoExtensionOptions>).Catalog()` (HX-04).
+- Consumes: `ConditionTranslator.Translate<T>` (Task 5); `RecordShape.Of`, `.Entity`, `.EventType`, `.Materialize<T>` (Tasks 2–3); `ExtensionRegistrations.AddHandler`, `HandlerInvoker.FromDelegate(Delegate, Type)`, `HandlerInvoker.FromClass<THandler, TMessage>()`, `HandledEventType.Ensure(string)`, `EntityEvents`, `NamedEvent`, `HandlerVerb`; `HandlerCatalog.Registry(Action<IAlvoBuilder>)` and `HandlerCatalog.OnUpdated` (tests); `ExtensionCatalog(ExtensionRegistry, IOptions<AlvoExtensionOptions>).Catalog()` (HX-04).
 - Produces:
   - `internal sealed record TypedHandler(RecordShape Shape, Func<AlvoEventData, object> Message)` with `static TypedHandler ForEntity<T>(HandlerVerb verb) where T : class` and `static TypedHandler ForPayload<T>() where T : class`.
   - `HandlerRegistration` gains a trailing `TypedHandler? Typed = null`; `ExtensionRegistrations.AddHandler(..., HandlerInvoker invoker, TypedHandler? typed = null)`.
@@ -2906,6 +3157,8 @@ namespace MMLib.Alvo.Extensions;
 /// <remarks>
 /// A lambda <c>when</c> is translated into CEL as it is registered: an untranslatable one throws
 /// <see cref="Data.AlvoTranslationException"/> from this call, naming the handler. The catalog shows the translated CEL.
+/// Pass a lambda or a CEL string as <c>when</c>, or leave it out; an explicit <c>when: null</c> matches both overloads and
+/// does not compile (CS0121).
 /// </remarks>
 public sealed class AlvoEntityBuilder<T>
     where T : class
@@ -2978,7 +3231,7 @@ Then add the same four overloads (same order, same doc shape) for:
 - `OnDeleted` — `HandlerVerb.Deleted`, `AlvoDeleted<T>`, "…after a record is deleted…", "A condition over `e.Old` and `e.Caller`.", "An optional CEL condition over the deleted record (`old.`).";
 - `OnSaved` — `HandlerVerb.Saved`, `AlvoSaved<T>`, "…after a record is created or updated…", "A condition over `e.New` and `e.Caller`.", "An optional CEL condition over the stored record (`new.`)."
 
-Sixteen public methods in all, in the order Created, Updated, Deleted, Saved. (A call with a lambda `when` binds the `Expression` overload — a lambda does not convert to `string`; a call without `when` binds the `string?` overload, the only one whose `when` is optional.)
+Sixteen public methods in all, in the order Created, Updated, Deleted, Saved. (A call with a lambda `when` binds the `Expression` overload — a lambda does not convert to `string`; a call without `when` binds the `string?` overload, the only one whose `when` is optional. An explicit `when: null` converts to both and is a CS0121 ambiguity — deliberately left so, and said in the class remarks and on the docs page: leave `when` out instead. Making the lambda overload's `when` a different parameter name would cost the symmetric `when:` spelling the spec shows.)
 
 In `src/MMLib.Alvo/Extensions/AlvoExtensionBuilderExtensions.cs` add `using MMLib.Alvo.Data.Internal;` and, after `Entities`:
 
@@ -3053,15 +3306,15 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 7: A typed record that does not fit refuses boot and the apply that would break it **[slice end]**
+## Task 8: A typed record that does not fit refuses boot and the apply that would break it **[slice end]**
 
 **Files:**
 - Modify: `src/MMLib.Alvo/Extensions/Internal/HandlerBinding.cs`, `src/MMLib.Alvo/Extensions/Internal/ExtensionApplyRefusals.cs`
 - Test: `test/MMLib.Alvo.Tests/Extensions/TypedBindingTests.cs`; two facts and a helper appended to `test/MMLib.Alvo.Tests/Extensions/ExtensionApplyGuardTests.cs`
 
 **Interfaces:**
-- Consumes: `HandlerRegistration.Typed` (Task 6); `RecordShape.Problems`, `ShapeMapping.Problems(shape, entity, fromEventImages: true)`, `ShapeMapping.Holds` (Task 3); `HandlerCatalog.Compile`, `Registry`, `EveryService`, `ExtensionBindingCompiler.Check(registry, compiler, services)` and the guard test's `Guard`, `Refused`, `Precise`, `Replaced`, `WithoutField`, `FieldFix` (tests).
-- Produces: problems at locator `extensions/<id>/record` — catalog-free ones (`RecordShape.Problems`) from `HandlerBinding.CheckRegistration`, so an `Awaiting` boot refuses them too (HX-03 (39)); mapping ones from `Bind`. A handler with either never binds. `ExtensionApplyRefusals` points at a removed, excluded or retyped **mapped** field with the sentence "its typed record `<Type>` maps it".
+- Consumes: `HandlerRegistration.Typed` (Task 7); `RecordShape.Problems`, `ShapeMapping.Problems(shape, entity, fromEventImages: true)`, `ShapeMapping.Holds` (Task 3); `HandlerCatalog.Compile`, `Registry`, `EveryService`, `ExtensionBindingCompiler.Check(registry, compiler, services)` and the guard test's `Guard`, `Refused`, `Precise`, `Replaced`, `WithoutField`, `FieldFix` (tests).
+- Produces: problems at locator `extensions/<id>/record` — catalog-free ones (`RecordShape.Problems`) from `HandlerBinding.CheckRegistration`, so an `Awaiting` boot refuses them too (HX-03 (39)); mapping ones from `Bind`. A handler with either never binds. `ExtensionApplyRefusals` points at a removed, excluded or retyped **mapped** field with its own sentences, each saying "its typed record `<Type>` maps it" (the condition's exclusion sentence — "would decide the handler's condition by its absence" — is wrong for a mapped field and is not reused).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3163,9 +3416,15 @@ Append to `ExtensionApplyGuardTests` (add `using MMLib.Alvo.Tests.Data;`):
     }
 
     [Fact]
-    public void Excluding_a_field_a_typed_record_maps_is_refused_at_the_exclusion() =>
-        Precise(Refused(Guard(Typed("typed")), Replaced("tickets", entity => entity with { EventImageExclusions = ["secret", "title"] })))
-            .ShouldHaveSingleItem().Path.ShouldBe("/entities/tickets/events/exclude/1");
+    public void Excluding_a_field_a_typed_record_maps_is_refused_at_the_exclusion()
+    {
+        var precise = Precise(Refused(Guard(Typed("typed")), Replaced("tickets", entity => entity with { EventImageExclusions = ["secret", "title"] })))
+            .ShouldHaveSingleItem();
+
+        precise.Path.ShouldBe("/entities/tickets/events/exclude/1");
+        precise.Message.ShouldContain("its typed record TypedTicket maps it");
+        precise.FixSuggestion.ShouldBe("Remove the registration and redeploy first, or keep the field in the event images.");
+    }
 
     private static Action<IAlvoBuilder> Typed(string id) =>
         alvo => alvo.Entity<TypedTicket>(t => t.OnUpdated<TypedTicketResolved>(id));
@@ -3248,7 +3507,7 @@ and add:
         var index = after.EventImageExclusions.ToList().IndexOf(property.Field);
         if (index >= 0)
         {
-            return FieldExcluded(handler.Id, after.Name, property.Field, index);
+            return Error($"/entities/{after.Name}/events/exclude/{index}", $"Field '{property.Field}' of '{after.Name}' is read by extension '{handler.Id}' ({Kind}, in this host): its typed record {shape.Name} maps it, so left out of the event images it could never fill the record.", FixPrefix + "field in the event images.");
         }
 
         return ShapeMapping.Holds(property, now)
@@ -3275,7 +3534,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 8: Typed reads on `IAlvoSession` and `IAlvoData`
+## Task 9: Typed reads on `IAlvoSession` and `IAlvoData`
 
 **Files:**
 - Create: `src/MMLib.Alvo/Data/AlvoTypedReadExtensions.cs`, `src/MMLib.Alvo/Data/Internal/TypedEntity.cs`
@@ -3283,7 +3542,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 - Baseline: `test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.verified.txt`
 
 **Interfaces:**
-- Consumes: `FilterTranslator.Translate<T>` (Task 5); `RecordShape.Of(...).Entity`, `As<T>()` (Tasks 2–3); `IAlvoSession.GetAsync/QueryAsync`, `IAlvoData.GetAsync/QueryAsync`; `AlvoQuery { Entity, Filter, Limit }`, `AlvoPage.Items`.
+- Consumes: `FilterTranslator.Translate<T>` (Task 6); `RecordShape.Of(...).Entity`, `As<T>()` (Tasks 2–3); `IAlvoSession.GetAsync/QueryAsync`, `IAlvoData.GetAsync/QueryAsync`; `AlvoQuery { Entity, Filter, Limit }`, `AlvoPage.Items`.
 - Produces: `internal static class TypedEntity` — `string NameOf<T>()` (throws `InvalidOperationException` naming the missing `[AlvoEntity]`), `AlvoQuery Query<T>(Expression<Func<T, bool>> where, int limit) where T : class` (throws `ArgumentOutOfRangeException` for `limit < 1`), `IReadOnlyList<T> Items<T>(AlvoPage page) where T : class`; the public `AlvoTypedReadExtensions` (Global Constraints).
 
 - [ ] **Step 1: Write the failing tests**
@@ -3541,7 +3800,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 9: An event context for a class handler's unit test
+## Task 10: An event context for a class handler's unit test
 
 **Files:**
 - Modify: `src/MMLib.Alvo/Events/AlvoEventContext.cs`, `src/MMLib.Alvo.TestHost/AlvoTestHost.cs`
@@ -3720,7 +3979,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 10: The typed layer on both engines **[slice end]**
+## Task 11: The typed layer on both engines **[slice end]**
 
 **Files:**
 - Create: `test/_shared/testhost/descriptors/typed-desk.alvo.json`, `test/_shared/testhost/TypedLayerFacts.cs`, `test/MMLib.Alvo.TestHost.Tests/SqliteTypedLayerTests.cs`, `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlTypedLayerTests.cs`
@@ -4151,13 +4410,13 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 11: The dashboard shows a typed handler's translated condition
+## Task 12: The dashboard shows a typed handler's translated condition
 
 **Files:**
 - Modify: `test/MMLib.Alvo.Admin.Tests.EndToEnd/ExtensionWorld.cs`, `test/MMLib.Alvo.Admin.Tests.EndToEnd/ExtensionScenarios.cs`
 
 **Interfaces:**
-- Consumes: `Entity<T>` (Task 6); HX-04's lane test ids `lifecycle-after-commit`, `lane-extension-<id>`, `lane-extension-when`, `entity-extensions-<entity>`.
+- Consumes: `Entity<T>` (Task 7); HX-04's lane test ids `lifecycle-after-commit`, `lane-extension-<id>`, `lane-extension-when`, `entity-extensions-<entity>`.
 - Produces: `ExtensionWorld.Completed` (`"notify-completed"`), a typed handler on `work_orders`; the `work_orders` badge moves from 2 to 3.
 
 - [ ] **Step 1: Register a typed handler in the world and pin it**
@@ -4231,7 +4490,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 12: Docs — *Typed or CEL*, architecture docs, CHANGELOG, PLAN, spec amendment **[slice end]**
+## Task 13: Docs — *Typed or CEL*, architecture docs, CHANGELOG, PLAN, spec amendment **[slice end]**
 
 **Files:**
 - Create: `website/src/content/docs/extending/typed-or-cel.mdx`; `website/src/snippets/extending/typed/BookingDeskHandlers.cs`, `BookingDeskHandlersTests.cs`, `booking-desk.alvo.json`
@@ -4437,9 +4696,9 @@ Expected: PASS (`SnippetCoverageTests` finds `BookingDeskHandlers` and `BookingD
 `website/src/content/docs/extending/typed-or-cel.mdx` — frontmatter `title: Typed or CEL`, `description: Write a handler's condition as a C# lambda over your own class, or as CEL — Alvo translates the lambda once, checks your class against the descriptor at start-up, and reads typed records for you.`, `sidebar:` / `order: 4`. Imports as `event-handlers.mdx` does (`Code`, `SourceExcerpt`, the three snippets as `descriptor`, `handlers`, `tests`). Excerpt markers carry no quotes (HX-04's `extension-catalog.mdx` precedent). Sections, each a few sentences:
 
 1. *Two ways to write one handler* — `Entity("bookings", …)` with `AlvoRecord` and a CEL string, or `Entity<Booking>(…)` with your class and a lambda; mix them (a typed entity takes a CEL string too). `<Code code={descriptor} lang="json" title="booking-desk.alvo.json" />` and `<SourceExcerpt code={handlers} from="public static IAlvoBuilder AddBookingDesk" to="new.nights >= 7" title="BookingDeskHandlers.cs" />`. Every-entity (`"*"`), `Entities([...])` and application-event conditions stay CEL.
-2. *Your class* — `[AlvoEntity("bookings")]`; a property maps to its snake_case field unless `[AlvoField("…")]` names it; an enum member to its snake_case value unless `[AlvoEnumValue("…")]`; mapped = public with a setter (or `[AlvoField]`); a table field type → C# type (`string`/`text`/`json` → `string`; `integer` → `long` or `int`; `decimal` → `decimal`; `boolean` → `bool`; `uuid`/`ref` → `Guid`; `date` → `DateOnly`; `datetime` → `DateTimeOffset`; `enum` → `string` or an enum); an optional field needs a nullable property. At start-up a property with no field, the wrong type, a non-nullable property on an optional field, an enum member with no declared value, or a field `events.exclude` leaves out refuses the start, all problems at once — and an apply that would remove, exclude or retype a mapped field is refused like one that breaks a condition.
-3. *What a lambda can say* — the translation table (C# → CEL) with Rulings 2–6 in words: `== null` becomes `!has(…)`, a constant list becomes `||` of equalities, a `Guid` constant compares through `string(…)`, an instant through `timestamp('…')`, `StartsWith`/`EndsWith`/`Contains` compare ordinally; only constants, `const`, `static readonly` fields and enum members — a captured variable is refused, because the condition is translated once. The catalog and the dashboard's **Lifecycle** tab show the CEL. A refusal: the sample message ``Cannot translate 'e.New.Guest.GetHashCode()' in extension 'bad' (when): method 'GetHashCode' has no CEL equivalent. Fix: write the condition as a CEL string — when: "…" — or move the check into the handler body.`` and `<SourceExcerpt code={tests} from="var refusal" to="in extension 'bad' (when)" title="BookingDeskHandlersTests.cs" />`. Conditions have no clock yet.
-4. *Typed reads* — `context.Data.QueryAsync<Booking>(x => …, limit: 50)` and `GetAsync<Booking>(id)` (and on `IAlvoData` with a caller): the same rules, tenancy and hidden fields as an untyped read; captured values read on every call and bound as parameters, never written into SQL; one bounded page; `StartsWith`/`EndsWith`/`Contains` on a text, arithmetic and field-to-field comparisons are refused when the read is called. `record.As<Booking>()` for any record; it names the field a record lacks (a hidden field, or one left out of the event images).
+2. *Your class* — `[AlvoEntity("bookings")]`; a property maps to its snake_case field unless `[AlvoField("…")]` names it; an enum member to its snake_case value unless `[AlvoEnumValue("…")]`; mapped = public with a setter (or `[AlvoField]`); a table field type → C# type (`string`/`text`/`json` → `string`; `integer` → `long` or `int`; `decimal` → `decimal`; `boolean` → `bool`; `uuid`/`ref` → `Guid`; `date` → `DateOnly`; `datetime` → `DateTimeOffset`; `enum` → `string` or an enum); an optional field needs a nullable property; a field name is a CEL identifier (letters, digits and `_`, starting with a letter or `_`). At start-up a property with no field, the wrong type, a non-nullable property on an optional field, an enum member with no declared value, or a field `events.exclude` leaves out refuses the start, all problems at once — and an apply that would remove, exclude or retype a mapped field is refused like one that breaks a condition.
+3. *What a lambda can say* — the translation table (C# → CEL) with Rulings 2–6 in words: `== null` becomes `!has(…)`, a constant list becomes `||` of equalities, a `Guid` constant compares through `string(…)`, an instant through `timestamp('…')`, `StartsWith`/`EndsWith`/`Contains` compare ordinally; only constants, `const`, `static readonly` fields and enum members — a captured variable is refused, because the condition is translated once. The catalog and the dashboard's **Lifecycle** tab show the CEL. A refusal: the sample message ``Cannot translate 'e.New.Guest.GetHashCode()' in extension 'bad' (when): method 'GetHashCode' has no CEL equivalent. Fix: write the condition as a CEL string — when: "…" — or move the check into the handler body.`` and `<SourceExcerpt code={tests} from="var refusal" to="in extension 'bad' (when)" title="BookingDeskHandlersTests.cs" />`. Conditions have no clock yet. **Null follows CEL, not C#:** a comparison with an empty field is false, so `e.New.OwnerId != Fleet` does not match a record with no owner (C# would say true); write `e.New.OwnerId == null || e.New.OwnerId != Fleet` when an empty value should match.
+4. *Typed reads* — `context.Data.QueryAsync<Booking>(x => …, limit: 50)` and `GetAsync<Booking>(id)` (and on `IAlvoData` with a caller): the same rules, tenancy and hidden fields as an untyped read; captured values read on every call and bound as parameters, never written into SQL; one bounded page; null follows SQL — `x.Code != "A"` never matches a row whose `code` is empty, so add `|| x.Code == null` when it should; `StartsWith`/`EndsWith`/`Contains` on a text, arithmetic and field-to-field comparisons are refused when the read is called. `record.As<Booking>()` for any record; it names the field a record lacks (a hidden field, or one left out of the event images).
 5. *Testing a typed handler* — `<SourceExcerpt code={tests} from="public async Task Confirming_a_booking" to="new.status == 'confirmed'" title="BookingDeskHandlersTests.cs" />`, and calling a class handler yourself with `alvo.EventContext(staff)`: `<SourceExcerpt code={tests} from="public async Task A_class_handler_can_be_called_directly" to="mail.Sent.ShouldBe([" title="BookingDeskHandlersTests.cs" />`.
 6. *Generated classes* — a class implementing `IAlvoEntity` wraps the record instead of copying it (unknown fields survive; `x.Record["field"]` reaches any field); generated classes arrive in a later release.
 
@@ -4457,7 +4716,7 @@ Expected: PASS (`SnippetCoverageTests` finds `BookingDeskHandlers` and `BookingD
 
 - [ ] **Step 4: Spec amendment**
 
-In `docs/superpowers/specs/2026-10-14-host-extensibility-design.md`, after the refusal-message paragraph of §4.3 (before `### 4.4`), add **HX-05 settled details.** — "Rulings and deviations taken while planning (1–19, verbatim from `docs/superpowers/plans/2026-10-24-hx-05-typed-layer.md`), so a later reader can tell a decision from an oversight. Where a ruling and §4.3's table disagree, the ruling is what shipped." — followed by this plan's *Rulings and deviations* (1)–(19), numbered, verbatim. In §5, append to the `05` row that lists `Entity<T>(…)`: "`AlvoConditionCaller`, `AlvoEventContext.Create` and `AlvoTestHost.EventContext` added (§4.3 *HX-05 settled details* (5), (12))."
+In `docs/superpowers/specs/2026-10-14-host-extensibility-design.md`, after the refusal-message paragraph of §4.3 (before `### 4.4`), add **HX-05 settled details.** — "Rulings and deviations taken while planning (1–25, verbatim from `docs/superpowers/plans/2026-10-24-hx-05-typed-layer.md`; 20–25 from its review round), so a later reader can tell a decision from an oversight. Where a ruling and §4.3's table disagree, the ruling is what shipped." — followed by this plan's *Rulings and deviations* (1)–(25), numbered, verbatim. In §5, append to the `05` row that lists `Entity<T>(…)`: "`AlvoConditionCaller`, `AlvoEventContext.Create` and `AlvoTestHost.EventContext` added (§4.3 *HX-05 settled details* (5), (12))."
 
 - [ ] **Step 5: Build the site, ring1, commit**
 
@@ -4475,7 +4734,7 @@ Expected: the site builds with link validation green (the new public types appea
 
 ---
 
-## Task 13: Rings, reviews, plan-guard, PR report, PR
+## Task 14: Rings, reviews, plan-guard, PR report, PR
 
 - [ ] **Step 1: CI-parity Release build, rings and the out-of-ring suites**
 
@@ -4484,11 +4743,11 @@ docker run --rm -v "$PWD":/src -w /src mcr.microsoft.com/dotnet/sdk:10.0 sh -c '
 git clean -fdx -e .superpowers
 ```
 
-Expected: no output (any `error CAxxxx`/`IDExxxx`/`RCSxxxx` is fixed in a `fix(…): …` commit and this step re-run — CA1822 on the translation-only members takes the suppression Task 4 Step 3 names). Then `scripts/test-ring0`, `scripts/test-ring1`, `scripts/test-ring2` (both engines; includes `PostgreSqlTypedLayerTests`), `scripts/test-admin-e2e`, `(cd website && npm run build)`. Expected: all green. The OpenAPI document, the Vacuum ruleset and the TeaPie path set do not move (no route added). The assistant eval is not run: no skill, tool or instruction changed.
+Expected: no output (any `error CAxxxx`/`IDExxxx`/`RCSxxxx` is fixed in a `fix(…): …` commit and this step re-run — CA1822 on the translation-only members takes the suppression Task 5 Step 3 names). Then `scripts/test-ring0`, `scripts/test-ring1`, `scripts/test-ring2` (both engines; includes `PostgreSqlTypedLayerTests`), `scripts/test-admin-e2e`, `(cd website && npm run build)`. Expected: all green. The OpenAPI document, the Vacuum ruleset and the TeaPie path set do not move (no route added). The assistant eval is not run: no skill, tool or instruction changed.
 
 - [ ] **Step 2: Reviews (substitutes) and the security-core checklist**
 
-Freeze the tree. `/code-review` and `/security-review` are user-only: dispatch two reviewer subagents over `git diff hx/04-extension-catalog...HEAD`, labelled "substitute for /code-review high" and "substitute for /security-review". Point the code reviewer at: `LambdaShape.IsTransparent` (no narrowing conversion stripped), the enum and span-`Contains` shapes, `RecordValue`'s conversions, `HandlerBinding`'s new problems never letting a misfit bind, `ExtensionApplyRefusals.Mapped` never duplicating a condition's pointer. Point the security reviewer at: no captured or constant value ever reaching SQL text (`FilterTranslator` places values only in `AlvoComparison.Value`; field names come only from `RecordShape` — host-authored attribute strings — and are still checked by `FilterSqlRenderer` against the schema), typed reads going only through `IAlvoSession`/`IAlvoData` (policy in the `WHERE`, tenancy inside the port — `A_typed_read_never_crosses_tenants`), `As<T>()` and refusal messages never echoing a field's value, `CelText`'s escaping (`parse(render(s)) == s`), and `AlvoEventContext.Create` granting nothing (it carries the session it is given). Then run the `alvo-security-core-review` checklist and record each item's evidence for the PR report. Fix findings, re-run ring0, one `fix(…): …` commit per finding.
+Freeze the tree. `/code-review` and `/security-review` are user-only: dispatch two reviewer subagents over `git diff hx/04-extension-catalog...HEAD`, labelled "substitute for /code-review high" and "substitute for /security-review". Point the code reviewer at: `LambdaShape.IsTransparent` (no narrowing conversion stripped), the enum and span-`Contains` shapes, `RecordValue`'s conversions, `HandlerBinding`'s new problems never letting a misfit bind, `ExtensionApplyRefusals.Mapped` never duplicating a condition's pointer. Point the security reviewer at: no captured or constant value ever reaching SQL text (`FilterTranslator` places values only in `AlvoComparison.Value`; field names come only from `RecordShape` — host-authored attribute strings — and are still checked by `FilterSqlRenderer` against the schema), typed reads going only through `IAlvoSession`/`IAlvoData` (policy in the `WHERE`, tenancy inside the port — `A_typed_read_never_crosses_tenants`), `As<T>()` and refusal messages never echoing a field's value, `CelText`'s escaping (`parse(render(s)) == s`) and its refusal of a field name that is not a CEL identifier (Ruling 21 — the translator and `ShapeProblems` refuse such names before the writer sees one), and `AlvoEventContext.Create` granting nothing (it carries the session it is given). Then run the `alvo-security-core-review` checklist and record each item's evidence for the PR report. Fix findings, re-run ring0, one `fix(…): …` commit per finding.
 
 - [ ] **Step 3: `alvo-plan-guard`**
 
@@ -4511,7 +4770,7 @@ If #412 (HX-04) is merged: `git fetch origin && git merge origin/main` first (me
 
 ## Rulings and deviations this plan takes
 
-Each is recorded in the spec amendment (Task 12 Step 4) so a later reader can tell a decision from an oversight.
+Each is recorded in the spec amendment (Task 13 Step 4) so a later reader can tell a decision from an oversight.
 
 1. **Canonical CEL.** `CelText` writes one space around every binary operator, `, ` between call arguments, and parentheses only around a looser child or a right operand of equal precedence. A typed registration and an untyped one therefore show the same `When` exactly when the CEL string is written canonically (acceptance (6)); a CEL string spaced differently is shown as the host wrote it — the catalog never rewrites host text.
 2. **`== null` and `HasValue` become `has()`.** Alvo's CEL refuses `== null`/`!= null` (every comparison already treats a missing value as false), so `x == null` translates to `!has(new.x)` and `x != null`/`x.HasValue` to `has(new.x)` — a deviation from §4.3's row, same meaning. The query side keeps §4.3's `is null` / `not is null`.
@@ -4524,14 +4783,20 @@ Each is recorded in the spec amendment (Task 12 Step 4) so a later reader can te
 9. **No per-shape translation cache** (Q3's "translations cached per expression shape" deferred): a `when` is translated once anyway; a typed query is walked per call and its captured values evaluated per call — a constant or closure field read by reflection, anything else through `Compile(preferInterpretation: true)` — which also rules out a cache serving a stale captured value. A cache waits for a measurement (HX-10's calibration).
 10. **Typed `QueryAsync<T>` takes a required `limit` and returns `IReadOnlyList<T>`** — one bounded page, no cursor; paging stays the untyped `AlvoQuery`. A typed page would need an `AlvoPage<T>` §5 does not approve.
 11. **Mapping rules.** Field: `[AlvoField]`, else `JsonNamingPolicy.SnakeCaseLower`; enum value: `[AlvoEnumValue]`, else the same policy (prior art: `System.Text.Json`'s naming policy). Mapped: public, readable, not an indexer, with a public setter or `[AlvoField]`. Compatible CLR types per field type as the docs table lists (`integer` takes `long` or `int`; `enum` takes `string` or an enum whose every member names a declared value); nullability is read with `NullabilityInfoContext`, and a non-nullable property on an optional field refuses boot — D2's "no `!`" applied to the mapping.
-12. **The unit-test seam is two public members** — `AlvoEventContext.Create(...)` and `AlvoTestHost.EventContext(caller, …)` — closing HX-03 (53). Not on §5's list; a factory carries only the session it is given, so it grants nothing an `IAlvoSessions` caller lacks, and `InternalsVisibleTo` into the published TestHost is refused by the repository's own rule (forgeable).
+12. **The unit-test seam is two public members** — `AlvoEventContext.Create(...)` and `AlvoTestHost.EventContext(caller, …)` — closing HX-03 (53). Not on §5's list. Both ship because they do different jobs: `Create` is the factory the core must expose (the constructor is internal, and `InternalsVisibleTo` into the published TestHost is refused by the repository's own rule — forgeable); `EventContext` is the helper a test actually calls, because building an `AlvoEvent` by hand means filling nine required members and fetching an `IAlvoSessions` from the container. `Create` carries only the session it is given, so it grants nothing an `IAlvoSessions` caller lacks.
 13. **`IAlvoEntity` is `AlvoRecord Record { get; }` plus a public `(AlvoRecord)` constructor**: `As<T>()` wraps instead of copying, so unknown fields survive (the protocol HX-17's generated classes implement), and `x.Record["field"]` translates to the field in both translators — the reachable form of §4.3's `record["field"]` row, since the untyped builder keeps CEL strings (D1). A wrapper's `[AlvoField]` properties are checked like any mapping, and `As<T>()` refuses a record lacking one.
 14. **`As<T>()` throws `InvalidOperationException`** naming the field — missing (distinct from null), null for a property that cannot hold null, or a value the property cannot take — and never echoes the value.
 15. **Typed application events.** `AddEventHandler<TMessage, THandler>` reads the event type from `[AlvoEvent]`; its `when` stays a CEL string (an application event's condition tests only `@user`/`@tenant`, HX-03 (9)); `TMessage` is checked catalog-free only (a payload declares no fields), so a missing payload field fails the delivery attempt with the field named.
-16. **The apply guard counts mapped fields as reads.** Removing, excluding or retyping a field a typed record maps is refused at its pointer with "its typed record `<Type>` maps it"; a field both read and mapped gets the condition's sentence once.
+16. **The apply guard counts mapped fields as reads.** Removing, excluding or retyping a field a typed record maps is refused at its pointer with sentences of its own, each saying "its typed record `<Type>` maps it" — the condition's exclusion sentence ("would decide the handler's condition by its absence") is not reused, because it is wrong for a mapping; a field both read and mapped gets the condition's sentence once.
 17. **Constants in a `when`** are literal constants, `const` (folded by the compiler), `static readonly` fields, enum members, conversions and negations of those, and array initializers of those for `Contains`. A captured variable, an instance member, a static property and any call are refused (§4.3); the clock (`DateTime(Offset).Now/UtcNow/Today`, `TimeProvider.GetUtcNow/GetLocalNow`) is refused in both translators — in a `when` until HX-11's `now()`, in a query with "capture it first".
 18. **Acceptance (2) is proven through the real pipeline**: `SqlCapture` records every statement of a typed query on SQLite and PostgreSQL (`TypedLayerFacts`, linked into both legs), and 200 hostile captured strings per engine must yield statements byte-identical to a benign baseline. The alphabet is the filter-renderer property's hostile one, not the whole code space — PostgreSQL refuses NUL in a text parameter, which is the engine refusing the value, not text leaking into SQL.
 19. **The dashboard slice adds no UI**: the *Lifecycle* lane already renders `When`, which for a typed handler is the translated CEL; the admin e2e world gains a typed handler and pins its condition (the `work_orders` badge moves from 2 to 3).
+20. **Typed conditions and queries keep CEL's and SQL's null semantics, not C#'s.** A comparison with an empty value is false — `e.New.OwnerId != Fleet` does not match a record with no owner (`CelFunction.Invoke` answers null for a null argument; the interpreter folds it to false), and a query's `neq` never matches a null column (three-valued logic, `AlvoFilterOperator`'s remarks). The translator does not rewrite `!=` into `== null || !=`: that would make the typed and the CEL spelling of one condition mean different things. *Typed or CEL* says it in plain words, with the explicit spelling.
+21. **Field names must be CEL identifiers.** Field names are the one part of the CEL text no literal escape covers, so `CelText` refuses a field or `changed()` name outside the lexer's identifier grammar (a letter or `_` first, then letters, digits and `_`) or equal to `old`, `new`, `true`, `false`, `null`, `in` or `has`; the translator refuses such an `x.Record["…"]` key with `AlvoTranslationException`, and `ShapeProblems` refuses such an `[AlvoField]` name at boot (catalog-free). Without it, `e.New.Record["a == 'x' || true"]` would be written as `new.a == 'x' || true` — a different tree (§6.2, "one literal writer"). The query side already checks names against the schema (`FilterSqlRenderer`).
+22. **Registration parses what it wrote.** After `CelText.Write`, the translator runs `CelParser.Parse` on the text and turns a `CelSyntaxException` into `AlvoTranslationException`, so a lambda nested past `CelParser.MaxDepth` (32) fails at registration like an over-long one (Ruling 8), never at boot.
+23. **`when: null` is a compile error by design.** The `Expression` and `string?` overloads both accept a null literal (CS0121); `when` is simply left out instead. Renaming one parameter would remove the ambiguity at the cost of the `when:` spelling the spec shows for both; the class remarks and the docs page say so.
+24. **`Contains` in a `when` takes only an ordered list** — an array or an `IList` (`List<T>`). A `HashSet<T>` or another unordered collection is refused with a fix: its iteration order (string hashes are randomised per process) would make the condition's text, and with it the catalog's `When`, change between restarts. The query side accepts any `IEnumerable` — its value is bound, never written.
+25. **Query values take their field's CLR type.** `FilterTranslator` widens an integral value — and each `in` candidate — to `long`, the CLR type of an `integer` field (`FieldClrType.Of(Integer)`), because `AlvoComparison`'s value must match its field's type; an `int?` property compared with `9` therefore sends `9L`.
 
 ---
 
@@ -4539,17 +4804,17 @@ Each is recorded in the spec amendment (Task 12 Step 4) so a later reader can te
 
 | HX-05 criterion | Task(s) | Test |
 |---|---|---|
-| (1) the §4.3 table as a data-driven unit suite | 4, 5 | `ConditionTranslationTests.A_condition_translates_to_its_cel` (33 rows, each re-parsed and compiled against the entity), `FilterTranslationTests.A_predicate_translates_to_its_filter` (19 rows) |
-| (2) CsCheck: random captured strings never in emitted SQL text, both engines | 10 | `TypedLayerFacts.No_captured_string_reaches_the_sql_text` in `SqliteTypedLayerTests` and `PostgreSqlTypedLayerTests`; `A_hostile_captured_string_is_matched_as_a_value`; unit `FilterTranslationTests.A_captured_value_is_placed_as_a_typed_value_never_as_text` |
+| (1) the §4.3 table as a data-driven unit suite | 5, 6 | `ConditionTranslationTests.A_condition_translates_to_its_cel` (33 rows, each re-parsed and compiled against the entity), `LambdaShapeTests` (the conversion and `Contains` shapes), `FilterTranslationTests.A_predicate_translates_to_its_filter` (19 rows) |
+| (2) CsCheck: random captured strings never in emitted SQL text, both engines | 11 | `TypedLayerFacts.No_captured_string_reaches_the_sql_text` in `SqliteTypedLayerTests` and `PostgreSqlTypedLayerTests`; `A_hostile_captured_string_is_matched_as_a_value`; unit `FilterTranslationTests.A_captured_value_is_placed_as_a_typed_value_never_as_text` |
 | (3) CsCheck: `parse(render(s)) == s` | 1 | `CelTextTests.Every_string_reads_back_as_itself` (10 000 over the whole code space), `Every_number_reads_back_as_its_own_text`, `A_canonical_condition_is_written_back_as_itself` |
-| (4) every refused construct throws with id and fix; `UtcNow` in `when` refused until HX-11 | 4, 5, 6 | `ConditionTranslationTests.A_construct_with_no_cel_equivalent_is_refused_naming_the_extension_and_a_fix` (incl. `clock`, `local clock`), `The_refusal_names_the_construct_the_extension_and_the_fix`, `FilterTranslationTests.A_construct_with_no_filter_equivalent_is_refused_naming_the_entity_and_a_fix`, `TypedRegistrationTests.An_untranslatable_condition_is_refused_at_registration_naming_the_handler` |
-| (5) a typed record with a missing/mistyped field, or reading an excluded field, refuses boot | 3, 7, 10 | `TypedBindingTests` (missing, mistyped, excluded, nullability, enum member, catalog-free, all at once), `TypedLayerFacts.Typed_records_that_do_not_fit_refuse_boot_all_at_once` (both engines) |
-| (6) typed and untyped registrations of one handler produce the same catalog `When` | 6, 11 | `TypedRegistrationTests.Typed_and_untyped_registrations_of_one_handler_describe_the_same_condition`; e2e `The_lifecycle_tab_shows_a_typed_handler_s_condition_as_cel` |
+| (4) every refused construct throws with id and fix; `UtcNow` in `when` refused until HX-11 | 4, 5, 6, 7 | `ConditionTranslationTests.A_construct_with_no_cel_equivalent_is_refused_naming_the_extension_and_a_fix` (incl. `clock`, `local clock`), `The_refusal_names_the_construct_the_extension_and_the_fix`, `FilterTranslationTests.A_construct_with_no_filter_equivalent_is_refused_naming_the_entity_and_a_fix`, `LambdaShapeTests.A_refusal_names_the_construct_where_it_was_written_why_and_the_fix`, `TypedRegistrationTests.An_untranslatable_condition_is_refused_at_registration_naming_the_handler` |
+| (5) a typed record with a missing/mistyped field, or reading an excluded field, refuses boot | 3, 8, 11 | `TypedBindingTests` (missing, mistyped, excluded, nullability, enum member, catalog-free, all at once), `TypedLayerFacts.Typed_records_that_do_not_fit_refuse_boot_all_at_once` (both engines) |
+| (6) typed and untyped registrations of one handler produce the same catalog `When` | 7, 12 | `TypedRegistrationTests.Typed_and_untyped_registrations_of_one_handler_describe_the_same_condition`; e2e `The_lifecycle_tab_shows_a_typed_handler_s_condition_as_cel` |
 | (7) `As<T>()` with a missing field throws naming it | 3 | `AlvoRecordAsTests.A_missing_field_throws_naming_it_and_the_property`, `A_wrapper_missing_a_field_it_declares_throws_naming_it` |
-| Scope: `Entity<T>`, attributes, `IAlvoEntity`, typed messages | 2, 6, 10 | `RecordShapeTests`, `TypedRegistrationTests`, `TypedLayerFacts.A_typed_handler_is_handed_typed_images_and_its_translated_condition_selects`, `A_typed_application_event_handler_is_handed_its_typed_payload` |
-| Scope: typed reads | 8, 10 | `TypedReadTests`, `TypedLayerFacts.A_typed_read_returns_typed_records_through_the_caller_s_rules`, `A_typed_read_never_crosses_tenants` |
-| Scope: boot mapping validation incl. `events.exclude` (E7), and the apply guard | 7 | `TypedBindingTests.A_property_reading_a_field_left_out_of_the_event_images_refuses_boot`, `ExtensionApplyGuardTests.Removing_a_field_a_typed_record_maps_is_refused_at_the_field`, `Excluding_a_field_a_typed_record_maps_is_refused_at_the_exclusion` |
-| Handed over by HX-03 (13): `EventCondition<T>`, `AlvoEventAttribute`, `AddEventHandler<TMessage,THandler>` | 2, 4, 6 | public-API baseline; `TypedRegistrationTests.A_typed_application_event_handler_reads_its_type_from_the_attribute` |
-| Handed over by HX-03 (53): a public test factory for `AlvoEventContext` | 9 | `AlvoEventContextTests`, `AlvoTestHostEventContextTests.A_class_handler_called_directly_writes_as_the_caller`, snippet `A_class_handler_can_be_called_directly` |
-| Docs: *Typed or CEL*; Dashboard: catalog shows translated `when` | 11, 12 | `BookingDeskHandlersTests` in `MMLib.Alvo.DocsSnippets.Tests`; website build; admin e2e |
-| Security core (§6.2) | 13 | `alvo-security-core-review` checklist, `/security-review` substitute, `needs-deep-review` |
+| Scope: `Entity<T>`, attributes, `IAlvoEntity`, typed messages | 2, 7, 11 | `RecordShapeTests`, `TypedRegistrationTests`, `TypedLayerFacts.A_typed_handler_is_handed_typed_images_and_its_translated_condition_selects`, `A_typed_application_event_handler_is_handed_its_typed_payload` |
+| Scope: typed reads | 9, 11 | `TypedReadTests`, `TypedLayerFacts.A_typed_read_returns_typed_records_through_the_caller_s_rules`, `A_typed_read_never_crosses_tenants` |
+| Scope: boot mapping validation incl. `events.exclude` (E7), and the apply guard | 8 | `TypedBindingTests.A_property_reading_a_field_left_out_of_the_event_images_refuses_boot`, `ExtensionApplyGuardTests.Removing_a_field_a_typed_record_maps_is_refused_at_the_field`, `Excluding_a_field_a_typed_record_maps_is_refused_at_the_exclusion` |
+| Handed over by HX-03 (13): `EventCondition<T>`, `AlvoEventAttribute`, `AddEventHandler<TMessage,THandler>` | 2, 5, 7 | public-API baseline; `TypedRegistrationTests.A_typed_application_event_handler_reads_its_type_from_the_attribute` |
+| Handed over by HX-03 (53): a public test factory for `AlvoEventContext` | 10 | `AlvoEventContextTests`, `AlvoTestHostEventContextTests.A_class_handler_called_directly_writes_as_the_caller`, snippet `A_class_handler_can_be_called_directly` |
+| Docs: *Typed or CEL*; Dashboard: catalog shows translated `when` | 12, 13 | `BookingDeskHandlersTests` in `MMLib.Alvo.DocsSnippets.Tests`; website build; admin e2e |
+| Security core (§6.2) | 14 | `alvo-security-core-review` checklist, `/security-review` substitute, `needs-deep-review` |
