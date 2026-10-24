@@ -97,6 +97,7 @@ public sealed class FilterTranslationTests
             { "list read from the row", x => x.Note.Split(',', StringSplitOptions.None).Contains("a"), "Contains translates only as a list of values containing a field" },
             { "relational null", x => x.Rank < none, "only == and != can test for null" },
             { "captured condition", x => flag && x.IsPaid, "it reads no field" },
+            { "constant true", x => true, "it reads no field" },
             { "conditional", x => (x.IsPaid ? 1 : 0) == 1, "a conditional (?:) has no filter equivalent" },
         };
     }

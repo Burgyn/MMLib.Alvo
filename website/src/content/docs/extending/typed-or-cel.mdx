@@ -156,7 +156,9 @@ otherwise write by hand.
 - **Text compares as the database compares.** `x.Guest == "ada"` is judged by the column's collation, not by C#'s
   ordinal `==`, so a case-insensitive collation matches `Ada` too.
 - **Refused when the read is called:** `StartsWith`/`EndsWith`/`Contains` on a text (no filter operator for them yet),
-  arithmetic, a comparison of two fields, the clock, and any other method; and a predicate nested deeper than 512
+  arithmetic, a comparison of two fields, the clock, and any other method; a term that reads no field — a captured
+  `flag && …`, and `x => true` itself ("it reads no field"): to read the first rows unfiltered, send an untyped
+  `AlvoQuery` with no `Filter` and map each row with `As<T>()`; and a predicate nested deeper than 512
   levels or holding more than 4,096 expression nodes, which no filter of 256 terms needs — it is measured and refused
   before it is read.
 
