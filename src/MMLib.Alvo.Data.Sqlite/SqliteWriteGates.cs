@@ -30,14 +30,23 @@ internal static class SqliteWriteGates
     private static readonly ConcurrentDictionary<string, SerialRelationalWriteGate> _gates =
         new(OperatingSystem.IsLinux() ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>The gate for the database <paramref name="connectionString"/> names.</summary>
-    internal static SerialRelationalWriteGate For(string connectionString) =>
-        _gates.GetOrAdd(DatabaseKey(connectionString), static _ => new SerialRelationalWriteGate());
-
-    /// <summary>The key a database is found by: its full path, or its name when it lives in memory.</summary>
-    internal static string DatabaseKey(string connectionString)
+    /// <summary>
+    /// The gate for the database <paramref name="connectionString"/> names: its shared write line, waited at for no
+    /// longer than the connection string's <c>Default Timeout</c> (none when it is zero, as for the engine's own wait).
+    /// </summary>
+    internal static SqliteWriteGate For(string connectionString)
     {
         var builder = new SqliteConnectionStringBuilder(connectionString);
+        var line = _gates.GetOrAdd(DatabaseKey(builder), static _ => new SerialRelationalWriteGate());
+
+        return new SqliteWriteGate(line, builder.DefaultTimeout > 0 ? TimeSpan.FromSeconds(builder.DefaultTimeout) : Timeout.InfiniteTimeSpan);
+    }
+
+    /// <summary>The key a database is found by: its full path, or its name when it lives in memory.</summary>
+    internal static string DatabaseKey(string connectionString) => DatabaseKey(new SqliteConnectionStringBuilder(connectionString));
+
+    private static string DatabaseKey(SqliteConnectionStringBuilder builder)
+    {
         var source = builder.DataSource;
 
         return builder.Mode is SqliteOpenMode.Memory || string.IsNullOrEmpty(source) || source == ":memory:"

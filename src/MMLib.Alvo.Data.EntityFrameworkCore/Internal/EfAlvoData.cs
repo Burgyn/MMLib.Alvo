@@ -123,8 +123,11 @@ internal sealed class EfAlvoData : IAlvoData
     /// back first and the engine's lock is released before the next writer is let in. A turn is taken once per write
     /// transaction and never inside one: the outbox row, the idempotency record and the rollup recompute a write makes are
     /// statements in the same transaction, so nothing under the turn asks for it again, and the gate is not reentrant.
-    /// Before-hooks run inside the transaction, but they are compiled CEL; no host code runs while the turn is held. A
-    /// replayed write takes a fresh turn per attempt, so the wait between attempts holds none.
+    /// No code Alvo itself evaluates under the turn reaches the data path. Host code can run under it, though: a CEL
+    /// function the host registered (<c>AddCelFunction</c>) is evaluated by the before-hooks and by the in-transaction
+    /// row and tenant checks, and a host may replace <see cref="IBeforeHookRunner"/>. Such code must not write through
+    /// Alvo — its write would wait for the turn the write calling it holds, until the gate's timeout fails it. A replayed
+    /// write takes a fresh turn per attempt, so the wait between attempts holds none.
     /// </para>
     /// <para>
     /// <b>A unit of several writes</b> — a future transaction a host opens around them — takes the turn once when the unit

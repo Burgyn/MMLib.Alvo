@@ -68,6 +68,7 @@ public sealed class SqliteDataWriteGateTests : IAsyncDisposable
         using var cancel = new CancellationTokenSource();
         var waiting = data.CreateAsync(Notes, Values("cancelled"), _caller, cancellationToken: cancel.Token);
 
+        waiting.IsCompleted.ShouldBeFalse("the write is parked at the gate, not cancelled anywhere earlier");
         await cancel.CancelAsync();
         await Should.ThrowAsync<OperationCanceledException>(waiting);
         holder.Dispose();
@@ -79,9 +80,9 @@ public sealed class SqliteDataWriteGateTests : IAsyncDisposable
 
     public ValueTask DisposeAsync() => _fixture.DisposeAsync();
 
-    private async Task<(IAlvoData Data, RecordingGate Gate)> StartAsync()
+    private async Task<(IAlvoData Data, RecordingWriteGate Gate)> StartAsync()
     {
-        var gate = new RecordingGate(new SerialRelationalWriteGate());
+        var gate = new RecordingWriteGate(new SerialRelationalWriteGate());
         var host = await _fixture.StartAsync(Schema, Descriptor, configure: services => services.AddSingleton<IRelationalWriteGate>(gate));
 
         return (host.Data, gate);
@@ -127,40 +128,4 @@ public sealed class SqliteDataWriteGateTests : IAsyncDisposable
             ],
         },
     ]);
-
-    /// <summary>Passes every turn through to the real gate, counting the turns and the most writers ever inside at once.</summary>
-    private sealed class RecordingGate(IRelationalWriteGate inner) : IRelationalWriteGate
-    {
-        private int _entered;
-        private int _inside;
-        private int _most;
-
-        internal IRelationalWriteGate Inner => inner;
-
-        internal int Entered => Volatile.Read(ref _entered);
-
-        internal int MostInside => Volatile.Read(ref _most);
-
-        public async ValueTask<IDisposable> EnterAsync(CancellationToken cancellationToken)
-        {
-            var turn = await inner.EnterAsync(cancellationToken);
-            Interlocked.Increment(ref _entered);
-            var now = Interlocked.Increment(ref _inside);
-            int most;
-            while ((most = Volatile.Read(ref _most)) < now && Interlocked.CompareExchange(ref _most, now, most) != most)
-            {
-            }
-
-            return new Leaving(this, turn);
-        }
-
-        private sealed class Leaving(RecordingGate gate, IDisposable turn) : IDisposable
-        {
-            public void Dispose()
-            {
-                Interlocked.Decrement(ref gate._inside);
-                turn.Dispose();
-            }
-        }
-    }
 }

@@ -17,6 +17,12 @@
 /// provider's retry. A provider whose engine runs writers concurrently registers <see cref="NoRelationalWriteGate"/>,
 /// which is the driver's default.
 /// </para>
+/// <para>
+/// <b>A wait is bounded the way the engine's own busy wait is.</b> A provider bounds its gate by the busy timeout its
+/// connections already carry and, when it passes, fails the writer with the engine's own busy error — the failure a
+/// writer met before the gate existed, which the replay loop and the API already answer. A slow or wedged writer ahead
+/// of the line is then an error after that timeout, never an unbounded queue.
+/// </para>
 /// </remarks>
 internal interface IRelationalWriteGate
 {

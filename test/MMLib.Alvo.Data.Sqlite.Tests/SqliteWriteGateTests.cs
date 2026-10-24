@@ -18,6 +18,8 @@ public sealed class SqliteWriteGateTests : IDisposable
     private const string Subscriber = "send-confirmation";
     private const int Claimants = 64;
 
+    private static readonly TimeSpan _deadline = TimeSpan.FromSeconds(10);
+
     private readonly string _databasePath = Path.Combine(Path.GetTempPath(), $"alvo-write-gate-tests-{Guid.NewGuid():N}.db");
 
     [Fact]
@@ -29,8 +31,8 @@ public sealed class SqliteWriteGateTests : IDisposable
         var second = SqliteWriteGates.For($"Data Source={_databasePath};Pooling=False;Default Timeout=5");
         var other = SqliteWriteGates.For($"Data Source={_databasePath}.other");
 
-        second.ShouldBeSameAs(first);
-        other.ShouldNotBeSameAs(first);
+        second.Line.ShouldBeSameAs(first.Line);
+        other.Line.ShouldNotBeSameAs(first.Line);
     }
 
     /// <summary>
@@ -47,9 +49,9 @@ public sealed class SqliteWriteGateTests : IDisposable
         var second = SqliteWriteGates.For($"Mode=Memory;Cache=Shared;Data Source={name};Pooling=False");
         var other = SqliteWriteGates.For($"Data Source={name}-other;Mode=Memory;Cache=Shared");
 
-        second.ShouldBeSameAs(first);
-        other.ShouldNotBeSameAs(first);
-        SqliteWriteGates.For("Data Source=:memory:").ShouldBeSameAs(SqliteWriteGates.For("Data Source=:memory:;Pooling=False"));
+        second.Line.ShouldBeSameAs(first.Line);
+        other.Line.ShouldNotBeSameAs(first.Line);
+        SqliteWriteGates.For("Data Source=:memory:").Line.ShouldBeSameAs(SqliteWriteGates.For("Data Source=:memory:;Pooling=False").Line);
         SqliteWriteGates.DatabaseKey("Data Source=:memory:").ShouldBe("memory::memory:");
     }
 
@@ -61,7 +63,63 @@ public sealed class SqliteWriteGateTests : IDisposable
         collection.AddAlvo(alvo => alvo.UseSqlite(connectionString));
         using var services = collection.BuildServiceProvider();
 
-        services.GetRequiredService<RelationalConnectionFactory>().WriteGate.ShouldBeSameAs(SqliteWriteGates.For(connectionString));
+        var gate = services.GetRequiredService<RelationalConnectionFactory>().WriteGate.ShouldBeOfType<SqliteWriteGate>();
+        gate.Line.ShouldBeSameAs(SqliteWriteGates.For(connectionString).Line);
+        gate.Wait.ShouldBe(TimeSpan.FromSeconds(30), "the gate waits as long as the connection's own busy timeout, 30 s by default");
+    }
+
+    /// <summary>
+    /// A writer behind a turn that is never handed back fails once the connection's busy timeout passes, with the busy
+    /// error the engine itself would have raised — and its failed wait takes nothing: the gate still admits exactly one
+    /// writer afterwards.
+    /// </summary>
+    [Fact]
+    public async Task A_writer_stuck_behind_a_held_turn_fails_with_the_busy_error_after_the_timeout_and_leaks_nothing()
+    {
+        var gate = SqliteWriteGates.For($"Data Source={_databasePath};Default Timeout=1");
+        var holder = await gate.EnterAsync(Ct);
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+
+        var busy = await Should.ThrowAsync<SqliteException>(gate.EnterAsync(Ct).AsTask().WaitAsync(_deadline, Ct));
+
+        busy.SqliteErrorCode.ShouldBe(5);
+        waited.Elapsed.ShouldBeGreaterThanOrEqualTo(TimeSpan.FromSeconds(0.9));
+        holder.Dispose();
+        using var next = await gate.EnterAsync(Ct).AsTask().WaitAsync(_deadline, Ct);
+        var after = gate.EnterAsync(Ct).AsTask();
+        after.IsCompleted.ShouldBeFalse("a leaked or doubled release would let a second writer in beside the first");
+        next.Dispose();
+        (await after.WaitAsync(_deadline, Ct)).Dispose();
+    }
+
+    /// <summary>A store write behind a held turn surfaces as the same busy <see cref="SqliteException"/> the busy retry used to.</summary>
+    [Fact]
+    public async Task A_store_write_behind_a_held_turn_fails_with_the_busy_error_callers_already_handle()
+    {
+        var connectionString = $"Data Source={_databasePath};Pooling=False;Default Timeout=1";
+        var gate = SqliteWriteGates.For(connectionString);
+        await using var world = await DeliveryStoreWorld.StartAsync(() => new SqliteConnection(connectionString), gate);
+        var request = new DeliveryRequest { EventId = await world.AppendEventAsync("tickets:1"), Subscriber = Subscriber, PartitionKey = "tickets:1", Kind = "handler" };
+        using var holder = await gate.EnterAsync(Ct);
+
+        var busy = await Should.ThrowAsync<SqliteException>(world.Store.FanOutAsync([request], Ct).WaitAsync(_deadline, Ct));
+
+        busy.SqliteErrorCode.ShouldBe(5);
+    }
+
+    /// <summary>The caller's cancellation wins over a long busy timeout, and takes nothing with it.</summary>
+    [Fact]
+    public async Task A_cancelled_wait_ends_before_the_busy_timeout()
+    {
+        var gate = SqliteWriteGates.For($"Data Source={_databasePath};Default Timeout=60");
+        using var holder = await gate.EnterAsync(Ct);
+        using var cancel = new CancellationTokenSource();
+        var waiting = gate.EnterAsync(cancel.Token).AsTask();
+
+        waiting.IsCompleted.ShouldBeFalse();
+        await cancel.CancelAsync();
+
+        await Should.ThrowAsync<OperationCanceledException>(waiting.WaitAsync(_deadline, Ct));
     }
 
     [Fact]
@@ -76,7 +134,7 @@ public sealed class SqliteWriteGateTests : IDisposable
             using (await gate.EnterAsync(Ct))
             {
                 var now = Interlocked.Increment(ref inside);
-                InterlockedMax(ref most, now);
+                RecordingWriteGate.RaiseTo(ref most, now);
                 await Task.Delay(1, Ct);
                 Interlocked.Decrement(ref inside);
             }
@@ -124,7 +182,7 @@ public sealed class SqliteWriteGateTests : IDisposable
     public async Task Sixty_four_claimants_on_threads_queue_at_the_gate_one_at_a_time_and_take_every_delivery_once()
     {
         var connectionString = $"Data Source={_databasePath};Pooling=False;Default Timeout=3";
-        var gate = new RecordingGate(SqliteWriteGates.For(connectionString));
+        var gate = new RecordingWriteGate(SqliteWriteGates.For(connectionString));
         await using var world = await DeliveryStoreWorld.StartAsync(() => new SqliteConnection(connectionString), gate);
         await FanOutLanesAsync(world);
         var before = gate.Entered;
@@ -150,44 +208,6 @@ public sealed class SqliteWriteGateTests : IDisposable
         }
 
         GC.SuppressFinalize(this);
-    }
-
-    /// <summary>Passes every turn through to the real gate, counting the turns and the most writers ever inside at once.</summary>
-    private sealed class RecordingGate(IRelationalWriteGate inner) : IRelationalWriteGate
-    {
-        private int _entered;
-        private int _inside;
-        private int _most;
-
-        internal int Entered => Volatile.Read(ref _entered);
-
-        internal int MostInside => Volatile.Read(ref _most);
-
-        public async ValueTask<IDisposable> EnterAsync(CancellationToken cancellationToken)
-        {
-            var turn = await inner.EnterAsync(cancellationToken);
-            Interlocked.Increment(ref _entered);
-            InterlockedMax(ref _most, Interlocked.Increment(ref _inside));
-
-            return new Leaving(this, turn);
-        }
-
-        private sealed class Leaving(RecordingGate gate, IDisposable turn) : IDisposable
-        {
-            public void Dispose()
-            {
-                Interlocked.Decrement(ref gate._inside);
-                turn.Dispose();
-            }
-        }
-    }
-
-    private static void InterlockedMax(ref int target, int value)
-    {
-        int current;
-        while ((current = Volatile.Read(ref target)) < value && Interlocked.CompareExchange(ref target, value, current) != current)
-        {
-        }
     }
 
     private static async Task FanOutLanesAsync(DeliveryStoreWorld world)
