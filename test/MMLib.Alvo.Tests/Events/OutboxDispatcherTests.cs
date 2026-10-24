@@ -493,6 +493,7 @@ public sealed partial class OutboxDispatcherTests : IDisposable
             new AlvoSessions(Substitute.For<IAlvoData>()),
             catalogs,
             new DeliveryBackoff(() => 0.5),
+            Abandoned(),
             TimeProvider.System,
             _loggers.CreateLogger<DeliveryRunner>());
         var boot = new AlvoBootState();
@@ -504,11 +505,15 @@ public sealed partial class OutboxDispatcherTests : IDisposable
             catalogs,
             new ExtensionBinder(registry, CelFixtures.Compiler, HandlerCatalog.EveryService(), _loggers.CreateLogger<ExtensionBinder>()),
             runner,
+            Abandoned(),
             Options.Create(new AlvoEventOptions { DispatchMode = AlvoEventDispatchMode.Manual }),
             Options.Create(new AlvoDeliveryOptions()),
             TimeProvider.System,
             _loggers.CreateLogger<DeliveryDispatcher>());
     }
+
+    private AbandonedHandlers Abandoned() =>
+        new(Options.Create(new AlvoDeliveryOptions()), _loggers.CreateLogger<AbandonedHandlers>());
 
     /// <summary>Polls <paramref name="condition"/> until it holds, and throws rather than giving up quietly.</summary>
     private static async Task UntilAsync(Func<bool> condition, string what)

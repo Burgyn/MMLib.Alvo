@@ -83,6 +83,7 @@ internal static class EventsSetup
         services.TryAddSingleton<IAlvoEvents, AlvoEvents>();
         services.TryAddSingleton<DeliveryFanOut>();
         services.TryAddSingleton(new DeliveryBackoff());
+        services.TryAddSingleton<AbandonedHandlers>();
         services.TryAddSingleton<DeliveryRunner>();
         services.TryAddSingleton<OutboxDispatcher>();
         services.TryAddSingleton<IAlvoEventPump, EventPump>();

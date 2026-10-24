@@ -224,28 +224,111 @@ public sealed class DeliveryDispatcherTests : IDisposable
     public async Task An_abandoned_handler_does_not_hold_a_slot_of_the_background_loop()
     {
         const string Abandons = "abandons-its-slot";
+        const string RunsNext = "runs-in-the-freed-slot";
         using var abandoned = new DeadDeliveries(Abandons, AlvoDeliveryMetrics.AbandonedName);
         var store = new FakeDeliveryStore(TimeProvider.System);
         var stuck = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var calls = 0;
         var dispatcher = Dispatcher(
             store,
-            (AlvoCreated<AlvoRecord> _) => Interlocked.Increment(ref calls) == 1 ? stuck.Task : Task.CompletedTask,
+            (AlvoCreated<AlvoRecord> _) => stuck.Task,
             options => options.Timeout = TimeSpan.FromMilliseconds(50),
             concurrency: 1,
             mode: AlvoEventDispatchMode.Background,
             time: TimeProvider.System,
             settle: TimeSpan.FromMilliseconds(50),
-            id: Abandons);
-        await FanOutAsync(store, Abandons, "tickets:1", "tickets:2");
+            id: Abandons,
+            alongside: RunsNext);
+        await FanOutAsync(store, Abandons, "tickets:1");
+        await FanOutAsync(store, RunsNext, "tickets:2");
 
         await dispatcher.StartAsync(Ct);
         await UntilAsync(() => store.Rows.Any(row => row.Status == "succeeded"), "the second delivery to run beside the abandoned one");
         stuck.TrySetResult();
         await dispatcher.StopAsync(Ct);
 
-        store.Rows.Select(row => row.Status).Order(StringComparer.Ordinal).ShouldBe(["retrying", "succeeded"]);
+        Statuses(store, Abandons).ShouldBe(["retrying"]);
+        Statuses(store, RunsNext).ShouldBe(["succeeded"], "the only slot was free again although the abandoned handler still ran");
         abandoned.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_handler_that_ignores_its_token_stands_down_at_its_cap_while_other_handlers_keep_flowing()
+    {
+        const string Blocks = "ignores-its-token";
+        const string Flows = "keeps-flowing";
+        using var abandoned = new DeadDeliveries(Blocks, AlvoDeliveryMetrics.AbandonedName);
+        var store = new FakeDeliveryStore(TimeProvider.System);
+        var stuck = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var dispatcher = Dispatcher(
+            store,
+            (AlvoCreated<AlvoRecord> _) => stuck.Task,
+            options => options.Timeout = TimeSpan.FromMilliseconds(50),
+            concurrency: 1,
+            mode: AlvoEventDispatchMode.Background,
+            time: TimeProvider.System,
+            settle: TimeSpan.FromMilliseconds(50),
+            id: Blocks,
+            alongside: Flows);
+        await FanOutAsync(store, Blocks, "tickets:1", "tickets:2", "tickets:3");
+        await FanOutAsync(store, Flows, "tickets:4", "tickets:5", "tickets:6");
+
+        await dispatcher.StartAsync(Ct);
+        await UntilAsync(() => Statuses(store, Flows).All(status => status == "succeeded"), "the other handler's deliveries to run");
+        await Task.Delay(TimeSpan.FromMilliseconds(400), Ct);
+        var blocked = Statuses(store, Blocks);
+        stuck.TrySetResult();
+        await dispatcher.StopAsync(Ct);
+
+        blocked.ShouldBe(["pending", "pending", "retrying"], "with one invocation abandoned and alive, the handler is not claimed for again");
+        abandoned.Count.ShouldBe(1);
+        _logs.Entries.Count(entry => entry.EventName == "HandlerStoodDown").ShouldBe(1);
+        _logs.Entries.Single(entry => entry.EventName == "HandlerStoodDown").Level.ShouldBe(LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task A_stood_down_handler_is_claimed_for_again_once_its_abandoned_invocation_ends()
+    {
+        const string Blocks = "ignores-its-token";
+        var store = new FakeDeliveryStore(TimeProvider.System);
+        var stuck = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var dispatcher = Dispatcher(
+            store,
+            (AlvoCreated<AlvoRecord> _) => stuck.Task,
+            options => options.Timeout = TimeSpan.FromMilliseconds(50),
+            concurrency: 1,
+            mode: AlvoEventDispatchMode.Background,
+            time: TimeProvider.System,
+            settle: TimeSpan.FromMilliseconds(50),
+            id: Blocks);
+        await FanOutAsync(store, Blocks, "tickets:1", "tickets:2", "tickets:3");
+
+        await dispatcher.StartAsync(Ct);
+        await UntilAsync(() => _logs.Entries.Any(entry => entry.EventName == "HandlerStoodDown"), "the handler to stand down");
+        stuck.SetResult();
+        await UntilAsync(() => Statuses(store, Blocks).Count(status => status == "succeeded") == 2, "the remaining deliveries to run");
+        await dispatcher.StopAsync(Ct);
+
+        Statuses(store, Blocks).ShouldBe(["retrying", "succeeded", "succeeded"]);
+    }
+
+    [Fact]
+    public async Task A_manual_round_does_not_claim_for_a_handler_at_its_cap_of_abandoned_invocations()
+    {
+        var stuck = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var store = new FakeDeliveryStore(_clock);
+        var dispatcher = Dispatcher(
+            store,
+            (AlvoCreated<AlvoRecord> _) => stuck.Task,
+            options => options.Timeout = TimeSpan.FromMilliseconds(50),
+            concurrency: 1,
+            settle: TimeSpan.FromMilliseconds(50));
+        await FanOutAsync(store, Handler, "tickets:1", "tickets:2", "tickets:3");
+
+        var result = await dispatcher.ManualRoundAsync(Ct);
+        stuck.SetResult();
+
+        result.Claimed.ShouldBe(1, "the handler's first invocation was abandoned, alive, so it stood down for the rest of the round");
+        store.Rows.Count(row => row.Status == "pending").ShouldBe(2);
     }
 
     [Fact]
@@ -315,6 +398,22 @@ public sealed class DeliveryDispatcherTests : IDisposable
         _logs.Entries.ShouldContain(entry => entry.EventName == "DeliveryDispatcherManual");
     }
 
+    [Fact]
+    public async Task A_loop_whose_boot_primed_no_catalog_stands_down_and_says_so()
+    {
+        var store = new FakeDeliveryStore(TimeProvider.System);
+        var dispatcher = Dispatcher(
+            store, (AlvoCreated<AlvoRecord> _) => Task.CompletedTask, mode: AlvoEventDispatchMode.Background, time: TimeProvider.System, primed: false);
+        await FanOutAsync(store, Handler, "tickets:1");
+
+        await dispatcher.StartAsync(Ct);
+        await UntilAsync(() => dispatcher.ExecuteTask is { IsCompleted: true }, "the loop to stand down");
+        await dispatcher.StopAsync(Ct);
+
+        store.Rows.Single().Status.ShouldBe("pending");
+        _logs.Entries.ShouldContain(entry => entry.EventName == "DeliveryDispatcherStoodDownUnprimed" && entry.Level == LogLevel.Warning);
+    }
+
     private DeliveryDispatcher Dispatcher(
         FakeDeliveryStore store,
         Delegate handle,
@@ -326,26 +425,42 @@ public sealed class DeliveryDispatcherTests : IDisposable
         TimeSpan? settle = null,
         IDeliveryStore? port = null,
         string id = Handler,
-        bool ready = true)
+        bool ready = true,
+        string? alongside = null,
+        bool primed = true)
     {
         var clock = time ?? _clock;
         var deliveries = port ?? store;
-        var registry = HandlerCatalog.Registry(alvo => alvo.Entity("tickets", t => t.OnCreated(id, handle, configure: configure)));
+        var registry = HandlerCatalog.Registry(alvo => alvo.Entity("tickets", t =>
+        {
+            t.OnCreated(id, handle, configure: configure);
+            if (alongside is not null)
+            {
+                t.OnCreated(alongside, (AlvoCreated<AlvoRecord> _) => Task.CompletedTask);
+            }
+        }));
         var binder = new ExtensionBinder(registry, CelFixtures.Compiler, HandlerCatalog.EveryService(), _loggers.CreateLogger<ExtensionBinder>());
         var catalogs = new PolicyCatalogProvider();
-        catalogs.SetCurrent("handlers", _catalog);
+        if (primed)
+        {
+            catalogs.SetCurrent("handlers", _catalog);
+        }
+
         var boot = new AlvoBootState();
         if (ready)
         {
             boot.Ready("handlers", appliedRevision: 1);
         }
 
+        var maxConcurrency = Options.Create(new AlvoDeliveryOptions { MaxConcurrency = concurrency });
+        var abandoned = new AbandonedHandlers(maxConcurrency, _loggers.CreateLogger<AbandonedHandlers>());
         var runner = new DeliveryRunner(
             deliveries,
             new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             new AlvoSessions(Substitute.For<IAlvoData>()),
             catalogs,
             new DeliveryBackoff(() => 0.5),
+            abandoned,
             clock,
             _loggers.CreateLogger<DeliveryRunner>())
         {
@@ -358,8 +473,9 @@ public sealed class DeliveryDispatcherTests : IDisposable
             catalogs,
             binder,
             runner,
+            abandoned,
             Options.Create(new AlvoEventOptions { DispatchMode = mode, PollInterval = TimeSpan.FromMilliseconds(20), BatchSize = batchSize }),
-            Options.Create(new AlvoDeliveryOptions { MaxConcurrency = concurrency }),
+            maxConcurrency,
             clock,
             _loggers.CreateLogger<DeliveryDispatcher>());
     }
@@ -394,6 +510,9 @@ public sealed class DeliveryDispatcherTests : IDisposable
 
         return Task.FromResult(@event.Id);
     }
+
+    private static List<string> Statuses(FakeDeliveryStore store, string subscriber) =>
+        [.. store.Rows.Where(row => row.Subscriber == subscriber).Select(row => row.Status).Order(StringComparer.Ordinal)];
 
     private static void InterlockedMax(ref int target, int value)
     {

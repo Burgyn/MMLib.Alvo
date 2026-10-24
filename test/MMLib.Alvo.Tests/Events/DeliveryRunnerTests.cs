@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
@@ -15,6 +16,7 @@ using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 
 using System.Collections.Concurrent;
+using System.Data.Common;
 using System.Diagnostics;
 
 namespace MMLib.Alvo.Tests.Events;
@@ -522,6 +524,89 @@ public sealed class DeliveryRunnerTests : IDisposable
         spans.Recorded.ShouldHaveSingleItem().GetTagItem("alvo.outcome").ShouldBe("lease-lost");
     }
 
+    [Fact]
+    public async Task A_storage_refusal_of_the_answer_is_written_again_inside_the_lease()
+    {
+        var refusing = new AnswerRefusingStore(_store, refusals: 2, () => new BusyStorageException());
+        var (runner, handler) = Arrange((AlvoCreated<AlvoRecord> _) => Task.CompletedTask, port: refusing);
+        var delivery = await ClaimedAsync();
+
+        (await runner.RunAsync(delivery, handler, Claimant, Ct)).ShouldBe(DeliveryRunOutcome.Succeeded);
+
+        refusing.Answers.ShouldBe(3);
+        _store.Attempts.ShouldBe([(delivery.Id, 1, "succeeded")], "the attempt is answered once, not burnt by a busy database");
+        var retried = _logs.Entries.Where(entry => entry.EventName == "DeliveryAnswerRetried").ToList();
+        retried.Count.ShouldBe(2);
+        retried.ShouldAllBe(entry => entry.Message.Contains(typeof(BusyStorageException).FullName!) && !entry.Message.Contains(BusyStorageException.Secret));
+    }
+
+    [Fact]
+    public async Task A_fence_that_no_longer_holds_is_answered_once_and_never_retried()
+    {
+        var counting = new AnswerRefusingStore(_store, refusals: 0, () => new BusyStorageException());
+        var (runner, handler) = Arrange((AlvoCreated<AlvoRecord> _) => Task.CompletedTask, port: counting);
+        var late = await ClaimedAsync();
+        _clock.Advance(TimeSpan.FromMinutes(2));
+        await _store.ClaimAsync(Claim(), Ct);
+
+        (await runner.RunAsync(late, handler, Claimant, Ct)).ShouldBe(DeliveryRunOutcome.LeaseLost);
+
+        counting.Answers.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_storage_refusal_past_the_lease_is_not_retried()
+    {
+        var refusing = new AnswerRefusingStore(
+            _store, refusals: int.MaxValue, () => new BusyStorageException(), onAnswer: () => _clock.Advance(TimeSpan.FromMinutes(2)));
+        var (runner, handler) = Arrange((AlvoCreated<AlvoRecord> _) => Task.CompletedTask, options => options.Timeout = TimeSpan.FromSeconds(10), port: refusing);
+        var delivery = await ClaimedAsync();
+
+        await Should.ThrowAsync<BusyStorageException>(runner.RunAsync(delivery, handler, Claimant, Ct));
+
+        refusing.Answers.ShouldBe(1, "a retry would start after the lease, when another claimant may already hold the delivery");
+    }
+
+    [Fact]
+    public async Task An_answer_that_fails_is_not_retried_unless_storage_refused_it_and_its_span_still_ends_failed()
+    {
+        using var spans = new Spans();
+        var failing = new AnswerRefusingStore(_store, refusals: int.MaxValue, () => new InvalidOperationException());
+        var (runner, handler) = Arrange((AlvoCreated<AlvoRecord> _) => Task.CompletedTask, port: failing);
+        var claimed = await ClaimedEventAsync(traceParent: TraceParent);
+
+        await spans.WithinAsync(() => Should.ThrowAsync<InvalidOperationException>(runner.RunAsync(claimed.Delivery, handler, Claimant, Ct)));
+
+        failing.Answers.ShouldBe(1);
+        var span = spans.Recorded.ShouldHaveSingleItem();
+        span.GetTagItem("alvo.outcome").ShouldBe("failed");
+        span.Status.ShouldBe(ActivityStatusCode.Error);
+    }
+
+    [Fact]
+    public async Task A_handler_that_ends_within_its_settle_grace_after_its_timeout_is_answered_by_its_own_result()
+    {
+        var (runner, handler) = Arrange(
+            async (AlvoCreated<AlvoRecord> _) => await Task.Delay(TimeSpan.FromMilliseconds(200), CancellationToken.None),
+            options => options.Timeout = TimeSpan.FromMilliseconds(50),
+            time: TimeProvider.System,
+            settle: TimeSpan.FromSeconds(5));
+
+        (await runner.RunAsync(await ClaimedAsync(), handler, Claimant, Ct)).ShouldBe(DeliveryRunOutcome.Succeeded);
+
+        _store.Rows.ShouldHaveSingleItem().Status.ShouldBe("succeeded");
+    }
+
+    [Fact]
+    public void A_settled_handler_is_timed_out_only_when_it_gave_in_to_its_cancellation()
+    {
+        DeliveryRunner.Settled(Task.CompletedTask).Succeeded.ShouldBeTrue();
+        DeliveryRunner.Settled(Task.FromException(new InvalidOperationException())).ShouldBe(DeliveryRunner.AttemptVerdict.Retry(typeof(InvalidOperationException).FullName!));
+        DeliveryRunner.Settled(Task.FromException(new AggregateException(AlvoChainDepthExceededException.At(9, 8)))).ShouldBe(DeliveryRunner.AttemptVerdict.Dead("chain-depth-exceeded"));
+        DeliveryRunner.Settled(Task.FromCanceled(new CancellationToken(canceled: true))).ShouldBe(DeliveryRunner.AttemptVerdict.Retry("timeout"));
+        DeliveryRunner.Settled(Task.FromException(new OperationCanceledException())).ShouldBe(DeliveryRunner.AttemptVerdict.Retry("timeout"));
+    }
+
     private async Task<CapturedLogEntry> LoggedAsync(string eventName)
     {
         for (var wait = 0; wait < 500; wait++)
@@ -542,18 +627,20 @@ public sealed class DeliveryRunnerTests : IDisposable
         Action<AlvoHandlerOptions>? configure = null,
         TimeProvider? time = null,
         TimeSpan? settle = null,
-        IServiceProvider? services = null)
+        IServiceProvider? services = null,
+        IDeliveryStore? port = null)
     {
         var registry = HandlerCatalog.Registry(alvo => alvo.Entity("tickets", t => t.OnCreated(Handler, handle, configure: configure)));
         var binder = new ExtensionBinder(registry, CelFixtures.Compiler, HandlerCatalog.EveryService(), _loggers.CreateLogger<ExtensionBinder>());
         var catalogs = new PolicyCatalogProvider();
         catalogs.SetCurrent("handlers", _catalog);
         var runner = new DeliveryRunner(
-            _store,
+            port ?? _store,
             (services ?? new ServiceCollection().BuildServiceProvider()).GetRequiredService<IServiceScopeFactory>(),
             new AlvoSessions(_data),
             catalogs,
             new DeliveryBackoff(() => 0.5),
+            new AbandonedHandlers(Options.Create(new AlvoDeliveryOptions()), _loggers.CreateLogger<AbandonedHandlers>()),
             time ?? _clock,
             _loggers.CreateLogger<DeliveryRunner>())
         {
@@ -595,6 +682,49 @@ public sealed class DeliveryRunnerTests : IDisposable
 
     private static DeliveryClaim Claim() =>
         new() { Claimant = Claimant, Ordered = [Handler], BatchSize = 10, Lease = TimeSpan.FromMinutes(1), OutboxMaxAttempts = 10, OutboxClaimLease = TimeSpan.FromMinutes(5) };
+
+    /// <summary>What a provider throws when the database is busy — a <see cref="DbException"/> whose message is never logged.</summary>
+    private sealed class BusyStorageException() : DbException($"database is locked; {Secret}", 5)
+    {
+        internal const string Secret = "Password=hunter2";
+    }
+
+    /// <summary>The in-memory store whose answers throw the first <c>refusals</c> times, counting every answer it is asked for.</summary>
+    private sealed class AnswerRefusingStore(FakeDeliveryStore inner, int refusals, Func<Exception> refusal, Action? onAnswer = null) : IDeliveryStore
+    {
+        private int _answers;
+
+        internal int Answers => Volatile.Read(ref _answers);
+
+        public Task EnsureAsync(CancellationToken cancellationToken = default) => inner.EnsureAsync(cancellationToken);
+
+        public Task<int> FanOutAsync(IReadOnlyList<DeliveryRequest> requests, CancellationToken cancellationToken = default) =>
+            inner.FanOutAsync(requests, cancellationToken);
+
+        public Task<IReadOnlyList<ClaimedDelivery>> ClaimAsync(DeliveryClaim claim, CancellationToken cancellationToken = default) =>
+            inner.ClaimAsync(claim, cancellationToken);
+
+        public Task<bool> CompleteAsync(DeliveryAttempt attempt, CancellationToken cancellationToken = default) =>
+            Answer(() => inner.CompleteAsync(attempt, cancellationToken));
+
+        public Task<bool> FailAsync(DeliveryAttempt attempt, DeliveryFailure failure, CancellationToken cancellationToken = default) =>
+            Answer(() => inner.FailAsync(attempt, failure, cancellationToken));
+
+        public Task<IReadOnlyList<string>> PendingSubscribersAsync(CancellationToken cancellationToken = default) =>
+            inner.PendingSubscribersAsync(cancellationToken);
+
+        public Task<int> DeadLetterPendingAsync(string subscriber, string reason, CancellationToken cancellationToken = default) =>
+            inner.DeadLetterPendingAsync(subscriber, reason, cancellationToken);
+
+        public Task<int> CancelPendingAsync(string subscriber, CancellationToken cancellationToken = default) =>
+            inner.CancelPendingAsync(subscriber, cancellationToken);
+
+        private Task<bool> Answer(Func<Task<bool>> answer)
+        {
+            onAnswer?.Invoke();
+            return Interlocked.Increment(ref _answers) <= refusals ? Task.FromException<bool>(refusal()) : answer();
+        }
+    }
 
     /// <summary>A scoped service a handler asks for, so a fact can tell its delivery's scope apart and see it disposed.</summary>
     internal sealed class ScopedProbe : IDisposable

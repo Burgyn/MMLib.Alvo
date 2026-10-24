@@ -54,11 +54,33 @@ internal static partial class DeliveryLog
             + "background loop does not run, and deliveries run only in IAlvoEventPump.DrainAsync rounds.")]
     internal static partial void DeliveryDispatcherManual(ILogger logger);
 
-    /// <summary>The backstop outside the rounds — the boot wait itself; a failed round is <see cref="DeliveryDispatcherRoundFailed"/>.</summary>
+    /// <summary>
+    /// The backstop outside the rounds — the boot wait itself; a failed round is <see cref="DeliveryDispatcherRoundFailed"/>.
+    /// The type name only, like every other delivery line: a provider's exception message can carry a connection string.
+    /// </summary>
     [LoggerMessage(
         Level = LogLevel.Error,
-        Message = "Alvo's delivery dispatcher stopped and will not restart in this process; no event handler runs until it is restarted.")]
-    internal static partial void DeliveryDispatcherStopped(ILogger logger, Exception failure);
+        Message = "Alvo's delivery dispatcher stopped ({ErrorType}) and will not restart in this process; no event handler "
+            + "runs until it is restarted.")]
+    internal static partial void DeliveryDispatcherStopped(ILogger logger, string errorType);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Alvo's delivery dispatcher stood down: the boot finished without a primed policy catalog, so no handler "
+            + "can be bound. No delivery was claimed; every queued one is still pending. It starts on the next boot that "
+            + "primes a schema — apply a descriptor, then restart the host.")]
+    internal static partial void DeliveryDispatcherStoodDownUnprimed(ILogger logger);
+
+    /// <summary>
+    /// A handler reached the cap of abandoned invocations still running; its deliveries are not claimed until one of them
+    /// ends, so a handler that ignores its token cannot starve the thread pool. Other handlers keep running.
+    /// </summary>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Alvo stopped claiming deliveries for {Subscriber}: {Alive} of its invocations ran past their timeout, "
+            + "ignored their cancellation and are still running (the cap is Alvo:Deliveries:MaxConcurrency). Its deliveries "
+            + "wait until one of them ends; other handlers keep running. Make the handler observe its cancellation token.")]
+    internal static partial void HandlerStoodDown(ILogger logger, string subscriber, int alive);
 
     /// <summary>
     /// A round failed — the queue unreachable, a claim refused by a deadlock — and the loop waits, then claims again. The
@@ -69,6 +91,12 @@ internal static partial class DeliveryLog
         Message = "Alvo's delivery dispatcher could not finish a round ({ErrorType}). It keeps running and tries again in "
             + "{RetryIn}; a delivery it could not answer for returns when its lease ends.")]
     internal static partial void DeliveryDispatcherRoundFailed(ILogger logger, string errorType, TimeSpan retryIn);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Alvo's storage refused the answer for delivery {DeliveryId} of {Subscriber} ({ErrorType}); it is written "
+            + "again in {RetryIn}, inside the claim's lease.")]
+    internal static partial void DeliveryAnswerRetried(ILogger logger, Guid deliveryId, string subscriber, string errorType, TimeSpan retryIn);
 
     [LoggerMessage(
         Level = LogLevel.Error,

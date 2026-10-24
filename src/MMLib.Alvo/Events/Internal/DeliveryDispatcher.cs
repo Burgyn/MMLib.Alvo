@@ -34,11 +34,15 @@ namespace MMLib.Alvo.Events.Internal;
 /// <para>
 /// <b>No claimed delivery waits for a slot.</b> The loop claims only free slots, and a manual round claims at most
 /// <see cref="AlvoDeliveryOptions.MaxConcurrency"/> deliveries at a time, runs them and claims again, so no lease runs
-/// while its delivery queues. A handler abandoned past its timeout holds no slot: the runner has answered for it. The
-/// consequence is deliberate: the handler <em>code</em> running at once is unbounded across deliveries — a handler that
-/// ignores its token can leave up to <see cref="AlvoDeliveryOptions.MaxConcurrency"/> abandoned tasks behind per timeout
-/// and settle grace, each delivery bounded only by its retry policy. They are counted
-/// (<see cref="AlvoDeliveryMetrics.AbandonedName"/>) so the leak is visible.
+/// while its delivery queues. A handler abandoned past its timeout holds no slot: the runner has answered for it.
+/// </para>
+/// <para>
+/// <b>A handler that leaves abandoned invocations behind stands down.</b> Abandoned code keeps running — .NET cannot abort
+/// it — so the claim leaves out every handler with <see cref="AlvoDeliveryOptions.MaxConcurrency"/> abandoned invocations
+/// still alive (<see cref="AbandonedHandlers"/>), in the loop and in a manual round alike, and takes it back as soon as one
+/// of them ends. A handler that blocks its thread and ignores its token therefore strands a bounded number of thread-pool
+/// threads, not one per delivery; the other handlers keep flowing. Abandoned invocations are also counted
+/// (<see cref="AlvoDeliveryMetrics.AbandonedName"/>).
 /// </para>
 /// <para>
 /// <b>A shutdown waits for the runner, never for a handler.</b> The loop always awaits its in-flight deliveries before it
@@ -56,6 +60,7 @@ namespace MMLib.Alvo.Events.Internal;
 /// <param name="catalogs">The primed policy catalog the registered handlers are bound to.</param>
 /// <param name="binder">Binds the registered handlers to the current catalog.</param>
 /// <param name="runner">Runs one claimed delivery and answers for its attempt.</param>
+/// <param name="abandoned">The abandoned invocations still running, per handler; a handler at the cap is not claimed for.</param>
 /// <param name="events">The dispatch mode, poll interval and batch size, shared with the outbox dispatcher.</param>
 /// <param name="deliveries">How many deliveries may run at once.</param>
 /// <param name="time">The clock the idle wait is measured on.</param>
@@ -66,6 +71,7 @@ internal sealed class DeliveryDispatcher(
     IPolicyCatalogProvider catalogs,
     ExtensionBinder binder,
     DeliveryRunner runner,
+    AbandonedHandlers abandoned,
     IOptions<AlvoEventOptions> events,
     IOptions<AlvoDeliveryOptions> deliveries,
     TimeProvider time,
@@ -141,7 +147,7 @@ internal sealed class DeliveryDispatcher(
         }
         catch (Exception failure)
         {
-            DeliveryLog.DeliveryDispatcherStopped(logger, failure);
+            DeliveryLog.DeliveryDispatcherStopped(logger, TypeOf(failure));
         }
     }
 
@@ -211,7 +217,18 @@ internal sealed class DeliveryDispatcher(
             return false;
         }
 
-        return await boot.SettledAsync(stop).ConfigureAwait(false) is AlvoBootPhase.Ready && catalogs.Current is not null;
+        if (await boot.SettledAsync(stop).ConfigureAwait(false) is not AlvoBootPhase.Ready)
+        {
+            return false;
+        }
+
+        if (catalogs.Current is null)
+        {
+            DeliveryLog.DeliveryDispatcherStoodDownUnprimed(logger);
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>Brings the store up once; the loop and the manual rounds never run in one process together, so no lock.</summary>
@@ -224,16 +241,20 @@ internal sealed class DeliveryDispatcher(
         }
     }
 
-    private async Task<IReadOnlyList<ClaimedDelivery>> ClaimAsync(ExtensionBindings bindings, int batchSize, CancellationToken ct) =>
-        batchSize <= 0 || bindings.Handlers.Count == 0
+    /// <summary>Claims up to <paramref name="batchSize"/> lane heads of the bound handlers that are not stood down.</summary>
+    private async Task<IReadOnlyList<ClaimedDelivery>> ClaimAsync(ExtensionBindings bindings, int batchSize, CancellationToken ct)
+    {
+        var claimable = bindings.Handlers.Where(handler => !abandoned.StoodDown(handler.Id)).ToList();
+        return batchSize <= 0 || claimable.Count == 0
             ? []
-            : await store.ClaimAsync(ClaimOf(bindings, batchSize), ct).ConfigureAwait(false);
+            : await store.ClaimAsync(ClaimOf(bindings, claimable, batchSize), ct).ConfigureAwait(false);
+    }
 
-    private DeliveryClaim ClaimOf(ExtensionBindings bindings, int batchSize) => new()
+    private DeliveryClaim ClaimOf(ExtensionBindings bindings, List<BoundHandler> claimable, int batchSize) => new()
     {
         Claimant = _claimant,
-        Ordered = [.. bindings.Handlers.Where(handler => handler.Settings.Ordering is AlvoOrdering.PerRecord).Select(handler => handler.Id)],
-        Unordered = [.. bindings.Handlers.Where(handler => handler.Settings.Ordering is AlvoOrdering.None).Select(handler => handler.Id)],
+        Ordered = [.. claimable.Where(handler => handler.Settings.Ordering is AlvoOrdering.PerRecord).Select(handler => handler.Id)],
+        Unordered = [.. claimable.Where(handler => handler.Settings.Ordering is AlvoOrdering.None).Select(handler => handler.Id)],
         BatchSize = batchSize,
         Lease = bindings.LongestTimeout + DeliveryRunner.LeaseGrace + runner.SettleGrace,
         OutboxMaxAttempts = events.Value.MaxAttempts,

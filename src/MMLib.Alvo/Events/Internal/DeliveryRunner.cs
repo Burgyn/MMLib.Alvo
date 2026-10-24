@@ -6,6 +6,8 @@ using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
 
+using System.Data.Common;
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 
@@ -35,9 +37,19 @@ internal enum DeliveryRunOutcome
 /// <para>
 /// <b>The timeout is enforced, not cooperative.</b> The handler starts on the thread pool, so even one that blocks its
 /// thread cannot hold the runner past its timeout; the runner then cancels the handler's token, gives it
-/// <see cref="SettleGrace"/> to stop, and answers <c>timeout</c>. A handler still running then is abandoned — .NET has no
-/// thread abort — and its late completion is never recorded: the store's fence on (claimant, attempt) answers for each
-/// attempt once. Should such a handler fail later, its exception's type is logged, never its message.
+/// <see cref="SettleGrace"/> to stop. A handler that ends within that grace is answered by its own result — a success, or
+/// a failure of its own — unless it ended by giving in to the cancellation, which is <c>timeout</c>. A handler still
+/// running then is abandoned (.NET has no thread abort) and answered <c>timeout</c>; its late completion is never
+/// recorded: the store's fence on (claimant, attempt) answers for each attempt once. Should such a handler fail later, its
+/// exception's type is logged, never its message. While it runs it is tracked by <see cref="AbandonedHandlers"/>, which
+/// stands its handler down at the cap.
+/// </para>
+/// <para>
+/// <b>The answer is retried, inside the lease.</b> A storage refusal of the answer — a busy SQLite database, a PostgreSQL
+/// serialization failure or deadlock — is written again after a short, doubling wait while the retry would still start
+/// <see cref="AnswerMargin"/> before the handler's timeout + <see cref="LeaseGrace"/> + <see cref="SettleGrace"/> —
+/// never longer than the claim's lease, which covers the longest timeout. A fence that no longer holds is never retried.
+/// Without it, one refused write would cost an attempt whose side effect had already happened.
 /// </para>
 /// <para>
 /// <b>The span answers for the attempt as recorded.</b> It ends after the store has answered, so a handler that finished
@@ -56,6 +68,7 @@ internal sealed class DeliveryRunner(
     IAlvoSessions sessions,
     IPolicyCatalogProvider catalogs,
     DeliveryBackoff backoff,
+    AbandonedHandlers abandoned,
     TimeProvider time,
     ILogger<DeliveryRunner> logger)
 {
@@ -72,6 +85,16 @@ internal sealed class DeliveryRunner(
     /// </summary>
     internal TimeSpan SettleGrace { get; init; } = LeaseGrace;
 
+    /// <summary>
+    /// The room a retried answer leaves before the claim's lease ends: an answer is retried only while it would still start
+    /// this long before the handler's timeout + <see cref="LeaseGrace"/> + <see cref="SettleGrace"/> since the attempt began.
+    /// </summary>
+    internal static TimeSpan AnswerMargin { get; } = TimeSpan.FromSeconds(5);
+
+    private static TimeSpan FirstAnswerRetry { get; } = TimeSpan.FromMilliseconds(50);
+
+    private static TimeSpan LongestAnswerRetry { get; } = TimeSpan.FromSeconds(1);
+
     internal async Task<DeliveryRunOutcome> RunAsync(
         ClaimedDelivery delivery, BoundHandler handler, string claimant, CancellationToken stopping)
     {
@@ -86,7 +109,8 @@ internal sealed class DeliveryRunner(
         }
 
         var attempt = new DeliveryAttempt { Delivery = delivery, Claimant = claimant, StartedAt = startedAt, Duration = time.GetElapsedTime(started) };
-        var outcome = await RecordAsync(attempt, handler.Settings.Retry, answered).ConfigureAwait(false);
+        var answerBy = startedAt + handler.Settings.Timeout + LeaseGrace + SettleGrace - AnswerMargin;
+        var outcome = await RecordAsync(attempt, handler.Settings.Retry, answered, new AnswerWindow(answerBy, stopping), span).ConfigureAwait(false);
         AlvoHookTelemetry.Finish(span, SpanOutcome(outcome));
         AlvoDeliveryMetrics.Recorded(attempt, outcome);
 
@@ -154,13 +178,23 @@ internal sealed class DeliveryRunner(
     {
         await cancel.CancelAsync().ConfigureAwait(false);
         await SettleAsync(invocation, stopping).ConfigureAwait(false);
-        if (!invocation.IsCompleted)
+        if (invocation.IsCompleted)
         {
-            Abandon(invocation, delivery);
+            return Settled(invocation);
         }
 
+        Abandon(invocation, delivery);
         return AttemptVerdict.Retry(DeliveryErrors.Timeout);
     }
+
+    /// <summary>
+    /// The verdict of a handler that ended within its settle grace: its own result — a success, or a failure of its own —
+    /// unless it ended by giving in to the cancellation, which is the runner's <c>timeout</c>.
+    /// </summary>
+    internal static AttemptVerdict Settled(Task invocation) =>
+        invocation.IsCompletedSuccessfully ? AttemptVerdict.Success
+        : invocation.Exception?.InnerException is { } failure && failure is not OperationCanceledException ? VerdictOf(failure)
+        : AttemptVerdict.Retry(DeliveryErrors.Timeout);
 
     private async Task SettleAsync(Task invocation, CancellationToken stopping)
     {
@@ -173,10 +207,14 @@ internal sealed class DeliveryRunner(
         }
     }
 
-    /// <summary>Counts an abandoned handler, and observes its later failure and logs its type — never its message — since nothing records it.</summary>
+    /// <summary>
+    /// Counts an abandoned handler — and tracks it while it runs, so its handler stands down at the cap — and observes its
+    /// later failure and logs its type, never its message, since nothing records it.
+    /// </summary>
     private void Abandon(Task invocation, ClaimedDelivery delivery)
     {
         AlvoDeliveryMetrics.AbandonedRecorded(delivery.Subscriber);
+        abandoned.Track(delivery.Subscriber, invocation);
         _ = invocation.ContinueWith(
             ended => DeliveryLog.AbandonedHandlerFailed(
                 logger, delivery.Id, delivery.Subscriber, delivery.Attempts, TypeOf(ended.Exception!.InnerException ?? ended.Exception)),
@@ -243,11 +281,26 @@ internal sealed class DeliveryRunner(
         Depth = @event.ChainDepth + 1,
     };
 
-    private async Task<DeliveryRunOutcome> RecordAsync(DeliveryAttempt attempt, AlvoRetryPolicy policy, AttemptVerdict verdict)
+    /// <summary>Answers for the attempt; should the answer throw, the span still ends, as failed, before the failure goes on.</summary>
+    private async Task<DeliveryRunOutcome> RecordAsync(
+        DeliveryAttempt attempt, AlvoRetryPolicy policy, AttemptVerdict verdict, AnswerWindow window, Activity? span)
+    {
+        try
+        {
+            return await AnswerAsync(attempt, policy, verdict, window).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            AlvoHookTelemetry.Finish(span, AlvoHookTelemetry.Failed);
+            throw;
+        }
+    }
+
+    private async Task<DeliveryRunOutcome> AnswerAsync(DeliveryAttempt attempt, AlvoRetryPolicy policy, AttemptVerdict verdict, AnswerWindow window)
     {
         if (verdict.Succeeded)
         {
-            return await store.CompleteAsync(attempt, CancellationToken.None).ConfigureAwait(false)
+            return await AnsweredAsync(() => store.CompleteAsync(attempt, CancellationToken.None), attempt, window).ConfigureAwait(false)
                 ? DeliveryRunOutcome.Succeeded
                 : LeaseLost(attempt);
         }
@@ -255,10 +308,46 @@ internal sealed class DeliveryRunner(
         var retryAfter = verdict.Retryable ? backoff.After(attempt.Delivery.Attempts, policy) : null;
         var failure = new DeliveryFailure { ErrorType = verdict.ErrorType!, RetryAfter = retryAfter, MaxAttempts = policy.MaxAttempts };
 
-        return await store.FailAsync(attempt, failure, CancellationToken.None).ConfigureAwait(false)
+        return await AnsweredAsync(() => store.FailAsync(attempt, failure, CancellationToken.None), attempt, window).ConfigureAwait(false)
             ? Failed(attempt.Delivery, failure)
             : LeaseLost(attempt);
     }
+
+    /// <summary>
+    /// Writes the answer, and writes it again after a short, doubling wait when the storage refused it — a busy database, a
+    /// serialization failure, a deadlock — for as long as the retry would still start inside the lease. A fence that no
+    /// longer holds is an answer (<see langword="false"/>), never retried; a stop ends the retries, and the lease returns
+    /// the delivery.
+    /// </summary>
+    private async Task<bool> AnsweredAsync(Func<Task<bool>> answer, DeliveryAttempt attempt, AnswerWindow window)
+    {
+        for (var wait = FirstAnswerRetry; ; wait = TimeSpan.FromTicks(Math.Min(wait.Ticks * 2, LongestAnswerRetry.Ticks)))
+        {
+            try
+            {
+                return await answer().ConfigureAwait(false);
+            }
+            catch (Exception failure) when (IsStorageRefusal(failure) && window.Admits(time.GetUtcNow() + wait))
+            {
+                DeliveryLog.DeliveryAnswerRetried(logger, attempt.Delivery.Id, attempt.Delivery.Subscriber, TypeOf(failure), wait);
+            }
+
+            await Task.Delay(wait, time, window.Stopping).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// A storage refusal: a <see cref="DbException"/> anywhere in the chain. The core cannot tell an
+    /// engine's transient codes apart — SQLite does not mark <c>SQLITE_BUSY</c> transient — and need not: the answer is a
+    /// fenced, idempotent write, so retrying a permanent refusal costs only time inside the lease.
+    /// </summary>
+    private static bool IsStorageRefusal(Exception failure) => failure switch
+    {
+        DbException => true,
+        AggregateException aggregate => aggregate.InnerExceptions.Any(IsStorageRefusal),
+        { InnerException: { } inner } => IsStorageRefusal(inner),
+        _ => false,
+    };
 
     private DeliveryRunOutcome Failed(ClaimedDelivery delivery, DeliveryFailure failure)
     {
@@ -277,6 +366,12 @@ internal sealed class DeliveryRunner(
     {
         DeliveryLog.DeliveryLeaseLost(logger, attempt.Delivery.Id, attempt.Delivery.Subscriber, attempt.Delivery.Attempts);
         return DeliveryRunOutcome.LeaseLost;
+    }
+
+    /// <summary>Until when an answer may still be retried, and the stop that ends the retries sooner.</summary>
+    private readonly record struct AnswerWindow(DateTimeOffset AnswerBy, CancellationToken Stopping)
+    {
+        internal bool Admits(DateTimeOffset retryAt) => retryAt < AnswerBy && !Stopping.IsCancellationRequested;
     }
 
     internal readonly record struct AttemptVerdict(string? ErrorType, bool Retryable)

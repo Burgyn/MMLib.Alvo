@@ -185,7 +185,7 @@ internal sealed class OutboxDispatcher(
         catch (Exception failure) when (!stoppingToken.IsCancellationRequested)
         {
             failing = wait = NextBackoff(failing, options.Value.PollInterval);
-            EventLog.DispatcherRoundFailed(logger, failure.GetType().Name, wait);
+            EventLog.DispatcherRoundFailed(logger, failure.GetType().FullName ?? failure.GetType().Name, wait);
         }
 
         if (wait > TimeSpan.Zero)
@@ -416,7 +416,7 @@ internal sealed class OutboxDispatcher(
         }
         catch (Exception failure) when (!stoppingToken.IsCancellationRequested)
         {
-            EventLog.HoldBackFailed(logger, entry.Id, failure.GetType().Name);
+            EventLog.HoldBackFailed(logger, entry.Id, failure.GetType().FullName ?? failure.GetType().Name);
         }
     }
 
