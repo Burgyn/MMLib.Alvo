@@ -271,6 +271,25 @@ public abstract class DeliveryStoreContractTests
             .ShouldBe(events.Take(2));
     }
 
+    /// <summary>
+    /// Bringing the storage up is idempotent, and storage just brought up holds no work: the boot calls
+    /// <see cref="IDeliveryStore.EnsureAsync"/> and then reads and retires before anything has been fanned out.
+    /// </summary>
+    [Fact]
+    public async Task Storage_brought_up_again_holds_no_work_and_retiring_over_it_ends_nothing()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+
+        await world.Store.EnsureAsync(Ct);
+        await world.Store.EnsureAsync(Ct);
+
+        (await world.Store.PendingSubscribersAsync(Ct)).ShouldBeEmpty();
+        (await world.Store.DeadLetterPendingAsync(Confirm, "retired", Ct)).ShouldBe(0);
+        (await world.Store.CancelPendingAsync(Audit, Ct)).ShouldBe(0);
+        (await world.Store.ClaimAsync(Claim(Confirm, Audit), Ct)).ShouldBeEmpty();
+    }
+
     /// <summary>Retiring ends a subscriber's unfinished work: dead-lettered or cancelled, and no longer pending.</summary>
     [Fact]
     public async Task Retiring_ends_a_subscriber_s_unfinished_work()

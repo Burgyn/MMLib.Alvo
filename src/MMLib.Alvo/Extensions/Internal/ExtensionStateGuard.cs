@@ -25,14 +25,23 @@ namespace MMLib.Alvo.Extensions.Internal;
 /// find its handler's lanes already ended by a build that never served. Its refusal stops the process on every shape,
 /// because the fix is a code change — register the id again, or retire it — which the running process cannot take.
 /// </para>
+/// <para>
+/// <b>The store is brought up first.</b> Both steps call <see cref="IDeliveryStore.EnsureAsync"/> before they read or
+/// write: the port promises that call builds the storage, so a store that builds its tables there — rather than in the
+/// EF driver's stage 1 — is not read before they exist on its first boot. It is idempotent, so it changes nothing a
+/// rollback would find.
+/// </para>
 /// </remarks>
 internal sealed class ExtensionStateGuard(ExtensionRegistry registry, IDeliveryStore store, ILogger<ExtensionStateGuard> logger)
 {
+    private bool _ensured;
+
     /// <summary>Refuses the start when unfinished work belongs to an id this host neither registers nor retires; reads only.</summary>
     /// <param name="cancellationToken">Cancels the check, failing the boot.</param>
     /// <exception cref="AlvoStartupRefusedException">Unfinished work belongs to an id neither registered nor retired.</exception>
     internal async Task RefuseOrphansAsync(CancellationToken cancellationToken)
     {
+        await EnsureStoreAsync(cancellationToken).ConfigureAwait(false);
         var known = registry.All.Select(registration => registration.Id).ToHashSet(StringComparer.Ordinal);
         var orphans = (await store.PendingSubscribersAsync(cancellationToken).ConfigureAwait(false))
             .Where(id => !known.Contains(id)).ToList();
@@ -46,12 +55,26 @@ internal sealed class ExtensionStateGuard(ExtensionRegistry registry, IDeliveryS
     /// <param name="cancellationToken">Cancels the step, failing the boot.</param>
     internal async Task RetireAsync(CancellationToken cancellationToken)
     {
+        if (registry.Retired.Count > 0)
+        {
+            await EnsureStoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         foreach (var retired in registry.Retired)
         {
             var ended = retired.Retirement is AlvoRetirement.Discard
                 ? await store.CancelPendingAsync(retired.Id, cancellationToken).ConfigureAwait(false)
                 : await store.DeadLetterPendingAsync(retired.Id, DeliveryErrors.Retired, cancellationToken).ConfigureAwait(false);
             ExtensionLog.ExtensionRetired(logger, retired.Id, retired.Retirement.ToString(), ended);
+        }
+    }
+
+    private async Task EnsureStoreAsync(CancellationToken cancellationToken)
+    {
+        if (!_ensured)
+        {
+            await store.EnsureAsync(cancellationToken).ConfigureAwait(false);
+            _ensured = true;
         }
     }
 

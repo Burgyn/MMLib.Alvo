@@ -137,6 +137,28 @@ public sealed class ExtensionStateGuardTests : IDisposable
     }
 
     [Fact]
+    public async Task The_orphan_check_brings_up_a_store_that_builds_its_storage_in_EnsureAsync_before_reading_it()
+    {
+        var store = new StorageBuiltOnEnsure(_store);
+
+        await new ExtensionStateGuard(Registry(alvo => { }), store, _loggers.CreateLogger<ExtensionStateGuard>()).RefuseOrphansAsync(Ct);
+
+        store.Ensured.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task A_retirement_brings_up_a_store_that_builds_its_storage_in_EnsureAsync_before_writing_it()
+    {
+        var store = new StorageBuiltOnEnsure(_store);
+        var guard = new ExtensionStateGuard(
+            Registry(alvo => alvo.AddRetiredExtension("old-sync", AlvoRetirement.Discard)), store, _loggers.CreateLogger<ExtensionStateGuard>());
+
+        await guard.RetireAsync(Ct);
+
+        store.Ensured.ShouldBeTrue();
+    }
+
+    [Fact]
     public void Alvo_registers_the_guard_as_a_step_of_the_boot_not_as_a_hosted_service()
     {
         var collection = new ServiceCollection();
@@ -161,6 +183,42 @@ public sealed class ExtensionStateGuardTests : IDisposable
         OutboxMaxAttempts = 5,
         OutboxClaimLease = TimeSpan.FromMinutes(1),
     };
+
+    /// <summary>A third-party store that builds its storage in <see cref="IDeliveryStore.EnsureAsync"/>, as the port promises.</summary>
+    private sealed class StorageBuiltOnEnsure(FakeDeliveryStore inner) : IDeliveryStore
+    {
+        internal bool Ensured { get; private set; }
+
+        public Task EnsureAsync(CancellationToken cancellationToken = default)
+        {
+            Ensured = true;
+            return Task.CompletedTask;
+        }
+
+        public Task<int> FanOutAsync(IReadOnlyList<DeliveryRequest> requests, CancellationToken cancellationToken = default) =>
+            Built(() => inner.FanOutAsync(requests, cancellationToken));
+
+        public Task<IReadOnlyList<ClaimedDelivery>> ClaimAsync(DeliveryClaim claim, CancellationToken cancellationToken = default) =>
+            Built(() => inner.ClaimAsync(claim, cancellationToken));
+
+        public Task<bool> CompleteAsync(DeliveryAttempt attempt, CancellationToken cancellationToken = default) =>
+            Built(() => inner.CompleteAsync(attempt, cancellationToken));
+
+        public Task<bool> FailAsync(DeliveryAttempt attempt, DeliveryFailure failure, CancellationToken cancellationToken = default) =>
+            Built(() => inner.FailAsync(attempt, failure, cancellationToken));
+
+        public Task<IReadOnlyList<string>> PendingSubscribersAsync(CancellationToken cancellationToken = default) =>
+            Built(() => inner.PendingSubscribersAsync(cancellationToken));
+
+        public Task<int> DeadLetterPendingAsync(string subscriber, string reason, CancellationToken cancellationToken = default) =>
+            Built(() => inner.DeadLetterPendingAsync(subscriber, reason, cancellationToken));
+
+        public Task<int> CancelPendingAsync(string subscriber, CancellationToken cancellationToken = default) =>
+            Built(() => inner.CancelPendingAsync(subscriber, cancellationToken));
+
+        private Task<T> Built<T>(Func<Task<T>> read) =>
+            Ensured ? read() : throw new InvalidOperationException("no such table: alvo_deliveries");
+    }
 
     private Task<int> PendingAsync(string subscriber) =>
         _store.FanOutAsync([new DeliveryRequest { EventId = Guid.NewGuid(), Subscriber = subscriber, PartitionKey = "tickets:1", Kind = "handler" }], Ct);
