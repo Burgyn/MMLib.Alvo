@@ -94,9 +94,10 @@ internal static partial class DeliveryLog
 
     [LoggerMessage(
         Level = LogLevel.Warning,
-        Message = "Alvo's storage refused the answer for delivery {DeliveryId} of {Subscriber} ({ErrorType}); it is written "
-            + "again in {RetryIn}, inside the claim's lease.")]
-    internal static partial void DeliveryAnswerRetried(ILogger logger, Guid deliveryId, string subscriber, string errorType, TimeSpan retryIn);
+        Message = "Alvo's storage refused the answer for delivery {DeliveryId} of {Subscriber} ({ErrorType}, {Refusals} "
+            + "refusals so far); it is written again in {RetryIn}, while the retry still starts inside the claim's lease. "
+            + "The first retry is logged, then every tenth.")]
+    internal static partial void DeliveryAnswerRetried(ILogger logger, Guid deliveryId, string subscriber, string errorType, int refusals, TimeSpan retryIn);
 
     [LoggerMessage(
         Level = LogLevel.Error,

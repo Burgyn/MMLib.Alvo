@@ -536,8 +536,21 @@ public sealed class DeliveryRunnerTests : IDisposable
         refusing.Answers.ShouldBe(3);
         _store.Attempts.ShouldBe([(delivery.Id, 1, "succeeded")], "the attempt is answered once, not burnt by a busy database");
         var retried = _logs.Entries.Where(entry => entry.EventName == "DeliveryAnswerRetried").ToList();
-        retried.Count.ShouldBe(2);
+        retried.Count.ShouldBe(1, "the first retry is logged, then every tenth");
         retried.ShouldAllBe(entry => entry.Message.Contains(typeof(BusyStorageException).FullName!) && !entry.Message.Contains(BusyStorageException.Secret));
+    }
+
+    [Fact]
+    public async Task A_permanent_storage_refusal_stops_being_retried_a_settle_grace_after_the_first_refusal()
+    {
+        var refusing = new AnswerRefusingStore(
+            _store, refusals: int.MaxValue, () => new BusyStorageException(), onAnswer: () => _clock.Advance(TimeSpan.FromSeconds(10)));
+        var (runner, handler) = Arrange((AlvoCreated<AlvoRecord> _) => Task.CompletedTask, options => options.Timeout = TimeSpan.FromHours(1), port: refusing);
+
+        await Should.ThrowAsync<BusyStorageException>(runner.RunAsync(await ClaimedAsync(), handler, Claimant, Ct));
+
+        refusing.Answers.ShouldBe(4, "refused at +10 s, so retries start until +40 s — not for the hour the handler's timeout would allow");
+        _logs.Entries.Count(entry => entry.EventName == "DeliveryAnswerRetried").ShouldBe(1);
     }
 
     [Fact]

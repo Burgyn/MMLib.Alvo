@@ -46,10 +46,13 @@ internal enum DeliveryRunOutcome
 /// </para>
 /// <para>
 /// <b>The answer is retried, inside the lease.</b> A storage refusal of the answer — a busy SQLite database, a PostgreSQL
-/// serialization failure or deadlock — is written again after a short, doubling wait while the retry would still start
-/// <see cref="AnswerMargin"/> before the handler's timeout + <see cref="LeaseGrace"/> + <see cref="SettleGrace"/> —
-/// never longer than the claim's lease, which covers the longest timeout. A fence that no longer holds is never retried.
-/// Without it, one refused write would cost an attempt whose side effect had already happened.
+/// serialization failure or deadlock — is written again after a short, doubling wait while the retry would still
+/// <em>start</em> <see cref="AnswerMargin"/> before the handler's timeout + <see cref="LeaseGrace"/> +
+/// <see cref="SettleGrace"/> since the attempt began — never later than the claim's lease — and no later than
+/// <see cref="SettleGrace"/> after the first refusal, so a permanent refusal under a long timeout is not retried for an
+/// hour. The write itself may then wait at SQLite's write gate and land after the lease; the fence decides — it records
+/// the answer if nobody reclaimed the delivery, and changes nothing otherwise. A fence that no longer holds is never
+/// retried. Without the retry, one refused write would cost an attempt whose side effect had already happened.
 /// </para>
 /// <para>
 /// <b>The span answers for the attempt as recorded.</b> It ends after the store has answered, so a handler that finished
@@ -95,6 +98,8 @@ internal sealed class DeliveryRunner(
 
     private static TimeSpan LongestAnswerRetry { get; } = TimeSpan.FromSeconds(1);
 
+    private const int RetryLogEvery = 10;
+
     internal async Task<DeliveryRunOutcome> RunAsync(
         ClaimedDelivery delivery, BoundHandler handler, string claimant, CancellationToken stopping)
     {
@@ -110,7 +115,7 @@ internal sealed class DeliveryRunner(
 
         var attempt = new DeliveryAttempt { Delivery = delivery, Claimant = claimant, StartedAt = startedAt, Duration = time.GetElapsedTime(started) };
         var answerBy = startedAt + handler.Settings.Timeout + LeaseGrace + SettleGrace - AnswerMargin;
-        var outcome = await RecordAsync(attempt, handler.Settings.Retry, answered, new AnswerWindow(answerBy, stopping), span).ConfigureAwait(false);
+        var outcome = await RecordAsync(attempt, handler.Settings.Retry, answered, new AnswerWindow(answerBy, Narrowed: false, stopping), span).ConfigureAwait(false);
         AlvoHookTelemetry.Finish(span, SpanOutcome(outcome));
         AlvoDeliveryMetrics.Recorded(attempt, outcome);
 
@@ -315,24 +320,40 @@ internal sealed class DeliveryRunner(
 
     /// <summary>
     /// Writes the answer, and writes it again after a short, doubling wait when the storage refused it — a busy database, a
-    /// serialization failure, a deadlock — for as long as the retry would still start inside the lease. A fence that no
-    /// longer holds is an answer (<see langword="false"/>), never retried; a stop ends the retries, and the lease returns
-    /// the delivery.
+    /// serialization failure, a deadlock — while the retry would still start inside the lease and within
+    /// <see cref="SettleGrace"/> of the first refusal. A fence that no longer holds is an answer (<see langword="false"/>),
+    /// never retried; a stop ends the retries, and the lease returns the delivery. The first retry is logged, then every
+    /// tenth.
     /// </summary>
     private async Task<bool> AnsweredAsync(Func<Task<bool>> answer, DeliveryAttempt attempt, AnswerWindow window)
     {
+        var refusals = 0;
         for (var wait = FirstAnswerRetry; ; wait = TimeSpan.FromTicks(Math.Min(wait.Ticks * 2, LongestAnswerRetry.Ticks)))
         {
             try
             {
                 return await answer().ConfigureAwait(false);
             }
-            catch (Exception failure) when (IsStorageRefusal(failure) && window.Admits(time.GetUtcNow() + wait))
+            catch (Exception failure) when (IsStorageRefusal(failure))
             {
-                DeliveryLog.DeliveryAnswerRetried(logger, attempt.Delivery.Id, attempt.Delivery.Subscriber, TypeOf(failure), wait);
+                window = window.AfterRefusal(time.GetUtcNow(), SettleGrace);
+                if (!window.Admits(time.GetUtcNow() + wait))
+                {
+                    throw;
+                }
+
+                LogRetry(attempt, failure, ++refusals, wait);
             }
 
             await Task.Delay(wait, time, window.Stopping).ConfigureAwait(false);
+        }
+    }
+
+    private void LogRetry(DeliveryAttempt attempt, Exception failure, int refusals, TimeSpan wait)
+    {
+        if (refusals == 1 || refusals % RetryLogEvery == 0)
+        {
+            DeliveryLog.DeliveryAnswerRetried(logger, attempt.Delivery.Id, attempt.Delivery.Subscriber, TypeOf(failure), refusals, wait);
         }
     }
 
@@ -368,10 +389,16 @@ internal sealed class DeliveryRunner(
         return DeliveryRunOutcome.LeaseLost;
     }
 
-    /// <summary>Until when an answer may still be retried, and the stop that ends the retries sooner.</summary>
-    private readonly record struct AnswerWindow(DateTimeOffset AnswerBy, CancellationToken Stopping)
+    /// <summary>
+    /// Until when an answer may still be retried — narrowed once, at the first refusal, to that refusal plus the settle
+    /// grace — and the stop that ends the retries sooner.
+    /// </summary>
+    private readonly record struct AnswerWindow(DateTimeOffset AnswerBy, bool Narrowed, CancellationToken Stopping)
     {
         internal bool Admits(DateTimeOffset retryAt) => retryAt < AnswerBy && !Stopping.IsCancellationRequested;
+
+        internal AnswerWindow AfterRefusal(DateTimeOffset now, TimeSpan grace) =>
+            Narrowed ? this : this with { AnswerBy = AnswerBy < now + grace ? AnswerBy : now + grace, Narrowed = true };
     }
 
     internal readonly record struct AttemptVerdict(string? ErrorType, bool Retryable)

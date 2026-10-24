@@ -1030,10 +1030,14 @@ runs at a time) — no longer one per timed-out attempt across every record, whi
 
 **The answer is retried inside the lease.** A storage refusal of `CompleteAsync`/`FailAsync` — any `DbException` in the
 chain: SQLite busy (which `Microsoft.Data.Sqlite` does not mark `IsTransient`, measured), a PostgreSQL serialization
-failure or deadlock — is written again after 50 ms, doubling to at most 1 s, while the retry would still start
-`AnswerMargin` (5 s) before the handler's timeout + `LeaseGrace` + `SettleGrace` since the attempt began — never past the
-claim's lease. A fence that no longer holds is an answer (`false`), never retried; a stop ends the retries; any other
-exception is not retried. The core cannot tell an engine's transient codes from permanent ones and need not: the answer
+failure or deadlock — is written again after 50 ms, doubling to at most 1 s, while the retry would still **start**
+`AnswerMargin` (5 s) before the handler's timeout + `LeaseGrace` + `SettleGrace` since the attempt began — never later
+than the claim's lease — and no later than `SettleGrace` after the first refusal, so a permanent refusal under a 1 h
+timeout is not retried for an hour. `DeliveryAnswerRetried` logs the first retry, then every tenth. The bound is on when
+a retry starts: on SQLite the write may then wait at the write gate (up to the busy timeout) and land after the lease,
+and the fence decides — it records the answer if nobody reclaimed the delivery and returns `false` otherwise. A fence
+that no longer holds is an answer (`false`), never retried; a stop ends the retries; any other exception is not
+retried. The core cannot tell an engine's transient codes from permanent ones and need not: the answer
 is a fenced, idempotent write, so a retried permanent refusal costs only time inside the lease. Without the retry, a busy
 SQLite gate during an answer burned an attempt whose side effect had already run. An answer that still throws ends the
 delivery span as failed before `DeliveryRunFailed` logs its type.
