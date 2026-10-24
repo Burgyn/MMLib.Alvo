@@ -102,7 +102,12 @@ internal sealed partial class ConditionTranslator
 
     private CelNode Comparison(BinaryExpression comparison, CelBinaryOperator op)
     {
-        if (op is not (CelBinaryOperator.Equal or CelBinaryOperator.NotEqual) && (HidesEnum(comparison.Left) || HidesEnum(comparison.Right)))
+        if (comparison.Left.Type == typeof(object) || comparison.Right.Type == typeof(object))
+        {
+            throw Refuse(comparison, "a comparison of two objects compares references in C#, which CEL has no equivalent of", "compare the values without casting them to object.");
+        }
+
+        if (op is not (CelBinaryOperator.Equal or CelBinaryOperator.NotEqual) && (IsEnumField(comparison.Left) || IsEnumField(comparison.Right)))
         {
             throw Refuse(comparison, "an enum field compares with == and != only", TranslationRefusal.WhenFix);
         }
@@ -150,7 +155,7 @@ internal sealed partial class ConditionTranslator
 
     private CelNode Operand(Expression node)
     {
-        if (HidesEnum(node) && LambdaShape.Touches(node, _event))
+        if (IsEnumField(node))
         {
             throw Refuse(node, EnumNumberReason, "compare the field with a member of its enum, such as e.New.Status == OrderStatus.Approved.");
         }
@@ -158,7 +163,7 @@ internal sealed partial class ConditionTranslator
         var unwrapped = LambdaShape.Unwrapped(node);
         if (!LambdaShape.Touches(unwrapped, _event))
         {
-            return Constant(unwrapped);
+            return Constant(HidesEnum(node) ? node : unwrapped);
         }
 
         return unwrapped switch

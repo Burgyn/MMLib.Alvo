@@ -8,8 +8,9 @@ namespace MMLib.Alvo.Extensions.Internal;
 
 /// <summary>
 /// Enums in a <c>when</c>. CEL holds an enum field as its member's declared text, while C# compares an enum as its number,
-/// so an enum converted to a number translates only where it meets a member of its own enum — never in arithmetic, an
-/// ordering or against a number field, where the two would mean different things.
+/// so an enum field converted to a number translates only where it meets a member of its own enum — never in arithmetic,
+/// an ordering or against a number field, where the two would mean different things. An enum constant converted to a
+/// number is that number, as C# computes it.
 /// </summary>
 internal sealed partial class ConditionTranslator
 {
@@ -55,6 +56,8 @@ internal sealed partial class ConditionTranslator
             ? new CelBinary(op, Operand(left), Operand(right))
             : throw Refuse(comparison, "two enum fields compare only when they share one enum", TranslationRefusal.WhenFix);
     }
+
+    private bool IsEnumField(Expression node) => HidesEnum(node) && LambdaShape.Touches(node, _event);
 
     private static bool HidesEnum(Expression node)
     {

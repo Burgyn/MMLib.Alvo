@@ -25,6 +25,7 @@ public sealed class ConditionTranslationTests
     private static readonly OrderStatus[] _open = [OrderStatus.Draft, OrderStatus.InReview];
     private static readonly string[] _noNotes = [];
     private static readonly HashSet<string> _tags = ["a", "b"];
+    private static readonly OrderStatus _approved = OrderStatus.Approved;
     private static readonly string _longNote = new('x', CelParser.MaxSourceLength);
 
     public static TheoryData<string, string, Expression<Func<EventCondition<Order>, bool>>, string> Translated()
@@ -65,6 +66,10 @@ public sealed class ConditionTranslationTests
             { "negative decimal", "Updated", e => e.New.Total > -1.5m, "new.total > -1.5" },
             { "list of ids", "Updated", e => new[] { _fleet }.Contains(e.New.OwnerId!.Value), "string(new.owner_id) == '3fa85f64-5717-4562-b3fc-2c963f66afa6'" },
             { "list of enum numbers", "Updated", e => new[] { 0, 1 }.Contains((int)e.New.Status), "new.status == 'draft' || new.status == 'in_review'" },
+            { "enum constant as a number", "Updated", e => e.New.Quantity == (int)_approved, "new.quantity == 2" },
+            { "enum constant in arithmetic", "Updated", e => e.New.Quantity + (int)_approved > 1, "new.quantity + 2 > 1" },
+            { "enum constant ordering a number", "Updated", e => e.New.Quantity > (int)_approved, "new.quantity > 2" },
+            { "enum constants in a number list", "Updated", e => new long[] { (int)_approved, 0 }.Contains(e.New.Quantity), "new.quantity == 2 || new.quantity == 0" },
             { "bool literal", "Updated", e => e.New.IsPaid == true, "new.is_paid == true" },
             { "value of a nullable", "Updated", e => e.New.Rank!.Value > 2, "new.rank > 2" },
             { "created", "Created", e => e.New.Total > 0m, "new.total > 0.0" },
@@ -100,6 +105,7 @@ public sealed class ConditionTranslationTests
             { "enum against a number field", "Updated", e => (int)e.New.Status == e.New.Quantity, "converts to a number only to compare with a member of its enum" },
             { "undeclared enum number", "Updated", e => (int)e.New.Status == 99, "OrderStatus has no member 99" },
             { "caller null test", "Updated", e => e.Caller.Tenant == null, "is the caller's, not a field of Order" },
+            { "object comparison", "Updated", e => (object)e.New.Status == (object)OrderStatus.Draft, "compares references in C#" },
             { "role on another caller", "Updated", e => default(AlvoConditionCaller)!.HasRole("manager"), "HasRole is read from the event's own caller" },
         };
     }
