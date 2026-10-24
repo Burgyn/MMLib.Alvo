@@ -188,8 +188,9 @@ public sealed class FilterTranslationTests
     }
 
     [Fact]
-    public void A_query_typed_over_a_record_filters_any_field_through_it() =>
-        FilterText.Of(FilterTranslator.Translate<AlvoRecord>(x => (string?)x["legacy_code"] == "L-9", "orders")).ShouldBe("legacy_code eq 'L-9'");
+    public void A_bare_record_is_not_a_row_whose_keys_a_filter_reads() =>
+        Should.Throw<AlvoTranslationException>(() => FilterTranslator.Translate<AlvoRecord>(x => (string?)x["legacy_code"] == "L-9", "orders"))
+            .Message.ShouldContain("in a typed query on 'orders'");
 
     [Fact]
     public void A_captured_value_is_placed_as_a_typed_value_never_as_text()

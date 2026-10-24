@@ -11,8 +11,8 @@ namespace MMLib.Alvo.Data.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Every field is a mapped property of the row or a literal, identifier-checked key of the row's record (a wrapper's
-/// <c>Record</c>, or the row itself when the query is typed over <see cref="AlvoRecord"/>). Values are read and typed in
+/// Every field is a mapped property of the row or a literal, identifier-checked key of a wrapper's <c>Record</c>. A query
+/// is never typed over a bare <see cref="AlvoRecord"/>: it names no entity, so the read refuses it first. Values are read and typed in
 /// <c>FilterTranslator.Values.cs</c>; calls and lists in <c>FilterTranslator.Calls.cs</c>.
 /// </para>
 /// <para>
@@ -156,7 +156,7 @@ internal sealed partial class FilterTranslator
         : throw Refuse(node, $"'{name}' is not a field name a filter can name", "name a declared field: letters, digits and '_', starting with a letter or '_'.");
 
     private bool IsRowRecord(Expression record) =>
-        record == _row || record is MemberExpression { Member.Name: nameof(IAlvoEntity.Record), Expression: var owner } && owner == _row && _shape.IsWrapper;
+        record is MemberExpression { Member.Name: nameof(IAlvoEntity.Record), Expression: var owner } && owner == _row && _shape.IsWrapper;
 
     private string Describe(Expression node) => node switch
     {

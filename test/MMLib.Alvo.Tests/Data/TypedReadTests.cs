@@ -68,6 +68,11 @@ public sealed class TypedReadTests
             .Message.ShouldContain("[AlvoEntity(");
 
     [Fact]
+    public async Task A_query_typed_over_a_bare_record_is_refused_since_it_names_no_entity() =>
+        (await Should.ThrowAsync<InvalidOperationException>(() => Session(out _).QueryAsync<AlvoRecord>(x => (string?)x["note"] == "a", limit: 5, Ct)))
+            .Message.ShouldContain("[AlvoEntity(");
+
+    [Fact]
     public async Task A_type_mapped_to_every_entity_cannot_be_read()
     {
         var session = Substitute.For<IAlvoSession>();
