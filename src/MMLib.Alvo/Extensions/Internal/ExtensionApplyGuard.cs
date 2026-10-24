@@ -30,7 +30,9 @@ internal sealed class ExtensionApplyGuard(
 
     /// <summary>Refuses <paramref name="proposed"/> when a handler that binds the current catalog would no longer bind it.</summary>
     /// <param name="proposed">The catalog the change would prime.</param>
-    /// <exception cref="DescriptorValidationException">A handler that binds the current catalog would no longer bind.</exception>
+    /// <exception cref="DescriptorValidationException">
+    /// A handler that binds the current catalog would no longer bind; the warnings of every other handler travel with it.
+    /// </exception>
     internal ExtensionApplyCheck Check(PolicyCatalog proposed)
     {
         var problems = binder.Result(proposed).Problems;
@@ -39,18 +41,23 @@ internal sealed class ExtensionApplyGuard(
             return new(proposed, []);
         }
 
-        var boundNow = BoundNow();
+        var current = catalogs.Current;
+        var boundNow = BoundNow(current);
         var regressions = problems.Where(problem => boundNow.Contains(problem.Id)).ToList();
+        var warnings = ExtensionApplyRefusals.Warnings([.. problems.Where(problem => !boundNow.Contains(problem.Id))]);
         if (regressions.Count > 0)
         {
             throw new DescriptorValidationException(new DescriptorValidationResult(
-                ExtensionApplyRefusals.Refusals(registry, regressions, catalogs.Current!.Schema, proposed.Schema, compiler)));
+            [
+                .. ExtensionApplyRefusals.Refusals(registry, regressions, current!.Schema, proposed.Schema, compiler),
+                .. warnings,
+            ]));
         }
 
-        return new(proposed, ExtensionApplyRefusals.Warnings(problems));
+        return new(proposed, warnings);
     }
 
-    private HashSet<string> BoundNow() => catalogs.Current is { } current
-        ? binder.Result(current).Bindings.Handlers.Select(handler => handler.Id).ToHashSet(StringComparer.Ordinal)
-        : new HashSet<string>(StringComparer.Ordinal);
+    private HashSet<string> BoundNow(PolicyCatalog? current) => current is null
+        ? new HashSet<string>(StringComparer.Ordinal)
+        : binder.Result(current).Bindings.Handlers.Select(handler => handler.Id).ToHashSet(StringComparer.Ordinal);
 }

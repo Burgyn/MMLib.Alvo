@@ -7,9 +7,10 @@ namespace MMLib.Alvo.Extensions.Internal;
 
 /// <summary>
 /// Turns binding problems into descriptor findings. A refusal names, for a handler the change unbinds, the entity, the
-/// field or the <c>events.exclude</c> item the change removed or excluded — each existed before the change, since the
-/// handler bound it — and keeps the compiler's own sentence beside it, so a second cause is not hidden behind the
-/// first. A warning is the compiler's sentence alone, for a handler that bound neither catalog.
+/// field or the <c>events.exclude</c> item the change removed or excluded, or the field whose new type the condition no
+/// longer compiles against — each existed before the change, since the handler bound it — and keeps the compiler's own
+/// sentence beside it, so a second cause is not hidden behind the first. A warning is the compiler's sentence alone,
+/// for a handler that bound neither catalog.
 /// </summary>
 internal static class ExtensionApplyRefusals
 {
@@ -22,15 +23,15 @@ internal static class ExtensionApplyRefusals
             .GroupBy(problem => problem.Id, StringComparer.Ordinal)
             .SelectMany(refused => ForHandler(Registered(registry, refused.Key), refused, current, proposed, compiler))];
 
+    internal static IReadOnlyList<DescriptorValidationError> Warnings(IReadOnlyList<ExtensionProblem> problems) =>
+        [.. problems.Select(problem => Generic(problem, DescriptorValidationSeverity.Warning))];
+
     private static DescriptorValidationError[] ForHandler(
         HandlerRegistration handler, IEnumerable<ExtensionProblem> problems, SchemaModel current, SchemaModel proposed, ICelCompiler compiler) =>
         [.. Precise(handler, current, proposed, compiler), .. problems.Select(problem => Generic(problem, DescriptorValidationSeverity.Error))];
 
     private static HandlerRegistration Registered(ExtensionRegistry registry, string id) =>
         registry.Handlers.First(candidate => string.Equals(candidate.Id, id, StringComparison.Ordinal));
-
-    internal static IReadOnlyList<DescriptorValidationError> Warnings(IReadOnlyList<ExtensionProblem> problems) =>
-        [.. problems.Select(problem => Generic(problem, DescriptorValidationSeverity.Warning))];
 
     private static DescriptorValidationError[] Precise(
         HandlerRegistration handler, SchemaModel current, SchemaModel proposed, ICelCompiler compiler) =>
@@ -46,25 +47,50 @@ internal static class ExtensionApplyRefusals
             return [EntityRemoved(handler.Id, name)];
         }
 
-        return [.. FieldsRead(handler.When, Named(current, name), compiler)
-            .Select(field => FieldRefusal(handler.Id, after, field))
+        if (Named(current, name) is not { } before)
+        {
+            return [];
+        }
+
+        return [.. FieldsRead(handler.When, before, compiler)
+            .Select(field => FieldRefusal(handler, before, after, field, compiler))
             .OfType<DescriptorValidationError>()];
     }
 
-    private static DescriptorValidationError? FieldRefusal(string id, EntitySchema after, string field)
+    private static DescriptorValidationError? FieldRefusal(
+        HandlerRegistration handler, EntitySchema before, EntitySchema after, string field, ICelCompiler compiler)
     {
-        if (!after.Fields.Any(candidate => string.Equals(candidate.Name, field, StringComparison.Ordinal)))
+        if (Field(after, field) is not { } now)
         {
-            return FieldRemoved(id, after.Name, field);
+            return FieldRemoved(handler.Id, after.Name, field);
         }
 
         var index = after.EventImageExclusions.ToList().IndexOf(field);
-        return index < 0 ? null : FieldExcluded(id, after.Name, field, index);
+        if (index >= 0)
+        {
+            return FieldExcluded(handler.Id, after.Name, field, index);
+        }
+
+        return BreaksCondition(handler.When!, before, now, compiler) ? FieldRetyped(handler.Id, after.Name, field) : null;
     }
 
-    private static string[] FieldsRead(string? when, EntitySchema? before, ICelCompiler compiler)
+    private static bool BreaksCondition(string when, EntitySchema before, FieldSchema now, ICelCompiler compiler)
     {
-        if (when is null || before is null)
+        if (Field(before, now.Name) is not { } was || was.Type == now.Type)
+        {
+            return false;
+        }
+
+        var onlyThisRetyped = before with { Fields = [.. before.Fields.Select(field => field == was ? now : field)] };
+        return !compiler.Compile(when, CelProfile.Condition, onlyThisRetyped).IsSuccess;
+    }
+
+    private static FieldSchema? Field(EntitySchema entity, string name) =>
+        entity.Fields.FirstOrDefault(candidate => string.Equals(candidate.Name, name, StringComparison.Ordinal));
+
+    private static string[] FieldsRead(string? when, EntitySchema before, ICelCompiler compiler)
+    {
+        if (when is null)
         {
             return [];
         }
@@ -95,6 +121,13 @@ internal static class ExtensionApplyRefusals
         $"Field '{field}' of '{entity}' is read by extension '{id}' ({Kind}, in this host): left out of the event images, "
         + "it would decide the handler's condition by its absence.",
         FixPrefix + "field in the event images.");
+
+    private static DescriptorValidationError FieldRetyped(string id, string entity, string field) => Error(
+        $"/entities/{entity}/fields/{field}",
+        $"Field '{field}' of '{entity}' is read by extension '{id}' ({Kind}, in this host): with its new type the "
+        + "condition no longer compiles, so the handler would no longer bind, and every event it would have handled "
+        + "would be recorded dead.",
+        FixPrefix + "field's type.");
 
     private static DescriptorValidationError Generic(ExtensionProblem problem, DescriptorValidationSeverity severity) => new(
         string.Empty,

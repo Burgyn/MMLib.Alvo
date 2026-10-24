@@ -98,7 +98,7 @@ public sealed class ExtensionApplyGuardTests
     }
 
     [Fact]
-    public void A_retyped_field_the_condition_no_longer_compiles_against_is_refused_naming_the_extension()
+    public void A_retyped_field_the_condition_no_longer_compiles_against_is_refused_at_the_field()
     {
         var guard = Guard(alvo => alvo.Entity("tickets", t => t.OnUpdated("on-resolved", OnUpdated, when: "new.status == 'resolved'")));
         var retyped = Replaced("tickets", entity => entity with
@@ -108,8 +108,47 @@ public sealed class ExtensionApplyGuardTests
 
         var errors = Refused(guard, retyped);
 
-        Precise(errors).ShouldBeEmpty("the field is still there: no pointer names the cause");
-        errors.ShouldAllBe(error => error.Message.Contains("'on-resolved' (eventHandler, in this host) would no longer bind"));
+        var precise = Precise(errors).ShouldHaveSingleItem();
+        precise.Path.ShouldBe("/entities/tickets/fields/status");
+        precise.Message.ShouldContain("'on-resolved' (eventHandler, in this host)");
+        precise.FixSuggestion.ShouldBe("Remove the registration and redeploy first, or keep the field's type.");
+        errors.ShouldContain(error => error.Path.Length == 0 && error.Message.Contains("'on-resolved' (eventHandler, in this host) would no longer bind"));
+    }
+
+    [Fact]
+    public void A_retyped_field_the_condition_still_compiles_against_gets_no_pointer_when_another_cause_refuses()
+    {
+        var guard = Guard(alvo => alvo.Entity("tickets", t => t.OnUpdated("on-both", OnUpdated, when: "changed(code) && changed(status)")));
+        var changed = Replaced("tickets", entity => entity with
+        {
+            Fields = [.. entity.Fields
+                .Where(field => field.Name != "status")
+                .Select(field => field.Name == "code" ? new FieldSchema { Name = "code", Type = FieldType.Integer, Nullable = true } : field)],
+        });
+
+        Precise(Refused(guard, changed)).ShouldHaveSingleItem().Path.ShouldBe("/entities/tickets/fields/status");
+    }
+
+    [Fact]
+    public void A_refusal_carries_the_warnings_of_a_handler_that_was_already_unbound()
+    {
+        var withoutCode = WithoutField("tickets", "code");
+        var guard = Guard(
+            alvo =>
+            {
+                alvo.Entity("tickets", t => t.OnUpdated("stale", OnUpdated, when: "changed(code)"));
+                OnStatus("on-status")(alvo);
+            },
+            current: CatalogOf(withoutCode));
+        var proposed = new SchemaModel([.. withoutCode.Entities.Select(entity => entity.Name == "tickets"
+            ? entity with { Fields = [.. entity.Fields.Where(field => field.Name != "status")] }
+            : entity)]);
+
+        var errors = Refused(guard, proposed);
+
+        Precise(errors).ShouldHaveSingleItem().Message.ShouldContain("'on-status'");
+        errors.Where(error => error.Severity == DescriptorValidationSeverity.Error).ShouldAllBe(error => !error.Message.Contains("'stale'"));
+        errors.ShouldContain(error => error.Severity == DescriptorValidationSeverity.Warning && error.Message.Contains("'stale'"));
     }
 
     [Fact]
