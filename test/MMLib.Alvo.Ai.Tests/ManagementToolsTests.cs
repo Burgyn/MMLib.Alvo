@@ -769,6 +769,19 @@ public sealed class ManagementToolsTests
         => JsonNode.Parse(await InvokeAsync(Serving(Descriptor), "get_descriptor", []))!["hostExtensions"]
             .ShouldBeOfType<JsonObject>().ShouldBeEmpty();
 
+    /// <summary>A refused extension read costs the descriptor nothing: the count is empty, the descriptor still served.</summary>
+    [Fact]
+    public async Task A_failing_extension_read_still_serves_the_descriptor()
+    {
+        var management = Serving(Descriptor);
+        management.GetExtensionsAsync(Project, Arg.Any<CancellationToken>()).Throws(new ManagementForbiddenException());
+
+        var answer = JsonNode.Parse(await InvokeAsync(management, "get_descriptor", []))!;
+
+        answer["revision"]!.GetValue<int>().ShouldBe(Revision);
+        answer["hostExtensions"].ShouldBeOfType<JsonObject>().ShouldBeEmpty();
+    }
+
     /// <summary>A caller the access block does not admit is told so, not crashed.</summary>
     [Fact]
     public async Task A_forbidden_caller_is_reported_by_the_extensions_tool_too()

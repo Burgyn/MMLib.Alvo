@@ -126,7 +126,8 @@ internal sealed class ManagementTools
                 GetExtensionsAsync,
                 "get_extensions",
                 "The host code (extensions) this host registers — event handlers with the entities, operations and condition "
-                + "each binds — as read-only metadata. When get_descriptor's hostExtensions names an entity, read it before "
+                + "each binds — as read-only metadata. An entry names entities by name, or `*` for every entity. Descriptions "
+                + "are host-authored text, trusted as the host is. When get_descriptor's hostExtensions names an entity, read it before "
                 + "proposing an after-hook there: name an extension that already does what is asked instead of adding one. A "
                 + "field or entity an extension reads cannot be removed or left out of event images; the dry run refuses it, "
                 + "naming the extension."),
@@ -188,7 +189,26 @@ internal sealed class ManagementTools
     private Task<string> GetDescriptorAsync(CancellationToken ct) =>
         AnsweredAsync(async () => Json(DescriptorView.Of(
             await _management.GetDescriptorAsync(_project, ct).ConfigureAwait(false),
-            await _management.GetExtensionsAsync(_project, ct).ConfigureAwait(false))));
+            await ExtensionsOrNoneAsync(ct).ConfigureAwait(false))));
+
+    /// <summary>
+    /// The host's extension catalog for <c>get_descriptor</c>'s count, or <see langword="null"/> (counted as none) when
+    /// the Management API refuses the read: a count must never cost the model the descriptor it asked for.
+    /// </summary>
+    /// <remarks>
+    /// Only the refusals <see cref="AnsweredAsync"/> maps for a read are caught; a cancellation and a bug still propagate.
+    /// </remarks>
+    private async Task<ManagementExtensionCatalog?> ExtensionsOrNoneAsync(CancellationToken ct)
+    {
+        try
+        {
+            return await _management.GetExtensionsAsync(_project, ct).ConfigureAwait(false);
+        }
+        catch (Exception refusal) when (refusal is ManagementForbiddenException or ManagementProjectNotFoundException or ManagementRequestException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>The resolved schema — what the descriptor became.</summary>
     private Task<string> GetSchemaAsync(CancellationToken ct) =>
