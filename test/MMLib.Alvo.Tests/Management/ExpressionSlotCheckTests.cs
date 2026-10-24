@@ -137,16 +137,33 @@ public sealed class ExpressionSlotCheckTests
         refusal.Message.ShouldContain("/entities/orders/fields/big/values");
     }
 
+    /// <summary>
+    /// A hang guard, not a benchmark: a warm check at the bound measured ~0.1 s, and the shape this bound exists for — a
+    /// validation roughly quadratic in the array — costs minutes past it, so the 10 s ceiling is two orders of magnitude
+    /// above the real cost and still far below a regression. What made it flaky was what the stopwatch held besides the
+    /// check: the first, cold call (the validator's schema build, JIT) ran inside it, and a single sample took whatever
+    /// stall a machine at load 30–56 dealt that thread. So the cold call runs first, outside the clock, and the fact judges
+    /// the fastest of three warm runs — the repository's load gate judges <c>min</c> for the same reason (see
+    /// <c>test/load/README.md</c>): contention only ever adds time, so the minimum is the sample closest to the code's own
+    /// cost. A real hang still fails, since every run hangs.
+    /// </summary>
     [Fact]
     public void An_array_at_the_bound_is_checked_and_does_not_take_long()
     {
-        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var descriptor = WithEnumOf(2000);
+        Check(descriptor, ListRule, "'clerk' in @user.roles").Where(IsError).ShouldBeEmpty();
 
-        var findings = Check(WithEnumOf(2000), ListRule, "'clerk' in @user.roles");
+        var fastest = Enumerable.Range(0, 3).Min(_ => Timed(() => Check(descriptor, ListRule, "'clerk' in @user.roles")));
 
-        clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10), "a hang guard, not a benchmark");
-        findings.Where(IsError).ShouldBeEmpty();
-        Console.WriteLine($"[measure] 2000-element enum check: {clock.ElapsedMilliseconds} ms");
+        fastest.ShouldBeLessThan(TimeSpan.FromSeconds(10), "a hang guard, not a benchmark");
+        Console.WriteLine($"[measure] 2000-element enum check, fastest of 3 warm runs: {fastest.TotalMilliseconds:F0} ms");
+    }
+
+    private static TimeSpan Timed(Action action)
+    {
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        action();
+        return System.Diagnostics.Stopwatch.GetElapsedTime(started);
     }
 
     private static JsonObject WithEnumOf(int count)
