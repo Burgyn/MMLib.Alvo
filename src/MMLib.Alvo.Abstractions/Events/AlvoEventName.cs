@@ -109,7 +109,8 @@ public static partial class AlvoEventName
         + $"may publish into. A published '{first}.' event would be indistinguishable from a real data "
         + "change: every descriptor rule and after-hook subscribing to that name would fire on it, with a "
         + "partition key and provenance for a record nobody wrote. Publish it under a name of your own — "
-        + $"'orders.approved' rather than '{type}' — and note that no descriptor rule can subscribe to "
+        + $"'orders.approved' rather than '{type}' — and consume it with a host event handler, "
+        + "AddEventHandler(\"on-orders-approved\", \"orders.approved\", ...); no descriptor rule can subscribe to "
         + "such a name yet, because $defs/eventPattern is frozen to the reserved namespaces.";
 
     private static string FrameworkNamespaceRefusal(string type) =>
