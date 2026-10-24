@@ -16,8 +16,8 @@ internal static class HandlerDescription
         When = handler.When,
         Order = handler.Settings.Order,
         Timeout = handler.Settings.Timeout,
-        RunAs = handler.Settings.RunAs == AlvoRunAs.EventActor ? "eventActor" : "system",
-        Ordering = handler.Settings.Ordering == AlvoOrdering.None ? "none" : "perRecord",
+        RunAs = RunAs(handler.Settings.RunAs),
+        Ordering = Ordering(handler.Settings.Ordering),
         Description = handler.Settings.Description,
         TypeName = exposeTypeNames ? handler.Invoker.TypeName : null,
     };
@@ -27,6 +27,21 @@ internal static class HandlerDescription
         HandlerVerb.Created => ["create"],
         HandlerVerb.Updated => ["update"],
         HandlerVerb.Deleted => ["delete"],
-        _ => ["create", "update"],
+        HandlerVerb.Saved => ["create", "update"],
+        _ => throw new ArgumentOutOfRangeException(nameof(verb), verb, "A handler verb the catalog does not describe."),
+    };
+
+    private static string RunAs(AlvoRunAs runAs) => runAs switch
+    {
+        AlvoRunAs.System => "system",
+        AlvoRunAs.EventActor => "eventActor",
+        _ => throw new ArgumentOutOfRangeException(nameof(runAs), runAs, "An identity the catalog does not describe."),
+    };
+
+    private static string Ordering(AlvoOrdering ordering) => ordering switch
+    {
+        AlvoOrdering.PerRecord => "perRecord",
+        AlvoOrdering.None => "none",
+        _ => throw new ArgumentOutOfRangeException(nameof(ordering), ordering, "An ordering the catalog does not describe."),
     };
 }
