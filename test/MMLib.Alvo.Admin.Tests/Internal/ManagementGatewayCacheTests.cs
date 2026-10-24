@@ -187,6 +187,37 @@ public class ManagementGatewayCacheTests
         await Should.ThrowAsync<InvalidOperationException>(() => gateway.CelFunctionsAsync(Ct).AsTask());
     }
 
+    [Fact]
+    public async Task One_screen_reads_the_extension_catalog_once_and_a_navigation_reads_it_again()
+    {
+        var navigation = new TestNavigation();
+        using var gateway = Gateway(navigation, out var management);
+        management.GetExtensionsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new ManagementExtensionCatalog { Items = [Extension("notify-reschedule")] });
+
+        (await gateway.ExtensionsAsync(Ct)).Single().Id.ShouldBe("notify-reschedule");
+        await gateway.ExtensionsAsync(Ct);
+        await management.Received(1).GetExtensionsAsync("default", Arg.Any<CancellationToken>());
+
+        await navigation.GoToAsync("http://alvo.test/admin/schema");
+        await gateway.ExtensionsAsync(Ct);
+        await management.Received(2).GetExtensionsAsync("default", Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [MemberData(nameof(ExpectedCatalogFailures))]
+    public async Task An_extension_catalog_that_cannot_be_asked_answers_empty_and_is_asked_again(Exception failure)
+    {
+        using var gateway = Gateway(new TestNavigation(), out var management);
+        management.GetExtensionsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(
+                _ => throw failure,
+                _ => new ManagementExtensionCatalog { Items = [Extension("notify-reschedule")] });
+
+        (await gateway.ExtensionsAsync(Ct)).ShouldBeEmpty();
+        (await gateway.ExtensionsAsync(Ct)).ShouldHaveSingleItem("a failure to ask caches nothing");
+    }
+
     public static TheoryData<Exception> ExpectedCatalogFailures() =>
     [
         new ManagementRequestException("refused"),
@@ -205,6 +236,9 @@ public class ManagementGatewayCacheTests
         Provenance = CelFunctionProvenance.BuiltIn,
         Profiles = [CelProfile.Mutate],
     };
+
+    private static ManagementExtension Extension(string id) =>
+        new() { Id = id, Kind = AlvoExtensionKind.EventHandler, Stage = AlvoExtensionStage.PostCommit };
 
     [Fact]
     public async Task A_disposed_gateway_no_longer_follows_the_circuit()

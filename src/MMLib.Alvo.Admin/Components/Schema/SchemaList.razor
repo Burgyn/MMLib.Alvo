@@ -161,6 +161,7 @@
     private static readonly IReadOnlyList<string> _zooms = [FitZoom, ActualZoom];
 
     private SchemaModel? _schema;
+    private IReadOnlyList<ManagementExtension> _extensions = [];
     private AdminProblem? _problem;
     private bool _map;
     private bool _reactions;
@@ -202,6 +203,7 @@
             Session.Follow(Copy, InvokeAsync, StateHasChanged, ct);
 
             _schema = await Gateway.SchemaAsync(ct);
+            _extensions = await Gateway.ExtensionsAsync(ct);
             _byName = _schema.Entities.ToDictionary(entity => entity.Name, StringComparer.Ordinal);
             await Session.EnsureLoadedAsync(Copy, ct);
         }
@@ -245,6 +247,11 @@
                 <span class="a-badge a-badge--danger">removed — not applied yet</span>
             }
             <span class="a-badge">@entity.Fields.Count fields</span>
+            @if (LifecycleLane.Binding(entity.Name, _extensions).Count is > 0 and var bound)
+            {
+                <span class="a-badge a-badge--accent" data-testid="@($"entity-extensions-{entity.Name}")"
+                      title="@LifecycleLane.BadgeLabel(bound)" aria-label="@LifecycleLane.BadgeLabel(bound)">⟨/⟩ @bound</span>
+            }
             @if (entity.Tenancy == TenancyMode.Scoped)
             {
                 <span class="a-badge a-badge--accent">scoped</span>

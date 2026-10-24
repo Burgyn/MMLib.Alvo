@@ -43,6 +43,9 @@ Types and facets are in `alvo-descriptor-field-types-and-formats`; `computed` an
 - A `required` field that is `"readOnly": true` can never be created, and is refused, unless a literal `default`
   supplies its value. A `computed` or `rollup` field is already read-only: do not add `readOnly` to it, since
   `required` with `readOnly` is refused there too.
+- `"events": {"exclude": ["<field>"]}` leaves fields out of the entity's event images, so no webhook body, after-hook
+  or extension reads them; `id`, `tenant_id` and the managed columns stay. A field or entity an extension reads
+  (`get_extensions`) cannot be removed or excluded: apply refuses it, naming the extension.
 
 ## A new entity is one `add`
 

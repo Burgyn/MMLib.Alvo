@@ -782,7 +782,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// <b>This is the gap <see cref="RuntimeSchemaService"/>'s own remarks call real.</b> Priming used to be
     /// something a successful <em>apply</em> did on the way past, so a restart over an unchanged descriptor —
     /// the ordinary case — came back with an unprimed provider, which denies every operation. Publishing the
-    /// stage-0 catalog rather than calling <c>PolicyCatalogPriming.Prime</c> avoids compiling a second,
+    /// stage-0 catalog rather than building a fresh one avoids compiling a second,
     /// identical catalog; the content is the same either way.
     /// </remarks>
     private int? Prime(BootPlan boot, int? revision)

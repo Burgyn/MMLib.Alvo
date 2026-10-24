@@ -53,6 +53,7 @@ internal sealed class ManagementGateway(
     private readonly Slot<SchemaModel> _schema = new();
     private readonly Slot<ManagementCapabilities> _capabilities = new();
     private readonly Slot<ManagementCelFunctions> _functions = new();
+    private readonly Slot<ManagementExtensionCatalog> _extensions = new();
     private readonly Slot<ManagementInfo> _info = new();
     private readonly Slot<IReadOnlyList<ManagementProject>> _projects = new();
     private IDisposable? _following;
@@ -120,6 +121,27 @@ internal sealed class ManagementGateway(
             var answer = await CachedAsync(_functions, () => management.GetCelFunctionsAsync(project, ct), ct)
                 .ConfigureAwait(false);
             return answer.Functions;
+        }
+        catch (Exception ex) when (ex is ManagementRequestException or ManagementForbiddenException
+            or OperationCanceledException or HttpRequestException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>The host code registered with this instance — its extensions, as metadata (HX-04 <c>extensions</c>).</summary>
+    /// <remarks>
+    /// Cached like the function catalog, and for the same reason empty when it cannot be read: a badge and a read-only lane
+    /// are helpers, and a helper must never be the reason a screen does not draw.
+    /// </remarks>
+    public async ValueTask<IReadOnlyList<ManagementExtension>> ExtensionsAsync(CancellationToken ct)
+    {
+        try
+        {
+            var project = await ProjectAsync(ct).ConfigureAwait(false);
+            var answer = await CachedAsync(_extensions, () => management.GetExtensionsAsync(project, ct), ct)
+                .ConfigureAwait(false);
+            return answer.Items;
         }
         catch (Exception ex) when (ex is ManagementRequestException or ManagementForbiddenException
             or OperationCanceledException or HttpRequestException)
@@ -581,6 +603,7 @@ internal sealed class ManagementGateway(
         _schema.Value = null;
         _capabilities.Value = null;
         _functions.Value = null;
+        _extensions.Value = null;
         _info.Value = null;
     }
 

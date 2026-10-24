@@ -1,0 +1,79 @@
+﻿@*
+    What runs on this entity, by when it runs. This build draws one lane, After commit: the descriptor's after-hooks,
+    which the On write tab edits (one editor, not two), and the host's event handlers, which live in its C# and are
+    read-only here — marked by the accent badge every piece of host code wears, as the function list's "this host"
+    does. The other lanes appear with the host code that can run in them.
+*@
+<div data-testid="lifecycle-after-commit">
+    <SectionHead Title="After commit">
+        <Subtitle>
+            Runs once the write has committed, from the outbox: it can never undo the write, and it may leave the process.
+            This tab shows what runs after the commit only — before-hooks, which run inside the transaction, are on the
+            On write tab.
+        </Subtitle>
+    </SectionHead>
+
+    @if (_hooks.Count == 0 && _extensions.Count == 0)
+    {
+        <div data-testid="lifecycle-empty">
+            <EmptyState Title="Nothing runs after a commit on this entity"
+                        Body="No after-hook is declared, and the host registers no event handler for it." />
+        </div>
+    }
+
+    @foreach (var hook in _hooks)
+    {
+        <ListRow class="a-listrow--roomy a-listrow--stacked" data-testid="@($"lane-hook-{hook.Point}-{hook.Number}")">
+            <div class="a-row">
+                <span class="a-badge">descriptor</span>
+                <span class="a-mono a-name">@hook.Point</span>
+                <span class="a-section__sub">hook @hook.Number</span>
+            </div>
+            <CodeBlock Json="@hook.Json" />
+            <a class="a-link" href="@AdminPaths.Entity(Entity, EntityTabs.FromSlug(EntityTabs.OnWrite))" data-testid="lane-hook-edit">Change it on the On write tab</a>
+        </ListRow>
+    }
+
+    @foreach (var extension in _extensions)
+    {
+        <ListRow class="a-listrow--roomy a-listrow--stacked" data-testid="@($"lane-extension-{extension.Id}")">
+            <div class="a-row">
+                <span class="a-badge a-badge--accent">⟨/⟩ from code</span>
+                <span class="a-mono a-name">@extension.Id</span>
+            </div>
+            @if (extension.Description is { } description)
+            {
+                <span class="a-meta">@description</span>
+            }
+            <span class="a-section__sub" data-testid="lane-extension-summary">@LifecycleLane.Summary(extension)</span>
+            @if (extension.When is { } when)
+            {
+                <code class="a-mono" data-testid="lane-extension-when">when @when</code>
+            }
+            <p class="a-note">Registered in the host's C#: it is changed there, never here.</p>
+        </ListRow>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<LaneHook> _hooks = [];
+    private IReadOnlyList<ManagementExtension> _extensions = [];
+
+    /// <summary>The entity whose lane this is.</summary>
+    [Parameter, EditorRequired]
+    public string Entity { get; set; } = string.Empty;
+
+    /// <summary>The entity's hooks in the working copy, by point, as the On write tab reads them.</summary>
+    [Parameter]
+    public IReadOnlyList<KeyValuePair<string, string>> Hooks { get; set; } = [];
+
+    /// <summary>Every extension this instance registers; the lane keeps the ones that run on <see cref="Entity"/>.</summary>
+    [Parameter]
+    public IReadOnlyList<ManagementExtension> Extensions { get; set; } = [];
+
+    protected override void OnParametersSet()
+    {
+        _hooks = LifecycleLane.AfterCommitHooks(Hooks);
+        _extensions = LifecycleLane.AfterCommit(Entity, Extensions);
+    }
+}

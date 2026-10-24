@@ -130,6 +130,23 @@ public interface IAlvoManagement
     Task<ManagementCelFunctions> GetCelFunctionsAsync(string project, CancellationToken ct = default);
 
     /// <summary>
+    /// The host code registered with this instance — its extensions — as metadata: what each one is, what it binds to
+    /// and when it runs. Never the code, and never a way to change it.
+    /// </summary>
+    /// <remarks>
+    /// The list is the instance's, like <see cref="GetCelFunctionsAsync"/>'s: an extension exists only in the host that
+    /// registered it, and the standalone image registers none. An apply that would remove an entity or field one of them
+    /// binds, or leave a field it reads out of the event images, is refused naming it — read this before proposing such a
+    /// change.
+    /// </remarks>
+    /// <param name="project">The project name.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The extensions, by order and then registration order, in an envelope that can grow additively.</returns>
+    /// <exception cref="ManagementForbiddenException">The caller does not reach this operation's level.</exception>
+    /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
+    Task<ManagementExtensionCatalog> GetExtensionsAsync(string project, CancellationToken ct = default);
+
+    /// <summary>
     /// Answers what a named caller may do to an entity — <b>by calling the same <c>IPolicyEngine</c>
     /// production calls</b>, never a copy of it.
     /// </summary>

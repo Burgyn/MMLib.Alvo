@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
@@ -107,14 +108,15 @@ internal sealed class RuntimeSchemaWorld
     private RuntimeSchemaWorld(
         InMemoryDescriptorVersionStore versions,
         CountingRuntimeSchemaWriter writer,
-        CountingPolicyCatalogs policyCatalogs)
+        CountingPolicyCatalogs policyCatalogs,
+        ExtensionApplyGuard? extensions)
     {
         Versions = versions;
         Writer = writer;
         PolicyCatalogs = policyCatalogs;
         Service = new RuntimeSchemaService(
             new DescriptorValidator(), new InMemorySchemaMigrator(), versions, writer,
-            new CelCompiler(), policyCatalogs);
+            new CelCompiler(), policyCatalogs, extensions);
     }
 
     /// <summary>The service under test.</summary>
@@ -132,17 +134,26 @@ internal sealed class RuntimeSchemaWorld
     /// <summary>A world with nothing applied yet.</summary>
     internal static RuntimeSchemaWorld Empty() => Around(new InMemoryDescriptorVersionStore());
 
-    /// <summary>A world with nothing applied yet, over a store the caller also holds.</summary>
+    /// <summary>
+    /// A world with nothing applied yet, over a store the caller also holds — with the host's extension guard, built
+    /// over this world's catalog provider, when one is given.
+    /// </summary>
     /// <remarks>
     /// <b>The same store instance reaches the writer and the service.</b> The writer delegates its append
     /// there and the service reads its history from there, so two instances would make every append
     /// invisible to the very service that has to see it.
     /// </remarks>
     /// <param name="versions">The history store to build the world around.</param>
-    internal static RuntimeSchemaWorld Around(InMemoryDescriptorVersionStore versions) => new(
-        versions,
-        new CountingRuntimeSchemaWriter(new InMemoryRuntimeSchemaWriter(versions)),
-        new CountingPolicyCatalogs(new PolicyCatalogProvider()));
+    /// <param name="extensions">
+    /// Builds the host's extension guard over this world's catalog provider, when one is given; without it the
+    /// service carries no guard.
+    /// </param>
+    internal static RuntimeSchemaWorld Around(
+        InMemoryDescriptorVersionStore versions, Func<IPolicyCatalogProvider, ExtensionApplyGuard>? extensions = null)
+    {
+        var catalogs = new CountingPolicyCatalogs(new PolicyCatalogProvider());
+        return new(versions, new CountingRuntimeSchemaWriter(new InMemoryRuntimeSchemaWriter(versions)), catalogs, extensions?.Invoke(catalogs));
+    }
 
     /// <summary>A world with <paramref name="descriptorJson"/> already applied as revision 1.</summary>
     /// <remarks>

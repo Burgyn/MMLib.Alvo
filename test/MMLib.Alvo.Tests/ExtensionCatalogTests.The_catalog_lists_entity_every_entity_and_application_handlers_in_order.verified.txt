@@ -1,0 +1,58 @@
+﻿{
+  "items": [
+    {
+      "id": "audit-every-save",
+      "kind": "eventHandler",
+      "stage": "postCommit",
+      "entities": [
+        "*"
+      ],
+      "operations": [
+        "create",
+        "update"
+      ],
+      "event": null,
+      "when": null,
+      "order": -1,
+      "timeout": "00:00:05",
+      "runAs": "system",
+      "ordering": "perRecord",
+      "description": null,
+      "typeName": null
+    },
+    {
+      "id": "ticket-resolved",
+      "kind": "eventHandler",
+      "stage": "postCommit",
+      "entities": [
+        "tickets"
+      ],
+      "operations": [
+        "update"
+      ],
+      "event": null,
+      "when": "changed(status) && new.status == 'resolved'",
+      "order": 0,
+      "timeout": "00:00:30",
+      "runAs": "system",
+      "ordering": "perRecord",
+      "description": "Posts to the chat when a ticket is resolved.",
+      "typeName": null
+    },
+    {
+      "id": "orders-approved",
+      "kind": "eventHandler",
+      "stage": "postCommit",
+      "entities": [],
+      "operations": [],
+      "event": "orders.approved",
+      "when": null,
+      "order": 0,
+      "timeout": "00:00:30",
+      "runAs": "eventActor",
+      "ordering": "none",
+      "description": null,
+      "typeName": null
+    }
+  ]
+}

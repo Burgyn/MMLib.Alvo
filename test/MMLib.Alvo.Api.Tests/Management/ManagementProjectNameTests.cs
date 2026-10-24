@@ -34,6 +34,7 @@ public class ManagementProjectNameTests
     [InlineData("revisions/1")]
     [InlineData("schema")]
     [InlineData("capabilities")]
+    [InlineData("extensions")]
     public async Task A_blank_project_segment_is_the_named_404_rather_than_a_500(string operation)
     {
         await using var world = await ManagedFleet.StartAsync([_ops]);

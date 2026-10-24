@@ -59,7 +59,12 @@ internal static class EventConditionReads
         (node is CelFieldRef reference ? [reference.FieldName] : Enumerable.Empty<string>())
             .Concat(CelTree.Children(node).SelectMany(FieldsRead));
 
-    private static IEnumerable<string> FieldsReadOrCompared(CelNode node) =>
+    /// <summary>
+    /// Every field <paramref name="node"/> reads — through <c>new.</c>, <c>old.</c>, a bare field or <c>has()</c> — or
+    /// compares through <c>changed(field)</c>, in source order, repeats included.
+    /// </summary>
+    /// <param name="node">The compiled condition's tree.</param>
+    internal static IEnumerable<string> FieldsReadOrCompared(CelNode node) =>
         Own(node).Concat(CelTree.Children(node).SelectMany(FieldsReadOrCompared));
 
     private static string[] Own(CelNode node) => node switch

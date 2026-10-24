@@ -53,6 +53,7 @@ public class ManagementOperationsTests
             ManagementOperation.GetSchema,
             ManagementOperation.GetCapabilities,
             ManagementOperation.GetCelFunctions,
+            ManagementOperation.GetExtensions,
             ManagementOperation.GetInfo,
             ManagementOperation.SimulatePolicy,
         ]);
@@ -86,12 +87,12 @@ public class ManagementOperationsTests
         ]);
 
     /// <summary>
-    /// The surface is sixteen operations. A count rather than a comment, so adding a seventeenth fails
+    /// The surface is seventeen operations. A count rather than a comment, so adding an eighteenth fails
     /// here until somebody decides its level — which is the decision this table exists to force.
     /// </summary>
     [Fact]
-    public void The_management_surface_is_sixteen_operations()
-        => Enum.GetValues<ManagementOperation>().Length.ShouldBe(16);
+    public void The_management_surface_is_seventeen_operations()
+        => Enum.GetValues<ManagementOperation>().Length.ShouldBe(17);
 
     [Fact]
     public void The_levels_are_ordered_so_the_highest_match_is_the_greatest_value()

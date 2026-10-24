@@ -7,6 +7,7 @@ using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Migrations.Internal;
+using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Migrations;
@@ -28,6 +29,23 @@ public sealed class SchemaMigrationRunnerTests
               "fields": {
                 "vin": { "type": "string", "required": true, "maxLength": 17 },
                 "make": { "type": "string" }
+              }
+            }
+          }
+        }
+        """;
+
+    /// <summary><see cref="FleetDescriptorJson"/> plus a <c>plate</c> a handler reads — the catalog a host had primed before.</summary>
+    private const string FleetWithPlateJson = """
+        {
+          "apiVersion": "alvo.dev/v1",
+          "name": "fleet",
+          "entities": {
+            "vehicles": {
+              "fields": {
+                "vin": { "type": "string", "required": true, "maxLength": 17 },
+                "make": { "type": "string" },
+                "plate": { "type": "string" }
               }
             }
           }
@@ -268,31 +286,55 @@ public sealed class SchemaMigrationRunnerTests
     }
 
     /// <summary>
-    /// <c>ApplyAlvoDescriptorAsync</c> binds leniently, like a runtime apply: a handler that does not fit the applied
-    /// descriptor is left unbound and its events recorded dead — the apply is never refused for it.
+    /// <c>ApplyAlvoDescriptorAsync</c> is guarded like every apply (HX-04), and the guard refuses a change, not a state: a
+    /// handler that never bound — nothing was primed — blocks nothing, and is left unbound with its events recorded dead.
     /// </summary>
     [Fact]
-    public async Task Applying_a_descriptor_a_handler_does_not_fit_succeeds_and_leaves_the_handler_unbound()
+    public async Task A_descriptor_a_handler_never_fit_is_applied_and_the_handler_stays_unbound()
     {
         _store.GetCurrentAsync("fleet", Arg.Any<CancellationToken>()).Returns((AppliedSchema?)null);
         _introspector.IntrospectAsync(Arg.Any<CancellationToken>()).Returns(new SchemaModel([]));
-        var binder = new ExtensionBinder(
-            HandlerCatalog.Registry(alvo => alvo.Entity("no-such-entity", e => e.OnCreated("orphan-handler", HandlerCatalog.OnCreated))),
-            new CelCompiler(),
-            HandlerCatalog.EveryService(),
-            NullLogger<ExtensionBinder>.Instance);
+        var (runner, binder, catalogs) = Guarded(alvo => alvo.Entity("no-such-entity", e => e.OnCreated("orphan-handler", HandlerCatalog.OnCreated)));
+
+        var result = await runner.RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken);
+
+        result.Applied.ShouldBeTrue();
+        binder.For(catalogs.Current.ShouldNotBeNull()).Unbound.ShouldHaveSingleItem().Id.ShouldBe("orphan-handler");
+    }
+
+    /// <summary>A descriptor that drops what a bound handler reads is refused before anything is planned or saved.</summary>
+    [Fact]
+    public async Task A_descriptor_that_drops_what_a_bound_handler_reads_is_refused_before_anything_is_written()
+    {
+        _store.GetCurrentAsync("fleet", Arg.Any<CancellationToken>()).Returns((AppliedSchema?)null);
+        _introspector.IntrospectAsync(Arg.Any<CancellationToken>()).Returns(new SchemaModel([]));
+        var (runner, _, catalogs) = Guarded(alvo => alvo.Entity("vehicles", e => e.OnUpdated("on-plate", HandlerCatalog.OnUpdated, when: "changed(plate)")));
+        var primed = AlvoDescriptor.Parse(FleetWithPlateJson);
+        var before = PolicyCatalog.Build(primed, DescriptorToSchemaMapper.Map(primed), new CelCompiler());
+        catalogs.SetCurrent("fleet", before);
+
+        var refused = await Should.ThrowAsync<DescriptorValidationException>(
+            () => runner.RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken));
+
+        refused.Result.Errors.Where(error => error.Path.Length > 0).ShouldHaveSingleItem().Path.ShouldBe("/entities/vehicles/fields/plate");
+        await _store.DidNotReceive().SaveAsync(Arg.Any<string>(), Arg.Any<AppliedSchema>(), Arg.Any<CancellationToken>());
+        catalogs.Current.ShouldBeSameAs(before, "a refused apply primes nothing");
+    }
+
+    private (SchemaMigrationRunner Runner, ExtensionBinder Binder, PolicyCatalogProvider Catalogs) Guarded(Action<IAlvoBuilder> configure)
+    {
+        var registry = HandlerCatalog.Registry(configure);
+        var binder = new ExtensionBinder(registry, new CelCompiler(), HandlerCatalog.EveryService(), NullLogger<ExtensionBinder>.Instance);
         var catalogs = new PolicyCatalogProvider();
         var runner = new SchemaMigrationRunner(
             new DescriptorBootPlan(_source, new DescriptorValidator(), new CelCompiler(), NullLogger<DescriptorBootPlan>.Instance, binder),
             _migrator,
             _introspector,
             _store,
-            catalogs);
+            catalogs,
+            new ExtensionApplyGuard(registry, binder, new CelCompiler(), catalogs));
 
-        var result = await runner.RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken);
-
-        result.Applied.ShouldBeTrue();
-        binder.For(catalogs.Current.ShouldNotBeNull()).Unbound.ShouldHaveSingleItem().Id.ShouldBe("orphan-handler");
+        return (runner, binder, catalogs);
     }
 
     private static SchemaModel MapFleetDescriptor()

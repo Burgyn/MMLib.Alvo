@@ -1,0 +1,147 @@
+---
+title: See your extensions in the dashboard
+description: Every handler your host registers is listed — in the dashboard, the Management API and the assistant — and no apply can quietly drop what it reads.
+sidebar:
+  order: 4
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import extensions from '../../../snippets/extending/catalog/FleetDeskExtensions.cs?raw';
+import tests from '../../../snippets/extending/catalog/FleetDeskExtensionsTests.cs?raw';
+import descriptor from '../../../snippets/extending/catalog/fleet-desk.alvo.json?raw';
+
+Code your host registers is part of the backend as much as the descriptor is. Alvo lists it — the dashboard, the
+Management API and the schema assistant all read one **extension catalog** — and keeps the two from drifting apart: an
+apply that would take away what a handler reads is refused, naming the handler.
+
+## What is listed
+
+Every [event handler](/extending/event-handlers/) the host registers, as **metadata, never code**: what it is, what it
+binds to and when it runs. Nothing in the catalog can change a handler; it is changed in the host's C# and redeployed.
+
+<Code code={descriptor} lang="json" title="fleet-desk.alvo.json" />
+
+<SourceExcerpt code={extensions} from="public static IAlvoBuilder AddFleetDeskExtensions" to="goes in for repair." title="FleetDeskExtensions.cs" />
+
+| Member | What it says |
+|---|---|
+| `id` | the id the handler was registered under — its identity, and the key of its deliveries |
+| `kind` | `eventHandler` |
+| `stage` | `postCommit`: it runs after the write commits |
+| `entities` | the entities it binds; `["*"]` for an every-entity handler, `[]` for an application-event handler |
+| `operations` | `create`, `update`, `delete`, as the policy names them; `OnSaved` lists `create` and `update`, and `OnUpdated`'s `update` covers a replace; `[]` for an application-event handler |
+| `event` | the event type an application-event handler handles; `null` otherwise |
+| `when` | its condition as CEL text, or `null` |
+| `order` | its place among the handlers of the same target: lower first, then registration order — the order the catalog lists them in |
+| `timeout` | how long one attempt may take, as a `TimeSpan` (`"00:00:30"`) |
+| `runAs` | `system` or `eventActor` |
+| `ordering` | `perRecord` or `none` |
+| `description` | the sentence you set in `options.Description`, or `null` |
+| `typeName` | the class that implements it, only when the host exposes type names (below); a delegate is never named |
+
+An id retired with `AddRetiredExtension` is not an extension and is not listed. `kind` and `stage` gain values as later
+releases add kinds of host code; a typed .NET client older than the server cannot read a value it does not know, so a
+client that must tolerate one reads the raw string.
+
+## Read it
+
+`GET /management/projects/<project>/extensions` answers any caller with the `viewer` level, and
+`IAlvoManagement.GetExtensionsAsync` answers in process:
+
+```json
+{
+  "items": [
+    {
+      "id": "book-repair",
+      "kind": "eventHandler",
+      "stage": "postCommit",
+      "entities": ["vehicles"],
+      "operations": ["update"],
+      "event": null,
+      "when": "changed(status) && new.status == 'in_repair'",
+      "order": 0,
+      "timeout": "00:00:30",
+      "runAs": "system",
+      "ordering": "perRecord",
+      "description": "Books the vehicle into the workshop when it goes in for repair.",
+      "typeName": null
+    }
+  ]
+}
+```
+
+- **Type names stay hidden by default.** `Alvo:Extensions:ExposeTypeNames` (`false`) fills `typeName` for a class
+  handler. A type name reaches every catalog viewer and the assistant's model, and it describes your code's insides,
+  so it is something you opt into. Descriptions are visible to every viewer too: put no secrets in them.
+- **The capability report names the kind.** With at least one handler registered,
+  `GET …/capabilities` lists `extensions.eventHandler` in `honoured`, after the descriptor's blocks.
+- **The policy simulator lists what would run.** `POST …/policy/simulate` answers with `extensions`: the entity's own
+  handlers and the every-entity ones whose `operations` contain the simulated operation.
+
+## In the dashboard
+
+**Schema** marks every entity host code runs on with a `⟨/⟩ n` badge, counting the entity's own handlers and every
+every-entity one. Open the entity and its **Lifecycle** tab shows what runs *after the commit only* — before-hooks,
+which run inside the transaction, stay on **On write**:
+
+- the descriptor's after-hooks, read-only, each with a link to **On write**, where they are changed;
+- each handler, read-only and marked `⟨/⟩ from code`, with its description, its `when`, and a line such as
+  `on update · timeout 30 s · runs as the system · in order per record`.
+
+## An apply cannot drop what a handler reads
+
+A handler binds to the descriptor when the host starts. Alvo then refuses any change that would unbind it:
+
+| The change | Pointed at |
+|---|---|
+| removes an entity a handler binds | `/entities/<entity>` |
+| removes or renames a field its condition reads, or retypes it so the condition no longer compiles | `/entities/<entity>/fields/<field>` |
+| adds a field its condition reads to `events.exclude` | `/entities/<entity>/events/exclude/<index>` |
+
+The refusal is the `422` [`validation`](/reference/problem-types/#validation) problem any invalid descriptor gets, with
+code `descriptor`. Beside each pointed violation travels the binding compiler's own sentence at `"pointer": ""`, so a
+second cause is never hidden behind the first:
+
+```json
+[
+  {
+    "pointer": "/entities/vehicles/fields/status",
+    "code": "descriptor",
+    "message": "Field 'status' of 'vehicles' is bound by extension 'book-repair' (eventHandler, in this host): its condition reads it, so without it the handler would no longer bind, and every event it would have handled would be recorded dead.",
+    "fixSuggestion": "Remove the registration and redeploy first, or keep the field."
+  },
+  {
+    "pointer": "",
+    "code": "descriptor",
+    "message": "Extension 'book-repair' (eventHandler, in this host) would no longer bind to this descriptor — extensions/book-repair/when: …",
+    "fixSuggestion": "…"
+  }
+]
+```
+
+- **Every path is guarded**: an apply, a dry run (and with it the dashboard's preview), a rollback and
+  `ApplyAlvoDescriptorAsync`. The check runs right after validation and before the revision check, so a stale
+  `If-Match` on such a change answers `422`, not `412`: the change could never apply.
+- **It refuses a change, not a state.** A handler that never bound — a dashboard-first host's first descriptor, a stored
+  descriptor the host started over and could not apply — blocks nothing. The dry run carries a warning instead, and the
+  handler's events are recorded dead `unbound` until a descriptor fits it.
+- **The remedy has an order**: remove or change the registration, redeploy the host, then apply.
+
+<SourceExcerpt code={tests} from="var withoutStatus" to="/entities/vehicles/fields/status" title="FleetDeskExtensionsTests.cs" />
+
+The guard reads the catalog this process holds. Two applies racing before either publishes, or an apply on another
+replica, are not covered — the same window in which the published catalog itself can lag behind an apply.
+
+## The assistant
+
+The [schema assistant](/guides/schema-assistant/) reads the catalog when it matters. `get_descriptor` answers with
+`hostExtensions`, how many extensions run on each entity, and `get_extensions` lists them. Before proposing an
+after-hook on an entity that count names, it reads the catalog and names an extension that already does what you asked
+instead of adding a second one; and it does not propose removing a field an extension reads — the dry run would refuse
+it anyway, naming the extension.
+
+## Not yet
+
+Write hooks, commands and reads join the Lifecycle tab in later releases, each in its own lane. Delivery history,
+pause and replay arrive with the operations page.

@@ -54,7 +54,7 @@
                   Note="tables Alvo created and keeps in step" />
             <Stat Label="Revisions" Value="@_revisions.Count.ToString(CultureInfo.InvariantCulture)"
                   Note="appended, never rewritten" />
-            <Stat Label="Honoured blocks" Value="@_capabilities!.Honoured.Count.ToString(CultureInfo.InvariantCulture)"
+            <Stat Label="Honoured blocks" Value="@HonouredBlocks.Count(_capabilities!.Honoured).ToString(CultureInfo.InvariantCulture)"
                   Note="of the descriptor, running today" />
         </div>
 

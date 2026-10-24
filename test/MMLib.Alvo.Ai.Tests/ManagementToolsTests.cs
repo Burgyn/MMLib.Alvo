@@ -29,17 +29,17 @@ public sealed class ManagementToolsTests
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    /// <summary>The model can call exactly these seven tools, and nothing else.</summary>
+    /// <summary>The model can call exactly these eight tools, and nothing else.</summary>
     /// <remarks>
-    /// Equality rather than "does not contain apply": a seventh tool somebody adds is a capability the model gains,
+    /// Equality rather than "does not contain apply": a ninth tool somebody adds is a capability the model gains,
     /// and a test that only looked for forbidden names would pass for every one nobody thought to forbid.
     /// </remarks>
     [Fact]
-    public void The_tool_set_is_exactly_the_five_reads_and_the_two_dry_runs() =>
+    public void The_tool_set_is_exactly_the_six_reads_and_the_two_dry_runs() =>
         ManagementTools.For(Substitute.For<IAlvoManagement>(), Project).Functions
             .Select(tool => tool.Name)
             .OrderBy(name => name, StringComparer.Ordinal)
-            .ShouldBe(["check_change", "get_capabilities", "get_cel_functions", "get_descriptor", "get_revisions", "get_schema", "propose_change"]);
+            .ShouldBe(["check_change", "get_capabilities", "get_cel_functions", "get_descriptor", "get_extensions", "get_revisions", "get_schema", "propose_change"]);
 
     /// <summary>
     /// Both tools that reach the apply path always ask for a dry run, and never for destruction.
@@ -713,6 +713,83 @@ public sealed class ManagementToolsTests
         management.GetCelFunctionsAsync(Project, Arg.Any<CancellationToken>()).Throws(new ManagementForbiddenException());
 
         (await InvokeAsync(management, "get_cel_functions", [])).ShouldContain("forbidden");
+    }
+
+    /// <summary>The extensions tool reads through the management port, with the operator's authority and the project's name.</summary>
+    [Fact]
+    public async Task The_extensions_tool_answers_with_what_the_management_port_lists()
+    {
+        var management = Substitute.For<IAlvoManagement>();
+        management.GetExtensionsAsync(Project, Arg.Any<CancellationToken>()).Returns(new ManagementExtensionCatalog
+        {
+            Items =
+            [
+                new ManagementExtension
+                {
+                    Id = "open-damage-claim",
+                    Kind = AlvoExtensionKind.EventHandler,
+                    Stage = AlvoExtensionStage.PostCommit,
+                    Entities = ["rentals"],
+                    Operations = ["update"],
+                    When = "changed(damage_report)",
+                },
+            ],
+        });
+
+        var answer = await InvokeAsync(management, "get_extensions", []);
+
+        answer.ShouldContain("open-damage-claim");
+        answer.ShouldContain("changed(damage_report)");
+        answer.ShouldContain("eventHandler");
+    }
+
+    /// <summary>The descriptor read says per entity how many host extensions run there, so a hook case spends no extra call.</summary>
+    [Fact]
+    public async Task The_descriptor_read_counts_the_host_extensions_per_entity()
+    {
+        var management = Serving(Descriptor);
+        management.GetExtensionsAsync(Project, Arg.Any<CancellationToken>()).Returns(new ManagementExtensionCatalog
+        {
+            Items =
+            [
+                new ManagementExtension { Id = "a", Kind = AlvoExtensionKind.EventHandler, Stage = AlvoExtensionStage.PostCommit, Entities = ["rentals"] },
+                new ManagementExtension { Id = "b", Kind = AlvoExtensionKind.EventHandler, Stage = AlvoExtensionStage.PostCommit, Entities = ["*"] },
+                new ManagementExtension { Id = "c", Kind = AlvoExtensionKind.EventHandler, Stage = AlvoExtensionStage.PostCommit, Event = "fleet.alerted" },
+            ],
+        });
+
+        var counts = JsonNode.Parse(await InvokeAsync(management, "get_descriptor", []))!["hostExtensions"]!.AsObject();
+
+        counts.Select(pair => (pair.Key, pair.Value!.GetValue<int>())).ShouldBe([("rentals", 1), ("*", 1)], ignoreOrder: true);
+    }
+
+    /// <summary>A host that registers no extension reads an empty count, never a missing one.</summary>
+    [Fact]
+    public async Task A_host_without_extensions_reads_an_empty_count()
+        => JsonNode.Parse(await InvokeAsync(Serving(Descriptor), "get_descriptor", []))!["hostExtensions"]
+            .ShouldBeOfType<JsonObject>().ShouldBeEmpty();
+
+    /// <summary>A refused extension read costs the descriptor nothing: the count is empty, the descriptor still served.</summary>
+    [Fact]
+    public async Task A_failing_extension_read_still_serves_the_descriptor()
+    {
+        var management = Serving(Descriptor);
+        management.GetExtensionsAsync(Project, Arg.Any<CancellationToken>()).Throws(new ManagementForbiddenException());
+
+        var answer = JsonNode.Parse(await InvokeAsync(management, "get_descriptor", []))!;
+
+        answer["revision"]!.GetValue<int>().ShouldBe(Revision);
+        answer["hostExtensions"].ShouldBeOfType<JsonObject>().ShouldBeEmpty();
+    }
+
+    /// <summary>A caller the access block does not admit is told so, not crashed.</summary>
+    [Fact]
+    public async Task A_forbidden_caller_is_reported_by_the_extensions_tool_too()
+    {
+        var management = Substitute.For<IAlvoManagement>();
+        management.GetExtensionsAsync(Project, Arg.Any<CancellationToken>()).Throws(new ManagementForbiddenException());
+
+        (await InvokeAsync(management, "get_extensions", [])).ShouldContain("forbidden");
     }
 
     /// <summary>And a read that raced an apply reports it rather than ending the turn.</summary>

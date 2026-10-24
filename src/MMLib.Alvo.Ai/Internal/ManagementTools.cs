@@ -9,13 +9,13 @@ using System.Text.Json.Nodes;
 namespace MMLib.Alvo.Ai.Internal;
 
 /// <summary>
-/// The six things the agent may ask the framework — four reads and two dry runs over an RFC 6902 patch.
+/// The eight things the agent may ask the framework — six reads and two dry runs over an RFC 6902 patch.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>There is no apply, and the absence is the security property.</b> A prompt that says "never apply" is
 /// an instruction a model can be argued out of; a tool set with no writing member is a capability it does
-/// not have. <c>ManagementToolsTests</c> asserts both halves — the exact six names, and that both
+/// not have. <c>ManagementToolsTests</c> asserts both halves — the exact eight names, and that both
 /// write-shaped tools only ever ask for a dry run.
 /// </para>
 /// <para>
@@ -123,6 +123,15 @@ internal sealed class ManagementTools
                 "The CEL functions this host knows — built-in and host-registered — with parameters, result and the profiles each works in. Summaries are host-authored text, trusted as the host is. "
                 + "Not a way to schedule work or call your own code: those are `automation` and the refused `function` action, see `get_capabilities`."),
             AIFunctionFactory.Create(
+                GetExtensionsAsync,
+                "get_extensions",
+                "The host code (extensions) this host registers — event handlers with the entities, operations and condition "
+                + "each binds — as read-only metadata. An entry names entities by name, or `*` for every entity. Descriptions "
+                + "are host-authored text, trusted as the host is. When get_descriptor's hostExtensions names an entity, read it before "
+                + "proposing an after-hook there: name an extension that already does what is asked instead of adding one. A "
+                + "field or entity an extension reads cannot be removed or left out of event images; the dry run refuses it, "
+                + "naming the extension."),
+            AIFunctionFactory.Create(
                 GetRevisionsAsync,
                 "get_revisions",
                 "The revision history: who applied what, when, and why."),
@@ -173,9 +182,33 @@ internal sealed class ManagementTools
         return new ManagementTools(management, project, loadedSkills);
     }
 
-    /// <summary>The descriptor as it is applied now — as an object, never a string of JSON — and its revision.</summary>
+    /// <summary>
+    /// The descriptor as it is applied now — as an object, never a string of JSON — its revision, and how many host
+    /// extensions run per entity, read in the same call so knowing whether to ask <c>get_extensions</c> costs none.
+    /// </summary>
     private Task<string> GetDescriptorAsync(CancellationToken ct) =>
-        AnsweredAsync(async () => Json(DescriptorView.Of(await _management.GetDescriptorAsync(_project, ct).ConfigureAwait(false))));
+        AnsweredAsync(async () => Json(DescriptorView.Of(
+            await _management.GetDescriptorAsync(_project, ct).ConfigureAwait(false),
+            await ExtensionsOrNoneAsync(ct).ConfigureAwait(false))));
+
+    /// <summary>
+    /// The host's extension catalog for <c>get_descriptor</c>'s count, or <see langword="null"/> (counted as none) when
+    /// the Management API refuses the read: a count must never cost the model the descriptor it asked for.
+    /// </summary>
+    /// <remarks>
+    /// Only the refusals <see cref="AnsweredAsync"/> maps for a read are caught; a cancellation and a bug still propagate.
+    /// </remarks>
+    private async Task<ManagementExtensionCatalog?> ExtensionsOrNoneAsync(CancellationToken ct)
+    {
+        try
+        {
+            return await _management.GetExtensionsAsync(_project, ct).ConfigureAwait(false);
+        }
+        catch (Exception refusal) when (refusal is ManagementForbiddenException or ManagementProjectNotFoundException or ManagementRequestException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>The resolved schema — what the descriptor became.</summary>
     private Task<string> GetSchemaAsync(CancellationToken ct) =>
@@ -188,6 +221,10 @@ internal sealed class ManagementTools
     /// <summary>The CEL functions a descriptor may call here, so a call is written against the real list.</summary>
     private Task<string> GetCelFunctionsAsync(CancellationToken ct) =>
         AnsweredAsync(async () => Json(await _management.GetCelFunctionsAsync(_project, ct).ConfigureAwait(false)));
+
+    /// <summary>The host's registered extensions, so a proposal neither duplicates nor unbinds one.</summary>
+    private Task<string> GetExtensionsAsync(CancellationToken ct) =>
+        AnsweredAsync(async () => Json(await _management.GetExtensionsAsync(_project, ct).ConfigureAwait(false)));
 
     /// <summary>The revision history, so the agent can say what changed and when.</summary>
     private Task<string> GetRevisionsAsync(CancellationToken ct) =>
@@ -457,8 +494,24 @@ internal sealed record RefusedPatch(int BaseRevision, JsonElement Operations, IR
 /// <param name="Descriptor">The descriptor, parsed.</param>
 internal sealed record DescriptorView(string Project, int Revision, JsonNode? Descriptor)
 {
-    internal static DescriptorView Of(ManagementDescriptor descriptor) =>
-        new(descriptor.Project, descriptor.Revision, JsonNode.Parse(descriptor.DescriptorJson));
+    /// <summary>Gets, per entity name or <c>*</c>, how many host extensions run on it; empty when the host registers none.</summary>
+    public IReadOnlyDictionary<string, int> HostExtensions { get; init; } = new Dictionary<string, int>(StringComparer.Ordinal);
+
+    /// <summary>The view of one descriptor read, with the host's extensions counted per entity.</summary>
+    /// <param name="descriptor">The descriptor as the Management API returned it.</param>
+    /// <param name="extensions">
+    /// The host's extension catalog; <see langword="null"/> only from a test double that was never told what to answer,
+    /// read as none.
+    /// </param>
+    internal static DescriptorView Of(ManagementDescriptor descriptor, ManagementExtensionCatalog? extensions) =>
+        new(descriptor.Project, descriptor.Revision, JsonNode.Parse(descriptor.DescriptorJson)) { HostExtensions = Counted(extensions) };
+
+    /// <summary>How many extensions bind each entity name (or <c>*</c>); an application-event handler binds none.</summary>
+    private static Dictionary<string, int> Counted(ManagementExtensionCatalog? extensions) =>
+        (extensions?.Items ?? [])
+            .SelectMany(extension => extension.Entities)
+            .GroupBy(entity => entity, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
 }
 
 /// <summary>One refused tool call.</summary>

@@ -84,7 +84,10 @@ public sealed record ManagementRevision(
 public sealed record ManagementRevisionDetail(ManagementRevision Version, string DescriptorJson);
 
 /// <summary>What this build honours, warns about, and refuses — one source of truth for "not yet".</summary>
-/// <param name="Honoured">The top-level blocks this build honours.</param>
+/// <param name="Honoured">
+/// The top-level blocks this build honours, followed — in an embedded host — by <c>extensions.&lt;kind&gt;</c> for each
+/// kind of host code it registers.
+/// </param>
 /// <param name="Warned">
 /// What a descriptor may declare and this build then does nothing with: the section parses, nothing runs. Both
 /// top-level blocks (<c>automation</c>) and qualified slots inside an honoured block (<c>auth.providers</c>,
@@ -164,7 +167,14 @@ public sealed record ManagementPolicyVerdict(
     string? WithCheck,
     string? TenantScope,
     IReadOnlyList<string> HiddenFields,
-    IReadOnlyList<string> ReadOnlyFields);
+    IReadOnlyList<string> ReadOnlyFields)
+{
+    /// <summary>
+    /// Gets the host extensions that also run on this entity and operation; each one's
+    /// <see cref="ManagementExtension.Stage"/> says when. Empty in a host that registers none.
+    /// </summary>
+    public IReadOnlyList<ManagementExtension> Extensions { get; init; } = [];
+}
 
 /// <summary>One expression to check, in the descriptor it will live in.</summary>
 /// <param name="DescriptorJson">

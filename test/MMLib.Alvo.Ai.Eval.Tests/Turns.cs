@@ -21,8 +21,10 @@ internal static class Turns
             "rentals": { "fields": {
               "customer_id": { "type": "ref", "entity": "customers", "required": true },
               "status": { "type": "enum", "required": true, "values": ["reserved", "active", "returned", "overdue", "cancelled"] },
-              "returned_at": { "type": "datetime" } },
+              "returned_at": { "type": "datetime" },
+              "damage_report": { "type": "text" } },
               "hooks": { "afterCreate": [ { "action": { "type": "webhook", "endpoint": "rental-desk" } } ] } },
+            "rental_fleet": { "fields": { "in_service": { "type": "boolean", "default": true } } },
             "service_orders": { "fields": {
               "status": { "type": "enum", "required": true, "values": ["received", "ready", "collected"] },
               "assigned_user_id": { "type": "uuid" } },

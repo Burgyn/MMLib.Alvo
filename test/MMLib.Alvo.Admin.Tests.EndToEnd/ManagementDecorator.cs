@@ -56,6 +56,10 @@ public abstract class ManagementDecorator(IAlvoManagement inner) : IAlvoManageme
         => inner.GetCelFunctionsAsync(project, ct);
 
     /// <inheritdoc/>
+    public virtual Task<ManagementExtensionCatalog> GetExtensionsAsync(string project, CancellationToken ct = default)
+        => inner.GetExtensionsAsync(project, ct);
+
+    /// <inheritdoc/>
     public virtual Task<ManagementPolicyVerdict> SimulatePolicyAsync(
         string project, ManagementPolicySimulation simulation, CancellationToken ct = default)
         => inner.SimulatePolicyAsync(project, simulation, ct);

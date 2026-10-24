@@ -6,6 +6,7 @@ using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
@@ -45,6 +46,7 @@ namespace MMLib.Alvo.Management.Internal;
 /// descriptor rather than a second opinion that could drift from it.
 /// </param>
 /// <param name="functions">The CEL functions this instance knows; what <see cref="GetCelFunctionsAsync"/> lists.</param>
+/// <param name="extensions">The host's registered extensions; what <see cref="GetExtensionsAsync"/> lists.</param>
 /// <param name="roles">The declared role catalog a simulated caller's role names are resolved through.</param>
 /// <param name="data">The registered data port, or <see langword="null"/> when the host registered none.</param>
 /// <param name="versions">
@@ -94,6 +96,7 @@ internal sealed partial class AlvoManagementService(
     IPolicyEngine policies,
     IDescriptorValidator validator,
     CelFunctionCatalog functions,
+    ExtensionCatalog extensions,
     IRoleCatalogProvider roles,
     IAlvoData? data,
     IDescriptorVersionStore? versions,
@@ -198,7 +201,7 @@ internal sealed partial class AlvoManagementService(
         EnsureMayPerform(ManagementOperation.GetCapabilities);
         EnsureServed(project);
 
-        return Task.FromResult(CapabilityReport.Project());
+        return Task.FromResult(CapabilityReport.Project(extensions.HonouredKinds));
     }
 
     /// <inheritdoc/>
@@ -208,6 +211,15 @@ internal sealed partial class AlvoManagementService(
         EnsureServed(project);
 
         return Task.FromResult(new ManagementCelFunctions { Functions = functions.Describe() });
+    }
+
+    /// <inheritdoc/>
+    public Task<ManagementExtensionCatalog> GetExtensionsAsync(string project, CancellationToken ct = default)
+    {
+        EnsureMayPerform(ManagementOperation.GetExtensions);
+        EnsureServed(project);
+
+        return Task.FromResult(extensions.Catalog());
     }
 
     /// <inheritdoc/>
@@ -221,7 +233,8 @@ internal sealed partial class AlvoManagementService(
         var decision = policies.Resolve(
             simulation.Entity, Operation(simulation.Operation), Caller(simulation.Caller));
 
-        return Task.FromResult(Verdict(decision));
+        return Task.FromResult(
+            Verdict(decision) with { Extensions = extensions.RunningOn(simulation.Entity, simulation.Operation) });
     }
 
     /// <inheritdoc/>

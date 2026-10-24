@@ -1,0 +1,20 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "fleet-desk",
+  "access": { "admin": "'admin' in @user.roles" },
+  "entities": {
+    "vehicles": {
+      "fields": {
+        "plate": { "type": "string", "required": true, "maxLength": 12 },
+        "status": { "type": "enum", "values": ["in_service", "in_repair"] }
+      },
+      "rules": {
+        "list": "'admin' in @user.roles",
+        "get": "'admin' in @user.roles",
+        "create": "'admin' in @user.roles",
+        "update": "'admin' in @user.roles"
+      }
+    }
+  }
+}

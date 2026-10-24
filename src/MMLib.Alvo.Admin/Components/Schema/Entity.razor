@@ -186,7 +186,7 @@
             Only the open tab's body is drawn.
         *@
         <MudTabs ActivePanelIndex="@ActiveIndex" OnPreviewInteraction="OpenAsync"
-                 Elevation="0" Ripple="false" KeepPanelsAlive="false" Class="a-entitytabs"
+                 Elevation="0" Ripple="false" KeepPanelsAlive="false" Class="a-entitytabs" MinimumTabWidth="0"
                  id="entity-tabs">
             @foreach (var tab in EntityTabs.All)
             {
@@ -261,6 +261,9 @@
             case EntityTabs.OnWrite:
                 <HooksTab @key="EntityName" Hooks="@_hooks" Entity="@EntityName" Editable="DeclaredHere" Refused="_refused"
                           OnAdd="AddHook" OnRemove="RemoveHook" />
+                break;
+            case EntityTabs.Lifecycle:
+                <LifecycleTab @key="EntityName" Entity="@EntityName" Hooks="@_hooks" Extensions="@_extensions" />
                 break;
             case EntityTabs.Indexes:
                 <Indexes Entity="@IndexView(_entity!)" Declared="_indexes" Editable="DeclaredHere"

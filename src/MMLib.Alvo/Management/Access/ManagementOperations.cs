@@ -22,6 +22,7 @@ internal static class ManagementOperations
         [ManagementOperation.GetSchema] = ManagementLevel.Viewer,
         [ManagementOperation.GetCapabilities] = ManagementLevel.Viewer,
         [ManagementOperation.GetCelFunctions] = ManagementLevel.Viewer,
+        [ManagementOperation.GetExtensions] = ManagementLevel.Viewer,
         [ManagementOperation.GetInfo] = ManagementLevel.Viewer,
         [ManagementOperation.SimulatePolicy] = ManagementLevel.Viewer,
         [ManagementOperation.CheckExpression] = ManagementLevel.Developer,

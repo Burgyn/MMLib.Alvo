@@ -6,7 +6,7 @@ using System.Text.Json.Nodes;
 namespace MMLib.Alvo.Ai.Internal;
 
 /// <summary>What a trace's header names: the instructions, the provider, the model and the project.</summary>
-/// <param name="Instructions">The instructions' version, e.g. <c>alvo-schema-assistant v6</c>.</param>
+/// <param name="Instructions">The instructions' version, e.g. <c>alvo-schema-assistant v7</c>.</param>
 /// <param name="Provider">The connection's kind.</param>
 /// <param name="Model">The model the turn asked for.</param>
 /// <param name="Project">The project the turn was about.</param>

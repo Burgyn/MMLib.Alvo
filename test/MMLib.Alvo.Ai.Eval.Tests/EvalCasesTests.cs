@@ -14,7 +14,7 @@ public sealed class EvalCasesTests
     private const string PlanFix = "Only the operator can allow a destructive change, from Preview. Say first what data it loses.";
 
     [Fact]
-    public void The_suite_has_the_reliability_first_try_and_skill_cases() => EvalCases.All.Count.ShouldBe(17);
+    public void The_suite_has_the_reliability_first_try_and_skill_cases() => EvalCases.All.Count.ShouldBe(19);
 
     [Theory]
     [InlineData("hook_returned_at")]
@@ -24,6 +24,8 @@ public sealed class EvalCasesTests
     [InlineData("own_orders_only")]
     [InlineData("function_action_refused")]
     [InlineData("can_alvo_call_http")]
+    [InlineData("extension_named_not_duplicated")]
+    [InlineData("bound_field_removal_refused")]
     public void A_skill_case_can_be_asked_for_by_name(string name) =>
         EvalOptions.Parse(["--repository", ".", "--endpoint", "http://localhost:11434/v1", "--model", "m", "--case", name]).Case
             .ShouldBe(name);

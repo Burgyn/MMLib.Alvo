@@ -9,7 +9,8 @@ namespace MMLib.Alvo.Extensions;
 
 /// <summary>
 /// Registers the validated <see cref="AlvoExtensionOptions"/> and <see cref="AlvoDeliveryOptions"/>, the depth limit
-/// every store resolves, and the <see cref="ExtensionStateGuard"/> the boot runs before it reports ready.
+/// every store resolves, the <see cref="ExtensionStateGuard"/> the boot runs before it reports ready, and the
+/// <see cref="ExtensionCatalog"/> that describes the host's registrations.
 /// </summary>
 internal static class ExtensionsSetup
 {
@@ -29,6 +30,8 @@ internal static class ExtensionsSetup
         services.TryAddSingleton<IAlvoSessions, AlvoSessions>();
         services.TryAddSingleton(provider => new ExtensionRegistry(provider.GetServices<ExtensionRegistration>()));
         services.TryAddSingleton<ExtensionBinder>();
+        services.TryAddSingleton<ExtensionCatalog>();
+        services.TryAddSingleton<ExtensionApplyGuard>();
         services.TryAddSingleton<ExtensionStateGuard>();
 
         return services;

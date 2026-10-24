@@ -197,6 +197,12 @@ export const CAPABILITIES = {
       "level": "viewer"
     },
     {
+      "verb": "GET",
+      "path": "/projects/{project}/extensions",
+      "operation": "GetExtensions",
+      "level": "viewer"
+    },
+    {
       "verb": "POST",
       "path": "/projects/{project}/policy/simulate",
       "operation": "SimulatePolicy",

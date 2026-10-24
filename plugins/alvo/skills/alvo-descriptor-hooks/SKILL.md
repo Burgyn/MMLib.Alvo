@@ -44,18 +44,15 @@ belongs in a computed field, which stays true on every write; a `mutate` stamps 
 
 An embedded host may register its own CEL functions, which compute a value and never run your code (the
 `function` action is refused); they work in a `condition` and a `mutate` and nowhere else. Call
-`get_cel_functions` for this host's list with each function's parameters and result — never assume one exists. A
-function whose meaning changes gets a new name (`vatRate` stays, `vatRate2` is new). Alvo's tenant filter does not
-reach inside a function: one that reads stored data must take the tenant as a parameter and filter by it.
+`get_cel_functions` for this host's list with each function's parameters and result — never assume one exists.
 
 <!-- gen:cel-mutate -->
 - allowed: `now()` `lowerAscii(new.description)` `new.unit_price` `'part'` `trim(new.description)` `quantity * 2.0` `upperAscii(trim(new.description))` `math.round(new.unit_price * 1.2, 2)` `'#' + upperAscii(new.description)` `startsWith(new.description, 'Brake')`
 - refused: `new.quantity > 0.0` `'admin' in @user.roles` `changed(quantity)`
 <!-- /gen:cel-mutate -->
 
-A `mutate` value has no comparison operator (a text test such as `startsWith` is a call, and may fill a boolean
-field). For a flag decided by a comparison, let the `condition` compare and the `mutate` write the literal, with a
-second hook for the opposite case.
+A `mutate` value has no comparison operator. For a flag decided by a comparison, let the `condition` compare and
+the `mutate` write the literal, with a second hook for the opposite case.
 
 Adding a hook depends on what the entity already has:
 
@@ -91,6 +88,12 @@ Adding a hook depends on what the entity already has:
 ```json
 {"valid": true, "changedPaths": ["/entities/service_orders/hooks/beforeCreate"]}
 ```
+
+<!-- gen:descriptor-or-code -->
+Host C# may react after a commit (an extension). When `get_descriptor`'s `hostExtensions` names the entity or `*`,
+call `get_extensions` before proposing an after-hook there, and name one that already does it instead. Apply
+refuses removing, or excluding from event images, a field or entity an extension reads.
+<!-- /gen:descriptor-or-code -->
 
 After-hooks (`afterCreate`, `afterUpdate`, `afterDelete`) run after the commit, and only some of their action types
 run in this build: see `alvo-descriptor-capabilities-and-limits`.

@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Migrations.Internal;
+﻿using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Migrations.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 
@@ -29,6 +30,11 @@ namespace MMLib.Alvo.Migrations;
 /// the genuinely-applied branch publishes via <see cref="IPolicyCatalogProvider.SetCurrent"/> only
 /// after the applied snapshot is saved.
 /// </para>
+/// <para>
+/// Guarded like every apply: a descriptor that would unbind a handler the current catalog binds is refused
+/// (<see cref="Descriptor.DescriptorValidationException"/>) before anything is planned. A handler that never bound
+/// stays unbound, logged, with its events recorded dead.
+/// </para>
 /// </remarks>
 internal sealed class SchemaMigrationRunner
 {
@@ -37,13 +43,15 @@ internal sealed class SchemaMigrationRunner
     private readonly ISchemaIntrospector _introspector;
     private readonly IAppliedSchemaStore _store;
     private readonly IPolicyCatalogProvider _policyCatalogProvider;
+    private readonly ExtensionApplyGuard? _extensions;
 
     public SchemaMigrationRunner(
         DescriptorBootPlan bootPlan,
         ISchemaMigrator migrator,
         ISchemaIntrospector introspector,
         IAppliedSchemaStore store,
-        IPolicyCatalogProvider policyCatalogProvider)
+        IPolicyCatalogProvider policyCatalogProvider,
+        ExtensionApplyGuard? extensions = null)
     {
         ArgumentNullException.ThrowIfNull(bootPlan);
         ArgumentNullException.ThrowIfNull(migrator);
@@ -56,6 +64,7 @@ internal sealed class SchemaMigrationRunner
         _introspector = introspector;
         _store = store;
         _policyCatalogProvider = policyCatalogProvider;
+        _extensions = extensions;
     }
 
     /// <summary>Runs the code-first migration flow described in the type's remarks.</summary>
@@ -79,6 +88,7 @@ internal sealed class SchemaMigrationRunner
         ArgumentNullException.ThrowIfNull(options);
 
         var (descriptor, desired, descriptorJson, catalog) = await _bootPlan.LoadAsync(ct).ConfigureAwait(false);
+        _extensions?.Check(catalog);
 
         var appliedSnapshot = await _store.GetCurrentAsync(descriptor.Name, ct).ConfigureAwait(false);
         var current = appliedSnapshot?.Schema

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Extension catalog, apply guard, dashboard and assistant** (HX-04, #381). `GET {m}/projects/{p}/extensions` /
+  `IAlvoManagement.GetExtensionsAsync` (`viewer`) list every registered event handler as metadata (`ManagementExtension`,
+  `ManagementExtensionCatalog`, `AlvoExtensionKind`, `AlvoExtensionStage`) — id, entities, operations, condition, order,
+  timeout, identity, ordering and description, never code; `Alvo:Extensions:ExposeTypeNames` (default `false`) adds a
+  class handler's type name. The capability report's `honoured` gains `extensions.eventHandler` when a handler is
+  registered, and `ManagementPolicyVerdict.Extensions` lists what runs on the simulated entity and operation. The
+  dashboard marks entities with a `⟨/⟩ n` badge and gains a read-only *Lifecycle* tab (its *After commit* lane: the
+  descriptor's after-hooks and the host's handlers). The schema assistant gains `get_extensions` and
+  `get_descriptor`'s `hostExtensions` (instructions v7) and two eval cases, nineteen in all; `scripts/eval-assistant`
+  has not yet been run against v7. Docs: *See your extensions in the dashboard*.
+
 - **Event handlers on a delivery engine** (HX-03, #380). An embedded host reacts to committed changes in C#:
   `Entity("tickets", t => t.OnUpdated("id", handler, when: "changed(status) && new.status == 'resolved'"))`, also
   `Entities([...])`, `Entity("*")`, `OnCreated`/`OnDeleted`/`OnSaved`, class handlers (`IAlvoEventHandler<T>`) and
@@ -152,6 +163,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **`IAlvoManagement` gains `GetExtensionsAsync`** (HX-04). A third-party implementer or decorator of the public port
+  must add it; a caller is unaffected.
+- **An apply that would unbind an event handler is refused** (HX-04). A runtime apply, a dry run, a rollback and
+  `ApplyAlvoDescriptorAsync` that remove an entity or field a registered handler binds, retype a field so its condition
+  no longer compiles, or exclude a field it reads from the event images, now throw `DescriptorValidationException`
+  (`422 validation` over HTTP) naming the extension, answered before the revision check — instead of leaving the handler
+  unbound with its events recorded dead `unbound`. A handler that was not bound before the change (a dashboard-first
+  host's first descriptor) blocks nothing and is reported as a warning.
 - **`authtype` speaks the CloudEvents authcontext vocabulary** (HX-01). `AlvoEventAuthType.ApiKey` is now `api_key`
   (was `apikey`), `Unauthenticated` (`unauthenticated`) replaces the removed `Anonymous` (`anon`), and `User` (`user`)
   and `Unknown` (`unknown`) are new; a person signed in through `MMLib.Alvo.Identity` is now reported as `user`, not

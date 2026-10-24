@@ -93,11 +93,12 @@ updated).
   [`Alvo:Extensions:MaxDepth`](/reference/configuration/#alvoextensions) (8) the next delivery is recorded dead with
   `chain-depth-exceeded`, never run. The chain follows .NET's execution context: work you hand to your own queue
   leaves it.
-- **A handler that no longer fits the descriptor** — after an apply removed what its condition reads, say — is not
-  skipped silently: it is logged `ExtensionUnbound`, and every event it would have handled is recorded as a dead
-  delivery with the reason `unbound`. These rows do not hold the record's later events back: once the handler fits
-  again, new events flow, and the missed ones wait to be replayed (a later release; until then they are listed in
-  `<prefix>_deliveries`).
+- **An apply cannot unbind a handler.** An apply, a dry run, a rollback or `ApplyAlvoDescriptorAsync` that removes an
+  entity or field a bound handler reads, or excludes a field its condition reads, is refused naming the handler
+  ([details](/extending/extension-catalog/#an-apply-cannot-drop-what-a-handler-reads)). A handler that never bound — a
+  dashboard-first host before its descriptor fits, a stored boot that ended `Failed` — blocks nothing: the dry run
+  carries a warning, it is logged `ExtensionUnbound`, and every event it would have handled is recorded as a dead
+  delivery with the reason `unbound`, which does not hold the record's later events back.
 - **Nothing sensitive is stored.** A delivery records ids, statuses, times and an error **type** — never a body, a URL
   or an exception message. The type is the exception's type name, or one of `when-failed` (the condition threw),
   `timeout`, `chain-depth-exceeded`, `event-missing` (the envelope left the outbox), `event-unreadable`,
@@ -188,5 +189,4 @@ CEL function — must not write through Alvo itself. PostgreSQL has no such turn
 
 ## Not yet
 
-Typed handlers over your own classes (`Entity<T>`), the extension catalog and dashboard, and redeliver, replay and
-pause arrive in the next releases.
+Typed handlers over your own classes (`Entity<T>`), and redeliver, replay and pause arrive in the next releases.

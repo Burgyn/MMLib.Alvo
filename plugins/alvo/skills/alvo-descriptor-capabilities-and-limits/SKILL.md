@@ -25,7 +25,9 @@ These are declared by the schema and accepted, and are not honoured, or only in 
 proposed, but only against an endpoint under `webhooks.endpoints` or a template under `templates` that the descriptor
 already declares — never a new `webhooks` or `templates` block, which is a warned block. The delivery is
 **unsigned**: no `secretRef` is read, no HMAC header is sent and the payload is not projected per endpoint, so the
-receiver cannot verify the sender. Say so when you offer it. Referenced only from `automation`, they do nothing.
+receiver cannot verify the sender. Say so when you offer it. Referenced only from `automation`, they do nothing. An
+after-hook `condition` or template may read `@tenant.id` and `@user.roles`: the writer's tenant and roles as the event
+recorded them.
 
 These are refused at apply, each with its reason in the capability report (`field.default` is a `$cel` default; a
 literal is honoured):
