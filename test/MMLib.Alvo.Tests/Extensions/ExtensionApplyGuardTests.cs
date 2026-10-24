@@ -196,6 +196,29 @@ public sealed class ExtensionApplyGuardTests
         Guard(_ => { }).Check(descriptor, new SchemaModel([])).ShouldBeNull();
     }
 
+    /// <summary>
+    /// The catalog overload, which <c>ApplyAlvoDescriptorAsync</c> calls with the catalog its boot plan already built,
+    /// pays nothing either: with no handler registered, the binder is not asked to bind it.
+    /// </summary>
+    /// <remarks>
+    /// An empty registry binds nothing whether the binder is asked or not, so the probe is a binder over a registry of its
+    /// own whose handler the proposed catalog would unbind: had the guard asked it, the change would be refused.
+    /// </remarks>
+    [Fact]
+    public void A_host_without_handlers_does_not_bind_the_catalog_it_is_handed()
+    {
+        var catalogs = new PolicyCatalogProvider();
+        catalogs.SetCurrent("handlers", Catalog());
+        var binder = new ExtensionBinder(Registry(OnStatus("on-status")), CelFixtures.Compiler, EveryService(), NullLogger<ExtensionBinder>.Instance);
+        var guard = new ExtensionApplyGuard(Registry(_ => { }), binder, CelFixtures.Compiler, catalogs);
+        var proposed = CatalogOf(WithoutField("tickets", "status"));
+
+        var check = guard.Check(proposed);
+
+        check.Catalog.ShouldBeSameAs(proposed);
+        check.Warnings.ShouldBeEmpty();
+    }
+
     private static Action<IAlvoBuilder> OnStatus(string id) =>
         alvo => alvo.Entity("tickets", t => t.OnUpdated(id, OnUpdated, when: "changed(status)"));
 
