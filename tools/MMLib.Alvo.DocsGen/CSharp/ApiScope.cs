@@ -29,6 +29,15 @@ internal static class ApiScope
         "AlvoIdentity",
         "AlvoTestHost",
         "AlvoProblemTypes",
+        "AlvoEntityBuilder",
+        "AlvoEventContext",
+        "IAlvoEventHandler`1",
+        "AlvoCreated`1",
+        "AlvoUpdated`1",
+        "AlvoDeleted`1",
+        "AlvoSaved`1",
+        "IAlvoSession",
+        "IAlvoSessions",
     };
 
     private static readonly Type[] _registrationTargets = [typeof(IServiceCollection), typeof(IAlvoBuilder), typeof(IEndpointRouteBuilder)];

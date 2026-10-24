@@ -12,7 +12,7 @@ import exclude from '../../../snippets/extending/event-envelope/01-exclude.alvo.
 
 Every write appends one [CloudEvents 1.0.2](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md)
 event to the outbox, in the same transaction, and so does every `IAlvoEvents.PublishAsync`. After-hooks and webhooks
-read that envelope today; host event handlers will read the same one.
+read that envelope, and so do [event handlers](/extending/event-handlers/).
 
 <SourceExcerpt code={envelope} from="specversion" to="specversion" lang="json" title="An entity.vehicles.updated event" wrap />
 

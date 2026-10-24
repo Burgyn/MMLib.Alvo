@@ -85,6 +85,13 @@ generated route a CSRF target and is refused at startup.
      from the host lifecycle, so `ApplyAlvoDescriptorAsync` is now the explicit,
      on-demand door the CLI (`alvo apply …`) and the Management API go through — the
      same operation, minus the start.
+   - `Entity` / `Entities` — a **grouping verb** (HX-03, spec 2026-10-14 X14): it registers nothing itself; the
+     builder it hands out does, one registration per call — `Entity("tickets", t => t.OnUpdated(…))`,
+     `Entities(["orders", "invoices"], …)`, `Entity("*", …)`. The precedent is EF Core's `modelBuilder.Entity<T>(…)`.
+     The `On{Operation}` verbs (`OnCreated`, `OnUpdated`, `OnDeleted`, `OnSaved`) exist only on that builder and
+     return it, not `IAlvoBuilder`. Every other registration of host code is an `Add{Thing}`: `AddEventHandler` and
+     `AddRetiredExtension` from HX-03; `AddSchedule`, `AddFunction`, `AddCommand`, `AddDataMigration`,
+     `AddRequiredSecret` as they ship.
    - Fluent methods return `IAlvoBuilder`.
 5. **Config via the options pattern, validated at startup.** Infrastructure config
    is typed options (`AlvoOptions`, and per-provider options), bound and validated
@@ -284,6 +291,15 @@ The built-in functions and their exact semantics are in
 [cel.md](cel.md#built-in-functions). A value derived from other fields of the same
 row (a total, a full name) belongs in a **computed field**, which stays true on every
 write; a `mutate` stamps a value once, when its hook runs.
+
+## Registering an event handler
+
+`Entity("tickets", t => t.OnUpdated("ticket-resolved", handler, when: "…"))` adds one internal `HandlerRegistration`
+singleton — the `CelFunctionRegistration` precedent — and nothing else: the boot binds every registration to the primed
+catalog (`ExtensionBinder`) and refuses all problems at once; the checks that need no descriptor (ids, duplicates,
+ranges, missing services) run even at an `Awaiting` boot. The mechanism — fan-out, deliveries, lanes, retries, the
+lease, the SQLite write line — is [events.md](events.md#event-handlers-and-deliveries); the guide is *React to changes
+(event handlers)* on the docs site.
 
 ## Pitfalls (banned)
 

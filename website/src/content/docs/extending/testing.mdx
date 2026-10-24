@@ -2,7 +2,7 @@
 title: Testing your backend
 description: Run your descriptor — rules, hooks and webhooks — through the real Alvo pipeline inside a unit test, with event delivery on your schedule.
 sidebar:
-  order: 3
+  order: 4
 ---
 
 import { Code } from '@astrojs/starlight/components';
@@ -59,8 +59,12 @@ entries whose delivery failed, subscribers attempted. Webhooks go to the handler
 - **An in-process receiver runs inside the delivery.** Your `webhooks` handler is called on the dispatcher's own async
   flow, so anything it does inherits that flow (the trace, and — as host-code hooks arrive — the causation chain). A
   receiver that writes back should do it as a real one would, outside that flow:
-  `using (ExecutionContext.SuppressFlow()) { await Task.Run(writeBack); }`. Never drain from inside a receiver: a round
-  waits for the round it is in.
+  `using (ExecutionContext.SuppressFlow()) { await Task.Run(writeBack); }`. Never drain from inside a receiver or a
+  handler: the call is refused, because a round would wait for the round it is in.
+- **Event handlers run in the same rounds.** A round fans each event out to the handlers whose condition holds and
+  runs the deliveries that are due; `Hooks.AssertRan` counts a handler by its id. A failed delivery waits for its
+  retry, so pass a `FakeTimeProvider` and advance it to retry. See
+  [React to changes](/extending/event-handlers/#test-it).
 
 The test host runs the dispatcher with `Alvo:Events:DispatchMode` set to `Manual`, and each round is one call to the
 public `IAlvoEventPump.DrainAsync()`. An embedded host of your own can do the same; the standalone `MMLib.Alvo.Host`
@@ -84,5 +88,5 @@ stops it but leaves a database it did not create.
 
 - `InMemoryAlvoData` in `MMLib.Alvo.Testing` is the double the provider contract suites run against; it enforces rules
   but runs no hooks. To test your backend's behaviour, use `AlvoTestHost`.
-- Event handlers, write hooks and timers in C# arrive one release at a time; each joins the test host — and
-  `Hooks.AssertRan` — as it ships.
+- Write hooks and timers in C# arrive one release at a time; each joins the test host — and `Hooks.AssertRan` — as
+  it ships.
