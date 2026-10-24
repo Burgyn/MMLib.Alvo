@@ -46,9 +46,13 @@ public sealed class TypedRegistrationTests
             "typed-cel", (AlvoCreated<TypedTicket> _) => Task.CompletedTask, when: "new.title == 'x'"))).Handlers.ShouldHaveSingleItem().When.ShouldBe("new.title == 'x'");
 
     [Fact]
-    public void A_type_without_an_entity_attribute_is_refused_at_registration() =>
-        Should.Throw<ArgumentException>(() => Registry(alvo => alvo.Entity<Unmarked>(_ => { })))
-            .Message.ShouldContain("[AlvoEntity(");
+    public void A_type_without_an_entity_attribute_is_refused_at_registration()
+    {
+        var refusal = Should.Throw<ArgumentException>(() => Registry(alvo => alvo.Entity<Unmarked>(_ => { })));
+
+        refusal.Message.ShouldContain("[AlvoEntity(");
+        refusal.ParamName.ShouldBe("T");
+    }
 
     [Fact]
     public void An_untranslatable_condition_is_refused_at_registration_naming_the_handler() =>
@@ -65,9 +69,13 @@ public sealed class TypedRegistrationTests
     }
 
     [Fact]
-    public void A_payload_type_without_an_event_attribute_is_refused_at_registration() =>
-        Should.Throw<ArgumentException>(() => Registry(alvo => alvo.AddEventHandler<TypedTicket, UnusedHandler>("no-event")))
-            .Message.ShouldContain("[AlvoEvent(");
+    public void A_payload_type_without_an_event_attribute_is_refused_at_registration()
+    {
+        var refusal = Should.Throw<ArgumentException>(() => Registry(alvo => alvo.AddEventHandler<TypedTicket, UnusedHandler>("no-event")));
+
+        refusal.Message.ShouldContain("[AlvoEvent(");
+        refusal.ParamName.ShouldBe("TMessage");
+    }
 
     [Fact]
     public void The_typed_message_is_built_from_the_event_images()

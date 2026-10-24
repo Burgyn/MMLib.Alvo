@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Descriptor;
+﻿using MMLib.Alvo.Data.Internal;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Schema;
@@ -8,7 +9,8 @@ namespace MMLib.Alvo.Extensions.Internal;
 /// <summary>
 /// Turns binding problems into descriptor findings. A refusal names, for a handler the change unbinds, the entity, the
 /// field or the <c>events.exclude</c> item the change removed or excluded, or the field whose new type the condition no
-/// longer compiles against — each existed before the change, since the handler bound it — and keeps the compiler's own
+/// longer compiles against, or that its typed record maps and could no longer fill — each existed before the change,
+/// since the handler bound it — and keeps the compiler's own
 /// sentence beside it, so a second cause is not hidden behind the first. A warning is the compiler's sentence alone,
 /// for a handler that bound neither catalog.
 /// </summary>
@@ -52,9 +54,31 @@ internal static class ExtensionApplyRefusals
             return [];
         }
 
-        return [.. FieldsRead(handler.When, before, compiler)
-            .Select(field => FieldRefusal(handler, before, after, field, compiler))
-            .OfType<DescriptorValidationError>()];
+        var read = FieldsRead(handler.When, before, compiler);
+        return [.. read.Select(field => FieldRefusal(handler, before, after, field, compiler)).OfType<DescriptorValidationError>(),
+            .. Mapped(handler, read).Select(mapped => MappedRefusal(handler.Id, mapped.Shape, mapped.Property, after)).OfType<DescriptorValidationError>()];
+    }
+
+    /// <summary>The fields a typed record maps that the condition does not read (a field read and mapped gets the condition's sentence once).</summary>
+    private static IEnumerable<(RecordShape Shape, MappedProperty Property)> Mapped(HandlerRegistration handler, string[] read) =>
+        handler.Typed is { } typed
+            ? typed.Shape.Properties.Where(property => !read.Contains(property.Field, StringComparer.Ordinal)).Select(property => (typed.Shape, property))
+            : [];
+
+    private static DescriptorValidationError? MappedRefusal(string id, RecordShape shape, MappedProperty property, EntitySchema after)
+    {
+        if (Field(after, property.Field) is not { } now)
+        {
+            return MappedRemoved(id, after.Name, property.Field, shape.Name);
+        }
+
+        var index = after.EventImageExclusions.ToList().IndexOf(property.Field);
+        if (index >= 0)
+        {
+            return MappedExcluded(id, after.Name, property.Field, shape.Name, index);
+        }
+
+        return ShapeMapping.Holds(property, now) ? null : MappedRetyped(id, after.Name, property.Field, shape.Name);
     }
 
     private static DescriptorValidationError? FieldRefusal(
@@ -126,6 +150,25 @@ internal static class ExtensionApplyRefusals
         $"/entities/{entity}/fields/{field}",
         $"Field '{field}' of '{entity}' is read by extension '{id}' ({Kind}, in this host): with its new type the "
         + "condition no longer compiles, so the handler would no longer bind, and every event it would have handled "
+        + "would be recorded dead.",
+        FixPrefix + "field's type.");
+
+    private static DescriptorValidationError MappedRemoved(string id, string entity, string field, string type) => Error(
+        $"/entities/{entity}/fields/{field}",
+        $"Field '{field}' of '{entity}' is bound by extension '{id}' ({Kind}, in this host): its typed record {type} maps "
+        + "it, so without it the handler would no longer bind, and every event it would have handled would be recorded dead.",
+        FixPrefix + "field.");
+
+    private static DescriptorValidationError MappedExcluded(string id, string entity, string field, string type, int index) => Error(
+        $"/entities/{entity}/events/exclude/{index}",
+        $"Field '{field}' of '{entity}' is read by extension '{id}' ({Kind}, in this host): its typed record {type} maps "
+        + "it, so left out of the event images it could never fill the record, and the handler would no longer bind.",
+        FixPrefix + "field in the event images.");
+
+    private static DescriptorValidationError MappedRetyped(string id, string entity, string field, string type) => Error(
+        $"/entities/{entity}/fields/{field}",
+        $"Field '{field}' of '{entity}' is read by extension '{id}' ({Kind}, in this host): its typed record {type} maps "
+        + "it and cannot hold its new type, so the handler would no longer bind, and every event it would have handled "
         + "would be recorded dead.",
         FixPrefix + "field's type.");
 

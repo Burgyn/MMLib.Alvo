@@ -7,6 +7,7 @@ using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
+using MMLib.Alvo.Tests.Data;
 using MMLib.Alvo.Tests.Expressions;
 
 using static MMLib.Alvo.Tests.Extensions.HandlerCatalog;
@@ -219,8 +220,57 @@ public sealed class ExtensionApplyGuardTests
         check.Warnings.ShouldBeEmpty();
     }
 
+    [Fact]
+    public void Removing_a_field_a_typed_record_maps_is_refused_at_the_field()
+    {
+        var precise = Precise(Refused(Guard(Typed("typed")), WithoutField("tickets", "title"))).ShouldHaveSingleItem();
+
+        precise.Path.ShouldBe("/entities/tickets/fields/title");
+        precise.Message.ShouldContain("its typed record TypedTicket maps it");
+        precise.FixSuggestion.ShouldBe(FieldFix);
+    }
+
+    [Fact]
+    public void Excluding_a_field_a_typed_record_maps_is_refused_at_the_exclusion()
+    {
+        var precise = Precise(Refused(Guard(Typed("typed")), Replaced("tickets", entity => entity with { EventImageExclusions = ["secret", "title"] })))
+            .ShouldHaveSingleItem();
+
+        precise.Path.ShouldBe("/entities/tickets/events/exclude/1");
+        precise.Message.ShouldContain("its typed record TypedTicket maps it");
+        precise.FixSuggestion.ShouldBe("Remove the registration and redeploy first, or keep the field in the event images.");
+    }
+
+    [Fact]
+    public void Retyping_a_field_a_typed_record_maps_is_refused_at_the_field()
+    {
+        var retyped = Replaced("tickets", entity => entity with
+        {
+            Fields = [.. entity.Fields.Select(field => field.Name == "code" ? new FieldSchema { Name = "code", Type = FieldType.Integer, Nullable = true } : field)],
+        });
+
+        var precise = Precise(Refused(Guard(Typed("typed")), retyped)).ShouldHaveSingleItem();
+
+        precise.Path.ShouldBe("/entities/tickets/fields/code");
+        precise.Message.ShouldContain("its typed record TypedTicket maps it and cannot hold its new type");
+        precise.FixSuggestion.ShouldBe("Remove the registration and redeploy first, or keep the field's type.");
+    }
+
+    [Fact]
+    public void A_field_both_read_and_mapped_is_refused_once_with_the_condition_s_sentence()
+    {
+        var guard = Guard(alvo => alvo.Entity<TypedTicket>(t => t.OnUpdated<TypedTicketResolved>("typed", when: e => e.Changed(x => x.Status))));
+
+        var precise = Precise(Refused(guard, WithoutField("tickets", "status"))).ShouldHaveSingleItem();
+
+        precise.Message.ShouldContain("its condition reads it");
+    }
+
     private static Action<IAlvoBuilder> OnStatus(string id) =>
         alvo => alvo.Entity("tickets", t => t.OnUpdated(id, OnUpdated, when: "changed(status)"));
+
+    private static Action<IAlvoBuilder> Typed(string id) =>
+        alvo => alvo.Entity<TypedTicket>(t => t.OnUpdated<TypedTicketResolved>(id));
 
     private static ExtensionApplyGuard Guard(Action<IAlvoBuilder> configure) => Guard(configure, Catalog());
 

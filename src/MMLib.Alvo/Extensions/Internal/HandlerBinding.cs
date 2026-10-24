@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 
+using MMLib.Alvo.Data.Internal;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Internal;
@@ -27,9 +28,13 @@ internal sealed class HandlerBinding(HandlerRegistration handler, ICelCompiler c
             ? entities
             : null;
 
-    /// <summary>The catalog-free pass: services, options, what the handler selects, and a fieldless <c>when</c>.</summary>
+    /// <summary>
+    /// The catalog-free pass: a typed record's own shape, services, options, what the handler selects, and a fieldless
+    /// <c>when</c>.
+    /// </summary>
     internal HandlerBinding CheckRegistration(IServiceProviderIsService services)
     {
+        CheckShape();
         ResolveServices(services);
         CheckTimeout();
         CheckChoices();
@@ -46,6 +51,29 @@ internal sealed class HandlerBinding(HandlerRegistration handler, ICelCompiler c
             : new Dictionary<string, BoundCondition>(StringComparer.Ordinal);
 
         return _problems.Count == 0 ? new BoundHandler(handler, conditions, _fallback) : null;
+    }
+
+    /// <summary>What no descriptor can cure in a typed record (no constructor, a value no field holds, …); an <c>Awaiting</c> boot refuses it too.</summary>
+    private void CheckShape()
+    {
+        foreach (var problem in handler.Typed?.Shape.Problems ?? [])
+        {
+            Add("record", problem.Message, problem.Fix);
+        }
+    }
+
+    /// <summary>A typed record against one entity, filled from its event images; skipped when its shape is already refused.</summary>
+    private void TypedMapping(EntitySchema entity)
+    {
+        if (handler.Typed is not { Shape: { Problems.Count: 0 } shape })
+        {
+            return;
+        }
+
+        foreach (var problem in ShapeMapping.Problems(shape, entity, fromEventImages: true))
+        {
+            Add("record", problem.Message, problem.Fix);
+        }
     }
 
     private void ResolveServices(IServiceProviderIsService services)
@@ -126,13 +154,23 @@ internal sealed class HandlerBinding(HandlerRegistration handler, ICelCompiler c
             {
                 UnknownEntity(name, catalog);
             }
-            else if (Condition(entity, source.Verb) is { } condition)
+            else
             {
-                conditions[name] = condition;
+                BindEntity(entity, source.Verb, conditions);
             }
         }
 
         return conditions;
+    }
+
+    private void BindEntity(EntitySchema entity, HandlerVerb verb, Dictionary<string, BoundCondition> conditions)
+    {
+        if (Condition(entity, verb) is { } condition)
+        {
+            conditions[entity.Name] = condition;
+        }
+
+        TypedMapping(entity);
     }
 
     private static EntitySchema? EntityNamed(string name, PolicyCatalog catalog) =>

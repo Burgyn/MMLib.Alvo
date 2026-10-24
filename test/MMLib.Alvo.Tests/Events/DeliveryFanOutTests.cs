@@ -6,6 +6,7 @@ using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Tests.Data;
 using MMLib.Alvo.Tests.Expressions;
 using MMLib.Alvo.Tests.Extensions;
 
@@ -151,6 +152,22 @@ public sealed class DeliveryFanOutTests : IDisposable
         row.Status.ShouldBe("dead");
         row.LastErrorType.ShouldBe("unbound");
         _logs.Entries.Count(entry => entry.EventName == "ExtensionUnbound").ShouldBe(1, "logged once per catalog, not per event");
+    }
+
+    /// <summary>
+    /// A typed handler whose record shape has problems of its own never binds, so its events are recorded dead
+    /// <c>unbound</c> at fan-out and never handed to it to fail on materializing, attempt after attempt.
+    /// </summary>
+    [Fact]
+    public async Task An_event_a_typed_handler_with_a_misfit_shape_would_select_is_never_delivered_to_it()
+    {
+        var fanOut = FanOut(alvo => alvo.Entity<TicketWithScore>(t => t.OnCreated("scored", (AlvoCreated<TicketWithScore> _) => Task.CompletedTask)));
+
+        await fanOut.FanOutAsync(Event("entity.tickets.created", Record(("score", 1.5m))), _catalog, Ct);
+
+        var row = _store.Rows.ShouldHaveSingleItem();
+        row.Status.ShouldBe("dead");
+        row.LastErrorType.ShouldBe("unbound");
     }
 
     [Fact]
