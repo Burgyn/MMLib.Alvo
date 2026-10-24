@@ -15,7 +15,8 @@ namespace MMLib.Alvo.Data.Internal;
 /// A property is mapped when it is public, readable and not an indexer, and has a public setter (<c>set</c> or <c>init</c>)
 /// or carries <see cref="AlvoFieldAttribute"/>. A plain type is built through its parameterless constructor, else through
 /// the public constructor with the most parameters that all name mapped properties and take their types (a positional record's); a wrapper
-/// (<see cref="IAlvoEntity"/>) through its constructor taking one <see cref="AlvoRecord"/>.
+/// (<see cref="IAlvoEntity"/>) through its constructor taking one <see cref="AlvoRecord"/>. A plain type's mapped property
+/// that constructor does not take and no public setter fills is a problem: it would always hold its default.
 /// </remarks>
 internal sealed class RecordShape
 {

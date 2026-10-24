@@ -217,6 +217,23 @@ public sealed class FixedNote(string note, string? code)
     public string? Code { get; } = code;
 }
 
+public sealed class PrivatelySetNote
+{
+    [AlvoField("note")]
+    public string Note { get; private set; } = string.Empty;
+}
+
+public sealed class UncoveredNote
+{
+    public UncoveredNote(string note) => Note = note;
+
+    [AlvoField("note")]
+    public string Note { get; }
+
+    [AlvoField("code")]
+    public string? Code { get; }
+}
+
 public sealed class MistypedParameter(string level)
 {
     public long Level { get; init; } = level.Length;

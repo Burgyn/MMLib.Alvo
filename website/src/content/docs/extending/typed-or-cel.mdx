@@ -42,7 +42,9 @@ overload (CS0121).
   `[AlvoEnumValue("…")]` names it.
 - A property is mapped when it is public, readable and has a public setter (`init` counts), or carries `[AlvoField]`.
   Alvo builds the class through a parameterless constructor, or a constructor taking only mapped properties (a
-  positional record).
+  positional record). Every mapped property must be one Alvo can fill: a parameter of that constructor, or a public
+  `set`/`init` accessor. A mapped property with neither (a `private set`, or a get-only property the constructor does
+  not take) is refused when the host starts.
 - Each field type takes one C# type:
 
   | Field type | C# property |

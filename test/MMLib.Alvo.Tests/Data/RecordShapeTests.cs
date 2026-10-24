@@ -70,6 +70,8 @@ public sealed class RecordShapeTests
     [InlineData(typeof(BadFieldName), "BadFieldName.Title maps to 'not a name', which is not a field name")]
     [InlineData(typeof(WithSharedValue), "SharedValue.Opened and SharedValue.Open map the same value 'open'.")]
     [InlineData(typeof(WrapperWithoutRecord), "WrapperWithoutRecord implements IAlvoEntity but has no public constructor taking an AlvoRecord.")]
+    [InlineData(typeof(PrivatelySetNote), "PrivatelySetNote.Note is mapped, but Alvo cannot set it")]
+    [InlineData(typeof(UncoveredNote), "UncoveredNote.Code is mapped, but Alvo cannot set it")]
     public void A_type_no_descriptor_can_map_carries_its_problem(Type type, string problem)
     {
         var problems = RecordShape.Of(type).Problems;
@@ -77,6 +79,10 @@ public sealed class RecordShapeTests
         problems.ShouldContain(candidate => candidate.Message.StartsWith(problem, StringComparison.Ordinal));
         problems.ShouldAllBe(candidate => !string.IsNullOrWhiteSpace(candidate.Fix));
     }
+
+    [Fact]
+    public void A_property_the_constructor_takes_is_not_a_problem_though_it_has_no_setter() =>
+        RecordShape.Of(typeof(FixedNote)).Problems.ShouldBeEmpty();
 
     [Fact]
     public void An_override_of_a_named_property_is_mapped_to_the_base_field() =>

@@ -5,14 +5,14 @@ namespace MMLib.Alvo.Data.Internal;
 /// <summary>One thing wrong with a host type or its mapping, and how to fix it.</summary>
 internal sealed record ShapeProblem(string Message, string Fix);
 
-/// <summary>The problems a host type has whatever the descriptor says: no constructor to call, one field mapped twice, a value no field holds.</summary>
+/// <summary>The problems a host type has whatever the descriptor says: no constructor to call, a mapped property it cannot set, one field mapped twice, a value no field holds.</summary>
 internal static class ShapeProblems
 {
     private static readonly HashSet<Type> _held =
         [typeof(string), typeof(long), typeof(int), typeof(decimal), typeof(bool), typeof(Guid), typeof(DateOnly), typeof(DateTimeOffset)];
 
     internal static IReadOnlyList<ShapeProblem> Of(RecordShape shape) =>
-        [.. Construction(shape), .. FieldNames(shape), .. SharedFields(shape), .. shape.Properties.SelectMany(property => Values(shape, property))];
+        [.. Construction(shape), .. Unset(shape), .. FieldNames(shape), .. SharedFields(shape), .. shape.Properties.SelectMany(property => Values(shape, property))];
 
     internal static string WithArticle(string word) =>
         $"{("AEIOUaeiou".Contains(word[0], StringComparison.Ordinal) ? "an" : "a")} {word}";
@@ -35,6 +35,13 @@ internal static class ShapeProblems
             : new($"{shape.Name} has no public constructor Alvo can call: none is parameterless, and none takes only properties it maps.",
                 "Add a parameterless constructor, or make it a positional record over the mapped properties.");
     }
+
+    private static IEnumerable<ShapeProblem> Unset(RecordShape shape) =>
+        shape.IsWrapper || shape.Constructor is null
+            ? []
+            : shape.Properties.Where(property => !shape.Arguments.Contains(property) && !shape.Settable.Contains(property)).Select(property => new ShapeProblem(
+                $"{shape.Name}.{property.Property.Name} is mapped, but Alvo cannot set it: the constructor it is built through does not take it, and it has no public setter, so it would always hold its default.",
+                $"Give {property.Property.Name} a public init or set accessor, or take it as a parameter of {shape.Name}'s constructor."));
 
     private static IEnumerable<ShapeProblem> FieldNames(RecordShape shape) =>
         shape.Properties.Where(property => !CelText.IsFieldName(property.Field)).Select(property => new ShapeProblem(
