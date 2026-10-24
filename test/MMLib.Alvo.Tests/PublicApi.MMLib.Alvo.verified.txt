@@ -197,6 +197,7 @@ namespace MMLib.Alvo.Events
         public MMLib.Alvo.Events.AlvoEvent Event { get; }
         public System.Guid EventId { get; }
         public string Subscriber { get; }
+        public static MMLib.Alvo.Events.AlvoEventContext Create(MMLib.Alvo.Events.AlvoEvent @event, MMLib.Alvo.Data.IAlvoSession data, string subscriber, int attempt = 1) { }
     }
     public enum AlvoEventDispatchMode
     {

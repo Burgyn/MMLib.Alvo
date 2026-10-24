@@ -21,6 +21,7 @@ namespace MMLib.Alvo.TestHost
         public System.IServiceProvider Services { get; }
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Events.AlvoDrainResult> DrainEventsAsync(System.Threading.CancellationToken cancellationToken = default) { }
+        public MMLib.Alvo.Events.AlvoEventContext EventContext(MMLib.Alvo.AlvoContext caller, string subscriber = "test-handler", int attempt = 1) { }
         public static MMLib.Alvo.AlvoContext Caller(params string[] roles) { }
         public static System.Threading.Tasks.Task<MMLib.Alvo.TestHost.AlvoTestHost> StartAsync(System.Action<MMLib.Alvo.IAlvoBuilder> configure, System.TimeProvider? time = null, System.Net.Http.HttpMessageHandler? webhooks = null, System.Threading.CancellationToken cancellationToken = default) { }
     }
