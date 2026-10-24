@@ -41,19 +41,20 @@ internal static class HandlerCatalog
         },
     ]);
 
-    internal static PolicyCatalog Catalog() =>
+    internal static PolicyCatalog Catalog() => CatalogOf(Schema);
+
+    internal static PolicyCatalog CatalogOf(SchemaModel schema) =>
         PolicyCatalog.Build(
             new AlvoDescriptor
             {
                 ApiVersion = "alvo.dev/v1",
                 Name = "handlers",
-                Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
-                {
-                    ["tickets"] = new() { Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal) },
-                    ["notes"] = new() { Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal) },
-                },
+                Entities = schema.Entities.ToDictionary(
+                    entity => entity.Name,
+                    _ => new EntityDescriptor { Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal) },
+                    StringComparer.Ordinal),
             },
-            Schema,
+            schema,
             CelFixtures.Compiler);
 
     internal static ExtensionRegistry Registry(Action<IAlvoBuilder> configure)

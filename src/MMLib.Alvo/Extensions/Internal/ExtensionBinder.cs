@@ -64,6 +64,10 @@ internal sealed class ExtensionBinder(
         return binding.Result.Bindings;
     }
 
+    /// <summary>What binding <paramref name="catalog"/> produced — compiled once per catalog and cached; logs nothing.</summary>
+    /// <param name="catalog">A catalog the boot primed, an apply proposes, or the provider holds.</param>
+    internal ExtensionBindingResult Result(PolicyCatalog catalog) => Binding(catalog).Result;
+
     private static string Described(IEnumerable<ExtensionProblem> problems) =>
         string.Join("; ", problems.Select(problem => $"{problem.Locator}: {problem.Message}"));
 

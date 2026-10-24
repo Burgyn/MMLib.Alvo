@@ -31,6 +31,7 @@ internal static class ExtensionsSetup
         services.TryAddSingleton(provider => new ExtensionRegistry(provider.GetServices<ExtensionRegistration>()));
         services.TryAddSingleton<ExtensionBinder>();
         services.TryAddSingleton<ExtensionCatalog>();
+        services.TryAddSingleton<ExtensionApplyGuard>();
         services.TryAddSingleton<ExtensionStateGuard>();
 
         return services;
