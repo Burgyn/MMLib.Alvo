@@ -14,8 +14,8 @@ public sealed class ExtensionCatalogScenarios(ExtensionWorld world) : IClassFixt
 
         var orders = session.Page.GetByTestId("entity-extensions-work_orders");
         await orders.WaitForAsync();
-        (await orders.InnerTextAsync()).Trim().ShouldBe("⟨/⟩ 2");
-        (await orders.GetAttributeAsync("aria-label")).ShouldBe("2 extensions from code run on this entity");
+        (await orders.InnerTextAsync()).Trim().ShouldBe("⟨/⟩ 3");
+        (await orders.GetAttributeAsync("aria-label")).ShouldBe("3 extensions from code run on this entity");
         (await session.Page.GetByTestId("entity-extensions-regions").InnerTextAsync()).Trim()
             .ShouldBe("⟨/⟩ 1", "an every-entity handler runs on regions too");
         session.AssertConsoleClean();
@@ -39,6 +39,20 @@ public sealed class ExtensionCatalogScenarios(ExtensionWorld world) : IClassFixt
         (await item.GetByRole(AriaRole.Button).CountAsync()).ShouldBe(0, "host code is read-only on the dashboard");
         (await lane.GetByTestId($"lane-extension-{ExtensionWorld.Audit}").InnerTextAsync()).ShouldContain("every entity");
         await session.AssertNoHorizontalScrollAsync();
+        session.AssertConsoleClean();
+    }
+
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_lifecycle_tab_shows_a_typed_handler_s_condition_as_cel()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders?tab=lifecycle");
+
+        var item = session.Page.GetByTestId("lifecycle-after-commit").GetByTestId($"lane-extension-{ExtensionWorld.Completed}");
+        await item.WaitForAsync();
+
+        (await item.GetByTestId("lane-extension-when").InnerTextAsync()).Trim()
+            .ShouldBe("when changed(status) && new.status == 'completed'");
         session.AssertConsoleClean();
     }
 }
