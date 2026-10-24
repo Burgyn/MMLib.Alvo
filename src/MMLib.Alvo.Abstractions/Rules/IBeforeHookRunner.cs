@@ -50,6 +50,12 @@ namespace MMLib.Alvo.Rules;
 /// around it.
 /// </para>
 /// <para>
+/// <b>Nothing a hook runs may write through Alvo</b> — neither a host function nor a replacement for this runner. A
+/// hook runs while its write holds the database's write turn, on an engine that admits one writer at a time, so a
+/// nested write through <see cref="Data.IAlvoData"/> waits for the very write that is running the hook, and fails when
+/// the busy timeout passes.
+/// </para>
+/// <para>
 /// <b>A refusal is an exception and the patch is a return value, deliberately in that asymmetry.</b> A
 /// <c>reject</c> that came back as a value would be a refusal a driver can forget to check — and a forgotten
 /// refusal is a hook that silently does not guard the write it was declared to guard, which is worse than no

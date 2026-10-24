@@ -153,6 +153,25 @@ public class CSharpApiTests
     }
 
     [Fact]
+    public void The_event_handler_surface_is_in_scope()
+    {
+        var core = ApiScope.TypesOf(ShippedPackages.All.Single(p => p.Package == "MMLib.Alvo").Assembly).Select(type => type.Name).ToList();
+        var abstractions = ApiScope.TypesOf(ShippedPackages.All.Single(p => p.Package == "MMLib.Alvo.Abstractions").Assembly)
+            .Select(type => type.Name).ToList();
+
+        core.ShouldContain("AlvoEntityBuilder");
+        core.ShouldContain("AlvoEventContext");
+        core.ShouldContain("IAlvoEventHandler`1");
+        core.ShouldContain("AlvoCreated`1");
+        core.ShouldContain("AlvoUpdated`1");
+        core.ShouldContain("AlvoDeleted`1");
+        core.ShouldContain("AlvoSaved`1");
+        core.ShouldContain("AlvoExtensionBuilderExtensions");
+        abstractions.ShouldContain("IAlvoSession");
+        abstractions.ShouldContain("IAlvoSessions");
+    }
+
+    [Fact]
     public void A_package_without_host_facing_types_says_so()
     {
         var page = CSharpApiGenerator.RenderPackage("Fixture", "A fixture package.", [], XmlDocs.Parse("<doc><members/></doc>"), 20);

@@ -3,6 +3,7 @@ using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 
@@ -76,6 +77,7 @@ internal sealed class DescriptorBootPlan
     private readonly IDescriptorValidator _validator;
     private readonly ICelCompiler _compiler;
     private readonly ILogger<DescriptorBootPlan> _logger;
+    private readonly ExtensionBinder? _extensions;
 
     /// <summary>Initializes a new instance of the <see cref="DescriptorBootPlan"/> class.</summary>
     /// <param name="source">
@@ -85,11 +87,16 @@ internal sealed class DescriptorBootPlan
     /// <param name="validator">The JSON-Schema and semantic validation the descriptor must pass.</param>
     /// <param name="compiler">The CEL compiler every rule and field flag is compiled through.</param>
     /// <param name="logger">Writes the declared-but-unhonoured warning.</param>
+    /// <param name="extensions">
+    /// Binds the host's handler registrations to the boot's catalog, or <see langword="null"/> for a composition with none
+    /// to check — see <see cref="EnsureRegistrable"/> and <see cref="EnsureBindable"/>.
+    /// </param>
     public DescriptorBootPlan(
         IDescriptorSource? source,
         IDescriptorValidator validator,
         ICelCompiler compiler,
-        ILogger<DescriptorBootPlan> logger)
+        ILogger<DescriptorBootPlan> logger,
+        ExtensionBinder? extensions = null)
     {
         ArgumentNullException.ThrowIfNull(validator);
         ArgumentNullException.ThrowIfNull(compiler);
@@ -99,6 +106,7 @@ internal sealed class DescriptorBootPlan
         _validator = validator;
         _compiler = compiler;
         _logger = logger;
+        _extensions = extensions;
     }
 
     /// <summary>
@@ -181,6 +189,34 @@ internal sealed class DescriptorBootPlan
 
         return new BootPlan(descriptor, desired, descriptorJson, PolicyCatalog.Build(descriptor, desired, _compiler));
     }
+
+    /// <summary>
+    /// Refuses a boot whose handler registrations do not fit <paramref name="catalog"/>, listing every problem at once.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A separate step from <see cref="Plan"/>, called by the boot alone.</b> <see cref="LoadAsync"/> also serves
+    /// <c>SchemaMigrationRunner</c> (<c>ApplyAlvoDescriptorAsync</c>), and a catalog primed there — like one a runtime
+    /// apply primes — is bound leniently: a handler that does not fit is left unbound and logged, never refused.
+    /// Only the boot is strict, because only at boot can the host's own author still fix the registration before
+    /// anything is served.
+    /// </para>
+    /// <para>Still stage 0: the binder reads the registry and the compiled catalog, never a database.</para>
+    /// </remarks>
+    /// <param name="catalog">The catalog the boot is about to prime.</param>
+    /// <exception cref="AlvoStartupRefusedException">A registration does not fit the catalog.</exception>
+    internal void EnsureBindable(PolicyCatalog catalog) => _extensions?.EnsureBindable(catalog);
+
+    /// <summary>
+    /// Refuses a boot whose handler registrations are wrong whatever the descriptor says — ids, services, options, a
+    /// <c>"*"</c> mixed with names, a fieldless condition — listing every problem at once, and logs the order ties.
+    /// </summary>
+    /// <remarks>
+    /// Needs no catalog, so it runs on every boot shape, a dashboard-first host awaiting its first descriptor included:
+    /// no descriptor can cure such a problem, so it refuses the start even where a descriptor refusal would not.
+    /// </remarks>
+    /// <exception cref="AlvoStartupRefusedException">A registration is wrong whatever the descriptor says.</exception>
+    internal void EnsureRegistrable() => _extensions?.EnsureRegistrable();
 
     private void EnsureValid(string descriptorJson)
     {

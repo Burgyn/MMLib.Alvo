@@ -86,7 +86,7 @@ internal sealed class CapturingLogger : ILogger, ILoggerProvider
     {
         ArgumentNullException.ThrowIfNull(formatter);
 
-        var entry = new CapturedLogEntry(logLevel, formatter(state, exception), exception);
+        var entry = new CapturedLogEntry(logLevel, formatter(state, exception), exception) { EventName = eventId.Name };
         lock (_gate)
         {
             _entries.Add(entry);
@@ -107,4 +107,8 @@ internal sealed class CapturingLogger : ILogger, ILoggerProvider
 /// <param name="Level">The level the entry was written at.</param>
 /// <param name="Message">The formatted message, exactly as the pipeline rendered it.</param>
 /// <param name="Exception">The exception the entry carried, when it carried one.</param>
-internal sealed record CapturedLogEntry(LogLevel Level, string Message, Exception? Exception);
+internal sealed record CapturedLogEntry(LogLevel Level, string Message, Exception? Exception)
+{
+    /// <summary>Gets the name of the event the entry was written under, such as a <c>LoggerMessage</c> method's.</summary>
+    internal string? EventName { get; init; }
+}

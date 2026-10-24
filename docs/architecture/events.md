@@ -36,7 +36,7 @@ application event* plus *The wildcard ruling* by PR5b-2.
 | Stage | Where it runs | What it is |
 |---|---|---|
 | **emit** | `EfAlvoData`'s four write sites, **on the caller's own `DbTransaction`** | `OutboxEventFactory.For(...)` builds the envelope, `OutboxTable.InsertAsync` appends one row on the same transaction and the same connection as the data change |
-| **claim** | `OutboxDispatcher` → `IOutboxStore.ClaimAsync` | one portable `UPDATE … RETURNING` on an autocommit connection: take the oldest claimable entries, stamp `claimed_at`/`claimed_by`, increment `attempts` |
+| **claim** | `OutboxDispatcher` → `IOutboxStore.ClaimAsync` | one portable `UPDATE … RETURNING`, alone in a write-first transaction of its own (`BEGIN IMMEDIATE` on SQLite): take the oldest claimable entries, stamp `claimed_at`/`claimed_by`, increment `attempts` |
 | **deliver** | `EventSubscriptions` then `EventActionExecutor` | pick the after-hooks this event is subscribed to (the CEL condition is part of the *subscription*), run each hook's `webhook`/`email` action |
 | **mark** | `IOutboxStore.MarkDispatchedAsync` | one statement stamping `dispatched_at`, **after** the last action, so "dispatched" means every matched hook ran |
 | **retire** | the counter, and the row that stays | `alvo.events.dispatched` (or `alvo.events.filtered`) is incremented **after** the mark. The row is never deleted or moved — an abandoned event is still countable and inspectable |
@@ -295,8 +295,14 @@ holds the line, and `OutboxTable.cs`/`EfCoreOutboxStore.cs` are both in
 `ChangeTrackerReachTests._sqlComposingFiles`. This is why `data-path.md`'s prediction that *"PR5 adds
 LINQ to this package"* was corrected rather than left standing: it did not.
 
-**Why no transaction is opened around the claim, and why adding one would break SQLite.** Claim, mark
-and release are one autocommit statement each. Q5 measured that a transaction which **reads and then
+**Why no transaction spans two store calls, and why adding one would break SQLite.** Claim, mark
+and release are one statement each. Mark and release run on autocommit; the claim's one statement runs
+in a write-first transaction of its own (`RelationalSqlBatch.ReadWrittenRowsAsync` — the provider's
+default transaction, `BEGIN IMMEDIATE` on SQLite, read committed on PostgreSQL). It has to: on autocommit an
+`UPDATE … RETURNING` commits on its *last* step, inside `DbDataReader.Read`, where `Microsoft.Data.Sqlite`
+does not retry a busy lock, so a claim that met a concurrent reader threw `database is locked` at once.
+Both `BEGIN IMMEDIATE`, which takes the write lock up front, and `COMMIT` go through the retried path,
+and the write is the transaction's first and only statement, so it is not the shape Q5 refused. Q5 measured that a transaction which **reads and then
 writes** is the single shape that fails unretryably with `SQLITE_BUSY_SNAPSHOT` (`Extended=517`) after
 burning the whole 30-second retry loop under WAL — and fails the *request path* instead under the
 shipped journal mode. Wrapping two store calls in a transaction "to be tidy" is the edit that would undo
@@ -860,13 +866,13 @@ rather than fold an absent operand into a verdict.
 **one round** of every dispatcher — today, through the internal `EventPump`, exactly one tick of this loop
 (`OutboxDispatcher.ManualRoundAsync` runs the same `RoundAsync` the loop's `PumpOneBatchAsync` does): claim what is
 due, run the hooks, retire or release under the usual backoff — and reports it as an `AlvoDrainResult` (`Claimed`,
-`Failed`, `Subscribers`). HX-03's delivery dispatcher and HX-13's pumps become further steps of the same round. The
+`Failed`, `Subscribers`). HX-03's delivery dispatcher is the second step of the same round, and HX-13's pumps follow. The
 dispatcher is one singleton, hosted and driven by the pump as the same instance. The standalone host refuses `Manual`
 at startup — nothing in it drains by hand, so it would deliver nothing. A round is refused, before anything is
 claimed, unless the mode is `Manual` and `Enabled` is on (two drivers of one outbox break per-key ordering, as two
 replicas do), and unless the boot is `Ready` with a primed catalog (the same gate the loop keeps: an event judged
 against an unprimed catalog is retired as delivered); each of the four causes is refused in its own words, naming its
-fix. Concurrent rounds are serialised, and the gate is not re-entrant — a subscriber must never drain.
+fix. Concurrent rounds are serialised, and the gate is not re-entrant — a round called from inside a round is refused.
 `MMLib.Alvo.TestHost` runs in this mode and loops rounds until one is quiet, giving up after 100 (spec 2026-10-14
 §4.15).
 
@@ -877,7 +883,7 @@ Every after-hook action the dispatcher runs is one consumer activity on the `MML
 `alvo.event.id`, `alvo.event.type` and `alvo.outcome` (`succeeded` | `failed`, status `Error` when failed; none when
 the host stopped mid-run, which is not an attempt) — ids only, the rule the log lines keep. It costs nothing without a
 listener. The test host's `Hooks.AssertRan` reads it; HX-03 puts handler deliveries on the same source and links each
-span to the envelope's `traceparent`.
+span to the envelope's `traceparent` ([Event handlers and deliveries](#event-handlers-and-deliveries)).
 
 ### The execution log is logs plus metrics, not a table
 
@@ -944,6 +950,177 @@ configuration key, its `Alvo__…` environment spelling, and a value that would 
 `ValidateDataAnnotations()` is deliberately **not** used, because a `[Range]` message names the property
 rather than the key and would add a second, worse message to every refusal.
 
+## Event handlers and deliveries
+
+HX-03 (spec 2026-10-14 §4.8) adds C# event handlers on a delivery engine. The guide is *React to changes (event
+handlers)* on the docs site; this section is the mechanism.
+
+**Fan-out runs first.** For each claimed outbox entry, in id order, `DeliveryFanOut` judges every handler bound to the
+current catalog (`ExtensionBinder.For`) and inserts one `alvo_deliveries` row per match before the declarative actions
+run; `UNIQUE (event_id, subscriber)` makes a second fan-out a no-op. A `when` that throws is a `dead` `when-failed`
+row; a matching handler on an envelope whose `chaindepth + 1 > MaxDepth` is a `dead` `chain-depth-exceeded` row and an
+Error `ChainDepthExceeded`; a condition reading a caller value the envelope lacks matches nothing. A storage failure of
+the insert releases the entry and holds back every later entry of the batch with the same partition key, unprocessed,
+without spending their attempts (`IOutboxStore.HoldBackAsync`). A failing action no longer touches deliveries already
+recorded. An event that produced only dead deliveries counts as `alvo.events.dispatched`, not `filtered`.
+
+**The tables.** `alvo_deliveries` and `alvo_delivery_attempts` (identical DDL on both engines, `SystemSchemaInitializer`,
+names from `AlvoFrameworkTables`); no body, URL or exception message is stored; the envelope stays in `alvo_outbox`,
+which a claim reads it from — so `IDeliveryStore` and `IOutboxStore` share one database. Beside the spec's
+`ix_<deliveries>_claim` and `ix_<deliveries>_lane`, the first boot builds `ix_<deliveries>_lane_open`, a partial index on
+`(subscriber, partition_key, event_id)` over the rows that can still hold a lane back (`status IN ('pending', 'running',
+'retrying', 'dead')`): the claim's look at a lane head's earlier deliveries carries that term verbatim, so it seeks the
+few unfinished rows instead of walking the lane's succeeded history, which is never purged before #154 (a recorded
+addition to the spec's DDL; `SqliteDeliveryStoreTests` and `PostgreSqlDeliveryStoreTests` pin the plan). It also builds
+`ix_<outbox>_unfanned`, a partial index on the outbox's undispatched `(partition_key, id)`; on PostgreSQL a plain
+`CREATE INDEX` blocks outbox writes while it builds (identical DDL rules out `CONCURRENTLY`). A failed build is retried
+once, idempotently, then rethrown — never swallowed by the table-existence recovery. Statuses:
+`pending | running | succeeded | retrying | dead | superseded | cancelled`.
+
+**The claim.** One `UPDATE … RETURNING` with the outbox's EvalPlanQual-safe shape, restricted to the handlers this
+process binds, due (`pending`, `retrying` past `not_before`, or `running` past its lease), and — for an ordered handler —
+no earlier delivery of the same subscriber and partition key pending, running, retrying or dead (other than `unbound`),
+**and no earlier outbox entry of the same partition key still undispatched below `Alvo:Events:MaxAttempts`** — or still
+under a claim younger than `Alvo:Events:ClaimLease`, which covers an entry being fanned out on its last attempt (the
+partial index keeps that a seek). The second half is what keeps a record's order across outbox batches, a failed
+fan-out and a dispatcher that died between claiming an entry and fanning it out; it also means a descriptor action that
+keeps failing on event 1 holds the record's later handler deliveries back until it succeeds or reaches the outbox
+ceiling — about `attempts × PollInterval` per failing event, ≈ 45 s at the defaults (HX-15 moves actions onto
+deliveries and removes that coupling). On SQLite both claims — the delivery claim and the outbox's — run in a
+write-first transaction (`BEGIN IMMEDIATE`), because `Microsoft.Data.Sqlite` retries a busy engine only on a
+statement's first step, and an auto-committed `UPDATE … RETURNING` met its busy on commit; the outbox claim had the
+same latent "database is locked" on `main`. On PostgreSQL a deadlock between two claimants (`40P01`) is a failed round,
+retried — there is no `SKIP LOCKED`.
+
+**The lease** is per claim: the longest registered timeout + `LeaseGrace` (30 s) + `SettleGrace` (30 s) — **90 s at the
+defaults**. The runner answers for an attempt within `Timeout + SettleGrace` of its start, so the answer lands inside the
+lease with 30 s to spare, and no second claim starts a delivery whose attempt is still unanswered (the fence keeps it at
+most once regardless). This deliberately deviates from the spec's "timeout + 30 s": that lease did not cover the settle
+wait a timed-out handler gets. The cost: crash recovery for a short handler waits out the longest handler's timeout.
+Completion and failure are fenced on `(claimed_by, attempts)`: a late finisher changes nothing and logs
+`DeliveryLeaseLost`. The claimant is per dispatcher instance (`{machine}:{pid}:{instance}`).
+
+**A delivery.** `DeliveryRunner` enters `AlvoFlow` (`Depth = chaindepth + 1`, `CausationId = event id`, the event's
+`CorrelationId`, no trace parent) — the first production caller of `AlvoFlow.Enter` — and runs the handler in its own DI
+scope, as `System(event tenant)` or the event's actor (`EventActor`: the envelope's role names resolved against the
+roles the descriptor declares today; none left is `anon`; a system-originated event runs as `admin`), under its
+timeout. `AlvoEventContext.Data` is an `IAlvoSession` bound through `IAlvoSessions.For`, never a raw `IAlvoData`.
+Retries follow `AlvoRetryPolicy` ±20 % (default 5 s, 30 s, 2 min, 15 min, 1 h, 6 h: dead after attempt 7; a policy's
+waits are capped at 7 days). `AlvoChainDepthExceededException`, also wrapped as an inner exception, is dead at once; a
+host stopping records nothing; a delivery reclaimed past its policy's last attempt is dead `lease-expired` without
+running; an envelope gone from the outbox is dead `event-missing`; an envelope whose `tenantid` (or, for `EventActor`,
+`authid`) does not parse is dead `event-unreadable` — never run as a tenantless system or an anonymous caller. Every
+other failure records the exception's **type name**, never its message, and `DeliveryRunFailed` logs the type only.
+
+**Timeouts are enforced, not requested.** The runner awaits the handler with `WaitAsync(Timeout)` (default 30 s, at most
+1 h — a longer one refuses the start, because the lease would overflow), cancels its token and waits at most
+`SettleGrace`. A handler that ends within that grace is answered by its own result — succeeded, its own exception type,
+or dead `chain-depth-exceeded` — unless it ended by giving in to the cancellation (an `OperationCanceledException`, or a
+cancelled task), which is `timeout`. A handler still running then is **abandoned** — .NET cannot stop it — answered
+`timeout`, and keeps running in the background (X15): it holds no `MaxConcurrency` slot and may overlap its own retry.
+`alvo.delivery.abandoned{alvo.subscriber}` counts them and a later failure of one is logged by type. Handlers must be
+idempotent on `EventId`.
+
+**Abandoned handlers are bounded per handler.** `AbandonedHandlers` tracks each abandoned invocation until its task ends.
+A handler with `MaxConcurrency` of them still alive is left out of every claim — the loop's and a manual round's — until
+one ends; its deliveries wait as `pending`/`retrying`, other handlers keep flowing, and entering the stand-down logs a
+Warning `HandlerStoodDown` once. Claiming stops at the cap, but deliveries of that handler already running may still be
+abandoned, so one handler strands at most `2 × MaxConcurrency − 1` thread-pool threads (exactly the cap when one delivery
+runs at a time) — no longer one per timed-out attempt across every record, which could starve the process's thread pool.
+
+**The answer is retried inside the lease.** A storage refusal of `CompleteAsync`/`FailAsync` — any `DbException` in the
+chain: SQLite busy (which `Microsoft.Data.Sqlite` does not mark `IsTransient`, measured), a PostgreSQL serialization
+failure or deadlock — is written again after 50 ms, doubling to at most 1 s, while the retry would still **start**
+`AnswerMargin` (5 s) before the handler's timeout + `LeaseGrace` + `SettleGrace` since the attempt began — never later
+than the claim's lease — and no later than `SettleGrace` after the first refusal, so a permanent refusal under a 1 h
+timeout is not retried for an hour. `DeliveryAnswerRetried` logs the first retry, then every tenth. The bound is on when
+a retry starts: on SQLite the write may then wait at the write gate (up to the busy timeout) and land after the lease,
+and the fence decides — it records the answer if nobody reclaimed the delivery and returns `false` otherwise. A fence
+that no longer holds is an answer (`false`), never retried; a stop ends the retries; any other exception is not
+retried. The core cannot tell an engine's transient codes from permanent ones and need not: the answer
+is a fenced, idempotent write, so a retried permanent refusal costs only time inside the lease. Without the retry, a busy
+SQLite gate during an answer burned an attempt whose side effect had already run. An answer that still throws ends the
+delivery span as failed before `DeliveryRunFailed` logs its type.
+
+**Worker model.** `DeliveryDispatcher` keeps at most `Alvo:Deliveries:MaxConcurrency` (16, 1–256) deliveries running and
+claims only free slots, so no lease runs while its delivery queues. In the manual mode it is the second step of a pump
+round, loops its claims (at most `MaxConcurrency` at a time, until nothing is due or `Alvo:Events:BatchSize` were
+claimed), and a round called from inside a round is refused. A failed round — an outage, a deadlock — no longer ends
+either dispatcher: it is logged by the exception type's full name, never its message (`DeliveryDispatcherRoundFailed`,
+`DispatcherRoundFailed`; also `HoldBackFailed` and the delivery loop's backstop `DeliveryDispatcherStopped`) and the next
+round waits a backoff that doubles from the poll interval up to one minute, reset by a round that succeeds (the outbox
+dispatcher used to stop for good on any round exception). A shutdown always awaits the in-flight runners, never a
+handler. The job pool for schedules and migrations arrives with them (HX-13).
+
+**SQLite: one write line per database, per process.** Under the dispatcher's concurrency, SQLite's busy-retry sleeps —
+not the work — were the cost of a delivery (#410: 10 000 events took ~1 000 s at concurrency 16). The EF driver now
+queues every write transaction of one process to one database behind an internal `IRelationalWriteGate`
+(`SerialRelationalWriteGate`, one per database file) before it asks the engine for the lock: the outbox and delivery
+stores, the EF data path's write transactions (an outbox append inside a data write holds the turn once; no
+re-entrancy), `EfCoreRuntimeSchemaWriter`, `EfCoreSecretStore`, `EfCoreDescriptorVersionStore` and
+`EfCoreManagementIdempotencyStore`. The same chaos run takes ~55 s (~84 s when every handler also writes through `IAlvoData`). A wait is
+bounded by the connection's busy timeout (`Default Timeout`; at 0 it is unbounded, as the engine's own wait then is) and
+then fails with SQLite's own `SQLITE_BUSY` "database is locked", which the replay loop and the API already answer. Code that runs while a turn is held — a host CEL function, a replacement
+`IBeforeHookRunner` — must not write through Alvo, or it waits on itself until the busy timeout. Another process on the
+same file, or a write path the gate does not cover, still meets the engine's lock. PostgreSQL keeps the driver's
+no-op default (`NoRelationalWriteGate`).
+
+**Boot.** Every registration is bound when the boot plan compiles the catalog (`DescriptorBootPlan` through
+`ExtensionBinder`); all problems refuse the start at once, each with its locator `extensions/{id}/{slot}`. The checks
+that do not depend on the descriptor — ids, duplicates, derived-name collisions, timeout and enum ranges, services the
+container cannot provide — also run at an `Awaiting` boot, before any descriptor exists, so a host-code bug fails fast
+on a dashboard-first host. `ExtensionStateGuard` runs in `AlvoBootService` in two steps: right after stage 1 brings the
+system tables up and before anything converges, a **read-only** check refuses a start over unfinished (pending, running
+or retrying) work of an id nobody registers or retires — so a refused start changes nothing; and just before Ready it
+applies `AddRetiredExtension` (`DeadLetter` → dead `retired`, `Discard` → `cancelled`). A retirement applies only at
+boot; a delivery of that id still running elsewhere may finish its side effect — only its answer is fenced off. Both
+steps call `IDeliveryStore.EnsureAsync` first (idempotent): the port promises that call builds the storage, so a
+third-party store that builds its tables there is not read before they exist on its first boot; the contract suite pins
+that ensured, empty storage reads as no work.
+
+**The orphan check refuses two starts an operator may not expect** (E3: "rolling deploys need an explicit drop"). A
+**rollback** to a build that does not know a handler a newer build added, while that handler has unfinished work, is
+refused — the older build can neither register nor retire an id it never knew; and **two applications over one
+database** (the standalone image beside an embedded host) that register different handlers each refuse the other's
+work. The remedy is to roll forward, to drain first (let the work finish, or set its rows `cancelled`), to roll back to a
+build carrying `AddRetiredExtension`, or — for two applications — to register the same handlers or use two databases.
+The guide states it beside *Rename or remove a handler*.
+
+**Observability.** `alvo.delivery {subscriber}` spans on `MMLib.Alvo.Hooks` keep the ambient parent and **link** the
+envelope's `traceparent` (a parent would take the span out of the test host's recorder); tags add
+`alvo.delivery.attempt`. Metrics on `MMLib.Alvo.Events`: `alvo.delivery.duration`, `alvo.delivery.attempts{alvo.outcome}`,
+`alvo.delivery.lag`, `alvo.delivery.dead{alvo.reason}`, `alvo.delivery.abandoned`.
+
+**Unbound handlers.** A registered handler that does not fit a catalog the boot plan did not bind (a runtime apply,
+`ApplyAlvoDescriptorAsync`, or — in the manual mode only — a dashboard-first host's first catalog) is logged `ExtensionUnbound` once and gets a dead
+`unbound` delivery (`DeliveryRequest.UnboundReason`) for every event its source selects — never a silent drop, never a
+binding against a stale catalog. An `unbound` row does **not** block its lane: it is selected without `when`, so it may
+name records the condition would never have matched; once the handler rebinds, later events flow and the missed ones
+wait for HX-06's replay. In the background mode a dashboard-first host that booted `Awaiting` never reaches that lenient
+first catalog: both dispatchers stand down on a boot that primed no catalog — logged as Warnings
+`DispatcherStoodDownUnprimed` and `DeliveryDispatcherStoodDownUnprimed` — and stay down until a restart, whose boot over
+the stored descriptor binds every handler **strictly** (`EnsureBindable`; a misfit records `Failed`).
+
+**Dead deliveries block their lane.** Any other dead delivery holds its (handler, record) lane until HX-06's redeliver;
+the manual remedy is to set the row `cancelled`, or to retire the handler. Re-pending a dead row is a retry only with
+`attempts = 0` **and** its `alvo_delivery_attempts` rows deleted in the same transaction: the claim increments
+`attempts`, so a row that died at its last attempt would be reclaimed past its policy and recorded dead `lease-expired`
+without running (`DeliveryRunner`), and the attempt number is half of the attempts table's primary key, so a reset count
+without the deleted history fails every answer on a duplicate key. The guide gives the statement; HX-06's redeliver
+replaces it.
+`AlvoOrdering.None` handlers are never held.
+
+**Inherited, stated.** Order is event-id order, which is per-record order across batches, failed fan-outs and
+dispatcher crashes; what remains of #150 is its id condition — two processes writing one record within one millisecond
+can interleave. A subscriber receives events fanned out after its registration on the fanning replica. E4 holds by
+construction: `PolicyCatalogProvider` primes one project per host, and the binder binds to that catalog only. A
+handler's `when` reading an `events.exclude` field, through `changed()` included, is refused at boot (stricter than an
+after-hook's), so #398 cannot reach a handler; an envelope with no `data.changed` (#399) reads `changed()` as false for
+a handler exactly as for an after-hook, through the shared `EnvelopeReading`. A handler's `when` reading `@tenant.id` on
+a global entity's event — whose envelope carries no `tenantid` — matches nothing, failing closed as an after-hook's
+does; an apply-time warning for that mistake is #400. Retention (#154) must cover both delivery
+tables and keep an outbox row while any delivery of its event is unfinished.
+
 ## Chain depth
 
 **One counter bounds every loop a hook, handler or timer can start** (HX-01, spec 2026-10-14 X3). Every write and
@@ -969,8 +1146,9 @@ implementer owes it too: it is the port's seventh exception family.
 Data API maps every `IAlvoData` family, and `AlvoExceptionHandler`, for a refusal escaping an Alvo route, both answer
 through `ProblemResultFactory.ChainDepthExceeded`; the document carries `"retryable": false`, the only problem that
 carries the member. A host's own route keeps its own 500, as for every other family. Over HTTP the refusal is
-reachable today only through an explicitly stated `Provenance.Depth`: HX-01 ships no production caller of
-`AlvoFlow.Enter` — HX-03 (deliveries) and HX-07 (the write unit) add them.
+reachable today only through an explicitly stated `Provenance.Depth`. `DeliveryRunner` (HX-03) is the first
+production caller of `AlvoFlow.Enter` — a handler writes one hop deeper than its event — and HX-07's write unit the
+second.
 
 **The limit, stated: depth follows the execution context.** `AlvoFlow` is an `AsyncLocal`. Work a host hands to its
 own queue or background loop, or runs with execution-context flow suppressed, leaves its reach and starts again at
@@ -986,7 +1164,7 @@ IAlvoEvents.PublishAsync(type, subject, data, context)
         │
         ├─ AlvoEventName.EnsureCustom(type)   ← refuses first, before the clock is read
         │     1. blank
-        │     2. first segment in AlvoEventName.ReservedNamespaces  (entity | auth | storage)
+        │     2. first segment in AlvoEventName.ReservedNamespaces  (entity | auth | storage | alvo)
         │     3. not two or more lower-case dot-separated segments
         │
         ├─ AlvoEventId.Create(now) · AlvoEvent.DefaultSource · AlvoEventProvenance.*
@@ -1117,10 +1295,13 @@ The frozen grammar has **two** authorities, split along the two contracts it ser
 `HasWildcard` for this refusal (a *descriptor* question — what a rule may subscribe to), and `AlvoEventName`
 owns `ReservedNamespaces` for the publish guard (a *wire* question — which names Alvo emits, so which a host
 may not mint). They live in different assemblies for that reason, and
-`EventPatternTests.The_reserved_namespaces_are_the_schema_s_own`
+`EventPatternTests.The_reserved_namespaces_are_the_schema_s_own_plus_the_framework_s`
 reads the alternation out of `schema/project.schema.json` itself, so the schema stays the authority over the
 authority. A segment is a wildcard only when it is *entirely* `*`, because the grammar admits it nowhere else;
-the cheap `pattern.Contains('*')` passes every other fact and is killed by its own.
+the cheap `pattern.Contains('*')` passes every other fact and is killed by its own. `alvo` is reserved beside
+the schema's three (HX-03, spec 2026-10-14 E12): the framework mints `alvo.schedule.<id>` and
+`alvo.command.<name>.completed` there, a host may not, and `$defs/eventPattern` does not admit it — framework
+events reach host handlers only.
 
 **This refuses a descriptor whose only defect is being ahead of the build, against `UnhonouredSubsystems`'
 own line** — refuse what silently produces wrong data, warn what is observably absent. It is taken anyway
@@ -1305,17 +1486,21 @@ adapter implements the queue, not the dispatcher.
 | Assembly | Files |
 |---|---|
 | `MMLib.Alvo.Abstractions/Events/` | `AlvoEvent`, `AlvoEventId`, `AlvoEventAttributes`, `AlvoEventJson`, `AlvoEventProvenance`, `IOutboxStore`, `IEmailSender` — all public; `AlvoEnvelopeStamp`, the one derivation of an envelope's provenance both emit paths share — internal |
-| `MMLib.Alvo.Abstractions/Data/` | `AlvoChainDepthLimit` — internal, the one depth limit every write and publish face enforces |
+| `MMLib.Alvo.Abstractions/Events/` (HX-03) | `IDeliveryStore` and its records `DeliveryRequest`, `DeliveryClaim`, `ClaimedDelivery`, `DeliveryAttempt`, `DeliveryFailure` — public |
+| `MMLib.Alvo.Abstractions/Data/` | `AlvoChainDepthLimit` — internal, the one depth limit every write and publish face enforces; `IAlvoSession` and `IAlvoSessions` (one file) — public (HX-03) |
 | `MMLib.Alvo.Abstractions/Rules/` | `IBeforeHookRunner` — public, the port a storage driver calls in-transaction |
-| `MMLib.Alvo.Data.EntityFrameworkCore/` | `Internal/OutboxTable`, `Internal/OutboxEventFactory`, `EfCoreOutboxStore`; the four before-hook call sites in `Internal/EfAlvoData` |
-| `MMLib.Alvo/Events/` | `AlvoEventOptions`, `AlvoEventDispatchMode`, `IAlvoEventPump`, `AlvoDrainResult`, `Setup`; and `Internal/`: `OutboxDispatcher`, `EventSubscriptions`, `EventActionExecutor`, `WebhookDelivery`, `ConsoleEmailSender`, `AlvoTemplate`, `JsonataSlot`, `AfterHookCompiler`, `AfterImagePhase` (#325: the row-image rule for after-hook conditions and templates), `ActionVocabulary`, `AlvoEventMetrics`, `EventLog`, `AlvoEventOptionsConfiguration`, `EventPump` and `DrainRound` (manual rounds), `AlvoHookTelemetry` (the `MMLib.Alvo.Hooks` source) |
+| `MMLib.Alvo.Data.EntityFrameworkCore/` | `Internal/OutboxTable`, `Internal/OutboxEventFactory`, `EfCoreOutboxStore`; the four before-hook call sites in `Internal/EfAlvoData`; HX-03: `Internal/DeliveryTable`, `Internal/EfCoreDeliveryStore` (internal), `Internal/IRelationalWriteGate`, `Internal/SerialRelationalWriteGate`, `Internal/NoRelationalWriteGate` |
+| `MMLib.Alvo.Data.Sqlite/` | `SqliteWriteGate`, `SqliteWriteGates` — the per-database write line (HX-03) |
+| `MMLib.Alvo/Events/` | `AlvoEventOptions`, `AlvoEventDispatchMode`, `IAlvoEventPump`, `AlvoDrainResult`, `Setup`; and `Internal/`: `OutboxDispatcher`, `EventSubscriptions`, `EventActionExecutor`, `WebhookDelivery`, `ConsoleEmailSender`, `AlvoTemplate`, `JsonataSlot`, `AfterHookCompiler`, `AfterImagePhase` (#325: the row-image rule for after-hook conditions and templates), `ActionVocabulary`, `AlvoEventMetrics`, `EventLog`, `AlvoEventOptionsConfiguration`, `EventPump` and `DrainRound` (manual rounds), `AlvoHookTelemetry` (the `MMLib.Alvo.Hooks` source); HX-03: `AlvoEventContext`, `IAlvoEventHandler<T>`, the four messages (`AlvoEventMessages`), and `Internal/`: `EnvelopeReading`, `HandlerCondition`, `DeliveryFanOut`, `DeliveryRunner`, `DeliveryDispatcher`, `EventActor`, `HandlerMessage`, `DeliveryBackoff`, `AlvoDeliveryMetrics`, `DeliveryLog`, `DeliveryVocabulary` |
+| `MMLib.Alvo/Extensions/` (HX-03) | the builder surface (`AlvoExtensionBuilderExtensions`, `AlvoEntityBuilder`, `AlvoHandlerOptions`, `AlvoRetryPolicy`, `AlvoRunAs`, `AlvoOrdering`, `AlvoRetirement`, `AlvoDeliveryOptions`) and `Internal/`: the registrations, `ExtensionBindingCompiler`, `ExtensionBinder`, `HandlerBinding`, `HandlerInvoker`, `ExtensionStateGuard`, `AlvoSessions` |
 | `MMLib.Alvo/Rules/` | `BeforeHooks` (`EntityBeforeHooks`, `CompiledBeforeHook`, `CompiledMutation`) and `Internal/`: `BeforeHookCompiler`, `BeforeHookRunner` — all `internal` |
-| `MMLib.Alvo.Testing/Events/` | `OutboxStoreContractTests` + `IOutboxStoreWorld`, `AlvoEventCriteriaTests` + `IAlvoEventWorld` — the suites a provider inherits |
+| `MMLib.Alvo.Testing/Events/` | `OutboxStoreContractTests` + `IOutboxStoreWorld`, `AlvoEventCriteriaTests` + `IAlvoEventWorld`, `DeliveryStoreContractTests` + `IDeliveryStoreWorld` (HX-03) — the suites a provider inherits |
 | `MMLib.Alvo.Testing/Data/` | `AlvoDataBeforeHookTests` + `IAlvoDataBeforeHookWorld` — the before-hook suite every engine inherits |
 
 Only `AlvoEventOptions`, the manual-dispatch surface (`AlvoEventDispatchMode`, `IAlvoEventPump`, `AlvoDrainResult`),
-the three ports and the four envelope types are public; everything else in the
-core is `internal`.
+the four ports (`IOutboxStore`, `IEmailSender`, `IBeforeHookRunner` and, from HX-03, `IDeliveryStore` with its records),
+the four envelope types and the HX-03 handler surface (`AlvoEventContext`, `IAlvoEventHandler<T>`, the four messages,
+and the `MMLib.Alvo.Extensions` builder and option types) are public; everything else in the core is `internal`.
 
 ## A replacement emits its branch's own event (#105)
 

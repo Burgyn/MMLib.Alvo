@@ -1,0 +1,20 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "tenant-desk",
+  "tenancy": { "enabled": true },
+  "auth": { "roles": ["agent"] },
+  "entities": {
+    "notes": {
+      "tenancy": "scoped",
+      "fields": {
+        "text": { "type": "string", "maxLength": 80 }
+      },
+      "rules": {
+        "list": "'agent' in @user.roles || 'admin' in @user.roles",
+        "get": "'agent' in @user.roles || 'admin' in @user.roles",
+        "create": "'agent' in @user.roles || 'admin' in @user.roles"
+      }
+    }
+  }
+}

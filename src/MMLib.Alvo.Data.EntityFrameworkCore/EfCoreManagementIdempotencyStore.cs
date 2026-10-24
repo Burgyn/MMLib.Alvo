@@ -78,16 +78,19 @@ internal sealed class EfCoreManagementIdempotencyStore : IManagementIdempotencyS
         await using (connection.ConfigureAwait(false))
         {
             await OpenAsync(connection, ct).ConfigureAwait(false);
-            await IdempotencyTable.InsertRecordedAsync(
-                connection,
-                transaction: null,
-                _tableName,
-                key,
-                scope,
-                fingerprint,
-                revision.ToString(CultureInfo.InvariantCulture),
-                DateTimeOffset.UtcNow,
-                ct).ConfigureAwait(false);
+            using (await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false))
+            {
+                await IdempotencyTable.InsertRecordedAsync(
+                    connection,
+                    transaction: null,
+                    _tableName,
+                    key,
+                    scope,
+                    fingerprint,
+                    revision.ToString(CultureInfo.InvariantCulture),
+                    DateTimeOffset.UtcNow,
+                    ct).ConfigureAwait(false);
+            }
         }
     }
 

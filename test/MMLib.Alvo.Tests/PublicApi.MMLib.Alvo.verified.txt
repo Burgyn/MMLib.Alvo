@@ -108,6 +108,18 @@ namespace MMLib.Alvo.Auth
 }
 namespace MMLib.Alvo.Events
 {
+    public sealed class AlvoCreated<T> : System.IEquatable<MMLib.Alvo.Events.AlvoCreated<T>>
+        where T :  class
+    {
+        public AlvoCreated() { }
+        public required T New { get; init; }
+    }
+    public sealed class AlvoDeleted<T> : System.IEquatable<MMLib.Alvo.Events.AlvoDeleted<T>>
+        where T :  class
+    {
+        public AlvoDeleted() { }
+        public required T Old { get; init; }
+    }
     public sealed class AlvoDrainResult : System.IEquatable<MMLib.Alvo.Events.AlvoDrainResult>
     {
         public AlvoDrainResult() { }
@@ -115,6 +127,15 @@ namespace MMLib.Alvo.Events
         public required int Failed { get; init; }
         public bool IsQuiet { get; }
         public required System.Collections.Generic.IReadOnlyList<string> Subscribers { get; init; }
+    }
+    public sealed class AlvoEventContext
+    {
+        public int Attempt { get; }
+        public MMLib.Alvo.AlvoContext Caller { get; }
+        public MMLib.Alvo.Data.IAlvoSession Data { get; }
+        public MMLib.Alvo.Events.AlvoEvent Event { get; }
+        public System.Guid EventId { get; }
+        public string Subscriber { get; }
     }
     public enum AlvoEventDispatchMode
     {
@@ -133,6 +154,25 @@ namespace MMLib.Alvo.Events
         public System.TimeSpan PollInterval { get; set; }
         public System.Collections.Generic.IList<string> WebhookAllowedNetworks { get; }
     }
+    public sealed class AlvoSaved<T> : System.IEquatable<MMLib.Alvo.Events.AlvoSaved<T>>
+        where T :  class
+    {
+        public AlvoSaved() { }
+        public required T New { get; init; }
+        public T Old { get; init; }
+    }
+    public sealed class AlvoUpdated<T> : System.IEquatable<MMLib.Alvo.Events.AlvoUpdated<T>>
+        where T :  class
+    {
+        public AlvoUpdated() { }
+        public required T New { get; init; }
+        public required T Old { get; init; }
+    }
+    public interface IAlvoEventHandler<in TMessage>
+        where in TMessage :  class
+    {
+        System.Threading.Tasks.Task HandleAsync(TMessage message, MMLib.Alvo.Events.AlvoEventContext context, System.Threading.CancellationToken cancellationToken);
+    }
     public interface IAlvoEventPump
     {
         System.Threading.Tasks.Task<MMLib.Alvo.Events.AlvoDrainResult> DrainAsync(System.Threading.CancellationToken cancellationToken = default);
@@ -140,11 +180,65 @@ namespace MMLib.Alvo.Events
 }
 namespace MMLib.Alvo.Extensions
 {
+    public sealed class AlvoDeliveryOptions
+    {
+        public const string SectionName = "Alvo:Deliveries";
+        public AlvoDeliveryOptions() { }
+        public int MaxConcurrency { get; set; }
+    }
+    public sealed class AlvoEntityBuilder
+    {
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder OnCreated(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder OnCreated<THandler>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoCreated<MMLib.Alvo.Data.AlvoRecord>> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder OnDeleted(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder OnDeleted<THandler>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoDeleted<MMLib.Alvo.Data.AlvoRecord>> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder OnSaved(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder OnSaved<THandler>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoSaved<MMLib.Alvo.Data.AlvoRecord>> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder OnUpdated(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder OnUpdated<THandler>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoUpdated<MMLib.Alvo.Data.AlvoRecord>> { }
+    }
     public sealed class AlvoExtensionOptions
     {
         public const string SectionName = "Alvo:Extensions";
         public AlvoExtensionOptions() { }
         public int MaxDepth { get; set; }
+    }
+    public sealed class AlvoHandlerOptions
+    {
+        public AlvoHandlerOptions() { }
+        public string? Description { get; set; }
+        public int Order { get; set; }
+        public MMLib.Alvo.Extensions.AlvoOrdering Ordering { get; set; }
+        public MMLib.Alvo.Extensions.AlvoRetryPolicy Retry { get; set; }
+        public MMLib.Alvo.Extensions.AlvoRunAs RunAs { get; set; }
+        public System.TimeSpan Timeout { get; set; }
+    }
+    public enum AlvoOrdering
+    {
+        PerRecord = 0,
+        None = 1,
+    }
+    public enum AlvoRetirement
+    {
+        DeadLetter = 0,
+        Discard = 1,
+    }
+    public sealed class AlvoRetryPolicy
+    {
+        public System.Collections.Generic.IReadOnlyList<System.TimeSpan> Delays { get; }
+        public int MaxAttempts { get; }
+        public static MMLib.Alvo.Extensions.AlvoRetryPolicy Default { get; }
+        public static MMLib.Alvo.Extensions.AlvoRetryPolicy None { get; }
+        public static MMLib.Alvo.Extensions.AlvoRetryPolicy From(params System.TimeSpan[] delays) { }
+    }
+    public enum AlvoRunAs
+    {
+        System = 0,
+        EventActor = 1,
     }
 }
 namespace MMLib.Alvo.Management
@@ -241,6 +335,15 @@ namespace Microsoft.Extensions.DependencyInjection
     public static class AlvoDescriptorApplyExtensions
     {
         public static System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationResult> ApplyAlvoDescriptorAsync(this System.IServiceProvider services, MMLib.Alvo.Migrations.MigrationOptions? options = null, System.Threading.CancellationToken ct = default) { }
+    }
+    public static class AlvoExtensionBuilderExtensions
+    {
+        public static MMLib.Alvo.IAlvoBuilder AddEventHandler(this MMLib.Alvo.IAlvoBuilder builder, string id, string eventType, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
+        public static MMLib.Alvo.IAlvoBuilder AddEventHandler<THandler>(this MMLib.Alvo.IAlvoBuilder builder, string id, string eventType, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Data.AlvoRecord> { }
+        public static MMLib.Alvo.IAlvoBuilder AddRetiredExtension(this MMLib.Alvo.IAlvoBuilder builder, string id, MMLib.Alvo.Extensions.AlvoRetirement retirement) { }
+        public static MMLib.Alvo.IAlvoBuilder Entities(this MMLib.Alvo.IAlvoBuilder builder, System.Collections.Generic.IEnumerable<string> entities, System.Action<MMLib.Alvo.Extensions.AlvoEntityBuilder> configure) { }
+        public static MMLib.Alvo.IAlvoBuilder Entity(this MMLib.Alvo.IAlvoBuilder builder, string entity, System.Action<MMLib.Alvo.Extensions.AlvoEntityBuilder> configure) { }
     }
     public static class AlvoProblemDetailsExtensions
     {

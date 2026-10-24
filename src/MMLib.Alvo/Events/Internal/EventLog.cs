@@ -106,9 +106,10 @@ internal static partial class EventLog
     /// <remarks>
     /// <c>HostOptions.BackgroundServiceExceptionBehavior</c> defaults to <c>StopHost</c> and, from .NET 11,
     /// <c>RunAsync</c>/<c>StopAsync</c> also throw and the process exits non-zero — so a failure escaping
-    /// <c>ExecuteAsync</c> would take down a host serving HTTP over one queue entry. The failure is contained
-    /// instead, and this line is the whole notification: nothing restarts the pump, so a process that logs this
-    /// serves requests and delivers no events until it is restarted.
+    /// <c>ExecuteAsync</c> would take down a host serving HTTP. A failed <em>round</em> never gets here: the loop
+    /// survives it (<see cref="DispatcherRoundFailed"/>). This is the backstop for a failure outside the rounds — the
+    /// boot wait itself — which is an invariant break, not a storage hiccup; a process that logs it serves requests and
+    /// delivers no events until it is restarted.
     /// </remarks>
     /// <param name="logger">The logger the dispatcher writes through.</param>
     /// <param name="failure">The failure exactly as it was thrown, stack trace and all.</param>
@@ -117,6 +118,32 @@ internal static partial class EventLog
         Message = "Alvo's outbox dispatcher stopped and will not restart in this process. The host keeps "
             + "serving requests, and no event is delivered until it is restarted.")]
     internal static partial void DispatcherStopped(ILogger logger, Exception failure);
+
+    /// <summary>A round failed — the queue unreachable, a hand-back refused — and the loop waits, then claims again.</summary>
+    /// <remarks>
+    /// The wait doubles from the poll interval with every failed round in a row, up to a minute, and a round that
+    /// succeeds resets it — so an outage costs one line per wait rather than a dead pump. The type name only: a
+    /// provider's exception message can carry a connection string.
+    /// </remarks>
+    /// <param name="logger">The logger the dispatcher writes through.</param>
+    /// <param name="errorType">The type name of what the round threw.</param>
+    /// <param name="retryIn">How long the loop waits before the next round.</param>
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "Alvo's outbox dispatcher could not finish a round ({ErrorType}). It keeps running and tries again in "
+            + "{RetryIn}; nothing claimed was retired, and an entry it could not hand back returns when its claim lease ends.")]
+    internal static partial void DispatcherRoundFailed(ILogger logger, string errorType, TimeSpan retryIn);
+
+    /// <summary>An entry held behind a failed fan-out could not be handed back; its claim lease returns it.</summary>
+    /// <param name="logger">The logger the dispatcher writes through.</param>
+    /// <param name="eventId">The held-back entry's id.</param>
+    /// <param name="errorType">The type name of what the hand-back threw.</param>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Alvo could not hand back event {EventId}, held behind an earlier event of its record ({ErrorType}). It "
+            + "stays claimed and undispatched, so nothing of its record is delivered ahead of it, and returns when its "
+            + "claim lease ends.")]
+    internal static partial void HoldBackFailed(ILogger logger, Guid eventId, string errorType);
 
     /// <summary>
     /// The dispatcher stood down because the boot reported Ready with no policy catalog primed.

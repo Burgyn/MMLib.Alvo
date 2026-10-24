@@ -21,7 +21,7 @@ namespace MMLib.Alvo.Tests.Events;
 public sealed class EventPatternTests
 {
     /// <summary>
-    /// <b>The reserved set is the schema's own first alternation, not a copy of it.</b>
+    /// <b>The reserved set is the schema's own first alternation, plus the framework's <c>alvo</c>.</b>
     /// </summary>
     /// <remarks>
     /// Read out of <c>schema/project.schema.json</c> at run time rather than restated, on
@@ -31,12 +31,21 @@ public sealed class EventPatternTests
     /// can still subscribe to it.
     /// </remarks>
     [Fact]
-    public void The_reserved_namespaces_are_the_schema_s_own()
+    public void The_reserved_namespaces_are_the_schema_s_own_plus_the_framework_s()
         => AlvoEventName.ReservedNamespaces.Order(StringComparer.Ordinal).ToList().ShouldBe(
-            NamespacesTheSchemaAdmits(),
+            [.. NamespacesTheSchemaAdmits().Append("alvo").Order(StringComparer.Ordinal)],
             customMessage:
-                "The namespaces a host is refused must be exactly the ones $defs/eventPattern admits, or a "
-                + "host could mint events into a namespace descriptor rules can subscribe to");
+                "A host is refused the namespaces $defs/eventPattern admits, so it cannot forge an event a descriptor "
+                + "rule subscribes to, and 'alvo', where the framework mints schedule runs and command completions");
+
+    /// <summary>
+    /// <b>The framework namespace is reserved for publishing but not subscribable from a descriptor</b> — the frozen
+    /// grammar does not admit <c>alvo</c>, so framework events reach host handlers only.
+    /// </summary>
+    [Fact]
+    public void No_descriptor_rule_can_subscribe_to_the_framework_namespace()
+        => NamespacesTheSchemaAdmits().ShouldNotContain(
+            "alvo", "framework events are for host handlers; the frozen descriptor grammar does not reach them");
 
     [Theory]
     [InlineData("entity.orders.*")]

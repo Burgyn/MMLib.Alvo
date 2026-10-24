@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Event handlers on a delivery engine** (HX-03, #380). An embedded host reacts to committed changes in C#:
+  `Entity("tickets", t => t.OnUpdated("id", handler, when: "changed(status) && new.status == 'resolved'"))`, also
+  `Entities([...])`, `Entity("*")`, `OnCreated`/`OnDeleted`/`OnSaved`, class handlers (`IAlvoEventHandler<T>`) and
+  `AddEventHandler(id, "orders.approved", …)` for application events. Every registration is checked at start-up against
+  the descriptor, all problems in one refusal (the descriptor-independent ones even at an `Awaiting` boot). Each
+  matching event becomes a row in the new `alvo_deliveries` table (attempts in `alvo_delivery_attempts`): at least once
+  with the same `EventId`, retried 5 s → 6 h and dead after attempt 7, in order per record (a dead delivery holds that
+  record back; `AlvoOrdering.None` opts out), fenced against late finishers, one hop deeper in the causation chain
+  (loops are recorded dead with `chain-depth-exceeded`), run as the system in the event's tenant or as the event's
+  actor, traced (`alvo.delivery`, linked to the envelope's trace) and metered (`alvo.delivery.*`). A timeout (30 s by
+  default, at most 1 h) is enforced: a handler that ignores its token is abandoned to the background and counted on
+  `alvo.delivery.abandoned`, and a handler with `MaxConcurrency` abandoned invocations still running is not claimed
+  for until one ends (`HandlerStoodDown`), so it cannot starve the thread pool. An answer the database refuses — SQLite
+  busy, a PostgreSQL deadlock — is written again inside the delivery's lease. `AddRetiredExtension` retires an id; a
+  start over another id's unfinished work is refused before anything changes — a rollback past a newly added handler
+  with unfinished work included. `IAlvoSession` binds data access to one caller. `Alvo:Deliveries:MaxConcurrency` (16).
+  Docs: *React to changes (event handlers)*.
+
 - **`MMLib.Alvo.TestHost`, a real backend inside a test** (HX-02, #379). `AlvoTestHost.StartAsync(b => b.FromDescriptor(…))`
   starts the production pipeline over a private in-memory SQLite database (or the builder's own `UsePostgreSql`), with
   `Data` (behaving exactly as the host's `IAlvoData`), `AlvoTestHost.Caller(roles)`, an optional `TimeProvider`,
@@ -376,6 +394,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the warning is dropped silently — a startup crash traded for a silent drop.
 
 ### Changed
+
+- **The `alvo.` event namespace is reserved** (HX-03). `IAlvoEvents.PublishAsync("alvo.…")` is refused, as
+  `entity.…` already was: Alvo mints schedule runs and command completions there.
+- **A database provider must supply `IDeliveryStore`** over the same database as `IOutboxStore` (HX-03); both shipped
+  providers do, and `DeliveryStoreContractTests` is the suite a third-party store inherits. The boot needs it even with
+  no handler registered, because it refuses unfinished work of an unregistered id. The outbox dispatcher fans each event
+  out to its handler deliveries before running the descriptor's after-hook actions. Expect `IDeliveryStore` to grow
+  before 1.0 (reads, job kinds, steps); its records are `required init`, never positional, so members can be added.
+- **`IOutboxStore` gains `HoldBackAsync`** (HX-03), implemented by `EfCoreOutboxStore`: an entry held behind a failed
+  earlier entry of its key is handed back without spending an attempt. It is an abstract member, not a default one, so
+  a third-party implementation of the port must add it.
+- **Upgrade: the first boot builds an index on `alvo_outbox`** (HX-03, `ix_<outbox>_unfanned` — `ix_alvo_outbox_unfanned`
+  under the default names — partial on undispatched entries). On a large outbox this takes a while, and on PostgreSQL a
+  plain `CREATE INDEX` blocks outbox writes while it builds (identical DDL on both engines rules out `CONCURRENTLY`);
+  plan the first deploy for a quiet moment, or create the index by hand beforehand with the same name.
+- **On SQLite, one process's writes to one database take turns** (HX-03, #410). Every write transaction of the EF
+  driver — the outbox and delivery stores, the data path, the runtime schema writer, the secret, descriptor-version and
+  management-idempotency stores — queues behind an in-process, per-database write line before asking SQLite for its
+  lock, instead of meeting `SQLITE_BUSY` and sleeping in `Microsoft.Data.Sqlite`'s retry: a 10 000-event delivery run at
+  the default concurrency went from ~1 000 s to ~55 s (~84 s when every handler also writes). A wait is bounded by the
+  connection's busy timeout (`Default Timeout`; 0 means no bound, as for the engine) and then fails with the same
+  "database is locked" error as before. Code running inside a
+  write — a host CEL function, a replacement `IBeforeHookRunner` — must not write through Alvo. PostgreSQL is
+  unchanged.
 
 - **The #325 refusal reports each offending reference on its own, in new words.** One refusal per distinct row-image
   reference and per distinct `changed()` call, each naming the point and the image it lacks; anything matching the
@@ -762,6 +804,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The outbox claim on SQLite could fail with "database is locked" under concurrent writers** (HX-03). It now runs in
+  a write-first transaction (`BEGIN IMMEDIATE`), like the new delivery claim: `Microsoft.Data.Sqlite` retries a busy
+  engine only on a statement's first step, and the auto-committed `UPDATE … RETURNING` met its busy on commit.
+- **The outbox dispatcher no longer stops for good on a transient storage error** (HX-03). A failed round — an outage,
+  a restarting database, a deadlock — is logged by type and the next one waits a backoff that doubles from the poll
+  interval up to a minute; before, the first round exception ended event delivery until the process restarted. The
+  delivery dispatcher behaves the same.
 - **The architecture guard's banned-member list named a type that does not exist** (#397). The application-role ban
   named `MMLib.Alvo.Identity.Role`, so every suite asserting it passed vacuously. Each banned name is now resolved
   against Abstractions by reflection, and the Identity and Testing suites run the whole security-core list.

@@ -90,6 +90,7 @@ public sealed class EfCoreSecretStore : IWritableSecretStore
         await using (connection.ConfigureAwait(false))
         {
             await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
+            using var turn = await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false);
 
             var command = connection.CreateCommand();
             await using (command.ConfigureAwait(false))
@@ -114,6 +115,7 @@ public sealed class EfCoreSecretStore : IWritableSecretStore
         await using (connection.ConfigureAwait(false))
         {
             await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
+            using var turn = await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false);
 
             var command = connection.CreateCommand();
             await using (command.ConfigureAwait(false))

@@ -16,7 +16,7 @@ until it ships, use the row above it or an after-hook `webhook`.
 | Validation needs an external service (VIES, fraud, billing) | `IValidateWriteHook` | Before the transaction, with network and a timeout. Not atomic, so nothing integrity depends on. | planned |
 | It must happen atomically with the write and depends on other rows | `IBeforeWriteHook` | The same transaction and locks; refuses as 409/422. No network. | planned |
 | Atomic, but needs the id or the result of the write | `IAfterWriteHook` | Audit rows, children, a first sprint. Can still cancel the whole write. | planned |
-| A side effect after a successful write: mail, Slack, ERP, payment, cache | `IAlvoEventHandler` | After the commit, retried on failure, never undoes the write. | planned — use an after-hook `webhook` |
+| A side effect after a successful write: mail, Slack, ERP, payment, cache | `IAlvoEventHandler` | After the commit, retried on failure, never undoes the write. | available — untyped (`Entity("name", e => e.OnCreated(…))`); typed planned |
 | The effect has several steps (payment → invoice → ERP) | handler + `IAlvoSteps` | Each step runs once; a retry continues where it failed. | planned |
 | The same effect must be visible and configurable in the descriptor | `IAlvoFunction` + `"type": "function"` | An agent wires it with a condition; the code is named and typed. | planned |
 | Not CRUD, or an inbound webhook | `MapAlvoCommand` / minimal API | Your own route and contract; Alvo's rules and hooks still apply. A named command is visible to agents. | minimal API available |

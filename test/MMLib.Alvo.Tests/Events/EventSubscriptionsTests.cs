@@ -486,6 +486,9 @@ public sealed class EventSubscriptionsTests : IDisposable
 
         public Task ReleaseAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+
+        public Task HoldBackAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 
     private readonly CapturingLogger _logger = new();

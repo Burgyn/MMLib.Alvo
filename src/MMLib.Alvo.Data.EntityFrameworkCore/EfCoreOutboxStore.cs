@@ -18,9 +18,14 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// fails the request path instead — and <c>journal_mode=WAL</c> is persistent in the database file, so it is
 /// not a redeploy away from being undone. Every other shape measured waited (~1 s) and then succeeded, in both
 /// directions, because <c>Microsoft.Data.Sqlite</c>'s <c>DefaultTimeout</c> is 30 s and its retry loop covers
-/// <c>BEGIN</c>. So each member here opens a connection, issues one autocommit statement, and disposes — which
-/// satisfies the constraint by construction. Wrapping two of them in a transaction to be tidy is the edit that
-/// would undo it.
+/// <c>BEGIN</c>. So each member here opens a connection, issues one statement, and disposes — which satisfies the
+/// constraint by construction. Wrapping two of them in a transaction to be tidy is the edit that would undo it.
+/// </para>
+/// <para>
+/// <b>The claim's one statement runs in a write-first transaction of its own</b>
+/// (<see cref="RelationalSqlBatch.ReadWrittenRowsAsync"/>): in autocommit an <c>UPDATE … RETURNING</c> commits on its
+/// last step, inside <c>DbDataReader.Read</c>, where <c>Microsoft.Data.Sqlite</c> does not retry a busy lock. It is
+/// still one statement and no read precedes it, so it is the write-first shape spike Q5 measured as waiting.
 /// </para>
 /// <para>
 /// <b>Nothing here sets a <c>Default Timeout</c>, a <c>busy_timeout</c> or a <c>journal_mode</c></b>, on its
@@ -62,7 +67,10 @@ public sealed class EfCoreOutboxStore : IOutboxStore
         await using (connection.ConfigureAwait(false))
         {
             await RelationalSqlBatch.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
-            await OutboxTable.EnsureAsync(connection, _tableName, cancellationToken).ConfigureAwait(false);
+            using (await _connections.WriteGate.EnterAsync(cancellationToken).ConfigureAwait(false))
+            {
+                await OutboxTable.EnsureAsync(connection, _tableName, cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 
@@ -114,9 +122,12 @@ public sealed class EfCoreOutboxStore : IOutboxStore
         await using (connection.ConfigureAwait(false))
         {
             await RelationalSqlBatch.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
-            await OutboxTable
-                .InsertAsync(connection, transaction: null, _tableName, customEvent.Envelope, cancellationToken)
-                .ConfigureAwait(false);
+            using (await _connections.WriteGate.EnterAsync(cancellationToken).ConfigureAwait(false))
+            {
+                await OutboxTable
+                    .InsertAsync(connection, transaction: null, _tableName, customEvent.Envelope, cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
     }
 
@@ -148,43 +159,50 @@ public sealed class EfCoreOutboxStore : IOutboxStore
             cancellationToken);
     }
 
+    /// <inheritdoc/>
+    public Task HoldBackAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(retryAfter.Ticks);
+
+        return ExecuteAsync(
+            OutboxTable.HoldBackSql(_tableName),
+            command => RelationalSqlBatch.AddParameter(
+                command, "@claimed_at", StoredInstant.Text(_time.GetUtcNow() + retryAfter)),
+            id,
+            cancellationToken);
+    }
+
     private async Task<IReadOnlyList<OutboxEntry>> ClaimBatchAsync(
         string claimant, int batchSize, int maxAttempts, TimeSpan lease, CancellationToken ct)
     {
-        var now = _time.GetUtcNow();
         var connection = _connections.Create();
         await using (connection.ConfigureAwait(false))
         {
             await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
-            var command = connection.CreateCommand();
-            await using (command.ConfigureAwait(false))
+            using (await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false))
             {
-                command.CommandText = OutboxTable.ClaimSql(_tableName);
-                RelationalSqlBatch.AddParameter(command, "@claimed_at", StoredInstant.Text(now));
-                RelationalSqlBatch.AddParameter(command, "@claimed_by", claimant);
-                RelationalSqlBatch.AddParameter(command, "@now", StoredInstant.Text(now));
-                RelationalSqlBatch.AddParameter(command, "@stale_before", StoredInstant.Text(now - lease));
-                RelationalSqlBatch.AddParameter(command, "@max_attempts", maxAttempts);
-                RelationalSqlBatch.AddParameter(command, "@batch", batchSize);
-
-                return await ReadEntriesAsync(command, ct).ConfigureAwait(false);
+                return await RelationalSqlBatch.ReadWrittenRowsAsync(
+                    connection,
+                    OutboxTable.ClaimSql(_tableName),
+                    command => BindClaim(command, claimant, batchSize, maxAttempts, lease),
+                    ReadEntry,
+                    ct).ConfigureAwait(false);
             }
         }
     }
 
-    private static async Task<IReadOnlyList<OutboxEntry>> ReadEntriesAsync(DbCommand command, CancellationToken ct)
+    /// <summary>
+    /// Binds the claim's parameters; it runs after the write lock is held, so the instant it stamps excludes the wait.
+    /// </summary>
+    private void BindClaim(DbCommand command, string claimant, int batchSize, int maxAttempts, TimeSpan lease)
     {
-        var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        await using (reader.ConfigureAwait(false))
-        {
-            var entries = new List<OutboxEntry>();
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                entries.Add(ReadEntry(reader));
-            }
-
-            return entries;
-        }
+        var now = _time.GetUtcNow();
+        RelationalSqlBatch.AddParameter(command, "@claimed_at", StoredInstant.Text(now));
+        RelationalSqlBatch.AddParameter(command, "@claimed_by", claimant);
+        RelationalSqlBatch.AddParameter(command, "@now", StoredInstant.Text(now));
+        RelationalSqlBatch.AddParameter(command, "@stale_before", StoredInstant.Text(now - lease));
+        RelationalSqlBatch.AddParameter(command, "@max_attempts", maxAttempts);
+        RelationalSqlBatch.AddParameter(command, "@batch", batchSize);
     }
 
     private static OutboxEntry ReadEntry(DbDataReader reader) => new(
@@ -201,14 +219,17 @@ public sealed class EfCoreOutboxStore : IOutboxStore
         await using (connection.ConfigureAwait(false))
         {
             await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
-            var command = connection.CreateCommand();
-            await using (command.ConfigureAwait(false))
+            using (await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false))
             {
-                command.CommandText = sql;
-                bind(command);
-                RelationalSqlBatch.AddParameter(command, "@id", id.ToString());
+                var command = connection.CreateCommand();
+                await using (command.ConfigureAwait(false))
+                {
+                    command.CommandText = sql;
+                    bind(command);
+                    RelationalSqlBatch.AddParameter(command, "@id", id.ToString());
 
-                await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                    await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                }
             }
         }
     }

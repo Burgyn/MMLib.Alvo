@@ -71,6 +71,11 @@ public static class AlvoBuilderExtensions
     /// an argument) in an exception message: it would land in every log sink the host ships to.
     /// </para>
     /// <para>
+    /// <b>It must never write through Alvo</b> (<c>IAlvoData</c>, an event handler's session). A before-hook and a write's
+    /// own row checks evaluate it inside that write's transaction, while the write holds the database's write turn; a
+    /// write from inside the function waits for the write that is calling it and fails when the busy timeout passes.
+    /// </para>
+    /// <para>
     /// <b>Alvo's tenant filter does not reach inside the function.</b> A function that reads stored data must take the
     /// tenant as a parameter and filter by it itself. On a tenant-scoped entity pass the row's own <c>new.tenant_id</c>,
     /// which a <c>condition</c> and a <c>mutate</c> both read; <c>@tenant.id</c> works in a <c>condition</c> only, because

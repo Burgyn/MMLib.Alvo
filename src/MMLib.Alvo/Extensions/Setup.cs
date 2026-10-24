@@ -7,7 +7,10 @@ using MMLib.Alvo.Extensions.Internal;
 
 namespace MMLib.Alvo.Extensions;
 
-/// <summary>Registers the validated <see cref="AlvoExtensionOptions"/> and the depth limit every store resolves.</summary>
+/// <summary>
+/// Registers the validated <see cref="AlvoExtensionOptions"/> and <see cref="AlvoDeliveryOptions"/>, the depth limit
+/// every store resolves, and the <see cref="ExtensionStateGuard"/> the boot runs before it reports ready.
+/// </summary>
 internal static class ExtensionsSetup
 {
     internal static IServiceCollection AddAlvoExtensions(this IServiceCollection services)
@@ -17,11 +20,23 @@ internal static class ExtensionsSetup
             ServiceDescriptor.Singleton<IConfigureOptions<AlvoExtensionOptions>, AlvoExtensionOptionsConfiguration>(Create));
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IValidateOptions<AlvoExtensionOptions>, AlvoExtensionOptionsConfiguration>(Create));
+        services.AddOptions<AlvoDeliveryOptions>().ValidateOnStart();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IConfigureOptions<AlvoDeliveryOptions>, AlvoDeliveryOptionsConfiguration>(Deliveries));
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<AlvoDeliveryOptions>, AlvoDeliveryOptionsConfiguration>(Deliveries));
         services.TryAddSingleton(DepthLimit);
+        services.TryAddSingleton<IAlvoSessions, AlvoSessions>();
+        services.TryAddSingleton(provider => new ExtensionRegistry(provider.GetServices<ExtensionRegistration>()));
+        services.TryAddSingleton<ExtensionBinder>();
+        services.TryAddSingleton<ExtensionStateGuard>();
 
         return services;
 
         static AlvoExtensionOptionsConfiguration Create(IServiceProvider provider) =>
+            new(provider.GetService<IConfiguration>());
+
+        static AlvoDeliveryOptionsConfiguration Deliveries(IServiceProvider provider) =>
             new(provider.GetService<IConfiguration>());
 
         static AlvoChainDepthLimit DepthLimit(IServiceProvider provider) =>

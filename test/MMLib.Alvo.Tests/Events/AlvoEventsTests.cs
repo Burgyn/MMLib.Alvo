@@ -31,6 +31,8 @@ public sealed class AlvoEventsTests
     [InlineData("entity.deals.created")]
     [InlineData("auth.user.login")]
     [InlineData("storage.file.uploaded")]
+    [InlineData("alvo.schedule.roll_slots")]
+    [InlineData("alvo.command.issue_invoice.completed")]
     public async Task Publish_refuses_a_reserved_namespace(string type)
     {
         var store = new RecordingOutboxStore();
@@ -44,7 +46,24 @@ public sealed class AlvoEventsTests
     }
 
     /// <summary>
-    /// A name outside the three namespaces is published, so the guard refuses the forgery and not the feature.
+    /// A framework event cannot be published by a host (spec 2026-10-14 E12): it would start every handler of a schedule or
+    /// a command as though it had really run.
+    /// </summary>
+    [Fact]
+    public async Task Publish_refuses_a_framework_event_naming_what_it_would_forge()
+    {
+        var store = new RecordingOutboxStore();
+
+        var refusal = await Should.ThrowAsync<ArgumentException>(() => Publisher(store).PublishAsync(
+            "alvo.schedule.x", "jobs/1", null, Caller, TestContext.Current.CancellationToken));
+
+        refusal.Message.ShouldContain("reserved 'alvo' namespace");
+        refusal.Message.ShouldContain("schedule");
+        store.Appended.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A name outside the reserved namespaces is published, so the guard refuses the forgery and not the feature.
     /// </summary>
     [Fact]
     public async Task Publish_appends_one_entry_carrying_the_guarded_name()
@@ -126,9 +145,23 @@ public sealed class AlvoEventsTests
     [InlineData("entity.orders.updated")]
     [InlineData("auth.user.login")]
     [InlineData("storage.file.uploaded")]
+    [InlineData("alvo.schedule.roll_slots")]
+    [InlineData("alvo.command.issue_invoice.completed")]
     public void The_only_door_into_the_queue_refuses_a_reserved_name(string type)
         => Should.Throw<ArgumentException>(() => AlvoCustomEvent.Create(Forged(type)))
             .Message.ShouldContain("reserved");
+
+    /// <summary>
+    /// A look-alike of the framework namespace — upper-case, or with a Cyrillic <c>а</c> — is not reserved by the
+    /// ordinal set, so the door must still refuse it, as malformed: the ASCII-only name shape is what closes it.
+    /// </summary>
+    /// <param name="type">A name that would read as <c>alvo.</c> to a person but not to the ordinal set.</param>
+    [Theory]
+    [InlineData("ALVO.schedule.x")]
+    [InlineData("аlvo.schedule.x")]
+    public void The_only_door_into_the_queue_refuses_a_framework_look_alike_as_malformed(string type)
+        => Should.Throw<ArgumentException>(() => AlvoCustomEvent.Create(Forged(type)))
+            .Message.ShouldContain("not a well-formed event name");
 
     /// <summary>
     /// <b>The reserved set cannot be emptied through the interface it is handed out as.</b>
@@ -403,6 +436,9 @@ public sealed class AlvoEventsTests
             => Task.CompletedTask;
 
         public Task ReleaseAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task HoldBackAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
     }
 }

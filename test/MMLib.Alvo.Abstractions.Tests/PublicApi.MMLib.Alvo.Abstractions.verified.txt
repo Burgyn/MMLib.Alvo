@@ -543,6 +543,20 @@ namespace MMLib.Alvo.Data
         System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> UpdateAsync(string entity, System.Guid id, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Data.AlvoPrecondition? precondition = default, MMLib.Alvo.Data.AlvoIdempotency? idempotency = default, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoBatchResult> UpdateManyAsync(string entity, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRowPatch> rows, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Data.AlvoIdempotency? idempotency = default, System.Threading.CancellationToken cancellationToken = default);
     }
+    public interface IAlvoSession
+    {
+        MMLib.Alvo.AlvoContext Context { get; }
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> CreateAsync(string entity, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task DeleteAsync(string entity, System.Guid id, MMLib.Alvo.Data.AlvoPrecondition? precondition = default, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord?> GetAsync(string entity, System.Guid id, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoPage> QueryAsync(MMLib.Alvo.Data.AlvoQuery query, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoReplaceResult> ReplaceAsync(string entity, System.Guid id, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.Data.AlvoPrecondition? precondition = default, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> UpdateAsync(string entity, System.Guid id, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.Data.AlvoPrecondition? precondition = default, System.Threading.CancellationToken cancellationToken = default);
+    }
+    public interface IAlvoSessions
+    {
+        MMLib.Alvo.Data.IAlvoSession For(MMLib.Alvo.AlvoContext context);
+    }
 }
 namespace MMLib.Alvo.Descriptor
 {
@@ -1086,9 +1100,67 @@ namespace MMLib.Alvo.Events
         public string Subject { get; init; }
         public string To { get; init; }
     }
+    public sealed class ClaimedDelivery : System.IEquatable<MMLib.Alvo.Events.ClaimedDelivery>
+    {
+        public ClaimedDelivery() { }
+        public required int Attempts { get; init; }
+        public required System.Guid EventId { get; init; }
+        public required System.Guid Id { get; init; }
+        public required string PartitionKey { get; init; }
+        public string? Payload { get; init; }
+        public required string Subscriber { get; init; }
+    }
+    public sealed class DeliveryAttempt : System.IEquatable<MMLib.Alvo.Events.DeliveryAttempt>
+    {
+        public DeliveryAttempt() { }
+        public required string Claimant { get; init; }
+        public required MMLib.Alvo.Events.ClaimedDelivery Delivery { get; init; }
+        public required System.TimeSpan Duration { get; init; }
+        public required System.DateTimeOffset StartedAt { get; init; }
+    }
+    public sealed class DeliveryClaim : System.IEquatable<MMLib.Alvo.Events.DeliveryClaim>
+    {
+        public DeliveryClaim() { }
+        public required int BatchSize { get; init; }
+        public required string Claimant { get; init; }
+        public required System.TimeSpan Lease { get; init; }
+        public required System.Collections.Generic.IReadOnlyCollection<string> Ordered { get; init; }
+        public required System.TimeSpan OutboxClaimLease { get; init; }
+        public required int OutboxMaxAttempts { get; init; }
+        public System.Collections.Generic.IReadOnlyCollection<string> Unordered { get; init; }
+    }
+    public sealed class DeliveryFailure : System.IEquatable<MMLib.Alvo.Events.DeliveryFailure>
+    {
+        public DeliveryFailure() { }
+        public required string ErrorType { get; init; }
+        public required int MaxAttempts { get; init; }
+        public System.TimeSpan? RetryAfter { get; init; }
+    }
+    public sealed class DeliveryRequest : System.IEquatable<MMLib.Alvo.Events.DeliveryRequest>
+    {
+        public const string UnboundReason = "unbound";
+        public DeliveryRequest() { }
+        public string? DeadReason { get; init; }
+        public required System.Guid EventId { get; init; }
+        public required string Kind { get; init; }
+        public required string PartitionKey { get; init; }
+        public required string Subscriber { get; init; }
+        public string? TenantId { get; init; }
+    }
     public interface IAlvoEvents
     {
         System.Threading.Tasks.Task PublishAsync(string type, string subject, System.Collections.Generic.IReadOnlyDictionary<string, object?>? data, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
+    }
+    public interface IDeliveryStore
+    {
+        System.Threading.Tasks.Task<int> CancelPendingAsync(string subscriber, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.ClaimedDelivery>> ClaimAsync(MMLib.Alvo.Events.DeliveryClaim claim, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<bool> CompleteAsync(MMLib.Alvo.Events.DeliveryAttempt attempt, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<int> DeadLetterPendingAsync(string subscriber, string reason, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task EnsureAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<bool> FailAsync(MMLib.Alvo.Events.DeliveryAttempt attempt, MMLib.Alvo.Events.DeliveryFailure failure, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<int> FanOutAsync(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.DeliveryRequest> requests, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> PendingSubscribersAsync(System.Threading.CancellationToken cancellationToken = default);
     }
     public interface IEmailSender
     {
@@ -1099,6 +1171,7 @@ namespace MMLib.Alvo.Events
         System.Threading.Tasks.Task AppendAsync(MMLib.Alvo.Events.AlvoCustomEvent customEvent, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.OutboxEntry>> ClaimAsync(string claimant, int batchSize, int maxAttempts, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task EnsureAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task HoldBackAsync(System.Guid id, System.TimeSpan retryAfter, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task MarkDispatchedAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task ReleaseAsync(System.Guid id, System.TimeSpan retryAfter, System.Threading.CancellationToken cancellationToken = default);
     }

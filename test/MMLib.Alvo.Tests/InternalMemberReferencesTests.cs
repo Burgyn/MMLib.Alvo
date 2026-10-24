@@ -34,6 +34,11 @@ public sealed class InternalMemberReferencesTests
     public void The_scan_sees_the_core_reach_a_security_core_member(string member)
         => InternalMemberReferences.Of(typeof(PolicyEngine).Assembly).ShouldContain(member);
 
+    /// <summary>HX-03 is the flow's first production setter: the delivery runner, in the core, which the ban allows.</summary>
+    [Fact]
+    public void The_scan_sees_the_core_reach_the_flow_setter()
+        => InternalMemberReferences.Of(typeof(PolicyEngine).Assembly).ShouldContain("MMLib.Alvo.AlvoFlow::Enter");
+
     private static (string Type, string Member) Split(string member)
     {
         var separator = member.IndexOf("::", StringComparison.Ordinal);

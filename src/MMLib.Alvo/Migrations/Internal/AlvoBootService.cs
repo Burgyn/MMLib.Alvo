@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 using System.Data.Common;
@@ -72,6 +73,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     private readonly IPolicyCatalogProvider _policyCatalogProvider;
     private readonly AlvoBootState _state;
     private readonly IOptions<AlvoSchemaOptions> _options;
+    private readonly ExtensionStateGuard _extensionState;
     private readonly ILogger<AlvoBootService> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="AlvoBootService"/> class.</summary>
@@ -87,6 +89,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// <param name="policyCatalogProvider">Where stage 3 publishes the compiled catalog.</param>
     /// <param name="state">What the boot publishes for a readiness probe to read.</param>
     /// <param name="options">The startup mode and destructive allowance, already validated by the host.</param>
+    /// <param name="extensionState">Retires and refuses the durable work of ids this host no longer registers.</param>
     /// <param name="logger">Records what the boot decided, so a restart's no-op is visible.</param>
     public AlvoBootService(
         DescriptorBootPlan bootPlan,
@@ -98,6 +101,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         IPolicyCatalogProvider policyCatalogProvider,
         AlvoBootState state,
         IOptions<AlvoSchemaOptions> options,
+        ExtensionStateGuard extensionState,
         ILogger<AlvoBootService> logger)
     {
         ArgumentNullException.ThrowIfNull(bootPlan);
@@ -109,6 +113,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         ArgumentNullException.ThrowIfNull(policyCatalogProvider);
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(extensionState);
         ArgumentNullException.ThrowIfNull(logger);
 
         _bootPlan = bootPlan;
@@ -120,6 +125,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         _policyCatalogProvider = policyCatalogProvider;
         _state = state;
         _options = options;
+        _extensionState = extensionState;
         _logger = logger;
     }
 
@@ -175,6 +181,8 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// </remarks>
     private async Task BootAsync(CancellationToken ct)
     {
+        RefuseUnregistrableExtensions();
+
         if (!_bootPlan.HasSource)
         {
             await BootFromTheStoredDescriptorAsync(ct).ConfigureAwait(false);
@@ -193,6 +201,13 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
             return;
         }
 
+        await RetireThenReadyAsync(project, outcome, revision, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The boot's last step on every shape that serves: retirements apply, then Ready is published and recorded.</summary>
+    private async Task RetireThenReadyAsync(string project, SchemaStartupOutcome outcome, int? revision, CancellationToken ct)
+    {
+        await _extensionState.RetireAsync(ct).ConfigureAwait(false);
         _state.Ready(project, revision);
         RecordWhatTheBootDid(project, outcome, revision);
     }
@@ -226,8 +241,8 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         var stored = await _history.GetCurrentAsync(project, ct).ConfigureAwait(false);
         if (stored is null)
         {
-            _state.Ready(project, appliedRevision: null);
-            RecordWhatTheBootDid(project, SchemaStartupOutcome.Awaiting, revision: null);
+            await RefuseOrphanedWorkAsync(project, ct).ConfigureAwait(false);
+            await RetireThenReadyAsync(project, SchemaStartupOutcome.Awaiting, revision: null, ct).ConfigureAwait(false);
 
             return;
         }
@@ -237,10 +252,9 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
             return;
         }
 
+        await RefuseOrphanedWorkAsync(project, ct).ConfigureAwait(false);
         _ = Prime(boot, stored.Revision);
-
-        _state.Ready(project, stored.Revision);
-        RecordWhatTheBootDid(project, SchemaStartupOutcome.Unchanged, stored.Revision);
+        await RetireThenReadyAsync(project, SchemaStartupOutcome.Unchanged, stored.Revision, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -276,43 +290,91 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     private bool TryPlanTheStoredDescriptor(
         string project, DescriptorVersion stored, [NotNullWhen(true)] out BootPlan? boot)
     {
+        var (plan, reason) = PlanTheStoredDescriptor(project, stored);
+        if (plan is not null)
+        {
+            boot = plan;
+            return true;
+        }
+
+        boot = null;
+        _state.Failed(project, reason!);
+        BootRefused(_logger, reason!);
+
+        return false;
+    }
+
+    /// <summary>Stage 0′ over the stored descriptor: the plan, or why this build refuses to serve it.</summary>
+    private (BootPlan? Plan, string? Reason) PlanTheStoredDescriptor(string project, DescriptorVersion stored)
+    {
         try
         {
-            boot = _bootPlan.Plan(stored.DescriptorJson);
+            var plan = _bootPlan.Plan(stored.DescriptorJson);
+            if (!string.Equals(plan.Descriptor.Name, project, StringComparison.Ordinal))
+            {
+                return (null, NameMismatch(project, plan.Descriptor.Name));
+            }
+
+            _bootPlan.EnsureBindable(plan.Catalog);
+            return (plan, null);
+        }
+        catch (AlvoStartupRefusedException refused)
+        {
+            return (null, UnfitExtensions(project, stored.Revision, refused.Message));
         }
         catch (Exception refused) when (refused is DescriptorValidationException or InvalidOperationException)
         {
-            boot = null;
-            var reason =
-                $"Alvo cannot serve project '{project}': the descriptor stored at revision {stored.Revision} "
-                + $"is one this build refuses — {refused.Message} The process is staying up, reporting not "
-                + "ready and serving nothing, so the descriptor can be corrected through the dashboard or the "
-                + "Management API; it does not live in a file this host can edit.";
-
-            _state.Failed(project, reason);
-            BootRefused(_logger, reason);
-
-            return false;
+            return (null, RefusedDescriptor(project, stored.Revision, refused.Message));
         }
+    }
 
-        if (!string.Equals(boot.Descriptor.Name, project, StringComparison.Ordinal))
+    private static string RefusedDescriptor(string project, int revision, string refusal) =>
+        $"Alvo cannot serve project '{project}': the descriptor stored at revision {revision} "
+        + $"is one this build refuses — {refusal} The process is staying up, reporting not "
+        + "ready and serving nothing, so the descriptor can be corrected through the dashboard or the "
+        + "Management API; it does not live in a file this host can edit.";
+
+    /// <summary>
+    /// The reason a dashboard-first boot stands down when the host's handler registrations do not fit the stored
+    /// descriptor — recorded rather than thrown, like every other stored-descriptor refusal: the process stays up so
+    /// the descriptor can still be corrected through the dashboard.
+    /// </summary>
+    private static string UnfitExtensions(string project, int revision, string refusal) =>
+        $"Alvo cannot serve project '{project}': the extensions this host registers do not fit the descriptor stored "
+        + $"at revision {revision} — {refusal} The process is staying up, reporting not ready and "
+        + "serving nothing; fix the registrations and redeploy the host, or apply a descriptor they fit.";
+
+    private static string NameMismatch(string project, string declared) =>
+        $"Alvo cannot serve project '{project}': the descriptor stored under that key declares the "
+        + $"name '{declared}'. Priming would publish the policy catalog under one name "
+        + "while the boot state and the version history use the other, and the next runtime apply "
+        + "would then be refused for a project that was 'already primed' as something else. Check "
+        + $"{AlvoSchemaOptions.ProjectEnvironmentVariable}, or the caller that appended a version "
+        + "under a key the descriptor does not match.";
+
+    /// <summary>
+    /// Refuses the start, on every boot shape and before any database is touched, when a handler registration is wrong
+    /// whatever the descriptor says.
+    /// </summary>
+    /// <remarks>
+    /// <b>Thrown even by a dashboard-first host, unlike a stored-descriptor refusal.</b> Standing down keeps the
+    /// process up so the dashboard can correct the descriptor; no descriptor can correct a bad id, a missing service or
+    /// a <c>"*"</c> condition that reads a field — only redeploying the host can. Recorded first, because
+    /// <see cref="StartingAsync"/> rethrows an <see cref="AlvoStartupRefusedException"/> untouched.
+    /// </remarks>
+    private void RefuseUnregistrableExtensions()
+    {
+        try
         {
-            var mismatch =
-                $"Alvo cannot serve project '{project}': the descriptor stored under that key declares the "
-                + $"name '{boot.Descriptor.Name}'. Priming would publish the policy catalog under one name "
-                + "while the boot state and the version history use the other, and the next runtime apply "
-                + "would then be refused for a project that was 'already primed' as something else. Check "
-                + $"{AlvoSchemaOptions.ProjectEnvironmentVariable}, or the caller that appended a version "
-                + "under a key the descriptor does not match.";
-
-            boot = null;
-            _state.Failed(project, mismatch);
-            BootRefused(_logger, mismatch);
-
-            return false;
+            _bootPlan.EnsureRegistrable();
         }
+        catch (AlvoStartupRefusedException refusal)
+        {
+            _state.Failed(refusal.Message);
+            BootRefused(_logger, refusal.Message);
 
-        return true;
+            throw;
+        }
     }
 
     /// <summary>
@@ -388,7 +450,10 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     {
         try
         {
-            return await _bootPlan.LoadAsync(ct).ConfigureAwait(false);
+            var boot = await _bootPlan.LoadAsync(ct).ConfigureAwait(false);
+            _bootPlan.EnsureBindable(boot.Catalog);
+
+            return boot;
         }
         catch (AlvoStartupRefusedException refusal)
         {
@@ -501,6 +566,11 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     {
         var applied = await ReadAppliedSchemaAsync(boot.Descriptor.Name, ct).ConfigureAwait(false);
         var decision = await DecideAsync(boot, applied, ct).ConfigureAwait(false);
+        if (decision.Outcome is not (SchemaStartupOutcome.Refuse or SchemaStartupOutcome.StandDown))
+        {
+            await RefuseOrphanedWorkAsync(boot.Descriptor.Name, ct).ConfigureAwait(false);
+        }
+
         var revision = await CarryOutAsync(boot, applied, decision, ct).ConfigureAwait(false);
 
         return new BootOutcome(decision.Outcome, revision);
@@ -626,6 +696,39 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         BootRefused(_logger, refusal);
 
         throw new AlvoStartupRefusedException(refusal, decision.Fix ?? string.Empty);
+    }
+
+    /// <summary>
+    /// Refuses the start over unfinished work no registration owns, on every shape that is going to reach Ready.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>After stage 1, before anything changes.</b> Stage 1 has brought the system tables up — the delivery tables
+    /// among them — so the check can read; it runs before stage 2 applies anything and before the retirements are
+    /// applied, so a refused build leaves the database exactly as it found it, and the rollback that follows a refused
+    /// deploy finds neither a migrated schema nor ended work. On the file path it waits for stage 2's decision, so a boot
+    /// that refuses its schema or stands down says that instead. The retirements themselves run last, just before Ready,
+    /// because the delivery dispatcher waits for Ready and so cannot claim work a retirement is about to end.
+    /// </para>
+    /// <para>
+    /// Thrown even by a dashboard-first host, like <see cref="RefuseUnregistrableExtensions"/>: only a redeploy cures
+    /// it. Recorded first, because <see cref="StartingAsync"/> rethrows an <see cref="AlvoStartupRefusedException"/>
+    /// untouched.
+    /// </para>
+    /// </remarks>
+    private async Task RefuseOrphanedWorkAsync(string project, CancellationToken ct)
+    {
+        try
+        {
+            await _extensionState.RefuseOrphansAsync(ct).ConfigureAwait(false);
+        }
+        catch (AlvoStartupRefusedException refusal)
+        {
+            _state.Failed(project, refusal.Message);
+            BootRefused(_logger, refusal.Message);
+
+            throw;
+        }
     }
 
     /// <summary>

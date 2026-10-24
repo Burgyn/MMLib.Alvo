@@ -56,11 +56,15 @@ internal sealed partial class SystemSchemaInitializer
         _idempotencyTableName = IdempotencyTable.NameFor(schemaPrefix);
         _outboxTableName = OutboxTable.NameFor(schemaPrefix);
         _secretsTableName = SecretsTable.NameFor(schemaPrefix);
+        _deliveriesTableName = DeliveryTable.NameFor(schemaPrefix);
+        _deliveryAttemptsTableName = DeliveryTable.AttemptsNameFor(schemaPrefix);
     }
 
     private readonly string _idempotencyTableName;
     private readonly string _outboxTableName;
     private readonly string _secretsTableName;
+    private readonly string _deliveriesTableName;
+    private readonly string _deliveryAttemptsTableName;
 
     /// <summary>Gets the fully-prefixed descriptor-versions table name, e.g. <c>alvo_descriptor_versions</c>.</summary>
     public string TableName { get; }
@@ -109,6 +113,14 @@ internal sealed partial class SystemSchemaInitializer
             _outboxTableName, OutboxTable.Ddl(_outboxTableName), ct).ConfigureAwait(false);
         await CreateIfMissingAsync(
             _secretsTableName, SecretsTable.Ddl(_secretsTableName), ct).ConfigureAwait(false);
+        await CreateIfMissingAsync(
+            _deliveriesTableName, DeliveryTable.Ddl(_deliveriesTableName), ct).ConfigureAwait(false);
+        await CreateIndexIfMissingAsync(DeliveryTable.ClaimIndexDdl(_deliveriesTableName), ct).ConfigureAwait(false);
+        await CreateIndexIfMissingAsync(DeliveryTable.LaneIndexDdl(_deliveriesTableName), ct).ConfigureAwait(false);
+        await CreateIndexIfMissingAsync(DeliveryTable.OpenLaneIndexDdl(_deliveriesTableName), ct).ConfigureAwait(false);
+        await CreateIfMissingAsync(
+            _deliveryAttemptsTableName, DeliveryTable.AttemptsDdl(_deliveryAttemptsTableName), ct).ConfigureAwait(false);
+        await CreateIndexIfMissingAsync(DeliveryTable.OutboxUnfannedIndexDdl(_outboxTableName), ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -156,6 +168,57 @@ internal sealed partial class SystemSchemaInitializer
         }
     }
 
+    /// <summary>
+    /// Runs one <c>CREATE INDEX IF NOT EXISTS</c> and, when it fails, runs it once more: the index-shaped twin of
+    /// <see cref="CreateIfMissingAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Not the table probe.</b> An index is built on a table that is already there, so asking whether the table
+    /// exists answers yes for every failure — a lock or statement timeout on a large outbox, a full disk, a missing
+    /// column — and the boot would go on without the index, silently turning a seek into a scan of a key's whole
+    /// history.
+    /// </para>
+    /// <para>
+    /// <b>The second run is the existence check</b>, in the same "read the outcome, not the error" discipline: after a
+    /// lost race the concurrent creator's index is committed, so <c>IF NOT EXISTS</c> skips it and the run succeeds;
+    /// any other failure fails again, and the <em>first</em> error is rethrown. It needs no catalog query, which is
+    /// what keeps it free of a per-engine branch (<c>sqlite_master</c> on one engine, <c>pg_indexes</c> on the other).
+    /// </para>
+    /// </remarks>
+    /// <param name="ddl">The <c>CREATE INDEX IF NOT EXISTS</c> statement.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    private async Task CreateIndexIfMissingAsync(string ddl, CancellationToken ct)
+    {
+        try
+        {
+            await ExecuteAsync(ddl, ct).ConfigureAwait(false);
+        }
+        catch (DbException)
+        {
+            if (!await SucceedsAsync(ddl, ct).ConfigureAwait(false))
+            {
+                throw;
+            }
+        }
+    }
+
+    /// <summary>Whether <paramref name="sql"/> runs without a database error.</summary>
+    /// <param name="sql">The statement to run.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    private async Task<bool> SucceedsAsync(string sql, CancellationToken ct)
+    {
+        try
+        {
+            await ExecuteAsync(sql, ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (DbException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Whether <paramref name="tableName"/> can be selected from, i.e. whether it exists.</summary>
     /// <remarks>
     /// A zero-row select rather than a catalog query: SQLite has <c>sqlite_master</c>, PostgreSQL has
@@ -164,18 +227,8 @@ internal sealed partial class SystemSchemaInitializer
     /// </remarks>
     /// <param name="tableName">The table to look for.</param>
     /// <param name="ct">A token to cancel the operation.</param>
-    private async Task<bool> ExistsAsync(string tableName, CancellationToken ct)
-    {
-        try
-        {
-            await ExecuteAsync($"SELECT 1 FROM {tableName} WHERE 1 = 0", ct).ConfigureAwait(false);
-            return true;
-        }
-        catch (DbException)
-        {
-            return false;
-        }
-    }
+    private Task<bool> ExistsAsync(string tableName, CancellationToken ct) =>
+        SucceedsAsync($"SELECT 1 FROM {tableName} WHERE 1 = 0", ct);
 
     private string DescriptorVersionsDdl =>
         $"""

@@ -1,11 +1,8 @@
 ﻿using Microsoft.Extensions.Logging;
 
-using MMLib.Alvo.Data;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
-
-using System.Globalization;
 
 namespace MMLib.Alvo.Events.Internal;
 
@@ -70,42 +67,16 @@ internal static class EventSubscriptions
         ArgumentNullException.ThrowIfNull(@event);
         ArgumentNullException.ThrowIfNull(evaluator);
 
-        if (!TryReadSubscription(@event.Type, out var entity, out var operation)
+        if (!EnvelopeReading.TryReadDataType(@event.Type, out var entity, out var operation)
             || !catalog.TryGetEntity(entity, out var policy))
         {
             return [];
         }
 
-        var caller = CallerOf(@event);
+        var caller = EnvelopeReading.CallerOf(@event);
 
         return [.. policy.AfterHooks.For(operation).Where(hook => Selects(hook, @event, evaluator, caller, logger))];
     }
-
-    /// <summary>
-    /// The caller one event's conditions resolve against: the credential, tenant and roles the envelope records.
-    /// </summary>
-    /// <remarks>
-    /// What the envelope does not record is left absent — the all-zero id, no tenant, only <see cref="Role.Anon"/> —
-    /// and never borrowed from the dispatcher's own <see cref="AlvoContext.System"/> identity. <see cref="Selects"/>
-    /// is what keeps a condition reading an absent value from being decided against it. <c>authclaims</c> is parsed
-    /// once here, and whether it named any role travels with the context.
-    /// </remarks>
-    private static EventCaller CallerOf(AlvoEvent @event)
-    {
-        var actor = UserId.TryParse(@event.AuthId, CultureInfo.InvariantCulture, out var user) ? user : default;
-        TenantId? tenant = TenantId.TryParse(@event.TenantId, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
-        var names = AlvoEventProvenance.RolesIn(@event.AuthClaims);
-        var roles = names is { Count: > 0 } ? RoleCatalog.Create(names).Resolve(names) : null;
-
-        return new EventCaller(new AlvoContext { User = actor, Roles = roles ?? _noRoles, Tenant = tenant }, roles is not null);
-    }
-
-    /// <summary>One event's caller, and whether its <c>authclaims</c> named any role — parsed once per event.</summary>
-    /// <param name="Context">The caller conditions are evaluated against.</param>
-    /// <param name="CarriesRoles">Whether <see cref="AlvoContext.Roles"/> came from the envelope rather than standing in for none.</param>
-    private readonly record struct EventCaller(AlvoContext Context, bool CarriesRoles);
-
-    private static readonly IReadOnlySet<Role> _noRoles = new HashSet<Role> { Role.Anon };
 
     /// <summary>
     /// The reference <paramref name="hook"/>'s condition reads and the event does not carry, or
@@ -116,7 +87,7 @@ internal static class EventSubscriptions
     /// writes an empty role list, and the <see cref="Role.Anon"/> the context holds in its place is a stand-in a
     /// condition must not be decided against.
     /// </remarks>
-    private static string? UnreadProvenance(CompiledAfterHook hook, EventCaller caller) =>
+    private static string? UnreadProvenance(CompiledAfterHook hook, EnvelopeCaller caller) =>
         hook.Required.TenantIdMissingFrom(caller.Context) ? TenantReference
         : hook.ReadsRoles && !caller.CarriesRoles ? RolesReference
         : null;
@@ -146,7 +117,7 @@ internal static class EventSubscriptions
         CompiledAfterHook hook,
         AlvoEvent @event,
         IPredicateEvaluator evaluator,
-        EventCaller caller,
+        EnvelopeCaller caller,
         ILogger logger)
     {
         if (hook.Condition is null)
@@ -161,7 +132,7 @@ internal static class EventSubscriptions
 
         try
         {
-            return Holds(hook.Condition, @event.Data, evaluator, caller.Context);
+            return EnvelopeReading.Holds(hook.Condition, @event.Data, evaluator, caller.Context);
         }
         catch (CelFunctionException failure)
         {
@@ -177,27 +148,10 @@ internal static class EventSubscriptions
     }
 
     /// <summary>
-    /// Evaluates <paramref name="condition"/> over the event's images, answering <c>changed(f)</c> from
-    /// <see cref="AlvoEventData.Changed"/> whenever the evaluator can (spec E7).
-    /// </summary>
-    /// <remarks>
-    /// The list is the envelope's one account of what moved: it is computed from the full images before
-    /// <c>events.exclude</c> strips them, so it still names an excluded field the stripped images would read as
-    /// <see langword="null"/> on both sides — which would make <c>changed(f)</c> never hold and its negation hold on
-    /// every update. An evaluator that cannot take the list (a host's own <see cref="IPredicateEvaluator"/>) compares
-    /// the images, exactly as the published port documents.
-    /// </remarks>
-    private static bool Holds(
-        CompiledExpression condition, AlvoEventData data, IPredicateEvaluator evaluator, AlvoContext context) =>
-        evaluator is IChangeListPredicateEvaluator changeAware
-            ? changeAware.Evaluate(condition, data.Record ?? AlvoRecord.Empty, data.OldRecord, data.Changed, context)
-            : evaluator.Evaluate(condition, data.Record ?? AlvoRecord.Empty, data.OldRecord, context);
-
-    /// <summary>
     /// Whether <paramref name="event"/> carries every caller value <paramref name="hook"/>'s condition reads; when it
     /// does not, the hook is not selected and the missing reference is recorded at Debug.
     /// </summary>
-    private static bool CarriesWhatItReads(CompiledAfterHook hook, AlvoEvent @event, EventCaller caller, ILogger logger)
+    private static bool CarriesWhatItReads(CompiledAfterHook hook, AlvoEvent @event, EnvelopeCaller caller, ILogger logger)
     {
         if (hook.Required.UserIdMissingFrom(caller.Context))
         {
@@ -213,42 +167,4 @@ internal static class EventSubscriptions
 
         return true;
     }
-
-    /// <summary>Reads the entity and the operation out of an event type, or answers <see langword="false"/>.</summary>
-    private static bool TryReadSubscription(string type, out string entity, out DataOperation operation)
-    {
-        entity = string.Empty;
-        operation = default;
-
-        var segments = type.Split(TypeSeparator);
-
-        if (segments.Length != TypeSegments
-            || !string.Equals(segments[PrefixSegment], DataEventPrefix, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        entity = segments[EntitySegment];
-
-        return _operations.TryGetValue(segments[OperationSegment], out operation);
-    }
-
-    private const char TypeSeparator = '.';
-    private const int TypeSegments = 3;
-    private const int PrefixSegment = 0;
-    private const int EntitySegment = 1;
-    private const int OperationSegment = 2;
-    private const string DataEventPrefix = "entity";
-
-    /// <summary>
-    /// The third segment of a data event's type, as the emitting driver spells it, mapped onto the operation
-    /// whose hook list it selects.
-    /// </summary>
-    private static readonly Dictionary<string, DataOperation> _operations =
-        new(StringComparer.Ordinal)
-        {
-            ["created"] = DataOperation.Create,
-            ["updated"] = DataOperation.Update,
-            ["deleted"] = DataOperation.Delete,
-        };
 }

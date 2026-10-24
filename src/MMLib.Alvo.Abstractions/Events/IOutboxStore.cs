@@ -5,7 +5,7 @@
 /// </summary>
 /// <param name="Id">The event's id, and the order the queue is claimed in.</param>
 /// <param name="Type">The event type, so a dispatcher can route without deserializing the payload.</param>
-/// <param name="PartitionKey">The key events for one row share; nothing reads it in this build (see the remarks).</param>
+/// <param name="PartitionKey">The key events for one row share — the record they are ordered within (see the remarks).</param>
 /// <param name="Payload">The stored envelope, exactly as <see cref="AlvoEventJson.Write"/> produced it.</param>
 /// <param name="Attempts">How many times this entry has been claimed, <b>including</b> this claim.</param>
 /// <remarks>
@@ -15,9 +15,9 @@
 /// <see cref="AlvoEventJson.Read(string)"/> is the one reader, and the dispatcher calls it.
 /// </para>
 /// <para>
-/// <see cref="PartitionKey"/> is carried with no reader in this build for the reason the column is written
-/// with none: F7's per-key claim is then an additive change rather than a migration of a shipped table and
-/// a widened port.
+/// <see cref="PartitionKey"/> is what a dispatcher keeps one record's events in order by: an entry whose processing
+/// failed stops its key for the rest of the batch, and every later entry of that key is handed back untried with
+/// <see cref="IOutboxStore.HoldBackAsync"/>, while entries of other keys proceed.
 /// </para>
 /// <para>
 /// <see cref="Attempts"/> counts the claim that produced this entry, so a first delivery reads
@@ -193,4 +193,19 @@ public interface IOutboxStore
     /// </para>
     /// </remarks>
     Task ReleaseAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Hands <paramref name="id"/> back <b>without counting its claim as an attempt</b>: it was held behind an earlier entry
+    /// of its partition key whose processing failed, and was never tried itself.
+    /// </summary>
+    /// <param name="id">The entry's id.</param>
+    /// <param name="retryAfter">How long the entry stays unclaimable — the backoff of the entry it waits behind.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>A task that completes when the entry is handed back.</returns>
+    /// <remarks>
+    /// <see cref="ReleaseAsync"/> keeps the attempt, which is right for an entry that failed. An entry that only waited
+    /// must not walk to the attempt ceiling behind one that keeps failing: past the ceiling it is never claimed again.
+    /// One statement, on the port's standing rule.
+    /// </remarks>
+    Task HoldBackAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default);
 }

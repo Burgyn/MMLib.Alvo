@@ -349,6 +349,14 @@ internal static class OutboxTable
     internal static string ReleaseSql(string tableName) =>
         $"UPDATE {tableName} SET claimed_at = @claimed_at, claimed_by = NULL WHERE id = @id";
 
+    /// <summary>
+    /// <see cref="ReleaseSql"/> that also gives the claim's attempt back, for an entry held behind a failed earlier entry
+    /// of its key and never tried itself. The decrement is clamped at zero rather than the statement guarded by it, so an
+    /// entry with no attempt to give back is still released for its backoff.
+    /// </summary>
+    internal static string HoldBackSql(string tableName) =>
+        $"UPDATE {tableName} SET claimed_at = @claimed_at, claimed_by = NULL, attempts = CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END WHERE id = @id";
+
     /// <summary>How many delivery attempts a freshly written event has had.</summary>
     private const int UndeliveredAttempts = 0;
 }

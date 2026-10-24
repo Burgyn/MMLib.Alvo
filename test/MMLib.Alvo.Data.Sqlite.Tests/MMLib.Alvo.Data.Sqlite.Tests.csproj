@@ -47,6 +47,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/AlvoDataOutboxWorld.cs" Link="_shared/AlvoDataOutboxWorld.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/AlvoDataBeforeHookWorld.cs" Link="_shared/AlvoDataBeforeHookWorld.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/OutboxStoreWorld.cs" Link="_shared/OutboxStoreWorld.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/DeliveryStoreWorld.cs" Link="_shared/DeliveryStoreWorld.cs" />
   </ItemGroup>
 
   <!-- The world the two event acceptance criteria run over, shared with

@@ -68,6 +68,7 @@ public static class AlvoEfCoreProvider
         // IAlvoBuilder — a provider must not assume a particular caller.
         builder.Services.AddOptions<AlvoOptions>();
 
+        builder.Services.TryAddSingleton<IRelationalWriteGate>(NoRelationalWriteGate.Instance);
         builder.Services.TryAddSingleton(sp => CreateConnectionFactory(sp, registration));
         builder.Services.TryAddSingleton<ISchemaMigrator>(sp => CreateMigrator(sp, registration));
         builder.Services.TryAddSingleton<ISchemaIntrospector>(sp => CreateIntrospector(sp, registration));
@@ -85,6 +86,7 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton<IAlvoData>(CreateData);
         builder.Services.TryAddSingleton<IAlvoDataReachability>(CreateReachability);
         builder.Services.TryAddSingleton<IOutboxStore>(CreateOutboxStore);
+        builder.Services.TryAddSingleton<IDeliveryStore>(CreateDeliveryStore);
         AddSecretStore(builder.Services);
 
         return builder;
@@ -100,7 +102,8 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<AlvoDataContextFactory>(),
         services.GetRequiredService<TimeProvider>(),
         services.GetRequiredService<IOptions<AlvoOptions>>().Value,
-        services.GetRequiredService<AlvoChainDepthLimit>());
+        services.GetRequiredService<AlvoChainDepthLimit>(),
+        services.GetRequiredService<IRelationalWriteGate>());
 
     /// <summary>Creates the readiness probe every EF-backed driver shares (#133).</summary>
     /// <remarks>
@@ -163,10 +166,16 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<IOptions<AlvoOptions>>().Value,
         services.GetRequiredService<TimeProvider>());
 
+    private static EfCoreDeliveryStore CreateDeliveryStore(IServiceProvider services) => new(
+        services.GetRequiredService<RelationalConnectionFactory>(),
+        services.GetRequiredService<IOptions<AlvoOptions>>().Value,
+        services.GetRequiredService<TimeProvider>());
+
     private static RelationalConnectionFactory CreateConnectionFactory(IServiceProvider services, RelationalProviderRegistration registration)
     {
         var connectionString = registration.ConnectionString(services);
-        return new RelationalConnectionFactory(() => registration.CreateConnection(connectionString));
+        return new RelationalConnectionFactory(
+            () => registration.CreateConnection(connectionString), services.GetRequiredService<IRelationalWriteGate>());
     }
 
     private static EfCoreSchemaMigrator CreateMigrator(IServiceProvider services, RelationalProviderRegistration registration)

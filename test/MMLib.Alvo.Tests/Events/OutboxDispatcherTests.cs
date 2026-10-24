@@ -1,15 +1,21 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
+using MMLib.Alvo.Extensions;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Tests.Expressions;
+using MMLib.Alvo.Tests.Extensions;
+
+using NSubstitute;
 
 using System.Globalization;
 using System.Net;
@@ -352,28 +358,42 @@ public sealed partial class OutboxDispatcherTests : IDisposable
     }
 
     /// <summary>
-    /// A failure that is nobody's event in particular — the queue itself being unreachable — is contained too:
-    /// the pump stops with one Error line and <c>ExecuteAsync</c> completes, so the host keeps serving.
+    /// A failure that is nobody's event in particular — the queue itself being unreachable — fails one round, not the
+    /// pump: one Error line naming the exception's type, a backoff, and the next round delivers.
     /// </summary>
     /// <remarks>
-    /// Nothing restarts the pump, and that is the honest answer without a supervision policy: the Error line is
-    /// the notification, and its wording says the process serves requests and delivers no events until it is
-    /// restarted.
+    /// A pump that ended here delivered nothing until the process restarted, over what is usually a restarting
+    /// database. The line carries the type name only, never the message, which a provider may fill with a connection
+    /// string.
     /// </remarks>
     [Fact]
-    public async Task A_queue_that_cannot_be_reached_stops_the_pump_loudly_without_faulting_the_host()
+    public async Task A_queue_that_cannot_be_reached_fails_a_round_and_the_pump_keeps_delivering()
     {
-        var store = new FakeOutboxStore { ClaimThrows = new InvalidOperationException("the database is gone") };
+        var store = StoreWith(WonDeal());
+        store.ClaimFailures = 1;
         await using var pump = await StartAsync(store, Ready);
 
-        await UntilAsync(() => pump.Service.ExecuteTask!.IsCompleted, "the pump to end");
+        await UntilAsync(() => store.DispatchedIds.Count == 1, "the event to be delivered after the failed round");
 
-        pump.Service.ExecuteTask!.IsCompletedSuccessfully.ShouldBeTrue(
-            "an escaping failure would take down a host serving HTTP, because "
-            + "BackgroundServiceExceptionBehavior defaults to StopHost");
-        Errors.ShouldHaveSingleItem().Message.ShouldContain("stopped");
-        Errors[0].Exception.ShouldNotBeNull().Message.ShouldBe("the database is gone");
+        pump.Service.ExecuteTask!.IsCompleted.ShouldBeFalse("a failed round must not end the pump");
+        var error = Errors.ShouldHaveSingleItem();
+        error.Message.ShouldContain(nameof(InvalidOperationException));
+        error.Message.ShouldNotContain(FakeOutboxStore.ClaimFailure);
+        error.Exception.ShouldBeNull("the type name is logged, never the exception and its message");
     }
+
+    [Theory]
+    [InlineData(0, 20)]
+    [InlineData(20, 40)]
+    [InlineData(40_000, 60_000)]
+    [InlineData(60_000, 60_000)]
+    public void A_failed_round_waits_double_the_last_wait_up_to_a_minute(int previousMs, int expectedMs) =>
+        OutboxDispatcher.NextBackoff(TimeSpan.FromMilliseconds(previousMs), _pollInterval)
+            .ShouldBe(TimeSpan.FromMilliseconds(expectedMs));
+
+    [Fact]
+    public void A_poll_interval_longer_than_a_minute_is_its_own_ceiling() =>
+        OutboxDispatcher.NextBackoff(TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(2)).ShouldBe(TimeSpan.FromMinutes(2));
 
     private const string Project = "test";
     private const string EndpointName = "crm-sync";
@@ -427,7 +447,8 @@ public sealed partial class OutboxDispatcherTests : IDisposable
         Guid? refuseBodiesNaming = null,
         TaskCompletionSource? blockDeliveriesOn = null,
         IPolicyCatalogProvider? catalogs = null,
-        AlvoBootState? boot = null)
+        AlvoBootState? boot = null,
+        DeliveryFanOut? fanOut = null)
     {
         var options = new AlvoEventOptions { PollInterval = _pollInterval };
         configure?.Invoke(options);
@@ -445,10 +466,54 @@ public sealed partial class OutboxDispatcherTests : IDisposable
                     new StubWebhookReceiver(status, refuseBodiesNaming, blockDeliveriesOn))),
                 new DiscardingEmailSender(),
                 _loggers.CreateLogger<EventActionExecutor>()),
+            fanOut ?? NoHandlers(),
             Options.Create(options),
             TimeProvider.System,
             _loggers.CreateLogger<OutboxDispatcher>());
     }
+
+    /// <summary>A fan-out with no handler registered: every pre-HX-03 fact here keeps its meaning.</summary>
+    private DeliveryFanOut NoHandlers() => new(
+        new FakeDeliveryStore(TimeProvider.System),
+        new ExtensionBinder(ExtensionRegistry.Empty, CelFixtures.Compiler, HandlerCatalog.EveryService(), _loggers.CreateLogger<ExtensionBinder>()),
+        CelFixtures.Evaluator,
+        AlvoChainDepthLimit.Default,
+        _loggers.CreateLogger<DeliveryFanOut>());
+
+    /// <summary>A delivery dispatcher with no handler registered, for the pump the manual-round facts drive.</summary>
+    private DeliveryDispatcher NoDeliveries() =>
+        DeliveriesOver(new FakeDeliveryStore(TimeProvider.System), ExtensionRegistry.Empty, PrimedCatalogs);
+
+    /// <summary>A manual delivery dispatcher over <paramref name="store"/>, with a Ready boot, for the pump's delivery step.</summary>
+    private DeliveryDispatcher DeliveriesOver(FakeDeliveryStore store, ExtensionRegistry registry, IPolicyCatalogProvider catalogs)
+    {
+        var runner = new DeliveryRunner(
+            store,
+            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            new AlvoSessions(Substitute.For<IAlvoData>()),
+            catalogs,
+            new DeliveryBackoff(() => 0.5),
+            Abandoned(),
+            TimeProvider.System,
+            _loggers.CreateLogger<DeliveryRunner>());
+        var boot = new AlvoBootState();
+        Ready(boot);
+
+        return new DeliveryDispatcher(
+            store,
+            boot,
+            catalogs,
+            new ExtensionBinder(registry, CelFixtures.Compiler, HandlerCatalog.EveryService(), _loggers.CreateLogger<ExtensionBinder>()),
+            runner,
+            Abandoned(),
+            Options.Create(new AlvoEventOptions { DispatchMode = AlvoEventDispatchMode.Manual }),
+            Options.Create(new AlvoDeliveryOptions()),
+            TimeProvider.System,
+            _loggers.CreateLogger<DeliveryDispatcher>());
+    }
+
+    private AbandonedHandlers Abandoned() =>
+        new(Options.Create(new AlvoDeliveryOptions()), _loggers.CreateLogger<AbandonedHandlers>());
 
     /// <summary>Polls <paramref name="condition"/> until it holds, and throws rather than giving up quietly.</summary>
     private static async Task UntilAsync(Func<bool> condition, string what)
@@ -609,11 +674,18 @@ public sealed partial class OutboxDispatcherTests : IDisposable
         private readonly List<Guid> _dispatched = [];
         private readonly List<Guid> _released = [];
         private readonly List<TimeSpan> _backoffs = [];
+        private readonly List<Guid> _heldBack = [];
+        private readonly List<TimeSpan> _heldBackFor = [];
         private readonly Lock _gate = new();
         private int _ensureCount;
 
-        /// <summary>What <see cref="ClaimAsync"/> throws instead of answering, when it throws.</summary>
-        internal Exception? ClaimThrows { get; init; }
+        internal const string ClaimFailure = "the database is gone";
+
+        /// <summary>How many of the next claims throw instead of answering.</summary>
+        internal int ClaimFailures { get; set; }
+
+        /// <summary>Whether <see cref="HoldBackAsync"/> throws instead of handing the entry back.</summary>
+        internal bool HoldBackThrows { get; set; }
 
         internal int EnsureCount => Volatile.Read(ref _ensureCount);
 
@@ -627,6 +699,10 @@ public sealed partial class OutboxDispatcherTests : IDisposable
 
         /// <summary>The backoff each release was given, in order — the retry spacing the dispatcher chose.</summary>
         internal IReadOnlyList<TimeSpan> Backoffs => Snapshot(_backoffs);
+
+        internal IReadOnlyList<Guid> HeldBackIds => Snapshot(_heldBack);
+
+        internal IReadOnlyList<TimeSpan> HeldBackFor => Snapshot(_heldBackFor);
 
         /// <summary>The only entry, for the facts that queue exactly one.</summary>
         internal FakeEntry OnlyEntry
@@ -654,7 +730,7 @@ public sealed partial class OutboxDispatcherTests : IDisposable
         {
             lock (_gate)
             {
-                _entries.Add(new FakeEntry(@event.Id, @event.Type, AlvoEventJson.Write(@event)));
+                _entries.Add(new FakeEntry(@event.Id, @event.Type, @event.PartitionKey, AlvoEventJson.Write(@event)));
             }
         }
 
@@ -686,11 +762,14 @@ public sealed partial class OutboxDispatcherTests : IDisposable
             lock (_gate)
             {
                 _claims.Add(new ClaimRequest(claimant, batchSize, maxAttempts, lease));
+                if (ClaimFailures > 0)
+                {
+                    ClaimFailures--;
+                    return Task.FromException<IReadOnlyList<OutboxEntry>>(new InvalidOperationException(ClaimFailure));
+                }
             }
 
-            return ClaimThrows is not null
-                ? Task.FromException<IReadOnlyList<OutboxEntry>>(ClaimThrows)
-                : Task.FromResult(Claimed(claimant, batchSize, maxAttempts));
+            return Task.FromResult(Claimed(claimant, batchSize, maxAttempts));
         }
 
         public Task MarkDispatchedAsync(Guid id, CancellationToken cancellationToken = default)
@@ -718,6 +797,25 @@ public sealed partial class OutboxDispatcherTests : IDisposable
             return Task.CompletedTask;
         }
 
+        public Task HoldBackAsync(Guid id, TimeSpan retryAfter, CancellationToken cancellationToken = default)
+        {
+            if (HoldBackThrows)
+            {
+                return Task.FromException(new InvalidOperationException("the hand-back was refused"));
+            }
+
+            lock (_gate)
+            {
+                var entry = _entries.Single(candidate => candidate.Id == id);
+                entry.Claimed = false;
+                entry.Attempts = Math.Max(0, entry.Attempts - 1);
+                _heldBack.Add(id);
+                _heldBackFor.Add(retryAfter);
+            }
+
+            return Task.CompletedTask;
+        }
+
         private IReadOnlyList<OutboxEntry> Claimed(string claimant, int batchSize, int maxAttempts)
         {
             lock (_gate)
@@ -737,7 +835,7 @@ public sealed partial class OutboxDispatcherTests : IDisposable
             entry.ClaimedBy = claimant;
             entry.Attempts++;
 
-            return new OutboxEntry(entry.Id, entry.Type, "deals:1", entry.Payload, entry.Attempts);
+            return new OutboxEntry(entry.Id, entry.Type, entry.PartitionKey, entry.Payload, entry.Attempts);
         }
 
         private IReadOnlyList<T> Snapshot<T>(List<T> values)
@@ -750,11 +848,13 @@ public sealed partial class OutboxDispatcherTests : IDisposable
     }
 
     /// <summary>One queued entry's mutable state, exactly the columns a fact reads.</summary>
-    private sealed class FakeEntry(Guid id, string type, string payload)
+    private sealed class FakeEntry(Guid id, string type, string partitionKey, string payload)
     {
         internal Guid Id => id;
 
         internal string Type => type;
+
+        internal string PartitionKey => partitionKey;
 
         internal string Payload => payload;
 

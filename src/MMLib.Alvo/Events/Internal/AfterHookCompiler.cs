@@ -115,7 +115,8 @@ internal static class AfterHookCompiler
 
         return action is null
             ? null
-            : new CompiledAfterHook(path, condition, ProvenanceRead(condition), action, RolesRead(condition));
+            : new CompiledAfterHook(
+                path, condition, EventConditionReads.Required(condition), action, EventConditionReads.ReadsRoles(condition));
     }
 
     /// <summary>
@@ -148,24 +149,6 @@ internal static class AfterHookCompiler
 
         return refusals.Count == 0 ? expression : null;
     }
-
-    /// <summary>Which caller values the condition reads that an envelope may lack, so the dispatcher can gate on them.</summary>
-    /// <remarks>
-    /// <c>@tenant.id</c> and <c>@user.roles</c> compile since #153, because the envelope carries <c>tenantid</c> and
-    /// <c>authclaims</c>. They are not refused here, and not in <see cref="CelTypeChecker"/>'s profile table either:
-    /// what an envelope may lack is a per-event fact, so the dispatcher refuses to <em>select</em> a hook whose
-    /// event does not carry what its condition reads — the same <see cref="RequiredContext"/> gate the policy engine
-    /// applies to a rule, because a negated comparison against an absent value passes every event.
-    /// </remarks>
-    private static RequiredContext ProvenanceRead(CompiledExpression? condition) =>
-        condition is null
-            ? RequiredContext.None
-            : new RequiredContext(
-                TenantId: PolicyCatalogBuilder.ReferencesContextValue(condition.Root, CelContextValue.TenantId),
-                UserId: PolicyCatalogBuilder.ReferencesContextValue(condition.Root, CelContextValue.UserId));
-
-    private static bool RolesRead(CompiledExpression? condition) =>
-        condition is not null && PolicyCatalogBuilder.ReferencesContextValue(condition.Root, CelContextValue.UserRoles);
 
     private static CompiledAction? CompileAction(AutomationAction action, string path, AfterHookScope scope) =>
         action switch
@@ -474,14 +457,8 @@ internal static class AfterHookCompiler
 
     private static IEnumerable<DescriptorValidationError> ExcludedFieldReads(
         CelNode root, string path, AfterHookScope scope) =>
-        FieldsRead(root)
-            .Where(field => scope.Schema.EventImageExclusions.Contains(field, StringComparer.Ordinal))
-            .Distinct(StringComparer.Ordinal)
+        EventConditionReads.ExcludedFieldsRead(root, scope.Schema)
             .Select(field => Error(path, ExcludedCondition(field), ExcludedConditionFix(scope, field)));
-
-    private static IEnumerable<string> FieldsRead(CelNode node) =>
-        (node is CelFieldRef reference ? [reference.FieldName] : Enumerable.Empty<string>())
-            .Concat(CelTree.Children(node).SelectMany(FieldsRead));
 
     private static IEnumerable<string> ExcludedPlaceholders(AlvoTemplate template, EntitySchema entity) =>
         template.Placeholders

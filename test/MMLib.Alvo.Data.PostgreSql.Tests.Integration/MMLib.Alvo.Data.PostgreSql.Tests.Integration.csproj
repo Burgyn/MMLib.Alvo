@@ -57,6 +57,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/AlvoDataOutboxWorld.cs" Link="_shared/AlvoDataOutboxWorld.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/AlvoDataBeforeHookWorld.cs" Link="_shared/AlvoDataBeforeHookWorld.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/OutboxStoreWorld.cs" Link="_shared/OutboxStoreWorld.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/DeliveryStoreWorld.cs" Link="_shared/DeliveryStoreWorld.cs" />
   </ItemGroup>
 
   <!-- The world the two event acceptance criteria run over, shared with MMLib.Alvo.Data.Sqlite.Tests — see the
@@ -78,6 +79,8 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/OutboxChaosCriteriaTests.cs" Link="_shared/OutboxChaosCriteriaTests.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/OutboxChaosWorld.cs" Link="_shared/OutboxChaosWorld.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/ChaosWebhookReceiver.cs" Link="_shared/ChaosWebhookReceiver.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/deliveries/DeliveryChaosCriteriaTests.cs" Link="_shared/DeliveryChaosCriteriaTests.cs" />
+    <None Include="$(MSBuildThisFileDirectory)../_shared/deliveries/chaos-desk.alvo.json" Link="chaos-desk.alvo.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- The container-creation mechanics every Testcontainers-backed PostgreSQL fixture in this repository

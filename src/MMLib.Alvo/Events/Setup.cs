@@ -58,7 +58,8 @@ internal static class EventsSetup
     /// one dispatcher, and a manual round and the hosted loop can never be two instances: two dispatchers in one
     /// process would break per-entity-key ordering exactly as two replicas do. Registration order says nothing about
     /// when it runs: on .NET 10 <c>ExecuteAsync</c> runs entirely off the startup thread, so the readiness gate is an
-    /// await on <c>AlvoBootState</c> inside the service itself.
+    /// await on <c>AlvoBootState</c> inside the service itself. The delivery dispatcher is registered the same way: one
+    /// singleton, hosted and driven by the pump as the same instance.
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection to add the event services to.</param>
@@ -80,10 +81,17 @@ internal static class EventsSetup
         services.TryAddSingleton<EventActionExecutor>();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IAlvoEvents, AlvoEvents>();
+        services.TryAddSingleton<DeliveryFanOut>();
+        services.TryAddSingleton(new DeliveryBackoff());
+        services.TryAddSingleton<AbandonedHandlers>();
+        services.TryAddSingleton<DeliveryRunner>();
         services.TryAddSingleton<OutboxDispatcher>();
         services.TryAddSingleton<IAlvoEventPump, EventPump>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, OutboxDispatcher>(
             provider => provider.GetRequiredService<OutboxDispatcher>()));
+        services.TryAddSingleton<DeliveryDispatcher>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, DeliveryDispatcher>(
+            provider => provider.GetRequiredService<DeliveryDispatcher>()));
 
         return services;
 
