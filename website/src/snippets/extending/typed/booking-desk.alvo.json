@@ -1,0 +1,23 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "booking-desk",
+  "access": { "admin": "'admin' in @user.roles" },
+  "auth": { "roles": ["staff"] },
+  "entities": {
+    "bookings": {
+      "fields": {
+        "guest": { "type": "string", "required": true, "maxLength": 80 },
+        "status": { "type": "enum", "required": true, "values": ["requested", "confirmed", "cancelled"] },
+        "nights": { "type": "integer", "required": true },
+        "total": { "type": "decimal", "precision": 10, "scale": 2 }
+      },
+      "rules": {
+        "list": "'staff' in @user.roles || 'admin' in @user.roles",
+        "get": "'staff' in @user.roles || 'admin' in @user.roles",
+        "create": "'staff' in @user.roles",
+        "update": "'staff' in @user.roles"
+      }
+    }
+  }
+}

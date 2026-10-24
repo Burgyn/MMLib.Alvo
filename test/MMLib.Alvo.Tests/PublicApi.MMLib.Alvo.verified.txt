@@ -106,8 +106,63 @@ namespace MMLib.Alvo.Auth
         public bool TryResolve(MMLib.Alvo.Auth.ApiKeyRecord key, string? requestedTenant, out MMLib.Alvo.TenantId? tenant) { }
     }
 }
+namespace MMLib.Alvo.Data
+{
+    [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple=false, Inherited=false)]
+    public sealed class AlvoEntityAttribute : System.Attribute
+    {
+        public AlvoEntityAttribute(string name) { }
+        public string Name { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Field, AllowMultiple=false, Inherited=false)]
+    public sealed class AlvoEnumValueAttribute : System.Attribute
+    {
+        public AlvoEnumValueAttribute(string value) { }
+        public string Value { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property, AllowMultiple=false, Inherited=true)]
+    public sealed class AlvoFieldAttribute : System.Attribute
+    {
+        public AlvoFieldAttribute(string name) { }
+        public string Name { get; }
+    }
+    public static class AlvoRecordExtensions
+    {
+        public static T As<T>(this MMLib.Alvo.Data.AlvoRecord record)
+            where T :  class { }
+    }
+    public sealed class AlvoTranslationException : System.Exception
+    {
+        public AlvoTranslationException() { }
+        public AlvoTranslationException(string message) { }
+        public AlvoTranslationException(string message, System.Exception innerException) { }
+        public AlvoTranslationException(string message, string fixSuggestion) { }
+        public string FixSuggestion { get; }
+    }
+    public static class AlvoTypedReadExtensions
+    {
+        public static System.Threading.Tasks.Task<T?> GetAsync<T>(this MMLib.Alvo.Data.IAlvoSession session, System.Guid id, System.Threading.CancellationToken cancellationToken = default)
+            where T :  class { }
+        public static System.Threading.Tasks.Task<T?> GetAsync<T>(this MMLib.Alvo.Data.IAlvoData data, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default)
+            where T :  class { }
+        public static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<T>> QueryAsync<T>(this MMLib.Alvo.Data.IAlvoSession session, System.Linq.Expressions.Expression<System.Func<T, bool>> @where, int limit, System.Threading.CancellationToken cancellationToken = default)
+            where T :  class { }
+        public static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<T>> QueryAsync<T>(this MMLib.Alvo.Data.IAlvoData data, System.Linq.Expressions.Expression<System.Func<T, bool>> @where, int limit, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default)
+            where T :  class { }
+    }
+    public interface IAlvoEntity
+    {
+        MMLib.Alvo.Data.AlvoRecord Record { get; }
+    }
+}
 namespace MMLib.Alvo.Events
 {
+    public sealed class AlvoConditionCaller
+    {
+        public System.Guid? Tenant { get; }
+        public System.Guid? User { get; }
+        public bool HasRole(string role) { }
+    }
     public sealed class AlvoCreated<T> : System.IEquatable<MMLib.Alvo.Events.AlvoCreated<T>>
         where T :  class
     {
@@ -128,6 +183,12 @@ namespace MMLib.Alvo.Events
         public bool IsQuiet { get; }
         public required System.Collections.Generic.IReadOnlyList<string> Subscribers { get; init; }
     }
+    [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple=false, Inherited=false)]
+    public sealed class AlvoEventAttribute : System.Attribute
+    {
+        public AlvoEventAttribute(string type) { }
+        public string Type { get; }
+    }
     public sealed class AlvoEventContext
     {
         public int Attempt { get; }
@@ -136,6 +197,7 @@ namespace MMLib.Alvo.Events
         public MMLib.Alvo.Events.AlvoEvent Event { get; }
         public System.Guid EventId { get; }
         public string Subscriber { get; }
+        public static MMLib.Alvo.Events.AlvoEventContext Create(MMLib.Alvo.Events.AlvoEvent @event, MMLib.Alvo.Data.IAlvoSession data, string subscriber, int attempt = 1) { }
     }
     public enum AlvoEventDispatchMode
     {
@@ -167,6 +229,14 @@ namespace MMLib.Alvo.Events
         public AlvoUpdated() { }
         public required T New { get; init; }
         public required T Old { get; init; }
+    }
+    public sealed class EventCondition<T>
+        where T :  class
+    {
+        public MMLib.Alvo.Events.AlvoConditionCaller Caller { get; }
+        public T New { get; }
+        public T Old { get; }
+        public bool Changed(params System.Linq.Expressions.Expression<System.Func<T, object?>>[] fields) { }
     }
     public interface IAlvoEventHandler<in TMessage>
         where in TMessage :  class
@@ -200,6 +270,34 @@ namespace MMLib.Alvo.Extensions
         public MMLib.Alvo.Extensions.AlvoEntityBuilder OnUpdated(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder OnUpdated<THandler>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
             where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoUpdated<MMLib.Alvo.Data.AlvoRecord>> { }
+    }
+    public sealed class AlvoEntityBuilder<T>
+        where T :  class
+    {
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnCreated(string id, System.Delegate handler, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Events.EventCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnCreated(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnCreated<THandler>(string id, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Events.EventCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoCreated<T>> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnCreated<THandler>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoCreated<T>> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnDeleted(string id, System.Delegate handler, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Events.EventCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnDeleted(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnDeleted<THandler>(string id, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Events.EventCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoDeleted<T>> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnDeleted<THandler>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoDeleted<T>> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnSaved(string id, System.Delegate handler, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Events.EventCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnSaved(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnSaved<THandler>(string id, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Events.EventCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoSaved<T>> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnSaved<THandler>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoSaved<T>> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnUpdated(string id, System.Delegate handler, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Events.EventCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnUpdated(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnUpdated<THandler>(string id, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Events.EventCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoUpdated<T>> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnUpdated<THandler>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoUpdated<T>> { }
     }
     public sealed class AlvoExtensionOptions
     {
@@ -342,9 +440,14 @@ namespace Microsoft.Extensions.DependencyInjection
         public static MMLib.Alvo.IAlvoBuilder AddEventHandler(this MMLib.Alvo.IAlvoBuilder builder, string id, string eventType, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
         public static MMLib.Alvo.IAlvoBuilder AddEventHandler<THandler>(this MMLib.Alvo.IAlvoBuilder builder, string id, string eventType, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
             where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Data.AlvoRecord> { }
+        public static MMLib.Alvo.IAlvoBuilder AddEventHandler<TMessage, THandler>(this MMLib.Alvo.IAlvoBuilder builder, string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
+            where TMessage :  class
+            where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<TMessage> { }
         public static MMLib.Alvo.IAlvoBuilder AddRetiredExtension(this MMLib.Alvo.IAlvoBuilder builder, string id, MMLib.Alvo.Extensions.AlvoRetirement retirement) { }
         public static MMLib.Alvo.IAlvoBuilder Entities(this MMLib.Alvo.IAlvoBuilder builder, System.Collections.Generic.IEnumerable<string> entities, System.Action<MMLib.Alvo.Extensions.AlvoEntityBuilder> configure) { }
         public static MMLib.Alvo.IAlvoBuilder Entity(this MMLib.Alvo.IAlvoBuilder builder, string entity, System.Action<MMLib.Alvo.Extensions.AlvoEntityBuilder> configure) { }
+        public static MMLib.Alvo.IAlvoBuilder Entity<T>(this MMLib.Alvo.IAlvoBuilder builder, System.Action<MMLib.Alvo.Extensions.AlvoEntityBuilder<T>> configure)
+            where T :  class { }
     }
     public static class AlvoProblemDetailsExtensions
     {

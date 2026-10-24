@@ -301,6 +301,34 @@ ranges, missing services) run even at an `Awaiting` boot. The mechanism — fan-
 lease, the SQLite write line — is [events.md](events.md#event-handlers-and-deliveries); the guide is *React to changes
 (event handlers)* on the docs site.
 
+## Registering typed code
+
+`Entity<T>(t => t.OnUpdated<SendConfirmation>("send-confirmation", when: e => …))` adds the same internal
+`HandlerRegistration` an untyped registration adds. Its `When` is the CEL text `ConditionTranslator` wrote **at
+registration** — through `CelText`, the one writer of CEL text ([cel.md](cel.md#one-writer)), and parsed back once, so
+an untranslatable, over-long or over-deep lambda throws `AlvoTranslationException` from the registration call, never
+at boot. The registration also carries a `TypedHandler`: the type's `RecordShape` (its mapping, built once per type)
+and the factory that builds the handler's `AlvoCreated<T>`/`AlvoUpdated<T>`/… or payload from the event at delivery,
+where an untyped registration hands over `AlvoRecord`.
+
+The boot adds only the mapping checks, at `extensions/<id>/record`: `RecordShape.Problems` (`ShapeProblems`) — no
+constructor, a value type no field holds, a field mapped twice, a `[Flags]` enum, a field name that is not a CEL
+identifier — catalog-free, so they refuse even an `Awaiting` boot; and `ShapeMapping` against the bound entity — a
+missing or mistyped field, a non-nullable property on an optional field, an enum member with no declared value, a field
+`events.exclude` leaves out of the images. A typed handler whose mapping does not fit never binds, and its events are
+recorded dead `unbound`, as any unbound handler's are. The enum check runs member → value only: a declared value no
+member names is not refused at boot, and a record holding it fails `As<T>()` (and with it that delivery attempt).
+
+The apply guard (`ExtensionApplyRefusals`) counts a typed handler's mapped fields as reads: removing, excluding or
+retyping one, making it optional under a non-nullable property, or removing an enum value a member maps is refused at
+the field's pointer with a sentence of its own; a field both read by the condition and mapped gets the condition's
+sentence once.
+
+Typed reads (`AlvoTypedReadExtensions.GetAsync<T>`/`QueryAsync<T>` on `IAlvoSession` and `IAlvoData`) are extension
+methods that build an `AlvoQuery` through `FilterTranslator` — once per call, values captured then and placed as typed
+values the driver binds — and read through the unchanged port, so every policy, tenancy and hidden-field rule applies
+exactly as to an untyped read. The guide is *Typed or CEL* on the docs site.
+
 ## Pitfalls (banned)
 
 - **Never call `BuildServiceProvider()` during registration** — it builds a second

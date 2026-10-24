@@ -8,8 +8,9 @@ sidebar:
 import { Code } from '@astrojs/starlight/components';
 import SourceExcerpt from '../../../components/SourceExcerpt.astro';
 import handlers from '../../../snippets/extending/handlers/TicketDeskHandlers.cs?raw';
-import tests from '../../../snippets/extending/handlers/TicketDeskHandlersTests.cs?raw';
 import descriptor from '../../../snippets/extending/handlers/ticket-desk.alvo.json?raw';
+import typedHandlers from '../../../snippets/extending/handlers/TicketDeskTypedHandlers.cs?raw';
+import typedTests from '../../../snippets/extending/handlers/TicketDeskTypedHandlersTests.cs?raw';
 
 An event handler is C# your host runs **after** a write commits: post to a chat, call an ERP, open a follow-up. It runs
 on Alvo's transactional outbox, so it never undoes the write and is never lost with it — each matching event becomes a
@@ -19,30 +20,42 @@ on Alvo's transactional outbox, so it never undoes the write and is never lost w
 
 ## Register a handler
 
-Group registrations by entity with `Entity("name", …)` — or `Entities(["orders", "invoices"], …)`, or `Entity("*", …)`
-for every entity — and pick the verb: `OnCreated`, `OnUpdated` (also a replace), `OnDeleted`, `OnSaved` (created or
-updated).
+Group registrations by entity with `Entity<Ticket>(…)` over your own class — or `Entity("name", …)` over `AlvoRecord`,
+`Entities(["orders", "invoices"], …)`, or `Entity("*", …)` for every entity — and pick the verb: `OnCreated`,
+`OnUpdated` (also a replace), `OnDeleted`, `OnSaved` (created or updated).
+
+<SourceExcerpt code={typedHandlers} from="public static IAlvoBuilder AddTicketDeskTypedHandlers" to="TimeSpan.FromSeconds(10)));" title="TicketDeskTypedHandlers.cs" />
+
+The class maps the entity: `[AlvoEntity("tickets")]`, a property per field, an enum per enum field
+([Typed or CEL](/extending/typed-or-cel/#your-class) has the rules). Each lambda is translated into CEL when it is
+registered — the first one becomes `changed(status) && new.status == 'resolved'`.
+
+The same handlers over `AlvoRecord`, with the conditions written as CEL strings — the form an every-entity or
+multi-entity registration always takes:
 
 <SourceExcerpt code={handlers} from="public static IAlvoBuilder AddTicketDeskHandlers" to="TimeSpan.FromSeconds(10)));" title="TicketDeskHandlers.cs" />
 
 - **The id is the handler's identity.** Lower-case letters, digits and hyphens. Its deliveries are found by it after a
   restart, so renaming a handler is retiring the old id ([below](#rename-or-remove-a-handler)).
-- **A delegate** takes the message — `AlvoCreated<AlvoRecord>` (`New`), `AlvoUpdated<AlvoRecord>` (`Old`, `New`),
-  `AlvoDeleted<AlvoRecord>` (`Old`), `AlvoSaved<AlvoRecord>` (`New`, `Old` is `null` on create) — and any of
+- **A delegate** takes the message — `AlvoCreated<T>` (`New`), `AlvoUpdated<T>` (`Old`, `New`), `AlvoDeleted<T>`
+  (`Old`), `AlvoSaved<T>` (`New`, `Old` is `null` on create), where `T` is your class or `AlvoRecord` — and any of
   `AlvoEventContext`, a `CancellationToken` and your own services. **A class** implementing
   `IAlvoEventHandler<TMessage>` is built per delivery from the delivery's own DI scope.
-- **`when`** is a CEL condition over the images the verb's event carries: `new.` and `old.` on updates, `new.` on
-  creates and saves, `old.` on deletes, `changed(field)` on updates, `@user` and `@tenant`. It is judged after the commit
-  and before any delivery exists: an event it does not match costs nothing. An `OnSaved` condition reads only `new.` —
-  use `OnUpdated` for a condition on the change. A `"*"` registration's condition tests only `@user` and `@tenant`.
+- **`when`** is a lambda over `e.New`, `e.Old`, `e.Changed(…)` and `e.Caller`, or a CEL condition over the images the
+  verb's event carries: `new.` and `old.` on updates, `new.` on creates and saves, `old.` on deletes, `changed(field)`
+  on updates, `@user` and `@tenant`. The condition is judged after the commit and before any delivery exists: an event
+  it does not match costs nothing. An `OnSaved` condition reads only `new.` — use `OnUpdated` for a condition on the
+  change. A `"*"` registration's condition tests only `@user` and `@tenant`. A lambda that reads what its verb does not
+  carry, or that has no CEL equivalent, throws `AlvoTranslationException` from the registration
+  ([what translates](/extending/typed-or-cel/#what-a-lambda-can-say)).
 - **Everything is checked when the host starts**, against your descriptor: an unknown entity, a typo in a condition, a
   condition reading what the event cannot carry or a field left out of the event images (`changed()` included), a
-  service your container cannot provide, a timeout that is not positive or longer than an hour. All problems are
-  reported in one refusal, each naming the handler and its slot — `extensions/ticket-resolved-to-chat/when`. Problems
-  that do not depend on the descriptor — a malformed or repeated id, a missing service — refuse the start even before a
-  dashboard-first host has a descriptor.
+  typed class that does not fit its entity (at `extensions/<id>/record`), a service your container cannot provide, a
+  timeout that is not positive or longer than an hour. All problems are reported in one refusal, each naming the
+  handler and its slot — `extensions/ticket-resolved-to-chat/when`. Problems that do not depend on the descriptor — a
+  malformed or repeated id, a missing service — refuse the start even before a dashboard-first host has a descriptor.
 
-<SourceExcerpt code={handlers} from="public sealed class OpenFollowUp" title="TicketDeskHandlers.cs" />
+<SourceExcerpt code={typedHandlers} from="public sealed class OpenFollowUp" title="TicketDeskTypedHandlers.cs" />
 
 ## What a delivery guarantees
 
@@ -88,6 +101,12 @@ updated).
   now: a role redefined since the event grants its rules as they are now; a role it dropped is not held. A handler on
   an event the system made runs as `admin`, as the event did. An event whose tenant or caller cannot be read is never
   run as someone else: its delivery is dead with `event-unreadable`.
+- **A typed message that cannot be built is dead at once.** When the event's record lacks a field your class maps
+  (a payload missing one, say), holds null where the property cannot, or holds a value it cannot take, the delivery is
+  dead with `record-unreadable`, never retried — the same record would fail again. The log entry
+  `DeliveryRecordUnreadable` names the class and the field, never the value. Fix the class, then
+  [redeliver it](#retry-a-dead-delivery-by-hand). The same holds for a `record.As<T>()` or typed read inside the handler
+  that throws for that reason.
 - **Loops stop.** A handler's writes and published events sit one hop deeper in the causation chain than the event that
   ran it — even through a DI-injected `IAlvoData` with a fresh `AlvoContext.System`. Past
   [`Alvo:Extensions:MaxDepth`](/reference/configuration/#alvoextensions) (8) the next delivery is recorded dead with
@@ -102,6 +121,7 @@ updated).
 - **Nothing sensitive is stored.** A delivery records ids, statuses, times and an error **type** — never a body, a URL
   or an exception message. The type is the exception's type name, or one of `when-failed` (the condition threw),
   `timeout`, `chain-depth-exceeded`, `event-missing` (the envelope left the outbox), `event-unreadable`,
+  `record-unreadable` (a typed message could not be built),
   `lease-expired` (its last attempt never answered — a handler that crashes its process, say), `retired` and
   `unbound`.
 
@@ -130,8 +150,11 @@ claims it. Its earlier attempts are gone from the history; HX-06's redeliver wil
 
 `AddEventHandler(id, "orders.approved", (AlvoRecord payload, …) => …)` handles an event your code publishes with
 `IAlvoEvents.PublishAsync`; `AddEventHandler<THandler>(id, "orders.approved")` takes an
-`IAlvoEventHandler<AlvoRecord>` class. Its condition tests only `@user` and `@tenant`; check the payload inside the
-handler. The `alvo.` namespace is reserved for events Alvo mints itself, and a host cannot publish into it.
+`IAlvoEventHandler<AlvoRecord>` class, and `AddEventHandler<TMessage, THandler>(id)` an `IAlvoEventHandler<TMessage>`
+over your own payload class, its event type named by `[AlvoEvent("orders.approved")]`. Its condition — a CEL string —
+tests only `@user` and `@tenant`; check the payload inside the handler. A payload declares no fields, so a payload class
+is checked only for what no descriptor can cure; a payload lacking a field it maps makes the delivery dead
+with `record-unreadable`, never retried (see above). The `alvo.` namespace is reserved for events Alvo mints itself, and a host cannot publish into it.
 
 ## Rename or remove a handler
 
@@ -158,12 +181,15 @@ The same check refuses two starts you may not expect:
 
 The test host runs handlers in the same rounds as after-hooks, and `Hooks.AssertRan` counts them by id:
 
-<SourceExcerpt code={tests} from="Resolving_a_ticket_posts_to_the_chat_once()" to="Items.ShouldHaveSingleItem();" title="TicketDeskHandlersTests.cs" />
+<SourceExcerpt code={typedTests} from="Resolving_a_ticket_posts_to_the_chat_once()" to="Items.ShouldHaveSingleItem();" title="TicketDeskTypedHandlersTests.cs" />
+
+The test of the CEL-string spelling is the same, over `AddTicketDeskHandlers()`
+([`TicketDeskHandlersTests.cs`](https://github.com/Burgyn/MMLib.Alvo/blob/main/website/src/snippets/extending/handlers/TicketDeskHandlersTests.cs)).
 
 Never drain from inside a handler: the call is refused, because a round would wait for itself.
 
-`AlvoEventContext` has no public constructor yet, so test a class handler through the test host, as above, rather
-than by calling `HandleAsync` yourself.
+To call a class handler's `HandleAsync` yourself, pass it `alvo.EventContext(caller)` — data access through the test
+host's real pipeline as that caller ([example](/extending/typed-or-cel/#testing-a-typed-handler)).
 
 ## Configuration
 
@@ -189,4 +215,4 @@ CEL function — must not write through Alvo itself. PostgreSQL has no such turn
 
 ## Not yet
 
-Typed handlers over your own classes (`Entity<T>`), and redeliver, replay and pause arrive in the next releases.
+Redeliver, replay and pause arrive in the next releases.

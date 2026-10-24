@@ -1,0 +1,117 @@
+﻿using MMLib.Alvo.Events;
+
+using System.Collections.Concurrent;
+using System.Reflection;
+using System.Text.Json;
+
+namespace MMLib.Alvo.Data.Internal;
+
+/// <summary>
+/// How one host type maps to an entity's fields, read once per type: each mapped property's field
+/// (<see cref="AlvoFieldAttribute"/>, else snake_case), the value it holds, whether it takes null, its enum's values, the
+/// constructor to call — and the problems no descriptor can cure.
+/// </summary>
+/// <remarks>
+/// A property is mapped when it is public, readable and not an indexer, and has a public setter (<c>set</c> or <c>init</c>)
+/// or carries <see cref="AlvoFieldAttribute"/>. A plain type is built through its parameterless constructor, else through
+/// the public constructor with the most parameters that all name mapped properties and take their types (a positional record's); a wrapper
+/// (<see cref="IAlvoEntity"/>) through its constructor taking one <see cref="AlvoRecord"/>. A plain type's mapped property
+/// that constructor does not take and no public setter fills is a problem: it would always hold its default.
+/// </remarks>
+internal sealed class RecordShape
+{
+    private static readonly ConcurrentDictionary<Type, RecordShape> _shapes = new();
+
+    private readonly Dictionary<string, MappedProperty> _byName;
+
+    private RecordShape(Type type)
+    {
+        Type = type;
+        Entity = type.GetCustomAttribute<AlvoEntityAttribute>()?.Name;
+        EventType = type.GetCustomAttribute<AlvoEventAttribute>()?.Type;
+        IsWrapper = typeof(IAlvoEntity).IsAssignableFrom(type);
+        var nullability = new NullabilityInfoContext();
+        Properties = [.. Candidates(type).Select(property => MappedProperty.Of(property, nullability))];
+        _byName = Properties.GroupBy(property => property.Property.Name, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        Constructor = IsWrapper ? type.GetConstructor([typeof(AlvoRecord)]) : Callable(type, Properties);
+        Arguments = IsWrapper ? [] : ArgumentsOf(Constructor, Properties);
+        Settable = [.. Properties.Where(property => property.Property.SetMethod is { IsPublic: true } && !Arguments.Contains(property))];
+        Problems = ShapeProblems.Of(this);
+    }
+
+    internal Type Type { get; }
+
+    internal string Name => Type.Name;
+
+    internal string? Entity { get; }
+
+    internal string? EventType { get; }
+
+    internal bool IsWrapper { get; }
+
+    internal IReadOnlyList<MappedProperty> Properties { get; }
+
+    internal ConstructorInfo? Constructor { get; }
+
+    /// <summary>The mapped property behind each of <see cref="Constructor"/>'s parameters, in order; empty for a wrapper.</summary>
+    internal IReadOnlyList<MappedProperty> Arguments { get; }
+
+    /// <summary>The mapped properties set after construction: a public setter, and not passed to the constructor.</summary>
+    internal IReadOnlyList<MappedProperty> Settable { get; }
+
+    internal IReadOnlyList<ShapeProblem> Problems { get; }
+
+    internal static RecordShape Of(Type type) => _shapes.GetOrAdd(type, static shaped => new RecordShape(shaped));
+
+    internal static MappedProperty? ParameterProperty(ParameterInfo parameter, IReadOnlyList<MappedProperty> properties) =>
+        properties.FirstOrDefault(property =>
+            string.Equals(property.Property.Name, parameter.Name, StringComparison.OrdinalIgnoreCase)
+            && parameter.ParameterType.IsAssignableFrom(property.Property.PropertyType));
+
+    internal MappedProperty? Mapped(MemberInfo member) =>
+        member is PropertyInfo property && _byName.TryGetValue(property.Name, out var mapped) ? mapped : null;
+
+    internal T Materialize<T>(AlvoRecord? record)
+        where T : class =>
+        (T)RecordMaterializer.Create(this, record ?? AlvoRecord.Empty);
+
+    private static IEnumerable<PropertyInfo> Candidates(Type type) =>
+        type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(property => property.GetIndexParameters().Length == 0 && property.GetMethod is { IsPublic: true })
+            .Where(property => property.SetMethod is { IsPublic: true } || Attribute.IsDefined(property, typeof(AlvoFieldAttribute), inherit: true));
+
+    private static MappedProperty[] ArgumentsOf(ConstructorInfo? constructor, IReadOnlyList<MappedProperty> properties) =>
+        constructor is null ? [] : [.. constructor.GetParameters().Select(parameter => ParameterProperty(parameter, properties)!)];
+
+    private static ConstructorInfo? Callable(Type type, IReadOnlyList<MappedProperty> properties)
+    {
+        var constructors = type.GetConstructors();
+
+        return constructors.FirstOrDefault(constructor => constructor.GetParameters().Length == 0)
+            ?? constructors
+                .Where(constructor => constructor.GetParameters().All(parameter => ParameterProperty(parameter, properties) is not null))
+                .MaxBy(constructor => constructor.GetParameters().Length);
+    }
+}
+
+/// <summary>One mapped property: its field, the value it holds (nullable unwrapped), whether it takes null, and its enum.</summary>
+internal sealed record MappedProperty(PropertyInfo Property, string Field, Type ValueType, bool AcceptsNull, EnumMap? Enum)
+{
+    internal static MappedProperty Of(PropertyInfo property, NullabilityInfoContext nullability)
+    {
+        var lifted = Nullable.GetUnderlyingType(property.PropertyType);
+        var valueType = lifted ?? property.PropertyType;
+
+        return new(property, FieldName(property), valueType, lifted is not null || TakesNull(property, nullability), valueType.IsEnum ? EnumMap.Of(valueType) : null);
+    }
+
+    private static string FieldName(PropertyInfo property) =>
+        property.GetCustomAttribute<AlvoFieldAttribute>(inherit: true)?.Name ?? JsonNamingPolicy.SnakeCaseLower.ConvertName(property.Name);
+
+    private static bool TakesNull(PropertyInfo property, NullabilityInfoContext nullability) =>
+        !property.PropertyType.IsValueType && DeclaredState(nullability.Create(property)) != NullabilityState.NotNull;
+
+    private static NullabilityState DeclaredState(NullabilityInfo info) =>
+        info.WriteState == NullabilityState.Unknown ? info.ReadState : info.WriteState;
+}

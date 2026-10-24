@@ -11,7 +11,8 @@ internal static class ExtensionRegistrations
         HandlerSource source,
         string? when,
         Action<AlvoHandlerOptions>? configure,
-        HandlerInvoker invoker)
+        HandlerInvoker invoker,
+        TypedHandler? typed = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         if (when is not null)
@@ -21,7 +22,7 @@ internal static class ExtensionRegistrations
 
         var options = new AlvoHandlerOptions();
         configure?.Invoke(options);
-        Add(services, sequence => new HandlerRegistration(id, sequence, source, when, HandlerSettings.From(options), invoker));
+        Add(services, sequence => new HandlerRegistration(id, sequence, source, when, HandlerSettings.From(options), invoker, typed));
     }
 
     internal static void Add(IServiceCollection services, Func<int, ExtensionRegistration> create)

@@ -21,6 +21,7 @@
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/docs/DocsSnippets.cs" Link="_shared/DocsSnippets.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/InternalMemberReferences.cs" Link="_shared/InternalMemberReferences.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/literals/LiteralText.cs" Link="_shared/LiteralText.cs" />
   </ItemGroup>
 
 </Project>

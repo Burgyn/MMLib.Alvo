@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Data.Internal;
 using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
@@ -173,7 +174,17 @@ internal sealed class DeliveryRunner(
         }
         catch (Exception failure) when (!stopping.IsCancellationRequested)
         {
+            LogUnreadable(failure, delivery);
             return VerdictOf(failure);
+        }
+    }
+
+    /// <summary>Logs why a record could not be read as its host type: the message names the field, never a value.</summary>
+    private void LogUnreadable(Exception failure, ClaimedDelivery delivery)
+    {
+        if (failure is RecordUnreadableException unreadable)
+        {
+            DeliveryLog.DeliveryRecordUnreadable(logger, delivery.Id, delivery.Subscriber, delivery.Attempts, unreadable.Message);
         }
     }
 
@@ -229,7 +240,9 @@ internal sealed class DeliveryRunner(
     }
 
     private static AttemptVerdict VerdictOf(Exception failure) =>
-        IsDepthRefusal(failure) ? AttemptVerdict.Dead(DeliveryErrors.ChainDepthExceeded) : AttemptVerdict.Retry(TypeOf(failure));
+        IsDepthRefusal(failure) ? AttemptVerdict.Dead(DeliveryErrors.ChainDepthExceeded)
+        : failure is RecordUnreadableException ? AttemptVerdict.Dead(DeliveryErrors.RecordUnreadable)
+        : AttemptVerdict.Retry(TypeOf(failure));
 
     private static string TypeOf(Exception failure) => failure.GetType().FullName ?? failure.GetType().Name;
 
@@ -269,7 +282,7 @@ internal sealed class DeliveryRunner(
         await using (scope.ConfigureAwait(false))
         {
             var context = new AlvoEventContext(@event, delivery.Subscriber, delivery.Attempts, sessions.For(CallerFor(@event, handler.Settings.RunAs)));
-            var message = HandlerMessage.For(@event, handler.Registration.Source);
+            var message = HandlerMessage.For(@event, handler.Registration);
             await handler.Registration.Invoker.InvokeAsync(scope.ServiceProvider, message, context, ct).ConfigureAwait(false);
         }
     }

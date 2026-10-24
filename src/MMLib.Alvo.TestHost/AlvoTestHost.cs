@@ -28,6 +28,7 @@ public sealed class AlvoTestHost : IAsyncDisposable
 {
     private const int MaxRounds = 100;
     private const string DrainActivityName = "alvo.test.drain";
+    private const string TestEventType = "test.delivery";
 
     private static readonly ActivitySource _drainSource = new(AlvoHookRecorder.DrainSourceName);
 
@@ -142,6 +143,50 @@ public sealed class AlvoTestHost : IAsyncDisposable
         {
             User = new UserId(Guid.NewGuid()),
             Roles = RoleCatalog.Create(roles).Resolve([Role.Authenticated.Name, .. roles]),
+        };
+    }
+
+    /// <summary>
+    /// An event context for calling a class handler's <c>HandleAsync</c> yourself: data access as <paramref name="caller"/>
+    /// through this host's real pipeline, and a synthetic event of type <c>test.delivery</c> with a fresh id.
+    /// </summary>
+    /// <remarks>
+    /// Not a delivery: writes through the context's <c>Data</c> carry no causation from the synthetic event and sit no hop
+    /// deeper in the chain. Write through the host and let a handler run on its delivery to test causation or depth.
+    /// </remarks>
+    /// <param name="caller">The caller the handler acts as; <see cref="Caller"/> builds one.</param>
+    /// <param name="subscriber">The handler id the context reports.</param>
+    /// <param name="attempt">The attempt the context reports, from 1.</param>
+    /// <returns>The context to pass to the handler.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="caller"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="subscriber"/> is empty or white space.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="attempt"/> is less than 1.</exception>
+    /// <exception cref="ObjectDisposedException">The host was disposed.</exception>
+    public AlvoEventContext EventContext(AlvoContext caller, string subscriber = "test-handler", int attempt = 1)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        var services = Services;
+        var now = services.GetRequiredService<TimeProvider>().GetUtcNow();
+
+        return AlvoEventContext.Create(TestEvent(now), services.GetRequiredService<IAlvoSessions>().For(caller), subscriber, attempt);
+    }
+
+    /// <summary>The synthetic envelope <see cref="EventContext"/> hands the handler, minted at <paramref name="now"/>.</summary>
+    private static AlvoEvent TestEvent(DateTimeOffset now)
+    {
+        var utc = now.ToUniversalTime();
+
+        return new AlvoEvent
+        {
+            Id = AlvoEventId.Create(utc),
+            Source = AlvoEvent.DefaultSource,
+            Type = TestEventType,
+            Time = utc,
+            Subject = TestEventType,
+            PartitionKey = TestEventType,
+            AuthType = AlvoEventAuthType.Unknown,
+            CorrelationId = Guid.NewGuid().ToString("N"),
+            Data = new AlvoEventData(),
         };
     }
 

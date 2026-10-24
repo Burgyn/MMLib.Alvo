@@ -1,0 +1,188 @@
+---
+title: Typed or CEL
+description: Write a handler's condition as a C# lambda over your own class, or as CEL — Alvo translates the lambda once, checks your class against the descriptor at start-up, and reads typed records for you.
+sidebar:
+  order: 4
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import handlers from '../../../snippets/extending/typed/BookingDeskHandlers.cs?raw';
+import tests from '../../../snippets/extending/typed/BookingDeskHandlersTests.cs?raw';
+import descriptor from '../../../snippets/extending/typed/booking-desk.alvo.json?raw';
+
+An [event handler](/extending/event-handlers/) can be written over your own C# class instead of `AlvoRecord`, with its
+condition as a lambda the compiler checks. Alvo translates that lambda into CEL **once, when the handler is
+registered** — so the start-up check, the [catalog](/extending/extension-catalog/) and the apply guard see exactly the
+CEL a string condition would have given them.
+
+## Two ways to write one handler
+
+`Entity("bookings", …)` hands the handler `AlvoRecord` and takes its `when` as a CEL string. `Entity<Booking>(…)` hands
+it your class and takes its `when` as a lambda over `e.New`, `e.Old`, `e.Changed(…)` and `e.Caller` — or as a CEL
+string, so the two mix freely in one registration:
+
+<Code code={descriptor} lang="json" title="booking-desk.alvo.json" />
+
+<SourceExcerpt code={handlers} from="public static IAlvoBuilder AddBookingDesk" to="new.nights >= 7" title="BookingDeskHandlers.cs" />
+
+Every-entity (`Entity("*", …)`), `Entities([...], …)` and application-event conditions stay CEL: they test only
+`@user` and `@tenant`. `AddEventHandler<TMessage, THandler>(id)` hands a class handler the payload as a `TMessage`
+marked `[AlvoEvent("orders.approved")]`; its `when` is a CEL string.
+
+Leave `when` out when there is none. `when: null` does not compile — it matches both the lambda and the string
+overload (CS0121).
+
+## Your class
+
+<SourceExcerpt code={handlers} from="public enum BookingStatus" to="public sealed record Booking(" title="BookingDeskHandlers.cs" />
+
+- `[AlvoEntity("bookings")]` names the entity. A property maps to its snake_case field (`GuestName` → `guest_name`)
+  unless `[AlvoField("…")]` names it; an enum member maps to its snake_case value (`InRepair` → `in_repair`) unless
+  `[AlvoEnumValue("…")]` names it.
+- A property is mapped when it is public, readable and has a public setter (`init` counts), or carries `[AlvoField]`.
+  Alvo builds the class through a parameterless constructor, or a constructor taking only mapped properties (a
+  positional record). Every mapped property must be one Alvo can fill: a parameter of that constructor, or a public
+  `set`/`init` accessor. A mapped property with neither (a `private set`, or a get-only property the constructor does
+  not take) is refused when the host starts.
+- Each field type takes one C# type:
+
+  | Field type | C# property |
+  |---|---|
+  | `string`, `text`, `json` | `string` |
+  | `integer` | `long` or `int` |
+  | `decimal` | `decimal` |
+  | `boolean` | `bool` |
+  | `uuid`, `ref` | `Guid` |
+  | `date` | `DateOnly` |
+  | `datetime` | `DateTimeOffset` |
+  | `enum` | `string`, or an enum whose every member names a declared value |
+
+- A field that is not `required` may be empty, so its property must accept null (`decimal? Total`).
+- A mapped field's name is a CEL identifier: letters, digits and `_`, starting with a letter or `_`.
+
+**Your class is checked when the host starts**, against the descriptor, at the handler's slot
+`extensions/<id>/record`: a property with no field, the wrong type, a non-nullable property on an optional field, an
+enum member with no declared value, a field `events.exclude` leaves out of the event images — every problem in one
+refusal, each with a fix. What no descriptor can cure — no constructor Alvo can call, a property type no field holds,
+two properties on one field, a `[Flags]` enum — refuses the start even before a dashboard-first host has a
+descriptor. A typed handler that does not fit never binds: like any unbound handler, its events are recorded dead
+`unbound`.
+
+And **an apply cannot break it later**: removing, excluding or retyping a field a typed record maps, making it optional
+under a non-nullable property, or removing an enum value one of its members maps is refused, naming the handler — the
+same guard that keeps a condition's fields ([details](/extending/extension-catalog/#an-apply-cannot-drop-what-a-handler-reads)).
+An enum is checked one way only: each member must name a declared value; a declared value no member names is not
+refused, and a record holding one fails to read into the class.
+
+## What a lambda can say
+
+| C# in `when` | The CEL it becomes |
+|---|---|
+| `e.New.Status == BookingStatus.Confirmed` | `new.status == 'confirmed'` |
+| `e.Old.Nights`, `e.New.Total` | `old.nights`, `new.total` |
+| `&&`, `\|\|`, `!`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `+`, `-`, `*`, `/` | the same operators |
+| `e.Changed(x => x.Status, x => x.Total)` (`OnUpdated` only) | `changed(status) \|\| changed(total)` |
+| `e.New.Total == null` | `!has(new.total)` |
+| `e.New.Total != null`, `e.New.Total.HasValue` | `has(new.total)` |
+| `Codes.Contains(e.New.Code)` over an array or `List<T>` | `new.code == 'a' \|\| new.code == 'b'` |
+| `e.New.Guest.StartsWith("A")`, `EndsWith`, `Contains` | `startsWith(new.guest, 'A')`, `endsWith(…)`, `contains(…)` |
+| `e.Caller.HasRole("staff")` | `'staff' in @user.roles` |
+| `e.New.OwnerId == e.Caller.User`, `e.Caller.Tenant` | `new.owner_id == @user.id`, `@tenant.id` |
+| `e.New.OwnerId == Fleet` (a `Guid` constant) | `string(new.owner_id) == '<the guid>'` |
+| `e.New.DueAt < Cutoff` (a `DateTimeOffset` constant) | `new.due_at < timestamp('2026-01-01T00:00:00Z')` |
+| `e.New.Record["legacy_code"]` (a class implementing `IAlvoEntity`) | `new.legacy_code` |
+
+- **Only constants.** A literal, a `const`, a `static readonly` field, an enum member, a conversion or negation of
+  those, and an array of those for `Contains`. A captured variable, an instance member, a static property and any other
+  call are refused: the condition is translated once, at registration, so it could never see a later value. For the
+  same reason a `static readonly` collection is read **once, at registration** — change its contents afterwards and the
+  condition does not follow.
+- **Text tests are ordinal**, as CEL compares characters exactly: the one-argument `StartsWith`/`EndsWith`/`Contains`,
+  or with `StringComparison.Ordinal`; any other comparison is refused.
+- **`Contains` takes an ordered list** — an array or a `List<T>`. A `HashSet<T>` is refused: its order changes between
+  runs, and so would the condition's text. An empty list is refused; it would match nothing.
+- **Enum fields compare with `==` and `!=` only**, against a member of their own enum or another field of that enum. An
+  enum field converted to a number, an ordering on it, and a comparison cast to `object` are refused; an enum
+  *constant* cast to a number is that number.
+- **No clock yet.** `DateTimeOffset.UtcNow`, `DateTime.Now`, `TimeProvider.GetUtcNow()` and the like are refused: a
+  condition is judged after the commit and has no clock until `now()` arrives. Compare against a field the write
+  stored, or check the time in the handler.
+- **No exact literal, no translation.** A `double`, `float`, `char`, `DateOnly` or `DateTime` constant, `long.MinValue`,
+  a user-defined conversion operator and a `?:` are refused; use a `decimal` (`99.5m`) or a `DateTimeOffset`.
+
+**The catalog shows the CEL.** `GET …/extensions`, the dashboard's **Lifecycle** tab and the assistant all show the
+translated text — `changed(status) && new.status == 'confirmed'` for the handler above. It is written canonically (one
+space around each operator, parentheses only where needed), so a CEL string written the same way reads the same.
+
+**A lambda with no CEL equivalent throws when it is registered**, as `AlvoTranslationException`, naming the handler and
+the construct — not at start-up, and never at an event:
+
+```text
+Cannot translate 'e.New.Guest.GetHashCode()' in extension 'bad' (when): method 'GetHashCode' has no CEL equivalent. Fix: write the condition as a CEL string — when: "…" — or move the check into the handler body.
+```
+
+<SourceExcerpt code={tests} from="var refusal" to="in extension 'bad' (when)" title="BookingDeskHandlersTests.cs" />
+
+A lambda whose CEL would be longer than 2,000 characters or nested deeper than the parser's 32 levels is refused the
+same way, and so is a constant list of more than 250 values, or a lambda nested deeper than 500 levels or holding more
+than 4,000 expression nodes — such a lambda (say, one built by folding thousands of `Or`s) is measured and refused
+before it is read, never walked.
+
+**Null follows CEL, not C#.** A comparison with an empty field is false, so `e.New.OwnerId != Fleet` does not match a
+record with no owner — C# would say true — and neither does `!e.New.IsPaid` when `is_paid` is empty. When an empty
+value should match, say so: `e.New.OwnerId == null || e.New.OwnerId != Fleet`. The translator never rewrites `!=` for
+you, so the lambda and the CEL string of one condition always mean the same thing.
+
+## Typed reads
+
+Inside a handler, `context.Data.QueryAsync<Booking>(x => …, limit: 50)` and `context.Data.GetAsync<Booking>(id)` read
+your class; on `IAlvoData` they take the caller too — `data.QueryAsync<Booking>(x => …, limit, caller)`. They go through
+the same rules, tenancy and hidden fields as an untyped read; the lambda only builds the `AlvoFilter` you would
+otherwise write by hand.
+
+<SourceExcerpt code={handlers} from="var guest = confirmed.New.Guest" to="limit: 50" title="BookingDeskHandlers.cs" />
+
+- **Captured values are read on every call** — `guest` above — and bound as parameters, never written into SQL. A query
+  has no constant-only rule: any value works, `DateTimeOffset.UtcNow` excepted — capture it first
+  (`var now = DateTimeOffset.UtcNow;`).
+- **One bounded page.** `limit` is required and returns at most that many records; page through more with an untyped
+  `AlvoQuery`.
+- **`Contains` becomes `in`**, over any list of values (at most 1,000; an empty list matches nothing). A lazy sequence is
+  read once per call and stopped past 1,000; a `HashSet<T>` with its own comparer, or a collection with its own
+  equality, is refused — the database cannot apply it.
+- **Null follows SQL.** `x.Code != "A"` never matches a row whose `code` is empty; add `|| x.Code == null` when it
+  should. `== null` and `HasValue` test for empty.
+- **Text compares as the database compares.** `x.Guest == "ada"` is judged by the column's collation, not by C#'s
+  ordinal `==`, so a case-insensitive collation matches `Ada` too.
+- **Refused when the read is called:** `StartsWith`/`EndsWith`/`Contains` on a text (no filter operator for them yet),
+  arithmetic, a comparison of two fields, the clock, and any other method; a term that reads no field — a captured
+  `flag && …`, and `x => true` itself ("it reads no field"): to read the first rows unfiltered, send an untyped
+  `AlvoQuery` with no `Filter` and map each row with `As<T>()`; and a predicate nested deeper than 512
+  levels or holding more than 4,096 expression nodes, which no filter of 256 terms needs — it is measured and refused
+  before it is read.
+
+`record.As<Booking>()` reads any `AlvoRecord` into your class — a row from an untyped read, an event payload. It throws
+`InvalidOperationException` naming the field when the record lacks one the class maps (a hidden field, or one left out
+of the event images), holds null where the property cannot, or holds a value the property cannot take; the value
+itself is never echoed. A typed handler whose message cannot be built that way is
+[dead at once with `record-unreadable`](/extending/event-handlers/#what-a-delivery-guarantees), not retried.
+
+## Testing a typed handler
+
+The [test host](/extending/testing/) runs a typed handler like any other, and the catalog shows its translated
+condition:
+
+<SourceExcerpt code={tests} from="public async Task Confirming_a_booking" to="new.status == 'confirmed'" title="BookingDeskHandlersTests.cs" />
+
+To call a class handler yourself, hand it `alvo.EventContext(caller)`: data access as that caller through the test
+host's real pipeline, and a synthetic event with a fresh id. Outside the test host, `AlvoEventContext.Create(event,
+session, subscriber)` builds one from an `IAlvoSession` you already have.
+
+<SourceExcerpt code={tests} from="public async Task A_class_handler_can_be_called_directly" to="mail.Sent.ShouldBe([" title="BookingDeskHandlersTests.cs" />
+
+## Generated classes
+
+A class implementing `IAlvoEntity` — an `AlvoRecord Record { get; }` and a public constructor taking an `AlvoRecord` —
+wraps the record instead of copying it: fields the class does not declare survive, and `x.Record["field"]` reaches any
+of them in a condition or a query. That is the shape generated classes will have; they arrive in a later release.

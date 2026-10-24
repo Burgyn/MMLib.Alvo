@@ -17,4 +17,5 @@ internal static class DeliveryErrors
     internal const string Retired = "retired";
     internal const string Unbound = DeliveryRequest.UnboundReason;
     internal const string EventUnreadable = "event-unreadable";
+    internal const string RecordUnreadable = "record-unreadable";
 }

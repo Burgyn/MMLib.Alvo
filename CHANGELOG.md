@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Typed layer and lambda translation** (HX-05, #382). `Entity<T>` / `AlvoEntityBuilder<T>` register handlers over a
+  host class with conditions as lambdas over `EventCondition<T>` (`New`, `Old`, `Changed`, `Caller` —
+  `AlvoConditionCaller`), translated once, at registration, into the CEL the catalog shows (`e.Changed(x => x.Status)
+  && e.New.Status == BookingStatus.Confirmed` → `changed(status) && new.status == 'confirmed'`); a CEL string `when`
+  still works on a typed entity. `AddEventHandler<TMessage, THandler>` with `[AlvoEvent]`; `[AlvoEntity]`,
+  `[AlvoField]`, `[AlvoEnumValue]`, `IAlvoEntity`; `AlvoRecord.As<T>()`; typed reads `GetAsync<T>`/`QueryAsync<T>` on
+  `IAlvoSession` and `IAlvoData` (`AlvoTypedReadExtensions`), translated into `AlvoFilter` on every call with captured
+  values bound as parameters; `AlvoTranslationException` (thrown at registration for a `when`, at the call for a
+  query). A typed record that does not fit the descriptor refuses start-up (`extensions/<id>/record`) and the apply
+  that would break it; `AlvoEventContext.Create` and `AlvoTestHost.EventContext` call a class handler in a unit test.
+  A typed handler's message is built from the event's images (or payload) at delivery: one that cannot be built — an
+  application-event payload lacking a field its class maps, or an enum value no member names — is dead at once
+  with `record-unreadable` (never retried; the `DeliveryRecordUnreadable` log names the class and field). Conditions and queries
+  keep CEL's and SQL's null semantics, not C#'s. Docs: *Typed or CEL*; the *extending* examples now show the lambda
+  form first. No breaking change.
+
 - **Extension catalog, apply guard, dashboard and assistant** (HX-04, #381). `GET {m}/projects/{p}/extensions` /
   `IAlvoManagement.GetExtensionsAsync` (`viewer`) list every registered event handler as metadata (`ManagementExtension`,
   `ManagementExtensionCatalog`, `AlvoExtensionKind`, `AlvoExtensionStage`) — id, entities, operations, condition, order,

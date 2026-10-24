@@ -85,7 +85,8 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   HX-01…HX-19 ([epic #370](https://github.com/Burgyn/MMLib.Alvo/issues/370)), designed in
   `docs/superpowers/specs/2026-10-14-host-extensibility-design.md`. HX-01 (envelope provenance) is the first PR; HX-02
   (`MMLib.Alvo.TestHost` and the docs-snippet harness) the second; HX-03 (event handlers on the delivery engine) the
-  third; HX-04 (extension catalog, apply guard, dashboard and assistant) the fourth.
+  third; HX-04 (extension catalog, apply guard, dashboard and assistant) the fourth; HX-05 (typed layer and lambda
+  translation) the fifth.
   This line runs ahead of F5's close, the way F4 ran beside F3; the marker stays on F5.
 
 ## 3a. What closed F4
