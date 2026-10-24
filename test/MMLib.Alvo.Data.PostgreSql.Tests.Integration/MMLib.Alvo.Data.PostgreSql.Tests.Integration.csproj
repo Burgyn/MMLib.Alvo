@@ -79,6 +79,8 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/OutboxChaosCriteriaTests.cs" Link="_shared/OutboxChaosCriteriaTests.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/OutboxChaosWorld.cs" Link="_shared/OutboxChaosWorld.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/ChaosWebhookReceiver.cs" Link="_shared/ChaosWebhookReceiver.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/deliveries/DeliveryChaosCriteriaTests.cs" Link="_shared/DeliveryChaosCriteriaTests.cs" />
+    <None Include="$(MSBuildThisFileDirectory)../_shared/deliveries/chaos-desk.alvo.json" Link="chaos-desk.alvo.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- The container-creation mechanics every Testcontainers-backed PostgreSQL fixture in this repository

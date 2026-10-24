@@ -23,6 +23,7 @@
          live in the core, the engine lives in the driver, and the criterion drives one through the other. -->
     <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
     <ProjectReference Include="../../src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
+    <ProjectReference Include="../../src/MMLib.Alvo.TestHost/MMLib.Alvo.TestHost.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -52,6 +53,9 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/OutboxTallyProbe.cs" Link="_shared/OutboxTallyProbe.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingEventLog.cs" Link="_shared/RecordingEventLog.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/RecordingMeterListener.cs" Link="_shared/RecordingMeterListener.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/deliveries/DeliveryChaosCriteriaTests.cs" Link="_shared/DeliveryChaosCriteriaTests.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/testhost/DeliveryRows.cs" Link="_shared/DeliveryRows.cs" />
+    <None Include="$(MSBuildThisFileDirectory)../_shared/deliveries/chaos-desk.alvo.json" Link="chaos-desk.alvo.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

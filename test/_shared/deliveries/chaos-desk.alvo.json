@@ -1,0 +1,19 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "chaos-desk",
+  "auth": { "roles": ["agent"] },
+  "entities": {
+    "orders": {
+      "fields": {
+        "step": { "type": "integer" }
+      },
+      "rules": {
+        "list": "'agent' in @user.roles",
+        "get": "'agent' in @user.roles",
+        "create": "'agent' in @user.roles",
+        "update": "'agent' in @user.roles"
+      }
+    }
+  }
+}
