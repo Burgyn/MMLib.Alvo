@@ -168,6 +168,45 @@ public sealed class EscalationHandler : IAlvoEventHandler<TicketEscalated>
     public Task HandleAsync(TicketEscalated message, AlvoEventContext context, CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
+public abstract class NotedBase
+{
+    [AlvoField("note")]
+    public virtual string? Text => null;
+}
+
+public sealed class NotedOverride : NotedBase
+{
+    public override string? Text => "noted";
+}
+
+public enum SharedValue
+{
+    [AlvoEnumValue("open")]
+    Opened,
+    Open,
+}
+
+public sealed class WithSharedValue
+{
+    public SharedValue Status { get; init; }
+}
+
+public sealed class WrapperWithoutRecord : IAlvoEntity
+{
+    public AlvoRecord Record { get; } = new(new Dictionary<string, object?>(StringComparer.Ordinal));
+}
+
+public sealed class LooseNote
+{
+    [System.Diagnostics.CodeAnalysis.AllowNull]
+    public string Note { get; init; } = string.Empty;
+}
+
+public sealed class MistypedParameter(string level)
+{
+    public long Level { get; init; } = level.Length;
+}
+
 /// <summary>Host types, the <c>orders</c> entity they map, and records shaped as event images carry them.</summary>
 public static class TypedFixtures
 {

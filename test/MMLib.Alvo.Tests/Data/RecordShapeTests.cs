@@ -66,8 +66,38 @@ public sealed class RecordShapeTests
     [InlineData(typeof(TwoNames), "TwoNames.Title and TwoNames.Heading map the same field 'title'.")]
     [InlineData(typeof(WithFlags), "Flagged is a [Flags] enum")]
     [InlineData(typeof(BadFieldName), "BadFieldName.Title maps to 'not a name', which is not a field name")]
-    public void A_type_no_descriptor_can_map_carries_its_problem(Type type, string problem) =>
-        RecordShape.Of(type).Problems.ShouldContain(candidate => candidate.Message.StartsWith(problem, StringComparison.Ordinal));
+    [InlineData(typeof(WithSharedValue), "SharedValue.Opened and SharedValue.Open map the same value 'open'.")]
+    [InlineData(typeof(WrapperWithoutRecord), "WrapperWithoutRecord implements IAlvoEntity but has no public constructor taking an AlvoRecord.")]
+    public void A_type_no_descriptor_can_map_carries_its_problem(Type type, string problem)
+    {
+        var problems = RecordShape.Of(type).Problems;
+
+        problems.ShouldContain(candidate => candidate.Message.StartsWith(problem, StringComparison.Ordinal));
+        problems.ShouldAllBe(candidate => !string.IsNullOrWhiteSpace(candidate.Fix));
+    }
+
+    [Fact]
+    public void An_override_of_a_named_property_is_mapped_to_the_base_field() =>
+        Field(RecordShape.Of(typeof(NotedOverride)), nameof(NotedOverride.Text)).ShouldBe("note");
+
+    [Fact]
+    public void A_property_that_allows_null_on_write_accepts_null() =>
+        Mapped(RecordShape.Of(typeof(LooseNote)), nameof(LooseNote.Note)).AcceptsNull.ShouldBeTrue();
+
+    [Fact]
+    public void A_constructor_parameter_must_take_its_property_s_type() =>
+        RecordShape.Of(typeof(MistypedParameter)).Constructor.ShouldBeNull();
+
+    [Fact]
+    public void An_enum_member_is_read_once_whatever_its_value()
+    {
+        var map = EnumMap.Of(typeof(OrderStatus));
+
+        map.ShouldBeSameAs(EnumMap.Of(typeof(OrderStatus)));
+        map.ValueOf(Enum.ToObject(typeof(OrderStatus), 1)).ShouldBe("in_review");
+        map.ValueOf(99).ShouldBeNull();
+        map.IsFlags.ShouldBeFalse();
+    }
 
     [Fact]
     public void A_blank_field_name_is_refused_where_it_is_written() =>

@@ -14,7 +14,7 @@ namespace MMLib.Alvo.Data.Internal;
 /// <remarks>
 /// A property is mapped when it is public, readable and not an indexer, and has a public setter (<c>set</c> or <c>init</c>)
 /// or carries <see cref="AlvoFieldAttribute"/>. A plain type is built through its parameterless constructor, else through
-/// the public constructor with the most parameters that all name mapped properties (a positional record's); a wrapper
+/// the public constructor with the most parameters that all name mapped properties and take their types (a positional record's); a wrapper
 /// (<see cref="IAlvoEntity"/>) through its constructor taking one <see cref="AlvoRecord"/>.
 /// </remarks>
 internal sealed class RecordShape
@@ -56,7 +56,9 @@ internal sealed class RecordShape
     internal static RecordShape Of(Type type) => _shapes.GetOrAdd(type, static shaped => new RecordShape(shaped));
 
     internal static MappedProperty? ParameterProperty(ParameterInfo parameter, IReadOnlyList<MappedProperty> properties) =>
-        properties.FirstOrDefault(property => string.Equals(property.Property.Name, parameter.Name, StringComparison.OrdinalIgnoreCase));
+        properties.FirstOrDefault(property =>
+            string.Equals(property.Property.Name, parameter.Name, StringComparison.OrdinalIgnoreCase)
+            && parameter.ParameterType.IsAssignableFrom(property.Property.PropertyType));
 
     internal MappedProperty? Mapped(MemberInfo member) =>
         member is PropertyInfo property && _byName.TryGetValue(property.Name, out var mapped) ? mapped : null;
@@ -64,7 +66,7 @@ internal sealed class RecordShape
     private static IEnumerable<PropertyInfo> Candidates(Type type) =>
         type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(property => property.GetIndexParameters().Length == 0 && property.GetMethod is { IsPublic: true })
-            .Where(property => property.SetMethod is { IsPublic: true } || property.IsDefined(typeof(AlvoFieldAttribute), inherit: true));
+            .Where(property => property.SetMethod is { IsPublic: true } || Attribute.IsDefined(property, typeof(AlvoFieldAttribute), inherit: true));
 
     private static ConstructorInfo? Callable(Type type, IReadOnlyList<MappedProperty> properties)
     {
@@ -92,5 +94,5 @@ internal sealed record MappedProperty(PropertyInfo Property, string Field, Type 
         property.GetCustomAttribute<AlvoFieldAttribute>(inherit: true)?.Name ?? JsonNamingPolicy.SnakeCaseLower.ConvertName(property.Name);
 
     private static bool TakesNull(PropertyInfo property, NullabilityInfoContext nullability) =>
-        !property.PropertyType.IsValueType && nullability.Create(property).ReadState != NullabilityState.NotNull;
+        !property.PropertyType.IsValueType && nullability.Create(property).WriteState != NullabilityState.NotNull;
 }
