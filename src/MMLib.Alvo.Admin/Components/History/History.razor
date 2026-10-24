@@ -350,7 +350,8 @@
         @if (_previous is { } before)
         {
             @* Keyed by the revision, so every revision opens on its change, whichever tab the last one was left on. *@
-            <MudTabs @key="selected.Version.Revision" Elevation="0" Ripple="false" KeepPanelsAlive="false" Class="a-revtabs" id="revision-tabs">
+            <MudTabs @key="selected.Version.Revision" Elevation="0" Ripple="false" KeepPanelsAlive="false" Class="a-revtabs"
+                     MinimumTabWidth="0" id="revision-tabs">
                 <MudTabPanel Text="@($"Changes from r{before.Version.Revision}")">
                     <div data-testid="revision-diff">
                         <DescriptorDiff Before="@before.DescriptorJson" After="@selected.DescriptorJson"

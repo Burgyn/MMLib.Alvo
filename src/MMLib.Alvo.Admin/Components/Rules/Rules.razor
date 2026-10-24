@@ -43,7 +43,8 @@
         else
         {
             <MudTabs ActivePanelIndex="@SelectedIndex" OnPreviewInteraction="ChooseAsync"
-                     Elevation="0" Ripple="false" KeepPanelsAlive="false" Class="a-ruletabs" id="rules-entities">
+                     Elevation="0" Ripple="false" KeepPanelsAlive="false" Class="a-ruletabs" MinimumTabWidth="0"
+                     id="rules-entities">
                 @foreach (var name in _names)
                 {
                     <MudTabPanel Text="@name" />

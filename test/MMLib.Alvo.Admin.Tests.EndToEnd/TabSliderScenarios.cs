@@ -33,4 +33,26 @@ public sealed class TabSliderScenarios(AdminWorld world) : IClassFixture<AdminWo
 
         session.AssertConsoleClean();
     }
+
+    /// <summary>
+    /// On a desktop the whole entity strip is in view: no scroll arrows, and opening the last tab leaves the first one
+    /// where a click reaches it.
+    /// </summary>
+    /// <remarks>
+    /// The library's 160 px tab floor made seven tabs overflow a 1400 px desktop by eight pixels, so the strip grew
+    /// arrows and opening API slid Fields out of sight behind them (HX-04, when Lifecycle became the seventh tab). A
+    /// narrow desktop, 1024 px, so the next tab added is caught here before it reaches the default width.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Every_entity_tab_is_in_view_on_a_desktop()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, width: 1024);
+        await session.GoAsync("/schema/work_orders");
+
+        await session.OpenTabAsync("API");
+        (await session.Page.Locator("#entity-tabs .mud-tabs-scroll-button").CountAsync()).ShouldBe(0);
+        await session.OpenTabAsync("Fields");
+
+        session.AssertConsoleClean();
+    }
 }

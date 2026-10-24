@@ -3187,6 +3187,17 @@
     background: transparent;
   }
 
+  /* Each tab as wide as its label, as the hand-rolled strip's were (`.a-tab`), not the library's 160 px floor
+     (MinimumTabWidth="0" on each strip lifts that inline floor; this drops the stretch to it). Seven 160 px entity tabs
+     overflowed a 1400 px desktop by eight pixels, so the strip grew scroll arrows and opening API slid Fields out of
+     sight behind them. Labels this size fit any desktop column; only a phone's strip scrolls, and on purpose. */
+  .a-entitytabs .mud-tab,
+  .a-revtabs .mud-tab,
+  .a-ruletabs .mud-tab {
+    width: auto;
+    padding: var(--space-3) var(--space-4);
+  }
+
   .a-entitytabs .mud-tabs-panels,
   .a-revtabs .mud-tabs-panels {
     padding-top: var(--space-4);
