@@ -2,10 +2,17 @@
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
-/// <summary>An <see cref="IRelationalWriteGate"/> that admits one writer at a time, in the order they arrived.</summary>
+/// <summary>An <see cref="IRelationalWriteGate"/> that admits one writer at a time.</summary>
 /// <remarks>
+/// <para>
 /// One instance stands for one database: a provider hands every store over the same database the same instance, whatever
 /// container it was built in, so two hosts in one process over one file queue behind each other too.
+/// </para>
+/// <para>
+/// <b>Not first come, first served.</b> <see cref="SemaphoreSlim"/> promises no order among its waiters, so a writer may
+/// overtake one that waited longer. Nothing depends on the order: a record's event ids are minted inside its write's
+/// transaction, under the turn, so the turn's order is the ids' order whoever got it first.
+/// </para>
 /// </remarks>
 [SuppressMessage(
     "Reliability",

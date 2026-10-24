@@ -51,12 +51,20 @@ updated).
 - **Retries.** 5 s, 30 s, 2 min, 15 min, 1 h, 6 h (each spread by a fifth either way); after the seventh attempt the
   delivery is **dead**. Change it per handler with `options.Retry = AlvoRetryPolicy.From(…)` (no wait longer than
   7 days) or `AlvoRetryPolicy.None`.
-- **Timeouts are enforced.** `options.Timeout` (30 s by default, at most 1 h) ends the attempt as failed whether or not
-  the handler observes its token: Alvo cancels the token, waits up to 30 s more, then records the attempt and moves on.
-  A handler that ignores its token is **abandoned, not stopped** — .NET cannot stop it. It keeps running in the
-  background, no longer counted against the concurrency limit, and can overlap its own retry; a handler that keeps
-  hanging leaves one such task behind per timed-out attempt, without bound. Watch the `alvo.delivery.abandoned`
-  counter, honour the token, and be idempotent on `EventId`.
+- **Timeouts are enforced.** `options.Timeout` (30 s by default, at most 1 h) ends the attempt whether or not the
+  handler observes its token: Alvo cancels the token and waits up to 30 s more. A handler that ends in that grace is
+  recorded by its own result — succeeded, or failed with its own error — unless it ended by giving in to the
+  cancellation, which is a `timeout`. A handler still running then is **abandoned, not stopped** — .NET cannot stop it:
+  the attempt is recorded as a `timeout`, and the handler keeps running in the background, no longer counted against
+  the concurrency limit, and can overlap its own retry.
+- **A handler that keeps hanging stands down.** Once one handler has as many abandoned invocations still running as
+  `Alvo:Deliveries:MaxConcurrency`, Alvo stops claiming that handler's deliveries — logged once, as a warning
+  `HandlerStoodDown` — until one of them ends; every other handler keeps running. A handler that blocks its thread and
+  ignores its token therefore strands a bounded number of thread-pool threads (fewer than twice `MaxConcurrency`), not
+  one per attempt. Watch the `alvo.delivery.abandoned` counter, honour the token, and be idempotent on `EventId`.
+- **A busy database does not cost an attempt.** When the database refuses the write that records an attempt — SQLite
+  busy, a PostgreSQL deadlock or serialization failure — Alvo writes it again after a short wait, for as long as that
+  still lands inside the delivery's lease. A delivery another worker has already taken over is never answered twice.
 - **In order per record.** One record's events reach a handler in order — also when an earlier event of the record
   has not been fanned out yet because its processing failed or its dispatcher died — and a dead delivery holds that
   record's later events back, for that handler only. `options.Ordering = AlvoOrdering.None` opts out. Order is by event
@@ -130,6 +138,17 @@ refuses to start, naming the id, and changes nothing. Say what becomes of them:
 A retirement is applied once, when the host starts, just before it reports ready. A delivery of that id still running
 on another replica at that moment may finish its side effect; only its answer is ignored.
 
+The same check refuses two starts you may not expect:
+
+- **A rollback.** Going back to a build that does not know a handler a newer build added, while that handler still has
+  unfinished deliveries, is refused like a removal: the older build can neither register nor retire an id it never
+  knew. Roll forward instead; or drain first — let the handler's deliveries finish, or cancel them
+  (`UPDATE alvo_deliveries SET status = 'cancelled' WHERE subscriber = '<id>' AND status IN ('pending', 'running', 'retrying')`)
+  — before you roll back; or roll back to a build that carries `AddRetiredExtension("<id>", …)`.
+- **Two applications over one database** — say the standalone image and an embedded host — that register different
+  handlers. Each refuses the other's unfinished work. Register the same handlers in both, or give each its own
+  database.
+
 ## Test it
 
 The test host runs handlers in the same rounds as after-hooks, and `Hooks.AssertRan` counts them by id:
@@ -138,17 +157,29 @@ The test host runs handlers in the same rounds as after-hooks, and `Hooks.Assert
 
 Never drain from inside a handler: the call is refused, because a round would wait for itself.
 
+`AlvoEventContext` has no public constructor yet, so test a class handler through the test host, as above, rather
+than by calling `HandleAsync` yourself.
+
 ## Configuration
 
 [`Alvo:Deliveries:MaxConcurrency`](/reference/configuration/#alvodeliveries) (16, from 1 to 256) bounds how many
-deliveries one process runs at once. Deliveries share `Alvo:Events:Enabled`, `DispatchMode` and `PollInterval` with the
-outbox.
+deliveries one process runs at once, and how many abandoned invocations one handler may leave running before it stands
+down. Deliveries share these with the outbox ([`Alvo:Events`](/reference/configuration/#alvoevents)):
+
+- `Enabled`, `DispatchMode` and `PollInterval` — the same switch, mode and idle wait;
+- `BatchSize` — the most deliveries one manual round (`DrainAsync`) claims;
+- `MaxAttempts` and `ClaimLease` — not a delivery's own retries, which follow the handler's `Retry` policy, but how long
+  an earlier event of a record that the outbox has not fanned out yet holds that record's ordered deliveries back.
+
+A delivery's lease is not configured: a claim holds for the longest registered handler timeout plus 60 s (90 s at the
+defaults), so an attempt that times out and settles is still answered inside it.
 
 On SQLite, one process's writes to one database take turns — every write transaction Alvo's EF driver makes: the
 outbox, the deliveries, every data write (a handler's included), schema changes, secrets, descriptor versions and
 management idempotency records — instead of contending for the file's lock. A turn waits no longer than the
-connection's busy timeout (`Default Timeout`, 30 s unless you set it; 0 waits without bound, as SQLite itself then does)
-and then fails with the same "database is locked" error SQLite gives. Code that runs inside a write — a custom
+connection's busy timeout (`Default Timeout`, 30 s unless you set it) and then fails with the same "database is locked"
+error SQLite gives. `Default Timeout=0` waits without bound, as SQLite itself then does — and then a delivery's answer,
+and with it the host's shutdown, can wait behind a stuck writer until the host's shutdown timeout ends the process. Code that runs inside a write — a custom
 CEL function — must not write through Alvo itself. PostgreSQL has no such turn.
 
 ## Not yet

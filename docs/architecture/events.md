@@ -966,7 +966,12 @@ recorded. An event that produced only dead deliveries counts as `alvo.events.dis
 
 **The tables.** `alvo_deliveries` and `alvo_delivery_attempts` (identical DDL on both engines, `SystemSchemaInitializer`,
 names from `AlvoFrameworkTables`); no body, URL or exception message is stored; the envelope stays in `alvo_outbox`,
-which a claim reads it from — so `IDeliveryStore` and `IOutboxStore` share one database. The first boot also builds
+which a claim reads it from — so `IDeliveryStore` and `IOutboxStore` share one database. Beside the spec's
+`ix_<deliveries>_claim` and `ix_<deliveries>_lane`, the first boot builds `ix_<deliveries>_lane_open`, a partial index on
+`(subscriber, partition_key, event_id)` over the rows that can still hold a lane back (`status IN ('pending', 'running',
+'retrying', 'dead')`): the claim's look at a lane head's earlier deliveries carries that term verbatim, so it seeks the
+few unfinished rows instead of walking the lane's succeeded history, which is never purged before #154 (a recorded
+addition to the spec's DDL; `SqliteDeliveryStoreTests` and `PostgreSqlDeliveryStoreTests` pin the plan). It also builds
 `ix_<outbox>_unfanned`, a partial index on the outbox's undispatched `(partition_key, id)`; on PostgreSQL a plain
 `CREATE INDEX` blocks outbox writes while it builds (identical DDL rules out `CONCURRENTLY`). A failed build is retried
 once, idempotently, then rethrown — never swallowed by the table-existence recovery. Statuses:
@@ -1008,17 +1013,37 @@ running; an envelope gone from the outbox is dead `event-missing`; an envelope w
 other failure records the exception's **type name**, never its message, and `DeliveryRunFailed` logs the type only.
 
 **Timeouts are enforced, not requested.** The runner awaits the handler with `WaitAsync(Timeout)` (default 30 s, at most
-1 h — a longer one refuses the start, because the lease would overflow), cancels its token, waits at most `SettleGrace`
-and answers `timeout`. A handler still running then is **abandoned** — .NET cannot stop it — and keeps running in the
-background (X15): it holds no `MaxConcurrency` slot, may overlap its own retry, and, if it keeps hanging, leaves one task
-per timed-out attempt behind, unbounded across deliveries. `alvo.delivery.abandoned{alvo.subscriber}` counts them and a
-later failure of one is logged by type. Handlers must be idempotent on `EventId`.
+1 h — a longer one refuses the start, because the lease would overflow), cancels its token and waits at most
+`SettleGrace`. A handler that ends within that grace is answered by its own result — succeeded, its own exception type,
+or dead `chain-depth-exceeded` — unless it ended by giving in to the cancellation (an `OperationCanceledException`, or a
+cancelled task), which is `timeout`. A handler still running then is **abandoned** — .NET cannot stop it — answered
+`timeout`, and keeps running in the background (X15): it holds no `MaxConcurrency` slot and may overlap its own retry.
+`alvo.delivery.abandoned{alvo.subscriber}` counts them and a later failure of one is logged by type. Handlers must be
+idempotent on `EventId`.
+
+**Abandoned handlers are bounded per handler.** `AbandonedHandlers` tracks each abandoned invocation until its task ends.
+A handler with `MaxConcurrency` of them still alive is left out of every claim — the loop's and a manual round's — until
+one ends; its deliveries wait as `pending`/`retrying`, other handlers keep flowing, and entering the stand-down logs a
+Warning `HandlerStoodDown` once. Claiming stops at the cap, but deliveries of that handler already running may still be
+abandoned, so one handler strands at most `2 × MaxConcurrency − 1` thread-pool threads (exactly the cap when one delivery
+runs at a time) — no longer one per timed-out attempt across every record, which could starve the process's thread pool.
+
+**The answer is retried inside the lease.** A storage refusal of `CompleteAsync`/`FailAsync` — any `DbException` in the
+chain: SQLite busy (which `Microsoft.Data.Sqlite` does not mark `IsTransient`, measured), a PostgreSQL serialization
+failure or deadlock — is written again after 50 ms, doubling to at most 1 s, while the retry would still start
+`AnswerMargin` (5 s) before the handler's timeout + `LeaseGrace` + `SettleGrace` since the attempt began — never past the
+claim's lease. A fence that no longer holds is an answer (`false`), never retried; a stop ends the retries; any other
+exception is not retried. The core cannot tell an engine's transient codes from permanent ones and need not: the answer
+is a fenced, idempotent write, so a retried permanent refusal costs only time inside the lease. Without the retry, a busy
+SQLite gate during an answer burned an attempt whose side effect had already run. An answer that still throws ends the
+delivery span as failed before `DeliveryRunFailed` logs its type.
 
 **Worker model.** `DeliveryDispatcher` keeps at most `Alvo:Deliveries:MaxConcurrency` (16, 1–256) deliveries running and
 claims only free slots, so no lease runs while its delivery queues. In the manual mode it is the second step of a pump
 round, loops its claims (at most `MaxConcurrency` at a time, until nothing is due or `Alvo:Events:BatchSize` were
 claimed), and a round called from inside a round is refused. A failed round — an outage, a deadlock — no longer ends
-either dispatcher: it is logged by type (`DeliveryDispatcherRoundFailed`, `DispatcherRoundFailed`) and the next
+either dispatcher: it is logged by the exception type's full name, never its message (`DeliveryDispatcherRoundFailed`,
+`DispatcherRoundFailed`; also `HoldBackFailed` and the delivery loop's backstop `DeliveryDispatcherStopped`) and the next
 round waits a backoff that doubles from the poll interval up to one minute, reset by a round that succeeds (the outbox
 dispatcher used to stop for good on any round exception). A shutdown always awaits the in-flight runners, never a
 handler. The job pool for schedules and migrations arrives with them (HX-13).
@@ -1044,7 +1069,18 @@ on a dashboard-first host. `ExtensionStateGuard` runs in `AlvoBootService` in tw
 system tables up and before anything converges, a **read-only** check refuses a start over unfinished (pending, running
 or retrying) work of an id nobody registers or retires — so a refused start changes nothing; and just before Ready it
 applies `AddRetiredExtension` (`DeadLetter` → dead `retired`, `Discard` → `cancelled`). A retirement applies only at
-boot; a delivery of that id still running elsewhere may finish its side effect — only its answer is fenced off.
+boot; a delivery of that id still running elsewhere may finish its side effect — only its answer is fenced off. Both
+steps call `IDeliveryStore.EnsureAsync` first (idempotent): the port promises that call builds the storage, so a
+third-party store that builds its tables there is not read before they exist on its first boot; the contract suite pins
+that ensured, empty storage reads as no work.
+
+**The orphan check refuses two starts an operator may not expect** (E3: "rolling deploys need an explicit drop"). A
+**rollback** to a build that does not know a handler a newer build added, while that handler has unfinished work, is
+refused — the older build can neither register nor retire an id it never knew; and **two applications over one
+database** (the standalone image beside an embedded host) that register different handlers each refuse the other's
+work. The remedy is to roll forward, to drain first (let the work finish, or set its rows `cancelled`), to roll back to a
+build carrying `AddRetiredExtension`, or — for two applications — to register the same handlers or use two databases.
+The guide states it beside *Rename or remove a handler*.
 
 **Observability.** `alvo.delivery {subscriber}` spans on `MMLib.Alvo.Hooks` keep the ambient parent and **link** the
 envelope's `traceparent` (a parent would take the span out of the test host's recorder); tags add
@@ -1052,11 +1088,14 @@ envelope's `traceparent` (a parent would take the span out of the test host's re
 `alvo.delivery.lag`, `alvo.delivery.dead{alvo.reason}`, `alvo.delivery.abandoned`.
 
 **Unbound handlers.** A registered handler that does not fit a catalog the boot plan did not bind (a runtime apply,
-`ApplyAlvoDescriptorAsync`, a dashboard-first host's first catalog) is logged `ExtensionUnbound` once and gets a dead
+`ApplyAlvoDescriptorAsync`, or — in the manual mode only — a dashboard-first host's first catalog) is logged `ExtensionUnbound` once and gets a dead
 `unbound` delivery (`DeliveryRequest.UnboundReason`) for every event its source selects — never a silent drop, never a
 binding against a stale catalog. An `unbound` row does **not** block its lane: it is selected without `when`, so it may
 name records the condition would never have matched; once the handler rebinds, later events flow and the missed ones
-wait for HX-06's replay.
+wait for HX-06's replay. In the background mode a dashboard-first host that booted `Awaiting` never reaches that lenient
+first catalog: both dispatchers stand down on a boot that primed no catalog — logged as Warnings
+`DispatcherStoodDownUnprimed` and `DeliveryDispatcherStoodDownUnprimed` — and stay down until a restart, whose boot over
+the stored descriptor binds every handler **strictly** (`EnsureBindable`; a misfit records `Failed`).
 
 **Dead deliveries block their lane.** Any other dead delivery holds its (handler, record) lane until HX-06's redeliver;
 the manual remedy is to set the row `cancelled`, or to retire the handler. Re-pending a dead row is a retry only with

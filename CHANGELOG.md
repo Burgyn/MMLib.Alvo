@@ -20,8 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (loops are recorded dead with `chain-depth-exceeded`), run as the system in the event's tenant or as the event's
   actor, traced (`alvo.delivery`, linked to the envelope's trace) and metered (`alvo.delivery.*`). A timeout (30 s by
   default, at most 1 h) is enforced: a handler that ignores its token is abandoned to the background and counted on
-  `alvo.delivery.abandoned`. `AddRetiredExtension` retires an id; a start over another id's unfinished work is refused
-  before anything changes. `IAlvoSession` binds data access to one caller. `Alvo:Deliveries:MaxConcurrency` (16).
+  `alvo.delivery.abandoned`, and a handler with `MaxConcurrency` abandoned invocations still running is not claimed
+  for until one ends (`HandlerStoodDown`), so it cannot starve the thread pool. An answer the database refuses — SQLite
+  busy, a PostgreSQL deadlock — is written again inside the delivery's lease. `AddRetiredExtension` retires an id; a
+  start over another id's unfinished work is refused before anything changes — a rollback past a newly added handler
+  with unfinished work included. `IAlvoSession` binds data access to one caller. `Alvo:Deliveries:MaxConcurrency` (16).
   Docs: *React to changes (event handlers)*.
 
 - **`MMLib.Alvo.TestHost`, a real backend inside a test** (HX-02, #379). `AlvoTestHost.StartAsync(b => b.FromDescriptor(…))`
