@@ -106,6 +106,31 @@ namespace MMLib.Alvo.Auth
         public bool TryResolve(MMLib.Alvo.Auth.ApiKeyRecord key, string? requestedTenant, out MMLib.Alvo.TenantId? tenant) { }
     }
 }
+namespace MMLib.Alvo.Data
+{
+    [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple=false, Inherited=false)]
+    public sealed class AlvoEntityAttribute : System.Attribute
+    {
+        public AlvoEntityAttribute(string name) { }
+        public string Name { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Field, AllowMultiple=false, Inherited=false)]
+    public sealed class AlvoEnumValueAttribute : System.Attribute
+    {
+        public AlvoEnumValueAttribute(string value) { }
+        public string Value { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property, AllowMultiple=false, Inherited=true)]
+    public sealed class AlvoFieldAttribute : System.Attribute
+    {
+        public AlvoFieldAttribute(string name) { }
+        public string Name { get; }
+    }
+    public interface IAlvoEntity
+    {
+        MMLib.Alvo.Data.AlvoRecord Record { get; }
+    }
+}
 namespace MMLib.Alvo.Events
 {
     public sealed class AlvoCreated<T> : System.IEquatable<MMLib.Alvo.Events.AlvoCreated<T>>
@@ -127,6 +152,12 @@ namespace MMLib.Alvo.Events
         public required int Failed { get; init; }
         public bool IsQuiet { get; }
         public required System.Collections.Generic.IReadOnlyList<string> Subscribers { get; init; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple=false, Inherited=false)]
+    public sealed class AlvoEventAttribute : System.Attribute
+    {
+        public AlvoEventAttribute(string type) { }
+        public string Type { get; }
     }
     public sealed class AlvoEventContext
     {

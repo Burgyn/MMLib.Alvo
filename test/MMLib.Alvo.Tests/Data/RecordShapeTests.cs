@@ -1,0 +1,84 @@
+﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Data.Internal;
+
+namespace MMLib.Alvo.Tests.Data;
+
+/// <summary>How a host type maps to fields (spec 2026-10-14 §4.3): names, enum values, constructors, and the problems no descriptor cures.</summary>
+public sealed class RecordShapeTests
+{
+    [Fact]
+    public void A_property_maps_to_its_snake_case_name_unless_it_names_its_field()
+    {
+        var shape = RecordShape.Of(typeof(Order));
+
+        Field(shape, nameof(Order.IsPaid)).ShouldBe("is_paid");
+        Field(shape, nameof(Order.DueAt)).ShouldBe("due_at");
+        Field(shape, nameof(Order.Reference)).ShouldBe("ref_no");
+        shape.Entity.ShouldBe("orders");
+        shape.Problems.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_get_only_property_without_a_field_attribute_is_not_mapped() =>
+        RecordShape.Of(typeof(Order)).Properties.Select(property => property.Property.Name).ShouldNotContain(nameof(Order.Summary));
+
+    [Fact]
+    public void Nullability_is_read_from_the_declaration()
+    {
+        var shape = RecordShape.Of(typeof(Order));
+
+        Mapped(shape, nameof(Order.Code)).AcceptsNull.ShouldBeTrue();
+        Mapped(shape, nameof(Order.Note)).AcceptsNull.ShouldBeFalse();
+        Mapped(shape, nameof(Order.Rank)).AcceptsNull.ShouldBeTrue();
+        Mapped(shape, nameof(Order.Rank)).ValueType.ShouldBe(typeof(int));
+        Mapped(shape, nameof(Order.Total)).AcceptsNull.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void An_enum_member_maps_to_its_snake_case_name_unless_it_names_its_value()
+    {
+        var map = EnumMap.Of(typeof(OrderStatus));
+
+        map.ValueOf(OrderStatus.InReview).ShouldBe("in_review");
+        map.ValueOf(OrderStatus.Approved).ShouldBe("ok");
+        map.MemberOf("draft").ShouldBe(OrderStatus.Draft);
+        map.MemberOf("approved").ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_wrapper_is_built_from_its_record_and_maps_its_field_attributes()
+    {
+        var shape = RecordShape.Of(typeof(OrderView));
+
+        shape.IsWrapper.ShouldBeTrue();
+        shape.Constructor!.GetParameters().ShouldHaveSingleItem().ParameterType.ShouldBe(typeof(AlvoRecord));
+        Field(shape, nameof(OrderView.Note)).ShouldBe("note");
+        shape.Properties.Select(property => property.Property.Name).ShouldNotContain(nameof(OrderView.Record));
+    }
+
+    [Fact]
+    public void A_positional_record_is_built_through_its_constructor() =>
+        RecordShape.Of(typeof(OrderLine)).Constructor!.GetParameters().Length.ShouldBe(3);
+
+    [Theory]
+    [InlineData(typeof(TicketWithScore), "TicketWithScore.Score is a Double, which no field type holds.")]
+    [InlineData(typeof(Uncallable), "Uncallable has no public constructor Alvo can call")]
+    [InlineData(typeof(TwoNames), "TwoNames.Title and TwoNames.Heading map the same field 'title'.")]
+    [InlineData(typeof(WithFlags), "Flagged is a [Flags] enum")]
+    [InlineData(typeof(BadFieldName), "BadFieldName.Title maps to 'not a name', which is not a field name")]
+    public void A_type_no_descriptor_can_map_carries_its_problem(Type type, string problem) =>
+        RecordShape.Of(type).Problems.ShouldContain(candidate => candidate.Message.StartsWith(problem, StringComparison.Ordinal));
+
+    [Fact]
+    public void A_blank_field_name_is_refused_where_it_is_written() =>
+        Should.Throw<ArgumentException>(() => new AlvoFieldAttribute(" "));
+
+    [Fact]
+    public void One_type_is_read_once() =>
+        RecordShape.Of(typeof(Order)).ShouldBeSameAs(RecordShape.Of(typeof(Order)));
+
+    private static MappedProperty Mapped(RecordShape shape, string property) =>
+        shape.Properties.Single(candidate => candidate.Property.Name == property);
+
+    private static string Field(RecordShape shape, string property) => Mapped(shape, property).Field;
+}
