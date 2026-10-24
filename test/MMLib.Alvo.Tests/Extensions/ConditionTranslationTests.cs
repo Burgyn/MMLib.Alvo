@@ -27,6 +27,8 @@ public sealed class ConditionTranslationTests
     private static readonly HashSet<string> _tags = ["a", "b"];
     private static readonly OrderStatus _approved = OrderStatus.Approved;
     private static readonly string _longNote = new('x', CelParser.MaxSourceLength);
+    private static readonly long[] _huge = [.. Enumerable.Range(0, 50_000).Select(number => (long)number)];
+    private static readonly long[] _over = [.. Enumerable.Range(0, (CelParser.MaxSourceLength / 8) + 1).Select(number => (long)number)];
 
     public static TheoryData<string, string, Expression<Func<EventCondition<Order>, bool>>, string> Translated()
     {
@@ -164,6 +166,33 @@ public sealed class ConditionTranslationTests
 
         Should.Throw<AlvoTranslationException>(() => ConditionTranslator.Translate(Expression.Lambda<Func<EventCondition<Order>, bool>>(body, e), "deep", HandlerVerb.Updated))
             .Message.ShouldContain("its CEL does not parse back");
+    }
+
+    [Fact]
+    public void A_condition_too_deep_to_walk_is_refused_without_reading_it_through()
+    {
+        var e = Expression.Parameter(typeof(EventCondition<Order>), "e");
+        var quantity = Expression.Property(Expression.Property(e, nameof(EventCondition<Order>.New)), nameof(Order.Quantity));
+        var body = Enumerable.Range(0, 50_000)
+            .Select(number => (Expression)Expression.Equal(quantity, Expression.Constant((long)number)))
+            .Aggregate(Expression.OrElse);
+
+        var refusal = Should.Throw<AlvoTranslationException>(() =>
+            ConditionTranslator.Translate(Expression.Lambda<Func<EventCondition<Order>, bool>>(body, e), "deep", HandlerVerb.Updated));
+
+        refusal.Message.ShouldContain("in extension 'deep' (when)");
+        refusal.Message.ShouldContain($"more than a condition of {CelParser.MaxSourceLength} characters can hold");
+        refusal.Message.Length.ShouldBeLessThan(1000);
+        refusal.FixSuggestion.ShouldNotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public void A_constant_list_longer_than_a_condition_can_hold_is_refused_before_it_is_written()
+    {
+        Should.Throw<AlvoTranslationException>(() => ConditionTranslator.Translate<Order>(e => _huge.Contains(e.New.Quantity), "huge", HandlerVerb.Updated))
+            .Message.ShouldContain("it lists 50000 values");
+        Should.Throw<AlvoTranslationException>(() => ConditionTranslator.Translate<Order>(e => _over.Contains(e.New.Quantity), "over", HandlerVerb.Updated))
+            .Message.ShouldContain($"more than the {CelParser.MaxSourceLength / 8}");
     }
 
     [Fact]

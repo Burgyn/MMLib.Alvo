@@ -1,4 +1,5 @@
 ﻿using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace MMLib.Alvo.Expressions.Internal;
@@ -109,7 +110,14 @@ internal static class CelText
         _ => builder.Append(character),
     };
 
-    private static string Text(CelNode node) => node switch
+    private static string Text(CelNode node)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
+        return Spelled(node);
+    }
+
+    private static string Spelled(CelNode node) => node switch
     {
         CelLiteral literal => Literal(literal),
         CelFieldRef field => Field(field),

@@ -42,6 +42,11 @@ internal sealed partial class FilterTranslator
         ExpressionType.MultiplyChecked, ExpressionType.Divide, ExpressionType.Modulo, ExpressionType.Negate, ExpressionType.NegateChecked,
     ];
 
+    /// <summary>How deep and how large a predicate may be before it is walked: room for a flat or-chain of every term a filter may hold.</summary>
+    private static readonly int _maxDepth = AlvoFilter.MaxTerms * 2;
+
+    private static readonly int _maxNodes = AlvoFilter.MaxTerms * 16;
+
     private readonly ParameterExpression _row;
     private readonly string _entity;
     private readonly RecordShape _shape;
@@ -52,6 +57,10 @@ internal sealed partial class FilterTranslator
         where T : class
     {
         ArgumentNullException.ThrowIfNull(where);
+        if (!LambdaShape.IsWithin(where.Body, _maxDepth, _maxNodes))
+        {
+            throw TranslationRefusal.QueryTooLarge(entity, _maxDepth, _maxNodes);
+        }
 
         return new FilterTranslator(where.Parameters[0], entity, RecordShape.Of(typeof(T))).Filter(where.Body);
     }

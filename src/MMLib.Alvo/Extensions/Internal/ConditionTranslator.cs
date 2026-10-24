@@ -41,6 +41,14 @@ internal sealed partial class ConditionTranslator
         [ExpressionType.Divide] = CelBinaryOperator.Divide,
     }.ToFrozenDictionary();
 
+    /// <summary>How deep and how large a lambda may be before it is walked: more than any condition of <see cref="CelParser.MaxSourceLength"/> characters needs.</summary>
+    private const int MaxLambdaDepth = CelParser.MaxSourceLength / 4;
+
+    private const int MaxLambdaNodes = CelParser.MaxSourceLength * 2;
+
+    /// <summary>The longest constant list a condition can hold: no equality term is shorter than eight characters.</summary>
+    private const int MaxListValues = CelParser.MaxSourceLength / 8;
+
     private readonly ParameterExpression _event;
     private readonly string _id;
     private readonly HandlerVerb _verb;
@@ -53,6 +61,11 @@ internal sealed partial class ConditionTranslator
         where T : class
     {
         ArgumentNullException.ThrowIfNull(when);
+        if (!LambdaShape.IsWithin(when.Body, MaxLambdaDepth, MaxLambdaNodes))
+        {
+            throw TranslationRefusal.WhenTooLarge(id, MaxLambdaDepth, MaxLambdaNodes);
+        }
+
         var translator = new ConditionTranslator(when.Parameters[0], id, verb, RecordShape.Of(typeof(T)));
         var text = translator.Write(when.Body);
         if (text.Length > CelParser.MaxSourceLength)

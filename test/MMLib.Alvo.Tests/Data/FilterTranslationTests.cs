@@ -143,6 +143,50 @@ public sealed class FilterTranslationTests
     }
 
     [Fact]
+    public void A_predicate_too_deep_to_walk_is_refused_without_reading_it_through()
+    {
+        var x = Expression.Parameter(typeof(Order), "x");
+        var quantity = Expression.Property(x, nameof(Order.Quantity));
+        var body = Enumerable.Range(0, 50_000)
+            .Select(number => (Expression)Expression.Equal(quantity, Expression.Constant((long)number)))
+            .Aggregate(Expression.OrElse);
+
+        var refusal = Should.Throw<AlvoTranslationException>(() => FilterTranslator.Translate(Expression.Lambda<Func<Order, bool>>(body, x), "orders"));
+
+        refusal.Message.ShouldContain("in a typed query on 'orders'");
+        refusal.Message.ShouldContain("more than a filter of");
+        refusal.Message.Length.ShouldBeLessThan(1000);
+        refusal.FixSuggestion.ShouldNotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public void A_predicate_wider_than_a_filter_can_hold_is_refused_before_it_is_walked()
+    {
+        var x = Expression.Parameter(typeof(Order), "x");
+        var quantity = Expression.Property(x, nameof(Order.Quantity));
+        var terms = Enumerable.Range(0, 4096).Select(number => (Expression)Expression.Equal(quantity, Expression.Constant((long)number))).ToList();
+        while (terms.Count > 1)
+        {
+            terms = [.. terms.Chunk(2).Select(pair => pair.Length == 2 ? Expression.OrElse(pair[0], pair[1]) : pair[0])];
+        }
+
+        Should.Throw<AlvoTranslationException>(() => FilterTranslator.Translate(Expression.Lambda<Func<Order, bool>>(terms[0], x), "orders"))
+            .Message.ShouldContain("more than a filter of");
+    }
+
+    [Fact]
+    public void An_or_chain_as_long_as_a_filter_may_hold_still_translates()
+    {
+        var x = Expression.Parameter(typeof(Order), "x");
+        var quantity = Expression.Property(x, nameof(Order.Quantity));
+        var body = Enumerable.Range(0, AlvoFilter.MaxTerms - 1)
+            .Select(number => (Expression)Expression.Equal(quantity, Expression.Constant((long)number)))
+            .Aggregate(Expression.OrElse);
+
+        FilterTranslator.Translate(Expression.Lambda<Func<Order, bool>>(body, x), "orders").ShouldBeOfType<AlvoOr>().Filters.Count.ShouldBe(AlvoFilter.MaxTerms - 1);
+    }
+
+    [Fact]
     public void A_query_typed_over_a_record_filters_any_field_through_it() =>
         FilterText.Of(FilterTranslator.Translate<AlvoRecord>(x => (string?)x["legacy_code"] == "L-9", "orders")).ShouldBe("legacy_code eq 'L-9'");
 

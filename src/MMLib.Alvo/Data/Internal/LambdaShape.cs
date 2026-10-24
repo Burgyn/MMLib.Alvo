@@ -2,6 +2,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 
 namespace MMLib.Alvo.Data.Internal;
 
@@ -16,6 +17,32 @@ internal static class LambdaShape
     private static readonly HashSet<Type> _texts = [typeof(string), typeof(ReadOnlySpan<char>), typeof(Span<char>)];
 
     internal static bool Touches(Expression node, ParameterExpression parameter) => new ParameterFinder(parameter).Finds(node);
+
+    /// <summary>
+    /// Whether a tree nests no deeper than <paramref name="maxDepth"/> and holds no more than <paramref name="maxNodes"/>
+    /// nodes — measured without recursion, so a tree too deep to recurse over is refused before any walk that recurses.
+    /// </summary>
+    internal static bool IsWithin(Expression node, int maxDepth, int maxNodes)
+    {
+        var pending = new Stack<(Expression Node, int Depth)>();
+        pending.Push((node, 1));
+        var children = new ChildCollector();
+        var nodes = 0;
+        while (pending.TryPop(out var next))
+        {
+            if (next.Depth > maxDepth || ++nodes > maxNodes)
+            {
+                return false;
+            }
+
+            foreach (var child in children.Of(next.Node))
+            {
+                pending.Push((child, next.Depth + 1));
+            }
+        }
+
+        return true;
+    }
 
     internal static Expression? FindClock(Expression node) => new ClockFinder().Find(node);
 
@@ -140,6 +167,30 @@ internal static class LambdaShape
     private static bool Widens(Type from, Type to) =>
         ((to == typeof(long) || to == typeof(decimal)) && _integral.Contains(from)) || (to == typeof(int) && _small.Contains(from));
 
+    /// <summary>A node's direct children: the base visitor dispatches on the node, and each child it visits is collected, not entered.</summary>
+    private sealed class ChildCollector : ExpressionVisitor
+    {
+        private readonly List<Expression> _children = [];
+
+        internal List<Expression> Of(Expression parent)
+        {
+            _children.Clear();
+            base.Visit(parent);
+
+            return _children;
+        }
+
+        public override Expression? Visit(Expression? node)
+        {
+            if (node is not null)
+            {
+                _children.Add(node);
+            }
+
+            return node;
+        }
+    }
+
     private sealed class ParameterFinder(ParameterExpression parameter) : ExpressionVisitor
     {
         private bool _found;
@@ -149,6 +200,13 @@ internal static class LambdaShape
             Visit(node);
 
             return _found;
+        }
+
+        public override Expression? Visit(Expression? node)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+
+            return _found ? node : base.Visit(node);
         }
 
         protected override Expression VisitParameter(ParameterExpression node)

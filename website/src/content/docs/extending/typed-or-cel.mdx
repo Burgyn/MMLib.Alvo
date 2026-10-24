@@ -125,7 +125,9 @@ Cannot translate 'e.New.Guest.GetHashCode()' in extension 'bad' (when): method '
 <SourceExcerpt code={tests} from="var refusal" to="in extension 'bad' (when)" title="BookingDeskHandlersTests.cs" />
 
 A lambda whose CEL would be longer than 2,000 characters or nested deeper than the parser's 32 levels is refused the
-same way.
+same way, and so is a constant list of more than 250 values, or a lambda nested deeper than 500 levels or holding more
+than 4,000 expression nodes — such a lambda (say, one built by folding thousands of `Or`s) is measured and refused
+before it is read, never walked.
 
 **Null follows CEL, not C#.** A comparison with an empty field is false, so `e.New.OwnerId != Fleet` does not match a
 record with no owner — C# would say true — and neither does `!e.New.IsPaid` when `is_paid` is empty. When an empty
@@ -154,7 +156,9 @@ otherwise write by hand.
 - **Text compares as the database compares.** `x.Guest == "ada"` is judged by the column's collation, not by C#'s
   ordinal `==`, so a case-insensitive collation matches `Ada` too.
 - **Refused when the read is called:** `StartsWith`/`EndsWith`/`Contains` on a text (no filter operator for them yet),
-  arithmetic, a comparison of two fields, the clock, and any other method.
+  arithmetic, a comparison of two fields, the clock, and any other method; and a predicate nested deeper than 512
+  levels or holding more than 4,096 expression nodes, which no filter of 256 terms needs — it is measured and refused
+  before it is read.
 
 `record.As<Booking>()` reads any `AlvoRecord` into your class — a row from an untyped read, an event payload. It throws
 `InvalidOperationException` naming the field when the record lacks one the class maps (a hidden field, or one left out

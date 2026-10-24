@@ -90,6 +90,11 @@ internal sealed partial class ConditionTranslator
         }
 
         var list = OrderedList(source);
+        if (list.Count > MaxListValues)
+        {
+            throw Refuse(call, $"it lists {list.Count} values, more than the {MaxListValues} a condition of {CelParser.MaxSourceLength} characters can hold", "test fewer values, or move the check into the handler body.");
+        }
+
         var field = LambdaShape.HidesEnum(value) ? LambdaShape.Bare(value) : value;
         var enumType = field == value ? null : LambdaShape.Underlying(field.Type);
         var tests = list.Cast<object?>()
