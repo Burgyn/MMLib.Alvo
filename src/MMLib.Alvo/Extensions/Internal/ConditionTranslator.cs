@@ -163,7 +163,7 @@ internal sealed partial class ConditionTranslator
         var unwrapped = LambdaShape.Unwrapped(node);
         if (!LambdaShape.Touches(unwrapped, _event))
         {
-            return Constant(HidesEnum(node) ? node : unwrapped);
+            return Constant(LambdaShape.HidesEnum(node) ? node : unwrapped);
         }
 
         return unwrapped switch

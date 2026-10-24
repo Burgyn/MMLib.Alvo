@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
 
@@ -40,6 +41,36 @@ internal sealed class EnumMap
     internal string? ValueOf(object member) => _byMember.GetValueOrDefault(member);
 
     internal object? MemberOf(string value) => _byValue.GetValueOrDefault(value);
+
+    /// <summary>
+    /// The member of <paramref name="enumType"/> a raw value stands for: an enum value by its number, an integral only when
+    /// it fits the enum's underlying type; otherwise <see langword="null"/> and why.
+    /// </summary>
+    internal static Enum? MemberFor(Type enumType, object raw, out string reason)
+    {
+        reason = string.Empty;
+        if (raw is Enum)
+        {
+            return (Enum)Enum.ToObject(enumType, raw);
+        }
+
+        if (raw is not (sbyte or byte or short or ushort or int or uint or long or ulong))
+        {
+            reason = $"a {raw.GetType().Name} is not a member of {enumType.Name}";
+            return null;
+        }
+
+        var underlying = Enum.GetUnderlyingType(enumType);
+        try
+        {
+            return (Enum)Enum.ToObject(enumType, Convert.ChangeType(raw, underlying, CultureInfo.InvariantCulture));
+        }
+        catch (OverflowException)
+        {
+            reason = $"{raw} is outside the range of {enumType.Name}'s underlying {underlying.Name}";
+            return null;
+        }
+    }
 
     private static EnumMember Member(FieldInfo field) => new(
         field.Name,

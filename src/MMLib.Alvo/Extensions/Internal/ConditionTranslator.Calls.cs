@@ -90,7 +90,7 @@ internal sealed partial class ConditionTranslator
         }
 
         var list = OrderedList(source);
-        var field = HidesEnum(value) ? Bare(value) : value;
+        var field = LambdaShape.HidesEnum(value) ? LambdaShape.Bare(value) : value;
         var enumType = field == value ? null : LambdaShape.Underlying(field.Type);
         var tests = list.Cast<object?>()
             .Select(item => Typed(call, CelBinaryOperator.Equal, Operand(field), Literal(source, AsMember(source, enumType, item))))

@@ -1,7 +1,6 @@
 ﻿using MMLib.Alvo.Data.Internal;
 using MMLib.Alvo.Expressions;
 
-using System.Globalization;
 using System.Linq.Expressions;
 
 namespace MMLib.Alvo.Extensions.Internal;
@@ -46,67 +45,21 @@ internal sealed partial class ConditionTranslator
 
     private CelBinary? EnumPair(BinaryExpression comparison, CelBinaryOperator op)
     {
-        if (!HidesEnum(comparison.Left) || !HidesEnum(comparison.Right))
+        if (!LambdaShape.HidesEnum(comparison.Left) || !LambdaShape.HidesEnum(comparison.Right))
         {
             return null;
         }
 
-        var (left, right) = (Bare(comparison.Left), Bare(comparison.Right));
+        var (left, right) = (LambdaShape.Bare(comparison.Left), LambdaShape.Bare(comparison.Right));
         return LambdaShape.Underlying(left.Type) == LambdaShape.Underlying(right.Type)
             ? new CelBinary(op, Operand(left), Operand(right))
             : throw Refuse(comparison, "two enum fields compare only when they share one enum", TranslationRefusal.WhenFix);
     }
 
-    private bool IsEnumField(Expression node) => HidesEnum(node) && LambdaShape.Touches(node, _event);
+    private bool IsEnumField(Expression node) => LambdaShape.HidesEnum(node) && LambdaShape.Touches(node, _event);
 
-    private static bool HidesEnum(Expression node)
-    {
-        while (node is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } convert)
-        {
-            var from = LambdaShape.Underlying(convert.Operand.Type);
-            if (from.IsEnum && from != LambdaShape.Underlying(convert.Type))
-            {
-                return true;
-            }
-
-            node = convert.Operand;
-        }
-
-        return false;
-    }
-
-    private static Expression Bare(Expression node)
-    {
-        while (!LambdaShape.Underlying(node.Type).IsEnum && node is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } convert)
-        {
-            node = convert.Operand;
-        }
-
-        return node;
-    }
-
-    private Enum EnumMember(Expression node, Type enumType, object raw)
-    {
-        if (raw is Enum)
-        {
-            return (Enum)Enum.ToObject(enumType, raw);
-        }
-
-        if (raw is not (sbyte or byte or short or ushort or int or uint or long or ulong))
-        {
-            throw Refuse(node, $"a {raw.GetType().Name} is not a member of {enumType.Name}", ConstantFix);
-        }
-
-        var underlying = Enum.GetUnderlyingType(enumType);
-        try
-        {
-            return (Enum)Enum.ToObject(enumType, Convert.ChangeType(raw, underlying, CultureInfo.InvariantCulture));
-        }
-        catch (OverflowException)
-        {
-            throw Refuse(node, $"{raw} is outside the range of {enumType.Name}'s underlying {underlying.Name}", ConstantFix);
-        }
-    }
+    private Enum EnumMember(Expression node, Type enumType, object raw) =>
+        EnumMap.MemberFor(enumType, raw, out var reason) ?? throw Refuse(node, reason, ConstantFix);
 
     private CelLiteral EnumText(Expression node, Enum member) => EnumMap.Of(member.GetType()).ValueOf(member) is { } text
         ? new CelLiteral(CelValueType.String, text)

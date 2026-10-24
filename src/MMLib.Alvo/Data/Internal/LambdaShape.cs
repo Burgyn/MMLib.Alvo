@@ -41,6 +41,34 @@ internal static class LambdaShape
             ? type
             : null;
 
+    /// <summary>Whether a chain of conversions turns an enum into a different type — the number C# compares an enum as.</summary>
+    internal static bool HidesEnum(Expression node)
+    {
+        while (node is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } convert)
+        {
+            var from = Underlying(convert.Operand.Type);
+            if (from.IsEnum && from != Underlying(convert.Type))
+            {
+                return true;
+            }
+
+            node = convert.Operand;
+        }
+
+        return false;
+    }
+
+    /// <summary>The enum-typed operand under the conversions <see cref="HidesEnum"/> found.</summary>
+    internal static Expression Bare(Expression node)
+    {
+        while (!Underlying(node.Type).IsEnum && node is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } convert)
+        {
+            node = convert.Operand;
+        }
+
+        return node;
+    }
+
     internal static bool IsNullable(Expression? node) => node is not null && Nullable.GetUnderlyingType(node.Type) is not null;
 
     internal static Type Underlying(Type type) => Nullable.GetUnderlyingType(type) ?? type;
