@@ -53,7 +53,7 @@ internal sealed partial class FilterTranslator
         EnsureDefaultEquality(source, items);
         if (items is ICollection { Count: var count } && count > AlvoFilter.MaxInCandidates)
         {
-            throw TooMany(call, count.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            throw TooMany(call, count.ToString(CultureInfo.InvariantCulture));
         }
 
         var candidates = items.Cast<object?>().Take(AlvoFilter.MaxInCandidates + 1).Select(item => (object?)Candidate(item, enumType, source)).ToList();

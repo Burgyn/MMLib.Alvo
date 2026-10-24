@@ -67,6 +67,7 @@ public sealed class FilterTranslationTests
     {
         var many = Enumerable.Range(0, 1001).Select(number => (long)number).ToArray();
         var flag = true;
+        var endless = Endless(new Pulls());
         int? none = null;
         string[]? missing = null;
 
@@ -83,6 +84,7 @@ public sealed class FilterTranslationTests
             { "relational enum", x => x.Status > OrderStatus.Draft, "an enum field compares with == and != only" },
             { "relational enum on the left", x => OrderStatus.Draft <= x.Previous, "an enum field compares with == and != only" },
             { "too many candidates", x => many.Contains(x.Quantity), "it lists 1001 candidates" },
+            { "endless candidates", x => endless.Contains(x.Quantity), "it lists more than 1000 candidates" },
             { "unmapped property", x => x.Summary == "a", "Order.Summary maps to no field" },
             { "object comparison", x => (object)x.Status == (object)OrderStatus.Draft, "compares references in C#" },
             { "arithmetic on an enum", x => (int)x.Status + 1 == 2, "arithmetic has no filter equivalent" },
@@ -115,11 +117,34 @@ public sealed class FilterTranslationTests
         refusal.FixSuggestion.ShouldNotBeNullOrWhiteSpace(row);
     }
 
+    private static IEnumerable<long> Endless(Pulls pulls)
+    {
+        while (true)
+        {
+            yield return ++pulls.Count;
+        }
+    }
+
     private static IEnumerable<string> Lazy()
     {
         yield return "x!";
         yield return "y!";
     }
+
+    [Fact]
+    public void An_endless_list_is_refused_after_pulling_no_more_than_one_past_the_cap()
+    {
+        var pulls = new Pulls();
+        var endless = Endless(pulls);
+
+        Should.Throw<AlvoTranslationException>(() => FilterTranslator.Translate<Order>(x => endless.Contains(x.Quantity), "orders"));
+
+        pulls.Count.ShouldBeLessThanOrEqualTo(AlvoFilter.MaxInCandidates + 1);
+    }
+
+    [Fact]
+    public void A_query_typed_over_a_record_filters_any_field_through_it() =>
+        FilterText.Of(FilterTranslator.Translate<AlvoRecord>(x => (string?)x["legacy_code"] == "L-9", "orders")).ShouldBe("legacy_code eq 'L-9'");
 
     [Fact]
     public void A_captured_value_is_placed_as_a_typed_value_never_as_text()
@@ -178,4 +203,10 @@ public sealed class FilterTranslationTests
     public void A_value_no_field_type_holds_is_refused() =>
         Should.Throw<AlvoTranslationException>(() => FilterTranslator.Translate<TicketWithScore>(x => x.Score > 1.5, "tickets"))
             .Message.ShouldContain("a Double value matches no field type");
+}
+
+/// <summary>How many items a test's endless sequence has handed out.</summary>
+internal sealed class Pulls
+{
+    public long Count { get; set; }
 }
