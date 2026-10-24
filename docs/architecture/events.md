@@ -1027,10 +1027,11 @@ handler. The job pool for schedules and migrations arrives with them (HX-13).
 not the work — were the cost of a delivery (#410: 10 000 events took ~1 000 s at concurrency 16). The EF driver now
 queues every write transaction of one process to one database behind an internal `IRelationalWriteGate`
 (`SerialRelationalWriteGate`, one per database file) before it asks the engine for the lock: the outbox and delivery
-stores and the EF data path's write transactions (an outbox append inside a data write holds the turn once; no
-re-entrancy). The same chaos run takes ~55 s (~84 s when every handler also writes through `IAlvoData`). A wait is
-bounded by the connection's busy timeout and then fails with SQLite's own `SQLITE_BUSY` "database is locked", which the
-replay loop and the API already answer. Code that runs while a turn is held — a host CEL function, a replacement
+stores, the EF data path's write transactions (an outbox append inside a data write holds the turn once; no
+re-entrancy), `EfCoreRuntimeSchemaWriter`, `EfCoreSecretStore`, `EfCoreDescriptorVersionStore` and
+`EfCoreManagementIdempotencyStore`. The same chaos run takes ~55 s (~84 s when every handler also writes through `IAlvoData`). A wait is
+bounded by the connection's busy timeout (`Default Timeout`; at 0 it is unbounded, as the engine's own wait then is) and
+then fails with SQLite's own `SQLITE_BUSY` "database is locked", which the replay loop and the API already answer. Code that runs while a turn is held — a host CEL function, a replacement
 `IBeforeHookRunner` — must not write through Alvo, or it waits on itself until the busy timeout. Another process on the
 same file, or a write path the gate does not cover, still meets the engine's lock. PostgreSQL keeps the driver's
 no-op default (`NoRelationalWriteGate`).
@@ -1058,7 +1059,12 @@ name records the condition would never have matched; once the handler rebinds, l
 wait for HX-06's replay.
 
 **Dead deliveries block their lane.** Any other dead delivery holds its (handler, record) lane until HX-06's redeliver;
-the manual remedy is to set the row `cancelled` (or `pending` to retry it), or to retire the handler.
+the manual remedy is to set the row `cancelled`, or to retire the handler. Re-pending a dead row is a retry only with
+`attempts = 0` **and** its `alvo_delivery_attempts` rows deleted in the same transaction: the claim increments
+`attempts`, so a row that died at its last attempt would be reclaimed past its policy and recorded dead `lease-expired`
+without running (`DeliveryRunner`), and the attempt number is half of the attempts table's primary key, so a reset count
+without the deleted history fails every answer on a duplicate key. The guide gives the statement; HX-06's redeliver
+replaces it.
 `AlvoOrdering.None` handlers are never held.
 
 **Inherited, stated.** Order is event-id order, which is per-record order across batches, failed fan-outs and
@@ -1449,8 +1455,9 @@ adapter implements the queue, not the dispatcher.
 | `MMLib.Alvo.Testing/Data/` | `AlvoDataBeforeHookTests` + `IAlvoDataBeforeHookWorld` — the before-hook suite every engine inherits |
 
 Only `AlvoEventOptions`, the manual-dispatch surface (`AlvoEventDispatchMode`, `IAlvoEventPump`, `AlvoDrainResult`),
-the three ports and the four envelope types are public; everything else in the
-core is `internal`.
+the four ports (`IOutboxStore`, `IEmailSender`, `IBeforeHookRunner` and, from HX-03, `IDeliveryStore` with its records),
+the four envelope types and the HX-03 handler surface (`AlvoEventContext`, `IAlvoEventHandler<T>`, the four messages,
+and the `MMLib.Alvo.Extensions` builder and option types) are public; everything else in the core is `internal`.
 
 ## A replacement emits its branch's own event (#105)
 

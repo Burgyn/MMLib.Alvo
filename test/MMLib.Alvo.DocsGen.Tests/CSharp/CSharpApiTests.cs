@@ -162,7 +162,10 @@ public class CSharpApiTests
         core.ShouldContain("AlvoEntityBuilder");
         core.ShouldContain("AlvoEventContext");
         core.ShouldContain("IAlvoEventHandler`1");
+        core.ShouldContain("AlvoCreated`1");
         core.ShouldContain("AlvoUpdated`1");
+        core.ShouldContain("AlvoDeleted`1");
+        core.ShouldContain("AlvoSaved`1");
         core.ShouldContain("AlvoExtensionBuilderExtensions");
         abstractions.ShouldContain("IAlvoSession");
         abstractions.ShouldContain("IAlvoSessions");

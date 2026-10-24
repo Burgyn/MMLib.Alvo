@@ -406,11 +406,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under the default names — partial on undispatched entries). On a large outbox this takes a while, and on PostgreSQL a
   plain `CREATE INDEX` blocks outbox writes while it builds (identical DDL on both engines rules out `CONCURRENTLY`);
   plan the first deploy for a quiet moment, or create the index by hand beforehand with the same name.
-- **On SQLite, one process's writes to one database take turns** (HX-03, #410). The outbox and delivery stores and the
-  EF data path's write transactions queue behind an in-process, per-database write line before asking SQLite for its
+- **On SQLite, one process's writes to one database take turns** (HX-03, #410). Every write transaction of the EF
+  driver — the outbox and delivery stores, the data path, the runtime schema writer, the secret, descriptor-version and
+  management-idempotency stores — queues behind an in-process, per-database write line before asking SQLite for its
   lock, instead of meeting `SQLITE_BUSY` and sleeping in `Microsoft.Data.Sqlite`'s retry: a 10 000-event delivery run at
   the default concurrency went from ~1 000 s to ~55 s (~84 s when every handler also writes). A wait is bounded by the
-  connection's busy timeout and then fails with the same "database is locked" error as before. Code running inside a
+  connection's busy timeout (`Default Timeout`; 0 means no bound, as for the engine) and then fails with the same
+  "database is locked" error as before. Code running inside a
   write — a host CEL function, a replacement `IBeforeHookRunner` — must not write through Alvo. PostgreSQL is
   unchanged.
 

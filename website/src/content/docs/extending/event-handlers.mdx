@@ -68,8 +68,8 @@ updated).
   ([`Alvo:Events:MaxAttempts`](/reference/configuration/#alvoevents)): about 45 s per failing event at the defaults.
   The failing event's own delivery is not held.
 - **A dead delivery blocks its record until it is cleared.** Redeliver, replay and pause arrive in a later release; until
-  then an operator unblocks a lane by setting that row of `alvo_deliveries` to `cancelled` (or back to `pending` to
-  retry it), or retires the whole handler with `AddRetiredExtension`.
+  then an operator unblocks a lane by setting that row's `status` in `alvo_deliveries` to `'cancelled'`, or retires the
+  whole handler with `AddRetiredExtension`. To run a dead delivery again instead, [reset it by hand](#retry-a-dead-delivery-by-hand).
 - **Who the handler is.** By default the system, in the event's tenant (`'admin' in @user.roles` is true, another
   tenant's rows are invisible); `options.RunAs = AlvoRunAs.EventActor` acts as the caller who made the change.
   `context.Data` reads and writes as that caller, through the same rules and tenancy as any other call.
@@ -92,6 +92,26 @@ updated).
   `timeout`, `chain-depth-exceeded`, `event-missing` (the envelope left the outbox), `event-unreadable`,
   `lease-expired` (its last attempt never answered — a handler that crashes its process, say), `retired` and
   `unbound`.
+
+### Retry a dead delivery by hand
+
+Setting a dead row back to `pending` alone does not retry it: a delivery that died at its last attempt keeps that
+attempt count, so the next claim takes it past its policy and records it dead `lease-expired` without running it.
+Reset the count too — and, because each attempt's number keys its row in `alvo_delivery_attempts`, delete the
+delivery's attempt history in the same transaction (the table names carry your `SchemaPrefix`, `alvo` by default):
+
+```sql
+BEGIN;
+DELETE FROM alvo_delivery_attempts WHERE delivery_id = '<delivery id>';
+UPDATE alvo_deliveries
+   SET status = 'pending', attempts = 0, claimed_by = NULL, lease_until = NULL,
+       completed_at = NULL, last_error_type = NULL
+ WHERE id = '<delivery id>' AND status = 'dead';
+COMMIT;
+```
+
+The row keeps its event, its place in the record's order and its `not_before`, which is already past, so the next round
+claims it. Its earlier attempts are gone from the history; HX-06's redeliver will keep them.
 
 ## Application events
 
@@ -124,9 +144,11 @@ Never drain from inside a handler: the call is refused, because a round would wa
 deliveries one process runs at once. Deliveries share `Alvo:Events:Enabled`, `DispatchMode` and `PollInterval` with the
 outbox.
 
-On SQLite, one process's writes to one database take turns — the outbox, the deliveries and every data write, a
-handler's included — instead of contending for the file's lock. A turn waits no longer than the connection's busy
-timeout and then fails with the same "database is locked" error SQLite gives. Code that runs inside a write — a custom
+On SQLite, one process's writes to one database take turns — every write transaction Alvo's EF driver makes: the
+outbox, the deliveries, every data write (a handler's included), schema changes, secrets, descriptor versions and
+management idempotency records — instead of contending for the file's lock. A turn waits no longer than the
+connection's busy timeout (`Default Timeout`, 30 s unless you set it; 0 waits without bound, as SQLite itself then does)
+and then fails with the same "database is locked" error SQLite gives. Code that runs inside a write — a custom
 CEL function — must not write through Alvo itself. PostgreSQL has no such turn.
 
 ## Not yet
