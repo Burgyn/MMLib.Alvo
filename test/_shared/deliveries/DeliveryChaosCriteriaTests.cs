@@ -40,6 +40,9 @@ public abstract class DeliveryChaosCriteriaTests
     /// <summary>The engine and build configuration a reported number was measured under.</summary>
     protected abstract string EngineDescription { get; }
 
+    /// <summary>How many deliveries this leg runs at once; an engine whose writers serialise may run fewer.</summary>
+    protected virtual int MaxConcurrency => 64;
+
     /// <summary>Registers this leg's database on the builder, and a raw connection to read the delivery table.</summary>
     protected abstract Task<(Action<IAlvoBuilder> Use, Func<DbConnection> Connect)> DatabaseAsync();
 
@@ -50,7 +53,7 @@ public abstract class DeliveryChaosCriteriaTests
         var database = await DatabaseAsync();
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 10, 23, 9, 0, 0, TimeSpan.Zero));
         var sink = new ChaosSink();
-        await using var alvo = await StartAsync(database.Use, clock, sink);
+        await using var alvo = await StartAsync(database.Use, clock, sink, MaxConcurrency);
 
         var seeded = await SeedAsync(alvo);
         var stopwatch = Stopwatch.StartNew();
@@ -58,7 +61,7 @@ public abstract class DeliveryChaosCriteriaTests
         var rows = await DeliveryRows.ReadAsync(database.Connect, Ct);
 
         await ReportAsync($"§3 delivery chaos ({EventCount} events on {RecordCount} records, fail 1-in-{FailEvery}, "
-            + $"{AbandonedClaims} abandoned claims, {EngineDescription}): {run.Rounds} rounds, {sink.AcceptedEvents.Count} accepted, "
+            + $"{AbandonedClaims} abandoned claims, concurrency {MaxConcurrency}, {EngineDescription}): {run.Rounds} rounds, {sink.AcceptedEvents.Count} accepted, "
             + $"{sink.Refused.Count} refused, {stopwatch.Elapsed.TotalSeconds:F1}s");
 
         AssertNothingIsLost(seeded, sink, rows, run);
@@ -66,7 +69,7 @@ public abstract class DeliveryChaosCriteriaTests
         AssertTheChaosHappened(sink, run);
     }
 
-    private static async Task<AlvoTestHost> StartAsync(Action<IAlvoBuilder> use, FakeTimeProvider clock, ChaosSink sink) =>
+    private static async Task<AlvoTestHost> StartAsync(Action<IAlvoBuilder> use, FakeTimeProvider clock, ChaosSink sink, int maxConcurrency) =>
         await AlvoTestHost.StartAsync(
             builder =>
             {
@@ -75,7 +78,7 @@ public abstract class DeliveryChaosCriteriaTests
                 builder.Entity(Orders, orders => orders.OnSaved(
                     Sink, sink.HandleAsync, configure: options => options.Retry = AlvoRetryPolicy.From([.. Enumerable.Repeat(TimeSpan.FromSeconds(1), 12)])));
                 builder.Services.Configure<AlvoEventOptions>(options => options.BatchSize = 500);
-                builder.Services.Configure<AlvoDeliveryOptions>(options => options.MaxConcurrency = 64);
+                builder.Services.Configure<AlvoDeliveryOptions>(options => options.MaxConcurrency = maxConcurrency);
             },
             clock,
             cancellationToken: Ct);

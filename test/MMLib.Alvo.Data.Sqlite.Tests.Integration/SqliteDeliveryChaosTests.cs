@@ -17,6 +17,14 @@ public sealed class SqliteDeliveryChaosTests : DeliveryChaosCriteriaTests, IDisp
 
     protected override string EngineDescription => "sqlite (file), " + BuildConfiguration;
 
+    /// <summary>
+    /// 64, the PostgreSQL leg's value, chosen by measurement: 64 and 128 tie within noise and are the fastest
+    /// concurrency above one. Drain times for the 10 000 events, Debug build: 1 → ~130 s, 4 → 1 314 s,
+    /// 16 (the shipped default) → 1 029 s, 64 → ~385 s, 128 → 377 s (PostgreSQL at 64: 5.6 s). None reaches the
+    /// ~3-minute target; the SQLite throughput is tracked in issue 410.
+    /// </summary>
+    protected override int MaxConcurrency => 64;
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();
