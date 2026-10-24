@@ -9,7 +9,7 @@ public class HonouredBlocksTests
 {
     [Fact]
     public void The_count_leaves_out_the_host_kinds()
-        => HonouredBlocks.Count(["entities", "auth", "hooks", "access", "capabilities", "extensions.eventHandler"]).ShouldBe(5);
+        => HonouredBlocks.Count(["entities", "auth", "tenancy", "access", "formats", "extensions.eventHandler"]).ShouldBe(5);
 
     [Fact]
     public void Without_a_host_kind_every_entry_is_a_block()
