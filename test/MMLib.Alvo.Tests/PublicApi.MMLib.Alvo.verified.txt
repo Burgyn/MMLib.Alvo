@@ -139,6 +139,17 @@ namespace MMLib.Alvo.Data
         public AlvoTranslationException(string message, string fixSuggestion) { }
         public string FixSuggestion { get; }
     }
+    public static class AlvoTypedReadExtensions
+    {
+        public static System.Threading.Tasks.Task<T?> GetAsync<T>(this MMLib.Alvo.Data.IAlvoSession session, System.Guid id, System.Threading.CancellationToken cancellationToken = default)
+            where T :  class { }
+        public static System.Threading.Tasks.Task<T?> GetAsync<T>(this MMLib.Alvo.Data.IAlvoData data, System.Guid id, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default)
+            where T :  class { }
+        public static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<T>> QueryAsync<T>(this MMLib.Alvo.Data.IAlvoSession session, System.Linq.Expressions.Expression<System.Func<T, bool>> @where, int limit, System.Threading.CancellationToken cancellationToken = default)
+            where T :  class { }
+        public static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<T>> QueryAsync<T>(this MMLib.Alvo.Data.IAlvoData data, System.Linq.Expressions.Expression<System.Func<T, bool>> @where, int limit, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default)
+            where T :  class { }
+    }
     public interface IAlvoEntity
     {
         MMLib.Alvo.Data.AlvoRecord Record { get; }
