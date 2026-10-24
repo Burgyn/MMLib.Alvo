@@ -126,6 +126,11 @@ namespace MMLib.Alvo.Data
         public AlvoFieldAttribute(string name) { }
         public string Name { get; }
     }
+    public static class AlvoRecordExtensions
+    {
+        public static T As<T>(this MMLib.Alvo.Data.AlvoRecord record)
+            where T :  class { }
+    }
     public interface IAlvoEntity
     {
         MMLib.Alvo.Data.AlvoRecord Record { get; }

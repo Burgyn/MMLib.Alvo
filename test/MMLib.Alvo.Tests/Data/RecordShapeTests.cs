@@ -1,6 +1,8 @@
 ﻿using MMLib.Alvo.Data;
 using MMLib.Alvo.Data.Internal;
 
+using FieldType = MMLib.Alvo.Schema.FieldType;
+
 namespace MMLib.Alvo.Tests.Data;
 
 /// <summary>How a host type maps to fields (spec 2026-10-14 §4.3): names, enum values, constructors, and the problems no descriptor cures.</summary>
@@ -115,6 +117,41 @@ public sealed class RecordShapeTests
     [Fact]
     public void One_type_is_read_once() =>
         RecordShape.Of(typeof(Order)).ShouldBeSameAs(RecordShape.Of(typeof(Order)));
+
+    [Fact]
+    public void A_type_that_fits_its_entity_has_no_mapping_problem() =>
+        ShapeMapping.Problems(RecordShape.Of(typeof(Order)), TypedFixtures.OrdersSchema, fromEventImages: true).ShouldBeEmpty();
+
+    [Fact]
+    public void A_property_whose_field_the_entity_lacks_is_named()
+    {
+        var entity = TypedFixtures.OrdersSchema with { Fields = [.. TypedFixtures.OrdersSchema.Fields.Where(field => field.Name != "ref_no")] };
+
+        ShapeMapping.Problems(RecordShape.Of(typeof(Order)), entity, fromEventImages: false).ShouldHaveSingleItem()
+            .Message.ShouldBe("Order.Reference maps to 'ref_no', which 'orders' does not declare.");
+    }
+
+    [Fact]
+    public void A_property_of_another_type_than_its_field_holds_is_a_problem()
+    {
+        var entity = TypedFixtures.OrdersSchema with
+        {
+            Fields = [.. TypedFixtures.OrdersSchema.Fields.Select(field => field.Name == "quantity" ? field with { Type = FieldType.String } : field)],
+        };
+
+        ShapeMapping.Problems(RecordShape.Of(typeof(Order)), entity, fromEventImages: false).ShouldHaveSingleItem()
+            .Message.ShouldBe("Order.Quantity is a Int64, but 'quantity' is a string field, which holds String.");
+    }
+
+    [Fact]
+    public void A_field_left_out_of_the_event_images_is_a_problem_only_for_a_handler()
+    {
+        var entity = TypedFixtures.OrdersSchema with { EventImageExclusions = ["note"] };
+
+        ShapeMapping.Problems(RecordShape.Of(typeof(Order)), entity, fromEventImages: false).ShouldBeEmpty();
+        ShapeMapping.Problems(RecordShape.Of(typeof(Order)), entity, fromEventImages: true).ShouldHaveSingleItem()
+            .Message.ShouldContain("leaves out of its event images (events.exclude)");
+    }
 
     private static MappedProperty Mapped(RecordShape shape, string property) =>
         shape.Properties.Single(candidate => candidate.Property.Name == property);

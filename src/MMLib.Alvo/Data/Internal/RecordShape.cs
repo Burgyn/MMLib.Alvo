@@ -63,6 +63,10 @@ internal sealed class RecordShape
     internal MappedProperty? Mapped(MemberInfo member) =>
         member is PropertyInfo property && _byName.TryGetValue(property.Name, out var mapped) ? mapped : null;
 
+    internal T Materialize<T>(AlvoRecord? record)
+        where T : class =>
+        (T)RecordMaterializer.Create(this, record ?? AlvoRecord.Empty);
+
     private static IEnumerable<PropertyInfo> Candidates(Type type) =>
         type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(property => property.GetIndexParameters().Length == 0 && property.GetMethod is { IsPublic: true })
