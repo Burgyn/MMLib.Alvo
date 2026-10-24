@@ -24,9 +24,12 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$DIR/.." && pwd)"
 cd "$ROOT"
 
-staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+# Deletions count for the full-check test (removing a .props changes the rules too), never
+# for the file list below. core.quotePath=false keeps non-ASCII paths unquoted.
+staged="$(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR)"
+staged_any="$(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMRD)"
 
-if grep -qE '(\.csproj|\.props|\.targets|(^|/)\.editorconfig)$' <<< "$staged"; then
+if grep -qE '(\.csproj|\.props|\.targets|(^|/)\.editorconfig)$' <<< "$staged_any"; then
   echo "[format-staged] a staged build or style file can change how every document is judged: full solution"
   exec dotnet format --verify-no-changes
 fi

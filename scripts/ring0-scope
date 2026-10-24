@@ -41,18 +41,20 @@ src/ MMLib.Alvo.Tests
 src/ MMLib.Alvo.DocsGen.Tests
 src/MMLib.Alvo.Data.Sqlite/ MMLib.Alvo.Data.EntityFrameworkCore.Tests
 src/MMLib.Alvo.Data.PostgreSql/ MMLib.Alvo.Data.EntityFrameworkCore.Tests
+test/MMLib.Alvo.Admin.Tests.EndToEnd/ MMLib.Alvo.Admin.Tests
 "
 # Why each line is there:
 #   MMLib.Alvo.Tests          ShippedSources: absence facts over every src/**/*.cs.
 #   MMLib.Alvo.DocsGen.Tests  options keys and problem types over every src/**/*.cs, the README over every src/**/*.csproj.
 #   ...EntityFrameworkCore.Tests  ChangeTrackerReachTests reads the Sqlite and PostgreSql packages' sources.
+#   MMLib.Alvo.Admin.Tests    EndToEndSelectorTests reads the (not ring0) EndToEnd suite's sources: a test-to-test edge.
 
 everything() {
   echo "[ring0-scope] every module: $1" >&2
   exit 0
 }
 
-staged="$(git diff --cached --name-only --no-renames)"
+staged="$(git -c core.quotePath=false diff --cached --name-only --no-renames)"
 [ -n "$staged" ] || everything "nothing is staged"
 
 project_dirs="$(sed -nE 's|.*Project Path="([^"]+)/[^/"]+\.csproj".*|\1|p' "$SLNX")"

@@ -254,7 +254,8 @@ the fast modules `scripts/ring0-scope` finds affected (dotnet-affected plus a
 by-path table), falling back to every module for anything it cannot place —
 `scripts/**`, `.husky/**`, `test/_shared/**`, shared build files, Abstractions,
 any file outside a project. `scripts/test-ring0` by hand, ring1/ring2 and CI
-still run everything; a test that reads another project's sources by path
+still run everything; a test that reads another project's sources by path —
+including another *test* project's, e.g. Admin.Tests reading the EndToEnd suite —
 belongs in `ring0-scope`'s table.
 **commit-msg**: Conventional Commits. Details in `.husky/task-runner.json`.
 
