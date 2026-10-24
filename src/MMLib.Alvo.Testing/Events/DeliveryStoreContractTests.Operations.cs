@@ -94,4 +94,37 @@ public abstract partial class DeliveryStoreContractTests
 
         await Should.ThrowAsync<ArgumentOutOfRangeException>(() => world.Store.ListAsync(new DeliveryFilter { Limit = 0 }, Ct));
     }
+
+    /// <summary>A page larger than the store's ceiling of 1 000 is refused, so no caller can ask the port for an unbounded read.</summary>
+    [Fact]
+    public async Task A_page_above_the_store_s_ceiling_is_refused()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(() => world.Store.ListAsync(new DeliveryFilter { Limit = 1001 }, Ct));
+        (await world.Store.ListAsync(new DeliveryFilter { Limit = 1000 }, Ct)).ShouldBeEmpty();
+    }
+
+    /// <summary>A cursor and a subscriber filter together continue within that subscriber's deliveries only.</summary>
+    [Fact]
+    public async Task A_page_of_one_subscriber_continues_after_its_cursor_within_that_subscriber()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var events = new List<Guid>();
+        foreach (var key in new[] { KeyA, KeyB, "tickets:c" })
+        {
+            var @event = await world.AppendEventAsync(key);
+            await world.Store.FanOutAsync([Request(@event, Confirm, key), Request(@event, Audit, key)], Ct);
+            events.Add(@event);
+        }
+
+        var first = await world.Store.ListAsync(new DeliveryFilter { Subscriber = Audit, Limit = 1 }, Ct);
+        var rest = await world.Store.ListAsync(new DeliveryFilter { Subscriber = Audit, Limit = 10, After = first[^1].Id }, Ct);
+
+        first.ShouldHaveSingleItem().EventId.ShouldBe(events[2]);
+        rest.Select(delivery => delivery.EventId).ShouldBe([events[1], events[0]]);
+        first.Concat(rest).ShouldAllBe(delivery => delivery.Subscriber == Audit);
+    }
 }

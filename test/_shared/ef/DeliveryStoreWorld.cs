@@ -185,6 +185,27 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
         }
     }
 
+    /// <summary>The engine's plan for a page of one subscriber continuing after a cursor, as one text.</summary>
+    internal async Task<string> ExplainSubscriberPageAsync(string explain)
+    {
+        var filter = new DeliveryFilter { Subscriber = "send-confirmation", After = Guid.NewGuid(), Limit = 50 };
+        var connection = _connect();
+        await using (connection.ConfigureAwait(false))
+        {
+            await connection.OpenAsync(Ct);
+            var command = connection.CreateCommand();
+            await using (command.ConfigureAwait(false))
+            {
+                command.CommandText = $"{explain} {DeliveryOperationsTable.ListSql(_table, filter)}";
+                RelationalSqlBatch.AddParameter(command, "@subscriber", filter.Subscriber);
+                RelationalSqlBatch.AddParameter(command, "@after", filter.After.ToString()!);
+                RelationalSqlBatch.AddParameter(command, "@limit", filter.Limit);
+
+                return await PlanTextAsync(command);
+            }
+        }
+    }
+
     private static async Task ScalarOrNothingAsync(DbConnection connection, string sql)
     {
         var command = connection.CreateCommand();

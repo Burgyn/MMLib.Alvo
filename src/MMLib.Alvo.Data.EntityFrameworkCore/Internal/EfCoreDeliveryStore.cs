@@ -57,7 +57,7 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
                 await OutboxTable.EnsureAsync(connection, _outbox, cancellationToken).ConfigureAwait(false);
                 await DeliveryTable.EnsureAsync(connection, _table, _attempts, _outbox, cancellationToken).ConfigureAwait(false);
                 await RelationalSqlBatch.ExecuteAsync(
-                    connection, DeliveryOperationsTable.Statements(_controls, _log), transaction: null, cancellationToken).ConfigureAwait(false);
+                    connection, DeliveryOperationsTable.Statements(_table, _controls, _log), transaction: null, cancellationToken).ConfigureAwait(false);
             }
         }
     }

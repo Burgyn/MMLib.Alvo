@@ -62,6 +62,21 @@ public sealed class SqliteDeliveryStoreTests : DeliveryStoreContractTests, IDisp
     }
 
     /// <summary>
+    /// A page of one subscriber seeks its (subscriber, id) index past the cursor, newest first — never a scan of every
+    /// subscriber's deliveries followed by a sort.
+    /// </summary>
+    [Fact]
+    public async Task A_page_of_one_subscriber_seeks_its_index_past_the_cursor()
+    {
+        await using var world = await DeliveryStoreWorld.StartAsync(Connect);
+
+        var plan = await world.ExplainSubscriberPageAsync("EXPLAIN QUERY PLAN");
+
+        plan.ShouldContain("USING INDEX ix_alvo_deliveries_subscriber_id (subscriber=? AND id<?)");
+        plan.ShouldNotContain("TEMP B-TREE");
+    }
+
+    /// <summary>
     /// A delivery put back to pending restarts its claim count at one, and the attempt that follows is recorded after the
     /// ones already in its history — not as attempt 1 again, which the history's primary key would refuse.
     /// </summary>

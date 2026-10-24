@@ -65,7 +65,17 @@ public sealed class DeliveryOperationsTableTests
 
     [Fact]
     public void Bringing_the_tables_up_is_idempotent() =>
-        DeliveryOperationsTable.Statements(Controls, Log).ShouldAllBe(statement => statement.Contains("IF NOT EXISTS"));
+        DeliveryOperationsTable.Statements("alvo_deliveries", Controls, Log).ShouldAllBe(statement => statement.Contains("IF NOT EXISTS"));
+
+    /// <summary>A page of one subscriber has its own index, brought up with the operator's tables.</summary>
+    [Fact]
+    public void A_page_of_one_subscriber_has_its_own_index()
+    {
+        var ddl = DeliveryOperationsTable.SubscriberPageIndexDdl("alvo_deliveries");
+
+        ddl.ShouldBe("CREATE INDEX IF NOT EXISTS ix_alvo_deliveries_subscriber_id ON alvo_deliveries (subscriber, id)");
+        DeliveryOperationsTable.Statements("alvo_deliveries", Controls, Log).ShouldContain(ddl);
+    }
 
     /// <summary>An unfiltered page has no <c>WHERE</c>; it seeks by id, newest first, and its size is a parameter.</summary>
     [Fact]

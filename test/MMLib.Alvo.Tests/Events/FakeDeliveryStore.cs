@@ -137,7 +137,9 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
 
     public Task<IReadOnlyList<StoredDelivery>> ListAsync(DeliveryFilter filter, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(filter);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(filter.Limit);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(filter.Limit, 1000);
         lock (_gate)
         {
             return Task.FromResult<IReadOnlyList<StoredDelivery>>([.. Matching(filter)

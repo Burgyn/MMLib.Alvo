@@ -41,6 +41,7 @@ internal sealed partial class EfCoreDeliveryStore
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(filter.Limit);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(filter.Limit, DeliveryOperationsTable.MaxPage);
     }
 
     private static void BindId(DbCommand command, Guid id) => RelationalSqlBatch.AddParameter(command, "@id", id.ToString());

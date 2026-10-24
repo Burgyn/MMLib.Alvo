@@ -20,8 +20,16 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// without its scope: SQL treats <c>NULL</c>s as distinct, so a scope-less key would slip past the unique index.
 /// </para>
 /// <para>
+/// <b>A page seeks, it does not sort.</b> A page orders by the primary key, newest first, and continues with
+/// <c>id &lt; @after</c>, so an unfiltered page walks the primary key backwards and stops at the limit. A page of one
+/// subscriber — the Operations page's common filter — seeks <c>ix_{deliveries}_subscriber_id</c> on
+/// <c>(subscriber, id)</c> the same way. A page filtered by status alone is served either by the claim index on
+/// <c>(status, not_before)</c> followed by a sort, or by the same backwards primary-key walk discarding other statuses; the
+/// engine picks. A rare status (<c>dead</c>) costs at most one pass over the table, bounded by the store's page ceiling.
+/// </para>
+/// <para>
 /// <b>Identifier length.</b> <see cref="AlvoOptions.SchemaPrefix"/> is capped at 16 characters, so the longest name here,
-/// <c>ux_{prefix}_operations_log_key</c>, is at most 38 bytes, inside PostgreSQL's 63-byte identifier limit.
+/// <c>ix_{prefix}_deliveries_subscriber_id</c>, is at most 44 bytes, inside PostgreSQL's 63-byte identifier limit.
 /// </para>
 /// </remarks>
 internal static class DeliveryOperationsTable
@@ -63,8 +71,13 @@ internal static class DeliveryOperationsTable
     internal static string LogKeyIndexDdl(string log) =>
         $"CREATE UNIQUE INDEX IF NOT EXISTS ux_{log}_key ON {log} (idempotency_scope, idempotency_key) WHERE idempotency_key IS NOT NULL";
 
-    internal static IReadOnlyList<string> Statements(string controls, string log) =>
-        [ControlsDdl(controls), LogDdl(log), LogKeyIndexDdl(log)];
+    internal static string SubscriberPageIndexDdl(string deliveries) =>
+        $"CREATE INDEX IF NOT EXISTS ix_{deliveries}_subscriber_id ON {deliveries} (subscriber, id)";
+
+    internal static IReadOnlyList<string> Statements(string deliveries, string controls, string log) =>
+        [SubscriberPageIndexDdl(deliveries), ControlsDdl(controls), LogDdl(log), LogKeyIndexDdl(log)];
+
+    internal const int MaxPage = 1000;
 
     internal const string DeliveryColumns =
         "id, event_id, subscriber, partition_key, tenant_id, kind, status, attempts, not_before, completed_at, last_error_type";

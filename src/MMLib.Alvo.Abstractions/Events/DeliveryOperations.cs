@@ -82,6 +82,9 @@ public sealed record DeliveryFilter
     /// <summary>Gets the delivery id a page continues after: only strictly older deliveries are listed; ignored by a selection.</summary>
     public Guid? After { get; init; }
 
-    /// <summary>Gets a page's size, or a selection's and a replay's sample size; a store refuses zero or less with <see cref="ArgumentOutOfRangeException"/>.</summary>
+    /// <summary>
+    /// Gets a page's size, or a selection's and a replay's sample size; a store refuses zero or less, and a page of more than
+    /// 1 000, with <see cref="ArgumentOutOfRangeException"/>.
+    /// </summary>
     public required int Limit { get; init; }
 }

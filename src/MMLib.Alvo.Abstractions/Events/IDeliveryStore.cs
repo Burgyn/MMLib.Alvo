@@ -224,7 +224,13 @@ public interface IDeliveryStore
     /// <param name="filter">Which deliveries, and how many.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>At most <see cref="DeliveryFilter.Limit"/> deliveries.</returns>
-    /// <exception cref="ArgumentOutOfRangeException"><see cref="DeliveryFilter.Limit"/> is zero or less.</exception>
+    /// <remarks>
+    /// A page is a stable walk, not a snapshot. A delivery id is minted when the delivery is fanned out, in order within one
+    /// process only: a delivery another replica fanned out in the same instant, or one whose fan-out committed after a page
+    /// was read, can carry an id older than the cursor and is then never reached by continuing. Paging forward never
+    /// repeats or skips a delivery that existed when its page was read; to see late arrivals, read again from the newest.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="DeliveryFilter.Limit"/> is zero or less, or more than 1 000.</exception>
     Task<IReadOnlyList<StoredDelivery>> ListAsync(DeliveryFilter filter, CancellationToken cancellationToken = default);
 
     /// <summary>One delivery, with its stored envelope.</summary>
