@@ -1,8 +1,8 @@
 # The Management API
 
-The configuration surface: twelve HTTP routes over one service, `IAlvoManagement`, that read and change what a
-project **is** — its descriptor, its revision history, its resolved schema, what this build honours, and who
-a policy would admit. It never reads or writes a row of application data. That is not an omission; it is
+The configuration surface: twenty-one HTTP routes over two services — `IAlvoManagement`, and `IAlvoUserAdministration`
+for *Administering people* — that read and change what a project **is** — its descriptor, its revision history, its
+resolved schema, what this build honours, the host code registered with it, and who a policy would admit. It never reads or writes a row of application data. That is not an omission; it is
 deviation **D4**, and the whole shape of this document follows from it.
 
 Mounted by `MapAlvo()` under `Alvo:Management:RoutePrefix` (default `/management`), and closed: every route
@@ -22,6 +22,7 @@ because it is infrastructure configuration rather than a block a locked-out proj
 | `GET {m}/projects/{project}/schema` | `GetSchemaAsync` | `viewer` |
 | `GET {m}/projects/{project}/capabilities` | `GetCapabilitiesAsync` | `viewer` |
 | `GET {m}/projects/{project}/cel/functions` | `GetCelFunctionsAsync` | `viewer` |
+| `GET {m}/projects/{project}/extensions` | `GetExtensionsAsync` | `viewer` |
 | `POST {m}/projects/{project}/policy/simulate` | `SimulatePolicyAsync` | `viewer` |
 | `POST {m}/projects/{project}/cel/check` | `CheckExpressionAsync` | `developer` |
 | `PUT {m}/projects/{project}/descriptor` | `ApplyDescriptorAsync` | `developer` |
@@ -50,7 +51,7 @@ the code is right.
 
 **The level is not on the route.** A route carries a `ManagementOperation`; `ManagementOperations` is the
 one table mapping an operation to the level it needs, and an operation it does not list requires `admin` —
-the most restrictive answer, not the most convenient one. Two of the fifteen operations
+the most restrictive answer, not the most convenient one. Two of the seventeen operations
 (`ManageApiKeys`, `DeleteProject`) have no route at all; see *What is deliberately absent*.
 `ManageUsers` gained seven in F5 — see *Administering people*.
 
@@ -166,6 +167,42 @@ condition — so an action slot is asked about in a hook without its condition (
   `policy/simulate` already covers rules.
 * No `Position`: the validator folds `CelCompilationError.Position` into the message; an underline needs a
   caret, and the property is additive when an editor needs it.
+
+## Extensions
+
+`GET {m}/projects/{project}/extensions` (`GetExtensionsAsync`, operation `GetExtensions`, `viewer`) lists the host code
+registered with this instance as metadata — `{ "items": [ … ] }` of `ManagementExtension`: `id`, `kind`
+(`eventHandler`), `stage` (`postCommit`), `entities` (`["*"]` for every entity, `[]` for an application event, whose type
+is in `event`), `operations` (the policy's `create`/`update`/`delete`), `when`, `order`, `timeout`, `runAs`
+(`system`/`eventActor`), `ordering` (`perRecord`/`none`), `description`, `typeName`. Registrations, not bindings, by
+`order` then registration order; a retired id is not listed. Like `cel/functions` it is Viewer and per instance, and
+project-scoped for symmetry: it discloses ids, conditions and the host developer's own descriptions. `typeName` stays
+`null` unless `Alvo:Extensions:ExposeTypeNames` is `true` (default `false`), because a type name describes the host's
+code to every Viewer and to the assistant's model; a delegate is never named. HX-04 ships only the members it fills —
+§4.13's others arrive with the PR that first fills each (spec §4.13 *HX-04 settled details* (1)).
+
+It is threaded through two existing answers. The capability report's `honoured` gains `extensions.<kind>` after the five
+blocks, per request and only for kinds registered (the static list the skill region and the prototype hold stays the
+blocks). `ManagementPolicyVerdict.Extensions` (init, default `[]`) lists the entity's own and every-entity extensions
+whose `operations` contain the simulated operation; rendering it is HX-09's.
+
+**The apply guard.** `ExtensionApplyGuard` keeps an apply from unbinding a handler. It is **change-based**: a change is
+refused only when a handler that binds the current catalog (`IPolicyCatalogProvider.Current`) would not bind the
+proposed one, judged by HX-03's own binding compiler through the binder's per-catalog cache, so it cannot drift from the
+boot. It runs at every site that accepts a catalog outside the boot — `RuntimeSchemaService.ApplyAsync`,
+`PreviewAsync` (the dashboard's preview and `?dryRun=true`, a rollback's dry run included) and `RollbackAsync`, and
+`SchemaMigrationRunner.RunAsync` (`ApplyAlvoDescriptorAsync`) — **right after validation, before the revision check**,
+the plan and the destructive guardrail, so a stale `If-Match` on an unbinding change answers 422, not 412. The refusal
+is a `DescriptorValidationException`, `422 validation` with violation code `descriptor`: pointed violations at
+`/entities/<e>` (entity removed), `/entities/<e>/fields/<f>` (field removed, renamed, or retyped so the condition no
+longer compiles) and `/entities/<e>/events/exclude/<i>` (field excluded), each naming the extension as `'<id>'
+(eventHandler, in this host)`, and **beside them** the compiler's own sentence for every problem at `""`. A handler
+bound by **neither** catalog — a dashboard-first host's first descriptor, a stored boot that ended `Failed` — blocks
+nothing: it is a warning on the preview result (internal `ManagementApplyResult.Warnings`, read by the assistant, not on
+the wire). The guard reads the in-process current catalog: two applies racing before either publishes, or an apply on
+another replica, are not covered — the same window the catalog publish already has. With no handler registered it costs
+nothing; with one, a Management apply builds the proposed catalog twice (preview, then apply) and publishes the very
+instance it checked. A `RuntimeSchemaService` a host constructs itself through the public constructor carries no guard.
 
 ## One path, two transports
 
@@ -483,7 +520,8 @@ engine makes "no such entity" indistinguishable from "not authorised" and reprod
 "the same engine" means.
 
 **`branding`, from both capability lists.** `GET {m}/projects/{project}/capabilities` reports three arrays:
-`honoured` (`entities`, `auth`, `tenancy`, `access`, `formats`), `warned` (the five unhonoured subsystems,
+`honoured` (`entities`, `auth`, `tenancy`, `access`, `formats`, then `extensions.<kind>` per registered kind — see
+*Extensions*), `warned` (the five unhonoured subsystems,
 each with the framework's own sentence for what does not happen), and `refused` (the features an apply
 rejects outright). The block question is decided by the first two, and they are deliberately not the whole
 schema: `branding` is in neither. It is not warned, because an

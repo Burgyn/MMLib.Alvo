@@ -22,13 +22,14 @@ checked, which you then review and apply. About ten minutes, starting from a run
 
 The assistant reads the project and runs dry runs. It **cannot apply anything**: there is no apply tool in its tool
 set, so no instruction, however it is phrased, gives it one. Every change it makes is a proposal you review and apply.
-The table is its complete tool set: five reads, two dry runs and two skill readers.
+The table is its complete tool set: six reads, two dry runs and two skill readers.
 
 | It may call | What for |
 |---|---|
-| `get_descriptor`, `get_schema` | the current descriptor and the revision a change must be written against, and the resolved schema |
+| `get_descriptor`, `get_schema` | the current descriptor, the revision a change must be written against and `hostExtensions`, how many host extensions run on each entity; and the resolved schema |
 | `get_capabilities` | what this build honours, so it says "not in this build" instead of writing a key nothing runs |
 | `get_cel_functions` | the CEL functions this host knows, built in and registered by the host, with the profiles each works in |
+| `get_extensions` | the host code (extensions) this host registers and what each binds, read-only |
 | `get_revisions` | what changed recently, and why |
 | `check_change`, `propose_change` | a dry run of a change: "would this apply?", and the only way a change becomes a proposal |
 | `load_skill`, `read_skill_resource` | the nine descriptor skills, and the schema slices they cite |
@@ -42,6 +43,9 @@ What follows from that:
   assistant reads the refusal, fixes the draft and tries again within the same turn, a bounded number of times.
 - **It cannot drop data.** Its dry runs never allow a destructive plan, so a change that would drop a column comes back
   as a refusal it has to show you.
+- **It knows your host code.** Before an after-hook on an entity that `hostExtensions` counts, it reads
+  `get_extensions` and names an extension that already does what you asked instead of adding a second one, and it
+  does not propose removing a field an extension reads ([details](/extending/extension-catalog/#the-assistant)).
 - **It says "proposed", never "done"**, and answers in the language you wrote in. It quotes what this build cannot do
   from `get_capabilities` rather than from memory.
 

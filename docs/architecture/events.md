@@ -1091,10 +1091,16 @@ envelope's `traceparent` (a parent would take the span out of the test host's re
 `alvo.delivery.attempt`. Metrics on `MMLib.Alvo.Events`: `alvo.delivery.duration`, `alvo.delivery.attempts{alvo.outcome}`,
 `alvo.delivery.lag`, `alvo.delivery.dead{alvo.reason}`, `alvo.delivery.abandoned`.
 
-**Unbound handlers.** A registered handler that does not fit a catalog the boot plan did not bind (a runtime apply,
-`ApplyAlvoDescriptorAsync`, or — in the manual mode only — a dashboard-first host's first catalog) is logged `ExtensionUnbound` once and gets a dead
+**Unbound handlers.** Since HX-04 no apply path can unbind a bound handler: the extension apply guard
+(`ExtensionApplyGuard`) refuses a runtime apply, its dry run, a rollback and `ApplyAlvoDescriptorAsync` whenever a
+handler that binds the current catalog (`IPolicyCatalogProvider.Current`) would not bind the proposed one — a
+`DescriptorValidationException` naming the handler, answered before the revision check. The guard is change-based, so
+`unbound` rows remain the record for a handler that **never** bound: a dashboard-first host's first descriptor (in the
+manual mode only — see below), a stored boot that ended `Failed`, or a host that primes `IPolicyCatalogProvider`
+itself. Such a handler blocks no apply (the dry run carries a warning), is logged `ExtensionUnbound` once and gets a dead
 `unbound` delivery (`DeliveryRequest.UnboundReason`) for every event its source selects — never a silent drop, never a
-binding against a stale catalog. An `unbound` row does **not** block its lane: it is selected without `when`, so it may
+binding against a stale catalog. The guard reads the in-process current catalog, so two applies racing before either
+publishes, or an apply on another replica, are outside it — the window the catalog publish already has. An `unbound` row does **not** block its lane: it is selected without `when`, so it may
 name records the condition would never have matched; once the handler rebinds, later events flow and the missed ones
 wait for HX-06's replay. In the background mode a dashboard-first host that booted `Awaiting` never reaches that lenient
 first catalog: both dispatchers stand down on a boot that primed no catalog — logged as Warnings
