@@ -35,7 +35,7 @@ internal static class RecordValue
     private static InvalidOperationException Unheld(RecordShape shape, MappedProperty property, object raw) => new(
         property.Enum is { } map
             ? $"Field '{property.Field}' holds a value {map.Type.Name} has no member for: name the member's value with [AlvoEnumValue(\"…\")]."
-            : $"Field '{property.Field}' holds a {raw.GetType().Name}, which {shape.Name}.{property.Property.Name} ({property.ValueType.Name}) cannot take.");
+            : $"Field '{property.Field}' holds {ShapeProblems.WithArticle(raw.GetType().Name)}, which {shape.Name}.{property.Property.Name} ({property.ValueType.Name}) cannot take.");
 
     private static object? Held(object raw, MappedProperty property)
     {

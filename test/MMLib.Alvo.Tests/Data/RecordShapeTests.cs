@@ -96,6 +96,36 @@ public sealed class RecordShapeTests
     }
 
     [Fact]
+    public void A_text_property_on_an_integer_field_reads_with_its_article()
+    {
+        var entity = TypedFixtures.OrdersSchema with
+        {
+            Fields = [.. TypedFixtures.OrdersSchema.Fields.Select(field => field.Name == "note" ? field with { Type = FieldType.Integer } : field)],
+        };
+
+        ShapeMapping.Problems(RecordShape.Of(typeof(Order)), entity, fromEventImages: false).ShouldHaveSingleItem()
+            .Message.ShouldBe("Order.Note is a String, but 'note' is an integer field, which holds Int64 or Int32.");
+    }
+
+    [Fact]
+    public void The_constructor_arguments_and_the_setters_are_planned_once()
+    {
+        var line = RecordShape.Of(typeof(OrderLine));
+        var order = RecordShape.Of(typeof(Order));
+
+        line.Arguments.Select(property => property.Property.Name).ShouldBe([nameof(OrderLine.Id), nameof(OrderLine.Note), nameof(OrderLine.Total)]);
+        line.Settable.ShouldBeEmpty();
+        order.Arguments.ShouldBeEmpty();
+        order.Settable.Count.ShouldBe(order.Properties.Count);
+    }
+
+    [Fact]
+    public void An_abstract_type_is_refused_with_a_fix() =>
+        RecordShape.Of(typeof(AbstractNote)).Problems.ShouldHaveSingleItem().ShouldSatisfyAllConditions(
+            problem => problem.Message.ShouldBe("AbstractNote is abstract, so Alvo cannot create one."),
+            problem => problem.Fix.ShouldBe("Map a concrete type that derives from AbstractNote."));
+
+    [Fact]
     public void A_constructor_parameter_must_take_its_property_s_type() =>
         RecordShape.Of(typeof(MistypedParameter)).Constructor.ShouldBeNull();
 
@@ -140,7 +170,7 @@ public sealed class RecordShapeTests
         };
 
         ShapeMapping.Problems(RecordShape.Of(typeof(Order)), entity, fromEventImages: false).ShouldHaveSingleItem()
-            .Message.ShouldBe("Order.Quantity is a Int64, but 'quantity' is a string field, which holds String.");
+            .Message.ShouldBe("Order.Quantity is an Int64, but 'quantity' is a string field, which holds String.");
     }
 
     [Fact]

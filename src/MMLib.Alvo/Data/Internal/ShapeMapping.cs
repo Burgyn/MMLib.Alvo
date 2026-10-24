@@ -50,7 +50,7 @@ internal static class ShapeMapping
     }
 
     private static ShapeProblem Mistyped(string owner, MappedProperty property, FieldSchema field) => new(
-        $"{owner} is a {property.ValueType.Name}, but '{field.Name}' is a {field.Type.ToString().ToLowerInvariant()} field, which holds {Held(field)}.",
+        $"{owner} is {ShapeProblems.WithArticle(property.ValueType.Name)}, but '{field.Name}' is {ShapeProblems.WithArticle(field.Type.ToString().ToLowerInvariant())} field, which holds {Held(field)}.",
         $"Declare {owner} as {Held(field)}.");
 
     private static string Held(FieldSchema field) => field.Type switch

@@ -216,6 +216,37 @@ public sealed class MistypedParameter(string level)
     public long Level { get; init; } = level.Length;
 }
 
+public abstract class AbstractNote
+{
+    public string? Note { get; init; }
+}
+
+public sealed class RefusingNote
+{
+    private readonly string? _note;
+
+    public string? Note
+    {
+        get => _note;
+        init
+        {
+            _note = value;
+            throw new ArgumentException("The host refuses this note.");
+        }
+    }
+}
+
+public sealed class RefusingView : IAlvoEntity
+{
+    public RefusingView(AlvoRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        throw new ArgumentException("The host refuses this record.");
+    }
+
+    public AlvoRecord Record => AlvoRecord.Empty;
+}
+
 /// <summary>Host types, the <c>orders</c> entity they map, and records shaped as event images carry them.</summary>
 public static class TypedFixtures
 {

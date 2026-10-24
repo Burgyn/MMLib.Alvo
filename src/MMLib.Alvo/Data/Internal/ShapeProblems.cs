@@ -14,8 +14,17 @@ internal static class ShapeProblems
     internal static IReadOnlyList<ShapeProblem> Of(RecordShape shape) =>
         [.. Construction(shape), .. FieldNames(shape), .. SharedFields(shape), .. shape.Properties.SelectMany(property => Values(shape, property))];
 
+    internal static string WithArticle(string word) =>
+        $"{("AEIOUaeiou".Contains(word[0], StringComparison.Ordinal) ? "an" : "a")} {word}";
+
     private static IEnumerable<ShapeProblem> Construction(RecordShape shape)
     {
+        if (shape.Type.IsAbstract)
+        {
+            yield return new($"{shape.Name} is abstract, so Alvo cannot create one.", $"Map a concrete type that derives from {shape.Name}.");
+            yield break;
+        }
+
         if (shape.Constructor is not null)
         {
             yield break;

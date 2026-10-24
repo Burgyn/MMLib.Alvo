@@ -3,6 +3,7 @@
 namespace MMLib.Alvo.Data.Internal;
 
 /// <summary>Builds a host type from a record through the constructor its shape chose, then its remaining public setters.</summary>
+/// <remarks>The host's own constructor or setter exception surfaces as itself, not wrapped in a <see cref="TargetInvocationException"/>.</remarks>
 internal static class RecordMaterializer
 {
     internal static object Create(RecordShape shape, AlvoRecord record)
@@ -19,21 +20,20 @@ internal static class RecordMaterializer
     {
         var missing = shape.Properties.FirstOrDefault(property => !record.TryGetValue(property.Field, out _));
 
-        return missing is null ? shape.Constructor!.Invoke([record]) : throw RecordValue.Missing(shape, missing);
+        return missing is null ? Construct(shape, [record]) : throw RecordValue.Missing(shape, missing);
     }
 
     private static object Built(RecordShape shape, AlvoRecord record)
     {
-        var parameters = shape.Constructor!.GetParameters();
-        var instance = shape.Constructor.Invoke([.. parameters.Select(parameter => RecordValue.Read(shape, record, RecordShape.ParameterProperty(parameter, shape.Properties)!))]);
-        foreach (var property in shape.Properties.Where(property => property.Property.SetMethod is { IsPublic: true } && !Passed(property, parameters)))
+        var instance = Construct(shape, [.. shape.Arguments.Select(property => RecordValue.Read(shape, record, property))]);
+        foreach (var property in shape.Settable)
         {
-            property.Property.SetValue(instance, RecordValue.Read(shape, record, property));
+            property.Property.SetValue(instance, RecordValue.Read(shape, record, property), BindingFlags.DoNotWrapExceptions, binder: null, index: null, culture: null);
         }
 
         return instance;
     }
 
-    private static bool Passed(MappedProperty property, ParameterInfo[] parameters) =>
-        parameters.Any(parameter => string.Equals(parameter.Name, property.Property.Name, StringComparison.OrdinalIgnoreCase));
+    private static object Construct(RecordShape shape, object?[] arguments) =>
+        shape.Constructor!.Invoke(BindingFlags.DoNotWrapExceptions, binder: null, arguments, culture: null);
 }

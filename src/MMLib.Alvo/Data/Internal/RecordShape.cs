@@ -34,6 +34,8 @@ internal sealed class RecordShape
         _byName = Properties.GroupBy(property => property.Property.Name, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
         Constructor = IsWrapper ? type.GetConstructor([typeof(AlvoRecord)]) : Callable(type, Properties);
+        Arguments = IsWrapper ? [] : ArgumentsOf(Constructor, Properties);
+        Settable = [.. Properties.Where(property => property.Property.SetMethod is { IsPublic: true } && !Arguments.Contains(property))];
         Problems = ShapeProblems.Of(this);
     }
 
@@ -50,6 +52,12 @@ internal sealed class RecordShape
     internal IReadOnlyList<MappedProperty> Properties { get; }
 
     internal ConstructorInfo? Constructor { get; }
+
+    /// <summary>The mapped property behind each of <see cref="Constructor"/>'s parameters, in order; empty for a wrapper.</summary>
+    internal IReadOnlyList<MappedProperty> Arguments { get; }
+
+    /// <summary>The mapped properties set after construction: a public setter, and not passed to the constructor.</summary>
+    internal IReadOnlyList<MappedProperty> Settable { get; }
 
     internal IReadOnlyList<ShapeProblem> Problems { get; }
 
@@ -71,6 +79,9 @@ internal sealed class RecordShape
         type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(property => property.GetIndexParameters().Length == 0 && property.GetMethod is { IsPublic: true })
             .Where(property => property.SetMethod is { IsPublic: true } || Attribute.IsDefined(property, typeof(AlvoFieldAttribute), inherit: true));
+
+    private static MappedProperty[] ArgumentsOf(ConstructorInfo? constructor, IReadOnlyList<MappedProperty> properties) =>
+        constructor is null ? [] : [.. constructor.GetParameters().Select(parameter => ParameterProperty(parameter, properties)!)];
 
     private static ConstructorInfo? Callable(Type type, IReadOnlyList<MappedProperty> properties)
     {

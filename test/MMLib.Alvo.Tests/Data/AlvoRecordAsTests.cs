@@ -83,6 +83,19 @@ public sealed class AlvoRecordAsTests
         Should.Throw<InvalidOperationException>(() => OrderRecord(("note", Absent)).As<OrderView>()).Message.ShouldContain("'note'");
 
     [Fact]
+    public void A_setter_s_own_exception_surfaces_unwrapped() =>
+        Should.Throw<ArgumentException>(() => OrderRecord().As<RefusingNote>()).Message.ShouldBe("The host refuses this note.");
+
+    [Fact]
+    public void A_wrapper_constructor_s_own_exception_surfaces_unwrapped() =>
+        Should.Throw<ArgumentException>(() => OrderRecord().As<RefusingView>()).Message.ShouldBe("The host refuses this record.");
+
+    [Fact]
+    public void A_value_the_property_cannot_take_names_its_type_with_its_article() =>
+        Should.Throw<InvalidOperationException>(() => OrderRecord(("note", 3L)).As<Order>()).Message
+            .ShouldBe("Field 'note' holds an Int64, which Order.Note (String) cannot take.");
+
+    [Fact]
     public void A_type_with_a_shape_problem_cannot_be_read() =>
         Should.Throw<InvalidOperationException>(() => AlvoRecord.Empty.As<TicketWithScore>()).Message.ShouldContain("Double");
 }
