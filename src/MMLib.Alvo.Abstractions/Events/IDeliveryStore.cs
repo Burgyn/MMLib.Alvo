@@ -154,6 +154,11 @@ public sealed record DeliveryFailure
 /// exception, when the claim no longer holds. A late finisher whose lease was reclaimed, a second answer for one attempt,
 /// and an answer for a delivery retired while it ran all change nothing.
 /// </para>
+/// <para>
+/// <b>The operator's members</b> read deliveries, put finished ones back to pending, pause a subscriber and record each of
+/// those changes in the operations log in the same transaction as the change; a member that changes nothing records nothing.
+/// They are abstract: a default that did nothing would report success and leave a dead delivery's lane blocked.
+/// </para>
 /// </remarks>
 public interface IDeliveryStore
 {
@@ -214,4 +219,23 @@ public interface IDeliveryStore
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>How many deliveries were cancelled.</returns>
     Task<int> CancelPendingAsync(string subscriber, CancellationToken cancellationToken = default);
+
+    /// <summary>A page of deliveries, newest first — by delivery id — strictly after <see cref="DeliveryFilter.After"/>, without payloads.</summary>
+    /// <param name="filter">Which deliveries, and how many.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>At most <see cref="DeliveryFilter.Limit"/> deliveries.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="DeliveryFilter.Limit"/> is zero or less.</exception>
+    Task<IReadOnlyList<StoredDelivery>> ListAsync(DeliveryFilter filter, CancellationToken cancellationToken = default);
+
+    /// <summary>One delivery, with its stored envelope.</summary>
+    /// <param name="id">The delivery id.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The delivery, or <see langword="null"/> when no fan-out recorded it.</returns>
+    Task<StoredDelivery?> FindAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>A delivery's recorded attempts, ascending.</summary>
+    /// <param name="id">The delivery id.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The attempts; none for an unknown id.</returns>
+    Task<IReadOnlyList<StoredDeliveryAttempt>> AttemptsAsync(Guid id, CancellationToken cancellationToken = default);
 }

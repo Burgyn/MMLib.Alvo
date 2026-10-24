@@ -216,6 +216,15 @@ public sealed class ExtensionStateGuardTests : IDisposable
         public Task<int> CancelPendingAsync(string subscriber, CancellationToken cancellationToken = default) =>
             Built(() => inner.CancelPendingAsync(subscriber, cancellationToken));
 
+        public Task<IReadOnlyList<StoredDelivery>> ListAsync(DeliveryFilter filter, CancellationToken cancellationToken = default) =>
+            Built(() => inner.ListAsync(filter, cancellationToken));
+
+        public Task<StoredDelivery?> FindAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Built(() => inner.FindAsync(id, cancellationToken));
+
+        public Task<IReadOnlyList<StoredDeliveryAttempt>> AttemptsAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Built(() => inner.AttemptsAsync(id, cancellationToken));
+
         private Task<T> Built<T>(Func<Task<T>> read) =>
             Ensured ? read() : throw new InvalidOperationException("no such table: alvo_deliveries");
     }

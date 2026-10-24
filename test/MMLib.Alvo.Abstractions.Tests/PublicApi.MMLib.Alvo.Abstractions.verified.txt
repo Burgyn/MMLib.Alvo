@@ -1136,6 +1136,17 @@ namespace MMLib.Alvo.Events
         public required int MaxAttempts { get; init; }
         public System.TimeSpan? RetryAfter { get; init; }
     }
+    public sealed class DeliveryFilter : System.IEquatable<MMLib.Alvo.Events.DeliveryFilter>
+    {
+        public DeliveryFilter() { }
+        public System.Guid? After { get; init; }
+        public System.Guid? FromEventId { get; init; }
+        public required int Limit { get; init; }
+        public string? PartitionKey { get; init; }
+        public string? Status { get; init; }
+        public string? Subscriber { get; init; }
+        public System.Guid? ToEventId { get; init; }
+    }
     public sealed class DeliveryRequest : System.IEquatable<MMLib.Alvo.Events.DeliveryRequest>
     {
         public const string UnboundReason = "unbound";
@@ -1153,6 +1164,7 @@ namespace MMLib.Alvo.Events
     }
     public interface IDeliveryStore
     {
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.StoredDeliveryAttempt>> AttemptsAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<int> CancelPendingAsync(string subscriber, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.ClaimedDelivery>> ClaimAsync(MMLib.Alvo.Events.DeliveryClaim claim, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> CompleteAsync(MMLib.Alvo.Events.DeliveryAttempt attempt, System.Threading.CancellationToken cancellationToken = default);
@@ -1160,6 +1172,8 @@ namespace MMLib.Alvo.Events
         System.Threading.Tasks.Task EnsureAsync(System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> FailAsync(MMLib.Alvo.Events.DeliveryAttempt attempt, MMLib.Alvo.Events.DeliveryFailure failure, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<int> FanOutAsync(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.DeliveryRequest> requests, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Events.StoredDelivery?> FindAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.StoredDelivery>> ListAsync(MMLib.Alvo.Events.DeliveryFilter filter, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> PendingSubscribersAsync(System.Threading.CancellationToken cancellationToken = default);
     }
     public interface IEmailSender
@@ -1183,6 +1197,31 @@ namespace MMLib.Alvo.Events
         public string PartitionKey { get; init; }
         public string Payload { get; init; }
         public string Type { get; init; }
+    }
+    public sealed class StoredDelivery : System.IEquatable<MMLib.Alvo.Events.StoredDelivery>
+    {
+        public StoredDelivery() { }
+        public required int Attempts { get; init; }
+        public System.DateTimeOffset? CompletedAt { get; init; }
+        public required System.Guid EventId { get; init; }
+        public required System.Guid Id { get; init; }
+        public required string Kind { get; init; }
+        public string? LastErrorType { get; init; }
+        public required System.DateTimeOffset NotBefore { get; init; }
+        public required string PartitionKey { get; init; }
+        public string? Payload { get; init; }
+        public required string Status { get; init; }
+        public required string Subscriber { get; init; }
+        public string? TenantId { get; init; }
+    }
+    public sealed class StoredDeliveryAttempt : System.IEquatable<MMLib.Alvo.Events.StoredDeliveryAttempt>
+    {
+        public StoredDeliveryAttempt() { }
+        public required int Attempt { get; init; }
+        public required System.TimeSpan Duration { get; init; }
+        public string? ErrorType { get; init; }
+        public required string Outcome { get; init; }
+        public required System.DateTimeOffset StartedAt { get; init; }
     }
 }
 namespace MMLib.Alvo.Expressions

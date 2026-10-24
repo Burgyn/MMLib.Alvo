@@ -66,4 +66,31 @@ public sealed class DeliveryOperationsTableTests
     [Fact]
     public void Bringing_the_tables_up_is_idempotent() =>
         DeliveryOperationsTable.Statements(Controls, Log).ShouldAllBe(statement => statement.Contains("IF NOT EXISTS"));
+
+    /// <summary>An unfiltered page has no <c>WHERE</c>; it seeks by id, newest first, and its size is a parameter.</summary>
+    [Fact]
+    public void An_unfiltered_page_seeks_by_id_newest_first() =>
+        DeliveryOperationsTable.ListSql("alvo_deliveries", new() { Limit = 5 }).ShouldBe(
+            $"SELECT {DeliveryOperationsTable.DeliveryColumns} FROM alvo_deliveries ORDER BY id DESC LIMIT @limit");
+
+    /// <summary>Every filter value is a parameter, and the keyset term belongs to a page only, never to a selection.</summary>
+    [Fact]
+    public void Every_filter_value_is_a_parameter_and_the_keyset_term_is_a_page_s_only()
+    {
+        var filter = new MMLib.Alvo.Events.DeliveryFilter
+        {
+            Subscriber = "x'; DROP TABLE t; --",
+            PartitionKey = "tickets:a",
+            Status = "dead",
+            FromEventId = Guid.NewGuid(),
+            ToEventId = Guid.NewGuid(),
+            After = Guid.NewGuid(),
+            Limit = 5,
+        };
+        const string Terms =
+            "subscriber = @subscriber AND partition_key = @partition_key AND status = @status AND event_id >= @from_event AND event_id < @to_event";
+
+        DeliveryOperationsTable.Conditions(filter, keyset: true).ShouldBe(Terms + " AND id < @after");
+        DeliveryOperationsTable.Conditions(filter, keyset: false).ShouldBe(Terms);
+    }
 }

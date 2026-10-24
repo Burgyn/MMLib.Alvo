@@ -1,8 +1,10 @@
-﻿namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+﻿using MMLib.Alvo.Events;
+
+namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
 /// <summary>
-/// The operator's two tables — the pause control and the operations log — and, from the next task on, every statement the
-/// operator's members of <c>IDeliveryStore</c> run; identical on both shipped engines, as the delivery tables' are.
+/// The operator's two tables — the pause control and the operations log — and every statement the operator's members of
+/// <c>IDeliveryStore</c> run; identical on both shipped engines, as the delivery tables' are.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -63,4 +65,39 @@ internal static class DeliveryOperationsTable
 
     internal static IReadOnlyList<string> Statements(string controls, string log) =>
         [ControlsDdl(controls), LogDdl(log), LogKeyIndexDdl(log)];
+
+    internal const string DeliveryColumns =
+        "id, event_id, subscriber, partition_key, tenant_id, kind, status, attempts, not_before, completed_at, last_error_type";
+
+    internal static string ListSql(string table, DeliveryFilter filter) =>
+        $"SELECT {DeliveryColumns} FROM {table}{Where(filter, keyset: true)} ORDER BY id DESC LIMIT @limit";
+
+    internal static string FindSql(string table) => $"SELECT {DeliveryColumns} FROM {table} WHERE id = @id";
+
+    internal static string AttemptsSql(string attempts) =>
+        $"SELECT attempt, started_at, duration_ms, outcome, error_type FROM {attempts} WHERE delivery_id = @id ORDER BY attempt";
+
+    internal static string Conditions(DeliveryFilter filter, bool keyset)
+    {
+        var terms = new List<string>();
+        AddWhen(terms, filter.Subscriber is not null, "subscriber = @subscriber");
+        AddWhen(terms, filter.PartitionKey is not null, "partition_key = @partition_key");
+        AddWhen(terms, filter.Status is not null, "status = @status");
+        AddWhen(terms, filter.FromEventId is not null, "event_id >= @from_event");
+        AddWhen(terms, filter.ToEventId is not null, "event_id < @to_event");
+        AddWhen(terms, keyset && filter.After is not null, "id < @after");
+
+        return string.Join(" AND ", terms);
+    }
+
+    private static string Where(DeliveryFilter filter, bool keyset) =>
+        Conditions(filter, keyset) is { Length: > 0 } terms ? $" WHERE {terms}" : string.Empty;
+
+    private static void AddWhen(List<string> terms, bool present, string term)
+    {
+        if (present)
+        {
+            terms.Add(term);
+        }
+    }
 }

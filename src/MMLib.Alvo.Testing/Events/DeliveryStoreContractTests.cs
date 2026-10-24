@@ -11,7 +11,7 @@ namespace MMLib.Alvo.Testing.Events;
 /// per-lane order, retry, the attempt ceiling, lease recovery and fenced completion.
 /// </summary>
 /// <remarks>Inherited unchanged by both shipped drivers and by any external one; everything engine-specific arrives through <see cref="WorldAsync"/>.</remarks>
-public abstract class DeliveryStoreContractTests
+public abstract partial class DeliveryStoreContractTests
 {
     private const string Kind = "handler";
     private const string Claimant = "worker-1";

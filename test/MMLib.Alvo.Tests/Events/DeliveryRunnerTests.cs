@@ -760,6 +760,14 @@ public sealed class DeliveryRunnerTests : IDisposable
         public Task<int> CancelPendingAsync(string subscriber, CancellationToken cancellationToken = default) =>
             inner.CancelPendingAsync(subscriber, cancellationToken);
 
+        public Task<IReadOnlyList<StoredDelivery>> ListAsync(DeliveryFilter filter, CancellationToken cancellationToken = default) =>
+            inner.ListAsync(filter, cancellationToken);
+
+        public Task<StoredDelivery?> FindAsync(Guid id, CancellationToken cancellationToken = default) => inner.FindAsync(id, cancellationToken);
+
+        public Task<IReadOnlyList<StoredDeliveryAttempt>> AttemptsAsync(Guid id, CancellationToken cancellationToken = default) =>
+            inner.AttemptsAsync(id, cancellationToken);
+
         private Task<bool> Answer(Func<Task<bool>> answer)
         {
             onAnswer?.Invoke();

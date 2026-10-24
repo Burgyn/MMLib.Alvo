@@ -39,4 +39,12 @@ internal sealed class FailingFirstFanOut(IDeliveryStore inner) : IDeliveryStore
 
     public Task<int> CancelPendingAsync(string subscriber, CancellationToken cancellationToken = default) =>
         inner.CancelPendingAsync(subscriber, cancellationToken);
+
+    public Task<IReadOnlyList<StoredDelivery>> ListAsync(DeliveryFilter filter, CancellationToken cancellationToken = default) =>
+        inner.ListAsync(filter, cancellationToken);
+
+    public Task<StoredDelivery?> FindAsync(Guid id, CancellationToken cancellationToken = default) => inner.FindAsync(id, cancellationToken);
+
+    public Task<IReadOnlyList<StoredDeliveryAttempt>> AttemptsAsync(Guid id, CancellationToken cancellationToken = default) =>
+        inner.AttemptsAsync(id, cancellationToken);
 }

@@ -18,6 +18,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     private readonly Dictionary<Guid, string> _payloads = [];
     private readonly Dictionary<Guid, (string Key, bool Dispatched, int Attempts, DateTimeOffset? ClaimedAt, bool Held)> _outbox = [];
     private readonly List<(Guid Delivery, int Attempt, string Outcome)> _attempts = [];
+    private readonly List<(Guid Delivery, DateTimeOffset StartedAt, TimeSpan Duration, string Outcome, string? ErrorType)> _history = [];
 
     internal int FanOutFailures { get; set; }
 
@@ -110,13 +111,13 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     }
 
     public Task<bool> CompleteAsync(DeliveryAttempt attempt, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Answer(attempt, Succeed, "succeeded"));
+        Task.FromResult(Answer(attempt, Succeed, "succeeded", errorType: null));
 
     public Task<bool> FailAsync(DeliveryAttempt attempt, DeliveryFailure failure, CancellationToken cancellationToken = default)
     {
         var dead = failure.RetryAfter is null || attempt.Delivery.Attempts >= failure.MaxAttempts;
 
-        return Task.FromResult(Answer(attempt, row => Fail(row, failure, dead), dead ? "dead" : "failed"));
+        return Task.FromResult(Answer(attempt, row => Fail(row, failure, dead), dead ? "dead" : "failed", failure.ErrorType));
     }
 
     public Task<IReadOnlyList<string>> PendingSubscribersAsync(CancellationToken cancellationToken = default)
@@ -134,6 +135,68 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     public Task<int> CancelPendingAsync(string subscriber, CancellationToken cancellationToken = default) =>
         Task.FromResult(End(subscriber, "cancelled", "retired"));
 
+    public Task<IReadOnlyList<StoredDelivery>> ListAsync(DeliveryFilter filter, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(filter.Limit);
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<StoredDelivery>>([.. Matching(filter)
+                .Where(row => filter.After is not { } after || string.CompareOrdinal(row.Id.ToString(), after.ToString()) < 0)
+                .OrderByDescending(row => row.Id.ToString(), StringComparer.Ordinal)
+                .Take(filter.Limit)
+                .Select(Stored)]);
+        }
+    }
+
+    public Task<StoredDelivery?> FindAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult(_rows.SingleOrDefault(row => row.Id == id) is { } row
+                ? Stored(row) with { Payload = _payloads.GetValueOrDefault(row.EventId) }
+                : null);
+        }
+    }
+
+    public Task<IReadOnlyList<StoredDeliveryAttempt>> AttemptsAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<StoredDeliveryAttempt>>([.. _history
+                .Where(entry => entry.Delivery == id)
+                .Select((entry, index) => new StoredDeliveryAttempt
+                {
+                    Attempt = index + 1,
+                    StartedAt = entry.StartedAt,
+                    Duration = entry.Duration,
+                    Outcome = entry.Outcome,
+                    ErrorType = entry.ErrorType,
+                })]);
+        }
+    }
+
+    private IEnumerable<Row> Matching(DeliveryFilter filter) => _rows.Where(row =>
+        (filter.Subscriber is null || row.Subscriber == filter.Subscriber)
+        && (filter.PartitionKey is null || row.PartitionKey == filter.PartitionKey)
+        && (filter.Status is null || row.Status == filter.Status)
+        && (filter.FromEventId is not { } from || !Before(row.EventId, from))
+        && (filter.ToEventId is not { } to || Before(row.EventId, to)));
+
+    private static StoredDelivery Stored(Row row) => new()
+    {
+        Id = row.Id,
+        EventId = row.EventId,
+        Subscriber = row.Subscriber,
+        PartitionKey = row.PartitionKey,
+        TenantId = row.TenantId,
+        Kind = row.Kind,
+        Status = row.Status,
+        Attempts = row.Attempts,
+        NotBefore = row.NotBefore,
+        CompletedAt = row.CompletedAt,
+        LastErrorType = row.LastErrorType,
+    };
+
     private Row NewRow(DeliveryRequest request) => new()
     {
         Id = AlvoEventId.Create(time.GetUtcNow()),
@@ -141,6 +204,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         Subscriber = request.Subscriber,
         PartitionKey = request.PartitionKey,
         TenantId = request.TenantId,
+        Kind = request.Kind,
         Status = request.DeadReason is null ? "pending" : "dead",
         LastErrorType = request.DeadReason,
         NotBefore = time.GetUtcNow(),
@@ -189,7 +253,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         };
     }
 
-    private bool Answer(DeliveryAttempt attempt, Action<Row> change, string outcome)
+    private bool Answer(DeliveryAttempt attempt, Action<Row> change, string outcome, string? errorType)
     {
         AnswerFlows.Enqueue(AlvoFlow.Provenance);
         lock (_gate)
@@ -206,6 +270,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
             change(row);
             row.LeaseUntil = null;
             _attempts.Add((row.Id, row.Attempts, outcome));
+            _history.Add((row.Id, attempt.StartedAt, attempt.Duration, outcome, errorType));
 
             return true;
         }
@@ -254,6 +319,8 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         public string PartitionKey { get; init; } = string.Empty;
 
         public string? TenantId { get; init; }
+
+        public string Kind { get; init; } = "handler";
 
         public string Status { get; set; } = "pending";
 
