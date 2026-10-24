@@ -558,6 +558,23 @@ untrusted input, never emit it verbatim — this matters especially for F7's dyn
 interpolates it into a SQL string literal rather than a quoted identifier, where quoting rules
 differ.
 
+## One writer
+
+`CelText` (`src/MMLib.Alvo/Expressions/Internal/CelText.cs`) is the only code that writes CEL text — today for the
+typed layer's `ConditionTranslator`, which turns a handler's lambda into the `when` the untyped core compiles. It
+writes the canonical spelling: one space around each binary operator, `, ` between call arguments, and parentheses only
+around a looser child, a right operand of equal precedence, and **either operand of a comparison that is itself a
+comparison** — the parser refuses chained comparisons, so `(a == b) == c` must keep its brackets on both sides. Two
+spellings of one condition are therefore one text. A literal is spelled from its `(Type, Value)` pair together — a
+String holding a string, an Int a long, a Decimal a decimal, a Bool a bool — and any other pairing is refused; a
+negative number is written `-n`. Every string literal goes through one escape, the exact inverse of `CelLexer`'s six
+escapes, proven by `CelTextTests.Every_string_reads_back_as_itself` over the whole code space. Names are the one part
+no escape covers, so a field or `changed()` name outside the identifier grammar (or a reserved word: `old`, `new`,
+`true`, `false`, `null`, `in`, `has`) is refused rather than written.
+
+Alvo's CEL has no list literal and refuses `== null`, so the translator writes `||` chains of equalities for a
+constant list's `Contains` and `has()` / `!has()` for a null test.
+
 ## Deliberate deviations from CEL
 
 Alvo deliberately adopts the CEL spec so agents recognize the grammar from training data — every

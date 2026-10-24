@@ -152,6 +152,7 @@ export default defineConfig({
           page('Where logic goes', 'extending/where-logic-goes'),
           page('The event envelope', 'extending/event-envelope'),
           page('React to changes', 'extending/event-handlers'),
+          page('Typed or CEL', 'extending/typed-or-cel'),
           page('See your extensions in the dashboard', 'extending/extension-catalog'),
           page('Testing your backend', 'extending/testing'),
           page('Use your own authentication', 'guides/own-authentication'),

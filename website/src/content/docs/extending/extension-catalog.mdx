@@ -2,7 +2,7 @@
 title: See your extensions in the dashboard
 description: Every handler your host registers is listed — in the dashboard, the Management API and the assistant — and no apply can quietly drop what it reads.
 sidebar:
-  order: 4
+  order: 5
 ---
 
 import { Code } from '@astrojs/starlight/components';
@@ -24,6 +24,10 @@ binds to and when it runs. Nothing in the catalog can change a handler; it is ch
 
 <SourceExcerpt code={extensions} from="public static IAlvoBuilder AddFleetDeskExtensions" to="goes in for repair." title="FleetDeskExtensions.cs" />
 
+The condition is a lambda over the host's `Vehicle` class ([Typed or CEL](/extending/typed-or-cel/)), and the catalog
+lists the CEL it was translated into when it was registered: `changed(status) && new.status == 'in_repair'`. Registered
+over `Entity("vehicles", …)` with that text as a CEL string `when`, the handler is listed exactly the same.
+
 | Member | What it says |
 |---|---|
 | `id` | the id the handler was registered under — its identity, and the key of its deliveries |
@@ -32,7 +36,7 @@ binds to and when it runs. Nothing in the catalog can change a handler; it is ch
 | `entities` | the entities it binds; `["*"]` for an every-entity handler, `[]` for an application-event handler |
 | `operations` | `create`, `update`, `delete`, as the policy names them; `OnSaved` lists `create` and `update`, and `OnUpdated`'s `update` covers a replace; `[]` for an application-event handler |
 | `event` | the event type an application-event handler handles; `null` otherwise |
-| `when` | its condition as CEL text, or `null` |
+| `when` | its condition as CEL text — a lambda's translation, written canonically — or `null` |
 | `order` | its place among the handlers of the same target: lower first, then registration order — the order the catalog lists them in |
 | `timeout` | how long one attempt may take, as a `TimeSpan` (`"00:00:30"`) |
 | `runAs` | `system` or `eventActor` |
@@ -98,9 +102,12 @@ A handler binds to the descriptor when the host starts. Alvo then refuses any ch
 | removes an entity a handler binds | `/entities/<entity>` |
 | removes or renames a field its condition reads, or retypes it so the condition no longer compiles | `/entities/<entity>/fields/<field>` |
 | adds a field its condition reads to `events.exclude` | `/entities/<entity>/events/exclude/<index>` |
+| removes or retypes a field its typed class maps, makes it optional under a non-nullable property, or drops an enum value one of the class's members maps | `/entities/<entity>/fields/<field>` |
+| adds a field its typed class maps to `events.exclude` | `/entities/<entity>/events/exclude/<index>` |
 
 The refusal is the `422` [`validation`](/reference/problem-types/#validation) problem any invalid descriptor gets, with
-code `descriptor`. Beside each pointed violation travels the binding compiler's own sentence at `"pointer": ""`, so a
+code `descriptor`. A field both read by the condition and mapped by the class gets the condition's sentence, once; a
+mapped field's own sentence names the class — "its typed record Vehicle maps it". Beside each pointed violation travels the binding compiler's own sentence at `"pointer": ""`, so a
 second cause is never hidden behind the first:
 
 ```json
