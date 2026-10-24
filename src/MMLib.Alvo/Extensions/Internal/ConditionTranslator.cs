@@ -100,8 +100,18 @@ internal sealed partial class ConditionTranslator
         _ => Operand(node),
     };
 
-    private CelNode Comparison(BinaryExpression comparison, CelBinaryOperator op) =>
-        NullTest(comparison, op) ?? EnumComparison(comparison, op) ?? Typed(comparison, op, Operand(comparison.Left), Operand(comparison.Right));
+    private CelNode Comparison(BinaryExpression comparison, CelBinaryOperator op)
+    {
+        if (op is not (CelBinaryOperator.Equal or CelBinaryOperator.NotEqual) && (HidesEnum(comparison.Left) || HidesEnum(comparison.Right)))
+        {
+            throw Refuse(comparison, "an enum field compares with == and != only", TranslationRefusal.WhenFix);
+        }
+
+        return NullTest(comparison, op)
+            ?? EnumComparison(comparison, op)
+            ?? EnumPair(comparison, op)
+            ?? Typed(comparison, op, Operand(comparison.Left), Operand(comparison.Right));
+    }
 
     private CelNode? NullTest(BinaryExpression comparison, CelBinaryOperator op)
     {
@@ -122,39 +132,6 @@ internal sealed partial class ConditionTranslator
 
     private static bool IsNull(Expression node) => LambdaShape.Unwrapped(node) is ConstantExpression { Value: null };
 
-    private CelBinary? EnumComparison(BinaryExpression comparison, CelBinaryOperator op)
-    {
-        var (field, constant, type) = EnumSides(comparison);
-        if (field is null)
-        {
-            return null;
-        }
-
-        if (op is not (CelBinaryOperator.Equal or CelBinaryOperator.NotEqual))
-        {
-            throw Refuse(comparison, "an enum field compares with == and != only", TranslationRefusal.WhenFix);
-        }
-
-        if (!LambdaValues.TryConstant(LambdaShape.Unwrapped(constant!), out var raw, out var reason) || raw is null)
-        {
-            throw Refuse(constant!, reason.Length > 0 ? reason : "null is tested with == null against a field", ConstantFix);
-        }
-
-        return new CelBinary(op, Operand(field), EnumText(constant!, (Enum)Enum.ToObject(type!, raw)));
-    }
-
-    private (Expression? Field, Expression? Constant, Type? Type) EnumSides(BinaryExpression comparison)
-    {
-        if (LambdaShape.EnumBehind(comparison.Left) is { } left && LambdaShape.Touches(comparison.Left, _event) && !LambdaShape.Touches(comparison.Right, _event))
-        {
-            return (((UnaryExpression)comparison.Left).Operand, comparison.Right, left);
-        }
-
-        return LambdaShape.EnumBehind(comparison.Right) is { } right && LambdaShape.Touches(comparison.Right, _event) && !LambdaShape.Touches(comparison.Left, _event)
-            ? (((UnaryExpression)comparison.Right).Operand, comparison.Left, right)
-            : (null, null, null);
-    }
-
     private CelBinary Typed(Expression node, CelBinaryOperator op, CelNode left, CelNode right)
     {
         if (left is not CelLiteral { Type: CelValueType.Uuid } && right is not CelLiteral { Type: CelValueType.Uuid })
@@ -173,6 +150,11 @@ internal sealed partial class ConditionTranslator
 
     private CelNode Operand(Expression node)
     {
+        if (HidesEnum(node) && LambdaShape.Touches(node, _event))
+        {
+            throw Refuse(node, EnumNumberReason, "compare the field with a member of its enum, such as e.New.Status == OrderStatus.Approved.");
+        }
+
         var unwrapped = LambdaShape.Unwrapped(node);
         if (!LambdaShape.Touches(unwrapped, _event))
         {
@@ -188,12 +170,17 @@ internal sealed partial class ConditionTranslator
         };
     }
 
-    private CelContextRef? CallerValue(MemberExpression member) => member switch
-    {
-        { Expression: MemberExpression { Member.Name: nameof(EventCondition<>.Caller), Expression: var owner }, Member.Name: nameof(AlvoConditionCaller.User) } when owner == _event => new(CelContextValue.UserId, CelValueType.Uuid),
-        { Expression: MemberExpression { Member.Name: nameof(EventCondition<>.Caller), Expression: var owner }, Member.Name: nameof(AlvoConditionCaller.Tenant) } when owner == _event => new(CelContextValue.TenantId, CelValueType.Uuid),
-        _ => null,
-    };
+    private CelContextRef? CallerValue(MemberExpression member) => IsEventCaller(member.Expression)
+        ? member.Member.Name switch
+        {
+            nameof(AlvoConditionCaller.User) => new(CelContextValue.UserId, CelValueType.Uuid),
+            nameof(AlvoConditionCaller.Tenant) => new(CelContextValue.TenantId, CelValueType.Uuid),
+            _ => null,
+        }
+        : null;
+
+    private bool IsEventCaller(Expression? node) =>
+        node is MemberExpression { Member.Name: nameof(EventCondition<>.Caller), Expression: var owner } && owner == _event;
 
     private CelFieldRef Field(Expression node)
     {
@@ -243,10 +230,14 @@ internal sealed partial class ConditionTranslator
 
     private string Describe(Expression node) => node switch
     {
+        MethodCallExpression { Object: { } record } call when record.Type == typeof(AlvoRecord) && LambdaShape.RecordKey(call) is null =>
+            "a record's key must be a literal string, such as Record[\"legacy_code\"]",
         MethodCallExpression call => $"method '{call.Method.Name}' has no CEL equivalent",
         ConditionalExpression => "a conditional (?:) has no CEL equivalent",
         UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } convert => $"the conversion to {convert.Type.Name} has no CEL equivalent",
         MemberExpression member when LambdaShape.IsClock(member) => ClockReason,
+        MemberExpression member when IsEventCaller(member.Expression) =>
+            $"e.Caller.{member.Member.Name} is the caller's, not a field of {_shape.Name}: it compares with == and != and is never tested for null",
         MemberExpression member => $"'{member.Member.Name}' is not a field of {_shape.Name} a condition can read",
         _ => $"a {node.NodeType} expression has no CEL equivalent",
     };

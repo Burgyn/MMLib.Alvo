@@ -59,10 +59,17 @@ internal sealed partial class ConditionTranslator
             : throw Refuse(argument, "changed() takes a mapped property of the record, such as x => x.Status", TranslationRefusal.WhenFix);
     }
 
-    private CelBinary HasRole(MethodCallExpression call) =>
-        LambdaValues.TryConstant(call.Arguments[0], out var role, out var reason) && role is string { Length: > 0 } name
+    private CelBinary HasRole(MethodCallExpression call)
+    {
+        if (!IsEventCaller(call.Object))
+        {
+            throw Refuse(call, "HasRole is read from the event's own caller", "write e.Caller.HasRole(\"role\").");
+        }
+
+        return LambdaValues.TryConstant(call.Arguments[0], out var role, out var reason) && role is string { Length: > 0 } name
             ? new CelBinary(CelBinaryOperator.In, new CelLiteral(CelValueType.String, name), new CelContextRef(CelContextValue.UserRoles, CelValueType.StringList))
             : throw Refuse(call, reason.Length > 0 ? reason : "a role is a non-empty constant", ConstantFix);
+    }
 
     private CelCall TextTest(MethodCallExpression call, string name)
     {
@@ -83,9 +90,10 @@ internal sealed partial class ConditionTranslator
         }
 
         var list = OrderedList(source);
-        var enumType = LambdaShape.EnumBehind(value);
+        var field = HidesEnum(value) ? Bare(value) : value;
+        var enumType = field == value ? null : LambdaShape.Underlying(field.Type);
         var tests = list.Cast<object?>()
-            .Select(item => Typed(call, CelBinaryOperator.Equal, Operand(value), Literal(source, AsMember(enumType, item))))
+            .Select(item => Typed(call, CelBinaryOperator.Equal, Operand(field), Literal(source, AsMember(source, enumType, item))))
             .ToList();
         return tests.Count > 0
             ? AnyTrue(tests)
@@ -105,8 +113,8 @@ internal sealed partial class ConditionTranslator
             "use an array or a List<T>.");
     }
 
-    private static object? AsMember(Type? enumType, object? item) =>
-        enumType is not null && item is not null and not Enum ? Enum.ToObject(enumType, item) : item;
+    private object? AsMember(Expression source, Type? enumType, object? item) =>
+        enumType is not null && item is not null and not Enum ? EnumMember(source, enumType, item) : item;
 
     private static CelNode AnyTrue(IEnumerable<CelNode> tests) =>
         tests.Aggregate((left, right) => new CelBinary(CelBinaryOperator.Or, left, right));
@@ -148,8 +156,4 @@ internal sealed partial class ConditionTranslator
 
     private static string Rfc3339(DateTimeOffset instant) =>
         instant.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture) + "Z";
-
-    private CelLiteral EnumText(Expression node, Enum member) => EnumMap.Of(member.GetType()).ValueOf(member) is { } text
-        ? new CelLiteral(CelValueType.String, text)
-        : throw Refuse(node, $"{member.GetType().Name} has no member {member}", TranslationRefusal.WhenFix);
 }

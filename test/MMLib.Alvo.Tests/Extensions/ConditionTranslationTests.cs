@@ -55,6 +55,7 @@ public sealed class ConditionTranslationTests
             { "enum images", "Updated", e => e.Old.Status != e.New.Status, "old.status != new.status" },
             { "role", "Updated", e => e.Caller.HasRole("manager"), "'manager' in @user.roles" },
             { "caller id", "Updated", e => e.New.OwnerId == e.Caller.User, "new.owner_id == @user.id" },
+            { "caller tenant", "Updated", e => e.Caller.Tenant == e.New.OwnerId, "@tenant.id == new.owner_id" },
             { "static readonly and const", "Updated", e => e.New.Total > _threshold && e.New.Total < Ceiling, "new.total > 250.5 && new.total < 1000.0" },
             { "local const", "Updated", e => e.New.Quantity < limit, "new.quantity < 99" },
             { "id constant", "Updated", e => e.New.OwnerId == _fleet, "string(new.owner_id) == '3fa85f64-5717-4562-b3fc-2c963f66afa6'" },
@@ -94,6 +95,12 @@ public sealed class ConditionTranslationTests
             { "empty list", "Updated", e => _noNotes.Contains(e.New.Note), "an empty list matches nothing" },
             { "computed constant", "Updated", e => e.New.Note == "a".Trim(), "it is computed when the condition runs" },
             { "unordered set", "Updated", e => _tags.Contains(e.New.Note), "has no fixed order" },
+            { "old/new relational enum", "Updated", e => e.Old.Status < e.New.Status, "an enum field compares with == and != only" },
+            { "arithmetic on an enum", "Updated", e => (int)e.New.Status + 1 == 2, "converts to a number only to compare with a member of its enum" },
+            { "enum against a number field", "Updated", e => (int)e.New.Status == e.New.Quantity, "converts to a number only to compare with a member of its enum" },
+            { "undeclared enum number", "Updated", e => (int)e.New.Status == 99, "OrderStatus has no member 99" },
+            { "caller null test", "Updated", e => e.Caller.Tenant == null, "is the caller's, not a field of Order" },
+            { "role on another caller", "Updated", e => default(AlvoConditionCaller)!.HasRole("manager"), "HasRole is read from the event's own caller" },
         };
     }
 
@@ -162,4 +169,31 @@ public sealed class ConditionTranslationTests
     public void A_wrapper_reads_any_field_through_its_record() =>
         ConditionTranslator.Translate<OrderView>(e => (string?)e.New.Record["legacy_code"] == "L-9" && e.New.Note != null, "row", HandlerVerb.Updated)
             .ShouldBe("new.legacy_code == 'L-9' && has(new.note)");
+
+    [Fact]
+    public void A_record_key_that_is_not_a_literal_is_refused()
+    {
+        var key = "note";
+
+        Should.Throw<AlvoTranslationException>(() => ConditionTranslator.Translate<OrderView>(e => (string?)e.New.Record[key] == "y", "row", HandlerVerb.Updated))
+            .Message.ShouldContain("a record's key must be a literal string");
+    }
+
+    [Fact]
+    public void An_enum_number_outside_its_underlying_type_is_refused() =>
+        Should.Throw<AlvoTranslationException>(() => ConditionTranslator.Translate<Gauge>(e => (int)e.New.Level == 257, "row", HandlerVerb.Updated))
+            .Message.ShouldContain("257 is outside the range of GaugeLevel's underlying Byte");
+}
+
+public sealed class Gauge
+{
+    public GaugeLevel Level { get; init; }
+}
+
+#pragma warning disable CA1028
+public enum GaugeLevel : byte
+#pragma warning restore CA1028
+{
+    Low,
+    High,
 }
