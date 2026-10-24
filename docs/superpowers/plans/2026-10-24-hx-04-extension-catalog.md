@@ -4,7 +4,7 @@
 
 **Goal:** Every event handler an embedded host registers is visible as metadata — through `IAlvoManagement.GetExtensionsAsync` / `GET {m}/projects/{p}/extensions`, the capability report, the policy simulator's verdict, a `⟨/⟩ n` badge and a read-only *After commit* lane on the dashboard, and the assistant's `get_extensions` tool — and no apply, dry run, rollback or `ApplyAlvoDescriptorAsync` can leave a registered handler unbound: removing an entity or field a handler binds, or excluding a field it reads via `events.exclude`, is refused naming the extension.
 
-**Architecture:** An internal `ExtensionCatalog` projects HX-03's `ExtensionRegistry` into the new public Abstractions records `ManagementExtension` / `ManagementExtensionCatalog`; `AlvoManagementService` serves it on a Viewer route, appends `extensions.<kind>` to the capability report's `Honoured`, and fills `ManagementPolicyVerdict.Extensions`. An internal `ExtensionApplyGuard` runs HX-03's own `ExtensionBindingCompiler.Compile` against the *proposed* catalog wherever a catalog is accepted outside the boot (`RuntimeSchemaService.ApplyAsync`/`PreviewAsync`/`RollbackAsync`, `SchemaMigrationRunner.RunAsync`) and turns any problem into a `DescriptorValidationException` whose findings point at the removed entity, the removed field or the `events.exclude` item. The dashboard reads the catalog through `IAlvoManagement` only (a gateway slot, a pure `LifecycleLane` helper, a badge, a *Lifecycle* tab); the assistant gains one read tool, one `gen:` skill region and two eval cases.
+**Architecture:** An internal `ExtensionCatalog` projects HX-03's `ExtensionRegistry` into the new public Abstractions records `ManagementExtension` / `ManagementExtensionCatalog`; `AlvoManagementService` serves it on a Viewer route, appends `extensions.<kind>` to the capability report's `Honoured`, and fills `ManagementPolicyVerdict.Extensions`. An internal `ExtensionApplyGuard` runs HX-03's own `ExtensionBindingCompiler.Compile` against the *proposed* catalog wherever a catalog is accepted outside the boot (`RuntimeSchemaService.ApplyAsync`/`PreviewAsync`/`RollbackAsync`, `SchemaMigrationRunner.RunAsync`) and refuses a *change* that would unbind a handler bound to the current catalog — a `DescriptorValidationException` whose findings point at the removed entity, the removed field or the `events.exclude` item, beside the compiler's own sentence — while a handler that binds neither catalog is reported as a warning. The guard hands back the catalog it checked, so the apply publishes it without a second build and the binder's per-catalog cache compiles it once. The dashboard reads the catalog through `IAlvoManagement` only (a gateway slot, a pure `LifecycleLane` helper, a badge, a *Lifecycle* tab); the assistant gains one read tool, one `gen:` skill region and two eval cases.
 
 **Tech Stack:** .NET 10, C#, xUnit v3 on Microsoft.Testing.Platform, Shouldly, NSubstitute, Verify + PublicApiGenerator, Blazor (server-interactive) + MudBlazor, Microsoft.Playwright (admin e2e), Microsoft.Extensions.AI (assistant tools), Astro/Starlight (docs).
 
@@ -16,7 +16,9 @@
 - **Scope is §7 HX-04 only.** No typed layer, `Entity<T>`, translator (HX-05); no `IAlvoOperations`, delivery history, pause, replay, `ManagementExtensionStats`, p95 or 24 h rejection counts (HX-06); no write hooks, validate/before/after-write kinds, *Before the transaction* / *In the transaction* lanes, hook-editor note or simulator rendering of `Extensions` (HX-09); no commands lane (HX-08); no reads lane (HX-16).
 - **Public surface added is exactly:** Abstractions / `MMLib.Alvo.Management` — `ManagementExtension` (members `Id`, `Kind`, `Stage`, `Entities`, `Operations`, `Event`, `When`, `Order`, `Timeout`, `RunAs`, `Ordering`, `Description`, `TypeName`), `ManagementExtensionCatalog` (`Items`), `AlvoExtensionKind` (`EventHandler`), `AlvoExtensionStage` (`PostCommit`), `IAlvoManagement.GetExtensionsAsync(string project, CancellationToken ct = default)`, `ManagementPolicyVerdict.Extensions` (init, default `[]`); core / `MMLib.Alvo.Extensions` — `AlvoExtensionOptions.ExposeTypeNames`. Everything else is `internal`. `RuntimeSchemaService`'s public constructor is unchanged (the guard arrives through a new **internal** constructor overload). The `MMLib.Alvo.Testing` baseline (`*TestingLibraryPublicApiTests`) must not move.
 - **Wire spellings (verbatim):** route `GET {m}/projects/{project}/extensions`, level `viewer`, operation `ManagementOperation.GetExtensions`; envelope `{ "items": [...] }`; `kind` `eventHandler`; `stage` `postCommit`; `operations` from `create`, `update`, `delete` (an `OnSaved` handler lists `create`, `update`; an `OnUpdated` handler's `update` covers a replace); `runAs` `system` | `eventActor`; `ordering` `perRecord` | `none`; `timeout` the `TimeSpan` (`"00:00:30"`); `entities` `["*"]` for an every-entity handler, `[]` for an application-event handler, whose `event` carries the event type; the capability report's `Honoured` gains `extensions.eventHandler` after the five blocks when at least one handler is registered; config key `Alvo:Extensions:ExposeTypeNames` (default `false`).
-- **Refusal shape (verbatim):** `DescriptorValidationException` → `422`, problem type `validation`, violation code `descriptor`. Pointers: `/entities/<e>` (entity removed), `/entities/<e>/fields/<f>` (field removed or renamed), `/entities/<e>/events/exclude/<i>` (field excluded), `""` (any other reason a handler would no longer bind). Messages name the extension as `'<id>' (eventHandler, in this host)`; fixes are `Remove the registration from the host and redeploy first, or keep the entity.` / `… or keep the field.` / `… or keep the field in the event images.`
+- **Guard rule (change-based, §4.2):** refuse an apply, dry run, rollback or `ApplyAlvoDescriptorAsync` only when a handler that binds `IPolicyCatalogProvider.Current` would not bind the proposed catalog. A handler already unbound (a dashboard-first host's first descriptor, a stored boot that ended `Failed`) blocks nothing; it is a `Warning` finding in the preview/dry-run result.
+- **Refusal shape (verbatim):** `DescriptorValidationException` → `422`, problem type `validation`, violation code `descriptor`; on the wire a violation carries `pointer`, `code`, `message`, `fixSuggestion` (`AlvoViolation`). Pointed findings: `/entities/<e>` (entity removed), `/entities/<e>/fields/<f>` (field removed or renamed), `/entities/<e>/events/exclude/<i>` (field excluded); the compiler's own sentence for every problem travels beside them at `""`. Messages name the extension as `'<id>' (eventHandler, in this host)`; fixes are §4.2's `Remove the registration and redeploy first, or keep the field.` / `… or keep the entity.` and, for an exclusion, `… or keep the field in the event images.`
+- **CI parity:** rings are Debug on the local SDK; CI builds Release on the newest `10.0` SDK with `TreatWarningsAsErrors`. Private helpers return arrays where an analyzer (CA1859) would flag an interface return, as HX-03's neighbours do; Task 13 runs the Release build in the CI SDK container before anything is pushed.
 - **SQL text scan.** `SqlTextConfinedToRendererArchitectureTests` scans `src/MMLib.Alvo/{Expressions,Rules,Events}` and `src/MMLib.Alvo.Abstractions/{Expressions,Rules,Events}`: no file there (code, strings or XML docs) may contain `SELECT `, `WHERE `, `ILIKE`, `COALESCE(`, `IS NOT NULL`, `CASE WHEN `, ` IN (` or the whole upper-case words `AND`, `OR`, `NOT`. The one file this plan touches there is `src/MMLib.Alvo/Events/Internal/EventConditionReads.cs` (Task 4): keep its new doc comment in lower case.
 - Public XML docs cite no `§` and no `#issue` (DocsGen's `RemarksFilterTests`). XML docs on every public member.
 - C# style: `alvo-dotnet-conventions` — no inline comments, methods ≲ 25 lines, English only, `ConfigureAwait(false)` in `src/`, never in tests (xUnit1030); every test call passes `TestContext.Current.CancellationToken` (xUnit1051). `.cs` files are **UTF-8 with BOM + CRLF**: after creating or editing `.cs` files run `dotnet format whitespace MMLib.Alvo.slnx --include <file> <file> …` — `--include` takes **file paths**, never a directory (or run `dotnet format whitespace <project>.csproj` on the whole project). `.razor` files follow their neighbours (BOM + CRLF).
@@ -31,7 +33,7 @@
 
 1. **A rename of a bound field** (`renamedFrom` on a field a handler's `when` reads) must be refused like a removal, at the old field's pointer — not slip through because the column survives — test `Renaming_a_field_a_handler_reads_is_refused_at_the_old_field` (Task 4).
 2. **A field retyped so the handler's condition no longer compiles** (enum → integer under `new.status == 'resolved'`) must be refused naming the extension, even though no precise pointer exists — test `A_retyped_field_the_condition_no_longer_compiles_against_is_refused_naming_the_extension` (Task 4).
-3. **A dashboard-first host's first apply** (nothing primed, no stored revision) that a handler does not fit must be refused, not leave the handler unbound — test `A_first_apply_a_handler_does_not_fit_is_refused_even_with_nothing_primed` (Task 5).
+3. **A dashboard-first host's first apply** (nothing primed, no stored revision) that a handler does not fit must be applied *with a warning naming the handler* — neither blocked (the host could never get a first descriptor in) nor silent — test `A_first_apply_a_handler_does_not_fit_is_applied_with_a_warning` (Task 5); and an already-unbound handler must not block an unrelated apply — `A_handler_already_unbound_does_not_block_an_unrelated_apply`.
 4. **A stale `If-Match` on an unbinding apply** must answer the binding refusal (422), not the revision conflict, so the operator fixes the real problem first — test `The_binding_refusal_is_answered_before_the_revision_check` (Task 5).
 5. **The Lifecycle lane at phone width** with a long `when` must not scroll the page sideways — test `The_lifecycle_tab_shows_code_after_the_commit_read_only` asserts `AssertNoHorizontalScrollAsync` at 375 px (Task 8).
 
@@ -46,7 +48,7 @@ Created:
 | `src/MMLib.Alvo.Abstractions/Management/ManagementExtension.cs`, `ManagementExtensionCatalog.cs`, `AlvoExtensionKind.cs`, `AlvoExtensionStage.cs` | public catalog records and enums |
 | `src/MMLib.Alvo/Extensions/Internal/ExtensionCatalog.cs` | registry → catalog projection, simulator filter, honoured kinds |
 | `src/MMLib.Alvo/Extensions/Internal/HandlerDescription.cs` | one handler registration → one `ManagementExtension` |
-| `src/MMLib.Alvo/Extensions/Internal/ExtensionApplyGuard.cs` | refuses a proposed catalog that a registered handler no longer fits |
+| `src/MMLib.Alvo/Extensions/Internal/ExtensionApplyGuard.cs` | `ExtensionApplyCheck`; refuses a change that would unbind a bound handler, warns for handlers bound by neither catalog |
 | `src/MMLib.Alvo/Extensions/Internal/ExtensionApplyRefusals.cs` | binding problems → descriptor findings with precise pointers |
 | `src/MMLib.Alvo.Admin/Components/Schema/LifecycleLane.cs` | pure lane/badge logic and words |
 | `src/MMLib.Alvo.Admin/Components/Schema/LifecycleTab.razor` | the *Lifecycle* tab (After commit lane) |
@@ -61,7 +63,7 @@ Created:
 | `test/MMLib.Alvo.Ai.Eval.Tests/ExtensionCasesTests.cs` | the graders (acceptance (4)) |
 | `website/src/content/docs/extending/extension-catalog.mdx`; `website/src/snippets/extending/catalog/{FleetDeskExtensions.cs,FleetDeskExtensionsTests.cs,fleet-desk.alvo.json}` | *See your extensions in the dashboard* |
 
-Modified: `src/MMLib.Alvo.Abstractions/Management/{IAlvoManagement.cs,ManagementModels.cs}`; `src/MMLib.Alvo/Extensions/{AlvoExtensionOptions.cs,Setup.cs}`, `Extensions/Internal/HandlerInvoker.cs`; `src/MMLib.Alvo/Events/Internal/EventConditionReads.cs`; `src/MMLib.Alvo/Management/{Setup.cs,Access/ManagementOperation.cs,Access/ManagementOperations.cs}`, `Management/Internal/{AlvoManagementService.cs,ManagementEndpoints.cs,CapabilityReport.cs}`; `src/MMLib.Alvo/Migrations/{RuntimeSchemaService.cs,SchemaMigrationRunner.cs,Internal/DescriptorBootPlan.cs}`; `src/MMLib.Alvo/AlvoServiceCollectionExtensions.cs`; `src/MMLib.Alvo.Admin/Internal/ManagementGateway.cs`, `Components/Schema/{EntityTabs.cs,Entity.razor,Entity.razor.cs,SchemaList.razor}`, `Components/Home/Overview.razor`; `src/MMLib.Alvo.Ai/Internal/{ManagementTools.cs,AssistantInstructions.cs}`, `Instructions/schema-assistant.md`; `plugins/alvo/skills/{alvo-descriptor-hooks,alvo-descriptor-entities-and-fields,alvo-descriptor-capabilities-and-limits}/SKILL.md`; `eval/MMLib.Alvo.Ai.Eval/{EvalCases.cs,EvalWorld.cs}`; tests named per task; `docs/design/f5-admin/generated/*.js` (regenerated); docs per Task 12.
+Modified: `src/MMLib.Alvo.Abstractions/Management/{IAlvoManagement.cs,ManagementModels.cs}`; `src/MMLib.Alvo/Extensions/{AlvoExtensionOptions.cs,Setup.cs}`, `Extensions/Internal/{HandlerInvoker.cs,ExtensionBinder.cs}`; `src/MMLib.Alvo/Events/Internal/EventConditionReads.cs`; `src/MMLib.Alvo/Management/{Setup.cs,Access/ManagementOperation.cs,Access/ManagementOperations.cs}`, `Management/Internal/{AlvoManagementService.cs,ManagementEndpoints.cs,CapabilityReport.cs}`; `src/MMLib.Alvo/Migrations/{RuntimeSchemaService.cs,SchemaMigrationRunner.cs,Internal/DescriptorBootPlan.cs}`; `src/MMLib.Alvo/AlvoServiceCollectionExtensions.cs`; `src/MMLib.Alvo.Admin/Internal/ManagementGateway.cs`, `Components/Schema/{EntityTabs.cs,Entity.razor,Entity.razor.cs,SchemaList.razor}`, `Components/Home/Overview.razor`; `src/MMLib.Alvo.Ai/Internal/{ManagementTools.cs,AssistantInstructions.cs}` (incl. `DescriptorView.HostExtensions`), `Instructions/schema-assistant.md`; `plugins/alvo/skills/{alvo-descriptor-hooks,alvo-descriptor-entities-and-fields,alvo-descriptor-capabilities-and-limits}/SKILL.md`; `eval/MMLib.Alvo.Ai.Eval/{EvalCases.cs,EvalWorld.cs}`; tests named per task; `docs/design/f5-admin/generated/*.js` (regenerated); docs per Task 12.
 
 ---
 
@@ -74,7 +76,7 @@ Modified: `src/MMLib.Alvo.Abstractions/Management/{IAlvoManagement.cs,Management
 - Baseline: `test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt`
 
 **Interfaces:**
-- Produces: `public enum AlvoExtensionKind { EventHandler }` (wire `eventHandler`); `public enum AlvoExtensionStage { PostCommit }` (wire `postCommit`); `public sealed record ManagementExtension { required string Id; required AlvoExtensionKind Kind; required AlvoExtensionStage Stage; IReadOnlyList<string> Entities = []; IReadOnlyList<string> Operations = []; string? Event; string? When; int Order; TimeSpan? Timeout; string? RunAs; string? Ordering; string? Description; string? TypeName }` (all `init`); `public sealed record ManagementExtensionCatalog { required IReadOnlyList<ManagementExtension> Items }`; `ManagementPolicyVerdict.Extensions` (`IReadOnlyList<ManagementExtension>`, init, default `[]`).
+- Produces: `public enum AlvoExtensionKind { EventHandler = 0 }` (wire `eventHandler`); `public enum AlvoExtensionStage { PostCommit = 0 }` (wire `postCommit`), both append-only; `public sealed record ManagementExtension { required string Id; required AlvoExtensionKind Kind; required AlvoExtensionStage Stage; IReadOnlyList<string> Entities = []; IReadOnlyList<string> Operations = []; string? Event; string? When; int Order; TimeSpan? Timeout; string? RunAs; string? Ordering; string? Description; string? TypeName }` (all `init`); `public sealed record ManagementExtensionCatalog { required IReadOnlyList<ManagementExtension> Items }`; `ManagementPolicyVerdict.Extensions` (`IReadOnlyList<ManagementExtension>`, init, default `[]`).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -134,6 +136,13 @@ public sealed class ManagementExtensionTests
         verdict.ShouldBe(new ManagementPolicyVerdict(true, null, "true", null, null, [], []));
     }
 
+    [Fact]
+    public void The_first_members_are_pinned_to_zero_so_appending_never_renumbers_them()
+    {
+        ((int)AlvoExtensionKind.EventHandler).ShouldBe(0);
+        ((int)AlvoExtensionStage.PostCommit).ShouldBe(0);
+    }
+
     private static ManagementExtension Minimal() => new()
     {
         Id = "ticket-resolved",
@@ -158,13 +167,18 @@ using System.Text.Json.Serialization;
 namespace MMLib.Alvo.Management;
 
 /// <summary>What kind of host code an extension is.</summary>
-/// <remarks>A later version appends the kinds it learns to register; a client must treat an unknown value as opaque.</remarks>
+/// <remarks>
+/// Append only: a later version adds the kinds it learns to register after the existing members and never reorders or
+/// renumbers them. A client should read an unknown value as opaque; a typed .NET client older than the server cannot —
+/// <see cref="JsonStringEnumConverter{TEnum}"/> throws on a member it does not know — so such a client reads the raw
+/// string when it must tolerate a newer server.
+/// </remarks>
 [JsonConverter(typeof(JsonStringEnumConverter<AlvoExtensionKind>))]
 public enum AlvoExtensionKind
 {
     /// <summary>An event handler: host C# run after a write commits, once per matching event, at least once.</summary>
     [JsonStringEnumMemberName("eventHandler")]
-    EventHandler,
+    EventHandler = 0,
 }
 ```
 
@@ -176,13 +190,16 @@ using System.Text.Json.Serialization;
 namespace MMLib.Alvo.Management;
 
 /// <summary>When, relative to a write, an extension runs.</summary>
-/// <remarks>A later version appends the stages it learns to run code in; a client must treat an unknown value as opaque.</remarks>
+/// <remarks>
+/// Append only, never reordered or renumbered — the same rule, and the same caveat for an older typed client, as
+/// <see cref="AlvoExtensionKind"/>.
+/// </remarks>
 [JsonConverter(typeof(JsonStringEnumConverter<AlvoExtensionStage>))]
 public enum AlvoExtensionStage
 {
     /// <summary>After the write's transaction has committed, from the outbox: it can never undo the write.</summary>
     [JsonStringEnumMemberName("postCommit")]
-    PostCommit,
+    PostCommit = 0,
 }
 ```
 
@@ -287,7 +304,7 @@ public sealed record ManagementPolicyVerdict(
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `dotnet test --project test/MMLib.Alvo.Abstractions.Tests --filter-class '*ManagementExtensionTests'`
-Expected: PASS (5).
+Expected: PASS (6).
 
 - [ ] **Step 5: Approve the Abstractions baseline**
 
@@ -520,8 +537,8 @@ In `src/MMLib.Alvo/Extensions/AlvoExtensionOptions.cs` add:
 ```csharp
     /// <summary>
     /// Gets or sets whether the extension catalog names each class handler's .NET type; default <see langword="false"/>,
-    /// because a type name tells every viewer of the catalog how the host's code is laid out. A delegate handler is
-    /// never named.
+    /// because a type name tells every viewer of the catalog — and the schema assistant's model, which reads the catalog
+    /// through its <c>get_extensions</c> tool — how the host's code is laid out. A delegate handler is never named.
     /// </summary>
     public bool ExposeTypeNames { get; set; }
 ```
@@ -562,7 +579,7 @@ internal static class HandlerDescription
         TypeName = exposeTypeNames ? handler.Invoker.TypeName : null,
     };
 
-    private static IReadOnlyList<string> Operations(HandlerVerb verb) => verb switch
+    private static string[] Operations(HandlerVerb verb) => verb switch
     {
         HandlerVerb.Created => ["create"],
         HandlerVerb.Updated => ["update"],
@@ -655,7 +672,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 - Modify: `src/MMLib.Alvo.Abstractions/Management/IAlvoManagement.cs`, `ManagementExtensionCatalog.cs` (cref), `ManagementModels.cs` (`ManagementCapabilities.Honoured` doc)
 - Modify: `src/MMLib.Alvo/Management/Access/ManagementOperation.cs`, `Access/ManagementOperations.cs`, `Management/Setup.cs`, `Management/Internal/AlvoManagementService.cs`, `Management/Internal/ManagementEndpoints.cs`, `Management/Internal/CapabilityReport.cs`
 - Modify (implementers): `test/MMLib.Alvo.Admin.Tests.EndToEnd/ManagementDecorator.cs`, `test/MMLib.Alvo.Admin.Tests.EndToEnd/KeptFollowScenarios.cs` (`Holding`), `test/MMLib.Alvo.Api.Tests/Management/ManagementAccessTests.cs` (`RefusingManagement`)
-- Modify: `test/MMLib.Alvo.Tests/Management/ManagementOperationsTests.cs`
+- Modify: `test/MMLib.Alvo.Tests/Management/ManagementOperationsTests.cs`, `test/MMLib.Alvo.Api.Tests/Management/ManagementProjectNameTests.cs`
 - Create: `test/MMLib.Alvo.Api.Tests/Management/ManagedExtensions.cs`, `test/MMLib.Alvo.Api.Tests/Management/ManagementExtensionsTests.cs`
 - Regenerate: `docs/design/f5-admin/generated/*.js`
 - Baseline: `test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt`
@@ -830,7 +847,7 @@ public sealed class ManagementExtensionsTests
 }
 ```
 
-In `test/MMLib.Alvo.Tests/Management/ManagementOperationsTests.cs`, `A_viewer_may_read_everything_including_the_simulator`: insert `ManagementOperation.GetExtensions,` between `ManagementOperation.GetCelFunctions,` and `ManagementOperation.GetInfo,`.
+In `test/MMLib.Alvo.Tests/Management/ManagementOperationsTests.cs`, `A_viewer_may_read_everything_including_the_simulator`: insert `ManagementOperation.GetExtensions,` between `ManagementOperation.GetCelFunctions,` and `ManagementOperation.GetInfo,`. In `test/MMLib.Alvo.Api.Tests/Management/ManagementProjectNameTests.cs`, add `[InlineData("extensions")]` after `[InlineData("capabilities")]`.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -938,7 +955,7 @@ Confirm nothing else implements the port: `git grep -n ": IAlvoManagement\b" -- 
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `dotnet test --project test/MMLib.Alvo.Api.Tests --filter-class '*ManagementExtensionsTests'`, then `--filter-class '*ManagementContractTests'`, `--filter-class '*ManagementCapabilitiesHttpTests'`, `--filter-class '*ManagementPolicySimulationTests'`; `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*ManagementOperationsTests'` and `--filter-class '*ManagementCapabilitiesTests'`.
+Run: `dotnet test --project test/MMLib.Alvo.Api.Tests --filter-class '*ManagementExtensionsTests'`, then `--filter-class '*ManagementProjectNameTests'`, `--filter-class '*ManagementContractTests'`, `--filter-class '*ManagementCapabilitiesHttpTests'`, `--filter-class '*ManagementPolicySimulationTests'`; `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*ManagementOperationsTests'` and `--filter-class '*ManagementCapabilitiesTests'`.
 Expected: PASS. `ManagementContractTests` proves the new member has exactly one route and a level.
 
 - [ ] **Step 5: Baseline, prototype fixtures**
@@ -949,9 +966,9 @@ Run `python3 scripts/gen-prototype-fixtures`, then `python3 scripts/gen-prototyp
 - [ ] **Step 6: Format, ring0 + ring1, commit**
 
 ```bash
-dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo.Abstractions/Management/IAlvoManagement.cs src/MMLib.Alvo.Abstractions/Management/ManagementExtensionCatalog.cs src/MMLib.Alvo.Abstractions/Management/ManagementModels.cs src/MMLib.Alvo/Management/Access/ManagementOperation.cs src/MMLib.Alvo/Management/Access/ManagementOperations.cs src/MMLib.Alvo/Management/Setup.cs src/MMLib.Alvo/Management/Internal/AlvoManagementService.cs src/MMLib.Alvo/Management/Internal/ManagementEndpoints.cs src/MMLib.Alvo/Management/Internal/CapabilityReport.cs test/MMLib.Alvo.Admin.Tests.EndToEnd/ManagementDecorator.cs test/MMLib.Alvo.Admin.Tests.EndToEnd/KeptFollowScenarios.cs test/MMLib.Alvo.Api.Tests/Management/ManagementAccessTests.cs test/MMLib.Alvo.Tests/Management/ManagementOperationsTests.cs test/MMLib.Alvo.Api.Tests/Management/ManagedExtensions.cs test/MMLib.Alvo.Api.Tests/Management/ManagementExtensionsTests.cs
+dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo.Abstractions/Management/IAlvoManagement.cs src/MMLib.Alvo.Abstractions/Management/ManagementExtensionCatalog.cs src/MMLib.Alvo.Abstractions/Management/ManagementModels.cs src/MMLib.Alvo/Management/Access/ManagementOperation.cs src/MMLib.Alvo/Management/Access/ManagementOperations.cs src/MMLib.Alvo/Management/Setup.cs src/MMLib.Alvo/Management/Internal/AlvoManagementService.cs src/MMLib.Alvo/Management/Internal/ManagementEndpoints.cs src/MMLib.Alvo/Management/Internal/CapabilityReport.cs test/MMLib.Alvo.Admin.Tests.EndToEnd/ManagementDecorator.cs test/MMLib.Alvo.Admin.Tests.EndToEnd/KeptFollowScenarios.cs test/MMLib.Alvo.Api.Tests/Management/ManagementAccessTests.cs test/MMLib.Alvo.Tests/Management/ManagementOperationsTests.cs test/MMLib.Alvo.Api.Tests/Management/ManagementProjectNameTests.cs test/MMLib.Alvo.Api.Tests/Management/ManagedExtensions.cs test/MMLib.Alvo.Api.Tests/Management/ManagementExtensionsTests.cs
 scripts/test-ring0 && scripts/test-ring1
-git add src/MMLib.Alvo.Abstractions/Management/IAlvoManagement.cs src/MMLib.Alvo.Abstractions/Management/ManagementExtensionCatalog.cs src/MMLib.Alvo.Abstractions/Management/ManagementModels.cs src/MMLib.Alvo/Management/Access/ManagementOperation.cs src/MMLib.Alvo/Management/Access/ManagementOperations.cs src/MMLib.Alvo/Management/Setup.cs src/MMLib.Alvo/Management/Internal/AlvoManagementService.cs src/MMLib.Alvo/Management/Internal/ManagementEndpoints.cs src/MMLib.Alvo/Management/Internal/CapabilityReport.cs test/MMLib.Alvo.Admin.Tests.EndToEnd/ManagementDecorator.cs test/MMLib.Alvo.Admin.Tests.EndToEnd/KeptFollowScenarios.cs test/MMLib.Alvo.Api.Tests/Management/ManagementAccessTests.cs test/MMLib.Alvo.Tests/Management/ManagementOperationsTests.cs test/MMLib.Alvo.Api.Tests/Management/ManagedExtensions.cs test/MMLib.Alvo.Api.Tests/Management/ManagementExtensionsTests.cs test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt docs/design/f5-admin/generated
+git add src/MMLib.Alvo.Abstractions/Management/IAlvoManagement.cs src/MMLib.Alvo.Abstractions/Management/ManagementExtensionCatalog.cs src/MMLib.Alvo.Abstractions/Management/ManagementModels.cs src/MMLib.Alvo/Management/Access/ManagementOperation.cs src/MMLib.Alvo/Management/Access/ManagementOperations.cs src/MMLib.Alvo/Management/Setup.cs src/MMLib.Alvo/Management/Internal/AlvoManagementService.cs src/MMLib.Alvo/Management/Internal/ManagementEndpoints.cs src/MMLib.Alvo/Management/Internal/CapabilityReport.cs test/MMLib.Alvo.Admin.Tests.EndToEnd/ManagementDecorator.cs test/MMLib.Alvo.Admin.Tests.EndToEnd/KeptFollowScenarios.cs test/MMLib.Alvo.Api.Tests/Management/ManagementAccessTests.cs test/MMLib.Alvo.Tests/Management/ManagementOperationsTests.cs test/MMLib.Alvo.Api.Tests/Management/ManagementProjectNameTests.cs test/MMLib.Alvo.Api.Tests/Management/ManagedExtensions.cs test/MMLib.Alvo.Api.Tests/Management/ManagementExtensionsTests.cs test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt docs/design/f5-admin/generated
 git commit -m "feat(management): serve the extension catalog, its kinds and the simulator's extensions
 
 Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
@@ -959,16 +976,21 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 4: `ExtensionApplyGuard` — a proposed catalog every handler must still fit
+## Task 4: `ExtensionApplyGuard` — refuse a change that would unbind a bound handler
 
 **Files:**
 - Create: `src/MMLib.Alvo/Extensions/Internal/ExtensionApplyGuard.cs`, `src/MMLib.Alvo/Extensions/Internal/ExtensionApplyRefusals.cs`
-- Modify: `src/MMLib.Alvo/Events/Internal/EventConditionReads.cs` (expose `FieldsReadOrCompared`), `src/MMLib.Alvo/Extensions/Setup.cs`, `test/MMLib.Alvo.Tests/Extensions/HandlerCatalog.cs`
+- Modify: `src/MMLib.Alvo/Extensions/Internal/ExtensionBinder.cs` (a non-logging, cached `Result`), `src/MMLib.Alvo/Events/Internal/EventConditionReads.cs` (expose `FieldsReadOrCompared`), `src/MMLib.Alvo/Extensions/Setup.cs`, `test/MMLib.Alvo.Tests/Extensions/HandlerCatalog.cs`
 - Test: `test/MMLib.Alvo.Tests/Extensions/ExtensionApplyGuardTests.cs`
 
 **Interfaces:**
-- Consumes: `ExtensionBindingCompiler.Compile(ExtensionRegistry, PolicyCatalog, ICelCompiler, IServiceProviderIsService)` → `ExtensionBindingResult.Problems` (`ExtensionProblem(Id, Kind, Locator, Message, Fix)`); `ExtensionBindingCompiler.HandlerKind`; `IPolicyCatalogProvider.Current`; `PolicyCatalog.Build(AlvoDescriptor, SchemaModel, ICelCompiler)`; `PolicyCatalog.Schema`.
-- Produces: `internal sealed class ExtensionApplyGuard(ExtensionRegistry registry, ICelCompiler compiler, IServiceProviderIsService services, IPolicyCatalogProvider catalogs)` with `void EnsureKeepsBindings(PolicyCatalog proposed)` and `void EnsureKeepsBindings(AlvoDescriptor descriptor, SchemaModel schema)` — both throw `DescriptorValidationException`; registered singleton. `internal static IEnumerable<string> EventConditionReads.FieldsReadOrCompared(CelNode node)`. Test helper `HandlerCatalog.CatalogOf(SchemaModel schema)`.
+- Consumes: `ExtensionBinder`'s per-catalog cache (`ConditionalWeakTable<PolicyCatalog, CatalogBinding>`) over `ExtensionBindingCompiler.Compile`; `ExtensionBindingResult.Bindings.Handlers` / `.Problems` (`ExtensionProblem(Id, Kind, Locator, Message, Fix)`); `ExtensionBindingCompiler.HandlerKind`; `IPolicyCatalogProvider.Current`; `PolicyCatalog.Build(AlvoDescriptor, SchemaModel, ICelCompiler)`; `PolicyCatalog.Schema`.
+- Produces:
+  - `internal ExtensionBindingResult ExtensionBinder.Result(PolicyCatalog catalog)` — cached per catalog instance, logs nothing.
+  - `internal sealed record ExtensionApplyCheck(PolicyCatalog Catalog, IReadOnlyList<DescriptorValidationError> Warnings)`.
+  - `internal sealed class ExtensionApplyGuard(ExtensionRegistry registry, ExtensionBinder binder, ICelCompiler compiler, IPolicyCatalogProvider catalogs)` with `ExtensionApplyCheck? Check(AlvoDescriptor descriptor, SchemaModel schema)` (`null` when the host registers no handler; otherwise builds the catalog once) and `ExtensionApplyCheck Check(PolicyCatalog proposed)`. Both throw `DescriptorValidationException` when a handler that binds `catalogs.Current` would not bind the proposed catalog; a handler that binds neither is a `Warning` in the result. Registered singleton.
+  - `internal static IEnumerable<string> EventConditionReads.FieldsReadOrCompared(CelNode node)`.
+  - Test helper `HandlerCatalog.CatalogOf(SchemaModel schema)`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -995,6 +1017,8 @@ In `test/MMLib.Alvo.Tests/Extensions/HandlerCatalog.cs`, replace `Catalog()` wit
 Create `test/MMLib.Alvo.Tests/Extensions/ExtensionApplyGuardTests.cs`:
 
 ```csharp
+using Microsoft.Extensions.Logging.Abstractions;
+
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
@@ -1009,67 +1033,73 @@ using FieldType = MMLib.Alvo.Schema.FieldType;
 namespace MMLib.Alvo.Tests.Extensions;
 
 /// <summary>
-/// The apply guard (spec 2026-10-14 §4.2, HX-03 settled details (6)): a catalog an apply proposes is refused when a
-/// registered handler would no longer bind it, each finding at the pointer of what the change removed or excluded.
+/// The apply guard (spec 2026-10-14 §4.2, HX-03 settled details (6)): a change is refused when a handler that binds the
+/// current catalog would no longer bind the proposed one, each finding at the pointer of what the change removed or
+/// excluded, beside the compiler's own sentence; a handler that binds neither is a warning, never a refusal.
 /// </summary>
 public sealed class ExtensionApplyGuardTests
 {
-    private const string FieldFix = "Remove the registration from the host and redeploy first, or keep the field.";
+    private const string FieldFix = "Remove the registration and redeploy first, or keep the field.";
 
     [Fact]
-    public void A_catalog_every_handler_still_fits_is_accepted()
+    public void A_catalog_every_bound_handler_still_fits_passes_and_is_handed_back()
     {
-        var guard = Guard(OnStatus("on-status"));
+        var proposed = CatalogOf(WithField("tickets", "priority"));
 
-        Should.NotThrow(() => guard.EnsureKeepsBindings(CatalogOf(WithField("tickets", "priority"))));
+        var check = Guard(OnStatus("on-status")).Check(proposed);
+
+        check.Catalog.ShouldBeSameAs(proposed, "the apply publishes the catalog the guard checked, never a second build");
+        check.Warnings.ShouldBeEmpty();
     }
 
     [Fact]
-    public void Removing_a_field_a_handler_reads_is_refused_at_the_field_naming_the_extension()
+    public void Removing_a_field_a_bound_handler_reads_is_refused_at_the_field_naming_the_extension()
     {
-        var error = Refused(Guard(OnStatus("on-status")), WithoutField("tickets", "status")).ShouldHaveSingleItem();
+        var errors = Refused(Guard(OnStatus("on-status")), WithoutField("tickets", "status"));
 
-        error.Path.ShouldBe("/entities/tickets/fields/status");
-        error.Message.ShouldContain("'on-status' (eventHandler, in this host)");
-        error.FixSuggestion.ShouldBe(FieldFix);
-        error.Severity.ShouldBe(DescriptorValidationSeverity.Error);
+        var precise = Precise(errors).ShouldHaveSingleItem();
+        precise.Path.ShouldBe("/entities/tickets/fields/status");
+        precise.Message.ShouldContain("'on-status' (eventHandler, in this host)");
+        precise.FixSuggestion.ShouldBe(FieldFix);
+        errors.ShouldAllBe(error => error.Severity == DescriptorValidationSeverity.Error);
+        errors.ShouldContain(error => error.Path.Length == 0, "the compiler's own sentence is kept beside the pointer");
     }
 
     [Fact]
-    public void Renaming_a_field_a_handler_reads_is_refused_at_the_old_field()
+    public void Renaming_a_field_a_bound_handler_reads_is_refused_at_the_old_field()
     {
         var renamed = Replaced("tickets", entity => entity with
         {
             Fields = [.. entity.Fields.Select(field => field.Name == "status" ? field with { Name = "state" } : field)],
         });
 
-        Refused(Guard(OnStatus("on-status")), renamed).ShouldHaveSingleItem().Path.ShouldBe("/entities/tickets/fields/status");
+        Precise(Refused(Guard(OnStatus("on-status")), renamed)).ShouldHaveSingleItem().Path.ShouldBe("/entities/tickets/fields/status");
     }
 
     [Fact]
-    public void Removing_an_entity_a_handler_names_is_refused_at_the_entity()
+    public void Removing_an_entity_a_bound_handler_names_is_refused_at_the_entity()
     {
         var withoutTickets = new SchemaModel([.. Schema.Entities.Where(entity => entity.Name != "tickets")]);
 
-        var error = Refused(Guard(OnStatus("on-status")), withoutTickets).ShouldHaveSingleItem();
+        var precise = Precise(Refused(Guard(OnStatus("on-status")), withoutTickets)).ShouldHaveSingleItem();
 
-        error.Path.ShouldBe("/entities/tickets");
-        error.FixSuggestion.ShouldBe("Remove the registration from the host and redeploy first, or keep the entity.");
+        precise.Path.ShouldBe("/entities/tickets");
+        precise.FixSuggestion.ShouldBe("Remove the registration and redeploy first, or keep the entity.");
     }
 
     [Fact]
-    public void Excluding_a_field_a_handler_reads_is_refused_at_the_exclusion()
+    public void Excluding_a_field_a_bound_handler_reads_is_refused_at_the_exclusion()
     {
         var excluded = Replaced("tickets", entity => entity with { EventImageExclusions = ["secret", "status"] });
 
-        var error = Refused(Guard(OnStatus("on-status")), excluded).ShouldHaveSingleItem();
+        var precise = Precise(Refused(Guard(OnStatus("on-status")), excluded)).ShouldHaveSingleItem();
 
-        error.Path.ShouldBe("/entities/tickets/events/exclude/1");
-        error.FixSuggestion.ShouldBe("Remove the registration from the host and redeploy first, or keep the field in the event images.");
+        precise.Path.ShouldBe("/entities/tickets/events/exclude/1");
+        precise.FixSuggestion.ShouldBe("Remove the registration and redeploy first, or keep the field in the event images.");
     }
 
     [Fact]
-    public void Every_handler_a_change_unbinds_is_named_on_its_own()
+    public void Every_bound_handler_a_change_unbinds_is_named_on_its_own()
     {
         var guard = Guard(alvo =>
         {
@@ -1077,7 +1107,7 @@ public sealed class ExtensionApplyGuardTests
             OnStatus("second")(alvo);
         });
 
-        var messages = Refused(guard, WithoutField("tickets", "status")).Select(error => error.Message).ToList();
+        var messages = Precise(Refused(guard, WithoutField("tickets", "status"))).Select(error => error.Message).ToList();
 
         messages.Count.ShouldBe(2);
         messages.ShouldContain(message => message.Contains("'first'", StringComparison.Ordinal));
@@ -1095,19 +1125,29 @@ public sealed class ExtensionApplyGuardTests
 
         var errors = Refused(guard, retyped);
 
-        errors.ShouldNotBeEmpty();
-        errors.ShouldAllBe(error => error.Path.Length == 0, "the field is still there: no precise pointer exists");
+        Precise(errors).ShouldBeEmpty("the field is still there: no pointer names the cause");
         errors.ShouldAllBe(error => error.Message.Contains("'on-resolved' (eventHandler, in this host) would no longer bind"));
     }
 
     [Fact]
-    public void With_nothing_primed_a_removed_field_is_still_refused_naming_the_extension()
+    public void With_nothing_primed_an_unfit_handler_is_a_warning_not_a_refusal()
     {
-        var errors = Refused(Guard(OnStatus("on-status"), current: null), WithoutField("tickets", "status"));
+        var check = Guard(OnStatus("on-status"), current: null).Check(CatalogOf(WithoutField("tickets", "status")));
 
-        errors.ShouldNotBeEmpty();
-        errors.ShouldAllBe(error => error.Path.Length == 0, "with no catalog before the change, what the condition read is unknown");
-        errors.ShouldAllBe(error => error.Message.Contains("'on-status'"));
+        check.Warnings.ShouldNotBeEmpty();
+        check.Warnings.ShouldAllBe(warning => warning.Severity == DescriptorValidationSeverity.Warning);
+        check.Warnings.ShouldAllBe(warning => warning.Message.Contains("'on-status'"));
+    }
+
+    [Fact]
+    public void A_handler_already_unbound_does_not_block_an_unrelated_change()
+    {
+        var unbound = WithoutField("tickets", "status");
+        var guard = Guard(OnStatus("on-status"), current: CatalogOf(unbound));
+
+        var check = guard.Check(CatalogOf(new SchemaModel([.. unbound.Entities.Where(entity => entity.Name != "notes")])));
+
+        check.Warnings.ShouldContain(warning => warning.Message.Contains("'on-status'"), "still reported, as it was before the change");
     }
 
     [Fact]
@@ -1118,12 +1158,21 @@ public sealed class ExtensionApplyGuardTests
             .AddEventHandler("approved", "orders.approved", OnRecord));
         var withoutNotes = new SchemaModel([.. Schema.Entities.Where(entity => entity.Name != "notes")]);
 
-        Should.NotThrow(() => guard.EnsureKeepsBindings(CatalogOf(withoutNotes)));
+        guard.Check(CatalogOf(withoutNotes)).Warnings.ShouldBeEmpty();
     }
 
     [Fact]
-    public void A_host_without_handlers_never_refuses()
-        => Should.NotThrow(() => Guard(_ => { }).EnsureKeepsBindings(CatalogOf(new SchemaModel([]))));
+    public void A_host_without_handlers_builds_no_catalog_and_checks_nothing()
+    {
+        var descriptor = new AlvoDescriptor
+        {
+            ApiVersion = "alvo.dev/v1",
+            Name = "handlers",
+            Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal),
+        };
+
+        Guard(_ => { }).Check(descriptor, new SchemaModel([])).ShouldBeNull();
+    }
 
     private static Action<IAlvoBuilder> OnStatus(string id) =>
         alvo => alvo.Entity("tickets", t => t.OnUpdated(id, OnUpdated, when: "changed(status)"));
@@ -1138,11 +1187,16 @@ public sealed class ExtensionApplyGuardTests
             catalogs.SetCurrent("handlers", current);
         }
 
-        return new ExtensionApplyGuard(Registry(configure), CelFixtures.Compiler, EveryService(), catalogs);
+        var registry = Registry(configure);
+        var binder = new ExtensionBinder(registry, CelFixtures.Compiler, EveryService(), NullLogger<ExtensionBinder>.Instance);
+        return new ExtensionApplyGuard(registry, binder, CelFixtures.Compiler, catalogs);
     }
 
     private static IReadOnlyList<DescriptorValidationError> Refused(ExtensionApplyGuard guard, SchemaModel proposed) =>
-        Should.Throw<DescriptorValidationException>(() => guard.EnsureKeepsBindings(CatalogOf(proposed))).Result.Errors;
+        Should.Throw<DescriptorValidationException>(() => guard.Check(CatalogOf(proposed))).Result.Errors;
+
+    private static IEnumerable<DescriptorValidationError> Precise(IEnumerable<DescriptorValidationError> errors) =>
+        errors.Where(error => error.Path.Length > 0);
 
     private static SchemaModel Replaced(string name, Func<EntitySchema, EntitySchema> change) =>
         new([.. Schema.Entities.Select(entity => entity.Name == name ? change(entity) : entity)]);
@@ -1160,9 +1214,19 @@ Check the namespaces of `PolicyCatalogProvider` (`git grep -n "class PolicyCatal
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*ExtensionApplyGuardTests'`
-Expected: build FAIL — `ExtensionApplyGuard` does not exist.
+Expected: build FAIL — `ExtensionApplyGuard` and `ExtensionBinder.Result` do not exist.
 
 - [ ] **Step 3: Implement**
+
+`src/MMLib.Alvo/Extensions/Internal/ExtensionBinder.cs`, beside `For`:
+
+```csharp
+    /// <summary>What binding <paramref name="catalog"/> produced — compiled once per catalog and cached; logs nothing.</summary>
+    /// <param name="catalog">A catalog the boot primed, an apply proposes, or the provider holds.</param>
+    internal ExtensionBindingResult Result(PolicyCatalog catalog) => Binding(catalog).Result;
+```
+
+Because the cache is keyed by the catalog **instance**, the catalog the guard checks — and the apply then publishes (Task 5) — is compiled once: the delivery dispatcher's later `For(catalog)` is a cache hit.
 
 `src/MMLib.Alvo/Events/Internal/EventConditionReads.cs`: make `FieldsReadOrCompared` internal and document it (lower-case prose: this file is under the SQL text scan):
 
@@ -1179,8 +1243,6 @@ Expected: build FAIL — `ExtensionApplyGuard` does not exist.
 `src/MMLib.Alvo/Extensions/Internal/ExtensionApplyGuard.cs`:
 
 ```csharp
-using Microsoft.Extensions.DependencyInjection;
-
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
@@ -1188,44 +1250,54 @@ using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Extensions.Internal;
 
+/// <summary>A proposed catalog no bound handler would lose, and the handlers that bind neither it nor the current one.</summary>
+/// <param name="Catalog">The checked catalog — the one an apply publishes, so it is built and compiled once.</param>
+/// <param name="Warnings">One warning per problem of a handler that was not bound before the change either.</param>
+internal sealed record ExtensionApplyCheck(PolicyCatalog Catalog, IReadOnlyList<DescriptorValidationError> Warnings);
+
 /// <summary>
-/// Refuses a catalog an apply proposes when a registered handler would no longer bind it — the same compiler the boot
-/// binds with, run against the proposed revision. It is what keeps a runtime apply, a rollback, a dry run and
-/// <c>ApplyAlvoDescriptorAsync</c> from leaving a handler unbound; the boot refuses on its own, through
-/// <see cref="ExtensionBinder.EnsureBindable"/>.
+/// Refuses a change that would unbind a handler: one that binds the catalog the provider holds and would not bind the
+/// proposed one — HX-03's own compiler, through the binder's per-catalog cache, so the guard cannot drift from the boot.
+/// It keeps a runtime apply, a rollback, a dry run and <c>ApplyAlvoDescriptorAsync</c> from unbinding a handler; the boot
+/// refuses on its own, through <see cref="ExtensionBinder.EnsureBindable"/>. A handler that was already unbound (a
+/// dashboard-first host's first descriptor, a stored boot that ended <c>Failed</c>) blocks nothing: it is reported as a
+/// warning, and its events keep being recorded dead <c>unbound</c> until a descriptor fits it.
 /// </summary>
 internal sealed class ExtensionApplyGuard(
-    ExtensionRegistry registry, ICelCompiler compiler, IServiceProviderIsService services, IPolicyCatalogProvider catalogs)
+    ExtensionRegistry registry, ExtensionBinder binder, ICelCompiler compiler, IPolicyCatalogProvider catalogs)
 {
-    /// <summary>Builds the catalog <paramref name="descriptor"/> proposes, only when a handler is registered, and checks it.</summary>
+    /// <summary>Builds the catalog <paramref name="descriptor"/> proposes and checks it; <see langword="null"/> when no handler is registered.</summary>
     /// <param name="descriptor">The proposed descriptor.</param>
-    /// <param name="schema">The schema it maps to.</param>
-    /// <exception cref="DescriptorValidationException">A registered handler would no longer bind.</exception>
-    internal void EnsureKeepsBindings(AlvoDescriptor descriptor, SchemaModel schema)
-    {
-        if (registry.Handlers.Count > 0)
-        {
-            EnsureKeepsBindings(PolicyCatalog.Build(descriptor, schema, compiler));
-        }
-    }
+    /// <param name="schema">The schema it maps to — the very instance the apply publishes.</param>
+    /// <exception cref="DescriptorValidationException">A handler that binds the current catalog would no longer bind.</exception>
+    internal ExtensionApplyCheck? Check(AlvoDescriptor descriptor, SchemaModel schema) =>
+        registry.Handlers.Count == 0 ? null : Check(PolicyCatalog.Build(descriptor, schema, compiler));
 
-    /// <summary>Refuses <paramref name="proposed"/> when a registered handler would no longer bind it.</summary>
+    /// <summary>Refuses <paramref name="proposed"/> when a handler that binds the current catalog would no longer bind it.</summary>
     /// <param name="proposed">The catalog the change would prime.</param>
-    /// <exception cref="DescriptorValidationException">A registered handler would no longer bind.</exception>
-    internal void EnsureKeepsBindings(PolicyCatalog proposed)
+    /// <exception cref="DescriptorValidationException">A handler that binds the current catalog would no longer bind.</exception>
+    internal ExtensionApplyCheck Check(PolicyCatalog proposed)
     {
-        if (registry.Handlers.Count == 0)
+        var problems = binder.Result(proposed).Problems;
+        if (problems.Count == 0)
         {
-            return;
+            return new(proposed, []);
         }
 
-        var problems = ExtensionBindingCompiler.Compile(registry, proposed, compiler, services).Problems;
-        if (problems.Count > 0)
+        var boundNow = BoundNow();
+        var regressions = problems.Where(problem => boundNow.Contains(problem.Id)).ToList();
+        if (regressions.Count > 0)
         {
             throw new DescriptorValidationException(new DescriptorValidationResult(
-                ExtensionApplyRefusals.Of(registry, problems, catalogs.Current?.Schema, proposed.Schema, compiler)));
+                ExtensionApplyRefusals.Refusals(registry, regressions, catalogs.Current!.Schema, proposed.Schema, compiler)));
         }
+
+        return new(proposed, ExtensionApplyRefusals.Warnings(problems));
     }
+
+    private HashSet<string> BoundNow() => catalogs.Current is { } current
+        ? binder.Result(current).Bindings.Handlers.Select(handler => handler.Id).ToHashSet(StringComparer.Ordinal)
+        : new HashSet<string>(StringComparer.Ordinal);
 }
 ```
 
@@ -1240,45 +1312,48 @@ using MMLib.Alvo.Schema;
 namespace MMLib.Alvo.Extensions.Internal;
 
 /// <summary>
-/// Turns the problems a proposed catalog gives the registered handlers into descriptor findings: at the entity, the
-/// field or the <c>events.exclude</c> item the change removed or excluded when that is why, and at the whole document,
-/// with the compiler's own sentence, otherwise.
+/// Turns binding problems into descriptor findings. A refusal names, for a handler the change unbinds, the entity, the
+/// field or the <c>events.exclude</c> item the change removed or excluded — each existed before the change, since the
+/// handler bound it — and keeps the compiler's own sentence beside it, so a second cause is not hidden behind the
+/// first. A warning is the compiler's sentence alone, for a handler that bound neither catalog.
 /// </summary>
 internal static class ExtensionApplyRefusals
 {
     private const string Kind = ExtensionBindingCompiler.HandlerKind;
-    private const string FixPrefix = "Remove the registration from the host and redeploy first, or keep the ";
+    private const string FixPrefix = "Remove the registration and redeploy first, or keep the ";
 
-    internal static IReadOnlyList<DescriptorValidationError> Of(
-        ExtensionRegistry registry, IReadOnlyList<ExtensionProblem> problems, SchemaModel? current, SchemaModel proposed, ICelCompiler compiler)
+    internal static IReadOnlyList<DescriptorValidationError> Refusals(
+        ExtensionRegistry registry, IReadOnlyList<ExtensionProblem> regressions, SchemaModel current, SchemaModel proposed, ICelCompiler compiler)
     {
         var errors = new List<DescriptorValidationError>();
-        foreach (var refused in problems.GroupBy(problem => problem.Id, StringComparer.Ordinal))
+        foreach (var refused in regressions.GroupBy(problem => problem.Id, StringComparer.Ordinal))
         {
-            var handler = registry.Handlers.FirstOrDefault(candidate => string.Equals(candidate.Id, refused.Key, StringComparison.Ordinal));
-            var precise = handler is null ? [] : Precise(handler, current, proposed, compiler);
-            errors.AddRange(precise.Count > 0 ? precise : refused.Select(Generic));
+            var handler = registry.Handlers.First(candidate => string.Equals(candidate.Id, refused.Key, StringComparison.Ordinal));
+            errors.AddRange(Precise(handler, current, proposed, compiler));
+            errors.AddRange(refused.Select(problem => Generic(problem, DescriptorValidationSeverity.Error)));
         }
 
         return errors;
     }
 
-    private static List<DescriptorValidationError> Precise(
-        HandlerRegistration handler, SchemaModel? current, SchemaModel proposed, ICelCompiler compiler) =>
+    internal static IReadOnlyList<DescriptorValidationError> Warnings(IReadOnlyList<ExtensionProblem> problems) =>
+        [.. problems.Select(problem => Generic(problem, DescriptorValidationSeverity.Warning))];
+
+    private static DescriptorValidationError[] Precise(
+        HandlerRegistration handler, SchemaModel current, SchemaModel proposed, ICelCompiler compiler) =>
         handler.Source is EntityEvents { IsAll: false } source
             ? [.. source.Entities.SelectMany(entity => ForEntity(handler, entity, current, proposed, compiler))]
             : [];
 
     private static IEnumerable<DescriptorValidationError> ForEntity(
-        HandlerRegistration handler, string name, SchemaModel? current, SchemaModel proposed, ICelCompiler compiler)
+        HandlerRegistration handler, string name, SchemaModel current, SchemaModel proposed, ICelCompiler compiler)
     {
         if (Named(proposed, name) is not { } after)
         {
             return [EntityRemoved(handler.Id, name)];
         }
 
-        var before = current is null ? null : Named(current, name);
-        return FieldsRead(handler.When, before, after, compiler)
+        return FieldsRead(handler.When, Named(current, name), compiler)
             .Select(field => FieldRefusal(handler.Id, after, field))
             .OfType<DescriptorValidationError>();
     }
@@ -1294,23 +1369,17 @@ internal static class ExtensionApplyRefusals
         return index < 0 ? null : FieldExcluded(id, after.Name, field, index);
     }
 
-    private static IReadOnlyList<string> FieldsRead(string? when, EntitySchema? before, EntitySchema after, ICelCompiler compiler)
+    private static string[] FieldsRead(string? when, EntitySchema? before, ICelCompiler compiler)
     {
-        if (when is null)
+        if (when is null || before is null)
         {
             return [];
         }
 
-        foreach (var entity in new[] { before, after }.OfType<EntitySchema>())
-        {
-            var result = compiler.Compile(when, CelProfile.Condition, entity);
-            if (result.IsSuccess)
-            {
-                return [.. EventConditionReads.FieldsReadOrCompared(result.Expression!.Root).Distinct(StringComparer.Ordinal)];
-            }
-        }
-
-        return [];
+        var result = compiler.Compile(when, CelProfile.Condition, before);
+        return result.IsSuccess
+            ? [.. EventConditionReads.FieldsReadOrCompared(result.Expression!.Root).Distinct(StringComparer.Ordinal)]
+            : [];
     }
 
     private static EntitySchema? Named(SchemaModel schema, string name) =>
@@ -1334,31 +1403,33 @@ internal static class ExtensionApplyRefusals
         + "it would decide the handler's condition by its absence.",
         FixPrefix + "field in the event images.");
 
-    private static DescriptorValidationError Generic(ExtensionProblem problem) => Error(
+    private static DescriptorValidationError Generic(ExtensionProblem problem, DescriptorValidationSeverity severity) => new(
         string.Empty,
-        $"Extension '{problem.Id}' ({problem.Kind}, in this host) would no longer bind to this descriptor — "
-        + $"{problem.Locator}: {problem.Message}",
-        problem.Fix);
+        severity == DescriptorValidationSeverity.Error
+            ? $"Extension '{problem.Id}' ({problem.Kind}, in this host) would no longer bind to this descriptor — {problem.Locator}: {problem.Message}"
+            : $"Extension '{problem.Id}' ({problem.Kind}, in this host) does not bind to this descriptor, and did not before this change — {problem.Locator}: {problem.Message}",
+        problem.Fix,
+        severity);
 
     private static DescriptorValidationError Error(string path, string message, string fix) =>
         new(path, message, fix, DescriptorValidationSeverity.Error);
 }
 ```
 
-`src/MMLib.Alvo/Extensions/Setup.cs`: after the `ExtensionCatalog` line add `services.TryAddSingleton<ExtensionApplyGuard>();` (the container supplies `IServiceProviderIsService`; `IPolicyCatalogProvider` and `ICelCompiler` are core registrations).
+`src/MMLib.Alvo/Extensions/Setup.cs`: after the `ExtensionCatalog` line add `services.TryAddSingleton<ExtensionApplyGuard>();` (`ExtensionBinder`, `IPolicyCatalogProvider` and `ICelCompiler` are core registrations).
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*ExtensionApplyGuardTests'`, then the HX-03 suites that read `HandlerCatalog.Catalog()`: `--filter-class '*ExtensionBindingCompilerTests'`, `--filter-class '*ExtensionBinderTests'`, `--filter-class '*DeliveryFanOutTests'`.
+Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*ExtensionApplyGuardTests'`, then the HX-03 suites that read `HandlerCatalog.Catalog()` or the binder: `--filter-class '*ExtensionBindingCompilerTests'`, `--filter-class '*ExtensionBinderTests'`, `--filter-class '*DeliveryFanOutTests'`.
 Expected: PASS.
 
 - [ ] **Step 5: Format, ring0, commit**
 
 ```bash
-dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo/Extensions/Internal/ExtensionApplyGuard.cs src/MMLib.Alvo/Extensions/Internal/ExtensionApplyRefusals.cs src/MMLib.Alvo/Events/Internal/EventConditionReads.cs src/MMLib.Alvo/Extensions/Setup.cs test/MMLib.Alvo.Tests/Extensions/HandlerCatalog.cs test/MMLib.Alvo.Tests/Extensions/ExtensionApplyGuardTests.cs
+dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo/Extensions/Internal/ExtensionApplyGuard.cs src/MMLib.Alvo/Extensions/Internal/ExtensionApplyRefusals.cs src/MMLib.Alvo/Extensions/Internal/ExtensionBinder.cs src/MMLib.Alvo/Events/Internal/EventConditionReads.cs src/MMLib.Alvo/Extensions/Setup.cs test/MMLib.Alvo.Tests/Extensions/HandlerCatalog.cs test/MMLib.Alvo.Tests/Extensions/ExtensionApplyGuardTests.cs
 scripts/test-ring0
-git add src/MMLib.Alvo/Extensions/Internal/ExtensionApplyGuard.cs src/MMLib.Alvo/Extensions/Internal/ExtensionApplyRefusals.cs src/MMLib.Alvo/Events/Internal/EventConditionReads.cs src/MMLib.Alvo/Extensions/Setup.cs test/MMLib.Alvo.Tests/Extensions/HandlerCatalog.cs test/MMLib.Alvo.Tests/Extensions/ExtensionApplyGuardTests.cs
-git commit -m "feat(extensions): refuse a catalog a registered handler would no longer bind
+git add src/MMLib.Alvo/Extensions/Internal/ExtensionApplyGuard.cs src/MMLib.Alvo/Extensions/Internal/ExtensionApplyRefusals.cs src/MMLib.Alvo/Extensions/Internal/ExtensionBinder.cs src/MMLib.Alvo/Events/Internal/EventConditionReads.cs src/MMLib.Alvo/Extensions/Setup.cs test/MMLib.Alvo.Tests/Extensions/HandlerCatalog.cs test/MMLib.Alvo.Tests/Extensions/ExtensionApplyGuardTests.cs
+git commit -m "feat(extensions): refuse a change that would unbind a bound handler
 
 Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 ```
@@ -1374,8 +1445,8 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 - Modify: `test/MMLib.Alvo.Api.Tests/Management/ManagementExtensionsTests.cs`
 
 **Interfaces:**
-- Consumes: Task 4's `ExtensionApplyGuard.EnsureKeepsBindings(AlvoDescriptor, SchemaModel)` and `(PolicyCatalog)`.
-- Produces: `internal RuntimeSchemaService(IDescriptorValidator, ISchemaMigrator, IDescriptorVersionStore, IRuntimeSchemaWriter, ICelCompiler, IPolicyCatalogProvider, ExtensionApplyGuard? extensions)`; `SchemaMigrationRunner(…, IPolicyCatalogProvider policyCatalogProvider, ExtensionApplyGuard? extensions = null)`; `RuntimeSchemaWorld.Around(InMemoryDescriptorVersionStore versions, Func<IPolicyCatalogProvider, ExtensionApplyGuard>? extensions = null)`.
+- Consumes: Task 4's `ExtensionApplyGuard.Check(AlvoDescriptor, SchemaModel)` → `ExtensionApplyCheck?` and `Check(PolicyCatalog)`; `ExtensionBinder(registry, compiler, services, logger)`.
+- Produces: `internal RuntimeSchemaService(IDescriptorValidator, ISchemaMigrator, IDescriptorVersionStore, IRuntimeSchemaWriter, ICelCompiler, IPolicyCatalogProvider, ExtensionApplyGuard? extensions)`; `SchemaMigrationRunner(…, IPolicyCatalogProvider policyCatalogProvider, ExtensionApplyGuard? extensions = null)`; `RuntimeSchemaWorld.Around(InMemoryDescriptorVersionStore versions, Func<IPolicyCatalogProvider, ExtensionApplyGuard>? extensions = null)`; the guard's warnings reach `DescriptorApplyPreview.Warnings` (and with it `ManagementApplyResult.Warnings`, which the assistant reads).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1395,6 +1466,8 @@ and extend its docs: "with the host's extension guard, built over this world's c
 Create `test/MMLib.Alvo.Tests/Migrations/RuntimeSchemaServiceExtensionGuardTests.cs` (take the `using`s for `DescriptorToSchemaMapper`, `InMemoryDescriptorVersionStore` and `CelCompiler` from `RuntimeSchemaWorld.cs` if they differ from these):
 
 ```csharp
+using Microsoft.Extensions.Logging.Abstractions;
+
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions.Internal;
@@ -1410,7 +1483,8 @@ namespace MMLib.Alvo.Tests.Migrations;
 
 /// <summary>
 /// The guard on the runtime apply path (spec 2026-10-14 §4.2, HX-03 settled details (6)): an apply, a dry run and a
-/// rollback that a registered handler would no longer fit are refused before anything is read, planned or written.
+/// rollback that would unbind a bound handler are refused before anything is read, planned or written; a handler that
+/// was never bound blocks nothing and is reported as a warning.
 /// </summary>
 public sealed class RuntimeSchemaServiceExtensionGuardTests
 {
@@ -1418,21 +1492,22 @@ public sealed class RuntimeSchemaServiceExtensionGuardTests
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private static Func<IPolicyCatalogProvider, ExtensionApplyGuard> OnNotes => catalogs => new ExtensionApplyGuard(
-        HandlerCatalog.Registry(alvo => alvo.Entity("tasks", tasks => tasks.OnUpdated("on-notes", HandlerCatalog.OnUpdated, when: "changed(notes)"))),
-        new CelCompiler(),
-        HandlerCatalog.EveryService(),
-        catalogs);
+    private static Func<IPolicyCatalogProvider, ExtensionApplyGuard> OnNotes => catalogs =>
+    {
+        var registry = HandlerCatalog.Registry(alvo => alvo.Entity("tasks", tasks => tasks.OnUpdated("on-notes", HandlerCatalog.OnUpdated, when: "changed(notes)")));
+        var binder = new ExtensionBinder(registry, new CelCompiler(), HandlerCatalog.EveryService(), NullLogger<ExtensionBinder>.Instance);
+        return new ExtensionApplyGuard(registry, binder, new CelCompiler(), catalogs);
+    };
 
     [Fact]
-    public async Task An_apply_that_removes_a_field_a_handler_reads_is_refused_and_writes_and_primes_nothing()
+    public async Task An_apply_that_removes_a_field_a_bound_handler_reads_is_refused_and_writes_and_primes_nothing()
     {
         var world = await WithNotesAsync();
 
         var refused = await Should.ThrowAsync<DescriptorValidationException>(() => world.Service.ApplyAsync(
             Project, OneField, expectedRevision: 1, new MigrationOptions { AllowDestructive = true }, Ct));
 
-        refused.Result.Errors.ShouldHaveSingleItem().Path.ShouldBe(NotesPointer);
+        Pointed(refused).ShouldBe(NotesPointer);
         world.Writer.Applies.ShouldBe(0);
         world.PolicyCatalogs.SetCurrentCalls.ShouldBe(0);
     }
@@ -1445,7 +1520,7 @@ public sealed class RuntimeSchemaServiceExtensionGuardTests
         var refused = await Should.ThrowAsync<DescriptorValidationException>(() => world.Service.PreviewAsync(
             Project, OneField, expectedRevision: 1, new MigrationOptions(), Ct));
 
-        refused.Result.Errors.ShouldHaveSingleItem().Path.ShouldBe(NotesPointer);
+        Pointed(refused).ShouldBe(NotesPointer);
     }
 
     [Fact]
@@ -1478,28 +1553,40 @@ public sealed class RuntimeSchemaServiceExtensionGuardTests
         var refused = await Should.ThrowAsync<DescriptorValidationException>(() => guarded.Service.RollbackAsync(
             Project, targetRevision: 1, new MigrationOptions { AllowDestructive = true }, Ct));
 
-        refused.Result.Errors.ShouldHaveSingleItem().Path.ShouldBe(NotesPointer);
+        Pointed(refused).ShouldBe(NotesPointer);
         (await versions.GetCurrentAsync(Project, Ct))!.Revision.ShouldBe(2);
     }
 
     [Fact]
-    public async Task A_first_apply_a_handler_does_not_fit_is_refused_even_with_nothing_primed()
+    public async Task A_first_apply_a_handler_does_not_fit_is_applied_with_a_warning()
     {
         var world = Around(new InMemoryDescriptorVersionStore(), OnNotes);
 
-        var refused = await Should.ThrowAsync<DescriptorValidationException>(() => world.Service.ApplyAsync(
-            Project, OneField, expectedRevision: 0, new MigrationOptions(), Ct));
+        var preview = await world.Service.PreviewAsync(Project, OneField, expectedRevision: 0, new MigrationOptions(), Ct);
+        var applied = await world.Service.ApplyAsync(Project, OneField, expectedRevision: 0, new MigrationOptions(), Ct);
 
-        refused.Result.Errors.ShouldNotBeEmpty();
-        refused.Result.Errors.ShouldAllBe(error => error.Message.Contains("'on-notes'"));
-        world.Writer.Applies.ShouldBe(0);
+        preview.Warnings.ShouldContain(warning =>
+            warning.Severity == DescriptorValidationSeverity.Warning && warning.Message.Contains("'on-notes'"));
+        applied.Revision.ShouldBe(1, "a handler nothing ever bound blocks no apply; its events are recorded dead 'unbound'");
     }
 
     [Fact]
-    public async Task A_first_apply_every_handler_fits_is_applied()
+    public async Task A_handler_already_unbound_does_not_block_an_unrelated_apply()
+    {
+        var world = Around(new InMemoryDescriptorVersionStore(), OnNotes);
+        await world.Service.ApplyAsync(Project, OneField, expectedRevision: 0, new MigrationOptions(), Ct);
+
+        (await world.Service.ApplyAsync(Project, OneFieldPlusRequired, expectedRevision: 1, new MigrationOptions(), Ct)).Revision.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task A_first_apply_every_handler_fits_is_applied_without_a_warning()
     {
         var world = Around(new InMemoryDescriptorVersionStore(), OnNotes);
 
+        var preview = await world.Service.PreviewAsync(Project, TwoFields, expectedRevision: 0, new MigrationOptions(), Ct);
+
+        preview.Warnings.ShouldNotContain(warning => warning.Message.Contains("'on-notes'"));
         (await world.Service.ApplyAsync(Project, TwoFields, expectedRevision: 0, new MigrationOptions(), Ct)).Revision.ShouldBe(1);
     }
 
@@ -1513,6 +1600,9 @@ public sealed class RuntimeSchemaServiceExtensionGuardTests
         return world;
     }
 
+    private static string Pointed(DescriptorValidationException refused) =>
+        refused.Result.Errors.Where(error => error.Path.Length > 0).ShouldHaveSingleItem().Path;
+
     private static PolicyCatalog CatalogOf(string descriptorJson)
     {
         var descriptor = AlvoDescriptor.Parse(descriptorJson);
@@ -1521,40 +1611,86 @@ public sealed class RuntimeSchemaServiceExtensionGuardTests
 }
 ```
 
-In `test/MMLib.Alvo.Tests/Migrations/SchemaMigrationRunnerTests.cs`, replace `Applying_a_descriptor_a_handler_does_not_fit_succeeds_and_leaves_the_handler_unbound` (and its summary) with:
+In `test/MMLib.Alvo.Tests/Migrations/SchemaMigrationRunnerTests.cs`, add beside `FleetDescriptorJson`:
+
+```csharp
+    /// <summary><see cref="FleetDescriptorJson"/> plus a <c>plate</c> a handler reads — the catalog a host had primed before.</summary>
+    private const string FleetWithPlateJson = """
+        {
+          "apiVersion": "alvo.dev/v1",
+          "name": "fleet",
+          "entities": {
+            "vehicles": {
+              "fields": {
+                "vin": { "type": "string", "required": true, "maxLength": 17 },
+                "make": { "type": "string" },
+                "plate": { "type": "string" }
+              }
+            }
+          }
+        }
+        """;
+```
+
+and replace `Applying_a_descriptor_a_handler_does_not_fit_succeeds_and_leaves_the_handler_unbound` (and its summary) with:
 
 ```csharp
     /// <summary>
-    /// <c>ApplyAlvoDescriptorAsync</c> is an apply like any other (HX-04): a descriptor a registered handler does not fit
-    /// is refused before anything is planned or saved, naming the handler — never applied with the handler left unbound.
+    /// <c>ApplyAlvoDescriptorAsync</c> is guarded like every apply (HX-04), and the guard refuses a change, not a state: a
+    /// handler that never bound — nothing was primed — blocks nothing, and is left unbound with its events recorded dead.
     /// </summary>
     [Fact]
-    public async Task Applying_a_descriptor_a_handler_does_not_fit_is_refused_before_anything_is_written()
+    public async Task A_descriptor_a_handler_never_fit_is_applied_and_the_handler_stays_unbound()
     {
         _store.GetCurrentAsync("fleet", Arg.Any<CancellationToken>()).Returns((AppliedSchema?)null);
         _introspector.IntrospectAsync(Arg.Any<CancellationToken>()).Returns(new SchemaModel([]));
-        var registry = HandlerCatalog.Registry(alvo => alvo.Entity("no-such-entity", e => e.OnCreated("orphan-handler", HandlerCatalog.OnCreated)));
-        var catalogs = new PolicyCatalogProvider();
-        var runner = new SchemaMigrationRunner(
-            BootPlan(),
-            _migrator,
-            _introspector,
-            _store,
-            catalogs,
-            new ExtensionApplyGuard(registry, new CelCompiler(), HandlerCatalog.EveryService(), catalogs));
+        var (runner, binder, catalogs) = Guarded(alvo => alvo.Entity("no-such-entity", e => e.OnCreated("orphan-handler", HandlerCatalog.OnCreated)));
+
+        var result = await runner.RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken);
+
+        result.Applied.ShouldBeTrue();
+        binder.For(catalogs.Current.ShouldNotBeNull()).Unbound.ShouldHaveSingleItem().Id.ShouldBe("orphan-handler");
+    }
+
+    /// <summary>A descriptor that drops what a bound handler reads is refused before anything is planned or saved.</summary>
+    [Fact]
+    public async Task A_descriptor_that_drops_what_a_bound_handler_reads_is_refused_before_anything_is_written()
+    {
+        _store.GetCurrentAsync("fleet", Arg.Any<CancellationToken>()).Returns((AppliedSchema?)null);
+        _introspector.IntrospectAsync(Arg.Any<CancellationToken>()).Returns(new SchemaModel([]));
+        var (runner, _, catalogs) = Guarded(alvo => alvo.Entity("vehicles", e => e.OnUpdated("on-plate", HandlerCatalog.OnUpdated, when: "changed(plate)")));
+        var primed = AlvoDescriptor.Parse(FleetWithPlateJson);
+        var before = PolicyCatalog.Build(primed, DescriptorToSchemaMapper.Map(primed), new CelCompiler());
+        catalogs.SetCurrent("fleet", before);
 
         var refused = await Should.ThrowAsync<DescriptorValidationException>(
             () => runner.RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken));
 
-        refused.Result.Errors.ShouldHaveSingleItem().Path.ShouldBe("/entities/no-such-entity");
+        refused.Result.Errors.Where(error => error.Path.Length > 0).ShouldHaveSingleItem().Path.ShouldBe("/entities/vehicles/fields/plate");
         await _store.DidNotReceive().SaveAsync(Arg.Any<string>(), Arg.Any<AppliedSchema>(), Arg.Any<CancellationToken>());
-        catalogs.Current.ShouldBeNull("a refused apply primes nothing");
+        catalogs.Current.ShouldBeSameAs(before, "a refused apply primes nothing");
+    }
+
+    private (SchemaMigrationRunner Runner, ExtensionBinder Binder, PolicyCatalogProvider Catalogs) Guarded(Action<IAlvoBuilder> configure)
+    {
+        var registry = HandlerCatalog.Registry(configure);
+        var binder = new ExtensionBinder(registry, new CelCompiler(), HandlerCatalog.EveryService(), NullLogger<ExtensionBinder>.Instance);
+        var catalogs = new PolicyCatalogProvider();
+        var runner = new SchemaMigrationRunner(
+            new DescriptorBootPlan(_source, new DescriptorValidator(), new CelCompiler(), NullLogger<DescriptorBootPlan>.Instance, binder),
+            _migrator,
+            _introspector,
+            _store,
+            catalogs,
+            new ExtensionApplyGuard(registry, binder, new CelCompiler(), catalogs));
+
+        return (runner, binder, catalogs);
     }
 ```
 
-Remove the `using`s only the deleted fact needed (IDE0005 names them).
+Add the `using`s the new facts need (`MMLib.Alvo.Extensions.Internal`, the namespaces of `DescriptorToSchemaMapper` and `AlvoDescriptor`) and drop any the build reports unused.
 
-Append to `test/MMLib.Alvo.Api.Tests/Management/ManagementExtensionsTests.cs` (acceptance (2)), with `private static readonly TestApiKey _dev = new("mgmt-dev", ["dispatcher"], ["*:write"]);` beside `_ops` and the `using` for `AlvoProblemTypes` (`git grep -n "class AlvoProblemTypes" -- src`):
+Append to `test/MMLib.Alvo.Api.Tests/Management/ManagementExtensionsTests.cs` (acceptance (2)), with `private static readonly TestApiKey _dev = new("mgmt-dev", ["dispatcher"], ["*:write"]);` beside `_ops` and the `using` for `AlvoProblemTypes` (`git grep -n "class AlvoProblemTypes" -- src`). A violation's fix travels as `fixSuggestion` (`AlvoViolation`'s `JsonPropertyName`):
 
 ```csharp
     [Fact]
@@ -1568,7 +1704,7 @@ Append to `test/MMLib.Alvo.Api.Tests/Management/ManagementExtensionsTests.cs` (a
 
         violation["pointer"]!.GetValue<string>().ShouldBe("/entities/vehicles/fields/plate");
         violation["message"]!.GetValue<string>().ShouldContain($"'{PlateChanged}' (eventHandler, in this host)");
-        violation["fix"]!.GetValue<string>().ShouldBe("Remove the registration from the host and redeploy first, or keep the field.");
+        violation["fixSuggestion"]!.GetValue<string>().ShouldBe("Remove the registration and redeploy first, or keep the field.");
         (await ManagementApplyWorld.RevisionAsync(world, _dev)).ShouldBe(1);
     }
 
@@ -1613,6 +1749,7 @@ Append to `test/MMLib.Alvo.Api.Tests/Management/ManagementExtensionsTests.cs` (a
     private static async Task<JsonNode> CurrentAsync(AlvoApiWorld world) =>
         JsonNode.Parse(await ManagementApplyWorld.CurrentAsync(world, _dev))!;
 
+    /// <summary>The refusal's one pointed violation; the compiler's own sentences travel beside it at the empty pointer.</summary>
     private static async Task<JsonObject> RefusedAsync(AlvoApiWorld world, JsonNode descriptor, bool allowDestructive = false, string query = "")
     {
         using var response = await ManagementApplyWorld.ApplyAsync(
@@ -1620,7 +1757,10 @@ Append to `test/MMLib.Alvo.Api.Tests/Management/ManagementExtensionsTests.cs` (a
 
         response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
         (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Validation);
-        return (await response.ReadJsonObjectAsync())["violations"]!.AsArray().ShouldHaveSingleItem()!.AsObject();
+        return (await response.ReadJsonObjectAsync())["violations"]!.AsArray()
+            .Select(violation => violation!.AsObject())
+            .Where(violation => violation["pointer"]!.GetValue<string>().Length > 0)
+            .ShouldHaveSingleItem();
     }
 ```
 
@@ -1634,18 +1774,19 @@ Expected: build FAIL (no 7-argument `RuntimeSchemaService` constructor, no 6-arg
 `src/MMLib.Alvo/Migrations/RuntimeSchemaService.cs`:
 - add the field `private readonly ExtensionApplyGuard? _extensions;` and `using MMLib.Alvo.Extensions.Internal;`;
 - the public constructor keeps its signature and documentation and becomes `: this(validator, migrator, store, writer, compiler, policyCatalogProvider, extensions: null) { }`;
-- add the internal constructor carrying today's null checks and assignments plus `_extensions = extensions;`, its `extensions` param documented: "Refuses a descriptor a registered handler would no longer bind; `null` for a service a host builds itself, which then carries no guard.";
-- `ApplyAsync`: right after `var desired = DescriptorToSchemaMapper.Map(descriptor);` insert `_extensions?.EnsureKeepsBindings(descriptor, desired);`;
+- add the internal constructor carrying today's null checks and assignments plus `_extensions = extensions;`, its `extensions` param documented: "Refuses a descriptor that would unbind a handler bound to the current catalog, and hands back the catalog it checked; `null` for a service a host builds itself, which then carries no guard.";
+- `ApplyAsync`: right after `var desired = DescriptorToSchemaMapper.Map(descriptor);` insert `var checkedCatalog = _extensions?.Check(descriptor, desired)?.Catalog;`. In the unchanged-reapply branch replace `PolicyCatalogPriming.Prime(_policyCatalogProvider, _compiler, project, descriptor, desired);` with `_policyCatalogProvider.SetCurrent(project, checkedCatalog ?? PolicyCatalog.Build(descriptor, desired, _compiler));` (what `Prime` does, minus the second build), and replace `var catalog = PolicyCatalog.Build(descriptor, desired, _compiler);` with `var catalog = checkedCatalog ?? PolicyCatalog.Build(descriptor, desired, _compiler);`;
 - `PreviewAsync`: replace `var desired = DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(descriptorJson));` with
 
 ```csharp
         var descriptor = AlvoDescriptor.Parse(descriptorJson);
         var desired = DescriptorToSchemaMapper.Map(descriptor);
-        _extensions?.EnsureKeepsBindings(descriptor, desired);
+        var check = _extensions?.Check(descriptor, desired);
 ```
 
-- `RollbackAsync`: right after `currentVersion` is read, insert `_extensions?.EnsureKeepsBindings(AlvoDescriptor.Parse(target.DescriptorJson), target.Schema);`;
-- extend each of the three members' `DescriptorValidationException` doc with "…, or a registered extension would no longer bind to it." (`RollbackAsync` gains that `<exception>` line).
+  and make the result's warnings `Warnings = [.. validation.Errors.Where(error => error.Severity == DescriptorValidationSeverity.Warning), .. check?.Warnings ?? []],`;
+- `RollbackAsync`: move `var restored = target.Schema with { };` (and its ABA comment) up to right after `currentVersion` is read, insert `var checkedCatalog = _extensions?.Check(AlvoDescriptor.Parse(target.DescriptorJson), restored)?.Catalog;` after it, and replace the later `var catalog = PolicyCatalog.Build(AlvoDescriptor.Parse(target.DescriptorJson), restored, _compiler);` with `var catalog = checkedCatalog ?? PolicyCatalog.Build(AlvoDescriptor.Parse(target.DescriptorJson), restored, _compiler);` — the checked catalog is built over the fresh `restored` instance, so the ABA rule holds;
+- extend each of the three members' `DescriptorValidationException` doc with "…, or it would unbind an extension the current catalog binds." (`RollbackAsync` gains that `<exception>` line).
 
 `src/MMLib.Alvo/AlvoServiceCollectionExtensions.cs`: replace `services.TryAddSingleton<RuntimeSchemaService>();` with
 
@@ -1662,7 +1803,7 @@ Expected: build FAIL (no 7-argument `RuntimeSchemaService` constructor, no 6-arg
 
 (add the `using`s the file lacks). The factory is resolved lazily, as the type registration was, so a driver-less container still activates nothing until the first apply.
 
-`src/MMLib.Alvo/Migrations/SchemaMigrationRunner.cs`: add the constructor parameter `ExtensionApplyGuard? extensions = null` (last), store it, and in `RunAsync` right after `LoadAsync` insert `_extensions?.EnsureKeepsBindings(catalog);`. In the type remarks, state: an apply like any other — a descriptor a registered handler would no longer bind is refused (`DescriptorValidationException`) before anything is planned. `DescriptorBootPlan.EnsureBindable`'s remark names `ApplyAlvoDescriptorAsync` as lenient: rewrite it to say the boot refuses through the binder and every other apply path through `ExtensionApplyGuard`; only a host priming `IPolicyCatalogProvider` itself can still leave a handler unbound.
+`src/MMLib.Alvo/Migrations/SchemaMigrationRunner.cs`: add the constructor parameter `ExtensionApplyGuard? extensions = null` (last), store it, and in `RunAsync` right after `LoadAsync` insert `_extensions?.Check(catalog);`. In the type remarks, state: guarded like every apply — a descriptor that would unbind a handler the current catalog binds is refused (`DescriptorValidationException`) before anything is planned; a handler that never bound stays unbound, logged, its events recorded dead. `DescriptorBootPlan.EnsureBindable`'s remark names `ApplyAlvoDescriptorAsync` as lenient: rewrite it to say the boot refuses every misfit through the binder, and every other apply path refuses a change that would unbind a bound handler through `ExtensionApplyGuard`.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -1675,7 +1816,7 @@ Expected: PASS. Then `--filter-class '*PublicApiApprovalTests'` in `test/MMLib.A
 dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo/Migrations/RuntimeSchemaService.cs src/MMLib.Alvo/Migrations/SchemaMigrationRunner.cs src/MMLib.Alvo/Migrations/Internal/DescriptorBootPlan.cs src/MMLib.Alvo/AlvoServiceCollectionExtensions.cs test/MMLib.Alvo.Tests/Migrations/RuntimeSchemaWorld.cs test/MMLib.Alvo.Tests/Migrations/SchemaMigrationRunnerTests.cs test/MMLib.Alvo.Tests/Migrations/RuntimeSchemaServiceExtensionGuardTests.cs test/MMLib.Alvo.Api.Tests/Management/ManagementExtensionsTests.cs
 scripts/test-ring0 && scripts/test-ring1
 git add src/MMLib.Alvo/Migrations/RuntimeSchemaService.cs src/MMLib.Alvo/Migrations/SchemaMigrationRunner.cs src/MMLib.Alvo/Migrations/Internal/DescriptorBootPlan.cs src/MMLib.Alvo/AlvoServiceCollectionExtensions.cs test/MMLib.Alvo.Tests/Migrations/RuntimeSchemaWorld.cs test/MMLib.Alvo.Tests/Migrations/SchemaMigrationRunnerTests.cs test/MMLib.Alvo.Tests/Migrations/RuntimeSchemaServiceExtensionGuardTests.cs test/MMLib.Alvo.Api.Tests/Management/ManagementExtensionsTests.cs
-git commit -m "feat(migrations): refuse an apply, dry run or rollback that would unbind a handler
+git commit -m "feat(migrations): refuse an apply, dry run or rollback that would unbind a bound handler
 
 Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 ```
@@ -2008,6 +2149,8 @@ and `new("Lifecycle", Lifecycle),` right after `new("On write", OnWrite),` in `A
     <SectionHead Title="After commit">
         <Subtitle>
             Runs once the write has committed, from the outbox: it can never undo the write, and it may leave the process.
+            This tab shows what runs after the commit only — before-hooks, which run inside the transaction, are on the
+            On write tab.
         </Subtitle>
     </SectionHead>
 
@@ -2261,12 +2404,12 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 ## Task 9: The assistant's `get_extensions` tool
 
 **Files:**
-- Modify: `src/MMLib.Alvo.Ai/Internal/ManagementTools.cs`, `src/MMLib.Alvo.Ai/Instructions/schema-assistant.md`, `src/MMLib.Alvo.Ai/Internal/AssistantInstructions.cs`
+- Modify: `src/MMLib.Alvo.Ai/Internal/ManagementTools.cs` (the tool, and `DescriptorView.HostExtensions`), `src/MMLib.Alvo.Ai/Instructions/schema-assistant.md`, `src/MMLib.Alvo.Ai/Internal/AssistantInstructions.cs`
 - Test: `test/MMLib.Alvo.Ai.Tests/ManagementToolsTests.cs`, `test/MMLib.Alvo.Ai.Tests/AlvoAssistantTests.cs`
 
 **Interfaces:**
 - Consumes: Task 3's `IAlvoManagement.GetExtensionsAsync`.
-- Produces: tool `get_extensions` (no arguments), answering the catalog as JSON through the same `AnsweredAsync`/`Json` path the other reads use; instructions version `<!-- alvo-schema-assistant v7 -->`.
+- Produces: tool `get_extensions` (no arguments), answering the catalog as JSON through the same `AnsweredAsync`/`Json` path the other reads use; `get_descriptor`'s answer gains `hostExtensions` — per entity name (or `*`), how many host extensions run on it, `{}` when none — read through the port inside the same tool call, so the model learns *whether* to call `get_extensions` without spending a call against the eval's `MaximumToolCalls` (6); instructions version `<!-- alvo-schema-assistant v7 -->`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2301,6 +2444,31 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
         answer.ShouldContain("eventHandler");
     }
 
+    /// <summary>The descriptor read says per entity how many host extensions run there, so a hook case spends no extra call.</summary>
+    [Fact]
+    public async Task The_descriptor_read_counts_the_host_extensions_per_entity()
+    {
+        var management = Serving(Descriptor);
+        management.GetExtensionsAsync(Project, Arg.Any<CancellationToken>()).Returns(new ManagementExtensionCatalog
+        {
+            Items =
+            [
+                new ManagementExtension { Id = "a", Kind = AlvoExtensionKind.EventHandler, Stage = AlvoExtensionStage.PostCommit, Entities = ["rentals"] },
+                new ManagementExtension { Id = "b", Kind = AlvoExtensionKind.EventHandler, Stage = AlvoExtensionStage.PostCommit, Entities = ["*"] },
+                new ManagementExtension { Id = "c", Kind = AlvoExtensionKind.EventHandler, Stage = AlvoExtensionStage.PostCommit, Event = "fleet.alerted" },
+            ],
+        });
+
+        var counts = JsonNode.Parse(await InvokeAsync(management, "get_descriptor", []))!["hostExtensions"]!.AsObject();
+
+        counts.Select(pair => (pair.Key, pair.Value!.GetValue<int>())).ShouldBe([("rentals", 1), ("*", 1)], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task A_host_without_extensions_reads_an_empty_count()
+        => JsonNode.Parse(await InvokeAsync(Serving(Descriptor), "get_descriptor", []))!["hostExtensions"]
+            .ShouldBeOfType<JsonObject>().ShouldBeEmpty();
+
     /// <summary>A caller the access block does not admit is told so, not crashed.</summary>
     [Fact]
     public async Task A_forbidden_caller_is_reported_by_the_extensions_tool_too()
@@ -2328,12 +2496,41 @@ Expected: FAIL — seven tools, and `get_extensions` is not found.
                 GetExtensionsAsync,
                 "get_extensions",
                 "The host code (extensions) this host registers — event handlers with the entities, operations and condition "
-                + "each binds — as read-only metadata. Read it before proposing a hook: name an extension that already does "
-                + "what is asked instead of adding one. A field or entity an extension reads cannot be removed or left out of "
-                + "event images; the dry run refuses it, naming the extension."),
+                + "each binds — as read-only metadata. When get_descriptor's hostExtensions names an entity, read it before "
+                + "proposing an after-hook there: name an extension that already does what is asked instead of adding one. A "
+                + "field or entity an extension reads cannot be removed or left out of event images; the dry run refuses it, "
+                + "naming the extension."),
 ```
 
-and after `GetCelFunctionsAsync`:
+`GetDescriptorAsync` reads both through the port in one tool call:
+
+```csharp
+    private Task<string> GetDescriptorAsync(CancellationToken ct) =>
+        AnsweredAsync(async () => Json(DescriptorView.Of(
+            await _management.GetDescriptorAsync(_project, ct).ConfigureAwait(false),
+            await _management.GetExtensionsAsync(_project, ct).ConfigureAwait(false))));
+```
+
+and `DescriptorView` (same file) gains the count — `extensions` may be `null` from a test double that does not configure the call:
+
+```csharp
+internal sealed record DescriptorView(string Project, int Revision, JsonNode? Descriptor)
+{
+    /// <summary>Gets, per entity name or <c>*</c>, how many host extensions run on it; empty when the host registers none.</summary>
+    public IReadOnlyDictionary<string, int> HostExtensions { get; init; } = new Dictionary<string, int>(StringComparer.Ordinal);
+
+    internal static DescriptorView Of(ManagementDescriptor descriptor, ManagementExtensionCatalog? extensions) =>
+        new(descriptor.Project, descriptor.Revision, JsonNode.Parse(descriptor.DescriptorJson)) { HostExtensions = Counted(extensions) };
+
+    private static Dictionary<string, int> Counted(ManagementExtensionCatalog? extensions) =>
+        (extensions?.Items ?? [])
+            .SelectMany(extension => extension.Entities)
+            .GroupBy(entity => entity, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+}
+```
+
+(Document the new `<param>`/property; keep the existing ones.) Then after `GetCelFunctionsAsync`:
 
 ```csharp
     /// <summary>The host's registered extensions, so a proposal neither duplicates nor unbinds one.</summary>
@@ -2341,7 +2538,7 @@ and after `GetCelFunctionsAsync`:
         AnsweredAsync(async () => Json(await _management.GetExtensionsAsync(_project, ct).ConfigureAwait(false)));
 ```
 
-`schema-assistant.md`: first line `<!-- alvo-schema-assistant v7 -->`; in *Your tools*, after the `get_cel_functions` bullet:
+`schema-assistant.md`: first line `<!-- alvo-schema-assistant v7 -->`; the `get_descriptor` bullet ends "…, with its `revision` and `hostExtensions` (how many host extensions run per entity)."; in *Your tools*, after the `get_cel_functions` bullet:
 
 ```markdown
 - `get_extensions` — the host code (extensions) this host registers and what each one binds; read-only.
@@ -2357,7 +2554,7 @@ and under *You cannot*, after "Read or change data rows, or apply anything.":
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `dotnet test --project test/MMLib.Alvo.Ai.Tests` (whole project: `AssistantInstructionsTests` holds the tool bullets to the registered set).
+Run: `dotnet test --project test/MMLib.Alvo.Ai.Tests` (whole project: `AssistantInstructionsTests` holds the tool bullets to the registered set) and `dotnet test --project test/MMLib.Alvo.Host.Tests --filter-class '*InstructionExampleOutcomeTests'` (it drives the real tools).
 Expected: PASS. `--filter-class '*PublicApiApprovalTests'` in `test/MMLib.Alvo.Ai.Tests`: PASS unchanged.
 
 - [ ] **Step 5: Format, ring0, commit**
@@ -2381,7 +2578,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 **Interfaces:**
 - Consumes: Task 9's `get_extensions` tool name.
-- Produces: region `<!-- gen:descriptor-or-code -->` in the hooks skill whose only token is `get_extensions`, held by `SkillRegionTests.The_descriptor_or_code_region_names_the_extension_read`.
+- Produces: region `<!-- gen:descriptor-or-code -->` in the hooks skill whose tokens are `get_descriptor`, `hostExtensions`, `*`, `get_extensions`, held by `SkillRegionTests.The_descriptor_or_code_region_names_the_extension_read`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2392,7 +2589,7 @@ In `test/MMLib.Alvo.Ai.Tests/SkillRegionTests.cs`: append `"descriptor-or-code"`
     [Fact]
     public void The_descriptor_or_code_region_names_the_extension_read()
     {
-        Holds("hooks", "descriptor-or-code", ["get_extensions"]);
+        Holds("hooks", "descriptor-or-code", ["get_descriptor", "hostExtensions", "*", "get_extensions"]);
         ManagementTools.For(Substitute.For<IAlvoManagement>(), "p").Functions.Select(tool => tool.Name).ShouldContain("get_extensions");
     }
 ```
@@ -2404,17 +2601,21 @@ Expected: FAIL — `alvo-descriptor-hooks has no <!-- gen:descriptor-or-code -->
 
 - [ ] **Step 3: Edit the skills**
 
-`alvo-descriptor-hooks/SKILL.md` is 6 061 bytes of a 6 144 cap, so the region costs two sentences that are for the host developer, not the descriptor author — both are kept in `website/src/content/docs/guides/custom-cel-functions.mdx` ("Tenant-aware", "A new meaning gets a new name"):
+`alvo-descriptor-hooks/SKILL.md` is 6 061 bytes of a 6 144 cap, so the region costs two sentences that are for the host developer, not the descriptor author — both are kept in `website/src/content/docs/guides/custom-cel-functions.mdx` ("Tenant-aware", "A new meaning gets a new name") — and one parenthetical the `cel-mutate` region already shows by example:
 
 1. In the paragraph that begins "An embedded host may register its own CEL functions", delete its last two sentences — from " A function whose meaning changes gets a new name" through "must take the tenant as a parameter and filter by it." — so the paragraph ends at "never assume one exists."
-2. Immediately before the paragraph that begins "After-hooks (`afterCreate`, `afterUpdate`, `afterDelete`) run after the commit", insert (followed by a blank line):
+2. Replace "A `mutate` value has no comparison operator (a text test such as `startsWith` is a call, and may fill a boolean\nfield). For a flag decided by a comparison, let the `condition` compare and the `mutate` write the literal, with a\nsecond hook for the opposite case." with "A `mutate` value has no comparison operator. For a flag decided by a comparison, let the `condition` compare and\nthe `mutate` write the literal, with a second hook for the opposite case."
+3. Immediately before the paragraph that begins "After-hooks (`afterCreate`, `afterUpdate`, `afterDelete`) run after the commit", insert (followed by a blank line):
 
 ```markdown
 <!-- gen:descriptor-or-code -->
-Host C# may also react after a commit (an extension): call `get_extensions` before proposing a hook, and name one that
-already does it instead. Apply refuses removing, or excluding from event images, a field or entity an extension reads.
+Host C# may react after a commit (an extension). When `get_descriptor`'s `hostExtensions` names the entity or `*`,
+call `get_extensions` before proposing an after-hook there, and name one that already does it instead. Apply
+refuses removing, or excluding from event images, a field or entity an extension reads.
 <!-- /gen:descriptor-or-code -->
 ```
+
+The read is conditional on purpose: an extension is post-commit host code, so only an *after*-hook can duplicate one, and only on an entity the count names — a before-hook case (`hook_returned_at`, `reject_negative_price`) spends no extra call against the eval's `MaximumToolCalls` of 6. §4.13's "read the catalog before proposing a **rule** an extension enforces" is narrowed to after-hooks for that reason (ruling 14).
 
 `alvo-descriptor-entities-and-fields/SKILL.md`: after the bullet that ends "`required` with `readOnly` is refused there too." add
 
@@ -2431,7 +2632,7 @@ Referenced only from `automation`, they do nothing. An after-hook `condition` or
 `@tenant.id` and `@user.roles`: the writer's tenant and roles as the event recorded them.
 ```
 
-Measure: `wc -c plugins/alvo/skills/alvo-descriptor-{hooks,entities-and-fields,capabilities-and-limits}/SKILL.md` — expected 6 142, 6 031 and 3 162 bytes (all ≤ 6 144); `wc -l` all ≤ 200. Keep the files LF, as they are.
+Measure: `wc -c plugins/alvo/skills/alvo-descriptor-{hooks,entities-and-fields,capabilities-and-limits}/SKILL.md` — expected 6 141, 6 031 and 3 162 bytes (all ≤ 6 144; the hooks skill keeps 3 bytes of headroom, debt the PR report names); `wc -l` all ≤ 200. Keep the files LF, as they are.
 
 - [ ] **Step 4: Run the skill suites**
 
@@ -2551,8 +2752,9 @@ using MMLib.Alvo.Events;
 namespace MMLib.Alvo.Ai.Eval;
 
 /// <summary>
-/// The eval host's own C#: two event handlers on bike-workshop entities no other case touches, so the extension cases have
-/// something to name and something to protect without changing what any other case grades.
+/// The eval host's own C#: two event handlers — on <c>rental_fleet</c>, which no other case touches, and on the one
+/// <c>rentals</c> field (<c>damage_report</c>) no other case reads — so the extension cases have something to name and
+/// something to protect without changing what any other case grades.
 /// </summary>
 internal static class EvalExtensions
 {
@@ -2632,7 +2834,7 @@ and extend the class summary: "…, and the two extension cases (HX-04)".
     }
 ```
 
-and add to its remarks that the world registers `EvalExtensions`' two handlers, which no other case's request touches.
+and add to its remarks that the world registers `EvalExtensions`' two handlers. `rentals` is also the entity of `hook_returned_at`, `rollup_rentals_count` and `automation_refused`; their requests are before-hooks, a rollup and a schedule, none an after-hook, so the conditional `get_extensions` read (Task 10) does not add a call to them, and `damage_report` appears in none of them.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -2718,11 +2920,10 @@ public interface IWorkshop
 }
 ```
 
-`website/src/snippets/extending/catalog/FleetDeskExtensionsTests.cs` (fix the usings to the real namespaces of `UserId`, `Role` and `ApiKeyScope` — `git grep -n "record UserId\|class Role\b\|record ApiKeyScope" -- src/MMLib.Alvo.Abstractions`):
+`website/src/snippets/extending/catalog/FleetDeskExtensionsTests.cs` (fix the usings to the real namespace of `ApiKeyScope` — `git grep -n "record ApiKeyScope" -- src/MMLib.Alvo.Abstractions`):
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
-using MMLib.Alvo;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Management;
@@ -2758,14 +2959,14 @@ public sealed class FleetDeskExtensionsTests
         withoutStatus["entities"]!["vehicles"]!["fields"]!.AsObject().Remove("status");
         var refused = await Should.ThrowAsync<DescriptorValidationException>(() => management.ApplyDescriptorAsync(
             "fleet-desk", new ManagementApplyRequest(withoutStatus.ToJsonString(), ExpectedRevision: 1, DryRun: true), ct));
-        refused.Result.Errors.ShouldHaveSingleItem().Path.ShouldBe("/entities/vehicles/fields/status");
+        refused.Result.Errors.ShouldContain(error => error.Path == "/entities/vehicles/fields/status");
     }
 
     private static IAlvoManagement AsAdministrator(AlvoTestHost alvo)
     {
         alvo.Services.GetRequiredService<IAlvoContextAccessor>().Principal = new AlvoPrincipal
         {
-            Context = new AlvoContext { User = UserId.New(), Roles = new HashSet<Role> { Role.Admin } },
+            Context = AlvoTestHost.Caller("admin"),
             Scopes = new HashSet<ApiKeyScope>(),
             KeyId = "docs",
         };
@@ -2780,42 +2981,42 @@ public sealed class FleetDeskExtensionsTests
 ```
 
 Run: `dotnet test --project test/MMLib.Alvo.DocsSnippets.Tests`
-Expected: PASS (`SnippetCoverageTests` finds both new types; the fact passes — the guard answers before the revision check, so the dry run's `ExpectedRevision` does not decide it). If the call is refused with `ManagementForbiddenException`, the access block did not admit the principal: check `ManagementAccessEvaluator` for what an `admin` level needs and keep the descriptor honest, not the test.
+Expected: PASS (`SnippetCoverageTests` finds both new types; the fact passes — the guard answers before the revision check, so the dry run's `ExpectedRevision` does not decide it). Two failure modes are not the guard: a `ManagementForbiddenException` means the access block did not admit the principal (check `ManagementAccessEvaluator` for what an `admin` level needs and keep the descriptor honest, not the test); an activation error naming `IRuntimeSchemaWriter` or `IDescriptorVersionStore` means `AlvoTestHost`'s container cannot resolve `RuntimeSchemaService` — then read the catalog half only, and move the refusal half to a fact over `ManagedExtensions` in `MMLib.Alvo.Api.Tests`, saying so on the page.
 
 - [ ] **Step 2: Write the page**
 
 `website/src/content/docs/extending/extension-catalog.mdx` — frontmatter `title: See your extensions in the dashboard`, `description: Every handler your host registers is listed — in the dashboard, the Management API and the assistant — and no apply can quietly drop what it reads.`, `sidebar:` / `order: 4`. Imports as `event-handlers.mdx` does (`Code`, `SourceExcerpt`, the three snippets as `descriptor`, `extensions`, `tests`). Sections, each a few sentences:
 
 1. *What is listed* — every event handler as metadata, never code; a table of the members (`id`, `kind`, `stage`, `entities`, `operations`, `event`, `when`, `order`, `timeout`, `runAs`, `ordering`, `description`, `typeName`) with the wire values from this plan's Global Constraints; `<Code code={descriptor} lang="json" title="fleet-desk.alvo.json" />` and `<SourceExcerpt code={extensions} from="public static IAlvoBuilder AddFleetDeskExtensions" to="go in for repair.\"));" title="FleetDeskExtensions.cs" />`.
-2. *Read it* — `GET /management/projects/<project>/extensions` (Viewer) and `IAlvoManagement.GetExtensionsAsync`; a hand-written JSON block of the one-item answer for `book-repair` (matching the fact's assertions and Task 2's snapshot shape: `entities ["vehicles"]`, `operations ["update"]`, `timeout "00:00:30"`, `runAs "system"`, `ordering "perRecord"`, `typeName null`); `Alvo:Extensions:ExposeTypeNames` and why it defaults to `false`; the capability report's `extensions.eventHandler`; the policy simulator's `extensions`.
-3. *In the dashboard* — the `⟨/⟩ n` badge on **Schema** (every-entity handlers count too) and the **Lifecycle** tab's *After commit* lane: descriptor after-hooks (changed on **On write**) and code items, read-only, marked `⟨/⟩ from code`, with the description, `when` and a line such as `on update · timeout 30 s · runs as the system · in order per record`.
-4. *An apply cannot drop what a handler reads* — the three refusals and their pointers; a sample violation `{"pointer": "/entities/vehicles/fields/status", "code": "descriptor", "message": "Field 'status' of 'vehicles' is bound by extension 'book-repair' (eventHandler, in this host): …", "fix": "Remove the registration from the host and redeploy first, or keep the field."}`; it holds for a dry run, a rollback and `ApplyAlvoDescriptorAsync` too, and is answered before the revision check; the remedy order: remove or change the registration, redeploy, then apply; `<SourceExcerpt code={tests} from="var withoutStatus" to="/entities/vehicles/fields/status\");" title="FleetDeskExtensionsTests.cs" />`.
-5. *The assistant* — `get_extensions`; it names an extension that already does what is asked and will not propose removing what one reads.
+2. *Read it* — `GET /management/projects/<project>/extensions` (Viewer) and `IAlvoManagement.GetExtensionsAsync`; a hand-written JSON block of the one-item answer for `book-repair` (matching the fact's assertions and Task 2's snapshot shape: `entities ["vehicles"]`, `operations ["update"]`, `timeout "00:00:30"`, `runAs "system"`, `ordering "perRecord"`, `typeName null`); `Alvo:Extensions:ExposeTypeNames` and why it defaults to `false` (a type name reaches every catalog viewer and the assistant's model); the capability report's `extensions.eventHandler`; the policy simulator's `extensions`.
+3. *In the dashboard* — the `⟨/⟩ n` badge on **Schema** (every-entity handlers count too) and the **Lifecycle** tab, which shows what runs *after the commit only* (before-hooks stay on **On write**): descriptor after-hooks (changed on **On write**) and code items, read-only, marked `⟨/⟩ from code`, with the description, `when` and a line such as `on update · timeout 30 s · runs as the system · in order per record`.
+4. *An apply cannot drop what a handler reads* — the three refusals and their pointers; a sample violation `{"pointer": "/entities/vehicles/fields/status", "code": "descriptor", "message": "Field 'status' of 'vehicles' is bound by extension 'book-repair' (eventHandler, in this host): …", "fixSuggestion": "Remove the registration and redeploy first, or keep the field."}`, with the compiler's own sentence beside it at `"pointer": ""`; it holds for a dry run, a rollback and `ApplyAlvoDescriptorAsync` too, and is answered before the revision check; it refuses a *change* — a handler that never bound (a dashboard-first host's first descriptor) blocks nothing and is listed as a warning in the preview; the remedy order: remove or change the registration, redeploy, then apply; `<SourceExcerpt code={tests} from="var withoutStatus" to="/entities/vehicles/fields/status\");" title="FleetDeskExtensionsTests.cs" />`.
+5. *The assistant* — `get_descriptor`'s `hostExtensions` count and `get_extensions`; before an after-hook on an entity the count names, it reads the catalog and names an extension that already does what is asked, and it will not propose removing what one reads.
 6. *Not yet* — write hooks, commands and reads join the lane in later releases; delivery history, pause and replay arrive with the operations page.
 
 `website/astro.config.mjs`: `page('See your extensions in the dashboard', 'extending/extension-catalog'),` after the *React to changes* entry; `extending/testing.mdx` frontmatter `order: 5`; `extending/index.mdx`: a bullet `- [See your extensions in the dashboard](/extending/extension-catalog/) — the catalog, the Lifecycle tab, and the apply guard.` after the event-handlers bullet.
 
-`extending/event-handlers.mdx`: replace the bullet that begins "**A handler that no longer fits the descriptor**" with: "**An apply cannot unbind a handler.** An apply, a dry run, a rollback or `ApplyAlvoDescriptorAsync` that removes an entity or field a handler binds, or excludes a field its condition reads, is refused naming the handler ([details](/extending/extension-catalog/#an-apply-cannot-drop-what-a-handler-reads)). Only a host that primes `IPolicyCatalogProvider` itself can still leave one unbound: it is then logged `ExtensionUnbound`, and every event it would have handled is recorded as a dead delivery with the reason `unbound`, which does not hold the record's later events back." — and in *Not yet* drop "the extension catalog and dashboard,".
+`extending/event-handlers.mdx`: replace the bullet that begins "**A handler that no longer fits the descriptor**" with: "**An apply cannot unbind a handler.** An apply, a dry run, a rollback or `ApplyAlvoDescriptorAsync` that removes an entity or field a bound handler reads, or excludes a field its condition reads, is refused naming the handler ([details](/extending/extension-catalog/#an-apply-cannot-drop-what-a-handler-reads)). A handler that never bound — a dashboard-first host before its descriptor fits, a stored boot that ended `Failed` — blocks nothing: the preview warns, it is logged `ExtensionUnbound`, and every event it would have handled is recorded as a dead delivery with the reason `unbound`, which does not hold the record's later events back." — and in *Not yet* drop "the extension catalog and dashboard,".
 
 `guides/admin-dashboard.mdx`: the tab list reads *Fields*, *Relationships*, *Rules*, *On write* (the hooks), *Lifecycle* (what runs after a commit, host code included), … — keep the rest of the sentence. `guides/schema-assistant.mdx`: a table row ``| `get_extensions` | the host code (extensions) this host registers and what each binds, read-only |`` after `get_cel_functions`.
 
 - [ ] **Step 3: Architecture docs, CHANGELOG, PLAN**
 
-`docs/architecture/management-api.md`: "twelve HTTP routes" → "thirteen"; a row ``| `GET {m}/projects/{project}/extensions` | `GetExtensionsAsync` | `viewer` |`` after the `cel/functions` row; a section **Extensions** after the capabilities section: the catalog and its members, `ExposeTypeNames`, `honoured` gaining `extensions.<kind>`, `ManagementPolicyVerdict.Extensions`, and the apply guard (sites, ordering before the revision check, pointers, `422 validation`).
+`docs/architecture/management-api.md`: "twelve HTTP routes" → "twenty-one" (it is twenty today — `grep -c "new ManagementRoute(" src/MMLib.Alvo/Management/Internal/ManagementEndpoints.cs` — and this adds one; sweep the file for any other count of routes); a row ``| `GET {m}/projects/{project}/extensions` | `GetExtensionsAsync` | `viewer` |`` after the `cel/functions` row; a section **Extensions** after the capabilities section: the catalog and its members, `ExposeTypeNames`, `honoured` gaining `extensions.<kind>`, `ManagementPolicyVerdict.Extensions`, and the apply guard (change-based; sites; ordering before the revision check; pointers beside the compiler's sentences; warnings for handlers bound by neither catalog; `422 validation`).
 
-`docs/architecture/events.md` *Unbound handlers*: rewrite to say the apply guard (HX-04) refuses every apply path that would unbind a handler; `unbound` rows remain the record for a host that primes `IPolicyCatalogProvider` itself.
+`docs/architecture/events.md` *Unbound handlers*: rewrite to say the apply guard (HX-04) refuses every apply path that would unbind a bound handler; `unbound` rows remain the record for a handler that never bound (a dashboard-first host's first descriptor, a stored boot that ended `Failed`, a host that primes `IPolicyCatalogProvider` itself).
 
 `CHANGELOG.md`, under `## [Unreleased]`:
 - `### Added`, as the first entry: **Extension catalog, apply guard, dashboard and assistant** (HX-04, #381). `GET {m}/projects/{p}/extensions` / `IAlvoManagement.GetExtensionsAsync` list every registered event handler as metadata (`ManagementExtension`, `ManagementExtensionCatalog`, `AlvoExtensionKind`, `AlvoExtensionStage`); `Alvo:Extensions:ExposeTypeNames`; the capability report's `honoured` gains `extensions.eventHandler`; `ManagementPolicyVerdict.Extensions`; the dashboard's `⟨/⟩ n` badge and *Lifecycle* tab (*After commit* lane); the assistant's `get_extensions` and two eval cases. Docs: *See your extensions in the dashboard*.
-- `### Changed (breaking)`: **`IAlvoManagement` gains `GetExtensionsAsync`** (HX-04) — an implementer or decorator adds it; a caller is unaffected. **An apply that would unbind an event handler is refused** (HX-04) — a runtime apply, a dry run, a rollback and `ApplyAlvoDescriptorAsync` that remove an entity or field a registered handler binds, or exclude a field it reads, now throw `DescriptorValidationException` (`422 validation` over HTTP), answered before the revision check, instead of leaving the handler unbound.
+- `### Changed (breaking)`: **`IAlvoManagement` gains `GetExtensionsAsync`** (HX-04) — an implementer or decorator adds it; a caller is unaffected. **An apply that would unbind an event handler is refused** (HX-04) — a runtime apply, a dry run, a rollback and `ApplyAlvoDescriptorAsync` that remove an entity or field a registered handler binds, or exclude a field it reads, now throw `DescriptorValidationException` (`422 validation` over HTTP), answered before the revision check, instead of leaving the handler unbound. A handler that was not bound before the change (a dashboard-first host's first descriptor) blocks nothing and is reported as a warning.
 
 `docs/PLAN.md`, *Host extensibility* line: "…; HX-03 (event handlers on the delivery engine) the third; HX-04 (extension catalog, apply guard, dashboard and assistant) the fourth."
 
 - [ ] **Step 4: Spec amendment**
 
 In `docs/superpowers/specs/2026-10-14-host-extensibility-design.md`:
-- after the *Assistant* paragraph of §4.13, add **HX-04 settled details.** with the fifteen rulings of this plan's *Rulings and deviations* section, numbered (1)–(15), verbatim;
-- at the end of *HX-03 settled details* (6), append: "— **As built (HX-04):** every apply path is guarded (§4.13 *HX-04 settled details* (6)–(8)); a dashboard-first host's first apply is refused rather than primed with an unbound handler, so acceptance (7) holds for it in full. The dispatchers' stand-down on a boot that primed no catalog is unchanged."
+- after the *Assistant* paragraph of §4.13, add **HX-04 settled details.** with the seventeen rulings of this plan's *Rulings and deviations* section, numbered (1)–(17), verbatim (ruling 10 records the per-apply cost);
+- at the end of *HX-03 settled details* (6), append: "— **As built (HX-04):** every apply path is guarded, change-based (§4.13 *HX-04 settled details* (6)–(9)): no apply can unbind a handler the current catalog binds; a handler that never bound (an `Awaiting` first descriptor, a `Failed` stored boot) blocks nothing, is warned about in the preview, and keeps its dead `unbound` rows until a descriptor fits it. The dispatchers' stand-down on a boot that primed no catalog is unchanged."
 
 - [ ] **Step 5: Build the site, ring0, commit**
 
@@ -2835,9 +3036,16 @@ Expected: the site builds with link validation green. `CLAUDE.md` says the eval 
 
 ## Task 13: Rings, reviews, plan-guard, PR report, PR
 
-- [ ] **Step 1: Rings and the out-of-ring suites**
+- [ ] **Step 1: CI-parity Release build, rings and the out-of-ring suites**
 
-`scripts/test-ring0`, `scripts/test-ring1`, `scripts/test-ring2`, `scripts/test-admin-e2e`, `python3 scripts/gen-prototype-fixtures --check`, `scripts/test-prototype`, `(cd website && npm run build)`. Expected: all green. ring2 includes the API invariant suite and `scripts/lint-api`; the management route is excluded from the OpenAPI document (`ManagementContractTests.No_management_route_reaches_the_published_openapi_document`), so the Vacuum ruleset and the TeaPie path set do not move. The eval is **not** run (it costs tokens): say so in the PR report and give `scripts/eval-assistant --case extension_named_not_duplicated` and `--case bound_field_removal_refused`.
+First the Release build on CI's SDK (rings are Debug on the local SDK; CI's newer analyzers under `TreatWarningsAsErrors` are what it catches):
+
+```bash
+docker run --rm -v "$PWD":/src -w /src mcr.microsoft.com/dotnet/sdk:10.0 sh -c 'dotnet build MMLib.Alvo.slnx -c Release -p:HUSKY=0 2>&1 | grep -E "error [A-Z]+[0-9]+" | sort -u'
+git clean -fdx -e .superpowers
+```
+
+Expected: no output from the build (any `error CAxxxx` line is fixed in a `fix(…): …` commit, and this step re-run). The clean removes the container's `bin/`/`obj/` (written as root) before the local rings. Repeat both commands before every push of a fix commit. Then `scripts/test-ring0`, `scripts/test-ring1`, `scripts/test-ring2`, `scripts/test-admin-e2e`, `python3 scripts/gen-prototype-fixtures --check`, `scripts/test-prototype`, `(cd website && npm run build)`. Expected: all green. ring2 includes the API invariant suite and `scripts/lint-api`; the management route is excluded from the OpenAPI document (`ManagementContractTests.No_management_route_reaches_the_published_openapi_document`), so the Vacuum ruleset and the TeaPie path set do not move. The eval is **not** run (it costs tokens): say so in the PR report and give `scripts/eval-assistant --case extension_named_not_duplicated` and `--case bound_field_removal_refused`.
 
 - [ ] **Step 2: Reviews (substitutes)**
 
@@ -2849,7 +3057,7 @@ Dispatch `alvo-plan-guard` last (read-only); act on drift it reports. The PLAN m
 
 - [ ] **Step 4: PR report**
 
-Use the `alvo-pr-report` skill: it dispatches `alvo-pr-reporter` and publishes the 8-section page. Evidence: acceptance (1)–(5) → tests (table below), the two public-API diffs against the public-surface line, the snapshot, the admin e2e run, the skill byte counts, the CLAUDE.md one-word change for the maintainer, and the rulings below.
+Use the `alvo-pr-report` skill: it dispatches `alvo-pr-reporter` and publishes the 8-section page. Evidence: acceptance (1)–(5) → tests (table below), the two public-API diffs against the public-surface line, the snapshot, the admin e2e run, the Release build, the skill byte counts (the hooks skill at 6 141 of 6 144 — the next edit there must trim first), that the eval was not run and the after-hook cases' management-call counts may rise by one where `hostExtensions` names their entity, the CLAUDE.md one-word change for the maintainer, and the rulings below.
 
 - [ ] **Step 5: Push and open the PR**
 
@@ -2871,16 +3079,18 @@ Each is recorded in the spec amendment (Task 12 Step 4) so a later reader can te
 3. **Operations use the policy's wire names** — `create`, `update`, `delete` — so the simulator filters by plain equality: `OnSaved` lists `create`, `update`; `OnUpdated`'s `update` covers a replace (both emit `.updated`). An application-event handler has `entities: []`, `operations: []` and its type in `event`; an every-entity handler has `entities: ["*"]`.
 4. **`runAs` and `ordering` are wire strings** (`system`/`eventActor`, `perRecord`/`none`) because the enums they come from are core types Abstractions may not name; `timeout` is a `TimeSpan` (`"00:00:30"`).
 5. **`TypeName`** is the class handler's full name when `Alvo:Extensions:ExposeTypeNames` is true; a delegate handler is never named (its method's declaring type is compiler-generated noise).
-6. **The apply guard's rule is "every registered handler still binds the proposed catalog"**, checked by HX-03's own `ExtensionBindingCompiler.Compile` — a superset of §4.2's two named cases (removal, `events.exclude`), so a retyped field the condition no longer compiles against is refused too and the guard cannot drift from the boot. Findings carry a precise pointer when the cause is a removed entity, a removed or renamed field (what the condition read, compiled against the current catalog first), or an `events.exclude` item; otherwise the whole document (`""`) with the compiler's sentence. Every-entity and application-event handlers bind no field and never refuse an apply.
-7. **Guarded sites:** `RuntimeSchemaService.ApplyAsync`, `PreviewAsync` (the dashboard's preview, `?dryRun=true`, and a rollback's dry run) and `RollbackAsync`, and `SchemaMigrationRunner.RunAsync` (`ApplyAlvoDescriptorAsync`) — reversing HX-03's "binds leniently" for that path (its test now pins the refusal). The boot keeps its own refusal (`ExtensionBinder.EnsureBindable`, `AlvoStartupRefusedException`). An `unbound` delivery remains reachable only when a host primes `IPolicyCatalogProvider.SetCurrent` itself, and stays the record for that case.
-8. **The guard runs right after validation,** before the revision check, the plan and the destructive guardrail: a binding refusal is a validation finding about the descriptor itself, and an operator must not be told "allow destructive" or "reload" before being told the change can never apply. A stale `If-Match` on an unbinding apply therefore answers 422, not 412 (pinned).
-9. **The dashboard-first `Awaiting` path:** a first apply goes through `RuntimeSchemaService.ApplyAsync` and is guarded; with nothing primed the condition is compiled against the proposed entity, so a removed field is refused at `""` with the compiler's sentence and a missing entity at its pointer. The dispatchers' stand-down until a restart on a boot that primed no catalog (HX-03 (6) *as built*) is unchanged — a candidate follow-up, not HX-04's.
-10. **The refusal is a `DescriptorValidationException`** — the same `422 validation` / code `descriptor` an agent already parses, and the shape §4.2 writes. `RuntimeSchemaService`'s public constructor is unchanged; the guard arrives through an internal overload the DI factory calls, so a service a host constructs itself carries no guard (stated in its docs).
+6. **The apply guard is change-based, as §4.2 writes it:** an apply is refused only when a handler that binds the current catalog (`IPolicyCatalogProvider.Current`) would not bind the proposed one, checked by HX-03's own `ExtensionBindingCompiler.Compile` through the binder's per-catalog cache, so the guard cannot drift from the boot. That covers §4.2's two named cases (removing a bound entity or field, adding it to `events.exclude`) and every other way a change can unbind a bound handler (a retyped field the condition no longer compiles against, a rename). A refusal carries a pointer to the removed entity, the removed or renamed field (what the condition read, compiled against the current catalog) or the `events.exclude` item, **and** the compiler's own sentence for every problem at `""`, so a second cause is never hidden behind the first. Because only a handler that bound the current catalog is refused, every pointed entity or field existed before the change — "keep the entity/field" is always accurate. Every-entity and application-event handlers bind no field and never refuse an apply.
+7. **Guarded sites:** `RuntimeSchemaService.ApplyAsync`, `PreviewAsync` (the dashboard's preview, `?dryRun=true`, and a rollback's dry run) and `RollbackAsync`, and `SchemaMigrationRunner.RunAsync` (`ApplyAlvoDescriptorAsync`), which loses HX-03's lenient binding only for bound handlers — its test now pins both halves (a handler that never fit is applied and stays unbound; one that bound is refused). The boot keeps its own refusal (`ExtensionBinder.EnsureBindable`, `AlvoStartupRefusedException`).
+8. **The guard runs right after validation,** before the revision check, the plan and the destructive guardrail: a binding refusal is a validation finding about the descriptor itself, and an operator must not be told "allow destructive" or "reload" before being told the change can never apply. A stale `If-Match` on an unbinding apply therefore answers 422, not 412 (pinned) — the house order, since `Validate` already precedes the revision check.
+9. **Handlers already unbound block nothing.** On a dashboard-first host that booted `Awaiting` (nothing primed) and after a stored-descriptor boot that ended `Failed`, no handler binds the current catalog, so no apply is refused for a handler; each one the proposed catalog does not fit is a `Warning` finding (the compiler's sentence, at `""`) in the preview, the dry run and `ManagementApplyResult.Warnings`, and its events keep being recorded dead `unbound` (HX-03 (6)) until a descriptor fits it. Refusing instead would lock such a host out of every unrelated apply. The dispatchers' stand-down until a restart on a boot that primed no catalog is unchanged — a candidate follow-up, not HX-04's.
+10. **The refusal is a `DescriptorValidationException`** — the same `422 validation` / code `descriptor` an agent already parses (fix text on the wire as `fixSuggestion`), and the shape §4.2 writes. `RuntimeSchemaService`'s public constructor is unchanged; the guard arrives through an internal overload the DI factory calls, so a service a host constructs itself carries no guard (stated in its docs). **Cost:** with at least one handler registered, the guard builds the proposed catalog once and hands it back; `ApplyAsync` and `RollbackAsync` publish that very instance (no second build), and the binder compiles it once — the delivery dispatcher's later `For(catalog)` is a cache hit. A Management apply runs `PreviewAsync` then `ApplyAsync`, so it builds the proposed catalog twice where it built it once before (plus the validator's own build in each); a host with no handler pays nothing.
 11. **The capability report appends `extensions.<kind>`** to `Honoured` after the five blocks, per request, only for kinds registered; the static `CapabilityReport.Honoured` (held by the skill region and the prototype) stays the blocks, and the dashboard's *Honoured blocks* stat counts entries without a dot.
 12. **`ManagementPolicyVerdict.Extensions` is filled in HX-04** (the entity's own and every-entity extensions whose operations contain the simulated one); rendering it in the simulator and the apply dry run is HX-09's row.
-13. **The Lifecycle tab draws one lane, *After commit*:** the descriptor's after-hooks read-only with a link to *On write* (one editor, not two — "editable" is one click to it), and code items read-only with the accent `⟨/⟩ from code` badge the function list's "this host" precedent sets. p95 and 24 h rejections need HX-06's stats and are not drawn; the other lanes appear with the host code that runs in them. The badge counts every extension that runs on the entity, every-entity ones included. The field-removal confirm does not list extensions yet (follow-up): the preview refusal is the HX-04 surface.
-14. **The hooks skill's region fits its 6 144-byte cap** only by dropping two host-developer sentences (function versioning, tenant filtering inside a function), both kept in the *Custom CEL functions* guide. HX-01's handed-over awareness lands as a bullet in `alvo-descriptor-entities-and-fields` (`events.exclude`) and a sentence in `alvo-descriptor-capabilities-and-limits` (`@tenant.id`/`@user.roles` in after-hooks). The instructions move to v7.
-15. **The eval cases** register two handlers in `EvalWorld` on entities no other case touches (`rental_fleet.in_service`, `rentals.damage_report`), so no existing case's grade can move. The real-model run is on demand, not on the PR.
+13. **The Lifecycle tab draws one lane, *After commit*, and says so** ("after the commit only"): the descriptor's after-hooks read-only with a link to *On write* (one editor, not two — "editable" is one click to it), and code items read-only with the accent `⟨/⟩ from code` badge the function list's "this host" precedent sets. p95 and 24 h rejections need HX-06's stats and are not drawn; the other lanes appear with the host code that runs in them. The badge counts every extension that runs on the entity, every-entity ones included. The field-removal confirm does not list extensions yet (follow-up): the preview refusal is the HX-04 surface.
+14. **The assistant reads the catalog only when it matters.** `get_descriptor`'s answer gains `hostExtensions` (per entity or `*`, read through the port inside the same tool call), and the hooks skill's `descriptor-or-code` region sends the model to `get_extensions` only before an *after*-hook on an entity that count names — §4.13's "before proposing a rule an extension enforces" narrowed to the one place a post-commit extension can be duplicated, so no before-hook, rule or rollup case spends a call against the eval's `MaximumToolCalls` (6). The region fits the 6 144-byte cap (6 141) by dropping two host-developer sentences (kept in the *Custom CEL functions* guide) and one parenthetical the `cel-mutate` region already shows. HX-01's handed-over awareness lands as a bullet in `alvo-descriptor-entities-and-fields` (`events.exclude`) and a sentence in `alvo-descriptor-capabilities-and-limits` (`@tenant.id`/`@user.roles` in after-hooks). The instructions move to v7.
+15. **The eval cases** register two handlers in `EvalWorld`: one on `rental_fleet`, which no other case touches, and one on `rentals.damage_report`, a field no other case reads. `rentals` is the entity of `hook_returned_at`, `rollup_rentals_count` and `automation_refused` — a before-hook, a rollup and a schedule, none an after-hook — so `hostExtensions` naming it adds no read to them. The real-model run is on demand, not on the PR.
+16. **Fix text follows §4.2 verbatim** for a removal ("Remove the registration and redeploy first, or keep the field." / "…, or keep the entity."); an exclusion, which §4.2 names without a sentence, reads "…, or keep the field in the event images." — the one wording this plan adds.
+17. **Enum values are pinned** (`EventHandler = 0`, `PostCommit = 0`) and documented append-only: a later PR adds §4.13's kinds after them and never reorders to match the spec's listing. A typed .NET client older than the server cannot read an unknown member (`JsonStringEnumConverter` throws); the docs say a tolerant client reads the raw string.
 
 ---
 
@@ -2889,9 +3099,9 @@ Each is recorded in the spec amendment (Task 12 Step 4) so a later reader can te
 | HX-04 criterion | Task(s) | Test |
 |---|---|---|
 | (1) catalog snapshot for untyped and `"*"` registrations (Verify) | 2 | `ExtensionCatalogTests.The_catalog_lists_entity_every_entity_and_application_handlers_in_order` (+ `.verified.txt`) |
-| (2) apply removing a bound field, and apply excluding a bound field, refused naming the extension (Management API integration) | 4, 5 | `ManagementExtensionsTests.Removing_a_bound_field_is_refused_naming_the_extension`, `Excluding_a_bound_field_from_the_event_images_is_refused_naming_the_extension`, `A_dry_run_removing_a_bound_entity_is_refused_at_the_entity`; unit `ExtensionApplyGuardTests`, `RuntimeSchemaServiceExtensionGuardTests` (apply, preview, rollback, first apply, precedence) |
+| (2) apply removing a bound field, and apply excluding a bound field, refused naming the extension (Management API integration) | 4, 5 | `ManagementExtensionsTests.Removing_a_bound_field_is_refused_naming_the_extension`, `Excluding_a_bound_field_from_the_event_images_is_refused_naming_the_extension`, `A_dry_run_removing_a_bound_entity_is_refused_at_the_entity`; unit `ExtensionApplyGuardTests`, `RuntimeSchemaServiceExtensionGuardTests` (apply, preview, rollback, precedence) |
 | (3) admin e2e: badge count and read-only lane | 7, 8 | `ExtensionCatalogScenarios.The_entity_list_counts_the_extensions_that_run_on_each_entity`, `The_lifecycle_tab_shows_code_after_the_commit_read_only` |
-| (4) eval graders for the two cases unit-tested; `get_extensions` contract test | 9, 11 | `ExtensionCasesTests` (6 facts), `EvalCasesTests` count; `ManagementToolsTests.The_tool_set_is_exactly_the_six_reads_and_the_two_dry_runs`, `The_extensions_tool_answers_with_what_the_management_port_lists`, `A_forbidden_caller_is_reported_by_the_extensions_tool_too` |
+| (4) eval graders for the two cases unit-tested; `get_extensions` contract test | 9, 11 | `ExtensionCasesTests` (6 facts), `EvalCasesTests` count; `ManagementToolsTests.The_tool_set_is_exactly_the_six_reads_and_the_two_dry_runs`, `The_extensions_tool_answers_with_what_the_management_port_lists`, `A_forbidden_caller_is_reported_by_the_extensions_tool_too`, `The_descriptor_read_counts_the_host_extensions_per_entity` |
 | (5) `BoundaryArchitectureTests` green | 7 | `MMLib.Alvo.Admin.Tests` whole project |
 | Scope: `GetExtensionsAsync`, route, Viewer | 3 | `ManagementExtensionsTests` (read, empty, 404, 403), `ManagementContractTests`, `ManagementOperationsTests` |
 | Scope: capability report lists registered kinds | 2, 3 | `The_capability_report_honours_the_kind_the_host_registers_after_the_blocks`, `ExtensionCatalogTests.The_honoured_kinds_are_named_once_each_and_only_when_registered` |
@@ -2902,4 +3112,4 @@ Each is recorded in the spec amendment (Task 12 Step 4) so a later reader can te
 | Scope: `ExposeTypeNames` | 2 | `A_class_handler_is_named_only_when_the_host_asks`, `Type_names_stay_hidden_unless_the_section_exposes_them` |
 | Docs: *See your extensions in the dashboard* | 12 | `FleetDeskExtensionsTests` in `MMLib.Alvo.DocsSnippets.Tests`; website build |
 | Handed over by HX-01: assistant awareness of `events.exclude` and after-hook `@tenant.id`/`@user.roles` | 10 | skill text; `SkillConformanceTests` caps |
-| Handed over by HX-03 (6): the guard closes the `unbound` gap, incl. the `Awaiting` path | 5 | `A_first_apply_a_handler_does_not_fit_is_refused_even_with_nothing_primed`, `SchemaMigrationRunnerTests.Applying_a_descriptor_a_handler_does_not_fit_is_refused_before_anything_is_written` |
+| Handed over by HX-03 (6): the guard closes the `unbound` gap (change-based), incl. the `Awaiting` path | 4, 5 | `A_first_apply_a_handler_does_not_fit_is_applied_with_a_warning`, `A_handler_already_unbound_does_not_block_an_unrelated_apply`, `SchemaMigrationRunnerTests.A_descriptor_that_drops_what_a_bound_handler_reads_is_refused_before_anything_is_written`, `A_descriptor_a_handler_never_fit_is_applied_and_the_handler_stays_unbound`, `ExtensionApplyGuardTests.A_handler_already_unbound_does_not_block_an_unrelated_change` |
