@@ -269,7 +269,7 @@ internal sealed class DeliveryRunner(
         await using (scope.ConfigureAwait(false))
         {
             var context = new AlvoEventContext(@event, delivery.Subscriber, delivery.Attempts, sessions.For(CallerFor(@event, handler.Settings.RunAs)));
-            var message = HandlerMessage.For(@event, handler.Registration.Source);
+            var message = HandlerMessage.For(@event, handler.Registration);
             await handler.Registration.Invoker.InvokeAsync(scope.ServiceProvider, message, context, ct).ConfigureAwait(false);
         }
     }
