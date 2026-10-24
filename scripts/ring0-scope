@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Which fast test modules a staged change can affect — the scoping behind
+# `scripts/test-ring0 --staged`, the pre-commit hook's ring0.
+#
+# Prints the chosen test project names (one per line, e.g. MMLib.Alvo.Identity.Tests) on
+# stdout, its reasoning on stderr, and an EMPTY stdout for "run every module". Every path it
+# cannot decide prints nothing, so the failure mode of this script is a slower commit,
+# never a skipped module. Nothing outside the hook uses it: ring0 by hand, ring1, ring2 and
+# CI all run every module.
+#
+# How it decides:
+#   1. Every staged path (added, changed or deleted) must sit inside a project directory
+#      registered in MMLib.Alvo.slnx. Anything else runs everything: the shared build inputs
+#      (Directory.Build.props/targets, Directory.Packages.props, global.json, .config/,
+#      .editorconfig, the .slnx), the gate itself (scripts/**, .husky/**), the sources test
+#      projects compile in by link (test/_shared/**), and every file a test reads by path
+#      (schema/, examples/, plugins/, docs/, website/, …).
+#   2. src/MMLib.Alvo.Abstractions runs everything: every project depends on the ports.
+#   3. The affected projects come from dotnet-affected, the same tool and the same project
+#      graph ring2 already scopes its integration tests with (here against the working tree
+#      rather than origin/main: what the hook builds and tests is the working tree). Every
+#      project the commit stages must be among them, or it cannot decide.
+#   4. Project references miss the facts that read other projects' sources BY PATH, so those
+#      edges are added by hand below (READS_BY_PATH). A new by-path scanner of another
+#      project's sources belongs in that table; until it is there, the hook can miss it and
+#      CI, which runs everything, is what catches it.
+#   5. Of the result, only fast modules (`*.Tests`, never `*.Tests.Integration`) are printed.
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$DIR/.." && pwd)"
+cd "$ROOT"
+SLNX="MMLib.Alvo.slnx"
+
+# Run whenever anything at all is scoped: references no project, judges every project file by path.
+ALWAYS="MMLib.Alvo.Conventions.Tests"
+
+# <path prefix> <module>: a staged path under the prefix also runs the module, because that
+# module reads those sources as text rather than referencing them.
+READS_BY_PATH="
+src/ MMLib.Alvo.Tests
+src/ MMLib.Alvo.DocsGen.Tests
+src/MMLib.Alvo.Data.Sqlite/ MMLib.Alvo.Data.EntityFrameworkCore.Tests
+src/MMLib.Alvo.Data.PostgreSql/ MMLib.Alvo.Data.EntityFrameworkCore.Tests
+"
+# Why each line is there:
+#   MMLib.Alvo.Tests          ShippedSources: absence facts over every src/**/*.cs.
+#   MMLib.Alvo.DocsGen.Tests  options keys and problem types over every src/**/*.cs, the README over every src/**/*.csproj.
+#   ...EntityFrameworkCore.Tests  ChangeTrackerReachTests reads the Sqlite and PostgreSql packages' sources.
+
+everything() {
+  echo "[ring0-scope] every module: $1" >&2
+  exit 0
+}
+
+staged="$(git diff --cached --name-only --no-renames)"
+[ -n "$staged" ] || everything "nothing is staged"
+
+project_dirs="$(sed -nE 's|.*Project Path="([^"]+)/[^/"]+\.csproj".*|\1|p' "$SLNX")"
+
+# The registered project directory that holds <path>, or nothing.
+owner_of() {
+  local dir
+  dir="$(dirname "$1")"
+  while [ "$dir" != "." ] && [ "$dir" != "/" ]; do
+    if grep -qxF "$dir" <<< "$project_dirs"; then
+      printf '%s\n' "$dir"
+      return
+    fi
+    dir="$(dirname "$dir")"
+  done
+}
+
+owners=""
+extra=""
+while IFS= read -r path; do
+  case "$path" in
+    src/MMLib.Alvo.Abstractions/*) everything "$path is in the ports every project depends on" ;;
+  esac
+  owner="$(owner_of "$path")"
+  [ -n "$owner" ] || everything "$path is outside every project (a shared input, the gate itself, or a file tests read by path)"
+  owners="$owners$(basename "$owner")"$'\n'
+  while read -r prefix module; do
+    if [ -n "$prefix" ] && [[ "$path" == "$prefix"* ]]; then
+      extra="$extra$module"$'\n'
+    fi
+  done <<< "$READS_BY_PATH"
+done <<< "$staged"
+
+if ! affected_raw="$(dotnet tool run dotnet-affected -- --repository-path "$ROOT" --filter-file-path "$ROOT/$SLNX" --dry-run -f text 2>/dev/null)"; then
+  everything "dotnet-affected could not compute the affected projects"
+fi
+affected="$(sed -nE 's|.*/([^/]+)\.csproj$|\1|p' <<< "$affected_raw")"
+
+while IFS= read -r owner; do
+  if [ -n "$owner" ] && ! grep -qxF "$owner" <<< "$affected"; then
+    everything "dotnet-affected did not report $owner, which the commit stages"
+  fi
+done <<< "$owners"
+
+chosen="$(printf '%s\n%s\n%s\n' "$affected" "$extra" "$ALWAYS" | grep -E '\.Tests$' | sort -u)"
+echo "[ring0-scope] $(grep -c . <<< "$chosen") module(s) for $(grep -c . <<< "$staged") staged path(s):" $chosen >&2
+printf '%s\n' "$chosen"

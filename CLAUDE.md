@@ -246,7 +246,16 @@ inline here**; and `alvo-plan-guard` is your pre-PR check (see Hard rules).
 Husky.Net, auto-installed on the first `dotnet build`/`dotnet restore` — no
 manual `git config` step; `HUSKY=0` and CI skip them. **pre-commit**:
 brief-freshness on a staged spec/analysis/brief (regenerate via
-`alvo-regen-brief` if it fires), plus `dotnet format` and ring0 on staged code.
+`alvo-regen-brief` if it fires), plus `dotnet format` and ring0 on staged code —
+both **scoped to the commit**: `scripts/format-staged` verifies only the staged
+`.cs` files (a staged `.csproj`/`.props`/`.targets`/`.editorconfig` runs the full
+check), and `scripts/test-ring0 --staged` builds the whole solution but runs only
+the fast modules `scripts/ring0-scope` finds affected (dotnet-affected plus a
+by-path table), falling back to every module for anything it cannot place —
+`scripts/**`, `.husky/**`, `test/_shared/**`, shared build files, Abstractions,
+any file outside a project. `scripts/test-ring0` by hand, ring1/ring2 and CI
+still run everything; a test that reads another project's sources by path
+belongs in `ring0-scope`'s table.
 **commit-msg**: Conventional Commits. Details in `.husky/task-runner.json`.
 
 ## Claude Code hooks

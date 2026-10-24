@@ -28,10 +28,21 @@
 # and CI already sets TESTINGPLATFORM_EXITCODE_IGNORE=8 on Windows, so an include
 # that stopped matching would pass with zero tests. A misnamed project can only ever
 # land back HERE, which is loud, never silently unrun.
+#
+# `--staged` is the pre-commit hook's mode, and only the hook's: it still builds the whole
+# solution and still counts every module, then runs only the fast modules the staged change
+# can affect (scripts/ring0-scope decides, and falls back to every module whenever it
+# cannot). Run by hand, and in CI through ring1/ring2, this script runs every module.
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$DIR/.." && pwd)"
 CONFIG="${ALVO_CONFIGURATION:-Debug}"
+STAGED=false
+case "${1:-}" in
+  "") ;;
+  --staged) STAGED=true ;;
+  *) echo "usage: scripts/test-ring0 [--staged]" >&2; exit 2 ;;
+esac
 
 echo "[ring0] dotnet build (-c $CONFIG)"
 dotnet build "$ROOT/MMLib.Alvo.slnx" -c "$CONFIG"
@@ -50,6 +61,28 @@ if [ "$matched" != "$expected" ]; then
   exit 1
 fi
 
-echo "[ring0] dotnet test — $matched fast modules, no Docker (-c $CONFIG)"
-dotnet test --test-modules "test/**/bin/$CONFIG/*/*.Tests.dll" --root-directory "$ROOT"
+pattern="test/**/bin/$CONFIG/*/*.Tests.dll"
+count="$matched"
+if [ "$STAGED" = true ]; then
+  # ring0-scope prints the chosen projects on stdout and its reasoning on stderr; an empty
+  # stdout means "every module". Each chosen project maps to the one module the count
+  # above already found on disk, so a scoped run cannot pick up a stale DLL either.
+  scoped="$("$DIR/ring0-scope")"
+  if [ -n "$scoped" ]; then
+    pattern=""
+    count=0
+    while IFS= read -r name; do
+      module="$(grep -E "/test/$name/bin/$CONFIG/[^/]+/$name\.dll$" <<< "$modules" || true)"
+      if [ "$(grep -c . <<< "$module")" != 1 ]; then
+        echo "[ring0] FAIL: scoping chose $name, which is not exactly one fast module on disk." >&2
+        exit 1
+      fi
+      pattern="${pattern:+$pattern;}test/$name/bin/$CONFIG/*/$name.dll"
+      count=$((count + 1))
+    done <<< "$scoped"
+  fi
+fi
+
+echo "[ring0] dotnet test — $count of $matched fast modules, no Docker (-c $CONFIG)"
+dotnet test --test-modules "$pattern" --root-directory "$ROOT"
 echo "[ring0] OK"
