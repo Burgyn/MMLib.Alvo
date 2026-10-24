@@ -20,6 +20,12 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// Names are the one part of the text no literal escape covers, so the writer refuses a field, <c>changed()</c> or call
 /// name it cannot spell rather than letting it read back as a different tree.
 /// </para>
+/// <para>
+/// A literal is spelled by its type and value together — a String holding a string, an Int holding a long, a Decimal
+/// holding a decimal, a Bool holding a bool — and any other pairing is refused. CEL has no negative number token: a
+/// negative literal is written <c>-n</c> and reads back as <c>CelUnary(Negate, n)</c>, the same meaning in a different
+/// shape. A translator should therefore emit a negation over a non-negative literal, or accept that shape back.
+/// </para>
 /// </remarks>
 internal static class CelText
 {
@@ -117,7 +123,14 @@ internal static class CelText
     };
 
     private static string Unary(CelUnary unary) =>
-        (unary.Operator == CelUnaryOperator.Not ? "!" : "-") + Child(unary.Operand, UnaryLevel, isRight: false);
+        UnaryOperator(unary.Operator) + Child(unary.Operand, UnaryLevel, isRight: false);
+
+    private static string UnaryOperator(CelUnaryOperator op) => op switch
+    {
+        CelUnaryOperator.Not => "!",
+        CelUnaryOperator.Negate => "-",
+        _ => throw new ArgumentException($"The operator {op} has no CEL spelling.", nameof(op)),
+    };
 
     private static string Binary(CelBinary binary)
     {
@@ -147,14 +160,16 @@ internal static class CelText
         _ => PrimaryLevel,
     };
 
-    private static string Literal(CelLiteral literal) => literal.Value switch
+    private static string Literal(CelLiteral literal) => (literal.Type, literal.Value) switch
     {
-        string text => StringLiteral(text),
-        bool flag => flag ? "true" : "false",
-        long.MinValue => throw new ArgumentOutOfRangeException(nameof(literal), "long.MinValue has no CEL spelling: its magnitude is not an Int."),
-        long number => number.ToString(CultureInfo.InvariantCulture),
-        decimal number => DecimalText(number),
-        _ => throw new ArgumentException($"A {literal.Type} literal has no CEL spelling here.", nameof(literal)),
+        (CelValueType.String, string text) => StringLiteral(text),
+        (CelValueType.Bool, bool flag) => flag ? "true" : "false",
+        (CelValueType.Int, long.MinValue) => throw new ArgumentOutOfRangeException(nameof(literal), "long.MinValue has no CEL spelling: its magnitude is not an Int."),
+        (CelValueType.Int, long number) => number.ToString(CultureInfo.InvariantCulture),
+        (CelValueType.Decimal, decimal number) => DecimalText(number),
+        _ => throw new ArgumentException(
+            $"A {literal.Type} literal holding {literal.Value?.GetType().Name ?? "null"} has no CEL spelling here.",
+            nameof(literal)),
     };
 
     private static string DecimalText(decimal number)

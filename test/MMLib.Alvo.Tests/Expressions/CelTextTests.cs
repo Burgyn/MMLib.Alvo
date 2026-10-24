@@ -106,4 +106,30 @@ public sealed class CelTextTests
     [Fact]
     public void A_conditional_has_no_canonical_text() =>
         Should.Throw<ArgumentException>(() => CelText.Write(CelParser.Parse("a ? b : c")));
+
+    [Theory]
+    [MemberData(nameof(MismatchedLiterals))]
+    public void A_literal_whose_value_does_not_match_its_type_is_refused(CelValueType type, object? value) =>
+        Should.Throw<ArgumentException>(() => CelText.Write(new CelLiteral(type, value)));
+
+    [Fact]
+    public void An_unknown_unary_operator_is_refused() =>
+        Should.Throw<ArgumentException>(
+            () => CelText.Write(new CelUnary((CelUnaryOperator)99, new CelLiteral(CelValueType.Bool, true))));
+
+    [Fact]
+    public void Every_tree_the_parser_builds_reads_back_as_itself() =>
+        CelTrees.Any(depth: 5).Sample(tree => CelTrees.Same(CelParser.Parse(CelText.Write(tree)), tree), iter: 2_000);
+
+    public static TheoryData<CelValueType, object?> MismatchedLiterals() => new()
+    {
+        { CelValueType.Uuid, "3fa85f64-5717-4562-b3fc-2c963f66afa6" },
+        { CelValueType.Decimal, 5L },
+        { CelValueType.Int, 5m },
+        { CelValueType.Int, 5 },
+        { CelValueType.String, true },
+        { CelValueType.Bool, "true" },
+        { CelValueType.Null, null },
+        { CelValueType.Timestamp, DateTimeOffset.UnixEpoch },
+    };
 }
