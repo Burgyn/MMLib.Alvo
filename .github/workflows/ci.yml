@@ -261,7 +261,8 @@ jobs:
   # measurement is advisory.
   prototype:
     name: Design prototype scenarios
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04, where Playwright ships no Chromium ("does not support chromium on ubuntu26.04-x64"). Unpin once it does.
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
       - name: Checkout
@@ -307,7 +308,8 @@ jobs:
 
   admin-e2e:
     name: Admin dashboard scenarios
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04, where Playwright ships no Chromium ("does not support chromium on ubuntu26.04-x64"). Unpin once it does.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout
