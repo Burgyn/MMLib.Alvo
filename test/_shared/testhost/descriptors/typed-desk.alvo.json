@@ -25,6 +25,18 @@
         "create": "'agent' in @user.roles",
         "update": "'agent' in @user.roles"
       }
+    },
+    "tasks": {
+      "tenancy": "scoped",
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 60 },
+        "assigned_to": { "type": "uuid" }
+      },
+      "rules": {
+        "list": "assigned_to == @user.id",
+        "get": "assigned_to == @user.id",
+        "create": "'agent' in @user.roles"
+      }
     }
   }
 }

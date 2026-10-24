@@ -60,6 +60,16 @@ public sealed class DeskOrderWithNote
     public string? InternalNote { get; init; }
 }
 
+[AlvoEntity("tasks")]
+public sealed class DeskTask
+{
+    public Guid Id { get; init; }
+
+    public required string Title { get; init; }
+
+    public Guid? AssignedTo { get; init; }
+}
+
 [AlvoEvent("desk.shipped")]
 public sealed record DeskShipped(string Reference, long Boxes);
 
@@ -175,6 +185,27 @@ public abstract class TypedLayerFacts
     }
 
     [Fact]
+    public async Task A_typed_read_sees_only_the_rows_the_caller_s_row_rules_admit_as_an_untyped_read_does()
+    {
+        await using var alvo = await StartAsync(await DatabaseAsync(), _ => { });
+        var tenant = Guid.NewGuid();
+        var ada = Agent(tenant);
+        var bob = Agent(tenant);
+        var adas = await CreateTaskAsync(alvo, ada, "Call back", ada);
+        var bobs = await CreateTaskAsync(alvo, ada, "Call back", bob);
+
+        var typed = await alvo.Data.QueryAsync<DeskTask>(x => x.Title == "Call back", 10, ada, Ct);
+        var untyped = await alvo.Data.QueryAsync(
+            new AlvoQuery { Entity = "tasks", Filter = new AlvoComparison("title", AlvoFilterOperator.Eq, "Call back"), Limit = 10 }, ada, Ct);
+
+        typed.Select(task => task.Id).ShouldBe([adas]);
+        untyped.Items.Select(item => (Guid)item[AlvoManagedColumns.Id]!).ShouldBe([adas]);
+        (await alvo.Data.GetAsync<DeskTask>(bobs, ada, Ct)).ShouldBeNull();
+        (await alvo.Data.GetAsync<DeskTask>(bobs, bob, Ct)).ShouldNotBeNull().AssignedTo.ShouldBe(bob.User.Value);
+        (await alvo.Data.QueryAsync<DeskTask>(x => x.Title == "Call back", 10, bob, Ct)).Select(task => task.Id).ShouldBe([bobs]);
+    }
+
+    [Fact]
     public async Task A_hostile_captured_string_is_matched_as_a_value()
     {
         await using var alvo = await StartAsync(await DatabaseAsync(), _ => { });
@@ -240,6 +271,18 @@ public abstract class TypedLayerFacts
             ["total"] = 12.5m,
             ["quantity"] = 3L,
             ["ship_on"] = "2026-11-03",
+            ["tenant_id"] = agent.Tenant!.Value.Value,
+        }, agent, cancellationToken: Ct);
+
+        return (Guid)created[AlvoManagedColumns.Id]!;
+    }
+
+    private static async Task<Guid> CreateTaskAsync(AlvoTestHost alvo, AlvoContext agent, string title, AlvoContext assignee)
+    {
+        var created = await alvo.Data.CreateAsync("tasks", new Dictionary<string, object?>
+        {
+            ["title"] = title,
+            ["assigned_to"] = assignee.User.Value,
             ["tenant_id"] = agent.Tenant!.Value.Value,
         }, agent, cancellationToken: Ct);
 
