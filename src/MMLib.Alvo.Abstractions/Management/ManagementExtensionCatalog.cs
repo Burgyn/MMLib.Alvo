@@ -1,6 +1,6 @@
 ﻿namespace MMLib.Alvo.Management;
 
-/// <summary>The answer of <c>IAlvoManagement.GetExtensionsAsync</c>: the host code registered with this instance.</summary>
+/// <summary>The answer of <see cref="IAlvoManagement.GetExtensionsAsync"/>: the host code registered with this instance.</summary>
 /// <remarks>An envelope rather than a bare list, so it can grow additively.</remarks>
 public sealed record ManagementExtensionCatalog
 {

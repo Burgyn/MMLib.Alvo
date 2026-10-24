@@ -317,6 +317,10 @@ internal sealed class RefusingManagement : IAlvoManagement
         throw new ManagementForbiddenException();
 
     /// <inheritdoc/>
+    public Task<ManagementExtensionCatalog> GetExtensionsAsync(string project, CancellationToken ct = default) =>
+        throw new ManagementForbiddenException();
+
+    /// <inheritdoc/>
     public Task<ManagementPolicyVerdict> SimulatePolicyAsync(
         string project, ManagementPolicySimulation simulation, CancellationToken ct = default) =>
         throw new ManagementForbiddenException();

@@ -47,6 +47,11 @@ namespace MMLib.Alvo.Management.Internal;
 /// alternative, a dashboard note citing #38 by link, would have put a sentence about the build in a client, which
 /// is the second spelling this type exists to prevent.
 /// </para>
+/// <para>
+/// <b>The static <see cref="Honoured"/> stays the five blocks.</b> The skill region and the design prototype are held to
+/// it, and it describes the build. A host's registered extension kinds describe the host, so they are appended per
+/// request by <see cref="Project(IReadOnlyList{string})"/>, after the blocks, as <c>extensions.&lt;kind&gt;</c>.
+/// </para>
 /// </remarks>
 internal static class CapabilityReport
 {
@@ -71,9 +76,16 @@ internal static class CapabilityReport
     internal static IReadOnlyList<string> Honoured { get; } =
         ["entities", "auth", "tenancy", "access", "formats"];
 
-    /// <summary>What this build honours, warns about, and refuses.</summary>
-    internal static ManagementCapabilities Project() => new(
-        Honoured,
+    /// <summary>What this build honours, warns about, and refuses, for a host that registers no extension.</summary>
+    internal static ManagementCapabilities Project() => Project([]);
+
+    /// <summary>
+    /// What this build honours, warns about, and refuses — the honoured blocks followed by <c>extensions.&lt;kind&gt;</c>
+    /// for each kind of host code this host registers.
+    /// </summary>
+    /// <param name="registeredKinds">The kinds, already spelled as honoured entries.</param>
+    internal static ManagementCapabilities Project(IReadOnlyList<string> registeredKinds) => new(
+        [.. Honoured, .. registeredKinds],
         [.. UnhonouredSubsystems.All
             .Concat(UnhonouredSubsystems.WithinBlocks)
             .Concat(UnhonouredSubsystems.ReportedOnly)

@@ -84,7 +84,10 @@ public sealed record ManagementRevision(
 public sealed record ManagementRevisionDetail(ManagementRevision Version, string DescriptorJson);
 
 /// <summary>What this build honours, warns about, and refuses — one source of truth for "not yet".</summary>
-/// <param name="Honoured">The top-level blocks this build honours.</param>
+/// <param name="Honoured">
+/// The top-level blocks this build honours, followed — in an embedded host — by <c>extensions.&lt;kind&gt;</c> for each
+/// kind of host code it registers.
+/// </param>
 /// <param name="Warned">
 /// What a descriptor may declare and this build then does nothing with: the section parses, nothing runs. Both
 /// top-level blocks (<c>automation</c>) and qualified slots inside an honoured block (<c>auth.providers</c>,

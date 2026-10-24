@@ -44,6 +44,9 @@ internal enum ManagementOperation
     /// <summary>Read the CEL functions a descriptor may call: built-ins and host registrations.</summary>
     GetCelFunctions,
 
+    /// <summary>Read the host code registered with this instance, as metadata.</summary>
+    GetExtensions,
+
     /// <summary>Read the build, mode, engine and startup mode.</summary>
     GetInfo,
 
