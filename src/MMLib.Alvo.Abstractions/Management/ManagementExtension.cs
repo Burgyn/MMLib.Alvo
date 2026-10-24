@@ -39,13 +39,22 @@ public sealed record ManagementExtension
     /// <summary>Gets where it sits among the extensions of the same target; lower first, then registration order.</summary>
     public int Order { get; init; }
 
-    /// <summary>Gets how long one run may take before it is cancelled and counted as failed.</summary>
+    /// <summary>
+    /// Gets how long one attempt may take before it is cancelled and counted as failed; <see langword="null"/> for a
+    /// kind that has no timeout.
+    /// </summary>
     public TimeSpan? Timeout { get; init; }
 
-    /// <summary>Gets who it acts as: <c>system</c> (the system in the event's tenant) or <c>eventActor</c>.</summary>
+    /// <summary>
+    /// Gets who it acts as: <c>system</c> (the system in the event's tenant) or <c>eventActor</c>;
+    /// <see langword="null"/> for a kind that has no identity of its own.
+    /// </summary>
     public string? RunAs { get; init; }
 
-    /// <summary>Gets whether one record's events reach it in order: <c>perRecord</c> or <c>none</c>.</summary>
+    /// <summary>
+    /// Gets whether one record's events reach it in order: <c>perRecord</c> or <c>none</c>; <see langword="null"/> for a
+    /// kind that receives no events.
+    /// </summary>
     public string? Ordering { get; init; }
 
     /// <summary>Gets what it does, in the host developer's own sentence, when they wrote one.</summary>

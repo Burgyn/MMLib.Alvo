@@ -167,8 +167,8 @@ public sealed record ManagementPolicyVerdict(
     IReadOnlyList<string> ReadOnlyFields)
 {
     /// <summary>
-    /// Gets the host extensions that also run on this entity and operation — after the write commits, they never change
-    /// what the policy admits. Empty in a host that registers none.
+    /// Gets the host extensions that also run on this entity and operation; each one's
+    /// <see cref="ManagementExtension.Stage"/> says when. Empty in a host that registers none.
     /// </summary>
     public IReadOnlyList<ManagementExtension> Extensions { get; init; } = [];
 }
