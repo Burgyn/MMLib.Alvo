@@ -34,6 +34,7 @@ public abstract class DeliveryChaosCriteriaTests
     private const int MaxRounds = 5_000;
     private const string Sink = "chaos-sink";
     private const string Orders = "orders";
+    private const string Tallies = "tallies";
 
     private static readonly AlvoContext _agent = AlvoTestHost.Caller("agent");
 
@@ -42,6 +43,12 @@ public abstract class DeliveryChaosCriteriaTests
 
     /// <summary>How many deliveries this leg runs at once; an engine whose writers serialise may run fewer.</summary>
     protected virtual int MaxConcurrency => 64;
+
+    /// <summary>
+    /// Whether the handler also writes a record, through its session, for every event it accepts — a write on the data
+    /// path, competing for the database with the dispatcher's own writes.
+    /// </summary>
+    protected virtual bool HandlerWrites => false;
 
     /// <summary>Registers this leg's database on the builder, and a raw connection to read the delivery table.</summary>
     protected abstract Task<(Action<IAlvoBuilder> Use, Func<DbConnection> Connect)> DatabaseAsync();
@@ -55,18 +62,21 @@ public abstract class DeliveryChaosCriteriaTests
         var sink = new ChaosSink();
         await using var alvo = await StartAsync(database.Use, clock, sink, MaxConcurrency);
 
+        sink.WriteTo(HandlerWrites ? await CreateTallyAsync(alvo) : null);
         var seeded = await SeedAsync(alvo);
         var stopwatch = Stopwatch.StartNew();
         var run = await RunWithChaosAsync(alvo, clock, sink);
         var rows = await DeliveryRows.ReadAsync(database.Connect, Ct);
 
         await ReportAsync($"§3 delivery chaos ({EventCount} events on {RecordCount} records, fail 1-in-{FailEvery}, "
-            + $"{AbandonedClaims} abandoned claims, concurrency {MaxConcurrency}, {EngineDescription}): {run.Rounds} rounds, {sink.AcceptedEvents.Count} accepted, "
-            + $"{sink.Refused.Count} refused, {stopwatch.Elapsed.TotalSeconds:F1}s");
+            + $"{AbandonedClaims} abandoned claims, concurrency {MaxConcurrency}, handler writes {(HandlerWrites ? "on" : "off")}, {EngineDescription}): "
+            + $"{run.Rounds} rounds, {sink.AcceptedEvents.Count} accepted, {sink.Duplicates} duplicates, {sink.Refused.Count} refused, "
+            + $"{sink.Writes} handler writes, {sink.WriteFailures.Count} failed writes, {stopwatch.Elapsed.TotalSeconds:F1}s");
 
+        AssertEveryHandlerWriteLanded(sink);
         AssertNothingIsLost(seeded, sink, rows, run);
         AssertEveryRecordKeptItsOrder(sink);
-        AssertTheChaosHappened(sink, run);
+        AssertTheChaosHappened(sink, rows, run);
     }
 
     private static async Task<AlvoTestHost> StartAsync(Action<IAlvoBuilder> use, FakeTimeProvider clock, ChaosSink sink, int maxConcurrency) =>
@@ -116,6 +126,13 @@ public abstract class DeliveryChaosCriteriaTests
         return ids;
     }
 
+    private static async Task<Guid> CreateTallyAsync(AlvoTestHost alvo)
+    {
+        var tally = await alvo.Data.CreateAsync(Tallies, new Dictionary<string, object?> { ["hits"] = 0L }, _agent, cancellationToken: Ct);
+
+        return (Guid)tally[AlvoManagedColumns.Id]!;
+    }
+
     private static Dictionary<string, object?> Step(int step) => new() { ["step"] = (long)step };
 
     private static async Task<ChaosRun> RunWithChaosAsync(AlvoTestHost alvo, FakeTimeProvider clock, ChaosSink sink)
@@ -162,12 +179,26 @@ public abstract class DeliveryChaosCriteriaTests
         outOfOrder.ShouldBeEmpty($"{outOfOrder.Count} records saw their events out of order");
     }
 
-    private static void AssertTheChaosHappened(ChaosSink sink, ChaosRun run)
+    private static void AssertTheChaosHappened(ChaosSink sink, IReadOnlyList<DeliveryRow> rows, ChaosRun run)
     {
         sink.Refused.Count.ShouldBeGreaterThan(EventCount / (FailEvery * 2), "the chaos must have happened, not only been configured");
         sink.Refused.Keys.ShouldAllBe(id => sink.AcceptedEvents.ContainsKey(id), "a refused delivery is retried until it lands");
         run.Abandoned.Count.ShouldBe(AbandonedClaims, "a claim must have been abandoned mid-run");
         run.Abandoned.ShouldAllBe(id => sink.AcceptedEvents.ContainsKey(id), "an abandoned claim is recovered by its lease and nothing else");
+        rows.Where(row => run.Abandoned.Contains(row.EventId)).ShouldAllBe(
+            row => row.Attempts >= 2, "the dead worker's claim spent an attempt, and the lease handed the delivery to a second one");
+    }
+
+    /// <summary>
+    /// With <see cref="HandlerWrites"/> on, every accepted event wrote its record, and no write failed — a write that
+    /// waited out the engine's busy retry behind the dispatcher's queued writes would throw <c>database is locked</c> here.
+    /// </summary>
+    private void AssertEveryHandlerWriteLanded(ChaosSink sink)
+    {
+        sink.WriteFailures.ShouldBeEmpty(
+            "a handler's data-path write must not be starved by the dispatcher's writes; first failures: "
+            + string.Join(" | ", sink.WriteFailures.Distinct(StringComparer.Ordinal).Take(3)));
+        sink.Writes.ShouldBe(HandlerWrites ? sink.AcceptedEvents.Count + sink.Duplicates : 0);
     }
 
     private static async Task ReportAsync(string line)
@@ -207,8 +238,17 @@ public abstract class DeliveryChaosCriteriaTests
     {
         private int _abandoning;
         private int _calls;
+        private int _duplicates;
+        private int _writes;
         private IDeliveryStore? _store;
         private CancellationToken _ct;
+        private Guid? _tally;
+
+        internal int Duplicates => Volatile.Read(ref _duplicates);
+
+        internal int Writes => Volatile.Read(ref _writes);
+
+        internal ConcurrentQueue<string> WriteFailures { get; } = new();
 
         internal ConcurrentQueue<Guid> Abandoned { get; } = new();
 
@@ -224,6 +264,8 @@ public abstract class DeliveryChaosCriteriaTests
             _ct = ct;
         }
 
+        internal void WriteTo(Guid? tally) => _tally = tally;
+
         internal async Task HandleAsync(AlvoSaved<AlvoRecord> saved, AlvoEventContext context)
         {
             var call = Interlocked.Increment(ref _calls);
@@ -234,9 +276,34 @@ public abstract class DeliveryChaosCriteriaTests
                 throw new InvalidOperationException("chaos");
             }
 
+            var step = Convert.ToInt32(saved.New["step"], CultureInfo.InvariantCulture);
+            await WriteTallyAsync(context, step);
             if (AcceptedEvents.TryAdd(context.EventId, 0))
             {
-                Steps.GetOrAdd(saved.New[AlvoManagedColumns.Id]!.ToString()!, _ => new()).Enqueue(Convert.ToInt32(saved.New["step"], CultureInfo.InvariantCulture));
+                Steps.GetOrAdd(saved.New[AlvoManagedColumns.Id]!.ToString()!, _ => new()).Enqueue(step);
+            }
+            else
+            {
+                Interlocked.Increment(ref _duplicates);
+            }
+        }
+
+        private async Task WriteTallyAsync(AlvoEventContext context, int step)
+        {
+            if (_tally is not { } tally)
+            {
+                return;
+            }
+
+            try
+            {
+                await context.Data.UpdateAsync(Tallies, tally, new Dictionary<string, object?> { ["hits"] = (long)step }, cancellationToken: _ct);
+                Interlocked.Increment(ref _writes);
+            }
+            catch (Exception failure) when (failure is not OperationCanceledException)
+            {
+                WriteFailures.Enqueue($"{failure.GetType().Name}: {failure.Message}");
+                throw;
             }
         }
 

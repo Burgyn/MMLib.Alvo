@@ -14,6 +14,16 @@
         "create": "'agent' in @user.roles",
         "update": "'agent' in @user.roles"
       }
+    },
+    "tallies": {
+      "fields": {
+        "hits": { "type": "integer" }
+      },
+      "rules": {
+        "get": "'agent' in @user.roles || 'admin' in @user.roles",
+        "create": "'agent' in @user.roles || 'admin' in @user.roles",
+        "update": "'agent' in @user.roles || 'admin' in @user.roles"
+      }
     }
   }
 }

@@ -33,6 +33,26 @@ public sealed class SqliteWriteGateTests : IDisposable
         other.ShouldNotBeSameAs(first);
     }
 
+    /// <summary>
+    /// A named shared-cache in-memory database is one database to every connection that names it, so its spellings share
+    /// a gate and another name gets its own. A private <c>:memory:</c> database is a new database per connection, which
+    /// no gate can tell apart: every one of them shares the one <c>:memory:</c> key — extra queueing, never a missed one.
+    /// </summary>
+    [Fact]
+    public void A_shared_in_memory_database_is_keyed_by_its_name_and_private_ones_share_one_key()
+    {
+        var name = $"alvo-gate-{Guid.NewGuid():N}";
+
+        var first = SqliteWriteGates.For($"Data Source={name};Mode=Memory;Cache=Shared");
+        var second = SqliteWriteGates.For($"Mode=Memory;Cache=Shared;Data Source={name};Pooling=False");
+        var other = SqliteWriteGates.For($"Data Source={name}-other;Mode=Memory;Cache=Shared");
+
+        second.ShouldBeSameAs(first);
+        other.ShouldNotBeSameAs(first);
+        SqliteWriteGates.For("Data Source=:memory:").ShouldBeSameAs(SqliteWriteGates.For("Data Source=:memory:;Pooling=False"));
+        SqliteWriteGates.DatabaseKey("Data Source=:memory:").ShouldBe("memory::memory:");
+    }
+
     [Fact]
     public void Use_sqlite_hands_the_stores_the_gate_of_the_database_it_names()
     {
@@ -90,26 +110,32 @@ public sealed class SqliteWriteGateTests : IDisposable
     }
 
     /// <summary>
-    /// Sixty-four claimants on real threads, each claiming and then answering in its own write transaction, over a
-    /// connection whose busy retry gives up after one second: queued at the gate, none meets the busy database, and every
+    /// Sixty-four claimants on real threads, each claiming and then answering in its own write transaction: every claim and
+    /// every answer queues at the database's gate, never more than one is inside it, none meets a busy database, and every
     /// delivery is taken once.
     /// </summary>
     /// <remarks>
-    /// Without the gate this fails: the claimants reach SQLite together, and <c>Microsoft.Data.Sqlite</c>'s sleeping retry
-    /// outlasts a one-second <c>Default Timeout</c> for some of them, which then throw <c>database is locked</c>.
+    /// The gate is the database's own, wrapped to count, so the fact fails on every run if a store stops entering it — a
+    /// busy-retry timeout cannot tell the two apart: without the gate the same run passes on a three-second
+    /// <c>Default Timeout</c>, and fails only on one second, and then not every time. Three seconds is here so a loaded
+    /// runner's reads cannot fail it.
     /// </remarks>
     [Fact]
-    public async Task Sixty_four_claimants_on_threads_queue_at_the_gate_and_none_meets_a_busy_database()
+    public async Task Sixty_four_claimants_on_threads_queue_at_the_gate_one_at_a_time_and_take_every_delivery_once()
     {
-        var connectionString = $"Data Source={_databasePath};Pooling=False;Default Timeout=1";
-        await using var world = await DeliveryStoreWorld.StartAsync(() => new SqliteConnection(connectionString), SqliteWriteGates.For(connectionString));
+        var connectionString = $"Data Source={_databasePath};Pooling=False;Default Timeout=3";
+        var gate = new RecordingGate(SqliteWriteGates.For(connectionString));
+        await using var world = await DeliveryStoreWorld.StartAsync(() => new SqliteConnection(connectionString), gate);
         await FanOutLanesAsync(world);
+        var before = gate.Entered;
 
         var claimed = await Task.WhenAll(Enumerable.Range(0, Claimants).Select(index => Task.Run(() => ClaimAndAnswerAsync(world.Store, $"worker-{index}"), Ct)));
 
         var ids = claimed.SelectMany(batch => batch).ToList();
         ids.ShouldBeUnique();
         ids.Count.ShouldBe(Claimants);
+        (gate.Entered - before).ShouldBe(Claimants * 2, "each claimant's claim and its answer wait their turn at the gate");
+        gate.MostInside.ShouldBe(1);
     }
 
     public void Dispose()
@@ -124,6 +150,36 @@ public sealed class SqliteWriteGateTests : IDisposable
         }
 
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Passes every turn through to the real gate, counting the turns and the most writers ever inside at once.</summary>
+    private sealed class RecordingGate(IRelationalWriteGate inner) : IRelationalWriteGate
+    {
+        private int _entered;
+        private int _inside;
+        private int _most;
+
+        internal int Entered => Volatile.Read(ref _entered);
+
+        internal int MostInside => Volatile.Read(ref _most);
+
+        public async ValueTask<IDisposable> EnterAsync(CancellationToken cancellationToken)
+        {
+            var turn = await inner.EnterAsync(cancellationToken);
+            Interlocked.Increment(ref _entered);
+            InterlockedMax(ref _most, Interlocked.Increment(ref _inside));
+
+            return new Leaving(this, turn);
+        }
+
+        private sealed class Leaving(RecordingGate gate, IDisposable turn) : IDisposable
+        {
+            public void Dispose()
+            {
+                Interlocked.Decrement(ref gate._inside);
+                turn.Dispose();
+            }
+        }
     }
 
     private static void InterlockedMax(ref int target, int value)

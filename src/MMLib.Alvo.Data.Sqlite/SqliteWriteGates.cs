@@ -16,7 +16,9 @@ namespace MMLib.Alvo.Data.Sqlite;
 /// <b>The key is the database, not the connection string's spelling.</b> A file database is keyed by its full path, so
 /// a relative and an absolute spelling, or two connection strings that differ only in their other keywords, share one gate.
 /// The path compares without case where the platform's default file system does (Windows, macOS). An in-memory database
-/// is keyed by its name: a named shared-cache database is one database to every connection that names it.
+/// is keyed by its name: a named shared-cache database is one database to every connection that names it. A private
+/// <c>:memory:</c> database, a new one per connection, cannot be told apart from the next: they all share one key, which
+/// costs queueing they did not need and never misses one they did.
 /// </para>
 /// <para>
 /// The gates are never removed. One per database a process opens is the whole cost, and a gate removed while a store
