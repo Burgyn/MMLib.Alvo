@@ -60,7 +60,7 @@ public static class AlvoExtensionBuilderExtensions
     /// <param name="builder">The Alvo builder.</param>
     /// <param name="configure">Registers the entity's handlers.</param>
     /// <returns><paramref name="builder"/>, for chaining.</returns>
-    /// <exception cref="ArgumentException"><typeparamref name="T"/> carries no <see cref="AlvoEntityAttribute"/>.</exception>
+    /// <exception cref="ArgumentException"><typeparamref name="T"/> carries no <see cref="AlvoEntityAttribute"/>, or names <c>"*"</c>.</exception>
     public static IAlvoBuilder Entity<T>(this IAlvoBuilder builder, Action<AlvoEntityBuilder<T>> configure)
         where T : class
     {
@@ -68,6 +68,13 @@ public static class AlvoExtensionBuilderExtensions
         ArgumentNullException.ThrowIfNull(configure);
         var entity = RecordShape.Of(typeof(T)).Entity
             ?? throw new ArgumentException($"Mark {typeof(T).Name} with [AlvoEntity(\"<entity>\")], so Alvo knows which entity it maps.", nameof(T));
+        if (entity == EntityEvents.AllEntities)
+        {
+            throw new ArgumentException(
+                $"{typeof(T).Name} maps [AlvoEntity(\"*\")], but a type maps one entity: register every-entity handlers with Entity(\"*\", …) and a CEL condition.",
+                nameof(T));
+        }
+
         configure(new AlvoEntityBuilder<T>(builder.Services, entity));
 
         return builder;

@@ -55,6 +55,16 @@ public sealed class TypedRegistrationTests
     }
 
     [Fact]
+    public void A_type_mapped_to_every_entity_is_refused_at_registration()
+    {
+        var refusal = Should.Throw<ArgumentException>(() => Registry(alvo => alvo.Entity<EveryEntity>(_ => { })));
+
+        refusal.Message.ShouldContain("EveryEntity");
+        refusal.Message.ShouldContain("Entity(\"*\"");
+        refusal.ParamName.ShouldBe("T");
+    }
+
+    [Fact]
     public void An_untranslatable_condition_is_refused_at_registration_naming_the_handler() =>
         Should.Throw<AlvoTranslationException>(() => Registry(alvo => alvo.Entity<TypedTicket>(tickets => tickets.OnUpdated<TypedTicketResolved>(
             "typed-bad", when: e => e.New.Title.GetHashCode() == 1)))).Message.ShouldContain("in extension 'typed-bad' (when)");

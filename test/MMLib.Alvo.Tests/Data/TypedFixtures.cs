@@ -119,6 +119,12 @@ public sealed class TicketWithScore
     public double Score { get; init; }
 }
 
+[AlvoEntity("*")]
+public sealed class EveryEntity
+{
+    public string? Title { get; init; }
+}
+
 public sealed class Unmarked
 {
     public string? Title { get; init; }

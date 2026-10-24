@@ -68,6 +68,18 @@ public sealed class TypedReadTests
             .Message.ShouldContain("[AlvoEntity(");
 
     [Fact]
+    public async Task A_type_mapped_to_every_entity_cannot_be_read()
+    {
+        var session = Substitute.For<IAlvoSession>();
+
+        (await Should.ThrowAsync<InvalidOperationException>(() => session.GetAsync<EveryEntity>(Guid.NewGuid(), Ct)))
+            .Message.ShouldContain("EveryEntity");
+        await Should.ThrowAsync<InvalidOperationException>(() => session.QueryAsync<EveryEntity>(x => x.Title == "a", limit: 5, Ct));
+        await session.DidNotReceiveWithAnyArgs().GetAsync(default!, default, Ct);
+        await session.DidNotReceiveWithAnyArgs().QueryAsync(default!, Ct);
+    }
+
+    [Fact]
     public async Task An_untranslatable_query_is_refused_at_its_call_naming_the_entity() =>
         (await Should.ThrowAsync<AlvoTranslationException>(() => Session(out _).QueryAsync<Order>(x => x.Note.Trim() == "a", limit: 5, Ct)))
             .Message.ShouldContain("in a typed query on 'orders'");
