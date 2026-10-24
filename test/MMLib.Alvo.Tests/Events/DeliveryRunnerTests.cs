@@ -9,6 +9,7 @@ using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
+using MMLib.Alvo.Tests.Data;
 using MMLib.Alvo.Tests.Expressions;
 using MMLib.Alvo.Tests.Extensions;
 
@@ -211,6 +212,23 @@ public sealed class DeliveryRunnerTests : IDisposable
         var row = _store.Rows.ShouldHaveSingleItem();
         row.Status.ShouldBe("dead");
         row.LastErrorType.ShouldBe("chain-depth-exceeded");
+    }
+
+    [Fact]
+    public async Task A_typed_message_that_cannot_be_built_is_dead_at_once_and_names_its_field_never_a_value()
+    {
+        var (runner, handler) = Arrange(
+            (AlvoCreated<TypedTicket> _) => Task.CompletedTask,
+            register: (alvo, handle) => alvo.Entity<TypedTicket>(tickets => tickets.OnCreated(Handler, handle)));
+
+        (await runner.RunAsync(await ClaimedAsync(), handler, Claimant, Ct)).ShouldBe(DeliveryRunOutcome.Dead);
+
+        var row = _store.Rows.ShouldHaveSingleItem();
+        row.Status.ShouldBe("dead");
+        row.LastErrorType.ShouldBe("record-unreadable");
+        var unreadable = _logs.Entries.Where(entry => entry.EventName == "DeliveryRecordUnreadable").ShouldHaveSingleItem();
+        unreadable.Message.ShouldContain("'id'");
+        unreadable.Exception.ShouldBeNull();
     }
 
     [Fact]
@@ -641,9 +659,19 @@ public sealed class DeliveryRunnerTests : IDisposable
         TimeProvider? time = null,
         TimeSpan? settle = null,
         IServiceProvider? services = null,
-        IDeliveryStore? port = null)
+        IDeliveryStore? port = null,
+        Action<IAlvoBuilder, Delegate>? register = null)
     {
-        var registry = HandlerCatalog.Registry(alvo => alvo.Entity("tickets", t => t.OnCreated(Handler, handle, configure: configure)));
+        var registry = HandlerCatalog.Registry(alvo =>
+        {
+            if (register is null)
+            {
+                alvo.Entity("tickets", t => t.OnCreated(Handler, handle, configure: configure));
+                return;
+            }
+
+            register(alvo, handle);
+        });
         var binder = new ExtensionBinder(registry, CelFixtures.Compiler, HandlerCatalog.EveryService(), _loggers.CreateLogger<ExtensionBinder>());
         var catalogs = new PolicyCatalogProvider();
         catalogs.SetCurrent("handlers", _catalog);

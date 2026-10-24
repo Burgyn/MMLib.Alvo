@@ -10,7 +10,7 @@ internal static class RecordMaterializer
     {
         if (shape.Problems.Count > 0)
         {
-            throw new InvalidOperationException($"{shape.Name} cannot be read from a record: {shape.Problems[0].Message} {shape.Problems[0].Fix}");
+            throw new RecordUnreadableException($"{shape.Name} cannot be read from a record: {shape.Problems[0].Message} {shape.Problems[0].Fix}");
         }
 
         return shape.IsWrapper ? Wrapped(shape, record) : Built(shape, record);

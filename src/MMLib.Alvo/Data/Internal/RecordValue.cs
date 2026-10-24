@@ -24,15 +24,15 @@ internal static class RecordValue
         return Held(raw, property) ?? throw Unheld(shape, property, raw);
     }
 
-    internal static InvalidOperationException Missing(RecordShape shape, MappedProperty property) => new(
+    internal static RecordUnreadableException Missing(RecordShape shape, MappedProperty property) => new(
         $"The record has no field '{property.Field}', which {shape.Name}.{property.Property.Name} maps to. A read leaves out a "
         + "field the caller may not see, and an event image leaves out what events.exclude names: map a type without it, or "
         + "read the record untyped.");
 
-    private static InvalidOperationException Null(RecordShape shape, MappedProperty property) => new(
+    private static RecordUnreadableException Null(RecordShape shape, MappedProperty property) => new(
         $"Field '{property.Field}' is null, but {shape.Name}.{property.Property.Name} cannot hold null: declare it as {property.ValueType.Name}?.");
 
-    private static InvalidOperationException Unheld(RecordShape shape, MappedProperty property, object raw) => new(
+    private static RecordUnreadableException Unheld(RecordShape shape, MappedProperty property, object raw) => new(
         property.Enum is { } map
             ? $"Field '{property.Field}' holds a value {map.Type.Name} has no member for: name the member's value with [AlvoEnumValue(\"…\")]."
             : $"Field '{property.Field}' holds {ShapeProblems.WithArticle(raw.GetType().Name)}, which {shape.Name}.{property.Property.Name} ({property.ValueType.Name}) cannot take.");

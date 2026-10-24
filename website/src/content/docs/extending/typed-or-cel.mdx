@@ -159,7 +159,8 @@ otherwise write by hand.
 `record.As<Booking>()` reads any `AlvoRecord` into your class — a row from an untyped read, an event payload. It throws
 `InvalidOperationException` naming the field when the record lacks one the class maps (a hidden field, or one left out
 of the event images), holds null where the property cannot, or holds a value the property cannot take; the value
-itself is never echoed.
+itself is never echoed. A typed handler whose message cannot be built that way is
+[dead at once with `record-unreadable`](/extending/event-handlers/#what-a-delivery-guarantees), not retried.
 
 ## Testing a typed handler
 

@@ -2,7 +2,10 @@
 
 namespace MMLib.Alvo.Events.Internal;
 
-/// <summary>What deliveries log — ids, counts and type names; never a URL, a body or an exception message.</summary>
+/// <summary>
+/// What deliveries log — ids, counts and type names; never a URL, a body or an exception message, save the one Alvo writes
+/// itself for a record a host type cannot be read from, which names a field and never a value.
+/// </summary>
 internal static partial class DeliveryLog
 {
     [LoggerMessage(
@@ -41,6 +44,12 @@ internal static partial class DeliveryLog
             + "with per-record order it holds back this handler's later events of the same record until it is redelivered "
             + "or retired.")]
     internal static partial void DeliveryDead(ILogger logger, Guid deliveryId, string subscriber, int attempt, string errorType);
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "Alvo's attempt {Attempt} of delivery {DeliveryId} for {Subscriber} could not read a record as its host "
+            + "type: {Reason} It is dead (record-unreadable), since the same record fails again; fix the type, then redeliver it.")]
+    internal static partial void DeliveryRecordUnreadable(ILogger logger, Guid deliveryId, string subscriber, int attempt, string reason);
 
     [LoggerMessage(
         Level = LogLevel.Warning,
