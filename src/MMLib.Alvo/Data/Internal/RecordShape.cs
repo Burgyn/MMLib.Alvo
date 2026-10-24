@@ -94,5 +94,8 @@ internal sealed record MappedProperty(PropertyInfo Property, string Field, Type 
         property.GetCustomAttribute<AlvoFieldAttribute>(inherit: true)?.Name ?? JsonNamingPolicy.SnakeCaseLower.ConvertName(property.Name);
 
     private static bool TakesNull(PropertyInfo property, NullabilityInfoContext nullability) =>
-        !property.PropertyType.IsValueType && nullability.Create(property).WriteState != NullabilityState.NotNull;
+        !property.PropertyType.IsValueType && DeclaredState(nullability.Create(property)) != NullabilityState.NotNull;
+
+    private static NullabilityState DeclaredState(NullabilityInfo info) =>
+        info.WriteState == NullabilityState.Unknown ? info.ReadState : info.WriteState;
 }

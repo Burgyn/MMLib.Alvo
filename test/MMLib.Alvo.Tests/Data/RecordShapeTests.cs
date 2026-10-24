@@ -85,6 +85,15 @@ public sealed class RecordShapeTests
         Mapped(RecordShape.Of(typeof(LooseNote)), nameof(LooseNote.Note)).AcceptsNull.ShouldBeTrue();
 
     [Fact]
+    public void A_get_only_property_takes_null_only_when_it_is_declared_nullable()
+    {
+        var shape = RecordShape.Of(typeof(FixedNote));
+
+        Mapped(shape, nameof(FixedNote.Note)).AcceptsNull.ShouldBeFalse();
+        Mapped(shape, nameof(FixedNote.Code)).AcceptsNull.ShouldBeTrue();
+    }
+
+    [Fact]
     public void A_constructor_parameter_must_take_its_property_s_type() =>
         RecordShape.Of(typeof(MistypedParameter)).Constructor.ShouldBeNull();
 

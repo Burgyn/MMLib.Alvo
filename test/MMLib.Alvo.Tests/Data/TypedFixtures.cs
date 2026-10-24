@@ -202,6 +202,15 @@ public sealed class LooseNote
     public string Note { get; init; } = string.Empty;
 }
 
+public sealed class FixedNote(string note, string? code)
+{
+    [AlvoField("note")]
+    public string Note { get; } = note;
+
+    [AlvoField("code")]
+    public string? Code { get; } = code;
+}
+
 public sealed class MistypedParameter(string level)
 {
     public long Level { get; init; } = level.Length;
