@@ -150,6 +150,10 @@ public sealed class AlvoTestHost : IAsyncDisposable
     /// An event context for calling a class handler's <c>HandleAsync</c> yourself: data access as <paramref name="caller"/>
     /// through this host's real pipeline, and a synthetic event of type <c>test.delivery</c> with a fresh id.
     /// </summary>
+    /// <remarks>
+    /// Not a delivery: writes through the context's <c>Data</c> carry no causation from the synthetic event and sit no hop
+    /// deeper in the chain. Write through the host and let a handler run on its delivery to test causation or depth.
+    /// </remarks>
     /// <param name="caller">The caller the handler acts as; <see cref="Caller"/> builds one.</param>
     /// <param name="subscriber">The handler id the context reports.</param>
     /// <param name="attempt">The attempt the context reports, from 1.</param>
