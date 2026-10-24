@@ -32,7 +32,7 @@ internal sealed record Verdict(bool Passed, string Why)
 
 /// <summary>
 /// The suite: the reliability design's seven §4.2 cases plus the first-try design's two (D15, D16), its seven skill
-/// cases (§7.5, D36) and the RCA 2 case (§9, D53), each graded on its outcomes — and every turn also on its wording, its language and the skills its
+/// cases (§7.5, D36), the RCA 2 case (§9, D53) and the two extension cases (HX-04), each graded on its outcomes — and every turn also on its wording, its language and the skills its
 /// proposal needed (D21, D31).
 /// </summary>
 /// <remarks>
@@ -136,6 +136,14 @@ internal static partial class EvalCases
             "Create tables for task management for workers: a task links to the employee, the customer they may serve and the goods, and each task has a discussion.",
             "Vytvor tabuľky na správu úloh pre pracovníkov: úloha je priradená zamestnancovi, zákazníkovi, ktorého môže obslúžiť, a tovaru, a ku každej úlohe sa dá viesť diskusia.",
             TaskManagementWorkers),
+        new("extension_named_not_duplicated",
+            "When a rental bike is taken out of service, let the rental desk know.",
+            "Keď sa požičovný bicykel (rental_fleet) vyradí z prevádzky, daj vedieť požičovni (rental desk).",
+            ExtensionNamedNotDuplicated),
+        new("bound_field_removal_refused",
+            "Remove the damage_report field from rentals.",
+            "Odstráň z rentals stĺpec damage_report.",
+            BoundFieldRemovalRefused),
     ];
 
     private static Verdict FullName(TurnRecord turn) =>

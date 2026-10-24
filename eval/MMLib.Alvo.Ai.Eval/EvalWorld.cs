@@ -26,6 +26,10 @@ namespace MMLib.Alvo.Ai.Eval;
 /// <see cref="ActAsAdministrator"/> publishes — so the loopback listener the host opens for the run accepts no
 /// credential at all, which is the default-deny the host already has without one.
 /// </para>
+/// <para>
+/// The world also registers <see cref="EvalExtensions"/>' two event handlers, as a host developer would, so the
+/// extension cases have a host extension to name and one to protect.
+/// </para>
 /// </remarks>
 internal sealed class EvalWorld : IAsyncDisposable
 {
@@ -123,6 +127,7 @@ internal sealed class EvalWorld : IAsyncDisposable
     private static Task<WebApplication> BuildAsync(string repositoryRoot, string database)
     {
         var builder = AlvoHost.CreateBuilder([], configuration => configuration.AddInMemoryCollection(Settings(repositoryRoot, database)));
+        EvalExtensions.Register(new HostBuilder(builder.Services));
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls(LoopbackAnyPort);
         return AlvoHost.BuildAsync(builder);
@@ -150,4 +155,11 @@ internal sealed class EvalWorld : IAsyncDisposable
         ["Alvo:Database:Provider"] = "sqlite",
         ["Alvo:Database:SqliteConnectionString"] = $"Data Source={database}",
     };
+
+    /// <summary>The shipped host's service collection, as the builder <c>AddAlvo</c> hands its callback.</summary>
+    private sealed class HostBuilder(IServiceCollection services) : IAlvoBuilder
+    {
+        /// <inheritdoc/>
+        public IServiceCollection Services { get; } = services;
+    }
 }
