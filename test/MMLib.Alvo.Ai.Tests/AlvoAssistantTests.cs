@@ -248,7 +248,7 @@ public sealed class AlvoAssistantTests
             Scripted.Says("I proposed notes.")), trace: true);
 
         var trace = JsonNode.Parse(updates[^1].ShouldBeOfType<AssistantUpdate.TurnTraced>().Json)!;
-        trace["instructions"]!.GetValue<string>().ShouldBe("alvo-schema-assistant v6");
+        trace["instructions"]!.GetValue<string>().ShouldBe("alvo-schema-assistant v7");
         trace["model"]!.GetValue<string>().ShouldBe("qwen3:8b");
         trace["baseRevision"]!.GetValue<int>().ShouldBe(4);
         trace["end"]!.GetValue<string>().ShouldBe("answered");
