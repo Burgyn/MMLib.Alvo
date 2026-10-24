@@ -23,15 +23,20 @@ internal sealed class HandlerInvoker
 
     private HandlerInvoker(
         Type messageType,
+        string? typeName,
         Func<IServiceProvider, object, AlvoEventContext, CancellationToken, Task> invoke,
         Func<IServiceProviderIsService, IReadOnlyList<Type>> unresolvable)
     {
         MessageType = messageType;
+        TypeName = typeName;
         _invoke = invoke;
         _unresolvable = unresolvable;
     }
 
     internal Type MessageType { get; }
+
+    /// <summary>The full name of the handler class, or <see langword="null"/> for a delegate, which has none worth naming.</summary>
+    internal string? TypeName { get; }
 
     internal Task InvokeAsync(IServiceProvider services, object message, AlvoEventContext context, CancellationToken cancellationToken) =>
         _invoke(services, message, context, cancellationToken);
@@ -49,6 +54,7 @@ internal sealed class HandlerInvoker
 
         return new HandlerInvoker(
             messageType,
+            typeName: null,
             (provider, message, context, ct) => InvokeDelegateAsync(handler, parameters, provider, message, context, ct),
             isService => [.. services.Where(type => !isService.IsService(type))]);
     }
@@ -64,7 +70,7 @@ internal sealed class HandlerInvoker
                 nameof(THandler));
         }
 
-        return new(typeof(TMessage), InvokeClassAsync<THandler, TMessage>, isService => ClassUnresolvable(typeof(THandler), isService));
+        return new(typeof(TMessage), typeof(THandler).FullName, InvokeClassAsync<THandler, TMessage>, isService => ClassUnresolvable(typeof(THandler), isService));
     }
 
     private static void EnsureReturnsTask(Delegate handler)

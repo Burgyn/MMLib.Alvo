@@ -47,6 +47,16 @@ public class AlvoExtensionOptionsTests
         services.GetRequiredService<AlvoChainDepthLimit>().MaxDepth.ShouldBe(AlvoChainDepthLimit.MinimumMaxDepth);
     }
 
+    [Fact]
+    public void Type_names_stay_hidden_unless_the_section_exposes_them()
+    {
+        using var hidden = Container(new());
+        using var exposed = Container(new() { ["Alvo:Extensions:ExposeTypeNames"] = "true" });
+
+        hidden.GetRequiredService<IOptions<AlvoExtensionOptions>>().Value.ExposeTypeNames.ShouldBeFalse();
+        exposed.GetRequiredService<IOptions<AlvoExtensionOptions>>().Value.ExposeTypeNames.ShouldBeTrue();
+    }
+
     private static ServiceProvider Container(Dictionary<string, string?> settings) => new ServiceCollection()
         .AddSingleton<IConfiguration>(new ConfigurationBuilder().AddInMemoryCollection(settings).Build())
         .AddAlvoExtensions()
