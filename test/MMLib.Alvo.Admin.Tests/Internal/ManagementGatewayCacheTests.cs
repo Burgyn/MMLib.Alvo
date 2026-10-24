@@ -187,25 +187,6 @@ public class ManagementGatewayCacheTests
         await Should.ThrowAsync<InvalidOperationException>(() => gateway.CelFunctionsAsync(Ct).AsTask());
     }
 
-    public static TheoryData<Exception> ExpectedCatalogFailures() =>
-    [
-        new ManagementRequestException("refused"),
-        new ManagementForbiddenException(),
-        new HttpRequestException("down"),
-        new OperationCanceledException(),
-    ];
-
-    private static CelFunctionInfo Function(string name) => new()
-    {
-        Name = name,
-        Parameters = [],
-        Result = CelValueType.String,
-        ResultMayBeNull = false,
-        Summary = string.Empty,
-        Provenance = CelFunctionProvenance.BuiltIn,
-        Profiles = [CelProfile.Mutate],
-    };
-
     [Fact]
     public async Task One_screen_reads_the_extension_catalog_once_and_a_navigation_reads_it_again()
     {
@@ -236,6 +217,25 @@ public class ManagementGatewayCacheTests
         (await gateway.ExtensionsAsync(Ct)).ShouldBeEmpty();
         (await gateway.ExtensionsAsync(Ct)).ShouldHaveSingleItem("a failure to ask caches nothing");
     }
+
+    public static TheoryData<Exception> ExpectedCatalogFailures() =>
+    [
+        new ManagementRequestException("refused"),
+        new ManagementForbiddenException(),
+        new HttpRequestException("down"),
+        new OperationCanceledException(),
+    ];
+
+    private static CelFunctionInfo Function(string name) => new()
+    {
+        Name = name,
+        Parameters = [],
+        Result = CelValueType.String,
+        ResultMayBeNull = false,
+        Summary = string.Empty,
+        Provenance = CelFunctionProvenance.BuiltIn,
+        Profiles = [CelProfile.Mutate],
+    };
 
     private static ManagementExtension Extension(string id) =>
         new() { Id = id, Kind = AlvoExtensionKind.EventHandler, Stage = AlvoExtensionStage.PostCommit };

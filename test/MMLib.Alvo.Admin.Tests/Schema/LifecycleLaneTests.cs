@@ -50,7 +50,17 @@ public sealed class LifecycleLaneTests
 
         lane.Select(hook => (hook.Point, hook.Number)).ShouldBe([("afterUpdate", 1), ("afterUpdate", 2)]);
         lane[1].Json.ShouldContain("changed(status)");
+        lane[1].Json.ShouldContain("\n", Case.Sensitive, "the lane draws a hook as the Hooks tab does, written readable");
     }
+
+    [Fact]
+    public void A_malformed_hook_list_draws_nothing_rather_than_throwing()
+        => LifecycleLane.AfterCommitHooks([new("afterUpdate", "[{not json")]).ShouldBeEmpty();
+
+    [Fact]
+    public void A_summary_names_an_unknown_identity_or_ordering_as_declared()
+        => LifecycleLane.Summary(_application with { RunAs = "tenantOwner", Ordering = "perTenant" })
+            .ShouldBe("runs as tenantOwner · ordering perTenant");
 
     [Fact]
     public void A_summary_says_where_when_how_long_and_as_whom()

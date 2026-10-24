@@ -1,7 +1,6 @@
 ﻿using MMLib.Alvo.Management;
 
 using System.Globalization;
-using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
 
@@ -45,7 +44,7 @@ internal static class LifecycleLane
         : string.Create(CultureInfo.InvariantCulture, $"{count} extensions from code run on this entity");
 
     private static IEnumerable<LaneHook> Declared(string point, string json) =>
-        (JsonNode.Parse(json) as JsonArray ?? []).Select((hook, index) => new LaneHook(point, index + 1, hook?.ToJsonString() ?? "null"));
+        HooksTab.Declared(json).Select((hook, index) => new LaneHook(point, index + 1, hook));
 
     private static IEnumerable<string> Parts(ManagementExtension extension)
     {
@@ -66,14 +65,28 @@ internal static class LifecycleLane
 
         if (extension.RunAs is { } runAs)
         {
-            yield return runAs == "eventActor" ? "runs as the event's actor" : "runs as the system";
+            yield return RunsAs(runAs);
         }
 
         if (extension.Ordering is { } ordering)
         {
-            yield return ordering == "none" ? "in any order" : "in order per record";
+            yield return InOrder(ordering);
         }
     }
+
+    private static string RunsAs(string runAs) => runAs switch
+    {
+        "eventActor" => "runs as the event's actor",
+        "system" => "runs as the system",
+        _ => "runs as " + runAs,
+    };
+
+    private static string InOrder(string ordering) => ordering switch
+    {
+        "none" => "in any order",
+        "perRecord" => "in order per record",
+        _ => "ordering " + ordering,
+    };
 
     private static string Duration(TimeSpan value) =>
         value < TimeSpan.FromMinutes(1) ? Whole(value.TotalSeconds, "s")
