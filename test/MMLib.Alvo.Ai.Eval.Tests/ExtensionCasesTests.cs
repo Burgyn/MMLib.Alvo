@@ -32,6 +32,25 @@ public sealed class ExtensionCasesTests
     }
 
     [Fact]
+    public void An_after_hook_on_another_entity_fails()
+    {
+        var proposed = Edited(document => document["entities"]!["rentals"]!["hooks"] = new JsonObject
+        {
+            ["afterUpdate"] = new JsonArray(new JsonObject
+            {
+                ["action"] = new JsonObject { ["type"] = "webhook", ["endpoint"] = "rental-desk" },
+            }),
+        });
+
+        Grade(OutOfService, Turn(proposed, $"Added; `{EvalExtensions.OutOfService}` also exists.", calls: [Read("get_extensions"), Propose(Valid())]))
+            .Passed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Reading_the_catalog_without_naming_the_extension_fails()
+        => Grade(OutOfService, Turn(answer: "The host already tells the rental desk.", calls: Read("get_extensions"))).Passed.ShouldBeFalse();
+
+    [Fact]
     public void Naming_the_extension_without_reading_the_catalog_fails()
         => Grade(OutOfService, Turn(answer: $"`{EvalExtensions.OutOfService}` does it.")).Passed.ShouldBeFalse();
 
@@ -41,6 +60,15 @@ public sealed class ExtensionCasesTests
                 answer: $"I cannot remove it: the host's `{EvalExtensions.DamageClaim}` reads damage_report. Its developer has to remove that first.",
                 calls: Propose(Refused("validation", $"Field 'damage_report' of 'rentals' is bound by extension '{EvalExtensions.DamageClaim}' (eventHandler, in this host): …"))))
             .Passed.ShouldBeTrue();
+
+    [Fact]
+    public void Declining_after_reading_the_catalog_and_naming_the_extension_passes()
+        => Grade(DamageRemoval, Turn(answer: $"I will not remove it: `{EvalExtensions.DamageClaim}` reads damage_report.", calls: Read("get_extensions")))
+            .Passed.ShouldBeTrue();
+
+    [Fact]
+    public void Naming_the_extension_with_no_tool_call_fails()
+        => Grade(DamageRemoval, Turn(answer: $"`{EvalExtensions.DamageClaim}` reads damage_report, so I will not remove it.")).Passed.ShouldBeFalse();
 
     [Fact]
     public void A_valid_proposal_that_removes_the_field_fails()
