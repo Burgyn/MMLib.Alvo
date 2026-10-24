@@ -183,6 +183,16 @@ internal static class DeliveryTable
          WHERE {Fence}
         """;
 
+    /// <summary>
+    /// Records one answered attempt, numbered after the delivery's last recorded one (<c>COALESCE(MAX(attempt), 0) + 1</c>).
+    /// </summary>
+    /// <remarks>
+    /// <b>The number is safe only because the answer's fenced <c>UPDATE</c> of the delivery row runs first, in the same
+    /// transaction.</b> On PostgreSQL's <c>READ COMMITTED</c> two concurrent <c>MAX + 1</c> reads would see the same
+    /// maximum; what serializes them is the row lock that fenced update takes on the delivery, which every writer of the
+    /// delivery's history holds before it inserts here. So the invariant is: a reset, a redeliver or a replay goes through
+    /// an <c>UPDATE</c> of the delivery row, and nothing ever writes <c>{attempts}</c> directly.
+    /// </remarks>
     internal static string AttemptSql(string attempts) =>
         $"""
         INSERT INTO {attempts} (delivery_id, attempt, started_at, duration_ms, outcome, error_type)

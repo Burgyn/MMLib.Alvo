@@ -14,6 +14,8 @@ namespace MMLib.Alvo.Data.PostgreSql.Tests.Integration;
 /// </summary>
 public sealed class PostgreSqlDeliveryStoreTests : DeliveryStoreContractTests, IClassFixture<PostgresFixture>
 {
+    private const string Subscriber = "send-confirmation";
+
     private readonly string _connectionString = string.Empty;
 
     public PostgreSqlDeliveryStoreTests(PostgresFixture fixture)
@@ -68,6 +70,28 @@ public sealed class PostgreSqlDeliveryStoreTests : DeliveryStoreContractTests, I
         plan.ShouldContain("ix_alvo_deliveries_lane_open on alvo_deliveries earlier");
     }
 
+    /// <summary>
+    /// A delivery put back to pending restarts its claim count at one, and the attempt that follows is recorded after the
+    /// ones already in its history — the SQLite fact of the same name, on PostgreSQL.
+    /// </summary>
+    [Fact]
+    public async Task An_attempt_after_a_reset_is_numbered_after_the_last_one()
+    {
+        EnsureEngineAvailable();
+        await using var world = await ConcreteWorldAsync();
+        var @event = await world.AppendEventAsync("tickets:a");
+        await world.Store.FanOutAsync([new DeliveryRequest { EventId = @event, Subscriber = Subscriber, PartitionKey = "tickets:a", Kind = "handler" }], Ct);
+        var first = (await world.Store.ClaimAsync(ClaimFor("worker-1"), Ct)).ShouldHaveSingleItem();
+        (await world.Store.FailAsync(AttemptOf(first, "worker-1"), new DeliveryFailure { ErrorType = "Boom", MaxAttempts = 1 }, Ct)).ShouldBeTrue();
+
+        await world.ResetAsync(first.Id);
+        var second = (await world.Store.ClaimAsync(ClaimFor("worker-1"), Ct)).ShouldHaveSingleItem();
+
+        second.Attempts.ShouldBe(1, "the claim count restarts with the reset");
+        (await world.Store.CompleteAsync(AttemptOf(second, "worker-1"), Ct)).ShouldBeTrue();
+        (await world.AttemptNumbersAsync(first.Id)).ShouldBe([1, 2]);
+    }
+
     protected override async Task<IDeliveryStoreWorld> WorldAsync() => await ConcreteWorldAsync();
 
     protected override void EnsureEngineAvailable() =>
@@ -75,4 +99,19 @@ public sealed class PostgreSqlDeliveryStoreTests : DeliveryStoreContractTests, I
 
     private Task<DeliveryStoreWorld> ConcreteWorldAsync() =>
         DeliveryStoreWorld.StartAsync(() => new NpgsqlConnection(_connectionString));
+
+    private static DeliveryClaim ClaimFor(string claimant) => new()
+    {
+        Claimant = claimant,
+        Ordered = [Subscriber],
+        BatchSize = 3,
+        Lease = TimeSpan.FromMinutes(1),
+        OutboxMaxAttempts = 10,
+        OutboxClaimLease = TimeSpan.FromMinutes(5),
+    };
+
+    private static DeliveryAttempt AttemptOf(ClaimedDelivery delivery, string claimant) =>
+        new() { Delivery = delivery, Claimant = claimant, StartedAt = DateTimeOffset.UnixEpoch, Duration = TimeSpan.FromMilliseconds(1) };
+
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
 }

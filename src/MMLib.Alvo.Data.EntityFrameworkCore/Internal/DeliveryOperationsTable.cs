@@ -14,7 +14,12 @@
 /// <b>The log carries the replay's idempotency record.</b> Beside E11's six columns, a replay files how many deliveries it
 /// reset, the first ids, and the caller's key, scope and request fingerprint in the same row, written in the same
 /// transaction as the reset — so a retried replay is answered from the row, and a crash cannot leave a reset without its
-/// record. The key is unique per caller only when one was sent (a partial index).
+/// record. The key is unique per caller only when one was sent (a partial index), and a <c>CHECK</c> refuses a key stored
+/// without its scope: SQL treats <c>NULL</c>s as distinct, so a scope-less key would slip past the unique index.
+/// </para>
+/// <para>
+/// <b>Identifier length.</b> <see cref="AlvoOptions.SchemaPrefix"/> is capped at 16 characters, so the longest name here,
+/// <c>ux_{prefix}_operations_log_key</c>, is at most 38 bytes, inside PostgreSQL's 63-byte identifier limit.
 /// </para>
 /// </remarks>
 internal static class DeliveryOperationsTable
@@ -48,7 +53,8 @@ internal static class DeliveryOperationsTable
             sample TEXT NULL,
             idempotency_scope TEXT NULL,
             idempotency_key TEXT NULL,
-            request_fingerprint TEXT NULL
+            request_fingerprint TEXT NULL,
+            CHECK (idempotency_key IS NULL OR idempotency_scope IS NOT NULL)
         )
         """;
 

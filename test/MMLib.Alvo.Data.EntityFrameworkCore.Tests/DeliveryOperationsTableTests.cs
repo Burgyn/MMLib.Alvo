@@ -55,6 +55,14 @@ public sealed class DeliveryOperationsTableTests
         DeliveryOperationsTable.LogKeyIndexDdl(Log).ShouldBe(
             $"CREATE UNIQUE INDEX IF NOT EXISTS ux_{Log}_key ON {Log} (idempotency_scope, idempotency_key) WHERE idempotency_key IS NOT NULL");
 
+    /// <summary>
+    /// A key is never stored without its scope: a <c>NULL</c> scope would make the unique index treat every such key as
+    /// distinct, so a retried replay would run twice. The table refuses the row instead of trusting every writer.
+    /// </summary>
+    [Fact]
+    public void A_key_is_never_stored_without_its_scope() =>
+        DeliveryOperationsTable.LogDdl(Log).ShouldContain("CHECK (idempotency_key IS NULL OR idempotency_scope IS NOT NULL)");
+
     [Fact]
     public void Bringing_the_tables_up_is_idempotent() =>
         DeliveryOperationsTable.Statements(Controls, Log).ShouldAllBe(statement => statement.Contains("IF NOT EXISTS"));
