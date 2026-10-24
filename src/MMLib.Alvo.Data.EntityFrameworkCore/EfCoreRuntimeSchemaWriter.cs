@@ -75,6 +75,7 @@ internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposa
         DbConnection connection, string project, MigrationPlan plan, DescriptorVersion candidate,
         int expectedRevision, CancellationToken ct)
     {
+        using var turn = await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false);
         var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
         await using (transaction.ConfigureAwait(false))
         {

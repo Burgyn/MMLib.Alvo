@@ -102,7 +102,8 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<AlvoDataContextFactory>(),
         services.GetRequiredService<TimeProvider>(),
         services.GetRequiredService<IOptions<AlvoOptions>>().Value,
-        services.GetRequiredService<AlvoChainDepthLimit>());
+        services.GetRequiredService<AlvoChainDepthLimit>(),
+        services.GetRequiredService<IRelationalWriteGate>());
 
     /// <summary>Creates the readiness probe every EF-backed driver shares (#133).</summary>
     /// <remarks>

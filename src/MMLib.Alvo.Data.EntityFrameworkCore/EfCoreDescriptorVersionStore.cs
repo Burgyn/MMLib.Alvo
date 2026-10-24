@@ -89,6 +89,7 @@ internal sealed class EfCoreDescriptorVersionStore : IDescriptorVersionStore, IA
         await using (connection.ConfigureAwait(false))
         {
             await _rows.EnsureReadyAsync(connection, ct).ConfigureAwait(false);
+            using var turn = await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false);
             var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
             await using (transaction.ConfigureAwait(false))
             {

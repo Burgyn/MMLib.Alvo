@@ -74,6 +74,9 @@ internal sealed class EfAlvoData : IAlvoData
     /// <summary>The causation-chain limit every write face enforces before it reads or writes a row.</summary>
     private readonly AlvoChainDepthLimit _depthLimit;
 
+    /// <summary>Where every write transaction waits for this database's turn — see <see cref="WriteTurnAsync"/>.</summary>
+    private readonly IRelationalWriteGate _writeGate;
+
     internal EfAlvoData(
         IPolicyEngine policy,
         IPredicateEvaluator evaluator,
@@ -84,7 +87,8 @@ internal sealed class EfAlvoData : IAlvoData
         AlvoDataContextFactory contexts,
         TimeProvider time,
         AlvoOptions options,
-        AlvoChainDepthLimit depthLimit)
+        AlvoChainDepthLimit depthLimit,
+        IRelationalWriteGate? writeGate = null)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(evaluator);
@@ -107,6 +111,32 @@ internal sealed class EfAlvoData : IAlvoData
         _idempotencyTable = IdempotencyTable.NameFor(options.SchemaPrefix);
         _outboxTable = OutboxTable.NameFor(options.SchemaPrefix);
         _depthLimit = depthLimit;
+        _writeGate = writeGate ?? NoRelationalWriteGate.Instance;
+    }
+
+    /// <summary>
+    /// Opens the context's connection and waits for this database's write turn, before the write's transaction begins.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The caller disposes the turn after its transaction</b> — declared before it, so the transaction commits or rolls
+    /// back first and the engine's lock is released before the next writer is let in. A turn is taken once per write
+    /// transaction and never inside one: the outbox row, the idempotency record and the rollup recompute a write makes are
+    /// statements in the same transaction, so nothing under the turn asks for it again, and the gate is not reentrant.
+    /// Before-hooks run inside the transaction, but they are compiled CEL; no host code runs while the turn is held. A
+    /// replayed write takes a fresh turn per attempt, so the wait between attempts holds none.
+    /// </para>
+    /// <para>
+    /// <b>A unit of several writes</b> — a future transaction a host opens around them — takes the turn once when the unit
+    /// begins, and the writes inside it run on the unit's connection without asking again; this helper is the one place
+    /// that would learn whether a turn is already held.
+    /// </para>
+    /// </remarks>
+    private async Task<IDisposable> WriteTurnAsync(AlvoDataContext db, CancellationToken cancellationToken)
+    {
+        await db.Database.OpenConnectionAsync(cancellationToken);
+
+        return await _writeGate.EnterAsync(cancellationToken);
     }
 
     /// <inheritdoc/>
@@ -257,6 +287,7 @@ internal sealed class EfAlvoData : IAlvoData
         var (schema, candidate) = AuthorizedCandidate(db, entity, values, decision, context, now);
         await EnsureOutboxTableAsync(db, cancellationToken);
 
+        using var turn = await WriteTurnAsync(db, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         candidate = RunBeforeCreate(db, schema, decision, context, candidate, now);
         var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
@@ -517,6 +548,7 @@ internal sealed class EfAlvoData : IAlvoData
         await EnsureIdempotencyTableAsync(db, cancellationToken);
         await EnsureOutboxTableAsync(db, cancellationToken);
 
+        using var turn = await WriteTurnAsync(db, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var records = new IdempotencyScope(
             db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
@@ -1094,6 +1126,7 @@ internal sealed class EfAlvoData : IAlvoData
         var now = WriteInstantNow();
         await EnsureOutboxTableAsync(db, cancellationToken);
 
+        using var turn = await WriteTurnAsync(db, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await WrittenAsync(db, transaction, schema, decision, context, id, values, precondition, now, cancellationToken);
         var echoed = await EchoedAsync(db, schema, context, id, cancellationToken);
@@ -1121,6 +1154,7 @@ internal sealed class EfAlvoData : IAlvoData
         await EnsureIdempotencyTableAsync(db, cancellationToken);
         await EnsureOutboxTableAsync(db, cancellationToken);
 
+        using var turn = await WriteTurnAsync(db, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var records = new IdempotencyScope(
             db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
@@ -1292,6 +1326,7 @@ internal sealed class EfAlvoData : IAlvoData
         await EnsureIdempotencyTableAsync(db, cancellationToken);
         await EnsureOutboxTableAsync(db, cancellationToken);
 
+        using var turn = await WriteTurnAsync(db, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var records = new IdempotencyScope(
             db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
@@ -1345,6 +1380,7 @@ internal sealed class EfAlvoData : IAlvoData
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         await EnsureIdempotencyTableAsync(db, cancellationToken);
 
+        using var turn = await WriteTurnAsync(db, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var records = new IdempotencyScope(
             db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
@@ -1396,6 +1432,7 @@ internal sealed class EfAlvoData : IAlvoData
         var now = WriteInstantNow();
         await EnsureOutboxTableAsync(db, cancellationToken);
 
+        using var turn = await WriteTurnAsync(db, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var result = await ReplaceWrittenAsync(
             db, transaction, schema, branches, context, id, values, precondition, now, cancellationToken);
@@ -1685,6 +1722,7 @@ internal sealed class EfAlvoData : IAlvoData
         var now = WriteInstantNow();
         await EnsureOutboxTableAsync(db, cancellationToken);
 
+        using var turn = await WriteTurnAsync(db, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await ErasedAndEmittedAsync(
             db, transaction, schema, decision, context, id, precondition, now, cancellationToken);
@@ -1716,6 +1754,7 @@ internal sealed class EfAlvoData : IAlvoData
         await EnsureIdempotencyTableAsync(db, cancellationToken);
         await EnsureOutboxTableAsync(db, cancellationToken);
 
+        using var turn = await WriteTurnAsync(db, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var records = new IdempotencyScope(
             db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
@@ -2441,6 +2480,7 @@ internal sealed class EfAlvoData : IAlvoData
 
         await EnsureOutboxTableAsync(db, cancellationToken);
 
+        using var turn = await WriteTurnAsync(db, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var records = idempotency is { } token
             ? new IdempotencyScope(

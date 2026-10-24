@@ -8,7 +8,7 @@ using Xunit;
 
 namespace MMLib.Alvo.Data.PostgreSql.Tests.Integration;
 
-/// <summary>PostgreSQL runs concurrent writers itself, so its stores queue at no gate: the write path is the one it always had.</summary>
+/// <summary>PostgreSQL runs concurrent writers itself, so its stores and its data path queue at no gate: the write path is the one it always had.</summary>
 public sealed class PostgreSqlWriteGateTests
 {
     [Fact]
@@ -19,5 +19,6 @@ public sealed class PostgreSqlWriteGateTests
         using var services = collection.BuildServiceProvider();
 
         services.GetRequiredService<RelationalConnectionFactory>().WriteGate.ShouldBeSameAs(NoRelationalWriteGate.Instance);
+        services.GetRequiredService<IRelationalWriteGate>().ShouldBeSameAs(NoRelationalWriteGate.Instance, "the data path's writes take the same no-op turn");
     }
 }
