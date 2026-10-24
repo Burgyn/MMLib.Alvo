@@ -64,5 +64,5 @@ if [ "$(grep -c . <<< "$owners")" = 1 ] && [ "$owners" != "(none)" ]; then
   exec dotnet format "$owners" --verify-no-changes --include "${files[@]}"
 fi
 
-echo "[format-staged] ${#files[@]} staged C# file(s) across projects: solution workspace"
+echo "[format-staged] ${#files[@]} staged C# file(s), not all in one project: solution workspace"
 exec dotnet format --verify-no-changes --include "${files[@]}"
