@@ -195,11 +195,11 @@ internal sealed class DescriptorBootPlan
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>A separate step from <see cref="Plan"/>, called by the boot alone.</b> <see cref="LoadAsync"/> also serves
-    /// <c>SchemaMigrationRunner</c> (<c>ApplyAlvoDescriptorAsync</c>), and a catalog primed there — like one a runtime
-    /// apply primes — is bound leniently: a handler that does not fit is left unbound and logged, never refused.
-    /// Only the boot is strict, because only at boot can the host's own author still fix the registration before
-    /// anything is served.
+    /// <b>A separate step from <see cref="Plan"/>, called by the boot alone.</b> The boot refuses every misfit through
+    /// the binder, because only at boot can the host's own author still fix the registration before anything is
+    /// served. <see cref="LoadAsync"/> also serves <c>SchemaMigrationRunner</c> (<c>ApplyAlvoDescriptorAsync</c>), and
+    /// that path — like a runtime apply, a dry run and a rollback — refuses only a change that would unbind a bound
+    /// handler, through <c>ExtensionApplyGuard</c>; a handler that never bound is left unbound and logged.
     /// </para>
     /// <para>Still stage 0: the binder reads the registry and the compiled catalog, never a database.</para>
     /// </remarks>

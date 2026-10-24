@@ -67,7 +67,7 @@ public static class AlvoServiceCollectionExtensions
         services.TryAddSingleton<IDescriptorValidator, MMLib.Alvo.Descriptor.Internal.DescriptorValidator>();
         AddBootPlan(services);
         services.TryAddSingleton<SchemaMigrationRunner>();
-        services.TryAddSingleton<RuntimeSchemaService>();
+        AddRuntimeSchemaService(services);
         AddBoot(services);
         services.AddAlvoAuth();
         services.AddAlvoExpressions();
@@ -103,6 +103,23 @@ public static class AlvoServiceCollectionExtensions
             provider.GetRequiredService<ICelCompiler>(),
             provider.GetRequiredService<ILogger<DescriptorBootPlan>>(),
             provider.GetRequiredService<ExtensionBinder>()));
+
+    /// <summary>Registers the runtime apply path, guarded for the host's extensions.</summary>
+    /// <remarks>
+    /// Through a factory because the guard arrives through an internal constructor overload, which the public one
+    /// would otherwise win. The factory is resolved lazily, as the type registration was, so a driver-less container
+    /// still activates nothing until the first apply.
+    /// </remarks>
+    /// <param name="services">The service collection.</param>
+    private static void AddRuntimeSchemaService(IServiceCollection services) =>
+        services.TryAddSingleton(provider => new RuntimeSchemaService(
+            provider.GetRequiredService<IDescriptorValidator>(),
+            provider.GetRequiredService<ISchemaMigrator>(),
+            provider.GetRequiredService<IDescriptorVersionStore>(),
+            provider.GetRequiredService<IRuntimeSchemaWriter>(),
+            provider.GetRequiredService<ICelCompiler>(),
+            provider.GetRequiredService<IPolicyCatalogProvider>(),
+            provider.GetRequiredService<ExtensionApplyGuard>()));
 
     /// <summary>
     /// Registers the boot: the state a readiness probe reads, the hosted lifecycle service that fills it in

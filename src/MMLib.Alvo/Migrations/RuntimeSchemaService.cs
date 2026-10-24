@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
@@ -25,9 +26,16 @@ namespace MMLib.Alvo.Migrations;
 /// change, and published via <see cref="IPolicyCatalogProvider.SetCurrent"/> only <em>after</em> that
 /// commit succeeds: an uncompilable rule set rejects the whole apply rather than leaving a committed
 /// schema paired with a stale (possibly too-permissive) catalog. The re-apply of an identical
-/// descriptor writes nothing at all, so it builds and publishes in one step
-/// (<c>PolicyCatalogPriming</c>) — and rejects the call if a rule no longer compiles, rather than
-/// reporting success while leaving the catalog as it was.
+/// descriptor writes nothing at all, so it builds and publishes in one step — and rejects the call if
+/// a rule no longer compiles, rather than reporting success while leaving the catalog as it was.
+/// </para>
+/// <para>
+/// <strong>Every path is guarded for the host's extensions.</strong> Right after validation — before the
+/// revision is checked and before anything is planned — a descriptor that would unbind a handler bound to
+/// the current catalog is refused (<see cref="DescriptorValidationException"/>), on an apply, a preview
+/// and a rollback alike. The catalog the guard checked is the one that is published, built over the very
+/// schema instance the apply hands the writer, so it is compiled once. A handler that was never bound
+/// blocks nothing: it is a warning on the preview.
 /// </para>
 /// <para>
 /// <strong>Nothing primes at startup.</strong> This service is driven by a request, so a host that
@@ -46,6 +54,7 @@ public sealed class RuntimeSchemaService
     private readonly IRuntimeSchemaWriter _writer;
     private readonly ICelCompiler _compiler;
     private readonly IPolicyCatalogProvider _policyCatalogProvider;
+    private readonly ExtensionApplyGuard? _extensions;
 
     /// <summary>Initializes a new instance of the <see cref="RuntimeSchemaService"/> class.</summary>
     /// <param name="validator">Validates untrusted descriptor JSON before it is parsed.</param>
@@ -58,6 +67,26 @@ public sealed class RuntimeSchemaService
         IDescriptorValidator validator, ISchemaMigrator migrator,
         IDescriptorVersionStore store, IRuntimeSchemaWriter writer,
         ICelCompiler compiler, IPolicyCatalogProvider policyCatalogProvider)
+        : this(validator, migrator, store, writer, compiler, policyCatalogProvider, extensions: null)
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="RuntimeSchemaService"/> class, guarding the host's extensions.</summary>
+    /// <param name="validator">Validates untrusted descriptor JSON before it is parsed.</param>
+    /// <param name="migrator">Plans the migration between the current and desired schema.</param>
+    /// <param name="store">The append-only descriptor version history, read for the current/rollback source.</param>
+    /// <param name="writer">The atomic apply-plan-and-append-version seam.</param>
+    /// <param name="compiler">Compiles the policy catalog primed after every accepted apply/rollback.</param>
+    /// <param name="policyCatalogProvider">Holds the currently effective <see cref="PolicyCatalog"/> for <c>IPolicyEngine</c>.</param>
+    /// <param name="extensions">
+    /// Refuses a descriptor that would unbind a handler bound to the current catalog, and hands back the catalog it
+    /// checked; <see langword="null"/> for a service a host builds itself, which then carries no guard.
+    /// </param>
+    internal RuntimeSchemaService(
+        IDescriptorValidator validator, ISchemaMigrator migrator,
+        IDescriptorVersionStore store, IRuntimeSchemaWriter writer,
+        ICelCompiler compiler, IPolicyCatalogProvider policyCatalogProvider,
+        ExtensionApplyGuard? extensions)
     {
         ArgumentNullException.ThrowIfNull(validator);
         ArgumentNullException.ThrowIfNull(migrator);
@@ -71,6 +100,7 @@ public sealed class RuntimeSchemaService
         _writer = writer;
         _compiler = compiler;
         _policyCatalogProvider = policyCatalogProvider;
+        _extensions = extensions;
     }
 
     /// <summary>Validates, plans, guards, and atomically applies + versions a runtime descriptor change.</summary>
@@ -87,7 +117,10 @@ public sealed class RuntimeSchemaService
     /// what does: a rules-only change <b>does</b> append a version, an identical resubmission does
     /// not. Both (re)prime the policy catalog.
     /// </returns>
-    /// <exception cref="DescriptorValidationException"><paramref name="descriptorJson"/> is invalid, or one of its rules no longer compiles.</exception>
+    /// <exception cref="DescriptorValidationException">
+    /// <paramref name="descriptorJson"/> is invalid, or one of its rules no longer compiles, or it would unbind an
+    /// extension the current catalog binds.
+    /// </exception>
     /// <exception cref="DestructiveChangeNotAllowedException">The plan is destructive and <see cref="MigrationOptions.AllowDestructive"/> is <see langword="false"/>.</exception>
     /// <exception cref="DescriptorConcurrencyException">
     /// <paramref name="expectedRevision"/> is not the latest revision. Checked <em>before</em>
@@ -113,6 +146,7 @@ public sealed class RuntimeSchemaService
         _ = Validate(descriptorJson);
         var descriptor = AlvoDescriptor.Parse(descriptorJson);
         var desired = DescriptorToSchemaMapper.Map(descriptor);
+        var checkedCatalog = _extensions?.Check(descriptor, desired)?.Catalog;
         var current = await CurrentAtAsync(project, expectedRevision, ct).ConfigureAwait(false);
         var currentSchema = current?.Schema ?? new SchemaModel([]);
 
@@ -121,11 +155,11 @@ public sealed class RuntimeSchemaService
 
         if (IsUnchangedReapply(plan, current, descriptor))
         {
-            PolicyCatalogPriming.Prime(_policyCatalogProvider, _compiler, project, descriptor, desired);
+            _policyCatalogProvider.SetCurrent(project, checkedCatalog ?? PolicyCatalog.Build(descriptor, desired, _compiler));
             return current!;
         }
 
-        var catalog = PolicyCatalog.Build(descriptor, desired, _compiler);
+        var catalog = checkedCatalog ?? PolicyCatalog.Build(descriptor, desired, _compiler);
         var candidate = new DescriptorVersion(desired, descriptorJson, 0, DateTimeOffset.UtcNow, options.Author, options.Reason);
         var applied = await _writer.ApplyAndAppendAsync(project, plan, candidate, expectedRevision, options, ct).ConfigureAwait(false);
         _policyCatalogProvider.SetCurrent(project, catalog);
@@ -163,7 +197,9 @@ public sealed class RuntimeSchemaService
     /// </param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The plan, its base revision, and the guardrail's verdict.</returns>
-    /// <exception cref="DescriptorValidationException"><paramref name="descriptorJson"/> is invalid.</exception>
+    /// <exception cref="DescriptorValidationException">
+    /// <paramref name="descriptorJson"/> is invalid, or it would unbind an extension the current catalog binds.
+    /// </exception>
     /// <exception cref="DescriptorConcurrencyException">
     /// <paramref name="expectedRevision"/> is not the latest revision.
     /// </exception>
@@ -175,7 +211,9 @@ public sealed class RuntimeSchemaService
         ArgumentNullException.ThrowIfNull(options);
 
         var validation = Validate(descriptorJson);
-        var desired = DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(descriptorJson));
+        var descriptor = AlvoDescriptor.Parse(descriptorJson);
+        var desired = DescriptorToSchemaMapper.Map(descriptor);
+        var check = _extensions?.Check(descriptor, desired);
         var current = await CurrentAtAsync(project, expectedRevision, ct).ConfigureAwait(false);
         var plan = await _migrator.PlanAsync(
             current?.Schema ?? new SchemaModel([]), desired, options, ct).ConfigureAwait(false);
@@ -183,7 +221,7 @@ public sealed class RuntimeSchemaService
         return new DescriptorApplyPreview(
             plan, current?.Revision ?? 0, !plan.HasDestructiveChanges || options.AllowDestructive)
         {
-            Warnings = [.. validation.Errors.Where(error => error.Severity == DescriptorValidationSeverity.Warning)],
+            Warnings = [.. validation.Errors.Where(error => error.Severity == DescriptorValidationSeverity.Warning), .. check?.Warnings ?? []],
         };
     }
 
@@ -225,6 +263,7 @@ public sealed class RuntimeSchemaService
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The appended <see cref="DescriptorVersion"/>, with <see cref="DescriptorVersion.RolledBackFrom"/> set to <paramref name="targetRevision"/>.</returns>
     /// <exception cref="InvalidOperationException"><paramref name="targetRevision"/> does not exist, or the project has no applied schema to roll back.</exception>
+    /// <exception cref="DescriptorValidationException">The restored descriptor would unbind an extension the current catalog binds.</exception>
     /// <exception cref="DestructiveChangeNotAllowedException">The plan is destructive and <see cref="MigrationOptions.AllowDestructive"/> is <see langword="false"/>.</exception>
     /// <exception cref="DescriptorConcurrencyException">The current revision changed concurrently, losing the optimistic-lock race.</exception>
     /// <exception cref="NotSupportedException"><see cref="MigrationOptions.DryRun"/> is <see langword="true"/>; the runtime path has no dry-run.</exception>
@@ -239,15 +278,17 @@ public sealed class RuntimeSchemaService
         var currentVersion = await _store.GetCurrentAsync(project, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Project '{project}' has no applied schema to roll back.");
 
-        var plan = await _migrator.PlanAsync(currentVersion.Schema, target.Schema, options, ct).ConfigureAwait(false);
-        Guard(project, plan, options);
-
         // A fresh instance, never the one the store handed back: a store may return the very object an earlier
         // revision published (InMemoryDescriptorVersionStore does), and republishing it is an ABA for every
         // reader that keys "the revision did not change" on the published instance — AppliedSchemaView's
         // one-revision-per-request check, and the EF port's model token. See PolicyCatalogProvider.SetCurrent.
         var restored = target.Schema with { };
-        var catalog = PolicyCatalog.Build(AlvoDescriptor.Parse(target.DescriptorJson), restored, _compiler);
+        var checkedCatalog = _extensions?.Check(AlvoDescriptor.Parse(target.DescriptorJson), restored)?.Catalog;
+
+        var plan = await _migrator.PlanAsync(currentVersion.Schema, target.Schema, options, ct).ConfigureAwait(false);
+        Guard(project, plan, options);
+
+        var catalog = checkedCatalog ?? PolicyCatalog.Build(AlvoDescriptor.Parse(target.DescriptorJson), restored, _compiler);
         var candidate = new DescriptorVersion(
             restored, target.DescriptorJson, 0, DateTimeOffset.UtcNow,
             options.Author, options.Reason ?? $"Rollback to revision {targetRevision}", RolledBackFrom: targetRevision);
