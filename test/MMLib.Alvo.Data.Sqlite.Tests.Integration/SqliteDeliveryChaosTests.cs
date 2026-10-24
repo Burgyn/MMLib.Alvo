@@ -41,6 +41,10 @@ public sealed class SqliteDeliveryChaosTests : DeliveryChaosCriteriaTests, IDisp
 
     protected override Task<(Action<IAlvoBuilder> Use, Func<DbConnection> Connect)> DatabaseAsync()
     {
+        Assert.SkipWhen(
+            OperatingSystem.IsWindows(),
+            "SQLite's per-write cost on a Windows runner (~20 min for this run) is tracked by #410; the criterion is held on Linux.");
+
         var connectionString = $"Data Source={_path}";
 
         return Task.FromResult<(Action<IAlvoBuilder>, Func<DbConnection>)>((alvo => alvo.UseSqlite(connectionString), () => new SqliteConnection(connectionString)));
