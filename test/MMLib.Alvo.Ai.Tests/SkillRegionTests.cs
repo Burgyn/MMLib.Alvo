@@ -1,4 +1,8 @@
-﻿using MMLib.Alvo.Schema;
+﻿using MMLib.Alvo.Ai.Internal;
+using MMLib.Alvo.Management;
+using MMLib.Alvo.Schema;
+
+using NSubstitute;
 
 using System.Text.Json.Nodes;
 
@@ -12,7 +16,8 @@ public sealed class SkillRegionTests
 {
     /// <summary>The regions this suite holds to the schema and the ports.</summary>
     private static readonly string[] _heldHere =
-        ["entity-keys", "field-keys", "field-types", "on-delete", "built-in-formats", "managed-columns", "rollup-ops"];
+        ["entity-keys", "field-keys", "field-types", "on-delete", "built-in-formats", "managed-columns", "rollup-ops",
+            "descriptor-or-code"];
 
     /// <summary>
     /// The regions whose source is the core, held in <c>MMLib.Alvo.Host.Tests</c>: the reserved fields by
@@ -69,6 +74,14 @@ public sealed class SkillRegionTests
     [Fact]
     public void The_managed_columns_region_is_the_base_prompts_bullets_verbatim() =>
         AssistantInstructionsText().ShouldContain(Region("traits-and-tenancy", "managed-columns"), Case.Sensitive);
+
+    /// <summary>The hooks skill's "descriptor or code" region names exactly the read the assistant really has.</summary>
+    [Fact]
+    public void The_descriptor_or_code_region_names_the_extension_read()
+    {
+        Holds("hooks", "descriptor-or-code", ["get_descriptor", "hostExtensions", "*", "get_extensions"]);
+        ManagementTools.For(Substitute.For<IAlvoManagement>(), "p").Functions.Select(tool => tool.Name).ShouldContain("get_extensions");
+    }
 
     private static void Holds(string area, string region, IReadOnlyList<string> source) =>
         SkillCatalogue.Tokens(Region(area, region)).ShouldBe(source, $"<!-- gen:{region} --> should read:\n{SkillCatalogue.Expected(source)}");
