@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Branch `hx/06-delivery-operations` in the worktree `/Users/martiniak/Developer/GitHub/Burgyn/MMLib.Alvo-wt-hx06`, stacked on `hx/05-typed-layer` (PR #416, not yet merged). Issue **#383**, epic #370. One writer per worktree; never `git add -A` (stage each task's files by path); verify `git branch --show-current` prints `hx/06-delivery-operations` before every commit and before the push.
+- Branch `hx/06-delivery-operations` in the worktree `/Users/martiniak/Developer/GitHub/Burgyn/MMLib.Alvo-wt-hx06`, based on `main`: HX-05 merged as #416, and `main` is merged into this branch at `9081385b`; the PR's base is `main`. Issue **#383**, epic #370. One writer per worktree; never `git add -A` (stage each task's files by path); verify `git branch --show-current` prints `hx/06-delivery-operations` before every commit and before the push.
 - **Scope is §7 HX-06 only.** No validate hooks and no `ManagementExtension.Enabled` (HX-09 — the enabled route ships and refuses every kind that exists); no schedules (HX-13 — the run route ships and answers 404); no steps in a delivery's detail (HX-14); no timers on the Operations page (HX-13); no assistant tool or skill change (the assistant stays read-only and gains nothing to operate with); no retention of the new log (#154, commented at merge).
 - **Public surface added is exactly:**
   - Abstractions `MMLib.Alvo.Events`: `IDeliveryStore.ListAsync`, `.FindAsync`, `.AttemptsAsync`, `.SelectAsync`, `.RedeliverAsync`, `.ReplayAsync`, `.SetPausedAsync`, `.ControlsAsync`, `.FindOperationAsync` (abstract); records `StoredDelivery`, `StoredDeliveryAttempt`, `DeliveryFilter`, `DeliverySelection`, `DeliveryOperationEntry`, `SubscriberControl` (all `required init`, HX-03 (23)).
@@ -29,17 +29,17 @@
 - C# style: `alvo-dotnet-conventions` — no inline comments, methods ≲ 25 lines, English only, `ConfigureAwait(false)` in `src/`, never in tests (xUnit1030); every test call passes `TestContext.Current.CancellationToken` (xUnit1051). `.cs` files are **UTF-8 with BOM + CRLF**: after creating or editing `.cs` files run `dotnet format whitespace MMLib.Alvo.slnx --include <file> <file> …` (file paths, never a directory).
 - Single-test runs: `dotnet test --project <test project> --filter-class '*<ClassName>'` (MTP). Public-API baselines: `*PublicApiApprovalTests` (`test/MMLib.Alvo.Abstractions.Tests`, `test/MMLib.Alvo.Tests` for the core, `test/MMLib.Alvo.TestHost.Tests`, `test/MMLib.Alvo.Admin.Tests`); the Testing library's is `*TestingLibraryPublicApiTests` (`test/MMLib.Alvo.Tests`). Rings: `scripts/test-ring0` after every task, `scripts/test-ring1` after each task marked **[slice end]**, `scripts/test-ring2` before the PR.
 - A grown `PublicApi.*.verified.txt` or a new `*.verified.*` trips the turn-review gate: dispatch `alvo-snapshot-judge`, and justify each added public symbol against `alvo-architecture-rules` (*public is the contract*) and the public-surface list above.
-- **CI parity:** rings are Debug on the local SDK; CI builds Release with `TreatWarningsAsErrors`, `AnalysisLevel=latest-recommended` and `EnforceCodeStyleInBuild`. Task 19 runs the Release build in the CI SDK container before anything is pushed.
-- **Security core:** §6.2's list (HX-01, 03, 05, 07, 08, 09, 11, 12, 13, 15, 16, 18, 19) does **not** name HX-06. This plan nevertheless adds nine rows to the management authorization table, a second gated port, and a payload-disclosure surface (the fixture), and the `alvo-security-core-review` skill triggers on authorization changes — so Task 19 runs that checklist (the authorization and disclosure items), a labelled `/security-review` substitute, and labels the PR `needs-deep-review` (Ruling 20).
+- **CI parity:** rings are Debug on the local SDK; CI builds Release with `TreatWarningsAsErrors`, `AnalysisLevel=latest-recommended` and `EnforceCodeStyleInBuild`. Task 22 runs the Release build in the CI SDK container before anything is pushed.
+- **Security core:** §6.2's list (HX-01, 03, 05, 07, 08, 09, 11, 12, 13, 15, 16, 18, 19) does **not** name HX-06. This plan nevertheless adds nine rows to the management authorization table, a second gated port, and a payload-disclosure surface (the fixture), and the `alvo-security-core-review` skill triggers on authorization changes — so Task 22 runs that checklist (the authorization and disclosure items), a labelled `/security-review` substitute, and labels the PR `needs-deep-review` (Ruling 20).
 - Commits: Conventional Commits, one per task, each message ending with `Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB`. No `Closes` keyword in a commit message; the PR body carries `Closes #383` once.
 
 ## Review Focus
 
-1. **A delivery that died at its last attempt, redelivered,** must run again with a fresh attempt budget — not be reclaimed dead `lease-expired` at once (`DeliveryRunner.Admit`, HX-03 (15)/(29)) — and its history must keep the earlier attempts, numbered on, without a primary-key collision on `(delivery_id, attempt)` — contract fact `A_redelivered_delivery_runs_again_with_a_fresh_budget_and_keeps_its_history` (Task 3) and SQLite fact `An_attempt_after_a_reset_is_numbered_after_the_last_one` (Task 1).
-2. **A replay whose window also holds another handler's rows, or rows still pending/running/retrying,** must touch only the named subscriber's finished rows — contract fact `A_replay_resets_only_the_named_subscriber_s_finished_deliveries` (Task 3) and service fact `A_replay_of_an_unfinished_status_is_refused` (Task 11).
-3. **A redeliver or replay for a handler this host does not register** (renamed or removed since) must be refused 409/404 rather than leave a pending row that refuses the next start (E3) — `Redelivering_for_a_handler_this_host_does_not_register_is_refused` (Task 10) and `A_replay_names_a_handler_this_host_registers` (Task 11).
-4. **A retried replay — same `Idempotency-Key`, same body — after the first committed** must answer the first's count and ids with `replayed: true` and reset nothing again; the same key with a different body is 409 `idempotency-conflict` — `A_retried_replay_answers_the_first_and_resets_nothing` and `A_key_spent_on_a_different_replay_is_a_conflict` (Task 11), contract `A_replay_under_a_spent_key_changes_nothing` (Task 3), HTTP `A_replay_reads_its_idempotency_key_from_the_header` (Task 13).
-5. **A fixture of an application event, or of an entity the current schema no longer declares,** must redact every scalar but `id` and never echo a value — rows `an application event keeps only id` and `an entity no longer declared keeps only id` in `DeliveryFixturesTests` (Task 7).
+1. **A delivery that died at its last attempt, redelivered,** must run again with a fresh attempt budget — not be reclaimed dead `lease-expired` at once (`DeliveryRunner.Admit`, HX-03 (15)/(29)) — and its history must keep the earlier attempts, numbered on, without a primary-key collision on `(delivery_id, attempt)`; and a late answer from the claim before the redeliver must not land on the new run, though both claims' attempt counts are 1 — contract facts `A_redelivered_delivery_runs_again_with_a_fresh_budget_and_keeps_its_history` and `A_late_answer_from_before_a_redeliver_changes_nothing` (Task 4), dispatcher fact `Every_claim_carries_a_claimant_of_its_own` (Task 4) and SQLite fact `An_attempt_after_a_reset_is_numbered_after_the_last_one` (Task 1).
+2. **A replay whose window also holds another handler's rows, rows still pending/running/retrying, a loop the chain-depth limit stopped, or a record with a delivery running,** must touch only the named subscriber's replayable rows and refuse to put two deliveries of one record in flight (contract `A_replay_never_resets_a_loop_break_nor_a_delivery_whose_record_is_running`, Task 5; service `A_replay_leaves_out_loop_breaks`, `A_replay_of_a_record_whose_delivery_is_running_is_refused`, Task 14) — contract fact `A_replay_resets_only_the_named_subscriber_s_finished_deliveries` (Task 5) and service fact `A_replay_of_an_unfinished_status_is_refused` (Task 14).
+3. **A redeliver or replay for a handler this host does not register** (renamed or removed since) must be refused 409/404 rather than leave a pending row that refuses the next start (E3) — `Redelivering_for_a_handler_this_host_does_not_register_is_refused` (Task 13) and `A_replay_names_a_handler_this_host_registers` (Task 14).
+4. **A retried replay — same `Idempotency-Key`, same body — after the first committed** must answer the first's count and ids with `replayed: true` and reset nothing again; the same key with a different body is 409 `idempotency-conflict` — `A_retried_replay_answers_the_first_and_resets_nothing` and `A_key_spent_on_a_different_replay_is_a_conflict` (Task 14), contract `A_replay_under_a_spent_key_changes_nothing` (Task 5), HTTP `A_replay_reads_its_idempotency_key_from_the_header` (Task 16).
+5. **A fixture of an application event, or of an entity the current schema no longer declares,** must redact every scalar but `id` and never echo a value — rows `an application event keeps only id` and `an entity no longer declared keeps only id` in `DeliveryFixturesTests` (Task 9).
 
 ---
 
@@ -58,13 +58,13 @@ Created:
 | `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfCoreDeliveryStore.Operations.cs` | the EF store's operator members (partial) |
 | `src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs` | the operator contract rows (partial) |
 | `src/MMLib.Alvo/Management/Internal/ManagementGate.cs` | the level gate and the project check, shared by the operations service |
-| `src/MMLib.Alvo/Management/Internal/AlvoOperationsService.cs`, `AlvoOperationsService.Writes.cs`, `AlvoOperationsService.Replay.cs` | `IAlvoOperations` (reads; redeliver, pause and the refusing members; replay) |
+| `src/MMLib.Alvo/Management/Internal/AlvoOperationsService.cs`, `AlvoOperationsService.Reads.cs`, `AlvoOperationsService.Writes.cs`, `AlvoOperationsService.Replay.cs` | `IAlvoOperations` (a page and one delivery; fixture and stats; redeliver, pause and the refusing members; replay) |
 | `src/MMLib.Alvo/Management/Internal/DeliveryViews.cs`, `DeliveryQueries.cs`, `OperationReasons.cs`, `OperationsAudit.cs` | wire mapping, query validation, reason rules, the `ManagementAudit` log event |
 | `src/MMLib.Alvo/Management/Internal/DeliveryFixtures.cs` | redaction against the schema |
 | `src/MMLib.Alvo/Management/Internal/ManagementEndpoints.Operations.cs`, `ManagementOperationsBodies.cs` | the nine routes and their request bodies |
 | `src/MMLib.Alvo/Extensions/Internal/ExtensionStats.cs`, `LatencyHistogram.cs` | the `MeterListener` and its hourly buckets |
 | `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/DeliveryOperationsTableTests.cs` | DDL and statement shape |
-| `test/MMLib.Alvo.Tests/Management/OperationsTestWorld.cs`, `ManagementGateTests.cs`, `OperationsLevelTests.cs`, `DeliveryFixturesTests.cs`, `AlvoOperationsServiceTests.cs`, `AlvoOperationsWritesTests.cs`, `AlvoOperationsReplayTests.cs`, `PausedCatalogTests.cs`; `test/MMLib.Alvo.Abstractions.Tests/Management/ManagementOperationsModelsTests.cs`, `test/MMLib.Alvo.Abstractions.Tests/AlvoEventIdTests.cs` | the in-memory world, gate, level rows, models, redaction (acceptance (5)), service reads and writes (acceptance (9) in-process), the paused catalog |
+| `test/MMLib.Alvo.Tests/Management/OperationsTestWorld.cs`, `ManagementGateTests.cs`, `OperationsLevelTests.cs`, `DeliveryFixturesTests.cs`, `AlvoOperationsServiceTests.cs`, `AlvoOperationsFixtureAndStatsTests.cs`, `AlvoOperationsWritesTests.cs`, `AlvoOperationsReplayTests.cs`, `PausedCatalogTests.cs`; `test/MMLib.Alvo.Abstractions.Tests/Management/ManagementOperationsModelsTests.cs`, `test/MMLib.Alvo.Tests/Events/AlvoEventIdFloorTests.cs` | the in-memory world, gate, level rows, models, redaction (acceptance (5)), service reads and writes (acceptance (9) in-process), the paused catalog |
 | `test/MMLib.Alvo.Tests/Extensions/LatencyHistogramTests.cs`, `ExtensionStatsTests.cs` | percentiles, buckets, the listener (acceptance (8) unit) |
 | `test/MMLib.Alvo.Api.Tests/Management/OperationsRouteTests.cs`, `test/MMLib.Alvo.Api.Tests/descriptors/operated-notes.alvo.json` | over HTTP: acceptance (4), (8), (9), the idempotency header |
 | `test/_shared/testhost/DeliveryOperationsFacts.cs`, `test/_shared/testhost/AuditCapture.cs`, `test/_shared/testhost/descriptors/ops-desk.alvo.json`, `test/MMLib.Alvo.TestHost.Tests/SqliteDeliveryOperationsTests.cs`, `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlDeliveryOperationsTests.cs` | both engines: acceptance (1), (2), (3), (6), (7) |
@@ -73,7 +73,7 @@ Created:
 | `test/MMLib.Alvo.Admin.Tests/Operations/OperationsViewTests.cs`, `OperationsGatewayTests.cs`; `test/MMLib.Alvo.Admin.Tests.EndToEnd/OperationsWorld.cs`, `OperationsScenarios.cs` | its logic and acceptance (10) |
 | `website/src/content/docs/extending/operate-deliveries.mdx`; `website/src/snippets/extending/operations/{RepairDeskHandlers.cs,RepairDeskOperationsTests.cs,repair-desk.alvo.json}` | *Operate deliveries* |
 
-Modified: `src/MMLib.Alvo.Abstractions/AlvoFrameworkTables.cs`, `Events/IDeliveryStore.cs`, `Events/AlvoEventId.cs`, `Management/ManagementExtension.cs`; `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/{DeliveryTable.cs,EfCoreDeliveryStore.cs}`; `src/MMLib.Alvo.Testing/Events/{DeliveryStoreContractTests.cs,IDeliveryStoreWorld.cs}`; `src/MMLib.Alvo/Management/Access/{ManagementOperation.cs,ManagementOperations.cs}`, `Management/Setup.cs`, `Management/Internal/{AlvoManagementService.cs,ManagementEndpoints.cs}`, `src/MMLib.Alvo/Api/Internal/ProblemResultFactory.cs`, `src/MMLib.Alvo/Extensions/Internal/ExtensionCatalog.cs`, `src/MMLib.Alvo/Extensions/Setup.cs`; `src/MMLib.Alvo/Events/{IAlvoEventPump.cs,Internal/EventPump.cs,Internal/DeliveryDispatcher.cs,Internal/DeliveryRunner.cs}`; `src/MMLib.Alvo.TestHost/AlvoTestHost.cs`; `src/MMLib.Alvo.Admin/{AlvoAdminServiceCollectionExtensions.cs,Internal/ManagementGateway.cs,Internal/AdminProblem.cs,Internal/AdminPaths.cs,Components/Shell/AdminSection.cs,Components/DesignSystem/Icons.cs}`; tests `test/MMLib.Alvo.Tests/Events/{FakeDeliveryStore.cs,FakeDeliveryStoreTests.cs}`, `test/_shared/ef/DeliveryStoreWorld.cs`, `test/_shared/testhost/FailingFirstFanOut.cs`, `test/MMLib.Alvo.Tests/Schema/FrameworkTableReservationTests.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/DeliveryTableTests.cs`, `test/MMLib.Alvo.Data.Sqlite.Tests/{AddAlvoIntegrationTests.cs,SqliteDeliveryStoreTests.cs}`, `test/MMLib.Alvo.Api.Tests/Management/ManagementContractTests.cs`, `test/_shared/api/AlvoApiWorld.cs`; every `PublicApi.*.verified.txt` named above; docs per Task 18.
+Modified: `src/MMLib.Alvo.Abstractions/AlvoFrameworkTables.cs`, `Events/IDeliveryStore.cs`, `Events/AlvoEventId.cs`, `Management/ManagementExtension.cs`; `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/{DeliveryTable.cs,EfCoreDeliveryStore.cs}`; `src/MMLib.Alvo.Testing/Events/{DeliveryStoreContractTests.cs,IDeliveryStoreWorld.cs}`; `src/MMLib.Alvo/Management/Access/{ManagementOperation.cs,ManagementOperations.cs}`, `Management/Setup.cs`, `Management/Internal/{AlvoManagementService.cs,ManagementEndpoints.cs}`, `src/MMLib.Alvo/Api/Internal/ProblemResultFactory.cs`, `src/MMLib.Alvo/Extensions/Internal/ExtensionCatalog.cs`, `src/MMLib.Alvo/Extensions/Setup.cs`; `src/MMLib.Alvo/Events/{IAlvoEventPump.cs,Internal/EventPump.cs,Internal/DeliveryDispatcher.cs,Internal/DeliveryRunner.cs}`; `src/MMLib.Alvo.TestHost/AlvoTestHost.cs`; `src/MMLib.Alvo.Admin/{AlvoAdminServiceCollectionExtensions.cs,Internal/ManagementGateway.cs,Internal/AdminProblem.cs,Internal/AdminPaths.cs,Components/Shell/AdminSection.cs,Components/DesignSystem/Icons.cs}`; tests `test/MMLib.Alvo.Tests/Events/{FakeDeliveryStore.cs,FakeDeliveryStoreTests.cs}`, `test/_shared/ef/DeliveryStoreWorld.cs`, `test/_shared/testhost/FailingFirstFanOut.cs`, `test/MMLib.Alvo.Tests/Schema/FrameworkTableReservationTests.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/DeliveryTableTests.cs`, `test/MMLib.Alvo.Data.Sqlite.Tests/{AddAlvoIntegrationTests.cs,SqliteDeliveryStoreTests.cs}`, `test/MMLib.Alvo.Api.Tests/Management/ManagementContractTests.cs`, `test/_shared/api/AlvoApiWorld.cs`; every `PublicApi.*.verified.txt` named above; docs per Task 21.
 
 ## Task 1: The operator's two tables, reserved, and attempts numbered over a delivery's whole life
 
@@ -415,27 +415,25 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 2: The port's reads — a keyset page, one delivery with its history, an exact selection
+## Task 2: The port's reads — a keyset page and one delivery with its history
 
 **Files:**
 - Create: `src/MMLib.Alvo.Abstractions/Events/DeliveryOperations.cs`
-- Modify: `src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs`, `src/MMLib.Alvo.Abstractions/Events/AlvoEventId.cs`
+- Modify: `src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs`
 - Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTable.cs`
 - Create: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfCoreDeliveryStore.Operations.cs`
 - Modify: `src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.cs` (`partial`)
 - Create: `src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs`
-- Modify (tests): `test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs`, `test/_shared/testhost/FailingFirstFanOut.cs`, `test/MMLib.Alvo.Abstractions.Tests/AlvoEventIdTests.cs` (create if absent), `test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt`, `test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.Testing.verified.txt`
+- Modify (tests): `test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs`, `test/_shared/testhost/FailingFirstFanOut.cs`, `test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt`, `test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.Testing.verified.txt`
 
 **Interfaces:**
 - Consumes: Task 1's `EfCoreDeliveryStore` (partial), `DeliveryOperationsTable`.
 - Produces (public, Abstractions `MMLib.Alvo.Events`):
   - `StoredDelivery { required Guid Id; required Guid EventId; required string Subscriber; required string PartitionKey; string? TenantId; required string Kind; required string Status; required int Attempts; required DateTimeOffset NotBefore; DateTimeOffset? CompletedAt; string? LastErrorType; string? Payload }`
   - `StoredDeliveryAttempt { required int Attempt; required DateTimeOffset StartedAt; required TimeSpan Duration; required string Outcome; string? ErrorType }`
-  - `DeliveryFilter { string? Subscriber; string? Status; Guid? FromEventId; Guid? ToEventId; Guid? After; required int Limit }`
-  - `DeliverySelection { required int Count; required IReadOnlyList<Guid> Sample }`
-  - `IDeliveryStore.ListAsync(DeliveryFilter, CancellationToken) → Task<IReadOnlyList<StoredDelivery>>` (newest first by delivery id, strictly older than `After`, at most `Limit`, `Payload` null); `.FindAsync(Guid, CancellationToken) → Task<StoredDelivery?>` (with `Payload`); `.AttemptsAsync(Guid, CancellationToken) → Task<IReadOnlyList<StoredDeliveryAttempt>>` (ascending); `.SelectAsync(DeliveryFilter, CancellationToken) → Task<DeliverySelection>` (exact count, first `Limit` ids in event order, `After` ignored). A `Limit` of zero or less is refused with `ArgumentOutOfRangeException`.
-  - internal `AlvoEventId.Floor(DateTimeOffset instant) → Guid` (the smallest event id minted in `instant`'s millisecond).
-  - `FakeDeliveryStore.Row.Kind` (init, default `"handler"`); `FakeDeliveryStore` keeps a per-attempt history (`_history`).
+  - `DeliveryFilter { string? Subscriber; string? PartitionKey; string? Status; Guid? FromEventId; Guid? ToEventId; Guid? After; required int Limit }` (Task 3 appends `Replayable`)
+  - `IDeliveryStore.ListAsync(DeliveryFilter, CancellationToken) → Task<IReadOnlyList<StoredDelivery>>` (newest first by delivery id, strictly older than `After`, at most `Limit`, `Payload` null; a `Limit` of zero or less is refused with `ArgumentOutOfRangeException`); `.FindAsync(Guid, CancellationToken) → Task<StoredDelivery?>` (with `Payload`); `.AttemptsAsync(Guid, CancellationToken) → Task<IReadOnlyList<StoredDeliveryAttempt>>` (ascending).
+  - internal: `DeliveryOperationsTable.DeliveryColumns`, `ListSql`, `FindSql`, `AttemptsSql`, `Conditions(DeliveryFilter, bool keyset)`; `EfCoreDeliveryStore.EnsureRows`, `BindId`, `BindFilter(DbCommand, DeliveryFilter, bool keyset, bool limit)`, `ReadDelivery`, `ReadAttempt`; `FakeDeliveryStore.Row.Kind` (init, default `"handler"`), its per-attempt `_history`, `Matching(DeliveryFilter)`, `Stored(Row)`.
 
 - [ ] **Step 1: Write the failing contract rows**
 
@@ -452,7 +450,7 @@ using Xunit;
 
 namespace MMLib.Alvo.Testing.Events;
 
-/// <summary>The operator's half of the delivery protocol: reads, redeliver, replay, pause and the operations log.</summary>
+/// <summary>The operator's half of the delivery protocol: reads, selection, redeliver, replay, pause and the operations log.</summary>
 public abstract partial class DeliveryStoreContractTests
 {
     /// <summary>A page lists deliveries newest first and continues strictly after the last id it returned.</summary>
@@ -477,9 +475,9 @@ public abstract partial class DeliveryStoreContractTests
         first.ShouldAllBe(delivery => delivery.Payload == null && delivery.Status == "pending" && delivery.Kind == Kind);
     }
 
-    /// <summary>A page filters by subscriber, by status and by a half-open window of event ids.</summary>
+    /// <summary>A page filters by subscriber, by record, by status and by a half-open window of event ids.</summary>
     [Fact]
-    public async Task A_page_filters_by_subscriber_status_and_event_window()
+    public async Task A_page_filters_by_subscriber_record_status_and_event_window()
     {
         EnsureEngineAvailable();
         await using var world = await WorldAsync();
@@ -491,6 +489,7 @@ public abstract partial class DeliveryStoreContractTests
         await world.Store.FanOutAsync([Request(late, Confirm, "tickets:c")], Ct);
 
         (await world.Store.ListAsync(new DeliveryFilter { Subscriber = Audit, Limit = 10 }, Ct)).Count.ShouldBe(2);
+        (await world.Store.ListAsync(new DeliveryFilter { PartitionKey = KeyB, Limit = 10 }, Ct)).Count.ShouldBe(2);
         (await world.Store.ListAsync(new DeliveryFilter { Status = "dead", Limit = 10 }, Ct)).ShouldHaveSingleItem().EventId.ShouldBe(early);
         (await world.Store.ListAsync(new DeliveryFilter { Subscriber = Confirm, FromEventId = middle, ToEventId = late, Limit = 10 }, Ct))
             .ShouldHaveSingleItem().EventId.ShouldBe(middle, "the window includes its start and excludes its end");
@@ -530,61 +529,16 @@ public abstract partial class DeliveryStoreContractTests
         (await world.Store.AttemptsAsync(Guid.NewGuid(), Ct)).ShouldBeEmpty();
     }
 
-    /// <summary>A selection counts exactly, samples the first ids in event order, and changes nothing.</summary>
+    /// <summary>A page asking for nothing is refused rather than answered empty.</summary>
     [Fact]
-    public async Task A_selection_counts_exactly_samples_in_event_order_and_changes_nothing()
-    {
-        EnsureEngineAvailable();
-        await using var world = await WorldAsync();
-        var dead = new List<Guid>();
-        foreach (var key in new[] { KeyA, KeyB, "tickets:c" })
-        {
-            var @event = await world.AppendEventAsync(key);
-            await world.Store.FanOutAsync([Request(@event, Confirm, key) with { DeadReason = "when-failed" }, Request(@event, Audit, key)], Ct);
-            dead.Add(@event);
-        }
-
-        var before = await world.Store.ListAsync(new DeliveryFilter { Limit = 50 }, Ct);
-        var selection = await world.Store.SelectAsync(new DeliveryFilter { Subscriber = Confirm, Status = "dead", Limit = 2 }, Ct);
-        var after = await world.Store.ListAsync(new DeliveryFilter { Limit = 50 }, Ct);
-
-        selection.Count.ShouldBe(3);
-        selection.Sample.Count.ShouldBe(2);
-        (await world.Store.FindAsync(selection.Sample[0], Ct)).ShouldNotBeNull().EventId.ShouldBe(dead[0]);
-        after.ShouldBe(before);
-    }
-
-    /// <summary>A page or a selection asking for nothing is refused rather than answered empty.</summary>
-    [Fact]
-    public async Task A_read_asking_for_no_rows_is_refused()
+    public async Task A_page_asking_for_no_rows_is_refused()
     {
         EnsureEngineAvailable();
         await using var world = await WorldAsync();
 
         await Should.ThrowAsync<ArgumentOutOfRangeException>(() => world.Store.ListAsync(new DeliveryFilter { Limit = 0 }, Ct));
-        await Should.ThrowAsync<ArgumentOutOfRangeException>(() => world.Store.SelectAsync(new DeliveryFilter { Limit = 0 }, Ct));
     }
 }
-```
-
-Add to `test/MMLib.Alvo.Abstractions.Tests/AlvoEventIdTests.cs` (create the file with the namespace `MMLib.Alvo.Abstractions.Tests.Events` and class `AlvoEventIdTests` if it does not exist):
-
-```csharp
-    /// <summary>
-    /// The floor of an instant is at or below every id minted in its millisecond and above every id minted before it, in
-    /// the text order the stores compare ids by.
-    /// </summary>
-    [Fact]
-    public void The_floor_of_an_instant_bounds_the_ids_minted_in_it()
-    {
-        var instant = new DateTimeOffset(2026, 10, 24, 9, 0, 0, 123, TimeSpan.Zero);
-        var earlier = AlvoEventId.Create(instant.AddMilliseconds(-1)).ToString();
-        var within = AlvoEventId.Create(instant).ToString();
-        var floor = AlvoEventId.Floor(instant).ToString();
-
-        string.CompareOrdinal(earlier, floor).ShouldBeLessThan(0);
-        string.CompareOrdinal(floor, within).ShouldBeLessThanOrEqualTo(0);
-    }
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
@@ -666,6 +620,9 @@ public sealed record DeliveryFilter
     /// <summary>Gets the one subscriber to read, or <see langword="null"/> for all.</summary>
     public string? Subscriber { get; init; }
 
+    /// <summary>Gets the one lane — partition key — to read, or <see langword="null"/> for all.</summary>
+    public string? PartitionKey { get; init; }
+
     /// <summary>Gets the one status to read, or <see langword="null"/> for all.</summary>
     public string? Status { get; init; }
 
@@ -681,19 +638,9 @@ public sealed record DeliveryFilter
     /// <summary>Gets a page's size, or a selection's and a replay's sample size; a store refuses zero or less with <see cref="ArgumentOutOfRangeException"/>.</summary>
     public required int Limit { get; init; }
 }
-
-/// <summary>What a filter selects, counted exactly, with the first ids it would reset.</summary>
-public sealed record DeliverySelection
-{
-    /// <summary>Gets how many deliveries match.</summary>
-    public required int Count { get; init; }
-
-    /// <summary>Gets the first <see cref="DeliveryFilter.Limit"/> matching ids, in event order — the order they would run.</summary>
-    public required IReadOnlyList<Guid> Sample { get; init; }
-}
 ```
 
-In `src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs` extend the interface remarks with a paragraph — `<b>The operator's members</b> read deliveries, put finished ones back to pending, pause a subscriber and record each of those changes in the operations log in the same transaction as the change; a member that changes nothing records nothing. They are abstract: a store that could not serve them would leave a dead delivery's lane blocked forever.` — and append the four read members:
+In `src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs` extend the interface remarks with a paragraph — `<b>The operator's members</b> read deliveries, put finished ones back to pending, pause a subscriber and record each of those changes in the operations log in the same transaction as the change; a member that changes nothing records nothing. They are abstract: a default that did nothing would report success and leave a dead delivery's lane blocked.` — and append the three read members:
 
 ```csharp
     /// <summary>A page of deliveries, newest first — by delivery id — strictly after <see cref="DeliveryFilter.After"/>, without payloads.</summary>
@@ -714,28 +661,11 @@ In `src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs` extend the interface r
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The attempts; none for an unknown id.</returns>
     Task<IReadOnlyList<StoredDeliveryAttempt>> AttemptsAsync(Guid id, CancellationToken cancellationToken = default);
-
-    /// <summary>Counts what <paramref name="filter"/> selects, exactly, and samples the first ids in event order; changes nothing.</summary>
-    /// <param name="filter">Which deliveries; <see cref="DeliveryFilter.After"/> is ignored.</param>
-    /// <param name="cancellationToken">A token to cancel the operation.</param>
-    /// <returns>The count and the sample.</returns>
-    /// <exception cref="ArgumentOutOfRangeException"><see cref="DeliveryFilter.Limit"/> is zero or less.</exception>
-    Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default);
-```
-
-In `src/MMLib.Alvo.Abstractions/Events/AlvoEventId.cs`, after `Create(DateTimeOffset)`:
-
-```csharp
-    /// <summary>The smallest id <see cref="Create(DateTimeOffset)"/> can mint in <paramref name="instant"/>'s millisecond.</summary>
-    /// <remarks>An operator's window over event time is a window over ids: every id minted at or after the instant sorts at or above it.</remarks>
-    /// <param name="instant">The instant.</param>
-    /// <returns>The floor id.</returns>
-    internal static Guid Floor(DateTimeOffset instant) => Compose(instant.ToUnixTimeMilliseconds(), UInt128.Zero);
 ```
 
 - [ ] **Step 4: The EF statements and members**
 
-Append to `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTable.cs`:
+Append to `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTable.cs` (with `using MMLib.Alvo.Events;` at the top):
 
 ```csharp
     internal const string DeliveryColumns =
@@ -749,17 +679,11 @@ Append to `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTa
     internal static string AttemptsSql(string attempts) =>
         $"SELECT attempt, started_at, duration_ms, outcome, error_type FROM {attempts} WHERE delivery_id = @id ORDER BY attempt";
 
-    /// <summary>
-    /// The count and the sample in one statement: the window count is taken before the limit, so the two cannot disagree,
-    /// and a filter matching nothing returns no row — a count of zero.
-    /// </summary>
-    internal static string SelectSql(string table, DeliveryFilter filter) =>
-        $"SELECT id, COUNT(*) OVER () FROM {table}{Where(filter, keyset: false)} ORDER BY event_id, id LIMIT @limit";
-
     internal static string Conditions(DeliveryFilter filter, bool keyset)
     {
         var terms = new List<string>();
         AddWhen(terms, filter.Subscriber is not null, "subscriber = @subscriber");
+        AddWhen(terms, filter.PartitionKey is not null, "partition_key = @partition_key");
         AddWhen(terms, filter.Status is not null, "status = @status");
         AddWhen(terms, filter.FromEventId is not null, "event_id >= @from_event");
         AddWhen(terms, filter.ToEventId is not null, "event_id < @to_event");
@@ -779,8 +703,6 @@ Append to `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTa
         }
     }
 ```
-
-(add `using MMLib.Alvo.Events;` at the top of that file).
 
 Create `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfCoreDeliveryStore.Operations.cs`:
 
@@ -824,18 +746,6 @@ internal sealed partial class EfCoreDeliveryStore
         await ReadAsync(DeliveryOperationsTable.AttemptsSql(_attempts), command => BindId(command, id), ReadAttempt, cancellationToken)
             .ConfigureAwait(false);
 
-    public async Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default)
-    {
-        EnsureRows(filter);
-        var rows = await ReadAsync(
-            DeliveryOperationsTable.SelectSql(_table, filter),
-            command => BindFilter(command, filter, keyset: false, limit: true),
-            reader => (Id: Guid.Parse(reader.GetString(0), CultureInfo.InvariantCulture), Total: Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture)),
-            cancellationToken).ConfigureAwait(false);
-
-        return new DeliverySelection { Count = rows.Count == 0 ? 0 : rows[0].Total, Sample = [.. rows.Select(row => row.Id)] };
-    }
-
     private static void EnsureRows(DeliveryFilter filter)
     {
         ArgumentNullException.ThrowIfNull(filter);
@@ -847,6 +757,7 @@ internal sealed partial class EfCoreDeliveryStore
     private static void BindFilter(DbCommand command, DeliveryFilter filter, bool keyset, bool limit)
     {
         AddWhenSet(command, "@subscriber", filter.Subscriber);
+        AddWhenSet(command, "@partition_key", filter.PartitionKey);
         AddWhenSet(command, "@status", filter.Status);
         AddWhenSet(command, "@from_event", filter.FromEventId?.ToString());
         AddWhenSet(command, "@to_event", filter.ToEventId?.ToString());
@@ -893,7 +804,7 @@ internal sealed partial class EfCoreDeliveryStore
 
 - [ ] **Step 5: The fake store and the decorator keep up**
 
-`test/_shared/testhost/FailingFirstFanOut.cs` — delegate the four members to `inner`:
+`test/_shared/testhost/FailingFirstFanOut.cs` — delegate the three members to `inner`:
 
 ```csharp
     public Task<IReadOnlyList<StoredDelivery>> ListAsync(DeliveryFilter filter, CancellationToken cancellationToken = default) =>
@@ -903,9 +814,6 @@ internal sealed partial class EfCoreDeliveryStore
 
     public Task<IReadOnlyList<StoredDeliveryAttempt>> AttemptsAsync(Guid id, CancellationToken cancellationToken = default) =>
         inner.AttemptsAsync(id, cancellationToken);
-
-    public Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default) =>
-        inner.SelectAsync(filter, cancellationToken);
 ```
 
 `test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs`:
@@ -955,26 +863,12 @@ internal sealed partial class EfCoreDeliveryStore
         }
     }
 
-    public Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(filter.Limit);
-        lock (_gate)
-        {
-            var matched = InEventOrder(Matching(filter)).ToList();
-
-            return Task.FromResult(new DeliverySelection { Count = matched.Count, Sample = [.. matched.Take(filter.Limit).Select(row => row.Id)] });
-        }
-    }
-
     private IEnumerable<Row> Matching(DeliveryFilter filter) => _rows.Where(row =>
         (filter.Subscriber is null || row.Subscriber == filter.Subscriber)
+        && (filter.PartitionKey is null || row.PartitionKey == filter.PartitionKey)
         && (filter.Status is null || row.Status == filter.Status)
         && (filter.FromEventId is not { } from || !Before(row.EventId, from))
         && (filter.ToEventId is not { } to || Before(row.EventId, to)));
-
-    private static IEnumerable<Row> InEventOrder(IEnumerable<Row> rows) => rows
-        .OrderBy(row => row.EventId.ToString(), StringComparer.Ordinal)
-        .ThenBy(row => row.Id.ToString(), StringComparer.Ordinal);
 
     private static StoredDelivery Stored(Row row) => new()
     {
@@ -994,44 +888,333 @@ internal sealed partial class EfCoreDeliveryStore
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*FakeDeliveryStoreTests'`; `dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests --filter-class '*SqliteDeliveryStoreTests'`; `dotnet test --project test/MMLib.Alvo.Abstractions.Tests --filter-class '*AlvoEventIdTests'`.
+Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*FakeDeliveryStoreTests'`; `dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests --filter-class '*SqliteDeliveryStoreTests'`.
 Expected: PASS (the PostgreSQL leg runs the same rows in ring2).
 
 Run: `dotnet test --project test/MMLib.Alvo.Abstractions.Tests --filter-class '*PublicApiApprovalTests'` and `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*TestingLibraryPublicApiTests'`.
-Expected: FAIL — accept the received baselines (`mv *.received.txt` over the `.verified.txt`): Abstractions grows by the four records and four interface members; Testing by the six contract facts. Dispatch `alvo-snapshot-judge` when the turn-review gate asks.
+Expected: FAIL — accept the received baselines: Abstractions grows by three records and three interface members; Testing by five contract facts. Dispatch `alvo-snapshot-judge` when the turn-review gate asks.
 
 - [ ] **Step 7: Format, ring0, commit**
 
 ```bash
-dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo.Abstractions/Events/DeliveryOperations.cs src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs src/MMLib.Alvo.Abstractions/Events/AlvoEventId.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTable.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfCoreDeliveryStore.Operations.cs src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.cs src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs test/_shared/testhost/FailingFirstFanOut.cs test/MMLib.Alvo.Abstractions.Tests/AlvoEventIdTests.cs
+dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo.Abstractions/Events/DeliveryOperations.cs src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTable.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfCoreDeliveryStore.Operations.cs src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.cs src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs test/_shared/testhost/FailingFirstFanOut.cs
 scripts/test-ring0
-git add src/MMLib.Alvo.Abstractions/Events/DeliveryOperations.cs src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs src/MMLib.Alvo.Abstractions/Events/AlvoEventId.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTable.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfCoreDeliveryStore.Operations.cs src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.cs src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs test/_shared/testhost/FailingFirstFanOut.cs test/MMLib.Alvo.Abstractions.Tests/AlvoEventIdTests.cs test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.Testing.verified.txt
-git commit -m "feat(events): read deliveries, one delivery's history and an exact selection through the store
+git add src/MMLib.Alvo.Abstractions/Events/DeliveryOperations.cs src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTable.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfCoreDeliveryStore.Operations.cs src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.cs src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs test/_shared/testhost/FailingFirstFanOut.cs test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.Testing.verified.txt
+git commit -m "feat(events): read a page of deliveries and one delivery's history through the store
 
 Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 ```
 
 ---
 
-## Task 3: The port's writes — redeliver and replay, each with its log row in one transaction
+## Task 3: The exact selection a replay acts on, and event time as event ids
 
 **Files:**
-- Modify: `src/MMLib.Alvo.Abstractions/Events/DeliveryOperations.cs`, `src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs`
+- Modify: `src/MMLib.Alvo.Abstractions/Events/DeliveryOperations.cs`, `src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs`, `src/MMLib.Alvo.Abstractions/Events/AlvoEventId.cs`
 - Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTable.cs`, `EfCoreDeliveryStore.Operations.cs`
-- Modify: `src/MMLib.Alvo.Testing/Events/IDeliveryStoreWorld.cs`, `src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs`
-- Modify (tests): `test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs`, `test/MMLib.Alvo.Tests/Events/FakeDeliveryStoreTests.cs` (its `World`), `test/_shared/ef/DeliveryStoreWorld.cs`, `test/_shared/testhost/FailingFirstFanOut.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/DeliveryOperationsTableTests.cs`, both public-API baselines of Task 2
+- Modify: `src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs`
+- Modify (tests): `test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs`, `test/_shared/testhost/FailingFirstFanOut.cs`, both public-API baselines of Task 2
+- Create (test): `test/MMLib.Alvo.Tests/Events/AlvoEventIdFloorTests.cs`
 
 **Interfaces:**
-- Consumes: Task 2's records and reads; `RelationalConnectionFactory.WriteGate`.
+- Consumes: Task 2's records, `Conditions`, `BindFilter`, `EnsureRows`, `Matching`.
+- Produces (public, Abstractions `MMLib.Alvo.Events`):
+  - `DeliveryFilter.Replayable` (`bool`, init) — only what a replay may reset: a finished delivery (`succeeded`, `dead`, `cancelled`) that is not dead with `chain-depth-exceeded`.
+  - `DeliverySelection { required int Count; required IReadOnlyList<Guid> Sample; int Busy }` — `Busy`: how many selected deliveries have a delivery of the same subscriber and partition key running.
+  - `IDeliveryStore.SelectAsync(DeliveryFilter, CancellationToken) → Task<DeliverySelection>` (exact count, first `Limit` ids in event order, `After` ignored, changes nothing; a `Limit` of zero or less is refused).
+  - internal `AlvoEventId.Floor(DateTimeOffset instant) → Guid` (the smallest id minted in `instant`'s millisecond); `DeliveryOperationsTable.SelectSql`, `ReplayableTerm`, `LaneRunning(string table)`; `FakeDeliveryStore._finished`, `Replayable(Row)`, `LaneBusy(Row)`, `InEventOrder(IEnumerable<Row>)`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs`, inside the class:
+
+```csharp
+    /// <summary>A selection counts exactly, samples the first ids in event order, and changes nothing.</summary>
+    [Fact]
+    public async Task A_selection_counts_exactly_samples_in_event_order_and_changes_nothing()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var dead = new List<Guid>();
+        foreach (var key in new[] { KeyA, KeyB, "tickets:c" })
+        {
+            var @event = await world.AppendEventAsync(key);
+            await world.Store.FanOutAsync([Request(@event, Confirm, key) with { DeadReason = "when-failed" }, Request(@event, Audit, key)], Ct);
+            dead.Add(@event);
+        }
+
+        var before = await world.Store.ListAsync(new DeliveryFilter { Limit = 50 }, Ct);
+        var selection = await world.Store.SelectAsync(new DeliveryFilter { Subscriber = Confirm, Status = "dead", Limit = 2 }, Ct);
+        var after = await world.Store.ListAsync(new DeliveryFilter { Limit = 50 }, Ct);
+
+        selection.Count.ShouldBe(3);
+        selection.Sample.Count.ShouldBe(2);
+        selection.Busy.ShouldBe(0);
+        (await world.Store.FindAsync(selection.Sample[0], Ct)).ShouldNotBeNull().EventId.ShouldBe(dead[0]);
+        after.ShouldBe(before);
+    }
+
+    /// <summary>
+    /// A replayable selection leaves out what is unfinished and what broke a loop (dead <c>chain-depth-exceeded</c>), and
+    /// counts the selected deliveries whose record has a delivery of the same subscriber running.
+    /// </summary>
+    [Fact]
+    public async Task A_replayable_selection_leaves_out_loop_breaks_and_counts_running_records()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var loop = await world.AppendEventAsync(KeyA);
+        var failed = await world.AppendEventAsync(KeyB);
+        var running = await world.AppendEventAsync(KeyB);
+        var pending = await world.AppendEventAsync("tickets:c");
+        await world.Store.FanOutAsync([Request(loop, Confirm, KeyA) with { DeadReason = "chain-depth-exceeded" }], Ct);
+        await world.Store.FanOutAsync([Request(failed, Confirm, KeyB) with { DeadReason = "when-failed" }], Ct);
+        await world.Store.FanOutAsync([Request(running, Confirm, KeyB)], Ct);
+        await world.Store.FanOutAsync([Request(pending, Audit, "tickets:c")], Ct);
+        (await world.Store.ClaimAsync(Unordered(Confirm), Ct)).ShouldHaveSingleItem().EventId.ShouldBe(running);
+
+        var selection = await world.Store.SelectAsync(new DeliveryFilter { Replayable = true, Limit = 20 }, Ct);
+
+        selection.Count.ShouldBe(1, "only the failed delivery may be replayed");
+        (await world.Store.FindAsync(selection.Sample[0], Ct)).ShouldNotBeNull().EventId.ShouldBe(failed);
+        selection.Busy.ShouldBe(1, "its record has another delivery of the same handler running");
+    }
+
+    /// <summary>A selection asking for nothing is refused rather than answered empty.</summary>
+    [Fact]
+    public async Task A_selection_asking_for_no_rows_is_refused()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(() => world.Store.SelectAsync(new DeliveryFilter { Limit = 0 }, Ct));
+    }
+
+    /// <summary>A claim of unordered subscribers: their deliveries run whatever came before them in the lane.</summary>
+    private static DeliveryClaim Unordered(params string[] subscribers) =>
+        Claim() with { Ordered = [], Unordered = subscribers };
+```
+
+Create `test/MMLib.Alvo.Tests/Events/AlvoEventIdFloorTests.cs` (this project holds the `InternalsVisibleTo` grant `MMLib.Alvo.Abstractions.Tests` lacks; every id is built by hand — `AlvoEventId.Create` is monotonic across the process, so an id it mints "a millisecond earlier" can sort later):
+
+```csharp
+using MMLib.Alvo.Events;
+
+namespace MMLib.Alvo.Tests.Events;
+
+/// <summary>An instant's floor bounds the ids minted in its millisecond, in the text order the stores compare ids by.</summary>
+public sealed class AlvoEventIdFloorTests
+{
+    private static readonly DateTimeOffset _instant = new(2026, 10, 24, 9, 0, 0, 123, TimeSpan.Zero);
+
+    [Fact]
+    public void The_floor_sorts_after_the_previous_millisecond_and_at_or_before_every_id_of_its_own()
+    {
+        var floor = AlvoEventId.Floor(_instant);
+        var highestOfPrevious = WithTail(AlvoEventId.Floor(_instant.AddMilliseconds(-1)), 0xFF);
+        var withinMillisecond = WithTail(floor, 0xFF);
+        var nextFloor = AlvoEventId.Floor(_instant.AddMilliseconds(1));
+
+        string.CompareOrdinal(highestOfPrevious.ToString(), floor.ToString()).ShouldBeLessThan(0);
+        string.CompareOrdinal(floor.ToString(), withinMillisecond.ToString()).ShouldBeLessThan(0);
+        string.CompareOrdinal(withinMillisecond.ToString(), nextFloor.ToString()).ShouldBeLessThan(0);
+    }
+
+    [Fact]
+    public void The_floor_carries_the_instant_s_milliseconds_in_its_first_six_bytes()
+    {
+        var bytes = AlvoEventId.Floor(_instant).ToByteArray(bigEndian: true);
+
+        bytes.Take(6).Aggregate(0L, (millis, part) => (millis << 8) | part).ShouldBe(_instant.ToUnixTimeMilliseconds());
+    }
+
+    /// <summary>The same id with its last random byte set — an id minted later in the same millisecond.</summary>
+    private static Guid WithTail(Guid id, byte last)
+    {
+        var bytes = id.ToByteArray(bigEndian: true);
+        bytes[15] = last;
+
+        return new Guid(bytes, bigEndian: true);
+    }
+}
+```
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*FakeDeliveryStoreTests'`
+Expected: build FAIL — `SelectAsync`, `DeliveryFilter.Replayable`, `AlvoEventId.Floor` do not exist.
+
+- [ ] **Step 3: The record, the filter member, the port member and the floor**
+
+Append to `src/MMLib.Alvo.Abstractions/Events/DeliveryOperations.cs`:
+
+```csharp
+/// <summary>What a filter selects, counted exactly, with the first ids it would reset.</summary>
+public sealed record DeliverySelection
+{
+    /// <summary>Gets how many deliveries match.</summary>
+    public required int Count { get; init; }
+
+    /// <summary>Gets the first <see cref="DeliveryFilter.Limit"/> matching ids, in event order — the order they would run.</summary>
+    public required IReadOnlyList<Guid> Sample { get; init; }
+
+    /// <summary>
+    /// Gets how many of them have a delivery of the same subscriber and partition key running now — deliveries a reset
+    /// would put in flight beside it.
+    /// </summary>
+    public int Busy { get; init; }
+}
+```
+
+and append to `DeliveryFilter`:
+
+```csharp
+    /// <summary>
+    /// Gets whether to keep only what a replay may reset: a finished delivery — succeeded, dead or cancelled — that is not
+    /// dead with <c>chain-depth-exceeded</c>, the record of a loop the chain-depth limit stopped.
+    /// </summary>
+    public bool Replayable { get; init; }
+```
+
+Append to `IDeliveryStore`:
+
+```csharp
+    /// <summary>
+    /// Counts what <paramref name="filter"/> selects, exactly, samples the first ids in event order, and counts the selected
+    /// deliveries whose lane has a delivery running; changes nothing.
+    /// </summary>
+    /// <param name="filter">Which deliveries; <see cref="DeliveryFilter.After"/> is ignored.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The count, the sample and the busy count.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="DeliveryFilter.Limit"/> is zero or less.</exception>
+    Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default);
+```
+
+In `src/MMLib.Alvo.Abstractions/Events/AlvoEventId.cs`, after `Create(DateTimeOffset)`:
+
+```csharp
+    /// <summary>The smallest id <see cref="Create(DateTimeOffset)"/> can mint in <paramref name="instant"/>'s millisecond.</summary>
+    /// <remarks>An operator's window over event time is a window over ids: every id minted at or after the instant sorts at or above it.</remarks>
+    /// <param name="instant">The instant.</param>
+    /// <returns>The floor id.</returns>
+    internal static Guid Floor(DateTimeOffset instant) => Compose(instant.ToUnixTimeMilliseconds(), UInt128.Zero);
+```
+
+- [ ] **Step 4: The EF statement and member**
+
+In `DeliveryOperationsTable.cs` add the replayable term to `Conditions` (first, so the replay's statement reads well) and the selection:
+
+```csharp
+    internal const string ReplayableTerm =
+        "status IN ('succeeded', 'dead', 'cancelled') AND COALESCE(last_error_type, '') <> 'chain-depth-exceeded'";
+
+    /// <summary>Whether a delivery of the row's subscriber and partition key is running — the row's lane is busy.</summary>
+    internal static string LaneRunning(string table) =>
+        $"EXISTS (SELECT 1 FROM {table} lane WHERE lane.subscriber = {table}.subscriber AND lane.partition_key = {table}.partition_key AND lane.status = 'running')";
+
+    /// <summary>
+    /// The count, the busy count and the sample in one statement: the window aggregates are taken before the limit, so they
+    /// cannot disagree with the sample, and a filter matching nothing returns no row — counts of zero.
+    /// </summary>
+    internal static string SelectSql(string table, DeliveryFilter filter) =>
+        $"SELECT id, COUNT(*) OVER (), SUM(CASE WHEN {LaneRunning(table)} THEN 1 ELSE 0 END) OVER () FROM {table}{Where(filter, keyset: false)} ORDER BY event_id, id LIMIT @limit";
+```
+
+and, as the first line of `Conditions`' body after the list is created: `AddWhen(terms, filter.Replayable, ReplayableTerm);`.
+
+Append to `EfCoreDeliveryStore.Operations.cs`:
+
+```csharp
+    public async Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default)
+    {
+        EnsureRows(filter);
+        var rows = await ReadAsync(
+            DeliveryOperationsTable.SelectSql(_table, filter),
+            command => BindFilter(command, filter, keyset: false, limit: true),
+            reader => (
+                Id: Guid.Parse(reader.GetString(0), CultureInfo.InvariantCulture),
+                Total: Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture),
+                Busy: Convert.ToInt32(reader.GetValue(2), CultureInfo.InvariantCulture)),
+            cancellationToken).ConfigureAwait(false);
+
+        return rows.Count == 0
+            ? new DeliverySelection { Count = 0, Sample = [] }
+            : new DeliverySelection { Count = rows[0].Total, Busy = rows[0].Busy, Sample = [.. rows.Select(row => row.Id)] };
+    }
+```
+
+- [ ] **Step 5: The fake store and the decorator keep up**
+
+`FailingFirstFanOut.cs` — `public Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default) => inner.SelectAsync(filter, cancellationToken);`.
+
+`FakeDeliveryStore.cs` — add `&& (!filter.Replayable || Replayable(row))` as the first term of `Matching`, and:
+
+```csharp
+    private static readonly string[] _finished = ["succeeded", "dead", "cancelled"];
+
+    public Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(filter.Limit);
+        lock (_gate)
+        {
+            var matched = InEventOrder(Matching(filter)).ToList();
+
+            return Task.FromResult(new DeliverySelection
+            {
+                Count = matched.Count,
+                Busy = matched.Count(LaneBusy),
+                Sample = [.. matched.Take(filter.Limit).Select(row => row.Id)],
+            });
+        }
+    }
+
+    private static bool Replayable(Row row) => _finished.Contains(row.Status) && row.LastErrorType != "chain-depth-exceeded";
+
+    private bool LaneBusy(Row row) =>
+        _rows.Exists(other => other.Subscriber == row.Subscriber && other.PartitionKey == row.PartitionKey && other.Status == "running");
+
+    private static IEnumerable<Row> InEventOrder(IEnumerable<Row> rows) => rows
+        .OrderBy(row => row.EventId.ToString(), StringComparer.Ordinal)
+        .ThenBy(row => row.Id.ToString(), StringComparer.Ordinal);
+```
+
+- [ ] **Step 6: Run the tests to verify they pass**
+
+Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*FakeDeliveryStoreTests'` and `--filter-class '*AlvoEventIdFloorTests'`; `dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests --filter-class '*SqliteDeliveryStoreTests'`.
+Expected: PASS. Re-accept the Abstractions baseline (one record, one filter member, one interface member) and the Testing baseline (three facts); dispatch `alvo-snapshot-judge`.
+
+- [ ] **Step 7: Format, ring0, commit**
+
+```bash
+dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo.Abstractions/Events/DeliveryOperations.cs src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs src/MMLib.Alvo.Abstractions/Events/AlvoEventId.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTable.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfCoreDeliveryStore.Operations.cs src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs test/_shared/testhost/FailingFirstFanOut.cs test/MMLib.Alvo.Tests/Events/AlvoEventIdFloorTests.cs
+scripts/test-ring0
+git add src/MMLib.Alvo.Abstractions/Events/DeliveryOperations.cs src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs src/MMLib.Alvo.Abstractions/Events/AlvoEventId.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTable.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfCoreDeliveryStore.Operations.cs src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs test/_shared/testhost/FailingFirstFanOut.cs test/MMLib.Alvo.Tests/Events/AlvoEventIdFloorTests.cs test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.Testing.verified.txt
+git commit -m "feat(events): select exactly what a replay may reset, and floor event time to event ids
+
+Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
+```
+
+---
+
+## Task 4: Redeliver, the operations log, and a claimant per claim
+
+**Files:**
+- Modify: `src/MMLib.Alvo.Abstractions/Events/DeliveryOperations.cs`, `src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs` (the redeliver member; `DeliveryClaim.Claimant`'s docs; the *Fencing* remarks)
+- Modify: `src/MMLib.Alvo/Events/Internal/DeliveryDispatcher.cs` (a claimant per `ClaimAsync` call)
+- Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTable.cs`, `EfCoreDeliveryStore.Operations.cs`
+- Modify: `src/MMLib.Alvo.Testing/Events/IDeliveryStoreWorld.cs`, `src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs`
+- Modify (tests): `test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs`, `test/MMLib.Alvo.Tests/Events/FakeDeliveryStoreTests.cs` (its `World`), `test/MMLib.Alvo.Tests/Events/DeliveryDispatcherTests.cs`, `test/_shared/ef/DeliveryStoreWorld.cs`, `test/_shared/testhost/FailingFirstFanOut.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/DeliveryOperationsTableTests.cs`, both public-API baselines of Task 2
+
+**Interfaces:**
+- Consumes: Tasks 2–3's records and helpers (`BindId`, `LaneRunning`, `_finished`, `LaneBusy`); `RelationalConnectionFactory.WriteGate`; HX-03's `DeliveryDispatcher._claimant`, `ClaimOf`, `RunContainedAsync`.
 - Produces (public, Abstractions `MMLib.Alvo.Events`):
   - `DeliveryOperationEntry { required Guid Id; required DateTimeOffset At; required string Actor; required string Operation; required string Target; string? Reason; int? Affected; IReadOnlyList<Guid> Sample = []; string? IdempotencyScope; string? IdempotencyKey; string? Fingerprint }`
-  - `IDeliveryStore.RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken) → Task<bool>` — a `succeeded`, `dead` or `cancelled` delivery back to `pending` with its claim count at zero, due now, its last error cleared; one log row (`Affected = 1`) only when it changed; `false` changes and records nothing.
-  - `.ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken) → Task<DeliveryOperationEntry?>` — every finished delivery the filter selects reset as above, and one log row with `Affected` and `Sample` (first `filter.Limit` ids in event order) — always, even for zero; `null`, changing nothing, when `entry`'s `IdempotencyKey` is already recorded for its `IdempotencyScope`.
-  - `.FindOperationAsync(string scope, string key, CancellationToken) → Task<DeliveryOperationEntry?>`.
+  - `IDeliveryStore.RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken) → Task<bool>` — a `succeeded`, `dead` or `cancelled` delivery whose lane has nothing running back to `pending`, its claim count at zero, due now, its last error cleared; one log row (`Affected = 1`) only when it changed; `false` changes and records nothing.
+  - `DeliveryClaim.Claimant` documented as unique to one claim.
   - Testing: `IDeliveryStoreWorld.OperationsAsync() → Task<IReadOnlyList<DeliveryOperationEntry>>` (every log row, by `At` then `Id`).
-  - internal: `EfCoreDeliveryStore.ReadEntry(DbDataReader)` (internal static), `InTransactionAsync<T>`, `ExecuteInAsync`, `LogAsync`, `Nullable`; `DeliveryOperationsTable.LogColumns`, `Finished`, `Reset`, `AllOperationsSql(string log)`.
+  - internal: `DeliveryDispatcher.ClaimAsync` returns `(string Claimant, IReadOnlyList<ClaimedDelivery> Claimed)` with a fresh claimant per call (`"{process claimant}:{guid N}"`), passed to `RunContainedAsync` and `DeliveryRunner.RunAsync`; `DeliveryOperationsTable.LogColumns`, `Finished`, `Reset`, `RedeliverSql`, `InsertLogSql`, `AllOperationsSql`; `EfCoreDeliveryStore.ReadEntry(DbDataReader)` (internal static), `InTransactionAsync<T>`, `ExecuteInAsync`, `LogAsync`, `BindEntry`, `BindOutcome`, `Nullable`; `FakeDeliveryStore._operations`, `Operations`, `Reset(Row)`; the contract's `_operatedAt`, `Operator`, `Entry(string operation, string target, string? key = null)`.
 
-- [ ] **Step 1: Write the failing contract rows**
+- [ ] **Step 1: Write the failing tests**
 
 Append to `src/MMLib.Alvo.Testing/Events/IDeliveryStoreWorld.cs`:
 
@@ -1091,6 +1274,30 @@ Append to `src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.c
         (await world.Store.FindAsync(first.Id, Ct)).ShouldNotBeNull().LastErrorType.ShouldBeNull();
     }
 
+    /// <summary>
+    /// A claim's late answer never lands on a later claim of the same delivery: the attempt count restarts with a redeliver,
+    /// so only the claimant — unique to each claim — tells the two apart.
+    /// </summary>
+    [Fact]
+    public async Task A_late_answer_from_before_a_redeliver_changes_nothing()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var @event = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(@event, Confirm, KeyA)], Ct);
+        var stale = (await world.Store.ClaimAsync(Claim(Confirm) with { Claimant = "claim-1" }, Ct)).ShouldHaveSingleItem();
+        await world.Store.DeadLetterPendingAsync(Confirm, "retired", Ct);
+        await world.Store.RedeliverAsync(stale.Id, Entry("redeliver", stale.Id.ToString()), Ct);
+        var fresh = (await world.Store.ClaimAsync(Claim(Confirm) with { Claimant = "claim-2" }, Ct)).ShouldHaveSingleItem();
+
+        var answered = await world.Store.CompleteAsync(
+            new DeliveryAttempt { Delivery = stale, Claimant = "claim-1", StartedAt = _operatedAt, Duration = TimeSpan.FromSeconds(1) }, Ct);
+
+        answered.ShouldBeFalse("the first claim's answer must not finish the second claim's run");
+        fresh.Attempts.ShouldBe(stale.Attempts, "the attempt count alone cannot tell the two claims apart");
+        (await world.Store.FindAsync(stale.Id, Ct)).ShouldNotBeNull().Status.ShouldBe("running");
+    }
+
     /// <summary>A delivery still pending, running or retrying is not redelivered, and nothing is logged.</summary>
     [Fact]
     public async Task Redelivering_an_unfinished_delivery_changes_nothing_and_logs_nothing()
@@ -1108,6 +1315,25 @@ Append to `src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.c
 
         running.Attempts.ShouldBe(1, "the pending redeliver did not reset a claim count it never had");
         (await world.Store.FindAsync(running.Id, Ct)).ShouldNotBeNull().Status.ShouldBe("running");
+        (await world.OperationsAsync()).ShouldBeEmpty();
+    }
+
+    /// <summary>A finished delivery whose record has a delivery of the same handler running is not redelivered: two would run at once.</summary>
+    [Fact]
+    public async Task Redelivering_while_its_record_runs_another_delivery_changes_nothing()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var failed = await world.AppendEventAsync(KeyA);
+        var running = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(failed, Confirm, KeyA) with { DeadReason = "when-failed" }], Ct);
+        await world.Store.FanOutAsync([Request(running, Confirm, KeyA)], Ct);
+        await world.Store.ClaimAsync(Unordered(Confirm), Ct);
+        var dead = (await world.Store.ListAsync(new DeliveryFilter { Status = "dead", Limit = 1 }, Ct)).ShouldHaveSingleItem();
+
+        (await world.Store.RedeliverAsync(dead.Id, Entry("redeliver", dead.Id.ToString()), Ct)).ShouldBeFalse();
+
+        (await world.Store.FindAsync(dead.Id, Ct)).ShouldNotBeNull().Status.ShouldBe("dead");
         (await world.OperationsAsync()).ShouldBeEmpty();
     }
 
@@ -1129,65 +1355,6 @@ Append to `src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.c
             .ShouldBe((entry.Id, entry.At, entry.Actor, "redeliver", id.ToString(), "contract", (int?)1));
     }
 
-    /// <summary>A replay resets only the named subscriber's finished deliveries and records one row with its count and sample.</summary>
-    [Fact]
-    public async Task A_replay_resets_only_the_named_subscriber_s_finished_deliveries()
-    {
-        EnsureEngineAvailable();
-        await using var world = await WorldAsync();
-        var first = await world.AppendEventAsync(KeyA);
-        var second = await world.AppendEventAsync(KeyB);
-        var third = await world.AppendEventAsync("tickets:c");
-        await world.Store.FanOutAsync([Request(first, Confirm, KeyA) with { DeadReason = "when-failed" }, Request(first, Audit, KeyA) with { DeadReason = "when-failed" }], Ct);
-        await world.Store.FanOutAsync([Request(second, Confirm, KeyB) with { DeadReason = "when-failed" }], Ct);
-        await world.Store.FanOutAsync([Request(third, Confirm, "tickets:c")], Ct);
-
-        var recorded = (await world.Store.ReplayAsync(new DeliveryFilter { Subscriber = Confirm, Status = "dead", Limit = 20 }, Entry("replay", Confirm), Ct)).ShouldNotBeNull();
-
-        recorded.Affected.ShouldBe(2);
-        recorded.Sample.Count.ShouldBe(2);
-        (await world.Store.FindAsync(recorded.Sample[0], Ct)).ShouldNotBeNull().EventId.ShouldBe(first, "the sample is in event order");
-        (await world.Store.ListAsync(new DeliveryFilter { Subscriber = Audit, Status = "dead", Limit = 10 }, Ct)).ShouldHaveSingleItem("another subscriber's dead row is untouched");
-        (await world.Store.ListAsync(new DeliveryFilter { Subscriber = Confirm, Status = "pending", Limit = 10 }, Ct)).Count.ShouldBe(3);
-        (await world.OperationsAsync()).ShouldHaveSingleItem().Affected.ShouldBe(2);
-    }
-
-    /// <summary>A replay selecting nothing still records its row — the request happened — with a count of zero.</summary>
-    [Fact]
-    public async Task A_replay_that_selects_nothing_still_records_its_row()
-    {
-        EnsureEngineAvailable();
-        await using var world = await WorldAsync();
-
-        var recorded = await world.Store.ReplayAsync(new DeliveryFilter { Subscriber = Confirm, Status = "dead", Limit = 20 }, Entry("replay", Confirm), Ct);
-
-        recorded.ShouldNotBeNull().Affected.ShouldBe(0);
-        recorded.Sample.ShouldBeEmpty();
-        (await world.OperationsAsync()).ShouldHaveSingleItem();
-    }
-
-    /// <summary>A replay under a key the caller already spent changes nothing and answers null; the first row is found by the key.</summary>
-    [Fact]
-    public async Task A_replay_under_a_spent_key_changes_nothing()
-    {
-        EnsureEngineAvailable();
-        await using var world = await WorldAsync();
-        var first = await world.AppendEventAsync(KeyA);
-        await world.Store.FanOutAsync([Request(first, Confirm, KeyA) with { DeadReason = "when-failed" }], Ct);
-        var filter = new DeliveryFilter { Subscriber = Confirm, Status = "dead", Limit = 20 };
-        await world.Store.ReplayAsync(filter, Entry("replay", Confirm, key: "replay-1"), Ct);
-        var second = await world.AppendEventAsync(KeyB);
-        await world.Store.FanOutAsync([Request(second, Confirm, KeyB) with { DeadReason = "when-failed" }], Ct);
-
-        (await world.Store.ReplayAsync(filter, Entry("replay", Confirm, key: "replay-1"), Ct)).ShouldBeNull();
-
-        (await world.Store.ListAsync(filter, Ct)).ShouldHaveSingleItem().EventId.ShouldBe(second, "the second replay reset nothing");
-        var spent = (await world.Store.FindOperationAsync("global/ops", "replay-1", Ct)).ShouldNotBeNull();
-        spent.Affected.ShouldBe(1);
-        spent.Fingerprint.ShouldBe("fingerprint");
-        (await world.Store.FindOperationAsync("global/ops", "replay-2", Ct)).ShouldBeNull();
-    }
-
     private static DeliveryOperationEntry Entry(string operation, string target, string? key = null) => new()
     {
         Id = AlvoEventId.Create(_operatedAt),
@@ -1204,17 +1371,40 @@ Append to `src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.c
 
 (Log rows are compared member by member: a record's `Sample` list compares by reference.)
 
-Add to `DeliveryOperationsTableTests`:
+Add to `test/MMLib.Alvo.Tests/Events/DeliveryDispatcherTests.cs`:
+
+```csharp
+    /// <summary>Every claim carries a claimant of its own, so an answer is fenced on the one claim that took the delivery.</summary>
+    [Fact]
+    public async Task Every_claim_carries_a_claimant_of_its_own()
+    {
+        var port = Substitute.For<IDeliveryStore>();
+        port.ClaimAsync(Arg.Any<DeliveryClaim>(), Arg.Any<CancellationToken>()).Returns((IReadOnlyList<ClaimedDelivery>)[]);
+        var dispatcher = Dispatcher(new FakeDeliveryStore(_clock), (AlvoCreated<AlvoRecord> _) => Task.CompletedTask, port: port);
+
+        await dispatcher.ManualRoundAsync(Ct);
+        await dispatcher.ManualRoundAsync(Ct);
+
+        var claimants = port.ReceivedCalls()
+            .Where(call => call.GetMethodInfo().Name == nameof(IDeliveryStore.ClaimAsync))
+            .Select(call => ((DeliveryClaim)call.GetArguments()[0]!).Claimant)
+            .ToList();
+        claimants.Count.ShouldBe(2);
+        claimants.ShouldBeUnique();
+    }
+```
+
+Add to `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/DeliveryOperationsTableTests.cs`:
 
 ```csharp
     [Fact]
-    public void A_replay_resets_only_finished_rows_and_reads_back_what_it_reset()
+    public void A_redeliver_resets_only_a_finished_row_whose_lane_runs_nothing()
     {
-        var sql = DeliveryOperationsTable.ReplaySql("alvo_deliveries", new MMLib.Alvo.Events.DeliveryFilter { Subscriber = "a", Status = "dead", Limit = 20 });
+        var sql = DeliveryOperationsTable.RedeliverSql("alvo_deliveries");
 
-        sql.ShouldContain("WHERE status IN ('succeeded', 'dead', 'cancelled') AND subscriber = @subscriber AND status = @status");
+        sql.ShouldContain("status IN ('succeeded', 'dead', 'cancelled')");
         sql.ShouldContain("attempts = 0");
-        sql.ShouldEndWith("RETURNING id, event_id");
+        sql.ShouldContain("NOT EXISTS (SELECT 1 FROM alvo_deliveries lane");
     }
 
     [Fact]
@@ -1225,9 +1415,9 @@ Add to `DeliveryOperationsTableTests`:
 - [ ] **Step 2: Run them to verify they fail**
 
 Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*FakeDeliveryStoreTests'`
-Expected: build FAIL — `DeliveryOperationEntry`, `RedeliverAsync` … do not exist.
+Expected: build FAIL — `DeliveryOperationEntry`, `RedeliverAsync` do not exist.
 
-- [ ] **Step 3: The records and the write members**
+- [ ] **Step 3: The record, the member, and a claimant per claim**
 
 Append to `src/MMLib.Alvo.Abstractions/Events/DeliveryOperations.cs`:
 
@@ -1268,7 +1458,6 @@ public sealed record DeliveryOperationEntry
     /// <summary>Gets what makes a retry the same request, or <see langword="null"/>.</summary>
     public string? Fingerprint { get; init; }
 }
-
 ```
 
 Append to `IDeliveryStore`:
@@ -1277,31 +1466,34 @@ Append to `IDeliveryStore`:
     /// <summary>
     /// Puts a finished delivery — succeeded, dead or cancelled — back to pending, due now, with its claim count at zero and
     /// its last error cleared, and records <paramref name="entry"/> in the same transaction; its attempt history is kept.
+    /// Refused — <see langword="false"/> — while a delivery of the same subscriber and partition key is running, since the
+    /// reset one would run beside it.
     /// </summary>
     /// <param name="id">The delivery id.</param>
     /// <param name="entry">The log row to write when the delivery changed.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
-    /// <returns>Whether it changed; <see langword="false"/> for an unfinished or unknown delivery, which records nothing.</returns>
+    /// <returns>Whether it changed; <see langword="false"/> for an unfinished, busy or unknown delivery, which records nothing.</returns>
     Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Puts every finished delivery <paramref name="filter"/> selects back to pending, as <see cref="RedeliverAsync"/> does, and
-    /// records <paramref name="entry"/> with how many it reset and the first <see cref="DeliveryFilter.Limit"/> of them in
-    /// event order — in one transaction, whatever the count.
-    /// </summary>
-    /// <param name="filter">Which deliveries; <see cref="DeliveryFilter.After"/> is ignored.</param>
-    /// <param name="entry">The log row; its key, when present, may be recorded once per scope.</param>
-    /// <param name="cancellationToken">A token to cancel the operation.</param>
-    /// <returns>The recorded row, or <see langword="null"/> — nothing reset — when the key is already recorded.</returns>
-    Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default);
-
-    /// <summary>The log row a caller's key was recorded under.</summary>
-    /// <param name="scope">The caller's identity.</param>
-    /// <param name="key">The caller's key.</param>
-    /// <param name="cancellationToken">A token to cancel the operation.</param>
-    /// <returns>The row, or <see langword="null"/>.</returns>
-    Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default);
 ```
+
+In the same file, `DeliveryClaim.Claimant`'s summary becomes: `Gets who claims — unique to this one claim, never reused: each row records it, and an attempt is answered for only by the claim that took it.`; and the *Fencing* paragraph of the interface remarks gains a last sentence: `A claimant names one claim, not a process: a delivery put back to pending restarts its attempt count, so the claimant is what tells a stale claim's answer from the current one.`
+
+In `src/MMLib.Alvo/Events/Internal/DeliveryDispatcher.cs`, mint the claimant per claim and carry it to the run:
+
+```csharp
+    private async Task<(string Claimant, IReadOnlyList<ClaimedDelivery> Claimed)> ClaimAsync(
+        ExtensionBindings bindings, int batchSize, CancellationToken ct)
+    {
+        var claimable = bindings.Handlers.Where(handler => !abandoned.StoodDown(handler.Id)).ToList();
+        var claimant = $"{_claimant}:{Guid.NewGuid():N}";
+
+        return batchSize <= 0 || claimable.Count == 0
+            ? (claimant, [])
+            : (claimant, await store.ClaimAsync(ClaimOf(bindings, claimable, batchSize, claimant), ct).ConfigureAwait(false));
+    }
+```
+
+`ClaimOf` takes the claimant as a fourth parameter (`Claimant = claimant`); `RunContainedAsync(ClaimedDelivery delivery, ExtensionBindings bindings, DrainRound? round, string claimant, CancellationToken stop)` passes it to `runner.RunAsync(delivery, handler, claimant, stop)`; in `ManualRoundAsync` and `TickAsync`, `var (claimant, claimed) = await ClaimAsync(…)` and every `RunContainedAsync` call passes `claimant`. The field `_claimant` stays the process prefix (machine, process id, a guid), so a row's `claimed_by` still says which process took it.
 
 - [ ] **Step 4: The EF statements and members**
 
@@ -1311,17 +1503,13 @@ Append to `DeliveryOperationsTable.cs`:
     internal const string LogColumns =
         "id, at, actor, operation, target, reason, affected, sample, idempotency_scope, idempotency_key, request_fingerprint";
 
-    private const string Finished = "status IN ('succeeded', 'dead', 'cancelled')";
+    internal const string Finished = "status IN ('succeeded', 'dead', 'cancelled')";
 
-    private const string Reset =
+    internal const string Reset =
         "status = 'pending', attempts = 0, not_before = @now, lease_until = NULL, claimed_by = NULL, completed_at = NULL, last_error_type = NULL";
 
-    internal static string RedeliverSql(string table) => $"UPDATE {table} SET {Reset} WHERE id = @id AND {Finished}";
-
-    internal static string ReplaySql(string table, DeliveryFilter filter) =>
-        Conditions(filter, keyset: false) is { Length: > 0 } terms
-            ? $"UPDATE {table} SET {Reset} WHERE {Finished} AND {terms} RETURNING id, event_id"
-            : $"UPDATE {table} SET {Reset} WHERE {Finished} RETURNING id, event_id";
+    internal static string RedeliverSql(string table) =>
+        $"UPDATE {table} SET {Reset} WHERE id = @id AND {Finished} AND NOT {LaneRunning(table)}";
 
     internal static string InsertLogSql(string log) =>
         $"""
@@ -1329,11 +1517,6 @@ Append to `DeliveryOperationsTable.cs`:
         VALUES (@log_id, @log_at, @log_actor, @log_operation, @log_target, @log_reason, @log_affected, @log_sample, @log_scope, @log_key, @log_fingerprint)
         ON CONFLICT DO NOTHING
         """;
-
-    internal static string LogOutcomeSql(string log) => $"UPDATE {log} SET affected = @log_affected, sample = @log_sample WHERE id = @log_id";
-
-    internal static string FindLogSql(string log) =>
-        $"SELECT {LogColumns} FROM {log} WHERE idempotency_scope = @scope AND idempotency_key = @key";
 
     internal static string AllOperationsSql(string log) => $"SELECT {LogColumns} FROM {log} ORDER BY at, id";
 ```
@@ -1357,31 +1540,6 @@ Append to `EfCoreDeliveryStore.Operations.cs`:
         }, cancellationToken);
     }
 
-    public Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
-    {
-        EnsureRows(filter);
-        ArgumentNullException.ThrowIfNull(entry);
-
-        return InTransactionAsync(async (connection, transaction) =>
-            await LogAsync(connection, transaction, entry, cancellationToken).ConfigureAwait(false) == 0
-                ? null
-                : await ResetSelectedAsync(connection, transaction, filter, entry, cancellationToken).ConfigureAwait(false),
-            cancellationToken);
-    }
-
-    public async Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(scope);
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
-        var rows = await ReadAsync(DeliveryOperationsTable.FindLogSql(_log), command =>
-        {
-            RelationalSqlBatch.AddParameter(command, "@scope", scope);
-            RelationalSqlBatch.AddParameter(command, "@key", key);
-        }, ReadEntry, cancellationToken).ConfigureAwait(false);
-
-        return rows.Count == 0 ? null : rows[0];
-    }
-
     internal static DeliveryOperationEntry ReadEntry(DbDataReader reader) => new()
     {
         Id = Guid.Parse(reader.GetString(0), CultureInfo.InvariantCulture),
@@ -1396,26 +1554,6 @@ Append to `EfCoreDeliveryStore.Operations.cs`:
         IdempotencyKey = reader.IsDBNull(9) ? null : reader.GetString(9),
         Fingerprint = reader.IsDBNull(10) ? null : reader.GetString(10),
     };
-
-    private async Task<DeliveryOperationEntry> ResetSelectedAsync(
-        DbConnection connection, DbTransaction transaction, DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken ct)
-    {
-        var reset = await RelationalSqlBatch.ReadRowsAsync(connection, transaction, DeliveryOperationsTable.ReplaySql(_table, filter), command =>
-        {
-            BindFilter(command, filter, keyset: false, limit: false);
-            RelationalSqlBatch.AddParameter(command, "@now", Now);
-        }, reader => (Id: reader.GetString(0), EventId: reader.GetString(1)), ct).ConfigureAwait(false);
-        var recorded = entry with
-        {
-            Affected = reset.Count,
-            Sample = [.. reset.OrderBy(row => row.EventId, StringComparer.Ordinal).ThenBy(row => row.Id, StringComparer.Ordinal)
-                .Take(filter.Limit).Select(row => Guid.Parse(row.Id, CultureInfo.InvariantCulture))],
-        };
-        await ExecuteInAsync(connection, transaction, DeliveryOperationsTable.LogOutcomeSql(_log), command => BindOutcome(command, recorded), ct)
-            .ConfigureAwait(false);
-
-        return recorded;
-    }
 
     private Task<int> LogAsync(DbConnection connection, DbTransaction transaction, DeliveryOperationEntry entry, CancellationToken ct) =>
         ExecuteInAsync(connection, transaction, DeliveryOperationsTable.InsertLogSql(_log), command => BindEntry(command, entry), ct);
@@ -1476,7 +1614,7 @@ Append to `EfCoreDeliveryStore.Operations.cs`:
     }
 ```
 
-Each transaction opens with a write (the `UPDATE` or the log `INSERT`); a replay whose log insert is skipped commits a transaction that changed nothing. A redeliver whose log insert would be skipped cannot happen (a fresh id), so its `== 1` reads as "changed".
+Each transaction opens with a write (the `UPDATE`); a redeliver's log insert cannot be skipped (a fresh id), so its `== 1` reads as "changed".
 
 In `test/_shared/ef/DeliveryStoreWorld.cs`, implement the world member:
 
@@ -1497,12 +1635,11 @@ In `test/_shared/ef/DeliveryStoreWorld.cs`, implement the world member:
 
 - [ ] **Step 5: The fake store and the decorator keep up**
 
-`FailingFirstFanOut.cs` — delegate `RedeliverAsync`, `ReplayAsync`, `FindOperationAsync` to `inner` as in Task 2.
+`FailingFirstFanOut.cs` — `public Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) => inner.RedeliverAsync(id, entry, cancellationToken);`.
 
 `FakeDeliveryStore.cs`:
 
 ```csharp
-    private static readonly string[] _finished = ["succeeded", "dead", "cancelled"];
     private readonly List<DeliveryOperationEntry> _operations = [];
 
     internal IReadOnlyList<DeliveryOperationEntry> Operations
@@ -1520,7 +1657,7 @@ In `test/_shared/ef/DeliveryStoreWorld.cs`, implement the world member:
     {
         lock (_gate)
         {
-            if (_rows.SingleOrDefault(row => row.Id == id && _finished.Contains(row.Status)) is not { } row)
+            if (_rows.SingleOrDefault(row => row.Id == id && _finished.Contains(row.Status) && !LaneBusy(row)) is not { } row)
             {
                 return Task.FromResult(false);
             }
@@ -1529,33 +1666,6 @@ In `test/_shared/ef/DeliveryStoreWorld.cs`, implement the world member:
             _operations.Add(entry with { Affected = 1 });
 
             return Task.FromResult(true);
-        }
-    }
-
-    public Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(filter.Limit);
-        lock (_gate)
-        {
-            if (entry.IdempotencyKey is { } key && _operations.Exists(row => row.IdempotencyScope == entry.IdempotencyScope && row.IdempotencyKey == key))
-            {
-                return Task.FromResult<DeliveryOperationEntry?>(null);
-            }
-
-            var reset = InEventOrder(Matching(filter).Where(row => _finished.Contains(row.Status))).ToList();
-            reset.ForEach(Reset);
-            var recorded = entry with { Affected = reset.Count, Sample = [.. reset.Take(filter.Limit).Select(row => row.Id)] };
-            _operations.Add(recorded);
-
-            return Task.FromResult<DeliveryOperationEntry?>(recorded);
-        }
-    }
-
-    public Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default)
-    {
-        lock (_gate)
-        {
-            return Task.FromResult(_operations.LastOrDefault(row => row.IdempotencyScope == scope && row.IdempotencyKey == key));
         }
     }
 
@@ -1575,23 +1685,285 @@ In `FakeDeliveryStoreTests.World` add `public Task<IReadOnlyList<DeliveryOperati
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*FakeDeliveryStoreTests'`; `dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests --filter-class '*SqliteDeliveryStoreTests'`; `dotnet test --project test/MMLib.Alvo.Data.EntityFrameworkCore.Tests --filter-class '*DeliveryOperationsTableTests'`.
-Expected: PASS. Then re-accept the Abstractions and Testing baselines (one record, three members, eight contract facts, `OperationsAsync`) and dispatch `alvo-snapshot-judge`.
+Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*FakeDeliveryStoreTests'`, `--filter-class '*DeliveryDispatcherTests'` and `--filter-class '*DeliveryRunnerTests'`; `dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests --filter-class '*SqliteDeliveryStoreTests'`; `dotnet test --project test/MMLib.Alvo.Data.EntityFrameworkCore.Tests --filter-class '*DeliveryOperationsTableTests'`; `dotnet test --project test/MMLib.Alvo.TestHost.Tests --filter-class '*SqliteEventHandlerTests'` (HX-03's kill-mid-delivery and lease facts read `claimed_by`; they compare it across claims of one process only through the fence, which now holds per claim).
+Expected: PASS. Re-accept the Abstractions and Testing baselines (one record, one member, six contract facts, `OperationsAsync`) and dispatch `alvo-snapshot-judge`.
 
 - [ ] **Step 7: Format, ring0, commit**
 
 ```bash
-dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo.Abstractions/Events/DeliveryOperations.cs src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTable.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfCoreDeliveryStore.Operations.cs src/MMLib.Alvo.Testing/Events/IDeliveryStoreWorld.cs src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStoreTests.cs test/_shared/ef/DeliveryStoreWorld.cs test/_shared/testhost/FailingFirstFanOut.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/DeliveryOperationsTableTests.cs
+dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo.Abstractions/Events/DeliveryOperations.cs src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs src/MMLib.Alvo/Events/Internal/DeliveryDispatcher.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTable.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfCoreDeliveryStore.Operations.cs src/MMLib.Alvo.Testing/Events/IDeliveryStoreWorld.cs src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStoreTests.cs test/MMLib.Alvo.Tests/Events/DeliveryDispatcherTests.cs test/_shared/ef/DeliveryStoreWorld.cs test/_shared/testhost/FailingFirstFanOut.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/DeliveryOperationsTableTests.cs
 scripts/test-ring0
-git add src/MMLib.Alvo.Abstractions/Events/DeliveryOperations.cs src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTable.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfCoreDeliveryStore.Operations.cs src/MMLib.Alvo.Testing/Events/IDeliveryStoreWorld.cs src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStoreTests.cs test/_shared/ef/DeliveryStoreWorld.cs test/_shared/testhost/FailingFirstFanOut.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/DeliveryOperationsTableTests.cs test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.Testing.verified.txt
-git commit -m "feat(events): redeliver and replay through the store, each logged in its own transaction
+git add src/MMLib.Alvo.Abstractions/Events/DeliveryOperations.cs src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs src/MMLib.Alvo/Events/Internal/DeliveryDispatcher.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTable.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfCoreDeliveryStore.Operations.cs src/MMLib.Alvo.Testing/Events/IDeliveryStoreWorld.cs src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStoreTests.cs test/MMLib.Alvo.Tests/Events/DeliveryDispatcherTests.cs test/_shared/ef/DeliveryStoreWorld.cs test/_shared/testhost/FailingFirstFanOut.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/DeliveryOperationsTableTests.cs test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.Testing.verified.txt
+git commit -m "feat(events): redeliver through the store, logged in its transaction, fenced by a claimant per claim
 
 Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 ```
 
 ---
 
-## Task 4: Pause — the control the claim reads **[slice end]**
+## Task 5: Replay and its idempotency record
+
+**Files:**
+- Modify: `src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs`
+- Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTable.cs`, `EfCoreDeliveryStore.Operations.cs`
+- Modify: `src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs`
+- Modify (tests): `test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs`, `test/_shared/testhost/FailingFirstFanOut.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/DeliveryOperationsTableTests.cs`, both public-API baselines of Task 2
+
+**Interfaces:**
+- Consumes: Task 3's `Replayable`, `LaneRunning`, `InEventOrder`, `LaneBusy`; Task 4's `DeliveryOperationEntry`, `InTransactionAsync`, `ExecuteInAsync`, `LogAsync`, `BindOutcome`, `Reset`, `ReadEntry`, `Entry(…)`.
+- Produces:
+  - `IDeliveryStore.ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken) → Task<DeliveryOperationEntry?>` — every delivery the filter selects **as replayable** (Task 3) whose lane runs nothing, reset as a redeliver does, and one log row with `Affected` and `Sample` (first `filter.Limit` ids in event order) — always, even for zero; `null`, changing nothing, when `entry`'s `IdempotencyKey` is already recorded for its `IdempotencyScope`.
+  - `.FindOperationAsync(string scope, string key, CancellationToken) → Task<DeliveryOperationEntry?>`.
+  - internal: `DeliveryOperationsTable.ReplaySql`, `LogOutcomeSql`, `FindLogSql`; `EfCoreDeliveryStore.ResetSelectedAsync`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs`, inside the class:
+
+```csharp
+    /// <summary>A replay resets only the named subscriber's replayable deliveries and records one row with its count and sample.</summary>
+    [Fact]
+    public async Task A_replay_resets_only_the_named_subscriber_s_finished_deliveries()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var first = await world.AppendEventAsync(KeyA);
+        var second = await world.AppendEventAsync(KeyB);
+        var third = await world.AppendEventAsync("tickets:c");
+        await world.Store.FanOutAsync([Request(first, Confirm, KeyA) with { DeadReason = "when-failed" }, Request(first, Audit, KeyA) with { DeadReason = "when-failed" }], Ct);
+        await world.Store.FanOutAsync([Request(second, Confirm, KeyB) with { DeadReason = "when-failed" }], Ct);
+        await world.Store.FanOutAsync([Request(third, Confirm, "tickets:c")], Ct);
+
+        var recorded = (await world.Store.ReplayAsync(new DeliveryFilter { Subscriber = Confirm, Status = "dead", Limit = 20 }, Entry("replay", Confirm), Ct)).ShouldNotBeNull();
+
+        recorded.Affected.ShouldBe(2);
+        recorded.Sample.Count.ShouldBe(2);
+        (await world.Store.FindAsync(recorded.Sample[0], Ct)).ShouldNotBeNull().EventId.ShouldBe(first, "the sample is in event order");
+        (await world.Store.ListAsync(new DeliveryFilter { Subscriber = Audit, Status = "dead", Limit = 10 }, Ct)).ShouldHaveSingleItem("another subscriber's dead row is untouched");
+        (await world.Store.ListAsync(new DeliveryFilter { Subscriber = Confirm, Status = "pending", Limit = 10 }, Ct)).Count.ShouldBe(3);
+        (await world.OperationsAsync()).ShouldHaveSingleItem().Affected.ShouldBe(2);
+    }
+
+    /// <summary>A replay never resets a loop the chain-depth limit stopped, nor a delivery whose record has another delivery running.</summary>
+    [Fact]
+    public async Task A_replay_never_resets_a_loop_break_nor_a_delivery_whose_record_is_running()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var loop = await world.AppendEventAsync(KeyA);
+        var failed = await world.AppendEventAsync(KeyB);
+        var running = await world.AppendEventAsync(KeyB);
+        await world.Store.FanOutAsync([Request(loop, Confirm, KeyA) with { DeadReason = "chain-depth-exceeded" }], Ct);
+        await world.Store.FanOutAsync([Request(failed, Confirm, KeyB) with { DeadReason = "when-failed" }], Ct);
+        await world.Store.FanOutAsync([Request(running, Confirm, KeyB)], Ct);
+        await world.Store.ClaimAsync(Unordered(Confirm), Ct);
+
+        var recorded = (await world.Store.ReplayAsync(new DeliveryFilter { Subscriber = Confirm, Status = "dead", Limit = 20 }, Entry("replay", Confirm), Ct)).ShouldNotBeNull();
+
+        recorded.Affected.ShouldBe(0);
+        (await world.Store.ListAsync(new DeliveryFilter { Status = "dead", Limit = 10 }, Ct)).Count.ShouldBe(2);
+    }
+
+    /// <summary>A replay selecting nothing still records its row — the request happened — with a count of zero.</summary>
+    [Fact]
+    public async Task A_replay_that_selects_nothing_still_records_its_row()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+
+        var recorded = await world.Store.ReplayAsync(new DeliveryFilter { Subscriber = Confirm, Status = "dead", Limit = 20 }, Entry("replay", Confirm), Ct);
+
+        recorded.ShouldNotBeNull().Affected.ShouldBe(0);
+        recorded.Sample.ShouldBeEmpty();
+        (await world.OperationsAsync()).ShouldHaveSingleItem();
+    }
+
+    /// <summary>A replay under a key the caller already spent changes nothing and answers null; the first row is found by the key.</summary>
+    [Fact]
+    public async Task A_replay_under_a_spent_key_changes_nothing()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var first = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(first, Confirm, KeyA) with { DeadReason = "when-failed" }], Ct);
+        var filter = new DeliveryFilter { Subscriber = Confirm, Status = "dead", Limit = 20 };
+        await world.Store.ReplayAsync(filter, Entry("replay", Confirm, key: "replay-1"), Ct);
+        var second = await world.AppendEventAsync(KeyB);
+        await world.Store.FanOutAsync([Request(second, Confirm, KeyB) with { DeadReason = "when-failed" }], Ct);
+
+        (await world.Store.ReplayAsync(filter, Entry("replay", Confirm, key: "replay-1"), Ct)).ShouldBeNull();
+
+        (await world.Store.ListAsync(filter, Ct)).ShouldHaveSingleItem().EventId.ShouldBe(second, "the second replay reset nothing");
+        var spent = (await world.Store.FindOperationAsync("global/ops", "replay-1", Ct)).ShouldNotBeNull();
+        spent.Affected.ShouldBe(1);
+        spent.Fingerprint.ShouldBe("fingerprint");
+        (await world.Store.FindOperationAsync("global/ops", "replay-2", Ct)).ShouldBeNull();
+    }
+```
+
+Add to `DeliveryOperationsTableTests`:
+
+```csharp
+    [Fact]
+    public void A_replay_resets_only_replayable_rows_whose_lane_runs_nothing_and_reads_back_what_it_reset()
+    {
+        var sql = DeliveryOperationsTable.ReplaySql("alvo_deliveries", new MMLib.Alvo.Events.DeliveryFilter { Subscriber = "a", Status = "dead", Limit = 20 });
+
+        sql.ShouldContain("WHERE status IN ('succeeded', 'dead', 'cancelled') AND COALESCE(last_error_type, '') <> 'chain-depth-exceeded' AND subscriber = @subscriber AND status = @status");
+        sql.ShouldContain("AND NOT EXISTS (SELECT 1 FROM alvo_deliveries lane");
+        sql.ShouldEndWith("RETURNING id, event_id");
+    }
+```
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*FakeDeliveryStoreTests'`
+Expected: build FAIL — `ReplayAsync`, `FindOperationAsync` do not exist.
+
+- [ ] **Step 3: The members**
+
+Append to `IDeliveryStore`:
+
+```csharp
+    /// <summary>
+    /// Puts every delivery <paramref name="filter"/> selects as replayable (<see cref="DeliveryFilter.Replayable"/>, whatever the
+    /// filter says) and whose lane runs nothing back to pending, as <see cref="RedeliverAsync"/> does, and records
+    /// <paramref name="entry"/> with how many it reset and the first <see cref="DeliveryFilter.Limit"/> of them in event order —
+    /// in one transaction, whatever the count.
+    /// </summary>
+    /// <param name="filter">Which deliveries; <see cref="DeliveryFilter.After"/> is ignored.</param>
+    /// <param name="entry">The log row; its key, when present, may be recorded once per scope.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The recorded row, or <see langword="null"/> — nothing reset — when the key is already recorded.</returns>
+    Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default);
+
+    /// <summary>The log row a caller's key was recorded under.</summary>
+    /// <param name="scope">The caller's identity.</param>
+    /// <param name="key">The caller's key.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The row, or <see langword="null"/>.</returns>
+    Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default);
+```
+
+- [ ] **Step 4: The EF statements and members**
+
+Append to `DeliveryOperationsTable.cs`:
+
+```csharp
+    internal static string ReplaySql(string table, DeliveryFilter filter) =>
+        $"UPDATE {table} SET {Reset} WHERE {Conditions(filter with { Replayable = true }, keyset: false)} AND NOT {LaneRunning(table)} RETURNING id, event_id";
+
+    internal static string LogOutcomeSql(string log) => $"UPDATE {log} SET affected = @log_affected, sample = @log_sample WHERE id = @log_id";
+
+    internal static string FindLogSql(string log) =>
+        $"SELECT {LogColumns} FROM {log} WHERE idempotency_scope = @scope AND idempotency_key = @key";
+```
+
+Append to `EfCoreDeliveryStore.Operations.cs`:
+
+```csharp
+    public Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
+    {
+        EnsureRows(filter);
+        ArgumentNullException.ThrowIfNull(entry);
+
+        return InTransactionAsync(async (connection, transaction) =>
+            await LogAsync(connection, transaction, entry, cancellationToken).ConfigureAwait(false) == 0
+                ? null
+                : await ResetSelectedAsync(connection, transaction, filter, entry, cancellationToken).ConfigureAwait(false),
+            cancellationToken);
+    }
+
+    public async Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scope);
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        var rows = await ReadAsync(DeliveryOperationsTable.FindLogSql(_log), command =>
+        {
+            RelationalSqlBatch.AddParameter(command, "@scope", scope);
+            RelationalSqlBatch.AddParameter(command, "@key", key);
+        }, ReadEntry, cancellationToken).ConfigureAwait(false);
+
+        return rows.Count == 0 ? null : rows[0];
+    }
+
+    private async Task<DeliveryOperationEntry> ResetSelectedAsync(
+        DbConnection connection, DbTransaction transaction, DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken ct)
+    {
+        var reset = await RelationalSqlBatch.ReadRowsAsync(connection, transaction, DeliveryOperationsTable.ReplaySql(_table, filter), command =>
+        {
+            BindFilter(command, filter, keyset: false, limit: false);
+            RelationalSqlBatch.AddParameter(command, "@now", Now);
+        }, reader => (Id: reader.GetString(0), EventId: reader.GetString(1)), ct).ConfigureAwait(false);
+        var recorded = entry with
+        {
+            Affected = reset.Count,
+            Sample = [.. reset.OrderBy(row => row.EventId, StringComparer.Ordinal).ThenBy(row => row.Id, StringComparer.Ordinal)
+                .Take(filter.Limit).Select(row => Guid.Parse(row.Id, CultureInfo.InvariantCulture))],
+        };
+        await ExecuteInAsync(connection, transaction, DeliveryOperationsTable.LogOutcomeSql(_log), command => BindOutcome(command, recorded), ct)
+            .ConfigureAwait(false);
+
+        return recorded;
+    }
+```
+
+The replay's transaction opens with the log `INSERT`; `ON CONFLICT DO NOTHING` makes a concurrent request under the same key wait on the key's unique index and then insert nothing, so it commits a transaction that changed nothing and answers `null`.
+
+- [ ] **Step 5: The fake store and the decorator keep up**
+
+`FailingFirstFanOut.cs` — delegate `ReplayAsync` and `FindOperationAsync` to `inner`.
+
+`FakeDeliveryStore.cs`:
+
+```csharp
+    public Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(filter.Limit);
+        lock (_gate)
+        {
+            if (entry.IdempotencyKey is { } key && _operations.Exists(row => row.IdempotencyScope == entry.IdempotencyScope && row.IdempotencyKey == key))
+            {
+                return Task.FromResult<DeliveryOperationEntry?>(null);
+            }
+
+            var reset = InEventOrder(Matching(filter with { Replayable = true }).Where(row => !LaneBusy(row))).ToList();
+            reset.ForEach(Reset);
+            var recorded = entry with { Affected = reset.Count, Sample = [.. reset.Take(filter.Limit).Select(row => row.Id)] };
+            _operations.Add(recorded);
+
+            return Task.FromResult<DeliveryOperationEntry?>(recorded);
+        }
+    }
+
+    public Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult(_operations.LastOrDefault(row => row.IdempotencyScope == scope && row.IdempotencyKey == key));
+        }
+    }
+```
+
+- [ ] **Step 6: Run the tests to verify they pass**
+
+Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*FakeDeliveryStoreTests'`; `dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests --filter-class '*SqliteDeliveryStoreTests'`; `dotnet test --project test/MMLib.Alvo.Data.EntityFrameworkCore.Tests --filter-class '*DeliveryOperationsTableTests'`.
+Expected: PASS. Re-accept the Abstractions and Testing baselines (two members, four contract facts) and dispatch `alvo-snapshot-judge`.
+
+- [ ] **Step 7: Format, ring0, commit**
+
+```bash
+dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTable.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfCoreDeliveryStore.Operations.cs src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs test/_shared/testhost/FailingFirstFanOut.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/DeliveryOperationsTableTests.cs
+scripts/test-ring0
+git add src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DeliveryOperationsTable.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfCoreDeliveryStore.Operations.cs src/MMLib.Alvo.Testing/Events/DeliveryStoreContractTests.Operations.cs test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs test/_shared/testhost/FailingFirstFanOut.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/DeliveryOperationsTableTests.cs test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.Testing.verified.txt
+git commit -m "feat(events): replay through the store, its idempotency record in the reset's transaction
+
+Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
+```
+
+---
+
+## Task 6: Pause — the control the claim reads **[slice end]**
 
 **Files:**
 - Modify: `src/MMLib.Alvo.Abstractions/Events/DeliveryOperations.cs`, `src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs`
@@ -1600,7 +1972,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 - Modify (tests): `test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs`, `test/_shared/ef/DeliveryStoreWorld.cs`, `test/_shared/testhost/FailingFirstFanOut.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/DeliveryTableTests.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/DeliveryOperationsTableTests.cs`, both public-API baselines of Task 2
 
 **Interfaces:**
-- Consumes: Task 3's `DeliveryOperationEntry`, `InTransactionAsync`, `ExecuteInAsync`, `LogAsync`, `Nullable`, the contract's `Entry(…)`, `_operatedAt`, `Operator`; Task 1's `_controls` field.
+- Consumes: Task 4's `DeliveryOperationEntry`, `InTransactionAsync`, `ExecuteInAsync`, `LogAsync`, `Nullable`, the contract's `Entry(…)`, `_operatedAt`, `Operator`; Task 1's `_controls` field.
 - Produces (public, Abstractions `MMLib.Alvo.Events`):
   - `SubscriberControl { required string Subscriber; required DateTimeOffset PausedAt; required string PausedBy; string? Reason }`
   - `IDeliveryStore.SetPausedAsync(string subscriber, bool paused, DeliveryOperationEntry entry, CancellationToken) → Task<bool>` — `true` and one log row only when the state changed; the pause records `entry.At`, `entry.Actor` and `entry.Reason`.
@@ -1867,7 +2239,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 5: The operations wire records, the fixture and the refusals
+## Task 7: The operations wire records, the fixture and the refusals
 
 **Files:**
 - Create: `src/MMLib.Alvo.Abstractions/Management/ManagementOperationsModels.cs`, `DeliveryFixture.cs`, `ManagementDeliveryNotFoundException.cs`, `ManagementExtensionNotFoundException.cs`, `ManagementConflictException.cs`
@@ -2130,9 +2502,11 @@ namespace MMLib.Alvo.Management;
 /// field value that is not a key replaced by <c>&lt;redacted:FIELD&gt;</c>.
 /// </summary>
 /// <remarks>
-/// Kept: the envelope's attributes (id, type, subject, time, tenant, caller, chain depth), the record's <c>id</c> and
-/// <c>tenant_id</c>, fields of type <c>ref</c> and <c>enum</c>, the changed-field names, and empty values. Everything else is
-/// redacted — an application event's payload keeps only <c>id</c>. Fill in what a reproduction needs before delivering it.
+/// Kept: the envelope's attributes (id, type, time, tenant, caller, chain depth; a data event's subject and partition key),
+/// the record's <c>id</c> and <c>tenant_id</c>, fields of type <c>ref</c> and <c>enum</c>, the changed-field names, and null
+/// values. Everything else is redacted — an application event keeps only <c>id</c> in its payload and the namespace part of
+/// its partition key, and <c>tracestate</c> is dropped. Fill in what a reproduction needs before delivering it: a typed handler
+/// cannot read <c>&lt;redacted:FIELD&gt;</c> as a number, a date or a flag.
 /// </remarks>
 public sealed record DeliveryFixture
 {
@@ -2267,7 +2641,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 6: The operations port and its level rows
+## Task 8: The operations port and its level rows
 
 **Files:**
 - Create: `src/MMLib.Alvo.Abstractions/Management/IAlvoOperations.cs`
@@ -2275,7 +2649,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 - Test: `test/MMLib.Alvo.Tests/Management/OperationsLevelTests.cs`; baseline `test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt`
 
 **Interfaces:**
-- Consumes: the records and refusals of Task 5.
+- Consumes: the records and refusals of Task 7.
 - Produces:
   - public `interface IAlvoOperations` (Abstractions `MMLib.Alvo.Management`) — `Task<ManagementDeliveryPage> ListDeliveriesAsync(string project, ManagementDeliveryQuery query, CancellationToken ct = default)`; `Task<ManagementDelivery> GetDeliveryAsync(string project, Guid delivery, CancellationToken ct = default)`; `Task<ManagementDelivery> RedeliverAsync(string project, Guid delivery, string? reason, CancellationToken ct = default)`; `Task<ManagementReplayPlan> ReplayAsync(string project, ManagementReplayRequest request, CancellationToken ct = default)`; `Task<DeliveryFixture> GetFixtureAsync(string project, Guid delivery, CancellationToken ct = default)`; `Task<ManagementExtension> SetPausedAsync(string project, string subscriber, bool paused, string? reason, CancellationToken ct = default)`; `Task<ManagementExtension> SetEnabledAsync(string project, string extension, bool enabled, string? reason, CancellationToken ct = default)`; `Task<ManagementDelivery> RunScheduleAsync(string project, string schedule, CancellationToken ct = default)`; `Task<ManagementExtensionStats> GetExtensionStatsAsync(string project, CancellationToken ct = default)`.
   - internal `ManagementOperation.ListDeliveries`, `GetDelivery`, `RedeliverDelivery`, `ReplayDeliveries`, `GetDeliveryFixture`, `PauseSubscriber`, `SetExtensionEnabled`, `RunSchedule`, `GetExtensionStats`, with levels Viewer, Viewer, Developer, Developer, Developer, Developer, Admin, Developer, Viewer.
@@ -2375,13 +2749,16 @@ public interface IAlvoOperations
     /// <exception cref="ManagementForbiddenException">The caller does not reach <c>developer</c>.</exception>
     /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
     /// <exception cref="ManagementDeliveryNotFoundException">No such delivery was recorded.</exception>
-    /// <exception cref="ManagementConflictException">It is running, or its handler is not registered in this host.</exception>
+    /// <exception cref="ManagementConflictException">
+    /// It is running; its record has another delivery of the handler running; it is dead with <c>chain-depth-exceeded</c> (a loop the
+    /// chain-depth limit stopped); or its handler is not registered in this host.
+    /// </exception>
     /// <exception cref="ManagementRequestException">The reason is too long or holds a control character.</exception>
     Task<ManagementDelivery> RedeliverAsync(string project, Guid delivery, string? reason, CancellationToken ct = default);
 
     /// <summary>
     /// Counts (a dry run) or runs again (a real run) one handler's finished deliveries of one status within a window of event
-    /// time. A real run resets at most 10 000 deliveries.
+    /// time — never one dead with <c>chain-depth-exceeded</c>. A real run resets at most 10 000 deliveries.
     /// </summary>
     /// <param name="project">The project name.</param>
     /// <param name="request">The handler, the status, the window, whether to only count, the reason and the key.</param>
@@ -2394,6 +2771,7 @@ public interface IAlvoOperations
     /// A status that is not finished, a window that ends before it starts, more than 10 000 deliveries, a key on a dry run or
     /// one the caller cannot hold, or a bad reason.
     /// </exception>
+    /// <exception cref="ManagementConflictException">A real run selects a delivery whose record has a delivery of the handler running.</exception>
     /// <exception cref="Data.AlvoIdempotencyConflictException">The key was spent by this caller on a different replay.</exception>
     Task<ManagementReplayPlan> ReplayAsync(string project, ManagementReplayRequest request, CancellationToken ct = default);
 
@@ -2527,14 +2905,14 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 7: `DeliveryFixtures` — a fixture with every non-key scalar redacted
+## Task 9: `DeliveryFixtures` — a fixture with every non-key scalar redacted
 
 **Files:**
 - Create: `src/MMLib.Alvo/Management/Internal/DeliveryFixtures.cs`
 - Test: `test/MMLib.Alvo.Tests/Management/DeliveryFixturesTests.cs`
 
 **Interfaces:**
-- Consumes: `StoredDelivery` (Task 2), `DeliveryFixture` (Task 5), `EnvelopeReading.TryReadDataType`, `AlvoEventAttributes.Data`/`.Type`, `AlvoManagedColumns.Id`/`.TenantId`, `SchemaModel`.
+- Consumes: `StoredDelivery` (Task 2), `DeliveryFixture` (Task 7), `EnvelopeReading.TryReadDataType`, `AlvoEventAttributes.Data`/`.Type`, `AlvoManagedColumns.Id`/`.TenantId`, `SchemaModel`.
 - Produces: `internal static class DeliveryFixtures` with `DeliveryFixture Of(StoredDelivery delivery, string payload, SchemaModel schema)` and `string Placeholder(string field)` (`"<redacted:" + field + ">"`).
 
 - [ ] **Step 1: Write the failing tests**
@@ -2626,10 +3004,23 @@ public sealed class DeliveryFixturesTests
         var fixture = DeliveryFixtures.Of(Delivery(), Envelope("entity.tickets.updated", Row("Printer jam", 12.5m)), _schema);
 
         fixture.Envelope.GetProperty("type").GetString().ShouldBe("entity.tickets.updated");
+        fixture.Envelope.GetProperty("subject").GetString().ShouldBe($"tickets/{_ticket}", "a data event's subject is the record's id");
+        fixture.Envelope.GetProperty("partitionkey").GetString().ShouldBe($"tickets:{_ticket}");
         fixture.Envelope.GetProperty("tenantid").GetString().ShouldBe(_tenant.ToString());
         fixture.Envelope.GetProperty("data").GetProperty("changed").EnumerateArray().Select(name => name.GetString()).ShouldContain("title");
         fixture.Subscriber.ShouldBe("send-confirmation");
         fixture.Attempt.ShouldBe(3);
+    }
+
+    [Fact]
+    public void An_application_event_s_subject_and_key_value_are_redacted_and_its_trace_state_dropped()
+    {
+        var fixture = DeliveryFixtures.Of(Delivery(), Envelope("orders.shipped", Row("Printer jam", 12.5m), traceState: "vendor=customer-42"), _schema);
+
+        fixture.Envelope.GetProperty("subject").GetString().ShouldBe("<redacted:subject>");
+        fixture.Envelope.GetProperty("partitionkey").GetString().ShouldBe("orders.shipped:<redacted:partitionkey>");
+        fixture.Envelope.TryGetProperty("tracestate", out _).ShouldBeFalse();
+        fixture.Redacted.ShouldContain("/tracestate");
     }
 
     private static StoredDelivery Delivery() => new()
@@ -2658,7 +3049,7 @@ public sealed class DeliveryFixturesTests
         ["note"] = null,
     });
 
-    private static string Envelope(string type, AlvoRecord record) => AlvoEventJson.Write(new AlvoEvent
+    private static string Envelope(string type, AlvoRecord record, string? traceState = null) => AlvoEventJson.Write(new AlvoEvent
     {
         Id = Guid.Parse("0192f1a4-0000-7000-8000-000000000002"),
         Source = AlvoEvent.DefaultSource,
@@ -2669,6 +3060,7 @@ public sealed class DeliveryFixturesTests
         AuthType = AlvoEventAuthType.ApiKey,
         CorrelationId = "4bf92f3577b34da6a3ce929d0e0e4736",
         TenantId = _tenant.ToString(),
+        TraceState = traceState,
         Data = new AlvoEventData { Record = record, OldRecord = record, Changed = ["title"] },
     });
 }
@@ -2696,8 +3088,9 @@ using System.Text.Json.Nodes;
 namespace MMLib.Alvo.Management.Internal;
 
 /// <summary>
-/// A delivery's envelope as a fixture: the record images keep their keys, references and enum values, empty values stay
-/// empty, and every other value becomes <c>&lt;redacted:FIELD&gt;</c>.
+/// A delivery's envelope as a fixture: the record images keep their keys, references and enum values, null values stay
+/// null, every other value becomes <c>&lt;redacted:FIELD&gt;</c>, an application event's subject and partition-key value are
+/// redacted, and <c>tracestate</c> is dropped.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -2721,9 +3114,11 @@ internal static class DeliveryFixtures
         ArgumentNullException.ThrowIfNull(schema);
         var envelope = JsonNode.Parse(payload) as JsonObject ?? throw new JsonException("The stored envelope is not a JSON object.");
         var kept = KeptFields(envelope, schema);
-        List<string> redacted = envelope[AlvoEventAttributes.Data] is JsonObject data
-            ? [.. _images.SelectMany(image => Redact(data, image, kept))]
-            : [];
+        List<string> redacted = [.. RedactAttributes(envelope)];
+        if (envelope[AlvoEventAttributes.Data] is JsonObject data)
+        {
+            redacted.AddRange(_images.SelectMany(image => Redact(data, image, kept)));
+        }
 
         return new DeliveryFixture
         {
@@ -2737,12 +3132,42 @@ internal static class DeliveryFixtures
 
     internal static string Placeholder(string field) => $"<redacted:{field}>";
 
+    private static IEnumerable<string> RedactAttributes(JsonObject envelope)
+    {
+        if (envelope.Remove(AlvoEventAttributes.TraceState))
+        {
+            yield return $"/{AlvoEventAttributes.TraceState}";
+        }
+
+        if (DataEntity(envelope) is not null)
+        {
+            yield break;
+        }
+
+        if (envelope[AlvoEventAttributes.Subject] is not null)
+        {
+            envelope[AlvoEventAttributes.Subject] = Placeholder(AlvoEventAttributes.Subject);
+            yield return $"/{AlvoEventAttributes.Subject}";
+        }
+
+        if (envelope[AlvoEventAttributes.PartitionKey] is JsonValue key && key.TryGetValue<string>(out var text) && text.IndexOf(':', StringComparison.Ordinal) is var at and > 0)
+        {
+            envelope[AlvoEventAttributes.PartitionKey] = text[..(at + 1)] + Placeholder(AlvoEventAttributes.PartitionKey);
+            yield return $"/{AlvoEventAttributes.PartitionKey}";
+        }
+    }
+
+    private static string? DataEntity(JsonObject envelope) =>
+        envelope[AlvoEventAttributes.Type] is JsonValue type
+        && type.TryGetValue<string>(out var name)
+        && EnvelopeReading.TryReadDataType(name, out var entity, out _)
+            ? entity
+            : null;
+
     private static HashSet<string> KeptFields(JsonObject envelope, SchemaModel schema)
     {
         var kept = new HashSet<string>(StringComparer.Ordinal) { AlvoManagedColumns.Id };
-        if (envelope[AlvoEventAttributes.Type] is JsonValue type
-            && type.TryGetValue<string>(out var name)
-            && EnvelopeReading.TryReadDataType(name, out var entity, out _)
+        if (DataEntity(envelope) is { } entity
             && schema.Entities.FirstOrDefault(candidate => candidate.Name == entity) is { } declared)
         {
             kept.Add(AlvoManagedColumns.TenantId);
@@ -2795,7 +3220,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 8: `ExtensionStats` — per-instance numbers from a `MeterListener`
+## Task 10: `ExtensionStats` — per-instance numbers from a `MeterListener`
 
 **Files:**
 - Create: `src/MMLib.Alvo/Extensions/Internal/LatencyHistogram.cs`, `src/MMLib.Alvo/Extensions/Internal/ExtensionStats.cs`
@@ -2803,7 +3228,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 - Test: `test/MMLib.Alvo.Tests/Extensions/LatencyHistogramTests.cs`, `test/MMLib.Alvo.Tests/Extensions/ExtensionStatsTests.cs`
 
 **Interfaces:**
-- Consumes: `AlvoEventMetrics.MeterName` (`"MMLib.Alvo.Events"`), `AlvoDeliveryMetrics.DurationName` (`"alvo.delivery.duration"`), `.SubscriberTag`, `.OutcomeTag`, `.Durations`; `ManagementExtensionStats`/`ManagementExtensionStat` (Task 5).
+- Consumes: `AlvoEventMetrics.MeterName` (`"MMLib.Alvo.Events"`), `AlvoDeliveryMetrics.DurationName` (`"alvo.delivery.duration"`), `.SubscriberTag`, `.OutcomeTag`, `.Durations`; `ManagementExtensionStats`/`ManagementExtensionStat` (Task 7).
 - Produces: `internal static class LatencyHistogram` (`const int Bins = 128`, `int Bin(double milliseconds)`, `double UpperBound(int bin)`, `TimeSpan? Percentile(long[] bins, long count, double quantile)`); `internal sealed class ExtensionStats : IHostedService, IDisposable` (ctor `(TimeProvider time)`, `const string Scope = "this-instance"`, `static TimeSpan Window` = 24 h, `void Record(string subscriber, double milliseconds, bool failed)`, `ManagementExtensionStats Report(IReadOnlyList<string> ids)`), registered as a singleton and as a hosted service.
 
 - [ ] **Step 1: Write the failing tests**
@@ -3185,7 +3610,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 9: `AlvoOperationsService` reads — the gate, a page, one delivery, a fixture, stats
+## Task 11: The management gate, the operations test world, a page and one delivery
 
 **Files:**
 - Create: `src/MMLib.Alvo/Management/Internal/ManagementGate.cs`, `AlvoOperationsService.cs`, `DeliveryViews.cs`, `DeliveryQueries.cs`
@@ -3194,14 +3619,14 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 - Modify (tests): `test/MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj` (link `AuditCapture.cs`)
 
 **Interfaces:**
-- Consumes: `IDeliveryStore` reads (Task 2), the records of Task 5, `DeliveryFixtures` (Task 7), `ExtensionStats` (Task 8), `ExtensionCatalog.Items`, `AlvoBootState.Projects`, `ManagementAccessEvaluator.Allows(ManagementOperation, AlvoContext)`, `IAlvoContextAccessor.Principal`, `AlvoEventId.Floor`.
+- Consumes: `IDeliveryStore` reads (Task 2), the records of Task 7, `AlvoBootState.Projects`, `ManagementAccessEvaluator.Allows(ManagementOperation, AlvoContext)`, `IAlvoContextAccessor.Principal`, `AlvoEventId.Floor` (Task 3).
 - Produces:
   - `internal sealed class ManagementGate(AlvoBootState boot, IAlvoContextAccessor callers, ManagementAccessEvaluator access)` — `AlvoContext Caller`, `string Actor` (`"<key id>:<user id>"`, `"anonymous"` with no principal), `void Admit(ManagementOperation operation, string project)` (level first, then project — `ManagementForbiddenException`, then `ManagementProjectNotFoundException`).
-  - `internal sealed partial class AlvoOperationsService(ManagementGate gate, ExtensionCatalog catalog, ExtensionStats stats, ISchemaRegistry schemas, IDeliveryStore? store = null)` (Task 10 inserts `TimeProvider time, ILogger<AlvoOperationsService> logger` before `store`) with the public read members `ListDeliveriesAsync`, `GetDeliveryAsync`, `GetFixtureAsync`, `GetExtensionStatsAsync` (signatures of `IAlvoOperations`), `internal const int SampleSize = 20`, private `DetailAsync(Guid, CancellationToken)`, `FoundAsync(Guid, CancellationToken)`, `Store`.
+  - `internal sealed partial class AlvoOperationsService(ManagementGate gate, IDeliveryStore? store = null)` (Task 12 inserts `ExtensionCatalog catalog, ExtensionStats stats, ISchemaRegistry schemas` and Task 13 `TimeProvider time, ILogger<AlvoOperationsService> logger` before `store`) with `ListDeliveriesAsync`, `GetDeliveryAsync` (signatures of `IAlvoOperations`), `internal const int SampleSize = 20`, private `DetailAsync(Guid, CancellationToken)`, `FoundAsync(Guid, CancellationToken)`, `Store`.
   - `internal static class DeliveryViews` — `ManagementDelivery Of(StoredDelivery)`, `ManagementDeliveryAttempt Of(StoredDeliveryAttempt)`.
   - `internal static class DeliveryQueries` — `const int MaxPage = 200`, `FrozenSet<string> Statuses`, `FrozenSet<string> Finished`, `DeliveryFilter Filter(ManagementDeliveryQuery)`, `DeliveryFilter Window(DateTimeOffset? from, DateTimeOffset? to)`, `void EnsureStatus(string? status, FrozenSet<string> allowed, string verb)`.
   - Test-side `OperationsTestWorld` (below) and `AuditCapture : ILoggerProvider` (`IReadOnlyList<string> Lines` — the rendered `ManagementAudit` lines).
-  - DI: `ManagementGate` and `AlvoOperationsService` registered as singletons (the port is registered in Task 11).
+  - DI: `ManagementGate` and `AlvoOperationsService` registered as singletons (the port is registered in Task 14).
 
 - [ ] **Step 1: The test world and the audit capture**
 
@@ -3399,7 +3824,7 @@ using MMLib.Alvo.Management;
 
 namespace MMLib.Alvo.Tests.Management;
 
-/// <summary>The operations port's reads: a page, one delivery, a fixture and the stats.</summary>
+/// <summary>The operations port's reads: a page and one delivery.</summary>
 public sealed class AlvoOperationsServiceTests
 {
     private const string Project = OperationsTestWorld.Project;
@@ -3475,47 +3900,12 @@ public sealed class AlvoOperationsServiceTests
     }
 
     [Fact]
-    public async Task A_fixture_redacts_the_delivery_s_envelope()
-    {
-        using var world = new OperationsTestWorld();
-        var delivery = await world.DeliveryAsync("tickets:a", deadReason: "when-failed");
-
-        var fixture = await world.Service.GetFixtureAsync(Project, delivery.Id, Ct);
-
-        fixture.Subscriber.ShouldBe(OperationsTestWorld.Handler);
-        fixture.Envelope.GetRawText().ShouldNotContain("Printer jam");
-    }
-
-    [Fact]
-    public async Task A_fixture_of_a_delivery_whose_event_is_gone_is_a_conflict()
-    {
-        using var world = new OperationsTestWorld();
-        var delivery = await world.DeliveryAsync("tickets:a", keepEnvelope: false);
-
-        (await Should.ThrowAsync<ManagementConflictException>(() => world.Service.GetFixtureAsync(Project, delivery.Id, Ct)))
-            .Message.ShouldContain("no longer holds");
-    }
-
-    [Fact]
-    public async Task Stats_list_every_registered_extension_scoped_to_this_instance()
-    {
-        using var world = new OperationsTestWorld();
-
-        var stats = await world.Service.GetExtensionStatsAsync(Project, Ct);
-
-        stats.Scope.ShouldBe("this-instance");
-        stats.Items.ShouldHaveSingleItem().Id.ShouldBe(OperationsTestWorld.Handler);
-    }
-
-    [Fact]
     public async Task Every_read_refuses_an_unpublished_caller()
     {
         using var world = new OperationsTestWorld(admitted: false);
 
         await Should.ThrowAsync<ManagementForbiddenException>(() => world.Service.ListDeliveriesAsync(Project, new ManagementDeliveryQuery(), Ct));
         await Should.ThrowAsync<ManagementForbiddenException>(() => world.Service.GetDeliveryAsync(Project, Guid.NewGuid(), Ct));
-        await Should.ThrowAsync<ManagementForbiddenException>(() => world.Service.GetFixtureAsync(Project, Guid.NewGuid(), Ct));
-        await Should.ThrowAsync<ManagementForbiddenException>(() => world.Service.GetExtensionStatsAsync(Project, Ct));
     }
 }
 ```
@@ -3663,20 +4053,16 @@ Create `src/MMLib.Alvo/Management/Internal/AlvoOperationsService.cs`:
 
 ```csharp
 using MMLib.Alvo.Events;
-using MMLib.Alvo.Extensions.Internal;
-using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Management.Internal;
 
 /// <summary>
-/// The operator's port over handler deliveries: reads here, changes in <c>AlvoOperationsService.Writes.cs</c>. Every member
-/// is admitted by <see cref="ManagementGate"/> first, exactly as the management surface's members are.
+/// The operator's port over handler deliveries: reads here and in <c>AlvoOperationsService.Reads.cs</c>, changes in
+/// <c>AlvoOperationsService.Writes.cs</c> and <c>AlvoOperationsService.Replay.cs</c>. Every member is admitted by
+/// <see cref="ManagementGate"/> first, exactly as the management surface's members are.
 /// </summary>
 internal sealed partial class AlvoOperationsService(
     ManagementGate gate,
-    ExtensionCatalog catalog,
-    ExtensionStats stats,
-    ISchemaRegistry schemas,
     IDeliveryStore? store = null)
 {
     internal const int SampleSize = 20;
@@ -3699,24 +4085,6 @@ internal sealed partial class AlvoOperationsService(
         gate.Admit(ManagementOperation.GetDelivery, project);
 
         return await DetailAsync(delivery, ct).ConfigureAwait(false);
-    }
-
-    public async Task<DeliveryFixture> GetFixtureAsync(string project, Guid delivery, CancellationToken ct = default)
-    {
-        gate.Admit(ManagementOperation.GetDeliveryFixture, project);
-        var row = await FoundAsync(delivery, ct).ConfigureAwait(false);
-
-        return row.Payload is { } payload
-            ? DeliveryFixtures.Of(row, payload, schemas.GetSchema())
-            : throw new ManagementConflictException(
-                $"The outbox no longer holds the event of delivery '{delivery}', so there is no envelope to make a fixture of.");
-    }
-
-    public Task<ManagementExtensionStats> GetExtensionStatsAsync(string project, CancellationToken ct = default)
-    {
-        gate.Admit(ManagementOperation.GetExtensionStats, project);
-
-        return Task.FromResult(stats.Report([.. catalog.Items.Select(item => item.Id)]));
     }
 
     private IDeliveryStore Store => store ?? throw new ManagementRequestException(NoStore);
@@ -3752,14 +4120,143 @@ Expected: PASS.
 dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo/Management/Internal/ManagementGate.cs src/MMLib.Alvo/Management/Internal/AlvoOperationsService.cs src/MMLib.Alvo/Management/Internal/DeliveryViews.cs src/MMLib.Alvo/Management/Internal/DeliveryQueries.cs src/MMLib.Alvo/Management/Setup.cs test/MMLib.Alvo.Tests/Management/OperationsTestWorld.cs test/MMLib.Alvo.Tests/Management/ManagementGateTests.cs test/MMLib.Alvo.Tests/Management/AlvoOperationsServiceTests.cs test/_shared/testhost/AuditCapture.cs
 scripts/test-ring0
 git add src/MMLib.Alvo/Management/Internal/ManagementGate.cs src/MMLib.Alvo/Management/Internal/AlvoOperationsService.cs src/MMLib.Alvo/Management/Internal/DeliveryViews.cs src/MMLib.Alvo/Management/Internal/DeliveryQueries.cs src/MMLib.Alvo/Management/Setup.cs test/MMLib.Alvo.Tests/Management/OperationsTestWorld.cs test/MMLib.Alvo.Tests/Management/ManagementGateTests.cs test/MMLib.Alvo.Tests/Management/AlvoOperationsServiceTests.cs test/_shared/testhost/AuditCapture.cs test/MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj
-git commit -m "feat(management): read deliveries, fixtures and stats behind the management gate
+git commit -m "feat(management): read deliveries behind the management gate
 
 Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 ```
 
 ---
 
-## Task 10: `AlvoOperationsService` writes — redeliver, pause, the two refusing routes, the audit
+## Task 12: The fixture and the stats reads
+
+**Files:**
+- Create: `src/MMLib.Alvo/Management/Internal/AlvoOperationsService.Reads.cs`
+- Modify: `src/MMLib.Alvo/Management/Internal/AlvoOperationsService.cs` (three constructor parameters)
+- Test: `test/MMLib.Alvo.Tests/Management/AlvoOperationsFixtureAndStatsTests.cs`
+
+**Interfaces:**
+- Consumes: Task 11's service, gate and test world; `DeliveryFixtures` (Task 9); `ExtensionStats` (Task 10); `ExtensionCatalog.Items`; `ISchemaRegistry.GetSchema()`.
+- Produces: the service's `GetFixtureAsync` and `GetExtensionStatsAsync` (signatures of `IAlvoOperations`); constructor `(ManagementGate gate, ExtensionCatalog catalog, ExtensionStats stats, ISchemaRegistry schemas, IDeliveryStore? store = null)`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `test/MMLib.Alvo.Tests/Management/AlvoOperationsFixtureAndStatsTests.cs`:
+
+```csharp
+using MMLib.Alvo.Management;
+
+namespace MMLib.Alvo.Tests.Management;
+
+/// <summary>The operations port's fixture and stats reads.</summary>
+public sealed class AlvoOperationsFixtureAndStatsTests
+{
+    private const string Project = OperationsTestWorld.Project;
+
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    [Fact]
+    public async Task A_fixture_redacts_the_delivery_s_envelope()
+    {
+        using var world = new OperationsTestWorld();
+        var delivery = await world.DeliveryAsync("tickets:a", deadReason: "when-failed");
+
+        var fixture = await world.Service.GetFixtureAsync(Project, delivery.Id, Ct);
+
+        fixture.Subscriber.ShouldBe(OperationsTestWorld.Handler);
+        fixture.Envelope.GetRawText().ShouldNotContain("Printer jam");
+    }
+
+    [Fact]
+    public async Task A_fixture_of_a_delivery_whose_event_is_gone_is_a_conflict()
+    {
+        using var world = new OperationsTestWorld();
+        var delivery = await world.DeliveryAsync("tickets:a", keepEnvelope: false);
+
+        (await Should.ThrowAsync<ManagementConflictException>(() => world.Service.GetFixtureAsync(Project, delivery.Id, Ct)))
+            .Message.ShouldContain("no longer holds");
+    }
+
+    [Fact]
+    public async Task Stats_list_every_registered_extension_scoped_to_this_instance()
+    {
+        using var world = new OperationsTestWorld();
+
+        var stats = await world.Service.GetExtensionStatsAsync(Project, Ct);
+
+        stats.Scope.ShouldBe("this-instance");
+        stats.Items.ShouldHaveSingleItem().Id.ShouldBe(OperationsTestWorld.Handler);
+    }
+
+    [Fact]
+    public async Task The_fixture_and_the_stats_refuse_an_unpublished_caller()
+    {
+        using var world = new OperationsTestWorld(admitted: false);
+
+        await Should.ThrowAsync<ManagementForbiddenException>(() => world.Service.GetFixtureAsync(Project, Guid.NewGuid(), Ct));
+        await Should.ThrowAsync<ManagementForbiddenException>(() => world.Service.GetExtensionStatsAsync(Project, Ct));
+    }
+}
+```
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*AlvoOperationsFixtureAndStatsTests'`
+Expected: build FAIL — `GetFixtureAsync` and `GetExtensionStatsAsync` do not exist on the service.
+
+- [ ] **Step 3: Implement**
+
+In `src/MMLib.Alvo/Management/Internal/AlvoOperationsService.cs` insert three constructor parameters after `ManagementGate gate,` — `ExtensionCatalog catalog,`, `ExtensionStats stats,`, `ISchemaRegistry schemas,` — and add `using MMLib.Alvo.Extensions.Internal;` and `using MMLib.Alvo.Schema;`.
+
+Create `src/MMLib.Alvo/Management/Internal/AlvoOperationsService.Reads.cs`:
+
+```csharp
+using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Schema;
+
+namespace MMLib.Alvo.Management.Internal;
+
+/// <summary>The operator's reads that leave the store: a redacted fixture, and this instance's stats.</summary>
+internal sealed partial class AlvoOperationsService
+{
+    public async Task<DeliveryFixture> GetFixtureAsync(string project, Guid delivery, CancellationToken ct = default)
+    {
+        gate.Admit(ManagementOperation.GetDeliveryFixture, project);
+        var row = await FoundAsync(delivery, ct).ConfigureAwait(false);
+
+        return row.Payload is { } payload
+            ? DeliveryFixtures.Of(row, payload, schemas.GetSchema())
+            : throw new ManagementConflictException(
+                $"The outbox no longer holds the event of delivery '{delivery}', so there is no envelope to make a fixture of.");
+    }
+
+    public Task<ManagementExtensionStats> GetExtensionStatsAsync(string project, CancellationToken ct = default)
+    {
+        gate.Admit(ManagementOperation.GetExtensionStats, project);
+
+        return Task.FromResult(stats.Report([.. catalog.Items.Select(item => item.Id)]));
+    }
+}
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*AlvoOperationsFixtureAndStatsTests'` and `--filter-class '*AlvoOperationsServiceTests'`.
+Expected: PASS.
+
+- [ ] **Step 5: Format, ring0, commit**
+
+```bash
+dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo/Management/Internal/AlvoOperationsService.cs src/MMLib.Alvo/Management/Internal/AlvoOperationsService.Reads.cs test/MMLib.Alvo.Tests/Management/AlvoOperationsFixtureAndStatsTests.cs
+scripts/test-ring0
+git add src/MMLib.Alvo/Management/Internal/AlvoOperationsService.cs src/MMLib.Alvo/Management/Internal/AlvoOperationsService.Reads.cs test/MMLib.Alvo.Tests/Management/AlvoOperationsFixtureAndStatsTests.cs
+git commit -m "feat(management): read a delivery's redacted fixture and this instance's stats
+
+Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
+```
+
+---
+
+## Task 13: `AlvoOperationsService` writes — redeliver, pause, the two refusing routes, the audit
 
 **Files:**
 - Create: `src/MMLib.Alvo/Management/Internal/AlvoOperationsService.Writes.cs`, `OperationReasons.cs`, `OperationsAudit.cs`
@@ -3767,8 +4264,8 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 - Test: `test/MMLib.Alvo.Tests/Management/AlvoOperationsWritesTests.cs`
 
 **Interfaces:**
-- Consumes: Task 9's service, gate and helpers; the store's `RedeliverAsync` and `SetPausedAsync` (Tasks 3–4).
-- Produces: the service's public `RedeliverAsync`, `SetPausedAsync`, `SetEnabledAsync`, `RunScheduleAsync` (signatures of `IAlvoOperations`); private `EnsureRedeliverable(StoredDelivery)`, `Handler(string)` (a registered event handler, else `ManagementExtensionNotFoundException`), `Registered(string)`, `Entry(string operation, string target, string? reason) → DeliveryOperationEntry`; `internal static class OperationReasons` (`const int MaxLength = 500`, `void Ensure(string? reason)`); `internal static partial class OperationsAudit` (`void Write(ILogger logger, DeliveryOperationEntry entry)` → a `LoggerMessage` named `ManagementAudit` at Warning: `Management audit: {Actor} made '{Operation}' on '{Target}' ({Affected} changed). Reason: {Reason}`).
+- Consumes: Tasks 11–12's service, gate and helpers; the store's `RedeliverAsync` (Task 4), `ListAsync` (Task 2) and `SetPausedAsync` (Task 6).
+- Produces: the service's public `RedeliverAsync`, `SetPausedAsync`, `SetEnabledAsync`, `RunScheduleAsync` (signatures of `IAlvoOperations`); private `EnsureRedeliverable(StoredDelivery)` (running → 409; dead `chain-depth-exceeded` → 409), `EnsureRedeliverableAsync(StoredDelivery, CancellationToken)` (a finished delivery whose record has a delivery of the handler running → 409), `LaneRunsAsync`, `Handler(string)` (a registered event handler, else `ManagementExtensionNotFoundException`), `Registered(string)`, `Entry(string operation, string target, string? reason) → DeliveryOperationEntry`; `internal static class OperationReasons` (`const int MaxLength = 500`, `void Ensure(string? reason)`); `internal static partial class OperationsAudit` (`void Write(ILogger logger, DeliveryOperationEntry entry)` → a `LoggerMessage` named `ManagementAudit` at Warning: `Management audit: {Actor} made '{Operation}' on '{Target}' ({Affected} changed). Reason: {Reason}`).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3901,6 +4398,30 @@ public sealed class AlvoOperationsWritesTests
     }
 
     [Fact]
+    public async Task Redelivering_a_loop_break_is_refused()
+    {
+        using var world = new OperationsTestWorld();
+        var loop = await world.DeliveryAsync("tickets:a", deadReason: "chain-depth-exceeded");
+
+        (await Should.ThrowAsync<ManagementConflictException>(() => world.Service.RedeliverAsync(Project, loop.Id, reason: null, Ct)))
+            .Message.ShouldContain("loop");
+        world.Store.Operations.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Redelivering_while_the_record_runs_another_delivery_is_refused()
+    {
+        using var world = new OperationsTestWorld();
+        var dead = await world.DeliveryAsync("tickets:a", deadReason: "when-failed");
+        await world.DeliveryAsync("tickets:a");
+        await world.Store.ClaimAsync(new DeliveryClaim { Claimant = "w", Ordered = [], Unordered = [Handler], BatchSize = 1, Lease = TimeSpan.FromMinutes(1), OutboxMaxAttempts = 10, OutboxClaimLease = TimeSpan.FromMinutes(5) }, Ct);
+
+        (await Should.ThrowAsync<ManagementConflictException>(() => world.Service.RedeliverAsync(Project, dead.Id, reason: null, Ct)))
+            .Message.ShouldContain("running");
+        world.Store.Operations.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Every_write_refuses_an_unpublished_caller()
     {
         using var world = new OperationsTestWorld(admitted: false);
@@ -3998,13 +4519,14 @@ internal sealed partial class AlvoOperationsService
     private const string RedeliverOperation = "redeliver";
     private const string PauseOperation = "pause";
     private const string ResumeOperation = "resume";
+    private const string ChainDepthExceeded = "chain-depth-exceeded";
 
     public async Task<ManagementDelivery> RedeliverAsync(string project, Guid delivery, string? reason, CancellationToken ct = default)
     {
         gate.Admit(ManagementOperation.RedeliverDelivery, project);
         OperationReasons.Ensure(reason);
         var row = await FoundAsync(delivery, ct).ConfigureAwait(false);
-        EnsureRedeliverable(row);
+        await EnsureRedeliverableAsync(row, ct).ConfigureAwait(false);
         var entry = Entry(RedeliverOperation, delivery.ToString(), reason);
         if (DeliveryQueries.Finished.Contains(row.Status) && await Store.RedeliverAsync(delivery, entry, ct).ConfigureAwait(false))
         {
@@ -4061,7 +4583,30 @@ internal sealed partial class AlvoOperationsService
             throw new ManagementConflictException(
                 $"Delivery '{row.Id}' is running under a claim. Wait for its attempt to be answered, then redeliver it if it ends dead.");
         }
+
+        if (row.Status == "dead" && row.LastErrorType == ChainDepthExceeded)
+        {
+            throw new ManagementConflictException(
+                $"Delivery '{row.Id}' is dead with {ChainDepthExceeded}: the chain-depth limit stopped a loop there, and running it again "
+                + "would restart the loop. Fix the handler that writes what it reacts to; events that should still run can then be replayed.");
+        }
     }
+
+    private async Task EnsureRedeliverableAsync(StoredDelivery row, CancellationToken ct)
+    {
+        EnsureRedeliverable(row);
+        if (DeliveryQueries.Finished.Contains(row.Status) && await LaneRunsAsync(row, ct).ConfigureAwait(false))
+        {
+            throw new ManagementConflictException(
+                $"Another delivery of '{row.PartitionKey}' for '{row.Subscriber}' is running, so a redelivered one would run beside it. "
+                + "Wait for it to be answered, then redeliver.");
+        }
+    }
+
+    private async Task<bool> LaneRunsAsync(StoredDelivery row, CancellationToken ct) =>
+        (await Store.ListAsync(
+            new DeliveryFilter { Subscriber = row.Subscriber, PartitionKey = row.PartitionKey, Status = "running", Limit = 1 }, ct)
+            .ConfigureAwait(false)).Count > 0;
 
     private ManagementExtension Handler(string subscriber) =>
         catalog.Items.FirstOrDefault(item => item.Id == subscriber && item.Kind == AlvoExtensionKind.EventHandler)
@@ -4106,7 +4651,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 11: Replay with its idempotency key, and the port registered
+## Task 14: Replay with its idempotency key, and the port registered
 
 **Files:**
 - Create: `src/MMLib.Alvo/Management/Internal/AlvoOperationsService.Replay.cs`
@@ -4114,8 +4659,8 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 - Test: `test/MMLib.Alvo.Tests/Management/AlvoOperationsReplayTests.cs`
 
 **Interfaces:**
-- Consumes: Task 10's `Handler`, `Entry`, `OperationReasons`, `OperationsAudit`; the store's `SelectAsync`, `ReplayAsync`, `FindOperationAsync`; `ManagementIdempotency.FingerprintOf`, `ManagementIdempotencyToken`, `AlvoIdempotency.EnsureUsableKey`/`IdentityOf`; `DeliveryQueries.Window`/`EnsureStatus`/`Finished`.
-- Produces: `AlvoOperationsService : IAlvoOperations` (this partial declares the interface) with `ReplayAsync`; `internal const int MaxReplay = 10_000`; `internal static string ReplayFingerprint(string project, ManagementReplayRequest request)`; DI `IAlvoOperations` → the `AlvoOperationsService` singleton.
+- Consumes: Task 13's `Handler`, `Entry`, `OperationReasons`, `OperationsAudit`; the store's `SelectAsync`, `ReplayAsync`, `FindOperationAsync`; `ManagementIdempotency.FingerprintOf`, `ManagementIdempotencyToken`, `AlvoIdempotency.EnsureUsableKey`/`IdentityOf`; `DeliveryQueries.Window`/`EnsureStatus`/`Finished`.
+- Produces: `AlvoOperationsService : IAlvoOperations` (this partial declares the interface) with `ReplayAsync` (the filter always `Replayable`; a real run whose selection has a running record — `DeliverySelection.Busy > 0` — is 409); `internal const int MaxReplay = 10_000`; `internal static string ReplayFingerprint(string project, ManagementReplayRequest request)`; DI `IAlvoOperations` → the `AlvoOperationsService` singleton.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -4123,6 +4668,7 @@ Create `test/MMLib.Alvo.Tests/Management/AlvoOperationsReplayTests.cs`:
 
 ```csharp
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Events;
 using MMLib.Alvo.Management;
 
 namespace MMLib.Alvo.Tests.Management;
@@ -4231,6 +4777,31 @@ public sealed class AlvoOperationsReplayTests
     }
 
     [Fact]
+    public async Task A_replay_leaves_out_loop_breaks()
+    {
+        using var world = new OperationsTestWorld();
+        await world.DeliveryAsync("tickets:a", deadReason: "chain-depth-exceeded");
+        await world.DeliveryAsync("tickets:b", deadReason: "when-failed");
+
+        (await world.Service.ReplayAsync(Project, new ManagementReplayRequest { Subscriber = Handler, DryRun = true }, Ct)).Count.ShouldBe(1);
+        (await world.Service.ReplayAsync(Project, new ManagementReplayRequest { Subscriber = Handler }, Ct)).Count.ShouldBe(1);
+        world.Store.Rows.ShouldContain(row => row.LastErrorType == "chain-depth-exceeded" && row.Status == "dead");
+    }
+
+    [Fact]
+    public async Task A_replay_of_a_record_whose_delivery_is_running_is_refused()
+    {
+        using var world = new OperationsTestWorld();
+        await world.DeliveryAsync("tickets:a", deadReason: "when-failed");
+        await world.DeliveryAsync("tickets:a");
+        await world.Store.ClaimAsync(new DeliveryClaim { Claimant = "w", Ordered = [], Unordered = [Handler], BatchSize = 1, Lease = TimeSpan.FromMinutes(1), OutboxMaxAttempts = 10, OutboxClaimLease = TimeSpan.FromMinutes(5) }, Ct);
+
+        (await Should.ThrowAsync<ManagementConflictException>(() => world.Service.ReplayAsync(Project, new ManagementReplayRequest { Subscriber = Handler }, Ct)))
+            .Message.ShouldContain("running");
+        world.Store.Operations.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task A_replay_refuses_an_unpublished_caller()
     {
         using var world = new OperationsTestWorld(admitted: false);
@@ -4305,7 +4876,13 @@ internal sealed partial class AlvoOperationsService : IAlvoOperations
         Handler(request.Subscriber);
         DeliveryQueries.EnsureStatus(request.Status, DeliveryQueries.Finished, "replayed");
 
-        return DeliveryQueries.Window(request.From, request.To) with { Subscriber = request.Subscriber, Status = request.Status, Limit = SampleSize };
+        return DeliveryQueries.Window(request.From, request.To) with
+        {
+            Subscriber = request.Subscriber,
+            Status = request.Status,
+            Replayable = true,
+            Limit = SampleSize,
+        };
     }
 
     private ManagementIdempotencyToken? ReplayToken(string project, ManagementReplayRequest request)
@@ -4361,6 +4938,13 @@ internal sealed partial class AlvoOperationsService : IAlvoOperations
                 $"The replay selects {selected.Count} deliveries; one replay resets at most {MaxReplay}. Narrow 'from' and 'to', and replay the window in parts.");
         }
 
+        if (selected.Busy > 0)
+        {
+            throw new ManagementConflictException(
+                $"{selected.Busy} of the {selected.Count} deliveries belong to a record whose delivery for '{request.Subscriber}' is running now, "
+                + "so replaying them would run two of one record at once. Wait for it to be answered, then replay again.");
+        }
+
         var entry = Entry(ReplayOperation, request.Subscriber, request.Reason) with
         {
             IdempotencyScope = token?.Scope,
@@ -4381,7 +4965,7 @@ internal sealed partial class AlvoOperationsService : IAlvoOperations
 }
 ```
 
-In `src/MMLib.Alvo/Management/Setup.cs`, after the two singletons of Task 9:
+In `src/MMLib.Alvo/Management/Setup.cs`, after the two singletons of Task 11:
 
 ```csharp
         services.TryAddSingleton<IAlvoOperations>(provider => provider.GetRequiredService<AlvoOperationsService>());
@@ -4405,14 +4989,14 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 12: The catalog says which handlers are paused
+## Task 15: The catalog says which handlers are paused
 
 **Files:**
 - Modify: `src/MMLib.Alvo/Extensions/Internal/ExtensionCatalog.cs`, `src/MMLib.Alvo/Management/Internal/AlvoManagementService.cs` (`GetExtensionsAsync`, constructor), `src/MMLib.Alvo/Management/Setup.cs`
 - Test: `test/MMLib.Alvo.Tests/Management/PausedCatalogTests.cs`
 
 **Interfaces:**
-- Consumes: `IDeliveryStore.ControlsAsync` (Task 4), `ManagementExtension.Paused` (Task 5).
+- Consumes: `IDeliveryStore.ControlsAsync` (Task 6), `ManagementExtension.Paused` (Task 7).
 - Produces: `ExtensionCatalog.CatalogAsync(IDeliveryStore? store, CancellationToken ct) → Task<ManagementExtensionCatalog>` (every item with `Paused` set from the controls; without a store nothing is paused); `AlvoManagementService` gains a trailing constructor parameter `IDeliveryStore? deliveries` and its `GetExtensionsAsync` serves `CatalogAsync`.
 
 - [ ] **Step 1: Write the failing test**
@@ -4501,7 +5085,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 13: The nine routes over HTTP **[slice end]**
+## Task 16: The nine routes over HTTP **[slice end]**
 
 **Files:**
 - Modify: `src/MMLib.Alvo/Management/Internal/ManagementEndpoints.cs` (`partial`, `MapOperations(group)` in `Map`, three `catch` clauses in `Answer`)
@@ -4511,7 +5095,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 - Create (tests): `test/MMLib.Alvo.Api.Tests/descriptors/operated-notes.alvo.json`, `test/MMLib.Alvo.Api.Tests/Management/OperationsRouteTests.cs`
 
 **Interfaces:**
-- Consumes: `IAlvoOperations` (registered in Task 11), `ManagementEndpoints.Gate`, `.Answer`, `.Refused`, `.TryReadIdempotencyKey`, `RepeatedIdempotencyKey`.
+- Consumes: `IAlvoOperations` (registered in Task 14), `ManagementEndpoints.Gate`, `.Answer`, `.Refused`, `.TryReadIdempotencyKey`, `RepeatedIdempotencyKey`.
 - Produces: routes under `{m}/projects/{project}/`: `GET deliveries` (query `subscriber`, `status`, `from`, `to`, `after`, `limit`), `GET deliveries/{delivery:guid}`, `POST deliveries/{delivery:guid}/redeliver` (`{reason}`), `POST deliveries/replay` (`{subscriber, status, from, to, dryRun, reason}` + header `Idempotency-Key`), `GET deliveries/{delivery:guid}/fixture`, `PUT subscribers/{subscriber}/paused` (`{paused, reason}`), `PUT extensions/{extension}/enabled` (`{enabled, reason}`), `POST schedules/{schedule}/run`, `GET extensions/stats`; each with `ManagementRoute(nameof(IAlvoOperations.<Member>), ManagementOperation.<Row>)`; `ProblemResultFactory.ManagementConflict(string detail)` → 409 `conflict`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -4918,7 +5502,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 14: `DeliverAsync` — one fixture through one handler, as the dispatcher would run it
+## Task 17: `DeliverAsync` — one fixture through one handler, as the dispatcher would run it
 
 **Files:**
 - Modify: `src/MMLib.Alvo/Events/IAlvoEventPump.cs`, `src/MMLib.Alvo/Events/Internal/EventPump.cs`, `src/MMLib.Alvo/Events/Internal/DeliveryDispatcher.cs`, `src/MMLib.Alvo/Events/Internal/DeliveryRunner.cs`
@@ -4927,8 +5511,8 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 - Modify (tests): `test/MMLib.Alvo.Tests/Events/DeliveryDispatcherTests.cs`; baselines `test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.verified.txt`, `test/MMLib.Alvo.TestHost.Tests/PublicApi.MMLib.Alvo.TestHost.verified.txt`
 
 **Interfaces:**
-- Consumes: `DeliveryFixture` (Task 5); `IAlvoOperations.GetFixtureAsync` (Task 9); HX-03's `DeliveryRunner.RunHandlerAsync`, `FlowOf`, `ReadableEvent`, `AlvoHookTelemetry.StartDelivery`/`Finish`, `DeliveryDispatcher.EnsureManualGates`, `ExtensionBinder.For`.
-- Produces: public `IAlvoEventPump.DeliverAsync(DeliveryFixture fixture, CancellationToken cancellationToken = default) → Task` (manual mode only; the handler's own exception propagates; records nothing); public `AlvoTestHost.DeliverAsync(DeliveryFixture fixture, CancellationToken cancellationToken = default) → Task` (inside a drain activity, so `Hooks.AssertRan` counts it); internal `DeliveryDispatcher.DeliverFixtureAsync(DeliveryFixture, CancellationToken)`, `DeliveryRunner.InvokeOnceAsync(AlvoEvent, BoundHandler, int attempt, CancellationToken)`, `DeliveryRunner.ReadableEvent` made `internal static`; the test descriptor `ops-desk.alvo.json` (entity `tickets` with `title` and enum `status`; roles `agent`, `ops`; `access.developer = 'ops' in @user.roles`, `access.admin = 'admin' in @user.roles`).
+- Consumes: `DeliveryFixture` (Task 7); `IAlvoOperations.GetFixtureAsync` (Task 12); HX-03's `DeliveryRunner.RunHandlerAsync`, `FlowOf`, `ReadableEvent`, `AlvoHookTelemetry.StartDelivery`/`Finish`, `DeliveryDispatcher.EnsureManualGates`, `ExtensionBinder.For`.
+- Produces: public `IAlvoEventPump.DeliverAsync(DeliveryFixture fixture, CancellationToken cancellationToken = default) → Task` (manual mode only; the handler's own exception propagates; records nothing); public `AlvoTestHost.DeliverAsync(DeliveryFixture fixture, CancellationToken cancellationToken = default) → Task` (inside a drain activity, so `Hooks.AssertRan` counts it); internal `DeliveryDispatcher.DeliverFixtureAsync(DeliveryFixture, CancellationToken)`, `DeliveryRunner.InvokeOnceAsync(AlvoEvent, BoundHandler, int attempt, CancellationToken)`, `DeliveryRunner.ReadableEvent` made `internal static`; the test descriptor `ops-desk.alvo.json` (entity `tickets` with `title`, enum `status` and integer `estimate`; roles `agent`, `ops`; `access.developer = 'ops' in @user.roles`, `access.admin = 'admin' in @user.roles`).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -4948,7 +5532,8 @@ Create `test/_shared/testhost/descriptors/ops-desk.alvo.json`:
     "tickets": {
       "fields": {
         "title": { "type": "string", "maxLength": 120 },
-        "status": { "type": "enum", "values": ["open", "closed"] }
+        "status": { "type": "enum", "values": ["open", "closed"] },
+        "estimate": { "type": "integer" }
       },
       "rules": {
         "list": "'agent' in @user.roles || 'admin' in @user.roles",
@@ -5043,6 +5628,9 @@ using MMLib.Alvo.Events;
 using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Management;
 
+using System.Text.Json;
+using System.Text.Json.Nodes;
+
 namespace MMLib.Alvo.TestHost.Tests;
 
 /// <summary>
@@ -5090,6 +5678,38 @@ public sealed class AlvoTestHostDeliverTests
         alvo.Hooks.AssertRan(Handler, times: 1);
     }
 
+    /// <summary>
+    /// A typed handler cannot read a redacted number: the delivery fails naming the field, and runs once the field is filled
+    /// in — the fixture's redaction is a starting point, not a reproduction by itself.
+    /// </summary>
+    [Fact]
+    public async Task A_typed_handler_names_the_redacted_field_it_cannot_read_until_it_is_filled_in()
+    {
+        DeliveryFixture fixture;
+        await using (var production = await StartAsync(Failing))
+        {
+            await production.Data.CreateAsync("tickets", new Dictionary<string, object?> { ["title"] = "Printer jam", ["estimate"] = 3L }, AlvoTestHost.Caller("agent"), cancellationToken: Ct);
+            await production.DrainEventsAsync(Ct);
+            var operations = AsOperator(production);
+            var dead = (await operations.ListDeliveriesAsync("ops-desk", new ManagementDeliveryQuery { Status = "dead" }, Ct)).Items.ShouldHaveSingleItem();
+            fixture = await operations.GetFixtureAsync("ops-desk", dead.Id, Ct);
+        }
+
+        var estimates = new List<long?>();
+        await using var local = await AlvoTestHost.StartAsync(
+            builder => builder.FromDescriptor(Descriptor).Entity<OpsTicket>(t => t.OnCreated(
+                Handler, (AlvoCreated<OpsTicket> created) => estimates.Add(created.New.Estimate), configure: options => options.Retry = AlvoRetryPolicy.None)),
+            cancellationToken: Ct);
+
+        var unreadable = await Record.ExceptionAsync(() => local.DeliverAsync(fixture, Ct));
+        var envelope = JsonNode.Parse(fixture.Envelope.GetRawText())!;
+        envelope["data"]!["record"]!["estimate"] = 3;
+        await local.DeliverAsync(fixture with { Envelope = JsonSerializer.SerializeToElement(envelope) }, Ct);
+
+        unreadable.ShouldNotBeNull().Message.ShouldContain("estimate");
+        estimates.ShouldBe([3L]);
+    }
+
     [Fact]
     public async Task Stats_count_the_runs_this_instance_made()
     {
@@ -5126,6 +5746,15 @@ public sealed class AlvoTestHostDeliverTests
         };
 
         return alvo.Services.GetRequiredService<IAlvoOperations>();
+    }
+
+    /// <summary>The part of a ticket the typed handler maps.</summary>
+    [AlvoEntity("tickets")]
+    public sealed class OpsTicket
+    {
+        public string? Title { get; set; }
+
+        public long? Estimate { get; set; }
     }
 
     private static AlvoEvent Event() => new()
@@ -5323,14 +5952,14 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 15: Delivery operations on both engines **[slice end]**
+## Task 18: Delivery operations on both engines **[slice end]**
 
 **Files:**
 - Create: `test/_shared/testhost/DeliveryOperationsFacts.cs`, `test/MMLib.Alvo.TestHost.Tests/SqliteDeliveryOperationsTests.cs`, `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlDeliveryOperationsTests.cs`
 - Modify: `test/_shared/testhost/DeliveryRows.cs` (`OperationsAsync`)
 
 **Interfaces:**
-- Consumes: everything above; `ops-desk.alvo.json` (Task 14); `AuditCapture` (Task 9); HX-03's `DispatchedEventCollection` and `PostgresFixture`.
+- Consumes: everything above; `ops-desk.alvo.json` (Task 17); `AuditCapture` (Task 11); HX-03's `DispatchedEventCollection` and `PostgresFixture`.
 - Produces: `DeliveryRows.OperationsAsync(Func<DbConnection>, CancellationToken) → Task<IReadOnlyList<string>>` (the log's `operation` column, by `at` then `id`); the abstract `DeliveryOperationsFacts` with `protected abstract Task<OperationsDatabase> DatabaseAsync()` and `protected sealed record OperationsDatabase(Action<IAlvoBuilder> Use, Func<DbConnection> Connect)`.
 
 - [ ] **Step 1: Write the facts**
@@ -5644,11 +6273,11 @@ public sealed class PostgreSqlDeliveryOperationsTests(PostgresFixture postgres)
 - [ ] **Step 2: Run the SQLite leg**
 
 Run: `dotnet test --project test/MMLib.Alvo.TestHost.Tests --filter-class '*SqliteDeliveryOperationsTests'`
-Expected: PASS (all four facts) — the behaviour arrived with Tasks 1–14; a failure here is a real defect in one of them, fixed where it lives, never in the fact.
+Expected: PASS (all four facts) — the behaviour arrived with Tasks 1–17; a failure here is a real defect in one of them, fixed where it lives, never in the fact.
 
 - [ ] **Step 3: Run the PostgreSQL leg**
 
-Run: `dotnet test --project test/MMLib.Alvo.Data.PostgreSql.Tests.Integration --filter-class '*PostgreSqlDeliveryOperationsTests'` and `--filter-class '*PostgreSqlDeliveryStoreTests'` (the contract rows of Tasks 2–4 on PostgreSQL).
+Run: `dotnet test --project test/MMLib.Alvo.Data.PostgreSql.Tests.Integration --filter-class '*PostgreSqlDeliveryOperationsTests'` and `--filter-class '*PostgreSqlDeliveryStoreTests'` (the contract rows of Tasks 2–6 on PostgreSQL).
 Expected: PASS (skipped only where Docker is unavailable). Watch for a PostgreSQL-only defect in the upsert's `WHERE`, the partial unique index's `ON CONFLICT DO NOTHING`, or a `DBNull` parameter whose type the server cannot infer; a defect is fixed in `DeliveryOperationsTable` with identical text for both engines.
 
 - [ ] **Step 4: Format, ring1, commit**
@@ -5664,7 +6293,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 16: The dashboard's operations reads and writes — `OperationsGateway` and `OperationsView`
+## Task 19: The dashboard's operations reads and writes — `OperationsGateway` and `OperationsView`
 
 **Files:**
 - Create: `src/MMLib.Alvo.Admin/Internal/OperationsGateway.cs`, `src/MMLib.Alvo.Admin/Components/Operations/OperationsView.cs`
@@ -5672,7 +6301,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 - Test: `test/MMLib.Alvo.Admin.Tests/Operations/OperationsViewTests.cs`, `test/MMLib.Alvo.Admin.Tests/Operations/OperationsGatewayTests.cs`
 
 **Interfaces:**
-- Consumes: `IAlvoOperations` (Tasks 6, 11), `ManagementGateway.ExtensionsAsync`, `.Invalidate()`, private `ProjectAsync`/`AsOperatorAsync`.
+- Consumes: `IAlvoOperations` (Tasks 8, 14), `ManagementGateway.ExtensionsAsync`, `.Invalidate()`, private `ProjectAsync`/`AsOperatorAsync`.
 - Produces:
   - `ManagementGateway.ForProjectAsync<T>(Func<string, Task<T>> call, CancellationToken ct) → Task<T>` (internal: the project, then the call with the operator published).
   - `internal sealed class OperationsGateway(IAlvoOperations operations, ManagementGateway management)` — `Task<IReadOnlyList<ManagementExtension>> HandlersAsync(CancellationToken)`, `Task<ManagementExtensionStats> StatsAsync(CancellationToken)`, `Task<ManagementDeliveryPage> DeliveriesAsync(string? status, CancellationToken)`, `Task<ManagementDelivery> DeliveryAsync(Guid, CancellationToken)`, `Task<ManagementDelivery> RedeliverAsync(Guid, string? reason, CancellationToken)`, `Task<ManagementReplayPlan> PlanReplayAsync(string subscriber, CancellationToken)`, `Task<ManagementReplayPlan> ReplayAsync(string subscriber, string? reason, string key, CancellationToken)`, `Task<DeliveryFixture> FixtureAsync(Guid, CancellationToken)`, `Task<ManagementExtension> SetPausedAsync(string subscriber, bool paused, string? reason, CancellationToken)` (drops the catalog cache).
@@ -6028,7 +6657,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 17: The Operations page and its end-to-end scenario **[slice end]**
+## Task 20: The Operations page and its end-to-end scenario **[slice end]**
 
 **Files:**
 - Create: `src/MMLib.Alvo.Admin/Components/Operations/Operations.razor`, `Operations.razor.cs`
@@ -6037,7 +6666,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 - Modify (tests): `test/MMLib.Alvo.Admin.Tests/PublicApi.MMLib.Alvo.Admin.verified.txt`
 
 **Interfaces:**
-- Consumes: Task 16's gateway and view; the design system (`PageHeader`, `Panel`, `ListRow`, `AlvoButton`, `AlvoConfirm`, `EmptyState`, `Skeleton`, `RefreshBar`, `RefusalPanel`, `RefusalState<AdminProblem>`, `CodeBlock`), `AdminProblem.From`.
+- Consumes: Task 19's gateway and view; the design system (`PageHeader`, `Panel`, `ListRow`, `AlvoButton`, `AlvoConfirm`, `EmptyState`, `Skeleton`, `RefreshBar`, `RefusalPanel`, `RefusalState<AdminProblem>`, `CodeBlock`), `AdminProblem.From`.
 - Produces: the routable `/admin/operations` page (`Operations`), `AdminPaths.Operations` (`$"{AlvoAdmin.BasePath}/operations"`), `Icons.Operations`, the nav section *Operations* (go key `p`); test ids `ops-handler-{id}`, `ops-handler-paused-{id}`, `ops-runs-{id}`, `ops-pause-{id}`, `ops-resume-{id}`, `ops-replay-{id}`, `ops-reason`, `ops-confirm`/`ops-confirm-run`/`ops-confirm-cancel`, `ops-refresh`, `ops-status-filter-{status}`, `ops-delivery-list`, `ops-row-{id}`, `ops-delivery-status`, `ops-delivery-history`, `ops-redeliver`, `ops-fixture`, `ops-fixture-json`.
 
 - [ ] **Step 1: Write the failing scenario**
@@ -6477,7 +7106,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 18: Docs — *Operate deliveries*, architecture docs, CHANGELOG, PLAN, spec amendment **[slice end]**
+## Task 21: Docs — *Operate deliveries*, architecture docs, CHANGELOG, PLAN, spec amendment **[slice end]**
 
 **Files:**
 - Create: `website/src/content/docs/extending/operate-deliveries.mdx`; `website/src/snippets/extending/operations/RepairDeskHandlers.cs`, `RepairDeskOperationsTests.cs`, `repair-desk.alvo.json`
@@ -6673,10 +7302,10 @@ Expected: PASS (`SnippetCoverageTests` finds `RepairDeskHandlers` and `RepairDes
 1. *A delivery, and where it can end* — one row per (event, handler); statuses `pending`, `running`, `succeeded`, `retrying`, `dead`, `cancelled`; a dead delivery holds its record's later deliveries for that handler back (unless `Ordering = None`). `<Code code={descriptor} lang="json" title="repair-desk.alvo.json" />` and `<SourceExcerpt code={handlers} from="public static IAlvoBuilder AddRepairDesk" to="Orders the part a new repair needs." title="RepairDeskHandlers.cs" />`.
 2. *Who may do what* — the table: list, read one, stats → `viewer`; redeliver, replay, pause, fixture, run a schedule → `developer`; switch an extension off → `admin`; the levels come from the descriptor's `access` block, as for every management route. A viewer sees ids, statuses, tenants and error types — never a payload.
 3. *Look* — `GET {m}/projects/{p}/deliveries?subscriber=&status=&from=&to=&after=&limit=` (newest first; `next` is the cursor; `from`/`to` are event time, the end excluded), `GET …/deliveries/{id}` with its attempts (numbered across the delivery's whole life), and the same through `IAlvoOperations` in-process. `GET …/extensions/stats`: runs, failures, p50/p95 over the last 24 hours, **for this instance only** (`scope: "this-instance"`): another replica's runs are not in it, and a restart starts the day over (`since`).
-4. *Run a dead delivery again* — `POST …/deliveries/{id}/redeliver` `{reason}`: back to pending with a fresh attempt budget; its history is kept; its lane drains after it. A delivery still pending or retrying is answered as it is; a running one is 409; one whose handler this host no longer registers is 409 (retire it with `AddRetiredExtension` instead). `<SourceExcerpt code={tests} from="supplier.Down = false;" to="supplier.Ordered.ShouldBe" title="RepairDeskOperationsTests.cs" />`. Replace the old by-hand SQL: it is no longer needed.
-5. *Replay a window* — `POST …/deliveries/replay` `{subscriber, status, from, to, dryRun, reason}`: always ask with `"dryRun": true` first — it answers the exact count and the first 20 ids and changes nothing; the real run resets at most 10 000; send `Idempotency-Key` so a retried request answers the first one's count (`"replayed": true`) instead of running them twice (the same key with a different body is 409 `idempotency-conflict`; a key on a dry run is refused). Replayed deliveries run after newer events of the same records that already ran, and **their conditions are not evaluated again** — a delivery recorded `unbound` was recorded without its condition, so a replay of `unbound` rows can run the handler for records its condition would not have matched; check `when` in the handler body if that matters.
-6. *Pause and resume* — `PUT …/subscribers/{id}/paused` `{paused, reason}`: on every instance, until resumed — it survives a restart; new deliveries are still recorded and wait; a delivery already running finishes; after resume they run in order. The catalog and the dashboard show `paused`. `<SourceExcerpt code={tests} from="public async Task A_paused_handler_catches_up_in_order_once_resumed" to="supplier.Ordered.ShouldBe([\"chain\"" title="RepairDeskOperationsTests.cs" />` (if the excerpt component cannot take the escaped quote, end the excerpt at `await operations.SetPausedAsync(Project, "order-parts", paused: false`).
-7. *Reproduce a delivery locally* — `GET …/deliveries/{id}/fixture` (developer): the envelope with every value that is not a key replaced by `<redacted:FIELD>` (kept: `id`, `tenant_id`, `ref` and `enum` fields, empty values, the envelope's attributes and the changed-field names; an application event keeps only `id`); save it, fill in what the failure depends on, and run it with `AlvoTestHost.DeliverAsync(fixture)`: the handler runs once as a delivery would — its scope, its identity, its timeout — and its exception reaches your test as it was thrown. `<SourceExcerpt code={tests} from="var fixture = await operations.GetFixtureAsync" to="alvo.DeliverAsync(fixture, ct)" title="RepairDeskOperationsTests.cs" />`.
+4. *Run a dead delivery again* — `POST …/deliveries/{id}/redeliver` `{reason}`: back to pending with a fresh attempt budget; its history is kept; its lane drains after it. A delivery still pending or retrying is answered as it is; a running one is 409; one whose record has another delivery of the handler running is 409 (two would run at once — wait, then redeliver); one dead with `chain-depth-exceeded` is 409 (the depth limit stopped a loop there — fix the handler, do not restart the loop); one whose handler this host no longer registers is 409 (retire it with `AddRetiredExtension` instead). A redelivered `unbound` delivery waits — and holds its record's later deliveries for that handler — until the handler binds. `<SourceExcerpt code={tests} from="supplier.Down = false;" to="supplier.Ordered.ShouldBe" title="RepairDeskOperationsTests.cs" />`. Replace the old by-hand SQL: it is no longer needed.
+5. *Replay a window* — `POST …/deliveries/replay` `{subscriber, status, from, to, dryRun, reason}`: always ask with `"dryRun": true` first — it answers the exact count and the first 20 ids and changes nothing; the real run resets at most 10 000, never resets a delivery dead with `chain-depth-exceeded`, and is refused (409) while any selected record has a delivery of the handler running; send `Idempotency-Key` so a retried request answers the first one's count (`"replayed": true`) instead of running them twice (the same key with a different body is 409 `idempotency-conflict`; a key on a dry run is refused). Replayed deliveries run after newer events of the same records that already ran, and **their conditions are not evaluated again** — a delivery recorded `unbound` was recorded without its condition, so a replay of `unbound` rows can run the handler for records its condition would not have matched; check `when` in the handler body if that matters.
+6. *Pause and resume* — `PUT …/subscribers/{id}/paused` `{paused, reason}`: on every instance, until resumed — it survives a restart; new deliveries are still recorded and wait; a delivery already running — or, on PostgreSQL, already being claimed when the pause commits — finishes; after resume they run in order. The catalog and the dashboard show `paused`. `<SourceExcerpt code={tests} from="public async Task A_paused_handler_catches_up_in_order_once_resumed" to="supplier.Ordered.ShouldBe([\"chain\"" title="RepairDeskOperationsTests.cs" />` (if the excerpt component cannot take the escaped quote, end the excerpt at `await operations.SetPausedAsync(Project, "order-parts", paused: false`).
+7. *Reproduce a delivery locally* — `GET …/deliveries/{id}/fixture` (developer): the envelope with every value that is not a key replaced by `<redacted:FIELD>` (kept: `id`, `tenant_id`, `ref` and `enum` fields, null values, the envelope's attributes — a data event's subject and partition key included — and the changed-field names; an application event keeps only `id` and the namespace part of its partition key; `tracestate` is dropped); save it, fill in what the failure depends on, and run it with `AlvoTestHost.DeliverAsync(fixture)`: the handler runs once as a delivery would — its scope, its identity, its timeout — and its exception reaches your test as it was thrown. A typed handler reads `<redacted:FIELD>` as a value of its property's type, so a number, a date or a flag it maps fails `record-unreadable` naming the field: fill in every field your class maps before delivering the fixture. `<SourceExcerpt code={tests} from="var fixture = await operations.GetFixtureAsync" to="alvo.DeliverAsync(fixture, ct)" title="RepairDeskOperationsTests.cs" />`.
 8. *Audit* — every pause, resume, redeliver and replay that changed something writes one row to `<prefix>_operations_log` (who, when, what, on what, why, how many) and one `ManagementAudit` log line at Warning; one that changed nothing writes neither. The log is not pruned yet.
 9. *On the dashboard* — the **Operations** page (`g p`): each handler with its runs on this instance, Pause/Resume, Replay dead (the dry run's count first); the delivery list by status; a delivery's attempts, **Run again** and **Fixture**.
 10. *Switching code off, and schedules* — `PUT …/extensions/{id}/enabled` exists for validate hooks, which arrive with write hooks; for an event handler it answers 409 naming the pause route. `POST …/schedules/{id}/run` answers 404 until schedules exist.
@@ -6713,7 +7342,7 @@ Expected: the site builds with link validation green (the new public types appea
 
 ---
 
-## Task 19: Rings, reviews, plan-guard, PR report, PR
+## Task 22: Rings, reviews, plan-guard, PR report, PR
 
 - [ ] **Step 1: CI-parity Release build, rings and the out-of-ring suites**
 
@@ -6726,7 +7355,7 @@ Expected: no output (any `error CAxxxx`/`IDExxxx`/`RCSxxxx` is fixed in a `fix(�
 
 - [ ] **Step 2: Reviews (substitutes) and the security-core checklist**
 
-Freeze the tree. `/code-review` and `/security-review` are user-only: dispatch two reviewer subagents over `git diff hx/05-typed-layer...HEAD`, labelled "substitute for /code-review high" and "substitute for /security-review". Point the code reviewer at: every operator statement being identical on both engines and opening its transaction with a write; the attempt numbering (`MAX + 1`) and the reset's `attempts = 0` against `DeliveryRunner.Admit`'s ceiling; the claim's pause term in both halves of the EvalPlanQual-safe statement; the fake store matching the EF store row for row; `ReplayAsync`'s order (key replay before the count, the 10 000 ceiling, the `null` path); the no-op paths writing neither row nor audit; `EventPump.InRoundAsync` keeping the re-entrancy and stop semantics `DrainAsync` had. Point the security reviewer at: the nine rows in `ManagementOperations` and every route's `Gate` (the sweep in `ManagementAccessTests` reaches all nine); `ManagementGate.Admit`'s order (level before project); the fixture's redaction (no value but keys, `DeliveryFixturesTests`) and its Developer level; the reason's bounds against log injection; `IdempotencyKey` scoping by `AlvoIdempotency.IdentityOf`; `DeliverAsync` refused outside the manual mode (a fixture is a forged event); the viewer's list disclosing no payload. Then run the `alvo-security-core-review` checklist — §6.2 does not list HX-06, and the plan runs it anyway for its authorization and disclosure items (Ruling 20) — and record each item's evidence for the PR report. Fix findings, re-run ring0, one `fix(…): …` commit per finding.
+Freeze the tree. `/code-review` and `/security-review` are user-only: dispatch two reviewer subagents over `git diff origin/main...HEAD`, labelled "substitute for /code-review high" and "substitute for /security-review". Point the code reviewer at: the claimant minted per claim in `DeliveryDispatcher` and carried to every answer (Ruling 2 rests on it); every operator statement being identical on both engines and opening its transaction with a write; the attempt numbering (`MAX + 1`) and the reset's `attempts = 0` against `DeliveryRunner.Admit`'s ceiling; the claim's pause term in both halves of the EvalPlanQual-safe statement; the fake store matching the EF store row for row; `ReplayAsync`'s order (key replay before the count, the 10 000 ceiling, the `null` path); the no-op paths writing neither row nor audit; `EventPump.InRoundAsync` keeping the re-entrancy and stop semantics `DrainAsync` had. Point the security reviewer at: the nine rows in `ManagementOperations` and every route's `Gate` (the sweep in `ManagementAccessTests` reaches all nine); `ManagementGate.Admit`'s order (level before project); the fixture's redaction (no value but keys, `DeliveryFixturesTests`) and its Developer level; the reason's bounds against log injection; `IdempotencyKey` scoping by `AlvoIdempotency.IdentityOf`; `DeliverAsync` refused outside the manual mode (a fixture is a forged event); the viewer's list disclosing no payload. Then run the `alvo-security-core-review` checklist — §6.2 does not list HX-06, and the plan runs it anyway for its authorization and disclosure items (Ruling 20) — and record each item's evidence for the PR report. Fix findings, re-run ring0, one `fix(…): …` commit per finding.
 
 - [ ] **Step 3: `alvo-plan-guard`**
 
@@ -6743,34 +7372,34 @@ git branch --show-current   # hx/06-delivery-operations
 git push -u origin hx/06-delivery-operations
 ```
 
-If #416 (HX-05) is merged: `git fetch origin && git merge origin/main` first (merge-commit style), re-run ring0, push, then `gh pr create --base main`. If #416 is still open: `gh pr create --base main --draft`, the body's first line "Stacked on #416 — review `hx/05-typed-layer...hx/06-delivery-operations`; ready once #416 merges." The body is the skill's five-line pointer, carries `Closes #383` once, and ends with `https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB`. Then `gh pr edit --add-label needs-deep-review` (Ruling 20). After the merge, read #383 back (`gh issue view 383`) to confirm it — and only it — was closed, comment on #33 that HX-06 delivered its DLQ and redelivery UI, and on #154 that retention must now cover `alvo_operations_log` and `alvo_subscriber_controls` is not to be pruned.
+HX-05 is merged (#416) and `main` is already merged into this branch (`9081385b`): `git fetch origin && git merge origin/main` once more if `main` moved (merge-commit style), re-run ring0, push, then `gh pr create --base main`. The body is the skill's five-line pointer, carries `Closes #383` once, and ends with `https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB`. Then `gh pr edit --add-label needs-deep-review` (Ruling 20). After the merge, read #383 back (`gh issue view 383`) to confirm it — and only it — was closed, comment on #33 that HX-06 delivered its DLQ and redelivery UI, and on #154 that retention must now cover `alvo_operations_log` and `alvo_subscriber_controls` is not to be pruned.
 
 ---
 
 ## Rulings and deviations this plan takes
 
-Each is recorded in the spec amendment (Task 18 Step 4) so a later reader can tell a decision from an oversight.
+Each is recorded in the spec amendment (Task 21 Step 4) so a later reader can tell a decision from an oversight.
 
-1. **The delivery port grows instead of a second store port.** §5 lists no store additions for HX-06, but operations need storage a provider implements: `IDeliveryStore` gains nine **abstract** members (`ListAsync`, `FindAsync`, `AttemptsAsync`, `SelectAsync`, `RedeliverAsync`, `ReplayAsync`, `SetPausedAsync`, `ControlsAsync`, `FindOperationAsync`) and six `required init` records, and `ClaimAsync`'s contract gains "never a paused subscriber". One port because the claim must read the pause control in the same statement and the log row must commit with the change — one database, one port (the port's own *One database with the outbox* rule). Abstract, not default members, for `HoldBackAsync`'s reason (HX-03 (20), (33)): a default that did nothing would leave a dead lane blocked forever on a third-party store. No release tag carries `IDeliveryStore`, so the break reaches no published consumer; the CHANGELOG names it for anyone building from `main` or `:edge`. Held by eleven new rows of `DeliveryStoreContractTests`, on the EF store (both engines) and the core's fake.
-2. **A redelivered or replayed delivery restarts its attempt budget; its history keeps numbering.** The reset sets `attempts = 0` — what the retry policy, the backoff and `DeliveryRunner.Admit`'s ceiling read — so a delivery that died at its last attempt runs again instead of being reclaimed dead `lease-expired` at once; the history numbers an attempt `COALESCE(MAX(attempt), 0) + 1` per delivery, so it neither collides with the `(delivery_id, attempt)` key nor loses earlier attempts. The handler sees `AlvoEventContext.Attempt` start again at 1. Prior art: Hangfire's and MassTransit's requeue reset the retry count and keep the history. Supersedes HX-03 (29)'s by-hand recipe (which deleted the history).
-3. **The pause lives in the claim.** A `NOT EXISTS` over `alvo_subscriber_controls` in both halves of the claim, not a filter of the dispatcher's subscriber lists: it holds on every replica and across restarts, with no read-then-claim window (spec §4.8 *Claim*, "no pause control"). Fan-out is untouched, so a paused handler's deliveries accumulate; a delivery already running finishes; a drain over a paused handler is quiet, not a loop.
+1. **The delivery port grows instead of a second store port.** §5 lists no store additions for HX-06, but operations need storage a provider implements: `IDeliveryStore` gains nine **abstract** members (`ListAsync`, `FindAsync`, `AttemptsAsync`, `SelectAsync`, `RedeliverAsync`, `ReplayAsync`, `SetPausedAsync`, `ControlsAsync`, `FindOperationAsync`) and six `required init` records, and `ClaimAsync`'s contract gains "never a paused subscriber". One port, not a second one, because it has one implementer per provider and one contract suite (`DeliveryStoreContractTests`) that already owns the delivery tables' semantics; because no release tag carries `IDeliveryStore`, so growing it reaches no published consumer (the CHANGELOG names it for anyone building from `main` or `:edge`, and has said the port will grow before 1.0); and because `HoldBackAsync` (HX-03 (20), (33)) set the precedent of growing it. Abstract, not default members: a default `RedeliverAsync` that did nothing would report success and leave the lane blocked. Held by the new contract rows on the EF store (both engines) and the core's fake.
+2. **A redelivered or replayed delivery restarts its attempt budget; its history keeps numbering.** The reset sets `attempts = 0` — what the retry policy, the backoff and `DeliveryRunner.Admit`'s ceiling read — so a delivery that died at its last attempt runs again instead of being reclaimed dead `lease-expired` at once; the history numbers an attempt `COALESCE(MAX(attempt), 0) + 1` per delivery, so it neither collides with the `(delivery_id, attempt)` key nor loses earlier attempts. The handler sees `AlvoEventContext.Attempt` start again at 1. **The reset is safe only because a claimant names one claim:** with the attempt count restarting, a claim from before a redeliver and the claim after it both hold attempt 1, so the dispatcher mints a fresh claimant for every `ClaimAsync` call (`"{process}:{guid}"`) and answers with it; `DeliveryClaim.Claimant` and the port's *Fencing* remarks say so, and `A_late_answer_from_before_a_redeliver_changes_nothing` holds every store to it. Prior art: Hangfire's and MassTransit's requeue reset the retry count and keep the history. Supersedes HX-03 (29)'s by-hand recipe (which deleted the history).
+3. **The pause lives in the claim.** A `NOT EXISTS` over `alvo_subscriber_controls` in both halves of the claim, not a filter of the dispatcher's subscriber lists: it holds on every replica and across restarts, with no read-then-claim window (spec §4.8 *Claim*, "no pause control"). Fan-out is untouched, so a paused handler's deliveries accumulate; a delivery already running finishes — and on PostgreSQL a claim statement already under way when the pause commits may still take one batch (its snapshot predates the pause); a drain over a paused handler is quiet, not a loop.
 4. **The operations log carries the replay's idempotency record.** E11 names six columns; the log adds `affected`, `sample`, `idempotency_scope`, `idempotency_key`, `request_fingerprint`, and a partial unique index on the key. The record is written in the reset's own transaction — the log insert is the transaction's first write and `ON CONFLICT DO NOTHING` makes a concurrent duplicate a no-op — so a crash cannot leave a reset without its record (the window `IManagementIdempotencyStore`'s remarks state for the apply). `IManagementIdempotencyStore` is not reused: it records a revision number, and a replay's answer is a count and ids.
 5. **A change that changed nothing writes nothing.** Pausing a paused handler, resuming a running one and redelivering a delivery already pending or retrying answer the current state with no log row and no audit line — idempotent operations (§0 *agent-first*); acceptance (7) is read as "each change". A replay always writes its row, even for a count of zero: the row is its key's record.
-6. **`Idempotency-Key` follows the house rules, which differ from the IETF draft in one answer.** Optional (as on apply and rollback); read from one header line (two lines are 422); refused on a dry run; scoped by `AlvoIdempotency.IdentityOf(caller)`; the fingerprint is the operation, the project, the subscriber, the status and the window — not the reason, so the same replay retried with a reworded note is the same request. A retry answers the stored count and ids with `replayed: true` (the draft's "return the stored response"). The same key with a different request is 409 `idempotency-conflict`, the slug the data path and the apply already send, where the draft suggests 422.
-7. **What a replay selects.** One registered handler (required), one finished status (`dead` unless set; `succeeded` and `cancelled` allowed; an unfinished status is 422), and a half-open window over **event time**, mapped onto event ids through an internal `AlvoEventId.Floor` (UUIDv7 ids sort by time; the stores already compare them for lane order). The sample is the first 20 ids in event order — the order they run. A real run resets at most 10 000 deliveries, checked by a count before the reset; a concurrent fan-out can push one replay slightly past it, which is stated rather than locked against.
+6. **`Idempotency-Key` follows the house rules, which differ from the IETF draft in one answer.** Optional (as on apply and rollback); read from one header line (two lines are 422); refused on a dry run; scoped by `AlvoIdempotency.IdentityOf(caller)`; the fingerprint is the operation, the project, the subscriber, the status and the window — not the reason, so the same replay retried with a reworded note is the same request. A retry answers the stored count and ids with `replayed: true` (the draft's "return the stored response"). The same key with a different request is 409 `idempotency-conflict`, the slug the data path and the apply already send, where the draft suggests 422. The scope is the caller, not the project — as `ManagementIdempotency`'s is — so one caller reusing a key across two projects of one database is answered 409 too.
+7. **What a replay selects.** One registered handler (required), one finished status (`dead` unless set; `succeeded` and `cancelled` allowed; an unfinished status is 422), and a half-open window over **event time**, mapped onto event ids through an internal `AlvoEventId.Floor` (UUIDv7 ids sort by time; the stores already compare them for lane order). The sample is the first 20 ids in event order — the order they run. A real run resets at most 10 000 deliveries, checked by a count before the reset; a concurrent fan-out can push one replay slightly past it, which is stated rather than locked against. A replay never selects a delivery dead with `chain-depth-exceeded` (`DeliveryFilter.Replayable`): that row is the record of a loop the depth limit stopped, and running it again restarts the loop and its non-Alvo side effects. A real run is refused (409) when any selected delivery's record has a delivery of the handler running (`DeliverySelection.Busy`), and the reset statement itself skips such rows, so a race cannot put two deliveries of one record in flight; the dry run still counts them.
 8. **Conditions are not evaluated again.** A redelivered or replayed delivery runs its handler; `when` was decided at fan-out (X6). A delivery recorded `when-failed` or `unbound` was recorded without a decided condition, so replaying it runs the handler even for a record the condition would not match — HX-03 (6)'s stated trade-off, now in the operator's hands: the docs and the dashboard's replay confirm say so. Re-evaluating at claim time would change every delivery's semantics and is left to a measured need.
-9. **Redeliver's guards.** Running → 409 (the fence would make a reset racy); a handler this host does not register → 409 (a pending row for an unknown id refuses the next start, E3); pending or retrying → answered unchanged. A handler registered but not bound to the current schema may be redelivered: the delivery waits until it binds.
+9. **Redeliver's guards.** Running → 409; a finished delivery whose record has another delivery of the handler running → 409, and the store's statement refuses the same case (two deliveries of one record must never be in flight together); dead with `chain-depth-exceeded` → 409 (Ruling 7's loop reason); a handler this host does not register → 409 (a pending row for an unknown id refuses the next start, E3); pending or retrying → answered unchanged. A handler registered but not bound to the current schema may be redelivered: the delivery waits until it binds — and, being pending, **holds that handler's later deliveries of the record back until then**, unlike the `unbound` dead row it replaced. The docs say so.
 10. **`IAlvoOperations` is complete now, including two members that only refuse.** §4.8 defines the port complete in HX-06: `SetEnabledAsync` answers 404 or 409 for every kind that exists until validate hooks (HX-09), and `RunScheduleAsync` 404 until schedules (HX-13); it returns the `ManagementDelivery` that will run the schedule. Unlike HX-04 (1), which defers *init members* nothing fills, an *interface member* added later breaks every implementer and every test double of the port (the dashboard's), so the spec's "complete" stands.
 11. **`ManagementExtension.Paused` ships; `Enabled` waits.** HX-04 (1) appends `Enabled`/`Paused` "by the PR that first fills them": `Paused` is filled here (the catalog reads the controls); `Enabled` can be false for no kind before HX-09, so it waits for it.
 12. **Public types §5 does not list.** `ManagementDeliveryAttempt` (the detail's history), `ManagementDeliveryPage` (a keyset page needs its cursor), `ManagementExtensionStat` (the stats envelope's items, the house's envelope-with-items shape), three exceptions (the HTTP layer maps only types: 404 delivery, 404 extension, 409 conflict), the store records of Ruling 1, `IDeliveryStoreWorld.OperationsAsync` and the contract rows (Testing), and `IAlvoEventPump.DeliverAsync` — the TestHost holds no `InternalsVisibleTo` (HX-02, HX-05 (12)), so its `DeliverAsync` needs a public core seam, and the pump is the manual-mode surface it already drives.
 13. **Statuses and operations are wire strings**, not public enums — as HX-04 (4)'s `runAs`/`ordering`: the values are the store's own words, append-safe for a tolerant client.
-14. **What a fixture keeps.** The record images keep `id`, `tenant_id`, `ref` and `enum` fields and empty values; every other value — `uuid` and `json` included — becomes the string `<redacted:FIELD>`, also in a numeric or boolean field (the developer fills in what a reproduction needs; a typed handler names the field it cannot read). An application event, or an entity the current schema no longer declares, keeps only `id`. The envelope's attributes stay — ids, type, time, tenant, `authid`, the role names in `authclaims` — because they identify rather than describe, and a fixture must run as the event's tenant and actor. `Redacted` lists the JSON pointers. Developer level: it discloses a payload's shape.
+14. **What a fixture keeps.** The record images keep `id`, `tenant_id`, `ref` and `enum` fields and null values (an empty string is a value and is redacted); every other value — `uuid` and `json` included — becomes the string `<redacted:FIELD>`, also in a numeric or boolean field (the developer fills in what a reproduction needs; a typed handler names the field it cannot read). An application event, or an entity the current schema no longer declares, keeps only `id`. The envelope's attributes stay — ids, type, time, tenant, `authid`, the role names in `authclaims`, a data event's `subject` and `partitionkey` (the record's id) — because they identify rather than describe, and a fixture must run as the event's tenant and actor. An application event's `subject` and the value part of its `partitionkey` are host-chosen text and are redacted (the namespace before the first `:` stays, so the envelope still reads as an application event); `tracestate` carries vendor data and is dropped. `Redacted` lists the JSON pointers. Developer level: it discloses a payload's shape.
 15. **`DeliverAsync` runs as a delivery and records nothing.** Manual mode only (a fixture is an event nobody wrote); the handler's own scope, its `RunAs`, one hop deeper in the chain, its timeout and one delivery span, so `Hooks.AssertRan` counts it; its exception propagates unwrapped; a handler the host does not bind, or an unreadable envelope, is `InvalidOperationException`.
 16. **Stats are this process's, from a `MeterListener`.** On `alvo.delivery.duration` (one measurement per answered attempt, with subscriber and outcome): runs, failures (`failed`, `dead`), and p50/p95 from 128 quarter-octave bins (within 19 %), in 24 hourly buckets. Alvo's meters are process-wide, so `this-instance` means this process — two hosts in one test process see each other's runs, another replica's are never seen; `since` is the later of a day ago and the process start. Every registered extension is listed, zeros included; `rejections` is 0 until write hooks (HX-09) record them.
 17. **The audit line.** A source-generated `ManagementAudit` event at Warning (event name = the method's), written after the change commits, carrying actor (`<key id>:<user id>`), operation, target, count and reason — ids and the operator's own words only. A reason is at most 500 characters with no control character, refused 422 before anything is written (it is one log field). A crash between the commit and the log line loses the line, never the row.
 18. **A gate class beside the management service.** `ManagementGate` holds the level check and the project check for the operations port; `AlvoManagementService` keeps its two private copies unchanged, so the surface every existing management fact pins is not edited to serve a second port. Folding them is a later touch's.
 19. **A viewer sees every tenant's deliveries.** Ids, statuses, partition keys, tenant ids and error types — never a payload: the Management API is project-wide by design ("data is deliberately absent", `IAlvoManagement`'s remarks) and a delivery row holds no data. The fixture, which holds a payload's shape, is Developer.
-20. **Security core by trigger, not by list.** §6.2 does not list HX-06; it adds nine authorization rows, a second gated port and a disclosure surface, and `alvo-security-core-review` triggers on authorization — so the checklist, a labelled `/security-review` substitute and `needs-deep-review` apply (Task 19).
+20. **Security core by trigger, not by list.** §6.2 does not list HX-06; it adds nine authorization rows, a second gated port and a disclosure surface, and `alvo-security-core-review` triggers on authorization — so the checklist, a labelled `/security-review` substitute and `needs-deep-review` apply (Task 22).
 21. **The two tables** are created by both `SystemSchemaInitializer` and `IDeliveryStore.EnsureAsync` (HX-03's shape, E10), reserved in `AlvoFrameworkTables` (an entity cannot take the name; introspection never plans a drop), with no `ALTER`; the control table carries `disabled_at`/`disabled_by` now (Ruling 11's later need) because a column added later would be one.
 22. **A page is newest first by delivery id** (fan-out time), continued with `after`, 1–200 rows (50 unless set); `next` is set whenever a page is full, so the last page may be empty — the cost of not counting.
 23. **The dashboard slice.** One *Operations* page (`g p`, after *Integrations*): handlers with their runs on this instance, Pause/Resume (a reason asked for on pause), Replay dead (the dry run's count in the confirm; the key minted when it is drawn, so a double press replays rather than runs twice); the delivery list by status; a delivery's attempts, **Run again** and **Fixture**. No level-aware hiding: the port refuses and the page draws the refusal, as every other page does. Schedules and timers join with HX-13; the *Lifecycle* tab's p95 and 24 h columns remain HX-09's row (HX-04 (13)).
@@ -6783,18 +7412,19 @@ Each is recorded in the spec amendment (Task 18 Step 4) so a later reader can te
 
 | HX-06 criterion | Task(s) | Test |
 |---|---|---|
-| (1) replay dry run returns the exact count and changes nothing, both engines | 2, 11, 15 | contract `A_selection_counts_exactly_samples_in_event_order_and_changes_nothing` (SQLite, PostgreSQL, fake); `AlvoOperationsReplayTests.A_replay_dry_run_counts_exactly_and_changes_nothing`; `DeliveryOperationsFacts.A_replay_dry_run_returns_the_exact_count_and_changes_nothing` (`SqliteDeliveryOperationsTests`, `PostgreSqlDeliveryOperationsTests`) |
-| (2) a paused subscriber accumulates and drains in order after resume | 4, 15, 18 | contract `A_paused_subscriber_is_not_claimed_and_its_lane_drains_in_order_after_resume`; `DeliveryOperationsFacts.A_paused_handler_accumulates_and_drains_in_order_after_resume` (both engines); snippet `A_paused_handler_catches_up_in_order_once_resumed` |
-| (3) redeliver of a dead delivery unblocks its lane | 1, 3, 15 | contract `Redelivering_a_dead_delivery_makes_it_the_head_of_its_lane_again`, `A_redelivered_delivery_runs_again_with_a_fresh_budget_and_keeps_its_history`; SQLite `An_attempt_after_a_reset_is_numbered_after_the_last_one`; `DeliveryOperationsFacts.Redelivering_a_dead_delivery_unblocks_its_lane` (both engines) |
-| (4) Viewer gets 403 on redeliver | 6, 13 | `OperationsLevelTests`; `OperationsRouteTests.A_viewer_is_refused_a_redeliver`; `ManagementAccessTests.Every_mapped_management_route_refuses_a_caller_the_project_names_nowhere` |
-| (5) a fixture contains no non-key scalar | 7, 9, 14 | `DeliveryFixturesTests` (all rows, incl. `No_original_non_key_value_survives_anywhere_in_the_fixture`); `AlvoOperationsServiceTests.A_fixture_redacts_the_delivery_s_envelope`; `AlvoTestHostDeliverTests.A_fixture_from_one_host_reproduces_the_failure_in_another` |
-| (6) `DeliverAsync` reproduces a failure locally | 14, 18 | `AlvoTestHostDeliverTests.A_fixture_from_one_host_reproduces_the_failure_in_another`, `A_delivered_fixture_runs_the_handler_as_the_dispatcher_would_and_is_counted_as_a_run`; `DeliveryDispatcherTests.A_fixture_hands_back_the_handler_s_own_exception`; snippet `A_dead_delivery_is_reproduced_from_its_fixture_and_redelivered_once_fixed` |
-| (7) pause, redeliver and replay each write one log row and one `ManagementAudit` event | 3, 4, 10, 11, 15 | contract `A_redeliver_writes_one_log_row`, `A_replay_resets_only_the_named_subscriber_s_finished_deliveries`, `Pausing_twice_changes_nothing_the_second_time`; `AlvoOperationsWritesTests.Redelivering_a_dead_delivery_puts_it_back_and_audits_once`, `Pausing_twice_audits_once_and_answers_paused`; `AlvoOperationsReplayTests.A_replay_resets_what_it_selects_and_audits_once`; `DeliveryOperationsFacts.Pause_redeliver_and_replay_each_write_one_log_row_and_one_audit_line` (both engines) |
-| (8) stats states `scope: "this-instance"` | 8, 9, 13, 14 | `ExtensionStatsTests`; `AlvoOperationsServiceTests.Stats_list_every_registered_extension_scoped_to_this_instance`; `OperationsRouteTests.A_viewer_lists_deliveries_and_reads_the_stats`; `AlvoTestHostDeliverTests.Stats_count_the_runs_this_instance_made` |
-| (9) `PUT …/extensions/{id}/enabled` on a handler → 409 | 10, 13 | `AlvoOperationsWritesTests.Switching_a_handler_off_is_a_conflict_that_names_pausing`; `OperationsRouteTests.Switching_a_handler_off_is_409_naming_pausing`, `A_developer_may_not_switch_code_off` |
-| (10) admin e2e: pause → write → resume → delivered | 16, 17 | `OperationsScenarios.A_paused_handler_holds_its_delivery_until_it_is_resumed`; `OperationsGatewayTests`, `OperationsViewTests` |
-| Scope: `Idempotency-Key` | 3, 11, 13 | contract `A_replay_under_a_spent_key_changes_nothing`; `AlvoOperationsReplayTests.A_retried_replay_answers_the_first_and_resets_nothing`, `A_key_spent_on_a_different_replay_is_a_conflict`, `A_key_on_a_dry_run_is_refused`; `OperationsRouteTests.A_replay_reads_its_idempotency_key_from_the_header` |
-| Scope: `alvo_subscriber_controls`, `alvo_operations_log` | 1, 3, 4, 12 | `DeliveryOperationsTableTests`, `FrameworkTableReservationTests`, `AddAlvoIntegrationTests` (two survive-introspection facts), `PausedCatalogTests` |
-| Scope: routes and levels | 6, 13 | `OperationsLevelTests`, `ManagementContractTests.Every_member_of_the_management_ports_has_an_http_route`, `OperationsRouteTests` |
-| Docs: *Operate deliveries*; Dashboard: Operations page | 17, 18 | `RepairDeskOperationsTests` in `MMLib.Alvo.DocsSnippets.Tests`; website build; admin e2e |
-| Security (authorization and disclosure) | 19 | `alvo-security-core-review` checklist, `/security-review` substitute, `needs-deep-review` (Ruling 20) |
+| (1) replay dry run returns the exact count and changes nothing, both engines | 3, 14, 18 | contract `A_selection_counts_exactly_samples_in_event_order_and_changes_nothing`, `A_replayable_selection_leaves_out_loop_breaks_and_counts_running_records` (SQLite, PostgreSQL, fake); `AlvoOperationsReplayTests.A_replay_dry_run_counts_exactly_and_changes_nothing`; `DeliveryOperationsFacts.A_replay_dry_run_returns_the_exact_count_and_changes_nothing` (`SqliteDeliveryOperationsTests`, `PostgreSqlDeliveryOperationsTests`) |
+| (2) a paused subscriber accumulates and drains in order after resume | 6, 18, 21 | contract `A_paused_subscriber_is_not_claimed_and_its_lane_drains_in_order_after_resume`; `DeliveryOperationsFacts.A_paused_handler_accumulates_and_drains_in_order_after_resume` (both engines); snippet `A_paused_handler_catches_up_in_order_once_resumed` |
+| (3) redeliver of a dead delivery unblocks its lane | 1, 4, 18 | contract `Redelivering_a_dead_delivery_makes_it_the_head_of_its_lane_again`, `A_redelivered_delivery_runs_again_with_a_fresh_budget_and_keeps_its_history`, `A_late_answer_from_before_a_redeliver_changes_nothing`; SQLite `An_attempt_after_a_reset_is_numbered_after_the_last_one`; `DeliveryDispatcherTests.Every_claim_carries_a_claimant_of_its_own`; `DeliveryOperationsFacts.Redelivering_a_dead_delivery_unblocks_its_lane` (both engines) |
+| (4) Viewer gets 403 on redeliver | 8, 16 | `OperationsLevelTests`; `OperationsRouteTests.A_viewer_is_refused_a_redeliver`; `ManagementAccessTests.Every_mapped_management_route_refuses_a_caller_the_project_names_nowhere` |
+| (5) a fixture contains no non-key scalar | 9, 12, 17 | `DeliveryFixturesTests` (all rows, incl. `No_original_non_key_value_survives_anywhere_in_the_fixture`, `An_application_event_s_subject_and_key_value_are_redacted_and_its_trace_state_dropped`); `AlvoOperationsFixtureAndStatsTests.A_fixture_redacts_the_delivery_s_envelope`; `AlvoTestHostDeliverTests.A_fixture_from_one_host_reproduces_the_failure_in_another` |
+| (6) `DeliverAsync` reproduces a failure locally | 17, 21 | `AlvoTestHostDeliverTests.A_fixture_from_one_host_reproduces_the_failure_in_another`, `A_delivered_fixture_runs_the_handler_as_the_dispatcher_would_and_is_counted_as_a_run`, `A_typed_handler_names_the_redacted_field_it_cannot_read_until_it_is_filled_in`; `DeliveryDispatcherTests.A_fixture_hands_back_the_handler_s_own_exception`; snippet `A_dead_delivery_is_reproduced_from_its_fixture_and_redelivered_once_fixed` |
+| (7) pause, redeliver and replay each write one log row and one `ManagementAudit` event | 4, 5, 6, 13, 14, 18 | contract `A_redeliver_writes_one_log_row`, `A_replay_resets_only_the_named_subscriber_s_finished_deliveries`, `Pausing_twice_changes_nothing_the_second_time`; `AlvoOperationsWritesTests.Redelivering_a_dead_delivery_puts_it_back_and_audits_once`, `Pausing_twice_audits_once_and_answers_paused`; `AlvoOperationsReplayTests.A_replay_resets_what_it_selects_and_audits_once`; `DeliveryOperationsFacts.Pause_redeliver_and_replay_each_write_one_log_row_and_one_audit_line` (both engines) |
+| (8) stats states `scope: "this-instance"` | 10, 12, 16, 17 | `ExtensionStatsTests`; `AlvoOperationsFixtureAndStatsTests.Stats_list_every_registered_extension_scoped_to_this_instance`; `OperationsRouteTests.A_viewer_lists_deliveries_and_reads_the_stats`; `AlvoTestHostDeliverTests.Stats_count_the_runs_this_instance_made` |
+| (9) `PUT …/extensions/{id}/enabled` on a handler → 409 | 13, 16 | `AlvoOperationsWritesTests.Switching_a_handler_off_is_a_conflict_that_names_pausing`; `OperationsRouteTests.Switching_a_handler_off_is_409_naming_pausing`, `A_developer_may_not_switch_code_off` |
+| (10) admin e2e: pause → write → resume → delivered | 19, 20 | `OperationsScenarios.A_paused_handler_holds_its_delivery_until_it_is_resumed`; `OperationsGatewayTests`, `OperationsViewTests` |
+| Scope: `Idempotency-Key` | 5, 14, 16 | contract `A_replay_under_a_spent_key_changes_nothing`; `AlvoOperationsReplayTests.A_retried_replay_answers_the_first_and_resets_nothing`, `A_key_spent_on_a_different_replay_is_a_conflict`, `A_key_on_a_dry_run_is_refused`; `OperationsRouteTests.A_replay_reads_its_idempotency_key_from_the_header` |
+| Loop breaks and running records are never reset | 3, 4, 5, 13, 14 | contract `A_replayable_selection_leaves_out_loop_breaks_and_counts_running_records`, `Redelivering_while_its_record_runs_another_delivery_changes_nothing`, `A_replay_never_resets_a_loop_break_nor_a_delivery_whose_record_is_running`; `AlvoOperationsWritesTests.Redelivering_a_loop_break_is_refused`, `Redelivering_while_the_record_runs_another_delivery_is_refused`; `AlvoOperationsReplayTests.A_replay_leaves_out_loop_breaks`, `A_replay_of_a_record_whose_delivery_is_running_is_refused` |
+| Scope: `alvo_subscriber_controls`, `alvo_operations_log` | 1, 4, 6, 15 | `DeliveryOperationsTableTests`, `FrameworkTableReservationTests`, `AddAlvoIntegrationTests` (two survive-introspection facts), `PausedCatalogTests` |
+| Scope: routes and levels | 8, 16 | `OperationsLevelTests`, `ManagementContractTests.Every_member_of_the_management_ports_has_an_http_route`, `OperationsRouteTests` |
+| Docs: *Operate deliveries*; Dashboard: Operations page | 20, 21 | `RepairDeskOperationsTests` in `MMLib.Alvo.DocsSnippets.Tests`; website build; admin e2e |
+| Security (authorization and disclosure) | 22 | `alvo-security-core-review` checklist, `/security-review` substitute, `needs-deep-review` (Ruling 20) |
