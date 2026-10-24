@@ -201,6 +201,12 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
             return;
         }
 
+        await RetireThenReadyAsync(project, outcome, revision, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The boot's last step on every shape that serves: retirements apply, then Ready is published and recorded.</summary>
+    private async Task RetireThenReadyAsync(string project, SchemaStartupOutcome outcome, int? revision, CancellationToken ct)
+    {
         await _extensionState.RetireAsync(ct).ConfigureAwait(false);
         _state.Ready(project, revision);
         RecordWhatTheBootDid(project, outcome, revision);
@@ -236,9 +242,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         if (stored is null)
         {
             await RefuseOrphanedWorkAsync(project, ct).ConfigureAwait(false);
-            await _extensionState.RetireAsync(ct).ConfigureAwait(false);
-            _state.Ready(project, appliedRevision: null);
-            RecordWhatTheBootDid(project, SchemaStartupOutcome.Awaiting, revision: null);
+            await RetireThenReadyAsync(project, SchemaStartupOutcome.Awaiting, revision: null, ct).ConfigureAwait(false);
 
             return;
         }
@@ -250,10 +254,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
 
         await RefuseOrphanedWorkAsync(project, ct).ConfigureAwait(false);
         _ = Prime(boot, stored.Revision);
-
-        await _extensionState.RetireAsync(ct).ConfigureAwait(false);
-        _state.Ready(project, stored.Revision);
-        RecordWhatTheBootDid(project, SchemaStartupOutcome.Unchanged, stored.Revision);
+        await RetireThenReadyAsync(project, SchemaStartupOutcome.Unchanged, stored.Revision, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -289,36 +290,42 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     private bool TryPlanTheStoredDescriptor(
         string project, DescriptorVersion stored, [NotNullWhen(true)] out BootPlan? boot)
     {
+        var (plan, reason) = PlanTheStoredDescriptor(project, stored);
+        if (plan is not null)
+        {
+            boot = plan;
+            return true;
+        }
+
         boot = null;
-        string reason;
+        _state.Failed(project, reason!);
+        BootRefused(_logger, reason!);
+
+        return false;
+    }
+
+    /// <summary>Stage 0′ over the stored descriptor: the plan, or why this build refuses to serve it.</summary>
+    private (BootPlan? Plan, string? Reason) PlanTheStoredDescriptor(string project, DescriptorVersion stored)
+    {
         try
         {
             var plan = _bootPlan.Plan(stored.DescriptorJson);
             if (!string.Equals(plan.Descriptor.Name, project, StringComparison.Ordinal))
             {
-                reason = NameMismatch(project, plan.Descriptor.Name);
+                return (null, NameMismatch(project, plan.Descriptor.Name));
             }
-            else
-            {
-                _bootPlan.EnsureBindable(plan.Catalog);
-                boot = plan;
 
-                return true;
-            }
+            _bootPlan.EnsureBindable(plan.Catalog);
+            return (plan, null);
         }
         catch (AlvoStartupRefusedException refused)
         {
-            reason = UnfitExtensions(project, stored.Revision, refused.Message);
+            return (null, UnfitExtensions(project, stored.Revision, refused.Message));
         }
         catch (Exception refused) when (refused is DescriptorValidationException or InvalidOperationException)
         {
-            reason = RefusedDescriptor(project, stored.Revision, refused.Message);
+            return (null, RefusedDescriptor(project, stored.Revision, refused.Message));
         }
-
-        _state.Failed(project, reason);
-        BootRefused(_logger, reason);
-
-        return false;
     }
 
     private static string RefusedDescriptor(string project, int revision, string refusal) =>
