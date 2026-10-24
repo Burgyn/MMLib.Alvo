@@ -146,6 +146,12 @@ namespace MMLib.Alvo.Data
 }
 namespace MMLib.Alvo.Events
 {
+    public sealed class AlvoConditionCaller
+    {
+        public System.Guid? Tenant { get; }
+        public System.Guid? User { get; }
+        public bool HasRole(string role) { }
+    }
     public sealed class AlvoCreated<T> : System.IEquatable<MMLib.Alvo.Events.AlvoCreated<T>>
         where T :  class
     {
@@ -211,6 +217,14 @@ namespace MMLib.Alvo.Events
         public AlvoUpdated() { }
         public required T New { get; init; }
         public required T Old { get; init; }
+    }
+    public sealed class EventCondition<T>
+        where T :  class
+    {
+        public MMLib.Alvo.Events.AlvoConditionCaller Caller { get; }
+        public T New { get; }
+        public T Old { get; }
+        public bool Changed(params System.Linq.Expressions.Expression<System.Func<T, object?>>[] fields) { }
     }
     public interface IAlvoEventHandler<in TMessage>
         where in TMessage :  class
