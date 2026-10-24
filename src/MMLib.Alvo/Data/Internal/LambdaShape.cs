@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
+using System.Reflection;
 
 namespace MMLib.Alvo.Data.Internal;
 
@@ -11,6 +12,8 @@ internal static class LambdaShape
     private static readonly HashSet<string> _clockMembers = ["Now", "UtcNow", "Today"];
     private static readonly HashSet<Type> _integral = [typeof(sbyte), typeof(byte), typeof(short), typeof(ushort), typeof(int), typeof(uint), typeof(long)];
     private static readonly HashSet<Type> _small = [typeof(sbyte), typeof(byte), typeof(short), typeof(ushort)];
+    private static readonly HashSet<Type> _collections = [typeof(List<>), typeof(HashSet<>), typeof(ICollection<>)];
+    private static readonly HashSet<Type> _texts = [typeof(string), typeof(ReadOnlySpan<char>), typeof(Span<char>)];
 
     internal static bool Touches(Expression node, ParameterExpression parameter) => new ParameterFinder(parameter).Finds(node);
 
@@ -45,18 +48,38 @@ internal static class LambdaShape
     internal static string? RecordKey(MethodCallExpression call) =>
         call is { Method.Name: "get_Item", Object: { } record, Arguments: [ConstantExpression { Value: string key }] } && record.Type == typeof(AlvoRecord) ? key : null;
 
+    /// <summary>
+    /// Recognizes a membership test: <c>Enumerable.Contains</c>, <c>MemoryExtensions.Contains</c> over an implicit span
+    /// conversion (with no comparer or a <see langword="null"/> one), or the instance <c>Contains(T)</c> of a
+    /// <see cref="List{T}"/>, a <see cref="HashSet{T}"/> or an <see cref="ICollection{T}"/>. A text is never a list.
+    /// </summary>
+    /// <remarks>
+    /// A <see cref="HashSet{T}"/> carries its own comparer, which this shape cannot see: the caller evaluates the source
+    /// and refuses a set whose comparer is not the default one.
+    /// </remarks>
     internal static bool IsContains(MethodCallExpression call, [NotNullWhen(true)] out Expression? source, [NotNullWhen(true)] out Expression? value)
     {
         (source, value) = call switch
         {
             { Method.Name: "Contains", Object: null, Arguments: [var items, var item] } when IsSequence(call.Method.DeclaringType) => (Spanless(items), item),
             { Method.Name: "Contains", Object: null, Arguments: [var items, var item, ConstantExpression { Value: null }] } when call.Method.DeclaringType == typeof(MemoryExtensions) => (Spanless(items), item),
-            { Method.Name: "Contains", Object: { } items, Arguments: [var item] } when items.Type != typeof(string) && typeof(IEnumerable).IsAssignableFrom(items.Type) => (items, item),
+            { Method.Name: "Contains", Object: { } items, Arguments: [var item] } when IsCollectionContains(call.Method) => (items, item),
             _ => ((Expression?)null, (Expression?)null),
         };
 
+        if (source is null || _texts.Contains(source.Type))
+        {
+            (source, value) = (null, null);
+        }
+
         return source is not null;
     }
+
+    private static bool IsCollectionContains(MethodInfo method) =>
+        method.DeclaringType is { IsGenericType: true } declaring
+        && _collections.Contains(declaring.GetGenericTypeDefinition())
+        && method.GetParameters() is [var parameter]
+        && parameter.ParameterType == declaring.GetGenericArguments()[0];
 
     private static bool IsSequence(Type? type) => type == typeof(Enumerable) || type == typeof(MemoryExtensions);
 
@@ -72,6 +95,11 @@ internal static class LambdaShape
         if (unary.NodeType == ExpressionType.Quote)
         {
             return true;
+        }
+
+        if (IsNullable(unary.Operand) && unary.Type.IsValueType && !IsNullable(unary))
+        {
+            return false;
         }
 
         var from = Underlying(unary.Operand.Type);

@@ -40,13 +40,27 @@ internal static class LambdaValues
     private static bool TryFolded(UnaryExpression unary, out object? value, out string reason)
     {
         value = null;
-        if (!TryConstant(unary.Operand, out _, out reason))
+        if (unary.Method is { } method && method.DeclaringType != typeof(decimal))
         {
+            reason = $"'{unary}' calls the user-defined operator '{method.Name}' on '{method.DeclaringType?.Name}', which runs host code";
             return false;
         }
 
-        value = Evaluate(unary);
-        return true;
+        return TryConstant(unary.Operand, out _, out reason) && TryEvaluate(unary, out value, out reason);
+    }
+
+    private static bool TryEvaluate(UnaryExpression unary, out object? value, out string reason)
+    {
+        try
+        {
+            (value, reason) = (Evaluate(unary), string.Empty);
+            return true;
+        }
+        catch (Exception exception) when (exception is ArithmeticException or InvalidCastException or InvalidOperationException)
+        {
+            (value, reason) = (null, $"'{unary}' cannot be computed: {exception.Message}");
+            return false;
+        }
     }
 
     private static bool TryArray(NewArrayExpression array, out object? value, out string reason)
