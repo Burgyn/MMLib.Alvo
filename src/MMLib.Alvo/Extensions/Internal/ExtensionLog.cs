@@ -20,5 +20,5 @@ internal static partial class ExtensionLog
     [LoggerMessage(
         Level = LogLevel.Information,
         Message = "Alvo retired extension {Id} ({Retirement}): {Deliveries} unfinished deliveries were ended.")]
-    internal static partial void ExtensionRetired(ILogger logger, string id, string retirement, int deliveries);
+    internal static partial void ExtensionRetired(ILogger logger, string id, AlvoRetirement retirement, int deliveries);
 }
