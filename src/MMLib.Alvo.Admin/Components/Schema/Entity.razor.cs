@@ -28,6 +28,7 @@ public partial class Entity
     private IReadOnlyList<KeyValuePair<string, string>> _hooks = [];
     private IReadOnlyList<string> _entities = [];
     private IReadOnlyList<ManagementRefusedFeature> _refused = [];
+    private IReadOnlyList<ManagementExtension> _extensions = [];
 
     /// <summary>The build's sentence on a <c>storage: dynamic</c> entity, when it reports one (§8d item 21).</summary>
     private ManagementWarnedBlock? _storageWarning;
@@ -103,6 +104,7 @@ public partial class Entity
             entity => string.Equals(entity.Name, EntityName, StringComparison.Ordinal));
         var capabilities = await Gateway.CapabilitiesAsync(ct);
         _refused = capabilities.Refused;
+        _extensions = await Gateway.ExtensionsAsync(ct);
         _storageWarning = capabilities.Warned.FirstOrDefault(
             block => string.Equals(block.Block, DeclaredSlots.EntityStorage, StringComparison.Ordinal));
         _rules = DescriptorLens.Rules((await Gateway.DescriptorAsync(ct)).DescriptorJson, EntityName);

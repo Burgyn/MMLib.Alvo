@@ -839,6 +839,19 @@ namespace MMLib.Alvo.Admin.Components.Schema
         public Microsoft.AspNetCore.Components.EventCallback<int> OnRemove { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
+    public class LifecycleTab : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public LifecycleTab() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Entity { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementExtension> Extensions { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, string>> Hooks { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
+    }
     public class PlanSteps : Microsoft.AspNetCore.Components.ComponentBase
     {
         public PlanSteps() { }
