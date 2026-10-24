@@ -3,10 +3,12 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Migrations;
 using MMLib.Alvo.Tests.Extensions;
 
@@ -123,6 +125,53 @@ public sealed class RuntimeSchemaServiceExtensionGuardTests
         (await world.Service.ApplyAsync(Project, TwoFields, expectedRevision: 0, new MigrationOptions(), Ct)).Revision.ShouldBe(1);
     }
 
+    [Fact]
+    public async Task An_apply_and_a_reapply_publish_the_very_catalog_the_guard_checked()
+    {
+        var (guard, binder, compiles) = Watched();
+        var world = Around(new InMemoryDescriptorVersionStore(), guard);
+
+        await world.Service.ApplyAsync(Project, TwoFields, expectedRevision: 0, new MigrationOptions(), Ct);
+        ShouldBeTheCheckedCatalog(world, binder, compiles);
+        await world.Service.ApplyAsync(Project, TwoFields, expectedRevision: 1, new MigrationOptions(), Ct);
+        ShouldBeTheCheckedCatalog(world, binder, compiles);
+    }
+
+    [Fact]
+    public async Task A_rollback_publishes_the_very_catalog_the_guard_checked()
+    {
+        var (guard, binder, compiles) = Watched();
+        var world = Around(new InMemoryDescriptorVersionStore(), guard);
+        await world.Service.ApplyAsync(Project, TwoFields, expectedRevision: 0, new MigrationOptions(), Ct);
+        await world.Service.ApplyAsync(Project, ThreeFields, expectedRevision: 1, new MigrationOptions(), Ct);
+
+        await world.Service.RollbackAsync(Project, targetRevision: 1, new MigrationOptions { AllowDestructive = true }, Ct);
+
+        ShouldBeTheCheckedCatalog(world, binder, compiles);
+    }
+
+    /// <summary>
+    /// The binder caches one binding per catalog instance, so binding the published catalog compiles nothing when it
+    /// is the instance the guard checked — and compiles the handler's condition again when it is a second build.
+    /// </summary>
+    private static void ShouldBeTheCheckedCatalog(RuntimeSchemaWorld world, ExtensionBinder binder, CountingCompiler compiles)
+    {
+        var checkedCompiles = compiles.Calls;
+        checkedCompiles.ShouldBeGreaterThan(0, "the guard binds the proposed catalog, compiling the handler's condition");
+
+        binder.Result(world.PolicyCatalogs.Current.ShouldNotBeNull());
+
+        compiles.Calls.ShouldBe(checkedCompiles, "the published catalog is the instance the guard checked, not a second build");
+    }
+
+    private static (Func<IPolicyCatalogProvider, ExtensionApplyGuard> Guard, ExtensionBinder Binder, CountingCompiler Compiles) Watched()
+    {
+        var registry = HandlerCatalog.Registry(alvo => alvo.Entity("tasks", tasks => tasks.OnUpdated("on-notes", HandlerCatalog.OnUpdated, when: "changed(notes)")));
+        var compiles = new CountingCompiler(new CelCompiler());
+        var binder = new ExtensionBinder(registry, compiles, HandlerCatalog.EveryService(), NullLogger<ExtensionBinder>.Instance);
+        return (catalogs => new ExtensionApplyGuard(registry, binder, new CelCompiler(), catalogs), binder, compiles);
+    }
+
     private static async Task<RuntimeSchemaWorld> WithNotesAsync()
     {
         var world = Around(new InMemoryDescriptorVersionStore(), OnNotes);
@@ -140,5 +189,20 @@ public sealed class RuntimeSchemaServiceExtensionGuardTests
     {
         var descriptor = AlvoDescriptor.Parse(descriptorJson);
         return PolicyCatalog.Build(descriptor, DescriptorToSchemaMapper.Map(descriptor), new CelCompiler());
+    }
+
+    /// <summary>Counts compilations, forwarding each to the real compiler.</summary>
+    /// <param name="inner">The compiler that actually compiles.</param>
+    private sealed class CountingCompiler(ICelCompiler inner) : ICelCompiler
+    {
+        private int _calls;
+
+        internal int Calls => Volatile.Read(ref _calls);
+
+        public CelCompilationResult Compile(string source, CelProfile profile, EntitySchema entity)
+        {
+            Interlocked.Increment(ref _calls);
+            return inner.Compile(source, profile, entity);
+        }
     }
 }

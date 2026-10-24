@@ -10,8 +10,8 @@ internal static class RulesSetup
 {
     /// <summary>
     /// Adds <see cref="IPolicyCatalogProvider"/> (a single mutable holder, unprimed until a descriptor
-    /// is actually applied — see <see cref="PolicyCatalogPriming"/>, called from
-    /// <c>RuntimeSchemaService</c> and the code-first startup path) and <see cref="IPolicyEngine"/>
+    /// is actually applied — the boot, <c>RuntimeSchemaService</c> and <c>SchemaMigrationRunner</c> each build
+    /// a <see cref="PolicyCatalog"/> and publish it through <see cref="IPolicyCatalogProvider.SetCurrent"/>) and <see cref="IPolicyEngine"/>
     /// as singletons. Registering the provider unprimed, rather than eagerly building a catalog here,
     /// is deliberate: a descriptor is not available when <c>AddAlvo</c> runs (the <c>FromDescriptor</c>
     /// chicken/egg <c>AlvoServiceCollectionExtensions</c> already names), and resolving

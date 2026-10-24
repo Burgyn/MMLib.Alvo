@@ -34,7 +34,7 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// The rule-compilation pass runs only when the schema pass produced no errors — a descriptor the
 /// schema already rejects cannot reliably be parsed into <see cref="AlvoDescriptor"/> and mapped by
 /// <see cref="DescriptorToSchemaMapper"/>. It compiles the same <see cref="PolicyCatalog"/> the
-/// apply-time priming path (<c>PolicyCatalogPriming</c>, <c>SchemaMigrationRunner</c>,
+/// apply-time priming path (the boot, <c>SchemaMigrationRunner</c>,
 /// <c>RuntimeSchemaService</c>) later builds for real; this pass discards the built catalog and
 /// keeps only its errors, since <see cref="IDescriptorValidator.Validate"/>'s public contract
 /// returns findings, not a catalog. A descriptor that passes this pass is compiled a second time by

@@ -41,12 +41,8 @@ public class RulesSetupTests
           } } }
         """);
         var schema = DescriptorToSchemaMapper.Map(descriptor);
-        PolicyCatalogPriming.Prime(
-            provider.GetRequiredService<IPolicyCatalogProvider>(),
-            provider.GetRequiredService<ICelCompiler>(),
-            descriptor.Name,
-            descriptor,
-            schema);
+        provider.GetRequiredService<IPolicyCatalogProvider>().SetCurrent(
+            descriptor.Name, PolicyCatalog.Build(descriptor, schema, provider.GetRequiredService<ICelCompiler>()));
 
         var engine = provider.GetRequiredService<IPolicyEngine>();
         var context = new AlvoContext { User = UserId.New(), Roles = new HashSet<Role> { Role.Authenticated } };

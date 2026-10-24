@@ -2,8 +2,13 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Descriptor.Internal;
+using MMLib.Alvo.Events;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Internal;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 using System.Globalization;
 
@@ -18,6 +23,8 @@ public sealed class AddAlvoIntegrationTests : IDisposable
 {
     private readonly string _databasePath = Path.Combine(Path.GetTempPath(), $"alvo-addalvo-tests-{Guid.NewGuid():N}.db");
 
+    private string DescriptorFile => Path.ChangeExtension(_databasePath, ".alvo.json");
+
     public void Dispose()
     {
         // Best-effort: the test method disposes its ServiceProvider (via `using var sp`) before
@@ -28,6 +35,7 @@ public sealed class AddAlvoIntegrationTests : IDisposable
         try
         {
             File.Delete(_databasePath);
+            File.Delete(DescriptorFile);
         }
         catch (IOException)
         {
@@ -159,6 +167,33 @@ public sealed class AddAlvoIntegrationTests : IDisposable
         var introspected = await sp.GetRequiredService<ISchemaIntrospector>()
             .IntrospectAsync(TestContext.Current.CancellationToken);
         introspected.Entities.ShouldBeEmpty("a dry run must plan and write nothing");
+    }
+
+    /// <summary>
+    /// The runner the container builds carries the extension guard: a descriptor that drops the field a handler bound to
+    /// the primed catalog reads is refused through the public verb, and nothing is created.
+    /// </summary>
+    [Fact]
+    public async Task The_public_apply_extension_refuses_a_descriptor_that_would_unbind_a_bound_handler()
+    {
+        await File.WriteAllTextAsync(DescriptorFile, NotesDescriptor(withNickname: false), TestContext.Current.CancellationToken);
+        var services = new ServiceCollection();
+        services.AddAlvo(alvo => alvo
+            .UseSqlite($"Data Source={_databasePath}")
+            .FromDescriptor(DescriptorFile)
+            .Entity("notes", notes => notes.OnUpdated(
+                "on-nickname", (AlvoUpdated<AlvoRecord> _) => Task.CompletedTask, when: "changed(nickname)")));
+        using var sp = services.BuildServiceProvider();
+        var primed = AlvoDescriptor.Parse(NotesDescriptor(withNickname: true));
+        sp.GetRequiredService<IPolicyCatalogProvider>().SetCurrent(
+            primed.Name, PolicyCatalog.Build(primed, DescriptorToSchemaMapper.Map(primed), sp.GetRequiredService<ICelCompiler>()));
+
+        var refused = await Should.ThrowAsync<DescriptorValidationException>(
+            () => sp.ApplyAlvoDescriptorAsync(ct: TestContext.Current.CancellationToken));
+
+        refused.Result.Errors.Select(error => error.Path).ShouldContain("/entities/notes/fields/nickname");
+        (await sp.GetRequiredService<ISchemaIntrospector>().IntrospectAsync(TestContext.Current.CancellationToken))
+            .Entities.ShouldBeEmpty("a refused apply plans and writes nothing");
     }
 
     /// <summary>
@@ -409,6 +444,20 @@ public sealed class AddAlvoIntegrationTests : IDisposable
 
     private static string DescriptorPath() =>
         Path.Combine(RepositoryRoot.Find(), "examples", "simple-tasks", "tasks.alvo.json");
+
+    private static string NotesDescriptor(bool withNickname) => $$"""
+        {
+          "apiVersion": "alvo.dev/v1",
+          "name": "notebook",
+          "entities": {
+            "notes": {
+              "fields": {
+                "title": { "type": "string", "required": true }{{(withNickname ? ", \"nickname\": { \"type\": \"string\" }" : "")}}
+              }
+            }
+          }
+        }
+        """;
 
     private static string VehicleRegistryDescriptorPath() =>
         Path.Combine(RepositoryRoot.Find(), "examples", "vehicle-registry", "vehicles.alvo.json");

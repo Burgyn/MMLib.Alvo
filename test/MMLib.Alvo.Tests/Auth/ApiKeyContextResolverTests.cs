@@ -220,12 +220,8 @@ public class ApiKeyContextResolverTests
     private static void Apply(ServiceProvider host, string descriptorJson)
     {
         var descriptor = AlvoDescriptor.Parse(descriptorJson);
-        PolicyCatalogPriming.Prime(
-            host.GetRequiredService<IPolicyCatalogProvider>(),
-            new CelCompiler(),
-            descriptor.Name,
-            descriptor,
-            DescriptorToSchemaMapper.Map(descriptor));
+        host.GetRequiredService<IPolicyCatalogProvider>().SetCurrent(
+            descriptor.Name, PolicyCatalog.Build(descriptor, DescriptorToSchemaMapper.Map(descriptor), new CelCompiler()));
     }
 
     private static string DescriptorDeclaringRoles(params string[] roleNames) => $$"""

@@ -8,7 +8,7 @@ namespace MMLib.Alvo.Rules.Internal;
 /// <summary>
 /// The default <see cref="IPolicyEngine"/>: resolves the <see cref="IPolicyCatalogProvider.Current"/>
 /// catalog against one entity/operation/caller triple, with no blocking wait and no caching of a
-/// build failure — the catalog is built and primed elsewhere (see <see cref="PolicyCatalogPriming"/>),
+/// build failure — the catalog is built and primed elsewhere (the boot, <c>RuntimeSchemaService</c>, <c>SchemaMigrationRunner</c>),
 /// never lazily, by <see cref="Resolve"/> itself. Reads as five steps, in order: not-yet-primed (deny,
 /// the correct default-deny answer for "no descriptor has been applied yet"), look up the entity (deny
 /// if unknown or blank, never throw), the tenant guard (deny before any rule is consulted when a

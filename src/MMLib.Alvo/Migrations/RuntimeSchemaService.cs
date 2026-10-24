@@ -63,6 +63,10 @@ public sealed class RuntimeSchemaService
     /// <param name="writer">The atomic apply-plan-and-append-version seam.</param>
     /// <param name="compiler">Compiles the policy catalog primed after every accepted apply/rollback.</param>
     /// <param name="policyCatalogProvider">Holds the currently effective <see cref="PolicyCatalog"/> for <c>IPolicyEngine</c>.</param>
+    /// <remarks>
+    /// A service built through this constructor carries no extension guard: it does not refuse a change that would
+    /// unbind a handler the host registered. Resolve the service registered by <c>AddAlvo</c> for that.
+    /// </remarks>
     public RuntimeSchemaService(
         IDescriptorValidator validator, ISchemaMigrator migrator,
         IDescriptorVersionStore store, IRuntimeSchemaWriter writer,
