@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Delivery operations** (HX-06, #383). `IAlvoOperations` and nine Management routes: list deliveries, read one with
+  its attempts, redeliver, replay (dry run, `Idempotency-Key` scoped per caller; the reason is not part of the
+  fingerprint; the same key with a different request is 409 `idempotency-conflict`; at most 10 000 per run), redacted
+  fixtures (fail-closed: only key-shaped values, `authid`/`causationid` only as uuids, `tracestate` dropped),
+  pause/resume a handler on every instance, per-instance extension stats (`scope: "this-instance"`, registered
+  subscribers only, the current partial hour plus 23 hours), and the enable and run-schedule routes (refusing until
+  validate hooks and schedules exist); `ManagementExtension.Paused`; `IAlvoEventPump.DeliverAsync` and
+  `AlvoTestHost.DeliverAsync`; the dashboard's **Operations** page; every change audited in `alvo_operations_log` and
+  a `ManagementAudit` log event. Redeliver and replay refuse (409) a lane with a delivery of the handler running and a
+  delivery dead with `chain-depth-exceeded`, and do not evaluate `when` again. On PostgreSQL a per-subscriber advisory
+  lock serializes a claim (shared) against a redeliver, replay or pause (exclusive). The list pages at most 200 per
+  request (the store, 1 000). Levels are instance-wide: deliveries are not separated per project. Known limit,
+  pre-existing: the mutating management routes carry no antiforgery check for a cookie-authenticated caller. Docs:
+  *Operate deliveries*. **Breaking for delivery-store implementers:** `IDeliveryStore` gains nine abstract members and
+  `ClaimAsync` must skip paused subscribers; an attempt's number in the history now counts across redeliveries; the
+  dispatcher's claimant is unique per claim. **Breaking for SQL dialect implementers:**
+  `IAlvoSqlDialect.TransactionLockStatement`'s default throws `NotSupportedException`. Upgrade: the two tables are
+  created on start.
+
 - **Typed layer and lambda translation** (HX-05, #382). `Entity<T>` / `AlvoEntityBuilder<T>` register handlers over a
   host class with conditions as lambdas over `EventCondition<T>` (`New`, `Old`, `Changed`, `Caller` —
   `AlvoConditionCaller`), translated once, at registration, into the CEL the catalog shows (`e.Changed(x => x.Status)

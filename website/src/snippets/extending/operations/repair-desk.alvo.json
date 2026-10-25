@@ -1,0 +1,23 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "repair-desk",
+  "auth": { "roles": ["mechanic", "lead"] },
+  "access": {
+    "viewer": "'mechanic' in @user.roles",
+    "developer": "'lead' in @user.roles"
+  },
+  "entities": {
+    "repairs": {
+      "fields": {
+        "bike": { "type": "string", "required": true, "maxLength": 20 },
+        "part": { "type": "string", "required": true, "maxLength": 80 }
+      },
+      "rules": {
+        "list": "'mechanic' in @user.roles || 'admin' in @user.roles",
+        "get": "'mechanic' in @user.roles || 'admin' in @user.roles",
+        "create": "'mechanic' in @user.roles"
+      }
+    }
+  }
+}

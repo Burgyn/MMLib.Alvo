@@ -154,6 +154,7 @@ export default defineConfig({
           page('React to changes', 'extending/event-handlers'),
           page('Typed or CEL', 'extending/typed-or-cel'),
           page('See your extensions in the dashboard', 'extending/extension-catalog'),
+          page('Operate deliveries', 'extending/operate-deliveries'),
           page('Testing your backend', 'extending/testing'),
           page('Use your own authentication', 'guides/own-authentication'),
           page('Call Alvo from your endpoints', 'guides/call-from-endpoints'),
