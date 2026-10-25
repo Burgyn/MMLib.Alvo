@@ -50,9 +50,10 @@ namespace MMLib.Alvo.Events.Internal;
 /// On a stop the runner cancels the handler and answers nothing; the lease returns the delivery.
 /// </para>
 /// <para>
-/// <b>The claimant is per instance</b> (<c>{machine}:{pid}:{instance}</c>): two dispatchers in one process — two test hosts
-/// over one database — are two claimants, and completion is fenced on the attempt count besides, so a reclaimed lease's
-/// late finisher changes nothing whoever it is.
+/// <b>The claimant is per claim</b> (<c>{machine}:{pid}:{instance}:{claim}</c>): every <c>ClaimAsync</c> call mints a fresh
+/// one and every answer for what that claim took carries it, so a reclaimed lease's late finisher — in this dispatcher or
+/// another — changes nothing, and neither does an answer from before a redeliver, whose restarted attempt count alone
+/// could not tell the two claims apart. The prefix still names the process that took a row.
 /// </para>
 /// </remarks>
 /// <param name="store">The delivery queue: claim under a lease; the runner answers for each attempt.</param>
