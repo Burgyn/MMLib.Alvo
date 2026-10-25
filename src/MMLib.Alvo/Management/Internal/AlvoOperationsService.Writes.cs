@@ -4,10 +4,11 @@ namespace MMLib.Alvo.Management.Internal;
 
 /// <summary>The operator's changes: each audited once when it changed something, none when it did not.</summary>
 /// <remarks>
-/// <b>Deviation from the plan's Task 13 sketch</b>, which answered a finished delivery the store declined to reset as
-/// unchanged: the store declines a finished delivery only when its lane has a delivery running, so that answer is the same
-/// conflict the read-side guard raises — a lane that started running between the guard and the reset is refused, not
-/// silently reported as done.
+/// <b>Deviation from the plan's Task 13 sketch</b>, which answered a delivery the store declined to reset as unchanged:
+/// the row is read again. Still finished, the store declined because its lane has a delivery running — the same conflict
+/// the read-side guard raises, so a lane that started running between the guard and the reset is refused, not silently
+/// reported as done. No longer finished, another redeliver landed first, and the delivery is answered as it is now with
+/// no audit, as any redeliver that changed nothing is.
 /// </remarks>
 internal sealed partial class AlvoOperationsService
 {
@@ -68,12 +69,14 @@ internal sealed partial class AlvoOperationsService
     private async Task ResetAsync(StoredDelivery row, string? reason, CancellationToken ct)
     {
         var entry = Entry(RedeliverOperation, row.Id.ToString(), reason);
-        if (!await Store.RedeliverAsync(row.Id, entry, ct).ConfigureAwait(false))
+        if (await Store.RedeliverAsync(row.Id, entry, ct).ConfigureAwait(false))
+        {
+            OperationsAudit.Write(logger, entry with { Affected = 1 });
+        }
+        else if (DeliveryQueries.Finished.Contains((await FoundAsync(row.Id, ct).ConfigureAwait(false)).Status))
         {
             throw LaneRunning(row);
         }
-
-        OperationsAudit.Write(logger, entry with { Affected = 1 });
     }
 
     private void EnsureRedeliverable(StoredDelivery row)

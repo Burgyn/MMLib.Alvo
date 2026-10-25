@@ -25,6 +25,9 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
 
     internal int FanOutFailures { get; set; }
 
+    /// <summary>Runs once, before the next <see cref="RedeliverAsync"/> takes its lock — a change that lands between a caller's check and its reset.</summary>
+    internal Func<Task>? BeforeRedeliver { get; set; }
+
     /// <summary>The ambient <see cref="AlvoFlow"/> at each answer for an attempt — what a write the store made there would carry.</summary>
     internal ConcurrentQueue<AlvoProvenance?> AnswerFlows { get; } = new();
 
@@ -214,9 +217,20 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         }
     }
 
-    public Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
+    public async Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
     {
         EnsureEntry(entry);
+        if (BeforeRedeliver is { } interleaved)
+        {
+            BeforeRedeliver = null;
+            await interleaved();
+        }
+
+        return await Redeliver(id, entry);
+    }
+
+    private Task<bool> Redeliver(Guid id, DeliveryOperationEntry entry)
+    {
         lock (_gate)
         {
             if (_rows.SingleOrDefault(row => row.Id == id && _finished.Contains(row.Status) && !LaneBusy(row)) is not { } row)

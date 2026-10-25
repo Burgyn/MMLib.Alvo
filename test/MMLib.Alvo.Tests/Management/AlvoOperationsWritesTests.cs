@@ -74,6 +74,8 @@ public sealed class AlvoOperationsWritesTests
 
         world.Store.Operations.Select(row => row.Operation).ShouldBe(["pause", "resume"]);
         world.Audit.Lines.Count.ShouldBe(2);
+        world.Audit.Lines[0].ShouldContain($"made 'pause' on '{Handler}'");
+        world.Audit.Lines[1].ShouldContain($"made 'resume' on '{Handler}'");
     }
 
     [Fact]
@@ -105,6 +107,10 @@ public sealed class AlvoOperationsWritesTests
     [Theory]
     [InlineData("two\nlines")]
     [InlineData("tab\there")]
+    [InlineData("line\u2028separator")]
+    [InlineData("paragraph\u2029separator")]
+    [InlineData("right-to-left\u202Eoverride")]
+    [InlineData("zero\u200Bwidth")]
     public async Task A_reason_with_a_control_character_is_refused_before_anything_is_written(string reason)
     {
         using var world = new OperationsTestWorld();
@@ -148,6 +154,33 @@ public sealed class AlvoOperationsWritesTests
     }
 
     [Fact]
+    public async Task A_redeliver_another_operator_landed_first_answers_the_delivery_and_audits_nothing()
+    {
+        using var world = new OperationsTestWorld();
+        var dead = await world.DeliveryAsync("tickets:a", deadReason: "when-failed");
+        world.Store.BeforeRedeliver = () => world.Store.RedeliverAsync(dead.Id, Concurrent(world), Ct);
+
+        (await world.Service.RedeliverAsync(Project, dead.Id, reason: null, Ct)).Status.ShouldBe("pending");
+
+        world.Store.Operations.ShouldHaveSingleItem().Actor.ShouldBe("other-operator");
+        world.Audit.Lines.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_lane_that_starts_running_between_the_check_and_the_reset_is_a_conflict()
+    {
+        using var world = new OperationsTestWorld();
+        var dead = await world.DeliveryAsync("tickets:a", deadReason: "when-failed");
+        await world.DeliveryAsync("tickets:a");
+        world.Store.BeforeRedeliver = () => world.Store.ClaimAsync(new DeliveryClaim { Claimant = "w", Ordered = [], Unordered = [Handler], BatchSize = 1, Lease = TimeSpan.FromMinutes(1), OutboxMaxAttempts = 10, OutboxClaimLease = TimeSpan.FromMinutes(5) }, Ct);
+
+        (await Should.ThrowAsync<ManagementConflictException>(() => world.Service.RedeliverAsync(Project, dead.Id, reason: null, Ct)))
+            .Message.ShouldContain("running");
+        world.Store.Operations.ShouldBeEmpty();
+        world.Audit.Lines.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Every_write_refuses_an_unpublished_caller()
     {
         using var world = new OperationsTestWorld(admitted: false);
@@ -157,4 +190,13 @@ public sealed class AlvoOperationsWritesTests
         await Should.ThrowAsync<ManagementForbiddenException>(() => world.Service.SetEnabledAsync(Project, Handler, false, null, Ct));
         await Should.ThrowAsync<ManagementForbiddenException>(() => world.Service.RunScheduleAsync(Project, "nightly-report", Ct));
     }
+
+    private static DeliveryOperationEntry Concurrent(OperationsTestWorld world) => new()
+    {
+        Id = AlvoEventId.Create(world.Clock.GetUtcNow()),
+        At = world.Clock.GetUtcNow(),
+        Actor = "other-operator",
+        Operation = "redeliver",
+        Target = "concurrent",
+    };
 }
