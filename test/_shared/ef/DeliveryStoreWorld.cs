@@ -248,7 +248,7 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
             var command = connection.CreateCommand();
             await using (command.ConfigureAwait(false))
             {
-                command.CommandText = $"{explain} {DeliveryTable.ClaimSql(_table, _outbox, ordered: 1, unordered: 0)}";
+                command.CommandText = $"{explain} {DeliveryTable.ClaimSql(_table, _outbox, DeliveryOperationsTable.ControlsNameFor(SchemaPrefix), ordered: 1, unordered: 0)}";
                 BindClaim(command, "explain", "send-confirmation");
 
                 return await PlanTextAsync(command);
@@ -358,7 +358,7 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
         await using (command.ConfigureAwait(false))
         {
             command.Transaction = transaction;
-            command.CommandText = DeliveryTable.ClaimSql(_table, _outbox, ordered: 1, unordered: 0);
+            command.CommandText = DeliveryTable.ClaimSql(_table, _outbox, DeliveryOperationsTable.ControlsNameFor(SchemaPrefix), ordered: 1, unordered: 0);
             BindClaim(command, "racer", subscriber);
 
             return await CountRowsAsync(command);

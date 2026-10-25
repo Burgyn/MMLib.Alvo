@@ -158,6 +158,22 @@ public sealed class PostgreSqlDeliveryStoreTests : DeliveryStoreContractTests, I
         recorded.ShouldNotBeNull().Affected.ShouldBe(1);
     }
 
+    /// <summary>
+    /// A pause takes its subscriber's advisory lock exclusively before it writes the control, so it waits while a claim
+    /// holds the lock shared: once the pause has returned, no claim statement that began before it can still take a batch.
+    /// </summary>
+    [Fact]
+    public async Task A_pause_waits_while_a_claim_holds_its_subscriber_s_lock()
+    {
+        EnsureEngineAvailable();
+        await using var world = await ConcreteWorldAsync();
+        var entry = new DeliveryOperationEntry { Id = Guid.NewGuid(), At = DateTimeOffset.UnixEpoch, Actor = "ops", Operation = "pause", Target = Subscriber };
+
+        var changed = await world.WhileSubscriberLockedAsync(Subscriber, exclusive: false, () => world.Store.SetPausedAsync(Subscriber, paused: true, entry, Ct));
+
+        changed.ShouldBeTrue();
+    }
+
     protected override async Task<IDeliveryStoreWorld> WorldAsync() => await ConcreteWorldAsync();
 
     protected override void EnsureEngineAvailable() =>

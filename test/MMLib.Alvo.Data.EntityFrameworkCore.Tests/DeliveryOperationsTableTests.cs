@@ -64,6 +64,14 @@ public sealed class DeliveryOperationsTableTests
         DeliveryOperationsTable.LogDdl(Log).ShouldContain("CHECK (idempotency_key IS NULL OR idempotency_scope IS NOT NULL)");
 
     [Fact]
+    public void A_pause_changes_only_a_running_subscriber() =>
+        DeliveryOperationsTable.PauseSql(Controls).ShouldContain($"WHERE {Controls}.paused_at IS NULL");
+
+    [Fact]
+    public void A_resume_changes_only_a_paused_subscriber() =>
+        DeliveryOperationsTable.ResumeSql(Controls).ShouldEndWith("WHERE subscriber = @subscriber AND paused_at IS NOT NULL");
+
+    [Fact]
     public void Bringing_the_tables_up_is_idempotent() =>
         DeliveryOperationsTable.Statements("alvo_deliveries", Controls, Log).ShouldAllBe(statement => statement.Contains("IF NOT EXISTS"));
 

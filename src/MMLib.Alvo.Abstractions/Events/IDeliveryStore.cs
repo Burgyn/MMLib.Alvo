@@ -142,7 +142,7 @@ public sealed record DeliveryFailure
 /// </para>
 /// <para>
 /// <b>Lanes.</b> A delivery is claimable when it is pending, or retrying and due, or running with its lease expired; its
-/// subscriber is one the claim names; and — for an ordered subscriber — no delivery of the same subscriber and partition
+/// subscriber is one the claim names and is not paused; and — for an ordered subscriber — no delivery of the same subscriber and partition
 /// key with an earlier event id is pending, running, retrying or dead — except a delivery dead with
 /// <see cref="DeliveryRequest.UnboundReason"/>, a record of work missed while its handler did not fit the schema, which is replayed explicitly and does
 /// not hold the lane — <b>and no outbox entry of the same partition key with an earlier id is still undispatched, either
@@ -296,6 +296,28 @@ public interface IDeliveryStore
     /// The log refused <paramref name="entry"/> for its id, not for its key; nothing is reset.
     /// </exception>
     Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default);
+
+    /// <summary>Pauses or resumes a subscriber, recording <paramref name="entry"/> in the same transaction when the state changed.</summary>
+    /// <remarks>
+    /// A paused subscriber's deliveries are still fanned out and accumulate; a claim takes none of them until it is resumed,
+    /// and its lanes then drain in order. A delivery already running when the pause commits finishes. The pause is
+    /// serialized against the subscriber's claims, so once it has returned no claim takes the subscriber's deliveries.
+    /// </remarks>
+    /// <param name="subscriber">The subscriber id.</param>
+    /// <param name="paused">Whether it should be paused.</param>
+    /// <param name="entry">The log row; a pause also stores its instant, actor and reason on the control.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>Whether the state changed; <see langword="false"/> — pausing a paused subscriber, resuming a running one — records nothing.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The log refused <paramref name="entry"/> — its id, or its idempotency key, is already recorded; the change is rolled
+    /// back with it.
+    /// </exception>
+    Task<bool> SetPausedAsync(string subscriber, bool paused, DeliveryOperationEntry entry, CancellationToken cancellationToken = default);
+
+    /// <summary>The paused subscribers, by id.</summary>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The controls.</returns>
+    Task<IReadOnlyList<SubscriberControl>> ControlsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>The log row a caller's key was recorded under.</summary>
     /// <param name="scope">The caller's identity.</param>

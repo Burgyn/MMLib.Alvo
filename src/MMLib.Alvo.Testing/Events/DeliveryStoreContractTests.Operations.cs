@@ -509,6 +509,56 @@ public abstract partial class DeliveryStoreContractTests
         (await world.OperationsAsync()).ShouldHaveSingleItem().Affected.ShouldBe(0);
     }
 
+    /// <summary>A paused subscriber's deliveries are not claimed — another subscriber's are — and its lane drains in order after resume.</summary>
+    [Fact]
+    public async Task A_paused_subscriber_is_not_claimed_and_its_lane_drains_in_order_after_resume()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var first = await world.AppendEventAsync(KeyA);
+        var second = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(first, Confirm, KeyA), Request(first, Audit, KeyA)], Ct);
+        await world.Store.FanOutAsync([Request(second, Confirm, KeyA)], Ct);
+
+        (await world.Store.SetPausedAsync(Confirm, paused: true, Entry("pause", Confirm), Ct)).ShouldBeTrue();
+        (await world.Store.ClaimAsync(Claim(Confirm, Audit), Ct)).ShouldHaveSingleItem().Subscriber.ShouldBe(Audit);
+        (await world.Store.SetPausedAsync(Confirm, paused: false, Entry("resume", Confirm), Ct)).ShouldBeTrue();
+
+        var head = (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldHaveSingleItem();
+        head.EventId.ShouldBe(first);
+        await world.Store.CompleteAsync(Attempt(head), Ct);
+        (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldHaveSingleItem().EventId.ShouldBe(second);
+    }
+
+    /// <summary>Pausing a paused subscriber, or resuming a running one, changes nothing and logs nothing.</summary>
+    [Fact]
+    public async Task Pausing_twice_changes_nothing_the_second_time()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+
+        (await world.Store.SetPausedAsync(Confirm, paused: false, Entry("resume", Confirm), Ct)).ShouldBeFalse();
+        (await world.Store.SetPausedAsync(Confirm, paused: true, Entry("pause", Confirm), Ct)).ShouldBeTrue();
+        (await world.Store.SetPausedAsync(Confirm, paused: true, Entry("pause", Confirm), Ct)).ShouldBeFalse();
+
+        (await world.OperationsAsync()).Select(row => row.Operation).ShouldBe(["pause"]);
+    }
+
+    /// <summary>The paused subscribers are listed with who paused them, when and why, and no longer once resumed.</summary>
+    [Fact]
+    public async Task A_paused_subscriber_is_listed_with_who_when_and_why()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        await world.Store.SetPausedAsync(Confirm, paused: true, Entry("pause", Confirm), Ct);
+
+        var control = (await world.Store.ControlsAsync(Ct)).ShouldHaveSingleItem();
+        await world.Store.SetPausedAsync(Confirm, paused: false, Entry("resume", Confirm), Ct);
+
+        control.ShouldBe(new SubscriberControl { Subscriber = Confirm, PausedAt = _operatedAt, PausedBy = Operator, Reason = "contract" });
+        (await world.Store.ControlsAsync(Ct)).ShouldBeEmpty();
+    }
+
     private static DeliveryOperationEntry Entry(string operation, string target, string? key = null) => new()
     {
         Id = AlvoEventId.Create(_operatedAt),

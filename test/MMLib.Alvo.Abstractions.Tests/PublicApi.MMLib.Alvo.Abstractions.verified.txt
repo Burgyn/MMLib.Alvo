@@ -1191,6 +1191,7 @@ namespace MMLib.Alvo.Events
         System.Threading.Tasks.Task<int> CancelPendingAsync(string subscriber, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.ClaimedDelivery>> ClaimAsync(MMLib.Alvo.Events.DeliveryClaim claim, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> CompleteAsync(MMLib.Alvo.Events.DeliveryAttempt attempt, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.SubscriberControl>> ControlsAsync(System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<int> DeadLetterPendingAsync(string subscriber, string reason, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task EnsureAsync(System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> FailAsync(MMLib.Alvo.Events.DeliveryAttempt attempt, MMLib.Alvo.Events.DeliveryFailure failure, System.Threading.CancellationToken cancellationToken = default);
@@ -1202,6 +1203,7 @@ namespace MMLib.Alvo.Events
         System.Threading.Tasks.Task<bool> RedeliverAsync(System.Guid id, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliveryOperationEntry?> ReplayAsync(MMLib.Alvo.Events.DeliveryFilter filter, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliverySelection> SelectAsync(MMLib.Alvo.Events.DeliveryFilter filter, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<bool> SetPausedAsync(string subscriber, bool paused, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
     }
     public interface IEmailSender
     {
@@ -1249,6 +1251,14 @@ namespace MMLib.Alvo.Events
         public string? ErrorType { get; init; }
         public required string Outcome { get; init; }
         public required System.DateTimeOffset StartedAt { get; init; }
+    }
+    public sealed class SubscriberControl : System.IEquatable<MMLib.Alvo.Events.SubscriberControl>
+    {
+        public SubscriberControl() { }
+        public required System.DateTimeOffset PausedAt { get; init; }
+        public required string PausedBy { get; init; }
+        public string? Reason { get; init; }
+        public required string Subscriber { get; init; }
     }
 }
 namespace MMLib.Alvo.Expressions

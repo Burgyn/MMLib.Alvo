@@ -56,7 +56,7 @@ internal sealed partial class EfCoreDeliveryStore
 
     public async Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(entry);
+        EnsureEntry(entry);
         var subscribers = await ReadAsync(DeliveryOperationsTable.SubscriberOfSql(_table), command => BindId(command, id), reader => reader.GetString(0), cancellationToken)
             .ConfigureAwait(false);
 
@@ -85,7 +85,7 @@ internal sealed partial class EfCoreDeliveryStore
     public Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
     {
         EnsureRows(filter);
-        ArgumentNullException.ThrowIfNull(entry);
+        EnsureEntry(entry);
 
         return InTransactionAsync(async (connection, transaction) =>
             await LogAsync(connection, transaction, entry, cancellationToken).ConfigureAwait(false) == 1
@@ -165,11 +165,82 @@ internal sealed partial class EfCoreDeliveryStore
         {
             BindFilter(command, filter, keyset: false, limit: false);
             RelationalSqlBatch.AddParameter(command, "@now", Now);
-            for (var index = 0; filter.Subscriber is null && index < subscribers.Count; index++)
+            if (filter.Subscriber is null)
             {
-                RelationalSqlBatch.AddParameter(command, $"@replay_subscriber{index}", subscribers[index]);
+                BindLockedSubscribers(command, subscribers);
             }
         }, reader => (Id: reader.GetString(0), EventId: reader.GetString(1)), ct).ConfigureAwait(false);
+    }
+
+    private static void BindLockedSubscribers(DbCommand command, IReadOnlyList<string> subscribers)
+    {
+        for (var index = 0; index < subscribers.Count; index++)
+        {
+            RelationalSqlBatch.AddParameter(command, $"@replay_subscriber{index}", subscribers[index]);
+        }
+    }
+
+    /// <summary>
+    /// Takes the subscriber's lock exclusively — so the pause waits for a claim statement already under way and every later
+    /// claim statement sees it — then writes the control, and logs the change in the same transaction when there was one.
+    /// </summary>
+    public Task<bool> SetPausedAsync(string subscriber, bool paused, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subscriber);
+        EnsureEntry(entry);
+
+        return InTransactionAsync(async (connection, transaction) =>
+        {
+            await LockSubscribersAsync(connection, transaction, [subscriber], exclusive: true, cancellationToken).ConfigureAwait(false);
+            var sql = paused ? DeliveryOperationsTable.PauseSql(_controls) : DeliveryOperationsTable.ResumeSql(_controls);
+            var changed = await ExecuteInAsync(connection, transaction, sql, command => BindControl(command, subscriber, paused, entry), cancellationToken)
+                .ConfigureAwait(false) == 1;
+            if (changed)
+            {
+                await LogChangeAsync(connection, transaction, entry with { Affected = 1 }, cancellationToken).ConfigureAwait(false);
+            }
+
+            return changed;
+        }, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<SubscriberControl>> ControlsAsync(CancellationToken cancellationToken = default)
+    {
+        var controls = await ReadAsync(DeliveryOperationsTable.ControlsSql(_controls), _ => { }, ReadControl, cancellationToken).ConfigureAwait(false);
+
+        return [.. controls.OrderBy(control => control.Subscriber, StringComparer.Ordinal)];
+    }
+
+    private static void BindControl(DbCommand command, string subscriber, bool paused, DeliveryOperationEntry entry)
+    {
+        RelationalSqlBatch.AddParameter(command, "@subscriber", subscriber);
+        if (paused)
+        {
+            RelationalSqlBatch.AddParameter(command, "@at", StoredInstant.Text(entry.At));
+            RelationalSqlBatch.AddParameter(command, "@actor", entry.Actor);
+            RelationalSqlBatch.AddParameter(command, "@reason", Nullable(entry.Reason));
+        }
+    }
+
+    private static SubscriberControl ReadControl(DbDataReader reader) => new()
+    {
+        Subscriber = reader.GetString(0),
+        PausedAt = StoredInstant.Of(reader.GetValue(1)),
+        PausedBy = reader.GetString(2),
+        Reason = reader.IsDBNull(3) ? null : reader.GetString(3),
+    };
+
+    /// <summary>
+    /// Refuses a log row whose idempotency key comes without the scope it is recorded under — before any transaction, so
+    /// the log's <c>CHECK</c> never has to refuse it as an engine error after a change was made.
+    /// </summary>
+    private static void EnsureEntry(DeliveryOperationEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        if (entry.IdempotencyKey is not null && entry.IdempotencyScope is null)
+        {
+            throw new ArgumentException("An idempotency key is recorded under its caller's scope; the entry carries none.", nameof(entry));
+        }
     }
 
     private static void BindKey(DbCommand command, string scope, string key)

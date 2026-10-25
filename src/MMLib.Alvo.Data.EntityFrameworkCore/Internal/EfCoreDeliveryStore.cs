@@ -19,12 +19,14 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// <para>
 /// <b>A claim and an operator's reset of one subscriber are serialized by a subscriber lock</b>
 /// (<see cref="IAlvoSqlDialect.TransactionLockStatement"/>): the claim takes each subscriber it may claim for shared, a
-/// redeliver takes its delivery's subscriber exclusively, as the first statement of its transaction, and a replay takes
+/// redeliver and a pause take their subscriber exclusively, as the first statement of their transaction, and a replay takes
 /// every subscriber it may reset exclusively right after its log row, before the reset. On PostgreSQL
 /// under READ COMMITTED a lane check is evaluated against the statement's own snapshot and is not re-checked when a
 /// concurrent writer commits, so without the lock a redeliver and a claim of the same lane — ordered or not — could each
 /// pass the other's check: a redelivered earlier delivery and a later one both claimable, or two deliveries of one record
-/// running. SQLite needs no lock (the write gate admits one writer at a time), and its dialect answers none. The lock
+/// running. Likewise a claim statement already under way when a pause committed would still take one batch on a snapshot
+/// that predates the pause; with the lock, the pause waits for it, and no claim statement starts until the pause committed.
+/// SQLite needs no lock (the write gate admits one writer at a time), and its dialect answers none. The lock
 /// statement reads no row, so a transaction that opens with it still writes before it reads anything.
 /// </para>
 /// <para>
@@ -166,7 +168,7 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
                     var claimed = await RelationalSqlBatch.ReadRowsAsync(
                         connection,
                         transaction,
-                        DeliveryTable.ClaimSql(_table, _outbox, claim.Ordered.Count, claim.Unordered.Count),
+                        DeliveryTable.ClaimSql(_table, _outbox, _controls, claim.Ordered.Count, claim.Unordered.Count),
                         command => BindClaim(command, claim),
                         ReadClaimed,
                         ct).ConfigureAwait(false);

@@ -652,6 +652,12 @@ public sealed class DeliveryDispatcherTests : IDisposable
         public Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
             inner.ReplayAsync(filter, entry, cancellationToken);
 
+        public Task<bool> SetPausedAsync(string subscriber, bool paused, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+            inner.SetPausedAsync(subscriber, paused, entry, cancellationToken);
+
+        public Task<IReadOnlyList<SubscriberControl>> ControlsAsync(CancellationToken cancellationToken = default) =>
+            inner.ControlsAsync(cancellationToken);
+
         public Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default) =>
             inner.FindOperationAsync(scope, key, cancellationToken);
     }
@@ -704,6 +710,12 @@ public sealed class DeliveryDispatcherTests : IDisposable
 
         public Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
             inner.ReplayAsync(filter, entry, cancellationToken);
+
+        public Task<bool> SetPausedAsync(string subscriber, bool paused, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+            inner.SetPausedAsync(subscriber, paused, entry, cancellationToken);
+
+        public Task<IReadOnlyList<SubscriberControl>> ControlsAsync(CancellationToken cancellationToken = default) =>
+            inner.ControlsAsync(cancellationToken);
 
         public Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default) =>
             inner.FindOperationAsync(scope, key, cancellationToken);

@@ -130,9 +130,20 @@ internal static class DeliveryTable
     private static string FanOutRow(int row) =>
         $"(@id{row}, @event_id{row}, @subscriber{row}, @partition_key{row}, @tenant_id{row}, @kind{row}, @status{row}, 0, @now, @completed_at{row}, @last_error_type{row})";
 
-    internal static string ClaimSql(string table, string outbox, int ordered, int unordered)
+    /// <summary>
+    /// The claim: one conditional update whose outer condition repeats the claimability test — pending or due, a subscriber
+    /// the claim names, not paused, the head of its lane — so a claimant blocked behind another claims nothing twice.
+    /// </summary>
+    /// <remarks>
+    /// The pause is a <c>NOT EXISTS</c> over <paramref name="controls"/> in both halves, not a filter of the subscribers the
+    /// dispatcher names: it holds on every replica and across restarts with no read-then-claim window. The store takes the
+    /// subscriber's lock shared before this statement and a pause takes it exclusively, so on PostgreSQL a claim statement
+    /// never runs on a snapshot that predates a committed pause.
+    /// </remarks>
+    internal static string ClaimSql(string table, string outbox, string controls, int ordered, int unordered)
     {
-        var condition = $"{Claimable} AND {Registered(ordered + unordered)} AND {LaneHead(table, outbox, ordered, unordered)}";
+        var condition =
+            $"{Claimable} AND {Registered(ordered + unordered)} AND {NotPaused(table, controls)} AND {LaneHead(table, outbox, ordered, unordered)}";
 
         return
             $"""
@@ -145,6 +156,9 @@ internal static class DeliveryTable
             RETURNING id, event_id, subscriber, partition_key, attempts
             """;
     }
+
+    private static string NotPaused(string table, string controls) =>
+        $"NOT EXISTS (SELECT 1 FROM {controls} paused WHERE paused.subscriber = {table}.subscriber AND paused.paused_at IS NOT NULL)";
 
     private static string Registered(int subscribers) => $"subscriber IN ({Parameters(0, subscribers)})";
 

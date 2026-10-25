@@ -97,6 +97,40 @@ public sealed class SqliteDeliveryStoreTests : DeliveryStoreContractTests, IDisp
         (await world.AttemptNumbersAsync(first.Id)).ShouldBe([1, 2]);
     }
 
+    /// <summary>
+    /// A log row carrying an idempotency key without its scope is refused with <see cref="ArgumentException"/> before the
+    /// store opens a transaction, rather than by the log's <c>CHECK</c> as an engine error after a change was made.
+    /// </summary>
+    [Theory]
+    [InlineData("redeliver")]
+    [InlineData("replay")]
+    [InlineData("pause")]
+    public async Task A_key_without_its_scope_is_refused(string operation)
+    {
+        await using var world = await DeliveryStoreWorld.StartAsync(Connect, new SqliteSqlDialect());
+        var entry = new DeliveryOperationEntry
+        {
+            Id = Guid.NewGuid(),
+            At = DateTimeOffset.UnixEpoch,
+            Actor = "ops",
+            Operation = operation,
+            Target = Subscriber,
+            IdempotencyKey = "key-1",
+        };
+
+        await Should.ThrowAsync<ArgumentException>(() => Operate(world.Store, operation, entry));
+
+        (await world.OperationsAsync()).ShouldBeEmpty();
+        (await world.Store.ControlsAsync(Ct)).ShouldBeEmpty();
+    }
+
+    private static Task Operate(IDeliveryStore store, string operation, DeliveryOperationEntry entry) => operation switch
+    {
+        "redeliver" => store.RedeliverAsync(Guid.NewGuid(), entry, Ct),
+        "replay" => store.ReplayAsync(new DeliveryFilter { Limit = 1 }, entry, Ct),
+        _ => store.SetPausedAsync(Subscriber, paused: true, entry, Ct),
+    };
+
     protected override async Task<IDeliveryStoreWorld> WorldAsync() => await DeliveryStoreWorld.StartAsync(Connect, new SqliteSqlDialect());
 
     public void Dispose()

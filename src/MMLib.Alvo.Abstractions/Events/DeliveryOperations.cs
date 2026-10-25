@@ -147,3 +147,19 @@ public sealed record DeliveryOperationEntry
     /// <summary>Gets what makes a retry the same request, or <see langword="null"/>.</summary>
     public string? Fingerprint { get; init; }
 }
+
+/// <summary>A subscriber an operator has paused.</summary>
+public sealed record SubscriberControl
+{
+    /// <summary>Gets the subscriber id.</summary>
+    public required string Subscriber { get; init; }
+
+    /// <summary>Gets when it was paused.</summary>
+    public required DateTimeOffset PausedAt { get; init; }
+
+    /// <summary>Gets who paused it.</summary>
+    public required string PausedBy { get; init; }
+
+    /// <summary>Gets why, or <see langword="null"/>.</summary>
+    public string? Reason { get; init; }
+}

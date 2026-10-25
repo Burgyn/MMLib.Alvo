@@ -658,6 +658,8 @@ namespace MMLib.Alvo.Testing.Events
         public System.Threading.Tasks.Task A_page_filters_by_subscriber_record_status_and_event_window() { }
         public System.Threading.Tasks.Task A_page_lists_deliveries_newest_first_and_continues_after_the_last_one() { }
         public System.Threading.Tasks.Task A_page_of_one_subscriber_continues_after_its_cursor_within_that_subscriber() { }
+        public System.Threading.Tasks.Task A_paused_subscriber_is_listed_with_who_when_and_why() { }
+        public System.Threading.Tasks.Task A_paused_subscriber_is_not_claimed_and_its_lane_drains_in_order_after_resume() { }
         public System.Threading.Tasks.Task A_redeliver_whose_log_row_is_refused_changes_nothing() { }
         public System.Threading.Tasks.Task A_redeliver_writes_one_log_row() { }
         public System.Threading.Tasks.Task A_redelivered_delivery_runs_again_with_a_fresh_budget_and_keeps_its_history() { }
@@ -685,6 +687,7 @@ namespace MMLib.Alvo.Testing.Events
         public System.Threading.Tasks.Task An_unordered_subscriber_does_not_wait_for_an_earlier_unfanned_event() { }
         public System.Threading.Tasks.Task An_unordered_subscriber_is_not_blocked_by_a_dead_earlier_delivery() { }
         protected virtual void EnsureEngineAvailable() { }
+        public System.Threading.Tasks.Task Pausing_twice_changes_nothing_the_second_time() { }
         public System.Threading.Tasks.Task Redelivering_a_dead_delivery_makes_it_the_head_of_its_lane_again() { }
         public System.Threading.Tasks.Task Redelivering_an_unfinished_delivery_changes_nothing_and_logs_nothing() { }
         public System.Threading.Tasks.Task Redelivering_while_its_record_runs_another_delivery_changes_nothing() { }

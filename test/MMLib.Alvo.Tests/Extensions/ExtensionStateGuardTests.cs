@@ -234,6 +234,12 @@ public sealed class ExtensionStateGuardTests : IDisposable
         public Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
             Built(() => inner.ReplayAsync(filter, entry, cancellationToken));
 
+        public Task<bool> SetPausedAsync(string subscriber, bool paused, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+            Built(() => inner.SetPausedAsync(subscriber, paused, entry, cancellationToken));
+
+        public Task<IReadOnlyList<SubscriberControl>> ControlsAsync(CancellationToken cancellationToken = default) =>
+            Built(() => inner.ControlsAsync(cancellationToken));
+
         public Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default) =>
             Built(() => inner.FindOperationAsync(scope, key, cancellationToken));
 

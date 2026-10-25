@@ -174,6 +174,24 @@ internal static class DeliveryOperationsTable
         ON CONFLICT DO NOTHING
         """;
 
+    /// <summary>
+    /// Pauses a subscriber, recording when, by whom and why — and changes a row only from running to paused, so a second
+    /// pause answers no row and its caller logs nothing. An upsert, so the transaction it opens starts with a write.
+    /// </summary>
+    internal static string PauseSql(string controls) =>
+        $"""
+        INSERT INTO {controls} (subscriber, paused_at, paused_by, reason) VALUES (@subscriber, @at, @actor, @reason)
+        ON CONFLICT (subscriber) DO UPDATE SET paused_at = excluded.paused_at, paused_by = excluded.paused_by, reason = excluded.reason
+        WHERE {controls}.paused_at IS NULL
+        """;
+
+    /// <summary>Resumes a paused subscriber; a running one answers no row. The row stays, for the columns a later switch-off fills.</summary>
+    internal static string ResumeSql(string controls) =>
+        $"UPDATE {controls} SET paused_at = NULL, paused_by = NULL, reason = NULL WHERE subscriber = @subscriber AND paused_at IS NOT NULL";
+
+    internal static string ControlsSql(string controls) =>
+        $"SELECT subscriber, paused_at, paused_by, reason FROM {controls} WHERE paused_at IS NOT NULL";
+
     internal static string AllOperationsSql(string log) => $"SELECT {LogColumns} FROM {log} ORDER BY at, id";
 
     internal static string SubscriberOfSql(string table) => $"SELECT subscriber FROM {table} WHERE id = @id";

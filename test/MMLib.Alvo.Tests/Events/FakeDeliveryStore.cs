@@ -21,6 +21,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     private readonly List<(Guid Delivery, int Attempt, string Outcome)> _attempts = [];
     private readonly List<(Guid Delivery, DateTimeOffset StartedAt, TimeSpan Duration, string Outcome, string? ErrorType)> _history = [];
     private readonly List<DeliveryOperationEntry> _operations = [];
+    private readonly Dictionary<string, SubscriberControl> _paused = new(StringComparer.Ordinal);
 
     internal int FanOutFailures { get; set; }
 
@@ -206,7 +207,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
 
     public Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(entry);
+        EnsureEntry(entry);
         lock (_gate)
         {
             if (_rows.SingleOrDefault(row => row.Id == id && _finished.Contains(row.Status) && !LaneBusy(row)) is not { } row)
@@ -225,7 +226,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     public Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
     {
         EnsureRows(filter);
-        ArgumentNullException.ThrowIfNull(entry);
+        EnsureEntry(entry);
         lock (_gate)
         {
             if (KeyRecorded(entry))
@@ -250,6 +251,51 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         lock (_gate)
         {
             return Task.FromResult(_operations.Find(row => row.IdempotencyScope == scope && row.IdempotencyKey == key));
+        }
+    }
+
+    public Task<bool> SetPausedAsync(string subscriber, bool paused, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subscriber);
+        EnsureEntry(entry);
+        lock (_gate)
+        {
+            if (_paused.ContainsKey(subscriber) == paused)
+            {
+                return Task.FromResult(false);
+            }
+
+            EnsureLoggable(entry);
+            if (paused)
+            {
+                _paused.Add(subscriber, new SubscriberControl { Subscriber = subscriber, PausedAt = entry.At, PausedBy = entry.Actor, Reason = entry.Reason });
+            }
+            else
+            {
+                _paused.Remove(subscriber);
+            }
+
+            _operations.Add(entry with { Affected = 1 });
+
+            return Task.FromResult(true);
+        }
+    }
+
+    public Task<IReadOnlyList<SubscriberControl>> ControlsAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<SubscriberControl>>([.. _paused.Values.OrderBy(control => control.Subscriber, StringComparer.Ordinal)]);
+        }
+    }
+
+    /// <summary>Refuses a log row whose idempotency key comes without its scope, as the EF store does, before anything changes.</summary>
+    private static void EnsureEntry(DeliveryOperationEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        if (entry.IdempotencyKey is not null && entry.IdempotencyScope is null)
+        {
+            throw new ArgumentException("An idempotency key is recorded under its caller's scope; the entry carries none.", nameof(entry));
         }
     }
 
@@ -333,6 +379,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
 
     private bool Claimable(Row row, DeliveryClaim claim, DateTimeOffset now) =>
         (claim.Ordered.Contains(row.Subscriber) || claim.Unordered.Contains(row.Subscriber))
+        && !_paused.ContainsKey(row.Subscriber)
         && Due(row, now)
         && (claim.Unordered.Contains(row.Subscriber) || !Blocked(row, claim, now));
 
