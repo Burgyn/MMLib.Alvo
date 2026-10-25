@@ -1,8 +1,12 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Management;
+using MMLib.Alvo.Management.Internal;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Tests.Management;
 
@@ -195,4 +199,65 @@ public sealed class AlvoOperationsReplayTests
 
         world.Services.GetRequiredService<IAlvoOperations>().ShouldBeSameAs(world.Service);
     }
+
+    [Fact]
+    public async Task A_replay_whose_key_a_concurrent_run_recorded_first_answers_that_run()
+    {
+        using var world = new OperationsTestWorld();
+        await world.DeliveryAsync("tickets:a", deadReason: "when-failed");
+        var service = ServiceOver(world, new RacedReplayStore(world.Store));
+
+        var plan = await service.ReplayAsync(Project, new ManagementReplayRequest { Subscriber = Handler, IdempotencyKey = "replay-10" }, Ct);
+
+        (plan.Count, plan.Replayed, plan.DryRun).ShouldBe((1, true, false));
+        plan.Ids.ShouldBe(world.Store.Operations.ShouldHaveSingleItem().Sample);
+        world.Audit.Lines.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_replay_whose_key_a_concurrent_different_run_recorded_first_is_a_conflict()
+    {
+        using var world = new OperationsTestWorld();
+        await world.DeliveryAsync("tickets:a", deadReason: "when-failed");
+        var service = ServiceOver(world, new RacedReplayStore(world.Store, racingFingerprint: "another-request"));
+
+        await Should.ThrowAsync<AlvoIdempotencyConflictException>(() =>
+            service.ReplayAsync(Project, new ManagementReplayRequest { Subscriber = Handler, IdempotencyKey = "replay-11" }, Ct));
+
+        world.Audit.Lines.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_retry_spelling_the_same_window_in_another_offset_is_the_same_replay()
+    {
+        using var world = new OperationsTestWorld();
+        var from = new DateTimeOffset(2026, 10, 24, 8, 0, 0, TimeSpan.Zero);
+        await world.Service.ReplayAsync(Project, new ManagementReplayRequest { Subscriber = Handler, From = from, IdempotencyKey = "replay-12" }, Ct);
+
+        var retried = await world.Service.ReplayAsync(
+            Project, new ManagementReplayRequest { Subscriber = Handler, From = from.ToOffset(TimeSpan.FromHours(2)), IdempotencyKey = "replay-12" }, Ct);
+
+        retried.Replayed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task A_missing_status_is_the_dead_replay_it_defaults_to()
+    {
+        using var world = new OperationsTestWorld();
+        await world.DeliveryAsync("tickets:a", deadReason: "when-failed");
+        await world.Service.ReplayAsync(Project, new ManagementReplayRequest { Subscriber = Handler, IdempotencyKey = "replay-13" }, Ct);
+
+        var retried = await world.Service.ReplayAsync(Project, new ManagementReplayRequest { Subscriber = Handler, Status = null!, IdempotencyKey = "replay-13" }, Ct);
+
+        (retried.Count, retried.Replayed).ShouldBe((1, true));
+    }
+
+    private static AlvoOperationsService ServiceOver(OperationsTestWorld world, IDeliveryStore store) => new(
+        world.Services.GetRequiredService<ManagementGate>(),
+        world.Services.GetRequiredService<ExtensionCatalog>(),
+        world.Services.GetRequiredService<ExtensionStats>(),
+        world.Services.GetRequiredService<ISchemaRegistry>(),
+        world.Services.GetRequiredService<TimeProvider>(),
+        world.Services.GetRequiredService<ILogger<AlvoOperationsService>>(),
+        store);
 }

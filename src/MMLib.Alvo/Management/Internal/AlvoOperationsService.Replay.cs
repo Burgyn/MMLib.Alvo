@@ -12,12 +12,26 @@ namespace MMLib.Alvo.Management.Internal;
 /// <remarks>
 /// A real run always writes its log row and its one audit line, even when it reset nothing (plan Ruling 5): the row is its
 /// key's record. A retry answered from that record writes neither.
+/// <para>
+/// <b>What makes a retry the same request</b> is normalized before it is hashed: a missing status is the <c>dead</c> it
+/// defaults to — and the filter uses the same value, so the hash never describes a different selection than the reset — and
+/// the window's instants are hashed in UTC, so one instant spelled in two offsets is one request.
+/// </para>
+/// <para>
+/// <b>A duplicate that races the first run is answered by the record only once that run has committed.</b> A duplicate whose
+/// key lookup and selection run while the first run's transaction is still open sees no record, and its selection may be
+/// refused — 409 when a selected record has a delivery running, or 422 past <see cref="MaxReplay"/> — before its own
+/// reset would have found the key recorded. That is the window plan Ruling 7 accepts for the count check, stated rather
+/// than locked against; a retry after the first answer arrives always reads the record.
+/// </para>
 /// </remarks>
 internal sealed partial class AlvoOperationsService : IAlvoOperations
 {
     internal const int MaxReplay = 10_000;
 
     private const string ReplayOperation = "replay";
+
+    private const string DefaultReplayStatus = "dead";
 
     private const string KeyOnDryRun =
         "A dry run may not carry an 'Idempotency-Key'. It resets nothing, so there is nothing to record — and a record filed "
@@ -46,21 +60,23 @@ internal sealed partial class AlvoOperationsService : IAlvoOperations
             project,
             expectedRevision: 0,
             allowDestructive: false,
-            string.Join('\n', request.Subscriber, request.Status, Instant(request.From), Instant(request.To)));
+            string.Join('\n', request.Subscriber, StatusOf(request), Instant(request.From), Instant(request.To)));
 
-    private static string Instant(DateTimeOffset? instant) => instant?.ToString("O", CultureInfo.InvariantCulture) ?? string.Empty;
+    private static string Instant(DateTimeOffset? instant) => instant?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture) ?? string.Empty;
+
+    private static string StatusOf(ManagementReplayRequest request) => request.Status ?? DefaultReplayStatus;
 
     private DeliveryFilter ReplayFilter(ManagementReplayRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         OperationReasons.Ensure(request.Reason);
         Handler(request.Subscriber);
-        DeliveryQueries.EnsureStatus(request.Status, DeliveryQueries.Finished, "replayed");
+        DeliveryQueries.EnsureStatus(StatusOf(request), DeliveryQueries.Finished, "replayed");
 
         return DeliveryQueries.Window(request.From, request.To) with
         {
             Subscriber = request.Subscriber,
-            Status = request.Status,
+            Status = StatusOf(request),
             Replayable = true,
             Limit = SampleSize,
         };
