@@ -90,9 +90,24 @@ internal static class DeliveryOperationsTable
     internal static string AttemptsSql(string attempts) =>
         $"SELECT attempt, started_at, duration_ms, outcome, error_type FROM {attempts} WHERE delivery_id = @id ORDER BY attempt";
 
+    internal const string ReplayableTerm =
+        "status IN ('succeeded', 'dead', 'cancelled') AND COALESCE(last_error_type, '') <> 'chain-depth-exceeded'";
+
+    /// <summary>Whether a delivery of the row's subscriber and partition key is running — the row's lane is busy.</summary>
+    internal static string LaneRunning(string table) =>
+        $"EXISTS (SELECT 1 FROM {table} lane WHERE lane.subscriber = {table}.subscriber AND lane.partition_key = {table}.partition_key AND lane.status = 'running')";
+
+    /// <summary>
+    /// The count, the busy count and the sample in one statement: the window aggregates are taken before the limit, so they
+    /// cannot disagree with the sample, and a filter matching nothing returns no row — counts of zero.
+    /// </summary>
+    internal static string SelectSql(string table, DeliveryFilter filter) =>
+        $"SELECT id, COUNT(*) OVER (), SUM(CASE WHEN {LaneRunning(table)} THEN 1 ELSE 0 END) OVER () FROM {table}{Where(filter, keyset: false)} ORDER BY event_id, id LIMIT @limit";
+
     internal static string Conditions(DeliveryFilter filter, bool keyset)
     {
         var terms = new List<string>();
+        AddWhen(terms, filter.Replayable, ReplayableTerm);
         AddWhen(terms, filter.Subscriber is not null, "subscriber = @subscriber");
         AddWhen(terms, filter.PartitionKey is not null, "partition_key = @partition_key");
         AddWhen(terms, filter.Status is not null, "status = @status");

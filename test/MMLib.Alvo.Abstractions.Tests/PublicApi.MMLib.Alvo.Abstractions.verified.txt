@@ -1143,6 +1143,7 @@ namespace MMLib.Alvo.Events
         public System.Guid? FromEventId { get; init; }
         public required int Limit { get; init; }
         public string? PartitionKey { get; init; }
+        public bool Replayable { get; init; }
         public string? Status { get; init; }
         public string? Subscriber { get; init; }
         public System.Guid? ToEventId { get; init; }
@@ -1157,6 +1158,13 @@ namespace MMLib.Alvo.Events
         public required string PartitionKey { get; init; }
         public required string Subscriber { get; init; }
         public string? TenantId { get; init; }
+    }
+    public sealed class DeliverySelection : System.IEquatable<MMLib.Alvo.Events.DeliverySelection>
+    {
+        public DeliverySelection() { }
+        public int Busy { get; init; }
+        public required int Count { get; init; }
+        public required System.Collections.Generic.IReadOnlyList<System.Guid> Sample { get; init; }
     }
     public interface IAlvoEvents
     {
@@ -1175,6 +1183,7 @@ namespace MMLib.Alvo.Events
         System.Threading.Tasks.Task<MMLib.Alvo.Events.StoredDelivery?> FindAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.StoredDelivery>> ListAsync(MMLib.Alvo.Events.DeliveryFilter filter, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> PendingSubscribersAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliverySelection> SelectAsync(MMLib.Alvo.Events.DeliveryFilter filter, System.Threading.CancellationToken cancellationToken = default);
     }
     public interface IEmailSender
     {

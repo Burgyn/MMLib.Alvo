@@ -74,6 +74,12 @@ public static class AlvoEventId
         }
     }
 
+    /// <summary>The smallest id <see cref="Create(DateTimeOffset)"/> can mint in <paramref name="instant"/>'s millisecond.</summary>
+    /// <remarks>An operator's window over event time is a window over ids: every id minted at or after the instant sorts at or above it.</remarks>
+    /// <param name="instant">The instant.</param>
+    /// <returns>The floor id.</returns>
+    internal static Guid Floor(DateTimeOffset instant) => Compose(instant.ToUnixTimeMilliseconds(), UInt128.Zero);
+
     private static Guid NextInOrder(ReadOnlySpan<byte> candidate)
     {
         var milliseconds = MillisecondsOf(candidate);

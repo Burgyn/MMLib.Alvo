@@ -623,6 +623,9 @@ public sealed class DeliveryDispatcherTests : IDisposable
 
         public Task<IReadOnlyList<StoredDeliveryAttempt>> AttemptsAsync(Guid id, CancellationToken cancellationToken = default) =>
             inner.AttemptsAsync(id, cancellationToken);
+
+        public Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default) =>
+            inner.SelectAsync(filter, cancellationToken);
     }
 
     /// <summary>The in-memory store whose first claims fail the way a database under a deadlock or a restart refuses one.</summary>
@@ -664,5 +667,8 @@ public sealed class DeliveryDispatcherTests : IDisposable
 
         public Task<IReadOnlyList<StoredDeliveryAttempt>> AttemptsAsync(Guid id, CancellationToken cancellationToken = default) =>
             inner.AttemptsAsync(id, cancellationToken);
+
+        public Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default) =>
+            inner.SelectAsync(filter, cancellationToken);
     }
 }

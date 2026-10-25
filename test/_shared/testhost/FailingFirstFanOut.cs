@@ -47,4 +47,7 @@ internal sealed class FailingFirstFanOut(IDeliveryStore inner) : IDeliveryStore
 
     public Task<IReadOnlyList<StoredDeliveryAttempt>> AttemptsAsync(Guid id, CancellationToken cancellationToken = default) =>
         inner.AttemptsAsync(id, cancellationToken);
+
+    public Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default) =>
+        inner.SelectAsync(filter, cancellationToken);
 }

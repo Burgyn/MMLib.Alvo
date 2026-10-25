@@ -12,6 +12,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
 {
     private static readonly string[] _unfinished = ["pending", "running", "retrying"];
     private static readonly string[] _blocking = ["pending", "running", "retrying", "dead"];
+    private static readonly string[] _finished = ["succeeded", "dead", "cancelled"];
 
     private readonly Lock _gate = new();
     private readonly List<Row> _rows = [];
@@ -137,9 +138,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
 
     public Task<IReadOnlyList<StoredDelivery>> ListAsync(DeliveryFilter filter, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(filter);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(filter.Limit);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(filter.Limit, 1000);
+        EnsureRows(filter);
         lock (_gate)
         {
             return Task.FromResult<IReadOnlyList<StoredDelivery>>([.. Matching(filter)
@@ -177,8 +176,41 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         }
     }
 
+    public Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default)
+    {
+        EnsureRows(filter);
+        lock (_gate)
+        {
+            var matched = InEventOrder(Matching(filter)).ToList();
+
+            return Task.FromResult(new DeliverySelection
+            {
+                Count = matched.Count,
+                Busy = matched.Count(LaneBusy),
+                Sample = [.. matched.Take(filter.Limit).Select(row => row.Id)],
+            });
+        }
+    }
+
+    private static void EnsureRows(DeliveryFilter filter)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(filter.Limit);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(filter.Limit, 1000);
+    }
+
+    private static bool Replayable(Row row) => _finished.Contains(row.Status) && row.LastErrorType != "chain-depth-exceeded";
+
+    private bool LaneBusy(Row row) =>
+        _rows.Exists(other => other.Subscriber == row.Subscriber && other.PartitionKey == row.PartitionKey && other.Status == "running");
+
+    private static IEnumerable<Row> InEventOrder(IEnumerable<Row> rows) => rows
+        .OrderBy(row => row.EventId.ToString(), StringComparer.Ordinal)
+        .ThenBy(row => row.Id.ToString(), StringComparer.Ordinal);
+
     private IEnumerable<Row> Matching(DeliveryFilter filter) => _rows.Where(row =>
-        (filter.Subscriber is null || row.Subscriber == filter.Subscriber)
+        (!filter.Replayable || Replayable(row))
+        && (filter.Subscriber is null || row.Subscriber == filter.Subscriber)
         && (filter.PartitionKey is null || row.PartitionKey == filter.PartitionKey)
         && (filter.Status is null || row.Status == filter.Status)
         && (filter.FromEventId is not { } from || !Before(row.EventId, from))

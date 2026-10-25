@@ -37,6 +37,23 @@ internal sealed partial class EfCoreDeliveryStore
         await ReadAsync(DeliveryOperationsTable.AttemptsSql(_attempts), command => BindId(command, id), ReadAttempt, cancellationToken)
             .ConfigureAwait(false);
 
+    public async Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default)
+    {
+        EnsureRows(filter);
+        var rows = await ReadAsync(
+            DeliveryOperationsTable.SelectSql(_table, filter),
+            command => BindFilter(command, filter, keyset: false, limit: true),
+            reader => (
+                Id: Guid.Parse(reader.GetString(0), CultureInfo.InvariantCulture),
+                Total: Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture),
+                Busy: Convert.ToInt32(reader.GetValue(2), CultureInfo.InvariantCulture)),
+            cancellationToken).ConfigureAwait(false);
+
+        return rows.Count == 0
+            ? new DeliverySelection { Count = 0, Sample = [] }
+            : new DeliverySelection { Count = rows[0].Total, Busy = rows[0].Busy, Sample = [.. rows.Select(row => row.Id)] };
+    }
+
     private static void EnsureRows(DeliveryFilter filter)
     {
         ArgumentNullException.ThrowIfNull(filter);

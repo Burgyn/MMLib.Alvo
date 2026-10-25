@@ -127,4 +127,69 @@ public abstract partial class DeliveryStoreContractTests
         rest.Select(delivery => delivery.EventId).ShouldBe([events[1], events[0]]);
         first.Concat(rest).ShouldAllBe(delivery => delivery.Subscriber == Audit);
     }
+
+    /// <summary>A selection counts exactly, samples the first ids in event order, and changes nothing.</summary>
+    [Fact]
+    public async Task A_selection_counts_exactly_samples_in_event_order_and_changes_nothing()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var dead = new List<Guid>();
+        foreach (var key in new[] { KeyA, KeyB, "tickets:c" })
+        {
+            var @event = await world.AppendEventAsync(key);
+            await world.Store.FanOutAsync([Request(@event, Confirm, key) with { DeadReason = "when-failed" }, Request(@event, Audit, key)], Ct);
+            dead.Add(@event);
+        }
+
+        var before = await world.Store.ListAsync(new DeliveryFilter { Limit = 50 }, Ct);
+        var selection = await world.Store.SelectAsync(new DeliveryFilter { Subscriber = Confirm, Status = "dead", Limit = 2 }, Ct);
+        var after = await world.Store.ListAsync(new DeliveryFilter { Limit = 50 }, Ct);
+
+        selection.Count.ShouldBe(3);
+        selection.Sample.Count.ShouldBe(2);
+        selection.Busy.ShouldBe(0);
+        (await world.Store.FindAsync(selection.Sample[0], Ct)).ShouldNotBeNull().EventId.ShouldBe(dead[0]);
+        after.ShouldBe(before);
+    }
+
+    /// <summary>
+    /// A replayable selection leaves out what is unfinished and what broke a loop (dead <c>chain-depth-exceeded</c>), and
+    /// counts the selected deliveries whose record has a delivery of the same subscriber running.
+    /// </summary>
+    [Fact]
+    public async Task A_replayable_selection_leaves_out_loop_breaks_and_counts_running_records()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var loop = await world.AppendEventAsync(KeyA);
+        var failed = await world.AppendEventAsync(KeyB);
+        var running = await world.AppendEventAsync(KeyB);
+        var pending = await world.AppendEventAsync("tickets:c");
+        await world.Store.FanOutAsync([Request(loop, Confirm, KeyA) with { DeadReason = "chain-depth-exceeded" }], Ct);
+        await world.Store.FanOutAsync([Request(failed, Confirm, KeyB) with { DeadReason = "when-failed" }], Ct);
+        await world.Store.FanOutAsync([Request(running, Confirm, KeyB)], Ct);
+        await world.Store.FanOutAsync([Request(pending, Audit, "tickets:c")], Ct);
+        (await world.Store.ClaimAsync(Unordered(Confirm), Ct)).ShouldHaveSingleItem().EventId.ShouldBe(running);
+
+        var selection = await world.Store.SelectAsync(new DeliveryFilter { Replayable = true, Limit = 20 }, Ct);
+
+        selection.Count.ShouldBe(1, "only the failed delivery may be replayed");
+        (await world.Store.FindAsync(selection.Sample[0], Ct)).ShouldNotBeNull().EventId.ShouldBe(failed);
+        selection.Busy.ShouldBe(1, "its record has another delivery of the same handler running");
+    }
+
+    /// <summary>A selection asking for nothing is refused rather than answered empty.</summary>
+    [Fact]
+    public async Task A_selection_asking_for_no_rows_is_refused()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(() => world.Store.SelectAsync(new DeliveryFilter { Limit = 0 }, Ct));
+    }
+
+    /// <summary>A claim of unordered subscribers: their deliveries run whatever came before them in the lane.</summary>
+    private static DeliveryClaim Unordered(params string[] subscribers) =>
+        Claim() with { Ordered = [], Unordered = subscribers };
 }

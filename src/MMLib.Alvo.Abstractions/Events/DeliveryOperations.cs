@@ -83,8 +83,30 @@ public sealed record DeliveryFilter
     public Guid? After { get; init; }
 
     /// <summary>
-    /// Gets a page's size, or a selection's and a replay's sample size; a store refuses zero or less, and a page of more than
-    /// 1 000, with <see cref="ArgumentOutOfRangeException"/>.
+    /// Gets a page's size, or a selection's and a replay's sample size; a store refuses zero or less, and a page or sample of
+    /// more than 1 000, with <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public required int Limit { get; init; }
+
+    /// <summary>
+    /// Gets whether to keep only what a replay may reset: a finished delivery — succeeded, dead or cancelled — that is not
+    /// dead with <c>chain-depth-exceeded</c>, the record of a loop the chain-depth limit stopped.
+    /// </summary>
+    public bool Replayable { get; init; }
+}
+
+/// <summary>What a filter selects, counted exactly, with the first ids it would reset.</summary>
+public sealed record DeliverySelection
+{
+    /// <summary>Gets how many deliveries match.</summary>
+    public required int Count { get; init; }
+
+    /// <summary>Gets the first <see cref="DeliveryFilter.Limit"/> matching ids, in event order — the order they would run.</summary>
+    public required IReadOnlyList<Guid> Sample { get; init; }
+
+    /// <summary>
+    /// Gets how many of them have a delivery of the same subscriber and partition key running now — deliveries a reset
+    /// would put in flight beside it.
+    /// </summary>
+    public int Busy { get; init; }
 }

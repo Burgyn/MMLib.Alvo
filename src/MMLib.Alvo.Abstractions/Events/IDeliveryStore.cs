@@ -244,4 +244,14 @@ public interface IDeliveryStore
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The attempts; none for an unknown id.</returns>
     Task<IReadOnlyList<StoredDeliveryAttempt>> AttemptsAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Counts what <paramref name="filter"/> selects, exactly, samples the first ids in event order, and counts the selected
+    /// deliveries whose lane has a delivery running; changes nothing.
+    /// </summary>
+    /// <param name="filter">Which deliveries; <see cref="DeliveryFilter.After"/> is ignored.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The count, the sample and the busy count.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="DeliveryFilter.Limit"/> is zero or less, or more than 1 000.</exception>
+    Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default);
 }
