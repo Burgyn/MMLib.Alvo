@@ -38,8 +38,12 @@ namespace MMLib.Alvo.Management.Internal;
 /// the TeaPie e2e suite as a path-set equality. Mixing a hand-written admin surface into it would move all
 /// three for a reason that has nothing to do with the Data API. A document of its own is the follow-on.
 /// </para>
+/// <para>
+/// <b>The operations port's delegates live in <c>ManagementEndpoints.Operations.cs</c></b>, behind the same
+/// <c>Gate</c> and rendered by the same <c>Answer</c>.
+/// </para>
 /// </remarks>
-internal static class ManagementEndpoints
+internal static partial class ManagementEndpoints
 {
     /// <summary>Maps every management route under <paramref name="options"/>' prefix.</summary>
     /// <param name="endpoints">The endpoint route builder to map onto.</param>
@@ -63,6 +67,7 @@ internal static class ManagementEndpoints
         MapExpressionCheck(group);
         MapApply(group);
         MapRollback(group);
+        MapOperations(group);
 
         MapAiConnection(group);
         MapUsers(endpoints, group);
@@ -689,6 +694,18 @@ internal static class ManagementEndpoints
         catch (ManagementRevisionNotFoundException refusal)
         {
             return ProblemResultFactory.ManagementNotFound(refusal.Message);
+        }
+        catch (ManagementDeliveryNotFoundException refusal)
+        {
+            return ProblemResultFactory.ManagementNotFound(refusal.Message);
+        }
+        catch (ManagementExtensionNotFoundException refusal)
+        {
+            return ProblemResultFactory.ManagementNotFound(refusal.Message);
+        }
+        catch (ManagementConflictException refusal)
+        {
+            return ProblemResultFactory.ManagementConflict(refusal.Message);
         }
         catch (ManagementSimulationException refusal)
         {

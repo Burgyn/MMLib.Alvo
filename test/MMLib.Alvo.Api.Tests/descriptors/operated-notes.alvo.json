@@ -1,0 +1,29 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "operated-notes",
+  "description": "The management levels the operations routes are measured against: ops reads, dev operates, admin switches code off. One handler is registered on notes by the fact itself.",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["ops", "dev"]
+  },
+  "access": {
+    "viewer": "'ops' in @user.roles",
+    "developer": "'dev' in @user.roles",
+    "admin": "'admin' in @user.roles"
+  },
+  "entities": {
+    "notes": {
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 120 }
+      },
+      "rules": {
+        "list": "false",
+        "get": "false",
+        "create": "false",
+        "update": "false",
+        "delete": "false"
+      }
+    }
+  }
+}

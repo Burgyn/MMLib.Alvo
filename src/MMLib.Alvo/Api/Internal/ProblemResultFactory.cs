@@ -256,6 +256,14 @@ internal static class ProblemResultFactory
         StatusCodes.Status404NotFound, AlvoProblemTypes.NotFound, detail);
 
     /// <summary>
+    /// The 409 for an operation its target's state does not allow — a running delivery, an extension that cannot be
+    /// switched off — with the refusal's own sentence, which says what to do instead.
+    /// </summary>
+    /// <param name="detail">What stands in the way, and the way round it.</param>
+    internal static IResult ManagementConflict(string detail) => Problem(
+        StatusCodes.Status409Conflict, AlvoProblemTypes.Conflict, detail);
+
+    /// <summary>
     /// The 404 for a row that does not exist <em>or</em> that the caller's policy excludes — one
     /// wording and one type, because <c>IAlvoData</c>'s contract makes the two indistinguishable and the
     /// HTTP layer must not undo that.

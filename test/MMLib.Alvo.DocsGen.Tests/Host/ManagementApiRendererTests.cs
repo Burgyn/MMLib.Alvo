@@ -13,6 +13,9 @@ public class ManagementApiRendererTests
           <member name="M:MMLib.Alvo.IAlvoUserAdministration.ListAsync(MMLib.Alvo.AlvoUserQuery,System.Threading.CancellationToken)">
             <summary>Lists the people who can sign in.</summary>
           </member>
+          <member name="M:MMLib.Alvo.Management.IAlvoOperations.RedeliverAsync(System.String,System.Guid,System.String,System.Threading.CancellationToken)">
+            <summary>Runs one finished delivery again.</summary>
+          </member>
           <member name="M:MMLib.Alvo.Management.IAlvoManagement.GetInfoAsync(System.Threading.CancellationToken)">
             <summary></summary>
           </member>
@@ -40,6 +43,20 @@ public class ManagementApiRendererTests
 
         content.IndexOf("## IAlvoManagement", StringComparison.Ordinal).ShouldBeLessThan(content.IndexOf("## IAlvoUserAdministration", StringComparison.Ordinal));
         content.ShouldContain("| GET | `/management/projects/{project}/users` | `ListAsync` | Lists the people who can sign in. |\n");
+    }
+
+    [Fact]
+    public void The_operations_port_gets_its_own_section_after_the_management_port()
+    {
+        var content = ManagementApiRenderer.Render(
+            [
+                new("POST", "/management/projects/{project}/deliveries/{delivery:guid}/redeliver", "RedeliverAsync"),
+                new("GET", "/management/projects/{project}/cel/functions", "GetCelFunctionsAsync"),
+            ],
+            XmlDocs.Parse(Docs)).Content;
+
+        content.IndexOf("## IAlvoManagement", StringComparison.Ordinal).ShouldBeLessThan(content.IndexOf("## IAlvoOperations", StringComparison.Ordinal));
+        content.ShouldContain("| POST | `/management/projects/{project}/deliveries/{delivery:guid}/redeliver` | `RedeliverAsync` | Runs one finished delivery again. |\n");
     }
 
     [Fact]

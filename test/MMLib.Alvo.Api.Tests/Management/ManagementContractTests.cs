@@ -16,7 +16,7 @@ namespace MMLib.Alvo.Api.Tests.Management;
 public class ManagementContractTests
 {
     [Fact]
-    public async Task Every_member_of_IAlvoManagement_has_an_http_route()
+    public async Task Every_member_of_the_management_ports_has_an_http_route()
     {
         await using var world = await AlvoApiWorld.VehicleRegistryAsync(
             setup: new AlvoApiWorldSetup(MapManagementApi: true));
@@ -81,7 +81,7 @@ public class ManagementContractTests
             + "and an e2e path-set equality; a hand-written admin surface would move all three");
     }
 
-    /// <summary>Every member the contract declares, read off the interface rather than off a list.</summary>
+    /// <summary>Every member both management ports declare, read off the interfaces rather than off a list.</summary>
     private static IEnumerable<string> ContractMembers() =>
-        typeof(IAlvoManagement).GetMethods().Select(method => method.Name);
+        typeof(IAlvoManagement).GetMethods().Concat(typeof(IAlvoOperations).GetMethods()).Select(method => method.Name);
 }
