@@ -150,6 +150,19 @@ internal sealed class ManagementGateway(
         }
     }
 
+    /// <summary>Runs one call of another management port for this dashboard's project, with the operator published.</summary>
+    /// <remarks>The operations port gates itself exactly as this contract does; the dashboard only says who is asking.</remarks>
+    /// <typeparam name="T">What the call answers with.</typeparam>
+    /// <param name="call">The call, given the project's name.</param>
+    /// <param name="ct">Cancels resolving the project and the caller; the call itself carries its own.</param>
+    /// <returns>Whatever the call answered.</returns>
+    internal async Task<T> ForProjectAsync<T>(Func<string, Task<T>> call, CancellationToken ct)
+    {
+        var project = await ProjectAsync(ct).ConfigureAwait(false);
+
+        return await AsOperatorAsync(() => call(project), ct).ConfigureAwait(false);
+    }
+
     /// <summary>Build, mode, data provider and startup mode.</summary>
     public ValueTask<ManagementInfo> InfoAsync(CancellationToken ct)
         => CachedAsync(_info, () => management.GetInfoAsync(ct), ct);
