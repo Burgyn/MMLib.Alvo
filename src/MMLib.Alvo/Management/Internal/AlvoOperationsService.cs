@@ -1,4 +1,6 @@
-﻿using MMLib.Alvo.Events;
+﻿using Microsoft.Extensions.Logging;
+
+using MMLib.Alvo.Events;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Schema;
 
@@ -20,6 +22,8 @@ internal sealed partial class AlvoOperationsService(
     ExtensionCatalog catalog,
     ExtensionStats stats,
     ISchemaRegistry schemas,
+    TimeProvider time,
+    ILogger<AlvoOperationsService> logger,
     IDeliveryStore? store = null)
 {
     internal const int SampleSize = 20;
