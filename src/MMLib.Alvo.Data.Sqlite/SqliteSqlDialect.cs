@@ -134,6 +134,15 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     /// </remarks>
     bool IAlvoSqlDialect.GeneratedColumnAddRequiresTableRebuild => true;
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// None: the write gate and <c>BEGIN IMMEDIATE</c> already admit one writer at a time, so a claim and an operator's reset
+    /// of one subscriber never overlap. Answered explicitly, because the port's default refuses — an engine with concurrent
+    /// writers must never inherit "no lock" by omission. Implemented explicitly: it is the delivery store's question, not
+    /// part of this type's own surface.
+    /// </remarks>
+    string? IAlvoSqlDialect.TransactionLockStatement(IReadOnlyList<string> keyParameterMarkers, bool exclusive) => null;
+
     /// <summary><c>SQLITE_CONSTRAINT_UNIQUE</c> (2067): a <c>UNIQUE</c> index refused the row.</summary>
     private const int ConstraintUnique = 2067;
 

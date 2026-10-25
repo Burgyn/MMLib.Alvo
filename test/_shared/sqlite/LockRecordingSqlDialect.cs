@@ -80,4 +80,13 @@ internal sealed class LockRecordingSqlDialect : IAlvoSqlDialect
     /// through this fixture — which is data loss on a table rebuild, not a failing test.
     /// </remarks>
     public MigrationBatchFraming MigrationFraming => _inner.MigrationFraming;
+
+    /// <summary>
+    /// Forwarded, and <b>not optional</b>: the member's default refuses, so a wrapper that forgot it would fail every claim
+    /// of a delivery store built on this fixture.
+    /// </summary>
+    /// <param name="keyParameterMarkers">The parameter markers the caller binds the keys to.</param>
+    /// <param name="exclusive">Whether the locks are exclusive.</param>
+    public string? TransactionLockStatement(IReadOnlyList<string> keyParameterMarkers, bool exclusive) =>
+        ((IAlvoSqlDialect)_inner).TransactionLockStatement(keyParameterMarkers, exclusive);
 }

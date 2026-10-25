@@ -369,15 +369,22 @@ public interface IAlvoSqlDialect
     /// <b>Return grammar.</b> One complete statement, run with <see cref="DbCommand.ExecuteNonQueryAsync(CancellationToken)"/>
     /// inside the caller's transaction, naming each of <paramref name="keyParameterMarkers"/> once; the caller binds each to
     /// a 64-bit integer key and passes the markers in ascending key order, so two exclusive takers of several keys cannot
-    /// deadlock. A <b>default interface member</b> answering <see langword="null"/>, which is right for SQLite (the write
-    /// gate and <c>BEGIN IMMEDIATE</c> already admit one writer at a time) and <b>wrong</b> for any engine whose writers
-    /// run concurrently — such a driver must answer it.
+    /// deadlock.
+    /// </para>
+    /// <para>
+    /// <b>A refusing default.</b> The default interface member throws <see cref="NotSupportedException"/>, so a driver
+    /// that does not answer fails its first claim loudly instead of running without a lock. <see langword="null"/> is an
+    /// answer a driver gives on purpose — SQLite's, where the write gate and <c>BEGIN IMMEDIATE</c> already admit one
+    /// writer at a time — and is <b>wrong</b> for any engine whose writers run concurrently.
     /// </para>
     /// </remarks>
     /// <param name="keyParameterMarkers">The parameter markers the caller binds the keys to, in ascending key order.</param>
     /// <param name="exclusive">Whether the locks are exclusive; shared otherwise.</param>
     /// <returns>The statement, or <see langword="null"/> when the engine needs none.</returns>
-    string? TransactionLockStatement(IReadOnlyList<string> keyParameterMarkers, bool exclusive) => null;
+    /// <exception cref="NotSupportedException">The driver does not answer this member.</exception>
+    string? TransactionLockStatement(IReadOnlyList<string> keyParameterMarkers, bool exclusive) =>
+        throw new NotSupportedException(
+            $"{GetType().Name} does not say how it serializes a claim and an operator's reset; a driver must implement {nameof(TransactionLockStatement)}.");
 
     /// <summary>
     /// Decides whether <paramref name="failure"/> is this engine refusing a write on a constraint a
