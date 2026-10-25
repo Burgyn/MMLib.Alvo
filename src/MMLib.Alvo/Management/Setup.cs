@@ -27,6 +27,7 @@ internal static class ManagementSetup
         services.TryAddSingleton<ManagementAccessEvaluator>();
         services.TryAddSingleton<ManagementGate>();
         services.TryAddSingleton<AlvoOperationsService>();
+        services.TryAddSingleton<IAlvoOperations>(provider => provider.GetRequiredService<AlvoOperationsService>());
         AddUserAdministration(services);
         return services;
     }
