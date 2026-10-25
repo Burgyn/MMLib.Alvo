@@ -19,7 +19,8 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// <para>
 /// <b>A claim and an operator's reset of one subscriber are serialized by a subscriber lock</b>
 /// (<see cref="IAlvoSqlDialect.TransactionLockStatement"/>): the claim takes each subscriber it may claim for shared, a
-/// redeliver takes its delivery's subscriber exclusively, each as the first statement of its transaction. On PostgreSQL
+/// redeliver takes its delivery's subscriber exclusively, as the first statement of its transaction, and a replay takes
+/// every subscriber it may reset exclusively right after its log row, before the reset. On PostgreSQL
 /// under READ COMMITTED a lane check is evaluated against the statement's own snapshot and is not re-checked when a
 /// concurrent writer commits, so without the lock a redeliver and a claim of the same lane — ordered or not — could each
 /// pass the other's check: a redelivered earlier delivery and a later one both claimable, or two deliveries of one record

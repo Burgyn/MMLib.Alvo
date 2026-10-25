@@ -1196,9 +1196,11 @@ namespace MMLib.Alvo.Events
         System.Threading.Tasks.Task<bool> FailAsync(MMLib.Alvo.Events.DeliveryAttempt attempt, MMLib.Alvo.Events.DeliveryFailure failure, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<int> FanOutAsync(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.DeliveryRequest> requests, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Events.StoredDelivery?> FindAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliveryOperationEntry?> FindOperationAsync(string scope, string key, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.StoredDelivery>> ListAsync(MMLib.Alvo.Events.DeliveryFilter filter, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> PendingSubscribersAsync(System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> RedeliverAsync(System.Guid id, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliveryOperationEntry?> ReplayAsync(MMLib.Alvo.Events.DeliveryFilter filter, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliverySelection> SelectAsync(MMLib.Alvo.Events.DeliveryFilter filter, System.Threading.CancellationToken cancellationToken = default);
     }
     public interface IEmailSender

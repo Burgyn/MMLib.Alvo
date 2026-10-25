@@ -774,6 +774,12 @@ public sealed class DeliveryRunnerTests : IDisposable
         public Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
             inner.RedeliverAsync(id, entry, cancellationToken);
 
+        public Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+            inner.ReplayAsync(filter, entry, cancellationToken);
+
+        public Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default) =>
+            inner.FindOperationAsync(scope, key, cancellationToken);
+
         private Task<bool> Answer(Func<Task<bool>> answer)
         {
             onAnswer?.Invoke();

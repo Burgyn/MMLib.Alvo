@@ -389,6 +389,126 @@ public abstract partial class DeliveryStoreContractTests
         (await world.OperationsAsync()).ShouldHaveSingleItem();
     }
 
+    /// <summary>A replay resets only the named subscriber's replayable deliveries and records one row with its count and sample.</summary>
+    [Fact]
+    public async Task A_replay_resets_only_the_named_subscriber_s_finished_deliveries()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var first = await world.AppendEventAsync(KeyA);
+        var second = await world.AppendEventAsync(KeyB);
+        var third = await world.AppendEventAsync("tickets:c");
+        await world.Store.FanOutAsync([Request(first, Confirm, KeyA) with { DeadReason = "when-failed" }, Request(first, Audit, KeyA) with { DeadReason = "when-failed" }], Ct);
+        await world.Store.FanOutAsync([Request(second, Confirm, KeyB) with { DeadReason = "when-failed" }], Ct);
+        await world.Store.FanOutAsync([Request(third, Confirm, "tickets:c")], Ct);
+
+        var recorded = (await world.Store.ReplayAsync(new DeliveryFilter { Subscriber = Confirm, Status = "dead", Limit = 20 }, Entry("replay", Confirm), Ct)).ShouldNotBeNull();
+
+        recorded.Affected.ShouldBe(2);
+        recorded.Sample.Count.ShouldBe(2);
+        (await world.Store.FindAsync(recorded.Sample[0], Ct)).ShouldNotBeNull().EventId.ShouldBe(first, "the sample is in event order");
+        (await world.Store.ListAsync(new DeliveryFilter { Subscriber = Audit, Status = "dead", Limit = 10 }, Ct)).ShouldHaveSingleItem("another subscriber's dead row is untouched");
+        (await world.Store.ListAsync(new DeliveryFilter { Subscriber = Confirm, Status = "pending", Limit = 10 }, Ct)).Count.ShouldBe(3);
+        (await world.OperationsAsync()).ShouldHaveSingleItem().Affected.ShouldBe(2);
+    }
+
+    /// <summary>A replay never resets a loop the chain-depth limit stopped, nor a delivery whose record has another delivery running.</summary>
+    [Fact]
+    public async Task A_replay_never_resets_a_loop_break_nor_a_delivery_whose_record_is_running()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var loop = await world.AppendEventAsync(KeyA);
+        var failed = await world.AppendEventAsync(KeyB);
+        var running = await world.AppendEventAsync(KeyB);
+        await world.Store.FanOutAsync([Request(loop, Confirm, KeyA) with { DeadReason = "chain-depth-exceeded" }], Ct);
+        await world.Store.FanOutAsync([Request(failed, Confirm, KeyB) with { DeadReason = "when-failed" }], Ct);
+        await world.Store.FanOutAsync([Request(running, Confirm, KeyB)], Ct);
+        await world.Store.ClaimAsync(Unordered(Confirm), Ct);
+
+        var recorded = (await world.Store.ReplayAsync(new DeliveryFilter { Subscriber = Confirm, Status = "dead", Limit = 20 }, Entry("replay", Confirm), Ct)).ShouldNotBeNull();
+
+        recorded.Affected.ShouldBe(0);
+        (await world.Store.ListAsync(new DeliveryFilter { Status = "dead", Limit = 10 }, Ct)).Count.ShouldBe(2);
+    }
+
+    /// <summary>A replay selecting nothing still records its row — the request happened — with a count of zero.</summary>
+    [Fact]
+    public async Task A_replay_that_selects_nothing_still_records_its_row()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+
+        var recorded = await world.Store.ReplayAsync(new DeliveryFilter { Subscriber = Confirm, Status = "dead", Limit = 20 }, Entry("replay", Confirm), Ct);
+
+        recorded.ShouldNotBeNull().Affected.ShouldBe(0);
+        recorded.Sample.ShouldBeEmpty();
+        (await world.OperationsAsync()).ShouldHaveSingleItem();
+    }
+
+    /// <summary>A replay under a key the caller already spent changes nothing and answers null; the first row is found by the key.</summary>
+    [Fact]
+    public async Task A_replay_under_a_spent_key_changes_nothing()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var first = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(first, Confirm, KeyA) with { DeadReason = "when-failed" }], Ct);
+        var filter = new DeliveryFilter { Subscriber = Confirm, Status = "dead", Limit = 20 };
+        await world.Store.ReplayAsync(filter, Entry("replay", Confirm, key: "replay-1"), Ct);
+        var second = await world.AppendEventAsync(KeyB);
+        await world.Store.FanOutAsync([Request(second, Confirm, KeyB) with { DeadReason = "when-failed" }], Ct);
+
+        (await world.Store.ReplayAsync(filter, Entry("replay", Confirm, key: "replay-1"), Ct)).ShouldBeNull();
+
+        (await world.Store.ListAsync(filter, Ct)).ShouldHaveSingleItem().EventId.ShouldBe(second, "the second replay reset nothing");
+        var spent = (await world.Store.FindOperationAsync("global/ops", "replay-1", Ct)).ShouldNotBeNull();
+        spent.Affected.ShouldBe(1);
+        spent.Fingerprint.ShouldBe("fingerprint");
+        (await world.Store.FindOperationAsync("global/ops", "replay-2", Ct)).ShouldBeNull();
+    }
+
+    /// <summary>
+    /// A replay naming no subscriber resets every subscriber's replayable deliveries in its window, and its sample stops at
+    /// the filter's limit while its count does not.
+    /// </summary>
+    [Fact]
+    public async Task A_replay_naming_no_subscriber_resets_every_subscriber_s_replayable_deliveries()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var first = await world.AppendEventAsync(KeyA);
+        var second = await world.AppendEventAsync(KeyB);
+        await world.Store.FanOutAsync([Request(first, Confirm, KeyA) with { DeadReason = "when-failed" }, Request(first, Audit, KeyA) with { DeadReason = "when-failed" }], Ct);
+        await world.Store.FanOutAsync([Request(second, Audit, KeyB) with { DeadReason = "when-failed" }], Ct);
+
+        var recorded = (await world.Store.ReplayAsync(new DeliveryFilter { Status = "dead", Limit = 2 }, Entry("replay", "all"), Ct)).ShouldNotBeNull();
+
+        recorded.Affected.ShouldBe(3);
+        (await EventsOfAsync(world, recorded.Sample)).ShouldBe([first, first]);
+        (await world.Store.ListAsync(new DeliveryFilter { Status = "dead", Limit = 10 }, Ct)).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A replay whose log row is refused — its id already recorded, with no key to answer from — throws and resets nothing:
+    /// the port never reports, or makes, a change it did not log.
+    /// </summary>
+    [Fact]
+    public async Task A_replay_whose_log_row_is_refused_changes_nothing()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var entry = Entry("replay", Confirm);
+        await world.Store.ReplayAsync(new DeliveryFilter { Subscriber = Confirm, Limit = 20 }, entry, Ct);
+        var @event = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(@event, Confirm, KeyA) with { DeadReason = "when-failed" }], Ct);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => world.Store.ReplayAsync(new DeliveryFilter { Subscriber = Confirm, Limit = 20 }, entry, Ct));
+
+        (await world.Store.ListAsync(new DeliveryFilter { Status = "dead", Limit = 10 }, Ct)).ShouldHaveSingleItem();
+        (await world.OperationsAsync()).ShouldHaveSingleItem().Affected.ShouldBe(0);
+    }
+
     private static DeliveryOperationEntry Entry(string operation, string target, string? key = null) => new()
     {
         Id = AlvoEventId.Create(_operatedAt),

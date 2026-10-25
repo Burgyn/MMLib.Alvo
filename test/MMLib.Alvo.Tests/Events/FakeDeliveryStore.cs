@@ -222,6 +222,41 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         }
     }
 
+    public Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
+    {
+        EnsureRows(filter);
+        ArgumentNullException.ThrowIfNull(entry);
+        lock (_gate)
+        {
+            if (KeyRecorded(entry))
+            {
+                return Task.FromResult<DeliveryOperationEntry?>(null);
+            }
+
+            EnsureLoggable(entry);
+            var reset = InEventOrder(Matching(filter with { Replayable = true }).Where(row => !LaneBusy(row))).ToList();
+            reset.ForEach(Reset);
+            var recorded = entry with { Affected = reset.Count, Sample = [.. reset.Take(filter.Limit).Select(row => row.Id)] };
+            _operations.Add(recorded);
+
+            return Task.FromResult<DeliveryOperationEntry?>(recorded);
+        }
+    }
+
+    public Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scope);
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        lock (_gate)
+        {
+            return Task.FromResult(_operations.Find(row => row.IdempotencyScope == scope && row.IdempotencyKey == key));
+        }
+    }
+
+    private bool KeyRecorded(DeliveryOperationEntry entry) =>
+        entry.IdempotencyKey is not null
+        && _operations.Exists(logged => logged.IdempotencyScope == entry.IdempotencyScope && logged.IdempotencyKey == entry.IdempotencyKey);
+
     /// <summary>Refuses a log row whose id or idempotency key is spent, as the relational log's keys do, before anything changes.</summary>
     private void EnsureLoggable(DeliveryOperationEntry entry)
     {

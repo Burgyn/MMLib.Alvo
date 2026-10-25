@@ -661,6 +661,12 @@ namespace MMLib.Alvo.Testing.Events
         public System.Threading.Tasks.Task A_redeliver_whose_log_row_is_refused_changes_nothing() { }
         public System.Threading.Tasks.Task A_redeliver_writes_one_log_row() { }
         public System.Threading.Tasks.Task A_redelivered_delivery_runs_again_with_a_fresh_budget_and_keeps_its_history() { }
+        public System.Threading.Tasks.Task A_replay_naming_no_subscriber_resets_every_subscriber_s_replayable_deliveries() { }
+        public System.Threading.Tasks.Task A_replay_never_resets_a_loop_break_nor_a_delivery_whose_record_is_running() { }
+        public System.Threading.Tasks.Task A_replay_resets_only_the_named_subscriber_s_finished_deliveries() { }
+        public System.Threading.Tasks.Task A_replay_that_selects_nothing_still_records_its_row() { }
+        public System.Threading.Tasks.Task A_replay_under_a_spent_key_changes_nothing() { }
+        public System.Threading.Tasks.Task A_replay_whose_log_row_is_refused_changes_nothing() { }
         public System.Threading.Tasks.Task A_replayable_selection_leaves_out_loop_breaks_and_counts_running_records() { }
         public System.Threading.Tasks.Task A_request_repeated_within_one_fan_out_is_recorded_once() { }
         public System.Threading.Tasks.Task A_running_delivery_whose_lease_expired_is_claimed_again() { }

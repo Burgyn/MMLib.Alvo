@@ -79,6 +79,106 @@ internal sealed partial class EfCoreDeliveryStore
     }
 
     /// <summary>
+    /// The log row first — the transaction's opening write, and the key's claim: a concurrent replay under the same key waits
+    /// on the key's unique index, then inserts nothing and answers from the first's row — then the reset.
+    /// </summary>
+    public Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
+    {
+        EnsureRows(filter);
+        ArgumentNullException.ThrowIfNull(entry);
+
+        return InTransactionAsync(async (connection, transaction) =>
+            await LogAsync(connection, transaction, entry, cancellationToken).ConfigureAwait(false) == 1
+                ? await ResetSelectedAsync(connection, transaction, filter, entry, cancellationToken).ConfigureAwait(false)
+                : await SpentKeyAsync(connection, transaction, entry, cancellationToken).ConfigureAwait(false),
+            cancellationToken);
+    }
+
+    public async Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scope);
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        var rows = await ReadAsync(DeliveryOperationsTable.FindLogSql(_log), command => BindKey(command, scope, key), ReadEntry, cancellationToken)
+            .ConfigureAwait(false);
+
+        return rows.Count == 0 ? null : rows[0];
+    }
+
+    /// <summary>
+    /// Answers a replay whose log row was skipped: <see langword="null"/> when its key is recorded — the replay already
+    /// happened — and otherwise throws, since the row was refused for its id and the replay must not report what it did not log.
+    /// </summary>
+    private async Task<DeliveryOperationEntry?> SpentKeyAsync(DbConnection connection, DbTransaction transaction, DeliveryOperationEntry entry, CancellationToken ct)
+    {
+        if (entry.IdempotencyKey is { } key && entry.IdempotencyScope is { } scope)
+        {
+            var recorded = await RelationalSqlBatch.ReadRowsAsync(
+                connection, transaction, DeliveryOperationsTable.FindLogSql(_log), command => BindKey(command, scope, key), ReadEntry, ct).ConfigureAwait(false);
+            if (recorded.Count == 1)
+            {
+                return null;
+            }
+        }
+
+        throw new InvalidOperationException($"The operations log already holds row {entry.Id}; the {entry.Operation} reset nothing.");
+    }
+
+    /// <summary>
+    /// Locks the subscribers the filter may touch exclusively, resets what it selects, and writes the outcome onto the log
+    /// row — the count, and the first <see cref="DeliveryFilter.Limit"/> ids in event order.
+    /// </summary>
+    private async Task<DeliveryOperationEntry> ResetSelectedAsync(
+        DbConnection connection, DbTransaction transaction, DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken ct)
+    {
+        var subscribers = await ReplaySubscribersAsync(connection, transaction, filter, ct).ConfigureAwait(false);
+        var reset = subscribers.Count == 0 ? [] : await ResetLockedAsync(connection, transaction, filter, subscribers, ct).ConfigureAwait(false);
+        var recorded = entry with
+        {
+            Affected = reset.Count,
+            Sample = [.. reset.OrderBy(row => row.EventId, StringComparer.Ordinal).ThenBy(row => row.Id, StringComparer.Ordinal)
+                .Take(filter.Limit).Select(row => Guid.Parse(row.Id, CultureInfo.InvariantCulture))],
+        };
+        await ExecuteInAsync(connection, transaction, DeliveryOperationsTable.LogOutcomeSql(_log), command => BindOutcome(command, recorded), ct)
+            .ConfigureAwait(false);
+
+        return recorded;
+    }
+
+    /// <summary>The filter's subscriber, or — naming none — every subscriber with a replayable delivery it selects, read in the transaction.</summary>
+    private async Task<IReadOnlyList<string>> ReplaySubscribersAsync(DbConnection connection, DbTransaction transaction, DeliveryFilter filter, CancellationToken ct) =>
+        filter.Subscriber is { } subscriber
+            ? [subscriber]
+            : await RelationalSqlBatch.ReadRowsAsync(
+                connection,
+                transaction,
+                DeliveryOperationsTable.ReplaySubscribersSql(_table, filter),
+                command => BindFilter(command, filter, keyset: false, limit: false),
+                reader => reader.GetString(0),
+                ct).ConfigureAwait(false);
+
+    private async Task<List<(string Id, string EventId)>> ResetLockedAsync(
+        DbConnection connection, DbTransaction transaction, DeliveryFilter filter, IReadOnlyList<string> subscribers, CancellationToken ct)
+    {
+        await LockSubscribersAsync(connection, transaction, subscribers, exclusive: true, ct).ConfigureAwait(false);
+
+        return await RelationalSqlBatch.ReadRowsAsync(connection, transaction, DeliveryOperationsTable.ReplaySql(_table, filter, subscribers.Count), command =>
+        {
+            BindFilter(command, filter, keyset: false, limit: false);
+            RelationalSqlBatch.AddParameter(command, "@now", Now);
+            for (var index = 0; filter.Subscriber is null && index < subscribers.Count; index++)
+            {
+                RelationalSqlBatch.AddParameter(command, $"@replay_subscriber{index}", subscribers[index]);
+            }
+        }, reader => (Id: reader.GetString(0), EventId: reader.GetString(1)), ct).ConfigureAwait(false);
+    }
+
+    private static void BindKey(DbCommand command, string scope, string key)
+    {
+        RelationalSqlBatch.AddParameter(command, "@scope", scope);
+        RelationalSqlBatch.AddParameter(command, "@key", key);
+    }
+
+    /// <summary>
     /// Logs a change already made in <paramref name="transaction"/>, or throws so the transaction rolls the change back: a
     /// row skipped by <c>ON CONFLICT DO NOTHING</c> means its id or key is spent, and a change must never stand unlogged.
     /// </summary>

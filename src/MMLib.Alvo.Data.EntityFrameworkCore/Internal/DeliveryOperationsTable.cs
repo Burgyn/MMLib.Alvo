@@ -132,6 +132,41 @@ internal static class DeliveryOperationsTable
     internal static string RedeliverSql(string table) =>
         $"UPDATE {table} SET {Reset} WHERE id = @id AND {Finished} AND NOT {LaneRunning(table)}";
 
+    /// <summary>
+    /// Puts every replayable delivery <paramref name="filter"/> selects whose lane runs nothing back to pending, and reads
+    /// back what it reset — the <see cref="SelectSql"/> predicate, less the busy rows, so a dry run counts what a run resets.
+    /// </summary>
+    /// <remarks>
+    /// Run after the subscribers' locks are taken exclusively, as <see cref="RedeliverSql"/> is. A filter naming no
+    /// subscriber is narrowed to the <paramref name="lockedSubscribers"/> the store read with
+    /// <see cref="ReplaySubscribersSql"/> and locked, bound as <c>@replay_subscriber{n}</c>: a subscriber whose first
+    /// replayable row arrived after that read was not locked, so its rows are never reset beside a claim. Such a filter
+    /// with no locked subscriber is refused rather than rendered unnarrowed.
+    /// </remarks>
+    internal static string ReplaySql(string table, DeliveryFilter filter, int lockedSubscribers = 0) =>
+        $"UPDATE {table} SET {Reset} WHERE {Conditions(filter with { Replayable = true }, keyset: false)}{LockedSubscribers(filter, lockedSubscribers)} AND NOT {LaneRunning(table)} RETURNING id, event_id";
+
+    /// <summary>The subscribers with a replayable delivery <paramref name="filter"/> selects — the locks a replay naming none takes.</summary>
+    internal static string ReplaySubscribersSql(string table, DeliveryFilter filter) =>
+        $"SELECT DISTINCT subscriber FROM {table} WHERE {Conditions(filter with { Replayable = true }, keyset: false)}";
+
+    internal static string LogOutcomeSql(string log) => $"UPDATE {log} SET affected = @log_affected, sample = @log_sample WHERE id = @log_id";
+
+    internal static string FindLogSql(string log) =>
+        $"SELECT {LogColumns} FROM {log} WHERE idempotency_scope = @scope AND idempotency_key = @key";
+
+    private static string LockedSubscribers(DeliveryFilter filter, int count)
+    {
+        if (filter.Subscriber is not null)
+        {
+            return string.Empty;
+        }
+
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+
+        return $" AND subscriber IN ({string.Join(", ", Enumerable.Range(0, count).Select(index => $"@replay_subscriber{index}"))})";
+    }
+
     internal static string InsertLogSql(string log) =>
         $"""
         INSERT INTO {log} ({LogColumns})

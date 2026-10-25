@@ -648,6 +648,12 @@ public sealed class DeliveryDispatcherTests : IDisposable
 
         public Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
             inner.RedeliverAsync(id, entry, cancellationToken);
+
+        public Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+            inner.ReplayAsync(filter, entry, cancellationToken);
+
+        public Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default) =>
+            inner.FindOperationAsync(scope, key, cancellationToken);
     }
 
     /// <summary>The in-memory store whose first claims fail the way a database under a deadlock or a restart refuses one.</summary>
@@ -695,5 +701,11 @@ public sealed class DeliveryDispatcherTests : IDisposable
 
         public Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
             inner.RedeliverAsync(id, entry, cancellationToken);
+
+        public Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+            inner.ReplayAsync(filter, entry, cancellationToken);
+
+        public Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default) =>
+            inner.FindOperationAsync(scope, key, cancellationToken);
     }
 }

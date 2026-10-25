@@ -132,4 +132,45 @@ public sealed class DeliveryOperationsTableTests
         DeliveryOperationsTable.SubscriberLockKey("other_deliveries", "send-confirmation")
             .ShouldNotBe(DeliveryOperationsTable.SubscriberLockKey("alvo_deliveries", "send-confirmation"));
     }
+
+    [Fact]
+    public void A_replay_resets_only_replayable_rows_whose_lane_runs_nothing_and_reads_back_what_it_reset()
+    {
+        var sql = DeliveryOperationsTable.ReplaySql("alvo_deliveries", new MMLib.Alvo.Events.DeliveryFilter { Subscriber = "a", Status = "dead", Limit = 20 });
+
+        sql.ShouldContain("WHERE status IN ('succeeded', 'dead', 'cancelled') AND COALESCE(last_error_type, '') <> 'chain-depth-exceeded' AND subscriber = @subscriber AND status = @status");
+        sql.ShouldContain("AND NOT EXISTS (SELECT 1 FROM alvo_deliveries lane");
+        sql.ShouldNotContain("@replay_subscriber");
+        sql.ShouldEndWith("RETURNING id, event_id");
+    }
+
+    /// <summary>
+    /// A replay naming no subscriber resets only the subscribers whose locks it took: a subscriber whose first replayable
+    /// row appeared after the transaction read the set is left for the next replay, never reset unlocked.
+    /// </summary>
+    [Fact]
+    public void A_replay_naming_no_subscriber_resets_only_the_subscribers_it_locked()
+    {
+        var sql = DeliveryOperationsTable.ReplaySql("alvo_deliveries", new MMLib.Alvo.Events.DeliveryFilter { Status = "dead", Limit = 20 }, lockedSubscribers: 2);
+
+        sql.ShouldContain("AND subscriber IN (@replay_subscriber0, @replay_subscriber1)");
+        Should.Throw<ArgumentOutOfRangeException>(() => DeliveryOperationsTable.ReplaySql("alvo_deliveries", new MMLib.Alvo.Events.DeliveryFilter { Limit = 20 }));
+        DeliveryOperationsTable.ReplaySubscribersSql("alvo_deliveries", new MMLib.Alvo.Events.DeliveryFilter { Status = "dead", Limit = 20 })
+            .ShouldBe("SELECT DISTINCT subscriber FROM alvo_deliveries WHERE status IN ('succeeded', 'dead', 'cancelled') AND COALESCE(last_error_type, '') <> 'chain-depth-exceeded' AND status = @status");
+    }
+
+    [Fact]
+    public void A_replay_s_outcome_is_written_onto_its_row_and_a_key_is_found_within_its_scope()
+    {
+        DeliveryOperationsTable.LogOutcomeSql(Log).ShouldBe($"UPDATE {Log} SET affected = @log_affected, sample = @log_sample WHERE id = @log_id");
+        DeliveryOperationsTable.FindLogSql(Log).ShouldEndWith("WHERE idempotency_scope = @scope AND idempotency_key = @key");
+    }
+
+    /// <summary>
+    /// A dialect that does not answer the transaction lock refuses rather than answering "no lock": an engine whose writers
+    /// run concurrently must never inherit SQLite's answer by omission.
+    /// </summary>
+    [Fact]
+    public void A_dialect_that_does_not_answer_the_transaction_lock_refuses() =>
+        Should.Throw<NotSupportedException>(() => ((IAlvoSqlDialect)new TestSqlDialect()).TransactionLockStatement(["@lock0"], exclusive: true));
 }

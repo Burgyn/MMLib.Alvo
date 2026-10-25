@@ -136,6 +136,28 @@ public sealed class PostgreSqlDeliveryStoreTests : DeliveryStoreContractTests, I
         changed.ShouldBeTrue();
     }
 
+    /// <summary>
+    /// A replay naming its subscriber, and a replay naming none, each take the subscriber's advisory lock exclusively before
+    /// the reset, so each waits while a claim holds it shared — and its lane check then sees what the claim committed.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_replay_waits_while_a_claim_holds_a_subscriber_s_lock(bool named)
+    {
+        EnsureEngineAvailable();
+        await using var world = await ConcreteWorldAsync();
+        var @event = await world.AppendEventAsync("tickets:a");
+        await world.Store.FanOutAsync(
+            [new DeliveryRequest { EventId = @event, Subscriber = Subscriber, PartitionKey = "tickets:a", Kind = "handler", DeadReason = "when-failed" }], Ct);
+        var filter = new DeliveryFilter { Subscriber = named ? Subscriber : null, Status = "dead", Limit = 20 };
+        var entry = new DeliveryOperationEntry { Id = Guid.NewGuid(), At = DateTimeOffset.UnixEpoch, Actor = "ops", Operation = "replay", Target = Subscriber };
+
+        var recorded = await world.WhileSubscriberLockedAsync(Subscriber, exclusive: false, () => world.Store.ReplayAsync(filter, entry, Ct));
+
+        recorded.ShouldNotBeNull().Affected.ShouldBe(1);
+    }
+
     protected override async Task<IDeliveryStoreWorld> WorldAsync() => await ConcreteWorldAsync();
 
     protected override void EnsureEngineAvailable() =>

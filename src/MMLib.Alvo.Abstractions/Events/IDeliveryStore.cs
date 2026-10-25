@@ -275,4 +275,32 @@ public interface IDeliveryStore
     /// back with it, so the delivery is unchanged.
     /// </exception>
     Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Puts every delivery <paramref name="filter"/> selects as replayable (<see cref="DeliveryFilter.Replayable"/>, whatever the
+    /// filter says) and whose lane runs nothing back to pending, as <see cref="RedeliverAsync"/> does, and records
+    /// <paramref name="entry"/> with how many it reset and the first <see cref="DeliveryFilter.Limit"/> of them in event order —
+    /// in one transaction, whatever the count.
+    /// </summary>
+    /// <remarks>
+    /// A selection taken with <see cref="SelectAsync"/> under the same filter counts what a replay resets, less its
+    /// <see cref="DeliverySelection.Busy"/> deliveries. A replay naming no subscriber resets only the subscribers that had a
+    /// replayable delivery when its transaction read them; one whose first arrives meanwhile is left for the next replay,
+    /// since the reset is serialized against each subscriber's claims and a subscriber not yet seen cannot be.
+    /// </remarks>
+    /// <param name="filter">Which deliveries; <see cref="DeliveryFilter.After"/> is ignored.</param>
+    /// <param name="entry">The log row; its key, when present, may be recorded once per scope.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The recorded row, or <see langword="null"/> — nothing reset — when the key is already recorded.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The log refused <paramref name="entry"/> for its id, not for its key; nothing is reset.
+    /// </exception>
+    Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default);
+
+    /// <summary>The log row a caller's key was recorded under.</summary>
+    /// <param name="scope">The caller's identity.</param>
+    /// <param name="key">The caller's key.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The row, or <see langword="null"/>.</returns>
+    Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default);
 }
