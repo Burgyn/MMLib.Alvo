@@ -14,24 +14,34 @@ namespace MMLib.Alvo.Management.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Redaction is fail-closed: a value stays only when it is positively recognised as a key.</b> A data event of an entity
-/// the current schema still declares keeps <c>id</c>, <c>tenant_id</c> and its <c>ref</c> fields when the value is a uuid, and
-/// its <c>enum</c> fields when the value is one the schema lists; an application event, or an entity the schema no longer
-/// declares, keeps only a uuid <c>id</c>. A <c>uuid</c> field is redacted — it may be a key into another system or a person's
-/// identifier, and nothing in the schema says which — and a <c>json</c> field, an object or an array is replaced whole.
+/// <b>Redaction is fail-closed on the shape this build writes: a value stays only when it is positively recognised as a
+/// key.</b> A data event of an entity the current schema still declares keeps <c>id</c>, <c>tenant_id</c> and its <c>ref</c>
+/// fields when the value is a uuid, and its <c>enum</c> fields when the value is one the schema lists; an application event,
+/// or an entity the schema no longer declares, keeps only a uuid <c>id</c>. A <c>uuid</c> field is redacted — it may be a key
+/// into another system or a person's identifier, and nothing in the schema says which — and a <c>json</c> field, an object or
+/// an array is replaced whole.
 /// </para>
 /// <para>
-/// <b>The envelope's attributes stay when this build wrote them as scalars</b> — ids, type, time, tenant, <c>authid</c>,
-/// chain depth — because they identify rather than describe and a fixture must run as the event's tenant and actor.
-/// <c>authclaims</c> stays only while it carries nothing but role names. A data event's <c>subject</c> and
-/// <c>partitionkey</c> stay only while they are the entity and a uuid. An attribute this build does not know, and a member
-/// of <c>data</c> other than the images and the changed-field names, is redacted whole.
+/// <b>The envelope's attributes stay only on the shape this build writes them</b>, because they identify rather than
+/// describe and a fixture must run as the event's tenant and actor: <c>id</c>, <c>tenantid</c>, <c>authid</c> and
+/// <c>causationid</c> as uuids; <c>correlationid</c> as a uuid or a 32-hex-digit trace id; <c>traceparent</c> in the W3C
+/// format; <c>authclaims</c> while it carries nothing but role names; the remaining standard attributes and Alvo extensions
+/// as scalars. A data event's <c>subject</c> and <c>partitionkey</c> stay while they are the entity and a uuid; any other
+/// partition key keeps its namespace only when that is the entity or <c>custom.event</c> (the marker
+/// <c>IAlvoEvents.PublishAsync</c> writes), and is otherwise redacted whole. The changed-field names stay while each is a
+/// field or managed column the declared entity has. An attribute this build does not know, and a member of <c>data</c>
+/// other than the images and the changed-field names, is redacted whole.
 /// </para>
 /// <para>
 /// <b>Deviation from the plan's Task 9 sketch</b>, which kept every attribute, every key field's value and anything under
 /// <c>data</c> but the images: each of those is now kept only on the shape above, so an extension or a malformed key added
 /// later cannot carry a value into a fixture. A payload that is not a JSON object is refused with a fixed message and no
 /// inner exception, so the parser's own message cannot echo the payload.
+/// </para>
+/// <para>
+/// <b>Placeholders are escaped in <see cref="JsonElement.GetRawText"/></b> (their angle brackets written as JSON unicode escapes), the default
+/// encoder's choice; <see cref="JsonElement.GetString"/> reads them back unchanged. Whatever writes a fixture for a human to
+/// read should serialize it with <c>JavaScriptEncoder.UnsafeRelaxedJsonEscaping</c> at that point.
 /// </para>
 /// </remarks>
 internal static class DeliveryFixtures
@@ -40,16 +50,32 @@ internal static class DeliveryFixtures
     private const string OldRecordMember = "old_record";
     private const string ChangedMember = "changed";
     private const string RolesClaim = "roles";
+    private const string CustomPartitionMarker = "custom.event";
     private const char NamespaceSeparator = ':';
     private const char SubjectSeparator = '/';
+    private const char TraceSeparator = '-';
+    private const int TraceIdDigits = 32;
+    private const string InvalidTraceVersion = "ff";
 
-    private static readonly HashSet<string> _scalarAttributes = new(StringComparer.Ordinal)
+    private static readonly int[] _traceParentParts = [2, TraceIdDigits, 16, 2];
+
+    private static readonly Dictionary<string, Func<JsonNode, bool>> _attributes = new(StringComparer.Ordinal)
     {
-        AlvoEventAttributes.SpecVersion, AlvoEventAttributes.Id, AlvoEventAttributes.Source, AlvoEventAttributes.Type,
-        AlvoEventAttributes.Time, AlvoEventAttributes.DataContentType, AlvoEventAttributes.PayloadVersion,
-        AlvoEventAttributes.ChainDepth, AlvoEventAttributes.AuthType, AlvoEventAttributes.AuthId,
-        AlvoEventAttributes.CorrelationId, AlvoEventAttributes.CausationId, AlvoEventAttributes.TenantId,
-        AlvoEventAttributes.TraceParent,
+        [AlvoEventAttributes.SpecVersion] = IsScalar,
+        [AlvoEventAttributes.Source] = IsScalar,
+        [AlvoEventAttributes.Type] = IsScalar,
+        [AlvoEventAttributes.Time] = IsScalar,
+        [AlvoEventAttributes.DataContentType] = IsScalar,
+        [AlvoEventAttributes.PayloadVersion] = IsScalar,
+        [AlvoEventAttributes.ChainDepth] = IsScalar,
+        [AlvoEventAttributes.AuthType] = IsScalar,
+        [AlvoEventAttributes.Id] = value => Is(value, IsUuid),
+        [AlvoEventAttributes.TenantId] = value => Is(value, IsUuid),
+        [AlvoEventAttributes.AuthId] = value => Is(value, IsUuid),
+        [AlvoEventAttributes.CausationId] = value => Is(value, IsUuid),
+        [AlvoEventAttributes.CorrelationId] = value => Is(value, text => IsUuid(text) || IsHex(text, TraceIdDigits)),
+        [AlvoEventAttributes.TraceParent] = value => Is(value, IsTraceParent),
+        [AlvoEventAttributes.AuthClaims] = value => Is(value, IsRolesOnly),
     };
 
     private static readonly JsonDocumentOptions _strict = new() { AllowDuplicateProperties = false };
@@ -65,8 +91,7 @@ internal static class DeliveryFixtures
         ArgumentNullException.ThrowIfNull(payload);
         ArgumentNullException.ThrowIfNull(schema);
         var envelope = Parse(payload);
-        var entity = DataEntity(envelope);
-        var redaction = new Redaction(entity, KeptFields(entity, schema));
+        var redaction = RedactionFor(DataEntity(envelope), schema);
         foreach (var attribute in envelope.Select(member => member.Key).ToList())
         {
             RedactAttribute(envelope, attribute, redaction);
@@ -117,19 +142,25 @@ internal static class DeliveryFixtures
             ? entity
             : null;
 
-    private static Dictionary<string, Func<string, bool>> KeptFields(string? entity, SchemaModel schema)
+    private static Redaction RedactionFor(string? entity, SchemaModel schema)
     {
         var kept = new Dictionary<string, Func<string, bool>>(StringComparer.Ordinal) { [AlvoManagedColumns.Id] = IsUuid };
-        if (entity is not null && schema.Entities.FirstOrDefault(candidate => candidate.Name == entity) is { } declared)
+        var declared = entity is null ? null : schema.Entities.FirstOrDefault(candidate => candidate.Name == entity);
+        if (declared is null)
         {
-            kept[AlvoManagedColumns.TenantId] = IsUuid;
-            foreach (var field in declared.Fields)
-            {
-                AddKept(kept, field);
-            }
+            return new Redaction(entity, kept, null);
         }
 
-        return kept;
+        kept[AlvoManagedColumns.TenantId] = IsUuid;
+        foreach (var field in declared.Fields)
+        {
+            AddKept(kept, field);
+        }
+
+        var names = new HashSet<string>(declared.Fields.Select(field => field.Name), StringComparer.Ordinal);
+        names.UnionWith(AlvoManagedColumns.For(declared));
+
+        return new Redaction(entity, kept, names);
     }
 
     private static void AddKept(Dictionary<string, Func<string, bool>> kept, FieldSchema field)
@@ -151,10 +182,9 @@ internal static class DeliveryFixtures
         {
             case AlvoEventAttributes.Data: RedactData(envelope, redaction); break;
             case AlvoEventAttributes.TraceState: Drop(envelope, attribute, redaction); break;
-            case AlvoEventAttributes.Subject: KeepWhen(envelope, attribute, IsDataKey(value, redaction.Entity, SubjectSeparator), redaction); break;
+            case AlvoEventAttributes.Subject: KeepWhen(envelope, attribute, value is null || IsDataKey(value, redaction.Entity, SubjectSeparator), redaction); break;
             case AlvoEventAttributes.PartitionKey: RedactPartitionKey(envelope, redaction); break;
-            case AlvoEventAttributes.AuthClaims: KeepWhen(envelope, attribute, value is null || IsRolesOnly(TextOf(value)), redaction); break;
-            default: KeepWhen(envelope, attribute, value is null || (_scalarAttributes.Contains(attribute) && value is JsonValue), redaction); break;
+            default: KeepWhen(envelope, attribute, value is null || (_attributes.TryGetValue(attribute, out var recognises) && recognises(value)), redaction); break;
         }
     }
 
@@ -166,11 +196,18 @@ internal static class DeliveryFixtures
             return;
         }
 
-        var text = TextOf(value);
-        var at = text?.IndexOf(NamespaceSeparator, StringComparison.Ordinal) ?? -1;
         var placeholder = Placeholder(AlvoEventAttributes.PartitionKey);
-        envelope[AlvoEventAttributes.PartitionKey] = at > 0 ? string.Concat(text.AsSpan(0, at + 1), placeholder) : placeholder;
+        var space = NamespaceOf(TextOf(value));
+        var known = space is not null && (space == CustomPartitionMarker || space == redaction.Entity);
+        envelope[AlvoEventAttributes.PartitionKey] = known ? $"{space}{NamespaceSeparator}{placeholder}" : placeholder;
         redaction.Pointers.Add(Pointer(AlvoEventAttributes.PartitionKey));
+    }
+
+    private static string? NamespaceOf(string? key)
+    {
+        var at = key?.IndexOf(NamespaceSeparator, StringComparison.Ordinal) ?? -1;
+
+        return at > 0 ? key![..at] : null;
     }
 
     private static void RedactData(JsonObject envelope, Redaction redaction)
@@ -190,7 +227,7 @@ internal static class DeliveryFixtures
             }
             else
             {
-                KeepWhen(data, member, member == ChangedMember && IsNameList(data[member]), redaction, prefix);
+                KeepWhen(data, member, member == ChangedMember && IsNameList(data[member], redaction.Declared), redaction, prefix);
             }
         }
     }
@@ -234,27 +271,40 @@ internal static class DeliveryFixtures
         && text.StartsWith(entity + separator, StringComparison.Ordinal)
         && IsUuid(text[(entity.Length + 1)..]);
 
-    private static bool IsNameList(JsonNode? value) =>
-        value is JsonArray names && names.All(name => TextOf(name) is not null);
+    /// <summary>Whether <paramref name="value"/> is an array of strings, each one of <paramref name="allowed"/> when that is given.</summary>
+    private static bool IsNameList(JsonNode? value, IReadOnlySet<string>? allowed) =>
+        value is JsonArray names
+        && names.All(name => TextOf(name) is { } text && (allowed is null || allowed.Contains(text)));
 
-    private static bool IsRolesOnly(string? claims)
+    private static bool IsRolesOnly(string claims)
     {
-        if (claims is null)
-        {
-            return false;
-        }
-
         try
         {
             return JsonNode.Parse(claims, documentOptions: _strict) is JsonObject root
                 && root.Count == 1
-                && IsNameList(root[RolesClaim]);
+                && IsNameList(root[RolesClaim], null);
         }
         catch (JsonException)
         {
             return false;
         }
     }
+
+    private static bool IsTraceParent(string text)
+    {
+        var parts = text.Split(TraceSeparator);
+
+        return parts.Length == _traceParentParts.Length
+            && parts.Zip(_traceParentParts).All(part => IsHex(part.First, part.Second))
+            && parts[0] != InvalidTraceVersion;
+    }
+
+    private static bool IsHex(string text, int digits) =>
+        text.Length == digits && text.All(char.IsAsciiHexDigitLower);
+
+    private static bool IsScalar(JsonNode value) => value is JsonValue;
+
+    private static bool Is(JsonNode value, Func<string, bool> recognises) => TextOf(value) is { } text && recognises(text);
 
     private static bool IsUuid(string text) => Guid.TryParse(text, out _);
 
@@ -267,7 +317,8 @@ internal static class DeliveryFixtures
     /// <summary>One fixture's redaction: the event's data entity, the fields it keeps and what was redacted.</summary>
     /// <param name="Entity">The data event's entity, or <see langword="null"/> for an application event.</param>
     /// <param name="Kept">The fields that may stay, each with what recognises a key value.</param>
-    private sealed record Redaction(string? Entity, Dictionary<string, Func<string, bool>> Kept)
+    /// <param name="Declared">The declared entity's field and managed-column names, or <see langword="null"/> when none is declared.</param>
+    private sealed record Redaction(string? Entity, Dictionary<string, Func<string, bool>> Kept, IReadOnlySet<string>? Declared)
     {
         public List<string> Pointers { get; } = [];
     }

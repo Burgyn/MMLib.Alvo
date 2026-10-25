@@ -87,6 +87,10 @@ public sealed class DeliveryFixturesTests
         fixture.Envelope.GetProperty("partitionkey").GetString().ShouldBe($"tickets:{_ticket}");
         fixture.Envelope.GetProperty("tenantid").GetString().ShouldBe(_tenant.ToString());
         fixture.Envelope.GetProperty("authclaims").GetString().ShouldBe("""{"roles":["admin"]}""");
+        fixture.Envelope.GetProperty("authid").GetString().ShouldBe(_customer.ToString());
+        fixture.Envelope.GetProperty("causationid").GetString().ShouldBe(_ticket.ToString());
+        fixture.Envelope.GetProperty("correlationid").GetString().ShouldBe("4bf92f3577b34da6a3ce929d0e0e4736");
+        fixture.Envelope.GetProperty("traceparent").GetString().ShouldBe("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
         fixture.Envelope.GetProperty("data").GetProperty("changed").EnumerateArray().Select(name => name.GetString()).ShouldContain("title");
         fixture.Subscriber.ShouldBe("send-confirmation");
         fixture.Attempt.ShouldBe(3);
@@ -98,7 +102,7 @@ public sealed class DeliveryFixturesTests
         var fixture = DeliveryFixtures.Of(Delivery(), Envelope("orders.shipped", Row("Printer jam", 12.5m), traceState: "vendor=customer-42"), _schema);
 
         fixture.Envelope.GetProperty("subject").GetString().ShouldBe("<redacted:subject>");
-        fixture.Envelope.GetProperty("partitionkey").GetString().ShouldBe("orders.shipped:<redacted:partitionkey>");
+        fixture.Envelope.GetProperty("partitionkey").GetString().ShouldBe("custom.event:<redacted:partitionkey>", "the marker IAlvoEvents.PublishAsync writes stays");
         fixture.Envelope.TryGetProperty("tracestate", out _).ShouldBeFalse();
         fixture.Redacted.ShouldContain("/tracestate");
     }
@@ -156,6 +160,50 @@ public sealed class DeliveryFixturesTests
         fixture.Envelope.GetProperty("subject").GetString().ShouldBe("<redacted:subject>");
         fixture.Envelope.GetProperty("partitionkey").GetString().ShouldBe("tickets:<redacted:partitionkey>");
         fixture.Envelope.GetRawText().ShouldNotContain("jane@example.com");
+    }
+
+    [Theory]
+    [InlineData("authid", "jane@example.com")]
+    [InlineData("causationid", "jane@example.com")]
+    [InlineData("correlationid", "jane@example.com")]
+    [InlineData("correlationid", "4bf92f3577b34da6a3ce929d0e0e47")]
+    [InlineData("traceparent", "00-jane@example.com-00f067aa0ba902b7-01")]
+    [InlineData("traceparent", "ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")]
+    [InlineData("tenantid", "jane@example.com")]
+    [InlineData("id", "jane@example.com")]
+    public void An_identifying_attribute_not_in_the_shape_this_build_writes_is_redacted(string attribute, string value)
+    {
+        var envelope = Edit(Envelope("entity.tickets.updated", Row("Printer jam", 12.5m)), node => node[attribute] = value);
+
+        var fixture = DeliveryFixtures.Of(Delivery(), envelope, _schema);
+
+        fixture.Envelope.GetProperty(attribute).GetString().ShouldBe($"<redacted:{attribute}>");
+        fixture.Redacted.ShouldContain($"/{attribute}");
+    }
+
+    [Theory]
+    [InlineData("orders.shipped", "orders.shipped:jane@example.com")]
+    [InlineData("orders.shipped", "jane@example.com")]
+    [InlineData("entity.tickets.updated", "deals:jane@example.com")]
+    public void A_partition_key_in_a_namespace_this_build_does_not_write_is_redacted_whole(string type, string key)
+    {
+        var envelope = Edit(Envelope(type, Row("Printer jam", 12.5m)), node => node["partitionkey"] = key);
+
+        var fixture = DeliveryFixtures.Of(Delivery(), envelope, _schema);
+
+        fixture.Envelope.GetProperty("partitionkey").GetString().ShouldBe("<redacted:partitionkey>");
+    }
+
+    [Fact]
+    public void A_changed_list_naming_a_field_the_declared_entity_lacks_is_redacted()
+    {
+        var envelope = Edit(Envelope("entity.tickets.updated", Row("Printer jam", 12.5m)), node =>
+            node["data"]!["changed"] = new JsonArray("title", "jane@example.com"));
+
+        var fixture = DeliveryFixtures.Of(Delivery(), envelope, _schema);
+
+        fixture.Envelope.GetProperty("data").GetProperty("changed").GetString().ShouldBe("<redacted:changed>");
+        fixture.Redacted.ShouldContain("/data/changed");
     }
 
     [Theory]
@@ -217,10 +265,13 @@ public sealed class DeliveryFixturesTests
         Type = type,
         Time = new DateTimeOffset(2026, 10, 24, 9, 0, 0, TimeSpan.Zero),
         Subject = $"tickets/{_ticket}",
-        PartitionKey = type.StartsWith("entity.", StringComparison.Ordinal) ? $"tickets:{_ticket}" : $"orders.shipped:{_ticket}",
+        PartitionKey = type.StartsWith("entity.", StringComparison.Ordinal) ? $"tickets:{_ticket}" : $"custom.event:orders/{_ticket}",
         AuthType = AlvoEventAuthType.ApiKey,
+        AuthId = _customer.ToString(),
         AuthClaims = """{"roles":["admin"]}""",
         CorrelationId = "4bf92f3577b34da6a3ce929d0e0e4736",
+        CausationId = _ticket.ToString(),
+        TraceParent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
         TenantId = _tenant.ToString(),
         TraceState = traceState,
         Data = new AlvoEventData { Record = record, OldRecord = record, Changed = ["title"] },
