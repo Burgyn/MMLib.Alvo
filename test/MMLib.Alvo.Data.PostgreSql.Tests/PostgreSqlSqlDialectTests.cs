@@ -128,4 +128,16 @@ public class PostgreSqlSqlDialectTests : AlvoSqlDialectContractTests
     public void A_stored_generated_column_is_spelled_generated_always_as_stored()
         => _dialect.GeneratedColumnDefinition("line_total", "numeric(18,2)", "\"unit_price\" * \"amount\"")
             .ShouldBe("\"line_total\" numeric(18,2) GENERATED ALWAYS AS (\"unit_price\" * \"amount\") STORED");
+
+    /// <summary>
+    /// Transaction-scoped advisory locks, one per key, released by the commit or rollback that ends the transaction — the
+    /// shared form for a claim, the exclusive form for an operator's reset of the same subscriber.
+    /// </summary>
+    [Fact]
+    public void A_transaction_lock_is_an_advisory_lock_per_key_in_the_mode_asked_for()
+    {
+        _dialect.TransactionLockStatement(["@lock0", "@lock1"], exclusive: false)
+            .ShouldBe("SELECT pg_advisory_xact_lock_shared(@lock0), pg_advisory_xact_lock_shared(@lock1)");
+        _dialect.TransactionLockStatement(["@lock0"], exclusive: true).ShouldBe("SELECT pg_advisory_xact_lock(@lock0)");
+    }
 }

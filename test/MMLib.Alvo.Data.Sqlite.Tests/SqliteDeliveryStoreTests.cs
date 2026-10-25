@@ -37,7 +37,7 @@ public sealed class SqliteDeliveryStoreTests : DeliveryStoreContractTests, IDisp
             OperatingSystem.IsWindows(),
             "A Windows runner's per-write cost (~1.3 s a write on CI) outlasts the busy timeout under this load; tracked by #410, held on Linux and macOS.");
 
-        await using var world = await DeliveryStoreWorld.StartAsync(Connect);
+        await using var world = await DeliveryStoreWorld.StartAsync(Connect, new SqliteSqlDialect());
         await FanOutLanesAsync(world);
 
         var claimed = await Task.WhenAll(Enumerable.Range(0, Claimants).Select(index => Task.Run(() => ClaimAndAnswerAsync(world.Store, $"worker-{index}"), Ct)));
@@ -54,7 +54,7 @@ public sealed class SqliteDeliveryStoreTests : DeliveryStoreContractTests, IDisp
     [Fact]
     public async Task The_lane_check_seeks_the_partial_index_over_unfinished_deliveries()
     {
-        await using var world = await DeliveryStoreWorld.StartAsync(Connect);
+        await using var world = await DeliveryStoreWorld.StartAsync(Connect, new SqliteSqlDialect());
 
         var plan = await world.ExplainClaimAsync("EXPLAIN QUERY PLAN");
 
@@ -68,7 +68,7 @@ public sealed class SqliteDeliveryStoreTests : DeliveryStoreContractTests, IDisp
     [Fact]
     public async Task A_page_of_one_subscriber_seeks_its_index_past_the_cursor()
     {
-        await using var world = await DeliveryStoreWorld.StartAsync(Connect);
+        await using var world = await DeliveryStoreWorld.StartAsync(Connect, new SqliteSqlDialect());
 
         var plan = await world.ExplainSubscriberPageAsync("EXPLAIN QUERY PLAN");
 
@@ -83,7 +83,7 @@ public sealed class SqliteDeliveryStoreTests : DeliveryStoreContractTests, IDisp
     [Fact]
     public async Task An_attempt_after_a_reset_is_numbered_after_the_last_one()
     {
-        await using var world = await DeliveryStoreWorld.StartAsync(Connect);
+        await using var world = await DeliveryStoreWorld.StartAsync(Connect, new SqliteSqlDialect());
         var @event = await world.AppendEventAsync("tickets:a");
         await world.Store.FanOutAsync([new DeliveryRequest { EventId = @event, Subscriber = Subscriber, PartitionKey = "tickets:a", Kind = "handler" }], Ct);
         var first = (await world.Store.ClaimAsync(ClaimFor("worker-1"), Ct)).ShouldHaveSingleItem();
@@ -97,7 +97,7 @@ public sealed class SqliteDeliveryStoreTests : DeliveryStoreContractTests, IDisp
         (await world.AttemptNumbersAsync(first.Id)).ShouldBe([1, 2]);
     }
 
-    protected override async Task<IDeliveryStoreWorld> WorldAsync() => await DeliveryStoreWorld.StartAsync(Connect);
+    protected override async Task<IDeliveryStoreWorld> WorldAsync() => await DeliveryStoreWorld.StartAsync(Connect, new SqliteSqlDialect());
 
     public void Dispose()
     {

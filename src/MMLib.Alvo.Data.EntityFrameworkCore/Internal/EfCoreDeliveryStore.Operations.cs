@@ -54,12 +54,15 @@ internal sealed partial class EfCoreDeliveryStore
             : new DeliverySelection { Count = rows[0].Total, Busy = rows[0].Busy, Sample = [.. rows.Select(row => row.Id)] };
     }
 
-    public Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
+    public async Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entry);
+        var subscribers = await ReadAsync(DeliveryOperationsTable.SubscriberOfSql(_table), command => BindId(command, id), reader => reader.GetString(0), cancellationToken)
+            .ConfigureAwait(false);
 
-        return InTransactionAsync(async (connection, transaction) =>
+        return subscribers.Count == 1 && await InTransactionAsync(async (connection, transaction) =>
         {
+            await LockSubscribersAsync(connection, transaction, subscribers, exclusive: true, cancellationToken).ConfigureAwait(false);
             var reset = await ExecuteInAsync(connection, transaction, DeliveryOperationsTable.RedeliverSql(_table), command =>
             {
                 BindId(command, id);
@@ -67,7 +70,7 @@ internal sealed partial class EfCoreDeliveryStore
             }, cancellationToken).ConfigureAwait(false) == 1;
 
             return reset && await LogAsync(connection, transaction, entry with { Affected = 1 }, cancellationToken).ConfigureAwait(false) == 1;
-        }, cancellationToken);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     internal static DeliveryOperationEntry ReadEntry(DbDataReader reader) => new()

@@ -98,7 +98,7 @@ public sealed class SqliteWriteGateTests : IDisposable
     {
         var connectionString = $"Data Source={_databasePath};Pooling=False;Default Timeout=1";
         var gate = SqliteWriteGates.For(connectionString);
-        await using var world = await DeliveryStoreWorld.StartAsync(() => new SqliteConnection(connectionString), gate);
+        await using var world = await DeliveryStoreWorld.StartAsync(() => new SqliteConnection(connectionString), new SqliteSqlDialect(), gate);
         var request = new DeliveryRequest { EventId = await world.AppendEventAsync("tickets:1"), Subscriber = Subscriber, PartitionKey = "tickets:1", Kind = "handler" };
         using var holder = await gate.EnterAsync(Ct);
 
@@ -188,7 +188,7 @@ public sealed class SqliteWriteGateTests : IDisposable
 
         var connectionString = $"Data Source={_databasePath};Pooling=False;Default Timeout=30";
         var gate = new RecordingWriteGate(SqliteWriteGates.For(connectionString));
-        await using var world = await DeliveryStoreWorld.StartAsync(() => new SqliteConnection(connectionString), gate);
+        await using var world = await DeliveryStoreWorld.StartAsync(() => new SqliteConnection(connectionString), new SqliteSqlDialect(), gate);
         await FanOutLanesAsync(world);
         var before = gate.Entered;
 

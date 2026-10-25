@@ -53,6 +53,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore
         string RenderTable(MMLib.Alvo.Schema.EntitySchema entity, MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation? lockedPreImageFor);
         string RowLockClause(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation mutation);
         string RowWindowClause(string rowCountParameterMarker, string? rowOffsetParameterMarker = null);
+        string? TransactionLockStatement(System.Collections.Generic.IReadOnlyList<string> keyParameterMarkers, bool exclusive);
     }
     public sealed class MigrationBatchFraming : System.IEquatable<MMLib.Alvo.Data.EntityFrameworkCore.MigrationBatchFraming>
     {

@@ -17,6 +17,16 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// SQLite that turns the dispatcher's concurrent answers into a queue instead of busy locks the provider sleeps through.
 /// </para>
 /// <para>
+/// <b>A claim and an operator's reset of one subscriber are serialized by a subscriber lock</b>
+/// (<see cref="IAlvoSqlDialect.TransactionLockStatement"/>): the claim takes each subscriber it may claim for shared, a
+/// redeliver takes its delivery's subscriber exclusively, each as the first statement of its transaction. On PostgreSQL
+/// under READ COMMITTED a lane check is evaluated against the statement's own snapshot and is not re-checked when a
+/// concurrent writer commits, so without the lock a redeliver and a claim of the same lane — ordered or not — could each
+/// pass the other's check: a redelivered earlier delivery and a later one both claimable, or two deliveries of one record
+/// running. SQLite needs no lock (the write gate admits one writer at a time), and its dialect answers none. The lock
+/// statement reads no row, so a transaction that opens with it still writes before it reads anything.
+/// </para>
+/// <para>
 /// <b>Internal</b>: unlike <see cref="EfCoreOutboxStore"/> it is not part of what a host resolves by type; the port is the
 /// contract, and a provider author implements that.
 /// </para>
@@ -24,6 +34,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
 {
     private readonly RelationalConnectionFactory _connections;
+    private readonly IAlvoSqlDialect _dialect;
     private readonly TimeProvider _time;
     private readonly string _table;
     private readonly string _attempts;
@@ -31,13 +42,15 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
     private readonly string _controls;
     private readonly string _log;
 
-    internal EfCoreDeliveryStore(RelationalConnectionFactory connections, AlvoOptions options, TimeProvider time)
+    internal EfCoreDeliveryStore(RelationalConnectionFactory connections, IAlvoSqlDialect dialect, AlvoOptions options, TimeProvider time)
     {
         ArgumentNullException.ThrowIfNull(connections);
+        ArgumentNullException.ThrowIfNull(dialect);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(time);
 
         _connections = connections;
+        _dialect = dialect;
         _time = time;
         _table = DeliveryTable.NameFor(options.SchemaPrefix);
         _attempts = DeliveryTable.AttemptsNameFor(options.SchemaPrefix);
@@ -145,14 +158,46 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
             await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
             using (await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false))
             {
-                return await RelationalSqlBatch.ReadWrittenRowsAsync(
-                    connection,
-                    DeliveryTable.ClaimSql(_table, _outbox, claim.Ordered.Count, claim.Unordered.Count),
-                    command => BindClaim(command, claim),
-                    ReadClaimed,
-                    ct).ConfigureAwait(false);
+                var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+                await using (transaction.ConfigureAwait(false))
+                {
+                    await LockSubscribersAsync(connection, transaction, [.. claim.Ordered, .. claim.Unordered], exclusive: false, ct).ConfigureAwait(false);
+                    var claimed = await RelationalSqlBatch.ReadRowsAsync(
+                        connection,
+                        transaction,
+                        DeliveryTable.ClaimSql(_table, _outbox, claim.Ordered.Count, claim.Unordered.Count),
+                        command => BindClaim(command, claim),
+                        ReadClaimed,
+                        ct).ConfigureAwait(false);
+                    await transaction.CommitAsync(ct).ConfigureAwait(false);
+
+                    return claimed;
+                }
             }
         }
+    }
+
+    /// <summary>
+    /// Takes the subscribers' transaction locks, shared or exclusive, in ascending key order — the statement the dialect
+    /// answers, or nothing on an engine with one writer — so the transaction's next statement starts after any conflicting
+    /// claim or reset of those subscribers committed.
+    /// </summary>
+    private async Task LockSubscribersAsync(
+        DbConnection connection, DbTransaction transaction, IEnumerable<string> subscribers, bool exclusive, CancellationToken ct)
+    {
+        var keys = subscribers.Distinct(StringComparer.Ordinal).Select(subscriber => DeliveryOperationsTable.SubscriberLockKey(_table, subscriber)).Distinct().Order().ToList();
+        if (keys.Count == 0 || _dialect.TransactionLockStatement([.. keys.Select((_, index) => $"@lock{index}")], exclusive) is not { } sql)
+        {
+            return;
+        }
+
+        await ExecuteInAsync(connection, transaction, sql, command =>
+        {
+            for (var index = 0; index < keys.Count; index++)
+            {
+                RelationalSqlBatch.AddParameter(command, $"@lock{index}", keys[index]);
+            }
+        }, ct).ConfigureAwait(false);
     }
 
     private void BindClaim(DbCommand command, DeliveryClaim claim)

@@ -122,6 +122,13 @@ internal static class DeliveryOperationsTable
     /// write to the attempts table: on PostgreSQL the row lock it takes is what orders it against a fenced answer, and the
     /// history keeps numbering after the reset (<see cref="DeliveryTable.AttemptSql"/>).
     /// </summary>
+    /// <remarks>
+    /// The <c>NOT EXISTS</c> lane check alone does not hold on PostgreSQL: under READ COMMITTED it reads the statement's
+    /// snapshot and is not re-checked when a claim commits meanwhile, so a claim of a later delivery in the lane — ordered
+    /// or unordered — could pass beside the reset. The store runs this statement after taking the subscriber's lock
+    /// exclusively, as the claim takes it shared (<see cref="SubscriberLockKey"/>), so one of the two starts only after the
+    /// other committed.
+    /// </remarks>
     internal static string RedeliverSql(string table) =>
         $"UPDATE {table} SET {Reset} WHERE id = @id AND {Finished} AND NOT {LaneRunning(table)}";
 
@@ -133,6 +140,31 @@ internal static class DeliveryOperationsTable
         """;
 
     internal static string AllOperationsSql(string log) => $"SELECT {LogColumns} FROM {log} ORDER BY at, id";
+
+    internal static string SubscriberOfSql(string table) => $"SELECT subscriber FROM {table} WHERE id = @id";
+
+    /// <summary>
+    /// The key of a subscriber's transaction lock (<see cref="IAlvoSqlDialect.TransactionLockStatement"/>): the table is
+    /// part of it, so two Alvo schemas in one database never wait on each other.
+    /// </summary>
+    internal static long SubscriberLockKey(string table, string subscriber) => LockKey($"{table}:{subscriber}");
+
+    /// <summary>
+    /// FNV-1a, 64-bit, over the UTF-8 of <paramref name="text"/> — computed here rather than by the server so the key
+    /// depends on the name alone: every process, every server version and every engine derives the same one. A collision
+    /// with another key only makes two takers wait on each other; it never lets a conflict through.
+    /// </summary>
+    internal static long LockKey(string text)
+    {
+        const ulong Prime = 1099511628211UL;
+        var hash = 14695981039346656037UL;
+        foreach (var octet in System.Text.Encoding.UTF8.GetBytes(text))
+        {
+            hash = unchecked((hash ^ octet) * Prime);
+        }
+
+        return unchecked((long)hash);
+    }
 
     internal static string Conditions(DeliveryFilter filter, bool keyset)
     {

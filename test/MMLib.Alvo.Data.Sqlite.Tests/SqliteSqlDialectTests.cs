@@ -109,4 +109,9 @@ public class SqliteSqlDialectTests : AlvoSqlDialectContractTests
     public void A_stored_generated_column_is_spelled_generated_always_as_stored()
         => _dialect.GeneratedColumnDefinition("line_total", "TEXT", "\"unit_price\" * \"amount\"")
             .ShouldBe("\"line_total\" TEXT GENERATED ALWAYS AS (\"unit_price\" * \"amount\") STORED");
+
+    /// <summary>SQLite admits one writer at a time already — the write gate and <c>BEGIN IMMEDIATE</c> — so it takes no lock of its own.</summary>
+    [Fact]
+    public void A_transaction_lock_is_nothing_on_an_engine_with_one_writer()
+        => ((IAlvoSqlDialect)_dialect).TransactionLockStatement(["@lock0"], exclusive: true).ShouldBeNull();
 }

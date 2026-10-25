@@ -117,4 +117,19 @@ public sealed class DeliveryOperationsTableTests
     [Fact]
     public void A_log_row_under_a_spent_key_is_skipped_not_failed() =>
         DeliveryOperationsTable.InsertLogSql(Log).ShouldEndWith("ON CONFLICT DO NOTHING");
+
+    /// <summary>
+    /// A subscriber's lock key is FNV-1a over the UTF-8 of the table and the subscriber — computed in .NET, not by the
+    /// server, so every process derives the same key from the same name, and pinned to the published test vector.
+    /// </summary>
+    [Fact]
+    public void A_subscriber_s_lock_key_is_a_stable_64_bit_hash_of_its_table_and_name()
+    {
+        DeliveryOperationsTable.LockKey("a").ShouldBe(unchecked((long)0xaf63dc4c8601ec8cUL));
+        DeliveryOperationsTable.LockKey(string.Empty).ShouldBe(unchecked((long)0xcbf29ce484222325UL));
+        DeliveryOperationsTable.SubscriberLockKey("alvo_deliveries", "send-confirmation")
+            .ShouldBe(DeliveryOperationsTable.LockKey("alvo_deliveries:send-confirmation"));
+        DeliveryOperationsTable.SubscriberLockKey("other_deliveries", "send-confirmation")
+            .ShouldNotBe(DeliveryOperationsTable.SubscriberLockKey("alvo_deliveries", "send-confirmation"));
+    }
 }

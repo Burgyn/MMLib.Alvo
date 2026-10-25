@@ -29,6 +29,20 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
 
     /// <inheritdoc/>
     /// <remarks>
+    /// Transaction-level advisory locks (<i>Explicit Locking</i> §13.3.5): released at the end of the transaction with no
+    /// explicit unlock, so a failed or cancelled caller cannot leave one held on a pooled connection. The single-<c>bigint</c>
+    /// form takes the key the caller hashed; the shared and exclusive forms conflict exactly as a reader and a writer should.
+    /// </remarks>
+    public string? TransactionLockStatement(IReadOnlyList<string> keyParameterMarkers, bool exclusive)
+    {
+        ArgumentNullException.ThrowIfNull(keyParameterMarkers);
+        var function = exclusive ? "pg_advisory_xact_lock" : "pg_advisory_xact_lock_shared";
+
+        return $"SELECT {string.Join(", ", keyParameterMarkers.Select(marker => $"{function}({marker})"))}";
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
     /// <paramref name="lockedPreImageFor"/> is ignored because PostgreSQL's locking grammar is the trailing
     /// clause this dialect already answers from <see cref="RowLockClause"/>. Hinting the table source as well
     /// would be locking twice, which the port forbids.

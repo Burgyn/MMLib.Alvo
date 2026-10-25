@@ -92,13 +92,57 @@ public sealed class PostgreSqlDeliveryStoreTests : DeliveryStoreContractTests, I
         (await world.AttemptNumbersAsync(first.Id)).ShouldBe([1, 2]);
     }
 
+    /// <summary>
+    /// A claim takes each subscriber's advisory lock shared before its <c>UPDATE</c>, so it waits while an operator's reset
+    /// of that subscriber holds the lock exclusively — and its snapshot then sees what the reset committed.
+    /// </summary>
+    [Fact]
+    public async Task A_claim_waits_while_a_reset_holds_its_subscriber_s_lock()
+    {
+        EnsureEngineAvailable();
+        await using var world = await ConcreteWorldAsync();
+        var @event = await world.AppendEventAsync("tickets:a");
+        await world.Store.FanOutAsync([new DeliveryRequest { EventId = @event, Subscriber = Subscriber, PartitionKey = "tickets:a", Kind = "handler" }], Ct);
+
+        var claimed = await world.WhileSubscriberLockedAsync(Subscriber, exclusive: true, () => world.Store.ClaimAsync(ClaimFor("worker-1"), Ct));
+
+        claimed.ShouldHaveSingleItem();
+    }
+
+    /// <summary>
+    /// A redeliver takes its subscriber's advisory lock exclusively before its <c>UPDATE</c>, so it waits while a claim
+    /// holds the lock shared — and its lane check then sees what the claim committed.
+    /// </summary>
+    [Fact]
+    public async Task A_redeliver_waits_while_a_claim_holds_its_subscriber_s_lock()
+    {
+        EnsureEngineAvailable();
+        await using var world = await ConcreteWorldAsync();
+        var @event = await world.AppendEventAsync("tickets:a");
+        await world.Store.FanOutAsync(
+            [new DeliveryRequest { EventId = @event, Subscriber = Subscriber, PartitionKey = "tickets:a", Kind = "handler", DeadReason = "when-failed" }], Ct);
+        var id = (await world.Store.ListAsync(new DeliveryFilter { Limit = 1 }, Ct)).ShouldHaveSingleItem().Id;
+        var entry = new DeliveryOperationEntry
+        {
+            Id = Guid.NewGuid(),
+            At = DateTimeOffset.UnixEpoch,
+            Actor = "ops",
+            Operation = "redeliver",
+            Target = id.ToString(),
+        };
+
+        var changed = await world.WhileSubscriberLockedAsync(Subscriber, exclusive: false, () => world.Store.RedeliverAsync(id, entry, Ct));
+
+        changed.ShouldBeTrue();
+    }
+
     protected override async Task<IDeliveryStoreWorld> WorldAsync() => await ConcreteWorldAsync();
 
     protected override void EnsureEngineAvailable() =>
         Assert.SkipUnless(!OperatingSystem.IsWindows(), "PostgreSQL Testcontainers requires a Linux Docker daemon.");
 
     private Task<DeliveryStoreWorld> ConcreteWorldAsync() =>
-        DeliveryStoreWorld.StartAsync(() => new NpgsqlConnection(_connectionString));
+        DeliveryStoreWorld.StartAsync(() => new NpgsqlConnection(_connectionString), new PostgreSqlSqlDialect());
 
     private static DeliveryClaim ClaimFor(string claimant) => new()
     {

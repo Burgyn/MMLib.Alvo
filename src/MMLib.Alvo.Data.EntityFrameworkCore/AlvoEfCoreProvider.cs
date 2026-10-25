@@ -168,6 +168,7 @@ public static class AlvoEfCoreProvider
 
     private static EfCoreDeliveryStore CreateDeliveryStore(IServiceProvider services) => new(
         services.GetRequiredService<RelationalConnectionFactory>(),
+        services.GetRequiredService<IAlvoSqlDialect>(),
         services.GetRequiredService<IOptions<AlvoOptions>>().Value,
         services.GetRequiredService<TimeProvider>());
 

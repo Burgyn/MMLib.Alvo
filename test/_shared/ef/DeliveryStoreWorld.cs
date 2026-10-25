@@ -30,17 +30,18 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
     private readonly string _table = DeliveryTable.NameFor(SchemaPrefix);
     private readonly string _attempts = DeliveryTable.AttemptsNameFor(SchemaPrefix);
 
-    private DeliveryStoreWorld(Func<DbConnection> connect, IRelationalWriteGate? writeGate)
+    private DeliveryStoreWorld(Func<DbConnection> connect, IAlvoSqlDialect dialect, IRelationalWriteGate? writeGate)
     {
         _connect = connect;
-        Store = new EfCoreDeliveryStore(new RelationalConnectionFactory(connect, writeGate), new AlvoOptions { SchemaPrefix = SchemaPrefix }, _clock);
+        Store = new EfCoreDeliveryStore(
+            new RelationalConnectionFactory(connect, writeGate), dialect, new AlvoOptions { SchemaPrefix = SchemaPrefix }, _clock);
     }
 
     public IDeliveryStore Store { get; }
 
-    internal static async Task<DeliveryStoreWorld> StartAsync(Func<DbConnection> connect, IRelationalWriteGate? writeGate = null)
+    internal static async Task<DeliveryStoreWorld> StartAsync(Func<DbConnection> connect, IAlvoSqlDialect dialect, IRelationalWriteGate? writeGate = null)
     {
-        var world = new DeliveryStoreWorld(connect, writeGate);
+        var world = new DeliveryStoreWorld(connect, dialect, writeGate);
         await world.Store.EnsureAsync(Ct);
 
         return world;
@@ -170,7 +171,64 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
         }
     }
 
+    /// <summary>
+    /// Runs <paramref name="action"/> while another connection holds <paramref name="subscriber"/>'s advisory lock — the
+    /// exclusive or the shared form — and lets go only once a third connection sees a backend of this database waiting on
+    /// an advisory lock, so the action provably took the subscriber's lock in the conflicting mode. PostgreSQL only.
+    /// </summary>
+    internal async Task<T> WhileSubscriberLockedAsync<T>(string subscriber, bool exclusive, Func<Task<T>> action)
+    {
+        var holder = _connect();
+        await using (holder.ConfigureAwait(false))
+        {
+            var observer = _connect();
+            await using (observer.ConfigureAwait(false))
+            {
+                await holder.OpenAsync(Ct);
+                await observer.OpenAsync(Ct);
+                var holding = await holder.BeginTransactionAsync(Ct);
+                await using (holding.ConfigureAwait(false))
+                {
+                    await LockSubscriberOnAsync(holder, holding, subscriber, exclusive);
+                    var waiting = action();
+                    await WaitUntilAdvisoryWaitAsync(observer, waiting);
+                    await holding.CommitAsync(Ct);
+
+                    return await waiting;
+                }
+            }
+        }
+    }
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    private async Task LockSubscriberOnAsync(DbConnection connection, DbTransaction transaction, string subscriber, bool exclusive)
+    {
+        var command = connection.CreateCommand();
+        await using (command.ConfigureAwait(false))
+        {
+            command.Transaction = transaction;
+            command.CommandText = exclusive ? "SELECT pg_advisory_xact_lock(@key)" : "SELECT pg_advisory_xact_lock_shared(@key)";
+            RelationalSqlBatch.AddParameter(command, "@key", DeliveryOperationsTable.SubscriberLockKey(_table, subscriber));
+            await command.ExecuteNonQueryAsync(Ct);
+        }
+    }
+
+    private static async Task WaitUntilAdvisoryWaitAsync(DbConnection observer, Task waiting)
+    {
+        const string Waiters =
+            "SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND database = (SELECT oid FROM pg_database WHERE datname = current_database())";
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        while (Convert.ToInt64(await ScalarAsync(observer, Waiters, backend: null), CultureInfo.InvariantCulture) == 0)
+        {
+            if (waiting.IsCompleted || waited.Elapsed > _blockDeadline)
+            {
+                throw new InvalidOperationException("The action never waited on the subscriber's advisory lock; it does not take it.");
+            }
+
+            await Task.Delay(_blockPollInterval, Ct);
+        }
+    }
 
     /// <summary>
     /// The engine's plan for the claim of one ordered subscriber, every row and column of <paramref name="explain"/>'s
