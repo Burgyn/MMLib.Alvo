@@ -70,6 +70,15 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         }
     }
 
+    /// <summary>Replaces the stored envelope of <paramref name="eventId"/> with <paramref name="payload"/>, as a corrupted row would read.</summary>
+    internal void Overwrite(Guid eventId, string payload)
+    {
+        lock (_gate)
+        {
+            _payloads[eventId] = payload;
+        }
+    }
+
     internal void ReleaseOutboxEntry(Guid eventId, DateTimeOffset retryAt)
     {
         lock (_gate)

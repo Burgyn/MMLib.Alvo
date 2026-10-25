@@ -1,4 +1,6 @@
 ﻿using MMLib.Alvo.Events;
+using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Management.Internal;
 
@@ -15,6 +17,9 @@ namespace MMLib.Alvo.Management.Internal;
 /// </remarks>
 internal sealed partial class AlvoOperationsService(
     ManagementGate gate,
+    ExtensionCatalog catalog,
+    ExtensionStats stats,
+    ISchemaRegistry schemas,
     IDeliveryStore? store = null)
 {
     internal const int SampleSize = 20;
