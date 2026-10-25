@@ -245,6 +245,7 @@ namespace MMLib.Alvo.Events
     }
     public interface IAlvoEventPump
     {
+        System.Threading.Tasks.Task DeliverAsync(MMLib.Alvo.Management.DeliveryFixture fixture, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Events.AlvoDrainResult> DrainAsync(System.Threading.CancellationToken cancellationToken = default);
     }
 }

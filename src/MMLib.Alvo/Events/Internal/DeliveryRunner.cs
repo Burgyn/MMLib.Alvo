@@ -123,6 +123,51 @@ internal sealed class DeliveryRunner(
         return outcome;
     }
 
+    /// <summary>
+    /// Runs <paramref name="handler"/> once over <paramref name="event"/> exactly as an attempt would — its own scope, its
+    /// identity, one hop deeper in the chain, its timeout, one delivery span — and records nothing; the handler's exception
+    /// propagates as it was thrown — a <see cref="RecordUnreadableException"/> from reading a typed record included, which an
+    /// attempt would record dead <c>record-unreadable</c>.
+    /// </summary>
+    /// <exception cref="TimeoutException">The handler ran past its timeout; it is cancelled and not waited for.</exception>
+    internal async Task InvokeOnceAsync(AlvoEvent @event, BoundHandler handler, int attempt, CancellationToken cancellationToken)
+    {
+        var delivery = new ClaimedDelivery
+        {
+            Id = Guid.Empty,
+            EventId = @event.Id,
+            Subscriber = handler.Id,
+            PartitionKey = @event.PartitionKey,
+            Attempts = attempt,
+        };
+        using var flow = AlvoFlow.Enter(FlowOf(@event));
+        using var span = AlvoHookTelemetry.StartDelivery(handler.Id, @event, attempt);
+        try
+        {
+            await RunUnderTimeoutAsync(@event, delivery, handler, cancellationToken).ConfigureAwait(false);
+            AlvoHookTelemetry.Finish(span, AlvoHookTelemetry.Succeeded);
+        }
+        catch (Exception)
+        {
+            AlvoHookTelemetry.Finish(span, AlvoHookTelemetry.Failed);
+            throw;
+        }
+    }
+
+    private async Task RunUnderTimeoutAsync(AlvoEvent @event, ClaimedDelivery delivery, BoundHandler handler, CancellationToken cancellationToken)
+    {
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        try
+        {
+            await RunHandlerAsync(@event, delivery, handler, cancel.Token).WaitAsync(handler.Settings.Timeout, time, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            await cancel.CancelAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
     /// <summary>The verdict of a handler that has ended — its own result, whatever the runner's deadline did meanwhile.</summary>
     internal static AttemptVerdict Ended(Task invocation) =>
         invocation.IsCompletedSuccessfully ? AttemptVerdict.Success
@@ -255,7 +300,7 @@ internal sealed class DeliveryRunner(
     };
 
     /// <summary>The stored envelope, or <see langword="null"/> when it cannot be read as one this handler may run on.</summary>
-    private static AlvoEvent? ReadableEvent(string payload, AlvoRunAs runAs)
+    internal static AlvoEvent? ReadableEvent(string payload, AlvoRunAs runAs)
     {
         try
         {

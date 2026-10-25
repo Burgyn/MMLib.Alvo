@@ -8,6 +8,7 @@ using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Management;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
@@ -15,6 +16,8 @@ using MMLib.Alvo.Tests.Expressions;
 using MMLib.Alvo.Tests.Extensions;
 
 using NSubstitute;
+
+using System.Text.Json;
 
 namespace MMLib.Alvo.Tests.Events;
 
@@ -443,6 +446,94 @@ public sealed class DeliveryDispatcherTests : IDisposable
             .ToList();
         claimants.Count.ShouldBe(2);
         claimants.ShouldBeUnique();
+    }
+
+    [Fact]
+    public async Task A_fixture_runs_its_handler_once_and_records_nothing()
+    {
+        var store = new FakeDeliveryStore(_clock);
+        var seen = new List<(Guid Event, int Attempt)>();
+        var dispatcher = Dispatcher(store, (AlvoCreated<AlvoRecord> _, AlvoEventContext context) => seen.Add((context.EventId, context.Attempt)));
+        var (fixture, eventId) = Fixture(Handler, attempt: 3);
+
+        await dispatcher.DeliverFixtureAsync(fixture, Ct);
+
+        seen.ShouldBe([(eventId, 3)]);
+        store.Rows.ShouldBeEmpty();
+        store.Attempts.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_fixture_never_touches_the_delivery_store()
+    {
+        var port = Substitute.For<IDeliveryStore>();
+        var dispatcher = Dispatcher(new FakeDeliveryStore(_clock), (AlvoCreated<AlvoRecord> _) => Task.CompletedTask, port: port);
+
+        await dispatcher.DeliverFixtureAsync(Fixture(Handler, attempt: 1).Fixture, Ct);
+
+        port.ReceivedCalls().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_fixture_hands_back_the_handler_s_own_exception()
+    {
+        var store = new FakeDeliveryStore(_clock);
+        var dispatcher = Dispatcher(store, new Func<AlvoCreated<AlvoRecord>, Task>(_ => throw new InvalidOperationException("template missing")));
+
+        (await Should.ThrowAsync<InvalidOperationException>(() => dispatcher.DeliverFixtureAsync(Fixture(Handler, attempt: 1).Fixture, Ct)))
+            .Message.ShouldBe("template missing");
+        store.Attempts.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_fixture_is_refused_in_the_background_mode()
+    {
+        var dispatcher = Dispatcher(new FakeDeliveryStore(_clock), (AlvoCreated<AlvoRecord> _) => Task.CompletedTask, mode: AlvoEventDispatchMode.Background);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => dispatcher.DeliverFixtureAsync(Fixture(Handler, attempt: 1).Fixture, Ct));
+    }
+
+    [Fact]
+    public async Task A_fixture_for_a_handler_this_host_does_not_bind_is_refused_naming_the_bound_ones()
+    {
+        var dispatcher = Dispatcher(new FakeDeliveryStore(_clock), (AlvoCreated<AlvoRecord> _) => Task.CompletedTask);
+
+        (await Should.ThrowAsync<InvalidOperationException>(() => dispatcher.DeliverFixtureAsync(Fixture("someone-else", attempt: 1).Fixture, Ct)))
+            .Message.ShouldContain(Handler);
+    }
+
+    [Fact]
+    public async Task A_fixture_whose_envelope_is_not_an_event_is_refused()
+    {
+        var dispatcher = Dispatcher(new FakeDeliveryStore(_clock), (AlvoCreated<AlvoRecord> _) => Task.CompletedTask);
+        var fixture = Fixture(Handler, attempt: 1).Fixture with { Envelope = JsonDocument.Parse("""{"id":"not-an-event"}""").RootElement };
+
+        (await Should.ThrowAsync<InvalidOperationException>(() => dispatcher.DeliverFixtureAsync(fixture, Ct)))
+            .Message.ShouldContain("envelope");
+    }
+
+    private (DeliveryFixture Fixture, Guid EventId) Fixture(string subscriber, int attempt)
+    {
+        var @event = new AlvoEvent
+        {
+            Id = AlvoEventId.Create(_clock.GetUtcNow()),
+            Source = AlvoEvent.DefaultSource,
+            Type = "entity.tickets.created",
+            Time = _clock.GetUtcNow(),
+            Subject = "tickets/1",
+            PartitionKey = "tickets:1",
+            AuthType = AlvoEventAuthType.ApiKey,
+            CorrelationId = "c",
+            Data = new AlvoEventData { Record = AlvoRecord.Empty },
+        };
+
+        return (new DeliveryFixture
+        {
+            Subscriber = subscriber,
+            Delivery = Guid.NewGuid(),
+            Attempt = attempt,
+            Envelope = JsonDocument.Parse(AlvoEventJson.Write(@event)).RootElement,
+        }, @event.Id);
     }
 
     private DeliveryDispatcher Dispatcher(

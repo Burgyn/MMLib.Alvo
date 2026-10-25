@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 
 using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Management;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 
@@ -114,6 +115,31 @@ internal sealed class DeliveryDispatcher(
 
         return round.Result(claimedInRound);
     }
+
+    /// <summary>
+    /// Runs the handler a fixture names, once, over the fixture's envelope as a delivery attempt would, behind the manual
+    /// round's gates; it claims nothing and records nothing (spec 2026-10-14 HX-06 acceptance (6)).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// A gate is shut, the handler is not bound here, or the envelope cannot be read as an event the handler may run on — or
+    /// the handler itself threw one.
+    /// </exception>
+    internal async Task DeliverFixtureAsync(DeliveryFixture fixture, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(fixture);
+        var bindings = binder.For(EnsureManualGates());
+        var handler = bindings.Handler(fixture.Subscriber) ?? throw UnboundFixture(fixture.Subscriber, bindings);
+        var @event = DeliveryRunner.ReadableEvent(fixture.Envelope.GetRawText(), handler.Settings.RunAs)
+            ?? throw new InvalidOperationException(
+                $"The fixture's envelope cannot be read as an event '{handler.Id}' can run: it is not a CloudEvents envelope Alvo wrote, "
+                + "or its tenant or caller id is malformed. Restore the envelope's attributes as they were downloaded.");
+
+        await runner.InvokeOnceAsync(@event, handler, Math.Max(1, fixture.Attempt), cancellationToken).ConfigureAwait(false);
+    }
+
+    private static InvalidOperationException UnboundFixture(string subscriber, ExtensionBindings bindings) => new(
+        $"The fixture is for '{subscriber}', which this host does not bind. Register the handler under that id, or edit the "
+        + $"fixture's subscriber. This host binds: {(bindings.Handlers.Count == 0 ? "none" : string.Join(", ", bindings.Handlers.Select(handler => handler.Id)))}.");
 
     private PolicyCatalog EnsureManualGates()
     {

@@ -19,6 +19,7 @@ namespace MMLib.Alvo.TestHost
         public MMLib.Alvo.Data.IAlvoData Data { get; }
         public MMLib.Alvo.TestHost.AlvoHookRecorder Hooks { get; }
         public System.IServiceProvider Services { get; }
+        public System.Threading.Tasks.Task DeliverAsync(MMLib.Alvo.Management.DeliveryFixture fixture, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Events.AlvoDrainResult> DrainEventsAsync(System.Threading.CancellationToken cancellationToken = default) { }
         public MMLib.Alvo.Events.AlvoEventContext EventContext(MMLib.Alvo.AlvoContext caller, string subscriber = "test-handler", int attempt = 1) { }
