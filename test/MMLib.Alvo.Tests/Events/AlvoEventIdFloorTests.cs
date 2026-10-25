@@ -28,6 +28,13 @@ public sealed class AlvoEventIdFloorTests
         bytes.Take(6).Aggregate(0L, (millis, part) => (millis << 8) | part).ShouldBe(_instant.ToUnixTimeMilliseconds());
     }
 
+    [Fact]
+    public void An_instant_before_the_unix_epoch_has_no_floor()
+    {
+        Should.Throw<ArgumentOutOfRangeException>(() => AlvoEventId.Floor(DateTimeOffset.UnixEpoch.AddMilliseconds(-1)));
+        AlvoEventId.Floor(DateTimeOffset.UnixEpoch).ToByteArray(bigEndian: true).Take(6).ShouldAllBe(part => part == 0);
+    }
+
     /// <summary>The same id with its last random byte set — an id minted later in the same millisecond.</summary>
     private static Guid WithTail(Guid id, byte last)
     {

@@ -101,6 +101,11 @@ internal static class DeliveryOperationsTable
     /// The count, the busy count and the sample in one statement: the window aggregates are taken before the limit, so they
     /// cannot disagree with the sample, and a filter matching nothing returns no row — counts of zero.
     /// </summary>
+    /// <remarks>
+    /// The exact count reads every matching row, and the busy count probes each one's lane, before the limit applies: the
+    /// cost grows with the selection, not with the sample. A replay is bounded by its ceiling of 10 000 deliveries per real
+    /// run, so a selection worth acting on stays within that many rows; a wider one is read in full to be refused.
+    /// </remarks>
     internal static string SelectSql(string table, DeliveryFilter filter) =>
         $"SELECT id, COUNT(*) OVER (), SUM(CASE WHEN {LaneRunning(table)} THEN 1 ELSE 0 END) OVER () FROM {table}{Where(filter, keyset: false)} ORDER BY event_id, id LIMIT @limit";
 

@@ -154,29 +154,75 @@ public abstract partial class DeliveryStoreContractTests
     }
 
     /// <summary>
-    /// A replayable selection leaves out what is unfinished and what broke a loop (dead <c>chain-depth-exceeded</c>), and
-    /// counts the selected deliveries whose record has a delivery of the same subscriber running.
+    /// A replayable selection keeps every finished status — succeeded, dead, cancelled — and leaves out what is unfinished and
+    /// what broke a loop (dead <c>chain-depth-exceeded</c>); it counts as busy only a selected delivery whose record has a
+    /// delivery of the <em>same</em> subscriber running — not another subscriber's on that record, nor the same subscriber's
+    /// on another record.
     /// </summary>
     [Fact]
     public async Task A_replayable_selection_leaves_out_loop_breaks_and_counts_running_records()
     {
         EnsureEngineAvailable();
         await using var world = await WorldAsync();
+        var succeeded = await SucceededAsync(world, Audit, KeyA);
+        var cancelled = await CancelledAsync(world, "retired-hook", "tickets:c");
         var loop = await world.AppendEventAsync(KeyA);
         var failed = await world.AppendEventAsync(KeyB);
-        var running = await world.AppendEventAsync(KeyB);
-        var pending = await world.AppendEventAsync("tickets:c");
         await world.Store.FanOutAsync([Request(loop, Confirm, KeyA) with { DeadReason = "chain-depth-exceeded" }], Ct);
         await world.Store.FanOutAsync([Request(failed, Confirm, KeyB) with { DeadReason = "when-failed" }], Ct);
-        await world.Store.FanOutAsync([Request(running, Confirm, KeyB)], Ct);
-        await world.Store.FanOutAsync([Request(pending, Audit, "tickets:c")], Ct);
-        (await world.Store.ClaimAsync(Unordered(Confirm), Ct)).ShouldHaveSingleItem().EventId.ShouldBe(running);
+        await RunningAsync(world, (Confirm, KeyB), (Confirm, KeyA), (Audit, KeyB));
+        await world.Store.FanOutAsync([Request(await world.AppendEventAsync("tickets:c"), "notify-crm", "tickets:c")], Ct);
 
         var selection = await world.Store.SelectAsync(new DeliveryFilter { Replayable = true, Limit = 20 }, Ct);
 
-        selection.Count.ShouldBe(1, "only the failed delivery may be replayed");
-        (await world.Store.FindAsync(selection.Sample[0], Ct)).ShouldNotBeNull().EventId.ShouldBe(failed);
-        selection.Busy.ShouldBe(1, "its record has another delivery of the same handler running");
+        selection.Count.ShouldBe(3, "the succeeded, the cancelled and the failed delivery may be replayed");
+        (await EventsOfAsync(world, selection.Sample)).ShouldBe([succeeded, cancelled, failed]);
+        selection.Busy.ShouldBe(1, "only the failed delivery's record has a delivery of the same handler running");
+    }
+
+    /// <summary>A delivery of <paramref name="subscriber"/> on <paramref name="key"/> that ran and succeeded.</summary>
+    private static async Task<Guid> SucceededAsync(IDeliveryStoreWorld world, string subscriber, string key)
+    {
+        var @event = await world.AppendEventAsync(key);
+        await world.Store.FanOutAsync([Request(@event, subscriber, key)], Ct);
+        var claimed = (await world.Store.ClaimAsync(Unordered(subscriber), Ct)).ShouldHaveSingleItem();
+        (await world.Store.CompleteAsync(Attempt(claimed), Ct)).ShouldBeTrue();
+
+        return @event;
+    }
+
+    /// <summary>A delivery of <paramref name="subscriber"/> on <paramref name="key"/> cancelled while pending.</summary>
+    private static async Task<Guid> CancelledAsync(IDeliveryStoreWorld world, string subscriber, string key)
+    {
+        var @event = await world.AppendEventAsync(key);
+        await world.Store.FanOutAsync([Request(@event, subscriber, key)], Ct);
+        (await world.Store.CancelPendingAsync(subscriber, Ct)).ShouldBe(1);
+
+        return @event;
+    }
+
+    /// <summary>One running delivery per subscriber and key, each of a fresh event.</summary>
+    private static async Task RunningAsync(IDeliveryStoreWorld world, params (string Subscriber, string Key)[] lanes)
+    {
+        foreach (var (subscriber, key) in lanes)
+        {
+            await world.Store.FanOutAsync([Request(await world.AppendEventAsync(key), subscriber, key)], Ct);
+        }
+
+        var claimed = await world.Store.ClaimAsync(Unordered([.. lanes.Select(lane => lane.Subscriber).Distinct()]), Ct);
+        claimed.Count.ShouldBe(lanes.Length);
+    }
+
+    /// <summary>The event each delivery delivers, in the deliveries' order.</summary>
+    private static async Task<List<Guid>> EventsOfAsync(IDeliveryStoreWorld world, IReadOnlyList<Guid> deliveries)
+    {
+        var events = new List<Guid>();
+        foreach (var id in deliveries)
+        {
+            events.Add((await world.Store.FindAsync(id, Ct)).ShouldNotBeNull().EventId);
+        }
+
+        return events;
     }
 
     /// <summary>A selection asking for nothing is refused rather than answered empty.</summary>
