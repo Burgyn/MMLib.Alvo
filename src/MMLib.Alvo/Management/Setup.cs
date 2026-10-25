@@ -25,6 +25,8 @@ internal static class ManagementSetup
         AddManagementOptions(services);
         AddManagementService(services);
         services.TryAddSingleton<ManagementAccessEvaluator>();
+        services.TryAddSingleton<ManagementGate>();
+        services.TryAddSingleton<AlvoOperationsService>();
         AddUserAdministration(services);
         return services;
     }
