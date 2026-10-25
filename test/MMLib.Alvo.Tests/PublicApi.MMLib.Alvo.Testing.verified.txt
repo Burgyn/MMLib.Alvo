@@ -658,6 +658,7 @@ namespace MMLib.Alvo.Testing.Events
         public System.Threading.Tasks.Task A_page_filters_by_subscriber_record_status_and_event_window() { }
         public System.Threading.Tasks.Task A_page_lists_deliveries_newest_first_and_continues_after_the_last_one() { }
         public System.Threading.Tasks.Task A_page_of_one_subscriber_continues_after_its_cursor_within_that_subscriber() { }
+        public System.Threading.Tasks.Task A_redeliver_whose_log_row_is_refused_changes_nothing() { }
         public System.Threading.Tasks.Task A_redeliver_writes_one_log_row() { }
         public System.Threading.Tasks.Task A_redelivered_delivery_runs_again_with_a_fresh_budget_and_keeps_its_history() { }
         public System.Threading.Tasks.Task A_replayable_selection_leaves_out_loop_breaks_and_counts_running_records() { }

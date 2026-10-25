@@ -367,6 +367,28 @@ public abstract partial class DeliveryStoreContractTests
             .ShouldBe((entry.Id, entry.At, entry.Actor, "redeliver", id.ToString(), "contract", (int?)1));
     }
 
+    /// <summary>
+    /// A redeliver whose log row is refused — its id already recorded — throws and leaves the delivery as it was: the port
+    /// never reports, or makes, a change it did not log.
+    /// </summary>
+    [Fact]
+    public async Task A_redeliver_whose_log_row_is_refused_changes_nothing()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var @event = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(@event, Confirm, KeyA) with { DeadReason = "when-failed" }], Ct);
+        var id = (await world.Store.ListAsync(new DeliveryFilter { Limit = 1 }, Ct)).ShouldHaveSingleItem().Id;
+        var entry = Entry("redeliver", id.ToString());
+        (await world.Store.RedeliverAsync(id, entry, Ct)).ShouldBeTrue();
+        await world.Store.CompleteAsync(Attempt((await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldHaveSingleItem()), Ct);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => world.Store.RedeliverAsync(id, entry, Ct));
+
+        (await world.Store.FindAsync(id, Ct)).ShouldNotBeNull().Status.ShouldBe("succeeded");
+        (await world.OperationsAsync()).ShouldHaveSingleItem();
+    }
+
     private static DeliveryOperationEntry Entry(string operation, string target, string? key = null) => new()
     {
         Id = AlvoEventId.Create(_operatedAt),

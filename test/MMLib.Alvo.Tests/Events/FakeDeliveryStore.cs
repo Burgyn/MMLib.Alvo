@@ -214,10 +214,21 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
                 return Task.FromResult(false);
             }
 
+            EnsureLoggable(entry);
             Reset(row);
             _operations.Add(entry with { Affected = 1 });
 
             return Task.FromResult(true);
+        }
+    }
+
+    /// <summary>Refuses a log row whose id or idempotency key is spent, as the relational log's keys do, before anything changes.</summary>
+    private void EnsureLoggable(DeliveryOperationEntry entry)
+    {
+        if (_operations.Exists(logged => logged.Id == entry.Id
+            || (entry.IdempotencyKey is not null && logged.IdempotencyScope == entry.IdempotencyScope && logged.IdempotencyKey == entry.IdempotencyKey)))
+        {
+            throw new InvalidOperationException($"The operations log already holds row {entry.Id} or its idempotency key.");
         }
     }
 

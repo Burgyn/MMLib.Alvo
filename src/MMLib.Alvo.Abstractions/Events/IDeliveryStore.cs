@@ -270,5 +270,9 @@ public interface IDeliveryStore
     /// <param name="entry">The log row to write when the delivery changed.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>Whether it changed; <see langword="false"/> for an unfinished, busy or unknown delivery, which records nothing.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The log refused <paramref name="entry"/> — its id, or its idempotency key, is already recorded; the reset is rolled
+    /// back with it, so the delivery is unchanged.
+    /// </exception>
     Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default);
 }

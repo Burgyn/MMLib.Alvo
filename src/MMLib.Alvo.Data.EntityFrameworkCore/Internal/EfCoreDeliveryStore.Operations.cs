@@ -69,8 +69,25 @@ internal sealed partial class EfCoreDeliveryStore
                 RelationalSqlBatch.AddParameter(command, "@now", Now);
             }, cancellationToken).ConfigureAwait(false) == 1;
 
-            return reset && await LogAsync(connection, transaction, entry with { Affected = 1 }, cancellationToken).ConfigureAwait(false) == 1;
+            if (reset)
+            {
+                await LogChangeAsync(connection, transaction, entry with { Affected = 1 }, cancellationToken).ConfigureAwait(false);
+            }
+
+            return reset;
         }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Logs a change already made in <paramref name="transaction"/>, or throws so the transaction rolls the change back: a
+    /// row skipped by <c>ON CONFLICT DO NOTHING</c> means its id or key is spent, and a change must never stand unlogged.
+    /// </summary>
+    private async Task LogChangeAsync(DbConnection connection, DbTransaction transaction, DeliveryOperationEntry entry, CancellationToken ct)
+    {
+        if (await LogAsync(connection, transaction, entry, ct).ConfigureAwait(false) != 1)
+        {
+            throw new InvalidOperationException($"The operations log already holds row {entry.Id} or its idempotency key; the {entry.Operation} was rolled back.");
+        }
     }
 
     internal static DeliveryOperationEntry ReadEntry(DbDataReader reader) => new()
