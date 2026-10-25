@@ -3,7 +3,7 @@
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Management;
 
-using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Diagnostics.Metrics;
 
 namespace MMLib.Alvo.Extensions.Internal;
@@ -14,40 +14,49 @@ namespace MMLib.Alvo.Extensions.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>"This instance" is this process.</b> Alvo's meters are process-wide, so two hosts in one process — a test run — see
-/// each other's runs; another replica's are never seen. Nothing is stored: a restart starts the day over, and
-/// <see cref="ManagementExtensionStats.Since"/> says from when.
+/// <b>"This instance" is this process.</b> Alvo's meters are process-wide, so two hosts in one process — a test run — that
+/// register the same handler id see each other's runs; another replica's are never seen. Nothing is stored: a restart
+/// starts the day over, and <see cref="ManagementExtensionStats.Since"/> says from when.
 /// </para>
 /// <para>
 /// <b>One measurement carries everything:</b> <c>alvo.delivery.duration</c> is recorded once per answered attempt with the
 /// subscriber and the outcome, so a run is a measurement, a failure is an outcome of <c>failed</c> or <c>dead</c>, and the
-/// percentiles come from the same values. Write hooks' rejections join when write hooks exist; a handler refuses nothing.
+/// percentiles come from the same values. A <c>lease-lost</c> attempt counts as a run and not as a failure — a decision:
+/// the handler was not refused, its claim was taken over. Write hooks' rejections join when write hooks exist; a handler
+/// refuses nothing.
 /// </para>
 /// <para>
-/// <b>Bounded memory.</b> The listener sees every host's subscribers in the process, so at most
-/// <see cref="MostExtensions"/> are tracked and a later one is ignored; an hour's latency bins are allocated on its first
-/// run. The listener callback runs on any thread: the map is concurrent and each extension's buckets take one short lock.
+/// <b>Bounded memory.</b> Only this host's registered handler ids are tracked — the set is fixed at construction, so a
+/// measurement for any other subscriber (another host's, in one process) is ignored and the map never grows; an hour's
+/// latency bins are allocated on its first run. The listener callback runs on any thread: the map is read-only and each
+/// extension's buckets take one short lock.
+/// </para>
+/// <para>
+/// <b>The window is the current, partial hour and the 23 whole hours before it</b> — up to a day, hour-granular, which
+/// <see cref="ManagementExtensionStats.Since"/> reports exactly. Keeping a 24th whole hour would count up to 25 hours.
 /// </para>
 /// </remarks>
 internal sealed class ExtensionStats : IHostedService, IDisposable
 {
     internal const string Scope = "this-instance";
 
-    internal const int MostExtensions = 256;
-
     private const int Hours = 24;
 
     private readonly TimeProvider _time;
     private readonly DateTimeOffset _started;
-    private readonly ConcurrentDictionary<string, Buckets> _extensions = new(StringComparer.Ordinal);
+    private readonly FrozenDictionary<string, Buckets> _extensions;
     private readonly MeterListener _listener;
-    private volatile bool _full;
 
-    public ExtensionStats(TimeProvider time)
+    public ExtensionStats(TimeProvider time, ExtensionRegistry registry)
     {
         ArgumentNullException.ThrowIfNull(time);
+        ArgumentNullException.ThrowIfNull(registry);
         _time = time;
         _started = time.GetUtcNow();
+        _extensions = registry.Handlers
+            .Select(handler => handler.Id)
+            .Distinct(StringComparer.Ordinal)
+            .ToFrozenDictionary(id => id, _ => new Buckets(), StringComparer.Ordinal);
         _listener = new MeterListener { InstrumentPublished = Publish };
         _listener.SetMeasurementEventCallback<double>(OnDuration);
         _listener.Start();
@@ -65,8 +74,13 @@ internal sealed class ExtensionStats : IHostedService, IDisposable
 
     public void Dispose() => _listener.Dispose();
 
-    internal void Record(string subscriber, double milliseconds, bool failed) =>
-        Track(subscriber)?.Record(HourOf(_time.GetUtcNow()), milliseconds, failed);
+    internal void Record(string subscriber, double milliseconds, bool failed)
+    {
+        if (_extensions.TryGetValue(subscriber, out var buckets))
+        {
+            buckets.Record(HourOf(_time.GetUtcNow()), milliseconds, failed);
+        }
+    }
 
     internal ManagementExtensionStats Report(IReadOnlyList<string> ids)
     {
@@ -84,21 +98,6 @@ internal sealed class ExtensionStats : IHostedService, IDisposable
 
     private ManagementExtensionStat Stat(string id, long hour) =>
         _extensions.TryGetValue(id, out var buckets) ? buckets.Stat(id, hour) : new ManagementExtensionStat { Id = id };
-
-    private Buckets? Track(string subscriber)
-    {
-        if (_extensions.TryGetValue(subscriber, out var buckets))
-        {
-            return buckets;
-        }
-
-        if (_full || (_full = _extensions.Count >= MostExtensions))
-        {
-            return null;
-        }
-
-        return _extensions.GetOrAdd(subscriber, _ => new Buckets());
-    }
 
     private static void Publish(Instrument instrument, MeterListener listener)
     {
@@ -120,7 +119,7 @@ internal sealed class ExtensionStats : IHostedService, IDisposable
 
         if (subscriber is not null)
         {
-            Record(subscriber, milliseconds, outcome is "failed" or "dead");
+            Record(subscriber, milliseconds, outcome is AlvoDeliveryMetrics.FailedOutcome or AlvoDeliveryMetrics.DeadOutcome);
         }
     }
 
@@ -147,22 +146,30 @@ internal sealed class ExtensionStats : IHostedService, IDisposable
 
         internal ManagementExtensionStat Stat(string id, long hour)
         {
+            var bins = new long[LatencyHistogram.Bins];
+            long runs = 0;
+            long failures = 0;
             lock (_gate)
             {
-                var live = Enumerable.Range(0, Hours).Where(slot => _hours[slot] > hour - Hours).ToList();
-                var bins = new long[LatencyHistogram.Bins];
-                live.ForEach(slot => Add(bins, _bins[slot]));
-                var runs = live.Sum(slot => _runs[slot]);
-
-                return new ManagementExtensionStat
+                for (var slot = 0; slot < Hours; slot++)
                 {
-                    Id = id,
-                    Invocations = runs,
-                    Failures = live.Sum(slot => _failures[slot]),
-                    P50 = LatencyHistogram.Percentile(bins, runs, 0.5),
-                    P95 = LatencyHistogram.Percentile(bins, runs, 0.95),
-                };
+                    if (_hours[slot] > hour - Hours)
+                    {
+                        runs += _runs[slot];
+                        failures += _failures[slot];
+                        Add(bins, _bins[slot]);
+                    }
+                }
             }
+
+            return new ManagementExtensionStat
+            {
+                Id = id,
+                Invocations = runs,
+                Failures = failures,
+                P50 = LatencyHistogram.Percentile(bins, runs, 0.5),
+                P95 = LatencyHistogram.Percentile(bins, runs, 0.95),
+            };
         }
 
         private int Slot(long hour)

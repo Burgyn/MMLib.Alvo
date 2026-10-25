@@ -36,7 +36,8 @@ internal static class ExtensionsSetup
         services.TryAddSingleton<ExtensionApplyGuard>();
         services.TryAddSingleton<ExtensionStateGuard>();
         services.TryAddSingleton(TimeProvider.System);
-        services.TryAddSingleton(provider => new ExtensionStats(provider.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton(provider => new ExtensionStats(
+            provider.GetRequiredService<TimeProvider>(), provider.GetRequiredService<ExtensionRegistry>()));
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IHostedService, ExtensionStats>(provider => provider.GetRequiredService<ExtensionStats>()));
 

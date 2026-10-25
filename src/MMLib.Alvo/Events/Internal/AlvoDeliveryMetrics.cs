@@ -13,6 +13,8 @@ internal static class AlvoDeliveryMetrics
     internal const string LagName = "alvo.delivery.lag";
     internal const string OutcomeTag = "alvo.outcome";
     internal const string AbandonedName = "alvo.delivery.abandoned";
+    internal const string FailedOutcome = "failed";
+    internal const string DeadOutcome = "dead";
 
     private static readonly Meter _meter = new(AlvoEventMetrics.MeterName);
 
@@ -51,8 +53,8 @@ internal static class AlvoDeliveryMetrics
     private static string OutcomeName(DeliveryRunOutcome outcome) => outcome switch
     {
         DeliveryRunOutcome.Succeeded => "succeeded",
-        DeliveryRunOutcome.Dead => "dead",
+        DeliveryRunOutcome.Dead => DeadOutcome,
         DeliveryRunOutcome.LeaseLost => "lease-lost",
-        _ => "failed",
+        _ => FailedOutcome,
     };
 }
