@@ -1516,6 +1516,18 @@ namespace MMLib.Alvo.Management
         System.Threading.Tasks.Task SetAiConnectionAsync(MMLib.Alvo.Ai.StoredAiConnection connection, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementPolicyVerdict> SimulatePolicyAsync(string project, MMLib.Alvo.Management.ManagementPolicySimulation simulation, System.Threading.CancellationToken ct = default);
     }
+    public interface IAlvoOperations
+    {
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementDelivery> GetDeliveryAsync(string project, System.Guid delivery, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementExtensionStats> GetExtensionStatsAsync(string project, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.DeliveryFixture> GetFixtureAsync(string project, System.Guid delivery, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementDeliveryPage> ListDeliveriesAsync(string project, MMLib.Alvo.Management.ManagementDeliveryQuery query, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementDelivery> RedeliverAsync(string project, System.Guid delivery, string? reason, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementReplayPlan> ReplayAsync(string project, MMLib.Alvo.Management.ManagementReplayRequest request, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementDelivery> RunScheduleAsync(string project, string schedule, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementExtension> SetEnabledAsync(string project, string extension, bool enabled, string? reason, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementExtension> SetPausedAsync(string project, string subscriber, bool paused, string? reason, System.Threading.CancellationToken ct = default);
+    }
     public interface IManagementIdempotencyStore
     {
         System.Threading.Tasks.Task<int?> FindAsync(string key, string scope, string fingerprint, System.Threading.CancellationToken ct = default);

@@ -56,25 +56,40 @@ public class ManagementOperationsTests
             ManagementOperation.GetExtensions,
             ManagementOperation.GetInfo,
             ManagementOperation.SimulatePolicy,
+            ManagementOperation.ListDeliveries,
+            ManagementOperation.GetDelivery,
+            ManagementOperation.GetExtensionStats,
         ]);
 
     /// <summary>
     /// <b>Applying a descriptor is one operation whether or not <c>?dryRun=true</c> is set</b>, and that
     /// is deliberate: a dry run returns the migration plan and the guardrail verdict for a descriptor
     /// the caller supplied, which is the same disclosure the real apply makes. A separate, cheaper level
-    /// for it would let a viewer read a plan over a descriptor they may not write.
+    /// for it would let a viewer read a plan over a descriptor they may not write. Every change to how host
+    /// code runs — a redeliver, a replay, a pause, running a schedule — is a developer's too, and so is the
+    /// fixture: it discloses a payload's shape, which a viewer's delivery list deliberately does not.
     /// </summary>
     [Fact]
     public void A_developer_may_write_configuration_and_check_what_writing_it_would_say()
         => OperationsRequiring(ManagementLevel.Developer).ShouldBe(
-            [ManagementOperation.CheckExpression, ManagementOperation.ApplyDescriptor, ManagementOperation.RollbackRevision]);
+        [
+            ManagementOperation.CheckExpression,
+            ManagementOperation.ApplyDescriptor,
+            ManagementOperation.RollbackRevision,
+            ManagementOperation.RedeliverDelivery,
+            ManagementOperation.ReplayDeliveries,
+            ManagementOperation.GetDeliveryFixture,
+            ManagementOperation.PauseSubscriber,
+            ManagementOperation.RunSchedule,
+        ]);
 
     /// <summary>
     /// "Settings" is named rather than left to reading: it is the set <c>developer</c> is excluded from
     /// — the AI connection, API keys, user and role administration, and the danger zone. A developer edits
     /// <em>what the backend is</em>; an admin also decides <em>who may reach it</em>. The AI connection is
     /// in that second set because it is a credential: repointing the endpoint sends the descriptor, the
-    /// schema and every operator's prompts wherever it now points.
+    /// schema and every operator's prompts wherever it now points. Switching an extension off is in it too:
+    /// it removes host code the project's integrity may rest on.
     /// </summary>
     [Fact]
     public void Only_an_admin_may_reach_settings()
@@ -84,15 +99,17 @@ public class ManagementOperationsTests
             ManagementOperation.ManageUsers,
             ManagementOperation.SetAiConnection,
             ManagementOperation.DeleteProject,
+            ManagementOperation.SetExtensionEnabled,
         ]);
 
     /// <summary>
-    /// The surface is seventeen operations. A count rather than a comment, so adding an eighteenth fails
-    /// here until somebody decides its level — which is the decision this table exists to force.
+    /// The surface is twenty-six operations: seventeen over the descriptor and its settings, nine over the
+    /// deliveries of host code. A count rather than a comment, so adding a twenty-seventh fails here until
+    /// somebody decides its level — which is the decision this table exists to force.
     /// </summary>
     [Fact]
-    public void The_management_surface_is_seventeen_operations()
-        => Enum.GetValues<ManagementOperation>().Length.ShouldBe(17);
+    public void The_management_surface_is_twenty_six_operations()
+        => Enum.GetValues<ManagementOperation>().Length.ShouldBe(26);
 
     [Fact]
     public void The_levels_are_ordered_so_the_highest_match_is_the_greatest_value()
