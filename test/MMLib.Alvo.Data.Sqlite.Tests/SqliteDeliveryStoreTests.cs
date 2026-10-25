@@ -59,6 +59,8 @@ public sealed class SqliteDeliveryStoreTests : DeliveryStoreContractTests, IDisp
         var plan = await world.ExplainClaimAsync("EXPLAIN QUERY PLAN");
 
         plan.ShouldContain("SEARCH earlier USING INDEX ix_alvo_deliveries_lane_open (subscriber=? AND partition_key=? AND event_id<?)");
+        plan.ShouldContain("SEARCH paused");
+        plan.ShouldNotContain("SCAN paused");
     }
 
     /// <summary>
@@ -122,6 +124,23 @@ public sealed class SqliteDeliveryStoreTests : DeliveryStoreContractTests, IDisp
 
         (await world.OperationsAsync()).ShouldBeEmpty();
         (await world.Store.ControlsAsync(Ct)).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A pause whose log row is refused — its id already recorded — throws and pauses nothing: the claim never stops reading
+    /// a subscriber on a change the operations log does not hold.
+    /// </summary>
+    [Fact]
+    public async Task A_pause_whose_log_row_is_refused_changes_nothing()
+    {
+        await using var world = await DeliveryStoreWorld.StartAsync(Connect, new SqliteSqlDialect());
+        var entry = new DeliveryOperationEntry { Id = Guid.NewGuid(), At = DateTimeOffset.UnixEpoch, Actor = "ops", Operation = "replay", Target = Subscriber };
+        await world.Store.ReplayAsync(new DeliveryFilter { Subscriber = Subscriber, Limit = 20 }, entry, Ct);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => world.Store.SetPausedAsync(Subscriber, paused: true, entry with { Operation = "pause" }, Ct));
+
+        (await world.Store.ControlsAsync(Ct)).ShouldBeEmpty();
+        (await world.OperationsAsync()).ShouldHaveSingleItem().Operation.ShouldBe("replay");
     }
 
     private static Task Operate(IDeliveryStore store, string operation, DeliveryOperationEntry entry) => operation switch

@@ -57,6 +57,23 @@ public sealed class FakeDeliveryStoreTests : DeliveryStoreContractTests
         store.Operations.ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// A pause whose log row is refused — its id already recorded — throws and pauses nothing, as the EF store refuses it in
+    /// the transaction that would have written the control.
+    /// </summary>
+    [Fact]
+    public async Task A_pause_whose_log_row_is_refused_changes_nothing()
+    {
+        var store = new FakeDeliveryStore(new ManualClock(new DateTimeOffset(2026, 10, 23, 9, 0, 0, TimeSpan.Zero)));
+        var entry = new DeliveryOperationEntry { Id = Guid.NewGuid(), At = DateTimeOffset.UnixEpoch, Actor = "ops", Operation = "replay", Target = "send-confirmation" };
+        await store.ReplayAsync(new DeliveryFilter { Subscriber = "send-confirmation", Limit = 20 }, entry, TestContext.Current.CancellationToken);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => store.SetPausedAsync("send-confirmation", paused: true, entry with { Operation = "pause" }, TestContext.Current.CancellationToken));
+
+        (await store.ControlsAsync(TestContext.Current.CancellationToken)).ShouldBeEmpty();
+        store.Operations.ShouldHaveSingleItem().Operation.ShouldBe("replay");
+    }
+
     private static Task Operate(FakeDeliveryStore store, string operation, DeliveryOperationEntry entry) => operation switch
     {
         "redeliver" => store.RedeliverAsync(Guid.NewGuid(), entry, TestContext.Current.CancellationToken),
