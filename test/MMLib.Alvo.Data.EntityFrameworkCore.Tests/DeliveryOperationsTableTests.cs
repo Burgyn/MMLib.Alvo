@@ -103,4 +103,18 @@ public sealed class DeliveryOperationsTableTests
         DeliveryOperationsTable.Conditions(filter, keyset: true).ShouldBe(Terms + " AND id < @after");
         DeliveryOperationsTable.Conditions(filter, keyset: false).ShouldBe(Terms);
     }
+
+    [Fact]
+    public void A_redeliver_resets_only_a_finished_row_whose_lane_runs_nothing()
+    {
+        var sql = DeliveryOperationsTable.RedeliverSql("alvo_deliveries");
+
+        sql.ShouldContain("status IN ('succeeded', 'dead', 'cancelled')");
+        sql.ShouldContain("attempts = 0");
+        sql.ShouldContain("NOT EXISTS (SELECT 1 FROM alvo_deliveries lane");
+    }
+
+    [Fact]
+    public void A_log_row_under_a_spent_key_is_skipped_not_failed() =>
+        DeliveryOperationsTable.InsertLogSql(Log).ShouldEndWith("ON CONFLICT DO NOTHING");
 }

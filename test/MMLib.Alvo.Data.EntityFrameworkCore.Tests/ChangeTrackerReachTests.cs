@@ -136,8 +136,9 @@ public class ChangeTrackerReachTests
     /// <c>SecretsTable</c> and <c>EfCoreSecretStore</c> read and write only the framework's secrets table,
     /// binding the secret's name — a value already validated against <c>SecretName</c>'s grammar — and never
     /// an entity table, so there is no row a policy predicate could be missing from;
-    /// <c>DeliveryTable</c> and <c>EfCoreDeliveryStore</c> read and write only the delivery tables and read the outbox,
-    /// binding every value, and never an entity table;
+    /// <c>DeliveryTable</c> and <c>EfCoreDeliveryStore</c> read and write only the delivery tables and the operations log
+    /// and read the outbox, binding every value, and never an entity table — the store's operator half
+    /// (<c>EfCoreDeliveryStore.Operations.cs</c>) builds no command of its own and goes through the main file's;
     /// <c>RelationalReachability</c> executes one <c>const</c> of its own (<c>SELECT 1</c>) that names no
     /// table, carries no <c>WHERE</c> and binds no parameter, so there is nothing in it a caller could
     /// influence and nothing for a policy predicate to be missing from; and

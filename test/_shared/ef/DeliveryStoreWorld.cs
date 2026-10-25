@@ -85,6 +85,19 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
         }
     }
 
+    public async Task<IReadOnlyList<DeliveryOperationEntry>> OperationsAsync()
+    {
+        var connection = _connect();
+        await using (connection.ConfigureAwait(false))
+        {
+            await connection.OpenAsync(Ct);
+
+            return await RelationalSqlBatch.ReadRowsAsync(
+                connection, transaction: null, DeliveryOperationsTable.AllOperationsSql(DeliveryOperationsTable.LogNameFor(SchemaPrefix)),
+                _ => { }, EfCoreDeliveryStore.ReadEntry, Ct);
+        }
+    }
+
     /// <summary>Puts a delivery back to pending with its claim count at zero, as an operator's redeliver does.</summary>
     internal async Task ResetAsync(Guid delivery)
     {

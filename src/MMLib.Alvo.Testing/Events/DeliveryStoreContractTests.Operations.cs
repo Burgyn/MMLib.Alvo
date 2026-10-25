@@ -238,4 +238,145 @@ public abstract partial class DeliveryStoreContractTests
     /// <summary>A claim of unordered subscribers: their deliveries run whatever came before them in the lane.</summary>
     private static DeliveryClaim Unordered(params string[] subscribers) =>
         Claim() with { Ordered = [], Unordered = subscribers };
+
+    private static readonly DateTimeOffset _operatedAt = new(2026, 10, 24, 9, 0, 0, TimeSpan.Zero);
+    private const string Operator = "ops-key:00000000-0000-0000-0000-000000000001";
+
+    /// <summary>Redelivering a dead delivery makes it the claimable head of its lane again, and the lane drains after it.</summary>
+    [Fact]
+    public async Task Redelivering_a_dead_delivery_makes_it_the_head_of_its_lane_again()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var dead = await world.AppendEventAsync(KeyA);
+        var later = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(dead, Confirm, KeyA) with { DeadReason = "when-failed" }], Ct);
+        await world.Store.FanOutAsync([Request(later, Confirm, KeyA)], Ct);
+        (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldBeEmpty("the dead head blocks its lane");
+        var id = (await world.Store.ListAsync(new DeliveryFilter { Status = "dead", Limit = 1 }, Ct)).ShouldHaveSingleItem().Id;
+
+        (await world.Store.RedeliverAsync(id, Entry("redeliver", id.ToString()), Ct)).ShouldBeTrue();
+        var head = (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldHaveSingleItem();
+        await world.Store.CompleteAsync(Attempt(head), Ct);
+
+        head.EventId.ShouldBe(dead);
+        (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldHaveSingleItem().EventId.ShouldBe(later);
+    }
+
+    /// <summary>
+    /// A delivery that died at its last attempt runs again with a fresh attempt budget, and its history keeps the earlier
+    /// attempts, numbered on.
+    /// </summary>
+    [Fact]
+    public async Task A_redelivered_delivery_runs_again_with_a_fresh_budget_and_keeps_its_history()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var @event = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(@event, Confirm, KeyA)], Ct);
+        var first = (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldHaveSingleItem();
+        await world.Store.FailAsync(Attempt(first), Failure("System.InvalidOperationException", retryAfter: null), Ct);
+
+        await world.Store.RedeliverAsync(first.Id, Entry("redeliver", first.Id.ToString()), Ct);
+        var again = (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldHaveSingleItem();
+        (await world.Store.CompleteAsync(Attempt(again), Ct)).ShouldBeTrue();
+
+        again.Attempts.ShouldBe(1);
+        (await world.Store.AttemptsAsync(first.Id, Ct)).Select(attempt => (attempt.Attempt, attempt.Outcome)).ShouldBe([(1, "dead"), (2, "succeeded")]);
+        (await world.Store.FindAsync(first.Id, Ct)).ShouldNotBeNull().LastErrorType.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// A claim's late answer never lands on a later claim of the same delivery: the attempt count restarts with a redeliver,
+    /// so only the claimant — unique to each claim — tells the two apart.
+    /// </summary>
+    [Fact]
+    public async Task A_late_answer_from_before_a_redeliver_changes_nothing()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var @event = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(@event, Confirm, KeyA)], Ct);
+        var stale = (await world.Store.ClaimAsync(Claim(Confirm) with { Claimant = "claim-1" }, Ct)).ShouldHaveSingleItem();
+        await world.Store.DeadLetterPendingAsync(Confirm, "retired", Ct);
+        await world.Store.RedeliverAsync(stale.Id, Entry("redeliver", stale.Id.ToString()), Ct);
+        var fresh = (await world.Store.ClaimAsync(Claim(Confirm) with { Claimant = "claim-2" }, Ct)).ShouldHaveSingleItem();
+
+        var answered = await world.Store.CompleteAsync(
+            new DeliveryAttempt { Delivery = stale, Claimant = "claim-1", StartedAt = _operatedAt, Duration = TimeSpan.FromSeconds(1) }, Ct);
+
+        answered.ShouldBeFalse("the first claim's answer must not finish the second claim's run");
+        fresh.Attempts.ShouldBe(stale.Attempts, "the attempt count alone cannot tell the two claims apart");
+        (await world.Store.FindAsync(stale.Id, Ct)).ShouldNotBeNull().Status.ShouldBe("running");
+    }
+
+    /// <summary>A delivery still pending, running or retrying is not redelivered, and nothing is logged.</summary>
+    [Fact]
+    public async Task Redelivering_an_unfinished_delivery_changes_nothing_and_logs_nothing()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var @event = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(@event, Confirm, KeyA)], Ct);
+        var pending = (await world.Store.ListAsync(new DeliveryFilter { Limit = 1 }, Ct)).ShouldHaveSingleItem();
+        (await world.Store.RedeliverAsync(pending.Id, Entry("redeliver", pending.Id.ToString()), Ct)).ShouldBeFalse();
+        var running = (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldHaveSingleItem();
+
+        (await world.Store.RedeliverAsync(running.Id, Entry("redeliver", running.Id.ToString()), Ct)).ShouldBeFalse();
+        (await world.Store.RedeliverAsync(Guid.NewGuid(), Entry("redeliver", "unknown"), Ct)).ShouldBeFalse();
+
+        running.Attempts.ShouldBe(1, "the pending redeliver did not reset a claim count it never had");
+        (await world.Store.FindAsync(running.Id, Ct)).ShouldNotBeNull().Status.ShouldBe("running");
+        (await world.OperationsAsync()).ShouldBeEmpty();
+    }
+
+    /// <summary>A finished delivery whose record has a delivery of the same handler running is not redelivered: two would run at once.</summary>
+    [Fact]
+    public async Task Redelivering_while_its_record_runs_another_delivery_changes_nothing()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var failed = await world.AppendEventAsync(KeyA);
+        var running = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(failed, Confirm, KeyA) with { DeadReason = "when-failed" }], Ct);
+        await world.Store.FanOutAsync([Request(running, Confirm, KeyA)], Ct);
+        await world.Store.ClaimAsync(Unordered(Confirm), Ct);
+        var dead = (await world.Store.ListAsync(new DeliveryFilter { Status = "dead", Limit = 1 }, Ct)).ShouldHaveSingleItem();
+
+        (await world.Store.RedeliverAsync(dead.Id, Entry("redeliver", dead.Id.ToString()), Ct)).ShouldBeFalse();
+
+        (await world.Store.FindAsync(dead.Id, Ct)).ShouldNotBeNull().Status.ShouldBe("dead");
+        (await world.OperationsAsync()).ShouldBeEmpty();
+    }
+
+    /// <summary>A redeliver that changed the delivery writes exactly one log row, with who, what and why.</summary>
+    [Fact]
+    public async Task A_redeliver_writes_one_log_row()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var @event = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(@event, Confirm, KeyA) with { DeadReason = "when-failed" }], Ct);
+        var id = (await world.Store.ListAsync(new DeliveryFilter { Limit = 1 }, Ct)).ShouldHaveSingleItem().Id;
+        var entry = Entry("redeliver", id.ToString());
+
+        await world.Store.RedeliverAsync(id, entry, Ct);
+
+        var row = (await world.OperationsAsync()).ShouldHaveSingleItem();
+        (row.Id, row.At, row.Actor, row.Operation, row.Target, row.Reason, row.Affected)
+            .ShouldBe((entry.Id, entry.At, entry.Actor, "redeliver", id.ToString(), "contract", (int?)1));
+    }
+
+    private static DeliveryOperationEntry Entry(string operation, string target, string? key = null) => new()
+    {
+        Id = AlvoEventId.Create(_operatedAt),
+        At = _operatedAt,
+        Actor = Operator,
+        Operation = operation,
+        Target = target,
+        Reason = "contract",
+        IdempotencyScope = key is null ? null : "global/ops",
+        IdempotencyKey = key,
+        Fingerprint = key is null ? null : "fingerprint",
+    };
 }

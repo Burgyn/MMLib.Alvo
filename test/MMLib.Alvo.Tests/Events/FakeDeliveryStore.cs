@@ -20,6 +20,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     private readonly Dictionary<Guid, (string Key, bool Dispatched, int Attempts, DateTimeOffset? ClaimedAt, bool Held)> _outbox = [];
     private readonly List<(Guid Delivery, int Attempt, string Outcome)> _attempts = [];
     private readonly List<(Guid Delivery, DateTimeOffset StartedAt, TimeSpan Duration, string Outcome, string? ErrorType)> _history = [];
+    private readonly List<DeliveryOperationEntry> _operations = [];
 
     internal int FanOutFailures { get; set; }
 
@@ -44,6 +45,17 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
             lock (_gate)
             {
                 return [.. _attempts];
+            }
+        }
+    }
+
+    internal IReadOnlyList<DeliveryOperationEntry> Operations
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _operations];
             }
         }
     }
@@ -190,6 +202,34 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
                 Sample = [.. matched.Take(filter.Limit).Select(row => row.Id)],
             });
         }
+    }
+
+    public Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        lock (_gate)
+        {
+            if (_rows.SingleOrDefault(row => row.Id == id && _finished.Contains(row.Status) && !LaneBusy(row)) is not { } row)
+            {
+                return Task.FromResult(false);
+            }
+
+            Reset(row);
+            _operations.Add(entry with { Affected = 1 });
+
+            return Task.FromResult(true);
+        }
+    }
+
+    private void Reset(Row row)
+    {
+        row.Status = "pending";
+        row.Attempts = 0;
+        row.NotBefore = time.GetUtcNow();
+        row.LeaseUntil = null;
+        row.ClaimedBy = null;
+        row.CompletedAt = null;
+        row.LastErrorType = null;
     }
 
     private static void EnsureRows(DeliveryFilter filter)

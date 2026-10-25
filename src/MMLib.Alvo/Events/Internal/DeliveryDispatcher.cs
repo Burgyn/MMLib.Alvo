@@ -77,6 +77,7 @@ internal sealed class DeliveryDispatcher(
     TimeProvider time,
     ILogger<DeliveryDispatcher> logger) : BackgroundService
 {
+    /// <summary>The process's prefix of every claimant, so a row's <c>claimed_by</c> still says which process took it.</summary>
     private readonly string _claimant = $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
     private bool _storeReady;
 
@@ -99,14 +100,14 @@ internal sealed class DeliveryDispatcher(
         {
             cancellationToken.ThrowIfCancellationRequested();
             var slots = Math.Min(deliveries.Value.MaxConcurrency, events.Value.BatchSize - claimedInRound);
-            var claimed = await ClaimAsync(bindings, slots, cancellationToken).ConfigureAwait(false);
+            var (claimant, claimed) = await ClaimAsync(bindings, slots, cancellationToken).ConfigureAwait(false);
             if (claimed.Count == 0)
             {
                 break;
             }
 
             claimedInRound += claimed.Count;
-            await Task.WhenAll(claimed.Select(delivery => RunContainedAsync(delivery, bindings, round, cancellationToken))).ConfigureAwait(false);
+            await Task.WhenAll(claimed.Select(delivery => RunContainedAsync(delivery, bindings, round, claimant, cancellationToken))).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
         }
 
@@ -185,8 +186,8 @@ internal sealed class DeliveryDispatcher(
         {
             await EnsureStoreAsync(stop).ConfigureAwait(false);
             var bindings = binder.For(catalogs.Current!);
-            var claimed = await ClaimAsync(bindings, deliveries.Value.MaxConcurrency - running.Count, stop).ConfigureAwait(false);
-            running.AddRange(claimed.Select(delivery => RunContainedAsync(delivery, bindings, round: null, stop)));
+            var (claimant, claimed) = await ClaimAsync(bindings, deliveries.Value.MaxConcurrency - running.Count, stop).ConfigureAwait(false);
+            running.AddRange(claimed.Select(delivery => RunContainedAsync(delivery, bindings, round: null, claimant, stop)));
             if (claimed.Count == 0)
             {
                 await Task.WhenAny([Task.Delay(events.Value.PollInterval, time, stop), .. running]).ConfigureAwait(false);
@@ -241,18 +242,25 @@ internal sealed class DeliveryDispatcher(
         }
     }
 
-    /// <summary>Claims up to <paramref name="batchSize"/> lane heads of the bound handlers that are not stood down.</summary>
-    private async Task<IReadOnlyList<ClaimedDelivery>> ClaimAsync(ExtensionBindings bindings, int batchSize, CancellationToken ct)
+    /// <summary>
+    /// Claims up to <paramref name="batchSize"/> lane heads of the bound handlers that are not stood down, under a claimant
+    /// minted for this one claim — the process prefix and a fresh guid — which every answer for what it took carries: a
+    /// redeliver restarts a delivery's attempt count, so only the claimant tells a stale claim's answer from the current one.
+    /// </summary>
+    private async Task<(string Claimant, IReadOnlyList<ClaimedDelivery> Claimed)> ClaimAsync(
+        ExtensionBindings bindings, int batchSize, CancellationToken ct)
     {
         var claimable = bindings.Handlers.Where(handler => !abandoned.StoodDown(handler.Id)).ToList();
+        var claimant = $"{_claimant}:{Guid.NewGuid():N}";
+
         return batchSize <= 0 || claimable.Count == 0
-            ? []
-            : await store.ClaimAsync(ClaimOf(bindings, claimable, batchSize), ct).ConfigureAwait(false);
+            ? (claimant, [])
+            : (claimant, await store.ClaimAsync(ClaimOf(bindings, claimable, batchSize, claimant), ct).ConfigureAwait(false));
     }
 
-    private DeliveryClaim ClaimOf(ExtensionBindings bindings, List<BoundHandler> claimable, int batchSize) => new()
+    private DeliveryClaim ClaimOf(ExtensionBindings bindings, List<BoundHandler> claimable, int batchSize, string claimant) => new()
     {
-        Claimant = _claimant,
+        Claimant = claimant,
         Ordered = [.. claimable.Where(handler => handler.Settings.Ordering is AlvoOrdering.PerRecord).Select(handler => handler.Id)],
         Unordered = [.. claimable.Where(handler => handler.Settings.Ordering is AlvoOrdering.None).Select(handler => handler.Id)],
         BatchSize = batchSize,
@@ -262,7 +270,8 @@ internal sealed class DeliveryDispatcher(
     };
 
     /// <summary>Runs one delivery, containing whatever the runner throws so neither its round nor the loop is affected.</summary>
-    private async Task RunContainedAsync(ClaimedDelivery delivery, ExtensionBindings bindings, DrainRound? round, CancellationToken stop)
+    private async Task RunContainedAsync(
+        ClaimedDelivery delivery, ExtensionBindings bindings, DrainRound? round, string claimant, CancellationToken stop)
     {
         if (bindings.Handler(delivery.Subscriber) is not { } handler)
         {
@@ -272,7 +281,7 @@ internal sealed class DeliveryDispatcher(
         round?.Ran(delivery.Subscriber);
         try
         {
-            var outcome = await runner.RunAsync(delivery, handler, _claimant, stop).ConfigureAwait(false);
+            var outcome = await runner.RunAsync(delivery, handler, claimant, stop).ConfigureAwait(false);
             if (outcome is DeliveryRunOutcome.Failed or DeliveryRunOutcome.Dead)
             {
                 round?.Failed();

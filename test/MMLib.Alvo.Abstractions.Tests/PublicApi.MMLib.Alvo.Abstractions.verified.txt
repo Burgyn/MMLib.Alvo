@@ -1148,6 +1148,21 @@ namespace MMLib.Alvo.Events
         public string? Subscriber { get; init; }
         public System.Guid? ToEventId { get; init; }
     }
+    public sealed class DeliveryOperationEntry : System.IEquatable<MMLib.Alvo.Events.DeliveryOperationEntry>
+    {
+        public DeliveryOperationEntry() { }
+        public required string Actor { get; init; }
+        public int? Affected { get; init; }
+        public required System.DateTimeOffset At { get; init; }
+        public string? Fingerprint { get; init; }
+        public required System.Guid Id { get; init; }
+        public string? IdempotencyKey { get; init; }
+        public string? IdempotencyScope { get; init; }
+        public required string Operation { get; init; }
+        public string? Reason { get; init; }
+        public System.Collections.Generic.IReadOnlyList<System.Guid> Sample { get; init; }
+        public required string Target { get; init; }
+    }
     public sealed class DeliveryRequest : System.IEquatable<MMLib.Alvo.Events.DeliveryRequest>
     {
         public const string UnboundReason = "unbound";
@@ -1183,6 +1198,7 @@ namespace MMLib.Alvo.Events
         System.Threading.Tasks.Task<MMLib.Alvo.Events.StoredDelivery?> FindAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.StoredDelivery>> ListAsync(MMLib.Alvo.Events.DeliveryFilter filter, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> PendingSubscribersAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<bool> RedeliverAsync(System.Guid id, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliverySelection> SelectAsync(MMLib.Alvo.Events.DeliveryFilter filter, System.Threading.CancellationToken cancellationToken = default);
     }
     public interface IEmailSender

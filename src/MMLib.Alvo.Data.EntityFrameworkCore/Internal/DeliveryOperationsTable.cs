@@ -109,6 +109,31 @@ internal static class DeliveryOperationsTable
     internal static string SelectSql(string table, DeliveryFilter filter) =>
         $"SELECT id, COUNT(*) OVER (), SUM(CASE WHEN {LaneRunning(table)} THEN 1 ELSE 0 END) OVER () FROM {table}{Where(filter, keyset: false)} ORDER BY event_id, id LIMIT @limit";
 
+    internal const string LogColumns =
+        "id, at, actor, operation, target, reason, affected, sample, idempotency_scope, idempotency_key, request_fingerprint";
+
+    internal const string Finished = "status IN ('succeeded', 'dead', 'cancelled')";
+
+    internal const string Reset =
+        "status = 'pending', attempts = 0, not_before = @now, lease_until = NULL, claimed_by = NULL, completed_at = NULL, last_error_type = NULL";
+
+    /// <summary>
+    /// Puts one finished delivery whose lane runs nothing back to pending. An <c>UPDATE</c> of the delivery row, never a
+    /// write to the attempts table: on PostgreSQL the row lock it takes is what orders it against a fenced answer, and the
+    /// history keeps numbering after the reset (<see cref="DeliveryTable.AttemptSql"/>).
+    /// </summary>
+    internal static string RedeliverSql(string table) =>
+        $"UPDATE {table} SET {Reset} WHERE id = @id AND {Finished} AND NOT {LaneRunning(table)}";
+
+    internal static string InsertLogSql(string log) =>
+        $"""
+        INSERT INTO {log} ({LogColumns})
+        VALUES (@log_id, @log_at, @log_actor, @log_operation, @log_target, @log_reason, @log_affected, @log_sample, @log_scope, @log_key, @log_fingerprint)
+        ON CONFLICT DO NOTHING
+        """;
+
+    internal static string AllOperationsSql(string log) => $"SELECT {LogColumns} FROM {log} ORDER BY at, id";
+
     internal static string Conditions(DeliveryFilter filter, bool keyset)
     {
         var terms = new List<string>();

@@ -307,6 +307,43 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
         }
     }
 
+    /// <summary>
+    /// One transaction behind the database's write gate. <paramref name="work"/> opens it with a write, never a read
+    /// (the port's remarks): SQLite then holds the write lock from the first statement instead of upgrading a read lock.
+    /// </summary>
+    private async Task<T> InTransactionAsync<T>(Func<DbConnection, DbTransaction, Task<T>> work, CancellationToken ct)
+    {
+        var connection = _connections.Create();
+        await using (connection.ConfigureAwait(false))
+        {
+            await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
+            using (await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false))
+            {
+                var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+                await using (transaction.ConfigureAwait(false))
+                {
+                    var result = await work(connection, transaction).ConfigureAwait(false);
+                    await transaction.CommitAsync(ct).ConfigureAwait(false);
+
+                    return result;
+                }
+            }
+        }
+    }
+
+    private static async Task<int> ExecuteInAsync(DbConnection connection, DbTransaction transaction, string sql, Action<DbCommand> bind, CancellationToken ct)
+    {
+        var command = connection.CreateCommand();
+        await using (command.ConfigureAwait(false))
+        {
+            command.Transaction = transaction;
+            command.CommandText = sql;
+            bind(command);
+
+            return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+    }
+
     private async Task<int> ExecuteAsync(string sql, Action<DbCommand> bind, CancellationToken ct)
     {
         var connection = _connections.Create();

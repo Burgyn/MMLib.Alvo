@@ -38,7 +38,10 @@ public sealed record DeliveryRequest
 /// <summary>What one claim asks for: whose deliveries, how many, and for how long.</summary>
 public sealed record DeliveryClaim
 {
-    /// <summary>Gets who claims; recorded on each row and checked again when the attempt is answered for.</summary>
+    /// <summary>
+    /// Gets who claims — unique to this one claim, never reused: each row records it, and an attempt is answered for only by
+    /// the claim that took it.
+    /// </summary>
     public required string Claimant { get; init; }
 
     /// <summary>
@@ -152,7 +155,9 @@ public sealed record DeliveryFailure
 /// <b>Fencing.</b> <see cref="CompleteAsync"/> and <see cref="FailAsync"/> change the row only while it is still running
 /// under the same claimant and the same attempt count, and answer whether they did — <see langword="false"/>, never an
 /// exception, when the claim no longer holds. A late finisher whose lease was reclaimed, a second answer for one attempt,
-/// and an answer for a delivery retired while it ran all change nothing.
+/// and an answer for a delivery retired while it ran all change nothing. A claimant names one claim, not a process: a
+/// delivery put back to pending restarts its attempt count, so the claimant is what tells a stale claim's answer from the
+/// current one.
 /// </para>
 /// <para>
 /// <b>The operator's members</b> read deliveries, put finished ones back to pending, pause a subscriber and record each of
@@ -254,4 +259,16 @@ public interface IDeliveryStore
     /// <returns>The count, the sample and the busy count.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><see cref="DeliveryFilter.Limit"/> is zero or less, or more than 1 000.</exception>
     Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Puts a finished delivery — succeeded, dead or cancelled — back to pending, due now, with its claim count at zero and
+    /// its last error cleared, and records <paramref name="entry"/> in the same transaction; its attempt history is kept.
+    /// Refused — <see langword="false"/> — while a delivery of the same subscriber and partition key is running, since the
+    /// reset one would run beside it.
+    /// </summary>
+    /// <param name="id">The delivery id.</param>
+    /// <param name="entry">The log row to write when the delivery changed.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>Whether it changed; <see langword="false"/> for an unfinished, busy or unknown delivery, which records nothing.</returns>
+    Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default);
 }

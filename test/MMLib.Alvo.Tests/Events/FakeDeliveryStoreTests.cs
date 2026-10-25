@@ -56,6 +56,8 @@ public sealed class FakeDeliveryStoreTests : DeliveryStoreContractTests
 
         public IDeliveryStore Store => _store;
 
+        public Task<IReadOnlyList<DeliveryOperationEntry>> OperationsAsync() => Task.FromResult(_store.Operations);
+
         public void Advance(TimeSpan duration) => _clock.Advance(duration);
 
         public Task<Guid> AppendEventAsync(string partitionKey) => AppendAsync(partitionKey, dispatched: true, attempts: 0, claimed: false);

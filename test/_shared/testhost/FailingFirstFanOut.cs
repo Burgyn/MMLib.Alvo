@@ -50,4 +50,7 @@ internal sealed class FailingFirstFanOut(IDeliveryStore inner) : IDeliveryStore
 
     public Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default) =>
         inner.SelectAsync(filter, cancellationToken);
+
+    public Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+        inner.RedeliverAsync(id, entry, cancellationToken);
 }

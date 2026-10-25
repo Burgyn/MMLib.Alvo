@@ -426,6 +426,25 @@ public sealed class DeliveryDispatcherTests : IDisposable
         _logs.Entries.ShouldContain(entry => entry.EventName == "DeliveryDispatcherStoodDownUnprimed" && entry.Level == LogLevel.Warning);
     }
 
+    /// <summary>Every claim carries a claimant of its own, so an answer is fenced on the one claim that took the delivery.</summary>
+    [Fact]
+    public async Task Every_claim_carries_a_claimant_of_its_own()
+    {
+        var port = Substitute.For<IDeliveryStore>();
+        port.ClaimAsync(Arg.Any<DeliveryClaim>(), Arg.Any<CancellationToken>()).Returns((IReadOnlyList<ClaimedDelivery>)[]);
+        var dispatcher = Dispatcher(new FakeDeliveryStore(_clock), (AlvoCreated<AlvoRecord> _) => Task.CompletedTask, port: port);
+
+        await dispatcher.ManualRoundAsync(Ct);
+        await dispatcher.ManualRoundAsync(Ct);
+
+        var claimants = port.ReceivedCalls()
+            .Where(call => call.GetMethodInfo().Name == nameof(IDeliveryStore.ClaimAsync))
+            .Select(call => ((DeliveryClaim)call.GetArguments()[0]!).Claimant)
+            .ToList();
+        claimants.Count.ShouldBe(2);
+        claimants.ShouldBeUnique();
+    }
+
     private DeliveryDispatcher Dispatcher(
         FakeDeliveryStore store,
         Delegate handle,
@@ -626,6 +645,9 @@ public sealed class DeliveryDispatcherTests : IDisposable
 
         public Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default) =>
             inner.SelectAsync(filter, cancellationToken);
+
+        public Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+            inner.RedeliverAsync(id, entry, cancellationToken);
     }
 
     /// <summary>The in-memory store whose first claims fail the way a database under a deadlock or a restart refuses one.</summary>
@@ -670,5 +692,8 @@ public sealed class DeliveryDispatcherTests : IDisposable
 
         public Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default) =>
             inner.SelectAsync(filter, cancellationToken);
+
+        public Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+            inner.RedeliverAsync(id, entry, cancellationToken);
     }
 }

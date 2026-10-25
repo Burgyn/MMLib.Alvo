@@ -54,6 +54,62 @@ internal sealed partial class EfCoreDeliveryStore
             : new DeliverySelection { Count = rows[0].Total, Busy = rows[0].Busy, Sample = [.. rows.Select(row => row.Id)] };
     }
 
+    public Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+
+        return InTransactionAsync(async (connection, transaction) =>
+        {
+            var reset = await ExecuteInAsync(connection, transaction, DeliveryOperationsTable.RedeliverSql(_table), command =>
+            {
+                BindId(command, id);
+                RelationalSqlBatch.AddParameter(command, "@now", Now);
+            }, cancellationToken).ConfigureAwait(false) == 1;
+
+            return reset && await LogAsync(connection, transaction, entry with { Affected = 1 }, cancellationToken).ConfigureAwait(false) == 1;
+        }, cancellationToken);
+    }
+
+    internal static DeliveryOperationEntry ReadEntry(DbDataReader reader) => new()
+    {
+        Id = Guid.Parse(reader.GetString(0), CultureInfo.InvariantCulture),
+        At = StoredInstant.Of(reader.GetValue(1)),
+        Actor = reader.GetString(2),
+        Operation = reader.GetString(3),
+        Target = reader.GetString(4),
+        Reason = reader.IsDBNull(5) ? null : reader.GetString(5),
+        Affected = reader.IsDBNull(6) ? null : Convert.ToInt32(reader.GetValue(6), CultureInfo.InvariantCulture),
+        Sample = reader.IsDBNull(7) ? [] : [.. reader.GetString(7).Split(',').Select(id => Guid.Parse(id, CultureInfo.InvariantCulture))],
+        IdempotencyScope = reader.IsDBNull(8) ? null : reader.GetString(8),
+        IdempotencyKey = reader.IsDBNull(9) ? null : reader.GetString(9),
+        Fingerprint = reader.IsDBNull(10) ? null : reader.GetString(10),
+    };
+
+    private Task<int> LogAsync(DbConnection connection, DbTransaction transaction, DeliveryOperationEntry entry, CancellationToken ct) =>
+        ExecuteInAsync(connection, transaction, DeliveryOperationsTable.InsertLogSql(_log), command => BindEntry(command, entry), ct);
+
+    private static void BindEntry(DbCommand command, DeliveryOperationEntry entry)
+    {
+        RelationalSqlBatch.AddParameter(command, "@log_at", StoredInstant.Text(entry.At));
+        RelationalSqlBatch.AddParameter(command, "@log_actor", entry.Actor);
+        RelationalSqlBatch.AddParameter(command, "@log_operation", entry.Operation);
+        RelationalSqlBatch.AddParameter(command, "@log_target", entry.Target);
+        RelationalSqlBatch.AddParameter(command, "@log_reason", Nullable(entry.Reason));
+        RelationalSqlBatch.AddParameter(command, "@log_scope", Nullable(entry.IdempotencyScope));
+        RelationalSqlBatch.AddParameter(command, "@log_key", Nullable(entry.IdempotencyKey));
+        RelationalSqlBatch.AddParameter(command, "@log_fingerprint", Nullable(entry.Fingerprint));
+        BindOutcome(command, entry);
+    }
+
+    private static void BindOutcome(DbCommand command, DeliveryOperationEntry entry)
+    {
+        RelationalSqlBatch.AddParameter(command, "@log_id", entry.Id.ToString());
+        RelationalSqlBatch.AddParameter(command, "@log_affected", (object?)entry.Affected ?? DBNull.Value);
+        RelationalSqlBatch.AddParameter(command, "@log_sample", entry.Sample.Count == 0 ? DBNull.Value : string.Join(',', entry.Sample));
+    }
+
+    private static object Nullable(string? value) => (object?)value ?? DBNull.Value;
+
     private static void EnsureRows(DeliveryFilter filter)
     {
         ArgumentNullException.ThrowIfNull(filter);

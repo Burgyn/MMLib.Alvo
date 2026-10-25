@@ -110,3 +110,40 @@ public sealed record DeliverySelection
     /// </summary>
     public int Busy { get; init; }
 }
+
+/// <summary>One audited delivery operation — a pause, a resume, a redeliver, a replay — as the log records it.</summary>
+public sealed record DeliveryOperationEntry
+{
+    /// <summary>Gets the row's id.</summary>
+    public required Guid Id { get; init; }
+
+    /// <summary>Gets when the operation was made.</summary>
+    public required DateTimeOffset At { get; init; }
+
+    /// <summary>Gets who made it: the credential and the user it acted for.</summary>
+    public required string Actor { get; init; }
+
+    /// <summary>Gets what was done: <c>pause</c>, <c>resume</c>, <c>redeliver</c> or <c>replay</c>.</summary>
+    public required string Operation { get; init; }
+
+    /// <summary>Gets what it was done to: a subscriber id, or a delivery id.</summary>
+    public required string Target { get; init; }
+
+    /// <summary>Gets why, in the operator's words, or <see langword="null"/>.</summary>
+    public string? Reason { get; init; }
+
+    /// <summary>Gets how many deliveries or controls it changed; the store fills it.</summary>
+    public int? Affected { get; init; }
+
+    /// <summary>Gets a replay's first reset ids, in event order; the store fills it.</summary>
+    public IReadOnlyList<Guid> Sample { get; init; } = [];
+
+    /// <summary>Gets the caller's identity a key is scoped to, or <see langword="null"/> when no key was sent.</summary>
+    public string? IdempotencyScope { get; init; }
+
+    /// <summary>Gets the caller's idempotency key, or <see langword="null"/>.</summary>
+    public string? IdempotencyKey { get; init; }
+
+    /// <summary>Gets what makes a retry the same request, or <see langword="null"/>.</summary>
+    public string? Fingerprint { get; init; }
+}
