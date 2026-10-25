@@ -154,19 +154,32 @@ internal sealed class DeliveryRunner(
         }
     }
 
+    /// <summary>
+    /// Runs the handler off the caller's thread, as <see cref="InvokeAsync"/> does, so one that blocks synchronously still
+    /// times out; past its timeout it is cancelled and dropped — its later failure observed, never tracked as abandoned,
+    /// since nothing records this run.
+    /// </summary>
     private async Task RunUnderTimeoutAsync(AlvoEvent @event, ClaimedDelivery delivery, BoundHandler handler, CancellationToken cancellationToken)
     {
         using var cancel = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var invocation = Task.Run(() => RunHandlerAsync(@event, delivery, handler, cancel.Token), CancellationToken.None);
         try
         {
-            await RunHandlerAsync(@event, delivery, handler, cancel.Token).WaitAsync(handler.Settings.Timeout, time, cancellationToken).ConfigureAwait(false);
+            await invocation.WaitAsync(handler.Settings.Timeout, time, cancellationToken).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
             await cancel.CancelAsync().ConfigureAwait(false);
+            Observe(invocation);
             throw;
         }
     }
+
+    private static void Observe(Task dropped) => _ = dropped.ContinueWith(
+        ended => _ = ended.Exception,
+        CancellationToken.None,
+        TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+        TaskScheduler.Default);
 
     /// <summary>The verdict of a handler that has ended — its own result, whatever the runner's deadline did meanwhile.</summary>
     internal static AttemptVerdict Ended(Task invocation) =>

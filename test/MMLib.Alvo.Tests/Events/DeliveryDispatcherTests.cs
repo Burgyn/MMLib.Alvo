@@ -512,6 +512,59 @@ public sealed class DeliveryDispatcherTests : IDisposable
             .Message.ShouldContain("envelope");
     }
 
+    /// <summary>The handler runs off the caller's thread, so one that blocks synchronously still meets its timeout.</summary>
+    [Fact]
+    public async Task A_fixture_whose_handler_blocks_synchronously_times_out()
+    {
+        var handlerTime = new FakeTimeProvider(_clock.GetUtcNow());
+        using var release = new ManualResetEventSlim();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var dispatcher = Dispatcher(
+            new FakeDeliveryStore(_clock),
+            new Func<AlvoCreated<AlvoRecord>, Task>(_ =>
+            {
+                started.TrySetResult();
+                release.Wait(_waitBudget);
+                return Task.CompletedTask;
+            }),
+            options => options.Timeout = TimeSpan.FromSeconds(5),
+            runnerTime: handlerTime);
+
+        var run = dispatcher.DeliverFixtureAsync(Fixture(Handler, attempt: 1).Fixture, Ct);
+        await started.Task.WaitAsync(_waitBudget, Ct);
+        handlerTime.Advance(TimeSpan.FromSeconds(5));
+
+        await Should.ThrowAsync<TimeoutException>(run);
+        release.Set();
+    }
+
+    [Fact]
+    public async Task A_fixture_whose_handler_runs_past_its_timeout_is_cancelled()
+    {
+        var handlerTime = new FakeTimeProvider(_clock.GetUtcNow());
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var dispatcher = Dispatcher(
+            new FakeDeliveryStore(_clock),
+            async (AlvoCreated<AlvoRecord> _, CancellationToken ct) =>
+            {
+                started.TrySetResult();
+                await using (ct.Register(() => cancelled.TrySetResult()))
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                }
+            },
+            options => options.Timeout = TimeSpan.FromSeconds(5),
+            runnerTime: handlerTime);
+
+        var run = dispatcher.DeliverFixtureAsync(Fixture(Handler, attempt: 1).Fixture, Ct);
+        await started.Task.WaitAsync(_waitBudget, Ct);
+        handlerTime.Advance(TimeSpan.FromSeconds(5));
+
+        await Should.ThrowAsync<TimeoutException>(run);
+        await cancelled.Task.WaitAsync(_waitBudget, Ct);
+    }
+
     private (DeliveryFixture Fixture, Guid EventId) Fixture(string subscriber, int attempt)
     {
         var @event = new AlvoEvent

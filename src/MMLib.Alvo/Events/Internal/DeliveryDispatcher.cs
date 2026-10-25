@@ -147,14 +147,14 @@ internal sealed class DeliveryDispatcher(
         if (settings.DispatchMode is not AlvoEventDispatchMode.Manual || !settings.Enabled)
         {
             throw new InvalidOperationException(
-                "A manual delivery round was refused before anything was claimed: the dispatch mode is not manual, or events "
+                "A manual delivery run — a round, or a fixture delivered — was refused before anything ran: the dispatch mode is not manual, or events "
                 + $"are off. Configured: mode '{settings.DispatchMode}', enabled {settings.Enabled}.");
         }
 
         return boot.Phase is AlvoBootPhase.Ready && catalogs.Current is { } catalog
             ? catalog
             : throw new InvalidOperationException(
-                "A manual delivery round was refused before anything was claimed: the boot has not primed a schema, so no "
+                "A manual delivery run — a round, or a fixture delivered — was refused before anything ran: the boot has not primed a schema, so no "
                 + "handler can be bound. Start the host, let its boot finish, and apply a descriptor first.");
     }
 
