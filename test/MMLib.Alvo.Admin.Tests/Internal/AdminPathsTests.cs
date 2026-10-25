@@ -41,6 +41,7 @@ public class AdminPathsTests
         { AdminPaths.Access, typeof(Components.Access.Access) },
         { AdminPaths.History, typeof(Components.History.History) },
         { AdminPaths.Integrations, typeof(Components.Integrations.Integrations) },
+        { AdminPaths.Operations, typeof(Components.Operations.Operations) },
         { AdminPaths.Automations, typeof(Components.Shell.NotYet) },
         { AdminPaths.Functions, typeof(Components.Shell.NotYet) },
         { AdminPaths.Settings, typeof(Components.Settings.Settings) },

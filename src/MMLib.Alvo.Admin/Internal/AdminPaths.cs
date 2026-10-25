@@ -50,6 +50,9 @@ internal static class AdminPaths
     /// <summary>Integrations.</summary>
     public const string Integrations = $"{AlvoAdmin.BasePath}/integrations";
 
+    /// <summary>Deliveries of the host's handlers: history, pause, redeliver, replay, fixtures.</summary>
+    public const string Operations = $"{AlvoAdmin.BasePath}/operations";
+
     /// <summary>Automations, declared and not yet built.</summary>
     public const string Automations = $"{AlvoAdmin.BasePath}/automations";
 

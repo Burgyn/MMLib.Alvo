@@ -42,6 +42,9 @@ internal static class Icons
     /// <summary>A plug.</summary>
     public const string Integrations = """<path d="M7 3v5M13 3v5"/><path d="M4 8h12v2a6 6 0 01-12 0z"/><path d="M10 16v2"/>""";
 
+    /// <summary>Operations: a pulse line.</summary>
+    public const string Operations = """<path d="M2 10h4l2-5 4 10 2-5h4"/>""";
+
     /// <summary>A bolt — something happens, so something else runs.</summary>
     public const string Automations = """<path d="M11 2L4 11h5l-1 7 7-9h-5z"/>""";
 
