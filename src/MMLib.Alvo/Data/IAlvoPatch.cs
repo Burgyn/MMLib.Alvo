@@ -19,7 +19,7 @@ public interface IAlvoPatch<T>
     /// <summary>Sets one mapped property — or, on a wrapper, one <c>Record["field"]</c> — to <paramref name="value"/>.</summary>
     /// <typeparam name="TValue">The property's type.</typeparam>
     /// <param name="field">The property, such as <c>x =&gt; x.Status</c>.</param>
-    /// <param name="value">Its new value; an enum member is written as its declared value.</param>
+    /// <param name="value">Its new value; an enum member is written as its declared value and a whole number as a <see cref="long"/>, on a <c>Record["field"]</c> too.</param>
     /// <returns>This patch, for chaining.</returns>
     /// <exception cref="ArgumentException"><paramref name="field"/> names no mapped field, or a field Alvo manages.</exception>
     [SuppressMessage(

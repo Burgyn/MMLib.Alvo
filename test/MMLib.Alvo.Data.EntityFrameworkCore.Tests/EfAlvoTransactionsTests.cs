@@ -55,6 +55,21 @@ public sealed class EfAlvoTransactionsTests
     }
 
     [Fact]
+    public async Task A_unit_names_the_applied_entity_a_typed_write_reads_its_maintained_fields_from()
+    {
+        await using var world = await StartAsync();
+
+        var named = await world.Transactions.TransactAsync(world.Caller, (unit, _) =>
+        {
+            var schema = unit.ShouldBeAssignableTo<IAlvoSessionSchema>().ShouldNotBeNull();
+            var system = unit.AsSystem().ShouldBeAssignableTo<IAlvoSessionSchema>().ShouldNotBeNull();
+            return Task.FromResult((schema.EntityOf(WritePathFixture.Entity)?.Name, system.EntityOf(WritePathFixture.Entity)?.Name, schema.EntityOf("absent")));
+        }, cancellationToken: Ct);
+
+        named.ShouldBe((WritePathFixture.Entity, WritePathFixture.Entity, null));
+    }
+
+    [Fact]
     public async Task A_read_inside_a_unit_sees_the_unit_s_own_writes()
     {
         await using var world = await StartAsync();

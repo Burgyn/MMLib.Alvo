@@ -219,6 +219,7 @@ public sealed class WriteUnitTests
         {
             deadline = Task.Run(() => clock.Advance(TimeSpan.FromSeconds(2)), Ct);
             SpinWait.SpinUntil(() => unit.TimedOut, TimeSpan.FromSeconds(30)).ShouldBeTrue();
+            deadline.IsCompleted.ShouldBeFalse("the deadline's callback must be parked on the unit's lock, not done");
             commit = unit.CommitAsync();
         }
         finally

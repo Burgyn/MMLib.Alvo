@@ -26,6 +26,9 @@ internal sealed class AlvoDataContextFactory
         _configureProvider = configureProvider;
     }
 
+    /// <summary>The applied schema now, as the next context would be built over.</summary>
+    internal SchemaModel AppliedSchema() => _schemas.GetSchema();
+
     internal AlvoDataContext Create()
     {
         var schema = _schemas.GetSchema();

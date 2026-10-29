@@ -270,6 +270,50 @@ public sealed class RefusingView : IAlvoEntity
     public AlvoRecord Record => AlvoRecord.Empty;
 }
 
+[AlvoEntity("orders")]
+public sealed class OrderWithManaged
+{
+    public Guid? TenantId { get; init; }
+
+    public DateTimeOffset? CreatedAt { get; init; }
+
+    public DateTimeOffset? UpdatedAt { get; init; }
+
+    public DateTimeOffset? DeletedAt { get; init; }
+
+    public required string Note { get; init; }
+}
+
+[AlvoEntity("orders")]
+public sealed class OrderWithTenant
+{
+    public Guid TenantId { get; init; }
+
+    public required string Note { get; init; }
+}
+
+[AlvoEntity("orders")]
+public sealed class OrderWithTotals
+{
+    public required string Note { get; init; }
+
+    public decimal LineTotal { get; init; }
+
+    public string? Label { get; init; }
+}
+
+[AlvoEntity("orders")]
+public sealed class UncoveredOrder
+{
+    public UncoveredOrder(string note) => Note = note;
+
+    [AlvoField("note")]
+    public string Note { get; }
+
+    [AlvoField("code")]
+    public string? Code { get; }
+}
+
 /// <summary>Host types, the <c>orders</c> entity they map, and records shaped as event images carry them.</summary>
 public static class TypedFixtures
 {
@@ -296,6 +340,17 @@ public static class TypedFixtures
             new FieldSchema { Name = "ship_on", Type = FieldType.Date, Nullable = true },
             new FieldSchema { Name = "ref_no", Type = FieldType.String, Nullable = true },
             new FieldSchema { Name = "legacy_code", Type = FieldType.String, Nullable = true },
+        ],
+    };
+
+    /// <summary><see cref="OrdersSchema"/> with a <c>rollup</c> field, <c>line_total</c>, and a <c>computed</c> one, <c>label</c>.</summary>
+    public static EntitySchema OrdersWithTotalsSchema { get; } = OrdersSchema with
+    {
+        Fields =
+        [
+            .. OrdersSchema.Fields,
+            new FieldSchema { Name = "line_total", Type = FieldType.Decimal, Precision = 18, Scale = 2, Rollup = new RollupSchema { From = "order_lines", Op = RollupOperation.Sum, Field = "amount", Via = "order_id" } },
+            new FieldSchema { Name = "label", Type = FieldType.String, Nullable = true, ComputedExpression = "note + '!'" },
         ],
     };
 

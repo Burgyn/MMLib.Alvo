@@ -1,13 +1,18 @@
-﻿namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+﻿using MMLib.Alvo.Schema;
+
+namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
 /// <summary>One unit's <see cref="IAlvoTransaction"/>: every call goes through the unit as <see cref="Context"/>.</summary>
 /// <param name="port">The data port the calls run through.</param>
 /// <param name="unit">The unit they run in.</param>
 /// <param name="context">The caller they run as.</param>
-internal sealed class EfAlvoTransaction(EfAlvoData port, WriteUnit unit, AlvoContext context) : IAlvoTransaction
+internal sealed class EfAlvoTransaction(EfAlvoData port, WriteUnit unit, AlvoContext context) : IAlvoTransaction, IAlvoSessionSchema
 {
     /// <inheritdoc/>
     public AlvoContext Context => context;
+
+    /// <inheritdoc/>
+    public EntitySchema? EntityOf(string entity) => port.AppliedEntity(entity);
 
     /// <inheritdoc/>
     public Task<AlvoPage> QueryAsync(AlvoQuery query, CancellationToken cancellationToken = default) =>

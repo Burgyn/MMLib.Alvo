@@ -2097,7 +2097,13 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// dynamic driver is a different <see cref="IAlvoSqlDialect"/>, registered later, not a branch in this
     /// class.
     /// </summary>
-    private static EntitySchema? Entity(AlvoDataContext db, string entity) => db.AppliedSchema.Entities
+    private static EntitySchema? Entity(AlvoDataContext db, string entity) => Entity(db.AppliedSchema, entity);
+
+    /// <summary>The applied schema's entity named <paramref name="entity"/> as a write resolves it now — for a typed write (Ruling 52).</summary>
+    /// <param name="entity">The entity name.</param>
+    internal EntitySchema? AppliedEntity(string entity) => Entity(_contexts.AppliedSchema(), entity);
+
+    private static EntitySchema? Entity(SchemaModel schema, string entity) => schema.Entities
         .FirstOrDefault(candidate =>
             string.Equals(candidate.Name, entity, StringComparison.Ordinal)
             && candidate.Storage == EntityStorage.Physical);
