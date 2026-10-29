@@ -35,10 +35,21 @@ internal sealed record WriteUnitParts(
 /// <see cref="CommitAsync"/> rolls back and throws that failure — so a delegate that catches it still cannot commit.
 /// </para>
 /// <para>
+/// <b>The commit decision is atomic (Ruling 46).</b> <see cref="CommitAsync"/> takes the gate and reads the failure under
+/// one lock: from then on no call is admitted and a later <see cref="Poison"/> is ignored, so a decided commit commits. A
+/// call still running at that moment — one the delegate started and did not await — fails the unit: it is cancelled,
+/// awaited, and the unit rolls back and throws an <see cref="InvalidOperationException"/> naming it.
+/// </para>
+/// <para>
 /// <b>The deadline ends the unit, not the delegate.</b> At <see cref="AlvoTransactionOptions.Timeout"/> the unit's token is
 /// cancelled and the unit is poisoned with a <see cref="TimeoutException"/>; as soon as no call is running it rolls back
 /// and lets go of the connection and the write turn — a delegate that ignores its token no longer holds the database. The
 /// deadline runs on the host's <see cref="TimeProvider"/>.
+/// </para>
+/// <para>
+/// <b>Every function passed to <see cref="RunAsync{T}"/> honours its token.</b> The deadline's rollback, a commit that
+/// found a call still running and <see cref="DisposeAsync"/> all cancel the unit's calls and then wait for them, so that
+/// bound is what keeps a unit from holding the write turn past its end (HX-09's hook budget must keep it true).
 /// </para>
 /// <para>
 /// <b>Open until released.</b> <see cref="IsOpen"/> stays true from opening until <see cref="DisposeAsync"/> — the end of
@@ -65,6 +76,8 @@ internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
     private readonly Lock _gate = new();
     private Exception? _failure;
     private bool _ended;
+    private bool _ending;
+    private bool _finished;
     private bool _released;
     private int _savepoints;
 
@@ -111,14 +124,17 @@ internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
     /// <summary>Gets a value indicating whether the unit's deadline has passed.</summary>
     internal bool TimedOut => _deadline.IsCancellationRequested;
 
-    /// <summary>Gets a value indicating whether the unit's transaction has committed or rolled back.</summary>
+    /// <summary>
+    /// Gets a value indicating whether the unit's transaction has committed or rolled back, and the unit has let go of its
+    /// connection and write turn.
+    /// </summary>
     internal bool HasEnded
     {
         get
         {
             lock (_gate)
             {
-                return _ended;
+                return _finished;
             }
         }
     }
@@ -167,6 +183,7 @@ internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
         var gate = _frame.Value is { } parent && parent.Unit == this ? parent.Children : _calls;
         if (!gate.Wait(0, CancellationToken.None))
         {
+            EnsureUsable();
             var refusal = Concurrent();
             Poison(refusal);
             throw refusal;
@@ -185,14 +202,22 @@ internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
         }
     }
 
-    /// <summary>Commits the unit — or, when it was poisoned, rolls it back and throws the poison.</summary>
+    /// <summary>
+    /// Commits the unit — or, when it was poisoned or a call is still running, rolls it back and throws why.
+    /// </summary>
     /// <param name="cancellationToken">A token to cancel the commit.</param>
     internal async Task CommitAsync(CancellationToken cancellationToken)
     {
-        await _calls.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var (failure, holdsGate) = Decide();
+        if (!holdsGate)
+        {
+            await _lifetime.CancelAsync().ConfigureAwait(false);
+            await _calls.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+
         try
         {
-            if (FailureOrEnd() is { } failure)
+            if (failure is not null)
             {
                 await EndAsync(commit: false, CancellationToken.None).ConfigureAwait(false);
                 ExceptionDispatchInfo.Throw(failure);
@@ -227,20 +252,16 @@ internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
             _released = true;
         }
 
-        await _onDeadline.DisposeAsync().ConfigureAwait(false);
-        await _calls.WaitAsync().ConfigureAwait(false);
         try
         {
-            await EndAsync(commit: false).ConfigureAwait(false);
+            await _onDeadline.DisposeAsync().ConfigureAwait(false);
+            await _lifetime.CancelAsync().ConfigureAwait(false);
+            await RollBackWhenFreeAsync().ConfigureAwait(false);
         }
         finally
         {
-            _calls.Release();
+            await DisposeScopeAndClocksAsync().ConfigureAwait(false);
         }
-
-        await _parts.Scope.DisposeAsync().ConfigureAwait(false);
-        _lifetime.Dispose();
-        _deadline.Dispose();
     }
 
     private async Task<T> GuardedAsync<T>(Func<CancellationToken, Task<T>> call, CancellationToken token)
@@ -281,11 +302,24 @@ internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
         }
     }
 
-    private Exception? FailureOrEnd()
+    /// <summary>
+    /// The commit decision, under one lock: whether the gate is free, and what the unit fails with — its poison, the end it
+    /// already reached, or a call still running. From here on no call is admitted and no poison is recorded.
+    /// </summary>
+    private (Exception? Failure, bool HoldsGate) Decide()
     {
         lock (_gate)
         {
-            return _failure ?? (_ended ? Ended() : null);
+            var holdsGate = _calls.Wait(0, CancellationToken.None);
+            if (_ended || _released)
+            {
+                return (_failure ?? Ended(), holdsGate);
+            }
+
+            _ended = true;
+            _failure ??= holdsGate ? null : Unawaited();
+
+            return (_failure, holdsGate);
         }
     }
 
@@ -293,11 +327,12 @@ internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
     {
         lock (_gate)
         {
-            if (_ended)
+            if (_ending)
             {
                 return;
             }
 
+            _ending = true;
             _ended = true;
         }
 
@@ -307,9 +342,68 @@ internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
         }
         finally
         {
+            await ReleasePartsAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Lets go of the transaction, the context and then the write turn — each whatever the one before it threw.</summary>
+    private async Task ReleasePartsAsync()
+    {
+        try
+        {
             await _parts.Transaction.DisposeAsync().ConfigureAwait(false);
-            await _parts.Root.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            try
+            {
+                await _parts.Root.DisposeAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                ReleaseTurn();
+            }
+        }
+    }
+
+    private void ReleaseTurn()
+    {
+        try
+        {
             _parts.Turn.Dispose();
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                _finished = true;
+            }
+        }
+    }
+
+    private async Task RollBackWhenFreeAsync()
+    {
+        await _calls.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await EndAsync(commit: false).ConfigureAwait(false);
+        }
+        finally
+        {
+            _calls.Release();
+        }
+    }
+
+    private async Task DisposeScopeAndClocksAsync()
+    {
+        try
+        {
+            await _parts.Scope.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _lifetime.Dispose();
+            _deadline.Dispose();
         }
     }
 
@@ -343,15 +437,7 @@ internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
     {
         try
         {
-            await _calls.WaitAsync().ConfigureAwait(false);
-            try
-            {
-                await EndAsync(commit: false).ConfigureAwait(false);
-            }
-            finally
-            {
-                _calls.Release();
-            }
+            await RollBackWhenFreeAsync().ConfigureAwait(false);
         }
         catch (Exception)
         {
@@ -367,6 +453,11 @@ internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
     private static InvalidOperationException Ended() => new(
         "This transaction unit has ended: its TransactAsync has returned, so it committed or rolled back. Fix: make every call "
         + "through the IAlvoTransaction inside the delegate, and await it there.");
+
+    private static InvalidOperationException Unawaited() => new(
+        "A call on this transaction was still running when the TransactAsync delegate returned: it was started and not "
+        + "awaited, so the unit cannot commit without it or with it. The unit rolled back; nothing it wrote was committed. "
+        + "Fix: await every call inside the delegate before it returns.");
 
     private static InvalidOperationException Concurrent() => new(
         "Another call on this transaction is still running. A unit runs one call at a time, on one connection — it is now "

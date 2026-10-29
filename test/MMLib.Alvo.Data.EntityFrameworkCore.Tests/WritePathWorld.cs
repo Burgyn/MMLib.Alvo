@@ -71,6 +71,9 @@ internal sealed class WritePathWorld : IAsyncDisposable
     /// <summary>The engine failures this world injects, and the statements it has seen.</summary>
     internal StatementFailureInterceptor Statements { get; } = new();
 
+    /// <summary>Holds a transaction's <c>COMMIT</c> until a test lets it through.</summary>
+    internal CommitHoldInterceptor Commits { get; } = new();
+
     /// <summary>The caller every write is performed as: a tenanted, authenticated identity.</summary>
     internal AlvoContext Caller { get; } = WritePathFixture.Caller();
 
@@ -104,7 +107,7 @@ internal sealed class WritePathWorld : IAsyncDisposable
             new FixedSchemaRegistry(schema),
             options => options
                 .UseSqlite(connection, sqlite => sqlite.UseRelationalNulls())
-                .AddInterceptors(world.Statements));
+                .AddInterceptors(world.Statements, world.Commits));
 
         await CreateTablesAsync(contexts);
         world._contexts = contexts;
@@ -153,6 +156,9 @@ internal sealed class WritePathWorld : IAsyncDisposable
 
         return id;
     }
+
+    /// <summary>A context over this world's database, for a test that assembles a unit's parts itself.</summary>
+    internal AlvoDataContext CreateContext() => _contexts.Create();
 
     /// <summary>Runs one statement against this world's own connection, outside the port entirely.</summary>
     /// <param name="sql">The statement to run.</param>
@@ -291,6 +297,38 @@ internal sealed class StatementFailureInterceptor : DbCommandInterceptor
         Failed++;
 
         throw new SqliteException("SQLite Error 5: 'database is locked'.", 5, 5);
+    }
+}
+
+/// <summary>
+/// Holds the next <c>COMMIT</c> of one world at the engine's door until <see cref="Release"/> — so a test can act while a
+/// commit is decided but not yet done, without a sleep.
+/// </summary>
+internal sealed class CommitHoldInterceptor : DbTransactionInterceptor
+{
+    private readonly TaskCompletionSource _reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private TaskCompletionSource? _release;
+
+    /// <summary>Completes once a held commit has reached the interceptor.</summary>
+    internal Task Reached => _reached.Task;
+
+    /// <summary>Holds every commit from now on until <see cref="Release"/>.</summary>
+    internal void Hold() => _release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Lets the held commit through.</summary>
+    internal void Release() => _release?.TrySetResult();
+
+    public override async ValueTask<InterceptionResult> TransactionCommittingAsync(
+        DbTransaction transaction, TransactionEventData eventData, InterceptionResult result,
+        CancellationToken cancellationToken = default)
+    {
+        if (_release is { } release)
+        {
+            _reached.TrySetResult();
+            await release.Task;
+        }
+
+        return result;
     }
 }
 

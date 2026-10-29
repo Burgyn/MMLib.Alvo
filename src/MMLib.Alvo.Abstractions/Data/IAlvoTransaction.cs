@@ -16,9 +16,10 @@
 /// through another data port while it is open: catching one of those cannot make the unit commit.
 /// </para>
 /// <para>
-/// One call at a time: await each call before making the next. A call the delegate starts and does not await before it
-/// returns is not part of the unit — it is refused, or runs after the commit decided without it. No call takes an
-/// idempotency key — a unit is never replayed. Alvo implements this interface and may add members to it; it is not meant
+/// One call at a time: await each call before making the next. A call the delegate starts and does not await is a
+/// programming error: if it is still running when the delegate returns, the unit is cancelled and rolls back, and
+/// <c>TransactAsync</c> throws an <see cref="InvalidOperationException"/> naming it; if it starts after, it is refused. No
+/// call takes an idempotency key — a unit is never replayed. Alvo implements this interface and may add members to it; it is not meant
 /// to be implemented by host code.
 /// </para>
 /// </remarks>
