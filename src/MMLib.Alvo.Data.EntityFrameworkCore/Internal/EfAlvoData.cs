@@ -2507,6 +2507,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         WriteUnit? unit,
         CancellationToken cancellationToken)
     {
+        EnsureNotKeyedInsideUnit(unit, idempotency);
         using var db = ContextFor(unit);
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         var now = WriteInstantNow();
@@ -2544,6 +2545,19 @@ internal sealed partial class EfAlvoData : IAlvoData
         await transaction.CommitAsync(cancellationToken);
 
         return result;
+    }
+
+    /// <summary>
+    /// Refuses a batch that is both inside a unit and keyed: the key's table would be ensured (DDL) on the unit's connection,
+    /// and a unit's call is never replayed. The data port's entries make it unreachable; this keeps it so for the unit's own.
+    /// </summary>
+    private static void EnsureNotKeyedInsideUnit(WriteUnit? unit, AlvoIdempotency? idempotency)
+    {
+        if (unit is not null && idempotency is not null)
+        {
+            throw new InvalidOperationException(
+                "A batch inside a transaction unit carried an idempotency key. A unit is never replayed, so its calls take none.");
+        }
     }
 
     /// <summary>What one verb's two passes produced: the caller's answer, and the rows to record.</summary>
