@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
@@ -64,6 +65,9 @@ internal sealed class WritePathWorld : IAsyncDisposable
 
     /// <summary>The port under test.</summary>
     internal EfAlvoData Data { get; private set; } = null!;
+
+    /// <summary>The transaction port over this world's data port and container — typed as the port, so its default members are reachable.</summary>
+    internal IAlvoTransactions Transactions => new EfAlvoTransactions(Data, Scopes);
 
     /// <summary>The hooks every write of this world runs; patches nothing until a test says so.</summary>
     internal StubBeforeHookRunner Hooks { get; } = new();

@@ -8,8 +8,8 @@ using MMLib.Alvo.Rules;
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
 /// <summary>
-/// The data port's transaction units (spec 2026-10-14 §4.5): opening one, and — from Task 8 on — running every read,
-/// write, batch and publish of <c>IAlvoTransaction</c> inside it.
+/// The data port's transaction units (spec 2026-10-14 §4.5): opening one, and running every read, write, batch and
+/// publish of <c>IAlvoTransaction</c> inside it.
 /// </summary>
 /// <remarks>
 /// A partial file of its own because it is the one place the data port reaches a unit's connection: it is allow-listed in
@@ -149,5 +149,177 @@ internal sealed partial class EfAlvoData
         {
             await joined.CommitAsync(cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>One page of a query inside <paramref name="unit"/>.</summary>
+    internal Task<AlvoPage> QueryInUnitAsync(WriteUnit unit, AlvoQuery query, AlvoContext context, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return unit.RunAsync(token => QueriedAsync(query, context, unit, token), cancellationToken);
+    }
+
+    /// <summary>One record inside <paramref name="unit"/>.</summary>
+    internal Task<AlvoRecord?> GetInUnitAsync(WriteUnit unit, string entity, Guid id, AlvoContext context, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entity);
+        return unit.RunAsync(token => GotAsync(entity, id, context, unit, token), cancellationToken);
+    }
+
+    /// <summary>One create inside <paramref name="unit"/>, as <paramref name="context"/>, under its own savepoint.</summary>
+    internal Task<AlvoRecord> CreateInUnitAsync(
+        WriteUnit unit, string entity, IReadOnlyDictionary<string, object?> values, AlvoContext context, CancellationToken cancellationToken)
+    {
+        EnsureUnitWrite(entity, values);
+        return unit.RunAsync(
+            token => CreatedAsync(entity, values, Decided(entity, DataOperation.Create, context), context, unit, token), cancellationToken);
+    }
+
+    /// <summary>One update inside <paramref name="unit"/>, as <paramref name="context"/>, under its own savepoint.</summary>
+    internal Task<AlvoRecord> UpdateInUnitAsync(
+        WriteUnit unit, string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context,
+        AlvoPrecondition? precondition, CancellationToken cancellationToken)
+    {
+        EnsureUnitWrite(entity, values);
+        return unit.RunAsync(
+            token => UpdatedAsync(entity, id, values, Decided(entity, DataOperation.Update, context), context, precondition, unit, token),
+            cancellationToken);
+    }
+
+    /// <summary>One create-or-replace inside <paramref name="unit"/>, as <paramref name="context"/>, under its own savepoint.</summary>
+    internal Task<AlvoReplaceResult> ReplaceInUnitAsync(
+        WriteUnit unit, string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context,
+        AlvoPrecondition? precondition, CancellationToken cancellationToken)
+    {
+        EnsureUnitWrite(entity, values);
+        return unit.RunAsync(
+            token => ReplacedAsync(entity, id, values, Branches(entity, context), context, precondition, unit, token), cancellationToken);
+    }
+
+    /// <summary>One delete inside <paramref name="unit"/>, as <paramref name="context"/>, under its own savepoint.</summary>
+    internal Task DeleteInUnitAsync(
+        WriteUnit unit, string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entity);
+        return unit.RunAsync(
+            async token =>
+            {
+                await ErasedAsync(entity, id, Decided(entity, DataOperation.Delete, context), context, precondition, unit, token).ConfigureAwait(false);
+                return true;
+            },
+            cancellationToken);
+    }
+
+    /// <summary>One create batch inside <paramref name="unit"/>: all its rows or none, under its own savepoint.</summary>
+    internal Task<AlvoBatchResult> CreateManyInUnitAsync(
+        WriteUnit unit, string entity, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, AlvoContext context,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        return unit.RunAsync(
+            token =>
+            {
+                var decision = BatchDecision(entity, DataOperation.Create, rows.Count, context, idempotency: null);
+                return BatchAsync(
+                    entity, context, idempotency: null,
+                    (db, transaction, schema, now) => CreatedRowsAsync(db, transaction, schema, decision, context, rows, now, token),
+                    producesRows: true, unit, token);
+            },
+            cancellationToken);
+    }
+
+    /// <summary>One update batch inside <paramref name="unit"/>: all its rows or none, under its own savepoint.</summary>
+    internal Task<AlvoBatchResult> UpdateManyInUnitAsync(
+        WriteUnit unit, string entity, IReadOnlyList<AlvoRowPatch> rows, AlvoContext context, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        return unit.RunAsync(
+            token =>
+            {
+                var decision = BatchDecision(entity, DataOperation.Update, rows.Count, context, idempotency: null);
+                return BatchAsync(
+                    entity, context, idempotency: null,
+                    (db, transaction, schema, now) => UpdatedRowsAsync(db, transaction, schema, decision, context, rows, now, token),
+                    producesRows: true, unit, token);
+            },
+            cancellationToken);
+    }
+
+    /// <summary>One delete batch inside <paramref name="unit"/>: all its rows or none, under its own savepoint.</summary>
+    internal Task<AlvoBatchResult> DeleteManyInUnitAsync(
+        WriteUnit unit, string entity, IReadOnlyList<Guid> ids, AlvoContext context, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        return unit.RunAsync(
+            token =>
+            {
+                var decision = BatchDecision(entity, DataOperation.Delete, ids.Count, context, idempotency: null);
+                return BatchAsync(
+                    entity, context, idempotency: null,
+                    (db, transaction, schema, now) => RemovedRowsAsync(db, transaction, schema, decision, context, ids, now, token),
+                    producesRows: false, unit, token);
+            },
+            cancellationToken);
+    }
+
+    /// <summary>One custom event written into <paramref name="unit"/>'s transaction: it commits with the unit, or not at all (spec 2026-10-14 X13).</summary>
+    internal Task PublishInUnitAsync(
+        WriteUnit unit, string type, string subject, IReadOnlyDictionary<string, object?>? data, AlvoContext context,
+        CancellationToken cancellationToken)
+    {
+        AlvoCustomEnvelope.Ensure(type, subject, data);
+        return unit.RunAsync(token => PublishedAsync(unit, type, subject, data, context, token), cancellationToken);
+    }
+
+    /// <summary>
+    /// <paramref name="context"/> one hop deeper in its causation chain — the context of a write made under another write's
+    /// stage (HX-09's hooks) — refused, and the unit failed, past the limit.
+    /// </summary>
+    /// <exception cref="AlvoChainDepthExceededException">The deeper context is past the limit; the unit is poisoned.</exception>
+    internal AlvoContext Deeper(WriteUnit unit, AlvoContext context)
+    {
+        var deeper = context with { Provenance = context.Provenance with { Depth = AlvoEventProvenance.Effective(context).Depth + 1 } };
+        try
+        {
+            _depthLimit.EnsureWithin(deeper);
+        }
+        catch (AlvoChainDepthExceededException refusal)
+        {
+            unit.Poison(refusal);
+            throw;
+        }
+
+        return deeper;
+    }
+
+    private async Task<bool> PublishedAsync(
+        WriteUnit unit, string type, string subject, IReadOnlyDictionary<string, object?>? data, AlvoContext context,
+        CancellationToken cancellationToken)
+    {
+        _depthLimit.EnsureWithin(context);
+        var custom = AlvoCustomEnvelope.Build(type, subject, data, context, _time.GetUtcNow());
+        using var db = ContextFor(unit);
+        await using var transaction = await BeginAsync(db, unit, cancellationToken).ConfigureAwait(false);
+        await OutboxTable.InsertAsync(unit.Connection, transaction.GetDbTransaction(), _outboxTable, custom.Envelope, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+
+        return true;
+    }
+
+    private PolicyDecision Decided(string entity, DataOperation operation, AlvoContext context)
+    {
+        _depthLimit.EnsureWithin(context);
+        return Resolve(entity, operation, context);
+    }
+
+    private ReplaceDecisions Branches(string entity, AlvoContext context)
+    {
+        _depthLimit.EnsureWithin(context);
+        return new ReplaceDecisions(Resolve(entity, DataOperation.Create, context), Resolve(entity, DataOperation.Update, context));
+    }
+
+    private static void EnsureUnitWrite(string entity, IReadOnlyDictionary<string, object?> values)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entity);
+        ArgumentNullException.ThrowIfNull(values);
     }
 }
