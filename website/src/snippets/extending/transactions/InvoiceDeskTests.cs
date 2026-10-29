@@ -91,7 +91,7 @@ public sealed class InvoiceDeskTests
 
         var refusal = await Should.ThrowAsync<AlvoUnitInProgressException>(() => transactions.TransactAsync(clerk, async (unit, token) =>
         {
-            await unit.CreateAsync("invoices", new Dictionary<string, object?> { ["number"] = "2026-0009" }, token);
+            await unit.CreateAsync(new Invoice { Number = "2026-0009" }, token);
             await alvo.Data.CreateAsync("invoices", new Dictionary<string, object?> { ["number"] = "2026-0010" }, clerk, cancellationToken: token);
         }, cancellationToken: ct));
 

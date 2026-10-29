@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the HTTP query string), also from a typed query's `StartsWith`/`EndsWith`/`Contains`; the shipped contract suite
   `AlvoDataLiteralTextTests`. Docs: *Transactions in your own code*. **Behaviour change:** inside a unit, the data port,
   `IAlvoEvents.PublishAsync` and the framework stores' writes throw instead of running outside it; a decorator around
-  `IAlvoData` does not see a unit's calls. **For third-party `IAlvoData` providers:** `AlvoFilterOperator` gained three
+  `IAlvoData` does not see a unit's calls. **Breaking for third-party `IAlvoData` providers:** `AlvoFilterOperator` gained three
   members; a provider must render them literally (the shipped `AlvoDataLiteralTextTests` hold it) or refuse them as a
   malformed filter.
 

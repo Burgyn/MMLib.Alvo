@@ -64,6 +64,7 @@ public sealed class InvoiceIssuer(IAlvoTransactions transactions)
         }
     }
 
+    // One row of invoice_lines per line of the invoice.
     private static Dictionary<string, object?> Line(Guid invoice, InvoiceLine line) =>
         new Dictionary<string, object?> { ["invoice_id"] = invoice, ["label"] = line.Label, ["amount"] = line.Amount };
 }

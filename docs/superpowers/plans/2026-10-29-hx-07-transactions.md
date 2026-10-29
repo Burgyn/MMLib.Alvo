@@ -5108,6 +5108,8 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 - Consumes: everything above.
 - Produces: the page, run by `InvoiceDeskTests` in `MMLib.Alvo.DocsSnippets.Tests` (ring0).
 
+> **As shipped (deviations from the blocks below, which are kept as written):** the snippet is `InvoiceIssuer.cs`, not `InvoiceDesk.cs` (`SnippetCoverageTests` needs a type named after the file); the invoice is created typed (`unit.CreateAsync(new Invoice { … })`, so `CreateInvoiceAsync` returns `Invoice`), per typed-form-first; and `A_taken_number_…` asserts with `ignoreOrder: true`, because events of two different records have no order between them.
+
 - [ ] **Step 1: Write the snippets and their facts**
 
 `website/src/snippets/extending/transactions/invoice-desk.alvo.json`:

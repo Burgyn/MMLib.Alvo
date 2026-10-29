@@ -41,7 +41,7 @@ tenant scope, the declarative before-hooks and rollups, and the same events. Rea
 Each call runs under its own savepoint, so a refusal — an authorization refusal, a unique or reference violation, a
 failed precondition — undoes that call alone, on PostgreSQL as on SQLite. Catch it and go on:
 
-<SourceExcerpt code={desk} from="private static async Task<Invoice> CreateInvoiceAsync" to='Number = number + "-B"' title="InvoiceIssuer.cs" />
+<SourceExcerpt code={desk} from="private static async Task<Invoice> CreateInvoiceAsync" to="One row of invoice_lines" dropComments={true} title="InvoiceIssuer.cs" />
 
 The same holds for an update or a delete that a unique or reference rule refuses. A refused batch returns its refusals
 without throwing, having written none of its rows; decide yourself whether the unit goes on. `IssueAsync` throws, and the
@@ -60,9 +60,9 @@ unit's work can no longer be trusted:
   `TransactAsync` throws an `InvalidOperationException` that names it;
 - a call through another data port while the unit is open (next section).
 
-Catching one of these does not let the unit commit: `TransactAsync` throws it. A call you start and do not await is
-never part of the unit — if it is still running when the delegate returns it rolls the unit back, and if it starts after
-it is refused.
+Catching one of these does not let the unit commit: `TransactAsync` throws it. Await every call inside the delegate. A
+call you start and do not await is a mistake: it may collide with your next call, which fails the unit. If it is still
+running when the delegate returns, it rolls the unit back. If it starts after the delegate returns, it is refused.
 
 ## Not inside a unit
 
@@ -108,8 +108,8 @@ On a unit and on any `IAlvoSession`:
 Outside a unit, get a session with `IAlvoSessions.For(caller)`. The untyped `CreateAsync(entity, values)` and
 `UpdateAsync(entity, id, values)` remain for a shape no class maps.
 
-- **What is never sent.** Fields Alvo manages — `id`, the audit columns, and `tenant_id` on a replace — and fields the
-  store maintains: a `computed` or `rollup` field. A class that maps them for reading stays writable.
+- **What is never sent.** Fields Alvo manages — `id`, the audit columns, `deleted_at`, and `tenant_id` on a replace —
+  and fields the store maintains: a `computed` or `rollup` field. A class that maps them for reading stays writable.
 - **A create leaves out a property that is `null`**, so the field's descriptor `default` applies. To leave a field to
   its default, make the property nullable: a non-nullable property's `0`, `false` or first enum member is a value and is
   sent. A replace sends every field, `null` included. An enum is written as its declared value.
@@ -127,8 +127,9 @@ same reason no call in a unit takes an idempotency key, and an `IAlvoData` write
 ## Time limit
 
 `new AlvoTransactionOptions { Timeout = … }` sets it: 30 seconds unless set, at most one hour. At the deadline the
-delegate's token is cancelled, the unit rolls back as soon as no call is running and lets go of the database, and
-`TransactAsync` throws `TimeoutException` — even if the delegate ignores its token and goes on. The deadline runs on
+delegate's token is cancelled, and the unit rolls back as soon as no call is running and lets go of the database,
+without waiting for the delegate. When the delegate ends, however it ends, `TransactAsync` throws `TimeoutException`.
+A delegate that ignores its token and goes on holds `TransactAsync` until it returns, but no longer the database. The deadline runs on
 the host's `TimeProvider`, so a test with a fake clock decides when it passes.
 
 Your own `cancellationToken` rolls the unit back too, and surfaces as `OperationCanceledException`.

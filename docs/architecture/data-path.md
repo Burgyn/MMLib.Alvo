@@ -1373,6 +1373,7 @@ in the graph while still resolving the production-composed port.
 
 **Singleton**, deliberately: the port holds no per-request state, it creates one `DbContext` per operation and
 disposes it, and every member takes the caller's `AlvoContext` as a parameter precisely so that no ambient
+scope decides who is asking. A scoped registration would imply the opposite and invite an accessor to be read
 instead of an argument to be passed. `IAlvoTransactions` is the second singleton over the same instance.
 
 ## A transaction unit spans several writes (HX-07)
@@ -1412,8 +1413,8 @@ authorization, constraint, precondition, not-found, validation, a raw `DbExcepti
 
 **The deadline.** `AlvoTransactionOptions.Timeout` (default 30 s, at most one hour) runs on the host's `TimeProvider`. At
 the deadline the unit's token is cancelled and the unit poisoned; as soon as no call is running it rolls back, releases
-the connection and the write turn — without waiting for a delegate that ignores its token — and `TransactAsync` throws
-`TimeoutException` (Ruling 10). A deadline that has already fired wins over a returning delegate (Ruling 51). Once the
+the connection and the write turn — without waiting for a delegate that ignores its token. `TransactAsync` itself awaits
+the delegate, so it throws `TimeoutException` once the delegate ends, however it ends (Ruling 10). A deadline that has already fired wins over a returning delegate (Ruling 51). Once the
 commit is decided, `COMMIT` runs with `CancellationToken.None`: neither the deadline nor the caller's token cancels it,
 and a hung `COMMIT` is bounded by the provider's command timeout (Ruling 50). A cleanup failure after a successful
 `COMMIT` is logged, not thrown (Ruling 47).
