@@ -32,7 +32,7 @@ public sealed class UnitSavepointJoinTests
     }
 
     [Fact]
-    public async Task A_join_from_the_flow_of_another_unit_is_refused()
+    public async Task A_join_from_the_flow_of_another_unit_is_refused_and_fails_the_unit()
     {
         await using var world = await StartAsync();
         await using var unit = await OpenAsync(world);
@@ -40,7 +40,9 @@ public sealed class UnitSavepointJoinTests
         var other = new OtherUnit();
         using var _ = AlvoFlow.EnterUnit(other, AlvoProvenance.None);
 
-        await Should.ThrowAsync<InvalidOperationException>(() => UnitSavepoint.JoinAsync(db, unit, Ct));
+        var refusal = await Should.ThrowAsync<InvalidOperationException>(() => UnitSavepoint.JoinAsync(db, unit, Ct));
+
+        (await Should.ThrowAsync<InvalidOperationException>(() => unit.CommitAsync(Ct))).ShouldBeSameAs(refusal);
     }
 
     [Fact]
