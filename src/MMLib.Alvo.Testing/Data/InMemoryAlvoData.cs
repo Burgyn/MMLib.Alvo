@@ -766,18 +766,24 @@ public sealed class InMemoryAlvoData : IAlvoData
         schema is not null && AlvoManagedColumns.VersionColumn(schema) is { } column ? stored[column] : null;
 
     /// <summary>
-    /// Refuses a literal text test on a field that is not text, with the shipped drivers' own wording — the reference
-    /// evaluator alone would answer such a row UNKNOWN, an empty page where an engine answers an error.
+    /// Refuses a literal text test on a field that is not text, or with a value that is not a string, with the shipped
+    /// drivers' own wording and in their order, before any row is read — the reference evaluator alone would answer the
+    /// first UNKNOWN and meet the second only on a row it evaluates, an empty page where an engine answers an error.
     /// </summary>
     private static void EnsureLiteralTextOnText(AlvoFilter? filter, EntitySchema? entity)
     {
-        foreach (var comparison in Comparisons(filter))
+        foreach (var comparison in Comparisons(filter).Where(c => c.Operator is AlvoFilterOperator.StartsWith or AlvoFilterOperator.EndsWith or AlvoFilterOperator.Contains))
         {
-            if (comparison.Operator is AlvoFilterOperator.StartsWith or AlvoFilterOperator.EndsWith or AlvoFilterOperator.Contains
-                && entity?.Fields.FirstOrDefault(field => field.Name == comparison.Field) is { Type: not (FieldType.String or FieldType.Text) } declared)
+            if (entity?.Fields.FirstOrDefault(field => field.Name == comparison.Field) is { Type: not (FieldType.String or FieldType.Text) } declared)
             {
                 throw new ArgumentException(
                     $"The filter uses '{comparison.Operator}' on '{declared.Name}', which is not a text field. Test a string or text field; compare any other type with eq or in.");
+            }
+
+            if (comparison.Value is not string)
+            {
+                throw new ArgumentException(
+                    $"The filter uses '{comparison.Operator}' with a value that is not a string. Pass the text to look for; a null field never matches, so test for it with is.");
             }
         }
     }

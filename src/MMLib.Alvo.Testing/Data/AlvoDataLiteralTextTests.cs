@@ -88,6 +88,28 @@ public abstract class AlvoDataLiteralTextTests
             new AlvoQuery { Entity = Entity, Filter = Code(AlvoFilterOperator.Contains, 5L) }, Caller, TestContext.Current.CancellationToken));
     }
 
+    /// <summary>The non-string refusal does not depend on the data: over an empty entity it is still refused, never an empty page.</summary>
+    [Fact]
+    public async Task A_value_that_is_not_a_string_is_refused_over_an_empty_entity()
+    {
+        var (descriptor, schema) = Fixture();
+        var data = await CreateAsync(schema, descriptor, new Dictionary<string, IReadOnlyList<AlvoRecord>>(StringComparer.Ordinal));
+
+        await Should.ThrowAsync<ArgumentException>(() => data.QueryAsync(
+            new AlvoQuery { Entity = Entity, Filter = Code(AlvoFilterOperator.Contains, 5L) }, Caller, TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>The non-string refusal does not depend on evaluation order: behind an <c>or</c> branch that already matches every row, it is still refused.</summary>
+    [Fact]
+    public async Task A_value_that_is_not_a_string_is_refused_behind_a_branch_that_already_matched()
+    {
+        var data = await SeededAsync();
+        var filter = new AlvoOr([Code(AlvoFilterOperator.StartsWith, string.Empty), Code(AlvoFilterOperator.Contains, 5L)]);
+
+        await Should.ThrowAsync<ArgumentException>(() => data.QueryAsync(
+            new AlvoQuery { Entity = Entity, Filter = filter }, Caller, TestContext.Current.CancellationToken));
+    }
+
     private static AlvoComparison Code(AlvoFilterOperator op, object? value) => new("code", op, value);
 
     private async Task<IReadOnlyList<string>> CodesAsync(AlvoFilter filter)
