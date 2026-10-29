@@ -58,6 +58,7 @@ internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposa
         ArgumentException.ThrowIfNullOrWhiteSpace(project);
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(candidate);
+        StoreWrites.RefuseInsideUnit();
 
         var connection = _connections.Create();
         await using (connection.ConfigureAwait(false))

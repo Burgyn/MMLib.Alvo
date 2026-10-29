@@ -84,6 +84,7 @@ internal sealed class EfCoreDescriptorVersionStore : IDescriptorVersionStore, IA
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(project);
         ArgumentNullException.ThrowIfNull(candidate);
+        StoreWrites.RefuseInsideUnit();
 
         var connection = _connections.Create();
         await using (connection.ConfigureAwait(false))

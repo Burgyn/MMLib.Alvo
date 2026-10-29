@@ -1,4 +1,7 @@
-﻿using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+﻿using Microsoft.Data.Sqlite;
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 
@@ -33,6 +36,44 @@ public sealed class WriteGateUnitRefusalTests
         using var turn = await EnterAsync(gate);
 
         turn.ShouldNotBeNull();
+    }
+
+    public static TheoryData<string> StoresThatEnsureFirst() => ["descriptor-version", "runtime-schema"];
+
+    /// <summary>
+    /// The two stores whose write ensures its tables before it reaches the gate refuse before that — before they even
+    /// open a connection — so a cold process never runs DDL beside an open unit (fix round 1, M1).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(StoresThatEnsureFirst))]
+    public async Task A_store_write_that_ensures_its_tables_first_is_refused_before_it_opens_a_connection(string store)
+    {
+        var opened = 0;
+        var connections = new RelationalConnectionFactory(() =>
+        {
+            opened++;
+            return new SqliteConnection("Data Source=:memory:");
+        });
+        var unit = new OpenUnit();
+        using var _ = AlvoFlow.EnterUnit(unit, AlvoProvenance.None);
+
+        var refusal = await Should.ThrowAsync<AlvoUnitInProgressException>(() => WriteAsync(store, connections));
+
+        refusal.Message.ShouldStartWith(StoreWrites.Call);
+        unit.Poisoned.ShouldHaveSingleItem().ShouldBeSameAs(refusal);
+        opened.ShouldBe(0, "the refusal comes before the store's connection and its ensure step");
+    }
+
+    private static Task<DescriptorVersion> WriteAsync(string store, RelationalConnectionFactory connections)
+    {
+        var version = new DescriptorVersion(new SchemaModel([]), "{}", 1, DateTimeOffset.UnixEpoch);
+        return store switch
+        {
+            "descriptor-version" => new EfCoreDescriptorVersionStore(connections, new AlvoOptions())
+                .AppendAsync("p", version, expectedRevision: 0, Ct),
+            _ => new EfCoreRuntimeSchemaWriter(connections, new AlvoOptions(), new SqliteTestDialect())
+                .ApplyAndAppendAsync("p", new MigrationPlan { Steps = [] }, version, expectedRevision: 0, new MigrationOptions(), Ct),
+        };
     }
 
     private static async Task<IDisposable?> EnterAsync(string gate) => gate switch

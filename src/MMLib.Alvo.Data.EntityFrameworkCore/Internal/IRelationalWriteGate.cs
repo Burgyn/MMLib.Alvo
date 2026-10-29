@@ -25,7 +25,8 @@
 /// </para>
 /// <para>
 /// <b>Inside an open transaction unit every gate refuses</b> (<c>StoreWrites</c>): a unit holds the turn for its whole run,
-/// and a write that waited for it would commit beside the unit.
+/// and a write that waited for it would commit beside the unit. That covers the writes that pass a gate, and only those;
+/// <c>StoreWrites</c> names what stays outside.
 /// </para>
 /// </remarks>
 internal interface IRelationalWriteGate
