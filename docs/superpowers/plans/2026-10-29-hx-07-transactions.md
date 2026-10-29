@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Branch `hx/07-transactions` in the worktree `/Users/martiniak/Developer/GitHub/Burgyn/MMLib.Alvo-wt-hx07`, based on `hx/06-delivery-operations` at `2e75ea32` (PR #422, open against `main`). Issue **#384**, epic #370, blocked by #383. The PR's base is `hx/06-delivery-operations` while #422 is open; once #422 merges, merge `origin/main` into this branch (merge-commit style) and retarget the PR to `main`. One writer per worktree; never `git add -A` (stage each task's files by path); verify `git branch --show-current` prints `hx/07-transactions` before every commit and before the push.
+- Branch `hx/07-transactions` in the worktree `/Users/martiniak/Developer/GitHub/Burgyn/MMLib.Alvo-wt-hx07`. HX-06 (#422) has merged, and `main` is merged into this branch at `facc8a69`: every diff in this plan is against `origin/main`, and the PR's base is `main` (Ruling 45). Issue **#384**, epic #370. One writer per worktree; never `git add -A` (stage each task's files by path); verify `git branch --show-current` prints `hx/07-transactions` before every commit and before the push.
 - **Scope is §7 HX-07 only.** No write hooks, no `IWriteExtensionRunner`, no budgets per hook, no self-write detection, no `ExtensionSystemAccess` log (HX-09); no commands, `AlvoCommandContext.TransactAsync`, command idempotency or completion events (HX-08); no `IAlvoScheduler` joining a unit (HX-13); no boot ban of `IAlvoTransactions` in hook constructors (HX-09's §4.4.5 check). **Dashboard: none** (§7). No change to the HTTP query syntax, the OpenAPI document, the Vacuum ruleset or the TeaPie path set.
 - **Public surface added is exactly:**
   - Abstractions `MMLib.Alvo.Data`: `IAlvoTransactions` (`TransactAsync<T>` + one non-generic default member), `IAlvoTransaction : IAlvoSession` (`CreateManyAsync`, `UpdateManyAsync`, `DeleteManyAsync`, `PublishAsync`, `AsSystem`), `AlvoTransactionOptions` (`Timeout`, `SuppressHostHooks`, `Reason`, all `init`), `AlvoUnitInProgressException`; `AlvoFilterOperator.StartsWith`, `.EndsWith`, `.Contains` (appended after `Is`).
@@ -21,6 +21,8 @@
   Everything else is `internal`. Every addition §5 does not list is a ruling below (Rulings 3, 4, 19, 25).
 - **Wire and naming constants (verbatim):** default `Timeout` 30 s; `Timeout` must be greater than zero and at most 1 hour; `Reason` at most 500 characters, no control character, required when `SuppressHostHooks` is set; savepoint names `alvo_unit_<n>` (n from 1 per unit); the LIKE escape character `\`; escaped characters `\`, `%`, `_`, `[`; the HTTP operator allow-list stays exactly `eq neq gt gte lt lte like ilike in is`.
 - **Engine parity:** every unit fact runs on SQLite (`MMLib.Alvo.TestHost.Tests`) and PostgreSQL (`MMLib.Alvo.Data.PostgreSql.Tests.Integration`) through one shared facts class in `test/_shared/testhost`; every literal-operator contract row runs on SQLite, PostgreSQL and the in-memory reference. **Top-level writes keep their exact statements** — no savepoint, no extra statement — so `AlvoDataSqlSnapshotTests`, `AlvoDataStatementTests` and every existing `AlvoData*Tests` row stay byte-identical (acceptance (7)).
+- **Mutation shards:** `EfAlvoData.Units.cs` joins `stryker-config.data-ef-core.json`'s `mutate` list beside `EfAlvoData.cs` and is excluded from `data-ef-rest`'s (Task 6); Task 12 re-probes **every** shard's declared `mutants:`/`suite:` in `.github/workflows/mutation.yml`, not one (Ruling 38).
+- **Architecture scans:** `BeforeHookTransactionArchitectureTests` accepts `BeginAsync(` as a fourth "a transaction is open" marker (Task 7, Ruling 28); its eight-site count stays.
 - **Data-package allow-lists:** `ChangeTrackerReachTests._sqlComposingFiles` gains exactly `EfAlvoData.Units.cs` (it opens the unit's connection and writes the unit's outbox row). No other new data-package file may contain `CreateCommand`, `CommandText`, `ExecuteNonQuery`/`Scalar`/`Reader`, `ExecuteSqlRaw`, `FromSql` or `GetDbConnection`; `WriteUnit.cs`, `UnitSavepoint.cs`, `TurnHeldTransaction.cs`, `EfAlvoTransactions.cs` and `EfAlvoTransaction.cs` receive their connection and transaction as parameters.
 - **SQL text scan:** `SqlTextConfinedToRendererArchitectureTests` scans `src/MMLib.Alvo/{Expressions,Rules,Events}`; the one file this plan edits there, `Events/Internal/AlvoEvents.cs`, may not contain `SELECT `, `WHERE `, `ILIKE`, `COALESCE(`, `IS NOT NULL`, `CASE WHEN `, ` IN (` or the upper-case words `AND`, `OR`, `NOT` (code, strings or XML docs).
 - **`AlvoFlow` setters:** only `MMLib.Alvo` and `MMLib.Alvo.Data.EntityFrameworkCore` may call `AlvoFlow.Enter` or the new `AlvoFlow.EnterUnit`; `InternalMemberReferences.FlowSetters` names both.
@@ -34,7 +36,7 @@
 
 ## Review Focus
 
-1. **A batch that fails at the engine inside a unit** must leave none of its rows while the unit's earlier writes still commit — the batch path returns a refused result *without* throwing, so only the savepoint's dispose-without-commit rollback stands between it and half a batch committed — `EfAlvoTransactionsTests.A_batch_failing_at_the_engine_inside_a_unit_leaves_none_of_its_rows` and `A_refused_batch_leaves_none_of_its_rows_and_the_unit_goes_on` (Task 8).
+1. **A call that wrote and then failed inside a unit** must leave none of its rows while the unit's earlier writes still commit — after `SaveChanges` succeeded, EF's own `__EFSavePoint` is already released, so only `UnitSavepoint`'s dispose-without-commit rollback stands between it and a half-written call committed — `UnitSavepointFacts.A_savepoint_disposed_without_commit_takes_its_insert_back_and_the_unit_goes_on` (SQLite and PostgreSQL, Task 7) and `EfAlvoTransactionsTests.A_batch_failing_at_the_engine_inside_a_unit_leaves_none_of_its_rows` (Task 8). (A batch the rules refuse writes nothing — every row is judged before any is written — so it cannot exercise the rollback, and no fact pretends it does: Ruling 31.)
 2. **Two calls on one transaction at once** (`Task.WhenAll(unit.CreateAsync(…), unit.CreateAsync(…))`) must be refused, not interleaved on one `DbConnection`, and the unit must roll back — `WriteUnitTests.A_second_call_while_one_runs_is_refused_and_poisons_the_unit` (Task 6), which holds the first call open with a `TaskCompletionSource`: over SQLite in memory two real writes complete synchronously and never overlap, so a fact built on them would pass without testing anything.
 3. **An `IAlvoTransaction` kept and used after `TransactAsync` returned** must be refused with an "ended" error, never write on a connection the pool has handed to someone else — `WriteUnitTests.A_unit_used_after_it_was_released_is_refused` (Task 6), `EfAlvoTransactionsTests.A_transaction_used_after_its_unit_ended_is_refused` (Task 8).
 4. **Work started inside the delegate that outlives it** (`_ = Task.Run(…)` calling `IAlvoData` later) must not be refused once the unit is over, though it inherited the unit's execution context — `AlvoFlowUnitTests.A_unit_that_has_ended_is_not_on_the_flow` (Task 1), `EfAlvoTransactionsTests.A_data_call_from_work_that_outlives_the_unit_is_not_refused` (Task 8).
@@ -66,8 +68,12 @@ Created:
 | `test/MMLib.Alvo.Tests/Data/FakeFlowUnit.cs`, `AlvoFlowUnitTests.cs`, `AlvoTransactionOptionsTests.cs`, `TypedWriteTests.cs`, `InMemoryAlvoDataLiteralTextTests.cs`; `test/MMLib.Alvo.Tests/Events/AlvoEventsUnitTests.cs` | flow, options, typed writes, in-memory leg, publish refusal |
 | `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/LiteralTextPatternTests.cs`, `WriteUnitTests.cs`, `EfAlvoDataUnitRefusalTests.cs`, `EfAlvoTransactionsTests.cs` | escaping, the unit, the refusals, the port over SQLite in memory |
 | `test/MMLib.Alvo.Data.Sqlite.Tests/SqliteAlvoDataLiteralTextTests.cs`, `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlAlvoDataLiteralTextTests.cs` | the contract's engine legs |
+| `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/StoreWrites.cs`; `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/WriteGateUnitRefusalTests.cs` | every framework store's write refused at its write gate inside a unit (Ruling 33) |
+| `test/_shared/ef/UnitSavepointFacts.cs`, `test/MMLib.Alvo.Data.Sqlite.Tests/SqliteUnitSavepointTests.cs`, `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlUnitSavepointTests.cs` | a savepoint takes back a real insert on both engines (Ruling 31) |
 | `test/_shared/testhost/TransactionFacts.cs`, `test/_shared/testhost/descriptors/ledger-desk.alvo.json`, `test/MMLib.Alvo.TestHost.Tests/SqliteTransactionTests.cs`, `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlTransactionTests.cs` | acceptance (1)–(6), (9), (10) on both engines |
 | `website/src/content/docs/extending/transactions.mdx`; `website/src/snippets/extending/transactions/{InvoiceDesk.cs,InvoiceDeskTests.cs,invoice-desk.alvo.json}` | *Transactions in your own code* |
+
+Modified (added by the review revision): `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/{NoRelationalWriteGate.cs,SerialRelationalWriteGate.cs}`, `src/MMLib.Alvo.Testing/Data/InMemoryAlvoData.cs`, `stryker-config.data-ef-core.json`, `stryker-config.data-ef-rest.json`, `.github/workflows/mutation.yml`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/BeforeHookTransactionArchitectureTests.cs`, `test/MMLib.Alvo.Data.Sqlite.Tests/MMLib.Alvo.Data.Sqlite.Tests.csproj`, `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/MMLib.Alvo.Data.PostgreSql.Tests.Integration.csproj`.
 
 Modified: `src/MMLib.Alvo.Abstractions/Identity/AlvoFlow.cs`, `Data/AlvoFilter.cs` (enum), `Data/IAlvoData.cs`, `Data/IAlvoSession.cs`, `Events/IAlvoEvents.cs` (docs); `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.cs` (partial, the seam, the refusals), `Internal/FilterSqlRenderer.cs`, `AlvoEfCoreProvider.cs`; `src/MMLib.Alvo/Events/Internal/AlvoEvents.cs`, `Api/Internal/FilterOperators.cs`, `Data/Internal/FilterTranslator.Calls.cs`, `Data/AlvoTypedReadExtensions.cs` (remarks); `src/MMLib.Alvo.Testing/Data/AlvoFilterEvaluator.cs`; tests `test/_shared/ai/InternalMemberReferences.cs`, `test/_shared/testhost/TypedLayerFacts.cs`, `test/MMLib.Alvo.Tests/Data/FilterTranslationTests.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/{FilterSqlRendererTests.cs,FilterSqlRendererPropertyTests.cs,ChangeTrackerReachTests.cs,WritePathWorld.cs,MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj}`, `test/MMLib.Alvo.Api.Tests/QueryStringParserTests.cs`; the three `PublicApi.*.verified.txt` named above; docs per Task 11.
 
@@ -400,15 +406,16 @@ namespace MMLib.Alvo.Data;
 
 /// <summary>
 /// A data call was made while a transaction unit is open on the current flow, through a port that would run outside the
-/// unit — <see cref="IAlvoData"/>, <see cref="IAlvoSession"/>, <c>IAlvoEvents.PublishAsync</c> or a nested
-/// <see cref="IAlvoTransactions.TransactAsync{T}"/>.
+/// unit — <see cref="IAlvoData"/>, <see cref="IAlvoSession"/>, <c>IAlvoEvents.PublishAsync</c>, a nested
+/// <see cref="IAlvoTransactions.TransactAsync{T}"/>, or a write through a framework store such as <c>IOutboxStore</c>.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Such a call would run on a second connection: it could not see the unit's writes, would not roll back with them, could
 /// carry a different caller into the middle of this one's work, and on an engine with one writer would wait for the
 /// unit's own lock. It is refused at once instead. Make the call through the unit's <see cref="IAlvoTransaction"/>, or
-/// move it before or after <c>TransactAsync</c>.
+/// move it before or after <c>TransactAsync</c>. The refusal follows the .NET execution context: work handed to a queue of
+/// the host's own, or run with the flow suppressed, is out of its reach.
 /// </para>
 /// <para>
 /// The refusal also fails the unit: it rolls back however the delegate ends, so a caught refusal cannot commit work its
@@ -561,8 +568,10 @@ namespace MMLib.Alvo.Data;
 /// through another data port while it is open: catching one of those cannot make the unit commit.
 /// </para>
 /// <para>
-/// One call at a time: await each call before making the next. No call takes an idempotency key — a unit is never
-/// replayed. Alvo implements this interface and may add members to it; it is not meant to be implemented by host code.
+/// One call at a time: await each call before making the next. A call the delegate starts and does not await before it
+/// returns is not part of the unit — it is refused, or runs after the commit decided without it. No call takes an
+/// idempotency key — a unit is never replayed. Alvo implements this interface and may add members to it; it is not meant
+/// to be implemented by host code.
 /// </para>
 /// </remarks>
 public interface IAlvoTransaction : IAlvoSession
@@ -1056,12 +1065,13 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 **Files:**
 - Create: `src/MMLib.Alvo.Testing/Data/AlvoDataLiteralTextTests.cs`
+- Modify: `src/MMLib.Alvo.Testing/Data/InMemoryAlvoData.cs` (`QueryAsync` refuses a literal text test on a non-text field)
 - Create (tests): `test/MMLib.Alvo.Data.Sqlite.Tests/SqliteAlvoDataLiteralTextTests.cs`, `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlAlvoDataLiteralTextTests.cs`, `test/MMLib.Alvo.Tests/Data/InMemoryAlvoDataLiteralTextTests.cs`
 - Modify (tests): `test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.Testing.verified.txt`
 
 **Interfaces:**
 - Consumes: Task 2's operators; the `CreateAsync(SchemaModel, AlvoDescriptor, seed)` seam shape `AlvoDataOrderingTests` defines; `SqliteAlvoDataFixture`, `PostgreSqlAlvoDataFixture`, `AlvoDataSeed.SeedAsync`, `InMemoryAlvoData`.
-- Produces: `public abstract class AlvoDataLiteralTextTests` with `protected abstract Task<IAlvoData> CreateAsync(SchemaModel schema, AlvoDescriptor descriptor, IReadOnlyDictionary<string, IReadOnlyList<AlvoRecord>> seed);` and seven facts — acceptance (11)'s contract rows.
+- Produces: `public abstract class AlvoDataLiteralTextTests` with `protected abstract Task<IAlvoData> CreateAsync(SchemaModel schema, AlvoDescriptor descriptor, IReadOnlyDictionary<string, IReadOnlyList<AlvoRecord>> seed);` and eight facts — acceptance (11)'s contract rows; `InMemoryAlvoData` refuses a literal text test on a non-text field, as the EF renderer does (Ruling 40).
 
 - [ ] **Step 1: Write the contract suite and its three legs**
 
@@ -1137,6 +1147,17 @@ public abstract class AlvoDataLiteralTextTests
     public async Task An_empty_value_matches_every_text_and_never_a_missing_one()
         => (await CodesAsync(new AlvoComparison("label", AlvoFilterOperator.StartsWith, string.Empty))).ShouldBe(["xy", "abc"], ignoreOrder: true);
 
+    /// <summary>A literal text test on a field that is not text is the port's malformed-filter refusal on every engine — never an empty page on one and an error on another.</summary>
+    [Fact]
+    public async Task A_literal_text_test_on_a_field_that_is_not_text_is_refused()
+    {
+        var data = await SeededAsync();
+
+        (await Should.ThrowAsync<ArgumentException>(() => data.QueryAsync(
+            new AlvoQuery { Entity = Entity, Filter = new AlvoComparison("rank", AlvoFilterOperator.StartsWith, "1") }, Caller, TestContext.Current.CancellationToken)))
+            .Message.ShouldContain("'rank', which is not a text field");
+    }
+
     /// <summary>A value that is not a string is the port's malformed-filter refusal on every engine.</summary>
     [Fact]
     public async Task A_value_that_is_not_a_string_is_refused()
@@ -1185,6 +1206,7 @@ public abstract class AlvoDataLiteralTextTests
                     {
                         ["code"] = new() { Type = DescField.String, Required = true, MaxLength = 40 },
                         ["label"] = new() { Type = DescField.String, MaxLength = 40 },
+                        ["rank"] = new() { Type = DescField.Integer },
                     },
                     Rules = new AccessRules { List = "true", Get = "true" },
                 },
@@ -1201,6 +1223,7 @@ public abstract class AlvoDataLiteralTextTests
                     new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true },
                     new FieldSchema { Name = "code", Type = SchemaField.String, Required = true, MaxLength = 40 },
                     new FieldSchema { Name = "label", Type = SchemaField.String, Nullable = true, MaxLength = 40 },
+                    new FieldSchema { Name = "rank", Type = SchemaField.Integer, Nullable = true },
                 ],
             },
         ]);
@@ -1313,22 +1336,54 @@ public sealed class InMemoryAlvoDataLiteralTextTests : AlvoDataLiteralTextTests
 }
 ```
 
+`src/MMLib.Alvo.Testing/Data/InMemoryAlvoData.cs` — in `QueryAsync`, after `EnsureQueryFieldsAvailable(query, decision);`, add `EnsureLiteralTextOnText(query.Filter, FindEntity(query.Entity));`, and add beside it:
+
+```csharp
+    /// <summary>
+    /// Refuses a literal text test on a field that is not text, with the shipped drivers' own wording — the reference
+    /// evaluator alone would answer such a row UNKNOWN, an empty page where an engine answers an error.
+    /// </summary>
+    private static void EnsureLiteralTextOnText(AlvoFilter? filter, EntitySchema? entity)
+    {
+        foreach (var comparison in Comparisons(filter))
+        {
+            if (comparison.Operator is AlvoFilterOperator.StartsWith or AlvoFilterOperator.EndsWith or AlvoFilterOperator.Contains
+                && entity?.Fields.FirstOrDefault(field => field.Name == comparison.Field) is { Type: not (FieldType.String or FieldType.Text) } declared)
+            {
+                throw new ArgumentException(
+                    $"The filter uses '{comparison.Operator}' on '{declared.Name}', which is not a text field. Test a string or text field; compare any other type with eq or in.");
+            }
+        }
+    }
+
+    private static IEnumerable<AlvoComparison> Comparisons(AlvoFilter? filter) => filter switch
+    {
+        AlvoComparison comparison => new[] { comparison },
+        AlvoAnd and => and.Filters.SelectMany(Comparisons),
+        AlvoOr or => or.Filters.SelectMany(Comparisons),
+        AlvoNot not => Comparisons(not.Filter),
+        _ => Enumerable.Empty<AlvoComparison>(),
+    };
+```
+
+(`FindEntity` is the file's existing lookup, already called a few lines below for `Unselected`; `FieldType` is `MMLib.Alvo.Schema.FieldType`, which the file already imports.)
+
 - [ ] **Step 2: Run the three legs**
 
 Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*InMemoryAlvoDataLiteralTextTests'`, `dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests --filter-class '*SqliteAlvoDataLiteralTextTests'`, `dotnet test --project test/MMLib.Alvo.Data.PostgreSql.Tests.Integration --filter-class '*PostgreSqlAlvoDataLiteralTextTests'` (Docker required; the facts skip when it is unavailable)
-Expected: PASS, seven facts per leg. A SQLite failure on `A_literal_text_test_is_case_sensitive` means `case_sensitive_like` is not on for the connection that ran it — fix the driver, not the row.
+Expected: PASS, eight facts per leg. A SQLite failure on `A_literal_text_test_is_case_sensitive` means `case_sensitive_like` is not on for the connection that ran it — fix the driver, not the row.
 
 - [ ] **Step 3: Accept the Testing baseline**
 
 Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*TestingLibraryPublicApiTests'`
-Expected: FAIL with a received file adding exactly `AlvoDataLiteralTextTests` (its constructor, the abstract `CreateAsync` and seven public facts). Accept it.
+Expected: FAIL with a received file adding exactly `AlvoDataLiteralTextTests` (its constructor, the abstract `CreateAsync` and eight public facts). Accept it.
 
 - [ ] **Step 4: Format, ring1, commit**
 
 ```bash
-dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo.Testing/Data/AlvoDataLiteralTextTests.cs test/MMLib.Alvo.Data.Sqlite.Tests/SqliteAlvoDataLiteralTextTests.cs test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlAlvoDataLiteralTextTests.cs test/MMLib.Alvo.Tests/Data/InMemoryAlvoDataLiteralTextTests.cs
+dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo.Testing/Data/AlvoDataLiteralTextTests.cs src/MMLib.Alvo.Testing/Data/InMemoryAlvoData.cs test/MMLib.Alvo.Data.Sqlite.Tests/SqliteAlvoDataLiteralTextTests.cs test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlAlvoDataLiteralTextTests.cs test/MMLib.Alvo.Tests/Data/InMemoryAlvoDataLiteralTextTests.cs
 scripts/test-ring1
-git add src/MMLib.Alvo.Testing/Data/AlvoDataLiteralTextTests.cs test/MMLib.Alvo.Data.Sqlite.Tests/SqliteAlvoDataLiteralTextTests.cs test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlAlvoDataLiteralTextTests.cs test/MMLib.Alvo.Tests/Data/InMemoryAlvoDataLiteralTextTests.cs test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.Testing.verified.txt
+git add src/MMLib.Alvo.Testing/Data/AlvoDataLiteralTextTests.cs src/MMLib.Alvo.Testing/Data/InMemoryAlvoData.cs test/MMLib.Alvo.Data.Sqlite.Tests/SqliteAlvoDataLiteralTextTests.cs test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlAlvoDataLiteralTextTests.cs test/MMLib.Alvo.Tests/Data/InMemoryAlvoDataLiteralTextTests.cs test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.Testing.verified.txt
 git commit -m "test(data): literal text operator contract rows on every engine
 
 Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
@@ -1610,7 +1665,7 @@ Expected: FAIL — `Publishing_inside_an_open_unit_is_refused_and_fails_the_unit
 
 - [ ] **Step 3: Move the envelope into Abstractions and refuse inside a unit**
 
-`src/MMLib.Alvo.Abstractions/Events/AlvoCustomEnvelope.cs` — the guards and builder moved verbatim from `AlvoEvents` (`EnsureWritable`, `Probe`, `ProbeType`, `ProbeSubject`, `PartitionKeyFor`, `CustomPartitionMarker` with **their XML docs unchanged**, and the body of `Envelope`), so the transactional publish and the autocommit one build one envelope:
+`src/MMLib.Alvo.Abstractions/Events/AlvoCustomEnvelope.cs` — the guards and builder moved verbatim from `AlvoEvents` (`EnsureWritable` — made `internal`, so the autocommit publish keeps calling it in its old position — `Probe`, `ProbeType`, `ProbeSubject`, `PartitionKeyFor`, `CustomPartitionMarker` with **their XML docs unchanged**, and the body of `Envelope`), so the transactional publish and the autocommit one build one envelope:
 
 ```csharp
 using MMLib.Alvo.Data;
@@ -1687,7 +1742,7 @@ internal static class AlvoCustomEnvelope
     /// about to serialize the same payload for real.
     /// </para>
     /// </remarks>
-    private static void EnsureWritable(IReadOnlyDictionary<string, object?>? data)
+    internal static void EnsureWritable(IReadOnlyDictionary<string, object?>? data)
     {
         if (data is null)
         {
@@ -1781,7 +1836,7 @@ internal static class AlvoCustomEnvelope
 }
 ```
 
-(The six members after `Build` are `AlvoEvents.cs` lines 47–156 as they stand on `hx/06-delivery-operations`, moved unchanged.)
+(The six members after `Build` are `AlvoEvents.cs` lines 47–156 as they stand on `origin/main` (HX-06 merged), moved unchanged — except `EnsureWritable`, which becomes `internal`.)
 
 `src/MMLib.Alvo/Events/Internal/AlvoEvents.cs` — delete the six moved members and `Envelope`, and replace `PublishAsync` with:
 
@@ -1794,8 +1849,10 @@ internal static class AlvoCustomEnvelope
         AlvoContext context,
         CancellationToken cancellationToken = default)
     {
-        AlvoCustomEnvelope.Ensure(type, subject, data);
+        AlvoEventName.EnsureCustom(type, nameof(type));
+        ArgumentException.ThrowIfNullOrWhiteSpace(subject);
         ArgumentNullException.ThrowIfNull(context);
+        AlvoCustomEnvelope.EnsureWritable(data);
         AlvoFlow.RefuseInsideUnit("IAlvoEvents.PublishAsync");
         depthLimit.EnsureWithin(context);
 
@@ -1803,7 +1860,7 @@ internal static class AlvoCustomEnvelope
     }
 ```
 
-and in the class remarks' first paragraph replace "The name guard runs first, then the depth refusal, then the clock." with "The name guard runs first, then the refusal inside a transaction unit, then the depth refusal, then the clock." and replace the second paragraph's first sentence with "The envelope is built by <see cref=\"AlvoCustomEnvelope\"/>, the one builder the transactional publish shares —". (Keep the words `and`/`or`/`not` lower-case in this file: the SQL text scan.)
+and in the class remarks' first paragraph replace "The name guard runs first, then the depth refusal, then the clock." with "The name, subject, caller and payload guards run first, in that order — unchanged — then the refusal inside a transaction unit, then the depth refusal, then the clock." (Ruling 44) and replace the second paragraph's first sentence with "The envelope is built by <see cref=\"AlvoCustomEnvelope\"/>, the one builder the transactional publish shares —". (Keep the words `and`/`or`/`not` lower-case in this file: the SQL text scan.)
 
 `src/MMLib.Alvo.Abstractions/Events/IAlvoEvents.cs` — replace the remarks paragraph that begins "<b>Not transactional with anything.</b>" with:
 
@@ -1846,6 +1903,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 - Create: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/WriteUnit.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.Units.cs`
 - Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.cs` (one word: `partial`)
 - Modify (tests): `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/WritePathWorld.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/ChangeTrackerReachTests.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj`
+- Modify: `stryker-config.data-ef-core.json`, `stryker-config.data-ef-rest.json`
 - Create (tests): `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/WriteUnitTests.cs`
 
 **Interfaces:**
@@ -1925,6 +1983,8 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 ```
 
 `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/ChangeTrackerReachTests.cs` — add `"EfAlvoData.Units.cs",` to `_sqlComposingFiles` after `"EfAlvoData.cs",` (it reads the unit's connection with `GetDbConnection` and, in Task 8, writes the unit's outbox row).
+
+`stryker-config.data-ef-core.json` — add `"Internal/EfAlvoData.Units.cs",` to `mutate` after `"Internal/EfAlvoData.cs",`; `stryker-config.data-ef-rest.json` — add `"!Internal/EfAlvoData.Units.cs",` after `"!Internal/EfAlvoData.cs",`. The partial file's mutants are killed by the same `Data.Sqlite.Tests` facts as the rest of `EfAlvoData`; the new standalone files (`WriteUnit.cs`, `UnitSavepoint.cs`, `TurnHeldTransaction.cs`, `EfAlvoTransaction(s).cs`, `StoreWrites.cs`, `LiteralTextPattern.cs`) fall into `data-ef-rest` by its `**/*.cs`, and Task 12 re-probes every shard's counts (Ruling 38).
 
 - [ ] **Step 2: Write the failing tests**
 
@@ -2020,6 +2080,40 @@ public sealed class WriteUnitTests
         release.SetResult(1);
 
         (await first).ShouldBe(1);
+        await Should.ThrowAsync<InvalidOperationException>(() => unit.CommitAsync(Ct));
+    }
+
+    [Fact]
+    public async Task A_call_made_by_the_call_holding_the_unit_is_admitted()
+    {
+        await using var world = await StartAsync();
+        await using var unit = await OpenAsync(world);
+
+        var answer = await unit.RunAsync(async _ => await unit.RunAsync(_ => Task.FromResult(2), Ct) + 1, Ct);
+
+        answer.ShouldBe(3);
+        await unit.CommitAsync(Ct);
+    }
+
+    [Fact]
+    public async Task Two_calls_at_once_under_the_holding_call_are_still_refused()
+    {
+        await using var world = await StartAsync();
+        await using var unit = await OpenAsync(world);
+        var release = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var refusal = await unit.RunAsync(
+            async _ =>
+            {
+                var holding = unit.RunAsync(_ => release.Task, Ct);
+                var sibling = await Should.ThrowAsync<InvalidOperationException>(() => unit.RunAsync(_ => Task.FromResult(9), Ct));
+                release.SetResult(1);
+                await holding;
+                return sibling;
+            },
+            Ct);
+
+        refusal.Message.ShouldContain("one call at a time");
         await Should.ThrowAsync<InvalidOperationException>(() => unit.CommitAsync(Ct));
     }
 
@@ -2183,8 +2277,11 @@ internal sealed record WriteUnitParts(
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>One call at a time.</b> A <see cref="DbConnection"/> runs one command at a time, so a second call made while one is
-/// running is refused, and poisons the unit: the delegate's result can no longer be the one it meant.
+/// <b>One call at a time — per level.</b> A <see cref="DbConnection"/> runs one command at a time, so a second call made
+/// while one is running is refused, and poisons the unit: the delegate's result can no longer be the one it meant. A call
+/// made <em>by</em> the running call — on its own execution flow, as a hook running inside a write will (HX-09) — is let in
+/// under its own savepoint, one at a time among its siblings; each call records itself in an <see cref="AsyncLocal{T}"/>
+/// frame for exactly that (Ruling 30).
 /// </para>
 /// <para>
 /// <b>Poisoned means it cannot commit.</b> <see cref="Poison"/> records the first failure; every later call is refused, and
@@ -2209,6 +2306,8 @@ internal sealed record WriteUnitParts(
 internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
 {
     private const string SavepointPrefix = "alvo_unit_";
+
+    private static readonly AsyncLocal<CallFrame?> _frame = new();
 
     private readonly WriteUnitParts _parts;
     private readonly TimeSpan _timeout;
@@ -2306,7 +2405,10 @@ internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
     internal string NextSavepoint() =>
         SavepointPrefix + Interlocked.Increment(ref _savepoints).ToString(CultureInfo.InvariantCulture);
 
-    /// <summary>Runs one call of the unit: alone, under the unit's token, refused once the unit failed or ended.</summary>
+    /// <summary>
+    /// Runs one call of the unit: alone among its siblings, under the unit's token, refused once the unit failed or ended.
+    /// A call made from inside a running call of this unit is a nested call: it waits on its parent's gate, not the unit's.
+    /// </summary>
     /// <typeparam name="T">What the call answers.</typeparam>
     /// <param name="call">The call, given the token it must pass to every statement.</param>
     /// <param name="cancellationToken">The call's own token.</param>
@@ -2315,7 +2417,8 @@ internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(call);
         EnsureUsable();
-        if (!_calls.Wait(0))
+        var gate = _frame.Value is { } parent && parent.Unit == this ? parent.Children : _calls;
+        if (!gate.Wait(0))
         {
             var refusal = Concurrent();
             Poison(refusal);
@@ -2326,11 +2429,12 @@ internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
         {
             EnsureUsable();
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+            _frame.Value = new CallFrame(this);
             return await GuardedAsync(call, linked.Token).ConfigureAwait(false);
         }
         finally
         {
-            _calls.Release();
+            gate.Release();
         }
     }
 
@@ -2520,6 +2624,23 @@ internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
     private static InvalidOperationException Concurrent() => new(
         "Another call on this transaction is still running. A unit runs one call at a time, on one connection — it is now "
         + "failed and will roll back. Fix: await each call before making the next.");
+
+    /// <summary>One running call of a unit, as the calls it makes in turn see it: their gate is its <see cref="Children"/>.</summary>
+    /// <remarks>
+    /// Set in <see cref="AsyncLocal{T}"/> inside <see cref="RunAsync{T}"/>, so it is visible to the call's own flow and to
+    /// nothing the delegate does beside it; the async method's return restores the caller's frame.
+    /// </remarks>
+    /// <param name="unit">The unit the call belongs to.</param>
+    [SuppressMessage(
+        "Design",
+        "CA1001:Types that own disposable fields should be disposable",
+        Justification = "SemaphoreSlim holds no handle unless AvailableWaitHandle is read, which this type never does; a frame lives for one call.")]
+    private sealed class CallFrame(WriteUnit unit)
+    {
+        internal WriteUnit Unit { get; } = unit;
+
+        internal SemaphoreSlim Children { get; } = new(1, 1);
+    }
 }
 ```
 
@@ -2551,8 +2672,16 @@ internal sealed partial class EfAlvoData
     /// <returns>The open unit; the caller disposes it.</returns>
     /// <exception cref="AlvoChainDepthExceededException">The caller is deeper in one causation chain than the limit allows.</exception>
     /// <remarks>
+    /// <para>
+    /// The connection is opened <b>through EF</b> first, so the provider's connection interceptors run on it — SQLite's
+    /// <c>case_sensitive_like</c> among them. <c>EnsureOutboxTableAsync</c> opens a closed connection raw, which runs no
+    /// interceptor, and the unit's connection is reused by every call: opened raw, the first unit of a process would match
+    /// <c>like</c> and the literal text tests case-insensitively on SQLite (Ruling 32).
+    /// </para>
+    /// <para>
     /// The outbox table is ensured here, before <c>BEGIN</c>, so no write inside the unit ever runs DDL on its connection —
     /// which SQLite would refuse inside a pending transaction.
+    /// </para>
     /// </remarks>
     internal async Task<WriteUnit> OpenUnitAsync(
         AlvoContext context, AlvoTransactionOptions options, IServiceScopeFactory scopes, CancellationToken cancellationToken)
@@ -2565,6 +2694,7 @@ internal sealed partial class EfAlvoData
         var root = _contexts.Create();
         try
         {
+            await root.Database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
             await EnsureOutboxTableAsync(root, cancellationToken).ConfigureAwait(false);
             return await BegunAsync(root, context, options, scopes, cancellationToken).ConfigureAwait(false);
         }
@@ -2616,7 +2746,7 @@ Expected: PASS. `ChangeTrackerReachTests.Every_allow_listed_file_still_exists` f
 ```bash
 dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/WriteUnit.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.Units.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/WriteUnitTests.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/WritePathWorld.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/ChangeTrackerReachTests.cs
 scripts/test-ring0
-git add src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/WriteUnit.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.Units.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/WriteUnitTests.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/WritePathWorld.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/ChangeTrackerReachTests.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj
+git add stryker-config.data-ef-core.json stryker-config.data-ef-rest.json src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/WriteUnit.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.Units.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/WriteUnitTests.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/WritePathWorld.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/ChangeTrackerReachTests.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj
 git commit -m "feat(ef): the write unit — one transaction, one turn, one scope, a deadline and poisoning
 
 Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
@@ -2627,13 +2757,14 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 ## Task 7: Every write site on one seam, and the data port refused inside a unit
 
 **Files:**
-- Create: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/TurnHeldTransaction.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/UnitSavepoint.cs`
-- Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.Units.cs`
-- Create (tests): `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/EfAlvoDataUnitRefusalTests.cs`
+- Create: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/TurnHeldTransaction.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/UnitSavepoint.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/StoreWrites.cs`
+- Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.Units.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/NoRelationalWriteGate.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/SerialRelationalWriteGate.cs`
+- Create (tests): `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/EfAlvoDataUnitRefusalTests.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/WriteGateUnitRefusalTests.cs`, `test/_shared/ef/UnitSavepointFacts.cs`, `test/MMLib.Alvo.Data.Sqlite.Tests/SqliteUnitSavepointTests.cs`, `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlUnitSavepointTests.cs`
+- Modify (tests): `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/BeforeHookTransactionArchitectureTests.cs` (Ruling 28), `test/MMLib.Alvo.Data.Sqlite.Tests/MMLib.Alvo.Data.Sqlite.Tests.csproj`, `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/MMLib.Alvo.Data.PostgreSql.Tests.Integration.csproj`
 
 **Interfaces:**
 - Consumes: Task 6's `WriteUnit`; Task 1's `AlvoFlow.RefuseInsideUnit`, `AlvoFlow.Unit`.
-- Produces: `internal sealed class TurnHeldTransaction(IDbContextTransaction transaction, IDisposable turn) : IDbContextTransaction, IInfrastructure<DbTransaction>`; `internal sealed class UnitSavepoint : IDbContextTransaction, IInfrastructure<DbTransaction> { internal static Task<UnitSavepoint> JoinAsync(AlvoDataContext db, WriteUnit unit, CancellationToken cancellationToken); }`; in `EfAlvoData`: `private AlvoDataContext ContextFor(WriteUnit? unit)`, `private Task<IDbContextTransaction> BeginAsync(AlvoDataContext db, WriteUnit? unit, CancellationToken)`, `private static Task<IDbContextTransaction?> ReadScopeAsync(AlvoDataContext db, WriteUnit? unit, CancellationToken)`, `private IBeforeHookRunner Hooks`; the private write methods `CreatedAsync`, `UpdatedAsync`, `ReplacedAsync`, `ErasedAsync`, `BatchAsync`, `OneBatchAsync` take `WriteUnit? unit` before their token; new private `QueriedAsync(AlvoQuery, AlvoContext, WriteUnit?, CancellationToken)` and `GotAsync(string, Guid, AlvoContext, WriteUnit?, CancellationToken)`.
+- Produces: `internal sealed class TurnHeldTransaction(IDbContextTransaction transaction, IDisposable turn) : IDbContextTransaction, IInfrastructure<DbTransaction>`; `internal sealed class UnitSavepoint : IDbContextTransaction, IInfrastructure<DbTransaction> { internal static Task<UnitSavepoint> JoinAsync(AlvoDataContext db, WriteUnit unit, CancellationToken cancellationToken); }`; in `EfAlvoData`: `private AlvoDataContext ContextFor(WriteUnit? unit)`, `private Task<IDbContextTransaction> BeginAsync(AlvoDataContext db, WriteUnit? unit, CancellationToken)`, `private static Task<IDbContextTransaction?> ReadScopeAsync(AlvoDataContext db, WriteUnit? unit, CancellationToken)`, `private IBeforeHookRunner Hooks`; the private write methods `CreatedAsync`, `UpdatedAsync`, `ReplacedAsync`, `ErasedAsync`, `BatchAsync`, `OneBatchAsync` take `WriteUnit? unit` before their token; new private `QueriedAsync(AlvoQuery, AlvoContext, WriteUnit?, CancellationToken)`, `PageOfAsync(AlvoDataContext, AlvoQuery, PolicyDecision, AlvoContext, CancellationToken)`, `GotAsync(string, Guid, AlvoContext, WriteUnit?, CancellationToken)` and `private static Task ReleaseAsync(IDbContextTransaction?, CancellationToken)`; `internal static class StoreWrites { internal const string Call; internal static void RefuseInsideUnit(); }`; `public abstract class UnitSavepointFacts` (test/_shared/ef) with `protected abstract Task<IServiceProvider> StartAsync(SchemaModel schema, AlvoDescriptor descriptor);`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2650,18 +2781,35 @@ public sealed class EfAlvoDataUnitRefusalTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    public static TheoryData<string, Func<EfAlvoData, AlvoContext, Task>> EveryMember() => new()
+    private static readonly (string Member, Func<EfAlvoData, AlvoContext, Task> Call)[] _members =
+    [
+        ("IAlvoData.QueryAsync", (data, caller) => data.QueryAsync(new AlvoQuery { Entity = WritePathFixture.Entity }, caller, Ct)),
+        ("IAlvoData.GetAsync", (data, caller) => data.GetAsync(WritePathFixture.Entity, Guid.NewGuid(), caller, Ct)),
+        ("IAlvoData.CreateAsync", (data, caller) => data.CreateAsync(WritePathFixture.Entity, WritePathFixture.CreatePayload("x"), caller, cancellationToken: Ct)),
+        ("IAlvoData.UpdateAsync", (data, caller) => data.UpdateAsync(WritePathFixture.Entity, Guid.NewGuid(), Title("x"), caller, cancellationToken: Ct)),
+        ("IAlvoData.ReplaceAsync", (data, caller) => data.ReplaceAsync(WritePathFixture.Entity, Guid.NewGuid(), WritePathFixture.CreatePayload("x"), caller, cancellationToken: Ct)),
+        ("IAlvoData.DeleteAsync", (data, caller) => data.DeleteAsync(WritePathFixture.Entity, Guid.NewGuid(), caller, cancellationToken: Ct)),
+        ("IAlvoData.CreateManyAsync", (data, caller) => data.CreateManyAsync(WritePathFixture.Entity, [WritePathFixture.CreatePayload("x")], caller, cancellationToken: Ct)),
+        ("IAlvoData.UpdateManyAsync", (data, caller) => data.UpdateManyAsync(WritePathFixture.Entity, [new AlvoRowPatch(Guid.NewGuid(), Title("x"))], caller, cancellationToken: Ct)),
+        ("IAlvoData.DeleteManyAsync", (data, caller) => data.DeleteManyAsync(WritePathFixture.Entity, [Guid.NewGuid()], caller, cancellationToken: Ct)),
+    ];
+
+    public static TheoryData<string, Func<EfAlvoData, AlvoContext, Task>> EveryMember()
     {
-        { "IAlvoData.QueryAsync", (data, caller) => data.QueryAsync(new AlvoQuery { Entity = WritePathFixture.Entity }, caller, Ct) },
-        { "IAlvoData.GetAsync", (data, caller) => data.GetAsync(WritePathFixture.Entity, Guid.NewGuid(), caller, Ct) },
-        { "IAlvoData.CreateAsync", (data, caller) => data.CreateAsync(WritePathFixture.Entity, WritePathFixture.CreatePayload("x"), caller, cancellationToken: Ct) },
-        { "IAlvoData.UpdateAsync", (data, caller) => data.UpdateAsync(WritePathFixture.Entity, Guid.NewGuid(), Title("x"), caller, cancellationToken: Ct) },
-        { "IAlvoData.ReplaceAsync", (data, caller) => data.ReplaceAsync(WritePathFixture.Entity, Guid.NewGuid(), WritePathFixture.CreatePayload("x"), caller, cancellationToken: Ct) },
-        { "IAlvoData.DeleteAsync", (data, caller) => data.DeleteAsync(WritePathFixture.Entity, Guid.NewGuid(), caller, cancellationToken: Ct) },
-        { "IAlvoData.CreateManyAsync", (data, caller) => data.CreateManyAsync(WritePathFixture.Entity, [WritePathFixture.CreatePayload("x")], caller, cancellationToken: Ct) },
-        { "IAlvoData.UpdateManyAsync", (data, caller) => data.UpdateManyAsync(WritePathFixture.Entity, [new AlvoRowPatch(Guid.NewGuid(), Title("x"))], caller, cancellationToken: Ct) },
-        { "IAlvoData.DeleteManyAsync", (data, caller) => data.DeleteManyAsync(WritePathFixture.Entity, [Guid.NewGuid()], caller, cancellationToken: Ct) },
-    };
+        var rows = new TheoryData<string, Func<EfAlvoData, AlvoContext, Task>>();
+        foreach (var (member, call) in _members)
+        {
+            rows.Add(member, call);
+        }
+
+        return rows;
+    }
+
+    /// <summary>A tenth member of the port cannot ship without its refusal row (Ruling 39).</summary>
+    [Fact]
+    public void The_refusal_rows_name_every_member_of_the_port()
+        => _members.Select(row => row.Member).ShouldBe(
+            typeof(IAlvoData).GetMethods().Select(method => "IAlvoData." + method.Name).Distinct(), ignoreOrder: true);
 
     [Theory]
     [MemberData(nameof(EveryMember))]
@@ -2727,10 +2875,237 @@ public sealed class EfAlvoDataUnitRefusalTests
 }
 ```
 
+`test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/WriteGateUnitRefusalTests.cs` (Ruling 33):
+
+```csharp
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+
+namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
+
+/// <summary>
+/// Every framework store that writes — the outbox, the deliveries, secrets, descriptor versions, the runtime schema, the
+/// management idempotency record — waits at the database's write gate first; inside an open unit the gate refuses, so no
+/// store write can wait for the unit's own turn on SQLite, nor commit beside the unit on PostgreSQL.
+/// </summary>
+public sealed class WriteGateUnitRefusalTests
+{
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    public static TheoryData<string> Gates() => ["no-gate", "serial", "serial-bounded"];
+
+    [Theory]
+    [MemberData(nameof(Gates))]
+    public async Task A_store_write_inside_an_open_unit_is_refused_at_its_gate_and_fails_the_unit(string gate)
+    {
+        var unit = new OpenUnit();
+        using var _ = AlvoFlow.EnterUnit(unit, AlvoProvenance.None);
+
+        var refusal = await Should.ThrowAsync<AlvoUnitInProgressException>(async () => (await EnterAsync(gate))?.Dispose());
+
+        refusal.Message.ShouldStartWith(StoreWrites.Call);
+        unit.Poisoned.ShouldHaveSingleItem().ShouldBeSameAs(refusal);
+    }
+
+    [Theory]
+    [MemberData(nameof(Gates))]
+    public async Task A_store_write_outside_any_unit_enters(string gate)
+    {
+        using var turn = await EnterAsync(gate);
+
+        turn.ShouldNotBeNull();
+    }
+
+    private static async Task<IDisposable?> EnterAsync(string gate) => gate switch
+    {
+        "no-gate" => await NoRelationalWriteGate.Instance.EnterAsync(Ct),
+        "serial" => await new SerialRelationalWriteGate().EnterAsync(Ct),
+        _ => await new SerialRelationalWriteGate().TryEnterAsync(TimeSpan.FromSeconds(1), Ct),
+    };
+
+    private sealed class OpenUnit : IAlvoFlowUnit
+    {
+        private readonly List<Exception> _poisoned = [];
+
+        public bool IsOpen => true;
+
+        internal IReadOnlyList<Exception> Poisoned => _poisoned;
+
+        public void Poison(Exception failure) => _poisoned.Add(failure);
+    }
+}
+```
+
+`test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/BeforeHookTransactionArchitectureTests.cs` (Ruling 28): add the marker
+
+```csharp
+    /// <summary>
+    /// The write seam (HX-07). <c>BeginAsync</c> always answers an open transaction — the write's own, or its unit's under a
+    /// savepoint — so a pipeline call after it is inside one, exactly as after <see cref="TransactionOpened"/>.
+    /// </summary>
+    private const string SeamOpened = "BeginAsync(";
+```
+
+beside `TransactionOpened`; change `_markers` to `[TransactionOpened, PreImageRead, TransactionHeld, SeamOpened]`; and add two rows to `The_scan_reads_the_order_within_a_member` (each `false` row keeps a declaration line of its own, as the test's remarks require):
+
+```csharp
+    [InlineData("await using var transaction = await BeginAsync(db, unit, cancellationToken);\nRunBeforeCreate(db);", true)]
+    [InlineData("private Task X()\nRunBeforeCreate(db);\nawait using var transaction = await BeginAsync(db, unit, cancellationToken);", false)]
+```
+
+`The_scan_finds_the_call_sites_it_is_written_about` keeps its count of 8. (`"BeginAsync("` never matches `BeginTransactionAsync(`.)
+
+`test/_shared/ef/UnitSavepointFacts.cs` (Ruling 31):
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Data;
+using MMLib.Alvo.Data.EntityFrameworkCore;
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Schema;
+using Shouldly;
+using Xunit;
+using DescField = MMLib.Alvo.Descriptor.FieldType;
+using SchemaField = MMLib.Alvo.Schema.FieldType;
+
+namespace MMLib.Alvo.Tests.Ef;
+
+/// <summary>
+/// A unit's savepoint disposed without being committed takes back what its call already wrote, and the unit goes on — on
+/// whichever engine the deriving class supplies. The case EF's own <c>__EFSavePoint</c> cannot cover: the insert's
+/// <c>SaveChanges</c> succeeded, so EF released its savepoint before anything failed.
+/// </summary>
+public abstract class UnitSavepointFacts
+{
+    private const string Entity = "codes";
+
+    private static readonly AlvoContext _caller = new() { User = UserId.New(), Roles = new HashSet<Role> { Role.Authenticated } };
+
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    /// <summary>Boots a host over <paramref name="schema"/> and <paramref name="descriptor"/> and answers its services.</summary>
+    protected abstract Task<IServiceProvider> StartAsync(SchemaModel schema, AlvoDescriptor descriptor);
+
+    [Fact]
+    public async Task A_savepoint_disposed_without_commit_takes_its_insert_back_and_the_unit_goes_on()
+    {
+        var services = await StartAsync(Schema(), Descriptor());
+        var data = (EfAlvoData)services.GetRequiredService<IAlvoData>();
+        var contexts = services.GetRequiredService<AlvoDataContextFactory>();
+        await using var unit = await data.OpenUnitAsync(_caller, new AlvoTransactionOptions(), services.GetRequiredService<IServiceScopeFactory>(), Ct);
+
+        await unit.RunAsync(
+            async ct =>
+            {
+                await InsertAsync(contexts, unit, "undone", commit: false, ct);
+                await InsertAsync(contexts, unit, "kept", commit: true, ct);
+                return true;
+            },
+            Ct);
+        await unit.CommitAsync(Ct);
+
+        var page = await data.QueryAsync(new AlvoQuery { Entity = Entity }, _caller, Ct);
+        page.Items.Select(row => (string)row["code"]!).ShouldBe(["kept"]);
+    }
+
+    private static async Task InsertAsync(AlvoDataContextFactory contexts, WriteUnit unit, string code, bool commit, CancellationToken ct)
+    {
+        using var db = contexts.Create();
+        db.Database.SetDbConnection(unit.Connection, contextOwnsConnection: false);
+        await using var savepoint = await UnitSavepoint.JoinAsync(db, unit, ct);
+        db.Rows(Entity).Add(new Dictionary<string, object>(StringComparer.Ordinal) { ["id"] = Guid.NewGuid(), ["code"] = code });
+        await db.SaveChangesAsync(ct);
+        if (commit)
+        {
+            await savepoint.CommitAsync(ct);
+        }
+    }
+
+    private static SchemaModel Schema() => new([
+        new EntitySchema
+        {
+            Name = Entity,
+            Tenancy = TenancyMode.Global,
+            Fields =
+            [
+                new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true },
+                new FieldSchema { Name = "code", Type = SchemaField.String, Required = true, MaxLength = 40 },
+            ],
+        },
+    ]);
+
+    private static AlvoDescriptor Descriptor() => new()
+    {
+        ApiVersion = "alvo.dev/v1",
+        Name = "unit-savepoint-fixture",
+        Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
+        {
+            [Entity] = new EntityDescriptor
+            {
+                Tenancy = EntityTenancy.Global,
+                Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+                {
+                    ["code"] = new() { Type = DescField.String, Required = true, MaxLength = 40 },
+                },
+                Rules = new AccessRules { List = "true", Get = "true", Create = "true" },
+            },
+        },
+    };
+}
+```
+
+`test/MMLib.Alvo.Data.Sqlite.Tests/SqliteUnitSavepointTests.cs`:
+
+```csharp
+using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Schema;
+using MMLib.Alvo.Tests.Ef;
+
+namespace MMLib.Alvo.Data.Sqlite.Tests;
+
+/// <summary>SQLite's leg of the savepoint facts.</summary>
+public sealed class SqliteUnitSavepointTests : UnitSavepointFacts, IAsyncDisposable
+{
+    private readonly SqliteAlvoDataFixture _fixture = new();
+
+    protected override async Task<IServiceProvider> StartAsync(SchemaModel schema, AlvoDescriptor descriptor) =>
+        (await _fixture.StartAsync(schema, descriptor)).Services;
+
+    public ValueTask DisposeAsync() => _fixture.DisposeAsync();
+}
+```
+
+`test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlUnitSavepointTests.cs`:
+
+```csharp
+using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Schema;
+using MMLib.Alvo.Tests.Ef;
+using Xunit;
+
+namespace MMLib.Alvo.Data.PostgreSql.Tests.Integration;
+
+/// <summary>PostgreSQL's leg of the savepoint facts — where a savepoint left un-rolled-back would leave the insert in the unit.</summary>
+public sealed class PostgreSqlUnitSavepointTests : UnitSavepointFacts, IAsyncLifetime
+{
+    private readonly PostgreSqlAlvoDataFixture _fixture = new();
+
+    public ValueTask InitializeAsync() => _fixture.InitializeAsync();
+
+    protected override async Task<IServiceProvider> StartAsync(SchemaModel schema, AlvoDescriptor descriptor) =>
+        (await _fixture.StartAsync(schema, descriptor)).Services;
+
+    public ValueTask DisposeAsync() => _fixture.DisposeAsync();
+}
+```
+
+In both `MMLib.Alvo.Data.Sqlite.Tests.csproj` and `MMLib.Alvo.Data.PostgreSql.Tests.Integration.csproj`, beside the `_shared/ef/OutboxTableFacts.cs` include, add `<Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/UnitSavepointFacts.cs" Link="_shared/UnitSavepointFacts.cs" />`. (`SaveChangesAsync` in a test file is outside `ChangeTrackerReachTests`' reach: it scans the data packages' `src` only.)
+
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `dotnet test --project test/MMLib.Alvo.Data.EntityFrameworkCore.Tests --filter-class '*EfAlvoDataUnitRefusalTests'`
-Expected: FAIL — every member runs (or fails on a missing row) instead of throwing `AlvoUnitInProgressException`.
+Run: `dotnet test --project test/MMLib.Alvo.Data.EntityFrameworkCore.Tests --filter-class '*EfAlvoDataUnitRefusalTests' --filter-class '*WriteGateUnitRefusalTests'`
+Expected: FAIL — every member runs (or fails on a missing row) instead of throwing `AlvoUnitInProgressException`, the gates enter, and `UnitSavepoint`/`StoreWrites` do not exist yet.
 
 - [ ] **Step 3: Write the two transaction shapes**
 
@@ -2800,15 +3175,16 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
 /// <summary>
 /// One call joined to a unit's transaction under a savepoint of its own: committing it releases the savepoint, and ending it
-/// any other way — an exception, or a refused batch that returns without committing — rolls back to it.
+/// any other way — an exception, or a return without committing — rolls back to it.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>Why every call gets one (spec 2026-10-14 §4.5, §6.1).</b> On PostgreSQL a failed statement aborts the whole
 /// transaction (<c>25P02</c>) until a rollback to a savepoint; on SQLite a constraint error rolls back only its statement.
 /// A savepoint per call makes "a failed call undoes itself and the unit goes on" true on both. EF's own
-/// <c>__EFSavePoint</c> around <c>SaveChanges</c> does not cover the <c>ExecuteUpdate</c>/<c>ExecuteDelete</c> and raw
-/// statements of the update and delete paths, so it is not enough on its own.
+/// <c>__EFSavePoint</c> around <c>SaveChanges</c> recovers an insert that fails inside <c>SaveChanges</c>, and nothing
+/// else: not the <c>ExecuteUpdate</c>/<c>ExecuteDelete</c> and raw statements of the update and delete paths, and not a
+/// statement that fails after a successful <c>SaveChanges</c> — EF has released its savepoint by then (Rulings 29, 31).
 /// </para>
 /// <para>
 /// <b>Committing never commits the unit.</b> The joined EF transaction does not own the unit's <see cref="DbTransaction"/>;
@@ -2942,6 +3318,58 @@ internal sealed class UnitSavepoint : IDbContextTransaction, IInfrastructure<DbT
 }
 ```
 
+`src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/StoreWrites.cs` (Ruling 33):
+
+```csharp
+namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+
+/// <summary>
+/// The refusal every framework store's write meets inside an open transaction unit, at the one place they all pass — the
+/// database's write gate.
+/// </summary>
+/// <remarks>
+/// <c>IOutboxStore</c>, <c>IDeliveryStore</c>, the secret, descriptor-version, runtime-schema and management-idempotency
+/// stores are public and DI-registered, so host code can reach them. Inside a unit such a write would run on its own
+/// connection: on SQLite it would wait for the unit's own write turn and then commit beside the unit after its deadline;
+/// on PostgreSQL it would commit beside the unit at once. Refusing at the gate fails closed for every store that writes,
+/// present and future, on every engine. A unit takes its own turn before it is on the flow, and the writes inside it never
+/// ask again, so the refusal never meets a unit's own work. A store's reads take no turn and are not refused: they commit
+/// nothing.
+/// </remarks>
+internal static class StoreWrites
+{
+    /// <summary>The refused call, as the refusal names it.</summary>
+    internal const string Call =
+        "A framework store's write (IOutboxStore, IDeliveryStore, or a secret, descriptor-version, runtime-schema or management-idempotency store)";
+
+    /// <summary>Refuses a store write made while a unit is open on this flow, and fails the unit.</summary>
+    internal static void RefuseInsideUnit() => AlvoFlow.RefuseInsideUnit(Call);
+}
+```
+
+`src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/NoRelationalWriteGate.cs` — replace `EnterAsync` with:
+
+```csharp
+    /// <inheritdoc/>
+    public ValueTask<IDisposable> EnterAsync(CancellationToken cancellationToken)
+    {
+        StoreWrites.RefuseInsideUnit();
+        return ValueTask.FromResult(_turn);
+    }
+```
+
+`src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/SerialRelationalWriteGate.cs` — call `StoreWrites.RefuseInsideUnit();` as the first statement of `EnterAsync`, and turn `TryEnterAsync` into a block body that does the same before waiting:
+
+```csharp
+    internal async ValueTask<IDisposable?> TryEnterAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        StoreWrites.RefuseInsideUnit();
+        return await _turn.WaitAsync(timeout, cancellationToken).ConfigureAwait(false) ? new Turn(_turn) : null;
+    }
+```
+
+(SQLite's `SqliteWriteGate` waits through `TryEnterAsync`, so it is covered without the SQLite package — which holds no grant to Abstractions' internals — touching `AlvoFlow`.) Add to `IRelationalWriteGate`'s remarks: "<b>Inside an open transaction unit every gate refuses</b> (<c>StoreWrites</c>): a unit holds the turn for its whole run, and a write that waited for it would commit beside the unit."
+
 - [ ] **Step 4: Put the seam into `EfAlvoData`**
 
 Append to `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.Units.cs` (inside the class; add `using Microsoft.EntityFrameworkCore.Storage;` and `using MMLib.Alvo.Rules;`):
@@ -2999,6 +3427,17 @@ Append to `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.Units.cs`
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     private static async Task<IDbContextTransaction?> ReadScopeAsync(AlvoDataContext db, WriteUnit? unit, CancellationToken cancellationToken) =>
         unit is null ? null : await UnitSavepoint.JoinAsync(db, unit, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>Releases a read's savepoint once the read succeeded, so the unit's savepoint stack does not grow with every read (Ruling 34).</summary>
+    /// <param name="joined">The read's savepoint, or <see langword="null"/> for a top-level read.</param>
+    /// <param name="cancellationToken">A token to cancel the release.</param>
+    private static async Task ReleaseAsync(IDbContextTransaction? joined, CancellationToken cancellationToken)
+    {
+        if (joined is not null)
+        {
+            await joined.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
 ```
 
 Then edit `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.cs`:
@@ -3202,6 +3641,16 @@ The five idempotent or replay sites (`CreatedOrReplayedAsync`, `UpdatedOrReplaye
 
         using var db = ContextFor(unit);
         await using var joined = await ReadScopeAsync(db, unit, cancellationToken);
+        var page = await PageOfAsync(db, query, decision, context, cancellationToken);
+        await ReleaseAsync(joined, cancellationToken);
+
+        return page;
+    }
+
+    /// <summary>The page itself, read on <paramref name="db"/> — joined to a unit or not.</summary>
+    private async Task<AlvoPage> PageOfAsync(
+        AlvoDataContext db, AlvoQuery query, PolicyDecision decision, AlvoContext context, CancellationToken cancellationToken)
+    {
         var entity = Entity(db, query.Entity);
         QueryFieldGuard.EnsureAvailable(QueryFields(query), entity, decision.HiddenFields);
 
@@ -3248,6 +3697,8 @@ The five idempotent or replay sites (`CreatedOrReplayedAsync`, `UpdatedOrReplaye
         using var db = ContextFor(unit);
         await using var joined = await ReadScopeAsync(db, unit, cancellationToken);
         var row = await SingleAsync(db, Entity(db, entity), decision, context, id, lockFor: null, cancellationToken);
+        await ReleaseAsync(joined, cancellationToken);
+
         return row is null ? null : RecordMaterializer.ToRecord(row, decision.HiddenFields, FrozenSet<string>.Empty);
     }
 ```
@@ -3263,15 +3714,16 @@ The five idempotent or replay sites (`CreatedOrReplayedAsync`, `UpdatedOrReplaye
 
 - [ ] **Step 5: Run the tests to verify they pass, and that nothing outside a unit moved**
 
-Run: `dotnet test --project test/MMLib.Alvo.Data.EntityFrameworkCore.Tests` (the whole module: `EfAlvoDataUnitRefusalTests`, `WriteUnitTests`, `ChangeTrackerReachTests`, the statement and write-path suites) and `dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests` (every `SqliteAlvoData*Tests` leg, `SqliteAlvoDataStatementTests`, the SQL snapshot)
+Run: `dotnet test --project test/MMLib.Alvo.Data.EntityFrameworkCore.Tests` (the whole module: `EfAlvoDataUnitRefusalTests`, `WriteGateUnitRefusalTests`, `WriteUnitTests`, `ChangeTrackerReachTests`, `BeforeHookTransactionArchitectureTests` with its two new rows, the statement and write-path suites), `dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests` (every `SqliteAlvoData*Tests` leg, `SqliteAlvoDataStatementTests`, the SQL snapshot, `SqliteUnitSavepointTests`, `SqliteWriteGateTests`) and `dotnet test --project test/MMLib.Alvo.Data.PostgreSql.Tests.Integration --filter-class '*PostgreSqlUnitSavepointTests' --filter-class '*PostgreSqlWriteGateTests'` (Docker)
 Expected: PASS, with **no** `*.received.*` file anywhere: a top-level write's statements are byte-identical.
 
 - [ ] **Step 6: Format, ring0, commit**
 
 ```bash
-dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/TurnHeldTransaction.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/UnitSavepoint.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.Units.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/EfAlvoDataUnitRefusalTests.cs
+FILES="src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/TurnHeldTransaction.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/UnitSavepoint.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/StoreWrites.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/NoRelationalWriteGate.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/SerialRelationalWriteGate.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/IRelationalWriteGate.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.Units.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/EfAlvoDataUnitRefusalTests.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/WriteGateUnitRefusalTests.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/BeforeHookTransactionArchitectureTests.cs test/_shared/ef/UnitSavepointFacts.cs test/MMLib.Alvo.Data.Sqlite.Tests/SqliteUnitSavepointTests.cs test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlUnitSavepointTests.cs"
+dotnet format whitespace MMLib.Alvo.slnx --include $FILES
 scripts/test-ring0
-git add src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/TurnHeldTransaction.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/UnitSavepoint.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.cs src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.Units.cs test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/EfAlvoDataUnitRefusalTests.cs
+git add $FILES test/MMLib.Alvo.Data.Sqlite.Tests/MMLib.Alvo.Data.Sqlite.Tests.csproj test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/MMLib.Alvo.Data.PostgreSql.Tests.Integration.csproj
 git commit -m "refactor(ef): every write site on one seam; the data port is refused inside a unit
 
 Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
@@ -3314,6 +3766,12 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 /// <see cref="EfAlvoTransactions"/> over SQLite in memory (spec 2026-10-14 §4.5): what commits together, what a savepoint
 /// undoes, what poisons, what is refused, and the unit's scope. The both-engine facts are <c>TransactionFacts</c>.
 /// </summary>
+/// <remarks>
+/// Outside a unit this world's writes run its <c>StubBeforeHookRunner</c>; inside one they run whatever the unit's scope
+/// resolves — <c>AddAlvo</c>'s real runner here — so a patch set on <c>world.Hooks</c> does not reach a write inside a unit
+/// (Ruling 42). A batch the rules refuse is not tested for its rollback here: it writes nothing before it refuses
+/// (Ruling 31), so `UnitSavepointFacts` holds that branch.
+/// </remarks>
 public sealed class EfAlvoTransactionsTests
 {
     private static readonly string _outbox = OutboxTable.NameFor(new AlvoOptions().SchemaPrefix);
@@ -3401,23 +3859,6 @@ public sealed class EfAlvoTransactionsTests
         }, cancellationToken: Ct);
 
         (await world.ScalarAsync("""SELECT COUNT(*) FROM "note" WHERE "title" LIKE 'b%'""")).ShouldBe(0L);
-        (await NotesAsync(world)).ShouldBe(1L);
-    }
-
-    [Fact]
-    public async Task A_refused_batch_leaves_none_of_its_rows_and_the_unit_goes_on()
-    {
-        await using var world = await StartAsync(WritePathFixture.Descriptor(create: "title != 'blocked'"));
-
-        var refused = await world.Transactions.TransactAsync(world.Caller, async (unit, ct) =>
-        {
-            var result = await unit.CreateManyAsync(
-                WritePathFixture.Entity, [WritePathFixture.CreatePayload("fine"), WritePathFixture.CreatePayload("blocked")], ct);
-            await unit.CreateAsync(WritePathFixture.Entity, WritePathFixture.CreatePayload("after"), ct);
-            return result;
-        }, cancellationToken: Ct);
-
-        refused.Succeeded.ShouldBeFalse();
         (await NotesAsync(world)).ShouldBe(1L);
     }
 
@@ -3969,7 +4410,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 **Interfaces:**
 - Consumes: HX-05's `RecordShape`, `MappedProperty`, `EnumMap.ValueOf`, `LambdaShape.Unwrapped`/`RecordKey`, `TypedEntity.NameOf<T>`/`Query<T>`, `AlvoRecordExtensions.As<T>()`; Task 1's `IAlvoTransaction : IAlvoSession` (so every extension works on a unit).
-- Produces: `public interface IAlvoPatch<T> where T : class { IReadOnlyDictionary<string, object?> Values { get; } IAlvoPatch<T> Set<TValue>(Expression<Func<T, TValue>> field, TValue value); }`; `public static class AlvoPatch { public static IAlvoPatch<T> For<T>() where T : class; }`; `public static class AlvoTypedWriteExtensions` with `Task<T?> CreateAsync<T>(this IAlvoSession, T record, CancellationToken = default)`, `Task<T?> UpdateAsync<T>(this IAlvoSession, Guid id, IAlvoPatch<T> patch, AlvoPrecondition? precondition = null, CancellationToken = default)`, `Task<T?> ReplaceAsync<T>(this IAlvoSession, Guid id, T record, AlvoPrecondition? precondition = null, CancellationToken = default)`, `Task<bool> ExistsAsync<T>(this IAlvoSession, Expression<Func<T, bool>> where, CancellationToken = default)`; internal `RecordWriter.Values<T>(T)`, `RecordWriter.Field(MappedProperty, object?)`, `RecordWriter.IsWritten(string)`, `RecordWriter.Readable<T>(AlvoRecord)`.
+- Produces: `public interface IAlvoPatch<T> where T : class { IReadOnlyDictionary<string, object?> Values { get; } IAlvoPatch<T> Set<TValue>(Expression<Func<T, TValue>> field, TValue value); }`; `public static class AlvoPatch { public static IAlvoPatch<T> For<T>() where T : class; }`; `public static class AlvoTypedWriteExtensions` with `Task<T?> CreateAsync<T>(this IAlvoSession, T record, CancellationToken = default)`, `Task<T?> UpdateAsync<T>(this IAlvoSession, Guid id, IAlvoPatch<T> patch, AlvoPrecondition? precondition = null, CancellationToken = default)`, `Task<T?> ReplaceAsync<T>(this IAlvoSession, Guid id, T record, AlvoPrecondition? precondition = null, CancellationToken = default)`, `Task<bool> ExistsAsync<T>(this IAlvoSession, Expression<Func<T, bool>> where, CancellationToken = default)`; internal `RecordWriter.Values<T>(T record, bool isCreate)`, `RecordWriter.Field(MappedProperty, object?)`, `RecordWriter.IsWritten(string field, bool isUpdate)`, `RecordWriter.Readable<T>(AlvoRecord)`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -4009,6 +4450,24 @@ public sealed class TypedWriteTests
         sent["total"].ShouldBe(12.5m);
         sent.ShouldNotContainKey("id");
         sent.ShouldNotContainKey("summary");
+        sent.ShouldNotContainKey("owner_id");
+    }
+
+    [Fact]
+    public async Task A_typed_create_leaves_out_a_null_property_so_its_descriptor_default_applies()
+    {
+        var session = Substitute.For<IAlvoSession>();
+        IReadOnlyDictionary<string, object?>? sent = null;
+        session.CreateAsync("orders", Arg.Do<IReadOnlyDictionary<string, object?>>(values => sent = values), Ct)
+            .Returns(Task.FromResult(OrderRecord()));
+
+        await session.CreateAsync(new Order { Note = "n" }, Ct);
+
+        sent.ShouldNotBeNull();
+        sent.Keys.ShouldNotContain("code");
+        sent.Keys.ShouldNotContain("due_at");
+        sent.Keys.ShouldNotContain("rank");
+        (sent["is_paid"], sent["quantity"]).ShouldBe(((object?)false, (object?)0L), "a non-nullable property's default is a value");
     }
 
     [Fact]
@@ -4087,7 +4546,8 @@ public sealed class TypedWriteTests
             .Returns(Task.FromResult(AlvoReplaceResult.ReplacedRow(OrderRecord())));
 
         (await session.ReplaceAsync(id, new Order { Note = "fragile" }, cancellationToken: Ct)).ShouldNotBeNull().Status.ShouldBe(OrderStatus.Approved);
-        await session.Received(1).ReplaceAsync("orders", id, Arg.Is<IReadOnlyDictionary<string, object?>>(values => !values.ContainsKey("id")), null, Ct);
+        await session.Received(1).ReplaceAsync(
+            "orders", id, Arg.Is<IReadOnlyDictionary<string, object?>>(values => !values.ContainsKey("id") && values.ContainsKey("owner_id") && values["owner_id"] == null), null, Ct);
     }
 
     [Fact]
@@ -4166,7 +4626,6 @@ public static class AlvoPatch
 `src/MMLib.Alvo/Data/Internal/RecordWriter.cs`:
 
 ```csharp
-using System.Collections.Frozen;
 using System.Globalization;
 
 namespace MMLib.Alvo.Data.Internal;
@@ -4178,18 +4637,22 @@ namespace MMLib.Alvo.Data.Internal;
 /// </summary>
 internal static class RecordWriter
 {
-    private static readonly FrozenSet<string> _managed = new[]
-    {
-        AlvoManagedColumns.Id, AlvoManagedColumns.CreatedAt, AlvoManagedColumns.CreatedBy,
-        AlvoManagedColumns.UpdatedAt, AlvoManagedColumns.UpdatedBy, AlvoManagedColumns.DeletedAt,
-    }.ToFrozenSet(StringComparer.Ordinal);
-
-    /// <summary>Whether a write sends <paramref name="field"/>: every field but the id and the audit and soft-delete columns.</summary>
-    internal static bool IsWritten(string field) => !_managed.Contains(field);
+    /// <summary>
+    /// Whether a write sends <paramref name="field"/>: never a column Alvo manages, except the one a caller may write — a
+    /// create's <c>tenant_id</c> — by the port's own rule (<see cref="AlvoManagedColumns.IsCallerWritable"/>).
+    /// </summary>
+    internal static bool IsWritten(string field, bool isUpdate) =>
+        !AlvoManagedColumns.All.Contains(field) || AlvoManagedColumns.IsCallerWritable(field, isUpdate);
 
     /// <summary>The fields <paramref name="record"/> writes: a wrapper's record, or a plain type's mapped properties.</summary>
+    /// <remarks>
+    /// A create leaves out every field whose value is <see langword="null"/>, so the field's descriptor default applies —
+    /// or, with none, the column stays empty — exactly as an untyped create that does not name the field. A replace sends
+    /// every field, <see langword="null"/> included, because it replaces the whole row. A non-nullable property's CLR
+    /// default (<c>0</c>, <see langword="false"/>, the first enum member) is a value, and is sent (Ruling 36).
+    /// </remarks>
     /// <exception cref="InvalidOperationException">The type has a mapping problem no descriptor can cure.</exception>
-    internal static Dictionary<string, object?> Values<T>(T record)
+    internal static Dictionary<string, object?> Values<T>(T record, bool isCreate)
         where T : class
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -4200,10 +4663,13 @@ internal static class RecordWriter
                 $"{shape.Name} cannot be written: {string.Join(" ", shape.Problems.Select(problem => problem.Message))}");
         }
 
-        return record is IAlvoEntity wrapper
-            ? wrapper.Record.Values.Where(pair => IsWritten(pair.Key)).ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal)
-            : shape.Properties.Where(property => IsWritten(property.Field))
-                .ToDictionary(property => property.Field, property => Field(property, property.Property.GetValue(record)), StringComparer.Ordinal);
+        var fields = record is IAlvoEntity wrapper
+            ? wrapper.Record.Values.Select(pair => (Name: pair.Key, Value: pair.Value))
+            : shape.Properties.Select(property => (Name: property.Field, Value: Field(property, property.Property.GetValue(record))));
+
+        return fields
+            .Where(field => IsWritten(field.Name, isUpdate: !isCreate) && !(isCreate && field.Value is null))
+            .ToDictionary(field => field.Name, field => field.Value, StringComparer.Ordinal);
     }
 
     /// <summary>One property's value as its field holds it.</summary>
@@ -4281,7 +4747,7 @@ internal sealed class TypedPatch<T> : IAlvoPatch<T>
             nameof(field));
     }
 
-    private static string Writable(string name) => RecordWriter.IsWritten(name)
+    private static string Writable(string name) => RecordWriter.IsWritten(name, isUpdate: true)
         ? name
         : throw new ArgumentException($"'{name}' is managed by Alvo and cannot be patched.", "field");
 }
@@ -4302,9 +4768,10 @@ namespace MMLib.Alvo.Data;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A write sends every mapped property except the fields Alvo manages (<c>id</c>, the audit columns, <c>deleted_at</c>): an
-/// enum member as its declared value, a whole number as a <see cref="long"/>. A wrapper (<see cref="IAlvoEntity"/>) sends its
-/// record. An <see cref="IAlvoTransaction"/> is a session, so each of these runs inside its unit too.
+/// A write sends every mapped property except the fields Alvo manages (<c>id</c>, the audit columns, <c>deleted_at</c>; and
+/// <c>tenant_id</c> on a replace): an enum member as its declared value, a whole number as a <see cref="long"/>. A create
+/// leaves out a property that is <see langword="null"/>, so the field's descriptor default applies; a replace sends it.
+/// A wrapper (<see cref="IAlvoEntity"/>) sends its record. An <see cref="IAlvoTransaction"/> is a session, so each of these runs inside its unit too.
 /// </para>
 /// <para>
 /// Each write answers the stored record as the caller's own read would return it, as <typeparamref name="T"/> — or
@@ -4324,7 +4791,7 @@ public static class AlvoTypedWriteExtensions
         where T : class
     {
         ArgumentNullException.ThrowIfNull(session);
-        var stored = await session.CreateAsync(TypedEntity.NameOf<T>(), RecordWriter.Values(record), cancellationToken).ConfigureAwait(false);
+        var stored = await session.CreateAsync(TypedEntity.NameOf<T>(), RecordWriter.Values(record, isCreate: true), cancellationToken).ConfigureAwait(false);
 
         return RecordWriter.Readable<T>(stored);
     }
@@ -4367,7 +4834,7 @@ public static class AlvoTypedWriteExtensions
         where T : class
     {
         ArgumentNullException.ThrowIfNull(session);
-        var result = await session.ReplaceAsync(TypedEntity.NameOf<T>(), id, RecordWriter.Values(record), precondition, cancellationToken).ConfigureAwait(false);
+        var result = await session.ReplaceAsync(TypedEntity.NameOf<T>(), id, RecordWriter.Values(record, isCreate: false), precondition, cancellationToken).ConfigureAwait(false);
 
         return RecordWriter.Readable<T>(result.Row);
     }
@@ -4458,6 +4925,8 @@ using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
 
+using Microsoft.Extensions.Time.Testing;
+
 using System.Collections.Concurrent;
 
 namespace MMLib.Alvo.TestHost.Tests;
@@ -4491,6 +4960,7 @@ public abstract class TransactionFacts
 {
     private const string LedgerDesk = "ledger-desk.alvo.json";
     private static readonly TimeSpan _immediately = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _pastTheDeadline = TimeSpan.FromSeconds(2);
 
     protected static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -4560,6 +5030,56 @@ public abstract class TransactionFacts
     }
 
     [Fact]
+    public async Task A_caught_unique_violation_on_an_update_lets_the_unit_go_on_and_commit()
+    {
+        await using var alvo = await StartAsync();
+        var clerk = Clerk(Guid.NewGuid());
+        await alvo.Data.CreateAsync("invoices", Invoice(clerk, "V-1"), clerk, cancellationToken: Ct);
+        var second = await alvo.Data.CreateAsync("invoices", Invoice(clerk, "V-2"), clerk, cancellationToken: Ct);
+
+        await Transactions(alvo).TransactAsync(clerk, async (unit, ct) =>
+        {
+            var taken = await Should.ThrowAsync<AlvoConstraintViolationException>(() => unit.UpdateAsync(
+                "invoices", (Guid)second["id"]!, new Dictionary<string, object?> { ["number"] = "V-1" }, cancellationToken: ct));
+            taken.Kind.ShouldBe(AlvoConstraintKind.Unique);
+            await unit.CreateAsync("invoices", Invoice(clerk, "V-3"), ct);
+        }, cancellationToken: Ct);
+
+        (await NumbersAsync(alvo, clerk)).ShouldBe(["V-1", "V-2", "V-3"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task A_text_test_in_the_first_unit_of_a_fresh_host_is_case_sensitive()
+    {
+        await using var alvo = await StartAsync();
+        var clerk = Clerk(Guid.NewGuid());
+
+        var (lower, exact) = await Transactions(alvo).TransactAsync(clerk, async (unit, ct) =>
+        {
+            await unit.CreateAsync("invoices", Invoice(clerk, "Abc-1"), ct);
+            return (await unit.ExistsAsync<LedgerInvoice>(x => x.Number.StartsWith("abc"), ct),
+                    await unit.ExistsAsync<LedgerInvoice>(x => x.Number.StartsWith("Abc"), ct));
+        }, cancellationToken: Ct);
+
+        (lower, exact).ShouldBe((false, true));
+    }
+
+    [Fact]
+    public async Task A_store_write_inside_a_unit_is_refused_at_once_with_no_side_write()
+    {
+        var events = new LedgerEvents();
+        await using var alvo = await StartAsync(events);
+        var clerk = Clerk(Guid.NewGuid());
+        var outbox = alvo.Services.GetRequiredService<IOutboxStore>();
+
+        await Should.ThrowAsync<AlvoUnitInProgressException>(() => Transactions(alvo).TransactAsync(clerk, (_, ct) =>
+            outbox.AppendAsync(ForgedClosing(), ct), cancellationToken: Ct).WaitAsync(_immediately, Ct));
+        await alvo.DrainEventsAsync(Ct);
+
+        events.Closed.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task A_caught_data_port_refusal_still_rolls_the_unit_back()
     {
         await using var alvo = await StartAsync();
@@ -4583,12 +5103,15 @@ public abstract class TransactionFacts
     [Fact]
     public async Task A_caught_timeout_still_rolls_the_unit_back()
     {
-        await using var alvo = await StartAsync();
+        var clock = new FakeTimeProvider();
+        await using var alvo = await StartAsync(time: clock);
         var clerk = Clerk(Guid.NewGuid());
+        var wrote = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        await Should.ThrowAsync<TimeoutException>(() => Transactions(alvo).TransactAsync(clerk, async (unit, ct) =>
+        var unitTask = Transactions(alvo).TransactAsync(clerk, async (unit, ct) =>
         {
             await unit.CreateAsync("invoices", Invoice(clerk, "P-3"), ct);
+            wrote.SetResult();
             try
             {
                 await Task.Delay(Timeout.InfiniteTimeSpan, ct);
@@ -4596,8 +5119,11 @@ public abstract class TransactionFacts
             catch (OperationCanceledException)
             {
             }
-        }, Short(), Ct));
+        }, Short(), Ct);
+        await wrote.Task.WaitAsync(_immediately, Ct);
+        clock.Advance(_pastTheDeadline);
 
+        await Should.ThrowAsync<TimeoutException>(() => unitTask);
         (await NumbersAsync(alvo, clerk)).ShouldBeEmpty();
     }
 
@@ -4719,22 +5245,29 @@ public abstract class TransactionFacts
     [Fact]
     public async Task A_unit_past_its_timeout_rolls_back()
     {
-        await using var alvo = await StartAsync();
+        var clock = new FakeTimeProvider();
+        await using var alvo = await StartAsync(time: clock);
         var clerk = Clerk(Guid.NewGuid());
+        var wrote = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        await Should.ThrowAsync<TimeoutException>(() => Transactions(alvo).TransactAsync(clerk, async (unit, ct) =>
+        var unitTask = Transactions(alvo).TransactAsync(clerk, async (unit, ct) =>
         {
             await unit.CreateAsync("invoices", Invoice(clerk, "T-1"), ct);
+            wrote.SetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, ct);
-        }, Short(), Ct));
+        }, Short(), Ct);
+        await wrote.Task.WaitAsync(_immediately, Ct);
+        clock.Advance(_pastTheDeadline);
 
+        await Should.ThrowAsync<TimeoutException>(() => unitTask);
         (await NumbersAsync(alvo, clerk)).ShouldBeEmpty();
     }
 
     [Fact]
     public async Task A_timed_out_unit_lets_go_of_the_database_before_its_delegate_returns()
     {
-        await using var alvo = await StartAsync();
+        var clock = new FakeTimeProvider();
+        await using var alvo = await StartAsync(time: clock);
         var clerk = Clerk(Guid.NewGuid());
         var wrote = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var stuck = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -4746,6 +5279,7 @@ public abstract class TransactionFacts
             await stuck.Task;
         }, Short(), Ct);
         await wrote.Task.WaitAsync(_immediately, Ct);
+        clock.Advance(_pastTheDeadline);
 
         await alvo.Data.CreateAsync("invoices", Invoice(clerk, "T-1"), clerk, cancellationToken: Ct).WaitAsync(TimeSpan.FromSeconds(20), Ct);
         stuck.SetResult();
@@ -4774,7 +5308,7 @@ public abstract class TransactionFacts
 
     protected abstract Task<TransactionDatabase> DatabaseAsync();
 
-    private async Task<AlvoTestHost> StartAsync(LedgerEvents? events = null)
+    private async Task<AlvoTestHost> StartAsync(LedgerEvents? events = null, TimeProvider? time = null)
     {
         var database = await DatabaseAsync();
         var log = events ?? new LedgerEvents();
@@ -4789,12 +5323,27 @@ public abstract class TransactionFacts
                 alvo.AddEventHandler(
                     "seen-closings", "ledger.closed", (AlvoRecord _, AlvoEventContext context) => log.Closed.Enqueue(context.Event));
             },
+            time,
             cancellationToken: Ct);
     }
 
     private static IAlvoTransactions Transactions(AlvoTestHost alvo) => alvo.Services.GetRequiredService<IAlvoTransactions>();
 
-    private static AlvoTransactionOptions Short() => new() { Timeout = TimeSpan.FromMilliseconds(1500) };
+    /// <summary>A one-second unit on the host's fake clock: the deadline passes when a fact advances it, never on a slow runner (Ruling 35).</summary>
+    private static AlvoTransactionOptions Short() => new() { Timeout = TimeSpan.FromSeconds(1) };
+
+    private static AlvoCustomEvent ForgedClosing() => AlvoCustomEvent.Create(new AlvoEvent
+    {
+        Id = Guid.CreateVersion7(),
+        Source = AlvoEvent.DefaultSource,
+        Type = "ledger.closed",
+        Time = DateTimeOffset.UtcNow,
+        Subject = "ledgers/1",
+        PartitionKey = "custom.event:ledgers/1",
+        AuthType = AlvoEventAuthType.Unauthenticated,
+        CorrelationId = "store-write",
+        Data = new AlvoEventData { Record = null },
+    });
 
     private static AlvoContext Clerk(Guid tenant) => Caller("clerk", tenant);
 
@@ -4926,7 +5475,7 @@ public sealed class PostgreSqlTransactionTests(PostgresFixture postgres)
 - [ ] **Step 2: Run both legs**
 
 Run: `dotnet test --project test/MMLib.Alvo.TestHost.Tests --filter-class '*SqliteTransactionTests'` and `dotnet test --project test/MMLib.Alvo.Data.PostgreSql.Tests.Integration --filter-class '*PostgreSqlTransactionTests'` (Docker)
-Expected: PASS, sixteen facts per engine. The two that only PostgreSQL can break: `A_caught_unique_violation_lets_the_unit_go_on_and_commit` (without the savepoint: `25P02 current transaction is aborted`) and `A_timed_out_unit_lets_go_of_the_database_before_its_delegate_returns` (the outside insert of the same number waits on the unit's uncommitted unique key until the deadline rolls it back). On SQLite the latter's outside write waits on the process write gate instead. A `WaitAsync` timeout in any `…refused_at_once…` fact means a refused call reached the database — that is R-B1 broken, not a slow machine.
+Expected: PASS, eighteen facts per engine. What each engine can break: `A_caught_unique_violation_on_an_update_lets_the_unit_go_on_and_commit` is the PostgreSQL fact for the unit savepoint — the failed `ExecuteUpdate` is outside EF's own `__EFSavePoint`, so without `UnitSavepoint` the transaction stays aborted (`25P02`) and `V-3` fails. `A_caught_unique_violation_lets_the_unit_go_on_and_commit` (an insert) is acceptance (2)'s literal row and passes on EF's own savepoint around `SaveChanges` — it does not test `UnitSavepoint` (Ruling 29). `A_text_test_in_the_first_unit_of_a_fresh_host_is_case_sensitive` is the SQLite fact for the unit's connection being opened through EF (Ruling 32). In `A_timed_out_unit_lets_go_of_the_database_before_its_delegate_returns` the outside insert of the same number waits — on PostgreSQL on the unit's uncommitted unique key, on SQLite on the process write gate — until the advanced fake clock's deadline rolls the unit back. A `WaitAsync` timeout in any `…refused_at_once…` fact means a refused call reached the database — that is R-B1 broken, not a slow machine.
 
 - [ ] **Step 3: Format, ring1, commit**
 
@@ -5206,13 +5755,13 @@ Expected: PASS (`SnippetCoverageTests` finds `InvoiceDesk` and `InvoiceDeskTests
 
 1. *When you need one* — an invoice and its lines and the event that says it was issued must exist together or not at all; `IAlvoData` commits each call on its own, so a failure between two calls leaves half. `IAlvoTransactions.TransactAsync(caller, (unit, ct) => …)` runs the delegate in one transaction unit; returning commits, throwing rolls back and rethrows. Resolve `IAlvoTransactions` from DI (the EF Core drivers register it; the in-memory reference does not). `<Code code={descriptor} lang="json" title="invoice-desk.alvo.json" />` and `<SourceExcerpt code={desk} from="public Task<Guid> IssueAsync" to="}, cancellationToken: cancellationToken);" title="InvoiceDesk.cs" />`.
 2. *What runs inside* — every call through `unit` runs as the caller: the same `create`/`update` rules and `WITH CHECK`, the same tenant scope, the declarative before-hooks and rollups, the same events. Reads (`GetAsync`, `QueryAsync`, typed `QueryAsync<T>`, `ExistsAsync<T>`) see the unit's own writes. Batches (`CreateManyAsync`, …) are all-or-nothing inside the unit too. `unit.AsSystem()` is the same unit acting as the system — in the caller's tenant only, never another.
-3. *A refused write does not end the unit* — each call runs under its own savepoint, so a refusal (403-kind authorization, a unique or reference violation, a failed precondition) undoes that call alone, on PostgreSQL as on SQLite; catch it and go on. `<SourceExcerpt code={desk} from="private static async Task<AlvoRecord> CreateInvoiceAsync" to="return await unit.CreateAsync(\"invoices\", InvoiceValues(number + \"-B\", total), ct);" title="InvoiceDesk.cs" />` (if the excerpt component cannot take the escaped quotes, end it at `catch (AlvoConstraintViolationException taken)`). A refused batch returns its refusals without throwing — decide yourself whether the unit goes on; `IssueAsync` throws, and the invoice goes with it.
-4. *What ends it* — an exception out of the delegate; and five failures that end it even when you catch them, because the unit's work can no longer be trusted: the unit's `Timeout`, the chain-depth limit, a cancelled call, two calls at once on one unit (await each before the next), and a call through another data port while it is open. Catching one of those does not let the unit commit: `TransactAsync` throws it.
-5. *Not inside a unit* — `IAlvoData`, an `IAlvoSession`, `IAlvoEvents.PublishAsync` and a nested `TransactAsync` throw `AlvoUnitInProgressException` at once while a unit is open on the same flow — they would run on a second connection, outside the unit (and on SQLite wait for the unit's own write lock). Use `unit` instead. `<SourceExcerpt code={tests} from="public async Task The_data_port_is_refused_inside_a_unit" to="refusal.Message.ShouldStartWith" title="InvoiceDeskTests.cs" />`. **No network inside a unit**: it holds row locks — on SQLite the database's one write lock — while it runs; call the payment provider or the VAT registry *before* `TransactAsync`, and act on its answer inside.
+3. *A refused write does not end the unit* — each call runs under its own savepoint, so a refusal (403-kind authorization, a unique or reference violation, a failed precondition) undoes that call alone, on PostgreSQL as on SQLite; catch it and go on. `<SourceExcerpt code={desk} from="private static async Task<AlvoRecord> CreateInvoiceAsync" to="return await unit.CreateAsync(\"invoices\", InvoiceValues(number + \"-B\", total), ct);" title="InvoiceDesk.cs" />` (if the excerpt component cannot take the escaped quotes, end it at `catch (AlvoConstraintViolationException taken)`). The same holds for an update or a delete that a unique or reference rule refuses. A refused batch returns its refusals without throwing, having written none of its rows — decide yourself whether the unit goes on; `IssueAsync` throws, and the invoice goes with it.
+4. *What ends it* — an exception out of the delegate; and five failures that end it even when you catch them, because the unit's work can no longer be trusted: the unit's `Timeout`, the chain-depth limit, a cancelled call, two calls at once on one unit (await each before the next), and a call through another data port while it is open. Catching one of those does not let the unit commit: `TransactAsync` throws it. A call you start and do not await before the delegate returns is not part of the unit.
+5. *Not inside a unit* — `IAlvoData`, an `IAlvoSession`, `IAlvoEvents.PublishAsync`, a nested `TransactAsync`, and any write through a framework store (`IOutboxStore`, `IDeliveryStore`, the secret store, …) throw `AlvoUnitInProgressException` at once while a unit is open on the same flow — they would run on a second connection, outside the unit (and on SQLite wait for the unit's own write lock). Use `unit` instead. The refusal follows .NET's execution context: work you hand to a queue or background service of your own, or start with the flow suppressed, escapes it — and runs outside the unit. `<SourceExcerpt code={tests} from="public async Task The_data_port_is_refused_inside_a_unit" to="refusal.Message.ShouldStartWith" title="InvoiceDeskTests.cs" />`. **No network inside a unit**: it holds row locks — on SQLite the database's one write lock — while it runs; call the payment provider or the VAT registry *before* `TransactAsync`, and act on its answer inside.
 6. *Events that commit with the writes* — `unit.PublishAsync(type, subject, data)` writes the event into the unit's transaction, so handlers see it only if the unit commits; every event of one unit carries one correlation id. `IAlvoEvents.PublishAsync` stays a single autocommit append, for an event that is not about a write.
-7. *Typed writes* — `unit.CreateAsync(new Invoice { … })`, `unit.UpdateAsync(id, AlvoPatch.For<Invoice>().Set(x => x.Paid, true))`, `unit.ReplaceAsync(id, record)`, `unit.ExistsAsync<Invoice>(x => …)` — on a unit and on any `IAlvoSession`. Alvo-managed fields (`id`, the audit columns) are never sent; an enum is written as its declared value. Each answers the record as the caller may read it back, or `null` when the caller's `get` rule does not return every field the class maps — the write happened either way. `<SourceExcerpt code={desk} from="public Task MarkPaidAsync" to="}, cancellationToken: cancellationToken);" title="InvoiceDesk.cs" />`.
+7. *Typed writes* — `unit.CreateAsync(new Invoice { … })`, `unit.UpdateAsync(id, AlvoPatch.For<Invoice>().Set(x => x.Paid, true))`, `unit.ReplaceAsync(id, record)`, `unit.ExistsAsync<Invoice>(x => …)` — on a unit and on any `IAlvoSession`. Alvo-managed fields (`id`, the audit columns; `tenant_id` on a replace) are never sent; an enum is written as its declared value. A typed **create leaves out a property that is `null`**, so the field's descriptor `default` applies — make it nullable to leave it to the default; a non-nullable property's `0`, `false` or first enum member is a value and is sent. A typed replace sends every field, `null` included. Each answers the record as the caller may read it back, or `null` when the caller's `get` rule does not return every field the class maps — the write happened either way. `<SourceExcerpt code={desk} from="public Task MarkPaidAsync" to="}, cancellationToken: cancellationToken);" title="InvoiceDesk.cs" />`.
 8. *Never retried, and no idempotency key* — the delegate runs once; a unique violation you do not catch surfaces at once. No call in a unit takes an idempotency key (a unit is never replayed); an `IAlvoData` write that carries one inside a unit is an `ArgumentException`.
-9. *Time limit* — `new AlvoTransactionOptions { Timeout = … }` (30 s unless set, at most one hour). At the deadline the delegate's token is cancelled, the unit rolls back as soon as no call is running and lets go of the database, and `TransactAsync` throws `TimeoutException` — even if the delegate ignores its token and goes on. The deadline runs on the host's `TimeProvider`, so a test with a fake clock decides when it passes. `SuppressHostHooks` (system context and a `Reason` only) is for maintenance that must skip host write hooks, which arrive with write hooks.
+9. *Time limit* — `new AlvoTransactionOptions { Timeout = … }` (30 s unless set, at most one hour). At the deadline the delegate's token is cancelled, the unit rolls back as soon as no call is running and lets go of the database, and `TransactAsync` throws `TimeoutException` — even if the delegate ignores its token and goes on. The deadline runs on the host's `TimeProvider`, so a test with a fake clock decides when it passes. `SuppressHostHooks` (system context and a `Reason` only) is for maintenance that must skip host write hooks, which arrive with write hooks. **Keep a unit small:** on PostgreSQL every writing call in a unit is a subtransaction (its savepoint), and past about 64 of them in one transaction the server's per-session subtransaction cache overflows, which slows snapshots for every session until the unit ends — write many rows with one batch call, not one call per row.
 10. *Text tests in typed queries* — `x.Number.StartsWith(prefix)`, `EndsWith`, `Contains(text)` match the text literally on every engine: a `%`, `_` or `\` in `prefix` matches itself. One-argument or `StringComparison.Ordinal` only. Link [Typed or CEL](/extending/typed-or-cel/#typed-reads).
 11. *Not yet* — write hooks receive the same unit as `write.Transaction`; commands get `ctx.TransactAsync`; a timer scheduled inside a unit joins it. Each arrives with its feature.
 
@@ -5220,7 +5769,7 @@ Expected: PASS (`SnippetCoverageTests` finds `InvoiceDesk` and `InvoiceDeskTests
 
 - [ ] **Step 3: Architecture docs, CHANGELOG, PLAN**
 
-`docs/architecture/data-path.md`, a new section **A transaction unit spans several writes (HX-07)** after *How `IAlvoData` reaches a host, and why it is a singleton*: the seam (`BeginAsync`: a top-level write takes the turn and its own transaction exactly as before — no savepoint, no extra statement; a unit's call joins the unit's `DbTransaction` with `UseTransactionAsync` on a context created on the unit's connection with `SetDbConnection`, under `alvo_unit_<n>`); why a savepoint per call (PostgreSQL `25P02`; SQLite statement-level rollback for constraints, whole-transaction rollback after `INTERRUPT`/`BUSY`/`IOERR`/`FULL`/`NOMEM`, so a failing rollback-to poisons); one call at a time; poisoning and its set; the deadline (host `TimeProvider`, abandon without waiting for the delegate, write turn released); R-B1 refuse-not-join and why (second connection, privilege mix, self-deadlock on PostgreSQL / 30 s busy wait on SQLite); the unit's DI scope and the hook runner resolved from it; `IAlvoTransactions` registered over the concrete `EfAlvoData`; the allow-list entry `EfAlvoData.Units.cs`. A second new section **Literal text tests escape `LIKE` and bind the escape**: the three operators, `LIKE @pattern ESCAPE @escape`, the escape set `\ % _ [` and why `[`, text fields only, off the wire, contract suite `AlvoDataLiteralTextTests` on three implementations. In *How `IAlvoData` reaches a host*, add a sentence: "`IAlvoTransactions` is the second singleton over the same instance."
+`docs/architecture/data-path.md`, a new section **A transaction unit spans several writes (HX-07)** after *How `IAlvoData` reaches a host, and why it is a singleton*: the seam (`BeginAsync`: a top-level write takes the turn and its own transaction exactly as before — no savepoint, no extra statement; a unit's call joins the unit's `DbTransaction` with `UseTransactionAsync` on a context created on the unit's connection with `SetDbConnection`, under `alvo_unit_<n>`); why a savepoint per call (PostgreSQL `25P02`; SQLite statement-level rollback for constraints, whole-transaction rollback after `INTERRUPT`/`BUSY`/`IOERR`/`FULL`/`NOMEM`, so a failing rollback-to poisons); one call at a time; poisoning and its set; the deadline (host `TimeProvider`, abandon without waiting for the delegate, write turn released); R-B1 refuse-not-join and why (second connection, privilege mix, self-deadlock on PostgreSQL / 30 s busy wait on SQLite); the unit's DI scope and the hook runner resolved from it; `IAlvoTransactions` registered over the concrete `EfAlvoData`; the allow-list entry `EfAlvoData.Units.cs`; nested calls under a running call (the `CallFrame` gate, Ruling 30); the unit's connection opened through EF so SQLite's `case_sensitive_like` interceptor runs (Ruling 32); every framework store refused at its write gate inside a unit (Ruling 33); read savepoints released, and PostgreSQL's subtransaction cache (`PGPROC_MAX_CACHED_SUBXIDS`, 64) as the reason to keep units small (Ruling 34); EF's `__EFSavePoint` covering only a failing `SaveChanges` (Ruling 29). A second new section **Literal text tests escape `LIKE` and bind the escape**: the three operators, `LIKE @pattern ESCAPE @escape`, the escape set `\ % _ [` and why `[`, text fields only, off the wire, contract suite `AlvoDataLiteralTextTests` on three implementations. In *How `IAlvoData` reaches a host*, add a sentence: "`IAlvoTransactions` is the second singleton over the same instance."
 
 `docs/architecture/events.md`: in the custom-events section, replace the bullet ending "**Deviation 88.**" with: "- **It is autocommit.** `IAlvoEvents.PublishAsync` appends with one statement of its own. Since HX-07 a host that needs its own writes and its event to commit together publishes through the unit — `IAlvoTransaction.PublishAsync` inside `TransactAsync` writes the same envelope (one builder, `AlvoCustomEnvelope`) into the unit's transaction — and `IAlvoEvents.PublishAsync` is refused while a unit is open on the flow. **Deviation 88, narrowed by spec 2026-10-14 X13.**" and in the line that cites "deviations 87 and 88", append "(88 narrowed by HX-07)".
 
@@ -5232,10 +5781,11 @@ Expected: PASS (`SnippetCoverageTests` finds `InvoiceDesk` and `InvoiceDeskTests
 
 In `docs/superpowers/specs/2026-10-14-host-extensibility-design.md`:
 
-1. After §4.5's last bullet (*Self-write*), add **HX-07 settled details.** — "Rulings and deviations taken while planning (1–27, verbatim from `docs/superpowers/plans/2026-10-29-hx-07-transactions.md`), so a later reader can tell a decision from an oversight. Where a ruling and §4.5 or §4.6 disagree, the ruling is what shipped." — followed by this plan's *Rulings and deviations* (1)–(27), numbered, verbatim.
+1. After §4.5's last bullet (*Self-write*), add **HX-07 settled details.** — "Rulings and deviations taken while planning (1–45, verbatim from `docs/superpowers/plans/2026-10-29-hx-07-transactions.md`; 28–45 from its review round), so a later reader can tell a decision from an oversight. Where a ruling and §4.5 or §4.6 disagree, the ruling is what shipped." — followed by this plan's *Rulings and deviations* (1)–(45), numbered, verbatim.
 2. In §4.3 *HX-05 settled details* (7), append: "— **Superseded by HX-07:** the three literal operators shipped (§4.5 *HX-07 settled details* (16)–(18))."
 3. In §5, append to the `IAlvoTransactions.TransactAsync<T>` row's notes: "`IAlvoTransaction : IAlvoSession`; a non-generic `TransactAsync` default member (§4.5 *HX-07 settled details* (3), (4))." and to the typed-writes row: "`AlvoPatch.For<T>()` added; the writes are `IAlvoSession` extensions returning `T?`, and `ExistsAsync<T>` takes a predicate (§4.5 *HX-07 settled details* (19))."
-4. In §4.6 *Who adds +1 (R-M2)*, after "A unit's nested write's depth = the unit's depth + 1." insert: "(A write through `TransactAsync`'s own `IAlvoTransaction` is at the unit's depth; "nested" is a write made under another write's stage — §4.5 *HX-07 settled details* (1).)"
+4. In §4.5's *Unit timeout* bullet, after "(default 30 s, top-level units use the same default)", insert: "— **not in HX-07:** the top-level clause is deferred to HX-09 (§4.5 *HX-07 settled details* (2), (43)); `TransactAsync` units carry the timeout." (Ruling 43.)
+5. In §4.6 *Who adds +1 (R-M2)*, after "A unit's nested write's depth = the unit's depth + 1." insert: "(A write through `TransactAsync`'s own `IAlvoTransaction` is at the unit's depth; "nested" is a write made under another write's stage — §4.5 *HX-07 settled details* (1).)"
 
 - [ ] **Step 5: Build the site, ring1, commit**
 
@@ -5258,17 +5808,18 @@ Expected: the site builds with link validation green (the new public types appea
 - [ ] **Step 1: CI-parity Release build, rings and the out-of-ring suites**
 
 ```bash
-docker run --rm -v "$PWD":/src -w /src mcr.microsoft.com/dotnet/sdk:10.0 sh -c 'dotnet build MMLib.Alvo.slnx -c Release -p:HUSKY=0 2>&1 | grep -E "error [A-Z]+[0-9]+" | sort -u'
-git clean -fdx -e .superpowers
+docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -e DOTNET_CLI_HOME=/tmp -v "$PWD":/src -w /src mcr.microsoft.com/dotnet/sdk:10.0 sh -c 'dotnet build MMLib.Alvo.slnx -c Release -p:HUSKY=0 2>&1 | grep -E "error [A-Z]+[0-9]+" | sort -u'
 ```
 
-Expected: no output (any `error CAxxxx`/`IDExxxx`/`RCSxxxx` is fixed in a `fix(…): …` commit and this step re-run — watch CA1031 on `WriteUnit.AbandonAsync` (suppressed with a justification), CA2213 on `WriteUnit._calls` (suppressed), CA1068 on token-last parameter order of the `…InUnitAsync` entries, CA2007 in the snippets, and CA1001 on `WriteUnit` should the analyzer not count `IAsyncDisposable` — then suppress it on the class with the justification "disposed by DisposeAsync: ending a unit rolls back a database transaction, which has no synchronous form here"). Then `scripts/test-ring0`, `scripts/test-ring1`, `scripts/test-ring2` (both engines: `PostgreSqlTransactionTests`, `PostgreSqlAlvoDataLiteralTextTests`, `PostgreSqlTypedLayerTests`, every `PostgreSqlAlvoData*Tests`), `scripts/test-admin-e2e` (whole — the dashboard writes through `IAlvoData`, whose registration now forwards), `(cd website && npm run build)`. Expected: all green. The OpenAPI document, the Vacuum ruleset and the TeaPie path set do not move (the wire allow-list is unchanged). The assistant eval is not run: no skill, tool or instruction changed.
+The container runs as you, so its `bin`/`obj` output is yours and nothing needs cleaning: no `git clean` (`-x` would remove ignored local state — `.claude/settings.local.json`, `website/node_modules`, the Husky install) (Ruling 37). Expected: no output (any `error CAxxxx`/`IDExxxx`/`RCSxxxx` is fixed in a `fix(…): …` commit and this step re-run — watch CA1031 on `WriteUnit.AbandonAsync` (suppressed with a justification), CA2213 on `WriteUnit._calls` (suppressed), CA1068 on token-last parameter order of the `…InUnitAsync` entries, CA2007 in the snippets, and CA1001 on `WriteUnit` should the analyzer not count `IAsyncDisposable` — then suppress it on the class with the justification "disposed by DisposeAsync: ending a unit rolls back a database transaction, which has no synchronous form here"). Then `scripts/test-ring0`, `scripts/test-ring1`, `scripts/test-ring2` (both engines: `PostgreSqlTransactionTests`, `PostgreSqlAlvoDataLiteralTextTests`, `PostgreSqlTypedLayerTests`, every `PostgreSqlAlvoData*Tests`), `scripts/test-admin-e2e` (whole — the dashboard writes through `IAlvoData`, whose registration now forwards), `(cd website && npm run build)`. Expected: all green. The OpenAPI document, the Vacuum ruleset and the TeaPie path set do not move (the wire allow-list is unchanged). The assistant eval is not run: no skill, tool or instruction changed.
 
-**Acceptance (7) check:** `git diff --stat origin/hx/06-delivery-operations...HEAD -- 'src/MMLib.Alvo.Testing/Data/AlvoData*Tests.cs' 'test/**/*AlvoData*Tests.cs'` lists only the **new** files `AlvoDataLiteralTextTests.cs` and its three legs — no existing `AlvoData*Tests` file changed — and ring2 ran every existing one green on both engines.
+**Acceptance (7) check:** `git diff --stat origin/main...HEAD -- 'src/MMLib.Alvo.Testing/Data/AlvoData*Tests.cs' 'test/**/*AlvoData*Tests.cs'` lists only the **new** files `AlvoDataLiteralTextTests.cs` and its three legs — no existing `AlvoData*Tests` file changed — and ring2 ran every existing one green on both engines.
+
+**Mutation shards (Ruling 38).** Every shard's declared counts in `.github/workflows/mutation.yml` are re-probed, not only the two this PR touches: the declared floor is one-sided, so growth elsewhere reports nothing until a leg times out. One shard at a time — never two Strykers in the repo at once — run from `test/`: `cd test && dotnet tool run dotnet-stryker -f ../stryker-config.<shard>.json --concurrency 4`, for every `config:` the matrix names (canary, expressions, rules/auth/rest, data-ef-core, data-ef-rest, data-sqlite, data-postgresql, and any other leg the matrix lists), stopping each once its log has printed the number of mutants created and the initial test run's test count. Record both per shard in the matrix's `mutants:`/`suite:` (with a `# probed <date> (was N)` comment, the file's own convention) and append a dated row block to the *RE-PROBED* table in the workflow's header comment. Then `scripts/test-assert-mutation-run`, the workflow's own suite. Commit as `ci(mutation): re-probe every shard after HX-07`.
 
 - [ ] **Step 2: Reviews (substitutes) and the security-core checklist**
 
-Freeze the tree. `/code-review` and `/security-review` are user-only: dispatch two reviewer subagents over `git diff origin/hx/06-delivery-operations...HEAD`, labelled "substitute for /code-review high" and "substitute for /security-review". Point the code reviewer at: `WriteUnit`'s locking (`_gate` vs `_calls`), the deadline's `AbandonAsync` racing `CommitAsync` and `DisposeAsync`, `ExceptionDispatchInfo.Throw` of a never-thrown poison; `UnitSavepoint` never committing the unit's `DbTransaction` and rolling back on dispose-without-commit (the refused-batch path); the ten write sites — the five top-level-only ones still `unit: null`, the five unit-capable ones passing `unit`; `ContextFor` and `SetDbConnection` on a context whose options name a connection string; `EnsureOutboxTableAsync` never running DDL on a unit's connection; the `Hooks` property read from the flow; `IAlvoData` forwarding to the concrete singleton. Point the security reviewer at: R-B1 at every `IAlvoData` member and at `IAlvoEvents.PublishAsync` (a refused call reaches no statement — `EfAlvoDataUnitRefusalTests`); every call through a unit authorized as outside (`A_caller_without_create_rights_is_refused_inside_a_unit_as_outside`) and tenant-bound, `AsSystem()` included (`A_unit_never_writes_into_another_tenant_not_even_as_the_system`); a poisoned unit never committing; the literal operators binding both pattern and escape (`No_captured_text_test_value_reaches_the_sql_text`, the renderer's property suite); `RecordWriter` never sending `id` or an audit column; `IsOpen` semantics (work outliving a unit is not refused, a timed-out unit still refuses its delegate). Then run the `alvo-security-core-review` checklist — §6.2 lists HX-07 — and record each item's evidence for the PR report: *SQL predicate* (the literal operators, the property and typed CsCheck facts), *authorization in the WHERE* (unit calls take the same `ReadStatementComposer` path; no in-memory filter added), *fail-fast compile* (unchanged; a typed text test refused when the read is called, as HX-05's other refusals), *cross-tenant isolation* (the two-tenant fact on both engines, `AsSystem` included; two-user: the auditor/clerk fact), *dynamic entities* (not built, #41 — no new path), *default-deny* (a unit's call resolves the same `PolicyDecision`; no call bypasses `Resolve`), *before-hooks in-transaction, budgeted, network-free* (the declarative runner unchanged, now resolved from the unit's scope inside a unit; no host hook yet — HX-09). Close it with: **mark this change `needs-deep-review`.** Fix findings, re-run ring0, one `fix(…): …` commit per finding.
+Freeze the tree. `/code-review` and `/security-review` are user-only: dispatch two reviewer subagents over `git diff origin/main...HEAD`, labelled "substitute for /code-review high" and "substitute for /security-review". Point the code reviewer at: `WriteUnit`'s locking (`_gate` vs `_calls`), the deadline's `AbandonAsync` racing `CommitAsync` and `DisposeAsync`, `ExceptionDispatchInfo.Throw` of a never-thrown poison; `UnitSavepoint` never committing the unit's `DbTransaction` and rolling back on dispose-without-commit (`UnitSavepointFacts`); the `CallFrame` gate (a nested call under the running call admitted, a sibling refused); the store gates' refusal never meeting a unit's own turn; the ten write sites — the five top-level-only ones still `unit: null`, the five unit-capable ones passing `unit`; `ContextFor` and `SetDbConnection` on a context whose options name a connection string; `EnsureOutboxTableAsync` never running DDL on a unit's connection; the `Hooks` property read from the flow; `IAlvoData` forwarding to the concrete singleton. Point the security reviewer at: R-B1 at every `IAlvoData` member and at `IAlvoEvents.PublishAsync` (a refused call reaches no statement — `EfAlvoDataUnitRefusalTests`); every call through a unit authorized as outside (`A_caller_without_create_rights_is_refused_inside_a_unit_as_outside`) and tenant-bound, `AsSystem()` included (`A_unit_never_writes_into_another_tenant_not_even_as_the_system`); a poisoned unit never committing; the literal operators binding both pattern and escape (`No_captured_text_test_value_reaches_the_sql_text`, the renderer's property suite); `RecordWriter` never sending `id` or an audit column; `IsOpen` semantics (work outliving a unit is not refused, a timed-out unit still refuses its delegate). Then run the `alvo-security-core-review` checklist — §6.2 lists HX-07 — and record each item's evidence for the PR report: *SQL predicate* (the literal operators, the property and typed CsCheck facts), *authorization in the WHERE* (unit calls take the same `ReadStatementComposer` path; no in-memory filter added), *fail-fast compile* (unchanged; a typed text test refused when the read is called, as HX-05's other refusals), *cross-tenant isolation* (the two-tenant fact on both engines, `AsSystem` included; two-user: the auditor/clerk fact), *dynamic entities* (not built, #41 — no new path), *default-deny* (a unit's call resolves the same `PolicyDecision`; no call bypasses `Resolve`), *before-hooks in-transaction, budgeted, network-free* (the declarative runner unchanged, now resolved from the unit's scope inside a unit; no host hook yet — HX-09). Close it with: **mark this change `needs-deep-review`.** Fix findings, re-run ring0, one `fix(…): …` commit per finding.
 
 - [ ] **Step 3: `alvo-plan-guard`**
 
@@ -5276,7 +5827,7 @@ Dispatch `alvo-plan-guard` last (read-only); act on drift it reports. The PLAN m
 
 - [ ] **Step 4: PR report**
 
-Use the `alvo-pr-report` skill (it dispatches `alvo-pr-reporter` and publishes the 8-section page). Evidence: acceptance (1)–(11) → tests (table below), the three public-API diffs against the public-surface list, the both-engine runs of `TransactionFacts`, `AlvoDataLiteralTextTests` and `TypedLayerFacts`, the acceptance (7) diff check, the Release build, the security-core checklist and both substitute reviews, and the rulings — calling out Ruling 1 (delegate writes at the unit's depth), 2 (top-level writes not yet units), 5 (reads refused too; the key refusal), 8 (savepoint per call), 10 (the deadline abandons the delegate) and 16 (the escape is bound, `[` escaped).
+Use the `alvo-pr-report` skill (it dispatches `alvo-pr-reporter` and publishes the 8-section page). Evidence: acceptance (1)–(11) → tests (table below), the three public-API diffs against the public-surface list, the both-engine runs of `TransactionFacts`, `AlvoDataLiteralTextTests` and `TypedLayerFacts`, the acceptance (7) diff check, the Release build, the security-core checklist and both substitute reviews, and the rulings — calling out Ruling 1 (delegate writes at the unit's depth), 2 (top-level writes not yet units), 5 (reads refused too; the key refusal), 8 (savepoint per call), 10 (the deadline abandons the delegate), 16 (the escape is bound, `[` escaped), 29 (which savepoint covers what), 30 (the per-level call gate) and 33 (every store refused at its write gate).
 
 - [ ] **Step 5: Push and open the PR**
 
@@ -5285,7 +5836,7 @@ git branch --show-current   # hx/07-transactions
 git push -u origin hx/07-transactions
 ```
 
-If #422 (HX-06) is still open: `gh pr create --base hx/06-delivery-operations`. If it has merged: `git fetch origin && git merge origin/main` (merge-commit style), re-run ring0, push, then `gh pr create --base main`. The body is the skill's five-line pointer, carries `Closes #384` once, and ends with `https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB`. Then `gh pr edit --add-label needs-deep-review`. After the merge, read #384 back (`gh issue view 384`) to confirm it — and only it — was closed, and comment on #377 that HX-07 shipped literal operators beside `like` rather than changing it (N-7 stays open).
+HX-06 (#422) is merged and `main` is already merged into this branch (`facc8a69`): `git fetch origin && git merge origin/main` once more if `main` moved (merge-commit style), re-run ring0, push, then `gh pr create --base main`. The body is the skill's five-line pointer, carries `Closes #384` once, and ends with `https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB`. Then `gh pr edit --add-label needs-deep-review`. After the merge, read #384 back (`gh issue view 384`) to confirm it — and only it — was closed, and comment on #377 that HX-07 shipped literal operators beside `like` rather than changing it (N-7 stays open).
 
 ---
 
@@ -5293,14 +5844,14 @@ If #422 (HX-06) is still open: `gh pr create --base hx/06-delivery-operations`. 
 
 Each is recorded in the spec amendment (Task 11 Step 4) so a later reader can tell a decision from an oversight.
 
-1. **A write through `TransactAsync`'s own `IAlvoTransaction` is at the unit's depth, not one deeper.** §4.6 says "a unit's nested write's depth = the unit's depth + 1". Read literally for the delegate's writes, wrapping two writes in a unit would report their events one hop deeper than the same writes made one by one, and a command at HTTP depth 0 would emit `chaindepth` 1 — a chain grows because it was made atomic. The unit's depth is the caller's effective depth (`max(explicit, ambient)`), set on the flow for the delegate, and "nested" means a write made under another write's stage: `EfAlvoTransaction.Deeper()` (internal) is that view, one hop deeper, refused and poisoning past `MaxDepth` — the seam HX-09 hands hooks as `write.Transaction`. Tested now (`A_write_one_hop_deeper_past_the_limit_is_refused_and_a_caught_refusal_still_rolls_back`).
+1. **A write through `TransactAsync`'s own `IAlvoTransaction` is at the unit's depth, not one deeper.** §4.6 says "a unit's nested write's depth = the unit's depth + 1". Read literally for the delegate's writes, wrapping two writes in a unit would report their events one hop deeper than the same writes made one by one, and a command at HTTP depth 0 would emit `chaindepth` 1 — a chain grows because it was made atomic. The unit's depth is the caller's effective depth (`max(explicit, ambient)`), set on the flow for the delegate, and "nested" means a write made under another write's stage: `EfAlvoTransaction.Deeper()` (internal) is that view, one hop deeper, refused and poisoning past `MaxDepth` — the seam HX-09 hands hooks as `write.Transaction`; a call through it made from inside the running write is admitted by the unit's per-call gate (Ruling 30). Tested now (`A_write_one_hop_deeper_past_the_limit_is_refused_and_a_caught_refusal_still_rolls_back`).
 2. **Top-level writes move onto the seam but are not yet flow-visible units.** §4.5 says every write opens its own unit and "top-level units use the same default" timeout. Here every `EfAlvoData` write site goes through one `BeginAsync(db, unit)`, whose top-level branch is today's turn + transaction, byte for byte; it puts nothing on the flow and has no deadline. Reason: acceptance (7) — a 30 s cap on every existing write, and refusing a host CEL function's data call during a top-level write (R-B1 on its flow), change shipped behaviour while nothing async runs inside a top-level write yet. HX-09, which first runs host hooks inside one, turns that branch into a unit (the one place to change).
 3. **`IAlvoTransaction` derives from `IAlvoSession`.** §5 lists its writes with `AlvoPrecondition?`, batch verbs, `PublishAsync`, `AsSystem()`; the session already has the reads and writes in that shape, and deriving makes HX-05's typed reads and this PR's typed writes work on a unit with no second copy. A session's "each call commits on its own" is restated as the property of `IAlvoSessions`' sessions. Reads are on the unit because R-B1 refuses every other read while it is open.
 4. **`IAlvoTransactions` has a non-generic `TransactAsync`**, a default interface member over `TransactAsync<T>` (§5 lists only the generic one): a unit that answers nothing is the common case, and a `Task`-returning lambda must not have to `return true`. Overload resolution follows `Task.Run(Func<Task>)`/`Task.Run(Func<Task<T>>)`.
 5. **The refusal covers every data-port member, reads included, and fails the unit.** R-B1 names `IAlvoData`, `IAlvoSession`, nested `TransactAsync` and `IAlvoEvents.PublishAsync`; all nine `IAlvoData` members refuse before any statement, the session through `IAlvoData`, and the refusal poisons the unit so a caught one cannot commit. **Acceptance (5)'s idempotency refusal**: no `IAlvoTransaction` member takes a key, so the only key that can reach a unit is an `IAlvoData` write's; inside a unit it is refused as `ArgumentException` (`ParamName` `idempotency`) instead of `AlvoUnitInProgressException`, naming the more specific mistake, and it poisons too.
 6. **"On the flow" means "its `TransactAsync` has not returned."** `IAlvoFlowUnit.IsOpen` stays true until the unit is released, so a delegate whose unit timed out and rolled back is still refused; work that outlives `TransactAsync` (a `Task.Run` the delegate started) carries the unit in its execution context but is not refused — it runs after the unit.
-7. **One call at a time.** A `DbConnection` runs one command at a time; a second call while one runs is refused (`InvalidOperationException`) and poisons the unit, rather than queued — queueing would hide a missing `await` and make the delegate's result depend on scheduling.
-8. **Every call through a unit runs under its own savepoint** (`alvo_unit_<n>`, EF `IDbContextTransaction` savepoints over ADO.NET `DbTransaction.Save/Rollback/Release`), reads included. An exception, or a refused batch that returns without committing, rolls back to it; the unit goes on. A rollback-to that itself fails poisons the unit — SQLite may roll the whole transaction back after `INTERRUPT`, `BUSY`, `IOERR`, `FULL` or `NOMEM` (*Response To Errors Within A Transaction*), and PostgreSQL's aborted state (`25P02`) is exactly what the savepoint exists to leave. Top-level writes take none (Ruling 2).
+7. **One call at a time.** A `DbConnection` runs one command at a time; a second call while one runs is refused (`InvalidOperationException`) and poisons the unit, rather than queued — queueing would hide a missing `await` and make the delegate's result depend on scheduling. "At a time" is per level: a call made by the running call itself is a nested call (Ruling 30).
+8. **Every call through a unit runs under its own savepoint** (`alvo_unit_<n>`, EF `IDbContextTransaction` savepoints over ADO.NET `DbTransaction.Save/Rollback/Release`), reads included. An exception, or a call that returns without committing, rolls back to it; the unit goes on. A rollback-to that itself fails poisons the unit — SQLite may roll the whole transaction back after `INTERRUPT`, `BUSY`, `IOERR`, `FULL` or `NOMEM` (*Response To Errors Within A Transaction*), and PostgreSQL's aborted state (`25P02`) is exactly what the savepoint exists to leave. Top-level writes take none (Ruling 2).
 9. **What poisons.** The unit's timeout; any `OperationCanceledException` from a call (a cancelled SQLite command may have rolled the transaction back); `AlvoChainDepthExceededException`; a data-port refusal (Ruling 5); a concurrent call (Ruling 7); a failed savepoint rollback (Ruling 8). Not poisoning: a call whose own savepoint rolled it back — authorization, constraint, precondition, not-found, validation, a raw `DbException`. Hook exceptions and the per-hook operation budget join the set with HX-09.
 10. **The deadline.** `Timeout` is greater than zero and at most one hour (a unit holds the write lock while it runs), 30 s by default, on the host's `TimeProvider`. At the deadline the unit's token is cancelled and the unit poisoned; as soon as no call is running it rolls back and releases the connection and the write turn — **without waiting for a delegate that ignores its token** — and every later call is refused. `TransactAsync` then throws `TimeoutException` whatever the delegate threw or returned (`A_timed_out_unit_lets_go_of_the_database_before_its_delegate_returns`).
 11. **The caller's own cancellation is not a timeout**: it rolls back and surfaces `OperationCanceledException`.
@@ -5311,7 +5862,7 @@ Each is recorded in the spec amendment (Task 11 Step 4) so a later reader can te
 16. **Literal text operators render `field LIKE @pattern ESCAPE @escape`, both bound.** The escape character (`\`) is a parameter, never a literal in the statement, so the renderer's property suite still finds no quote or backslash in any statement text; the value's `\`, `%`, `_` and `[` are escaped — `[` means nothing to SQLite's or PostgreSQL's `LIKE`, where any character after the escape matches itself, and escaping it closes T-SQL's character class before a T-SQL driver (#92) exists. Prior art: EF Core's `StartsWith`/`Contains` translation. Text fields (`string`, `text`) only, a string value only, case-sensitive and ordinal on both engines (SQLite's `case_sensitive_like`, on per connection already). The escaping lives in the shared EF renderer, not in a new `IAlvoSqlDialect`/`IFieldSqlRenderer` member: both are public, and an ANSI `ESCAPE` serves both shipped engines.
 17. **Not on the wire.** The three members have no HTTP query-string spelling: `FilterOperators` derives the allow-list from the enum minus them, so it stays PostgREST's ten; `QueryStringParserTests` pins it and the new members' lower-cased names answer `unknown-operator`.
 18. **Typed queries' text tests** translate in their one-argument form or with `StringComparison.Ordinal` (HX-05 (6)'s rule for `when`); a culture-folding comparison, a `char` overload, a field-to-field test and a null value are refused when the read is called. Supersedes HX-05 (7).
-19. **Typed writes are `IAlvoSession` extensions** (so they work on any session and on a unit), not `IAlvoData` ones: a host endpoint gets a session with `IAlvoSessions.For(caller)`. They return `T?` — `null` when the caller's own read-back lacks a field the class maps (a `get` rule excluding the row, a hidden field), because the write happened and an exception would look like a failure (and inside a unit, roll it back). `ExistsAsync<T>` takes a predicate (a by-id existence is `GetAsync<T>(id) is not null`). `AlvoPatch.For<T>()` is a public static factory §5 does not list — an interface needs a way in, and the house precedent for a guarded factory is `AlvoCustomEvent.Create`. A write never sends `id`, the audit columns or `deleted_at`; an enum is written as its declared value, a whole number as `long`. `ReplaceAsync<T>` with a type that maps `tenant_id` is refused by the existing replace rule, as an untyped replace is.
+19. **Typed writes are `IAlvoSession` extensions** (so they work on any session and on a unit), not `IAlvoData` ones: a host endpoint gets a session with `IAlvoSessions.For(caller)`. They return `T?` — `null` when the caller's own read-back lacks a field the class maps (a `get` rule excluding the row, a hidden field), because the write happened and an exception would look like a failure (and inside a unit, roll it back). `ExistsAsync<T>` takes a predicate (a by-id existence is `GetAsync<T>(id) is not null`). `AlvoPatch.For<T>()` is a public static factory §5 does not list — an interface needs a way in, and the house precedent for a guarded factory is `AlvoCustomEvent.Create`. A write never sends `id`, the audit columns or `deleted_at` — and a replace never sends `tenant_id` — by `AlvoManagedColumns.All` and `IsCallerWritable`, the port's own list, not a second copy; an enum is written as its declared value, a whole number as `long`. A create leaves out null properties (Ruling 36).
 20. **One custom-event envelope builder.** `AlvoEvents`' guards and envelope move, unchanged, into Abstractions (`AlvoCustomEnvelope`, internal) so the transactional publish and the autocommit one cannot drift. The autocommit publish keeps its order of refusals, now name → unit → depth → clock.
 21. **`EfAlvoData` becomes `partial`**; `EfAlvoData.Units.cs` joins `ChangeTrackerReachTests`' allow-list (it reads the unit's connection and writes the unit's outbox row). `WriteUnit`, `UnitSavepoint`, `TurnHeldTransaction`, `EfAlvoTransactions` and `EfAlvoTransaction` receive their connection and transaction as parameters and need no entry.
 22. **`InMemoryAlvoData` implements the three literal operators** (the reference evaluator, ordinal) — the contract suite runs on it — **but not `IAlvoTransactions`** (§5).
@@ -5321,6 +5872,25 @@ Each is recorded in the spec amendment (Task 11 Step 4) so a later reader can te
 26. **`IAlvoScheduler` joining a unit is HX-13's** (§4.10): nothing here touches `ITimerStore`; the unit's connection and transaction are exposed internally for it.
 27. **Dashboard: none** (§7). No admin page shows units; the operations page's history is unchanged — a unit's events reach it as any event.
 
+28. **(Review H1) `BeginAsync(` is a fourth transaction marker for `BeforeHookTransactionArchitectureTests`.** After Task 7 `CreatedAsync` holds its transaction from the seam, which the text scan did not know: `BeginAsync` always answers an open transaction (the write's own, or its unit's under a savepoint), so a pipeline call after it is inside one. Two control rows pin the new marker both ways (a call after it guarded, a call before it not); the eight-site count is unchanged.
+29. **(Review H2) EF's `__EFSavePoint` already recovers a failed insert; the unit savepoint is for everything else.** Inside a transaction EF did not start, `SaveChanges` wraps itself in a savepoint and rolls back to it on failure, so acceptance (2)'s literal insert fact passes on PostgreSQL with or without `UnitSavepoint` — the earlier claim that it would fail with `25P02` was wrong and is withdrawn. The fact that needs `UnitSavepoint` on PostgreSQL is the update path: an `ExecuteUpdate` unique violation, caught, then another write that commits (`A_caught_unique_violation_on_an_update_lets_the_unit_go_on_and_commit`, both engines). The insert fact stays as acceptance (2)'s literal row.
+30. **(Review H3) The one-call gate is per level, so a call made by the running call is admitted.** Each call records itself in an `AsyncLocal` `CallFrame` while it runs; a call whose flow carries a frame of the same unit waits on that frame's own gate instead of the unit's, under its own savepoint. A sibling — another call on the delegate's flow, or a second nested call beside the first — is still refused and poisons. This is what lets HX-09's hooks write through `Deeper()` from inside the write that runs them; `Deeper()` stays. Work a running call hands to `Task.Run` inherits its frame and counts as nested — stated, not guarded.
+31. **(Review H4) The dispose-without-commit rollback has a fact of its own on both engines, and the refused-batch fact is dropped.** A batch the rules refuse judges every row before writing any, so it can never exercise the rollback; its fact passed whatever `UnitSavepoint` did and was removed. `UnitSavepointFacts.A_savepoint_disposed_without_commit_takes_its_insert_back_and_the_unit_goes_on` inserts through EF (EF's own savepoint already released), disposes the savepoint uncommitted, inserts again and commits — on SQLite and PostgreSQL. The engine-failure batch fact stays: it fails a `SELECT` after a successful insert, so it too fails without the rollback.
+32. **(Review M1) A unit's connection is opened through EF.** `OpenUnitAsync` calls `root.Database.OpenConnectionAsync` before `EnsureOutboxTableAsync`, which opens a closed connection raw and so runs no interceptor; otherwise the first unit of a process ran SQLite's `like` and the literal text tests case-insensitively for its whole life. Held by `A_text_test_in_the_first_unit_of_a_fresh_host_is_case_sensitive` (both engines; the defect is SQLite's).
+33. **(Review M2) Every framework store's write is refused inside a unit, at the write gate.** `IOutboxStore`, `IDeliveryStore` and the secret, descriptor-version, runtime-schema and management-idempotency stores are public and DI-registered, so host code can reach them; each waits at the database's write gate before writing, and on SQLite would wait for the unit's own turn, then commit beside the unit after its deadline. `NoRelationalWriteGate.EnterAsync` and `SerialRelationalWriteGate.EnterAsync`/`TryEnterAsync` (which SQLite's gate waits through) refuse with `AlvoUnitInProgressException` while a unit is open on the flow — fail closed, every engine, every present and future store. A unit takes its own turn before it is on the flow, and calls inside it never take one. A store's reads take no turn and stay allowed: they commit nothing. The refusal, like all of R-B1, follows the execution context; the docs say what escapes it.
+34. **(Review M3) A read's savepoint is released on success**, so the unit's savepoint stack does not grow with every read; a failed read still rolls back to it. On PostgreSQL every writing call is a subtransaction, and past `PGPROC_MAX_CACHED_SUBXIDS` (64) in one transaction the per-backend cache overflows and snapshots slow down for every session; the docs and `data-path.md` say to keep a unit small and to write many rows with one batch call. Not enforced: a cap would be a guess.
+35. **(Review M4) The both-engine timeout facts run on a `FakeTimeProvider`.** The unit's deadline runs on the host's clock (Ruling 10), so each fact lets the unit write, then advances the clock past a one-second `Timeout`: no wall-clock budget, so a cold first write on a slow runner cannot trip it.
+36. **(Review M5) A typed create leaves out every property that is `null`**, so the field's descriptor `default` applies (or, with none, the column stays empty) — exactly what an untyped create that does not name the field gets. A replace sends every field, `null` included, because it replaces the whole row. A non-nullable property's CLR default (`0`, `false`, the first enum member) is a value and is sent: to leave a field to its default, make the property nullable. Decided now because changing it after release would break.
+37. **(Review M6) The CI-parity build runs the container as the user** (`docker run -u "$(id -u):$(id -g)"`), so its output is the user's own and nothing is cleaned afterwards; `git clean -fdx` is gone — it removed ignored local state.
+38. **(Review M7) The mutation shards follow the new files.** `EfAlvoData.Units.cs` is mutated with `EfAlvoData.cs` in `data-ef-core` (its killers live in `Data.Sqlite.Tests`) and excluded from `data-ef-rest`; the other new driver files fall into `data-ef-rest`. Task 12 re-probes every shard's declared `mutants:`/`suite:`, not one, as the workflow's own header requires.
+39. **(Review L2) The refusal rows are checked against `typeof(IAlvoData).GetMethods()`**, so a tenth member of the port cannot ship without its refusal row.
+40. **(Review L3) A literal text test on a field that is not text is refused on every implementation.** The reference evaluator alone answered UNKNOWN (an empty page) where the EF renderer throws; `InMemoryAlvoData.QueryAsync` now refuses it by the field's declared type with the drivers' wording, and the contract suite gains that eighth row.
+41. **(Review L4) A call the delegate does not await is not part of the unit.** If it starts while the commit holds the gate it is refused; the commit, already decided, still commits. Stated on `IAlvoTransaction` and on the docs page.
+42. **(Review L5) Inside a unit the hook runner comes from the unit's scope, outside from the driver's constructor.** One singleton in production; in `WritePathWorld` the stub runs outside and `AddAlvo`'s real runner inside, which `EfAlvoTransactionsTests`' remarks state.
+43. **(Review L6) The spec amendment quotes the deferred clause.** §4.5's "top-level units use the same default" is marked deferred to HX-09 beside Ruling 2, so it reads as a decision.
+44. **(Review L7) `IAlvoEvents.PublishAsync` keeps its guard order** — name, subject, caller, payload — and only then the unit refusal, the depth refusal and the clock; `AlvoCustomEnvelope.EnsureWritable` is internal so the order is unchanged.
+45. **(Review L1) The base is `main`.** HX-06 (#422) merged and `main` is merged into this branch at `facc8a69`; every diff in Task 12 is against `origin/main`, and the PR targets `main`.
+
 ---
 
 ## Acceptance criteria → tasks
@@ -5328,18 +5898,18 @@ Each is recorded in the spec amendment (Task 11 Step 4) so a later reader can te
 | HX-07 criterion | Task(s) | Test |
 |---|---|---|
 | (1) two writes + a custom event commit together or not at all, both engines | 8, 10 | `TransactionFacts.Two_writes_and_a_custom_event_commit_together_with_one_correlation_id`, `A_failed_unit_commits_no_write_and_no_event` (`SqliteTransactionTests`, `PostgreSqlTransactionTests`); `EfAlvoTransactionsTests.Two_writes_and_an_event_commit_together`, `A_delegate_that_throws_leaves_no_row_and_no_event` |
-| (2) a caught unique violation, then a different key, commits on both engines | 7, 8, 10 | `TransactionFacts.A_caught_unique_violation_lets_the_unit_go_on_and_commit` (both engines); `EfAlvoTransactionsTests.An_engine_failure_after_a_write_rolls_that_write_back_and_the_unit_goes_on` |
+| (2) a caught unique violation, then a different key, commits on both engines | 7, 8, 10 | `TransactionFacts.A_caught_unique_violation_lets_the_unit_go_on_and_commit` (the literal row; EF's savepoint) and `A_caught_unique_violation_on_an_update_lets_the_unit_go_on_and_commit` (the unit savepoint) on both engines; `UnitSavepointFacts.A_savepoint_disposed_without_commit_takes_its_insert_back_and_the_unit_goes_on` (both engines); `EfAlvoTransactionsTests.An_engine_failure_after_a_write_rolls_that_write_back_and_the_unit_goes_on` |
 | (3) a delegate that catches a poisoning failure still rolls back | 6, 8, 10 | `TransactionFacts.A_caught_data_port_refusal_still_rolls_the_unit_back`, `A_caught_timeout_still_rolls_the_unit_back` (both engines); `EfAlvoTransactionsTests.A_caught_refusal_still_rolls_the_unit_back`, `A_write_one_hop_deeper_past_the_limit_is_refused_and_a_caught_refusal_still_rolls_back`; `WriteUnitTests.A_poisoned_unit_refuses_further_calls_and_its_commit_throws_the_original_failure`, `A_chain_depth_refusal_inside_a_call_poisons_the_unit` |
 | (4) a caller without `create` rights is refused inside as outside (adversarial) | 10 | `TransactionFacts.A_caller_without_create_rights_is_refused_inside_a_unit_as_outside`, `A_unit_never_writes_into_another_tenant_not_even_as_the_system` (both engines) |
 | (5) an idempotency key inside → `ArgumentException` | 1, 7, 8, 10 | `AlvoFlowUnitTests.A_keyed_call_inside_an_open_unit_is_an_argument_exception_and_poisons_it`; `EfAlvoDataUnitRefusalTests.A_keyed_write_inside_an_open_unit_is_an_argument_exception`; `EfAlvoTransactionsTests.An_idempotency_key_inside_a_unit_is_an_argument_exception`; `TransactionFacts.An_idempotency_key_inside_a_unit_is_an_argument_exception` (both engines) |
 | (6) a deterministic violation runs the delegate once | 8, 10 | `TransactionFacts.A_deterministic_violation_runs_the_delegate_once` (both engines) |
 | (7) existing `AlvoData*Tests` unchanged and green | 7, 12 | every existing `AlvoData*Tests` suite and leg (InMemory, SQLite, PostgreSQL) in ring2; `AlvoDataSqlSnapshotTests` and `AlvoDataStatementTests` with no received file; the Task 12 Step 1 diff check |
 | (8) two nested writes in one unit resolve one DI scope, distinct from the request scope | 6, 8 | `EfAlvoTransactionsTests.Two_writes_in_one_unit_resolve_one_scope_distinct_from_the_request_s_and_the_next_unit_s`; `WriteUnitTests.A_unit_s_scope_is_one_per_unit_and_ends_with_it` |
-| (9) R-B1: a DI-injected `IAlvoData.CreateAsync` (and `IAlvoEvents.PublishAsync`) is refused at once on both engines, no hang, no committed side write | 1, 5, 7, 8, 10 | `TransactionFacts.A_data_port_write_inside_a_unit_is_refused_at_once_with_no_side_write`, `An_autocommit_publish_inside_a_unit_is_refused_at_once_with_no_event`, `A_session_write_inside_a_unit_is_refused_at_once` (both engines, bounded by `WaitAsync(10 s)`); `EfAlvoDataUnitRefusalTests.Every_member_is_refused_inside_an_open_unit_before_any_statement`; `AlvoEventsUnitTests.Publishing_inside_an_open_unit_is_refused_and_fails_the_unit`; `EfAlvoTransactionsTests.A_nested_TransactAsync_is_refused` |
-| (10) a unit exceeding `AlvoTransactionOptions.Timeout` rolls back | 6, 10 | `TransactionFacts.A_unit_past_its_timeout_rolls_back`, `A_timed_out_unit_lets_go_of_the_database_before_its_delegate_returns` (both engines); `WriteUnitTests.The_deadline_cancels_a_running_call_and_rolls_the_unit_back_without_waiting_for_its_caller` |
-| (11) contract rows for the three literal operators: a captured `%`/`_`/`\` matches literally on both engines | 2, 3, 4 | `AlvoDataLiteralTextTests` (seven rows: `%`, `_`, `\`, `[`, case, empty/missing, non-string) on `SqliteAlvoDataLiteralTextTests`, `PostgreSqlAlvoDataLiteralTextTests`, `InMemoryAlvoDataLiteralTextTests`; `TypedLayerFacts.A_captured_wildcard_in_a_text_test_matches_literally`, `No_captured_text_test_value_reaches_the_sql_text` (both engines); `FilterSqlRendererTests.A_literal_text_test_binds_its_escaped_pattern_and_its_escape`; `FilterSqlRendererPropertyTests` |
+| (9) R-B1: a DI-injected `IAlvoData.CreateAsync` (and `IAlvoEvents.PublishAsync`) is refused at once on both engines, no hang, no committed side write | 1, 5, 7, 8, 10 | `TransactionFacts.A_data_port_write_inside_a_unit_is_refused_at_once_with_no_side_write`, `An_autocommit_publish_inside_a_unit_is_refused_at_once_with_no_event`, `A_session_write_inside_a_unit_is_refused_at_once` (both engines, bounded by `WaitAsync(10 s)`); `EfAlvoDataUnitRefusalTests.Every_member_is_refused_inside_an_open_unit_before_any_statement`; `AlvoEventsUnitTests.Publishing_inside_an_open_unit_is_refused_and_fails_the_unit`; `EfAlvoTransactionsTests.A_nested_TransactAsync_is_refused`; `TransactionFacts.A_store_write_inside_a_unit_is_refused_at_once_with_no_side_write` (both engines); `WriteGateUnitRefusalTests`; `EfAlvoDataUnitRefusalTests.The_refusal_rows_name_every_member_of_the_port` |
+| (10) a unit exceeding `AlvoTransactionOptions.Timeout` rolls back | 6, 10 | `TransactionFacts.A_unit_past_its_timeout_rolls_back`, `A_timed_out_unit_lets_go_of_the_database_before_its_delegate_returns` (both engines, fake clock); `WriteUnitTests.The_deadline_cancels_a_running_call_and_rolls_the_unit_back_without_waiting_for_its_caller` |
+| (11) contract rows for the three literal operators: a captured `%`/`_`/`\` matches literally on both engines | 2, 3, 4 | `AlvoDataLiteralTextTests` (eight rows: `%`, `_`, `\`, `[`, case, empty/missing, non-text field, non-string) on `SqliteAlvoDataLiteralTextTests`, `PostgreSqlAlvoDataLiteralTextTests`, `InMemoryAlvoDataLiteralTextTests`; `TypedLayerFacts.A_captured_wildcard_in_a_text_test_matches_literally`, `No_captured_text_test_value_reaches_the_sql_text` (both engines); `FilterSqlRendererTests.A_literal_text_test_binds_its_escaped_pattern_and_its_escape`; `FilterSqlRendererPropertyTests`; `TransactionFacts.A_text_test_in_the_first_unit_of_a_fresh_host_is_case_sensitive` (both engines) |
 | Scope: typed writes | 9, 10, 11 | `TypedWriteTests`; `TransactionFacts.Typed_writes_inside_a_unit_commit_with_it`; snippet `Paying_is_a_typed_update_and_its_event_in_one_unit` |
 | Scope: transactional `PublishAsync` (X13) | 5, 8, 10 | as (1) and (9) |
-| Scope: savepoints, poisoning, nested depth via `AlvoFlow` | 1, 6, 7, 8 | `AlvoFlowUnitTests`, `WriteUnitTests`, `EfAlvoTransactionsTests` |
+| Scope: savepoints, poisoning, nested depth via `AlvoFlow` | 1, 6, 7, 8 | `AlvoFlowUnitTests`, `WriteUnitTests` (incl. `A_call_made_by_the_call_holding_the_unit_is_admitted`, `Two_calls_at_once_under_the_holding_call_are_still_refused`), `UnitSavepointFacts`, `EfAlvoTransactionsTests`, `BeforeHookTransactionArchitectureTests` |
 | Docs: *Transactions in your own code* | 11 | `InvoiceDeskTests` in `MMLib.Alvo.DocsSnippets.Tests`; website build |
 | Security core (§6.2) | 12 | `alvo-security-core-review` checklist, `/security-review` substitute, `needs-deep-review` |
