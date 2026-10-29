@@ -59,6 +59,12 @@ public abstract class TransactionFacts
     private const string LedgerDesk = "ledger-desk.alvo.json";
     private const long Forged = 999;
     private static readonly TimeSpan _immediately = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// How long an outside write may wait for a timed-out unit to let go: longer than <see cref="_immediately"/>, because it
+    /// waits through the unit's rollback on the engine's lock, not a refusal that answers before any statement.
+    /// </summary>
+    private static readonly TimeSpan _throughTheRollback = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan _pastTheDeadline = TimeSpan.FromSeconds(2);
 
     protected static CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -80,7 +86,7 @@ public abstract class TransactionFacts
 
         (await NumbersAsync(alvo, clerk)).ShouldBe(["C-1", "C-2"], ignoreOrder: true);
         (events.Created.Count, events.Closed.Count).ShouldBe((2, 1));
-        events.Created.Concat(events.Closed).Select(e => e.CorrelationId).Distinct().ShouldHaveSingleItem();
+        events.Created.Concat(events.Closed).Select(e => e.CorrelationId).Distinct().ShouldHaveSingleItem().ShouldNotBeNullOrWhiteSpace();
     }
 
     [Fact]
@@ -201,7 +207,7 @@ public abstract class TransactionFacts
             catch (AlvoUnitInProgressException)
             {
             }
-        }, cancellationToken: Ct));
+        }, cancellationToken: Ct).WaitAsync(_immediately, Ct));
 
         (await NumbersAsync(alvo, clerk)).ShouldBeEmpty();
     }
@@ -229,6 +235,7 @@ public abstract class TransactionFacts
         await wrote.Task.WaitAsync(_immediately, Ct);
         clock.Advance(_pastTheDeadline);
 
+        await EndedAsync(unitTask);
         await Should.ThrowAsync<TimeoutException>(() => unitTask);
         (await NumbersAsync(alvo, clerk)).ShouldBeEmpty();
     }
@@ -251,7 +258,7 @@ public abstract class TransactionFacts
             (await RefusalAsync(() => unit.CreateAsync("invoices", Invoice(auditor, "A-1"), ct))).Message,
             (await unit.CreateManyAsync("invoices", [Invoice(auditor, "A-2")], ct)).Refusals), cancellationToken: Ct);
 
-        outside.Refusals.ShouldHaveSingleItem().Index.ShouldBe(0);
+        outside.Refusals.ShouldHaveSingleItem().ShouldSatisfyAllConditions(row => row.Index.ShouldBe(0), row => row.Code.ShouldBe("forbidden"));
         inside.Message.ShouldBe(outside.Message);
         inside.Refusals.ShouldBe(outside.Refusals);
         (await NumbersAsync(alvo, Clerk(tenant))).ShouldBeEmpty();
@@ -288,6 +295,8 @@ public abstract class TransactionFacts
         var auditor = Caller("auditor", tenant);
         var other = Clerk(Guid.NewGuid());
 
+        var outside = await Should.ThrowAsync<AlvoAuthorizationException>(() => alvo.Data.CreateAsync(
+            "invoices", Invoice(other, "S-2"), AlvoContext.System(new TenantId(tenant)), cancellationToken: Ct));
         var smuggling = await Transactions(alvo).TransactAsync(auditor, async (unit, ct) =>
         {
             await Should.ThrowAsync<AlvoAuthorizationException>(() => unit.CreateAsync("invoices", Invoice(auditor, "S-0"), ct));
@@ -295,7 +304,7 @@ public abstract class TransactionFacts
             return await RefusalAsync(() => unit.AsSystem().CreateAsync("invoices", Invoice(other, "S-2"), ct));
         }, cancellationToken: Ct);
 
-        smuggling.ShouldBeAssignableTo<AlvoAuthorizationException>();
+        smuggling.ShouldBeOfType(outside.GetType());
         (await NumbersAsync(alvo, Clerk(tenant))).ShouldBe(["S-1"]);
         (await NumbersAsync(alvo, other)).ShouldBeEmpty();
     }
@@ -397,6 +406,7 @@ public abstract class TransactionFacts
         await wrote.Task.WaitAsync(_immediately, Ct);
         clock.Advance(_pastTheDeadline);
 
+        await EndedAsync(unitTask);
         await Should.ThrowAsync<TimeoutException>(() => unitTask);
         (await NumbersAsync(alvo, clerk)).ShouldBeEmpty();
     }
@@ -423,7 +433,7 @@ public abstract class TransactionFacts
         await wrote.Task.WaitAsync(_immediately, Ct);
         clock.Advance(_pastTheDeadline);
 
-        await alvo.Data.CreateAsync("invoices", Invoice(clerk, "T-1"), clerk, cancellationToken: Ct).WaitAsync(TimeSpan.FromSeconds(20), Ct);
+        await alvo.Data.CreateAsync("invoices", Invoice(clerk, "T-1"), clerk, cancellationToken: Ct).WaitAsync(_throughTheRollback, Ct);
         stuck.SetResult();
 
         await Should.ThrowAsync<TimeoutException>(() => unitTask);
@@ -451,7 +461,8 @@ public abstract class TransactionFacts
     /// <summary>
     /// Ruling 52 on the real composition: a typed create and replace leave out the rollup and the computed field the type maps,
     /// inside a unit and through the session <c>AddAlvo</c> registers, so the port never sees a write to either and the store's
-    /// own values stand. Without it every write here is refused.
+    /// own values stand: no line yet is a rollup of nothing (<c>NULL</c> on both engines, so <c>gross</c> too), one line of 7
+    /// makes <c>net</c> 7 and <c>gross</c> 7 + VAT. Without the ruling every write here is refused.
     /// </summary>
     [Fact]
     public async Task A_typed_record_mapping_a_computed_and_a_rollup_field_creates_and_replaces_in_a_unit_and_outside()
@@ -463,13 +474,19 @@ public abstract class TransactionFacts
         var (created, replaced) = await Transactions(alvo).TransactAsync(clerk, async (unit, ct) =>
         {
             var sheet = await unit.CreateAsync(Sheet(tenant, "M-1", vat: 3), ct);
-            var again = await unit.ReplaceAsync(sheet!.Id, Sheet(tenant, "M-1", vat: 4), cancellationToken: ct);
+            await unit.CreateAsync("invoice_lines", new Dictionary<string, object?>
+            {
+                ["invoice_id"] = sheet!.Id,
+                ["amount"] = 7L,
+                ["tenant_id"] = tenant,
+            }, ct);
+            var again = await unit.ReplaceAsync(sheet.Id, Sheet(tenant, "M-1", vat: 4), cancellationToken: ct);
             return (sheet, again!);
         }, cancellationToken: Ct);
         var outside = await alvo.Services.GetRequiredService<IAlvoSessions>().For(clerk).CreateAsync(Sheet(tenant, "M-2", vat: 5), Ct);
 
         (created.Vat, replaced.Vat, outside!.Vat).ShouldBe((3L, 4L, 5L));
-        new[] { created.Net, created.Gross, replaced.Net, replaced.Gross, outside.Net, outside.Gross }.ShouldNotContain(Forged);
+        (created.Net, created.Gross, replaced.Net, replaced.Gross, outside.Net, outside.Gross).ShouldBe((null, null, 7L, 11L, null, null));
         (await NumbersAsync(alvo, clerk)).ShouldBe(["M-1", "M-2"], ignoreOrder: true);
     }
 
@@ -528,6 +545,13 @@ public abstract class TransactionFacts
 
     private static async Task<IReadOnlyList<string>> NumbersAsync(AlvoTestHost alvo, AlvoContext caller) =>
         [.. (await alvo.Data.QueryAsync(new AlvoQuery { Entity = "invoices" }, caller, Ct)).Items.Select(row => (string)row["number"]!)];
+
+    /// <summary>
+    /// Waits for a unit the fake clock has timed out, failing — not hanging — when its deadline never fires. Not
+    /// <c>WaitAsync</c>: its own <see cref="TimeoutException"/> would pass for the unit's.
+    /// </summary>
+    private static async Task EndedAsync(Task unit) =>
+        (await Task.WhenAny(unit, Task.Delay(_immediately, Ct))).ShouldBeSameAs(unit, "the unit's deadline never ended it");
 
     private static async Task<Exception> RefusalAsync(Func<Task> write)
     {
