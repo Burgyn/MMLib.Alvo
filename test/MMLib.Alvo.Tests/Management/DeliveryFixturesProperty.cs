@@ -101,7 +101,7 @@ internal static class DeliveryFixturesProperty
 
     private static void CheckData(JsonElement data, Sample sample)
     {
-        var changedKept = sample.Event != EventKind.Declared || sample.Changed == 0;
+        var changedKept = sample.Event == EventKind.Declared && sample.Changed == 0;
         data.GetProperty("changed").ValueKind.ShouldBe(changedKept ? JsonValueKind.Array : JsonValueKind.String);
         if (sample.Changed == 2)
         {

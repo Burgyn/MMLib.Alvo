@@ -101,10 +101,10 @@ between them. The [catalog](/extending/extension-catalog/) and the dashboard sho
 `GET …/deliveries/{id}/fixture` (developer) answers the delivery's envelope with every value that is not a key replaced
 by `<redacted:FIELD>`. Redaction fails closed: a value stays only when it is recognised as a key and has a key's
 shape — `id` and `tenant_id`, `ref` fields holding a uuid, `enum` fields holding a value the schema lists — plus null
-values and the changed-field names. A `uuid` field is redacted. The envelope's attributes stay
+values and the changed-field names the entity declares. A `uuid` field is redacted. The envelope's attributes stay
 because they identify rather than describe — a data event's subject and partition key included — but `authid` and
 `causationid` only as uuids. An application event, or an entity the schema no longer declares, keeps only `id` and the
-namespace part of its partition key. `tracestate` is dropped.
+namespace part of its partition key; its changed-field names are redacted. `tracestate` is dropped.
 
 Save it, fill in what the failure depends on, and run it with `AlvoTestHost.DeliverAsync(fixture)`: the handler runs
 once as a delivery would — its scope, its identity, its timeout — and its exception reaches your test as it was thrown.

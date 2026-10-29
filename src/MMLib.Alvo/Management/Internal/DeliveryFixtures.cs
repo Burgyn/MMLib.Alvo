@@ -29,7 +29,8 @@ namespace MMLib.Alvo.Management.Internal;
 /// as scalars. A data event's <c>subject</c> and <c>partitionkey</c> stay while they are the entity and a uuid; any other
 /// partition key keeps its namespace only when that is the entity or <c>custom.event</c> (the marker
 /// <c>IAlvoEvents.PublishAsync</c> writes), and is otherwise redacted whole. The changed-field names stay while each is a
-/// field or managed column the declared entity has. An attribute this build does not know, and a member of <c>data</c>
+/// field or managed column the declared entity has; with no declared entity to check them against, the list is redacted
+/// whole. An attribute this build does not know, and a member of <c>data</c>
 /// other than the images and the changed-field names, is redacted whole.
 /// </para>
 /// <para>
@@ -227,7 +228,7 @@ internal static class DeliveryFixtures
             }
             else
             {
-                KeepWhen(data, member, member == ChangedMember && IsNameList(data[member], redaction.Declared), redaction, prefix);
+                KeepWhen(data, member, member == ChangedMember && redaction.Declared is { } declared && IsNameList(data[member], declared), redaction, prefix);
             }
         }
     }

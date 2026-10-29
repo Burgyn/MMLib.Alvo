@@ -207,6 +207,20 @@ public sealed class DeliveryFixturesTests
     }
 
     [Theory]
+    [InlineData("orders.shipped")]
+    [InlineData("entity.retired_tickets.updated")]
+    public void A_changed_list_with_no_declared_entity_to_check_it_against_is_redacted_whole(string type)
+    {
+        var envelope = Edit(Envelope(type, Row("Printer jam", 12.5m)), node =>
+            node["data"]!["changed"] = new JsonArray("title", "jane@example.com"));
+
+        var fixture = DeliveryFixtures.Of(Delivery(), envelope, _schema);
+
+        fixture.Envelope.GetProperty("data").GetProperty("changed").GetString().ShouldBe("<redacted:changed>");
+        fixture.Envelope.GetRawText().ShouldNotContain("jane@example.com");
+    }
+
+    [Theory]
     [InlineData("not json jane@example.com")]
     [InlineData("""["jane@example.com"]""")]
     [InlineData("""{"id":"jane@example.com","id":"x"}""")]
