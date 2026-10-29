@@ -565,6 +565,71 @@ public sealed class DeliveryDispatcherTests : IDisposable
         await cancelled.Task.WaitAsync(_waitBudget, Ct);
     }
 
+    /// <summary>A caller who cancels a fixture run abandons the handler as a timeout does: its later failure is observed, never left unobserved.</summary>
+    [Fact]
+    public async Task A_cancelled_fixture_run_observes_the_handler_that_later_fails()
+    {
+        var secret = $"late failure {Guid.NewGuid():N}";
+        var unobserved = new List<string>();
+        EventHandler<UnobservedTaskExceptionEventArgs> record = (_, args) =>
+        {
+            if (args.Exception.Flatten().InnerExceptions.Any(inner => inner.Message == secret))
+            {
+                lock (unobserved)
+                {
+                    unobserved.Add(secret);
+                }
+            }
+        };
+        TaskScheduler.UnobservedTaskException += record;
+        try
+        {
+            await RunCancelledFixtureThatLaterFailsAsync(secret);
+            await CollectAbandonedTasksAsync();
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= record;
+        }
+
+        unobserved.ShouldBeEmpty();
+    }
+
+    private async Task RunCancelledFixtureThatLaterFailsAsync(string secret)
+    {
+        using var release = new ManualResetEventSlim();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var failing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var dispatcher = Dispatcher(
+            new FakeDeliveryStore(_clock),
+            new Func<AlvoCreated<AlvoRecord>, Task>(_ =>
+            {
+                started.TrySetResult();
+                release.Wait(_waitBudget);
+                failing.TrySetResult();
+                throw new InvalidOperationException(secret);
+            }));
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+
+        var run = dispatcher.DeliverFixtureAsync(Fixture(Handler, attempt: 1).Fixture, cancel.Token);
+        await started.Task.WaitAsync(_waitBudget, Ct);
+        await cancel.CancelAsync();
+
+        await Should.ThrowAsync<OperationCanceledException>(run);
+        release.Set();
+        await failing.Task.WaitAsync(_waitBudget, Ct);
+    }
+
+    private static async Task CollectAbandonedTasksAsync()
+    {
+        for (var round = 0; round < 10; round++)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(20), CancellationToken.None);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+    }
+
     private (DeliveryFixture Fixture, Guid EventId) Fixture(string subscriber, int attempt)
     {
         var @event = new AlvoEvent

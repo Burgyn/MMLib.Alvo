@@ -156,8 +156,9 @@ internal sealed class DeliveryRunner(
 
     /// <summary>
     /// Runs the handler off the caller's thread, as <see cref="InvokeAsync"/> does, so one that blocks synchronously still
-    /// times out; past its timeout it is cancelled and dropped — its later failure observed, never tracked as abandoned,
-    /// since nothing records this run.
+    /// times out; past its timeout, or once the caller cancels, it is cancelled and dropped — its later failure observed, never
+    /// tracked as abandoned, since nothing records this run. A dropped handler that ignores its token may still be running
+    /// when the caller's next round starts: a cancelled run is abandoned, not awaited.
     /// </summary>
     private async Task RunUnderTimeoutAsync(AlvoEvent @event, ClaimedDelivery delivery, BoundHandler handler, CancellationToken cancellationToken)
     {
@@ -167,7 +168,7 @@ internal sealed class DeliveryRunner(
         {
             await invocation.WaitAsync(handler.Settings.Timeout, time, cancellationToken).ConfigureAwait(false);
         }
-        catch (TimeoutException)
+        catch (Exception abandoned) when (abandoned is TimeoutException or OperationCanceledException)
         {
             await cancel.CancelAsync().ConfigureAwait(false);
             Observe(invocation);

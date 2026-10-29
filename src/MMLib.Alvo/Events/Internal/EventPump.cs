@@ -51,7 +51,9 @@ internal sealed class EventPump(OutboxDispatcher outbox, DeliveryDispatcher deli
     /// <inheritdoc/>
     /// <remarks>
     /// The run takes the round's gate, so it never overlaps a round, and is marked as one, so a handler that drains from
-    /// inside it is refused rather than left waiting for itself.
+    /// inside it is refused rather than left waiting for itself. The one exception is a run the caller cancels or that times
+    /// out: its handler is abandoned, not awaited, so one that ignores its token can still be running when the gate is
+    /// released — its later failure is observed, not reported.
     /// </remarks>
     public Task DeliverAsync(DeliveryFixture fixture, CancellationToken cancellationToken = default)
     {
