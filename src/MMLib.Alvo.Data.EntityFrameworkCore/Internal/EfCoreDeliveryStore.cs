@@ -30,6 +30,15 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// statement reads no row, so a transaction that opens with it still writes before it reads anything.
 /// </para>
 /// <para>
+/// <b>The cost: an operator's action briefly holds back every claim on PostgreSQL, not only its own handler's.</b> A claim
+/// names every subscriber it may claim for, and PostgreSQL queues a new lock request behind a conflicting <em>waiting</em>
+/// one (so a writer is not starved). Once a pause, redeliver or replay of one handler waits on a claim under way, every later
+/// claim on every replica waits too — each names that handler — until the operator's transaction commits. For a pause or a
+/// redeliver that is one short statement; for a real replay it is the reset of up to 10 000 rows. Nothing is lost or
+/// reordered, deliveries only start later; accepted rather than shortened (by batching the reset, or narrowing the lock to
+/// the final <c>UPDATE</c>) because a replay is a rare, deliberate act.
+/// </para>
+/// <para>
 /// <b>Internal</b>: unlike <see cref="EfCoreOutboxStore"/> it is not part of what a host resolves by type; the port is the
 /// contract, and a provider author implements that.
 /// </para>

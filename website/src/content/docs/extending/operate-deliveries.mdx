@@ -137,3 +137,7 @@ answers 409 naming the pause route. `POST …/schedules/{id}/run` answers 404 un
 - The management routes that change something carry no antiforgery check for a cookie-authenticated caller; this is
   true of every mutating management route, not only these.
 - Stats are per process and are lost on restart.
+- On PostgreSQL a pause, redeliver or replay briefly holds back claims for **every** handler on every instance, not only
+  its own: a claim locks all the handlers it may claim for, and PostgreSQL queues it behind the operator's waiting lock.
+  For a pause or a redeliver that is one short statement; a real replay holds them back while it resets its rows (up to
+  10 000). Nothing is lost or reordered — deliveries only start later. SQLite has no such effect.

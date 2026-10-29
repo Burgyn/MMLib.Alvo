@@ -32,6 +32,9 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
     /// Transaction-level advisory locks (<i>Explicit Locking</i> §13.3.5): released at the end of the transaction with no
     /// explicit unlock, so a failed or cancelled caller cannot leave one held on a pooled connection. The single-<c>bigint</c>
     /// form takes the key the caller hashed; the shared and exclusive forms conflict exactly as a reader and a writer should.
+    /// A shared request also queues behind a conflicting exclusive one that is still <em>waiting</em>, so while an operator's
+    /// lock on one handler waits, every later claim naming that handler waits behind it, whatever else it would claim — the
+    /// cross-handler stall the delivery store's remarks accept.
     /// </remarks>
     public string? TransactionLockStatement(IReadOnlyList<string> keyParameterMarkers, bool exclusive)
     {
