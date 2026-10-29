@@ -29,6 +29,8 @@ public sealed class AccessTranslatorTests
 
         refusal.Message.ShouldContain("'confirm_booking' (access)");
         refusal.FixSuggestion.ShouldContain("access: \"…\"");
+        refusal.Message.ShouldNotContain("when:");
+        refusal.Message.ShouldEndWith(refusal.FixSuggestion);
     }
 
     [AlvoEntity("bookings")]

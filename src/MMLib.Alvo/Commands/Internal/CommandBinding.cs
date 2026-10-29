@@ -16,7 +16,7 @@ internal sealed record BoundCommand(CommandRegistration Registration, CompiledEx
     internal string Name => Registration.Id;
 
     /// <summary>Gets a value indicating whether the rule reads the row, so it can be answered only per row.</summary>
-    internal bool ReadsRow => EventConditionReads.FieldsReadOrCompared(Access.Root).Any();
+    internal bool ReadsRow { get; } = EventConditionReads.FieldsReadOrCompared(Access.Root).Any();
 
     /// <summary>
     /// Gets the context values the rule reads, measured once — as <c>PolicyEngine</c> measures a rule's, so a caller lacking
@@ -119,7 +119,10 @@ internal sealed class CommandBinding(CommandRegistration command, ICelCompiler c
     {
         if (!catalog.TryGetEntity(entity, out var policy))
         {
-            return access;
+            Add("access",
+                $"'{entity}' has no policy in this catalog, so the fields it hides cannot be told apart from the ones it shows.",
+                "Declare the entity in the descriptor so it carries a policy.");
+            return null;
         }
 
         var hidden = EventConditionReads.FieldsReadOrCompared(access.Root).Where(policy.Hidden.ContainsKey).Distinct(StringComparer.Ordinal).ToList();

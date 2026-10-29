@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Data.Internal;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Extensions.Internal;
 using System.Linq.Expressions;
@@ -16,6 +17,8 @@ namespace MMLib.Alvo.Commands.Internal;
 internal static class AccessTranslator
 {
     private const string AccessFix = "write the access rule as a CEL string — access: \"…\" — or check the rest in the handler body after the rule admits the caller.";
+
+    private const string SplitAccessFix = "split the access rule into a shorter one, or write it as a CEL string — access: \"…\" — or check the rest in the handler body after the rule admits the caller.";
 
     /// <summary>Translates a caller-only rule.</summary>
     /// <param name="access">The lambda.</param>
@@ -53,8 +56,23 @@ internal static class AccessTranslator
         }
         catch (AlvoTranslationException refusal)
         {
-            throw new AlvoTranslationException(refusal.Message.Replace(" (when): ", " (access): ", StringComparison.Ordinal), AccessFix);
+            throw AsAccess(refusal);
         }
+    }
+
+    /// <summary>The <c>when</c> refusal restated for the <c>access</c> slot: its slot and every fix that names <c>when:</c>.</summary>
+    private static AlvoTranslationException AsAccess(AlvoTranslationException refusal)
+    {
+        var fix = refusal.FixSuggestion switch
+        {
+            TranslationRefusal.SplitWhenFix => SplitAccessFix,
+            var named when named.Contains("when:", StringComparison.Ordinal) => AccessFix,
+            var specific => specific,
+        };
+        var message = refusal.Message.Replace(" (when): ", " (access): ", StringComparison.Ordinal);
+        message = message.EndsWith(refusal.FixSuggestion, StringComparison.Ordinal) ? message[..^refusal.FixSuggestion.Length] + fix : message;
+
+        return new AlvoTranslationException(message, fix);
     }
 
     private static Expression Rebind(Expression body, ParameterExpression from, Expression to) => new Rebinder(from, to).Visit(body);

@@ -27,6 +27,8 @@ public sealed class CommandBindingTests
         result.Problems.ShouldBeEmpty();
         var bound = result.Bindings.Command("quote_stay").ShouldNotBeNull();
         bound.ReadsRow.ShouldBeFalse();
+        bound.Required.TenantId.ShouldBeTrue();
+        bound.Required.UserId.ShouldBeFalse();
     }
 
     [Fact]
@@ -143,7 +145,7 @@ public sealed class CommandBindingTests
         return ExtensionBindingCompiler.Compile(provider.GetRequiredService<ExtensionRegistry>(), Catalog(), CelFixtures.Compiler, services ?? EveryService());
     }
 
-    private static PolicyCatalog HidingStatus() =>
+    internal static PolicyCatalog HidingStatus() =>
         PolicyCatalog.Build(
             new AlvoDescriptor
             {

@@ -58,6 +58,18 @@ public sealed class CommandAccessJudgeTests
     }
 
     [Fact]
+    public void An_entity_command_judged_without_its_row_is_refused_instead_of_reading_an_empty_one()
+    {
+        var judge = Judge(out _);
+
+        Should.Throw<AlvoAuthorizationException>(() => judge.EnsureAdmitted("not_resolved", null, _tenantless))
+            .Message.ShouldBe(CommandAccessJudge.RowMissing);
+        Should.NotThrow(() => judge.EnsureAdmitted("not_resolved", Ticket("open"), _tenantless));
+        Should.Throw<AlvoAuthorizationException>(() => judge.EnsureAdmitted("not_resolved", Ticket("resolved"), _tenantless))
+            .Message.ShouldBe(CommandAccessJudge.Refused);
+    }
+
+    [Fact]
     public void A_command_with_no_bound_catalog_is_refused_as_not_bound()
     {
         var judge = Judge(out var catalogs);
@@ -75,10 +87,14 @@ public sealed class CommandAccessJudgeTests
         var commands = provider.GetRequiredService<CommandRegistry>();
         commands.Map("not_blocked", "/a", null, CommandAccess.Of($"!(string(@tenant.id) == '{Blocked}')"));
         commands.Map("not_banned", "/b", null, CommandAccess.Of("!(string(@user.id) == '6c1f9a3e-0000-4000-8000-000000000001')"));
+        commands.Map("not_resolved", "/c/{id}", "tickets", CommandAccess.Of("!(status == 'resolved')"));
         catalogs = Substitute.For<IPolicyCatalogProvider>();
         catalogs.Current.Returns(Catalog());
         var binder = new ExtensionBinder(provider.GetRequiredService<ExtensionRegistry>(), CelFixtures.Compiler, EveryService(), NullLogger<ExtensionBinder>.Instance);
 
         return new CommandAccessJudge(binder, catalogs, provider.GetRequiredService<IPredicateEvaluator>());
     }
+
+    private static AlvoRecord Ticket(string status) =>
+        new(new Dictionary<string, object?> { ["id"] = Guid.NewGuid(), ["title"] = "Printer jam", ["status"] = status });
 }

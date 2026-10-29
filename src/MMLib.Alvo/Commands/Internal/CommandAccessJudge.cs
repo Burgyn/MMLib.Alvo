@@ -23,6 +23,9 @@ internal sealed class CommandAccessJudge(ExtensionBinder binder, IPolicyCatalogP
     internal const string NotBound =
         "This command is not bound to an applied descriptor, so its access rule cannot be judged. It answers once a descriptor it fits is applied.";
 
+    /// <summary>The refusal when a command bound to an entity is judged without its row: never evaluated against an empty one.</summary>
+    internal const string RowMissing = "This command is bound to a row, and it was judged without one.";
+
     /// <summary>The refusal when the rule reads <c>@tenant.id</c> and the caller has no tenant.</summary>
     internal const string MissingTenant = "The caller has no tenant, and this command's access rule reads one.";
 
@@ -31,7 +34,10 @@ internal sealed class CommandAccessJudge(ExtensionBinder binder, IPolicyCatalogP
 
     /// <summary>Admits the caller, or throws the refusal.</summary>
     /// <param name="name">The command.</param>
-    /// <param name="row">The bound row as the caller reads it; null for a command bound to none.</param>
+    /// <param name="row">
+    /// The bound row as the caller reads it; null for a command bound to none. A command bound to an entity and handed no row
+    /// is refused (<see cref="RowMissing"/>): an empty row would collapse a negated field test into an admission.
+    /// </param>
     /// <param name="caller">The caller.</param>
     /// <exception cref="AlvoAuthorizationException">The rule — or its required context — refuses the caller.</exception>
     internal void EnsureAdmitted(string name, AlvoRecord? row, AlvoContext caller)
@@ -52,6 +58,7 @@ internal sealed class CommandAccessJudge(ExtensionBinder binder, IPolicyCatalogP
 
     private string? Refusal(BoundCommand? bound, AlvoRecord? row, AlvoContext caller) =>
         bound is null ? NotBound
+        : bound.Registration.Entity is not null && row is null ? RowMissing
         : Missing(bound, caller) ?? (evaluator.Evaluate(bound.Access, row ?? AlvoRecord.Empty, null, caller) ? null : Refused);
 
     private static string? Missing(BoundCommand bound, AlvoContext caller) =>

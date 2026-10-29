@@ -25,8 +25,11 @@ internal sealed class ExtensionApplyGuard(
     /// <param name="descriptor">The proposed descriptor.</param>
     /// <param name="schema">The schema it maps to — the very instance the apply publishes.</param>
     /// <exception cref="DescriptorValidationException">A handler that binds the current catalog would no longer bind.</exception>
-    internal ExtensionApplyCheck? Check(AlvoDescriptor descriptor, SchemaModel schema) =>
-        registry.IsEmpty ? null : Check(PolicyCatalog.Build(descriptor, schema, compiler));
+    internal ExtensionApplyCheck? Check(AlvoDescriptor descriptor, SchemaModel schema)
+    {
+        registry.Seal();
+        return registry.IsEmpty ? null : Check(PolicyCatalog.Build(descriptor, schema, compiler));
+    }
 
     /// <summary>Refuses <paramref name="proposed"/> when a handler that binds the current catalog would no longer bind it.</summary>
     /// <remarks>With no handler or command registered the binder is not asked: a host with neither pays nothing.</remarks>
@@ -36,6 +39,7 @@ internal sealed class ExtensionApplyGuard(
     /// </exception>
     internal ExtensionApplyCheck Check(PolicyCatalog proposed)
     {
+        registry.Seal();
         if (registry.IsEmpty)
         {
             return new(proposed, []);

@@ -43,6 +43,18 @@ public sealed class CommandRegistryTests
             .Message.ShouldContain("before applying a descriptor");
     }
 
+    [Fact]
+    public void A_command_mapped_after_the_catalog_was_first_read_is_refused()
+    {
+        using var provider = Provider(_ => { });
+        var commands = provider.GetRequiredService<CommandRegistry>();
+        commands.Map("early", "/commands/early", null, CommandAccess.Of("true"));
+        _ = provider.GetRequiredService<ExtensionCatalog>().Items;
+
+        Should.Throw<InvalidOperationException>(() => commands.Map("late", "/commands/late", null, CommandAccess.Of("true")))
+            .Message.ShouldContain("'late'");
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
