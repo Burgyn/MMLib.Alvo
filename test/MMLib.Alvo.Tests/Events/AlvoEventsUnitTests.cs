@@ -40,6 +40,32 @@ public sealed class AlvoEventsUnitTests
     }
 
     [Fact]
+    public async Task An_unwritable_payload_is_still_refused_before_the_unit_refusal()
+    {
+        var events = new AlvoEvents(Substitute.For<IOutboxStore>(), TimeProvider.System, AlvoChainDepthLimit.Default);
+        var unit = new FakeFlowUnit();
+        using var _ = AlvoFlow.EnterUnit(unit, AlvoProvenance.None);
+
+        await Should.ThrowAsync<ArgumentException>(() => events.PublishAsync(
+            "orders.approved", "orders/1", new Dictionary<string, object?> { ["value"] = new Dictionary<string, object?> { ["nested"] = 1 } },
+            _caller, TestContext.Current.CancellationToken));
+        unit.Poisoned.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task The_unit_refusal_comes_before_the_depth_refusal()
+    {
+        var events = new AlvoEvents(Substitute.For<IOutboxStore>(), TimeProvider.System, AlvoChainDepthLimit.Default);
+        var unit = new FakeFlowUnit();
+        using var _ = AlvoFlow.EnterUnit(unit, AlvoProvenance.None);
+        var deep = _caller with { Provenance = new AlvoProvenance { Depth = AlvoChainDepthLimit.DefaultMaxDepth + 1 } };
+
+        var refusal = await Should.ThrowAsync<AlvoUnitInProgressException>(() => events.PublishAsync(
+            "orders.approved", "orders/1", null, deep, TestContext.Current.CancellationToken));
+        unit.Poisoned.ShouldHaveSingleItem().ShouldBeSameAs(refusal);
+    }
+
+    [Fact]
     public async Task A_publish_outside_any_unit_appends_one_envelope_built_by_the_shared_builder()
     {
         var outbox = Substitute.For<IOutboxStore>();

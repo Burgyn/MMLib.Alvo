@@ -113,7 +113,7 @@ internal static class AlvoCustomEnvelope
     private const string ProbeSubject = "probe";
 
     /// <summary>
-    /// The partition a custom event orders within: its type and its subject, joined.
+    /// The partition a custom event orders within: a fixed marker and its subject, joined.
     /// </summary>
     /// <remarks>
     /// <para>

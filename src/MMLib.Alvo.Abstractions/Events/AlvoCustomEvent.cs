@@ -60,7 +60,7 @@ public sealed class AlvoCustomEvent
     /// <remarks>
     /// <para>
     /// <b>The second half of the guard, and it exists because the documentation over-claimed without it.</b>
-    /// <c>AlvoEvents.PartitionKeyFor</c> says the disjointness from a data event's <c>{entity}:{rowId}</c> is
+    /// <c>AlvoCustomEnvelope.PartitionKeyFor</c> says the disjointness from a data event's <c>{entity}:{rowId}</c> is
     /// <em>"provable, not probable"</em> — but that was only true for callers coming through
     /// <c>IAlvoEvents.PublishAsync</c>, and this type exists precisely so that is not the only door. A host
     /// could <c>Create</c> a well-named <c>crm.thing.happened</c> carrying <c>PartitionKey =
