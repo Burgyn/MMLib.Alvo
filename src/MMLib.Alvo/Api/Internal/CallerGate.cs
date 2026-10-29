@@ -16,8 +16,9 @@ internal readonly record struct CallerAdmission(AlvoPrincipal? Principal, IResul
 }
 
 /// <summary>
-/// Resolves a request's credential with the same <see cref="CallerResolution"/> the generated routes use: no credential is
-/// anonymous, a credential that cannot be used is 401, and — when a scope is asked for — a key whose scopes exclude it is 403.
+/// Resolves a request's credential with the same <see cref="CallerResolution"/> the generated routes use: no credential
+/// is anonymous, a credential that cannot be used is 401, and — when a scope is asked for — a key whose scopes exclude
+/// it is 403.
 /// </summary>
 internal sealed class CallerGate(IAlvoContextResolver resolver, ScopeGate scopes, IOptions<AlvoAuthOptions> options)
 {
@@ -28,8 +29,11 @@ internal sealed class CallerGate(IAlvoContextResolver resolver, ScopeGate scopes
     /// <param name="http">The request.</param>
     /// <param name="scopeEntity">The entity a key's scopes must cover, or <see langword="null"/> for no scope check.</param>
     /// <param name="operation">The operation the scopes must cover.</param>
-    /// <param name="alsoRead">Whether the scopes must also cover reading <paramref name="scopeEntity"/> (a command bound to its rows, Ruling 39).</param>
-    internal async ValueTask<CallerAdmission> AdmitAsync(HttpContext http, string? scopeEntity, DataOperation operation, bool alsoRead = false)
+    /// <param name="alsoRead">
+    /// Whether the scopes must also cover reading <paramref name="scopeEntity"/> (a command bound to its rows, Ruling 39).
+    /// </param>
+    internal async ValueTask<CallerAdmission> AdmitAsync(
+        HttpContext http, string? scopeEntity, DataOperation operation, bool alsoRead = false)
     {
         ArgumentNullException.ThrowIfNull(http);
         var settings = options.Value;
@@ -39,14 +43,18 @@ internal sealed class CallerGate(IAlvoContextResolver resolver, ScopeGate scopes
             return new CallerAdmission(null, null);
         }
 
-        var principal = await CallerResolution.ResolveAsync(resolver, presented, http.Request, settings).ConfigureAwait(false);
+        var principal = await CallerResolution.ResolveAsync(resolver, presented, http.Request, settings)
+            .ConfigureAwait(false);
         if (principal is null)
         {
             return new CallerAdmission(null, ProblemResultFactory.Unauthenticated(settings.HeaderName));
         }
 
-        return scopeEntity is null || (scopes.Allows(principal, scopeEntity, operation) && (!alsoRead || scopes.Allows(principal, scopeEntity, DataOperation.Get)))
+        return scopeEntity is null || Covers(principal, scopeEntity, operation, alsoRead)
             ? new CallerAdmission(principal, null)
             : new CallerAdmission(principal, ProblemResultFactory.ScopeRefused());
     }
+
+    private bool Covers(AlvoPrincipal principal, string entity, DataOperation operation, bool alsoRead) =>
+        scopes.Allows(principal, entity, operation) && (!alsoRead || scopes.Allows(principal, entity, DataOperation.Get));
 }
