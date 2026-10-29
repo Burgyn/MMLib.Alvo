@@ -227,6 +227,7 @@ public class ChangeTrackerReachTests
     /// <summary>The files permitted to compose SQL text or construct a <c>DbCommand</c> inside a data package.</summary>
     private static readonly string[] _sqlComposingFiles =
     [
+        "CommandLedgerTable.cs",
         "DeliveryTable.cs",
         "EfAlvoData.cs",
         "EfAlvoData.Units.cs",
@@ -237,6 +238,7 @@ public class ChangeTrackerReachTests
         "EfCoreSchemaMigrator.cs",
         "EfCoreSecretStore.cs",
         "IdempotencyTable.cs",
+        "InboundWebhookTable.cs",
         "MigrationFramingScope.cs",
         "OutboxTable.cs",
         "PredicateParameterBinder.cs",

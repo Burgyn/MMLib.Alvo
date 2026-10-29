@@ -70,6 +70,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     private readonly TimeProvider _time;
     private readonly string _idempotencyTable;
     private readonly string _outboxTable;
+    private readonly string _commandTable;
 
     /// <summary>The causation-chain limit every write face enforces before it reads or writes a row.</summary>
     private readonly AlvoChainDepthLimit _depthLimit;
@@ -110,6 +111,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         _time = time;
         _idempotencyTable = IdempotencyTable.NameFor(options.SchemaPrefix);
         _outboxTable = OutboxTable.NameFor(options.SchemaPrefix);
+        _commandTable = CommandLedgerTable.NameFor(options.SchemaPrefix);
         _depthLimit = depthLimit;
         _writeGate = writeGate ?? NoRelationalWriteGate.Instance;
     }

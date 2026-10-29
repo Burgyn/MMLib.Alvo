@@ -43,10 +43,46 @@ public sealed class SystemSchemaInitializerTests : IDisposable
         await Should.NotThrowAsync(() => new SystemSchemaInitializer(_keepAlive, "alvo").EnsureAsync(ct));
     }
 
+    /// <summary>The boot creates the command and inbound webhook ledgers, each with its sweep index (Ruling 41).</summary>
+    [Fact]
+    public async Task The_boot_creates_both_ledgers_and_their_sweep_indexes()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        await new SystemSchemaInitializer(_keepAlive, "alvo").EnsureAsync(ct);
+
+        var objects = await SchemaObjectsAsync(ct);
+
+        objects.ShouldContain("alvo_command_requests");
+        objects.ShouldContain("alvo_command_requests_claimed");
+        objects.ShouldContain("alvo_inbound_webhooks");
+        objects.ShouldContain("alvo_inbound_webhooks_received");
+    }
+
     public void Dispose()
     {
         _keepAlive.Dispose();
         GC.SuppressFinalize(this);
+    }
+
+    private async Task<List<string>> SchemaObjectsAsync(CancellationToken ct)
+    {
+        var command = _keepAlive.CreateCommand();
+        await using (command)
+        {
+            command.CommandText = "SELECT name FROM sqlite_master";
+            var reader = await command.ExecuteReaderAsync(ct);
+            await using (reader)
+            {
+                var names = new List<string>();
+                while (await reader.ReadAsync(ct))
+                {
+                    names.Add(reader.GetString(0));
+                }
+
+                return names;
+            }
+        }
     }
 
     private async Task ExecuteAsync(string sql, CancellationToken ct)
