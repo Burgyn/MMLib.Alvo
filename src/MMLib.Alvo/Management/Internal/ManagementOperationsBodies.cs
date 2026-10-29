@@ -1,4 +1,7 @@
-﻿namespace MMLib.Alvo.Management.Internal;
+﻿using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace MMLib.Alvo.Management.Internal;
 
 /// <summary>The body of a redeliver: why, if the caller says.</summary>
 /// <param name="Reason">Kept in the audit.</param>
@@ -23,6 +26,14 @@ internal sealed record ManagementEnabledBody(bool? Enabled, string? Reason);
 /// <param name="Reason">Kept in the audit.</param>
 internal sealed record ManagementReplayBody(string? Subscriber, string? Status, DateTimeOffset? From, DateTimeOffset? To, bool DryRun, string? Reason)
 {
+    /// <summary>The members this body does not read, kept so the route refuses them rather than ignores them (Ruling 28).</summary>
+    /// <remarks>A misspelled <c>dry_run</c> ignored would turn a preview into a committed replay.</remarks>
+    [JsonExtensionData]
+    public IDictionary<string, JsonElement>? Unknown { get; set; }
+
+    /// <summary>The names of the members this body does not read, in the order they were sent; empty when there are none.</summary>
+    internal IReadOnlyList<string> UnknownNames => Unknown is null ? [] : [.. Unknown.Keys];
+
     /// <summary>The port's request, carrying the key read off the header.</summary>
     /// <param name="key">The single <c>Idempotency-Key</c> presented, or <see langword="null"/>.</param>
     internal ManagementReplayRequest ToRequest(string? key) => new()

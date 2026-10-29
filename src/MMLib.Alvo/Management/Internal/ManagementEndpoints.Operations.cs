@@ -19,8 +19,16 @@ internal static partial class ManagementEndpoints
     private const string EnabledRequired =
         "Send whether the extension should run: {\"enabled\": false} switches it off, {\"enabled\": true} on; 'reason' is optional.";
 
+    private const string ReplayBodyMembers =
+        "It reads 'subscriber' (required), 'status' (dead unless set), 'from', 'to', 'dryRun' and 'reason'; send no others, "
+        + "because an ignored member could turn a preview into a replay that runs for real.";
+
     private const string ReplayBodyRequired =
         "A replay needs a JSON body naming the handler: {\"subscriber\": \"…\"}; 'status' (dead unless set), 'from', 'to', 'dryRun' and 'reason' are optional.";
+
+    private const string ReplayQueryRefused =
+        "A replay reads no query parameters. Send 'dryRun' in the JSON body instead — {\"subscriber\": \"…\", \"dryRun\": true} — "
+        + "since a flag in the query would be ignored and the replay run for real.";
 
     /// <summary>The page size a delivery list answers with when the caller names none (Ruling 22).</summary>
     private const int DefaultDeliveryPage = 50;
@@ -136,22 +144,50 @@ internal static partial class ManagementEndpoints
                     Answer(() => operations.RunScheduleAsync(project, schedule, ct))),
             new ManagementRoute(nameof(IAlvoOperations.RunScheduleAsync), ManagementOperation.RunSchedule));
 
-    /// <summary>A replay: one key header at most, then a body that names the handler.</summary>
+    /// <summary>A replay: no query string, one key header at most, then a body that names the handler and nothing it does not read.</summary>
+    /// <remarks>
+    /// <b>Every shape this route does not read is refused, never ignored (Ruling 28).</b> Apply and rollback take
+    /// <c>?dryRun=true</c> in the query; a caller carrying that convention here, or misspelling the body's flag, would otherwise
+    /// commit the replay it asked to preview — and a committed reset cannot be undone.
+    /// </remarks>
     /// <param name="project">The project addressed.</param>
     /// <param name="body">The bound body, or <see langword="null"/> when none was sent.</param>
-    /// <param name="request">The request the key header is read from.</param>
+    /// <param name="request">The request the query string and the key header are read from.</param>
     /// <param name="operations">The operations port.</param>
     /// <param name="ct">The request's cancellation.</param>
     private static Task<IResult> ReplayAsync(
         string project, ManagementReplayBody? body, HttpRequest request, IAlvoOperations operations, CancellationToken ct)
     {
+        if (request.Query.Count > 0)
+        {
+            return Refused(ProblemResultFactory.ManagementValidation(ReplayQueryRefused));
+        }
+
         if (!TryReadIdempotencyKey(request, out var key))
         {
             return Refused(ProblemResultFactory.ManagementValidation(RepeatedIdempotencyKey));
         }
 
-        return string.IsNullOrWhiteSpace(body?.Subscriber)
-            ? Refused(ProblemResultFactory.ManagementValidation(ReplayBodyRequired))
-            : Answer(() => operations.ReplayAsync(project, body.ToRequest(key), ct));
+        return ReplayBodyRefusal(body) is { } refusal
+            ? Refused(ProblemResultFactory.ManagementValidation(refusal))
+            : Answer(() => operations.ReplayAsync(project, body!.ToRequest(key), ct));
+    }
+
+    /// <summary>Why a replay body cannot be used, or <see langword="null"/> when it can.</summary>
+    /// <remarks>
+    /// The unknown names are echoed because they are what the caller must correct — the line <see cref="UnknownQueryParameter"/>'s
+    /// remarks draw; the answer is a problem document returned to the caller who sent them, past the gate.
+    /// </remarks>
+    /// <param name="body">The bound body, or <see langword="null"/>.</param>
+    private static string? ReplayBodyRefusal(ManagementReplayBody? body)
+    {
+        if (string.IsNullOrWhiteSpace(body?.Subscriber))
+        {
+            return ReplayBodyRequired;
+        }
+
+        return body.UnknownNames is { Count: > 0 } unknown
+            ? $"A replay body does not read {string.Join(", ", unknown.Select(name => $"'{name}'"))}. {ReplayBodyMembers}"
+            : null;
     }
 }

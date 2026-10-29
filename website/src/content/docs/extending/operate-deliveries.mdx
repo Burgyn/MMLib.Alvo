@@ -74,6 +74,8 @@ The by-hand SQL this used to take is no longer needed.
 one handler in one finished status (`dead` unless set) whose event falls in the window.
 
 - **Ask with `"dryRun": true` first.** It answers the exact count and the first 20 ids, and changes nothing.
+- `dryRun` belongs in the body, not in the query string as on apply and rollback. A replay with any query parameter, or
+  with a body member it does not read (a misspelled `dry_run`, say), is 422 naming what to change, and nothing is reset.
 - A real run resets at most 10 000 deliveries, never resets one dead with `chain-depth-exceeded`, and is refused (409)
   while any selected record has a delivery of the handler running.
 - Send an `Idempotency-Key` so a retried request answers the first one's count (`"replayed": true`) instead of running

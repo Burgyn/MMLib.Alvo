@@ -13,6 +13,7 @@ public sealed class OperationsRouteTests
 {
     private const string Prefix = "/management/projects/operated-notes";
     private const string Handler = "note-audit";
+    private const string OperationsLog = "alvo_operations_log";
 
     private static readonly TestApiKey _viewer = new("ops-viewer", ["ops"], ["*:read"]);
     private static readonly TestApiKey _developer = new("ops-dev", ["dev"], ["*:write"]);
@@ -98,6 +99,45 @@ public sealed class OperationsRouteTests
         first.StatusCode.ShouldBe(HttpStatusCode.OK);
         JsonNode.Parse(await again.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))!["replayed"]!.GetValue<bool>().ShouldBeTrue();
         ambiguous.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, "two keys are two requests, and a replay is recorded under one");
+    }
+
+    [Theory]
+    [InlineData("?dryRun=true")]
+    [InlineData("?dry_run=true")]
+    public async Task A_replay_with_a_query_parameter_is_422_and_resets_nothing(string query)
+    {
+        await using var world = await WorldAsync();
+
+        var response = await world.SendAsync(HttpMethod.Post, $"{Prefix}/deliveries/replay{query}", _developer, body: new JsonObject { ["subscriber"] = Handler });
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, "a dry run asked where the apply route takes it must never commit a replay");
+        (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Validation);
+        (await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).ShouldContain("JSON body");
+        (await world.CountRowsAsync(OperationsLog)).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_replay_with_an_unknown_body_member_is_422_naming_it_and_resets_nothing()
+    {
+        await using var world = await WorldAsync();
+
+        var response = await world.SendAsync(HttpMethod.Post, $"{Prefix}/deliveries/replay", _developer, body: new JsonObject { ["subscriber"] = Handler, ["dry_run"] = true });
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, "a misspelled dry-run flag must never commit a replay");
+        (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Validation);
+        (await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).ShouldContain("'dry_run'");
+        (await world.CountRowsAsync(OperationsLog)).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_real_replay_is_logged_so_a_refusal_that_logs_nothing_reset_nothing()
+    {
+        await using var world = await WorldAsync();
+
+        (await world.SendAsync(HttpMethod.Post, $"{Prefix}/deliveries/replay", _developer, body: new JsonObject { ["subscriber"] = Handler }))
+            .StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        (await world.CountRowsAsync(OperationsLog)).ShouldBe(1);
     }
 
     [Theory]
