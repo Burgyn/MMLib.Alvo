@@ -59,12 +59,11 @@ public static class AlvoDataApiEndpointRouteBuilderExtensions
     /// probe is how a pod gets killed and restart-looped for a schema no restart can fix.
     /// </para>
     /// <para>
-    /// Every mapped endpoint carries the API-key context filter — attached in the same call as the operation
-    /// marker and as the host's own conventions — so nothing <em>this framework</em> maps has a path to
-    /// <c>IAlvoData</c> that skips the authorization seam. A convention the host attaches receives the
-    /// endpoint builder and could take it away again; that is host code deciding to dismantle its own
-    /// pipeline, which it could already do by substituting <c>IPolicyEngine</c>, and it is not what this
-    /// sentence claims.
+    /// Every mapped endpoint carries the API-key context filter, and the route-table build <b>fails</b> — empty
+    /// table, readiness <c>Failed</c>, a critical log naming the route — when a convention removes it: each route
+    /// counts the composition of its own filter into its request delegate, after every route and group convention
+    /// has run. A finally convention runs after that composition, so clearing the filter list there removes
+    /// nothing. A convention may add filters around Alvo's; it cannot take Alvo's away without the build failing.
     /// </para>
     /// <para>
     /// <b>It returns a convention builder rather than the route builder it was given, which is what every

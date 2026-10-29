@@ -156,13 +156,38 @@ internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
     /// implementation, for the same reason the endpoints are built through those helpers at all: it is the
     /// framework's own minimal-API data source that knows how to re-run a route handler's conventions and
     /// filters under a group's prefix. <c>app.MapGroup(prefix).MapAlvoDataApi()</c> is a supported call, and a
-    /// created row's <c>Location</c> is read off the matched endpoint's combined pattern (#121).
+    /// created row's <c>Location</c> is read off the matched endpoint's combined pattern (#121). Each group build
+    /// re-composes the gate, so the witnesses are read again here, against their counts before it.
     /// </remarks>
     public override IReadOnlyList<Endpoint> GetGroupedEndpoints(RouteGroupContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+        var table = Materialise();
 
-        return [.. Materialise().Sources.SelectMany(source => source.GetGroupedEndpoints(context))];
+        lock (_gate)
+        {
+            var before = table.Counts();
+            IReadOnlyList<Endpoint> grouped = [.. table.Sources.SelectMany(source => source.GetGroupedEndpoints(context))];
+            return GatedOrNothing(grouped, before);
+        }
+    }
+
+    /// <summary>A group build's endpoints, or none plus a recorded refusal when a convention removed the gate.</summary>
+    /// <param name="grouped">What the group build produced.</param>
+    /// <param name="before">Each witness's count before that build.</param>
+    private IReadOnlyList<Endpoint> GatedOrNothing(IReadOnlyList<Endpoint> grouped, Dictionary<AlvoGateWitness, int> before)
+    {
+        try
+        {
+            RouteTable.Gated(grouped, before);
+            return grouped;
+        }
+        catch (AlvoDataApiConventionException failure)
+        {
+            _boot.Failed(failure.Message);
+            AHostConventionFailed(_logger, failure.InnerException, failure.Message);
+            return [];
+        }
     }
 
     /// <inheritdoc/>
@@ -324,10 +349,36 @@ internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
 
         /// <summary>Snapshots what one <see cref="NestedRouteBuilder"/> was mapped onto.</summary>
         /// <param name="inner">The builder the <c>Map*</c> calls wrote into.</param>
+        /// <exception cref="AlvoDataApiConventionException">A convention removed Alvo's gate from a route.</exception>
         internal static RouteTable Of(NestedRouteBuilder inner)
         {
             IReadOnlyList<EndpointDataSource> sources = [.. inner.DataSources];
-            return new RouteTable(sources, [.. sources.SelectMany(source => source.Endpoints)]);
+            IReadOnlyList<Endpoint> endpoints = [.. sources.SelectMany(source => source.Endpoints)];
+            Gated(endpoints, before: null);
+
+            return new RouteTable(sources, endpoints);
         }
+
+        /// <summary>Refuses a build in which some route's gate was not composed into its request delegate.</summary>
+        /// <param name="endpoints">The endpoints that build produced.</param>
+        /// <param name="before">Each witness's count before the build, or <see langword="null"/> for the first build.</param>
+        /// <exception cref="AlvoDataApiConventionException">A convention removed Alvo's gate from a route.</exception>
+        internal static void Gated(IEnumerable<Endpoint> endpoints, IReadOnlyDictionary<AlvoGateWitness, int>? before)
+        {
+            foreach (var witness in Witnesses(endpoints))
+            {
+                if (witness.Compositions <= (before?.GetValueOrDefault(witness) ?? 0))
+                {
+                    throw AlvoDataApiConventionException.GateRemoved(witness);
+                }
+            }
+        }
+
+        /// <summary>Each witness's composition count now, so a group build can be judged against it.</summary>
+        internal Dictionary<AlvoGateWitness, int> Counts() =>
+            Witnesses(Endpoints).Distinct().ToDictionary(witness => witness, witness => witness.Compositions);
+
+        private static IEnumerable<AlvoGateWitness> Witnesses(IEnumerable<Endpoint> endpoints) =>
+            endpoints.Select(endpoint => endpoint.Metadata.GetMetadata<AlvoGateWitness>()).OfType<AlvoGateWitness>();
     }
 }
