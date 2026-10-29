@@ -19,6 +19,8 @@ public sealed class AlvoOperationsReplayTests
     private const string Project = OperationsTestWorld.Project;
     private const string Handler = OperationsTestWorld.Handler;
 
+    private static readonly DateTimeOffset _preEpoch = new(1969, 12, 31, 0, 0, 0, TimeSpan.Zero);
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
@@ -38,6 +40,43 @@ public sealed class AlvoOperationsReplayTests
         world.Store.Rows.ShouldAllBe(row => row.Status == "dead");
         world.Store.Operations.ShouldBeEmpty();
         world.Audit.Lines.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_replay_from_before_the_epoch_selects_from_the_first_event()
+    {
+        using var world = new OperationsTestWorld();
+        await world.DeliveryAsync("tickets:a", deadReason: "when-failed");
+
+        var plan = await world.Service.ReplayAsync(
+            Project, new ManagementReplayRequest { Subscriber = Handler, From = DateTimeOffset.MinValue, DryRun = true }, Ct);
+
+        plan.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_replay_up_to_before_the_epoch_selects_nothing()
+    {
+        using var world = new OperationsTestWorld();
+        await world.DeliveryAsync("tickets:a", deadReason: "when-failed");
+
+        var plan = await world.Service.ReplayAsync(
+            Project, new ManagementReplayRequest { Subscriber = Handler, To = _preEpoch, DryRun = true }, Ct);
+
+        plan.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_delivery_list_window_before_the_epoch_is_clamped_not_refused()
+    {
+        using var world = new OperationsTestWorld();
+        await world.DeliveryAsync("tickets:a", deadReason: "when-failed");
+
+        var fromBefore = await world.Service.ListDeliveriesAsync(Project, new ManagementDeliveryQuery { From = DateTimeOffset.MinValue, Limit = 10 }, Ct);
+        var toBefore = await world.Service.ListDeliveriesAsync(Project, new ManagementDeliveryQuery { From = DateTimeOffset.MinValue, To = _preEpoch, Limit = 10 }, Ct);
+
+        fromBefore.Items.ShouldHaveSingleItem();
+        toBefore.Items.ShouldBeEmpty();
     }
 
     [Fact]

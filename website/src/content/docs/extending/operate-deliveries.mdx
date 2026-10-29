@@ -41,7 +41,7 @@ a viewer sees every tenant's deliveries.
 
 `GET {management}/projects/{project}/deliveries?subscriber=&status=&from=&to=&after=&limit=` lists deliveries newest
 first; `next` is the cursor for the following page, `limit` is 1–200 (50 unless set), and `from`/`to` are event time
-with the end excluded. `GET …/deliveries/{id}` answers one delivery with its attempts, numbered across the delivery's
+with the end excluded — a bound before 1970 reads as 1970, since no event precedes it. `GET …/deliveries/{id}` answers one delivery with its attempts, numbered across the delivery's
 whole life — a redelivery keeps counting. In-process, `IAlvoOperations` answers the same.
 
 `GET …/extensions/stats` answers runs, failures and p50/p95 per handler over the current partial hour and the 23 hours

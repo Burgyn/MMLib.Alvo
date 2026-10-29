@@ -100,6 +100,30 @@ public sealed class OperationsRouteTests
         ambiguous.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, "two keys are two requests, and a replay is recorded under one");
     }
 
+    [Theory]
+    [InlineData("from")]
+    [InlineData("to")]
+    public async Task A_delivery_list_window_before_the_epoch_is_answered_not_500(string bound)
+    {
+        await using var world = await WorldAsync();
+
+        var response = await world.SendAsync(HttpMethod.Get, $"{Prefix}/deliveries?{bound}=1969-12-31T00:00:00Z", _viewer);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Theory]
+    [InlineData("from")]
+    [InlineData("to")]
+    public async Task A_replay_window_before_the_epoch_is_answered_not_500(string bound)
+    {
+        await using var world = await WorldAsync();
+
+        var response = await world.SendAsync(HttpMethod.Post, $"{Prefix}/deliveries/replay", _developer, body: new JsonObject { ["subscriber"] = Handler, [bound] = "0001-01-01T00:00:00Z", ["dryRun"] = true });
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
     [Fact]
     public async Task An_unknown_delivery_is_404()
     {

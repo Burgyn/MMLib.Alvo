@@ -38,10 +38,19 @@ internal static class DeliveryQueries
         return new DeliveryFilter
         {
             Limit = 1,
-            FromEventId = from is { } floor ? AlvoEventId.Floor(floor) : null,
-            ToEventId = to is { } ceiling ? AlvoEventId.Floor(ceiling) : null,
+            FromEventId = from is { } floor ? EventIdFloor(floor) : null,
+            ToEventId = to is { } ceiling ? EventIdFloor(ceiling) : null,
         };
     }
+
+    /// <summary>The smallest event id at <paramref name="instant"/>, an instant before 1970 read as the epoch (Ruling 27).</summary>
+    /// <remarks>
+    /// No event id precedes the epoch, so the clamp selects exactly what the caller asked for: a <c>from</c> before it starts at
+    /// the first event — an agent's "everything" lower bound — and a <c>to</c> before it ends the window before any event.
+    /// </remarks>
+    /// <param name="instant">The caller's bound.</param>
+    private static Guid EventIdFloor(DateTimeOffset instant) =>
+        AlvoEventId.Floor(instant < DateTimeOffset.UnixEpoch ? DateTimeOffset.UnixEpoch : instant);
 
     internal static void EnsureStatus(string? status, FrozenSet<string> allowed, string verb)
     {
