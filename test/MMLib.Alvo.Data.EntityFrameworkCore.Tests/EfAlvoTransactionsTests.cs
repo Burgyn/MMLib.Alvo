@@ -280,6 +280,21 @@ public sealed class EfAlvoTransactionsTests
     }
 
     [Fact]
+    public async Task A_cancel_before_the_commit_rolls_back_even_when_the_delegate_ignores_its_token()
+    {
+        await using var world = await StartAsync();
+        using var caller = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+
+        await Should.ThrowAsync<OperationCanceledException>(() => world.Transactions.TransactAsync(world.Caller, async (unit, ct) =>
+        {
+            await unit.CreateAsync(WritePathFixture.Entity, WritePathFixture.CreatePayload("cancelled"), ct);
+            await caller.CancelAsync();
+        }, cancellationToken: caller.Token));
+
+        (await NotesAsync(world)).ShouldBe(0L);
+    }
+
+    [Fact]
     public async Task A_cancel_during_the_commit_reports_success_with_the_data_committed()
     {
         await using var world = await StartAsync();

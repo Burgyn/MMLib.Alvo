@@ -45,7 +45,8 @@ internal sealed record WriteUnitParts(
 /// <para>
 /// <b>A decided commit is not cancellable (Ruling 50).</b> The <c>COMMIT</c> runs with <see cref="CancellationToken.None"/>:
 /// a caller's cancel landing while it runs could otherwise report as cancelled a transaction the engine committed — the
-/// outcome Ruling 47 exists to rule out. The caller's cancel still ends the unit at any point before the decision.
+/// outcome Ruling 47 exists to rule out. A caller's cancel that landed before the decision is part of it: the unit rolls
+/// back and throws an <see cref="OperationCanceledException"/>, even when nothing observed the token.
 /// </para>
 /// <para>
 /// <b>The deadline ends the unit, not the delegate.</b> At <see cref="AlvoTransactionOptions.Timeout"/> the unit's token is
@@ -357,7 +358,8 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
 
     /// <summary>
     /// The commit decision, under one lock: whether the gate is free, and what the unit fails with — its poison, the end it
-    /// already reached, or a call still running. From here on no call is admitted and no poison is recorded.
+    /// already reached, a call still running, or the caller's cancellation. From here on no call is admitted and no poison
+    /// is recorded.
     /// </summary>
     private (Exception? Failure, bool HoldsGate) Decide()
     {
@@ -370,11 +372,15 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
             }
 
             _ended = true;
-            _failure ??= holdsGate ? null : Unawaited();
+            _failure ??= holdsGate ? CancelledBeforeTheDecision() : Unawaited();
 
             return (_failure, holdsGate);
         }
     }
+
+    /// <summary>The caller's cancellation, when it landed before the decision — even if nothing observed it (Ruling 50).</summary>
+    private OperationCanceledException? CancelledBeforeTheDecision() =>
+        _lifetime.IsCancellationRequested && !TimedOut ? new OperationCanceledException(_lifetime.Token) : null;
 
     private async Task EndAsync(bool commit)
     {
