@@ -13,4 +13,15 @@ public enum AlvoExtensionStage
     /// <summary>After the write's transaction has committed, from the outbox: it can never undo the write.</summary>
     [JsonStringEnumMemberName("postCommit")]
     PostCommit = 0,
+
+    /// <summary>On an HTTP request, outside any transaction: the extension opens its own, if it writes.</summary>
+    [JsonStringEnumMemberName("http")]
+    Http = 1,
+
+    /// <summary>
+    /// Before any transaction is open, in the flow of whatever invoked it: a network call is allowed, and its writes open
+    /// their own unit.
+    /// </summary>
+    [JsonStringEnumMemberName("preTransaction")]
+    PreTransaction = 2,
 }

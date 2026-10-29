@@ -67,6 +67,21 @@ public sealed record ManagementExtension
     public string? TypeName { get; init; }
 
     /// <summary>
+    /// Gets the route pattern a command was mapped at, as the host wrote it — a <c>MapGroup</c> prefix is not included;
+    /// null for an extension with no route of its own.
+    /// </summary>
+    public string? Route { get; init; }
+
+    /// <summary>Gets the HTTP method of <see cref="Route"/>; null when there is no route.</summary>
+    public string? HttpMethod { get; init; }
+
+    /// <summary>
+    /// Gets a command's access rule as CEL text — a condition over <c>@user</c>, <c>@tenant</c> and, for a command bound to
+    /// an entity, the row; null for an extension that has none.
+    /// </summary>
+    public string? Access { get; init; }
+
+    /// <summary>
     /// Gets whether an operator paused it: its deliveries are still recorded, wait, and run in order once it is resumed.
     /// </summary>
     public bool Paused { get; init; }

@@ -15,4 +15,10 @@ public enum AlvoExtensionKind
     /// <summary>An event handler: host C# run after a write commits, once per matching event, at least once.</summary>
     [JsonStringEnumMemberName("eventHandler")]
     EventHandler = 0,
+
+    /// <summary>
+    /// A command: host C# a caller invokes by name — over HTTP, or in process — after its access rule admits them.
+    /// </summary>
+    [JsonStringEnumMemberName("command")]
+    Command = 1,
 }

@@ -19,6 +19,9 @@
       "ordering": "perRecord",
       "description": null,
       "typeName": null,
+      "route": null,
+      "httpMethod": null,
+      "access": null,
       "paused": false
     },
     {
@@ -39,6 +42,9 @@
       "ordering": "perRecord",
       "description": "Posts to the chat when a ticket is resolved.",
       "typeName": null,
+      "route": null,
+      "httpMethod": null,
+      "access": null,
       "paused": false
     },
     {
@@ -55,6 +61,9 @@
       "ordering": "none",
       "description": null,
       "typeName": null,
+      "route": null,
+      "httpMethod": null,
+      "access": null,
       "paused": false
     }
   ]

@@ -174,6 +174,12 @@ public sealed record ManagementPolicyVerdict(
     /// <see cref="ManagementExtension.Stage"/> says when. Empty in a host that registers none.
     /// </summary>
     public IReadOnlyList<ManagementExtension> Extensions { get; init; } = [];
+
+    /// <summary>
+    /// Gets the host's commands that act on this entity or on no entity, and what each one's access rule answers for this
+    /// caller — the same compiled rule a command evaluates before its handler. Empty in a host that maps none.
+    /// </summary>
+    public IReadOnlyList<ManagementCommandVerdict> Commands { get; init; } = [];
 }
 
 /// <summary>One expression to check, in the descriptor it will live in.</summary>
