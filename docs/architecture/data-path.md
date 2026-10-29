@@ -1402,13 +1402,18 @@ read; a failed read still rolls back to it (Ruling 34).
 refused (`InvalidOperationException`) and poisons the unit rather than queueing — a queue would hide a missing `await`
 (Ruling 7). Each running call records itself in an `AsyncLocal` `CallFrame`; a call made *by* the running call (HX-09's
 hooks writing through `Deeper()`) waits on that frame's own gate under its own savepoint, while a sibling is still refused
-(Ruling 30). A call still running when the delegate returns is cancelled and awaited, and the unit rolls back with an
+(Ruling 30). A frame is finished when its call returns: a nested call it started and did not await, still running
+then, poisons the unit and is refused when it returns, and one that starts after is refused and poisons — otherwise it
+would run outside the gate, beside a sibling or the `COMMIT`, and a row could commit without its outbox event (Ruling 54).
+A call still running when the delegate returns is cancelled and awaited, and the unit rolls back with an
 `InvalidOperationException` naming it; the commit decision and the gate are taken under one lock, so a decided commit
 commits (Ruling 46).
 
 **Poisoned means it cannot commit.** The first failure is recorded and every later call is refused. The set: the unit's
 timeout; any `OperationCanceledException` from a call; `AlvoChainDepthExceededException`; a data-port refusal; a
-concurrent call; a failed savepoint rollback or creation (Ruling 9). A call whose own savepoint rolled it back —
+concurrent call; a failed savepoint rollback or creation (Ruling 9); a join from a flow that does not carry the unit
+(Ruling 48); a nested call that outlives the call that started it (Ruling 54). A delegate that catches one and lets a later
+call's refusal end it still surfaces the recorded failure itself, not the `InvalidOperationException` that wraps it. A call whose own savepoint rolled it back —
 authorization, constraint, precondition, not-found, validation, a raw `DbException` — does not poison.
 
 **The deadline.** `AlvoTransactionOptions.Timeout` (default 30 s, at most one hour) runs on the host's `TimeProvider`. At

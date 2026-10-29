@@ -179,6 +179,23 @@ public sealed class EfAlvoTransactionsTests
     }
 
     [Fact]
+    public async Task A_caught_refusal_surfaces_as_itself_when_a_later_call_on_the_failed_unit_ends_the_delegate()
+    {
+        await using var world = await StartAsync();
+        AlvoUnitInProgressException? caught = null;
+
+        var thrown = await Should.ThrowAsync<AlvoUnitInProgressException>(() => world.Transactions.TransactAsync(world.Caller, async (unit, ct) =>
+        {
+            await unit.CreateAsync(WritePathFixture.Entity, WritePathFixture.CreatePayload("unit"), ct);
+            caught = await Should.ThrowAsync<AlvoUnitInProgressException>(() => world.Data.GetAsync(WritePathFixture.Entity, Guid.NewGuid(), world.Caller, ct));
+            await unit.CreateAsync(WritePathFixture.Entity, WritePathFixture.CreatePayload("after"), ct);
+        }, cancellationToken: Ct));
+
+        thrown.ShouldBeSameAs(caught);
+        (await NotesAsync(world)).ShouldBe(0L);
+    }
+
+    [Fact]
     public async Task A_nested_TransactAsync_is_refused()
     {
         await using var world = await StartAsync();

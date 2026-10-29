@@ -130,6 +130,64 @@ public sealed class WriteUnitTests
     }
 
     [Fact]
+    public async Task A_call_started_inside_a_call_and_still_running_after_it_returned_poisons_the_unit()
+    {
+        await using var world = await StartAsync();
+        await using var unit = await OpenAsync(world);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<int>? detached = null;
+
+        await unit.RunAsync(
+            async token =>
+            {
+                await InsertAsync(unit, token);
+                detached = unit.RunAsync(
+                    async _ =>
+                    {
+                        await release.Task;
+                        return 1;
+                    },
+                    Ct);
+                return 0;
+            },
+            Ct);
+        release.SetResult();
+
+        (await Should.ThrowAsync<InvalidOperationException>(() => detached!)).Message.ShouldContain("after the call that started it returned");
+        (await Should.ThrowAsync<InvalidOperationException>(() => unit.CommitAsync())).Message.ShouldContain("after the call that started it returned");
+        (await world.ScalarAsync("SELECT COUNT(*) FROM \"note\"")).ShouldBe(0L);
+    }
+
+    [Fact]
+    public async Task A_call_started_inside_a_call_that_starts_after_it_returned_is_refused_and_poisons_the_unit()
+    {
+        await using var world = await StartAsync();
+        await using var unit = await OpenAsync(world);
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<int>? late = null;
+
+        await unit.RunAsync(
+            async token =>
+            {
+                await InsertAsync(unit, token);
+                late = LateAsync();
+                return 0;
+            },
+            Ct);
+        start.SetResult();
+
+        (await Should.ThrowAsync<InvalidOperationException>(() => late!)).Message.ShouldContain("after the call that started it returned");
+        await Should.ThrowAsync<InvalidOperationException>(() => unit.CommitAsync());
+        (await world.ScalarAsync("SELECT COUNT(*) FROM \"note\"")).ShouldBe(0L);
+
+        async Task<int> LateAsync()
+        {
+            await start.Task;
+            return await unit.RunAsync(_ => Task.FromResult(2), Ct);
+        }
+    }
+
+    [Fact]
     public async Task The_deadline_cancels_a_running_call_and_rolls_the_unit_back_without_waiting_for_its_caller()
     {
         var clock = new FakeTimeProvider();
@@ -350,6 +408,15 @@ public sealed class WriteUnitTests
 
         unit.Hooks.ShouldBeOfType<StubBeforeHookRunner>().ShouldNotBeSameAs(world.Hooks);
         unit.Hooks.ShouldBeSameAs(unit.Services.GetRequiredService<IBeforeHookRunner>());
+    }
+
+    [Fact]
+    public async Task A_unit_resolves_its_hooks_once_however_many_writes_read_them()
+    {
+        await using var world = await StartAsync(services => services.AddTransient<IBeforeHookRunner, StubBeforeHookRunner>());
+        await using var unit = await OpenAsync(world);
+
+        unit.Hooks.ShouldBeSameAs(unit.Hooks);
     }
 
     [Fact]

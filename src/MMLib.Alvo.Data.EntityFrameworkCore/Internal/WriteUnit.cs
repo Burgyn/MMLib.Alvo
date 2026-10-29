@@ -33,6 +33,12 @@ internal sealed record WriteUnitParts(
 /// frame for exactly that (Ruling 30).
 /// </para>
 /// <para>
+/// <b>A nested call ends inside the call that made it (Ruling 54).</b> When a call returns, its frame is finished: a call
+/// it started and did not await, still running then, poisons the unit and is refused when it returns; one that starts
+/// after is refused, and poisons the unit too. Otherwise such a call would run outside the one-at-a-time gate — beside a
+/// sibling, or beside the <c>COMMIT</c> — and a row could commit without the outbox event its write was still adding.
+/// </para>
+/// <para>
 /// <b>Poisoned means it cannot commit.</b> <see cref="Poison"/> records the first failure; every later call is refused, and
 /// <see cref="CommitAsync"/> rolls back and throws that failure — so a delegate that catches it still cannot commit.
 /// </para>
@@ -90,6 +96,7 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
     private readonly CancellationTokenRegistration _onDeadline;
     private readonly SemaphoreSlim _calls = new(1, 1);
     private readonly Lock _gate = new();
+    private IBeforeHookRunner? _hooks;
     private Exception? _failure;
     private bool _ended;
     private bool _ending;
@@ -131,8 +138,8 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
     /// <summary>Gets the unit's DI scope, shared by everything the unit resolves.</summary>
     internal IServiceProvider Services => _parts.Scope.ServiceProvider;
 
-    /// <summary>Gets the declarative hook pipeline a write inside the unit runs, resolved from the unit's scope.</summary>
-    internal IBeforeHookRunner Hooks => Services.GetRequiredService<IBeforeHookRunner>();
+    /// <summary>Gets the declarative hook pipeline a write inside the unit runs, resolved from the unit's scope once, on first use.</summary>
+    internal IBeforeHookRunner Hooks => _hooks ??= Services.GetRequiredService<IBeforeHookRunner>();
 
     /// <summary>Gets the token every call of the unit runs under: the caller's, ended at the deadline.</summary>
     internal CancellationToken Token => _lifetime.Token;
@@ -194,7 +201,8 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
 
     /// <summary>
     /// Runs one call of the unit: alone among its siblings, under the unit's token, refused once the unit failed or ended.
-    /// A call made from inside a running call of this unit is a nested call: it waits on its parent's gate, not the unit's.
+    /// A call made from inside a running call of this unit is a nested call: it waits on its parent's gate, not the unit's,
+    /// and must end before its parent returns (Ruling 54).
     /// </summary>
     /// <typeparam name="T">What the call answers.</typeparam>
     /// <param name="call">The call, given the token it must pass to every statement.</param>
@@ -204,25 +212,19 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(call);
         EnsureUsable();
-        var gate = _frame.Value is { } parent && parent.Unit == this ? parent.Children : _calls;
-        if (!gate.Wait(0, CancellationToken.None))
-        {
-            EnsureUsable();
-            var refusal = Concurrent();
-            Poison(refusal);
-            throw refusal;
-        }
-
+        var parent = _frame.Value is { } frame && frame.Unit == this ? frame : null;
+        Enter(parent);
         try
         {
             EnsureUsable();
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-            _frame.Value = new CallFrame(this);
-            return await GuardedAsync(call, linked.Token).ConfigureAwait(false);
+            var answer = await OwnFrameAsync(call, cancellationToken).ConfigureAwait(false);
+            EnsureParentRunning(parent);
+
+            return answer;
         }
         finally
         {
-            gate.Release();
+            Leave(parent);
         }
     }
 
@@ -252,6 +254,19 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
         finally
         {
             _calls.Release();
+        }
+    }
+
+    /// <summary>
+    /// The failure the unit recorded, when <paramref name="thrown"/> is the refusal a call on the failed unit threw for it —
+    /// so a delegate that caught the first failure and made one more call still surfaces that failure, not its wrapper.
+    /// </summary>
+    /// <param name="thrown">What the delegate threw.</param>
+    internal Exception? RecordedFailureBehind(Exception thrown)
+    {
+        lock (_gate)
+        {
+            return thrown is InvalidOperationException { InnerException: { } inner } && ReferenceEquals(inner, _failure) ? inner : null;
         }
     }
 
@@ -317,6 +332,66 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
         {
             return;
         }
+    }
+
+    /// <summary>Takes the gate a call runs under — the unit's, or its parent call's — or refuses the call and poisons the unit.</summary>
+    private void Enter(CallFrame? parent)
+    {
+        var admission = parent?.AdmitChild() ?? (_calls.Wait(0, CancellationToken.None) ? Admission.Admitted : Admission.Busy);
+        if (admission == Admission.Admitted)
+        {
+            return;
+        }
+
+        EnsureUsable();
+        Refuse(admission == Admission.Busy ? Concurrent() : Outlived());
+    }
+
+    private void Leave(CallFrame? parent)
+    {
+        if (parent is null)
+        {
+            _calls.Release();
+        }
+        else
+        {
+            parent.ChildLeft();
+        }
+    }
+
+    /// <summary>Runs <paramref name="call"/> in a frame of its own, and finishes that frame when it returns (Ruling 54).</summary>
+    private async Task<T> OwnFrameAsync<T>(Func<CancellationToken, Task<T>> call, CancellationToken cancellationToken)
+    {
+        var own = new CallFrame(this);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+        _frame.Value = own;
+        try
+        {
+            return await GuardedAsync(call, linked.Token).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (own.Finish())
+            {
+                Poison(Outlived());
+            }
+        }
+    }
+
+    /// <summary>Refuses the answer of a nested call that ran on after the call that started it returned (Ruling 54).</summary>
+    private void EnsureParentRunning(CallFrame? parent)
+    {
+        if (parent is { IsFinished: true })
+        {
+            Refuse(Outlived());
+        }
+    }
+
+    [DoesNotReturn]
+    private void Refuse(InvalidOperationException refusal)
+    {
+        Poison(refusal);
+        throw refusal;
     }
 
     private async Task<T> GuardedAsync<T>(Func<CancellationToken, Task<T>> call, CancellationToken token)
@@ -554,24 +629,86 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
         + "awaited, so the unit cannot commit without it or with it. The unit rolled back; nothing it wrote was committed. "
         + "Fix: await every call inside the delegate before it returns.");
 
+    private static InvalidOperationException Outlived() => new(
+        "A call on this transaction ran after the call that started it returned: it was started inside that call and not "
+        + "awaited there, so it would run beside the unit's other calls or its COMMIT. The unit is now failed and will roll back. "
+        + "Fix: await every call made inside a call before that call returns.");
+
     private static InvalidOperationException Concurrent() => new(
         "Another call on this transaction is still running. A unit runs one call at a time, on one connection — it is now "
         + "failed and will roll back. Fix: await each call before making the next.");
 
-    /// <summary>One running call of a unit, as the calls it makes in turn see it: their gate is its <see cref="Children"/>.</summary>
+    private enum Admission
+    {
+        Admitted,
+        Busy,
+        Finished,
+    }
+
+    /// <summary>
+    /// One running call of a unit, as the calls it makes in turn see it: they run one at a time under it, and only while it
+    /// runs (Ruling 54).
+    /// </summary>
     /// <remarks>
     /// Set in <see cref="AsyncLocal{T}"/> inside <see cref="RunAsync{T}"/>, so it is visible to the call's own flow and to
-    /// nothing the delegate does beside it; the async method's return restores the caller's frame.
+    /// nothing the delegate does beside it; the async method's return restores the caller's frame. A task the call starts
+    /// carries the frame past the call's return — which is why the frame is finished then, not merely dropped.
     /// </remarks>
     /// <param name="unit">The unit the call belongs to.</param>
-    [SuppressMessage(
-        "Design",
-        "CA1001:Types that own disposable fields should be disposable",
-        Justification = "SemaphoreSlim holds no handle unless AvailableWaitHandle is read, which this type never does; a frame lives for one call.")]
     private sealed class CallFrame(WriteUnit unit)
     {
+        private readonly Lock _gate = new();
+        private bool _childRunning;
+        private bool _finished;
+
         internal WriteUnit Unit { get; } = unit;
 
-        internal SemaphoreSlim Children { get; } = new(1, 1);
+        internal bool IsFinished
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _finished;
+                }
+            }
+        }
+
+        internal Admission AdmitChild()
+        {
+            lock (_gate)
+            {
+                if (_finished)
+                {
+                    return Admission.Finished;
+                }
+
+                if (_childRunning)
+                {
+                    return Admission.Busy;
+                }
+
+                _childRunning = true;
+                return Admission.Admitted;
+            }
+        }
+
+        internal void ChildLeft()
+        {
+            lock (_gate)
+            {
+                _childRunning = false;
+            }
+        }
+
+        /// <summary>Finishes the frame; answers whether a call it started is still running.</summary>
+        internal bool Finish()
+        {
+            lock (_gate)
+            {
+                _finished = true;
+                return _childRunning;
+            }
+        }
     }
 }

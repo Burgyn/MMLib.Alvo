@@ -1,10 +1,12 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using System.Runtime.ExceptionServices;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
 /// <summary>
 /// <see cref="IAlvoTransactions"/> over the EF data port: open a unit, put it on the flow, run the delegate once, commit —
-/// or roll back and rethrow, as a <see cref="TimeoutException"/> whatever the delegate threw once the deadline passed.
+/// or roll back and rethrow, as a <see cref="TimeoutException"/> whatever the delegate threw once the deadline passed, and
+/// as the unit's own recorded failure a refusal that only wraps it.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -50,6 +52,11 @@ internal sealed class EfAlvoTransactions(EfAlvoData data, IServiceScopeFactory s
         catch (Exception failure) when (unit.TimedOut && failure is not TimeoutException)
         {
             throw unit.TimedOutBecause(failure);
+        }
+        catch (Exception failure) when (unit.RecordedFailureBehind(failure) is { } recorded)
+        {
+            ExceptionDispatchInfo.Throw(recorded);
+            throw;
         }
     }
 }
