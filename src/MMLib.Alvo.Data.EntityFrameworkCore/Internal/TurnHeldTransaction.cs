@@ -8,7 +8,9 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// <remarks>
 /// Exactly what every write site spelled out before the seam — the turn taken, then <c>BEGIN</c>, and the turn released
 /// after the transaction commits or rolls back, so the engine's lock is gone before the next writer is let in — kept as
-/// one object so the seam can hand a site either this or a unit's savepoint.
+/// one object so the seam can hand a site either this or a unit's savepoint. The turn is released even when disposing
+/// the transaction throws (a failed rollback), exactly as the nested <c>using</c> declarations it replaces released it:
+/// a turn kept would stop every later write to the database until the gate's timeout.
 /// </remarks>
 /// <param name="transaction">The write's transaction.</param>
 /// <param name="turn">The write turn taken before it began.</param>
@@ -36,14 +38,26 @@ internal sealed class TurnHeldTransaction(IDbContextTransaction transaction, IDi
     /// <inheritdoc/>
     public void Dispose()
     {
-        transaction.Dispose();
-        turn.Dispose();
+        try
+        {
+            transaction.Dispose();
+        }
+        finally
+        {
+            turn.Dispose();
+        }
     }
 
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
-        await transaction.DisposeAsync().ConfigureAwait(false);
-        turn.Dispose();
+        try
+        {
+            await transaction.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            turn.Dispose();
+        }
     }
 }
