@@ -2099,9 +2099,18 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// </summary>
     private static EntitySchema? Entity(AlvoDataContext db, string entity) => Entity(db.AppliedSchema, entity);
 
-    /// <summary>The applied schema's entity named <paramref name="entity"/> as a write resolves it now — for a typed write (Ruling 52).</summary>
+    /// <summary>
+    /// The applied schema's entity named <paramref name="entity"/>, whatever its storage — for a typed write, which reads
+    /// only its fields' traits (Ruling 52).
+    /// </summary>
+    /// <remarks>
+    /// Not <see cref="Entity(SchemaModel, string)"/>: that one answers which entity this driver can write, and refuses a
+    /// dynamic one. This one answers the same question <c>AlvoSession.EntityOf</c> answers outside a unit, so a typed write
+    /// sends the same fields inside a unit as outside.
+    /// </remarks>
     /// <param name="entity">The entity name.</param>
-    internal EntitySchema? AppliedEntity(string entity) => Entity(_contexts.AppliedSchema(), entity);
+    internal EntitySchema? AppliedEntity(string entity) => _contexts.AppliedSchema().Entities
+        .FirstOrDefault(candidate => string.Equals(candidate.Name, entity, StringComparison.Ordinal));
 
     private static EntitySchema? Entity(SchemaModel schema, string entity) => schema.Entities
         .FirstOrDefault(candidate =>

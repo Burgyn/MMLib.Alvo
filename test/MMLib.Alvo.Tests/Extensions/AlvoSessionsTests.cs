@@ -61,11 +61,13 @@ public sealed class AlvoSessionsTests
     {
         var schemas = Substitute.For<ISchemaRegistry>();
         var tickets = new EntitySchema { Name = "tickets", Fields = [] };
-        schemas.GetSchema().Returns(new SchemaModel([tickets]));
+        var evidence = new EntitySchema { Name = "evidence", Storage = EntityStorage.Dynamic, Fields = [] };
+        schemas.GetSchema().Returns(new SchemaModel([tickets, evidence]));
 
         var session = new AlvoSessions(_data, schemas).For(_caller).ShouldBeAssignableTo<IAlvoSessionSchema>().ShouldNotBeNull();
 
         session.EntityOf("tickets").ShouldBeSameAs(tickets);
+        session.EntityOf("evidence").ShouldBeSameAs(evidence);
         session.EntityOf("Tickets").ShouldBeNull();
         ((IAlvoSessionSchema)new AlvoSessions(_data).For(_caller)).EntityOf("tickets").ShouldBeNull();
     }

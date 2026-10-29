@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 
@@ -67,6 +68,28 @@ public sealed class EfAlvoTransactionsTests
         }, cancellationToken: Ct);
 
         named.ShouldBe((WritePathFixture.Entity, WritePathFixture.Entity, null));
+    }
+
+    /// <summary>
+    /// A unit names a dynamic entity as a session outside one does (Ruling 52): the typed layer asks for field traits,
+    /// which do not depend on the entity's storage, so the two answers to one question agree.
+    /// </summary>
+    [Fact]
+    public async Task A_unit_names_a_dynamic_entity_as_a_session_outside_one_does()
+    {
+        var evidence = new EntitySchema
+        {
+            Name = "evidence",
+            Storage = EntityStorage.Dynamic,
+            Fields = [new FieldSchema { Name = "id", Type = Schema.FieldType.Uuid, Required = true }],
+        };
+        await using var world = await WritePathWorld.StartAsync(
+            WritePathFixture.Descriptor(), new SchemaModel([.. WritePathFixture.Schema().Entities, evidence]));
+
+        var named = await world.Transactions.TransactAsync(world.Caller, (unit, _) =>
+            Task.FromResult(((IAlvoSessionSchema)unit).EntityOf("evidence")), cancellationToken: Ct);
+
+        named.ShouldNotBeNull().Storage.ShouldBe(EntityStorage.Dynamic);
     }
 
     [Fact]
