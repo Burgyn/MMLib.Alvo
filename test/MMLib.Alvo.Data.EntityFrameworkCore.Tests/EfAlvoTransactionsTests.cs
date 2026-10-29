@@ -150,17 +150,19 @@ public sealed class EfAlvoTransactionsTests
     }
 
     [Fact]
-    public async Task An_idempotency_key_inside_a_unit_is_an_argument_exception()
+    public async Task An_idempotency_key_inside_a_unit_is_an_argument_exception_and_a_caught_one_still_rolls_back()
     {
         await using var world = await StartAsync();
+        ArgumentException? caught = null;
 
-        await Should.ThrowAsync<ArgumentException>(() => world.Transactions.TransactAsync(world.Caller, async (unit, ct) =>
+        var thrown = await Should.ThrowAsync<ArgumentException>(() => world.Transactions.TransactAsync(world.Caller, async (unit, ct) =>
         {
             await unit.CreateAsync(WritePathFixture.Entity, WritePathFixture.CreatePayload("unit"), ct);
-            await world.Data.CreateAsync(
-                WritePathFixture.Entity, WritePathFixture.CreatePayload("keyed"), world.Caller, new AlvoIdempotency("key-1", "fp-1"), ct);
+            caught = await Should.ThrowAsync<ArgumentException>(() => world.Data.CreateAsync(
+                WritePathFixture.Entity, WritePathFixture.CreatePayload("keyed"), world.Caller, new AlvoIdempotency("key-1", "fp-1"), ct));
         }, cancellationToken: Ct));
 
+        thrown.ShouldBeSameAs(caught);
         (await NotesAsync(world)).ShouldBe(0L);
     }
 
@@ -267,18 +269,129 @@ public sealed class EfAlvoTransactionsTests
 
     [Fact]
     public async Task Options_are_checked_before_a_unit_opens()
-        => await Should.ThrowAsync<ArgumentOutOfRangeException>(async () =>
+    {
+        await using var world = await StartAsync();
+
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(() => world.Transactions.TransactAsync(
+            world.Caller, (_, _) => Task.CompletedTask, new AlvoTransactionOptions { Timeout = TimeSpan.Zero }, Ct));
+
+        await TwoWritesAsync(world);
+        (await NotesAsync(world)).ShouldBe(2L);
+    }
+
+    [Fact]
+    public async Task Every_verb_commits_with_the_unit()
+    {
+        await using var world = await StartAsync();
+        var rows = await SeedFiveAsync(world);
+        var fresh = Guid.NewGuid();
+
+        await world.Transactions.TransactAsync(world.Caller, (unit, ct) => EveryVerbAsync(unit, rows, fresh, ct), cancellationToken: Ct);
+
+        (await TitlesAsync(world)).ShouldBe("fresh,patched2,replaced2,updated2");
+    }
+
+    [Fact]
+    public async Task Every_verb_rolls_back_with_the_unit()
+    {
+        await using var world = await StartAsync();
+        var rows = await SeedFiveAsync(world);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => world.Transactions.TransactAsync(world.Caller, async (unit, ct) =>
         {
-            await using var world = await StartAsync();
-            await world.Transactions.TransactAsync(
-                world.Caller, (_, _) => Task.CompletedTask, new AlvoTransactionOptions { Timeout = TimeSpan.Zero }, Ct);
-        });
+            await EveryVerbAsync(unit, rows, Guid.NewGuid(), ct);
+            throw new InvalidOperationException("the host changed its mind");
+        }, cancellationToken: Ct));
+
+        (await TitlesAsync(world)).ShouldBe("deleted,patched,removed,replaced,updated");
+    }
+
+    [Fact]
+    public async Task A_caller_without_delete_rights_is_refused_inside_a_unit_as_outside_and_the_unit_goes_on()
+    {
+        await using var world = await StartAsync(WritePathFixture.Descriptor(delete: null));
+        var id = await world.SeedAsync("kept");
+        var outside = await RefusalsAsync(
+            () => world.Data.DeleteAsync(WritePathFixture.Entity, id, world.Caller, cancellationToken: Ct),
+            () => world.Data.DeleteManyAsync(WritePathFixture.Entity, [id], world.Caller, cancellationToken: Ct));
+
+        var inside = await world.Transactions.TransactAsync(world.Caller, async (unit, ct) =>
+        {
+            var refusals = await RefusalsAsync(
+                () => unit.DeleteAsync(WritePathFixture.Entity, id, cancellationToken: ct),
+                () => unit.DeleteManyAsync(WritePathFixture.Entity, [id], ct));
+            await unit.CreateAsync(WritePathFixture.Entity, WritePathFixture.CreatePayload("after"), ct);
+            return refusals;
+        }, cancellationToken: Ct);
+
+        inside.ShouldBe(outside);
+        (await TitlesAsync(world)).ShouldBe("after,kept");
+    }
+
+    [Fact]
+    public async Task A_caller_without_update_rights_is_refused_inside_a_unit_as_outside_and_the_unit_goes_on()
+    {
+        await using var world = await StartAsync(WritePathFixture.Descriptor(update: null));
+        var id = await world.SeedAsync("kept");
+        var outside = await RefusalsAsync(
+            () => world.Data.UpdateAsync(WritePathFixture.Entity, id, Title("changed"), world.Caller, cancellationToken: Ct),
+            () => world.Data.ReplaceAsync(WritePathFixture.Entity, id, WritePathFixture.Payload("changed"), world.Caller, cancellationToken: Ct),
+            () => world.Data.UpdateManyAsync(WritePathFixture.Entity, [new AlvoRowPatch(id, Title("changed"))], world.Caller, cancellationToken: Ct));
+
+        var inside = await world.Transactions.TransactAsync(world.Caller, async (unit, ct) =>
+        {
+            var refusals = await RefusalsAsync(
+                () => unit.UpdateAsync(WritePathFixture.Entity, id, Title("changed"), cancellationToken: ct),
+                () => unit.ReplaceAsync(WritePathFixture.Entity, id, WritePathFixture.Payload("changed"), cancellationToken: ct),
+                () => unit.UpdateManyAsync(WritePathFixture.Entity, [new AlvoRowPatch(id, Title("changed"))], ct));
+            await unit.CreateAsync(WritePathFixture.Entity, WritePathFixture.CreatePayload("after"), ct);
+            return refusals;
+        }, cancellationToken: Ct);
+
+        inside.ShouldBe(outside);
+        (await TitlesAsync(world)).ShouldBe("after,kept");
+    }
 
     private static Task<WritePathWorld> StartAsync(AlvoDescriptor? descriptor = null, Action<IServiceCollection>? services = null) =>
         WritePathWorld.StartAsync(descriptor ?? WritePathFixture.Descriptor(), WritePathFixture.Schema(), services);
 
     private static async Task<long> NotesAsync(WritePathWorld world) =>
         (long)(await world.ScalarAsync("""SELECT COUNT(*) FROM "note" """))!;
+
+    private static async Task<string?> TitlesAsync(WritePathWorld world) =>
+        (string?)await world.ScalarAsync("""SELECT group_concat("title", ',') FROM (SELECT "title" FROM "note" ORDER BY "title")""");
+
+    private static async Task<Guid[]> SeedFiveAsync(WritePathWorld world) =>
+    [
+        await world.SeedAsync("updated"),
+        await world.SeedAsync("replaced"),
+        await world.SeedAsync("deleted"),
+        await world.SeedAsync("patched"),
+        await world.SeedAsync("removed"),
+    ];
+
+    private static async Task EveryVerbAsync(IAlvoTransaction unit, Guid[] rows, Guid fresh, CancellationToken ct)
+    {
+        await unit.UpdateAsync(WritePathFixture.Entity, rows[0], Title("updated2"), cancellationToken: ct);
+        (await unit.ReplaceAsync(WritePathFixture.Entity, rows[1], WritePathFixture.Payload("replaced2"), cancellationToken: ct)).Created.ShouldBeFalse();
+        (await unit.ReplaceAsync(WritePathFixture.Entity, fresh, WritePathFixture.Payload("fresh"), cancellationToken: ct)).Created.ShouldBeTrue();
+        await unit.DeleteAsync(WritePathFixture.Entity, rows[2], cancellationToken: ct);
+        (await unit.UpdateManyAsync(WritePathFixture.Entity, [new AlvoRowPatch(rows[3], Title("patched2"))], ct)).Succeeded.ShouldBeTrue();
+        (await unit.DeleteManyAsync(WritePathFixture.Entity, [rows[4]], ct)).Succeeded.ShouldBeTrue();
+    }
+
+    private static async Task<string[]> RefusalsAsync(params Func<Task>[] calls)
+    {
+        var messages = new string[calls.Length];
+        for (var index = 0; index < calls.Length; index++)
+        {
+            messages[index] = (await Should.ThrowAsync<AlvoAuthorizationException>(calls[index])).Message;
+        }
+
+        return messages;
+    }
+
+    private static Dictionary<string, object?> Title(string title) => new(StringComparer.Ordinal) { ["title"] = title };
 
     private static Task TwoWritesAsync(WritePathWorld world) =>
         world.Transactions.TransactAsync(world.Caller, async (unit, ct) =>
