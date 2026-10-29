@@ -41,14 +41,18 @@ public abstract class UnitSavepointFacts
         var contexts = services.GetRequiredService<AlvoDataContextFactory>();
         await using var unit = await data.OpenUnitAsync(_caller, new AlvoTransactionOptions(), services.GetRequiredService<IServiceScopeFactory>(), Ct);
 
-        await unit.RunAsync(
-            async ct =>
-            {
-                await InsertAsync(contexts, unit, "undone", commit: false, ct);
-                await InsertAsync(contexts, unit, "kept", commit: true, ct);
-                return true;
-            },
-            Ct);
+        using (unit.EnterFlow())
+        {
+            await unit.RunAsync(
+                async ct =>
+                {
+                    await InsertAsync(contexts, unit, "undone", commit: false, ct);
+                    await InsertAsync(contexts, unit, "kept", commit: true, ct);
+                    return true;
+                },
+                Ct);
+        }
+
         await unit.CommitAsync(Ct);
 
         var page = await data.QueryAsync(new AlvoQuery { Entity = Entity }, _caller, Ct);

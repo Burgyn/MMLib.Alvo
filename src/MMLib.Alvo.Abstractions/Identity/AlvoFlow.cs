@@ -10,8 +10,8 @@
 /// Every assembly Abstractions grants <c>InternalsVisibleTo</c> can reach <see cref="Enter"/>, so an architecture fact
 /// in each other granted product assembly's suite holds that it never does (spec 2026-10-14 §4.6, R-9). HX-01 ships no
 /// production caller of <see cref="Enter"/>; HX-03 (deliveries) and HX-07 (the write unit) add them. HX-07 adds the
-/// open transaction unit beside the provenance: <see cref="EnterUnit"/> is called by the EF driver's
-/// <c>TransactAsync</c> alone, and every data-port entry calls <see cref="RefuseInsideUnit"/>.
+/// open transaction unit beside the provenance: <see cref="EnterUnit"/> is called by the EF driver's write unit alone
+/// (<c>WriteUnit.EnterFlow</c>, which <c>TransactAsync</c> enters), and every data-port entry calls <see cref="RefuseInsideUnit"/>.
 /// </para>
 /// <para>
 /// <b>The limit, stated:</b> it follows the execution context. Work a host hands to its own queue or background loop,

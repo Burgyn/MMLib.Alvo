@@ -173,6 +173,14 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
         }
     }
 
+    /// <summary>Makes this unit the one open on the current flow, with its provenance, until the returned scope is disposed.</summary>
+    /// <remarks>
+    /// The one place the driver puts a unit on the flow (<c>AlvoFlow.EnterUnit</c>): a call joins the unit only from a flow
+    /// that carries it (<see cref="UnitSavepoint"/>), and the data port refuses every other call there.
+    /// </remarks>
+    /// <returns>A scope whose disposal restores what was on the flow before.</returns>
+    internal IDisposable EnterFlow() => AlvoFlow.EnterUnit(this, Provenance);
+
     /// <summary>The next savepoint name of this unit: <c>alvo_unit_1</c>, <c>alvo_unit_2</c>, …</summary>
     internal string NextSavepoint() =>
         SavepointPrefix + Interlocked.Increment(ref _savepoints).ToString(CultureInfo.InvariantCulture);

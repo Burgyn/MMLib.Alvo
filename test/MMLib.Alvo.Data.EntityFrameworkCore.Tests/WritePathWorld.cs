@@ -74,6 +74,9 @@ internal sealed class WritePathWorld : IAsyncDisposable
     /// <summary>Holds a transaction's <c>COMMIT</c> until a test lets it through.</summary>
     internal CommitHoldInterceptor Commits { get; } = new();
 
+    /// <summary>Fails the next savepoint a context of this world creates, when a test arms it.</summary>
+    internal SavepointFailureInterceptor Savepoints { get; } = new();
+
     /// <summary>The caller every write is performed as: a tenanted, authenticated identity.</summary>
     internal AlvoContext Caller { get; } = WritePathFixture.Caller();
 
@@ -107,7 +110,7 @@ internal sealed class WritePathWorld : IAsyncDisposable
             new FixedSchemaRegistry(schema),
             options => options
                 .UseSqlite(connection, sqlite => sqlite.UseRelationalNulls())
-                .AddInterceptors(world.Statements, world.Commits));
+                .AddInterceptors(world.Statements, world.Commits, world.Savepoints));
 
         await CreateTablesAsync(contexts);
         world._contexts = contexts;
@@ -329,6 +332,26 @@ internal sealed class CommitHoldInterceptor : DbTransactionInterceptor
         }
 
         return result;
+    }
+}
+
+/// <summary>Fails the next <c>SAVEPOINT</c> once armed, as the engine's own <see cref="SqliteException"/>.</summary>
+internal sealed class SavepointFailureInterceptor : DbTransactionInterceptor
+{
+    /// <summary>Whether the next savepoint fails.</summary>
+    internal bool FailNext { get; set; }
+
+    public override ValueTask<InterceptionResult> CreatingSavepointAsync(
+        DbTransaction transaction, TransactionEventData eventData, InterceptionResult result,
+        CancellationToken cancellationToken = default)
+    {
+        if (FailNext)
+        {
+            FailNext = false;
+            throw new SqliteException("SQLite Error 10: 'disk I/O error'.", 10, 10);
+        }
+
+        return base.CreatingSavepointAsync(transaction, eventData, result, cancellationToken);
     }
 }
 
