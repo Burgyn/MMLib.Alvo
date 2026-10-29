@@ -150,6 +150,23 @@ internal sealed class ManagementGateway(
         }
     }
 
+    /// <summary>The host's extensions read again past the cache, a refusal thrown rather than read as none.</summary>
+    /// <remarks>
+    /// For the Operations page, whose subject the catalog is: its Refresh must show a pause made by another operator, the
+    /// CLI or an agent, and a refused read must be drawn as the refusal (Ruling 23) rather than as "no handlers". The fresh
+    /// answer refills the cache, so the other screens' extension badges agree with it.
+    /// </remarks>
+    /// <param name="ct">Cancels the read.</param>
+    /// <returns>The catalog's extensions, as this read found them.</returns>
+    internal async Task<IReadOnlyList<ManagementExtension>> ExtensionsAgainAsync(CancellationToken ct)
+    {
+        _extensions.Value = null;
+        var project = await ProjectAsync(ct).ConfigureAwait(false);
+        var answer = await CachedAsync(_extensions, () => management.GetExtensionsAsync(project, ct), ct).ConfigureAwait(false);
+
+        return answer.Items;
+    }
+
     /// <summary>Runs one call of another management port for this dashboard's project, with the operator published.</summary>
     /// <remarks>The operations port gates itself exactly as this contract does; the dashboard only says who is asking.</remarks>
     /// <typeparam name="T">What the call answers with.</typeparam>

@@ -45,6 +45,32 @@ public sealed class OperationsGatewayTests
     }
 
     [Fact]
+    public async Task Each_handler_read_asks_the_catalog_again_so_a_pause_made_elsewhere_shows()
+    {
+        var management = Management(out var contract);
+        contract.GetExtensionsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(
+            new ManagementExtensionCatalog { Items = [Handler(paused: false)] },
+            new ManagementExtensionCatalog { Items = [Handler(paused: true)] });
+        var gateway = new OperationsGateway(Substitute.For<IAlvoOperations>(), management);
+        await gateway.HandlersAsync(Ct);
+
+        var refreshed = await gateway.HandlersAsync(Ct);
+
+        refreshed.ShouldHaveSingleItem().Paused.ShouldBeTrue("another operator paused it; a refresh must show that");
+    }
+
+    [Fact]
+    public async Task A_refused_catalog_read_reaches_the_page_rather_than_reading_as_no_handlers()
+    {
+        var management = Management(out var contract);
+        contract.GetExtensionsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<ManagementExtensionCatalog>(_ => throw new ManagementForbiddenException("Viewer level is needed."));
+        var gateway = new OperationsGateway(Substitute.For<IAlvoOperations>(), management);
+
+        await Should.ThrowAsync<ManagementForbiddenException>(() => gateway.HandlersAsync(Ct));
+    }
+
+    [Fact]
     public async Task A_replay_dry_run_carries_no_key_and_the_real_run_carries_the_one_it_was_given()
     {
         var operations = Substitute.For<IAlvoOperations>();
@@ -58,6 +84,14 @@ public sealed class OperationsGatewayTests
         await operations.Received(1).ReplayAsync("default", Arg.Is<ManagementReplayRequest>(request => request.DryRun && request.IdempotencyKey == null), Arg.Any<CancellationToken>());
         await operations.Received(1).ReplayAsync("default", Arg.Is<ManagementReplayRequest>(request => !request.DryRun && request.IdempotencyKey == "key-1" && request.Reason == "endpoint back"), Arg.Any<CancellationToken>());
     }
+
+    private static ManagementExtension Handler(bool paused) => new()
+    {
+        Id = "send-confirmation",
+        Kind = AlvoExtensionKind.EventHandler,
+        Stage = AlvoExtensionStage.PostCommit,
+        Paused = paused,
+    };
 
     private static ManagementGateway Management(out IAlvoManagement contract)
     {

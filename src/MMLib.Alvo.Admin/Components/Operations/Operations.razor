@@ -21,7 +21,10 @@
 
     @if (_handlers is null)
     {
-        <Skeleton Size="Skeleton.SkeletonSize.Lg" />
+        if (!_problem.Shown)
+        {
+            <Skeleton Size="Skeleton.SkeletonSize.Lg" />
+        }
     }
     else if (_handlers.Count == 0)
     {

@@ -12,9 +12,9 @@ internal sealed class OperationsGateway(IAlvoOperations operations, ManagementGa
 {
     private const int PageSize = 50;
 
-    /// <summary>The host's event handlers, from the management gateway's cached catalog — empty when it cannot be read.</summary>
+    /// <summary>The host's event handlers, the catalog read again each time so a pause made elsewhere shows; a refusal is thrown.</summary>
     public async Task<IReadOnlyList<ManagementExtension>> HandlersAsync(CancellationToken ct) =>
-        [.. (await management.ExtensionsAsync(ct).ConfigureAwait(false)).Where(extension => extension.Kind == AlvoExtensionKind.EventHandler)];
+        [.. (await management.ExtensionsAgainAsync(ct).ConfigureAwait(false)).Where(extension => extension.Kind == AlvoExtensionKind.EventHandler)];
 
     /// <summary>This instance's per-handler numbers over the last 24 hours.</summary>
     public Task<ManagementExtensionStats> StatsAsync(CancellationToken ct) =>
