@@ -32,6 +32,16 @@ internal sealed class EntityConventions(string entity) : IEndpointConventionBuil
     /// <summary>Runs the finally conventions on <paramref name="endpoint"/> when it is one of the entity's routes.</summary>
     internal void ApplyFinally(EndpointBuilder endpoint) => Replay(_finally, endpoint);
 
+    /// <summary>
+    /// Runs the ordinary conventions and then the finally ones on <paramref name="endpoint"/> when it is one of the
+    /// entity's routes — the order a builder that can only reach the route late, through <c>Finally</c>, keeps.
+    /// </summary>
+    internal void ApplyAll(EndpointBuilder endpoint)
+    {
+        Apply(endpoint);
+        ApplyFinally(endpoint);
+    }
+
     private void Replay(List<Action<EndpointBuilder>> conventions, EndpointBuilder endpoint)
     {
         if (!Serves(endpoint))

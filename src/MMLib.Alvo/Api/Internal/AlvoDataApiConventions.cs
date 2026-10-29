@@ -160,7 +160,8 @@ internal sealed class AlvoDataApiConventions : IEndpointConventionBuilder
 }
 
 /// <summary>
-/// A convention the host attached to <c>MapAlvoDataApi()</c> threw while its endpoint was being built.
+/// A convention the host attached to <c>MapAlvoDataApi()</c> broke the build: it threw while its endpoint was being
+/// built, or a <c>ForEntity</c> named an entity the applied descriptor does not declare.
 /// </summary>
 /// <remarks>
 /// Its only job is to be a <em>distinct type</em>, so <see cref="AlvoEndpointDataSource"/> can tell a host's

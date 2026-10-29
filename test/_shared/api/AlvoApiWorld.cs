@@ -180,7 +180,7 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         // whose route-group prefix a created row's Location has to carry (#121). Mapped through the group
         // rather than onto the app, because IEndpointRouteBuilder is exactly the seam MapAlvoDataApi takes.
         var routes = setup.RouteGroupPrefix is { } groupPrefix
-            ? app.MapGroup(groupPrefix).MapAlvoDataApi()
+            ? MapUnderGroup(app.MapGroup(groupPrefix), setup)
             : app.MapAlvoDataApi();
 
         setup.ConfigureDataApiRoutes?.Invoke(routes);
@@ -327,6 +327,14 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     private const string FixtureDocumentTitle = "Alvo API Tests Fixture";
 
     private const string FixtureDocumentVersion = "v1";
+
+    /// <summary>Mounts the Data API under <paramref name="group"/>, attaching the group's own conventions first.</summary>
+    private static IEndpointConventionBuilder MapUnderGroup(RouteGroupBuilder group, AlvoApiWorldSetup setup)
+    {
+        setup.ConfigureRouteGroup?.Invoke(group);
+
+        return group.MapAlvoDataApi();
+    }
 
     /// <summary>
     /// Runs the production code-first migration flow, which is also what primes the policy catalog and
@@ -812,6 +820,11 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 /// prefix only lengthens the route, so a host mounted this way answers <em>nothing</em> at the unprefixed
 /// path.
 /// </param>
+/// <param name="ConfigureRouteGroup">
+/// Conventions attached to the <c>MapGroup</c> builder <paramref name="RouteGroupPrefix"/> mounts the Data API
+/// under, rather than to the builder <c>MapAlvoDataApi()</c> returns — the other place a host can scope them.
+/// Ignored without a <paramref name="RouteGroupPrefix"/>.
+/// </param>
 /// <param name="MapBeforePriming">
 /// Whether the world maps the Data API <em>before</em> anything has primed the applied schema — the shape a
 /// host writes once <c>MapAlvo()</c> is all it calls, and the coupling the lazy endpoint data source exists to
@@ -873,7 +886,8 @@ internal sealed record AlvoApiWorldSetup(
     Action<IServiceCollection>? ConfigureServicesAfterAlvo = null,
     Action<WebApplication>? ConfigureApp = null,
     Action<IEndpointConventionBuilder>? ConfigureDataApiRoutes = null,
-    bool MapManagementApi = false);
+    bool MapManagementApi = false,
+    Action<IEndpointConventionBuilder>? ConfigureRouteGroup = null);
 
 /// <summary>One dev API key a world issues, in the shape a test reads best.</summary>
 /// <param name="KeyId">The key's public identifier.</param>

@@ -247,6 +247,51 @@ public class DataApiConventionTests
         boot.Failure.ShouldNotBeNull().ShouldContain("ForEntity('ownres')");
     }
 
+    /// <summary>
+    /// A <c>Finally</c> convention passed through <c>ForEntity</c> is forwarded too, and reaches that entity's ten
+    /// routes and no other.
+    /// </summary>
+    [Fact]
+    public async Task ForEntity_forwards_a_finally_convention_to_that_entity_only()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin], new AlvoApiWorldSetup(
+            ConfigureDataApiRoutes: routes => routes.ForEntity("vehicles", vehicles => vehicles.Finally(
+                endpoint => endpoint.Metadata.Add(new FinallyMarker(SawTheOrdinaryOne: false))))));
+
+        var marked = Generated(world).Where(endpoint => endpoint.Metadata.GetMetadata<FinallyMarker>() is not null).ToList();
+
+        marked.Count.ShouldBe(10);
+        marked.ShouldAllBe(endpoint => endpoint.Metadata.GetMetadata<AlvoEndpointMetadata>()!.Entity == "vehicles");
+    }
+
+    /// <summary>
+    /// Ruling 50: <c>ForEntity</c> on the <c>MapGroup</c> builder the Data API is mounted under reaches that entity's
+    /// routes. A group's ordinary conventions run before a route's own metadata exists, so without forwarding they
+    /// would match nothing — a rate limit the host believes it has.
+    /// </summary>
+    [Fact]
+    public async Task ForEntity_on_a_group_the_data_api_is_mapped_under_reaches_that_entity()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin], new AlvoApiWorldSetup(
+            ConfigureServices: AddOnePerWindowLimiter,
+            ConfigureApp: app => app.UseRateLimiter(),
+            RouteGroupPrefix: "/v1",
+            ConfigureRouteGroup: group => group.ForEntity("owners", owners => owners
+                .RequireRateLimiting(OnePerWindow)
+                .WithMetadata(new HostMarker()))));
+
+        using var firstOwners = await world.SendAsync(HttpMethod.Get, "/v1/api/owners", _admin);
+        using var secondOwners = await world.SendAsync(HttpMethod.Get, "/v1/api/owners", _admin);
+        using var firstVehicles = await world.SendAsync(HttpMethod.Get, "/v1/api/vehicles", _admin);
+        using var secondVehicles = await world.SendAsync(HttpMethod.Get, "/v1/api/vehicles", _admin);
+
+        Generated(world).Count(endpoint => endpoint.Metadata.GetMetadata<HostMarker>() is not null).ShouldBe(10);
+        firstOwners.StatusCode.ShouldBe(HttpStatusCode.OK);
+        secondOwners.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests, "the group's ForEntity reaches the owners routes");
+        firstVehicles.StatusCode.ShouldBe(HttpStatusCode.OK);
+        secondVehicles.StatusCode.ShouldBe(HttpStatusCode.OK, "and no other entity's");
+    }
+
     /// <summary>Every endpoint Alvo generated, identified by the marker it attaches to each of them.</summary>
     private static List<RouteEndpoint> Generated(AlvoApiWorld world) =>
         [.. world.Endpoints.Where(
