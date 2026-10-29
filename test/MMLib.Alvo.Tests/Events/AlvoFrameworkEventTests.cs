@@ -12,7 +12,14 @@ public sealed class AlvoFrameworkEventTests
     [Fact]
     public void A_command_completion_is_minted_with_its_payload_and_the_caller_s_stamp()
     {
-        var caller = AlvoContext.System(new TenantId(Guid.NewGuid()));
+        var caller = new AlvoContext
+        {
+            User = UserId.New(),
+            Roles = new HashSet<Role> { Role.Authenticated },
+            Tenant = new TenantId(Guid.NewGuid()),
+            ActorKind = AlvoActorKind.User,
+            Provenance = new AlvoProvenance { CorrelationId = "corr-1" },
+        };
 
         var @event = AlvoFrameworkEvent.Create(
             "alvo.command.confirm_booking.completed",
@@ -25,10 +32,19 @@ public sealed class AlvoFrameworkEventTests
         @event.Subject.ShouldBe("bookings/42");
         @event.Data.Record!["command"].ShouldBe("confirm_booking");
         @event.TenantId.ShouldBe(caller.Tenant!.Value.ToString());
+        @event.AuthType.ShouldBe(AlvoEventAuthType.User);
+        @event.AuthId.ShouldBe(caller.User.Value.ToString(), "the actor is the caller");
+        @event.CorrelationId.ShouldBe("corr-1");
         @event.Time.ShouldBe(_now);
         @event.PartitionKey.ShouldBe(
             $"framework.event:{caller.Tenant}:bookings/42", "one tenant's completions never block another's");
     }
+
+    [Fact]
+    public void A_tenantless_completion_is_partitioned_under_the_tenantless_scope() =>
+        AlvoFrameworkEvent.Create(
+                "alvo.command.quote.completed", "commands/quote", new Dictionary<string, object?>(), AlvoContext.System(null), _now)
+            .PartitionKey.ShouldBe("framework.event:global:commands/quote");
 
     [Theory]
     [InlineData("orders.approved")]
