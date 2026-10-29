@@ -1,5 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using MMLib.Alvo.Rules;
 using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
@@ -49,7 +51,14 @@ internal sealed record WriteUnitParts(
 /// <para>
 /// <b>Every function passed to <see cref="RunAsync{T}"/> honours its token.</b> The deadline's rollback, a commit that
 /// found a call still running and <see cref="DisposeAsync"/> all cancel the unit's calls and then wait for them, so that
-/// bound is what keeps a unit from holding the write turn past its end (HX-09's hook budget must keep it true).
+/// bound is what keeps a unit from holding the write turn past its end (HX-09's hook budget must keep it true). The
+/// token is cancelled only while a call is in flight — a unit that ended cleanly fires no cancellation callback — and a
+/// callback that throws never stands between the unit and its rollback.
+/// </para>
+/// <para>
+/// <b>A committed unit reports success (Ruling 47).</b> Once <c>COMMIT</c> succeeded, a failure disposing the transaction
+/// or the context is logged as a warning after the write turn is released, not thrown: the data is committed, and a
+/// caller that retried on the exception would write it twice.
 /// </para>
 /// <para>
 /// <b>Open until released.</b> <see cref="IsOpen"/> stays true from opening until <see cref="DisposeAsync"/> — the end of
@@ -61,7 +70,7 @@ internal sealed record WriteUnitParts(
     "Reliability",
     "CA2213:Disposable fields should be disposed",
     Justification = "SemaphoreSlim holds no handle unless AvailableWaitHandle is read, which this type never does; disposing it would race a deadline still waiting for the unit's turn to roll it back.")]
-internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
+internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
 {
     private const string SavepointPrefix = "alvo_unit_";
 
@@ -211,7 +220,7 @@ internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
         var (failure, holdsGate) = Decide();
         if (!holdsGate)
         {
-            await _lifetime.CancelAsync().ConfigureAwait(false);
+            await CancelCallsAsync().ConfigureAwait(false);
             await _calls.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         }
 
@@ -255,12 +264,43 @@ internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
         try
         {
             await _onDeadline.DisposeAsync().ConfigureAwait(false);
-            await _lifetime.CancelAsync().ConfigureAwait(false);
-            await RollBackWhenFreeAsync().ConfigureAwait(false);
+            if (CallInFlight())
+            {
+                await CancelCallsAsync().ConfigureAwait(false);
+            }
         }
         finally
         {
-            await DisposeScopeAndClocksAsync().ConfigureAwait(false);
+            try
+            {
+                await RollBackWhenFreeAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                await DisposeScopeAndClocksAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>Whether a call holds the unit's gate now; a racy read, so a missed cancel only falls back to the deadline.</summary>
+    private bool CallInFlight()
+    {
+        lock (_gate)
+        {
+            return _calls.CurrentCount == 0;
+        }
+    }
+
+    /// <summary>Cancels the unit's calls; a host callback registered on <see cref="Token"/> that throws is ignored.</summary>
+    private async Task CancelCallsAsync()
+    {
+        try
+        {
+            await _lifetime.CancelAsync().ConfigureAwait(false);
+        }
+        catch (AggregateException)
+        {
+            return;
         }
     }
 
@@ -336,15 +376,46 @@ internal sealed class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
             _ended = true;
         }
 
+        var committed = false;
         try
         {
             await (commit ? _parts.Transaction.CommitAsync(cancellationToken) : RollBackAsync()).ConfigureAwait(false);
+            committed = commit;
         }
         finally
         {
-            await ReleasePartsAsync().ConfigureAwait(false);
+            await ReleaseAfterAsync(committed).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// Releases the parts; after a successful <c>COMMIT</c>, a failure doing so is logged, not thrown (Ruling 47) — the
+    /// write turn is released either way.
+    /// </summary>
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Only after a successful COMMIT: the data is committed, so any cleanup failure must not read as the unit's failure.")]
+    private async Task ReleaseAfterAsync(bool committed)
+    {
+        try
+        {
+            await ReleasePartsAsync().ConfigureAwait(false);
+        }
+        catch (Exception failure) when (committed)
+        {
+            CleanupFailedAfterCommit(Logger(), failure);
+        }
+    }
+
+    private ILogger Logger() =>
+        _parts.Scope.ServiceProvider.GetService<ILoggerFactory>()?.CreateLogger(typeof(WriteUnit).FullName!) ?? NullLogger.Instance;
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "A transaction unit committed, but releasing its transaction or context then failed. The data is committed "
+            + "and the write turn released; the unit reports success, so do not retry it.")]
+    private static partial void CleanupFailedAfterCommit(ILogger logger, Exception failure);
 
     /// <summary>Lets go of the transaction, the context and then the write turn — each whatever the one before it threw.</summary>
     private async Task ReleasePartsAsync()

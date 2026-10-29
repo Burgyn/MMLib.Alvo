@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Rules;
@@ -218,36 +219,94 @@ public sealed class WriteUnitTests
         unit.HasEnded.ShouldBeTrue();
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task A_failing_cleanup_step_still_releases_the_write_turn_and_the_scope(bool commit)
+    [Fact]
+    public async Task A_failing_cleanup_step_on_release_still_releases_the_write_turn_and_the_scope()
     {
         await using var world = await StartAsync(services => services.AddScoped<DisposalProbe>());
-        var root = world.CreateContext();
-        await root.Database.OpenConnectionAsync(Ct);
-        var transaction = new DisposeFailingTransaction(await root.Database.BeginTransactionAsync(Ct));
-        var turn = new TurnProbe();
-        var scope = world.Scopes.CreateAsyncScope();
-        var probe = scope.ServiceProvider.GetRequiredService<DisposalProbe>();
-        var unit = new WriteUnit(
-            new WriteUnitParts(root, root.Database.GetDbConnection(), transaction, turn, scope),
-            world.Caller, AlvoProvenance.None, TimeSpan.FromHours(1), TimeProvider.System, Ct);
+        var (unit, turn, probe) = await DisposeFailingUnitAsync(world);
 
-        if (commit)
-        {
-            await Should.ThrowAsync<CleanupFailure>(() => unit.CommitAsync(Ct));
-            turn.Disposed.ShouldBeTrue("a commit whose cleanup failed must still let go of the write turn");
-            await unit.DisposeAsync();
-        }
-        else
-        {
-            await Should.ThrowAsync<CleanupFailure>(async () => await unit.DisposeAsync());
-        }
+        await Should.ThrowAsync<CleanupFailure>(async () => await unit.DisposeAsync());
 
         turn.Disposed.ShouldBeTrue();
         probe.Disposed.ShouldBeTrue();
         unit.HasEnded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task A_cleanup_failure_after_a_successful_commit_is_logged_not_thrown()
+    {
+        var logs = new CapturingLoggerProvider();
+        await using var world = await StartAsync(services => services
+            .AddScoped<DisposalProbe>()
+            .AddLogging(logging => logging.AddProvider(logs)));
+        var (unit, turn, probe) = await DisposeFailingUnitAsync(world);
+
+        await unit.CommitAsync(Ct);
+
+        turn.Disposed.ShouldBeTrue("a commit whose cleanup failed must still let go of the write turn");
+        var warning = logs.Entries.ShouldHaveSingleItem();
+        warning.Level.ShouldBe(LogLevel.Warning);
+        warning.Exception.ShouldBeOfType<CleanupFailure>();
+        await unit.DisposeAsync();
+        probe.Disposed.ShouldBeTrue();
+        unit.HasEnded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task A_throwing_cancel_callback_does_not_stop_a_released_unit_rolling_back()
+    {
+        await using var world = await StartAsync();
+        var unit = await OpenAsync(world, new AlvoTransactionOptions { Timeout = TimeSpan.FromHours(1) });
+        unit.Token.Register(static () => throw new InvalidOperationException("a host callback"));
+        var orphan = unit.RunAsync(
+            async token =>
+            {
+                await InsertAsync(unit, token);
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                return 0;
+            },
+            Ct);
+
+        await unit.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30), Ct);
+
+        await Should.ThrowAsync<OperationCanceledException>(() => orphan);
+        unit.HasEnded.ShouldBeTrue();
+        await using var next = await OpenAsync(world).WaitAsync(TimeSpan.FromSeconds(30), Ct);
+        await next.CommitAsync(Ct);
+        (await world.ScalarAsync("SELECT COUNT(*) FROM \"note\"")).ShouldBe(0L);
+    }
+
+    [Fact]
+    public async Task A_throwing_cancel_callback_does_not_hide_the_not_awaited_refusal()
+    {
+        await using var world = await StartAsync();
+        await using var unit = await OpenAsync(world, new AlvoTransactionOptions { Timeout = TimeSpan.FromHours(1) });
+        unit.Token.Register(static () => throw new InvalidOperationException("a host callback"));
+        var orphan = unit.RunAsync(
+            async token =>
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                return 0;
+            },
+            Ct);
+
+        (await Should.ThrowAsync<InvalidOperationException>(() => unit.CommitAsync(Ct))).Message.ShouldContain("not awaited");
+        await Should.ThrowAsync<OperationCanceledException>(() => orphan);
+        unit.HasEnded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task A_committed_unit_fires_no_cancel_callback_when_released()
+    {
+        await using var world = await StartAsync();
+        var unit = await OpenAsync(world);
+        var cancelled = false;
+        unit.Token.Register(() => cancelled = true);
+
+        await unit.CommitAsync(Ct);
+        await unit.DisposeAsync();
+
+        cancelled.ShouldBeFalse();
     }
 
     [Fact]
@@ -380,6 +439,22 @@ public sealed class WriteUnitTests
     private static Task<WriteUnit> OpenAsync(WritePathWorld world, AlvoTransactionOptions? options = null) =>
         world.Data.OpenUnitAsync(world.Caller, options ?? new AlvoTransactionOptions(), world.Scopes, Ct);
 
+    /// <summary>A unit over real parts whose transaction fails to dispose, a turn probe, and a scoped probe.</summary>
+    private static async Task<(WriteUnit Unit, TurnProbe Turn, DisposalProbe Probe)> DisposeFailingUnitAsync(WritePathWorld world)
+    {
+        var root = world.CreateContext();
+        await root.Database.OpenConnectionAsync(Ct);
+        var transaction = new DisposeFailingTransaction(await root.Database.BeginTransactionAsync(Ct));
+        var turn = new TurnProbe();
+        var scope = world.Scopes.CreateAsyncScope();
+        var probe = scope.ServiceProvider.GetRequiredService<DisposalProbe>();
+        var unit = new WriteUnit(
+            new WriteUnitParts(root, root.Database.GetDbConnection(), transaction, turn, scope),
+            world.Caller, AlvoProvenance.None, TimeSpan.FromHours(1), TimeProvider.System, Ct);
+
+        return (unit, turn, probe);
+    }
+
     /// <summary>Writes one fixture row on the unit's own connection and transaction, as a call inside it will.</summary>
     private static async Task<int> InsertAsync(WriteUnit unit, CancellationToken token)
     {
@@ -399,6 +474,56 @@ public sealed class WriteUnitTests
         }
 
         condition().ShouldBeTrue();
+    }
+
+    private sealed record LogEntry(string Category, LogLevel Level, Exception? Exception);
+
+    /// <summary>Records what <see cref="WriteUnit"/> logs, and nothing any other category does.</summary>
+    private sealed class CapturingLoggerProvider : ILoggerProvider
+    {
+        private readonly List<LogEntry> _entries = [];
+
+        internal IReadOnlyList<LogEntry> Entries
+        {
+            get
+            {
+                lock (_entries)
+                {
+                    return [.. _entries];
+                }
+            }
+        }
+
+        public ILogger CreateLogger(string categoryName) => new Capturing(categoryName, this);
+
+        public void Dispose()
+        {
+        }
+
+        private void Add(LogEntry entry)
+        {
+            lock (_entries)
+            {
+                _entries.Add(entry);
+            }
+        }
+
+        private sealed class Capturing(string category, CapturingLoggerProvider owner) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state)
+                where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => category == typeof(WriteUnit).FullName;
+
+            public void Log<TState>(
+                LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                if (IsEnabled(logLevel))
+                {
+                    owner.Add(new LogEntry(category, logLevel, exception));
+                }
+            }
+        }
     }
 
     private sealed class TurnProbe : IDisposable
