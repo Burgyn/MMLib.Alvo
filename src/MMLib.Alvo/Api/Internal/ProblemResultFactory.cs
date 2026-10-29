@@ -194,6 +194,20 @@ internal static class ProblemResultFactory
         "This 'Idempotency-Key' was already spent on a different request. Send a fresh key with this body, "
         + "or resend the original body to replay the write it recorded.");
 
+    /// <summary>A command request whose key another request with the same key is still running under.</summary>
+    internal static IResult IdempotencyInFlight() => Problem(
+        StatusCodes.Status409Conflict,
+        AlvoProblemTypes.IdempotencyConflict,
+        "A request with this 'Idempotency-Key' is still being processed. Retry it once that one has answered: the retry is then "
+        + "answered with its result.");
+
+    /// <summary>A command request whose key's run committed and never recorded its answer.</summary>
+    internal static IResult IdempotencyUnanswered() => Problem(
+        StatusCodes.Status409Conflict,
+        AlvoProblemTypes.IdempotencyConflict,
+        "A request with this 'Idempotency-Key' already ran and committed its changes, but its answer could not be recorded. Do "
+        + "not resend it: read what it changed instead.");
+
     /// <summary>
     /// The 422 for a descriptor the validator refused, carrying its per-pointer findings.
     /// </summary>

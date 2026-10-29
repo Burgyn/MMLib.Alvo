@@ -131,6 +131,19 @@ namespace MMLib.Alvo.Auth
         public bool TryResolve(MMLib.Alvo.Auth.ApiKeyRecord key, string? requestedTenant, out MMLib.Alvo.TenantId? tenant) { }
     }
 }
+namespace MMLib.Alvo.Commands
+{
+    public sealed class AlvoCommandContext : Microsoft.AspNetCore.Http.IBindableFromHttpContext<MMLib.Alvo.Commands.AlvoCommandContext>
+    {
+        public MMLib.Alvo.AlvoContext Caller { get; }
+        public MMLib.Alvo.Data.IAlvoSession Data { get; }
+        public string Name { get; }
+        public MMLib.Alvo.Data.AlvoRecord? Record { get; }
+        public System.Threading.Tasks.Task TransactAsync(System.Func<MMLib.Alvo.Data.IAlvoTransaction, System.Threading.CancellationToken, System.Threading.Tasks.Task> work, MMLib.Alvo.Data.AlvoTransactionOptions? options = null, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task<T> TransactAsync<T>(System.Func<MMLib.Alvo.Data.IAlvoTransaction, System.Threading.CancellationToken, System.Threading.Tasks.Task<T>> work, MMLib.Alvo.Data.AlvoTransactionOptions? options = null, System.Threading.CancellationToken cancellationToken = default) { }
+        public static System.Threading.Tasks.ValueTask<MMLib.Alvo.Commands.AlvoCommandContext?> BindAsync(Microsoft.AspNetCore.Http.HttpContext context, System.Reflection.ParameterInfo parameter) { }
+    }
+}
 namespace MMLib.Alvo.Data
 {
     [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple=false, Inherited=false)]
