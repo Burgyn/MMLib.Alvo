@@ -36,7 +36,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// what makes a page's order and a page's boundary provably the same sequence.
 /// </para>
 /// </remarks>
-internal sealed class EfAlvoData : IAlvoData
+internal sealed partial class EfAlvoData : IAlvoData
 {
     private readonly IPolicyEngine _policy;
     private readonly IPredicateEvaluator _evaluator;
@@ -130,9 +130,8 @@ internal sealed class EfAlvoData : IAlvoData
     /// write takes a fresh turn per attempt, so the wait between attempts holds none.
     /// </para>
     /// <para>
-    /// <b>A unit of several writes</b> — a future transaction a host opens around them — takes the turn once when the unit
-    /// begins, and the writes inside it run on the unit's connection without asking again; this helper is the one place
-    /// that would learn whether a turn is already held.
+    /// <b>A transaction unit</b> takes the turn once when it opens (<c>OpenUnitAsync</c>), and the writes inside it run on
+    /// the unit's connection under savepoints without asking again — this method is never called inside a unit.
     /// </para>
     /// </remarks>
     private async Task<IDisposable> WriteTurnAsync(AlvoDataContext db, CancellationToken cancellationToken)

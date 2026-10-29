@@ -49,13 +49,18 @@ internal sealed class WritePathWorld : IAsyncDisposable
 {
     private readonly SqliteConnection _connection;
     private readonly ServiceProvider _services;
+    private readonly TimeProvider _time;
     private AlvoDataContextFactory _contexts = null!;
 
-    private WritePathWorld(SqliteConnection connection, ServiceProvider services)
+    private WritePathWorld(SqliteConnection connection, ServiceProvider services, TimeProvider time)
     {
         _connection = connection;
         _services = services;
+        _time = time;
     }
+
+    /// <summary>The scope factory of this world's container, which a unit opens its scope from.</summary>
+    internal IServiceScopeFactory Scopes => _services.GetRequiredService<IServiceScopeFactory>();
 
     /// <summary>The port under test.</summary>
     internal EfAlvoData Data { get; private set; } = null!;
@@ -72,26 +77,29 @@ internal sealed class WritePathWorld : IAsyncDisposable
     /// <summary>Boots a world over <paramref name="schema"/>, with <paramref name="descriptor"/>'s rules.</summary>
     /// <param name="descriptor">The descriptor whose rules the policy engine is primed with.</param>
     /// <param name="schema">The applied schema the read model and the write path are built from.</param>
-    internal static async Task<WritePathWorld> StartAsync(AlvoDescriptor descriptor, SchemaModel schema)
+    /// <param name="services">Registrations a test adds after <c>AddAlvo</c>, such as a scoped probe.</param>
+    /// <param name="time">The port's clock, which a unit's deadline also runs on; the system clock unless set.</param>
+    internal static async Task<WritePathWorld> StartAsync(
+        AlvoDescriptor descriptor, SchemaModel schema, Action<IServiceCollection>? services = null, TimeProvider? time = null)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(schema);
 
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
-        var services = new ServiceCollection().AddAlvo().Services.BuildServiceProvider();
-        var world = await BuildAsync(descriptor, schema, connection, services);
+        var collection = new ServiceCollection().AddAlvo().Services;
+        services?.Invoke(collection);
 
-        return world;
+        return await BuildAsync(descriptor, schema, connection, collection.BuildServiceProvider(), time ?? TimeProvider.System);
     }
 
     private static async Task<WritePathWorld> BuildAsync(
-        AlvoDescriptor descriptor, SchemaModel schema, SqliteConnection connection, ServiceProvider services)
+        AlvoDescriptor descriptor, SchemaModel schema, SqliteConnection connection, ServiceProvider services, TimeProvider time)
     {
         var catalog = PolicyCatalog.Build(descriptor, schema, services.GetRequiredService<ICelCompiler>());
         services.GetRequiredService<IPolicyCatalogProvider>().SetCurrent(descriptor.Name, catalog);
 
-        var world = new WritePathWorld(connection, services);
+        var world = new WritePathWorld(connection, services, time);
         var contexts = new AlvoDataContextFactory(
             new FixedSchemaRegistry(schema),
             options => options
@@ -114,7 +122,7 @@ internal sealed class WritePathWorld : IAsyncDisposable
             new TestFieldSqlRenderer(),
             new SqliteTestDialect(),
             contexts,
-            TimeProvider.System,
+            world._time,
             new AlvoOptions(),
             AlvoChainDepthLimit.Default);
 

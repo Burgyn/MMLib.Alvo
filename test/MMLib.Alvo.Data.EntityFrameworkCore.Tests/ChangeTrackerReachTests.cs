@@ -229,6 +229,7 @@ public class ChangeTrackerReachTests
     [
         "DeliveryTable.cs",
         "EfAlvoData.cs",
+        "EfAlvoData.Units.cs",
         "EfCoreDeliveryStore.cs",
         "EfCoreDescriptorVersionStore.cs",
         "EfCoreOutboxStore.cs",
