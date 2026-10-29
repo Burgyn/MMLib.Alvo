@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Api;
+﻿using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Api;
 using MMLib.Alvo.Api.Internal;
 
 namespace Microsoft.AspNetCore.Builder;
@@ -53,6 +54,33 @@ public static class AlvoEndpointConventionBuilderExtensions
         {
             builder.Finally(scoped.ApplyAll);
         }
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Resolves the request's caller for a plain endpoint the way the generated Data API does, and binds it to an
+    /// <see cref="AlvoCaller"/> parameter.
+    /// </summary>
+    /// <remarks>
+    /// No credential binds the anonymous caller; a credential that cannot be used is answered 401 before the handler runs.
+    /// The caller is also published through <c>IAlvoContextAccessor</c> while the handler runs. No API-key scope is checked:
+    /// a plain endpoint names no entity, so what it allows is the host's code — and every <c>IAlvoData</c> call it makes as
+    /// the caller is still judged by the descriptor's rules.
+    /// </remarks>
+    /// <typeparam name="TBuilder">The convention builder.</typeparam>
+    /// <param name="builder">The endpoint's builder.</param>
+    /// <returns>The same builder, for chaining.</returns>
+    public static TBuilder WithAlvoCaller<TBuilder>(this TBuilder builder)
+        where TBuilder : IEndpointConventionBuilder
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.Add(endpoint => endpoint.FilterFactories.Add((factory, next) =>
+        {
+            var filter = factory.ApplicationServices.GetRequiredService<AlvoCallerFilter>();
+            return invocation => filter.InvokeAsync(invocation, next);
+        }));
 
         return builder;
     }

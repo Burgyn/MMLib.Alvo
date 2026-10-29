@@ -52,6 +52,8 @@ internal static class ApiSetup
             ServiceDescriptor.Singleton<IValidateOptions<AlvoApiOptions>, AlvoApiOptionsValidator>());
         services.TryAddSingleton<EntityRouteCatalog>();
         services.TryAddSingleton<AlvoContextFilterFactory>();
+        services.TryAddSingleton<CallerGate>();
+        services.TryAddSingleton<AlvoCallerFilter>();
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IConfigureOptions<OpenApiOptions>, AlvoOpenApiSetup>());
         return services;

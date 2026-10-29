@@ -34,6 +34,11 @@ namespace MMLib.Alvo.Api
         public int MaxRequestBodyBytes { get; set; }
         public string RoutePrefix { get; set; }
     }
+    public sealed class AlvoCaller : Microsoft.AspNetCore.Http.IBindableFromHttpContext<MMLib.Alvo.Api.AlvoCaller>
+    {
+        public MMLib.Alvo.AlvoContext Context { get; }
+        public static System.Threading.Tasks.ValueTask<MMLib.Alvo.Api.AlvoCaller?> BindAsync(Microsoft.AspNetCore.Http.HttpContext context, System.Reflection.ParameterInfo parameter) { }
+    }
     public enum AlvoEndpointKind
     {
         List = 0,
@@ -452,6 +457,8 @@ namespace Microsoft.AspNetCore.Builder
     public static class AlvoEndpointConventionBuilderExtensions
     {
         public static TBuilder ForEntity<TBuilder>(this TBuilder builder, string entity, System.Action<Microsoft.AspNetCore.Builder.IEndpointConventionBuilder> configure)
+            where TBuilder : Microsoft.AspNetCore.Builder.IEndpointConventionBuilder { }
+        public static TBuilder WithAlvoCaller<TBuilder>(this TBuilder builder)
             where TBuilder : Microsoft.AspNetCore.Builder.IEndpointConventionBuilder { }
     }
     public static class AlvoEndpointRouteBuilderExtensions
