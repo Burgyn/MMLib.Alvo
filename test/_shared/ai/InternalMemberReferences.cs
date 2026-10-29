@@ -30,9 +30,10 @@ internal static class InternalMemberReferences
 
     /// <summary>
     /// The setter of the ambient flow (spec 2026-10-14 §4.6, R-9): only <c>MMLib.Alvo</c> and the EF driver may call it,
-    /// so no other granted product assembly can forge the chain depth or causation a write reports.
+    /// and the EF driver alone enters a unit, so no other granted product assembly can forge the chain depth or
+    /// causation a write reports.
     /// </summary>
-    internal static IReadOnlyList<string> FlowSetters { get; } = ["MMLib.Alvo.AlvoFlow::Enter"];
+    internal static IReadOnlyList<string> FlowSetters { get; } = ["MMLib.Alvo.AlvoFlow::Enter", "MMLib.Alvo.AlvoFlow::EnterUnit"];
 
     internal static IReadOnlySet<string> Of(Assembly assembly)
     {

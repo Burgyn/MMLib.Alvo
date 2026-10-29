@@ -531,6 +531,19 @@ namespace MMLib.Alvo.Data
         public string Field { get; init; }
         public MMLib.Alvo.Data.AlvoNullPlacement Nulls { get; init; }
     }
+    public sealed class AlvoTransactionOptions
+    {
+        public AlvoTransactionOptions() { }
+        public string? Reason { get; init; }
+        public bool SuppressHostHooks { get; init; }
+        public System.TimeSpan Timeout { get; init; }
+    }
+    public sealed class AlvoUnitInProgressException : System.InvalidOperationException
+    {
+        public AlvoUnitInProgressException() { }
+        public AlvoUnitInProgressException(string message) { }
+        public AlvoUnitInProgressException(string message, System.Exception innerException) { }
+    }
     public interface IAlvoData
     {
         System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoRecord> CreateAsync(string entity, System.Collections.Generic.IReadOnlyDictionary<string, object?> values, MMLib.Alvo.AlvoContext context, MMLib.Alvo.Data.AlvoIdempotency? idempotency = default, System.Threading.CancellationToken cancellationToken = default);
@@ -556,6 +569,19 @@ namespace MMLib.Alvo.Data
     public interface IAlvoSessions
     {
         MMLib.Alvo.Data.IAlvoSession For(MMLib.Alvo.AlvoContext context);
+    }
+    public interface IAlvoTransaction : MMLib.Alvo.Data.IAlvoSession
+    {
+        MMLib.Alvo.Data.IAlvoTransaction AsSystem();
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoBatchResult> CreateManyAsync(string entity, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyDictionary<string, object?>> rows, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoBatchResult> DeleteManyAsync(string entity, System.Collections.Generic.IReadOnlyList<System.Guid> ids, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task PublishAsync(string type, string subject, System.Collections.Generic.IReadOnlyDictionary<string, object?>? data, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Data.AlvoBatchResult> UpdateManyAsync(string entity, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRowPatch> rows, System.Threading.CancellationToken cancellationToken = default);
+    }
+    public interface IAlvoTransactions
+    {
+        System.Threading.Tasks.Task TransactAsync(MMLib.Alvo.AlvoContext context, System.Func<MMLib.Alvo.Data.IAlvoTransaction, System.Threading.CancellationToken, System.Threading.Tasks.Task> work, MMLib.Alvo.Data.AlvoTransactionOptions? options = null, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<T> TransactAsync<T>(MMLib.Alvo.AlvoContext context, System.Func<MMLib.Alvo.Data.IAlvoTransaction, System.Threading.CancellationToken, System.Threading.Tasks.Task<T>> work, MMLib.Alvo.Data.AlvoTransactionOptions? options = null, System.Threading.CancellationToken cancellationToken = default);
     }
 }
 namespace MMLib.Alvo.Descriptor

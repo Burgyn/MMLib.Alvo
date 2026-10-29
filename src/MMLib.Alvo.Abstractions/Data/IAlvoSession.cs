@@ -9,8 +9,9 @@ namespace MMLib.Alvo.Data;
 /// <remarks>
 /// <para>
 /// What host code running on Alvo's behalf is handed as its data access — an event handler's
-/// <c>AlvoEventContext.Data</c> — so it cannot pass a different caller by accident. There is no transaction spanning two
-/// calls, and no call takes an idempotency key: a handler deduplicates on its event's id.
+/// <c>AlvoEventContext.Data</c> — so it cannot pass a different caller by accident. A session from
+/// <see cref="IAlvoSessions"/> commits each call on its own, and no call takes an idempotency key: a handler deduplicates
+/// on its event's id. An <see cref="IAlvoTransaction"/> is the session of a transaction unit, whose calls commit together.
 /// </para>
 /// <para>
 /// The exceptions are <see cref="IAlvoData"/>'s, family for family.

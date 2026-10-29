@@ -261,6 +261,11 @@ namespace MMLib.Alvo.Data;
 /// for a <c>decimal</c> field), so a caller of this port — and the adversarial suite itself — can
 /// assert on a field's value without first normalizing it.
 /// </para>
+/// <para>
+/// <b>Inside a transaction unit every member throws <see cref="AlvoUnitInProgressException"/></b> (the invariant family,
+/// an <see cref="InvalidOperationException"/>) and fails the unit, before reading or writing anything; a write carrying an
+/// idempotency key throws <see cref="ArgumentException"/> instead. Use the unit's <see cref="IAlvoTransaction"/>.
+/// </para>
 /// </remarks>
 public interface IAlvoData
 {
