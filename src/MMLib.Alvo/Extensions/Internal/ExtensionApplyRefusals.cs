@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Data.Internal;
+﻿using MMLib.Alvo.Commands.Internal;
+using MMLib.Alvo.Data.Internal;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
@@ -23,7 +24,9 @@ internal static class ExtensionApplyRefusals
         ExtensionRegistry registry, IReadOnlyList<ExtensionProblem> regressions, SchemaModel current, SchemaModel proposed, ICelCompiler compiler) =>
         [.. regressions
             .GroupBy(problem => problem.Id, StringComparer.Ordinal)
-            .SelectMany(refused => ForHandler(Registered(registry, refused.Key), refused, current, proposed, compiler))];
+            .SelectMany(refused => CommandOf(registry, refused.Key) is { } command
+                ? CommandApplyRefusals.For(command, refused, current, proposed, compiler)
+                : ForHandler(Registered(registry, refused.Key), refused, current, proposed, compiler))];
 
     internal static IReadOnlyList<DescriptorValidationError> Warnings(IReadOnlyList<ExtensionProblem> problems) =>
         [.. problems.Select(problem => Generic(problem, DescriptorValidationSeverity.Warning))];
@@ -31,6 +34,9 @@ internal static class ExtensionApplyRefusals
     private static DescriptorValidationError[] ForHandler(
         HandlerRegistration handler, IEnumerable<ExtensionProblem> problems, SchemaModel current, SchemaModel proposed, ICelCompiler compiler) =>
         [.. Precise(handler, current, proposed, compiler), .. problems.Select(problem => Generic(problem, DescriptorValidationSeverity.Error))];
+
+    private static CommandRegistration? CommandOf(ExtensionRegistry registry, string id) =>
+        registry.Commands.FirstOrDefault(candidate => string.Equals(candidate.Id, id, StringComparison.Ordinal));
 
     private static HandlerRegistration Registered(ExtensionRegistry registry, string id) =>
         registry.Handlers.First(candidate => string.Equals(candidate.Id, id, StringComparison.Ordinal));
@@ -206,7 +212,7 @@ internal static class ExtensionApplyRefusals
         + "declare, so the handler would no longer bind, and every event it would have handled would be recorded dead.",
         FixPrefix + $"value '{member.Value}'.");
 
-    private static DescriptorValidationError Generic(ExtensionProblem problem, DescriptorValidationSeverity severity) => new(
+    internal static DescriptorValidationError Generic(ExtensionProblem problem, DescriptorValidationSeverity severity) => new(
         string.Empty,
         severity == DescriptorValidationSeverity.Error
             ? $"Extension '{problem.Id}' ({problem.Kind}, in this host) would no longer bind to this descriptor — {problem.Locator}: {problem.Message}"

@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 
+using MMLib.Alvo.Commands.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
 
@@ -22,6 +23,9 @@ internal static class ExtensionBindingCompiler
     {
         var problems = new List<ExtensionProblem>(ExtensionIdProblems.Of(registry));
         problems.AddRange(registry.Handlers.SelectMany(handler => new HandlerBinding(handler, compiler).CheckRegistration(services).Problems));
+        var relational = CommandProblems.Relational(services);
+        problems.AddRange(registry.Commands.SelectMany(command => new CommandBinding(command, compiler).CheckRegistration(relational).Problems));
+        problems.AddRange(CommandProblems.Shared(registry));
         var refused = Refused(problems);
 
         return new(problems, Ties(registry.Handlers.Where(handler => !refused.Contains(handler.Id))));
@@ -32,6 +36,21 @@ internal static class ExtensionBindingCompiler
         ExtensionRegistry registry, PolicyCatalog catalog, ICelCompiler compiler, IServiceProviderIsService services)
     {
         var problems = new List<ExtensionProblem>(ExtensionIdProblems.Of(registry));
+        var bound = BindHandlers(registry, catalog, compiler, services, problems);
+        var commands = BindCommands(registry, catalog, compiler, services, problems);
+        var refused = Refused(problems);
+        List<BoundHandler> binds = [.. bound.Where(handler => !refused.Contains(handler.Id))];
+        var bindings = new ExtensionBindings(
+            binds,
+            registry.Handlers.Where(handler => refused.Contains(handler.Id)),
+            commands.Where(command => !refused.Contains(command.Name)));
+
+        return new(bindings, problems, Ties(binds.Select(handler => handler.Registration)));
+    }
+
+    private static List<BoundHandler> BindHandlers(
+        ExtensionRegistry registry, PolicyCatalog catalog, ICelCompiler compiler, IServiceProviderIsService services, List<ExtensionProblem> problems)
+    {
         var bound = new List<BoundHandler>();
         foreach (var handler in registry.Handlers)
         {
@@ -44,11 +63,27 @@ internal static class ExtensionBindingCompiler
             problems.AddRange(binding.Problems);
         }
 
-        var refused = Refused(problems);
-        List<BoundHandler> binds = [.. bound.Where(handler => !refused.Contains(handler.Id))];
-        var bindings = new ExtensionBindings(binds, registry.Handlers.Where(handler => refused.Contains(handler.Id)));
+        return bound;
+    }
 
-        return new(bindings, problems, Ties(binds.Select(handler => handler.Registration)));
+    private static List<BoundCommand> BindCommands(
+        ExtensionRegistry registry, PolicyCatalog catalog, ICelCompiler compiler, IServiceProviderIsService services, List<ExtensionProblem> problems)
+    {
+        var relational = CommandProblems.Relational(services);
+        var bound = new List<BoundCommand>();
+        foreach (var command in registry.Commands)
+        {
+            var binding = new CommandBinding(command, compiler).CheckRegistration(relational);
+            if (binding.Bind(catalog) is { } boundCommand)
+            {
+                bound.Add(boundCommand);
+            }
+
+            problems.AddRange(binding.Problems);
+        }
+
+        problems.AddRange(CommandProblems.Shared(registry));
+        return bound;
     }
 
     private static HashSet<string> Refused(IEnumerable<ExtensionProblem> problems) =>

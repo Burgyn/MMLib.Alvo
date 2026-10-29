@@ -21,22 +21,22 @@ internal sealed record ExtensionApplyCheck(PolicyCatalog Catalog, IReadOnlyList<
 internal sealed class ExtensionApplyGuard(
     ExtensionRegistry registry, ExtensionBinder binder, ICelCompiler compiler, IPolicyCatalogProvider catalogs)
 {
-    /// <summary>Builds the catalog <paramref name="descriptor"/> proposes and checks it; <see langword="null"/> when no handler is registered.</summary>
+    /// <summary>Builds the catalog <paramref name="descriptor"/> proposes and checks it; <see langword="null"/> when no handler or command is registered.</summary>
     /// <param name="descriptor">The proposed descriptor.</param>
     /// <param name="schema">The schema it maps to — the very instance the apply publishes.</param>
     /// <exception cref="DescriptorValidationException">A handler that binds the current catalog would no longer bind.</exception>
     internal ExtensionApplyCheck? Check(AlvoDescriptor descriptor, SchemaModel schema) =>
-        registry.Handlers.Count == 0 ? null : Check(PolicyCatalog.Build(descriptor, schema, compiler));
+        registry.IsEmpty ? null : Check(PolicyCatalog.Build(descriptor, schema, compiler));
 
     /// <summary>Refuses <paramref name="proposed"/> when a handler that binds the current catalog would no longer bind it.</summary>
-    /// <remarks>With no handler registered the binder is not asked: a host with no handler pays nothing.</remarks>
+    /// <remarks>With no handler or command registered the binder is not asked: a host with neither pays nothing.</remarks>
     /// <param name="proposed">The catalog the change would prime.</param>
     /// <exception cref="DescriptorValidationException">
     /// A handler that binds the current catalog would no longer bind; the warnings of every other handler travel with it.
     /// </exception>
     internal ExtensionApplyCheck Check(PolicyCatalog proposed)
     {
-        if (registry.Handlers.Count == 0)
+        if (registry.IsEmpty)
         {
             return new(proposed, []);
         }
@@ -63,7 +63,14 @@ internal sealed class ExtensionApplyGuard(
         return new(proposed, warnings);
     }
 
-    private HashSet<string> BoundNow(PolicyCatalog? current) => current is null
-        ? new HashSet<string>(StringComparer.Ordinal)
-        : binder.Result(current).Bindings.Handlers.Select(handler => handler.Id).ToHashSet(StringComparer.Ordinal);
+    private HashSet<string> BoundNow(PolicyCatalog? current)
+    {
+        if (current is null)
+        {
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        var bindings = binder.Result(current).Bindings;
+        return [.. bindings.Handlers.Select(handler => handler.Id), .. bindings.Commands.Keys];
+    }
 }

@@ -22,6 +22,7 @@ internal sealed class ExtensionBinder(
     /// <exception cref="Migrations.AlvoStartupRefusedException">A registration is wrong whatever the descriptor says.</exception>
     internal void EnsureRegistrable()
     {
+        registry.Seal();
         var result = ExtensionBindingCompiler.Check(registry, compiler, services);
         foreach (var tie in result.Ties)
         {
@@ -71,8 +72,11 @@ internal sealed class ExtensionBinder(
     private static string Described(IEnumerable<ExtensionProblem> problems) =>
         string.Join("; ", problems.Select(problem => $"{problem.Locator}: {problem.Message}"));
 
-    private CatalogBinding Binding(PolicyCatalog catalog) =>
-        _bindings.GetValue(catalog, primed => new(ExtensionBindingCompiler.Compile(registry, primed, compiler, services)));
+    private CatalogBinding Binding(PolicyCatalog catalog)
+    {
+        registry.Seal();
+        return _bindings.GetValue(catalog, primed => new(ExtensionBindingCompiler.Compile(registry, primed, compiler, services)));
+    }
 
     /// <summary>One catalog's binding, and whether its unbound handlers were reported.</summary>
     private sealed class CatalogBinding(ExtensionBindingResult result)

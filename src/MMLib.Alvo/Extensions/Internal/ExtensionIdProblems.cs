@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Extensions.Internal;
+﻿using MMLib.Alvo.Commands.Internal;
+
+namespace MMLib.Alvo.Extensions.Internal;
 
 /// <summary>
 /// The id rules of the one catalog namespace (spec 2026-10-14 E3): each id in its grammar, registered once — a retired
@@ -12,11 +14,19 @@ internal static class ExtensionIdProblems
     internal static IEnumerable<ExtensionProblem> Of(ExtensionRegistry registry) =>
         [.. registry.All.Where(registration => !Grammatical(registration)).Select(BadId), .. Duplicates(registry), .. Collisions(registry)];
 
-    private static bool Grammatical(ExtensionRegistration registration) =>
-        registration is RetiredExtension ? ExtensionIds.IsRetirableId(registration.Id) : ExtensionIds.IsExtensionId(registration.Id);
+    private const string CommandNameFix =
+        "Use lower-case segments of letters, digits and underscores, each starting with a letter, separated by dots — 'confirm_booking' or 'billing.issue_invoice'.";
 
-    private static ExtensionProblem BadId(ExtensionRegistration registration) =>
-        new(registration.Id, KindOf(registration), IdLocator(registration.Id), $"'{registration.Id}' is not an extension id.", IdFix);
+    private static bool Grammatical(ExtensionRegistration registration) => registration switch
+    {
+        RetiredExtension => ExtensionIds.IsRetirableId(registration.Id),
+        CommandRegistration => ExtensionIds.IsCommandName(registration.Id),
+        _ => ExtensionIds.IsExtensionId(registration.Id),
+    };
+
+    private static ExtensionProblem BadId(ExtensionRegistration registration) => registration is CommandRegistration
+        ? new(registration.Id, KindOf(registration), IdLocator(registration.Id), $"'{registration.Id}' is not a command name.", CommandNameFix)
+        : new(registration.Id, KindOf(registration), IdLocator(registration.Id), $"'{registration.Id}' is not an extension id.", IdFix);
 
     private static IEnumerable<ExtensionProblem> Duplicates(ExtensionRegistry registry) =>
         registry.All.GroupBy(registration => registration.Id, StringComparer.Ordinal)
@@ -53,8 +63,12 @@ internal static class ExtensionIdProblems
         return handlers.Count > 0 ? handlers : [colliding[0]];
     }
 
-    private static string KindOf(ExtensionRegistration registration) =>
-        registration is RetiredExtension ? ExtensionBindingCompiler.RetiredKind : ExtensionBindingCompiler.HandlerKind;
+    private static string KindOf(ExtensionRegistration registration) => registration switch
+    {
+        RetiredExtension => ExtensionBindingCompiler.RetiredKind,
+        CommandRegistration => CommandBinding.Kind,
+        _ => ExtensionBindingCompiler.HandlerKind,
+    };
 
     private static string IdLocator(string id) => $"extensions/{id}/id";
 }

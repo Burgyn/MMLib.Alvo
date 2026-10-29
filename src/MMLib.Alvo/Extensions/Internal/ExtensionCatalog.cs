@@ -53,7 +53,13 @@ internal sealed class ExtensionCatalog(ExtensionRegistry registry, IOptions<Alvo
         item.Entities.Contains(entity, StringComparer.Ordinal)
         || item.Entities.Contains(EntityEvents.AllEntities, StringComparer.Ordinal);
 
-    private static ManagementExtension[] Describe(ExtensionRegistry registry, bool exposeTypeNames) =>
+    private static ManagementExtension[] Describe(ExtensionRegistry registry, bool exposeTypeNames)
+    {
+        registry.Seal();
+        return Handlers(registry, exposeTypeNames);
+    }
+
+    private static ManagementExtension[] Handlers(ExtensionRegistry registry, bool exposeTypeNames) =>
         [.. registry.Handlers
             .OrderBy(handler => handler.Settings.Order)
             .ThenBy(handler => handler.Sequence)
