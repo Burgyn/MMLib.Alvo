@@ -12,8 +12,10 @@
 /// <para>
 /// <b>A refused or failed call does not end the unit.</b> Each call runs under its own savepoint, so an authorization
 /// refusal, a constraint violation or a failed precondition undoes that call alone, on every engine; catch it and go on.
-/// <b>A few failures end it</b> — the unit's timeout, its chain-depth limit, a cancelled call, two calls at once, or a call
-/// through another data port while it is open: catching one of those cannot make the unit commit.
+/// <b>Some failures end it</b> — the unit's timeout, its chain-depth limit, a cancelled call, two calls at once, a call
+/// through another data port while it is open, a database error that leaves the unit's transaction in an unknown state, a
+/// call made from work queued off the delegate's flow, or a call started inside another call that outlives it: catching
+/// one of those cannot make the unit commit.
 /// </para>
 /// <para>
 /// One call at a time: await each call before making the next. A call the delegate starts and does not await is a

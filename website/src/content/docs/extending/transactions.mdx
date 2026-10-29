@@ -49,8 +49,8 @@ invoice goes with it.
 
 ## What ends it
 
-An exception out of the delegate ends the unit. So do six failures, **even when you catch them**, because after them the
-unit's work can no longer be trusted:
+An exception out of the delegate ends the unit. So do these failures, **even when you catch them**, because after them
+the unit's work can no longer be trusted:
 
 - the unit's `Timeout`;
 - the [chain-depth limit](/extending/#one-limit-already-enforced);
@@ -58,7 +58,12 @@ unit's work can no longer be trusted:
 - two calls at once on one unit — await each call before you make the next;
 - a call still running when the delegate returns — one you started and did not await. The unit rolls back and
   `TransactAsync` throws an `InvalidOperationException` that names it;
-- a call through another data port while the unit is open (next section).
+- a call through another data port while the unit is open (next section);
+- a database error that leaves the unit's transaction in an unknown state — a savepoint that could not be created or
+  rolled back to, as SQLite may after `BUSY` or an I/O error;
+- a call made from work that does not carry the delegate's flow — work queued with its execution context suppressed;
+- a call started inside another call — by a CEL function that call runs — that is still running, or only starts, after
+  that call returned. Otherwise it could run beside the `COMMIT` and commit a row without its event.
 
 Catching one of these does not let the unit commit: `TransactAsync` throws it. Await every call inside the delegate. A
 call you start and do not await is a mistake: it may collide with your next call, which fails the unit. If it is still
