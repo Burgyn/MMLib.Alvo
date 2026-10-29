@@ -10,7 +10,7 @@
     <PageHeader Title="Operations"
                 Subtitle="What the handlers this host registers did after each commit: pause one, run a dead delivery again, replay what failed. Run counts are this instance's, over the last 24 hours.">
         <Primary>
-            <AlvoButton Small="true" data-testid="ops-refresh" Busy="_loading" OnClick="_ => LoadAsync()">Refresh</AlvoButton>
+            <AlvoButton Small="true" data-testid="ops-refresh" Busy="Loading" OnClick="_ => LoadAsync()">Refresh</AlvoButton>
         </Primary>
     </PageHeader>
 
@@ -54,13 +54,13 @@
                         <div class="a-row a-row--wrap">
                             @if (handler.Paused)
                             {
-                                <AlvoButton Small="true" data-testid="@($"ops-resume-{handler.Id}")" Busy="_busy" OnClick="_ => ResumeAsync(handler.Id)">Resume</AlvoButton>
+                                <AlvoButton Small="true" data-testid="@($"ops-resume-{handler.Id}")" Busy="_busy.Busy" OnClick="_ => ResumeAsync(handler.Id)">Resume</AlvoButton>
                             }
                             else
                             {
-                                <AlvoButton Small="true" data-testid="@($"ops-pause-{handler.Id}")" Busy="_busy" OnClick="_ => AskPause(handler.Id)">Pause…</AlvoButton>
+                                <AlvoButton Small="true" data-testid="@($"ops-pause-{handler.Id}")" Busy="_busy.Busy" OnClick="_ => AskPause(handler.Id)">Pause…</AlvoButton>
                             }
-                            <AlvoButton Small="true" data-testid="@($"ops-replay-{handler.Id}")" Busy="_busy" OnClick="_ => PlanReplayAsync(handler.Id)">Replay dead…</AlvoButton>
+                            <AlvoButton Small="true" data-testid="@($"ops-replay-{handler.Id}")" Busy="_busy.Busy" OnClick="_ => PlanReplayAsync(handler.Id)">Replay dead…</AlvoButton>
                         </div>
                     </div>
                 </div>
@@ -69,7 +69,7 @@
 
         <div class="a-split">
             <Panel class="a-split__main a-grow" Title="Deliveries">
-                @RefreshBar.While(_loading)
+                @RefreshBar.While(Loading)
                 <div class="a-row a-row--wrap a-panel__body" role="group" aria-label="Filter by status">
                     <AlvoButton Small="true" Tone="@FilterTone(null)" data-testid="ops-status-filter-all" OnClick="_ => FilterAsync(null)">All</AlvoButton>
                     @foreach (var status in OperationsView.StatusFilters)
@@ -123,9 +123,9 @@
                         <div class="a-row a-actions">
                             @if (OperationsView.CanRedeliver(_selected))
                             {
-                                <AlvoButton Small="true" data-testid="ops-redeliver" Busy="_busy" OnClick="_ => RedeliverAsync(_selected.Id)">Run again</AlvoButton>
+                                <AlvoButton Small="true" data-testid="ops-redeliver" Busy="_busy.Busy" OnClick="_ => RedeliverAsync(_selected.Id)">Run again</AlvoButton>
                             }
-                            <AlvoButton Small="true" data-testid="ops-fixture" Busy="_busy" OnClick="_ => FixtureAsync(_selected.Id)">Fixture</AlvoButton>
+                            <AlvoButton Small="true" data-testid="ops-fixture" Busy="_busy.Busy" OnClick="_ => FixtureAsync(_selected.Id)">Fixture</AlvoButton>
                         </div>
                         @if (_fixture is { } fixture)
                         {
@@ -144,7 +144,7 @@
 
 <AlvoConfirm Open="_confirming is not null" TestId="ops-confirm" ConfirmTestId="ops-confirm-run" CancelTestId="ops-confirm-cancel"
              Title="@(_confirming?.Title ?? string.Empty)" Consequence="@(_confirming?.Consequence ?? string.Empty)"
-             Verb="@(_confirming?.Verb ?? string.Empty)" Busy="_busy" OnConfirm="ConfirmedAsync" OnCancel="() => _confirming = null">
+             Verb="@(_confirming?.Verb ?? string.Empty)" Busy="_busy.Busy" OnConfirm="ConfirmedAsync" OnCancel="() => _confirming = null">
     @* A form of one box, so Enter confirms as the verb would (spec §3.4). *@
     <form novalidate @onsubmit="ConfirmedAsync">
         <Field Label="Reason (kept in the audit)" For="ops-reason">

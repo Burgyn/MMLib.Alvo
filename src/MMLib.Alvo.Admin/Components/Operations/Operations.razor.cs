@@ -15,29 +15,38 @@ public partial class Operations
     private string? _fixture;
     private string? _status;
     private string? _reason;
+    private readonly NestedBusy _busy = new();
+    private OperationsLoader? _loader;
     private Question? _confirming;
-    private bool _loading;
-    private bool _busy;
+
+    private bool Loading => _loader?.Loading ?? true;
 
     /// <inheritdoc/>
-    protected override Task OnInitializedAsync() => LoadAsync();
+    protected override Task OnInitializedAsync()
+    {
+        _loader = new OperationsLoader(Gateway);
+        return LoadAsync();
+    }
 
     private ManagementExtensionStat? Stat(string id) => _stats?.Items.FirstOrDefault(item => item.Id == id);
 
     private AlvoButton.ButtonTone FilterTone(string? status) =>
         status == _status ? AlvoButton.ButtonTone.Primary : AlvoButton.ButtonTone.Secondary;
 
-    private async Task LoadAsync()
+    private Task LoadAsync() => GuardedAsync(async () =>
     {
-        _loading = true;
-        await GuardedAsync(async () =>
+        if (await _loader!.LoadAsync(_status, _selected?.Id, default) is { } snapshot)
         {
-            _handlers = await Gateway.HandlersAsync(default);
-            _stats = await Gateway.StatsAsync(default);
-            _deliveries = (await Gateway.DeliveriesAsync(_status, default)).Items;
-            _selected = _selected is null ? null : await Gateway.DeliveryAsync(_selected.Id, default);
-        });
-        _loading = false;
+            Show(snapshot);
+        }
+    });
+
+    private void Show(OperationsSnapshot snapshot)
+    {
+        _handlers = snapshot.Handlers;
+        _stats = snapshot.Stats;
+        _deliveries = snapshot.Deliveries;
+        _selected = snapshot.Selected;
     }
 
     private Task FilterAsync(string? status)
@@ -100,7 +109,7 @@ public partial class Operations
 
     private async Task ConfirmedAsync()
     {
-        if (_busy || _confirming is not { } question)
+        if (_busy.Busy || _confirming is not { } question)
         {
             return;
         }
@@ -118,7 +127,7 @@ public partial class Operations
 
     private async Task GuardedAsync(Func<Task> step)
     {
-        _busy = true;
+        using var running = _busy.Enter();
         try
         {
             _problem.Clear();
@@ -128,10 +137,6 @@ public partial class Operations
         {
             _confirming = null;
             _problem.Show(problem, fromPress: true);
-        }
-        finally
-        {
-            _busy = false;
         }
     }
 
