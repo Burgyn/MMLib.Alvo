@@ -280,6 +280,25 @@ public sealed class EfAlvoTransactionsTests
     }
 
     [Fact]
+    public async Task A_cancel_during_the_commit_reports_success_with_the_data_committed()
+    {
+        await using var world = await StartAsync();
+        using var caller = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+
+        var transact = world.Transactions.TransactAsync(world.Caller, async (unit, ct) =>
+        {
+            await unit.CreateAsync(WritePathFixture.Entity, WritePathFixture.CreatePayload("committed"), ct);
+            world.Commits.Hold();
+        }, cancellationToken: caller.Token);
+        await world.Commits.Reached;
+        await caller.CancelAsync();
+        world.Commits.Release();
+
+        await transact;
+        (await NotesAsync(world)).ShouldBe(1L);
+    }
+
+    [Fact]
     public async Task Every_verb_commits_with_the_unit()
     {
         await using var world = await StartAsync();

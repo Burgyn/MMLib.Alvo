@@ -28,7 +28,7 @@ public sealed class UnitSavepointJoinTests
         var refusal = await Should.ThrowAsync<InvalidOperationException>(join);
 
         refusal.Message.ShouldStartWith("A call joined this transaction unit from a flow that does not carry it");
-        (await Should.ThrowAsync<InvalidOperationException>(() => unit.CommitAsync(Ct))).ShouldBeSameAs(refusal);
+        (await Should.ThrowAsync<InvalidOperationException>(() => unit.CommitAsync())).ShouldBeSameAs(refusal);
     }
 
     [Fact]
@@ -42,7 +42,7 @@ public sealed class UnitSavepointJoinTests
 
         var refusal = await Should.ThrowAsync<InvalidOperationException>(() => UnitSavepoint.JoinAsync(db, unit, Ct));
 
-        (await Should.ThrowAsync<InvalidOperationException>(() => unit.CommitAsync(Ct))).ShouldBeSameAs(refusal);
+        (await Should.ThrowAsync<InvalidOperationException>(() => unit.CommitAsync())).ShouldBeSameAs(refusal);
     }
 
     [Fact]
@@ -57,7 +57,7 @@ public sealed class UnitSavepointJoinTests
             await savepoint.CommitAsync(Ct);
         }
 
-        await unit.CommitAsync(Ct);
+        await unit.CommitAsync();
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public sealed class UnitSavepointJoinTests
             failure = await Should.ThrowAsync<Microsoft.Data.Sqlite.SqliteException>(() => UnitSavepoint.JoinAsync(db, unit, Ct));
         }
 
-        (await Should.ThrowAsync<Microsoft.Data.Sqlite.SqliteException>(() => unit.CommitAsync(Ct))).ShouldBeSameAs(failure);
+        (await Should.ThrowAsync<Microsoft.Data.Sqlite.SqliteException>(() => unit.CommitAsync())).ShouldBeSameAs(failure);
     }
 
     private static Task<WritePathWorld> StartAsync() =>

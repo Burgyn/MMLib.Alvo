@@ -56,7 +56,7 @@ public sealed class WriteUnitTests
         var unit = await OpenAsync(world);
 
         (await unit.RunAsync(_ => Task.FromResult(7), Ct)).ShouldBe(7);
-        await unit.CommitAsync(Ct);
+        await unit.CommitAsync();
 
         unit.HasEnded.ShouldBeTrue();
         unit.IsOpen.ShouldBeTrue("the TransactAsync that opened it has not returned yet");
@@ -74,7 +74,7 @@ public sealed class WriteUnitTests
         unit.Poison(original);
 
         (await Should.ThrowAsync<InvalidOperationException>(() => unit.RunAsync(_ => Task.FromResult(1), Ct))).InnerException.ShouldBeSameAs(original);
-        (await Should.ThrowAsync<AlvoUnitInProgressException>(() => unit.CommitAsync(Ct))).ShouldBeSameAs(original);
+        (await Should.ThrowAsync<AlvoUnitInProgressException>(() => unit.CommitAsync())).ShouldBeSameAs(original);
         unit.HasEnded.ShouldBeTrue();
     }
 
@@ -91,7 +91,7 @@ public sealed class WriteUnitTests
         release.SetResult(1);
 
         (await first).ShouldBe(1);
-        await Should.ThrowAsync<InvalidOperationException>(() => unit.CommitAsync(Ct));
+        await Should.ThrowAsync<InvalidOperationException>(() => unit.CommitAsync());
     }
 
     [Fact]
@@ -103,7 +103,7 @@ public sealed class WriteUnitTests
         var answer = await unit.RunAsync(async _ => await unit.RunAsync(_ => Task.FromResult(2), Ct) + 1, Ct);
 
         answer.ShouldBe(3);
-        await unit.CommitAsync(Ct);
+        await unit.CommitAsync();
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public sealed class WriteUnitTests
             Ct);
 
         refusal.Message.ShouldContain("one call at a time");
-        await Should.ThrowAsync<InvalidOperationException>(() => unit.CommitAsync(Ct));
+        await Should.ThrowAsync<InvalidOperationException>(() => unit.CommitAsync());
     }
 
     [Fact]
@@ -148,7 +148,7 @@ public sealed class WriteUnitTests
         await EventuallyAsync(() => unit.HasEnded);
         unit.TimedOut.ShouldBeTrue();
         await Should.ThrowAsync<TimeoutException>(() => unit.RunAsync(_ => Task.FromResult(1), Ct));
-        await Should.ThrowAsync<TimeoutException>(() => unit.CommitAsync(Ct));
+        await Should.ThrowAsync<TimeoutException>(() => unit.CommitAsync());
     }
 
     [Fact]
@@ -166,7 +166,7 @@ public sealed class WriteUnitTests
             },
             Ct);
 
-        var commit = unit.CommitAsync(Ct);
+        var commit = unit.CommitAsync();
         var late = new InvalidOperationException("after the decision");
         unit.Poison(late);
         (await Should.ThrowAsync<InvalidOperationException>(() => unit.RunAsync(_ => Task.FromResult(2), Ct)))
@@ -189,7 +189,7 @@ public sealed class WriteUnitTests
         await unit.RunAsync(async token => await InsertAsync(unit, token), Ct);
         world.Commits.Hold();
 
-        var commit = unit.CommitAsync(Ct);
+        var commit = unit.CommitAsync();
         await world.Commits.Reached;
         (await Should.ThrowAsync<InvalidOperationException>(() => unit.RunAsync(_ => Task.FromResult(2), Ct)))
             .Message.ShouldContain("has ended");
@@ -241,7 +241,7 @@ public sealed class WriteUnitTests
             .AddLogging(logging => logging.AddProvider(logs)));
         var (unit, turn, probe) = await DisposeFailingUnitAsync(world);
 
-        await unit.CommitAsync(Ct);
+        await unit.CommitAsync();
 
         turn.Disposed.ShouldBeTrue("a commit whose cleanup failed must still let go of the write turn");
         var warning = logs.Entries.ShouldHaveSingleItem();
@@ -272,7 +272,7 @@ public sealed class WriteUnitTests
         await Should.ThrowAsync<OperationCanceledException>(() => orphan);
         unit.HasEnded.ShouldBeTrue();
         await using var next = await OpenAsync(world).WaitAsync(TimeSpan.FromSeconds(30), Ct);
-        await next.CommitAsync(Ct);
+        await next.CommitAsync();
         (await world.ScalarAsync("SELECT COUNT(*) FROM \"note\"")).ShouldBe(0L);
     }
 
@@ -290,7 +290,7 @@ public sealed class WriteUnitTests
             },
             Ct);
 
-        (await Should.ThrowAsync<InvalidOperationException>(() => unit.CommitAsync(Ct))).Message.ShouldContain("not awaited");
+        (await Should.ThrowAsync<InvalidOperationException>(() => unit.CommitAsync())).Message.ShouldContain("not awaited");
         await Should.ThrowAsync<OperationCanceledException>(() => orphan);
         unit.HasEnded.ShouldBeTrue();
     }
@@ -303,7 +303,7 @@ public sealed class WriteUnitTests
         var cancelled = false;
         unit.Token.Register(() => cancelled = true);
 
-        await unit.CommitAsync(Ct);
+        await unit.CommitAsync();
         await unit.DisposeAsync();
 
         cancelled.ShouldBeFalse();
@@ -324,7 +324,7 @@ public sealed class WriteUnitTests
     {
         await using var world = await StartAsync();
         await using var unit = await OpenAsync(world);
-        await unit.CommitAsync(Ct);
+        await unit.CommitAsync();
 
         unit.Poison(new InvalidOperationException("too late"));
 
@@ -350,7 +350,7 @@ public sealed class WriteUnitTests
 
         await Should.ThrowAsync<OperationCanceledException>(() => running);
         unit.TimedOut.ShouldBeFalse();
-        await Should.ThrowAsync<OperationCanceledException>(() => unit.CommitAsync(Ct));
+        await Should.ThrowAsync<OperationCanceledException>(() => unit.CommitAsync());
     }
 
     [Fact]
@@ -391,7 +391,7 @@ public sealed class WriteUnitTests
         await caller.CancelAsync();
 
         await Should.ThrowAsync<OperationCanceledException>(() => running);
-        await Should.ThrowAsync<OperationCanceledException>(() => unit.CommitAsync(Ct));
+        await Should.ThrowAsync<OperationCanceledException>(() => unit.CommitAsync());
         unit.TimedOut.ShouldBeFalse();
     }
 
@@ -404,7 +404,7 @@ public sealed class WriteUnitTests
         await Should.ThrowAsync<AlvoChainDepthExceededException>(() =>
             unit.RunAsync<int>(_ => throw new AlvoChainDepthExceededException("loop"), Ct));
 
-        await Should.ThrowAsync<AlvoChainDepthExceededException>(() => unit.CommitAsync(Ct));
+        await Should.ThrowAsync<AlvoChainDepthExceededException>(() => unit.CommitAsync());
     }
 
     [Fact]
@@ -417,7 +417,7 @@ public sealed class WriteUnitTests
             unit.RunAsync<int>(_ => throw new AlvoAuthorizationException("no"), Ct));
 
         (await unit.RunAsync(_ => Task.FromResult(3), Ct)).ShouldBe(3);
-        await unit.CommitAsync(Ct);
+        await unit.CommitAsync();
     }
 
     [Fact]

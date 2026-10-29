@@ -53,7 +53,7 @@ public abstract class UnitSavepointFacts
                 Ct);
         }
 
-        await unit.CommitAsync(Ct);
+        await unit.CommitAsync();
 
         var page = await data.QueryAsync(new AlvoQuery { Entity = Entity }, _caller, Ct);
         page.Items.Select(row => (string)row["code"]!).ShouldBe(["kept"]);

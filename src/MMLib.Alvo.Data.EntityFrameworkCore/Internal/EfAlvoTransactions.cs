@@ -36,7 +36,7 @@ internal sealed class EfAlvoTransactions(EfAlvoData data, IServiceScopeFactory s
         await using var unit = await data.OpenUnitAsync(context, settings, scopes, cancellationToken).ConfigureAwait(false);
         using var flow = unit.EnterFlow();
         var result = await WorkedAsync(unit, work, context).ConfigureAwait(false);
-        await unit.CommitAsync(cancellationToken).ConfigureAwait(false);
+        await unit.CommitAsync().ConfigureAwait(false);
 
         return result;
     }

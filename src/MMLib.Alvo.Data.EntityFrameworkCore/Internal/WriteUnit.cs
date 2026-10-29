@@ -43,6 +43,11 @@ internal sealed record WriteUnitParts(
 /// awaited, and the unit rolls back and throws an <see cref="InvalidOperationException"/> naming it.
 /// </para>
 /// <para>
+/// <b>A decided commit is not cancellable (Ruling 50).</b> The <c>COMMIT</c> runs with <see cref="CancellationToken.None"/>:
+/// a caller's cancel landing while it runs could otherwise report as cancelled a transaction the engine committed — the
+/// outcome Ruling 47 exists to rule out. The caller's cancel still ends the unit at any point before the decision.
+/// </para>
+/// <para>
 /// <b>The deadline ends the unit, not the delegate.</b> At <see cref="AlvoTransactionOptions.Timeout"/> the unit's token is
 /// cancelled and the unit is poisoned with a <see cref="TimeoutException"/>; as soon as no call is running it rolls back
 /// and lets go of the connection and the write turn — a delegate that ignores its token no longer holds the database. The
@@ -222,8 +227,8 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
     /// <summary>
     /// Commits the unit — or, when it was poisoned or a call is still running, rolls it back and throws why.
     /// </summary>
-    /// <param name="cancellationToken">A token to cancel the commit.</param>
-    internal async Task CommitAsync(CancellationToken cancellationToken)
+    /// <remarks>Takes no token: once decided, the commit runs to its end (Ruling 50).</remarks>
+    internal async Task CommitAsync()
     {
         var (failure, holdsGate) = Decide();
         if (!holdsGate)
@@ -236,11 +241,11 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
         {
             if (failure is not null)
             {
-                await EndAsync(commit: false, CancellationToken.None).ConfigureAwait(false);
+                await EndAsync(commit: false).ConfigureAwait(false);
                 ExceptionDispatchInfo.Throw(failure);
             }
 
-            await EndAsync(commit: true, cancellationToken).ConfigureAwait(false);
+            await EndAsync(commit: true).ConfigureAwait(false);
         }
         finally
         {
@@ -371,7 +376,7 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
         }
     }
 
-    private async Task EndAsync(bool commit, CancellationToken cancellationToken = default)
+    private async Task EndAsync(bool commit)
     {
         lock (_gate)
         {
@@ -387,7 +392,7 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
         var committed = false;
         try
         {
-            await (commit ? _parts.Transaction.CommitAsync(cancellationToken) : RollBackAsync()).ConfigureAwait(false);
+            await (commit ? _parts.Transaction.CommitAsync(CancellationToken.None) : RollBackAsync()).ConfigureAwait(false);
             committed = commit;
         }
         finally

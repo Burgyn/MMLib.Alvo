@@ -309,7 +309,7 @@ internal sealed class StatementFailureInterceptor : DbCommandInterceptor
 
 /// <summary>
 /// Holds the next <c>COMMIT</c> of one world at the engine's door until <see cref="Release"/> — so a test can act while a
-/// commit is decided but not yet done, without a sleep.
+/// commit is decided but not yet done, without a sleep. A held commit honours the token it was given, as the engine does.
 /// </summary>
 internal sealed class CommitHoldInterceptor : DbTransactionInterceptor
 {
@@ -332,7 +332,7 @@ internal sealed class CommitHoldInterceptor : DbTransactionInterceptor
         if (_release is { } release)
         {
             _reached.TrySetResult();
-            await release.Task;
+            await release.Task.WaitAsync(cancellationToken);
         }
 
         return result;
