@@ -288,6 +288,7 @@ internal sealed partial class EfAlvoData
     internal Task CommitCommandInUnitAsync(WriteUnit unit, CommandKey key, DateTimeOffset now, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(key);
+        CommandLedgerTable.Claimed(key);
         return unit.RunAsync(
             token => InUnitAsync(
                 unit, (connection, transaction, ct) => CommittedOrLostAsync(unit, connection, transaction, key, now, ct), token),

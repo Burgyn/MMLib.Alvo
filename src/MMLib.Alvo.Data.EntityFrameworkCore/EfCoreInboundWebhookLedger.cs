@@ -118,7 +118,10 @@ internal sealed class EfCoreInboundWebhookLedger : IInboundWebhookLedger
         await using (connection.ConfigureAwait(false))
         {
             await connection.OpenAsync(ct).ConfigureAwait(false);
-            await InboundWebhookTable.EnsureAsync(connection, _table, ct).ConfigureAwait(false);
+            using (await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false))
+            {
+                await InboundWebhookTable.EnsureAsync(connection, _table, ct).ConfigureAwait(false);
+            }
         }
     }
 }

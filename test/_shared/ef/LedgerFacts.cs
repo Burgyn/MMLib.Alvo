@@ -85,6 +85,20 @@ public abstract class LedgerFacts
     }
 
     [Fact]
+    public async Task A_stale_answer_changes_nothing_so_a_retry_never_replays_it()
+    {
+        var ledger = await LedgerAsync();
+        var stale = await ledger.ClaimAsync(Key("k11"), _now, Ct);
+        await ledger.ClaimAsync(Key("k11"), _now + _pastTheLease, Ct);
+
+        await ledger.AnswerAsync(Held(Key("k11"), stale), new CommandAnswer(200, "{\"stale\":true}"), Ct);
+
+        var retry = await ledger.ClaimAsync(Key("k11"), _now + _pastTheLease, Ct);
+        retry.State.ShouldBe(CommandClaimState.InFlight, "the newer run still holds it");
+        retry.Answer.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task A_completion_without_a_unit_commits_the_event_and_the_answer_together()
     {
         var services = await StartAsync(Schema(), Descriptor());
@@ -171,6 +185,59 @@ public abstract class LedgerFacts
         await services.GetRequiredService<IAlvoTransactions>().TransactAsync(_caller, (unit, ct) =>
             ((IAlvoCommandUnit)unit).CommitCommandAsync(current, _now + _pastTheLease, ct), cancellationToken: Ct);
         (await ledger.ClaimAsync(Key("k10"), _now.AddHours(1), Ct)).State.ShouldBe(CommandClaimState.Unanswered, "the run holding the claim commits");
+    }
+
+    /// <summary>
+    /// A handler that swallows the refusal and returns normally still cannot commit: the lost claim poisoned the unit
+    /// (Ruling 36).
+    /// </summary>
+    [Fact]
+    public async Task A_handler_that_catches_its_lost_claim_still_cannot_commit_its_writes_or_its_event()
+    {
+        var services = await StartAsync(Schema(), Descriptor());
+        var ledger = services.GetRequiredService<ICommandLedger>();
+        var stale = Held(Key("k12"), await ledger.ClaimAsync(Key("k12"), _now, Ct));
+        await ledger.ClaimAsync(Key("k12"), _now + _pastTheLease, Ct);
+
+        await Should.ThrowAsync<CommandClaimLostException>(() => services.GetRequiredService<IAlvoTransactions>().TransactAsync(_caller, async (unit, ct) =>
+        {
+            await unit.CreateAsync(Entity, new Dictionary<string, object?> { ["text"] = "swallowed" }, ct);
+            await ((IAlvoCommandUnit)unit).PublishFrameworkAsync(Completion(), ct);
+            try
+            {
+                await ((IAlvoCommandUnit)unit).CommitCommandAsync(stale, _now + _pastTheLease, ct);
+            }
+            catch (CommandClaimLostException)
+            {
+            }
+        }, cancellationToken: Ct));
+
+        (await services.GetRequiredService<IAlvoData>().QueryAsync(new AlvoQuery { Entity = Entity }, _caller, Ct)).Items.ShouldBeEmpty();
+        (await PendingTypesAsync(services)).ShouldNotContain("alvo.command.quote_stay.completed");
+    }
+
+    [Fact]
+    public async Task Committing_a_key_that_was_never_claimed_is_refused_as_a_programming_error()
+    {
+        var services = await StartAsync(Schema(), Descriptor());
+
+        var refusal = await Should.ThrowAsync<InvalidOperationException>(() => services.GetRequiredService<IAlvoTransactions>().TransactAsync(_caller, (unit, ct) =>
+            ((IAlvoCommandUnit)unit).CommitCommandAsync(Key("k13"), _now, ct), cancellationToken: Ct));
+
+        refusal.ShouldNotBeOfType<CommandClaimLostException>();
+        refusal.Message.ShouldContain("never claimed");
+    }
+
+    [Fact]
+    public async Task Completing_with_a_key_that_was_never_claimed_is_refused_as_a_programming_error()
+    {
+        var ledger = await LedgerAsync();
+
+        var refusal = await Should.ThrowAsync<InvalidOperationException>(() =>
+            ledger.CompleteAsync(Completion(), Key("k14"), new CommandAnswer(200, null), _now, Ct));
+
+        refusal.ShouldNotBeOfType<CommandClaimLostException>();
+        refusal.Message.ShouldContain("never claimed");
     }
 
     [Fact]

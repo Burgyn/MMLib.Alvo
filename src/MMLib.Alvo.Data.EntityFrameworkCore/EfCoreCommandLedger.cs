@@ -63,8 +63,15 @@ internal sealed class EfCoreCommandLedger : ICommandLedger
 
     /// <inheritdoc/>
     public Task CompleteAsync(
-        AlvoEvent completion, CommandKey? key, CommandAnswer? answer, DateTimeOffset now, CancellationToken cancellationToken) =>
-        InTransactionAsync(
+        AlvoEvent completion, CommandKey? key, CommandAnswer? answer, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(completion);
+        if (key is not null)
+        {
+            CommandLedgerTable.Claimed(key);
+        }
+
+        return InTransactionAsync(
             async (connection, transaction, ct) =>
             {
                 await OutboxTable.InsertAsync(connection, transaction, _outbox, completion, ct).ConfigureAwait(false);
@@ -73,6 +80,7 @@ internal sealed class EfCoreCommandLedger : ICommandLedger
             },
             _ => true,
             cancellationToken);
+    }
 
     /// <inheritdoc/>
     public async Task<int> SweepAsync(DateTimeOffset claimedBefore, CancellationToken cancellationToken)
@@ -169,7 +177,8 @@ internal sealed class EfCoreCommandLedger : ICommandLedger
     /// <summary>The ledger's table and the outbox a unitless completion writes to — both, once (Ruling 47).</summary>
     /// <remarks>
     /// The outbox too: a run that opened no unit appends its completion here, on a connection of the ledger's own, and a
-    /// database no write or boot has reached yet has no outbox.
+    /// database no write or boot has reached yet has no outbox. Inside the write gate, as <c>EfCoreOutboxStore</c> runs its
+    /// own DDL, so it never contends with a gated writer.
     /// </remarks>
     private async Task EnsureTablesAsync(CancellationToken ct)
     {
@@ -177,8 +186,11 @@ internal sealed class EfCoreCommandLedger : ICommandLedger
         await using (connection.ConfigureAwait(false))
         {
             await connection.OpenAsync(ct).ConfigureAwait(false);
-            await CommandLedgerTable.EnsureAsync(connection, _table, ct).ConfigureAwait(false);
-            await OutboxTable.EnsureAsync(connection, _outbox, ct).ConfigureAwait(false);
+            using (await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false))
+            {
+                await CommandLedgerTable.EnsureAsync(connection, _table, ct).ConfigureAwait(false);
+                await OutboxTable.EnsureAsync(connection, _outbox, ct).ConfigureAwait(false);
+            }
         }
     }
 }

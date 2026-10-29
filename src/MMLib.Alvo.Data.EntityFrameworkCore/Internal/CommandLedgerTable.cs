@@ -42,6 +42,14 @@ internal static class CommandLedgerTable
         await ExecutedAsync(Command(connection, null, IndexDdl(table), null), ct).ConfigureAwait(false);
     }
 
+    /// <summary><paramref name="key"/>, refused when it carries no claim's token — a caller's bug, not a lost lease.</summary>
+    /// <exception cref="InvalidOperationException">The key was never claimed.</exception>
+    internal static CommandKey Claimed(CommandKey key) =>
+        string.IsNullOrEmpty(key.Token)
+            ? throw new InvalidOperationException(
+                $"The command key '{key.Key}' was never claimed: only a key ClaimAsync granted a token to can be committed.")
+            : key;
+
     internal static async Task<CommandClaim?> FindAsync(
         DbConnection connection, DbTransaction? transaction, string table, CommandKey key, DateTimeOffset now,
         CancellationToken ct)
