@@ -50,9 +50,9 @@ internal sealed class CommandRun(
         Func<IAlvoTransaction, CancellationToken, Task<T>> work, AlvoTransactionOptions? options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(work);
-        EnsureFirstUnit();
         var units = transactions ?? throw new InvalidOperationException(
             "This host's data provider opens no transaction units (IAlvoTransactions), so a command cannot open one. Register UseSqlite(…) or UsePostgreSql(…).");
+        EnsureFirstUnit();
 
         var result = await units.TransactAsync(Caller, (unit, ct) => WorkedAsync(unit, work, ct), options, cancellationToken).ConfigureAwait(false);
         Interlocked.Exchange(ref _committed, 1);

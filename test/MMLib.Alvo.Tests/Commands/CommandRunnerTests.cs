@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using MMLib.Alvo.Commands;
@@ -189,6 +190,111 @@ public sealed class CommandRunnerTests
     }
 
     [Fact]
+    public async Task A_union_result_answering_4xx_releases_its_key_and_emits_nothing()
+    {
+        var runner = Runner(out _);
+        var run = runner.Start((await runner.ClaimAsync(Invocation("u1"))).Invocation);
+        Results<Ok<Quote>, BadRequest> refused = TypedResults.BadRequest();
+
+        await runner.FinishAsync(run, () => Task.FromResult<object?>(refused));
+
+        _ledger.Calls.ShouldBe(["claim", "release"]);
+        _ledger.Completions.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_union_result_answering_200_replays_the_arm_it_answered_with_its_body()
+    {
+        var runner = Runner(out _);
+        var run = runner.Start((await runner.ClaimAsync(Invocation("u2"))).Invocation);
+        Results<Ok<Quote>, NotFound> quoted = TypedResults.Ok(new Quote(3));
+
+        await runner.FinishAsync(run, () => Task.FromResult<object?>(quoted));
+
+        var replay = await ReplayedAsync(await runner.ClaimAsync(Invocation("u2")));
+        replay.ShouldBe((200, "application/json; charset=utf-8", "{\"total\":3}"));
+    }
+
+    [Fact]
+    public async Task A_problem_answered_after_the_unit_committed_replays_as_a_problem_document()
+    {
+        var runner = Runner(out _);
+        var run = runner.Start((await runner.ClaimAsync(Invocation("p1"))).Invocation);
+        var context = new AlvoCommandContext(run);
+
+        await runner.FinishAsync(run, async () =>
+        {
+            await context.TransactAsync((_, _) => Task.CompletedTask, cancellationToken: Ct);
+            return TypedResults.Problem(statusCode: StatusCodes.Status409Conflict, title: "Already booked");
+        });
+
+        var replay = await ReplayedAsync(await runner.ClaimAsync(Invocation("p1")));
+        replay.Status.ShouldBe(409);
+        replay.ContentType.ShouldBe("application/problem+json; charset=utf-8");
+        replay.Body.ShouldContain("\"title\":\"Already booked\"");
+    }
+
+    [Fact]
+    public async Task A_keyed_run_whose_answer_cannot_be_serialised_completes_without_an_answer()
+    {
+        var runner = Runner(out _);
+        var run = runner.Start((await runner.ClaimAsync(Invocation("s1"))).Invocation);
+
+        await runner.FinishAsync(run, () => Task.FromResult<object?>(TypedResults.Ok(Cycle.Of())));
+
+        _ledger.Calls.ShouldBe(["claim", "complete"]);
+        (await runner.ClaimAsync(Invocation("s1"))).Early.ShouldBeAssignableTo<IStatusCodeHttpResult>()!.StatusCode
+            .ShouldBe(StatusCodes.Status409Conflict, "it ran and committed; a retry must not run it again");
+    }
+
+    [Fact]
+    public async Task A_keyless_run_records_no_answer_so_an_unserialisable_value_is_never_serialised()
+    {
+        var runner = Runner(out _);
+        var run = runner.Start(new CommandInvocation(_quote, _staff, null, null));
+
+        await runner.FinishAsync(run, () => Task.FromResult<object?>(TypedResults.Ok(Cycle.Of())));
+
+        _ledger.Completions.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public void A_keyed_invocation_the_claim_did_not_grant_cannot_start()
+    {
+        var runner = Runner(out _);
+
+        var refusal = Should.Throw<InvalidOperationException>(() => runner.Start(Invocation("c1")));
+
+        refusal.Message.ShouldContain("unclaimed");
+    }
+
+    [Fact]
+    public async Task A_bookkeeping_failure_after_the_handler_threw_rethrows_the_handlers_own_exception()
+    {
+        var runner = Runner(out _);
+        var run = runner.Start((await runner.ClaimAsync(Invocation("b1"))).Invocation);
+        _ledger.ReleaseFailure = new InvalidOperationException("the ledger is down");
+
+        await Should.ThrowAsync<TimeoutException>(() => runner.FinishAsync(run, () => throw new TimeoutException("the payment provider")));
+
+        _ledger.Calls.ShouldBe(["claim", "release"]);
+    }
+
+    [Fact]
+    public async Task A_host_without_transaction_units_refuses_the_unit_without_counting_it_as_opened()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 10, 30, 9, 0, 0, TimeSpan.Zero));
+        var runner = new CommandRunner(
+            _ledger, null, Substitute.For<IAlvoSessions>(), new CommandCompletion(time), time, JsonSerializerOptions.Web, NullLogger<CommandRunner>.Instance);
+        var run = runner.Start(new CommandInvocation(_quote, _staff, null, null));
+
+        var refusal = await Should.ThrowAsync<InvalidOperationException>(() => new AlvoCommandContext(run).TransactAsync((_, _) => Task.CompletedTask, cancellationToken: Ct));
+
+        refusal.Message.ShouldContain("IAlvoTransactions");
+        run.OpenedWithoutCommit.ShouldBeFalse();
+    }
+
+    [Fact]
     public void A_plain_value_is_a_200_answer()
     {
         CommandAnswers.StatusOf(null).ShouldBe(200);
@@ -217,7 +323,36 @@ public sealed class CommandRunnerTests
         return new CommandRunner(_ledger, _transactions, sessions, new CommandCompletion(time), time, JsonSerializerOptions.Web, NullLogger<CommandRunner>.Instance);
     }
 
+    private static async Task<(int Status, string? ContentType, string Body)> ReplayedAsync(CommandClaimed claimed)
+    {
+        var http = new DefaultHttpContext();
+        using var body = new MemoryStream();
+        http.Response.Body = body;
+
+        await claimed.Early.ShouldBeOfType<ReplayedAnswer>().ExecuteAsync(http);
+
+        return (http.Response.StatusCode, http.Response.ContentType, System.Text.Encoding.UTF8.GetString(body.ToArray()));
+    }
+
     private static CommandInvocation Invocation(string key) => new(_quote, _staff, null, Key(key));
 
     private static CommandKey Key(string key) => new($"command:quote_stay/global/{_staff.User.Value}/-", key, "fp");
+}
+
+/// <summary>A command's answer value.</summary>
+/// <param name="Total">The quoted total.</param>
+public sealed record Quote(int Total);
+
+/// <summary>A value that refers to itself, which JSON cannot write.</summary>
+public sealed class Cycle
+{
+    /// <summary>Gets itself.</summary>
+    public Cycle? Self { get; private set; }
+
+    internal static Cycle Of()
+    {
+        var loop = new Cycle();
+        loop.Self = loop;
+        return loop;
+    }
 }

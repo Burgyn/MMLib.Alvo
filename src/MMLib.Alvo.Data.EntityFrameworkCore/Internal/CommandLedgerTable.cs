@@ -29,6 +29,7 @@ internal static class CommandLedgerTable
             committed_at TEXT NULL,
             answer_status INTEGER NULL,
             answer_body TEXT NULL,
+            answer_media_type TEXT NULL,
             PRIMARY KEY (scope, idempotency_key)
         )
         """;
@@ -57,7 +58,7 @@ internal static class CommandLedgerTable
         var command = Command(
             connection,
             transaction,
-            $"SELECT fingerprint, lease_until, committed_at, answer_status, answer_body FROM {table} WHERE {KeyMatches}",
+            $"SELECT fingerprint, lease_until, committed_at, answer_status, answer_body, answer_media_type FROM {table} WHERE {KeyMatches}",
             key);
         await using (command.ConfigureAwait(false))
         {
@@ -114,9 +115,10 @@ internal static class CommandLedgerTable
             Command(
                 connection,
                 transaction,
-                $"UPDATE {table} SET answer_status = @status, answer_body = @body WHERE {KeyMatches} AND {Holds}",
+                $"UPDATE {table} SET answer_status = @status, answer_body = @body, answer_media_type = @media_type "
+                + $"WHERE {KeyMatches} AND {Holds}",
                 key,
-                [("@token", key.Token), ("@status", answer.Status), ("@body", answer.Body)]),
+                [("@token", key.Token), ("@status", answer.Status), ("@body", answer.Body), ("@media_type", answer.MediaType)]),
             ct);
 
     internal static Task<int> ReleaseAsync(DbConnection connection, string table, CommandKey key, CancellationToken ct) =>
@@ -156,14 +158,18 @@ internal static class CommandLedgerTable
 
         if (!reader.IsDBNull(3))
         {
-            var status = Convert.ToInt32(reader.GetValue(3), CultureInfo.InvariantCulture);
-            return CommandClaim.Answered(new CommandAnswer(status, reader.IsDBNull(4) ? null : reader.GetString(4)));
+            return CommandClaim.Answered(AnswerOf(reader));
         }
 
         return !reader.IsDBNull(2) ? CommandClaim.Unanswered
             : string.CompareOrdinal(reader.GetString(1), StoredInstant.Text(now)) > 0 ? CommandClaim.InFlight
             : CommandClaim.Claimable;
     }
+
+    private static CommandAnswer AnswerOf(DbDataReader reader) => new(
+        Convert.ToInt32(reader.GetValue(3), CultureInfo.InvariantCulture),
+        reader.IsDBNull(4) ? null : reader.GetString(4),
+        reader.IsDBNull(5) ? null : reader.GetString(5));
 
     private static DbCommand Command(
         DbConnection connection, DbTransaction? transaction, string sql, CommandKey? key,

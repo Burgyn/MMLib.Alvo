@@ -26,8 +26,18 @@ internal sealed partial class CommandRunner(
         "This composition keeps no command ledger, so commands cannot run; the boot refuses this composition.");
 
     /// <summary>Starts a run as the invocation's caller.</summary>
-    internal CommandRun Start(CommandInvocation invocation) =>
-        new(invocation, sessions.For(invocation.Caller), transactions, completion);
+    /// <exception cref="InvalidOperationException">The invocation carries a key its claim did not grant a token to.</exception>
+    internal CommandRun Start(CommandInvocation invocation)
+    {
+        ArgumentNullException.ThrowIfNull(invocation);
+        if (invocation.Key is { Token: null })
+        {
+            throw new InvalidOperationException(
+                $"The command '{invocation.Command.Id}' was started with an unclaimed Idempotency-Key: start the invocation ClaimAsync answered, which carries its fencing token.");
+        }
+
+        return new(invocation, sessions.For(invocation.Caller), transactions, completion);
+    }
 
     /// <summary>
     /// Claims the invocation's key — not cancellable: a client that hung up mid-claim must not strand the key (Ruling 49) —
@@ -80,19 +90,22 @@ internal sealed partial class CommandRunner(
             return;
         }
 
-        await (run.Committed
-            ? Ledger.AnswerAsync(key, CommandAnswers.Failed, CancellationToken.None)
-            : Ledger.ReleaseAsync(key, CancellationToken.None)).ConfigureAwait(false);
+        try
+        {
+            await (run.Committed
+                ? Ledger.AnswerAsync(key, CommandAnswers.Failed, CancellationToken.None)
+                : Ledger.ReleaseAsync(key, CancellationToken.None)).ConfigureAwait(false);
+        }
+        catch (Exception bookkeeping)
+        {
+            FailureNotRecorded(logger, run.Name, bookkeeping);
+        }
     }
 
     private async Task AnsweredAsync(CommandRun run, object? result)
     {
         run.Finish();
-        var answer = CommandAnswers.Of(result, json);
-        if (answer is null && run.Key is not null)
-        {
-            ResultNotReplayable(logger, run.Name);
-        }
+        var answer = AnswerOf(run, result);
 
         if (run.Committed)
         {
@@ -112,15 +125,34 @@ internal sealed partial class CommandRunner(
             : ReleaseAsync(run)).ConfigureAwait(false);
     }
 
+    private CommandAnswer? AnswerOf(CommandRun run, object? result)
+    {
+        if (run.Key is null)
+        {
+            return null;
+        }
+
+        var answer = CommandAnswers.Of(result, json);
+        if (answer is null)
+        {
+            ResultNotReplayable(logger, run.Name);
+        }
+
+        return answer;
+    }
+
     private Task AnswerCommittedAsync(CommandRun run, CommandAnswer? answer) =>
         run.Key is { } key && answer is not null ? Ledger.AnswerAsync(key, answer, CancellationToken.None) : Task.CompletedTask;
 
     private Task ReleaseAsync(CommandRun run) =>
         run.Key is { } key ? Ledger.ReleaseAsync(key, CancellationToken.None) : Task.CompletedTask;
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Command '{Command}' answered after its transaction unit rolled back; no completion is recorded and its Idempotency-Key is given back.")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Command '{Command}' answered without its transaction unit reporting a commit; no completion is recorded and its Idempotency-Key is given back.")]
     private static partial void UnitRolledBack(ILogger logger, string command);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Command '{Command}' answered with a result that cannot be replayed (no status, or a body over 64 KiB); a retry with its Idempotency-Key will be refused, not answered.")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Command '{Command}' answered with a result that cannot be replayed (no status, a value that cannot be serialised, or a body over 64 KiB); a retry with its Idempotency-Key will be refused, not answered.")]
     private static partial void ResultNotReplayable(ILogger logger, string command);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Command '{Command}' threw, and recording that on its Idempotency-Key failed too; the handler's own exception is rethrown.")]
+    private static partial void FailureNotRecorded(ILogger logger, string command, Exception exception);
 }

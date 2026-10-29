@@ -114,6 +114,19 @@ public abstract class LedgerFacts
     }
 
     [Fact]
+    public async Task A_problem_answer_keeps_its_media_type_for_the_replay()
+    {
+        var services = await StartAsync(Schema(), Descriptor());
+        var ledger = services.GetRequiredService<ICommandLedger>();
+        var key = Held(Key("k15"), await ledger.ClaimAsync(Key("k15"), _now, Ct));
+        var problem = new CommandAnswer(409, "{\"status\":409}", "application/problem+json");
+
+        await ledger.CompleteAsync(Completion(), key, problem, _now, Ct);
+
+        (await ledger.ClaimAsync(Key("k15"), _now.AddHours(1), Ct)).Answer.ShouldBe(problem);
+    }
+
+    [Fact]
     public async Task A_completion_by_a_run_that_lost_its_claim_is_refused_with_its_event()
     {
         var services = await StartAsync(Schema(), Descriptor());

@@ -47,8 +47,11 @@ internal sealed record CommandKey(string Scope, string Key, string Fingerprint)
     internal string? Token { get; init; }
 }
 
-/// <summary>A run's answer as it is replayed: the status and the JSON body, if any.</summary>
-internal sealed record CommandAnswer(int Status, string? Body)
+/// <summary>
+/// A run's answer as it is replayed: the status, the JSON body, if any, and the body's media type when it is not plain
+/// <c>application/json</c> — a problem document's <c>application/problem+json</c>.
+/// </summary>
+internal sealed record CommandAnswer(int Status, string? Body, string? MediaType = null)
 {
     /// <summary>Gets a value indicating whether the answer is a 2xx.</summary>
     internal bool IsSuccess => Status is >= 200 and < 300;

@@ -13,6 +13,8 @@ internal sealed class FakeCommandLedger : ICommandLedger
 
     internal List<AlvoEvent> Completions { get; } = [];
 
+    internal Exception? ReleaseFailure { get; set; }
+
     public Task<CommandClaim> ClaimAsync(CommandKey key, DateTimeOffset now, CancellationToken cancellationToken)
     {
         Calls.Add("claim");
@@ -38,6 +40,11 @@ internal sealed class FakeCommandLedger : ICommandLedger
     public Task ReleaseAsync(CommandKey key, CancellationToken cancellationToken)
     {
         Calls.Add("release");
+        if (ReleaseFailure is { } failure)
+        {
+            throw failure;
+        }
+
         _rows.TryRemove((key.Scope, key.Key), out _);
         return Task.CompletedTask;
     }
