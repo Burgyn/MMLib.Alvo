@@ -470,7 +470,7 @@ internal static class ProblemResultFactory
 
     /// <summary>
     /// Runs <paramref name="operation"/> and maps every refusal <c>IAlvoData</c> is allowed to raise
-    /// onto its status code and problem type.
+    /// onto its status code and problem type (<see cref="RefusalFor"/>).
     /// </summary>
     /// <param name="operation">The port call, plus the rendering of its success.</param>
     internal static async Task<IResult> GuardAsync(Func<Task<IResult>> operation)
@@ -480,46 +480,46 @@ internal static class ProblemResultFactory
         {
             return await operation().ConfigureAwait(false);
         }
-        catch (AlvoAuthorizationException exception)
+        catch (Exception exception) when (RefusalFor(exception) is { } refusal)
         {
-            // The port's message is already designed never to name the entity, the row, or whether it
-            // exists (the tenant guard's deliberate exception aside), so it reaches the caller verbatim.
-            return Problem(StatusCodes.Status403Forbidden, AlvoProblemTypes.Forbidden, exception.Message);
-        }
-        catch (AlvoRecordNotFoundException)
-        {
-            return NotFound();
-        }
-        catch (AlvoPreconditionFailedException exception)
-        {
-            return Problem(
-                StatusCodes.Status412PreconditionFailed, AlvoProblemTypes.PreconditionFailed, exception.Message);
-        }
-        catch (AlvoIdempotencyConflictException exception)
-        {
-            return Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.IdempotencyConflict, exception.Message);
-        }
-        catch (AlvoConstraintViolationException exception)
-        {
-            return Conflict(exception);
-        }
-        catch (AlvoChainDepthExceededException exception)
-        {
-            return ChainDepthExceeded(exception.Message);
-        }
-        catch (ArgumentException exception) when (exception is not ArgumentNullException)
-        {
-            // Last, because it is the widest of the five: the malformed-query/payload channel.
-            //
-            // ArgumentNullException is excluded, and that exclusion is IAlvoData's own rule rather than this
-            // layer's local opinion — see the port's family table, which states it there because a provider
-            // author reads the port and not this file. In short: no request can express a null argument, so
-            // one reaching here is a broken invariant (family 5, rendered 500 by the host with its stack
-            // trace intact), and the region this guards grew several ThrowIfNull calls of its own when
-            // validation and the format catalogue landed inside it.
-            return Malformed(WithoutArgumentDetail(exception.Message));
+            return refusal;
         }
     }
+
+    /// <summary>
+    /// The refusal for one of the data port's documented families thrown by a call the caller can fix — authorization,
+    /// not-found, precondition, idempotency, constraint, chain depth — or null for anything else.
+    /// </summary>
+    /// <param name="exception">What the port threw.</param>
+    internal static IResult? PortRefusalFor(Exception exception) => exception switch
+    {
+        // The port's message is already designed never to name the entity, the row, or whether it
+        // exists (the tenant guard's deliberate exception aside), so it reaches the caller verbatim.
+        AlvoAuthorizationException authorization => Problem(StatusCodes.Status403Forbidden, AlvoProblemTypes.Forbidden, authorization.Message),
+        AlvoRecordNotFoundException => NotFound(),
+        AlvoPreconditionFailedException precondition => Problem(StatusCodes.Status412PreconditionFailed, AlvoProblemTypes.PreconditionFailed, precondition.Message),
+        AlvoIdempotencyConflictException conflict => Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.IdempotencyConflict, conflict.Message),
+        AlvoConstraintViolationException constraint => Conflict(constraint),
+        AlvoChainDepthExceededException loop => ChainDepthExceeded(loop.Message),
+        _ => null,
+    };
+
+    /// <summary>
+    /// <see cref="PortRefusalFor"/>, plus the malformed-request family (an <see cref="ArgumentException"/> that is not an
+    /// <see cref="ArgumentNullException"/>).
+    /// </summary>
+    /// <remarks>
+    /// The <see cref="ArgumentException"/> arm is last, because it is the widest: the malformed-query/payload channel.
+    /// <see cref="ArgumentNullException"/> is excluded, and that exclusion is <c>IAlvoData</c>'s own rule rather than this
+    /// layer's local opinion — see the port's family table, which states it there because a provider author reads the port
+    /// and not this file. In short: no request can express a null argument, so one reaching here is a broken invariant
+    /// (family 5, rendered 500 by the host with its stack trace intact), and the region this guards grew several
+    /// <c>ThrowIfNull</c> calls of its own when validation and the format catalogue landed inside it.
+    /// </remarks>
+    /// <param name="exception">What the port threw.</param>
+    internal static IResult? RefusalFor(Exception exception) =>
+        PortRefusalFor(exception)
+        ?? (exception is ArgumentException argument and not ArgumentNullException ? Malformed(WithoutArgumentDetail(argument.Message)) : null);
 
     /// <summary>
     /// <see cref="ArgumentException.Message"/> with everything <see cref="ArgumentException"/> itself appends
