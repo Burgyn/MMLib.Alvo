@@ -28,8 +28,8 @@ namespace MMLib.Alvo.Api.Internal;
 internal static class FilterOperators
 {
     /// <summary>
-    /// The port's operators with no wire spelling: the literal text tests are reached from C#, and PostgREST has no
-    /// spelling for them, so the allow-list leaves them out rather than invent one.
+    /// The port's operators that have a wire spelling — every member except the literal text tests, which are reached
+    /// from C# and which PostgREST has no spelling for, so the allow-list leaves them out rather than invent one.
     /// </summary>
     private static readonly AlvoFilterOperator[] _onTheWire =
         [.. Enum.GetValues<AlvoFilterOperator>().Where(op => op is not (AlvoFilterOperator.StartsWith or AlvoFilterOperator.EndsWith or AlvoFilterOperator.Contains))];

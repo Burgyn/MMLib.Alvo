@@ -101,8 +101,9 @@ internal sealed class BoundValue
         new(value, null, BoundValueOrigin.PolicyPredicate);
 
     /// <summary>
-    /// A value this data path generated itself, in a CLR type it chose — today only a page's row limit. Named
-    /// so that it cannot be reached for by a fragment that is really binding a caller's value.
+    /// A value this data path generated itself, in a CLR type it chose — a page's row limit and offset, or a literal
+    /// text test's escape character. Named so that it cannot be reached for by a fragment that is really binding a
+    /// caller's value.
     /// </summary>
     /// <param name="value">The value.</param>
     internal static BoundValue FromFramework(object? value) => new(value, null, BoundValueOrigin.Framework);
