@@ -416,6 +416,9 @@ namespace MMLib.Alvo.Data
         ILike = 7,
         In = 8,
         Is = 9,
+        StartsWith = 10,
+        EndsWith = 11,
+        Contains = 12,
     }
     public readonly struct AlvoIdempotency : System.IEquatable<MMLib.Alvo.Data.AlvoIdempotency>
     {

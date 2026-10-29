@@ -209,6 +209,35 @@ public class FilterSqlRendererTests
             filter, AlvoDataFixtures.Vehicle, new TestFieldSqlRenderer(), "  "));
     }
 
+    /// <summary>
+    /// A literal text test is a <c>LIKE</c> whose pattern and escape character are both parameters: the statement text
+    /// carries no quote and no backslash, and the value reaches the engine escaped.
+    /// </summary>
+    [Theory]
+    [InlineData(AlvoFilterOperator.StartsWith, "a%_\\[", "a\\%\\_\\\\\\[%")]
+    [InlineData(AlvoFilterOperator.EndsWith, "x", "%x")]
+    [InlineData(AlvoFilterOperator.Contains, "x", "%x%")]
+    public void A_literal_text_test_binds_its_escaped_pattern_and_its_escape(AlvoFilterOperator op, string value, string pattern)
+    {
+        var rendered = Render(new AlvoComparison("status", op, value));
+
+        rendered.Sql.ShouldBe("\"status\" LIKE @alvo_f0 ESCAPE @alvo_f1");
+        rendered.Parameters["alvo_f0"].Value.ShouldBe(pattern);
+        rendered.Parameters["alvo_f1"].Value.ShouldBe("\\");
+    }
+
+    [Fact]
+    public void A_literal_text_test_on_a_field_that_is_not_text_is_refused()
+        => Should.Throw<ArgumentException>(() => Render(new AlvoComparison("price", AlvoFilterOperator.StartsWith, "1")))
+            .Message.ShouldContain("'price', which is not a text field");
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(5L)]
+    public void A_literal_text_test_with_a_value_that_is_not_a_string_is_refused(object? value)
+        => Should.Throw<ArgumentException>(() => Render(new AlvoComparison("status", AlvoFilterOperator.Contains, value)))
+            .Message.ShouldContain("a value that is not a string");
+
     private static RenderedSql Render(AlvoFilter filter, IFieldSqlRenderer? fields = null) => FilterSqlRenderer.Render(
         filter, AlvoDataFixtures.Vehicle, fields ?? new TestFieldSqlRenderer(), PolicyParameterPrefix.Filter);
 }

@@ -64,7 +64,7 @@ public class FilterSqlRendererPropertyTests
                 }
 
                 rendered.AddOrUpdate(op, 1, static (_, count) => count + 1);
-                return sql == baselines[op] && parameters!.Values.Contains(value);
+                return sql == baselines[op] && Carries(parameters!, op, value);
             },
             iter: 10_000);
 
@@ -86,7 +86,7 @@ public class FilterSqlRendererPropertyTests
 
             rendered++;
             sql!.ShouldNotContain("DROP", Case.Insensitive);
-            parameters!.Values.ShouldContain(Payload);
+            Carries(parameters!, op, Payload).ShouldBeTrue($"'{op}' must bind the payload.");
         }
 
         rendered.ShouldBeGreaterThan(0, "at least one operator must actually render a caller value.");
@@ -151,6 +151,39 @@ public class FilterSqlRendererPropertyTests
             iter: 5_000);
 
         rendered.ShouldBeGreaterThan(1_000, "the generated trees must actually render, not only be refused.");
+    }
+
+    /// <summary>
+    /// Whether a rendered parameter carries <paramref name="value"/>: the value itself, or — for a literal text test — a
+    /// pattern that unescapes to it. The unescaping is this test's own, so the renderer's escaping is checked, not reused.
+    /// </summary>
+    private static bool Carries(IReadOnlyDictionary<string, object?> parameters, AlvoFilterOperator op, string value) =>
+        op is AlvoFilterOperator.StartsWith or AlvoFilterOperator.EndsWith or AlvoFilterOperator.Contains
+            ? parameters.Values.OfType<string>().Any(bound => Unescaped(op, bound) == value)
+            : parameters.Values.Contains(value);
+
+    private static string? Unescaped(AlvoFilterOperator op, string pattern)
+    {
+        var open = op is AlvoFilterOperator.EndsWith or AlvoFilterOperator.Contains;
+        var close = op is AlvoFilterOperator.StartsWith or AlvoFilterOperator.Contains;
+        if ((open && !pattern.StartsWith('%')) || (close && !pattern.EndsWith('%')))
+        {
+            return null;
+        }
+
+        var body = pattern[(open ? 1 : 0)..(pattern.Length - (close ? 1 : 0))];
+        var text = new System.Text.StringBuilder();
+        for (var index = 0; index < body.Length; index++)
+        {
+            if (body[index] == '\\' && index + 1 < body.Length)
+            {
+                index++;
+            }
+
+            text.Append(body[index]);
+        }
+
+        return text.ToString();
     }
 
     /// <summary>

@@ -377,6 +377,17 @@ public sealed class QueryStringParserTests
     public void An_operator_spelled_in_a_different_case_is_not_an_operator() =>
         OnlyViolation("year=GTE.2020").Code.ShouldBe("unknown-operator");
 
+    /// <summary>
+    /// The literal text operators are the port's, reached from C#; the wire keeps PostgREST's operators, so their lower-cased
+    /// names are unknown operators rather than a dialect nobody chose.
+    /// </summary>
+    [Theory]
+    [InlineData("make=startswith.Sko")]
+    [InlineData("make=endswith.da")]
+    [InlineData("make=contains.kod")]
+    public void The_literal_text_operators_have_no_wire_spelling(string query) =>
+        OnlyViolation(query).Code.ShouldBe("unknown-operator");
+
     [Fact]
     public void A_query_string_with_no_parameters_carries_no_filter_and_the_default_page_size()
     {

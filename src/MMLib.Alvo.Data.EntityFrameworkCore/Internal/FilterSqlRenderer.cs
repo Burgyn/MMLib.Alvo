@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Expressions;
+﻿using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Schema;
 using System.Collections;
 using System.Globalization;
@@ -28,6 +29,8 @@ internal sealed record RenderedSql(string Sql, IReadOnlyDictionary<string, Bound
 /// A caller-supplied pattern's <c>%</c> and <c>_</c> are meaningful and are <b>not</b> escaped — that is
 /// PostgREST's own <c>like</c>/<c>ilike</c> semantics, and therefore the semantics an agent expects. It
 /// is not an injection surface: the pattern is always a bind parameter, never text in the statement.
+/// The three literal text tests are the exception that proves it: their value is escaped and bound, so <c>%</c> and
+/// <c>_</c> in it match themselves.
 /// </para>
 /// <para>
 /// Every ordering and equality comparison renders <b>both</b> operands through
@@ -128,10 +131,40 @@ internal static class FilterSqlRenderer
                 target.Sql, bag.Add(fields, target.Column, comparison.Value)),
             AlvoFilterOperator.In => Membership(target, comparison.Value, fields, bag),
             AlvoFilterOperator.Is => Identity(target.Sql, comparison.Value, fields),
+            AlvoFilterOperator.StartsWith or AlvoFilterOperator.EndsWith or AlvoFilterOperator.Contains
+                => LiteralText(declared, target, comparison, fields, bag),
             _ => throw Malformed(
                 $"uses operator '{comparison.Operator}', which is not one this provider renders",
                 $"Use one of {nameof(AlvoFilterOperator)}'s declared members."),
         };
+    }
+
+    /// <summary>
+    /// A literal text test: <c>LIKE</c> over the escaped value, with the escape character bound beside it, on a text field
+    /// only — so neither a value nor a structural quote ever reaches the statement text.
+    /// </summary>
+    private static string LiteralText(
+        FieldSchema declared, ComparisonTarget target, AlvoComparison comparison, IFieldSqlRenderer fields, ParameterBag bag)
+    {
+        var name = comparison.Operator.ToString();
+        if (declared.Type is not (FieldType.String or FieldType.Text))
+        {
+            throw Malformed(
+                $"uses '{name}' on '{declared.Name}', which is not a text field",
+                "Test a string or text field; compare any other type with eq or in.");
+        }
+
+        if (comparison.Value is not string value)
+        {
+            throw Malformed(
+                $"uses '{name}' with a value that is not a string",
+                "Pass the text to look for; a null field never matches, so test for it with is.");
+        }
+
+        var pattern = bag.Add(fields, target.Column, LiteralTextPattern.For(comparison.Operator, value));
+        var escape = bag.AddFramework(fields, LiteralTextPattern.Escape);
+
+        return $"{target.Sql} LIKE {pattern} ESCAPE {escape}";
     }
 
     /// <summary>
@@ -224,6 +257,14 @@ internal static class FilterSqlRenderer
         {
             var name = prefix + _values.Count.ToString(CultureInfo.InvariantCulture);
             _values[name] = BoundValue.ForColumn(column, value);
+            return fields.RenderParameter(name);
+        }
+
+        /// <summary>Records one value the framework itself supplies — never a caller's — and returns the marker that references it.</summary>
+        internal string AddFramework(IFieldSqlRenderer fields, object value)
+        {
+            var name = prefix + _values.Count.ToString(CultureInfo.InvariantCulture);
+            _values[name] = BoundValue.FromFramework(value);
             return fields.RenderParameter(name);
         }
     }
