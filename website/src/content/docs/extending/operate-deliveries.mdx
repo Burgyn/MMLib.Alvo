@@ -89,9 +89,10 @@ the handler for records its condition would not have matched — check `when` in
 `PUT …/subscribers/{id}/paused` with `{ "paused": true, "reason": "…" }` pauses a handler on every instance until it is
 resumed — it survives a restart. New deliveries are still recorded and wait. A delivery already running finishes; on
 PostgreSQL the pause waits for a claim already under way, so no batch is taken after the pause commits. After resume,
-the waiting deliveries run in order. The [catalog](/extending/extension-catalog/) and the dashboard show `paused`.
+the waiting deliveries run: one record's in order, as the handler's ordering says, but different records' in no order
+between them. The [catalog](/extending/extension-catalog/) and the dashboard show `paused`.
 
-<SourceExcerpt code={tests} from="public async Task A_paused_handler_catches_up_in_order_once_resumed" to="paused: false, reason: null" title="RepairDeskOperationsTests.cs" />
+<SourceExcerpt code={tests} from="public async Task A_paused_handler_catches_up_once_resumed" to="paused: false, reason: null" title="RepairDeskOperationsTests.cs" />
 
 ## Reproduce a delivery locally
 

@@ -43,7 +43,7 @@ public sealed class RepairDeskOperationsTests
     }
 
     [Fact]
-    public async Task A_paused_handler_catches_up_in_order_once_resumed()
+    public async Task A_paused_handler_catches_up_once_resumed()
     {
         var ct = TestContext.Current.CancellationToken;
         var supplier = new Supplier();
@@ -61,7 +61,7 @@ public sealed class RepairDeskOperationsTests
 
         await operations.SetPausedAsync(Project, "order-parts", paused: false, reason: null, ct);
         await alvo.DrainEventsAsync(ct);
-        supplier.Ordered.ShouldBe(["chain", "brake pads"]);
+        supplier.Ordered.ShouldBe(["chain", "brake pads"], ignoreOrder: true);
     }
 
     private static Task<AlvoTestHost> StartAsync(Supplier supplier, TimeProvider clock, CancellationToken ct) =>
