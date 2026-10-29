@@ -1,0 +1,157 @@
+---
+title: Transactions in your own code
+description: Make several writes, batches and events one unit that commits together or not at all — as the caller, under the same rules, on SQLite and PostgreSQL alike.
+sidebar:
+  order: 7
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import desk from '../../../snippets/extending/transactions/InvoiceIssuer.cs?raw';
+import tests from '../../../snippets/extending/transactions/InvoiceDeskTests.cs?raw';
+import descriptor from '../../../snippets/extending/transactions/invoice-desk.alvo.json?raw';
+
+An invoice, its lines and the event that says it was issued must exist together or not at all. `IAlvoData` commits each
+call on its own, so a failure between two calls leaves half of it behind. This page is how to make them one unit.
+
+## When you need one
+
+`IAlvoTransactions.TransactAsync(caller, (unit, ct) => …)` runs the delegate in one transaction unit. Returning commits;
+throwing rolls back and rethrows. Resolve `IAlvoTransactions` from DI: the EF Core drivers (SQLite and PostgreSQL)
+register it; the in-memory reference `InMemoryAlvoData` does not.
+
+<Code code={descriptor} lang="json" title="invoice-desk.alvo.json" />
+
+<SourceExcerpt code={desk} from="public Task<Guid> IssueAsync" to="}, cancellationToken: cancellationToken);" title="InvoiceIssuer.cs" />
+
+## What runs inside
+
+Every call through `unit` runs as the caller: the same `create` and `update` rules and their `WITH CHECK`, the same
+tenant scope, the declarative before-hooks and rollups, and the same events. Reads — `GetAsync`, `QueryAsync`, a typed
+`QueryAsync<T>` or `ExistsAsync<T>` — see the unit's own writes. A batch (`CreateManyAsync`, `UpdateManyAsync`,
+`DeleteManyAsync`) is all-or-nothing inside the unit too.
+
+`unit.AsSystem()` is the same unit acting as the system — in the caller's tenant only, never in another.
+
+`IAlvoTransactions` is registered over the driver itself, not over `IAlvoData`. A decorator you register around
+`IAlvoData` therefore does not see the calls made inside a unit: a unit has to reach the driver's own connection.
+
+## A refused write does not end the unit
+
+Each call runs under its own savepoint, so a refusal — an authorization refusal, a unique or reference violation, a
+failed precondition — undoes that call alone, on PostgreSQL as on SQLite. Catch it and go on:
+
+<SourceExcerpt code={desk} from="private static async Task<Invoice> CreateInvoiceAsync" to='Number = number + "-B"' title="InvoiceIssuer.cs" />
+
+The same holds for an update or a delete that a unique or reference rule refuses. A refused batch returns its refusals
+without throwing, having written none of its rows; decide yourself whether the unit goes on. `IssueAsync` throws, and the
+invoice goes with it.
+
+## What ends it
+
+An exception out of the delegate ends the unit. So do six failures, **even when you catch them**, because after them the
+unit's work can no longer be trusted:
+
+- the unit's `Timeout`;
+- the [chain-depth limit](/extending/#one-limit-already-enforced);
+- a cancelled call;
+- two calls at once on one unit — await each call before you make the next;
+- a call still running when the delegate returns — one you started and did not await. The unit rolls back and
+  `TransactAsync` throws an `InvalidOperationException` that names it;
+- a call through another data port while the unit is open (next section).
+
+Catching one of these does not let the unit commit: `TransactAsync` throws it. A call you start and do not await is
+never part of the unit — if it is still running when the delegate returns it rolls the unit back, and if it starts after
+it is refused.
+
+## Not inside a unit
+
+While a unit is open on the same flow, these throw `AlvoUnitInProgressException` at once:
+
+- `IAlvoData` and an `IAlvoSession` from `IAlvoSessions`;
+- `IAlvoEvents.PublishAsync`;
+- a nested `TransactAsync`;
+- a write through a framework store (`IOutboxStore`, `IDeliveryStore`, the secret store, …).
+
+They would run on a second connection, outside the unit — and on SQLite wait for the unit's own write lock. Use `unit`
+instead. The refusal fails the unit, so it cannot be caught into a commit.
+
+<SourceExcerpt code={tests} from="public async Task The_data_port_is_refused_inside_a_unit" to="refusal.Message.ShouldStartWith" title="InvoiceDeskTests.cs" />
+
+The refusal follows .NET's execution context. Work you hand to a queue or a background service of your own, or start
+with the flow suppressed, escapes it — and runs outside the unit.
+
+`MMLib.Alvo.Identity` has its own unit of work, and its writes are **not** refused inside a unit. Do not make them
+there: they run outside it, and on SQLite they wait on the unit's write lock.
+
+**No network inside a unit.** It holds row locks while it runs — on SQLite the database's one write lock. Call the
+payment provider or the VAT registry *before* `TransactAsync`, and act on its answer inside.
+
+## Events that commit with the writes
+
+`unit.PublishAsync(type, subject, data)` writes the event into the unit's transaction, so handlers see it only if the
+unit commits. Every event of one unit — its data events and its custom ones — carries one correlation id.
+
+`IAlvoEvents.PublishAsync` stays a single autocommit append, for an event that is not about a write.
+
+## Typed writes
+
+On a unit and on any `IAlvoSession`:
+
+- `unit.CreateAsync(new Invoice { … })`
+- `unit.UpdateAsync(id, AlvoPatch.For<Invoice>().Set(x => x.Paid, true))`
+- `unit.ReplaceAsync(id, record)`
+- `unit.ExistsAsync<Invoice>(x => …)`
+
+<SourceExcerpt code={desk} from="public Task MarkPaidAsync" to="}, cancellationToken: cancellationToken);" title="InvoiceIssuer.cs" />
+
+Outside a unit, get a session with `IAlvoSessions.For(caller)`. The untyped `CreateAsync(entity, values)` and
+`UpdateAsync(entity, id, values)` remain for a shape no class maps.
+
+- **What is never sent.** Fields Alvo manages — `id`, the audit columns, and `tenant_id` on a replace — and fields the
+  store maintains: a `computed` or `rollup` field. A class that maps them for reading stays writable.
+- **A create leaves out a property that is `null`**, so the field's descriptor `default` applies. To leave a field to
+  its default, make the property nullable: a non-nullable property's `0`, `false` or first enum member is a value and is
+  sent. A replace sends every field, `null` included. An enum is written as its declared value.
+- **A tenant-scoped entity needs its tenant.** A typed create on one must map `tenant_id` and set it; a `tenant_id` of
+  `Guid.Empty` is refused with an `ArgumentException` before anything is sent.
+- **What it answers.** The record as the caller may read it back, or `null` when the caller's `get` rule does not return
+  every field the class maps. The write happened either way.
+
+## Never retried, and no idempotency key
+
+The delegate runs once. A unique violation you do not catch surfaces at once; nothing replays the unit for you. For the
+same reason no call in a unit takes an idempotency key, and an `IAlvoData` write that carries one inside a unit is an
+`ArgumentException`.
+
+## Time limit
+
+`new AlvoTransactionOptions { Timeout = … }` sets it: 30 seconds unless set, at most one hour. At the deadline the
+delegate's token is cancelled, the unit rolls back as soon as no call is running and lets go of the database, and
+`TransactAsync` throws `TimeoutException` — even if the delegate ignores its token and goes on. The deadline runs on
+the host's `TimeProvider`, so a test with a fake clock decides when it passes.
+
+Your own `cancellationToken` rolls the unit back too, and surfaces as `OperationCanceledException`.
+
+Once the delegate has returned and the commit is decided, the `COMMIT` runs to its end: neither the deadline nor your
+token cancels it, and `TransactAsync` reports what the database did. A `COMMIT` that hangs is bounded by the database
+provider's command timeout, not by `Timeout`.
+
+`SuppressHostHooks` (with a system context and a `Reason` only) is for maintenance that must skip host write hooks; it
+takes effect when write hooks arrive.
+
+**Keep a unit small.** On PostgreSQL every writing call in a unit is a subtransaction (its savepoint). Past about 64 of
+them in one transaction the server's per-session subtransaction cache overflows, which slows snapshots for every session
+until the unit ends. Write many rows with one batch call, not one call per row — `IssueAsync` writes all its lines with
+one `CreateManyAsync`.
+
+## Text tests in typed queries
+
+`x.Number.StartsWith(prefix)`, `EndsWith` and `Contains(text)` match the text literally, case-sensitively, on every
+engine: a `%`, `_`, `\` or `[` in `prefix` matches itself. One-argument or `StringComparison.Ordinal` only. See
+[Typed or CEL](/extending/typed-or-cel/#typed-reads).
+
+## Not yet
+
+Write hooks will receive the same unit as `write.Transaction`; commands will get `ctx.TransactAsync`; a timer scheduled
+inside a unit will join it. Each arrives with its feature.

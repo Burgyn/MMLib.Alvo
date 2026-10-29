@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Transactions in your own code** (HX-07, #384). `IAlvoTransactions.TransactAsync` runs reads, writes, batches and
+  custom events (`IAlvoTransaction.PublishAsync`) as one unit that commits together or not at all, as the caller, on
+  SQLite and PostgreSQL; every call runs under its own savepoint, so a caught refusal does not end the unit;
+  `AlvoTransactionOptions.Timeout` (30 s) rolls a unit back and frees the database; a timeout, chain-depth or misuse
+  failure cannot be caught into a commit, and a call still running when the delegate returns rolls the unit back; once
+  the commit is decided it is not cancelled. `AlvoUnitInProgressException` refuses `IAlvoData`, `IAlvoSession`,
+  `IAlvoEvents.PublishAsync`, a nested unit and every framework store's write while one is open. Typed writes
+  `CreateAsync<T>`, `UpdateAsync<T>(id, AlvoPatch.For<T>()…)`, `ReplaceAsync<T>`, `ExistsAsync<T>` on any session
+  (`AlvoTypedWriteExtensions`): Alvo-managed, `computed` and `rollup` fields are never sent, a create leaves out `null`
+  properties so the descriptor `default` applies, and a `tenant_id` of `Guid.Empty` is refused.
+  `AlvoFilterOperator.StartsWith`/`EndsWith`/`Contains` — literal, case-sensitive text tests (in process only, not on
+  the HTTP query string), also from a typed query's `StartsWith`/`EndsWith`/`Contains`; the shipped contract suite
+  `AlvoDataLiteralTextTests`. Docs: *Transactions in your own code*. **Behaviour change:** inside a unit, the data port,
+  `IAlvoEvents.PublishAsync` and the framework stores' writes throw instead of running outside it; a decorator around
+  `IAlvoData` does not see a unit's calls. **For third-party `IAlvoData` providers:** `AlvoFilterOperator` gained three
+  members; a provider must render them literally (the shipped `AlvoDataLiteralTextTests` hold it) or refuse them as a
+  malformed filter.
+
 - **Delivery operations** (HX-06, #383). `IAlvoOperations` and nine Management routes: list deliveries, read one with
   its attempts, redeliver, replay (dry run, `Idempotency-Key` scoped per caller; the reason is not part of the
   fingerprint; the same key with a different request is 409 `idempotency-conflict`; at most 10 000 per run), redacted

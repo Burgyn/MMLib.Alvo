@@ -46,6 +46,9 @@ an optional precondition (the `If-Match` of the HTTP API) and an idempotency tok
 
 The before-hooks, the rules and the after-hook events all run inside these calls, exactly as for an HTTP request.
 
+Several writes that must commit together go through [`IAlvoTransactions`](/extending/transactions/) instead — inside
+one, `IAlvoData` is refused.
+
 ## 2. Mount the generated API under your prefix
 
 The generated Data API defaults to `/api`. An embedded host usually moves it out of its own way with
