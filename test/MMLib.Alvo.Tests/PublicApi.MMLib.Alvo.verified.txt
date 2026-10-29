@@ -34,6 +34,26 @@ namespace MMLib.Alvo.Api
         public int MaxRequestBodyBytes { get; set; }
         public string RoutePrefix { get; set; }
     }
+    public enum AlvoEndpointKind
+    {
+        List = 0,
+        Query = 1,
+        Get = 2,
+        Create = 3,
+        Update = 4,
+        Replace = 5,
+        Delete = 6,
+        BatchCreate = 7,
+        BatchUpdate = 8,
+        BatchDelete = 9,
+    }
+    public sealed class AlvoEndpointMetadata : System.IEquatable<MMLib.Alvo.Api.AlvoEndpointMetadata>
+    {
+        public AlvoEndpointMetadata(string Entity, MMLib.Alvo.Rules.DataOperation Operation, MMLib.Alvo.Api.AlvoEndpointKind Kind) { }
+        public string Entity { get; init; }
+        public MMLib.Alvo.Api.AlvoEndpointKind Kind { get; init; }
+        public MMLib.Alvo.Rules.DataOperation Operation { get; init; }
+    }
     public static class AlvoHealth
     {
         public const string LivenessPath = "/health/live";
@@ -428,6 +448,11 @@ namespace Microsoft.AspNetCore.Builder
     public static class AlvoDataApiEndpointRouteBuilderExtensions
     {
         public static Microsoft.AspNetCore.Builder.IEndpointConventionBuilder MapAlvoDataApi(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
+    }
+    public static class AlvoEndpointConventionBuilderExtensions
+    {
+        public static TBuilder ForEntity<TBuilder>(this TBuilder builder, string entity, System.Action<Microsoft.AspNetCore.Builder.IEndpointConventionBuilder> configure)
+            where TBuilder : Microsoft.AspNetCore.Builder.IEndpointConventionBuilder { }
     }
     public static class AlvoEndpointRouteBuilderExtensions
     {

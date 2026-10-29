@@ -24,34 +24,34 @@ namespace MMLib.Alvo.Api.Internal;
 internal enum DataApiEndpointKind
 {
     /// <summary>The collection read, with its parameters in the query string.</summary>
-    List,
+    List = 0,
 
     /// <summary>The collection read, with its parameters in a JSON request body.</summary>
-    Query,
+    Query = 1,
 
     /// <summary>The single-row read.</summary>
-    Get,
+    Get = 2,
 
     /// <summary>The create.</summary>
-    Create,
+    Create = 3,
 
     /// <summary>The partial update.</summary>
-    Update,
+    Update = 4,
 
     /// <summary>The create-or-replace, which writes the row the path names whole.</summary>
-    Replace,
+    Replace = 5,
 
     /// <summary>The delete.</summary>
-    Delete,
+    Delete = 6,
 
     /// <summary>The batch create, taking many rows in one transaction.</summary>
-    BatchCreate,
+    BatchCreate = 7,
 
     /// <summary>The batch update.</summary>
-    BatchUpdate,
+    BatchUpdate = 8,
 
     /// <summary>The batch delete.</summary>
-    BatchDelete,
+    BatchDelete = 9,
 }
 
 /// <summary>What a <see cref="DataApiEndpointKind"/> means to the layers below and above it.</summary>
@@ -76,6 +76,24 @@ internal static class DataApiEndpointKinds
         DataApiEndpointKind.Delete or DataApiEndpointKind.BatchDelete => DataOperation.Delete,
         _ => throw new ArgumentOutOfRangeException(
             nameof(kind), kind, "Unmapped endpoint kind; state which operation gates it here."),
+    };
+
+    /// <summary>The public twin of this kind, which <see cref="AlvoEndpointMetadata"/> carries.</summary>
+    /// <remarks>Spelled out rather than cast, so a member added to one enum and not the other fails here, not on the wire.</remarks>
+    /// <param name="kind">The endpoint kind.</param>
+    internal static AlvoEndpointKind ToPublic(this DataApiEndpointKind kind) => kind switch
+    {
+        DataApiEndpointKind.List => AlvoEndpointKind.List,
+        DataApiEndpointKind.Query => AlvoEndpointKind.Query,
+        DataApiEndpointKind.Get => AlvoEndpointKind.Get,
+        DataApiEndpointKind.Create => AlvoEndpointKind.Create,
+        DataApiEndpointKind.Update => AlvoEndpointKind.Update,
+        DataApiEndpointKind.Replace => AlvoEndpointKind.Replace,
+        DataApiEndpointKind.Delete => AlvoEndpointKind.Delete,
+        DataApiEndpointKind.BatchCreate => AlvoEndpointKind.BatchCreate,
+        DataApiEndpointKind.BatchUpdate => AlvoEndpointKind.BatchUpdate,
+        DataApiEndpointKind.BatchDelete => AlvoEndpointKind.BatchDelete,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unmapped endpoint kind; give it a public twin."),
     };
 
     /// <summary>The spelling this endpoint's <c>operationId</c> is built from.</summary>

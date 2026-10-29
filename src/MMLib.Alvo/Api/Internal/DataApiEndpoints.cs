@@ -721,7 +721,9 @@ internal static class DataApiEndpoints
             // strong entity tag minted over a row version rather than over the response bytes.
             .AddEndpointFilter(NoStoreResponseFilter.Instance)
             .AddEndpointFilter(filters.For(entity.Name, kind.ToDataOperation()))
-            .WithMetadata(new DataApiOperationMetadata(entity.Name, kind))
+            .WithMetadata(
+                new DataApiOperationMetadata(entity.Name, kind),
+                new AlvoEndpointMetadata(entity.Name, kind.ToDataOperation(), kind.ToPublic()))
             .Documenting(entity, kind);
 
         conventions.ApplyTo(route);

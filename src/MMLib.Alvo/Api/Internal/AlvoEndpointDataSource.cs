@@ -290,7 +290,20 @@ internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
             DataApiEndpoints.Map(inner, entity, _prefix, _options, _filters, _applied, _conventions);
         }
 
+        EnsureExpectedEntities(snapshot.Schema.Entities.Select(entity => entity.Name).ToHashSet(StringComparer.Ordinal));
+
         return RouteTable.Of(inner);
+    }
+
+    /// <summary>Refuses a <c>ForEntity</c> that names no entity the applied schema declares.</summary>
+    /// <param name="declared">The entities the applied schema declares.</param>
+    /// <exception cref="AlvoDataApiConventionException">A <c>ForEntity</c> named an undeclared entity.</exception>
+    private void EnsureExpectedEntities(HashSet<string> declared)
+    {
+        if (_conventions.ExpectedEntities.FirstOrDefault(entity => !declared.Contains(entity)) is { } missing)
+        {
+            throw AlvoDataApiConventionException.NoSuchEntity(missing, declared.Order(StringComparer.Ordinal));
+        }
     }
 
     /// <summary>

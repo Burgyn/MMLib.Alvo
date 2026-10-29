@@ -44,8 +44,21 @@ internal sealed class AlvoDataApiConventions : IEndpointConventionBuilder
 {
     private readonly List<Action<EndpointBuilder>> _conventions = [];
     private readonly List<Action<EndpointBuilder>> _finallyConventions = [];
+    private readonly HashSet<string> _expected = new(StringComparer.Ordinal);
     private readonly Lock _gate = new();
     private bool _sealed;
+
+    /// <summary>The entities a <c>ForEntity</c> on this builder named, which the applied schema must declare.</summary>
+    internal IReadOnlyCollection<string> ExpectedEntities
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _expected];
+            }
+        }
+    }
 
     /// <inheritdoc/>
     public void Add(Action<EndpointBuilder> convention) => Collect(_conventions, convention);
@@ -70,6 +83,17 @@ internal sealed class AlvoDataApiConventions : IEndpointConventionBuilder
         foreach (var convention in _finallyConventions)
         {
             route.Finally(endpoint => Invoke(convention, endpoint));
+        }
+    }
+
+    /// <summary>Records that a <c>ForEntity</c> named <paramref name="entity"/>, so the build can refuse a name that serves nothing.</summary>
+    /// <param name="entity">The entity named.</param>
+    internal void Expect(string entity)
+    {
+        lock (_gate)
+        {
+            EnsureOpen();
+            _expected.Add(entity);
         }
     }
 
@@ -116,15 +140,21 @@ internal sealed class AlvoDataApiConventions : IEndpointConventionBuilder
 
         lock (_gate)
         {
-            if (_sealed)
-            {
-                throw new InvalidOperationException(
-                    "Alvo's Data API routes have already been built, so this convention cannot be applied. "
-                    + "Attach conventions to the builder MapAlvoDataApi() returns before the first request "
-                    + "reaches the application.");
-            }
-
+            EnsureOpen();
             conventions.Add(convention);
+        }
+    }
+
+    /// <summary>Refuses an addition once the table is built; called under <c>_gate</c>.</summary>
+    /// <exception cref="InvalidOperationException">The routes have already been built.</exception>
+    private void EnsureOpen()
+    {
+        if (_sealed)
+        {
+            throw new InvalidOperationException(
+                "Alvo's Data API routes have already been built, so this convention cannot be applied. "
+                + "Attach conventions to the builder MapAlvoDataApi() returns before the first request "
+                + "reaches the application.");
         }
     }
 }
@@ -138,10 +168,28 @@ internal sealed class AlvoDataApiConventions : IEndpointConventionBuilder
 /// and readiness reporting failed — but only one of them is the descriptor's fault, and an operator reading
 /// the wrong one looks in the wrong place.
 /// </remarks>
-/// <param name="failure">What the host's convention threw.</param>
-internal sealed class AlvoDataApiConventionException(Exception failure)
-    : Exception(BuildMessage(failure), failure)
+#pragma warning disable RCS1194 // Deliberately no standard constructors: each failure is one of two named diagnoses.
+internal sealed class AlvoDataApiConventionException : Exception
 {
+    /// <summary>A convention the host attached threw.</summary>
+    /// <param name="failure">What the host's convention threw.</param>
+    internal AlvoDataApiConventionException(Exception failure)
+        : base(BuildMessage(failure), failure)
+    {
+    }
+
+    private AlvoDataApiConventionException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>A <c>ForEntity</c> named an entity the applied schema does not declare.</summary>
+    /// <param name="entity">The name it used.</param>
+    /// <param name="declared">The entities the schema declares.</param>
+    internal static AlvoDataApiConventionException NoSuchEntity(string entity, IEnumerable<string> declared) => new(
+        $"ForEntity('{entity}') on MapAlvoDataApi() names no entity the applied descriptor declares, so its conventions would "
+        + $"reach no route and the Data API has no routes. Declared: {string.Join(", ", declared)}. Name one of them.");
+
     private static string BuildMessage(Exception failure)
     {
         ArgumentNullException.ThrowIfNull(failure);
@@ -150,3 +198,4 @@ internal sealed class AlvoDataApiConventionException(Exception failure)
             + $"Data API has no routes: {failure.Message}";
     }
 }
+#pragma warning restore RCS1194
