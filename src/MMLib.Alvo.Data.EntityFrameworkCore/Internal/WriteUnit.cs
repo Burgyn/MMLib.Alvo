@@ -52,7 +52,8 @@ internal sealed record WriteUnitParts(
 /// <b>The deadline ends the unit, not the delegate.</b> At <see cref="AlvoTransactionOptions.Timeout"/> the unit's token is
 /// cancelled and the unit is poisoned with a <see cref="TimeoutException"/>; as soon as no call is running it rolls back
 /// and lets go of the connection and the write turn — a delegate that ignores its token no longer holds the database. The
-/// deadline runs on the host's <see cref="TimeProvider"/>.
+/// deadline runs on the host's <see cref="TimeProvider"/>, and a deadline that fired before the commit decision wins over
+/// the commit (Ruling 51).
 /// </para>
 /// <para>
 /// <b>Every function passed to <see cref="RunAsync{T}"/> honours its token.</b> The deadline's rollback, a commit that
@@ -358,9 +359,13 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
 
     /// <summary>
     /// The commit decision, under one lock: whether the gate is free, and what the unit fails with — its poison, the end it
-    /// already reached, a call still running, or the caller's cancellation. From here on no call is admitted and no poison
-    /// is recorded.
+    /// already reached, the deadline, a call still running, or the caller's cancellation. From here on no call is admitted
+    /// and no poison is recorded.
     /// </summary>
+    /// <remarks>
+    /// A deadline that has fired wins over the commit even when its callback has not yet recorded the timeout — the timer
+    /// thread can lose the race for the lock to a returning delegate (Ruling 51).
+    /// </remarks>
     private (Exception? Failure, bool HoldsGate) Decide()
     {
         lock (_gate)
@@ -372,7 +377,7 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
             }
 
             _ended = true;
-            _failure ??= holdsGate ? CancelledBeforeTheDecision() : Unawaited();
+            _failure ??= TimedOut ? TimedOutBecause(null) : holdsGate ? CancelledBeforeTheDecision() : Unawaited();
 
             return (_failure, holdsGate);
         }
@@ -380,7 +385,7 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
 
     /// <summary>The caller's cancellation, when it landed before the decision — even if nothing observed it (Ruling 50).</summary>
     private OperationCanceledException? CancelledBeforeTheDecision() =>
-        _lifetime.IsCancellationRequested && !TimedOut ? new OperationCanceledException(_lifetime.Token) : null;
+        _lifetime.IsCancellationRequested ? new OperationCanceledException(_lifetime.Token) : null;
 
     private async Task EndAsync(bool commit)
     {

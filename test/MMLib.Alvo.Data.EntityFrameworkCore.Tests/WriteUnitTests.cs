@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Rules;
+using System.Runtime.CompilerServices;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 
@@ -198,6 +199,37 @@ public sealed class WriteUnitTests
 
         await commit;
         (await world.ScalarAsync("SELECT COUNT(*) FROM \"note\"")).ShouldBe(1L);
+    }
+
+    [Fact]
+    public async Task A_deadline_that_fired_before_the_commit_decision_rolls_the_unit_back()
+    {
+        var clock = new FakeTimeProvider();
+        await using var world = await StartAsync(time: clock);
+        await using var unit = await OpenAsync(world, new AlvoTransactionOptions { Timeout = TimeSpan.FromSeconds(1) });
+        await unit.RunAsync(async token => await InsertAsync(unit, token), Ct);
+        var gate = Gate(unit);
+        Task commit;
+        Task deadline;
+
+        // Holding the unit's lock parks the deadline's callback before it records the timeout: the deadline has fired,
+        // but only the decision itself can see it — the window a timer thread opens against a returning delegate.
+        gate.Enter();
+        try
+        {
+            deadline = Task.Run(() => clock.Advance(TimeSpan.FromSeconds(2)), Ct);
+            SpinWait.SpinUntil(() => unit.TimedOut, TimeSpan.FromSeconds(30)).ShouldBeTrue();
+            commit = unit.CommitAsync();
+        }
+        finally
+        {
+            gate.Exit();
+        }
+
+        await deadline;
+        (await Should.ThrowAsync<TimeoutException>(() => commit)).Message.ShouldContain("Timeout of 1 s");
+        unit.HasEnded.ShouldBeTrue();
+        (await world.ScalarAsync("SELECT COUNT(*) FROM \"note\"")).ShouldBe(0L);
     }
 
     [Fact]
@@ -465,6 +497,10 @@ public sealed class WriteUnitTests
 
         return await command.ExecuteNonQueryAsync(token);
     }
+
+    /// <summary>The unit's own lock, so a test can hold the deadline's callback at the point it would record the timeout.</summary>
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_gate")]
+    private static extern ref Lock Gate(WriteUnit unit);
 
     private static async Task EventuallyAsync(Func<bool> condition)
     {
