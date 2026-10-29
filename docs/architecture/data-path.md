@@ -1374,7 +1374,99 @@ in the graph while still resolving the production-composed port.
 **Singleton**, deliberately: the port holds no per-request state, it creates one `DbContext` per operation and
 disposes it, and every member takes the caller's `AlvoContext` as a parameter precisely so that no ambient
 scope decides who is asking. A scoped registration would imply the opposite and invite an accessor to be read
-instead of an argument to be passed.
+instead of an argument to be passed. `IAlvoTransactions` is the second singleton over the same instance.
+
+## A transaction unit spans several writes (HX-07)
+
+`IAlvoTransactions.TransactAsync` (spec 2026-10-14 §4.5) runs a host delegate as one unit: its reads, writes, batches
+and custom events commit together or not at all. The rulings cited here are the HX-07 plan's
+(`docs/superpowers/plans/2026-10-29-hx-07-transactions.md`), recorded verbatim in the spec's §4.5 *HX-07 settled details*.
+
+**One seam.** Every `EfAlvoData` write site begins its transaction through one `BeginAsync(db, unit)`. A top-level write
+(`unit` is `null`) takes the write turn and its own transaction exactly as before — no savepoint, no extra statement,
+nothing put on the flow, no deadline (Ruling 2; HX-09 turns that branch into a unit). A call through a unit creates its
+context on the unit's connection with `SetDbConnection(…, contextOwnsConnection: false)` and joins the unit's
+`DbTransaction` with `UseTransactionAsync`, under a savepoint of its own named `alvo_unit_<n>` (`UnitSavepoint`).
+Committing that joined transaction only releases the savepoint; the unit commits once, when its delegate returns.
+
+**Why a savepoint per call.** On PostgreSQL a failed statement aborts the whole transaction (`25P02`) until a rollback to
+a savepoint. On SQLite a constraint error rolls back its statement only, but `INTERRUPT`, `BUSY`, `IOERR`, `FULL` or
+`NOMEM` may roll the whole transaction back (*Response To Errors Within A Transaction*). A savepoint per call makes "a
+failed call undoes itself and the unit goes on" true on both, and a rollback-to that itself fails poisons the unit
+(Ruling 8). EF's own `__EFSavePoint` covers only an insert that fails inside `SaveChanges` — not the
+`ExecuteUpdate`/`ExecuteDelete` and raw statements of the update and delete paths, and not a statement that fails after a
+successful `SaveChanges` (Ruling 29). A read's savepoint is released on success, so the stack does not grow with every
+read; a failed read still rolls back to it (Ruling 34).
+
+**One call at a time, per level.** A `DbConnection` runs one command at a time, so a second call while one runs is
+refused (`InvalidOperationException`) and poisons the unit rather than queueing — a queue would hide a missing `await`
+(Ruling 7). Each running call records itself in an `AsyncLocal` `CallFrame`; a call made *by* the running call (HX-09's
+hooks writing through `Deeper()`) waits on that frame's own gate under its own savepoint, while a sibling is still refused
+(Ruling 30). A frame is finished when its call returns: a nested call it started and did not await, still running
+then, poisons the unit and is refused when it returns, and one that starts after is refused and poisons — otherwise it
+would run outside the gate, beside a sibling or the `COMMIT`, and a row could commit without its outbox event (Ruling 54).
+A call still running when the delegate returns is cancelled and awaited, and the unit rolls back with an
+`InvalidOperationException` naming it; the commit decision and the gate are taken under one lock, so a decided commit
+commits (Ruling 46).
+
+**Poisoned means it cannot commit.** The first failure is recorded and every later call is refused. The set: the unit's
+timeout; any `OperationCanceledException` from a call; `AlvoChainDepthExceededException`; a data-port refusal; a
+concurrent call; a failed savepoint rollback or creation (Ruling 9); a join from a flow that does not carry the unit
+(Ruling 48); a nested call that outlives the call that started it (Ruling 54). A delegate that catches one and lets a later
+call's refusal end it still surfaces the recorded failure itself, not the `InvalidOperationException` that wraps it. A call whose own savepoint rolled it back —
+authorization, constraint, precondition, not-found, validation, a raw `DbException` — does not poison.
+
+**The deadline.** `AlvoTransactionOptions.Timeout` (default 30 s, at most one hour) runs on the host's `TimeProvider`. At
+the deadline the unit's token is cancelled and the unit poisoned; as soon as no call is running it rolls back, releases
+the connection and the write turn — without waiting for a delegate that ignores its token. `TransactAsync` itself awaits
+the delegate, so it throws `TimeoutException` once the delegate ends, however it ends (Ruling 10). A deadline that has already fired wins over a returning delegate (Ruling 51). Once the
+commit is decided, `COMMIT` runs with `CancellationToken.None`: neither the deadline nor the caller's token cancels it,
+and a hung `COMMIT` is bounded by the provider's command timeout (Ruling 50). A cleanup failure after a successful
+`COMMIT` is logged, not thrown (Ruling 47).
+
+**Refuse, not join (R-B1).** While a unit is open on the flow (`IAlvoFlowUnit`, until its `TransactAsync` returns —
+Ruling 6), every `IAlvoData` member, an `IAlvoSession`, `IAlvoEvents.PublishAsync` and a nested `TransactAsync` throw
+`AlvoUnitInProgressException`, and the refusal poisons the unit (Ruling 5). Joining instead would run the call on a
+second connection outside the unit, mix the caller's privileges with another's, and deadlock against the unit's own row
+locks on PostgreSQL — or wait out SQLite's 30 s busy timeout for the unit's own write lock. Every framework store
+(`IOutboxStore`, `IDeliveryStore`, the secret, descriptor-version, runtime-schema and management-idempotency stores) is
+refused at its write gate — `NoRelationalWriteGate.EnterAsync` and `SerialRelationalWriteGate.EnterAsync`/`TryEnterAsync`
+— so a present or future store fails closed on every engine; its reads take no turn and stay allowed (Ruling 33).
+`MMLib.Alvo.Identity`'s writes are not refused (Ruling 49). The refusal follows the execution context, so work a host
+hands to its own queue, or starts with the flow suppressed, escapes it; a join from a flow that does not carry the unit
+is refused at `UnitSavepoint.JoinAsync`, the one choke point every join passes, and fails the unit (Ruling 48).
+
+**Scope, registration, connection.** Each unit has one DI scope, created when it opens and disposed when it ends; a
+write inside the unit resolves the declarative before-hook runner from it, while top-level writes keep the driver's
+(Rulings 13, 42). `IAlvoTransactions` is registered over the concrete `EfAlvoData` singleton, and `IAlvoData` forwards to
+the same instance, so a host decorator around `IAlvoData` does not see a unit's calls (Ruling 24). `EfAlvoData` is
+`partial`; `EfAlvoData.Units.cs` is the one file that reaches a unit's connection and is on `ChangeTrackerReachTests`'
+allow-list beside `EfAlvoData.cs` (Ruling 21). `OpenUnitAsync` opens the unit's connection **through EF**
+(`Database.OpenConnectionAsync`) before `EnsureOutboxTableAsync`, so the provider's interceptors — SQLite's
+`case_sensitive_like` — run on it; opened raw, the first unit of a process would match `LIKE` case-insensitively for its
+whole life (Ruling 32). The outbox table is ensured before `BEGIN`, so no DDL runs inside a pending transaction.
+
+**Keep units small.** On PostgreSQL every writing call is a subtransaction. Past `PGPROC_MAX_CACHED_SUBXIDS` (64) in one
+transaction the per-backend subtransaction cache overflows and snapshots slow down for every session until the unit
+ends. Not enforced — a cap would be a guess; the docs say to write many rows with one batch call (Ruling 34).
+
+## Literal text tests escape `LIKE` and bind the escape
+
+`AlvoFilterOperator.StartsWith`, `EndsWith` and `Contains` render `field LIKE @pattern ESCAPE @escape` in the shared
+`FilterSqlRenderer`, with both the pattern and the escape character (`\`) bound — never a literal in the statement, so
+the renderer's property suite still finds no quote or backslash in any statement text (Ruling 16). The value's `\`, `%`,
+`_` and `[` are escaped (`LiteralTextPattern`): `[` means nothing to SQLite's or PostgreSQL's `LIKE`, where any character
+after the escape matches itself, and escaping it closes T-SQL's character class before a T-SQL driver (#92) exists.
+Prior art: EF Core's own `StartsWith`/`Contains` translation. Text fields (`string`, `text`) and a string value only —
+anything else is refused on every implementation (Ruling 40) — case-sensitive and ordinal on both engines (SQLite's
+`case_sensitive_like`, on per connection). An ANSI `ESCAPE` serves both shipped engines, so no `IAlvoSqlDialect` or
+`IFieldSqlRenderer` member was added.
+
+The three are **off the wire**: `FilterOperators` derives the HTTP allow-list from the enum minus them, so it stays
+PostgREST's ten, and their lower-cased names answer `unknown-operator` (Ruling 17). They are reached from a typed query's
+`StartsWith`/`EndsWith`/`Contains` (Ruling 18) or an in-process `AlvoComparison`. The shipped contract suite
+`AlvoDataLiteralTextTests` (`MMLib.Alvo.Testing`) holds them on three implementations — SQLite, PostgreSQL and the
+in-memory reference.
 
 ## What is proved on a real engine, and where
 

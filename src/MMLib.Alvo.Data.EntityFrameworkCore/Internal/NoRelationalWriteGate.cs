@@ -13,7 +13,11 @@ internal sealed class NoRelationalWriteGate : IRelationalWriteGate
     public static NoRelationalWriteGate Instance { get; } = new();
 
     /// <inheritdoc/>
-    public ValueTask<IDisposable> EnterAsync(CancellationToken cancellationToken) => ValueTask.FromResult(_turn);
+    public ValueTask<IDisposable> EnterAsync(CancellationToken cancellationToken)
+    {
+        StoreWrites.RefuseInsideUnit();
+        return ValueTask.FromResult(_turn);
+    }
 
     private sealed class Turn : IDisposable
     {

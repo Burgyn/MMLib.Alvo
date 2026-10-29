@@ -36,7 +36,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// what makes a page's order and a page's boundary provably the same sequence.
 /// </para>
 /// </remarks>
-internal sealed class EfAlvoData : IAlvoData
+internal sealed partial class EfAlvoData : IAlvoData
 {
     private readonly IPolicyEngine _policy;
     private readonly IPredicateEvaluator _evaluator;
@@ -130,9 +130,8 @@ internal sealed class EfAlvoData : IAlvoData
     /// write takes a fresh turn per attempt, so the wait between attempts holds none.
     /// </para>
     /// <para>
-    /// <b>A unit of several writes</b> — a future transaction a host opens around them — takes the turn once when the unit
-    /// begins, and the writes inside it run on the unit's connection without asking again; this helper is the one place
-    /// that would learn whether a turn is already held.
+    /// <b>A transaction unit</b> takes the turn once when it opens (<c>OpenUnitAsync</c>), and the writes inside it run on
+    /// the unit's connection under savepoints without asking again — this method is never called inside a unit.
     /// </para>
     /// </remarks>
     private async Task<IDisposable> WriteTurnAsync(AlvoDataContext db, CancellationToken cancellationToken)
@@ -148,13 +147,32 @@ internal sealed class EfAlvoData : IAlvoData
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(context);
+        AlvoFlow.RefuseInsideUnit("IAlvoData.QueryAsync");
 
+        return await QueriedAsync(query, context, unit: null, cancellationToken);
+    }
+
+    /// <summary>One page of a query — top-level, or inside <paramref name="unit"/>, where it sees the unit's writes.</summary>
+    private async Task<AlvoPage> QueriedAsync(
+        AlvoQuery query, AlvoContext context, WriteUnit? unit, CancellationToken cancellationToken)
+    {
         var decision = Resolve(query.Entity, DataOperation.List, context);
         AlvoFilter.EnsureWithinLimits(query.Filter);
         AlvoQuery.EnsurePagingWindowIsSane(query);
         AlvoQuery.EnsureProjectionIsSane(query);
 
-        using var db = _contexts.Create();
+        using var db = ContextFor(unit);
+        await using var joined = await ReadScopeAsync(db, unit, cancellationToken);
+        var page = await PageOfAsync(db, query, decision, context, cancellationToken);
+        await ReleaseAsync(joined, cancellationToken);
+
+        return page;
+    }
+
+    /// <summary>The page itself, read on <paramref name="db"/> — joined to a unit or not.</summary>
+    private async Task<AlvoPage> PageOfAsync(
+        AlvoDataContext db, AlvoQuery query, PolicyDecision decision, AlvoContext context, CancellationToken cancellationToken)
+    {
         var entity = Entity(db, query.Entity);
         QueryFieldGuard.EnsureAvailable(QueryFields(query), entity, decision.HiddenFields);
 
@@ -252,11 +270,22 @@ internal sealed class EfAlvoData : IAlvoData
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(context);
+        AlvoFlow.RefuseInsideUnit("IAlvoData.GetAsync");
 
+        return await GotAsync(entity, id, context, unit: null, cancellationToken);
+    }
+
+    /// <summary>One record — top-level, or inside <paramref name="unit"/>, where it sees the unit's writes.</summary>
+    private async Task<AlvoRecord?> GotAsync(
+        string entity, Guid id, AlvoContext context, WriteUnit? unit, CancellationToken cancellationToken)
+    {
         var decision = Resolve(entity, DataOperation.Get, context);
 
-        using var db = _contexts.Create();
+        using var db = ContextFor(unit);
+        await using var joined = await ReadScopeAsync(db, unit, cancellationToken);
         var row = await SingleAsync(db, Entity(db, entity), decision, context, id, lockFor: null, cancellationToken);
+        await ReleaseAsync(joined, cancellationToken);
+
         return row is null ? null : RecordMaterializer.ToRecord(row, decision.HiddenFields, FrozenSet<string>.Empty);
     }
 
@@ -268,6 +297,7 @@ internal sealed class EfAlvoData : IAlvoData
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
+        AlvoFlow.RefuseInsideUnit("IAlvoData.CreateAsync", keyed: idempotency is not null);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
         _depthLimit.EnsureWithin(context);
 
@@ -275,23 +305,23 @@ internal sealed class EfAlvoData : IAlvoData
 
         return idempotency is { } token
             ? await ReplayableCreateAsync(entity, values, decision, context, token, cancellationToken)
-            : await CreatedAsync(entity, values, decision, context, cancellationToken);
+            : await CreatedAsync(entity, values, decision, context, unit: null, cancellationToken);
     }
 
     /// <summary>
-    /// One ordinary create: the authorized candidate, inserted, re-read and emitted inside one transaction.
+    /// One ordinary create: the authorized candidate, inserted, re-read and emitted inside one transaction — its own, or
+    /// <paramref name="unit"/>'s under a savepoint.
     /// </summary>
     private async Task<AlvoRecord> CreatedAsync(
         string entity, IReadOnlyDictionary<string, object?> values, PolicyDecision decision, AlvoContext context,
-        CancellationToken cancellationToken)
+        WriteUnit? unit, CancellationToken cancellationToken)
     {
-        using var db = _contexts.Create();
+        using var db = ContextFor(unit);
         var now = WriteInstantNow();
         var (schema, candidate) = AuthorizedCandidate(db, entity, values, decision, context, now);
         await EnsureOutboxTableAsync(db, cancellationToken);
 
-        using var turn = await WriteTurnAsync(db, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await BeginAsync(db, unit, cancellationToken);
         candidate = RunBeforeCreate(db, schema, decision, context, candidate, now);
         var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
         await RecomputeRollupsAsync(db, schema, [stored!], cancellationToken);
@@ -341,7 +371,7 @@ internal sealed class EfAlvoData : IAlvoData
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
         Dictionary<string, object> candidate, DateTimeOffset now)
     {
-        var patch = _hooks.Run(schema.Name, DataOperation.Create, Unmasked(candidate), previous: null, context, now);
+        var patch = Hooks.Run(schema.Name, DataOperation.Create, Unmasked(candidate), previous: null, context, now);
         if (patch.Count == 0)
         {
             return candidate;
@@ -551,8 +581,7 @@ internal sealed class EfAlvoData : IAlvoData
         await EnsureIdempotencyTableAsync(db, cancellationToken);
         await EnsureOutboxTableAsync(db, cancellationToken);
 
-        using var turn = await WriteTurnAsync(db, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await BeginAsync(db, unit: null, cancellationToken);
         var records = new IdempotencyScope(
             db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
 
@@ -1107,6 +1136,7 @@ internal sealed class EfAlvoData : IAlvoData
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
+        AlvoFlow.RefuseInsideUnit("IAlvoData.UpdateAsync", keyed: idempotency is not null);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
         _depthLimit.EnsureWithin(context);
 
@@ -1116,21 +1146,20 @@ internal sealed class EfAlvoData : IAlvoData
             ? await ReplayableWriteAsync(
                 () => UpdatedOrReplayedAsync(entity, id, values, decision, context, precondition, token, cancellationToken),
                 cancellationToken)
-            : await UpdatedAsync(entity, id, values, decision, context, precondition, cancellationToken);
+            : await UpdatedAsync(entity, id, values, decision, context, precondition, unit: null, cancellationToken);
     }
 
-    /// <summary>One ordinary update: the write and its event, inside one transaction.</summary>
+    /// <summary>One ordinary update: the write and its event, inside one transaction — its own, or <paramref name="unit"/>'s.</summary>
     private async Task<AlvoRecord> UpdatedAsync(
         string entity, Guid id, IReadOnlyDictionary<string, object?> values, PolicyDecision decision,
-        AlvoContext context, AlvoPrecondition? precondition, CancellationToken cancellationToken)
+        AlvoContext context, AlvoPrecondition? precondition, WriteUnit? unit, CancellationToken cancellationToken)
     {
-        using var db = _contexts.Create();
+        using var db = ContextFor(unit);
         var schema = UpdatableEntity(db, entity, values, decision, precondition);
         var now = WriteInstantNow();
         await EnsureOutboxTableAsync(db, cancellationToken);
 
-        using var turn = await WriteTurnAsync(db, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await BeginAsync(db, unit, cancellationToken);
         await WrittenAsync(db, transaction, schema, decision, context, id, values, precondition, now, cancellationToken);
         var echoed = await EchoedAsync(db, schema, context, id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -1157,8 +1186,7 @@ internal sealed class EfAlvoData : IAlvoData
         await EnsureIdempotencyTableAsync(db, cancellationToken);
         await EnsureOutboxTableAsync(db, cancellationToken);
 
-        using var turn = await WriteTurnAsync(db, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await BeginAsync(db, unit: null, cancellationToken);
         var records = new IdempotencyScope(
             db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
 
@@ -1283,6 +1311,7 @@ internal sealed class EfAlvoData : IAlvoData
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
+        AlvoFlow.RefuseInsideUnit("IAlvoData.ReplaceAsync", keyed: idempotency is not null);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
         _depthLimit.EnsureWithin(context);
 
@@ -1291,7 +1320,7 @@ internal sealed class EfAlvoData : IAlvoData
 
         if (idempotency is not { } token)
         {
-            return await ReplacedAsync(entity, id, values, branches, context, precondition, cancellationToken);
+            return await ReplacedAsync(entity, id, values, branches, context, precondition, unit: null, cancellationToken);
         }
 
         try
@@ -1329,8 +1358,7 @@ internal sealed class EfAlvoData : IAlvoData
         await EnsureIdempotencyTableAsync(db, cancellationToken);
         await EnsureOutboxTableAsync(db, cancellationToken);
 
-        using var turn = await WriteTurnAsync(db, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await BeginAsync(db, unit: null, cancellationToken);
         var records = new IdempotencyScope(
             db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
 
@@ -1383,8 +1411,7 @@ internal sealed class EfAlvoData : IAlvoData
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         await EnsureIdempotencyTableAsync(db, cancellationToken);
 
-        using var turn = await WriteTurnAsync(db, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await BeginAsync(db, unit: null, cancellationToken);
         var records = new IdempotencyScope(
             db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
 
@@ -1425,18 +1452,17 @@ internal sealed class EfAlvoData : IAlvoData
         return result;
     }
 
-    /// <summary>One ordinary create-or-replace: the write and its event, inside one transaction.</summary>
+    /// <summary>One ordinary create-or-replace: the write and its event, inside one transaction — its own, or <paramref name="unit"/>'s.</summary>
     private async Task<AlvoReplaceResult> ReplacedAsync(
         string entity, Guid id, IReadOnlyDictionary<string, object?> values, ReplaceDecisions branches,
-        AlvoContext context, AlvoPrecondition? precondition, CancellationToken cancellationToken)
+        AlvoContext context, AlvoPrecondition? precondition, WriteUnit? unit, CancellationToken cancellationToken)
     {
-        using var db = _contexts.Create();
+        using var db = ContextFor(unit);
         var schema = ReplaceableEntity(db, entity, values, branches, precondition);
         var now = WriteInstantNow();
         await EnsureOutboxTableAsync(db, cancellationToken);
 
-        using var turn = await WriteTurnAsync(db, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await BeginAsync(db, unit, cancellationToken);
         var result = await ReplaceWrittenAsync(
             db, transaction, schema, branches, context, id, values, precondition, now, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -1699,6 +1725,7 @@ internal sealed class EfAlvoData : IAlvoData
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(context);
+        AlvoFlow.RefuseInsideUnit("IAlvoData.DeleteAsync", keyed: idempotency is not null);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
         _depthLimit.EnsureWithin(context);
 
@@ -1712,21 +1739,20 @@ internal sealed class EfAlvoData : IAlvoData
             return;
         }
 
-        await ErasedAsync(entity, id, decision, context, precondition, cancellationToken);
+        await ErasedAsync(entity, id, decision, context, precondition, unit: null, cancellationToken);
     }
 
-    /// <summary>One ordinary delete: the erase and its event, inside one transaction.</summary>
+    /// <summary>One ordinary delete: the erase and its event, inside one transaction — its own, or <paramref name="unit"/>'s.</summary>
     private async Task ErasedAsync(
         string entity, Guid id, PolicyDecision decision, AlvoContext context, AlvoPrecondition? precondition,
-        CancellationToken cancellationToken)
+        WriteUnit? unit, CancellationToken cancellationToken)
     {
-        using var db = _contexts.Create();
+        using var db = ContextFor(unit);
         var schema = ErasableEntity(db, entity, precondition);
         var now = WriteInstantNow();
         await EnsureOutboxTableAsync(db, cancellationToken);
 
-        using var turn = await WriteTurnAsync(db, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await BeginAsync(db, unit, cancellationToken);
         await ErasedAndEmittedAsync(
             db, transaction, schema, decision, context, id, precondition, now, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -1757,8 +1783,7 @@ internal sealed class EfAlvoData : IAlvoData
         await EnsureIdempotencyTableAsync(db, cancellationToken);
         await EnsureOutboxTableAsync(db, cancellationToken);
 
-        using var turn = await WriteTurnAsync(db, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await BeginAsync(db, unit: null, cancellationToken);
         var records = new IdempotencyScope(
             db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
 
@@ -1875,7 +1900,7 @@ internal sealed class EfAlvoData : IAlvoData
     private void RunBeforeDelete(
         EntitySchema schema, AlvoContext context, AlvoRecord preImage, DateTimeOffset now)
     {
-        var patch = _hooks.Run(schema.Name, DataOperation.Delete, preImage, preImage, context, now);
+        var patch = Hooks.Run(schema.Name, DataOperation.Delete, preImage, preImage, context, now);
         if (patch.Count > 0)
         {
             throw new InvalidOperationException(
@@ -1969,7 +1994,7 @@ internal sealed class EfAlvoData : IAlvoData
         EntitySchema schema, AlvoContext context, AlvoRecord preImage,
         IReadOnlyDictionary<string, object?> values, DateTimeOffset now)
     {
-        var patch = _hooks.Run(
+        var patch = Hooks.Run(
             schema.Name, DataOperation.Update, Merge(preImage, values), preImage, context, now);
         if (patch.Count == 0)
         {
@@ -2072,7 +2097,22 @@ internal sealed class EfAlvoData : IAlvoData
     /// dynamic driver is a different <see cref="IAlvoSqlDialect"/>, registered later, not a branch in this
     /// class.
     /// </summary>
-    private static EntitySchema? Entity(AlvoDataContext db, string entity) => db.AppliedSchema.Entities
+    private static EntitySchema? Entity(AlvoDataContext db, string entity) => Entity(db.AppliedSchema, entity);
+
+    /// <summary>
+    /// The applied schema's entity named <paramref name="entity"/>, whatever its storage — for a typed write, which reads
+    /// only its fields' traits (Ruling 52).
+    /// </summary>
+    /// <remarks>
+    /// Not <see cref="Entity(SchemaModel, string)"/>: that one answers which entity this driver can write, and refuses a
+    /// dynamic one. This one answers the same question <c>AlvoSession.EntityOf</c> answers outside a unit, so a typed write
+    /// sends the same fields inside a unit as outside.
+    /// </remarks>
+    /// <param name="entity">The entity name.</param>
+    internal EntitySchema? AppliedEntity(string entity) => _contexts.AppliedSchema().Entities
+        .FirstOrDefault(candidate => string.Equals(candidate.Name, entity, StringComparison.Ordinal));
+
+    private static EntitySchema? Entity(SchemaModel schema, string entity) => schema.Entities
         .FirstOrDefault(candidate =>
             string.Equals(candidate.Name, entity, StringComparison.Ordinal)
             && candidate.Storage == EntityStorage.Physical);
@@ -2326,6 +2366,7 @@ internal sealed class EfAlvoData : IAlvoData
         AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(rows);
+        AlvoFlow.RefuseInsideUnit("IAlvoData.CreateManyAsync", keyed: idempotency is not null);
         var decision = BatchDecision(entity, DataOperation.Create, rows.Count, context, idempotency);
 
         return BatchAsync(
@@ -2335,6 +2376,7 @@ internal sealed class EfAlvoData : IAlvoData
             (db, transaction, schema, now) =>
                 CreatedRowsAsync(db, transaction, schema, decision, context, rows, now, cancellationToken),
             producesRows: true,
+            unit: null,
             cancellationToken);
     }
 
@@ -2344,6 +2386,7 @@ internal sealed class EfAlvoData : IAlvoData
         AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(rows);
+        AlvoFlow.RefuseInsideUnit("IAlvoData.UpdateManyAsync", keyed: idempotency is not null);
         var decision = BatchDecision(entity, DataOperation.Update, rows.Count, context, idempotency);
 
         return BatchAsync(
@@ -2353,6 +2396,7 @@ internal sealed class EfAlvoData : IAlvoData
             (db, transaction, schema, now) =>
                 UpdatedRowsAsync(db, transaction, schema, decision, context, rows, now, cancellationToken),
             producesRows: true,
+            unit: null,
             cancellationToken);
     }
 
@@ -2362,6 +2406,7 @@ internal sealed class EfAlvoData : IAlvoData
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(ids);
+        AlvoFlow.RefuseInsideUnit("IAlvoData.DeleteManyAsync", keyed: idempotency is not null);
         var decision = BatchDecision(entity, DataOperation.Delete, ids.Count, context, idempotency);
 
         return BatchAsync(
@@ -2371,6 +2416,7 @@ internal sealed class EfAlvoData : IAlvoData
             (db, transaction, schema, now) =>
                 RemovedRowsAsync(db, transaction, schema, decision, context, ids, now, cancellationToken),
             producesRows: false,
+            unit: null,
             cancellationToken);
     }
 
@@ -2438,6 +2484,7 @@ internal sealed class EfAlvoData : IAlvoData
     /// Whether this verb's rows survive the write, so a replay has something to re-read. False for a delete,
     /// whose rows are gone by construction.
     /// </param>
+    /// <param name="unit">The unit the batch runs in, or <see langword="null"/> for a top-level batch.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     private Task<AlvoBatchResult> BatchAsync(
         string entity,
@@ -2445,10 +2492,11 @@ internal sealed class EfAlvoData : IAlvoData
         AlvoIdempotency? idempotency,
         Func<AlvoDataContext, IDbContextTransaction, EntitySchema, DateTimeOffset, Task<BatchOutcome>> attempt,
         bool producesRows,
+        WriteUnit? unit,
         CancellationToken cancellationToken)
     {
         Task<AlvoBatchResult> Once() =>
-            OneBatchAsync(entity, context, idempotency, attempt, producesRows, cancellationToken);
+            OneBatchAsync(entity, context, idempotency, attempt, producesRows, unit, cancellationToken);
 
         return idempotency is null
             ? Once()
@@ -2471,9 +2519,11 @@ internal sealed class EfAlvoData : IAlvoData
         AlvoIdempotency? idempotency,
         Func<AlvoDataContext, IDbContextTransaction, EntitySchema, DateTimeOffset, Task<BatchOutcome>> attempt,
         bool producesRows,
+        WriteUnit? unit,
         CancellationToken cancellationToken)
     {
-        using var db = _contexts.Create();
+        EnsureNotKeyedInsideUnit(unit, idempotency);
+        using var db = ContextFor(unit);
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         var now = WriteInstantNow();
         if (idempotency is not null)
@@ -2483,8 +2533,7 @@ internal sealed class EfAlvoData : IAlvoData
 
         await EnsureOutboxTableAsync(db, cancellationToken);
 
-        using var turn = await WriteTurnAsync(db, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await BeginAsync(db, unit, cancellationToken);
         var records = idempotency is { } token
             ? new IdempotencyScope(
                 db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context)
@@ -2511,6 +2560,19 @@ internal sealed class EfAlvoData : IAlvoData
         await transaction.CommitAsync(cancellationToken);
 
         return result;
+    }
+
+    /// <summary>
+    /// Refuses a batch that is both inside a unit and keyed: the key's table would be ensured (DDL) on the unit's connection,
+    /// and a unit's call is never replayed. The data port's entries make it unreachable; this keeps it so for the unit's own.
+    /// </summary>
+    private static void EnsureNotKeyedInsideUnit(WriteUnit? unit, AlvoIdempotency? idempotency)
+    {
+        if (unit is not null && idempotency is not null)
+        {
+            throw new InvalidOperationException(
+                "A batch inside a transaction unit carried an idempotency key. A unit is never replayed, so its calls take none.");
+        }
     }
 
     /// <summary>What one verb's two passes produced: the caller's answer, and the rows to record.</summary>
@@ -2677,7 +2739,7 @@ internal sealed class EfAlvoData : IAlvoData
         IReadOnlyDictionary<string, object?> patch;
         try
         {
-            patch = _hooks.Run(schema.Name, DataOperation.Create, Unmasked(candidate), previous: null, context, now);
+            patch = Hooks.Run(schema.Name, DataOperation.Create, Unmasked(candidate), previous: null, context, now);
         }
         catch (AlvoAuthorizationException refusedByHook)
         {

@@ -23,6 +23,11 @@
 /// writer met before the gate existed, which the replay loop and the API already answer. A slow or wedged writer ahead
 /// of the line is then an error after that timeout, never an unbounded queue.
 /// </para>
+/// <para>
+/// <b>Inside an open transaction unit every gate refuses</b> (<c>StoreWrites</c>): a unit holds the turn for its whole run,
+/// and a write that waited for it would commit beside the unit. That covers the writes that pass a gate, and only those;
+/// <c>StoreWrites</c> names what stays outside.
+/// </para>
 /// </remarks>
 internal interface IRelationalWriteGate
 {

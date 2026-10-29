@@ -26,10 +26,10 @@ namespace MMLib.Alvo.Events;
 /// on it, carrying a partition key and provenance for a record nobody wrote.
 /// </para>
 /// <para>
-/// <b>Not transactional with anything.</b> "The event is published in the same transaction as the data
-/// change" is a guarantee about a <em>data</em> change, and a custom event has none — this appends with
-/// one autocommit statement. A host that needs its own write and its own event to commit together cannot get
-/// that here.
+/// <b>Autocommit.</b> This appends with one statement of its own, so it is not atomic with any write. A host whose own
+/// writes and event must commit together publishes through the unit instead — <c>IAlvoTransaction.PublishAsync</c> inside
+/// <c>IAlvoTransactions.TransactAsync</c> — and calling this method while a unit is open on the same flow is refused with
+/// <see cref="Data.AlvoUnitInProgressException"/>.
 /// </para>
 /// </remarks>
 public interface IAlvoEvents
@@ -60,6 +60,7 @@ public interface IAlvoEvents
     /// or <paramref name="data"/> carries a value the envelope cannot express.
     /// </exception>
     /// <exception cref="Data.AlvoChainDepthExceededException">The effective chain depth of <paramref name="context"/> is greater than the configured limit.</exception>
+    /// <exception cref="Data.AlvoUnitInProgressException">A transaction unit is open on this flow; publish through its <c>IAlvoTransaction</c>.</exception>
     Task PublishAsync(
         string type,
         string subject,

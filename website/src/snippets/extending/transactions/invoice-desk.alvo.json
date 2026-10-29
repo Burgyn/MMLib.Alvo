@@ -1,0 +1,33 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "invoice-desk",
+  "auth": { "roles": ["clerk"] },
+  "entities": {
+    "invoices": {
+      "fields": {
+        "number": { "type": "string", "required": true, "unique": true, "maxLength": 20 },
+        "total": { "type": "decimal", "precision": 12, "scale": 2 },
+        "paid": { "type": "boolean" }
+      },
+      "rules": {
+        "list": "'clerk' in @user.roles",
+        "get": "'clerk' in @user.roles",
+        "create": "'clerk' in @user.roles",
+        "update": "'clerk' in @user.roles"
+      }
+    },
+    "invoice_lines": {
+      "fields": {
+        "invoice_id": { "type": "uuid", "required": true },
+        "label": { "type": "string", "required": true, "maxLength": 80 },
+        "amount": { "type": "decimal", "required": true, "precision": 12, "scale": 2 }
+      },
+      "rules": {
+        "list": "'clerk' in @user.roles",
+        "get": "'clerk' in @user.roles",
+        "create": "'clerk' in @user.roles && amount > 0"
+      }
+    }
+  }
+}

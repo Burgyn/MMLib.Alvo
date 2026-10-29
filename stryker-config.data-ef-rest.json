@@ -23,6 +23,7 @@
       "!AlvoEfCoreProvider.cs",
       "!RelationalProviderRegistration.cs",
       "!Internal/EfAlvoData.cs",
+      "!Internal/EfAlvoData.Units.cs",
       "!Internal/UpdateSetterFactory.cs",
       "!Internal/WritePropertyBag.cs",
       "!Internal/BatchWrite.cs",

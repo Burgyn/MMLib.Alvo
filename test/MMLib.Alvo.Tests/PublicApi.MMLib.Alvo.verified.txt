@@ -126,6 +126,11 @@ namespace MMLib.Alvo.Data
         public AlvoFieldAttribute(string name) { }
         public string Name { get; }
     }
+    public static class AlvoPatch
+    {
+        public static MMLib.Alvo.Data.IAlvoPatch<T> For<T>()
+            where T :  class { }
+    }
     public static class AlvoRecordExtensions
     {
         public static T As<T>(this MMLib.Alvo.Data.AlvoRecord record)
@@ -150,9 +155,26 @@ namespace MMLib.Alvo.Data
         public static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<T>> QueryAsync<T>(this MMLib.Alvo.Data.IAlvoData data, System.Linq.Expressions.Expression<System.Func<T, bool>> @where, int limit, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default)
             where T :  class { }
     }
+    public static class AlvoTypedWriteExtensions
+    {
+        public static System.Threading.Tasks.Task<T?> CreateAsync<T>(this MMLib.Alvo.Data.IAlvoSession session, T record, System.Threading.CancellationToken cancellationToken = default)
+            where T :  class { }
+        public static System.Threading.Tasks.Task<bool> ExistsAsync<T>(this MMLib.Alvo.Data.IAlvoSession session, System.Linq.Expressions.Expression<System.Func<T, bool>> @where, System.Threading.CancellationToken cancellationToken = default)
+            where T :  class { }
+        public static System.Threading.Tasks.Task<T?> ReplaceAsync<T>(this MMLib.Alvo.Data.IAlvoSession session, System.Guid id, T record, MMLib.Alvo.Data.AlvoPrecondition? precondition = default, System.Threading.CancellationToken cancellationToken = default)
+            where T :  class { }
+        public static System.Threading.Tasks.Task<T?> UpdateAsync<T>(this MMLib.Alvo.Data.IAlvoSession session, System.Guid id, MMLib.Alvo.Data.IAlvoPatch<T> patch, MMLib.Alvo.Data.AlvoPrecondition? precondition = default, System.Threading.CancellationToken cancellationToken = default)
+            where T :  class { }
+    }
     public interface IAlvoEntity
     {
         MMLib.Alvo.Data.AlvoRecord Record { get; }
+    }
+    public interface IAlvoPatch<T>
+        where T :  class
+    {
+        System.Collections.Generic.IReadOnlyDictionary<string, object?> Values { get; }
+        MMLib.Alvo.Data.IAlvoPatch<T> Set<TValue>(System.Linq.Expressions.Expression<System.Func<T, TValue>> field, TValue value);
     }
 }
 namespace MMLib.Alvo.Events

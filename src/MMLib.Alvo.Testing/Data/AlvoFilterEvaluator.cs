@@ -110,6 +110,9 @@ internal static class AlvoFilterEvaluator
         AlvoFilterOperator.ILike => Like(fieldValue, operand, ignoreCase: true),
         AlvoFilterOperator.In => In(fieldValue, operand),
         AlvoFilterOperator.Is => Is(fieldValue, operand),
+        AlvoFilterOperator.StartsWith => Literal(fieldValue, operand, static (text, value) => text.StartsWith(value, StringComparison.Ordinal)),
+        AlvoFilterOperator.EndsWith => Literal(fieldValue, operand, static (text, value) => text.EndsWith(value, StringComparison.Ordinal)),
+        AlvoFilterOperator.Contains => Literal(fieldValue, operand, static (text, value) => text.Contains(value, StringComparison.Ordinal)),
         _ => throw Malformed(
             $"uses operator '{op}', which is not one this port declares",
             $"Use one of {nameof(AlvoFilterOperator)}'s declared members."),
@@ -203,6 +206,22 @@ internal static class AlvoFilterEvaluator
         var options = RegexOptions.NonBacktracking | RegexOptions.CultureInvariant
             | (ignoreCase ? RegexOptions.IgnoreCase : RegexOptions.None);
         return Regex.IsMatch(text, regex, options);
+    }
+
+    /// <summary>
+    /// A literal text test, ordinal and case-sensitive as the shipped backends answer it. A non-text field is
+    /// <c>UNKNOWN</c>; a value that is not a string is refused, as a shipped backend refuses it.
+    /// </summary>
+    private static bool? Literal(object? fieldValue, object? operand, Func<string, string, bool> test)
+    {
+        if (operand is not string value)
+        {
+            throw Malformed(
+                "uses a literal text test with a value that is not a string",
+                "Pass the text to look for; a null field never matches, so test for it with is.");
+        }
+
+        return fieldValue is string text ? test(text, value) : null;
     }
 
     /// <summary>

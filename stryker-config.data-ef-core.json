@@ -10,6 +10,7 @@
     "additional-timeout": 300000,
     "mutate": [
       "Internal/EfAlvoData.cs",
+      "Internal/EfAlvoData.Units.cs",
       "Internal/UpdateSetterFactory.cs",
       "Internal/WritePropertyBag.cs",
       "Internal/BatchWrite.cs",

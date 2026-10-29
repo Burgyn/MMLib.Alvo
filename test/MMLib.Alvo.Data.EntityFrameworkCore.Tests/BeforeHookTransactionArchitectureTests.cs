@@ -121,6 +121,8 @@ public class BeforeHookTransactionArchitectureTests
     [InlineData("await using var transaction = await db.Database.BeginTransactionAsync();\nRunBeforeCreate(db);\nawait transaction.CommitAsync();", true)]
     [InlineData("await using var transaction = await db.Database.BeginTransactionAsync();\nRunBeforeCreate(db);\nawait transaction.CommitAsync();\nRunBeforeCreate(db);", false)]
     [InlineData("await using var transaction = await db.Database.BeginTransactionAsync();\nawait transaction.RollbackAsync();\nRunBeforeCreate(db);", false)]
+    [InlineData("await using var transaction = await BeginAsync(db, unit, cancellationToken);\nRunBeforeCreate(db);", true)]
+    [InlineData("private Task X()\nRunBeforeCreate(db);\nawait using var transaction = await BeginAsync(db, unit, cancellationToken);", false)]
     public void The_scan_reads_the_order_within_a_member(string body, bool expected)
         => IsGuarded(body).ShouldBe(expected);
 
@@ -128,6 +130,12 @@ public class BeforeHookTransactionArchitectureTests
     private const string PipelineCall = "RunBefore";
 
     private const string TransactionOpened = "BeginTransactionAsync";
+
+    /// <summary>
+    /// The write seam (HX-07). <c>BeginAsync</c> always answers an open transaction — the write's own, or its unit's under a
+    /// savepoint — so a pipeline call after it is inside one, exactly as after <see cref="TransactionOpened"/>.
+    /// </summary>
+    private const string SeamOpened = "BeginAsync(";
 
     /// <summary>
     /// The row-locked pre-image read. It stands in for "a transaction is open" on the update and delete bodies,
@@ -221,7 +229,7 @@ public class BeforeHookTransactionArchitectureTests
     }
 
     /// <summary>Everything whose presence before the call proves a transaction is open around it.</summary>
-    private static readonly string[] _markers = [TransactionOpened, PreImageRead, TransactionHeld];
+    private static readonly string[] _markers = [TransactionOpened, PreImageRead, TransactionHeld, SeamOpened];
 
     /// <summary>And everything that <em>ends</em> the transaction a marker above it opened.</summary>
     private static readonly string[] _closers = ["CommitAsync", "RollbackAsync"];

@@ -336,6 +336,11 @@ public sealed record AlvoNot(AlvoFilter Filter) : AlvoFilter;
 /// <c>IS NULL</c>/<c>IS TRUE</c>/<c>IS FALSE</c>. Every provider implementing <see cref="IAlvoData"/>
 /// must preserve this — rendering these operators into SQL directly already gets it for free; an
 /// in-memory evaluator must reproduce it deliberately.
+/// <para>
+/// <b>The three literal text tests have no wire spelling.</b> <see cref="StartsWith"/>, <see cref="EndsWith"/> and
+/// <see cref="Contains"/> are reached from C# — a typed query's <c>StartsWith</c>, or a filter built in code — and are not
+/// query-string operators: PostgREST has none, and inventing a spelling would be a dialect.
+/// </para>
 /// </remarks>
 public enum AlvoFilterOperator
 {
@@ -381,4 +386,21 @@ public enum AlvoFilterOperator
 
     /// <summary>An identity test against <see langword="null"/>, <see langword="true"/>, or <see langword="false"/> (<c>is</c>).</summary>
     Is,
+
+    /// <summary>The text starts with the value, character for character (<c>startsWith</c>).</summary>
+    /// <remarks>
+    /// <b>A literal test, never a pattern</b>: a <c>%</c>, <c>_</c>, <c>\</c> or <c>[</c> in the value matches itself on every
+    /// engine, unlike <see cref="Like"/>, whose value is a pattern. Case-sensitive and ordinal. Applies to a <c>string</c> or
+    /// <c>text</c> field, with a string value; a <see langword="null"/> field never matches. Not part of the HTTP query
+    /// syntax, which keeps PostgREST's operators.
+    /// </remarks>
+    StartsWith,
+
+    /// <summary>The text ends with the value, character for character (<c>endsWith</c>).</summary>
+    /// <remarks>A literal test, as <see cref="StartsWith"/>.</remarks>
+    EndsWith,
+
+    /// <summary>The text contains the value, character for character (<c>contains</c>).</summary>
+    /// <remarks>A literal test, as <see cref="StartsWith"/>.</remarks>
+    Contains,
 }

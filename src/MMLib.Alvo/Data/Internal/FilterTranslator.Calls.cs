@@ -6,21 +6,27 @@ using System.Linq.Expressions;
 namespace MMLib.Alvo.Data.Internal;
 
 /// <summary>
-/// The calls a typed query may make: a list's <c>Contains</c> of a field, as <c>in</c> (an empty list matches nothing).
-/// The text tests wait for their filter operators (plan Ruling 7) and never fall back to <c>like</c>.
+/// The calls a typed query may make: a list's <c>Contains</c> of a field, as <c>in</c> (an empty list matches nothing), and
+/// a text field's <c>StartsWith</c>/<c>EndsWith</c>/<c>Contains</c> of a value, as the literal text operators — in their
+/// one-argument form or with <see cref="StringComparison.Ordinal"/>, because a filter compares characters exactly.
 /// </summary>
 internal sealed partial class FilterTranslator
 {
-    private const string NoTextOperatorFix = "match the whole value with ==, or filter the rows after reading them.";
+    private const string TextFix = "pass the text alone, or StringComparison.Ordinal; for any other comparison, filter the rows after reading them.";
     private const string ListFix = "copy the values into an array or a List<T>.";
 
-    private static readonly FrozenSet<string> _textTests = new[] { nameof(string.StartsWith), nameof(string.EndsWith), nameof(string.Contains) }.ToFrozenSet(StringComparer.Ordinal);
+    private static readonly FrozenDictionary<string, AlvoFilterOperator> _textTests = new Dictionary<string, AlvoFilterOperator>
+    {
+        [nameof(string.StartsWith)] = AlvoFilterOperator.StartsWith,
+        [nameof(string.EndsWith)] = AlvoFilterOperator.EndsWith,
+        [nameof(string.Contains)] = AlvoFilterOperator.Contains,
+    }.ToFrozenDictionary(StringComparer.Ordinal);
 
     private AlvoFilter Call(MethodCallExpression call)
     {
-        if (call.Object?.Type == typeof(string) && _textTests.Contains(call.Method.Name))
+        if (call.Object?.Type == typeof(string) && _textTests.TryGetValue(call.Method.Name, out var op))
         {
-            throw Refuse(call, $"'{call.Method.Name}' has no filter operator yet: AlvoFilter offers no literal prefix, suffix or substring test", NoTextOperatorFix);
+            return TextTest(call, op);
         }
 
         if (!LambdaShape.IsContains(call, out var source, out var value))
@@ -31,6 +37,43 @@ internal sealed partial class FilterTranslator
         return !LambdaShape.Touches(source, _row) && value.Type != typeof(object)
             ? Membership(call, source, value)
             : throw Refuse(call, "Contains translates only as a list of values containing a field");
+    }
+
+    private AlvoComparison TextTest(MethodCallExpression call, AlvoFilterOperator op)
+    {
+        if (!LambdaShape.Touches(call.Object!, _row))
+        {
+            throw Refuse(call, "the text it tests must be a field: a filter tests a field against a value, not a value against a field", "test the field, such as x => x.Code.StartsWith(prefix).");
+        }
+
+        if (!IsOrdinalText(call))
+        {
+            throw Refuse(call, $"'{call.Method.Name}' translates only in its one-argument form or with StringComparison.Ordinal: a filter compares characters exactly", TextFix);
+        }
+
+        var argument = call.Arguments[0];
+        if (LambdaShape.Touches(argument, _row))
+        {
+            throw Refuse(call, "it compares a field with a field", "compare the field with a value.");
+        }
+
+        var text = Value(argument, enumType: null) as string
+            ?? throw Refuse(argument, "the text is null, and a text test never matches a missing value", "test for null with == null.");
+
+        return new AlvoComparison(Field(call.Object!), op, text);
+    }
+
+    private bool IsOrdinalText(MethodCallExpression call)
+    {
+        var parameters = call.Method.GetParameters();
+        if (parameters.Length == 0 || parameters[0].ParameterType != typeof(string))
+        {
+            return false;
+        }
+
+        return parameters.Length == 1
+            || (parameters.Length == 2 && parameters[1].ParameterType == typeof(StringComparison)
+                && !LambdaShape.Touches(call.Arguments[1], _row) && LambdaValues.Evaluate(call.Arguments[1]) is StringComparison.Ordinal);
     }
 
     private AlvoFilter Membership(MethodCallExpression call, Expression source, Expression value)

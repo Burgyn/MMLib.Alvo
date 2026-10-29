@@ -57,6 +57,9 @@ public static class AlvoEfCoreProvider
     /// state, it creates one <see cref="DbContext"/> per operation and disposes it, and every member takes
     /// the caller's <c>AlvoContext</c> as a parameter precisely so no ambient scope decides who is asking.
     /// A scoped registration would imply the opposite and invite an accessor to be read instead.
+    /// <see cref="Data.IAlvoTransactions"/> is registered over the same <c>EfAlvoData</c> singleton — the concrete type,
+    /// not whatever <see cref="Data.IAlvoData"/> resolves to — because a unit's calls must reach this driver's connection:
+    /// a host that decorates <see cref="Data.IAlvoData"/> does not decorate the calls of a unit.
     /// </remarks>
     public static IAlvoBuilder AddRelationalProvider(this IAlvoBuilder builder, RelationalProviderRegistration registration)
     {
@@ -83,7 +86,10 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton(TimeProvider.System);
         builder.Services.TryAddSingleton(registration.Fields);
         builder.Services.TryAddSingleton(registration.Dialect);
-        builder.Services.TryAddSingleton<IAlvoData>(CreateData);
+        builder.Services.TryAddSingleton(CreateData);
+        builder.Services.TryAddSingleton<IAlvoData>(services => services.GetRequiredService<EfAlvoData>());
+        builder.Services.TryAddSingleton<IAlvoTransactions>(services => new EfAlvoTransactions(
+            services.GetRequiredService<EfAlvoData>(), services.GetRequiredService<IServiceScopeFactory>()));
         builder.Services.TryAddSingleton<IAlvoDataReachability>(CreateReachability);
         builder.Services.TryAddSingleton<IOutboxStore>(CreateOutboxStore);
         builder.Services.TryAddSingleton<IDeliveryStore>(CreateDeliveryStore);

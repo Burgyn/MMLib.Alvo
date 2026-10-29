@@ -33,6 +33,7 @@
     <!-- The property/fuzz arms of the caller-filter suite (#20's "no interpolation" and
          "fuzzing filtra bez pádu" criteria). -->
     <PackageReference Include="CsCheck" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,6 +1,7 @@
 ﻿using MMLib.Alvo.Admin;
 using MMLib.Alvo.Api;
 using MMLib.Alvo.Auth;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Data.PostgreSql;
 using MMLib.Alvo.Data.Sqlite;
 using MMLib.Alvo.DocsGen.CSharp;
@@ -53,6 +54,7 @@ internal static class OptionsCatalog
         [typeof(PostgreSqlProviderOptions)] = "Set in code by `UsePostgreSql(…)`; its connection string comes from `ConnectionStrings:Alvo`, listed below.",
         [typeof(MigrationOptions)] = "A per-call argument to the schema migrator, not a configuration section; the `Alvo:Schema` keys decide what start-up passes it.",
         [typeof(AlvoHandlerOptions)] = "Set per event handler by the `configure` argument of `AddEventHandler(…)` or of an entity's `OnCreated`, `OnUpdated`, `OnDeleted` and `OnSaved`; it is not a configuration section.",
+        [typeof(AlvoTransactionOptions)] = "A per-call argument to `IAlvoTransactions.TransactAsync(…)`, one unit at a time; it is not a configuration section.",
     };
 
     internal static IReadOnlyList<ConfigurationSection> Read(IEnumerable<Assembly> assemblies, XmlDocs docs)

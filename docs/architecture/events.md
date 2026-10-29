@@ -1287,10 +1287,11 @@ premise of refusing a host the `entity.` namespace, so the two must not be able 
   counts `alvo.events.filtered` and marks it dispatched. Deliberate — the fix is a **designed namespace**,
   taken once, not a prefix added under one PR's schedule — and stated on `IAlvoEvents` itself, where an author
   reads it before calling. **Deviation 87.**
-- **It is not transactional with anything.** The spec's *"event sa publikuje v tej istej transakcii ako dátová
-  zmena"* is a guarantee about a **data** change; a custom event has none to be atomic with, and
-  `AppendAsync` is one autocommit statement. A host needing its own write and its own event to commit
-  together does not get that here. **Deviation 88.**
+- **It is autocommit.** `IAlvoEvents.PublishAsync` appends with one statement of its own. Since HX-07 a host
+  that needs its own writes and its event to commit together publishes through the unit —
+  `IAlvoTransaction.PublishAsync` inside `TransactAsync` writes the same envelope (one builder,
+  `AlvoCustomEnvelope`) into the unit's transaction — and `IAlvoEvents.PublishAsync` is refused while a unit
+  is open on the flow. **Deviation 88, narrowed by spec 2026-10-14 X13.**
 - **It has no idempotency key, so a retried publish appends a second event.** `AlvoEvents` mints a fresh
   `AlvoEventId` per call, so a `PublishAsync` whose `AppendAsync` succeeded but whose result was lost to
   cancellation or a transport failure appends a *second* durable event when the host retries. Raised in
@@ -1425,7 +1426,7 @@ Recorded here so that neither the design addendum nor a discarded implementation
 these live.
 
 - ~~**`Publish` and its security ruling.**~~ **Done — PR5b-2.** See *Publishing a custom application event*
-  above for what shipped, and for the three things a custom event deliberately is not (deviations 87 and 88).
+  above for what shipped, and for the three things a custom event deliberately is not (deviations 87 and 88; 88 narrowed by HX-07).
   The gap this bullet recorded was real and is worth keeping named: `Publish` appeared in **neither** PR's
   content row and in neither Definition of Done, so it was a hole in the addendum rather than a deferral.
   What the addendum said about the frozen `$defs/eventPattern` still stands unchanged — no descriptor rule can

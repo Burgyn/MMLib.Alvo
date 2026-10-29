@@ -346,6 +346,21 @@ namespace MMLib.Alvo.Testing.Data
         public static MMLib.Alvo.AlvoContext Caller { get; }
         public static MMLib.Alvo.Schema.EntitySchema Vehicle { get; }
     }
+    public abstract class AlvoDataLiteralTextTests
+    {
+        protected AlvoDataLiteralTextTests() { }
+        public System.Threading.Tasks.Task A_backslash_in_an_ends_with_value_matches_only_itself() { }
+        public System.Threading.Tasks.Task A_bracket_in_a_contains_value_matches_only_itself() { }
+        public System.Threading.Tasks.Task A_literal_text_test_is_case_sensitive() { }
+        public System.Threading.Tasks.Task A_literal_text_test_on_a_field_that_is_not_text_is_refused() { }
+        public System.Threading.Tasks.Task A_percent_in_a_starts_with_value_matches_only_itself() { }
+        public System.Threading.Tasks.Task A_value_that_is_not_a_string_is_refused() { }
+        public System.Threading.Tasks.Task A_value_that_is_not_a_string_is_refused_behind_a_branch_that_already_matched() { }
+        public System.Threading.Tasks.Task A_value_that_is_not_a_string_is_refused_over_an_empty_entity() { }
+        public System.Threading.Tasks.Task An_empty_value_matches_every_text_and_never_a_missing_one() { }
+        public System.Threading.Tasks.Task An_underscore_in_a_contains_value_matches_only_itself() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
+    }
     public abstract class AlvoDataOrderingTests
     {
         protected AlvoDataOrderingTests() { }

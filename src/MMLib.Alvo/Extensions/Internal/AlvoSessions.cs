@@ -1,23 +1,29 @@
 ﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Extensions.Internal;
 
 /// <summary>The one <see cref="IAlvoSessions"/>: a thin binding over the registered <see cref="IAlvoData"/>.</summary>
-internal sealed class AlvoSessions(IAlvoData data) : IAlvoSessions
+/// <param name="data">The data port every session calls.</param>
+/// <param name="schemas">The applied schema, which a typed write reads its store-maintained fields from (Ruling 52).</param>
+internal sealed class AlvoSessions(IAlvoData data, ISchemaRegistry? schemas = null) : IAlvoSessions
 {
     /// <inheritdoc/>
     public IAlvoSession For(AlvoContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        return new AlvoSession(data, context);
+        return new AlvoSession(data, context, schemas);
     }
 }
 
 /// <summary>One caller's view of <see cref="IAlvoData"/>; every call passes the bound context and no idempotency key.</summary>
-internal sealed class AlvoSession(IAlvoData data, AlvoContext context) : IAlvoSession
+internal sealed class AlvoSession(IAlvoData data, AlvoContext context, ISchemaRegistry? schemas) : IAlvoSession, IAlvoSessionSchema
 {
     public AlvoContext Context => context;
+
+    public EntitySchema? EntityOf(string entity) =>
+        schemas?.GetSchema().Entities.FirstOrDefault(candidate => string.Equals(candidate.Name, entity, StringComparison.Ordinal));
 
     public Task<AlvoPage> QueryAsync(AlvoQuery query, CancellationToken cancellationToken = default) =>
         data.QueryAsync(query, context, cancellationToken);

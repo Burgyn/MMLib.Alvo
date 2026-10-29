@@ -17,7 +17,7 @@ namespace MMLib.Alvo.Api.Internal;
 /// under a spelling nobody chose. The spelling is the member name lower-cased, which yields exactly
 /// <c>eq neq gt gte lt lte like ilike in is</c>; <c>QueryStringParserTests</c> pins that set, so a future
 /// member whose lower-cased name is <em>not</em> its PostgREST spelling fails a test rather than inventing a
-/// dialect.
+/// dialect. The literal text tests are the one exception, left off the wire (<c>_onTheWire</c>).
 /// </para>
 /// <para>
 /// An unrecognized spelling is a refusal, never a fallback to <c>eq</c>: a mistyped operator that quietly
@@ -27,6 +27,13 @@ namespace MMLib.Alvo.Api.Internal;
 /// </remarks>
 internal static class FilterOperators
 {
+    /// <summary>
+    /// The port's operators that have a wire spelling — every member except the literal text tests, which are reached
+    /// from C# and which PostgREST has no spelling for, so the allow-list leaves them out rather than invent one.
+    /// </summary>
+    private static readonly AlvoFilterOperator[] _onTheWire =
+        [.. Enum.GetValues<AlvoFilterOperator>().Where(op => !op.IsLiteralText())];
+
     /// <summary>The wire spelling of <paramref name="operator"/>.</summary>
     /// <param name="operator">The port's operator.</param>
     internal static string WireName(AlvoFilterOperator @operator) =>
@@ -36,13 +43,13 @@ internal static class FilterOperators
 
     /// <summary>Every wire spelling, in the enum's own declaration order.</summary>
     internal static IReadOnlyList<string> WireNames { get; } =
-        [.. Enum.GetValues<AlvoFilterOperator>().Select(WireName)];
+        [.. _onTheWire.Select(WireName)];
 
     /// <summary>Every wire spelling as a comma-separated list, for a fix suggestion.</summary>
     internal static string AsList { get; } = string.Join(", ", WireNames);
 
     private static readonly FrozenDictionary<string, AlvoFilterOperator> _byWireName =
-        Enum.GetValues<AlvoFilterOperator>().ToFrozenDictionary(WireName, StringComparer.Ordinal);
+        _onTheWire.ToFrozenDictionary(WireName, StringComparer.Ordinal);
 
     /// <summary>
     /// Resolves a caller-supplied spelling. Ordinal and case-sensitive, like every other name in the

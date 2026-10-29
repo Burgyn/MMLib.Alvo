@@ -44,6 +44,7 @@
        two per-engine copies are two chances for them to stop being asked it. -->
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/OutboxTableFacts.cs" Link="_shared/OutboxTableFacts.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/UnitSavepointFacts.cs" Link="_shared/UnitSavepointFacts.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/AlvoDataOutboxWorld.cs" Link="_shared/AlvoDataOutboxWorld.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/AlvoDataBeforeHookWorld.cs" Link="_shared/AlvoDataBeforeHookWorld.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/OutboxStoreWorld.cs" Link="_shared/OutboxStoreWorld.cs" />

@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Data;
 using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Schema;
 
 using NSubstitute;
 
@@ -53,6 +54,22 @@ public sealed class AlvoSessionsTests
         await _data.Received(1).UpdateAsync("tickets", _id, _values, _caller, forUpdate, null, Ct);
         await _data.Received(1).ReplaceAsync("tickets", _id, _values, _caller, forReplace, null, Ct);
         await _data.Received(1).DeleteAsync("tickets", _id, _caller, forDelete, null, Ct);
+    }
+
+    [Fact]
+    public void A_session_names_the_applied_entity_a_typed_write_reads_its_maintained_fields_from()
+    {
+        var schemas = Substitute.For<ISchemaRegistry>();
+        var tickets = new EntitySchema { Name = "tickets", Fields = [] };
+        var evidence = new EntitySchema { Name = "evidence", Storage = EntityStorage.Dynamic, Fields = [] };
+        schemas.GetSchema().Returns(new SchemaModel([tickets, evidence]));
+
+        var session = new AlvoSessions(_data, schemas).For(_caller).ShouldBeAssignableTo<IAlvoSessionSchema>().ShouldNotBeNull();
+
+        session.EntityOf("tickets").ShouldBeSameAs(tickets);
+        session.EntityOf("evidence").ShouldBeSameAs(evidence);
+        session.EntityOf("Tickets").ShouldBeNull();
+        ((IAlvoSessionSchema)new AlvoSessions(_data).For(_caller)).EntityOf("tickets").ShouldBeNull();
     }
 
     [Fact]

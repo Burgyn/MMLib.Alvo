@@ -29,6 +29,7 @@ internal sealed class SerialRelationalWriteGate : IRelationalWriteGate
     /// </remarks>
     public async ValueTask<IDisposable> EnterAsync(CancellationToken cancellationToken)
     {
+        StoreWrites.RefuseInsideUnit();
         await _turn.WaitAsync(cancellationToken).ConfigureAwait(false);
 
         return new Turn(_turn);
@@ -38,8 +39,11 @@ internal sealed class SerialRelationalWriteGate : IRelationalWriteGate
     /// <param name="timeout">How long to wait; <see cref="Timeout.InfiniteTimeSpan"/> waits until the turn comes.</param>
     /// <param name="cancellationToken">Ends the wait; a cancellation wins over the timeout and holds nothing.</param>
     /// <returns>The turn, or <see langword="null"/> when the timeout passed first and nothing was taken.</returns>
-    internal async ValueTask<IDisposable?> TryEnterAsync(TimeSpan timeout, CancellationToken cancellationToken) =>
-        await _turn.WaitAsync(timeout, cancellationToken).ConfigureAwait(false) ? new Turn(_turn) : null;
+    internal async ValueTask<IDisposable?> TryEnterAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        StoreWrites.RefuseInsideUnit();
+        return await _turn.WaitAsync(timeout, cancellationToken).ConfigureAwait(false) ? new Turn(_turn) : null;
+    }
 
     private sealed class Turn(SemaphoreSlim turn) : IDisposable
     {

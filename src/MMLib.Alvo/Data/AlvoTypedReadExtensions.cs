@@ -11,7 +11,10 @@ namespace MMLib.Alvo.Data;
 /// <remarks>
 /// A predicate compares mapped properties with values — captured variables are read on every call and bound as
 /// parameters — combined with <c>&amp;&amp;</c>, <c>||</c> and <c>!</c>, tests <c>== null</c> and <c>HasValue</c>, and
-/// <c>Contains</c> over a list of values. Anything else throws <see cref="AlvoTranslationException"/> when the read is
+/// <c>Contains</c> over a list of values, and a text field's <c>StartsWith</c>, <c>EndsWith</c> and <c>Contains</c> of a value —
+/// one-argument or <see cref="StringComparison.Ordinal"/> — which match the value literally, so a <c>%</c> or <c>_</c> in it
+/// matches itself, and compare ordinally and case-sensitively, even for the one-argument <c>StartsWith</c>/<c>EndsWith</c>,
+/// which C# itself compares by culture. Anything else throws <see cref="AlvoTranslationException"/> when the read is
 /// called. A typed read returns one bounded page; page through more with an untyped <see cref="AlvoQuery"/>.
 /// </remarks>
 public static class AlvoTypedReadExtensions

@@ -151,13 +151,15 @@ otherwise write by hand.
 - **`Contains` becomes `in`**, over any list of values (at most 1,000; an empty list matches nothing). A lazy sequence is
   read once per call and stopped past 1,000; a `HashSet<T>` with its own comparer, or a collection with its own
   equality, is refused — the database cannot apply it.
+- **`StartsWith`, `EndsWith` and `Contains` on a text** match literally — a `%`, `_`, `\` or `[` in the value matches
+  itself — case-sensitively, on every engine; one-argument or `StringComparison.Ordinal` only. Any other comparison is
+  refused.
 - **Null follows SQL.** `x.Code != "A"` never matches a row whose `code` is empty; add `|| x.Code == null` when it
   should. `== null` and `HasValue` test for empty.
 - **Text compares as the database compares.** `x.Guest == "ada"` is judged by the column's collation, not by C#'s
   ordinal `==`, so a case-insensitive collation matches `Ada` too.
-- **Refused when the read is called:** `StartsWith`/`EndsWith`/`Contains` on a text (no filter operator for them yet),
-  arithmetic, a comparison of two fields, the clock, and any other method; a term that reads no field — a captured
-  `flag && …`, and `x => true` itself ("it reads no field"): to read the first rows unfiltered, send an untyped
+- **Refused when the read is called:** arithmetic, a comparison of two fields, the clock, and any other method; a term
+  that reads no field — a captured `flag && …`, and `x => true` itself ("it reads no field"): to read the first rows unfiltered, send an untyped
   `AlvoQuery` with no `Filter` and map each row with `As<T>()`; and a predicate nested deeper than 512
   levels or holding more than 4,096 expression nodes, which no filter of 256 terms needs — it is measured and refused
   before it is read.
