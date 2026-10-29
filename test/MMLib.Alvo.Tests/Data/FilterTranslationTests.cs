@@ -25,6 +25,7 @@ public sealed class FilterTranslationTests
     public static TheoryData<string, Expression<Func<Order, bool>>, string> Translated()
     {
         var note = "it's";
+        var wildcard = "50%_";
         List<Guid> ids = [Guid.Parse("11111111-1111-1111-1111-111111111111"), Guid.Parse("22222222-2222-2222-2222-222222222222")];
         var lazy = Lazy();
 
@@ -59,6 +60,10 @@ public sealed class FilterTranslationTests
             { "value of a nullable", x => x.Rank!.Value > 2, "rank gt 2" },
             { "set with the default comparer", x => _tags.Contains(x.Note), "note in ['a', 'b']" },
             { "lazy sequence", x => lazy.Contains(x.Note), "note in ['x!', 'y!']" },
+            { "starts with", x => x.Note.StartsWith("ab"), "note startswith 'ab'" },
+            { "ordinal ends with", x => x.Note.EndsWith("ab", StringComparison.Ordinal), "note endswith 'ab'" },
+            { "contains a captured wildcard", x => x.Note.Contains(wildcard), "note contains '50%_'" },
+            { "text test on a nullable text", x => x.Code!.StartsWith("C-"), "code startswith 'C-'" },
             { "or chain", x => x.Quantity == 1 || x.Quantity == 2 || x.IsPaid, "or(quantity eq 1, quantity eq 2, is_paid eq true)" },
         };
     }
@@ -70,11 +75,14 @@ public sealed class FilterTranslationTests
         var endless = Endless(new Pulls());
         int? none = null;
         string[]? missing = null;
+        string? missingText = null;
 
         return new()
         {
-            { "text operator", x => x.Note.StartsWith("ab"), "'StartsWith' has no filter operator yet" },
-            { "text contains", x => x.Note.Contains("ab"), "'Contains' has no filter operator yet" },
+            { "culture-folding comparison", x => x.Note.StartsWith("ab", StringComparison.OrdinalIgnoreCase), "translates only in its one-argument form or with StringComparison.Ordinal" },
+            { "char overload", x => x.Note.StartsWith('a'), "translates only in its one-argument form or with StringComparison.Ordinal" },
+            { "text against a field", x => x.Note.EndsWith(x.Code!), "it compares a field with a field" },
+            { "null text", x => x.Note.Contains(missingText!), "the text is null" },
             { "arithmetic", x => x.Total * 2m > 10m, "arithmetic has no filter equivalent" },
             { "two fields", x => x.Quantity > x.Rank, "it compares two fields" },
             { "two enum fields", x => x.Status == x.Previous, "it compares two fields" },

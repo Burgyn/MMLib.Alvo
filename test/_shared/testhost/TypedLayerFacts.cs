@@ -9,6 +9,7 @@ using MMLib.Alvo.Schema;
 using MMLib.Alvo.Tests.Data;
 
 using System.Collections.Concurrent;
+using System.Linq.Expressions;
 
 namespace MMLib.Alvo.TestHost.Tests;
 
@@ -239,6 +240,50 @@ public abstract class TypedLayerFacts
         sampled.ShouldBe(200);
     }
 
+    [Fact]
+    public async Task A_captured_wildcard_in_a_text_test_matches_literally()
+    {
+        await using var alvo = await StartAsync(await DatabaseAsync(), _ => { });
+        var agent = Agent(Guid.NewGuid());
+        foreach (var reference in new[] { "50%_off", "50XYoff", "C:\\tmp", "C:Xtmp", "[x]y", "xy" })
+        {
+            await CreateAsync(alvo, agent, reference, "draft");
+        }
+
+        var percent = "50%";
+        var underscore = "_";
+        var backslash = "\\tmp";
+        var bracket = "[x]";
+
+        (await ReferencesAsync(alvo, agent, x => x.Reference.StartsWith(percent))).ShouldBe(["50%_off"]);
+        (await ReferencesAsync(alvo, agent, x => x.Reference.Contains(underscore))).ShouldBe(["50%_off"]);
+        (await ReferencesAsync(alvo, agent, x => x.Reference.EndsWith(backslash, StringComparison.Ordinal))).ShouldBe(["C:\\tmp"]);
+        (await ReferencesAsync(alvo, agent, x => x.Reference.Contains(bracket))).ShouldBe(["[x]y"]);
+    }
+
+    [Fact]
+    public async Task No_captured_text_test_value_reaches_the_sql_text()
+    {
+        var database = await DatabaseAsync();
+        await using var alvo = await StartAsync(database, _ => { });
+        var agent = Agent(Guid.NewGuid());
+        using var capture = new SqlCapture(database.Marker);
+        var baseline = await TextTestStatementsAsync(alvo, agent, capture, "benign");
+        var sampled = 0;
+
+        await _hostile.SampleAsync(
+            async captured =>
+            {
+                (await TextTestStatementsAsync(alvo, agent, capture, captured)).ShouldBe(baseline, $"captured {captured}");
+                Interlocked.Increment(ref sampled);
+            },
+            iter: 200,
+            threads: 1);
+
+        baseline.ShouldNotBeEmpty();
+        sampled.ShouldBe(200);
+    }
+
     protected abstract Task<TypedDatabase> DatabaseAsync();
 
     private static async Task<IReadOnlyList<string>> StatementsAsync(AlvoTestHost alvo, AlvoContext agent, SqlCapture capture, string captured)
@@ -249,6 +294,17 @@ public abstract class TypedLayerFacts
 
         return capture.Statements;
     }
+
+    private static async Task<IReadOnlyList<string>> TextTestStatementsAsync(AlvoTestHost alvo, AlvoContext agent, SqlCapture capture, string captured)
+    {
+        capture.Clear();
+        await alvo.Data.QueryAsync<DeskOrder>(x => x.Reference.StartsWith(captured) || x.Reference.Contains(captured), 10, agent, Ct);
+
+        return capture.Statements;
+    }
+
+    private static async Task<IReadOnlyList<string>> ReferencesAsync(AlvoTestHost alvo, AlvoContext agent, Expression<Func<DeskOrder, bool>> where) =>
+        [.. (await alvo.Data.QueryAsync(where, 10, agent, Ct)).Select(order => order.Reference)];
 
     private static async Task<AlvoTestHost> StartAsync(TypedDatabase database, Action<IAlvoBuilder> configure) =>
         await AlvoTestHost.StartAsync(
