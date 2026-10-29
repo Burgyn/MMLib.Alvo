@@ -7,7 +7,7 @@ namespace MMLib.Alvo.DocsGen.Host;
 
 internal static class ManagementApiRenderer
 {
-    private static readonly Type[] _interfaces = [typeof(IAlvoManagement), typeof(IAlvoUserAdministration)];
+    private static readonly Type[] _interfaces = [typeof(IAlvoManagement), typeof(IAlvoOperations), typeof(IAlvoUserAdministration)];
 
     internal static GeneratedPage Render(IReadOnlyList<ManagementRouteInfo> routes, XmlDocs docs)
     {

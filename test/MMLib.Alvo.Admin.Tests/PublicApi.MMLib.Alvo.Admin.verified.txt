@@ -632,6 +632,17 @@ namespace MMLib.Alvo.Admin.Components.Integrations
         protected override void OnInitialized() { }
     }
 }
+namespace MMLib.Alvo.Admin.Components.Operations
+{
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/operations")]
+    public class Operations : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Operations() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+}
 namespace MMLib.Alvo.Admin.Components.Rules
 {
     public class PolicyVerdictView : Microsoft.AspNetCore.Components.ComponentBase

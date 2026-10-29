@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
+using MMLib.Alvo.Management;
 using MMLib.Alvo.TestHost.Internal;
 using System.Diagnostics;
 
@@ -226,6 +227,34 @@ public sealed class AlvoTestHost : IAsyncDisposable
         }
 
         throw AlvoDrainNotQuiescentException.After(MaxRounds, progress.Recent());
+    }
+
+    /// <summary>
+    /// Runs the handler a fixture names, once, over its envelope — as a delivery attempt on this host would — and records
+    /// nothing; the handler's exception reaches you as it was thrown. Take the fixture from <c>IAlvoOperations.GetFixtureAsync</c>
+    /// (or the Management API's <c>…/deliveries/{id}/fixture</c>) on the instance where the delivery failed.
+    /// </summary>
+    /// <remarks>
+    /// The fixture's non-key values arrive as <c>&lt;redacted:FIELD&gt;</c>; fill in what the reproduction needs before calling
+    /// this. A typed handler reads the record as its host type first, so a redacted value in a typed field it cannot hold — a
+    /// number, a date — fails with an <see cref="InvalidOperationException"/> naming the field before the handler runs. The run
+    /// counts for <see cref="Hooks"/> like a delivered one.
+    /// </remarks>
+    /// <param name="fixture">The fixture.</param>
+    /// <param name="cancellationToken">Cancels the run.</param>
+    /// <returns>A task that completes when the handler returns.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="fixture"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The handler is not registered here, the envelope cannot be read, or a typed field holds a value its type cannot.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The host was disposed.</exception>
+    public async Task DeliverAsync(DeliveryFixture fixture, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(fixture);
+
+        using var drain = StartDrain();
+        await _pump.DeliverAsync(fixture, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

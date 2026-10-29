@@ -25,6 +25,9 @@ internal static class ManagementSetup
         AddManagementOptions(services);
         AddManagementService(services);
         services.TryAddSingleton<ManagementAccessEvaluator>();
+        services.TryAddSingleton<ManagementGate>();
+        services.TryAddSingleton<AlvoOperationsService>();
+        services.TryAddSingleton<IAlvoOperations>(provider => provider.GetRequiredService<AlvoOperationsService>());
         AddUserAdministration(services);
         return services;
     }
@@ -112,7 +115,8 @@ internal static class ManagementSetup
             provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<AlvoManagementService>>(),
             provider.GetRequiredService<Ai.IAiConnectionResolver>(),
             provider.GetRequiredService<Secrets.ISecretStore>(),
-            provider.GetRequiredService<Migrations.RuntimeSchemaService>));
+            provider.GetRequiredService<Migrations.RuntimeSchemaService>,
+            provider.GetService<Events.IDeliveryStore>()));
 
     /// <summary>
     /// Registers <see cref="AlvoManagementOptions"/>, bound from its configuration section and validated at

@@ -17,29 +17,58 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// SQLite that turns the dispatcher's concurrent answers into a queue instead of busy locks the provider sleeps through.
 /// </para>
 /// <para>
+/// <b>A claim and an operator's reset of one subscriber are serialized by a subscriber lock</b>
+/// (<see cref="IAlvoSqlDialect.TransactionLockStatement"/>): the claim takes each subscriber it may claim for shared, a
+/// redeliver and a pause take their subscriber exclusively, as the first statement of their transaction, and a replay takes
+/// every subscriber it may reset exclusively right after its log row, before the reset. On PostgreSQL
+/// under READ COMMITTED a lane check is evaluated against the statement's own snapshot and is not re-checked when a
+/// concurrent writer commits, so without the lock a redeliver and a claim of the same lane — ordered or not — could each
+/// pass the other's check: a redelivered earlier delivery and a later one both claimable, or two deliveries of one record
+/// running. Likewise a claim statement already under way when a pause committed would still take one batch on a snapshot
+/// that predates the pause; with the lock, the pause waits for it, and no claim statement starts until the pause committed.
+/// SQLite needs no lock (the write gate admits one writer at a time), and its dialect answers none. The lock
+/// statement reads no row, so a transaction that opens with it still writes before it reads anything.
+/// </para>
+/// <para>
+/// <b>The cost: an operator's action briefly holds back every claim on PostgreSQL, not only its own handler's.</b> A claim
+/// names every subscriber it may claim for, and PostgreSQL queues a new lock request behind a conflicting <em>waiting</em>
+/// one (so a writer is not starved). Once a pause, redeliver or replay of one handler waits on a claim under way, every later
+/// claim on every replica waits too — each names that handler — until the operator's transaction commits. For a pause or a
+/// redeliver that is one short statement; for a real replay it is the reset of up to 10 000 rows. Nothing is lost or
+/// reordered, deliveries only start later; accepted rather than shortened (by batching the reset, or narrowing the lock to
+/// the final <c>UPDATE</c>) because a replay is a rare, deliberate act.
+/// </para>
+/// <para>
 /// <b>Internal</b>: unlike <see cref="EfCoreOutboxStore"/> it is not part of what a host resolves by type; the port is the
 /// contract, and a provider author implements that.
 /// </para>
 /// </remarks>
-internal sealed class EfCoreDeliveryStore : IDeliveryStore
+internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
 {
     private readonly RelationalConnectionFactory _connections;
+    private readonly IAlvoSqlDialect _dialect;
     private readonly TimeProvider _time;
     private readonly string _table;
     private readonly string _attempts;
     private readonly string _outbox;
+    private readonly string _controls;
+    private readonly string _log;
 
-    internal EfCoreDeliveryStore(RelationalConnectionFactory connections, AlvoOptions options, TimeProvider time)
+    internal EfCoreDeliveryStore(RelationalConnectionFactory connections, IAlvoSqlDialect dialect, AlvoOptions options, TimeProvider time)
     {
         ArgumentNullException.ThrowIfNull(connections);
+        ArgumentNullException.ThrowIfNull(dialect);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(time);
 
         _connections = connections;
+        _dialect = dialect;
         _time = time;
         _table = DeliveryTable.NameFor(options.SchemaPrefix);
         _attempts = DeliveryTable.AttemptsNameFor(options.SchemaPrefix);
         _outbox = OutboxTable.NameFor(options.SchemaPrefix);
+        _controls = DeliveryOperationsTable.ControlsNameFor(options.SchemaPrefix);
+        _log = DeliveryOperationsTable.LogNameFor(options.SchemaPrefix);
     }
 
     public async Task EnsureAsync(CancellationToken cancellationToken = default)
@@ -52,6 +81,8 @@ internal sealed class EfCoreDeliveryStore : IDeliveryStore
             {
                 await OutboxTable.EnsureAsync(connection, _outbox, cancellationToken).ConfigureAwait(false);
                 await DeliveryTable.EnsureAsync(connection, _table, _attempts, _outbox, cancellationToken).ConfigureAwait(false);
+                await RelationalSqlBatch.ExecuteAsync(
+                    connection, DeliveryOperationsTable.Statements(_table, _controls, _log), transaction: null, cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -139,14 +170,46 @@ internal sealed class EfCoreDeliveryStore : IDeliveryStore
             await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
             using (await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false))
             {
-                return await RelationalSqlBatch.ReadWrittenRowsAsync(
-                    connection,
-                    DeliveryTable.ClaimSql(_table, _outbox, claim.Ordered.Count, claim.Unordered.Count),
-                    command => BindClaim(command, claim),
-                    ReadClaimed,
-                    ct).ConfigureAwait(false);
+                var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+                await using (transaction.ConfigureAwait(false))
+                {
+                    await LockSubscribersAsync(connection, transaction, [.. claim.Ordered, .. claim.Unordered], exclusive: false, ct).ConfigureAwait(false);
+                    var claimed = await RelationalSqlBatch.ReadRowsAsync(
+                        connection,
+                        transaction,
+                        DeliveryTable.ClaimSql(_table, _outbox, _controls, claim.Ordered.Count, claim.Unordered.Count),
+                        command => BindClaim(command, claim),
+                        ReadClaimed,
+                        ct).ConfigureAwait(false);
+                    await transaction.CommitAsync(ct).ConfigureAwait(false);
+
+                    return claimed;
+                }
             }
         }
+    }
+
+    /// <summary>
+    /// Takes the subscribers' transaction locks, shared or exclusive, in ascending key order — the statement the dialect
+    /// answers, or nothing on an engine with one writer — so the transaction's next statement starts after any conflicting
+    /// claim or reset of those subscribers committed.
+    /// </summary>
+    private async Task LockSubscribersAsync(
+        DbConnection connection, DbTransaction transaction, IEnumerable<string> subscribers, bool exclusive, CancellationToken ct)
+    {
+        var keys = subscribers.Distinct(StringComparer.Ordinal).Select(subscriber => DeliveryOperationsTable.SubscriberLockKey(_table, subscriber)).Distinct().Order().ToList();
+        if (keys.Count == 0 || _dialect.TransactionLockStatement([.. keys.Select((_, index) => $"@lock{index}")], exclusive) is not { } sql)
+        {
+            return;
+        }
+
+        await ExecuteInAsync(connection, transaction, sql, command =>
+        {
+            for (var index = 0; index < keys.Count; index++)
+            {
+                RelationalSqlBatch.AddParameter(command, $"@lock{index}", keys[index]);
+            }
+        }, ct).ConfigureAwait(false);
     }
 
     private void BindClaim(DbCommand command, DeliveryClaim claim)
@@ -293,12 +356,48 @@ internal sealed class EfCoreDeliveryStore : IDeliveryStore
             command.Transaction = transaction;
             command.CommandText = DeliveryTable.AttemptSql(_attempts);
             RelationalSqlBatch.AddParameter(command, "@id", attempt.Delivery.Id.ToString());
-            RelationalSqlBatch.AddParameter(command, "@attempts", attempt.Delivery.Attempts);
             RelationalSqlBatch.AddParameter(command, "@started_at", StoredInstant.Text(attempt.StartedAt));
             RelationalSqlBatch.AddParameter(command, "@duration_ms", (int)Math.Min(int.MaxValue, attempt.Duration.TotalMilliseconds));
             RelationalSqlBatch.AddParameter(command, "@outcome", outcome);
             RelationalSqlBatch.AddParameter(command, "@error_type", (object?)errorType ?? DBNull.Value);
             await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// One transaction behind the database's write gate. <paramref name="work"/> opens it with a write, never a read
+    /// (the port's remarks): SQLite then holds the write lock from the first statement instead of upgrading a read lock.
+    /// </summary>
+    private async Task<T> InTransactionAsync<T>(Func<DbConnection, DbTransaction, Task<T>> work, CancellationToken ct)
+    {
+        var connection = _connections.Create();
+        await using (connection.ConfigureAwait(false))
+        {
+            await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
+            using (await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false))
+            {
+                var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+                await using (transaction.ConfigureAwait(false))
+                {
+                    var result = await work(connection, transaction).ConfigureAwait(false);
+                    await transaction.CommitAsync(ct).ConfigureAwait(false);
+
+                    return result;
+                }
+            }
+        }
+    }
+
+    private static async Task<int> ExecuteInAsync(DbConnection connection, DbTransaction transaction, string sql, Action<DbCommand> bind, CancellationToken ct)
+    {
+        var command = connection.CreateCommand();
+        await using (command.ConfigureAwait(false))
+        {
+            command.Transaction = transaction;
+            command.CommandText = sql;
+            bind(command);
+
+            return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
     }
 

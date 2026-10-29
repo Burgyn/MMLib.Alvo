@@ -14,6 +14,7 @@ public sealed class DeliveryTableTests
 {
     private const string Table = "alvo_deliveries";
     private const string Outbox = "alvo_outbox";
+    private const string Controls = "alvo_subscriber_controls";
 
     private static readonly TimeSpan _matchTimeout = TimeSpan.FromSeconds(1);
 
@@ -32,10 +33,10 @@ public sealed class DeliveryTableTests
     [Fact]
     public void The_claim_repeats_its_claimability_outside_the_subquery()
     {
-        var sql = DeliveryTable.ClaimSql(Table, Outbox, ordered: 2, unordered: 1);
+        var sql = DeliveryTable.ClaimSql(Table, Outbox, Controls, ordered: 2, unordered: 1);
 
         Regex.Count(sql, Regex.Escape("status IN ('pending', 'retrying')"), RegexOptions.None, _matchTimeout).ShouldBe(2);
-        Regex.Count(sql, "NOT EXISTS", RegexOptions.None, _matchTimeout).ShouldBe(4, "two lane checks in each half");
+        Regex.Count(sql, "NOT EXISTS", RegexOptions.None, _matchTimeout).ShouldBe(6, "two lane checks and the pause check in each half");
         sql.ShouldContain("subscriber IN (@s0, @s1, @s2)");
         sql.ShouldContain("subscriber IN (@s2) OR (NOT EXISTS");
         sql.ShouldContain("LIMIT @batch");
@@ -43,12 +44,12 @@ public sealed class DeliveryTableTests
 
     [Fact]
     public void An_ordered_lane_waits_for_earlier_entries_of_its_key_the_outbox_has_not_dispatched() =>
-        DeliveryTable.ClaimSql(Table, Outbox, ordered: 1, unordered: 0)
+        DeliveryTable.ClaimSql(Table, Outbox, Controls, ordered: 1, unordered: 0)
             .ShouldContain($"FROM {Outbox} unfanned WHERE unfanned.partition_key = {Table}.partition_key");
 
     [Fact]
     public void An_earlier_entry_under_a_live_claim_blocks_even_at_the_ceiling() =>
-        DeliveryTable.ClaimSql(Table, Outbox, ordered: 1, unordered: 0)
+        DeliveryTable.ClaimSql(Table, Outbox, Controls, ordered: 1, unordered: 0)
             .ShouldContain("unfanned.claimed_at >= @outbox_stale_before");
 
     /// <summary>
@@ -58,7 +59,7 @@ public sealed class DeliveryTableTests
     /// </summary>
     [Fact]
     public void A_dead_delivery_with_no_recorded_reason_still_holds_its_lane() =>
-        DeliveryTable.ClaimSql(Table, Outbox, ordered: 1, unordered: 0)
+        DeliveryTable.ClaimSql(Table, Outbox, Controls, ordered: 1, unordered: 0)
             .ShouldContain("COALESCE(earlier.last_error_type, '') <> 'unbound'");
 
     [Fact]
@@ -72,10 +73,28 @@ public sealed class DeliveryTableTests
         const string Predicate = "status IN ('pending', 'running', 'retrying', 'dead')";
 
         DeliveryTable.OpenLaneIndexDdl(Table).ShouldEndWith($"(subscriber, partition_key, event_id) WHERE {Predicate}");
-        DeliveryTable.ClaimSql(Table, Outbox, ordered: 1, unordered: 0).ShouldContain($"AND earlier.{Predicate} ");
+        DeliveryTable.ClaimSql(Table, Outbox, Controls, ordered: 1, unordered: 0).ShouldContain($"AND earlier.{Predicate} ");
     }
 
     [Fact]
+    public void A_paused_subscriber_is_never_claimed() =>
+        DeliveryTable.ClaimSql(Table, Outbox, Controls, ordered: 1, unordered: 1)
+            .ShouldContain($"NOT EXISTS (SELECT 1 FROM {Controls} paused WHERE paused.subscriber = {Table}.subscriber AND paused.paused_at IS NOT NULL)");
+
+    [Fact]
     public void A_claim_with_no_unordered_subscriber_orders_every_lane() =>
-        DeliveryTable.ClaimSql(Table, Outbox, ordered: 1, unordered: 0).ShouldNotContain("OR (NOT EXISTS");
+        DeliveryTable.ClaimSql(Table, Outbox, Controls, ordered: 1, unordered: 0).ShouldNotContain("OR (NOT EXISTS");
+
+    /// <summary>
+    /// An attempt is numbered after the delivery's last recorded one, not by the row's claim count: a redelivered row
+    /// restarts its count at one while its history keeps every earlier attempt (spec 2026-10-14 HX-06, Ruling 2).
+    /// </summary>
+    [Fact]
+    public void An_attempt_is_numbered_after_the_delivery_s_last_recorded_one()
+    {
+        var sql = DeliveryTable.AttemptSql("alvo_delivery_attempts");
+
+        sql.ShouldContain("COALESCE(MAX(attempt), 0) + 1");
+        sql.ShouldNotContain("@attempts");
+    }
 }

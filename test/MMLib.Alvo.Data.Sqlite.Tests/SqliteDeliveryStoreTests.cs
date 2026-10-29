@@ -37,7 +37,7 @@ public sealed class SqliteDeliveryStoreTests : DeliveryStoreContractTests, IDisp
             OperatingSystem.IsWindows(),
             "A Windows runner's per-write cost (~1.3 s a write on CI) outlasts the busy timeout under this load; tracked by #410, held on Linux and macOS.");
 
-        await using var world = await DeliveryStoreWorld.StartAsync(Connect);
+        await using var world = await DeliveryStoreWorld.StartAsync(Connect, new SqliteSqlDialect());
         await FanOutLanesAsync(world);
 
         var claimed = await Task.WhenAll(Enumerable.Range(0, Claimants).Select(index => Task.Run(() => ClaimAndAnswerAsync(world.Store, $"worker-{index}"), Ct)));
@@ -54,14 +54,103 @@ public sealed class SqliteDeliveryStoreTests : DeliveryStoreContractTests, IDisp
     [Fact]
     public async Task The_lane_check_seeks_the_partial_index_over_unfinished_deliveries()
     {
-        await using var world = await DeliveryStoreWorld.StartAsync(Connect);
+        await using var world = await DeliveryStoreWorld.StartAsync(Connect, new SqliteSqlDialect());
 
         var plan = await world.ExplainClaimAsync("EXPLAIN QUERY PLAN");
 
         plan.ShouldContain("SEARCH earlier USING INDEX ix_alvo_deliveries_lane_open (subscriber=? AND partition_key=? AND event_id<?)");
+        plan.ShouldContain("SEARCH paused");
+        plan.ShouldNotContain("SCAN paused");
     }
 
-    protected override async Task<IDeliveryStoreWorld> WorldAsync() => await DeliveryStoreWorld.StartAsync(Connect);
+    /// <summary>
+    /// A page of one subscriber seeks its (subscriber, id) index past the cursor, newest first — never a scan of every
+    /// subscriber's deliveries followed by a sort.
+    /// </summary>
+    [Fact]
+    public async Task A_page_of_one_subscriber_seeks_its_index_past_the_cursor()
+    {
+        await using var world = await DeliveryStoreWorld.StartAsync(Connect, new SqliteSqlDialect());
+
+        var plan = await world.ExplainSubscriberPageAsync("EXPLAIN QUERY PLAN");
+
+        plan.ShouldContain("USING INDEX ix_alvo_deliveries_subscriber_id (subscriber=? AND id<?)");
+        plan.ShouldNotContain("TEMP B-TREE");
+    }
+
+    /// <summary>
+    /// A delivery put back to pending restarts its claim count at one, and the attempt that follows is recorded after the
+    /// ones already in its history — not as attempt 1 again, which the history's primary key would refuse.
+    /// </summary>
+    [Fact]
+    public async Task An_attempt_after_a_reset_is_numbered_after_the_last_one()
+    {
+        await using var world = await DeliveryStoreWorld.StartAsync(Connect, new SqliteSqlDialect());
+        var @event = await world.AppendEventAsync("tickets:a");
+        await world.Store.FanOutAsync([new DeliveryRequest { EventId = @event, Subscriber = Subscriber, PartitionKey = "tickets:a", Kind = "handler" }], Ct);
+        var first = (await world.Store.ClaimAsync(ClaimFor("worker-1"), Ct)).ShouldHaveSingleItem();
+        (await world.Store.FailAsync(AttemptOf(first, "worker-1"), new DeliveryFailure { ErrorType = "Boom", MaxAttempts = 1 }, Ct)).ShouldBeTrue();
+
+        await world.ResetAsync(first.Id);
+        var second = (await world.Store.ClaimAsync(ClaimFor("worker-1"), Ct)).ShouldHaveSingleItem();
+
+        second.Attempts.ShouldBe(1, "the claim count restarts with the reset");
+        (await world.Store.CompleteAsync(AttemptOf(second, "worker-1"), Ct)).ShouldBeTrue();
+        (await world.AttemptNumbersAsync(first.Id)).ShouldBe([1, 2]);
+    }
+
+    /// <summary>
+    /// A log row carrying an idempotency key without its scope is refused with <see cref="ArgumentException"/> before the
+    /// store opens a transaction, rather than by the log's <c>CHECK</c> as an engine error after a change was made.
+    /// </summary>
+    [Theory]
+    [InlineData("redeliver")]
+    [InlineData("replay")]
+    [InlineData("pause")]
+    public async Task A_key_without_its_scope_is_refused(string operation)
+    {
+        await using var world = await DeliveryStoreWorld.StartAsync(Connect, new SqliteSqlDialect());
+        var entry = new DeliveryOperationEntry
+        {
+            Id = Guid.NewGuid(),
+            At = DateTimeOffset.UnixEpoch,
+            Actor = "ops",
+            Operation = operation,
+            Target = Subscriber,
+            IdempotencyKey = "key-1",
+        };
+
+        await Should.ThrowAsync<ArgumentException>(() => Operate(world.Store, operation, entry));
+
+        (await world.OperationsAsync()).ShouldBeEmpty();
+        (await world.Store.ControlsAsync(Ct)).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A pause whose log row is refused — its id already recorded — throws and pauses nothing: the claim never stops reading
+    /// a subscriber on a change the operations log does not hold.
+    /// </summary>
+    [Fact]
+    public async Task A_pause_whose_log_row_is_refused_changes_nothing()
+    {
+        await using var world = await DeliveryStoreWorld.StartAsync(Connect, new SqliteSqlDialect());
+        var entry = new DeliveryOperationEntry { Id = Guid.NewGuid(), At = DateTimeOffset.UnixEpoch, Actor = "ops", Operation = "replay", Target = Subscriber };
+        await world.Store.ReplayAsync(new DeliveryFilter { Subscriber = Subscriber, Limit = 20 }, entry, Ct);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => world.Store.SetPausedAsync(Subscriber, paused: true, entry with { Operation = "pause" }, Ct));
+
+        (await world.Store.ControlsAsync(Ct)).ShouldBeEmpty();
+        (await world.OperationsAsync()).ShouldHaveSingleItem().Operation.ShouldBe("replay");
+    }
+
+    private static Task Operate(IDeliveryStore store, string operation, DeliveryOperationEntry entry) => operation switch
+    {
+        "redeliver" => store.RedeliverAsync(Guid.NewGuid(), entry, Ct),
+        "replay" => store.ReplayAsync(new DeliveryFilter { Limit = 1 }, entry, Ct),
+        _ => store.SetPausedAsync(Subscriber, paused: true, entry, Ct),
+    };
+
+    protected override async Task<IDeliveryStoreWorld> WorldAsync() => await DeliveryStoreWorld.StartAsync(Connect, new SqliteSqlDialect());
 
     public void Dispose()
     {

@@ -31,6 +31,56 @@ public sealed class FakeDeliveryStoreTests : DeliveryStoreContractTests
         (await store.ClaimAsync(claim, TestContext.Current.CancellationToken)).ShouldHaveSingleItem().EventId.ShouldBe(later.Id);
     }
 
+    /// <summary>
+    /// A log row carrying an idempotency key without the scope it belongs to is refused before anything changes, as the EF
+    /// store refuses it: a key with no scope could never be found again, so a retry would run twice.
+    /// </summary>
+    [Theory]
+    [InlineData("redeliver")]
+    [InlineData("replay")]
+    [InlineData("pause")]
+    public async Task A_key_without_its_scope_is_refused(string operation)
+    {
+        var store = new FakeDeliveryStore(new ManualClock(new DateTimeOffset(2026, 10, 23, 9, 0, 0, TimeSpan.Zero)));
+        var entry = new DeliveryOperationEntry
+        {
+            Id = Guid.NewGuid(),
+            At = DateTimeOffset.UnixEpoch,
+            Actor = "ops",
+            Operation = operation,
+            Target = "send-confirmation",
+            IdempotencyKey = "key-1",
+        };
+
+        await Should.ThrowAsync<ArgumentException>(() => Operate(store, operation, entry));
+
+        store.Operations.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A pause whose log row is refused — its id already recorded — throws and pauses nothing, as the EF store refuses it in
+    /// the transaction that would have written the control.
+    /// </summary>
+    [Fact]
+    public async Task A_pause_whose_log_row_is_refused_changes_nothing()
+    {
+        var store = new FakeDeliveryStore(new ManualClock(new DateTimeOffset(2026, 10, 23, 9, 0, 0, TimeSpan.Zero)));
+        var entry = new DeliveryOperationEntry { Id = Guid.NewGuid(), At = DateTimeOffset.UnixEpoch, Actor = "ops", Operation = "replay", Target = "send-confirmation" };
+        await store.ReplayAsync(new DeliveryFilter { Subscriber = "send-confirmation", Limit = 20 }, entry, TestContext.Current.CancellationToken);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => store.SetPausedAsync("send-confirmation", paused: true, entry with { Operation = "pause" }, TestContext.Current.CancellationToken));
+
+        (await store.ControlsAsync(TestContext.Current.CancellationToken)).ShouldBeEmpty();
+        store.Operations.ShouldHaveSingleItem().Operation.ShouldBe("replay");
+    }
+
+    private static Task Operate(FakeDeliveryStore store, string operation, DeliveryOperationEntry entry) => operation switch
+    {
+        "redeliver" => store.RedeliverAsync(Guid.NewGuid(), entry, TestContext.Current.CancellationToken),
+        "replay" => store.ReplayAsync(new DeliveryFilter { Limit = 1 }, entry, TestContext.Current.CancellationToken),
+        _ => store.SetPausedAsync("send-confirmation", paused: true, entry, TestContext.Current.CancellationToken),
+    };
+
     private const string KeyA = "tickets:a";
     private const int OutboxCeiling = 10;
 
@@ -55,6 +105,8 @@ public sealed class FakeDeliveryStoreTests : DeliveryStoreContractTests
         internal World() => _store = new FakeDeliveryStore(_clock);
 
         public IDeliveryStore Store => _store;
+
+        public Task<IReadOnlyList<DeliveryOperationEntry>> OperationsAsync() => Task.FromResult(_store.Operations);
 
         public void Advance(TimeSpan duration) => _clock.Advance(duration);
 

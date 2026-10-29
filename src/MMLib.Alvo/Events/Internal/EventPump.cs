@@ -1,5 +1,7 @@
 ﻿using Microsoft.Extensions.Hosting;
 
+using MMLib.Alvo.Management;
+
 namespace MMLib.Alvo.Events.Internal;
 
 /// <summary>
@@ -41,7 +43,34 @@ internal sealed class EventPump(OutboxDispatcher outbox, DeliveryDispatcher deli
     /// passed <see cref="CancellationToken.None"/> — is a shutdown, as it is for the background loop: no failed span,
     /// no failed attempt, and the work in flight left claimed.
     /// </remarks>
-    public async Task<AlvoDrainResult> DrainAsync(CancellationToken cancellationToken = default)
+    public Task<AlvoDrainResult> DrainAsync(CancellationToken cancellationToken = default) =>
+        InRoundAsync(async round => Sum(
+            await outbox.ManualRoundAsync(round).ConfigureAwait(false),
+            await deliveries.ManualRoundAsync(round).ConfigureAwait(false)), cancellationToken);
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The run takes the round's gate, so it never overlaps a round, and is marked as one, so a handler that drains from
+    /// inside it is refused rather than left waiting for itself. The one exception is a run the caller cancels or that times
+    /// out: its handler is abandoned, not awaited, so one that ignores its token can still be running when the gate is
+    /// released — its later failure is observed, not reported.
+    /// </remarks>
+    public Task DeliverAsync(DeliveryFixture fixture, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(fixture);
+
+        return InRoundAsync(async round =>
+        {
+            await deliveries.DeliverFixtureAsync(fixture, round).ConfigureAwait(false);
+            return true;
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public void Dispose() => _rounds.Dispose();
+
+    /// <summary>Runs <paramref name="work"/> as one round: refused from inside a round, serialised by the gate, ended by a stop.</summary>
+    private async Task<T> InRoundAsync<T>(Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
     {
         if (_inRound.Value)
         {
@@ -53,10 +82,7 @@ internal sealed class EventPump(OutboxDispatcher outbox, DeliveryDispatcher deli
         try
         {
             _inRound.Value = true;
-            var fannedOut = await outbox.ManualRoundAsync(round.Token).ConfigureAwait(false);
-            var delivered = await deliveries.ManualRoundAsync(round.Token).ConfigureAwait(false);
-
-            return Sum(fannedOut, delivered);
+            return await work(round.Token).ConfigureAwait(false);
         }
         finally
         {
@@ -64,9 +90,6 @@ internal sealed class EventPump(OutboxDispatcher outbox, DeliveryDispatcher deli
             EndRound();
         }
     }
-
-    /// <inheritdoc/>
-    public void Dispose() => _rounds.Dispose();
 
     private static AlvoDrainResult Sum(AlvoDrainResult first, AlvoDrainResult second) => new()
     {

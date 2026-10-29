@@ -38,7 +38,10 @@ public sealed record DeliveryRequest
 /// <summary>What one claim asks for: whose deliveries, how many, and for how long.</summary>
 public sealed record DeliveryClaim
 {
-    /// <summary>Gets who claims; recorded on each row and checked again when the attempt is answered for.</summary>
+    /// <summary>
+    /// Gets who claims — unique to this one claim, never reused: each row records it, and an attempt is answered for only by
+    /// the claim that took it.
+    /// </summary>
     public required string Claimant { get; init; }
 
     /// <summary>
@@ -139,7 +142,7 @@ public sealed record DeliveryFailure
 /// </para>
 /// <para>
 /// <b>Lanes.</b> A delivery is claimable when it is pending, or retrying and due, or running with its lease expired; its
-/// subscriber is one the claim names; and — for an ordered subscriber — no delivery of the same subscriber and partition
+/// subscriber is one the claim names and is not paused; and — for an ordered subscriber — no delivery of the same subscriber and partition
 /// key with an earlier event id is pending, running, retrying or dead — except a delivery dead with
 /// <see cref="DeliveryRequest.UnboundReason"/>, a record of work missed while its handler did not fit the schema, which is replayed explicitly and does
 /// not hold the lane — <b>and no outbox entry of the same partition key with an earlier id is still undispatched, either
@@ -152,7 +155,14 @@ public sealed record DeliveryFailure
 /// <b>Fencing.</b> <see cref="CompleteAsync"/> and <see cref="FailAsync"/> change the row only while it is still running
 /// under the same claimant and the same attempt count, and answer whether they did — <see langword="false"/>, never an
 /// exception, when the claim no longer holds. A late finisher whose lease was reclaimed, a second answer for one attempt,
-/// and an answer for a delivery retired while it ran all change nothing.
+/// and an answer for a delivery retired while it ran all change nothing. A claimant names one claim, not a process: a
+/// delivery put back to pending restarts its attempt count, so the claimant is what tells a stale claim's answer from the
+/// current one.
+/// </para>
+/// <para>
+/// <b>The operator's members</b> read deliveries, put finished ones back to pending, pause a subscriber and record each of
+/// those changes in the operations log in the same transaction as the change; a member that changes nothing records nothing.
+/// They are abstract: a default that did nothing would report success and leave a dead delivery's lane blocked.
 /// </para>
 /// </remarks>
 public interface IDeliveryStore
@@ -214,4 +224,105 @@ public interface IDeliveryStore
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>How many deliveries were cancelled.</returns>
     Task<int> CancelPendingAsync(string subscriber, CancellationToken cancellationToken = default);
+
+    /// <summary>A page of deliveries, newest first — by delivery id — strictly after <see cref="DeliveryFilter.After"/>, without payloads.</summary>
+    /// <param name="filter">Which deliveries, and how many.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>At most <see cref="DeliveryFilter.Limit"/> deliveries.</returns>
+    /// <remarks>
+    /// A page is a stable walk, not a snapshot. A delivery id is minted when the delivery is fanned out, in order within one
+    /// process only: a delivery another replica fanned out in the same instant, or one whose fan-out committed after a page
+    /// was read, can carry an id older than the cursor and is then never reached by continuing. Paging forward never
+    /// repeats or skips a delivery that existed when its page was read; to see late arrivals, read again from the newest.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="DeliveryFilter.Limit"/> is zero or less, or more than 1 000.</exception>
+    Task<IReadOnlyList<StoredDelivery>> ListAsync(DeliveryFilter filter, CancellationToken cancellationToken = default);
+
+    /// <summary>One delivery, with its stored envelope.</summary>
+    /// <param name="id">The delivery id.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The delivery, or <see langword="null"/> when no fan-out recorded it.</returns>
+    Task<StoredDelivery?> FindAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>A delivery's recorded attempts, ascending.</summary>
+    /// <param name="id">The delivery id.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The attempts; none for an unknown id.</returns>
+    Task<IReadOnlyList<StoredDeliveryAttempt>> AttemptsAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Counts what <paramref name="filter"/> selects, exactly, samples the first ids in event order, and counts the selected
+    /// deliveries whose lane has a delivery running; changes nothing.
+    /// </summary>
+    /// <param name="filter">Which deliveries; <see cref="DeliveryFilter.After"/> is ignored.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The count, the sample and the busy count.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="DeliveryFilter.Limit"/> is zero or less, or more than 1 000.</exception>
+    Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Puts a finished delivery — succeeded, dead or cancelled — back to pending, due now, with its claim count at zero and
+    /// its last error cleared, and records <paramref name="entry"/> in the same transaction; its attempt history is kept.
+    /// Refused — <see langword="false"/> — while a delivery of the same subscriber and partition key is running, since the
+    /// reset one would run beside it.
+    /// </summary>
+    /// <param name="id">The delivery id.</param>
+    /// <param name="entry">The log row to write when the delivery changed.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>Whether it changed; <see langword="false"/> for an unfinished, busy or unknown delivery, which records nothing.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The log refused <paramref name="entry"/> — its id, or its idempotency key, is already recorded; the reset is rolled
+    /// back with it, so the delivery is unchanged.
+    /// </exception>
+    Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Puts every delivery <paramref name="filter"/> selects as replayable (<see cref="DeliveryFilter.Replayable"/>, whatever the
+    /// filter says) and whose lane runs nothing back to pending, as <see cref="RedeliverAsync"/> does, and records
+    /// <paramref name="entry"/> with how many it reset and the first <see cref="DeliveryFilter.Limit"/> of them in event order —
+    /// in one transaction, whatever the count.
+    /// </summary>
+    /// <remarks>
+    /// A selection taken with <see cref="SelectAsync"/> under the same filter counts what a replay resets, less its
+    /// <see cref="DeliverySelection.Busy"/> deliveries. A replay naming no subscriber resets only the subscribers that had a
+    /// replayable delivery when its transaction read them; one whose first arrives meanwhile is left for the next replay,
+    /// since the reset is serialized against each subscriber's claims and a subscriber not yet seen cannot be.
+    /// </remarks>
+    /// <param name="filter">Which deliveries; <see cref="DeliveryFilter.After"/> is ignored.</param>
+    /// <param name="entry">The log row; its key, when present, may be recorded once per scope.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The recorded row, or <see langword="null"/> — nothing reset — when the key is already recorded.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The log refused <paramref name="entry"/> for its id, not for its key; nothing is reset.
+    /// </exception>
+    Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default);
+
+    /// <summary>Pauses or resumes a subscriber, recording <paramref name="entry"/> in the same transaction when the state changed.</summary>
+    /// <remarks>
+    /// A paused subscriber's deliveries are still fanned out and accumulate; a claim takes none of them until it is resumed,
+    /// and its lanes then drain in order. A delivery already running when the pause commits finishes. The pause is
+    /// serialized against the subscriber's claims, so once it has returned no claim takes the subscriber's deliveries.
+    /// </remarks>
+    /// <param name="subscriber">The subscriber id.</param>
+    /// <param name="paused">Whether it should be paused.</param>
+    /// <param name="entry">The log row; a pause also stores its instant, actor and reason on the control.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>Whether the state changed; <see langword="false"/> — pausing a paused subscriber, resuming a running one — records nothing.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The log refused <paramref name="entry"/> — its id, or its idempotency key, is already recorded; the change is rolled
+    /// back with it.
+    /// </exception>
+    Task<bool> SetPausedAsync(string subscriber, bool paused, DeliveryOperationEntry entry, CancellationToken cancellationToken = default);
+
+    /// <summary>The paused subscribers, by id.</summary>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The controls.</returns>
+    Task<IReadOnlyList<SubscriberControl>> ControlsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>The log row a caller's key was recorded under.</summary>
+    /// <param name="scope">The caller's identity.</param>
+    /// <param name="key">The caller's key.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The row, or <see langword="null"/>.</returns>
+    Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default);
 }

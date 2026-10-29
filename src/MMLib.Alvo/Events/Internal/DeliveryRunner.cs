@@ -123,6 +123,65 @@ internal sealed class DeliveryRunner(
         return outcome;
     }
 
+    /// <summary>
+    /// Runs <paramref name="handler"/> once over <paramref name="event"/> exactly as an attempt would — its own scope, its
+    /// identity, one hop deeper in the chain, its timeout, one delivery span — and records nothing; the handler's exception
+    /// propagates as it was thrown — a <see cref="RecordUnreadableException"/> from reading a typed record included, which an
+    /// attempt would record dead <c>record-unreadable</c>.
+    /// </summary>
+    /// <exception cref="TimeoutException">The handler ran past its timeout; it is cancelled and not waited for.</exception>
+    internal async Task InvokeOnceAsync(AlvoEvent @event, BoundHandler handler, int attempt, CancellationToken cancellationToken)
+    {
+        var delivery = new ClaimedDelivery
+        {
+            Id = Guid.Empty,
+            EventId = @event.Id,
+            Subscriber = handler.Id,
+            PartitionKey = @event.PartitionKey,
+            Attempts = attempt,
+        };
+        using var flow = AlvoFlow.Enter(FlowOf(@event));
+        using var span = AlvoHookTelemetry.StartDelivery(handler.Id, @event, attempt);
+        try
+        {
+            await RunUnderTimeoutAsync(@event, delivery, handler, cancellationToken).ConfigureAwait(false);
+            AlvoHookTelemetry.Finish(span, AlvoHookTelemetry.Succeeded);
+        }
+        catch (Exception)
+        {
+            AlvoHookTelemetry.Finish(span, AlvoHookTelemetry.Failed);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Runs the handler off the caller's thread, as <see cref="InvokeAsync"/> does, so one that blocks synchronously still
+    /// times out; past its timeout, or once the caller cancels, it is cancelled and dropped — its later failure observed, never
+    /// tracked as abandoned, since nothing records this run. A dropped handler that ignores its token may still be running
+    /// when the caller's next round starts: a cancelled run is abandoned, not awaited.
+    /// </summary>
+    private async Task RunUnderTimeoutAsync(AlvoEvent @event, ClaimedDelivery delivery, BoundHandler handler, CancellationToken cancellationToken)
+    {
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var invocation = Task.Run(() => RunHandlerAsync(@event, delivery, handler, cancel.Token), CancellationToken.None);
+        try
+        {
+            await invocation.WaitAsync(handler.Settings.Timeout, time, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception abandoned) when (abandoned is TimeoutException or OperationCanceledException)
+        {
+            await cancel.CancelAsync().ConfigureAwait(false);
+            Observe(invocation);
+            throw;
+        }
+    }
+
+    private static void Observe(Task dropped) => _ = dropped.ContinueWith(
+        ended => _ = ended.Exception,
+        CancellationToken.None,
+        TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+        TaskScheduler.Default);
+
     /// <summary>The verdict of a handler that has ended — its own result, whatever the runner's deadline did meanwhile.</summary>
     internal static AttemptVerdict Ended(Task invocation) =>
         invocation.IsCompletedSuccessfully ? AttemptVerdict.Success
@@ -255,7 +314,7 @@ internal sealed class DeliveryRunner(
     };
 
     /// <summary>The stored envelope, or <see langword="null"/> when it cannot be read as one this handler may run on.</summary>
-    private static AlvoEvent? ReadableEvent(string payload, AlvoRunAs runAs)
+    internal static AlvoEvent? ReadableEvent(string payload, AlvoRunAs runAs)
     {
         try
         {

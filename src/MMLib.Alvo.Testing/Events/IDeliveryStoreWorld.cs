@@ -34,4 +34,8 @@ public interface IDeliveryStoreWorld : IAsyncDisposable
     /// <param name="eventId">The entry's id.</param>
     /// <returns>A task that completes when the entry is marked.</returns>
     Task MarkDispatchedAsync(Guid eventId);
+
+    /// <summary>Every row of the operations log, by when it was written and then by id.</summary>
+    /// <returns>The rows, as the store would find them.</returns>
+    Task<IReadOnlyList<DeliveryOperationEntry>> OperationsAsync();
 }

@@ -43,6 +43,7 @@ over `Entity("vehicles", …)` with that text as a CEL string `when`, the handle
 | `ordering` | `perRecord` or `none` |
 | `description` | the sentence you set in `options.Description`, or `null` |
 | `typeName` | the class that implements it, only when the host exposes type names (below); a delegate is never named |
+| `paused` | whether an operator paused the handler ([operate deliveries](/extending/operate-deliveries/#pause-and-resume)) |
 
 An id retired with `AddRetiredExtension` is not an extension and is not listed. `kind` and `stage` gain values as later
 releases add kinds of host code; a typed .NET client older than the server cannot read a value it does not know, so a
@@ -150,5 +151,4 @@ it anyway, naming the extension.
 
 ## Not yet
 
-Write hooks, commands and reads join the Lifecycle tab in later releases, each in its own lane. Delivery history,
-pause and replay arrive with the operations page.
+Write hooks, commands and reads join the Lifecycle tab in later releases, each in its own lane.

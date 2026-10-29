@@ -351,6 +351,42 @@ public interface IAlvoSqlDialect
     bool GeneratedColumnAddRequiresTableRebuild => false;
 
     /// <summary>
+    /// A statement that takes one <b>transaction-scoped</b> lock per key — shared or exclusive — held until the
+    /// transaction that ran it commits or rolls back; <see langword="null"/> for an engine that admits one writer at a time,
+    /// where no such lock is needed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>What it serializes.</b> The delivery store's claim takes a subscriber's lock shared, and an operator's reset of
+    /// that subscriber's deliveries (a redeliver, a replay) takes it exclusively, each as the first statement of its
+    /// transaction. On an engine whose writers run concurrently under READ COMMITTED, each statement reads its own
+    /// snapshot and a lane check in a <c>NOT EXISTS</c> is not re-evaluated when a concurrent writer commits, so a claim
+    /// and a reset could each pass the other's check and put two deliveries of one record in flight, or run a lane out of
+    /// order. The lock makes the second of them start its statement after the first committed. It must be a statement of
+    /// its own, ahead of the write: a statement's snapshot is taken when it starts, so a lock taken inside it is too late.
+    /// </para>
+    /// <para>
+    /// <b>Return grammar.</b> One complete statement, run with <see cref="DbCommand.ExecuteNonQueryAsync(CancellationToken)"/>
+    /// inside the caller's transaction, naming each of <paramref name="keyParameterMarkers"/> once; the caller binds each to
+    /// a 64-bit integer key and passes the markers in ascending key order, so two exclusive takers of several keys cannot
+    /// deadlock.
+    /// </para>
+    /// <para>
+    /// <b>A refusing default.</b> The default interface member throws <see cref="NotSupportedException"/>, so a driver
+    /// that does not answer fails its first claim loudly instead of running without a lock. <see langword="null"/> is an
+    /// answer a driver gives on purpose — SQLite's, where the write gate and <c>BEGIN IMMEDIATE</c> already admit one
+    /// writer at a time — and is <b>wrong</b> for any engine whose writers run concurrently.
+    /// </para>
+    /// </remarks>
+    /// <param name="keyParameterMarkers">The parameter markers the caller binds the keys to, in ascending key order.</param>
+    /// <param name="exclusive">Whether the locks are exclusive; shared otherwise.</param>
+    /// <returns>The statement, or <see langword="null"/> when the engine needs none.</returns>
+    /// <exception cref="NotSupportedException">The driver does not answer this member.</exception>
+    string? TransactionLockStatement(IReadOnlyList<string> keyParameterMarkers, bool exclusive) =>
+        throw new NotSupportedException(
+            $"{GetType().Name} does not say how it serializes a claim and an operator's reset; a driver must implement {nameof(TransactionLockStatement)}.");
+
+    /// <summary>
     /// Decides whether <paramref name="failure"/> is this engine refusing a write on a constraint a
     /// <em>caller</em> can do something about — a <c>unique</c> collision or a <c>restrict</c>-ed reference —
     /// and recovers whatever it names, or answers <see langword="null"/> when it is anything else.

@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Options;
 
+using MMLib.Alvo.Events;
 using MMLib.Alvo.Management;
 
 using System.Text.Json;
@@ -27,6 +28,19 @@ internal sealed class ExtensionCatalog(ExtensionRegistry registry, IOptions<Alvo
 
     /// <summary>The catalog envelope the Management API answers with.</summary>
     internal ManagementExtensionCatalog Catalog() => new() { Items = Items };
+
+    /// <summary>The catalog envelope, each item <c>Paused</c> as <paramref name="store"/>'s controls say; without a store nothing is paused.</summary>
+    internal async Task<ManagementExtensionCatalog> CatalogAsync(IDeliveryStore? store, CancellationToken ct)
+    {
+        if (store is null || Items.Count == 0)
+        {
+            return Catalog();
+        }
+
+        var paused = (await store.ControlsAsync(ct).ConfigureAwait(false)).Select(control => control.Subscriber).ToHashSet(StringComparer.Ordinal);
+
+        return new ManagementExtensionCatalog { Items = [.. Items.Select(item => paused.Contains(item.Id) ? item with { Paused = true } : item)] };
+    }
 
     /// <summary>The extensions that run on <paramref name="operation"/> (a policy wire name) of <paramref name="entity"/>.</summary>
     internal IReadOnlyList<ManagementExtension> RunningOn(string entity, string operation) =>

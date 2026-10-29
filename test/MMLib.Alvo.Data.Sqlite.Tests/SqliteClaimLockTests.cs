@@ -36,7 +36,7 @@ public sealed class SqliteClaimLockTests : IDisposable
     public async Task The_delivery_claim_reads_the_clock_under_the_write_lock()
     {
         var clock = new LockProbeClock(Connect);
-        var store = new EfCoreDeliveryStore(new RelationalConnectionFactory(Connect), new AlvoOptions(), clock);
+        var store = new EfCoreDeliveryStore(new RelationalConnectionFactory(Connect), new SqliteSqlDialect(), new AlvoOptions(), clock);
         await store.EnsureAsync(Ct);
         clock.Reads.Clear();
 

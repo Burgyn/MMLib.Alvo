@@ -73,4 +73,31 @@ internal enum ManagementOperation
 
     /// <summary>The danger zone: delete the project.</summary>
     DeleteProject,
+
+    /// <summary>List handler deliveries, without payloads.</summary>
+    ListDeliveries,
+
+    /// <summary>Read one delivery and its attempts.</summary>
+    GetDelivery,
+
+    /// <summary>Run a finished delivery again.</summary>
+    RedeliverDelivery,
+
+    /// <summary>Count or run again a window of finished deliveries.</summary>
+    ReplayDeliveries,
+
+    /// <summary>Take a delivery away as a redacted fixture — the shape of a payload, if none of its values.</summary>
+    GetDeliveryFixture,
+
+    /// <summary>Pause or resume a handler.</summary>
+    PauseSubscriber,
+
+    /// <summary>Switch an extension off or on.</summary>
+    SetExtensionEnabled,
+
+    /// <summary>Run a schedule now.</summary>
+    RunSchedule,
+
+    /// <summary>Read how each extension ran on this instance.</summary>
+    GetExtensionStats,
 }

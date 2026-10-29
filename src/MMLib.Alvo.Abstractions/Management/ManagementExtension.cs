@@ -65,4 +65,9 @@ public sealed record ManagementExtension
     /// <c>Alvo:Extensions:ExposeTypeNames</c>; a delegate is never named.
     /// </summary>
     public string? TypeName { get; init; }
+
+    /// <summary>
+    /// Gets whether an operator paused it: its deliveries are still recorded, wait, and run in order once it is resumed.
+    /// </summary>
+    public bool Paused { get; init; }
 }

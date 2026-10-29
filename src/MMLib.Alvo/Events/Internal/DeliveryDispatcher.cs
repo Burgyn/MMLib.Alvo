@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 
 using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Management;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 
@@ -50,9 +51,10 @@ namespace MMLib.Alvo.Events.Internal;
 /// On a stop the runner cancels the handler and answers nothing; the lease returns the delivery.
 /// </para>
 /// <para>
-/// <b>The claimant is per instance</b> (<c>{machine}:{pid}:{instance}</c>): two dispatchers in one process — two test hosts
-/// over one database — are two claimants, and completion is fenced on the attempt count besides, so a reclaimed lease's
-/// late finisher changes nothing whoever it is.
+/// <b>The claimant is per claim</b> (<c>{machine}:{pid}:{instance}:{claim}</c>): every <c>ClaimAsync</c> call mints a fresh
+/// one and every answer for what that claim took carries it, so a reclaimed lease's late finisher — in this dispatcher or
+/// another — changes nothing, and neither does an answer from before a redeliver, whose restarted attempt count alone
+/// could not tell the two claims apart. The prefix still names the process that took a row.
 /// </para>
 /// </remarks>
 /// <param name="store">The delivery queue: claim under a lease; the runner answers for each attempt.</param>
@@ -77,6 +79,7 @@ internal sealed class DeliveryDispatcher(
     TimeProvider time,
     ILogger<DeliveryDispatcher> logger) : BackgroundService
 {
+    /// <summary>The process's prefix of every claimant, so a row's <c>claimed_by</c> still says which process took it.</summary>
     private readonly string _claimant = $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
     private bool _storeReady;
 
@@ -99,19 +102,44 @@ internal sealed class DeliveryDispatcher(
         {
             cancellationToken.ThrowIfCancellationRequested();
             var slots = Math.Min(deliveries.Value.MaxConcurrency, events.Value.BatchSize - claimedInRound);
-            var claimed = await ClaimAsync(bindings, slots, cancellationToken).ConfigureAwait(false);
+            var (claimant, claimed) = await ClaimAsync(bindings, slots, cancellationToken).ConfigureAwait(false);
             if (claimed.Count == 0)
             {
                 break;
             }
 
             claimedInRound += claimed.Count;
-            await Task.WhenAll(claimed.Select(delivery => RunContainedAsync(delivery, bindings, round, cancellationToken))).ConfigureAwait(false);
+            await Task.WhenAll(claimed.Select(delivery => RunContainedAsync(delivery, bindings, round, claimant, cancellationToken))).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
         }
 
         return round.Result(claimedInRound);
     }
+
+    /// <summary>
+    /// Runs the handler a fixture names, once, over the fixture's envelope as a delivery attempt would, behind the manual
+    /// round's gates; it claims nothing and records nothing (spec 2026-10-14 HX-06 acceptance (6)).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// A gate is shut, the handler is not bound here, or the envelope cannot be read as an event the handler may run on — or
+    /// the handler itself threw one.
+    /// </exception>
+    internal async Task DeliverFixtureAsync(DeliveryFixture fixture, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(fixture);
+        var bindings = binder.For(EnsureManualGates());
+        var handler = bindings.Handler(fixture.Subscriber) ?? throw UnboundFixture(fixture.Subscriber, bindings);
+        var @event = DeliveryRunner.ReadableEvent(fixture.Envelope.GetRawText(), handler.Settings.RunAs)
+            ?? throw new InvalidOperationException(
+                $"The fixture's envelope cannot be read as an event '{handler.Id}' can run: it is not a CloudEvents envelope Alvo wrote, "
+                + "or its tenant or caller id is malformed. Restore the envelope's attributes as they were downloaded.");
+
+        await runner.InvokeOnceAsync(@event, handler, Math.Max(1, fixture.Attempt), cancellationToken).ConfigureAwait(false);
+    }
+
+    private static InvalidOperationException UnboundFixture(string subscriber, ExtensionBindings bindings) => new(
+        $"The fixture is for '{subscriber}', which this host does not bind. Register the handler under that id, or edit the "
+        + $"fixture's subscriber. This host binds: {(bindings.Handlers.Count == 0 ? "none" : string.Join(", ", bindings.Handlers.Select(handler => handler.Id)))}.");
 
     private PolicyCatalog EnsureManualGates()
     {
@@ -119,14 +147,14 @@ internal sealed class DeliveryDispatcher(
         if (settings.DispatchMode is not AlvoEventDispatchMode.Manual || !settings.Enabled)
         {
             throw new InvalidOperationException(
-                "A manual delivery round was refused before anything was claimed: the dispatch mode is not manual, or events "
+                "A manual delivery run — a round, or a fixture delivered — was refused before anything ran: the dispatch mode is not manual, or events "
                 + $"are off. Configured: mode '{settings.DispatchMode}', enabled {settings.Enabled}.");
         }
 
         return boot.Phase is AlvoBootPhase.Ready && catalogs.Current is { } catalog
             ? catalog
             : throw new InvalidOperationException(
-                "A manual delivery round was refused before anything was claimed: the boot has not primed a schema, so no "
+                "A manual delivery run — a round, or a fixture delivered — was refused before anything ran: the boot has not primed a schema, so no "
                 + "handler can be bound. Start the host, let its boot finish, and apply a descriptor first.");
     }
 
@@ -185,8 +213,8 @@ internal sealed class DeliveryDispatcher(
         {
             await EnsureStoreAsync(stop).ConfigureAwait(false);
             var bindings = binder.For(catalogs.Current!);
-            var claimed = await ClaimAsync(bindings, deliveries.Value.MaxConcurrency - running.Count, stop).ConfigureAwait(false);
-            running.AddRange(claimed.Select(delivery => RunContainedAsync(delivery, bindings, round: null, stop)));
+            var (claimant, claimed) = await ClaimAsync(bindings, deliveries.Value.MaxConcurrency - running.Count, stop).ConfigureAwait(false);
+            running.AddRange(claimed.Select(delivery => RunContainedAsync(delivery, bindings, round: null, claimant, stop)));
             if (claimed.Count == 0)
             {
                 await Task.WhenAny([Task.Delay(events.Value.PollInterval, time, stop), .. running]).ConfigureAwait(false);
@@ -241,18 +269,25 @@ internal sealed class DeliveryDispatcher(
         }
     }
 
-    /// <summary>Claims up to <paramref name="batchSize"/> lane heads of the bound handlers that are not stood down.</summary>
-    private async Task<IReadOnlyList<ClaimedDelivery>> ClaimAsync(ExtensionBindings bindings, int batchSize, CancellationToken ct)
+    /// <summary>
+    /// Claims up to <paramref name="batchSize"/> lane heads of the bound handlers that are not stood down, under a claimant
+    /// minted for this one claim — the process prefix and a fresh guid — which every answer for what it took carries: a
+    /// redeliver restarts a delivery's attempt count, so only the claimant tells a stale claim's answer from the current one.
+    /// </summary>
+    private async Task<(string Claimant, IReadOnlyList<ClaimedDelivery> Claimed)> ClaimAsync(
+        ExtensionBindings bindings, int batchSize, CancellationToken ct)
     {
         var claimable = bindings.Handlers.Where(handler => !abandoned.StoodDown(handler.Id)).ToList();
+        var claimant = $"{_claimant}:{Guid.NewGuid():N}";
+
         return batchSize <= 0 || claimable.Count == 0
-            ? []
-            : await store.ClaimAsync(ClaimOf(bindings, claimable, batchSize), ct).ConfigureAwait(false);
+            ? (claimant, [])
+            : (claimant, await store.ClaimAsync(ClaimOf(bindings, claimable, batchSize, claimant), ct).ConfigureAwait(false));
     }
 
-    private DeliveryClaim ClaimOf(ExtensionBindings bindings, List<BoundHandler> claimable, int batchSize) => new()
+    private DeliveryClaim ClaimOf(ExtensionBindings bindings, List<BoundHandler> claimable, int batchSize, string claimant) => new()
     {
-        Claimant = _claimant,
+        Claimant = claimant,
         Ordered = [.. claimable.Where(handler => handler.Settings.Ordering is AlvoOrdering.PerRecord).Select(handler => handler.Id)],
         Unordered = [.. claimable.Where(handler => handler.Settings.Ordering is AlvoOrdering.None).Select(handler => handler.Id)],
         BatchSize = batchSize,
@@ -262,7 +297,8 @@ internal sealed class DeliveryDispatcher(
     };
 
     /// <summary>Runs one delivery, containing whatever the runner throws so neither its round nor the loop is affected.</summary>
-    private async Task RunContainedAsync(ClaimedDelivery delivery, ExtensionBindings bindings, DrainRound? round, CancellationToken stop)
+    private async Task RunContainedAsync(
+        ClaimedDelivery delivery, ExtensionBindings bindings, DrainRound? round, string claimant, CancellationToken stop)
     {
         if (bindings.Handler(delivery.Subscriber) is not { } handler)
         {
@@ -272,7 +308,7 @@ internal sealed class DeliveryDispatcher(
         round?.Ran(delivery.Subscriber);
         try
         {
-            var outcome = await runner.RunAsync(delivery, handler, _claimant, stop).ConfigureAwait(false);
+            var outcome = await runner.RunAsync(delivery, handler, claimant, stop).ConfigureAwait(false);
             if (outcome is DeliveryRunOutcome.Failed or DeliveryRunOutcome.Dead)
             {
                 round?.Failed();

@@ -35,4 +35,26 @@ public interface IAlvoEventPump
     /// to stop, which is refused before anything is claimed.
     /// </exception>
     Task<AlvoDrainResult> DrainAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Runs the handler a fixture names, once, over the fixture's envelope — in its own scope, as its configured identity,
+    /// one hop deeper in the chain, under its timeout — exactly as a delivery attempt would, and records nothing.
+    /// </summary>
+    /// <remarks>
+    /// The way to reproduce a delivery taken from another instance: the handler's own exception reaches the caller as it was
+    /// thrown. Refused unless the dispatchers are manual — a fixture is an event nobody wrote, and only a test host may run one.
+    /// A typed handler reads the record as its host type first, so a redacted value in a typed field fails with a
+    /// <see cref="InvalidOperationException"/> naming the field before the handler runs, and nothing is recorded: fill it in
+    /// and run again.
+    /// </remarks>
+    /// <param name="fixture">The fixture, with whatever redacted values the reproduction needs filled in.</param>
+    /// <param name="cancellationToken">Cancels the run, as the host stopping does.</param>
+    /// <returns>A task that completes when the handler returns.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="fixture"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The dispatch mode is not <see cref="AlvoEventDispatchMode.Manual"/>, the boot is not ready, the handler is not bound,
+    /// the envelope cannot be read, or the call was made from inside a round.
+    /// </exception>
+    /// <exception cref="TimeoutException">The handler ran past its timeout.</exception>
+    Task DeliverAsync(Management.DeliveryFixture fixture, CancellationToken cancellationToken = default);
 }

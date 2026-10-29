@@ -557,7 +557,15 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 
     /// <summary>What a sweep sends for each route parameter the management surface declares.</summary>
     private static readonly Dictionary<string, string> _routeParameterValues =
-        new(StringComparer.Ordinal) { ["project"] = "no-such-project", ["revision"] = "0" };
+        new(StringComparer.Ordinal)
+        {
+            ["project"] = "no-such-project",
+            ["revision"] = "0",
+            ["delivery"] = Guid.Empty.ToString(),
+            ["subscriber"] = "no-such-handler",
+            ["extension"] = "no-such-extension",
+            ["schedule"] = "no-such-schedule",
+        };
 
     /// <summary>One path segment, with a route parameter replaced by a value a request can carry.</summary>
     /// <param name="segment">The raw segment, which may be a <c>{name}</c> or <c>{name:constraint}</c> token.</param>

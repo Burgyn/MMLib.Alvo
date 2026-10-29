@@ -16,6 +16,11 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// ANSI.</b> The outbox already spells its claim the same way; the T-SQL dialect question for Alvo's own tables belongs
 /// to the Azure SQL provider (#92).
 /// </para>
+/// <para>
+/// <b>An attempt is numbered after the delivery's last recorded one.</b> The row's <c>attempts</c> counts claims since the
+/// delivery was last put back to pending — what the retry policy and the attempt ceiling read — while the history numbers
+/// every attempt the delivery ever had, so a redelivered row neither collides with its own history nor loses it.
+/// </para>
 /// </remarks>
 internal static class DeliveryTable
 {
@@ -125,9 +130,20 @@ internal static class DeliveryTable
     private static string FanOutRow(int row) =>
         $"(@id{row}, @event_id{row}, @subscriber{row}, @partition_key{row}, @tenant_id{row}, @kind{row}, @status{row}, 0, @now, @completed_at{row}, @last_error_type{row})";
 
-    internal static string ClaimSql(string table, string outbox, int ordered, int unordered)
+    /// <summary>
+    /// The claim: one conditional update whose outer condition repeats the claimability test — pending or due, a subscriber
+    /// the claim names, not paused, the head of its lane — so a claimant blocked behind another claims nothing twice.
+    /// </summary>
+    /// <remarks>
+    /// The pause is a <c>NOT EXISTS</c> over <paramref name="controls"/> in both halves, not a filter of the subscribers the
+    /// dispatcher names: it holds on every replica and across restarts with no read-then-claim window. The store takes the
+    /// subscriber's lock shared before this statement and a pause takes it exclusively, so on PostgreSQL a claim statement
+    /// never runs on a snapshot that predates a committed pause.
+    /// </remarks>
+    internal static string ClaimSql(string table, string outbox, string controls, int ordered, int unordered)
     {
-        var condition = $"{Claimable} AND {Registered(ordered + unordered)} AND {LaneHead(table, outbox, ordered, unordered)}";
+        var condition =
+            $"{Claimable} AND {Registered(ordered + unordered)} AND {NotPaused(table, controls)} AND {LaneHead(table, outbox, ordered, unordered)}";
 
         return
             $"""
@@ -140,6 +156,9 @@ internal static class DeliveryTable
             RETURNING id, event_id, subscriber, partition_key, attempts
             """;
     }
+
+    private static string NotPaused(string table, string controls) =>
+        $"NOT EXISTS (SELECT 1 FROM {controls} paused WHERE paused.subscriber = {table}.subscriber AND paused.paused_at IS NOT NULL)";
 
     private static string Registered(int subscribers) => $"subscriber IN ({Parameters(0, subscribers)})";
 
@@ -178,10 +197,20 @@ internal static class DeliveryTable
          WHERE {Fence}
         """;
 
+    /// <summary>
+    /// Records one answered attempt, numbered after the delivery's last recorded one (<c>COALESCE(MAX(attempt), 0) + 1</c>).
+    /// </summary>
+    /// <remarks>
+    /// <b>The number is safe only because the answer's fenced <c>UPDATE</c> of the delivery row runs first, in the same
+    /// transaction.</b> On PostgreSQL's <c>READ COMMITTED</c> two concurrent <c>MAX + 1</c> reads would see the same
+    /// maximum; what serializes them is the row lock that fenced update takes on the delivery, which every writer of the
+    /// delivery's history holds before it inserts here. So the invariant is: a reset, a redeliver or a replay goes through
+    /// an <c>UPDATE</c> of the delivery row, and nothing ever writes <c>{attempts}</c> directly.
+    /// </remarks>
     internal static string AttemptSql(string attempts) =>
         $"""
         INSERT INTO {attempts} (delivery_id, attempt, started_at, duration_ms, outcome, error_type)
-        VALUES (@id, @attempts, @started_at, @duration_ms, @outcome, @error_type)
+        SELECT @id, COALESCE(MAX(attempt), 0) + 1, @started_at, @duration_ms, @outcome, @error_type FROM {attempts} WHERE delivery_id = @id
         """;
 
     internal static string PendingSubscribersSql(string table) =>

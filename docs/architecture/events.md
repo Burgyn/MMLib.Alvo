@@ -1127,6 +1127,55 @@ a global entity's event — whose envelope carries no `tenantid` — matches not
 does; an apply-time warning for that mistake is #400. Retention (#154) must cover both delivery
 tables and keep an outbox row while any delivery of its event is unfinished.
 
+### Operating deliveries (HX-06)
+
+The operator's story is *Operate deliveries* on the docs site; the routes and the second port are *Operations* in
+`management-api.md`. This is what the store does underneath.
+
+- **The store's operator members.** `IDeliveryStore` gains nine abstract members — `ListAsync`, `FindAsync`,
+  `AttemptsAsync`, `SelectAsync`, `RedeliverAsync`, `ReplayAsync`, `SetPausedAsync`, `ControlsAsync`,
+  `FindOperationAsync` — and `ClaimAsync` must never claim for a paused subscriber. Abstract, not default: a default
+  `RedeliverAsync` that did nothing would report success and leave the lane blocked. Breaking for a third-party store
+  (CHANGELOG). `ListAsync` caps `DeliveryFilter.Limit` at 1 000; the wire caps at 200.
+- **One transaction per change, write-first.** A redeliver, replay, pause or resume writes its change and its
+  `<prefix>_operations_log` row together; the log insert is the transaction's first write, so a crash cannot leave a
+  change without its row, and a failing log insert rolls the change back. A change that changed nothing writes nothing
+  — no row, no audit line — except a replay, whose row is its idempotency key's record.
+- **The reset, and the history.** Redeliver and replay set `attempts = 0` — what the retry policy, the backoff and the
+  runner's ceiling read — so a delivery that died at its last attempt runs again instead of being reclaimed dead
+  `lease-expired`. The history keeps every attempt and numbers the next one `COALESCE(MAX(attempt), 0) + 1` per
+  delivery, so it neither collides with the `(delivery_id, attempt)` key nor forgets. This replaces HX-03's by-hand SQL,
+  which deleted the history.
+- **The claimant is unique per claim (the fence).** With the count restarting, a claim from before a redeliver and the
+  claim after it would both hold attempt 1; so the dispatcher mints a fresh claimant (`"{process}:{guid}"`) for every
+  `ClaimAsync` call, and a late answer from the earlier claim matches no row and changes nothing.
+- **The pause lives in the claim.** A `NOT EXISTS` over `<prefix>_subscriber_controls` in both halves of the claim, not
+  a filter on the dispatcher's subscriber list: it holds on every replica, survives a restart, and is one statement
+  with no read-then-claim window. Fan-out is untouched, so a paused handler's deliveries accumulate and run in order on
+  resume; a delivery already running finishes.
+- **The per-subscriber lane lock.** On PostgreSQL every claim takes a transaction-scoped advisory lock per subscriber
+  it may claim for, **shared**; redeliver, replay and pause take it **exclusive**. The key is FNV-1a 64-bit over the
+  UTF-8 of the table and subscriber, computed in .NET so it is the same on every replica. So a reset cannot race a claim
+  into putting two deliveries of one record in flight, and a pause waits for a claim already under way: no batch is
+  claimed after the pause commits. SQLite needs no lock — its writes are already serialized by the write gate — and
+  its dialect answers `null`. `IAlvoSqlDialect.TransactionLockStatement`'s default throws `NotSupportedException`, so a
+  third engine must say how it serializes, rather than silently not.
+- **The guards.** Redeliver and replay refuse (409) a lane with a delivery of the handler running, and never reset a row
+  dead with `chain-depth-exceeded` — the record of a loop the depth limit stopped. The reset statement itself skips the
+  busy rows, so a race cannot slip past the check.
+- **Conditions are not evaluated again.** `when` was decided at fan-out. A row recorded `unbound` or `when-failed` was
+  recorded without a decided condition, so redelivering or replaying it runs the handler even for a record the
+  condition would not have matched — HX-03 (6)'s trade-off, now in the operator's hands.
+- **Stats** come from one process-wide `MeterListener` on `alvo.delivery.duration`, in 24 hourly buckets (the current
+  partial hour plus 23), for registered subscribers only — `scope: "this-instance"`, lost on restart.
+- **`DeliverAsync`** (`IAlvoEventPump`, surfaced as `AlvoTestHost.DeliverAsync`) runs a fixture's handler once as a
+  delivery would — its scope, its `RunAs`, its timeout, one hop deeper — and records nothing. Manual dispatch mode only:
+  a fixture is an event nobody wrote. A typed handler given a redacted value in a field it maps throws
+  `InvalidOperationException` naming the field before the handler runs.
+- **Fixture redaction is fail-closed.** A value stays only when it is recognised as a key in a key's shape (`id`,
+  `tenant_id`, uuid `ref` fields, listed `enum` values) or is null; `authid` and `causationid` stay only as uuids;
+  `tracestate` is dropped.
+
 ## Chain depth
 
 **One counter bounds every loop a hook, handler or timer can start** (HX-01, spec 2026-10-14 X3). Every write and

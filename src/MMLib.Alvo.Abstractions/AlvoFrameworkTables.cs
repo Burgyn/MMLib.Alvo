@@ -57,6 +57,12 @@ internal static class AlvoFrameworkTables
     /// <summary>The suffix of the table holding one row per delivery attempt.</summary>
     internal const string DeliveryAttemptsSuffix = "_delivery_attempts";
 
+    /// <summary>The suffix of the table holding one row per subscriber an operator has paused.</summary>
+    internal const string SubscriberControlsSuffix = "_subscriber_controls";
+
+    /// <summary>The suffix of the table holding one row per audited delivery operation.</summary>
+    internal const string OperationsLogSuffix = "_operations_log";
+
     /// <summary>The suffix of the table holding administrator accounts.</summary>
     internal const string IdentityUsersSuffix = "_identity_users";
 
@@ -119,6 +125,8 @@ internal static class AlvoFrameworkTables
             schemaPrefix + SecretsSuffix,
             schemaPrefix + DeliveriesSuffix,
             schemaPrefix + DeliveryAttemptsSuffix,
+            schemaPrefix + SubscriberControlsSuffix,
+            schemaPrefix + OperationsLogSuffix,
             .. IdentitySuffixes.Select(suffix => schemaPrefix + suffix),
         ];
     }

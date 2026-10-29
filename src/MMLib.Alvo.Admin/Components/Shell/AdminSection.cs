@@ -75,6 +75,7 @@ internal static class AdminNavigation
         new("Access", AdminPaths.Access, Icons.Access, 'a'),
         new("Configuration history", AdminPaths.History, Icons.History, 'h') { ShortTitle = "History" },
         new("Integrations", AdminPaths.Integrations, Icons.Integrations, 'i'),
+        new("Operations", AdminPaths.Operations, Icons.Operations, 'p'),
     ];
 
     /// <summary>The sections the descriptor may declare and this build does not run.</summary>

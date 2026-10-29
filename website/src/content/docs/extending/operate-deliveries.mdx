@@ -1,0 +1,143 @@
+---
+title: Operate deliveries
+description: See what your handlers did after each commit, pause one, run a dead delivery again, replay what failed, and take a delivery home as a redacted fixture to reproduce it in a test.
+sidebar:
+  order: 6
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import handlers from '../../../snippets/extending/operations/RepairDeskHandlers.cs?raw';
+import tests from '../../../snippets/extending/operations/RepairDeskOperationsTests.cs?raw';
+import descriptor from '../../../snippets/extending/operations/repair-desk.alvo.json?raw';
+
+An [event handler](/extending/event-handlers/) runs after the commit, so when it fails nobody is waiting on the request.
+This page is what an operator does next: look at what ran, pause a handler, run a dead delivery again, replay a window,
+and take one delivery home as a fixture to reproduce it in a test.
+
+## A delivery, and where it can end
+
+Alvo records one **delivery** per (event, handler). It is `pending`, `running`, `succeeded`, `retrying`, `dead` or
+`cancelled`. A dead delivery holds that record's later deliveries for the same handler back — unless the handler was
+registered with `Ordering = None` — until it is redelivered, replayed or cancelled.
+
+<Code code={descriptor} lang="json" title="repair-desk.alvo.json" />
+
+<SourceExcerpt code={handlers} from="public static IAlvoBuilder AddRepairDesk" to="Orders the part a new repair needs." title="RepairDeskHandlers.cs" />
+
+## Who may do what
+
+| Operation | Level |
+|---|---|
+| List deliveries, read one, extension stats | `viewer` |
+| Redeliver, replay, pause and resume, fixture, run a schedule | `developer` |
+| Switch an extension off | `admin` |
+
+The levels come from the descriptor's `access` block, as for every management route. A viewer sees ids, statuses,
+tenants and error types — never a payload. Deliveries are not separated per project: the levels are instance-wide, and
+a viewer sees every tenant's deliveries.
+
+## Look
+
+`GET {management}/projects/{project}/deliveries?subscriber=&status=&from=&to=&after=&limit=` lists deliveries newest
+first; `next` is the cursor for the following page, `limit` is 1–200 (50 unless set), and `from`/`to` are event time
+with the end excluded — a bound before 1970 reads as 1970, since no event precedes it. `GET …/deliveries/{id}` answers one delivery with its attempts, numbered across the delivery's
+whole life — a redelivery keeps counting. In-process, `IAlvoOperations` answers the same.
+
+`GET …/extensions/stats` answers runs, failures and p50/p95 per handler over the current partial hour and the 23 hours
+before it, **for this instance only** (`scope: "this-instance"`): another replica's runs are not in it, a restart starts
+the day over (`since` says from when), and only the handlers this host registers are listed.
+
+## Run a dead delivery again
+
+`POST …/deliveries/{id}/redeliver` with `{ "reason": "…" }` puts a finished delivery back to `pending` with a fresh
+attempt budget; its history is kept, and its lane drains after it. It does not evaluate the handler's `when` again.
+
+- A delivery still `pending` or `retrying` is answered as it is — nothing changes.
+- A `running` delivery is 409.
+- A delivery whose record has another delivery of the handler running is 409 — two would run at once; wait, then
+  redeliver.
+- A delivery dead with `chain-depth-exceeded` is 409: the depth limit stopped a loop there — fix the handler, do not
+  restart the loop.
+- A delivery whose handler this host no longer registers is 409 — retire it with `AddRetiredExtension` instead.
+
+A redelivered `unbound` delivery waits — and holds its record's later deliveries for that handler back — until the
+handler binds.
+
+<SourceExcerpt code={tests} from="supplier.Down = false;" to="supplier.Ordered.ShouldBe" title="RepairDeskOperationsTests.cs" />
+
+The by-hand SQL this used to take is no longer needed.
+
+## Replay a window
+
+`POST …/deliveries/replay` with `{ "subscriber", "status", "from", "to", "dryRun", "reason" }` resets every delivery of
+one handler in one finished status (`dead` unless set) whose event falls in the window.
+
+- **Ask with `"dryRun": true` first.** It answers the exact count and the first 20 ids, and changes nothing.
+- `dryRun` belongs in the body, not in the query string as on apply and rollback. A replay with any query parameter, or
+  with a body member it does not read (a misspelled `dry_run`, say), is 422 naming what to change, and nothing is reset.
+- A real run resets at most 10 000 deliveries, never resets one dead with `chain-depth-exceeded`, and is refused (409)
+  while any selected record has a delivery of the handler running.
+- Send an `Idempotency-Key` so a retried request answers the first one's count (`"replayed": true`) instead of running
+  them twice. The key is scoped to the caller; the reason is not part of the request's fingerprint, so a reworded note is
+  the same request; the same key with a different request is 409 `idempotency-conflict`; a key on a dry run is refused.
+
+Replayed deliveries run after newer events of the same records that already ran, and **their conditions are not
+evaluated again**. A delivery recorded `unbound` was recorded without its condition, so a replay of `unbound` rows can run
+the handler for records its condition would not have matched — check `when` in the handler body if that matters.
+
+## Pause and resume
+
+`PUT …/subscribers/{id}/paused` with `{ "paused": true, "reason": "…" }` pauses a handler on every instance until it is
+resumed — it survives a restart. New deliveries are still recorded and wait. A delivery already running finishes; on
+PostgreSQL the pause waits for a claim already under way, so no batch is taken after the pause commits. After resume,
+the waiting deliveries run: one record's in order, as the handler's ordering says, but different records' in no order
+between them. The [catalog](/extending/extension-catalog/) and the dashboard show `paused`.
+
+<SourceExcerpt code={tests} from="public async Task A_paused_handler_catches_up_once_resumed" to="paused: false, reason: null" title="RepairDeskOperationsTests.cs" />
+
+## Reproduce a delivery locally
+
+`GET …/deliveries/{id}/fixture` (developer) answers the delivery's envelope with every value that is not a key replaced
+by `<redacted:FIELD>`. Redaction fails closed: a value stays only when it is recognised as a key and has a key's
+shape — `id` and `tenant_id`, `ref` fields holding a uuid, `enum` fields holding a value the schema lists — plus null
+values and the changed-field names the entity declares. A `uuid` field is redacted. The envelope's attributes stay
+because they identify rather than describe — a data event's subject and partition key included — but `authid` and
+`causationid` only as uuids. An application event, or an entity the schema no longer declares, keeps only `id` and the
+namespace part of its partition key; its changed-field names are redacted. `tracestate` is dropped.
+
+Save it, fill in what the failure depends on, and run it with `AlvoTestHost.DeliverAsync(fixture)`: the handler runs
+once as a delivery would — its scope, its identity, its timeout — and its exception reaches your test as it was thrown.
+
+A typed handler reads the record as its host type first, so a `<redacted:FIELD>` left in a number, a date or a flag its
+class maps throws `InvalidOperationException` naming the field before the handler runs, and nothing is recorded: fill in
+the fields your type reads, then deliver the fixture again.
+
+<SourceExcerpt code={tests} from="var fixture = await operations.GetFixtureAsync" to="alvo.DeliverAsync(fixture, ct)" title="RepairDeskOperationsTests.cs" />
+
+## Audit
+
+Every pause, resume, redeliver and replay that changed something writes one row to `<prefix>_operations_log` (who,
+when, what, on what, why, how many) and one `ManagementAudit` log line at Warning; one that changed nothing writes
+neither. A replay always writes its row — it is its idempotency key's record. The log is not pruned yet.
+
+## On the dashboard
+
+The **Operations** page (`g p`) lists each handler with its runs on this instance, **Pause**/**Resume**, and **Replay
+dead** (the dry run's count first); the delivery list by status; and a delivery's attempts, **Run again** and
+**Fixture**.
+
+## Switching code off, and schedules
+
+`PUT …/extensions/{id}/enabled` exists for validate hooks, which arrive with write hooks; for an event handler it
+answers 409 naming the pause route. `POST …/schedules/{id}/run` answers 404 until schedules exist.
+
+## Known limits
+
+- The management routes that change something carry no antiforgery check for a cookie-authenticated caller; this is
+  true of every mutating management route, not only these.
+- Stats are per process and are lost on restart.
+- On PostgreSQL a pause, redeliver or replay briefly holds back claims for **every** handler on every instance, not only
+  its own: a claim locks all the handlers it may claim for, and PostgreSQL queues it behind the operator's waiting lock.
+  For a pause or a redeliver that is one short statement; a real replay holds them back while it resets its rows (up to
+  10 000). Nothing is lost or reordered — deliveries only start later. SQLite has no such effect.

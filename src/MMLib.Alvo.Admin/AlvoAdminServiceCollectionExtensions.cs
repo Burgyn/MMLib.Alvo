@@ -114,6 +114,11 @@ public static class AlvoAdminServiceCollectionExtensions
         });
         services.TryAddScoped<DataGateway>();
 
+        /* Scoped like the management gateway it composes: the operator, the project and the catalog cache are this circuit's. */
+        services.TryAddScoped(provider => new OperationsGateway(
+            provider.GetRequiredService<IAlvoOperations>(),
+            provider.GetRequiredService<ManagementGateway>()));
+
         /* Both of the assistant gateway's own dependencies are optional, and neither absence is an error: a
            deployment that installed no agent package has no IAlvoAssistant, and one whose secrets are
            deployed rather than clicked has no writable ISecretStore. The same factory shape the management

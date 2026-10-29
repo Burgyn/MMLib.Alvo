@@ -22,6 +22,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/docs/DocsSnippets.cs" Link="_shared/DocsSnippets.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/InternalMemberReferences.cs" Link="_shared/InternalMemberReferences.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/literals/LiteralText.cs" Link="_shared/LiteralText.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/testhost/AuditCapture.cs" Link="_shared/AuditCapture.cs" />
   </ItemGroup>
 
 </Project>

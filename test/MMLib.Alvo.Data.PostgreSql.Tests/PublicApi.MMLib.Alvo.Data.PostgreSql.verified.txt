@@ -25,6 +25,7 @@ namespace MMLib.Alvo.Data.PostgreSql
         public string RenderNullProjection(string storeType) { }
         public string RenderTable(MMLib.Alvo.Schema.EntitySchema entity, MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation? lockedPreImageFor) { }
         public string RowLockClause(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation mutation) { }
+        public string? TransactionLockStatement(System.Collections.Generic.IReadOnlyList<string> keyParameterMarkers, bool exclusive) { }
     }
 }
 namespace Microsoft.Extensions.DependencyInjection

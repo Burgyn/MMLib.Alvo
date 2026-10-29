@@ -29,6 +29,20 @@ because it is infrastructure configuration rather than a block a locked-out proj
 | `POST {m}/projects/{project}/revisions/{revision:int}/rollback` | `RollbackAsync` | `developer` |
 | `PUT {m}/ai/connection` | `SetAiConnectionAsync` | `admin` |
 
+Nine more, from the operations contract — see *Operations*:
+
+| Route | `IAlvoOperations` member | Level |
+|---|---|---|
+| `GET {m}/projects/{project}/deliveries` | `ListDeliveriesAsync` | `viewer` |
+| `GET {m}/projects/{project}/deliveries/{delivery:guid}` | `GetDeliveryAsync` | `viewer` |
+| `GET {m}/projects/{project}/extensions/stats` | `GetExtensionStatsAsync` | `viewer` |
+| `GET {m}/projects/{project}/deliveries/{delivery:guid}/fixture` | `GetFixtureAsync` | `developer` |
+| `POST {m}/projects/{project}/deliveries/{delivery:guid}/redeliver` | `RedeliverAsync` | `developer` |
+| `POST {m}/projects/{project}/deliveries/replay` | `ReplayAsync` | `developer` |
+| `PUT {m}/projects/{project}/subscribers/{subscriber}/paused` | `SetPausedAsync` | `developer` |
+| `POST {m}/projects/{project}/schedules/{schedule}/run` | `RunScheduleAsync` | `developer` |
+| `PUT {m}/projects/{project}/extensions/{extension}/enabled` | `SetEnabledAsync` | `admin` |
+
 And seven more, from a second contract — see *Administering people*:
 
 | Route | `IAlvoUserAdministration` member | Level |
@@ -203,6 +217,39 @@ the wire). The guard reads the in-process current catalog: two applies racing be
 another replica, are not covered — the same window the catalog publish already has. With no handler registered it costs
 nothing; with one, a Management apply builds the proposed catalog twice (preview, then apply) and publishes the very
 instance it checked. A `RuntimeSchemaService` a host constructs itself through the public constructor carries no guard.
+
+## Operations
+
+`IAlvoOperations` is a second port beside `IAlvoManagement`, not more members on it. `IAlvoManagement` is
+descriptor-shaped — what the backend *is*, planned, applied and rolled back by revision; operations act on runtime
+state — what a handler *did* after a commit — and no revision describes them. They share one gate
+(`ManagementGate`: the project check and the level check) and one level table, so a level means the same on both. The
+operator's story is *Operate deliveries* on the docs site; the store side is *Operating deliveries (HX-06)* in
+`events.md`.
+
+- **Levels are instance-wide.** Deliveries are not separated per project: a viewer of the instance sees every
+  delivery's ids, statuses, tenants and error types — never a payload. The fixture, which discloses a payload's shape,
+  is Developer.
+- **Pages.** The wire takes `limit` 1–200 (50 unless set); the store's own `DeliveryFilter.Limit` caps at 1 000.
+  Newest first by delivery id, continued with `after`; `next` is set whenever a page is full.
+- **The replay's `Idempotency-Key`.** Optional, one header line, refused on a dry run. Scoped per caller
+  (`AlvoIdempotency.IdentityOf`), not per project; the fingerprint is the operation, project, subscriber, status and
+  window — not the reason. A retry answers the stored count and ids with `replayed: true`; the same key with a
+  different request is 409 `idempotency-conflict`. Its record is the operations log row, written as the **first write
+  of the reset's own transaction** (`ON CONFLICT DO NOTHING` makes a concurrent duplicate a no-op) — unlike the
+  apply's record, which is written after the commit (*The post-commit window, stated plainly*). A crash cannot leave a
+  reset without its record. A replay resets at most 10 000 deliveries.
+- **The 409s** (`ManagementConflictException`): redeliver of a running delivery, of one whose record has another
+  delivery of the handler running, of one dead with `chain-depth-exceeded`, or of one whose handler this host no longer
+  registers; a real replay while any selected record has a delivery of the handler running; `SetEnabledAsync` on an
+  event handler (naming the pause route). A redeliver or replay does not evaluate `when` again.
+- **Shipped refusing.** The port is complete now so a later member does not break every implementer and test double:
+  `SetEnabledAsync` answers 404 or 409 for every kind that exists until validate hooks, and `RunScheduleAsync` 404 until
+  schedules.
+- **Stats are this instance's** (`scope: "this-instance"`): only registered subscribers, over the current partial hour
+  plus the 23 before it, from a process-wide `MeterListener`; a restart starts over.
+- **Known limit, not fixed here.** The management routes that change something carry no antiforgery check for a
+  cookie-authenticated caller. It is pre-existing and true of every mutating management route; these nine inherit it.
 
 ## One path, two transports
 

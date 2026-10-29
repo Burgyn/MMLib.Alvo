@@ -18,7 +18,8 @@
       "runAs": "system",
       "ordering": "perRecord",
       "description": null,
-      "typeName": null
+      "typeName": null,
+      "paused": false
     },
     {
       "id": "ticket-resolved",
@@ -37,7 +38,8 @@
       "runAs": "system",
       "ordering": "perRecord",
       "description": "Posts to the chat when a ticket is resolved.",
-      "typeName": null
+      "typeName": null,
+      "paused": false
     },
     {
       "id": "orders-approved",
@@ -52,7 +54,8 @@
       "runAs": "eventActor",
       "ordering": "none",
       "description": null,
-      "typeName": null
+      "typeName": null,
+      "paused": false
     }
   ]
 }

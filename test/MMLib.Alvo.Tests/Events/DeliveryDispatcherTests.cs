@@ -8,6 +8,7 @@ using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Management;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
@@ -15,6 +16,8 @@ using MMLib.Alvo.Tests.Expressions;
 using MMLib.Alvo.Tests.Extensions;
 
 using NSubstitute;
+
+using System.Text.Json;
 
 namespace MMLib.Alvo.Tests.Events;
 
@@ -426,6 +429,231 @@ public sealed class DeliveryDispatcherTests : IDisposable
         _logs.Entries.ShouldContain(entry => entry.EventName == "DeliveryDispatcherStoodDownUnprimed" && entry.Level == LogLevel.Warning);
     }
 
+    /// <summary>Every claim carries a claimant of its own, so an answer is fenced on the one claim that took the delivery.</summary>
+    [Fact]
+    public async Task Every_claim_carries_a_claimant_of_its_own()
+    {
+        var port = Substitute.For<IDeliveryStore>();
+        port.ClaimAsync(Arg.Any<DeliveryClaim>(), Arg.Any<CancellationToken>()).Returns((IReadOnlyList<ClaimedDelivery>)[]);
+        var dispatcher = Dispatcher(new FakeDeliveryStore(_clock), (AlvoCreated<AlvoRecord> _) => Task.CompletedTask, port: port);
+
+        await dispatcher.ManualRoundAsync(Ct);
+        await dispatcher.ManualRoundAsync(Ct);
+
+        var claimants = port.ReceivedCalls()
+            .Where(call => call.GetMethodInfo().Name == nameof(IDeliveryStore.ClaimAsync))
+            .Select(call => ((DeliveryClaim)call.GetArguments()[0]!).Claimant)
+            .ToList();
+        claimants.Count.ShouldBe(2);
+        claimants.ShouldBeUnique();
+    }
+
+    [Fact]
+    public async Task A_fixture_runs_its_handler_once_and_records_nothing()
+    {
+        var store = new FakeDeliveryStore(_clock);
+        var seen = new List<(Guid Event, int Attempt)>();
+        var dispatcher = Dispatcher(store, (AlvoCreated<AlvoRecord> _, AlvoEventContext context) => seen.Add((context.EventId, context.Attempt)));
+        var (fixture, eventId) = Fixture(Handler, attempt: 3);
+
+        await dispatcher.DeliverFixtureAsync(fixture, Ct);
+
+        seen.ShouldBe([(eventId, 3)]);
+        store.Rows.ShouldBeEmpty();
+        store.Attempts.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_fixture_never_touches_the_delivery_store()
+    {
+        var port = Substitute.For<IDeliveryStore>();
+        var dispatcher = Dispatcher(new FakeDeliveryStore(_clock), (AlvoCreated<AlvoRecord> _) => Task.CompletedTask, port: port);
+
+        await dispatcher.DeliverFixtureAsync(Fixture(Handler, attempt: 1).Fixture, Ct);
+
+        port.ReceivedCalls().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_fixture_hands_back_the_handler_s_own_exception()
+    {
+        var store = new FakeDeliveryStore(_clock);
+        var dispatcher = Dispatcher(store, new Func<AlvoCreated<AlvoRecord>, Task>(_ => throw new InvalidOperationException("template missing")));
+
+        (await Should.ThrowAsync<InvalidOperationException>(() => dispatcher.DeliverFixtureAsync(Fixture(Handler, attempt: 1).Fixture, Ct)))
+            .Message.ShouldBe("template missing");
+        store.Attempts.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_fixture_is_refused_in_the_background_mode()
+    {
+        var dispatcher = Dispatcher(new FakeDeliveryStore(_clock), (AlvoCreated<AlvoRecord> _) => Task.CompletedTask, mode: AlvoEventDispatchMode.Background);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => dispatcher.DeliverFixtureAsync(Fixture(Handler, attempt: 1).Fixture, Ct));
+    }
+
+    [Fact]
+    public async Task A_fixture_for_a_handler_this_host_does_not_bind_is_refused_naming_the_bound_ones()
+    {
+        var dispatcher = Dispatcher(new FakeDeliveryStore(_clock), (AlvoCreated<AlvoRecord> _) => Task.CompletedTask);
+
+        (await Should.ThrowAsync<InvalidOperationException>(() => dispatcher.DeliverFixtureAsync(Fixture("someone-else", attempt: 1).Fixture, Ct)))
+            .Message.ShouldContain(Handler);
+    }
+
+    [Fact]
+    public async Task A_fixture_whose_envelope_is_not_an_event_is_refused()
+    {
+        var dispatcher = Dispatcher(new FakeDeliveryStore(_clock), (AlvoCreated<AlvoRecord> _) => Task.CompletedTask);
+        var fixture = Fixture(Handler, attempt: 1).Fixture with { Envelope = JsonDocument.Parse("""{"id":"not-an-event"}""").RootElement };
+
+        (await Should.ThrowAsync<InvalidOperationException>(() => dispatcher.DeliverFixtureAsync(fixture, Ct)))
+            .Message.ShouldContain("envelope");
+    }
+
+    /// <summary>The handler runs off the caller's thread, so one that blocks synchronously still meets its timeout.</summary>
+    [Fact]
+    public async Task A_fixture_whose_handler_blocks_synchronously_times_out()
+    {
+        var handlerTime = new FakeTimeProvider(_clock.GetUtcNow());
+        using var release = new ManualResetEventSlim();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var dispatcher = Dispatcher(
+            new FakeDeliveryStore(_clock),
+            new Func<AlvoCreated<AlvoRecord>, Task>(_ =>
+            {
+                started.TrySetResult();
+                release.Wait(_waitBudget);
+                return Task.CompletedTask;
+            }),
+            options => options.Timeout = TimeSpan.FromSeconds(5),
+            runnerTime: handlerTime);
+
+        var run = dispatcher.DeliverFixtureAsync(Fixture(Handler, attempt: 1).Fixture, Ct);
+        await started.Task.WaitAsync(_waitBudget, Ct);
+        handlerTime.Advance(TimeSpan.FromSeconds(5));
+
+        await Should.ThrowAsync<TimeoutException>(run);
+        release.Set();
+    }
+
+    [Fact]
+    public async Task A_fixture_whose_handler_runs_past_its_timeout_is_cancelled()
+    {
+        var handlerTime = new FakeTimeProvider(_clock.GetUtcNow());
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var dispatcher = Dispatcher(
+            new FakeDeliveryStore(_clock),
+            async (AlvoCreated<AlvoRecord> _, CancellationToken ct) =>
+            {
+                started.TrySetResult();
+                await using (ct.Register(() => cancelled.TrySetResult()))
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                }
+            },
+            options => options.Timeout = TimeSpan.FromSeconds(5),
+            runnerTime: handlerTime);
+
+        var run = dispatcher.DeliverFixtureAsync(Fixture(Handler, attempt: 1).Fixture, Ct);
+        await started.Task.WaitAsync(_waitBudget, Ct);
+        handlerTime.Advance(TimeSpan.FromSeconds(5));
+
+        await Should.ThrowAsync<TimeoutException>(run);
+        await cancelled.Task.WaitAsync(_waitBudget, Ct);
+    }
+
+    /// <summary>A caller who cancels a fixture run abandons the handler as a timeout does: its later failure is observed, never left unobserved.</summary>
+    [Fact]
+    public async Task A_cancelled_fixture_run_observes_the_handler_that_later_fails()
+    {
+        var secret = $"late failure {Guid.NewGuid():N}";
+        var unobserved = new List<string>();
+        EventHandler<UnobservedTaskExceptionEventArgs> record = (_, args) =>
+        {
+            if (args.Exception.Flatten().InnerExceptions.Any(inner => inner.Message == secret))
+            {
+                lock (unobserved)
+                {
+                    unobserved.Add(secret);
+                }
+            }
+        };
+        TaskScheduler.UnobservedTaskException += record;
+        try
+        {
+            await RunCancelledFixtureThatLaterFailsAsync(secret);
+            await CollectAbandonedTasksAsync();
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= record;
+        }
+
+        unobserved.ShouldBeEmpty();
+    }
+
+    private async Task RunCancelledFixtureThatLaterFailsAsync(string secret)
+    {
+        using var release = new ManualResetEventSlim();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var failing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var dispatcher = Dispatcher(
+            new FakeDeliveryStore(_clock),
+            new Func<AlvoCreated<AlvoRecord>, Task>(_ =>
+            {
+                started.TrySetResult();
+                release.Wait(_waitBudget);
+                failing.TrySetResult();
+                throw new InvalidOperationException(secret);
+            }));
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+
+        var run = dispatcher.DeliverFixtureAsync(Fixture(Handler, attempt: 1).Fixture, cancel.Token);
+        await started.Task.WaitAsync(_waitBudget, Ct);
+        await cancel.CancelAsync();
+
+        await Should.ThrowAsync<OperationCanceledException>(run);
+        release.Set();
+        await failing.Task.WaitAsync(_waitBudget, Ct);
+    }
+
+    private static async Task CollectAbandonedTasksAsync()
+    {
+        for (var round = 0; round < 10; round++)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(20), CancellationToken.None);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+    }
+
+    private (DeliveryFixture Fixture, Guid EventId) Fixture(string subscriber, int attempt)
+    {
+        var @event = new AlvoEvent
+        {
+            Id = AlvoEventId.Create(_clock.GetUtcNow()),
+            Source = AlvoEvent.DefaultSource,
+            Type = "entity.tickets.created",
+            Time = _clock.GetUtcNow(),
+            Subject = "tickets/1",
+            PartitionKey = "tickets:1",
+            AuthType = AlvoEventAuthType.ApiKey,
+            CorrelationId = "c",
+            Data = new AlvoEventData { Record = AlvoRecord.Empty },
+        };
+
+        return (new DeliveryFixture
+        {
+            Subscriber = subscriber,
+            Delivery = Guid.NewGuid(),
+            Attempt = attempt,
+            Envelope = JsonDocument.Parse(AlvoEventJson.Write(@event)).RootElement,
+        }, @event.Id);
+    }
+
     private DeliveryDispatcher Dispatcher(
         FakeDeliveryStore store,
         Delegate handle,
@@ -615,6 +843,32 @@ public sealed class DeliveryDispatcherTests : IDisposable
 
         public Task<int> CancelPendingAsync(string subscriber, CancellationToken cancellationToken = default) =>
             inner.CancelPendingAsync(subscriber, cancellationToken);
+
+        public Task<IReadOnlyList<StoredDelivery>> ListAsync(DeliveryFilter filter, CancellationToken cancellationToken = default) =>
+            inner.ListAsync(filter, cancellationToken);
+
+        public Task<StoredDelivery?> FindAsync(Guid id, CancellationToken cancellationToken = default) => inner.FindAsync(id, cancellationToken);
+
+        public Task<IReadOnlyList<StoredDeliveryAttempt>> AttemptsAsync(Guid id, CancellationToken cancellationToken = default) =>
+            inner.AttemptsAsync(id, cancellationToken);
+
+        public Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default) =>
+            inner.SelectAsync(filter, cancellationToken);
+
+        public Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+            inner.RedeliverAsync(id, entry, cancellationToken);
+
+        public Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+            inner.ReplayAsync(filter, entry, cancellationToken);
+
+        public Task<bool> SetPausedAsync(string subscriber, bool paused, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+            inner.SetPausedAsync(subscriber, paused, entry, cancellationToken);
+
+        public Task<IReadOnlyList<SubscriberControl>> ControlsAsync(CancellationToken cancellationToken = default) =>
+            inner.ControlsAsync(cancellationToken);
+
+        public Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default) =>
+            inner.FindOperationAsync(scope, key, cancellationToken);
     }
 
     /// <summary>The in-memory store whose first claims fail the way a database under a deadlock or a restart refuses one.</summary>
@@ -648,5 +902,31 @@ public sealed class DeliveryDispatcherTests : IDisposable
 
         public Task<int> CancelPendingAsync(string subscriber, CancellationToken cancellationToken = default) =>
             inner.CancelPendingAsync(subscriber, cancellationToken);
+
+        public Task<IReadOnlyList<StoredDelivery>> ListAsync(DeliveryFilter filter, CancellationToken cancellationToken = default) =>
+            inner.ListAsync(filter, cancellationToken);
+
+        public Task<StoredDelivery?> FindAsync(Guid id, CancellationToken cancellationToken = default) => inner.FindAsync(id, cancellationToken);
+
+        public Task<IReadOnlyList<StoredDeliveryAttempt>> AttemptsAsync(Guid id, CancellationToken cancellationToken = default) =>
+            inner.AttemptsAsync(id, cancellationToken);
+
+        public Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default) =>
+            inner.SelectAsync(filter, cancellationToken);
+
+        public Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+            inner.RedeliverAsync(id, entry, cancellationToken);
+
+        public Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+            inner.ReplayAsync(filter, entry, cancellationToken);
+
+        public Task<bool> SetPausedAsync(string subscriber, bool paused, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+            inner.SetPausedAsync(subscriber, paused, entry, cancellationToken);
+
+        public Task<IReadOnlyList<SubscriberControl>> ControlsAsync(CancellationToken cancellationToken = default) =>
+            inner.ControlsAsync(cancellationToken);
+
+        public Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default) =>
+            inner.FindOperationAsync(scope, key, cancellationToken);
     }
 }

@@ -28,18 +28,20 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
     private readonly WorldClock _clock = new(_start);
     private readonly string _outbox = OutboxTable.NameFor(SchemaPrefix);
     private readonly string _table = DeliveryTable.NameFor(SchemaPrefix);
+    private readonly string _attempts = DeliveryTable.AttemptsNameFor(SchemaPrefix);
 
-    private DeliveryStoreWorld(Func<DbConnection> connect, IRelationalWriteGate? writeGate)
+    private DeliveryStoreWorld(Func<DbConnection> connect, IAlvoSqlDialect dialect, IRelationalWriteGate? writeGate)
     {
         _connect = connect;
-        Store = new EfCoreDeliveryStore(new RelationalConnectionFactory(connect, writeGate), new AlvoOptions { SchemaPrefix = SchemaPrefix }, _clock);
+        Store = new EfCoreDeliveryStore(
+            new RelationalConnectionFactory(connect, writeGate), dialect, new AlvoOptions { SchemaPrefix = SchemaPrefix }, _clock);
     }
 
     public IDeliveryStore Store { get; }
 
-    internal static async Task<DeliveryStoreWorld> StartAsync(Func<DbConnection> connect, IRelationalWriteGate? writeGate = null)
+    internal static async Task<DeliveryStoreWorld> StartAsync(Func<DbConnection> connect, IAlvoSqlDialect dialect, IRelationalWriteGate? writeGate = null)
     {
-        var world = new DeliveryStoreWorld(connect, writeGate);
+        var world = new DeliveryStoreWorld(connect, dialect, writeGate);
         await world.Store.EnsureAsync(Ct);
 
         return world;
@@ -84,6 +86,52 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
         }
     }
 
+    public async Task<IReadOnlyList<DeliveryOperationEntry>> OperationsAsync()
+    {
+        var connection = _connect();
+        await using (connection.ConfigureAwait(false))
+        {
+            await connection.OpenAsync(Ct);
+
+            return await RelationalSqlBatch.ReadRowsAsync(
+                connection, transaction: null, DeliveryOperationsTable.AllOperationsSql(DeliveryOperationsTable.LogNameFor(SchemaPrefix)),
+                _ => { }, EfCoreDeliveryStore.ReadEntry, Ct);
+        }
+    }
+
+    /// <summary>Puts a delivery back to pending with its claim count at zero, as an operator's redeliver does.</summary>
+    internal async Task ResetAsync(Guid delivery)
+    {
+        var connection = _connect();
+        await using (connection.ConfigureAwait(false))
+        {
+            await connection.OpenAsync(Ct);
+            await ExecuteAsync(
+                connection,
+                $"UPDATE {_table} SET status = 'pending', attempts = @value, claimed_by = NULL, lease_until = NULL WHERE id = @id",
+                delivery,
+                0);
+        }
+    }
+
+    /// <summary>The attempt numbers the history holds for one delivery, ascending.</summary>
+    internal async Task<IReadOnlyList<int>> AttemptNumbersAsync(Guid delivery)
+    {
+        var connection = _connect();
+        await using (connection.ConfigureAwait(false))
+        {
+            await connection.OpenAsync(Ct);
+
+            return await RelationalSqlBatch.ReadRowsAsync(
+                connection,
+                transaction: null,
+                $"SELECT attempt FROM {_attempts} WHERE delivery_id = @id ORDER BY attempt",
+                command => RelationalSqlBatch.AddParameter(command, "@id", delivery.ToString()),
+                reader => Convert.ToInt32(reader.GetValue(0), CultureInfo.InvariantCulture),
+                Ct);
+        }
+    }
+
     private static async Task ExecuteAsync(DbConnection connection, string sql, Guid id, object value)
     {
         var command = connection.CreateCommand();
@@ -123,7 +171,64 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
         }
     }
 
+    /// <summary>
+    /// Runs <paramref name="action"/> while another connection holds <paramref name="subscriber"/>'s advisory lock — the
+    /// exclusive or the shared form — and lets go only once a third connection sees a backend of this database waiting on
+    /// an advisory lock, so the action provably took the subscriber's lock in the conflicting mode. PostgreSQL only.
+    /// </summary>
+    internal async Task<T> WhileSubscriberLockedAsync<T>(string subscriber, bool exclusive, Func<Task<T>> action)
+    {
+        var holder = _connect();
+        await using (holder.ConfigureAwait(false))
+        {
+            var observer = _connect();
+            await using (observer.ConfigureAwait(false))
+            {
+                await holder.OpenAsync(Ct);
+                await observer.OpenAsync(Ct);
+                var holding = await holder.BeginTransactionAsync(Ct);
+                await using (holding.ConfigureAwait(false))
+                {
+                    await LockSubscriberOnAsync(holder, holding, subscriber, exclusive);
+                    var waiting = action();
+                    await WaitUntilAdvisoryWaitAsync(observer, waiting);
+                    await holding.CommitAsync(Ct);
+
+                    return await waiting;
+                }
+            }
+        }
+    }
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    private async Task LockSubscriberOnAsync(DbConnection connection, DbTransaction transaction, string subscriber, bool exclusive)
+    {
+        var command = connection.CreateCommand();
+        await using (command.ConfigureAwait(false))
+        {
+            command.Transaction = transaction;
+            command.CommandText = exclusive ? "SELECT pg_advisory_xact_lock(@key)" : "SELECT pg_advisory_xact_lock_shared(@key)";
+            RelationalSqlBatch.AddParameter(command, "@key", DeliveryOperationsTable.SubscriberLockKey(_table, subscriber));
+            await command.ExecuteNonQueryAsync(Ct);
+        }
+    }
+
+    private static async Task WaitUntilAdvisoryWaitAsync(DbConnection observer, Task waiting)
+    {
+        const string Waiters =
+            "SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND database = (SELECT oid FROM pg_database WHERE datname = current_database())";
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        while (Convert.ToInt64(await ScalarAsync(observer, Waiters, backend: null), CultureInfo.InvariantCulture) == 0)
+        {
+            if (waiting.IsCompleted || waited.Elapsed > _blockDeadline)
+            {
+                throw new InvalidOperationException("The action never waited on the subscriber's advisory lock; it does not take it.");
+            }
+
+            await Task.Delay(_blockPollInterval, Ct);
+        }
+    }
 
     /// <summary>
     /// The engine's plan for the claim of one ordered subscriber, every row and column of <paramref name="explain"/>'s
@@ -143,8 +248,29 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
             var command = connection.CreateCommand();
             await using (command.ConfigureAwait(false))
             {
-                command.CommandText = $"{explain} {DeliveryTable.ClaimSql(_table, _outbox, ordered: 1, unordered: 0)}";
+                command.CommandText = $"{explain} {DeliveryTable.ClaimSql(_table, _outbox, DeliveryOperationsTable.ControlsNameFor(SchemaPrefix), ordered: 1, unordered: 0)}";
                 BindClaim(command, "explain", "send-confirmation");
+
+                return await PlanTextAsync(command);
+            }
+        }
+    }
+
+    /// <summary>The engine's plan for a page of one subscriber continuing after a cursor, as one text.</summary>
+    internal async Task<string> ExplainSubscriberPageAsync(string explain)
+    {
+        var filter = new DeliveryFilter { Subscriber = "send-confirmation", After = Guid.NewGuid(), Limit = 50 };
+        var connection = _connect();
+        await using (connection.ConfigureAwait(false))
+        {
+            await connection.OpenAsync(Ct);
+            var command = connection.CreateCommand();
+            await using (command.ConfigureAwait(false))
+            {
+                command.CommandText = $"{explain} {DeliveryOperationsTable.ListSql(_table, filter)}";
+                RelationalSqlBatch.AddParameter(command, "@subscriber", filter.Subscriber);
+                RelationalSqlBatch.AddParameter(command, "@after", filter.After.ToString()!);
+                RelationalSqlBatch.AddParameter(command, "@limit", filter.Limit);
 
                 return await PlanTextAsync(command);
             }
@@ -232,7 +358,7 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
         await using (command.ConfigureAwait(false))
         {
             command.Transaction = transaction;
-            command.CommandText = DeliveryTable.ClaimSql(_table, _outbox, ordered: 1, unordered: 0);
+            command.CommandText = DeliveryTable.ClaimSql(_table, _outbox, DeliveryOperationsTable.ControlsNameFor(SchemaPrefix), ordered: 1, unordered: 0);
             BindClaim(command, "racer", subscriber);
 
             return await CountRowsAsync(command);

@@ -1136,6 +1136,33 @@ namespace MMLib.Alvo.Events
         public required int MaxAttempts { get; init; }
         public System.TimeSpan? RetryAfter { get; init; }
     }
+    public sealed class DeliveryFilter : System.IEquatable<MMLib.Alvo.Events.DeliveryFilter>
+    {
+        public DeliveryFilter() { }
+        public System.Guid? After { get; init; }
+        public System.Guid? FromEventId { get; init; }
+        public required int Limit { get; init; }
+        public string? PartitionKey { get; init; }
+        public bool Replayable { get; init; }
+        public string? Status { get; init; }
+        public string? Subscriber { get; init; }
+        public System.Guid? ToEventId { get; init; }
+    }
+    public sealed class DeliveryOperationEntry : System.IEquatable<MMLib.Alvo.Events.DeliveryOperationEntry>
+    {
+        public DeliveryOperationEntry() { }
+        public required string Actor { get; init; }
+        public int? Affected { get; init; }
+        public required System.DateTimeOffset At { get; init; }
+        public string? Fingerprint { get; init; }
+        public required System.Guid Id { get; init; }
+        public string? IdempotencyKey { get; init; }
+        public string? IdempotencyScope { get; init; }
+        public required string Operation { get; init; }
+        public string? Reason { get; init; }
+        public System.Collections.Generic.IReadOnlyList<System.Guid> Sample { get; init; }
+        public required string Target { get; init; }
+    }
     public sealed class DeliveryRequest : System.IEquatable<MMLib.Alvo.Events.DeliveryRequest>
     {
         public const string UnboundReason = "unbound";
@@ -1147,20 +1174,36 @@ namespace MMLib.Alvo.Events
         public required string Subscriber { get; init; }
         public string? TenantId { get; init; }
     }
+    public sealed class DeliverySelection : System.IEquatable<MMLib.Alvo.Events.DeliverySelection>
+    {
+        public DeliverySelection() { }
+        public int Busy { get; init; }
+        public required int Count { get; init; }
+        public required System.Collections.Generic.IReadOnlyList<System.Guid> Sample { get; init; }
+    }
     public interface IAlvoEvents
     {
         System.Threading.Tasks.Task PublishAsync(string type, string subject, System.Collections.Generic.IReadOnlyDictionary<string, object?>? data, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
     }
     public interface IDeliveryStore
     {
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.StoredDeliveryAttempt>> AttemptsAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<int> CancelPendingAsync(string subscriber, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.ClaimedDelivery>> ClaimAsync(MMLib.Alvo.Events.DeliveryClaim claim, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> CompleteAsync(MMLib.Alvo.Events.DeliveryAttempt attempt, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.SubscriberControl>> ControlsAsync(System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<int> DeadLetterPendingAsync(string subscriber, string reason, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task EnsureAsync(System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> FailAsync(MMLib.Alvo.Events.DeliveryAttempt attempt, MMLib.Alvo.Events.DeliveryFailure failure, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<int> FanOutAsync(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.DeliveryRequest> requests, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Events.StoredDelivery?> FindAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliveryOperationEntry?> FindOperationAsync(string scope, string key, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.StoredDelivery>> ListAsync(MMLib.Alvo.Events.DeliveryFilter filter, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> PendingSubscribersAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<bool> RedeliverAsync(System.Guid id, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliveryOperationEntry?> ReplayAsync(MMLib.Alvo.Events.DeliveryFilter filter, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliverySelection> SelectAsync(MMLib.Alvo.Events.DeliveryFilter filter, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<bool> SetPausedAsync(string subscriber, bool paused, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
     }
     public interface IEmailSender
     {
@@ -1183,6 +1226,39 @@ namespace MMLib.Alvo.Events
         public string PartitionKey { get; init; }
         public string Payload { get; init; }
         public string Type { get; init; }
+    }
+    public sealed class StoredDelivery : System.IEquatable<MMLib.Alvo.Events.StoredDelivery>
+    {
+        public StoredDelivery() { }
+        public required int Attempts { get; init; }
+        public System.DateTimeOffset? CompletedAt { get; init; }
+        public required System.Guid EventId { get; init; }
+        public required System.Guid Id { get; init; }
+        public required string Kind { get; init; }
+        public string? LastErrorType { get; init; }
+        public required System.DateTimeOffset NotBefore { get; init; }
+        public required string PartitionKey { get; init; }
+        public string? Payload { get; init; }
+        public required string Status { get; init; }
+        public required string Subscriber { get; init; }
+        public string? TenantId { get; init; }
+    }
+    public sealed class StoredDeliveryAttempt : System.IEquatable<MMLib.Alvo.Events.StoredDeliveryAttempt>
+    {
+        public StoredDeliveryAttempt() { }
+        public required int Attempt { get; init; }
+        public required System.TimeSpan Duration { get; init; }
+        public string? ErrorType { get; init; }
+        public required string Outcome { get; init; }
+        public required System.DateTimeOffset StartedAt { get; init; }
+    }
+    public sealed class SubscriberControl : System.IEquatable<MMLib.Alvo.Events.SubscriberControl>
+    {
+        public SubscriberControl() { }
+        public required System.DateTimeOffset PausedAt { get; init; }
+        public required string PausedBy { get; init; }
+        public string? Reason { get; init; }
+        public required string Subscriber { get; init; }
     }
 }
 namespace MMLib.Alvo.Expressions
@@ -1414,6 +1490,15 @@ namespace MMLib.Alvo.Management
         [System.Text.Json.Serialization.JsonStringEnumMemberName("postCommit")]
         PostCommit = 0,
     }
+    public sealed class DeliveryFixture : System.IEquatable<MMLib.Alvo.Management.DeliveryFixture>
+    {
+        public DeliveryFixture() { }
+        public required int Attempt { get; init; }
+        public required System.Guid Delivery { get; init; }
+        public required System.Text.Json.JsonElement Envelope { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> Redacted { get; init; }
+        public required string Subscriber { get; init; }
+    }
     public interface IAlvoManagement
     {
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementApplyResult> ApplyDescriptorAsync(string project, MMLib.Alvo.Management.ManagementApplyRequest request, System.Threading.CancellationToken ct = default);
@@ -1430,6 +1515,18 @@ namespace MMLib.Alvo.Management
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementApplyResult> RollbackAsync(string project, int targetRevision, MMLib.Alvo.Management.ManagementRollbackRequest request, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task SetAiConnectionAsync(MMLib.Alvo.Ai.StoredAiConnection connection, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementPolicyVerdict> SimulatePolicyAsync(string project, MMLib.Alvo.Management.ManagementPolicySimulation simulation, System.Threading.CancellationToken ct = default);
+    }
+    public interface IAlvoOperations
+    {
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementDelivery> GetDeliveryAsync(string project, System.Guid delivery, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementExtensionStats> GetExtensionStatsAsync(string project, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.DeliveryFixture> GetFixtureAsync(string project, System.Guid delivery, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementDeliveryPage> ListDeliveriesAsync(string project, MMLib.Alvo.Management.ManagementDeliveryQuery query, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementDelivery> RedeliverAsync(string project, System.Guid delivery, string? reason, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementReplayPlan> ReplayAsync(string project, MMLib.Alvo.Management.ManagementReplayRequest request, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementDelivery> RunScheduleAsync(string project, string schedule, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementExtension> SetEnabledAsync(string project, string extension, bool enabled, string? reason, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementExtension> SetPausedAsync(string project, string subscriber, bool paused, string? reason, System.Threading.CancellationToken ct = default);
     }
     public interface IManagementIdempotencyStore
     {
@@ -1476,6 +1573,60 @@ namespace MMLib.Alvo.Management
         public ManagementCelFunctions() { }
         public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Expressions.CelFunctionInfo> Functions { get; init; }
     }
+    public sealed class ManagementConflictException : System.Exception
+    {
+        public ManagementConflictException() { }
+        public ManagementConflictException(string message) { }
+        public ManagementConflictException(string message, System.Exception innerException) { }
+    }
+    public sealed class ManagementDelivery : System.IEquatable<MMLib.Alvo.Management.ManagementDelivery>
+    {
+        public ManagementDelivery() { }
+        public required int Attempts { get; init; }
+        public System.DateTimeOffset? CompletedAt { get; init; }
+        public required System.Guid EventId { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementDeliveryAttempt> History { get; init; }
+        public required System.Guid Id { get; init; }
+        public string? LastErrorType { get; init; }
+        public required System.DateTimeOffset NotBefore { get; init; }
+        public required string PartitionKey { get; init; }
+        public required string Status { get; init; }
+        public required string Subscriber { get; init; }
+        public string? TenantId { get; init; }
+    }
+    public sealed class ManagementDeliveryAttempt : System.IEquatable<MMLib.Alvo.Management.ManagementDeliveryAttempt>
+    {
+        public ManagementDeliveryAttempt() { }
+        public required int Attempt { get; init; }
+        public required System.TimeSpan Duration { get; init; }
+        public string? ErrorType { get; init; }
+        public required string Outcome { get; init; }
+        public required System.DateTimeOffset StartedAt { get; init; }
+    }
+    public sealed class ManagementDeliveryNotFoundException : System.Exception
+    {
+        public ManagementDeliveryNotFoundException() { }
+        public ManagementDeliveryNotFoundException(System.Guid delivery) { }
+        public ManagementDeliveryNotFoundException(string message) { }
+        public ManagementDeliveryNotFoundException(string message, System.Exception innerException) { }
+        public System.Guid Delivery { get; }
+    }
+    public sealed class ManagementDeliveryPage : System.IEquatable<MMLib.Alvo.Management.ManagementDeliveryPage>
+    {
+        public ManagementDeliveryPage() { }
+        public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementDelivery> Items { get; init; }
+        public System.Guid? Next { get; init; }
+    }
+    public sealed class ManagementDeliveryQuery : System.IEquatable<MMLib.Alvo.Management.ManagementDeliveryQuery>
+    {
+        public ManagementDeliveryQuery() { }
+        public System.Guid? After { get; init; }
+        public System.DateTimeOffset? From { get; init; }
+        public int Limit { get; init; }
+        public string? Status { get; init; }
+        public string? Subscriber { get; init; }
+        public System.DateTimeOffset? To { get; init; }
+    }
     public sealed class ManagementDescriptor : System.IEquatable<MMLib.Alvo.Management.ManagementDescriptor>
     {
         public ManagementDescriptor(string Project, int Revision, string DescriptorJson) { }
@@ -1513,6 +1664,7 @@ namespace MMLib.Alvo.Management
         public System.Collections.Generic.IReadOnlyList<string> Operations { get; init; }
         public int Order { get; init; }
         public string? Ordering { get; init; }
+        public bool Paused { get; init; }
         public string? RunAs { get; init; }
         public required MMLib.Alvo.Management.AlvoExtensionStage Stage { get; init; }
         public System.TimeSpan? Timeout { get; init; }
@@ -1523,6 +1675,32 @@ namespace MMLib.Alvo.Management
     {
         public ManagementExtensionCatalog() { }
         public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementExtension> Items { get; init; }
+    }
+    public sealed class ManagementExtensionNotFoundException : System.Exception
+    {
+        public ManagementExtensionNotFoundException() { }
+        public ManagementExtensionNotFoundException(string message) { }
+        public ManagementExtensionNotFoundException(string extension, System.Collections.Generic.IReadOnlyList<string> registered) { }
+        public ManagementExtensionNotFoundException(string message, System.Exception innerException) { }
+        public string Extension { get; }
+    }
+    public sealed class ManagementExtensionStat : System.IEquatable<MMLib.Alvo.Management.ManagementExtensionStat>
+    {
+        public ManagementExtensionStat() { }
+        public long Failures { get; init; }
+        public required string Id { get; init; }
+        public long Invocations { get; init; }
+        public System.TimeSpan? P50 { get; init; }
+        public System.TimeSpan? P95 { get; init; }
+        public long Rejections { get; init; }
+    }
+    public sealed class ManagementExtensionStats : System.IEquatable<MMLib.Alvo.Management.ManagementExtensionStats>
+    {
+        public ManagementExtensionStats() { }
+        public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementExtensionStat> Items { get; init; }
+        public required string Scope { get; init; }
+        public required System.DateTimeOffset Since { get; init; }
+        public required System.TimeSpan Window { get; init; }
     }
     public sealed class ManagementForbiddenException : System.Exception
     {
@@ -1586,6 +1764,25 @@ namespace MMLib.Alvo.Management
         public string Consequence { get; init; }
         public string Fix { get; init; }
         public string Slot { get; init; }
+    }
+    public sealed class ManagementReplayPlan : System.IEquatable<MMLib.Alvo.Management.ManagementReplayPlan>
+    {
+        public ManagementReplayPlan() { }
+        public required int Count { get; init; }
+        public required bool DryRun { get; init; }
+        public required System.Collections.Generic.IReadOnlyList<System.Guid> Ids { get; init; }
+        public bool Replayed { get; init; }
+    }
+    public sealed class ManagementReplayRequest : System.IEquatable<MMLib.Alvo.Management.ManagementReplayRequest>
+    {
+        public ManagementReplayRequest() { }
+        public bool DryRun { get; init; }
+        public System.DateTimeOffset? From { get; init; }
+        public string? IdempotencyKey { get; init; }
+        public string? Reason { get; init; }
+        public string Status { get; init; }
+        public required string Subscriber { get; init; }
+        public System.DateTimeOffset? To { get; init; }
     }
     public sealed class ManagementRequestException : System.Exception
     {

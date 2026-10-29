@@ -5,6 +5,7 @@ using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Events;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
@@ -87,6 +88,7 @@ namespace MMLib.Alvo.Management.Internal;
 /// driver-less container for <see cref="History"/>'s reason: no store, no boot, no project, so
 /// <see cref="EnsureServed"/> has already answered 404.
 /// </param>
+/// <param name="deliveries">The delivery store, read for which handlers are paused; none without a driver.</param>
 internal sealed partial class AlvoManagementService(
     IOptions<AlvoOptions> alvo,
     IOptions<AlvoManagementOptions> management,
@@ -106,7 +108,8 @@ internal sealed partial class AlvoManagementService(
     ILogger<AlvoManagementService> logger,
     IAiConnectionResolver ai,
     ISecretStore secrets,
-    Func<RuntimeSchemaService> runtime) : IAlvoManagement
+    Func<RuntimeSchemaService> runtime,
+    IDeliveryStore? deliveries) : IAlvoManagement
 {
     /// <summary>What <see cref="ManagementInfo.DataProvider"/> reports when no driver is registered.</summary>
     private const string NoDriverRegistered = "none";
@@ -214,12 +217,12 @@ internal sealed partial class AlvoManagementService(
     }
 
     /// <inheritdoc/>
-    public Task<ManagementExtensionCatalog> GetExtensionsAsync(string project, CancellationToken ct = default)
+    public async Task<ManagementExtensionCatalog> GetExtensionsAsync(string project, CancellationToken ct = default)
     {
         EnsureMayPerform(ManagementOperation.GetExtensions);
         EnsureServed(project);
 
-        return Task.FromResult(extensions.Catalog());
+        return await extensions.CatalogAsync(deliveries, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>

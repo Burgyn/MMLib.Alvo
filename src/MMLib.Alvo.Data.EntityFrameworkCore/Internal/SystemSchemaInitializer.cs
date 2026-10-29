@@ -58,6 +58,8 @@ internal sealed partial class SystemSchemaInitializer
         _secretsTableName = SecretsTable.NameFor(schemaPrefix);
         _deliveriesTableName = DeliveryTable.NameFor(schemaPrefix);
         _deliveryAttemptsTableName = DeliveryTable.AttemptsNameFor(schemaPrefix);
+        _subscriberControlsTableName = DeliveryOperationsTable.ControlsNameFor(schemaPrefix);
+        _operationsLogTableName = DeliveryOperationsTable.LogNameFor(schemaPrefix);
     }
 
     private readonly string _idempotencyTableName;
@@ -65,6 +67,8 @@ internal sealed partial class SystemSchemaInitializer
     private readonly string _secretsTableName;
     private readonly string _deliveriesTableName;
     private readonly string _deliveryAttemptsTableName;
+    private readonly string _subscriberControlsTableName;
+    private readonly string _operationsLogTableName;
 
     /// <summary>Gets the fully-prefixed descriptor-versions table name, e.g. <c>alvo_descriptor_versions</c>.</summary>
     public string TableName { get; }
@@ -118,9 +122,15 @@ internal sealed partial class SystemSchemaInitializer
         await CreateIndexIfMissingAsync(DeliveryTable.ClaimIndexDdl(_deliveriesTableName), ct).ConfigureAwait(false);
         await CreateIndexIfMissingAsync(DeliveryTable.LaneIndexDdl(_deliveriesTableName), ct).ConfigureAwait(false);
         await CreateIndexIfMissingAsync(DeliveryTable.OpenLaneIndexDdl(_deliveriesTableName), ct).ConfigureAwait(false);
+        await CreateIndexIfMissingAsync(DeliveryOperationsTable.SubscriberPageIndexDdl(_deliveriesTableName), ct).ConfigureAwait(false);
         await CreateIfMissingAsync(
             _deliveryAttemptsTableName, DeliveryTable.AttemptsDdl(_deliveryAttemptsTableName), ct).ConfigureAwait(false);
         await CreateIndexIfMissingAsync(DeliveryTable.OutboxUnfannedIndexDdl(_outboxTableName), ct).ConfigureAwait(false);
+        await CreateIfMissingAsync(
+            _subscriberControlsTableName, DeliveryOperationsTable.ControlsDdl(_subscriberControlsTableName), ct).ConfigureAwait(false);
+        await CreateIfMissingAsync(
+            _operationsLogTableName, DeliveryOperationsTable.LogDdl(_operationsLogTableName), ct).ConfigureAwait(false);
+        await CreateIndexIfMissingAsync(DeliveryOperationsTable.LogKeyIndexDdl(_operationsLogTableName), ct).ConfigureAwait(false);
     }
 
     /// <summary>

@@ -216,6 +216,33 @@ public sealed class ExtensionStateGuardTests : IDisposable
         public Task<int> CancelPendingAsync(string subscriber, CancellationToken cancellationToken = default) =>
             Built(() => inner.CancelPendingAsync(subscriber, cancellationToken));
 
+        public Task<IReadOnlyList<StoredDelivery>> ListAsync(DeliveryFilter filter, CancellationToken cancellationToken = default) =>
+            Built(() => inner.ListAsync(filter, cancellationToken));
+
+        public Task<StoredDelivery?> FindAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Built(() => inner.FindAsync(id, cancellationToken));
+
+        public Task<IReadOnlyList<StoredDeliveryAttempt>> AttemptsAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Built(() => inner.AttemptsAsync(id, cancellationToken));
+
+        public Task<DeliverySelection> SelectAsync(DeliveryFilter filter, CancellationToken cancellationToken = default) =>
+            Built(() => inner.SelectAsync(filter, cancellationToken));
+
+        public Task<bool> RedeliverAsync(Guid id, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+            Built(() => inner.RedeliverAsync(id, entry, cancellationToken));
+
+        public Task<DeliveryOperationEntry?> ReplayAsync(DeliveryFilter filter, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+            Built(() => inner.ReplayAsync(filter, entry, cancellationToken));
+
+        public Task<bool> SetPausedAsync(string subscriber, bool paused, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+            Built(() => inner.SetPausedAsync(subscriber, paused, entry, cancellationToken));
+
+        public Task<IReadOnlyList<SubscriberControl>> ControlsAsync(CancellationToken cancellationToken = default) =>
+            Built(() => inner.ControlsAsync(cancellationToken));
+
+        public Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default) =>
+            Built(() => inner.FindOperationAsync(scope, key, cancellationToken));
+
         private Task<T> Built<T>(Func<Task<T>> read) =>
             Ensured ? read() : throw new InvalidOperationException("no such table: alvo_deliveries");
     }
