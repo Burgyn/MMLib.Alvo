@@ -103,6 +103,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         AlvoQuery.EnsurePagingWindowIsSane(query);
         AlvoQuery.EnsureProjectionIsSane(query);
         EnsureQueryFieldsAvailable(query, decision);
+        EnsureLiteralTextOnText(query.Filter, FindEntity(query.Entity));
 
         List<AlvoRecord> snapshot;
         lock (_gate)
@@ -763,6 +764,32 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// </remarks>
     private static object? StoredVersion(EntitySchema? schema, AlvoRecord stored) =>
         schema is not null && AlvoManagedColumns.VersionColumn(schema) is { } column ? stored[column] : null;
+
+    /// <summary>
+    /// Refuses a literal text test on a field that is not text, with the shipped drivers' own wording — the reference
+    /// evaluator alone would answer such a row UNKNOWN, an empty page where an engine answers an error.
+    /// </summary>
+    private static void EnsureLiteralTextOnText(AlvoFilter? filter, EntitySchema? entity)
+    {
+        foreach (var comparison in Comparisons(filter))
+        {
+            if (comparison.Operator is AlvoFilterOperator.StartsWith or AlvoFilterOperator.EndsWith or AlvoFilterOperator.Contains
+                && entity?.Fields.FirstOrDefault(field => field.Name == comparison.Field) is { Type: not (FieldType.String or FieldType.Text) } declared)
+            {
+                throw new ArgumentException(
+                    $"The filter uses '{comparison.Operator}' on '{declared.Name}', which is not a text field. Test a string or text field; compare any other type with eq or in.");
+            }
+        }
+    }
+
+    private static IEnumerable<AlvoComparison> Comparisons(AlvoFilter? filter) => filter switch
+    {
+        AlvoComparison comparison => new[] { comparison },
+        AlvoAnd and => and.Filters.SelectMany(Comparisons),
+        AlvoOr or => or.Filters.SelectMany(Comparisons),
+        AlvoNot not => Comparisons(not.Filter),
+        _ => Enumerable.Empty<AlvoComparison>(),
+    };
 
     /// <summary>
     /// Rejects a filter or sort key naming a field this caller may not read — either because the mask
