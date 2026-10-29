@@ -32,7 +32,7 @@ internal static class FilterOperators
     /// from C# and which PostgREST has no spelling for, so the allow-list leaves them out rather than invent one.
     /// </summary>
     private static readonly AlvoFilterOperator[] _onTheWire =
-        [.. Enum.GetValues<AlvoFilterOperator>().Where(op => op is not (AlvoFilterOperator.StartsWith or AlvoFilterOperator.EndsWith or AlvoFilterOperator.Contains))];
+        [.. Enum.GetValues<AlvoFilterOperator>().Where(op => !op.IsLiteralText())];
 
     /// <summary>The wire spelling of <paramref name="operator"/>.</summary>
     /// <param name="operator">The port's operator.</param>

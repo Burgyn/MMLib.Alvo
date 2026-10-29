@@ -23,6 +23,6 @@ public sealed class LiteralTextPatternTests
 
     [Fact]
     public void Only_the_three_literal_operators_are_literal_text_tests()
-        => Enum.GetValues<AlvoFilterOperator>().Where(Internal.LiteralTextPattern.IsLiteralTextTest)
+        => Enum.GetValues<AlvoFilterOperator>().Where(op => op.IsLiteralText())
             .ShouldBe([AlvoFilterOperator.StartsWith, AlvoFilterOperator.EndsWith, AlvoFilterOperator.Contains]);
 }

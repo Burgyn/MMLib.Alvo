@@ -772,7 +772,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// </summary>
     private static void EnsureLiteralTextOnText(AlvoFilter? filter, EntitySchema? entity)
     {
-        foreach (var comparison in Comparisons(filter).Where(c => c.Operator is AlvoFilterOperator.StartsWith or AlvoFilterOperator.EndsWith or AlvoFilterOperator.Contains))
+        foreach (var comparison in Comparisons(filter).Where(c => c.Operator.IsLiteralText()))
         {
             if (entity?.Fields.FirstOrDefault(field => field.Name == comparison.Field) is { Type: not (FieldType.String or FieldType.Text) } declared)
             {

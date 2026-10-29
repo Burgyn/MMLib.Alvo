@@ -21,11 +21,6 @@ internal static class LiteralTextPattern
     /// <summary>The escape character, bound as the <c>ESCAPE</c> operand.</summary>
     internal const string Escape = "\\";
 
-    /// <summary>Whether <paramref name="op"/> is one of the three literal text tests.</summary>
-    /// <param name="op">The operator.</param>
-    internal static bool IsLiteralTextTest(AlvoFilterOperator op) =>
-        op is AlvoFilterOperator.StartsWith or AlvoFilterOperator.EndsWith or AlvoFilterOperator.Contains;
-
     /// <summary>The pattern <paramref name="op"/> matches <paramref name="value"/> with: the escaped value, a <c>%</c> on its open side.</summary>
     /// <param name="op">A literal text test.</param>
     /// <param name="value">The caller's text.</param>

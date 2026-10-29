@@ -131,7 +131,7 @@ internal static class FilterSqlRenderer
                 target.Sql, bag.Add(fields, target.Column, comparison.Value)),
             AlvoFilterOperator.In => Membership(target, comparison.Value, fields, bag),
             AlvoFilterOperator.Is => Identity(target.Sql, comparison.Value, fields),
-            var op when LiteralTextPattern.IsLiteralTextTest(op) => LiteralText(declared, target, comparison, fields, bag),
+            var op when op.IsLiteralText() => LiteralText(declared, target, comparison, fields, bag),
             _ => throw Malformed(
                 $"uses operator '{comparison.Operator}', which is not one this provider renders",
                 $"Use one of {nameof(AlvoFilterOperator)}'s declared members."),

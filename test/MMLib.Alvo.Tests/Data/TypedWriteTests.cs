@@ -177,7 +177,7 @@ public sealed class TypedWriteTests
     }
 
     [Fact]
-    public async Task Exists_asks_for_one_row_through_the_translated_filter()
+    public async Task Exists_asks_for_one_row_s_id_through_the_translated_filter()
     {
         var session = Substitute.For<IAlvoSession>();
         AlvoQuery? sent = null;
@@ -187,6 +187,7 @@ public sealed class TypedWriteTests
         (await session.ExistsAsync<Order>(x => x.Reference == "R-1", Ct)).ShouldBeTrue();
 
         (sent!.Entity, sent.Limit).ShouldBe(("orders", 1));
+        sent.Select.ShouldBe(["id"]);
         FilterText.Of(sent.Filter!).ShouldBe("ref_no eq 'R-1'");
     }
 

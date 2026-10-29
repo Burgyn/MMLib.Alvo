@@ -112,10 +112,15 @@ public static class AlvoTypedWriteExtensions
         where T : class
     {
         ArgumentNullException.ThrowIfNull(session);
-        var page = await session.QueryAsync(TypedEntity.Query(where, limit: 1), cancellationToken).ConfigureAwait(false);
+        var page = await session.QueryAsync(IdOfOneRow(where), cancellationToken).ConfigureAwait(false);
 
         return page.Items.Count > 0;
     }
+
+    /// <summary>A query for the id of at least one matching row: an existence test reads no other column.</summary>
+    private static AlvoQuery IdOfOneRow<T>(Expression<Func<T, bool>> where)
+        where T : class =>
+        TypedEntity.Query(where, limit: 1) with { Select = [AlvoManagedColumns.Id] };
 
     /// <summary>The entity's applied schema when the session can name it — Alvo's own sessions can (Ruling 52).</summary>
     private static EntitySchema? SchemaOf(IAlvoSession session, string entity) =>
