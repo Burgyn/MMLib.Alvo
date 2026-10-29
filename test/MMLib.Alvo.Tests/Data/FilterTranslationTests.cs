@@ -82,6 +82,8 @@ public sealed class FilterTranslationTests
             { "culture-folding comparison", x => x.Note.StartsWith("ab", StringComparison.OrdinalIgnoreCase), "translates only in its one-argument form or with StringComparison.Ordinal" },
             { "char overload", x => x.Note.StartsWith('a'), "translates only in its one-argument form or with StringComparison.Ordinal" },
             { "text against a field", x => x.Note.EndsWith(x.Code!), "it compares a field with a field" },
+            { "comparison read from the row", x => x.Note.StartsWith("ab", x.Status == OrderStatus.Draft ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase), "translates only in its one-argument form or with StringComparison.Ordinal" },
+            { "value tested against a field", x => "abc-prefix".StartsWith(x.Code!), "the text it tests must be a field" },
             { "null text", x => x.Note.Contains(missingText!), "the text is null" },
             { "arithmetic", x => x.Total * 2m > 10m, "arithmetic has no filter equivalent" },
             { "two fields", x => x.Quantity > x.Rank, "it compares two fields" },

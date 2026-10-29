@@ -41,6 +41,11 @@ internal sealed partial class FilterTranslator
 
     private AlvoComparison TextTest(MethodCallExpression call, AlvoFilterOperator op)
     {
+        if (!LambdaShape.Touches(call.Object!, _row))
+        {
+            throw Refuse(call, "the text it tests must be a field: a filter tests a field against a value, not a value against a field", "test the field, such as x => x.Code.StartsWith(prefix).");
+        }
+
         if (!IsOrdinalText(call))
         {
             throw Refuse(call, $"'{call.Method.Name}' translates only in its one-argument form or with StringComparison.Ordinal: a filter compares characters exactly", TextFix);
@@ -58,7 +63,7 @@ internal sealed partial class FilterTranslator
         return new AlvoComparison(Field(call.Object!), op, text);
     }
 
-    private static bool IsOrdinalText(MethodCallExpression call)
+    private bool IsOrdinalText(MethodCallExpression call)
     {
         var parameters = call.Method.GetParameters();
         if (parameters.Length == 0 || parameters[0].ParameterType != typeof(string))
@@ -67,7 +72,8 @@ internal sealed partial class FilterTranslator
         }
 
         return parameters.Length == 1
-            || (parameters.Length == 2 && parameters[1].ParameterType == typeof(StringComparison) && LambdaValues.Evaluate(call.Arguments[1]) is StringComparison.Ordinal);
+            || (parameters.Length == 2 && parameters[1].ParameterType == typeof(StringComparison)
+                && !LambdaShape.Touches(call.Arguments[1], _row) && LambdaValues.Evaluate(call.Arguments[1]) is StringComparison.Ordinal);
     }
 
     private AlvoFilter Membership(MethodCallExpression call, Expression source, Expression value)
