@@ -157,7 +157,11 @@ internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
     /// framework's own minimal-API data source that knows how to re-run a route handler's conventions and
     /// filters under a group's prefix. <c>app.MapGroup(prefix).MapAlvoDataApi()</c> is a supported call, and a
     /// created row's <c>Location</c> is read off the matched endpoint's combined pattern (#121). Each group build
-    /// re-composes the gate, so the witnesses are read again here, against their counts before it.
+    /// re-composes the gate, so the witnesses are read again here, against their counts before it. This is not
+    /// insurance behind the ungrouped check: under a group, the grouped endpoints are the ones that serve, and a
+    /// convention may behave differently under a group (read the group's metadata or the combined pattern), so the
+    /// ungrouped build can keep the gate while the grouped one loses it. The framework builds a group more than once,
+    /// so a failing group build records its refusal, and logs it, on each build.
     /// </remarks>
     public override IReadOnlyList<Endpoint> GetGroupedEndpoints(RouteGroupContext context)
     {
@@ -184,10 +188,17 @@ internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
         }
         catch (AlvoDataApiConventionException failure)
         {
-            _boot.Failed(failure.Message);
-            AHostConventionFailed(_logger, failure.InnerException, failure.Message);
+            Refuse(failure);
             return [];
         }
+    }
+
+    /// <summary>Records a host convention's failure on readiness and in the critical log.</summary>
+    /// <param name="failure">What the convention broke.</param>
+    private void Refuse(AlvoDataApiConventionException failure)
+    {
+        _boot.Failed(failure.Message);
+        AHostConventionFailed(_logger, failure.InnerException, failure.Message);
     }
 
     /// <inheritdoc/>
@@ -247,8 +258,7 @@ internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
         }
         catch (AlvoDataApiConventionException failure)
         {
-            _boot.Failed(failure.Message);
-            AHostConventionFailed(_logger, failure.InnerException, failure.Message);
+            Refuse(failure);
 
             return RouteTable.NothingIsRoutable;
         }

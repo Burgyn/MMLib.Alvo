@@ -64,6 +64,8 @@ public static class AlvoDataApiEndpointRouteBuilderExtensions
     /// counts the composition of its own filter into its request delegate, after every route and group convention
     /// has run. A finally convention runs after that composition, so clearing the filter list there removes
     /// nothing. A convention may add filters around Alvo's; it cannot take Alvo's away without the build failing.
+    /// A convention that assigns <c>EndpointBuilder.RequestDelegate</c> replaces the endpoint — handler and gate
+    /// alike — and is outside what the build checks.
     /// </para>
     /// <para>
     /// <b>It returns a convention builder rather than the route builder it was given, which is what every

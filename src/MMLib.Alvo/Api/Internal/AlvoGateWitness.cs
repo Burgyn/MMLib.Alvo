@@ -7,19 +7,26 @@ namespace MMLib.Alvo.Api.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The gate is added through a factory this type owns, and the factory counts each time ASP.NET Core composes it into the
-/// filter pipeline — which it does while it builds the endpoint, after every route and group convention has run and
-/// before any finally convention does (measured on .NET 10: a finally convention that clears <c>FilterFactories</c>
-/// leaves the composed gate in force, <c>GateWitnessTests</c>). So the count answers "did the factory compose Alvo's gate", not "is something in <c>FilterFactories</c> that looks like
-/// it": a convention that clears the list, or rebuilds it with look-alike factories, leaves the count where it was. A
-/// convention that assigns <c>EndpointBuilder.RequestDelegate</c> outright replaces the handler as well as the gate; that
-/// endpoint no longer reaches Alvo's code at all, and the witness does not claim to see it (Ruling 49).
+/// The gate is added through a factory this type owns, and the factory counts each time it is <em>invoked</em> — which
+/// ASP.NET Core does while it builds the endpoint, after every route and group convention has run and before any finally
+/// convention does (measured on .NET 10: a finally convention that clears <c>FilterFactories</c> leaves the composed gate
+/// in force, <c>GateWitnessTests</c>). So the count answers "was Alvo's factory invoked", not "is something in
+/// <c>FilterFactories</c> that looks like it": a convention that clears the list, or rebuilds it with look-alike
+/// factories, leaves the count where it was.
+/// </para>
+/// <para>
+/// <b>What it does not see</b> (Ruling 49). A convention that assigns <c>EndpointBuilder.RequestDelegate</c> outright
+/// replaces the endpoint — handler and gate alike — so that endpoint no longer reaches Alvo's code at all; and a
+/// convention that wraps Alvo's factory, invokes it and discards what it returned raises the count without the gate in
+/// the chain. Both are deliberate subversion rather than the accidental rewrite #184 is about, and both fail closed: with
+/// no filter, the caller is anonymous under default-deny.
 /// </para>
 /// <para>
 /// It rides on the endpoint as metadata, so the data source can read it back from each built endpoint. A route-level
-/// <c>Finally</c> check was the issue's proposal; it is not used because whether a group's finally conventions run before
-/// or after a route's is a framework detail, not a contract, so a <c>MapGroup(…).Finally(…)</c> could undo the check. The
-/// witness does not depend on any order.
+/// <c>Finally</c> check was the issue's proposal; it is not used because a finally convention runs after composition, so
+/// it would inspect <c>FilterFactories</c> rather than the delegate: it would refuse a harmless finally that clears the
+/// list, and could not tell a look-alike from Alvo's factory without an identity check. Counting the factory's own
+/// invocation asks the actual question, whatever order the conventions run in.
 /// </para>
 /// </remarks>
 /// <param name="route">The route it belongs to, as a refusal names it: <c>create on 'owners'</c>, <c>command 'confirm_stay'</c>.</param>
