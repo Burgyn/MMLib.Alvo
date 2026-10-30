@@ -130,12 +130,13 @@ public sealed class ExtensionCatalogTests
     [Fact]
     public void An_internal_command_runs_before_any_transaction_and_has_no_route()
     {
-        var item = Catalog(Registry(alvo => alvo.AddCommand<Escalate>("escalate_ticket", "true"))).Items.ShouldHaveSingleItem();
+        var catalog = Catalog(Registry(alvo => alvo.AddCommand<Escalate>("escalate_ticket", "true")));
+        var item = catalog.Items.ShouldHaveSingleItem();
 
         item.Stage.ShouldBe(AlvoExtensionStage.PreTransaction);
         item.Route.ShouldBeNull();
         item.HttpMethod.ShouldBeNull();
-        Catalog(Registry(alvo => alvo.AddCommand<Escalate>("escalate_ticket", "true"))).HonouredKinds.ShouldBe(["extensions.command"]);
+        catalog.HonouredKinds.ShouldBe(["extensions.command"]);
     }
 
     private sealed class Escalate : MMLib.Alvo.Commands.IAlvoCommand<Guid>

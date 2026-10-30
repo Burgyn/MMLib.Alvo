@@ -65,6 +65,33 @@ public sealed class CommandSimulatorTests
         }
     }
 
+    [Fact]
+    public void An_entity_bound_command_answers_exactly_as_the_judge_admits_it_on_a_row()
+    {
+        var simulator = Simulator(out var judge);
+        var row = new AlvoRecord(new Dictionary<string, object?> { ["id"] = Guid.NewGuid(), ["status"] = "open" });
+
+        foreach (var caller in new[] { _staff, AlvoContext.Anonymous, AlvoContext.System(null), _staff with { Tenant = new TenantId(Guid.NewGuid()) } })
+        {
+            foreach (var verdict in simulator.Simulate("tickets", caller).Where(verdict => verdict.Allowed is not null))
+            {
+                var admitted = Record.Exception(() => judge.EnsureAdmitted(verdict.Name, verdict.Entity is null ? null : row, caller)) is null;
+                verdict.Allowed.ShouldBe(admitted, $"{verdict.Name} for {caller.User}");
+            }
+        }
+    }
+
+    [Fact]
+    public void A_rule_reading_the_row_previews_refused_not_per_row_for_a_caller_without_what_it_reads()
+    {
+        var simulator = Simulator(out _);
+
+        simulator.Simulate("tickets", _staff).Single(verdict => verdict.Name == "close_ticket").Allowed
+            .ShouldBe(false, "the staff caller carries no tenant, so the required-context gate refuses before any row is read");
+        simulator.Simulate("tickets", _staff with { Tenant = new TenantId(Guid.NewGuid()) }).Single(verdict => verdict.Name == "close_ticket").Allowed
+            .ShouldBeNull();
+    }
+
     private static CommandSimulator Simulator(out CommandAccessJudge judge)
     {
         var services = new ServiceCollection();
@@ -74,6 +101,8 @@ public sealed class CommandSimulatorTests
         commands.Map("quote_stay", "/q", null, CommandAccess.Of("'staff' in @user.roles"));
         commands.Map("resolve_ticket", "/t/{id}", "tickets", CommandAccess.Of("status == 'open' && 'staff' in @user.roles"));
         commands.Map("not_blocked", "/n", null, CommandAccess.Of($"!(string(@tenant.id) == '{Blocked}')"));
+        commands.Map("assign_ticket", "/a/{id}", "tickets", CommandAccess.Of("'staff' in @user.roles && string(@tenant.id) != ''"));
+        commands.Map("close_ticket", "/c/{id}", "tickets", CommandAccess.Of("status == 'open' && string(@tenant.id) != ''"));
         var catalogs = Substitute.For<IPolicyCatalogProvider>();
         catalogs.Current.Returns(Catalog());
         var registry = provider.GetRequiredService<ExtensionRegistry>();
