@@ -190,6 +190,24 @@ internal static class DataApiDocumentation
     internal static IReadOnlyList<Response> SharedRefusals { get; } =
         [Unauthenticated, Forbidden, Absent, Precondition, Conflict, Malformed, UnsupportedMediaType];
 
+    /// <summary>
+    /// The refusals every command can answer with (Ruling 45): 401, 403, 404 for a command bound to a row, 409, 412 (a
+    /// precondition its handler's own write sent), 422 and 508 (the chain-depth limit).
+    /// </summary>
+    /// <param name="boundToRow">Whether the command reads a row its route names.</param>
+    internal static IReadOnlyList<Response> CommandRefusals(bool boundToRow) =>
+        boundToRow
+            ? [Unauthenticated, Forbidden, Absent, Conflict, Precondition, Malformed, LoopDetected]
+            : [Unauthenticated, Forbidden, Conflict, Precondition, Malformed, LoopDetected];
+
+    /// <summary>The chain-depth refusal; published only where a command can answer it, so the Data API's document is unchanged.</summary>
+    private static Response LoopDetected => new(
+        StatusCodes.Status508LoopDetected,
+        ResponseBody.Problem,
+        "The request would extend a chain of writes, events and handlers past the configured depth. It is not retryable: "
+        + "'retryable' is false. Break the loop rather than retrying.",
+        SharedId: "loopDetected");
+
     private static Response Ok(ResponseBody body, string description) =>
         new(StatusCodes.Status200OK, body, description);
 

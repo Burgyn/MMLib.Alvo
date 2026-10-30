@@ -76,7 +76,7 @@ internal sealed class AlvoDocumentTransformer(
         Overview(document);
         Origin(document);
         ProblemComponents.AddTo(document);
-        document.AddComponent(CredentialScheme, Credential());
+        AddCredential(document, auth.Value.HeaderName);
         Reusable(document, operations);
         foreach (var view in views)
         {
@@ -339,7 +339,7 @@ internal sealed class AlvoDocumentTransformer(
         DataApiHeaders.AddTo(document, operations);
         foreach (var refusal in DataApiDocumentation.SharedRefusals)
         {
-            document.AddComponent(refusal.SharedId!, Response(refusal, entity: null, document));
+            AddSharedRefusal(document, refusal);
         }
 
         var used = DataApiParameters.UsedSharedIds(operations);
@@ -349,6 +349,18 @@ internal sealed class AlvoDocumentTransformer(
             {
                 document.AddComponent(id, parameter);
             }
+        }
+    }
+
+    /// <summary>Publishes <paramref name="refusal"/> as a shared response component, unless the document already has it.</summary>
+    /// <remarks>Idempotent, so the command transformer can add only what this one did not.</remarks>
+    /// <param name="document">The document being built.</param>
+    /// <param name="refusal">A refusal carrying a <see cref="DataApiDocumentation.Response.SharedId"/>.</param>
+    internal static void AddSharedRefusal(OpenApiDocument document, DataApiDocumentation.Response refusal)
+    {
+        if (document.Components?.Responses?.ContainsKey(refusal.SharedId!) != true)
+        {
+            document.AddComponent(refusal.SharedId!, Response(refusal, entity: null, document));
         }
     }
 
@@ -390,7 +402,7 @@ internal sealed class AlvoDocumentTransformer(
     /// ApiExplorer built this document — which is what seeds <see cref="OpenApiDocument.Tags"/> before any
     /// transformer runs. A fallback that created a fresh tag here was accordingly a branch nothing could
     /// reach: a real absence would mean the endpoint table and this document disagree about what was mapped,
-    /// which is the same framework invariant <see cref="Find"/> and <see cref="ViewOf"/> already fail loudly
+    /// which is the same framework invariant <see cref="FindOperation"/> and <see cref="ViewOf"/> already fail loudly
     /// on rather than paper over.
     /// </remarks>
     private static OpenApiTag Tag(OpenApiDocument document, string entity) =>
@@ -403,7 +415,7 @@ internal sealed class AlvoDocumentTransformer(
     private static void Enrich(OpenApiDocument document, EntityView view, Endpoint endpoint)
     {
         var entity = view.Schema;
-        var operation = Find(document, endpoint);
+        var operation = FindOperation(document, endpoint.Description);
         var flags = (view.Hidden, view.ReadOnly);
 
         operation.Summary = DataApiDocumentation.SummaryOf(endpoint.Marker.Kind, entity.Name);
@@ -414,7 +426,7 @@ internal sealed class AlvoDocumentTransformer(
             endpoint.Marker.Kind, entity, flags.Hidden, document);
         operation.RequestBody = RequestBody(endpoint.Marker, entity, document);
         operation.Responses = Responses(endpoint.Marker, entity, document);
-        operation.Security = Security(document);
+        operation.Security = SecurityOf(document);
     }
 
     /// <summary>The component id of the API-key security scheme every generated operation references.</summary>
@@ -433,16 +445,27 @@ internal sealed class AlvoDocumentTransformer(
     /// Without this the document has a documented 401 and no way to satisfy it — a generated client would have
     /// no place to put a key, which defeats the whole reason the document is published.
     /// </remarks>
-    private OpenApiSecurityScheme Credential() => new()
+    private static OpenApiSecurityScheme CredentialFor(string headerName) => new()
     {
         Type = SecuritySchemeType.ApiKey,
         In = ParameterLocation.Header,
-        Name = auth.Value.HeaderName,
+        Name = headerName,
         Description =
             "An Alvo API key, presented as `<keyId>.<secret>`. A key that cannot be used — unknown, revoked, "
             + "expired, malformed, or issued for another tenant — is a 401 with one wording for all of them. "
             + "The header's name is host configuration; this is the name this host reads.",
     };
+
+    /// <summary>Publishes the API-key security scheme, unless the document already has it.</summary>
+    /// <param name="document">The document being built.</param>
+    /// <param name="headerName">The request header the host reads the key from.</param>
+    internal static void AddCredential(OpenApiDocument document, string headerName)
+    {
+        if (document.Components?.SecuritySchemes?.ContainsKey(CredentialScheme) != true)
+        {
+            document.AddComponent(CredentialScheme, CredentialFor(headerName));
+        }
+    }
 
     /// <summary>
     /// The security requirement each generated operation carries: this scheme, <b>or nothing</b>.
@@ -453,7 +476,8 @@ internal sealed class AlvoDocumentTransformer(
     /// be used, never for one that was absent. Declaring the scheme as mandatory would tell a client that a key
     /// is required, which for such a descriptor is false.
     /// </remarks>
-    private static List<OpenApiSecurityRequirement> Security(OpenApiDocument document) =>
+    /// <param name="document">The document the scheme reference resolves against.</param>
+    internal static List<OpenApiSecurityRequirement> SecurityOf(OpenApiDocument document) =>
     [
         new(),
         new() { [new OpenApiSecuritySchemeReference(CredentialScheme, document)] = [] },
@@ -475,10 +499,12 @@ internal sealed class AlvoDocumentTransformer(
     /// refuse, and skipping would leave the operation in the document undescribed instead of failing.
     /// </para>
     /// </remarks>
-    private static OpenApiOperation Find(OpenApiDocument document, Endpoint endpoint)
+    /// <param name="document">The document being built.</param>
+    /// <param name="description">The endpoint's API description.</param>
+    internal static OpenApiOperation FindOperation(OpenApiDocument document, ApiDescription description)
     {
-        var path = DocumentPath(endpoint.Description);
-        var method = HttpMethod.Parse(endpoint.Description.HttpMethod!);
+        var path = DocumentPath(description);
+        var method = HttpMethod.Parse(description.HttpMethod!);
 
         return document.Paths.TryGetValue(path, out var item)
             && item.Operations is { } operations
@@ -503,7 +529,7 @@ internal sealed class AlvoDocumentTransformer(
     /// <para>
     /// Scanned rather than matched with a regular expression, so there is no pattern to bound and no timeout to
     /// justify on a path this walk performs once per endpoint at document-build time. Text this does not
-    /// recognise is left as it is: the result then matches no path key and <see cref="Find"/> throws, which is
+    /// recognise is left as it is: the result then matches no path key and <see cref="FindOperation"/> throws, which is
     /// the loud outcome rather than an operation silently left undescribed.
     /// </para>
     /// </remarks>
