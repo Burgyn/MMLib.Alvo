@@ -100,10 +100,14 @@ else
         <span class="a-label">Commands — may this caller invoke them?</span>
         @foreach (var command in Verdict.Commands)
         {
-            <div class="a-row" data-testid="@($"verdict-command-{command.Name}")">
-                <span class="a-badge @CommandVerdicts.Tone(command)" data-testid="verdict-command-answer">@CommandVerdicts.Answer(command)</span>
-                <span class="a-mono a-name">@command.Name</span>
-                <code class="a-mono">@command.Access</code>
+            @* Stacked like the Commands lane: the rule on its own line, so at a phone's width the name and the rule are
+               never squeezed beside the badge and broken mid-identifier. *@
+            <div class="a-field" data-testid="@($"verdict-command-{command.Name}")">
+                <div class="a-row a-row--wrap">
+                    <span class="a-badge @CommandVerdicts.Tone(command)" data-testid="verdict-command-answer">@CommandVerdicts.Answer(command)</span>
+                    <span class="a-mono a-name" data-testid="verdict-command-name">@command.Name</span>
+                </div>
+                <code class="a-mono" data-testid="verdict-command-access">@command.Access</code>
             </div>
         }
         <span class="a-section__sub">

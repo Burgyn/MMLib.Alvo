@@ -26,6 +26,14 @@ public sealed class LifecycleLaneCommandTests
         LifecycleLane.Binding("work_orders", _extensions).Count.ShouldBe(2);
 
     [Fact]
+    public void The_lane_is_drawn_when_the_host_maps_a_command_on_any_entity() =>
+        LifecycleLane.HasMappedCommands(_extensions).ShouldBeTrue();
+
+    [Fact]
+    public void The_lane_is_absent_when_the_host_maps_no_command() =>
+        LifecycleLane.HasMappedCommands([_extensions[0], _extensions[2]]).ShouldBeFalse("an internal command maps no route, and a handler is no command");
+
+    [Fact]
     public void A_command_s_route_line_is_its_method_and_pattern_or_says_it_is_invoked_in_process()
     {
         LifecycleLane.Route(_extensions[1]).ShouldBe("POST /commands/work-orders/{id:guid}/complete");
