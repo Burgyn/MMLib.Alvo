@@ -125,8 +125,8 @@ status and JSON body — and the handler does not run again:
 - **Answers are kept 24 hours.** A retry after that runs as a new request: make the command safe to run twice if a client
   retries for longer, or send a new key.
 - **Only the status and the JSON body are replayed** — no headers, `Location` included. A result with no status (a
-  redirect, a file), a plain `string` (written as text, it could not be replayed as the same bytes) or a body over
-  64 KiB cannot be replayed: a retry is refused with `409` rather than run.
+  redirect, a file), a plain `string` or a text result such as `Results.Text` or `Results.Content` (written as text,
+  it could not be replayed as the same bytes) or a body over 64 KiB cannot be replayed: a retry is refused with `409` rather than run.
 - **A run is held for 15 minutes.** A run still going after that can be taken over by a retry. The run that lost its
   claim cannot commit its unit — its writes and its completion roll back, and it answers `409` — but what it did outside
   the unit stays done: a command with no unit keeps its own writes, and an external call is not undone. Keep a command

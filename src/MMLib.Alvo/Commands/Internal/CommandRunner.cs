@@ -172,7 +172,7 @@ internal sealed partial class CommandRunner(
     [LoggerMessage(Level = LogLevel.Warning, Message = "Command '{Command}' answered without its transaction unit reporting a commit; no completion is recorded and its Idempotency-Key is given back.")]
     private static partial void UnitRolledBack(ILogger logger, string command);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Command '{Command}' answered with a result that cannot be replayed (no status, a value that cannot be serialised, or a body over 64 KiB); a retry with its Idempotency-Key will be refused, not answered.")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Command '{Command}' answered with a result that cannot be replayed (no status, text, a value that cannot be serialised, or a body over 64 KiB); a retry with its Idempotency-Key will be refused, not answered.")]
     private static partial void ResultNotReplayable(ILogger logger, string command);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Command '{Command}' refused a request before its handler ran, and giving its Idempotency-Key back failed; the key is held until its lease runs out, and the refusal is still the answer.")]

@@ -328,6 +328,30 @@ public sealed class CommandRunnerTests
         CommandAnswers.Of("done", JsonSerializerOptions.Web).ShouldBeNull();
 
     [Fact]
+    public void A_text_result_is_not_replayable_because_a_replay_would_answer_json()
+    {
+        CommandAnswers.Of(TypedResults.Text("done"), JsonSerializerOptions.Web).ShouldBeNull();
+        CommandAnswers.Of(Results.Content("<p>done</p>", "text/html"), JsonSerializerOptions.Web).ShouldBeNull();
+        CommandAnswers.Of(TypedResults.Text("done"u8, "text/plain"), JsonSerializerOptions.Web).ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_text_result_still_answers_its_status_so_a_refusal_in_text_releases_its_key() =>
+        CommandAnswers.IsSuccess(TypedResults.Text("no", statusCode: StatusCodes.Status400BadRequest)).ShouldBeFalse();
+
+    [Fact]
+    public async Task A_keyed_run_answering_text_is_refused_on_retry_not_replayed_as_an_empty_200()
+    {
+        var runner = Runner(out _);
+        var run = runner.Start((await runner.ClaimAsync(Invocation("t1"))).Invocation);
+
+        await runner.FinishAsync(run, () => Task.FromResult<object?>(TypedResults.Text("done")));
+
+        (await runner.ClaimAsync(Invocation("t1"))).Early.ShouldBeAssignableTo<IStatusCodeHttpResult>()!.StatusCode
+            .ShouldBe(StatusCodes.Status409Conflict);
+    }
+
+    [Fact]
     public void A_result_with_no_status_is_not_replayable() =>
         CommandAnswers.Of(TypedResults.Redirect("/elsewhere"), JsonSerializerOptions.Web).ShouldBeNull();
 

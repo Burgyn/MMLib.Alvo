@@ -10,8 +10,8 @@ namespace MMLib.Alvo.Commands.Internal;
 /// <summary>
 /// What a handler's result is as a replayable answer (Ruling 9): its status, and its value as JSON — a problem document
 /// keeps its <c>application/problem+json</c>. A typed union (<c>Results&lt;…&gt;</c>) is read as the arm it answered. A
-/// result that carries no status — a redirect, a file, a stream — a plain <see cref="string"/> (minimal APIs write it as
-/// <c>text/plain</c>, a replay would answer JSON), a value that cannot be serialised, or a body past the cap is not
+/// result that carries no status — a redirect, a file, a stream — a plain <see cref="string"/> or a text result such as
+/// <c>Results.Text</c> or <c>Results.Content</c> (written as text, a replay would answer JSON), a value that cannot be serialised, or a body past the cap is not
 /// replayable. Headers — a <c>Created</c>'s <c>Location</c> among them — are not replayed (Ruling 49).
 /// </summary>
 internal static class CommandAnswers
@@ -38,7 +38,7 @@ internal static class CommandAnswers
     internal static CommandAnswer? Of(object? result, JsonSerializerOptions json)
     {
         var answered = Unwrapped(result);
-        if (StatusOf(answered) is not { } status)
+        if (IsText(answered) || StatusOf(answered) is not { } status)
         {
             return null;
         }
@@ -53,6 +53,12 @@ internal static class CommandAnswers
             ? new CommandAnswer(status, body, value is ProblemDetails ? ProblemMediaType : null)
             : null;
     }
+
+    /// <summary>
+    /// Gets a value indicating whether the result writes text it does not hold as a value — <c>Results.Text</c>,
+    /// <c>Results.Content</c> — which a replay, answering JSON, could not give back as the same bytes.
+    /// </summary>
+    private static bool IsText(object? answered) => answered is IContentTypeHttpResult and not IValueHttpResult;
 
     private static object? Unwrapped(object? result)
     {
