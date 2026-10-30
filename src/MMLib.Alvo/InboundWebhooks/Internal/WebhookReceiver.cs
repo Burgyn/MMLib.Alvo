@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Api;
 using MMLib.Alvo.Api.Internal;
@@ -91,7 +92,7 @@ internal sealed class WebhookReceiver(
     {
         try
         {
-            AlvoCaller.For(http).Resolve(AlvoContext.System(TenantOf(http.Request, body)));
+            AlvoCaller.For(http).Resolve(AlvoContext.System(await TenantOfAsync(http.Request, body).ConfigureAwait(false)));
             Replay(http.Request, body);
             await handler(http).ConfigureAwait(false);
         }
@@ -115,7 +116,7 @@ internal sealed class WebhookReceiver(
     /// The tenant from the verified bytes (Ruling 37). The body is replayed before the resolver too, so one that reads
     /// <c>request.Body</c> instead of the bytes it is given reads the same verified content.
     /// </summary>
-    private TenantId? TenantOf(HttpRequest request, byte[] body)
+    private async ValueTask<TenantId?> TenantOfAsync(HttpRequest request, byte[] body)
     {
         if (options.ResolveTenant is not { } resolve)
         {
@@ -123,7 +124,7 @@ internal sealed class WebhookReceiver(
         }
 
         Replay(request, body);
-        return resolve(request, body) ?? options.Tenant;
+        return await resolve(request, body, request.HttpContext.RequestAborted).ConfigureAwait(false) ?? options.Tenant;
     }
 
     private static void Replay(HttpRequest request, byte[] body)
@@ -154,6 +155,11 @@ internal sealed class WebhookReceiver(
         return seconds >= now - tolerance && seconds <= now + tolerance;
     }
 
+    /// <summary>
+    /// The body, or null past <see cref="AlvoWebhookReceiverOptions.MaxBodyBytes"/> — counted while it is read, so a body
+    /// without a length is never buffered past it. The server's own limit is raised to the receiver's, never lowered, and
+    /// a server that refuses the read past its limit answers the receiver's 413 too (Ruling 55).
+    /// </summary>
     private async Task<byte[]?> BodyAsync(HttpRequest request)
     {
         if (request.ContentLength > options.MaxBodyBytes)
@@ -161,6 +167,28 @@ internal sealed class WebhookReceiver(
             return null;
         }
 
+        RaiseServerLimit(request.HttpContext);
+        try
+        {
+            return await ReadCappedAsync(request).ConfigureAwait(false);
+        }
+        catch (BadHttpRequestException refused) when (refused.StatusCode == StatusCodes.Status413PayloadTooLarge)
+        {
+            return null;
+        }
+    }
+
+    private void RaiseServerLimit(HttpContext http)
+    {
+        if (http.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false, MaxRequestBodySize: { } limit } feature
+            && limit < options.MaxBodyBytes)
+        {
+            feature.MaxRequestBodySize = options.MaxBodyBytes;
+        }
+    }
+
+    private async Task<byte[]?> ReadCappedAsync(HttpRequest request)
+    {
         using var buffer = new MemoryStream();
         var chunk = new byte[16_384];
         int read;
@@ -181,17 +209,19 @@ internal sealed class WebhookReceiver(
     {
         try
         {
-            return await secrets.GetAsync(secret, ct).ConfigureAwait(false) is { } stored ? StandardWebhookSignature.Keys(stored) : Unusable();
+            return await secrets.GetAsync(secret, ct).ConfigureAwait(false) is { } stored
+                ? StandardWebhookSignature.Keys(stored)
+                : Unusable("Nothing is stored under that name.");
         }
-        catch (FormatException)
+        catch (FormatException unusable)
         {
-            return Unusable();
+            return Unusable(unusable.Message);
         }
     }
 
-    private IReadOnlyList<byte[]>? Unusable()
+    private IReadOnlyList<byte[]>? Unusable(string reason)
     {
-        WebhookLog.SecretUnusable(logger, pattern, secret.Value);
+        WebhookLog.SecretUnusable(logger, pattern, secret.Value, reason);
         return null;
     }
 

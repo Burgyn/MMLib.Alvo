@@ -103,7 +103,7 @@ namespace MMLib.Alvo.Api
     {
         public AlvoWebhookReceiverOptions() { }
         public long MaxBodyBytes { get; set; }
-        public System.Func<Microsoft.AspNetCore.Http.HttpRequest, System.ReadOnlyMemory<byte>, MMLib.Alvo.TenantId?>? ResolveTenant { get; set; }
+        public System.Func<Microsoft.AspNetCore.Http.HttpRequest, System.ReadOnlyMemory<byte>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<MMLib.Alvo.TenantId?>>? ResolveTenant { get; set; }
         public MMLib.Alvo.TenantId? Tenant { get; set; }
         public System.TimeSpan Tolerance { get; set; }
     }

@@ -7,9 +7,9 @@ using MMLib.Alvo.InboundWebhooks.Internal;
 namespace MMLib.Alvo.InboundWebhooks;
 
 /// <summary>Registers inbound webhooks; called from <c>AddAlvo</c> and nowhere else.</summary>
-internal static class WebhooksSetup
+internal static class InboundWebhooksSetup
 {
-    internal static IServiceCollection AddAlvoWebhooks(this IServiceCollection services)
+    internal static IServiceCollection AddAlvoInboundWebhooks(this IServiceCollection services)
     {
         services.TryAddSingleton<WebhookReceivers>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, LedgerSweeper>(provider => new LedgerSweeper(

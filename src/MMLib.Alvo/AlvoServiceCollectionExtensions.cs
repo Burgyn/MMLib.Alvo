@@ -77,7 +77,7 @@ public static class AlvoServiceCollectionExtensions
         services.AddAlvoManagement();
         services.AddAlvoExtensions();
         services.AddAlvoCommands();
-        services.AddAlvoWebhooks();
+        services.AddAlvoInboundWebhooks();
         services.AddAlvoEvents();
         services.AddAlvoApi();
 

@@ -23,7 +23,9 @@ public static class AlvoWebhookEndpointRouteBuilderExtensions
     /// present, the timestamp within <see cref="AlvoWebhookReceiverOptions.Tolerance"/> of now (5 minutes), the body within
     /// <see cref="AlvoWebhookReceiverOptions.MaxBodyBytes"/>, and one <c>v1,</c> signature must verify with the secret
     /// stored under <paramref name="secretName"/> (several space-separated <c>whsec_</c> secrets are accepted, for rotation).
-    /// Otherwise the answer is 401 (413 for the body) and nothing runs.
+    /// Otherwise the answer is 401 (413 for the body) and nothing runs. Every stored secret must decode to at least 24
+    /// bytes, as Standard Webhooks asks: a missing, malformed or shorter one answers 500 and logs an Error naming the
+    /// secret and why, never its value (Ruling 54). The handler's own failures are answered as Alvo's problem document.
     /// </para>
     /// <para>
     /// A <c>webhook-id</c> is handled once per receiver: a delivery already handled is acknowledged 200 without running the
@@ -35,7 +37,8 @@ public static class AlvoWebhookEndpointRouteBuilderExtensions
     /// </para>
     /// <para>
     /// The tenant comes from <see cref="AlvoWebhookReceiverOptions.Tenant"/> or from
-    /// <see cref="AlvoWebhookReceiverOptions.ResolveTenant"/>, which is given the verified body. Only the body is signed:
+    /// <see cref="AlvoWebhookReceiverOptions.ResolveTenant"/>, which is given the verified body and may look the tenant up
+    /// asynchronously (Ruling 56). Only the body is signed:
     /// do not take the tenant from the path or a header (Ruling 37).
     /// </para>
     /// <para>
@@ -69,7 +72,9 @@ public static class AlvoWebhookEndpointRouteBuilderExtensions
         var receiver = Receiver(endpoints, pattern, secret, options.Validated(), Inner(endpoints, pattern, handler));
         endpoints.ServiceProvider.GetRequiredService<WebhookReceivers>().Add(pattern);
 
-        return endpoints.MapPost(pattern, (RequestDelegate)receiver.ReceiveAsync).ExcludeFromDescription();
+        return endpoints.MapPost(pattern, (RequestDelegate)receiver.ReceiveAsync)
+            .WithMetadata(new WebhookReceiverEndpointMetadata(pattern))
+            .ExcludeFromDescription();
     }
 
     private static WebhookReceiver Receiver(

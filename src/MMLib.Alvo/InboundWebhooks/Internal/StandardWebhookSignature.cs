@@ -18,14 +18,20 @@ internal static class StandardWebhookSignature
     private const string SecretPrefix = "whsec_";
     private const string Version = "v1";
 
+    /// <summary>The shortest key accepted, in bytes: Standard Webhooks' secrets are 24 to 64 bytes (Ruling 54).</summary>
+    internal const int MinKeyBytes = 24;
+
     /// <summary>The keys a stored secret value holds: one, or several separated by spaces (the receiver's rotation, Ruling 22).</summary>
-    /// <exception cref="FormatException">A secret is not base64 or decodes to no key, or the value holds no secret at all.</exception>
+    /// <exception cref="FormatException">
+    /// A secret is not base64 or decodes to fewer than <see cref="MinKeyBytes"/> bytes, or the value holds no secret at all;
+    /// the message says which, and never quotes a secret.
+    /// </exception>
     internal static IReadOnlyList<byte[]> Keys(string stored)
     {
         ArgumentNullException.ThrowIfNull(stored);
         IReadOnlyList<byte[]> keys = [.. stored.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(Key)];
 
-        return keys.Count > 0 ? keys : throw new FormatException("The stored webhook secret value holds no secret.");
+        return keys.Count > 0 ? keys : throw new FormatException("It holds no secret.");
     }
 
     /// <summary>The <c>v1,…</c> signature of one delivery.</summary>
@@ -63,11 +69,22 @@ internal static class StandardWebhookSignature
         return Convert.TryFromBase64String(entry[(comma + 1)..], buffer, out var written) && written > 0 ? buffer[..written] : null;
     }
 
-    /// <summary>One secret's key; an empty one is refused, because anyone can sign with it.</summary>
+    /// <summary>
+    /// One secret's key. A short one is refused (Ruling 54): an empty key is one anyone can sign with, and Standard Webhooks
+    /// asks for at least 24 bytes. A longer one is not — HMAC hashes a long key, so it is no weaker.
+    /// </summary>
     private static byte[] Key(string secret)
     {
-        var key = Convert.FromBase64String(secret.StartsWith(SecretPrefix, StringComparison.Ordinal) ? secret[SecretPrefix.Length..] : secret);
-        return key.Length > 0 ? key : throw new FormatException("A webhook secret decodes to an empty key.");
+        var encoded = secret.StartsWith(SecretPrefix, StringComparison.Ordinal) ? secret[SecretPrefix.Length..] : secret;
+        var key = new byte[encoded.Length];
+        if (!Convert.TryFromBase64String(encoded, key, out var written))
+        {
+            throw new FormatException("A secret in it is not base64.");
+        }
+
+        return written >= MinKeyBytes
+            ? key[..written]
+            : throw new FormatException($"A secret in it decodes to a key shorter than {MinKeyBytes} bytes; Standard Webhooks' secrets are 24 to 64 bytes.");
     }
 
     private static byte[] Mac(byte[] key, string id, long timestamp, ReadOnlySpan<byte> body)

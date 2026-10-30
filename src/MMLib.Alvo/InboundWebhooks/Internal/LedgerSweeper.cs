@@ -15,7 +15,7 @@ namespace MMLib.Alvo.InboundWebhooks.Internal;
 internal sealed class LedgerSweeper(IServiceProvider services, TimeProvider time, ILogger<LedgerSweeper> logger) : BackgroundService
 {
     /// <summary>Runs one sweep; answers how many ids and keys it forgot.</summary>
-    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "A failed sweep must not stop the host: it is logged and retried an hour later.")]
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "A failed sweep — a provider timeout surfaced as a cancellation included — must not stop the host: it is logged and retried an hour later. Only the host's own stop ends it.")]
     internal async Task<int> SweepOnceAsync(CancellationToken cancellationToken)
     {
         try
@@ -27,14 +27,25 @@ internal sealed class LedgerSweeper(IServiceProvider services, TimeProvider time
             var commands = services.GetService<ICommandLedger>() is { } keys
                 ? await keys.SweepAsync(now - CommandLedgerLimits.Retention, cancellationToken).ConfigureAwait(false)
                 : 0;
-            WebhookLog.Swept(logger, webhooks, commands);
+            Log(webhooks, commands);
             return webhooks + commands;
         }
-        catch (Exception failure) when (failure is not OperationCanceledException)
+        catch (Exception failure) when (!cancellationToken.IsCancellationRequested)
         {
             WebhookLog.SweepFailed(logger, failure);
             return 0;
         }
+    }
+
+    private void Log(int webhooks, int commands)
+    {
+        if (webhooks + commands == 0)
+        {
+            WebhookLog.NothingSwept(logger);
+            return;
+        }
+
+        WebhookLog.Swept(logger, webhooks, commands);
     }
 
     /// <inheritdoc/>

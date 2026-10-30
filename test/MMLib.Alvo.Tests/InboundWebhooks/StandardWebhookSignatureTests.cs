@@ -73,6 +73,31 @@ public sealed class StandardWebhookSignatureTests
     public void A_stored_value_holding_an_empty_secret_or_none_is_unusable(string stored) =>
         Should.Throw<FormatException>(() => StandardWebhookSignature.Keys(stored));
 
+    /// <summary>Ruling 54: Standard Webhooks' secrets are 24 to 64 bytes; shorter is refused, longer is not.</summary>
+    [Theory]
+    [InlineData(23, false)]
+    [InlineData(24, true)]
+    [InlineData(65, true)]
+    public void A_key_shorter_than_24_bytes_is_refused_and_a_longer_one_is_not(int length, bool accepted)
+    {
+        var stored = "whsec_" + Convert.ToBase64String(Enumerable.Repeat((byte)7, length).ToArray());
+
+        if (accepted)
+        {
+            StandardWebhookSignature.Keys(stored).ShouldHaveSingleItem().Length.ShouldBe(length);
+        }
+        else
+        {
+            var refusal = Should.Throw<FormatException>(() => StandardWebhookSignature.Keys(stored));
+            refusal.Message.ShouldContain("24 bytes");
+            refusal.Message.ShouldNotContain(stored["whsec_".Length..], Case.Sensitive, "the reason names no key");
+        }
+    }
+
+    [Fact]
+    public void A_value_holding_one_short_secret_beside_a_good_one_is_refused_whole() =>
+        Should.Throw<FormatException>(() => StandardWebhookSignature.Keys($"{Secret} whsec_{Convert.ToBase64String(new byte[16])}"));
+
     [Theory]
     [InlineData("")]
     [InlineData("v1,")]
