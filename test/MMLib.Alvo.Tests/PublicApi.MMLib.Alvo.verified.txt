@@ -99,6 +99,14 @@ namespace MMLib.Alvo.Api
         [System.Text.Json.Serialization.JsonPropertyName("pointer")]
         public string Pointer { get; init; }
     }
+    public sealed class AlvoWebhookReceiverOptions
+    {
+        public AlvoWebhookReceiverOptions() { }
+        public long MaxBodyBytes { get; set; }
+        public System.Func<Microsoft.AspNetCore.Http.HttpRequest, System.ReadOnlyMemory<byte>, MMLib.Alvo.TenantId?>? ResolveTenant { get; set; }
+        public MMLib.Alvo.TenantId? Tenant { get; set; }
+        public System.TimeSpan Tolerance { get; set; }
+    }
 }
 namespace MMLib.Alvo.Auth
 {
@@ -503,6 +511,10 @@ namespace Microsoft.AspNetCore.Builder
     public static class AlvoManagementEndpointRouteBuilderExtensions
     {
         public static Microsoft.AspNetCore.Builder.IEndpointConventionBuilder MapAlvoManagementApi(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
+    }
+    public static class AlvoWebhookEndpointRouteBuilderExtensions
+    {
+        public static Microsoft.AspNetCore.Builder.IEndpointConventionBuilder MapAlvoWebhookReceiver(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints, string pattern, string secretName, System.Delegate handler, System.Action<MMLib.Alvo.Api.AlvoWebhookReceiverOptions>? configure = null) { }
     }
 }
 namespace Microsoft.Extensions.DependencyInjection

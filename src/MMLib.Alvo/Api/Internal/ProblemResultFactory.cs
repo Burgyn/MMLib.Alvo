@@ -311,6 +311,16 @@ internal static class ProblemResultFactory
         "The request could not be completed because of an internal error. It has been logged; retry, and if it "
         + "persists, report it to whoever operates this instance.");
 
+    /// <summary>An inbound webhook delivery that failed verification: 401, with no challenge — Standard Webhooks names none.</summary>
+    internal static IResult WebhookRefused(string detail) =>
+        Problem(StatusCodes.Status401Unauthorized, AlvoProblemTypes.Unauthenticated, detail);
+
+    /// <summary>An inbound webhook delivery whose id is still being handled.</summary>
+    internal static IResult WebhookInFlight() => Problem(
+        StatusCodes.Status409Conflict,
+        AlvoProblemTypes.Conflict,
+        "A delivery with this webhook-id is still being handled. Retry it later: once it is handled, a retry is acknowledged.");
+
     /// <summary>The 500 for a CEL function that failed during the write; the write was rolled back.</summary>
     /// <param name="detail">Names the function, and a built-in's reason; never the host's exception text.</param>
     /// <returns>The problem result.</returns>
