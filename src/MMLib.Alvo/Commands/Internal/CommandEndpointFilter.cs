@@ -76,18 +76,25 @@ internal sealed class CommandEndpointFilter(
     private async Task<object?> KeyedAsync(
         CommandRegistration command, CommandInputs inputs, EndpointFilterInvocationContext invocation, EndpointFilterDelegate next, CallerAdmission admission)
     {
-        var http = invocation.HttpContext;
-        var fingerprint = CommandKeys.Sent(http.Request)
-            ? await inputs.FingerprintAsync(command, http, invocation.Arguments, json.Value.SerializerOptions).ConfigureAwait(false)
-            : string.Empty;
-        var malformed = CommandKeys.TryRead(http.Request, command, admission.Context, admission.Principal?.KeyId, fingerprint, out var key);
+        var malformed = CommandKeys.TryRead(invocation.HttpContext.Request, admission.Context, out var value);
         if (malformed is not null)
         {
             return malformed;
         }
 
+        var key = value is null ? null : await KeyAsync(command, inputs, invocation, admission, value).ConfigureAwait(false);
         var claimed = await runner.ClaimAsync(new CommandInvocation(command, admission.Context, null, key)).ConfigureAwait(false);
         return claimed.Early ?? await AdmittedAsync(claimed.Invocation, invocation, next).ConfigureAwait(false);
+    }
+
+    private async Task<CommandKey> KeyAsync(
+        CommandRegistration command, CommandInputs inputs, EndpointFilterInvocationContext invocation, CallerAdmission admission, string value)
+    {
+        var http = invocation.HttpContext;
+        var fingerprint = await inputs.FingerprintAsync(command, http, invocation.Arguments, json.Value.SerializerOptions, http.RequestAborted)
+            .ConfigureAwait(false);
+
+        return CommandKeys.KeyOf(command, admission.Context, admission.Principal?.KeyId, value, fingerprint);
     }
 
     private async Task<object?> AdmittedAsync(CommandInvocation requested, EndpointFilterInvocationContext invocation, EndpointFilterDelegate next)

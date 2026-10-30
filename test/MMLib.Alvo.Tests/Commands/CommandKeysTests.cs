@@ -32,8 +32,8 @@ public sealed class CommandKeysTests
         var anonymous = new DefaultHttpContext();
         anonymous.Request.Headers[CommandKeys.Header] = "a";
 
-        CommandKeys.TryRead(repeated.Request, _quote, _user, "k", "fp", out var first).ShouldNotBeNull();
-        CommandKeys.TryRead(anonymous.Request, _quote, AlvoContext.Anonymous, null, "fp", out var second).ShouldNotBeNull();
+        CommandKeys.TryRead(repeated.Request, _user, out var first).ShouldNotBeNull();
+        CommandKeys.TryRead(anonymous.Request, AlvoContext.Anonymous, out var second).ShouldNotBeNull();
         first.ShouldBeNull();
         second.ShouldBeNull();
     }
@@ -44,27 +44,27 @@ public sealed class CommandKeysTests
         var http = new DefaultHttpContext();
         http.Request.Headers[CommandKeys.Header] = "order-7";
 
-        CommandKeys.TryRead(http.Request, _quote, _user, "key-a", "fp", out var key).ShouldBeNull();
+        CommandKeys.TryRead(http.Request, _user, out var value).ShouldBeNull();
 
-        key.ShouldBe(new CommandKey($"command:quote_stay/{AlvoIdempotency.IdentityOf(_user)}/key-a", "order-7", "fp"));
+        CommandKeys.KeyOf(_quote, _user, "key-a", value!, "fp").ShouldBe(new CommandKey($"command:quote_stay/{AlvoIdempotency.IdentityOf(_user)}/key-a", "order-7", "fp"));
     }
 
     [Fact]
-    public void No_header_is_not_sent_and_makes_no_key()
+    public void No_header_reads_no_key()
     {
         var request = new DefaultHttpContext().Request;
 
-        CommandKeys.Sent(request).ShouldBeFalse("no fingerprint is computed for a request that sent no key");
-        CommandKeys.TryRead(request, _quote, _user, "key-a", "fp", out var key).ShouldBeNull();
-        key.ShouldBeNull();
+        CommandKeys.TryRead(request, _user, out var value).ShouldBeNull();
+        value.ShouldBeNull("no fingerprint is computed for a request that sent no key");
     }
 
     [Fact]
-    public void A_header_even_an_empty_one_is_sent()
+    public void An_empty_header_is_refused_not_ignored()
     {
         var http = new DefaultHttpContext();
         http.Request.Headers[CommandKeys.Header] = string.Empty;
 
-        CommandKeys.Sent(http.Request).ShouldBeTrue();
+        CommandKeys.TryRead(http.Request, _user, out var value).ShouldNotBeNull();
+        value.ShouldBeNull();
     }
 }

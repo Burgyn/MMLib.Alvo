@@ -32,42 +32,42 @@ internal sealed class CommandInputs(IReadOnlyList<int> positions)
 
     /// <summary>The request's fingerprint: the command, the route's <c>id</c>, and each input described, hashed.</summary>
     internal async Task<string> FingerprintAsync(
-        CommandRegistration command, HttpContext http, IList<object?> arguments, JsonSerializerOptions json)
+        CommandRegistration command, HttpContext http, IList<object?> arguments, JsonSerializerOptions json, CancellationToken cancellationToken)
     {
         var text = new StringBuilder(command.Id).Append('\n').Append(http.Request.RouteValues["id"]);
         foreach (var position in positions)
         {
-            text.Append('\n').Append(await DescribedAsync(arguments[position], json).ConfigureAwait(false));
+            text.Append('\n').Append(await DescribedAsync(arguments[position], json, cancellationToken).ConfigureAwait(false));
         }
 
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())));
     }
 
-    private static async Task<string> DescribedAsync(object? value, JsonSerializerOptions json) => value switch
+    private static async Task<string> DescribedAsync(object? value, JsonSerializerOptions json, CancellationToken cancellationToken) => value switch
     {
         null => "null",
-        IFormFile file => await FileAsync(file).ConfigureAwait(false),
-        IFormFileCollection files => await FilesAsync(files).ConfigureAwait(false),
+        IFormFile file => await FileAsync(file, cancellationToken).ConfigureAwait(false),
+        IFormFileCollection files => await FilesAsync(files, cancellationToken).ConfigureAwait(false),
         _ => JsonSerializer.Serialize(value, value.GetType(), json),
     };
 
-    private static async Task<string> FilesAsync(IFormFileCollection files)
+    private static async Task<string> FilesAsync(IFormFileCollection files, CancellationToken cancellationToken)
     {
         var described = new List<string>(files.Count);
         foreach (var file in files)
         {
-            described.Add(await FileAsync(file).ConfigureAwait(false));
+            described.Add(await FileAsync(file, cancellationToken).ConfigureAwait(false));
         }
 
         return JsonSerializer.Serialize(described);
     }
 
-    private static async Task<string> FileAsync(IFormFile file)
+    private static async Task<string> FileAsync(IFormFile file, CancellationToken cancellationToken)
     {
         var content = file.OpenReadStream();
         await using (content.ConfigureAwait(false))
         {
-            var hash = await SHA256.HashDataAsync(content).ConfigureAwait(false);
+            var hash = await SHA256.HashDataAsync(content, cancellationToken).ConfigureAwait(false);
             return JsonSerializer.Serialize(new[] { file.Name, file.FileName, file.Length.ToString(CultureInfo.InvariantCulture), Convert.ToHexStringLower(hash) });
         }
     }

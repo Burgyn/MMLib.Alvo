@@ -23,14 +23,13 @@ internal static class CommandKeys
     /// <summary>The credential segment of a caller who presented no key (an internal caller, or a non-key resolver).</summary>
     internal const string NoCredential = "-";
 
-    /// <summary>Whether the request sent the header at all — only then is its fingerprint worth computing.</summary>
-    internal static bool Sent(HttpRequest request) => request.Headers.ContainsKey(Header);
-
-    /// <summary>Reads the key; answers a 422 to give instead, or null with <paramref name="key"/> set (null when no header).</summary>
-    internal static IResult? TryRead(
-        HttpRequest request, CommandRegistration command, AlvoContext caller, string? keyId, string fingerprint, out CommandKey? key)
+    /// <summary>
+    /// Reads the key's value; answers a 422 to give instead, or null with <paramref name="value"/> set (null when no header) —
+    /// before any fingerprint is computed, so a malformed key never costs the hashing of its uploads.
+    /// </summary>
+    internal static IResult? TryRead(HttpRequest request, AlvoContext caller, out string? value)
     {
-        key = null;
+        value = null;
         var header = request.Headers[Header];
         if (header.Count == 0)
         {
@@ -51,9 +50,13 @@ internal static class CommandKeys
             return ProblemResultFactory.Malformed(ProblemResultFactory.WithoutArgumentDetail(refusal.Message));
         }
 
-        key = new CommandKey(ScopeOf(command, caller, keyId), header[0]!, fingerprint);
+        value = header[0]!;
         return null;
     }
+
+    /// <summary>The key <paramref name="value"/> makes for <paramref name="command"/>, filed under the caller and credential.</summary>
+    internal static CommandKey KeyOf(CommandRegistration command, AlvoContext caller, string? keyId, string value, string fingerprint) =>
+        new(ScopeOf(command, caller, keyId), value, fingerprint);
 
     /// <summary>The scope a key of <paramref name="command"/> is filed under for <paramref name="caller"/> using <paramref name="keyId"/>.</summary>
     internal static string ScopeOf(CommandRegistration command, AlvoContext caller, string? keyId) =>
