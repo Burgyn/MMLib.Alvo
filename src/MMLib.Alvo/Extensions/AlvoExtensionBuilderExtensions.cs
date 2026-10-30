@@ -181,9 +181,12 @@ public static class AlvoExtensionBuilderExtensions
     /// Registers an internal command: <typeparamref name="TCommand"/>, invoked through <c>IAlvoCommands.InvokeAsync</c>
     /// under <paramref name="access"/>.
     /// </summary>
-    /// <typeparam name="TCommand">A class implementing <c>IAlvoCommand&lt;TInput&gt;</c> exactly once.</typeparam>
+    /// <typeparam name="TCommand">A concrete class implementing <c>IAlvoCommand&lt;TInput&gt;</c> exactly once.</typeparam>
     /// <param name="builder">The Alvo builder.</param>
-    /// <param name="name">The command's name: lower-case segments separated by dots, e.g. <c>escalate_ticket</c>.</param>
+    /// <param name="name">
+    /// The command's name: lower-case segments of letters, digits and underscores, each starting with a letter, separated by
+    /// dots — <c>confirm_booking</c> or <c>billing.issue_invoice</c>.
+    /// </param>
     /// <param name="access">The access rule: CEL over <c>@user</c> and <c>@tenant</c>; <c>'true'</c> admits every caller.</param>
     /// <returns><paramref name="builder"/>, for chaining.</returns>
     /// <exception cref="ArgumentException"><typeparamref name="TCommand"/> is no command, or <paramref name="access"/> is empty.</exception>
@@ -192,11 +195,12 @@ public static class AlvoExtensionBuilderExtensions
         Commanded<TCommand>(builder, name, CommandAccess.Of(access));
 
     /// <summary>Registers an internal command whose access rule is a lambda over the caller, translated to CEL here.</summary>
-    /// <typeparam name="TCommand">A class implementing <c>IAlvoCommand&lt;TInput&gt;</c> exactly once.</typeparam>
+    /// <typeparam name="TCommand">A concrete class implementing <c>IAlvoCommand&lt;TInput&gt;</c> exactly once.</typeparam>
     /// <param name="builder">The Alvo builder.</param>
     /// <param name="name">The command's name.</param>
     /// <param name="access">The access rule, e.g. <c>caller =&gt; caller.HasRole("dispatcher")</c>.</param>
     /// <returns><paramref name="builder"/>, for chaining.</returns>
+    /// <exception cref="ArgumentException"><typeparamref name="TCommand"/> is no command.</exception>
     /// <exception cref="AlvoTranslationException">The lambda has no CEL equivalent.</exception>
     public static IAlvoBuilder AddCommand<TCommand>(this IAlvoBuilder builder, string name, Expression<Func<AlvoConditionCaller, bool>> access)
         where TCommand : class =>
@@ -207,15 +211,24 @@ public static class AlvoExtensionBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        var input = InputOf(typeof(TCommand));
+        var input = InputOf<TCommand>();
         builder.Services.TryAddTransient<TCommand>();
         ExtensionRegistrations.Add(builder.Services, sequence => new CommandRegistration(name, sequence, access, null, null, typeof(TCommand), input));
 
         return builder;
     }
 
-    private static Type InputOf(Type command)
+    private static Type InputOf<TCommand>()
+        where TCommand : class
     {
+        var command = typeof(TCommand);
+        if (command.IsAbstract)
+        {
+            throw new ArgumentException(
+                $"{command.Name} is abstract, so it cannot be created to run: register a concrete class that implements IAlvoCommand<TInput>.",
+                nameof(TCommand));
+        }
+
         var implemented = command.GetInterfaces()
             .Where(candidate => candidate.IsGenericType && candidate.GetGenericTypeDefinition() == typeof(IAlvoCommand<>))
             .ToList();
@@ -224,6 +237,6 @@ public static class AlvoExtensionBuilderExtensions
             ? only.GetGenericArguments()[0]
             : throw new ArgumentException(
                 $"{command.Name} must implement IAlvoCommand<TInput> exactly once to be a command; it implements it {implemented.Count} times.",
-                nameof(command));
+                nameof(TCommand));
     }
 }

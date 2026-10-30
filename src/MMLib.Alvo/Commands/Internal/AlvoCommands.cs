@@ -35,7 +35,7 @@ internal sealed class AlvoCommands(
                 $"No internal command '{name}' is registered. AddCommand<TCommand>(\"{name}\", …) registers one; a command mapped over HTTP is invoked over HTTP.",
                 nameof(name));
 
-        return command.InputType!.IsAssignableFrom(input)
+        return typeof(IAlvoCommand<>).MakeGenericType(input).IsAssignableFrom(command.CommandType)
             ? command
             : throw new ArgumentException($"Command '{name}' takes {command.InputType!.Name}, not {input.Name}.", nameof(input));
     }
