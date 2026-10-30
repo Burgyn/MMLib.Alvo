@@ -49,7 +49,28 @@ internal sealed class LedgerSweeper(IServiceProvider services, TimeProvider time
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Nothing escapes: the host stopping ends the loop quietly — a host disposed without <c>StopAsync</c> included, which
+    /// would otherwise report this service as failed and stop the application — and a provider failure raised while it
+    /// stops is logged.
+    /// </remarks>
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "An exception escaping ExecuteAsync stops the host; a sweep that fails while the host stops is logged instead.")]
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
+            await SweepUntilStoppedAsync(stoppingToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception failure)
+        {
+            WebhookLog.SweeperStopped(logger, failure);
+        }
+    }
+
+    private async Task SweepUntilStoppedAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(InboundWebhookLimits.SweepInterval, time);
         do

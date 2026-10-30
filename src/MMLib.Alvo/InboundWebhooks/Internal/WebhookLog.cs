@@ -25,4 +25,7 @@ internal static partial class WebhookLog
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "The ledger sweep failed; it runs again in an hour.")]
     internal static partial void SweepFailed(ILogger logger, Exception failure);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "The ledger sweep failed while the host was stopping; the next start sweeps again.")]
+    internal static partial void SweeperStopped(ILogger logger, Exception failure);
 }
