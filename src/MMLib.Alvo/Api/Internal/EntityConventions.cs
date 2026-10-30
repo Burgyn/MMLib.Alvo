@@ -36,10 +36,20 @@ internal sealed class EntityConventions(string entity) : IEndpointConventionBuil
     /// Runs the ordinary conventions and then the finally ones on <paramref name="endpoint"/> when it is one of the
     /// entity's routes — the order a builder that can only reach the route late, through <c>Finally</c>, keeps.
     /// </summary>
+    /// <remarks>
+    /// A route's filter pipeline is composed before its <c>Finally</c> conventions run, so a filter added here would
+    /// never run. That is refused rather than dropped: a host's own check that silently does nothing fails open.
+    /// </remarks>
+    /// <exception cref="AlvoDataApiConventionException">A convention changed the route's filter factories.</exception>
     internal void ApplyAll(EndpointBuilder endpoint)
     {
+        var filters = endpoint.FilterFactories.Count;
         Apply(endpoint);
         ApplyFinally(endpoint);
+        if (endpoint.FilterFactories.Count != filters)
+        {
+            throw AlvoDataApiConventionException.FilterTooLate(entity);
+        }
     }
 
     private void Replay(List<Action<EndpointBuilder>> conventions, EndpointBuilder endpoint)

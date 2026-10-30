@@ -191,6 +191,13 @@ internal sealed class AlvoDataApiConventionException : Exception
         $"ForEntity('{entity}') on MapAlvoDataApi() names no entity the applied descriptor declares, so its conventions would "
         + $"reach no route and the Data API has no routes. Declared: {string.Join(", ", declared)}. Name one of them.");
 
+    /// <summary>A <c>ForEntity</c> on a group added a filter, which a group's late conventions can never compose.</summary>
+    /// <param name="entity">The name it used.</param>
+    internal static AlvoDataApiConventionException FilterTooLate(string entity) => new(
+        $"ForEntity('{entity}') on a MapGroup added an endpoint filter, so the Data API has no routes. A group reaches a "
+        + "route only through Finally, after its filters are composed, so the filter would never run. Add it through "
+        + $"ForEntity('{entity}') on the builder MapAlvoDataApi() returns instead.");
+
     /// <summary>A convention removed Alvo's authorization filter from a generated route (issue 184).</summary>
     /// <param name="witness">The route whose gate was not composed.</param>
     internal static AlvoDataApiConventionException GateRemoved(AlvoGateWitness witness) => new(

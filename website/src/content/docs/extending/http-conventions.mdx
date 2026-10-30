@@ -50,7 +50,10 @@ routes and to no other:
   dashboard applies only later fails the Data API until the process restarts.
 - **On a `MapGroup`** the Data API is mapped under, `ForEntity` cannot know the descriptor and checks no name, but it
   still reaches the entity's routes: its conventions are forwarded through the group's `Finally`, so they run after the
-  route's own conventions.
+  route's own conventions. That works for metadata — rate limiting, authorization, `WithMetadata` — but not for an
+  endpoint filter: a route's filters are composed before its `Finally` runs, so the filter could never run. A filter
+  added through `ForEntity` on a group fails the route-table build and readiness reports `Failed`. Put it on
+  `MapAlvoDataApi()`'s builder: `app.MapAlvoDataApi().ForEntity("rooms", r => r.AddEndpointFilter(…))`.
 - **A named rate-limit policy is one partition** across every endpoint that names it. `RequireRateLimiting("rooms")` on
   two entities would share one budget. To limit each entity on its own, partition the limiter on
   `AlvoEndpointMetadata.Entity`:

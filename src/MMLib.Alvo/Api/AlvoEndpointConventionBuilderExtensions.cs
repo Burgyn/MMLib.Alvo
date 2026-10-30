@@ -25,7 +25,10 @@ public static class AlvoEndpointConventionBuilderExtensions
     /// convention, ordinary or finally, is forwarded through that builder's <c>Finally</c>: a group's ordinary conventions
     /// run before a route's own metadata exists, so they could not tell which entity a route serves. Such conventions
     /// therefore run after the route's own ones, finally conventions included. A builder whose <c>Finally</c> is not
-    /// supported throws here rather than reaching no route.
+    /// supported throws here rather than reaching no route. Metadata conventions — rate limiting, authorization,
+    /// <c>WithMetadata</c> — work there; an endpoint filter does not, because a route's filters are composed before its
+    /// <c>Finally</c> runs, so a filter added this way fails the grouped route-table build (readiness reports
+    /// <c>Failed</c>) instead of never running. Add a filter through <c>ForEntity</c> on <c>MapAlvoDataApi()</c>'s builder.
     /// </para>
     /// <para>
     /// A named rate-limiting policy is one partition across every endpoint that names it; to limit each entity on its own,

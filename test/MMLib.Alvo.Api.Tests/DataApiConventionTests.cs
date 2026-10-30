@@ -292,6 +292,33 @@ public class DataApiConventionTests
         secondVehicles.StatusCode.ShouldBe(HttpStatusCode.OK, "and no other entity's");
     }
 
+    /// <summary>
+    /// A group's <c>Finally</c> runs after the route's filter pipeline is composed, so a filter a group <c>ForEntity</c>
+    /// adds would never run — a host's own check that fails open. The build refuses it instead, and names the fix.
+    /// </summary>
+    [Fact]
+    public async Task ForEntity_on_a_group_refuses_a_filter_that_could_never_run()
+    {
+        var runs = 0;
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin], new AlvoApiWorldSetup(
+            RouteGroupPrefix: "/v1",
+            ConfigureRouteGroup: group => group.ForEntity("owners", owners => owners.AddEndpointFilter(
+                (invocation, next) =>
+                {
+                    Interlocked.Increment(ref runs);
+                    return next(invocation);
+                }))));
+
+        using var response = await world.SendAsync(HttpMethod.Get, "/v1/api/owners", _admin);
+
+        runs.ShouldBe(0);
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound, "a filter that cannot run fails the grouped build");
+        var boot = world.Services.GetRequiredService<AlvoBootState>();
+        boot.Phase.ShouldBe(AlvoBootPhase.Failed);
+        boot.Failure.ShouldNotBeNull().ShouldContain("ForEntity('owners')");
+        boot.Failure.ShouldContain("MapAlvoDataApi()");
+    }
+
     /// <summary>Every endpoint Alvo generated, identified by the marker it attaches to each of them.</summary>
     private static List<RouteEndpoint> Generated(AlvoApiWorld world) =>
         [.. world.Endpoints.Where(

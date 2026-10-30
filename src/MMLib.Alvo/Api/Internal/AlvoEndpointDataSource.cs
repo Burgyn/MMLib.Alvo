@@ -170,19 +170,22 @@ internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
 
         lock (_gate)
         {
-            var before = table.Counts();
-            IReadOnlyList<Endpoint> grouped = [.. table.Sources.SelectMany(source => source.GetGroupedEndpoints(context))];
-            return GatedOrNothing(grouped, before);
+            return GatedOrNothing(table, context);
         }
     }
 
-    /// <summary>A group build's endpoints, or none plus a recorded refusal when a convention removed the gate.</summary>
-    /// <param name="grouped">What the group build produced.</param>
-    /// <param name="before">Each witness's count before that build.</param>
-    private IReadOnlyList<Endpoint> GatedOrNothing(IReadOnlyList<Endpoint> grouped, Dictionary<AlvoGateWitness, int> before)
+    /// <summary>
+    /// A group build's endpoints, or none plus a recorded refusal when a convention removed the gate or a group
+    /// <c>ForEntity</c> added a filter the group could never compose.
+    /// </summary>
+    /// <param name="table">The materialised table whose sources build the group.</param>
+    /// <param name="context">The group being built.</param>
+    private IReadOnlyList<Endpoint> GatedOrNothing(RouteTable table, RouteGroupContext context)
     {
         try
         {
+            var before = table.Counts();
+            IReadOnlyList<Endpoint> grouped = [.. table.Sources.SelectMany(source => source.GetGroupedEndpoints(context))];
             RouteTable.Gated(grouped, before);
             return grouped;
         }
