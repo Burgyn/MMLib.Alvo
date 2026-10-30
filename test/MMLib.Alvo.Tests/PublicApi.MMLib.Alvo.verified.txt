@@ -143,6 +143,14 @@ namespace MMLib.Alvo.Commands
         public System.Threading.Tasks.Task<T> TransactAsync<T>(System.Func<MMLib.Alvo.Data.IAlvoTransaction, System.Threading.CancellationToken, System.Threading.Tasks.Task<T>> work, MMLib.Alvo.Data.AlvoTransactionOptions? options = null, System.Threading.CancellationToken cancellationToken = default) { }
         public static System.Threading.Tasks.ValueTask<MMLib.Alvo.Commands.AlvoCommandContext?> BindAsync(Microsoft.AspNetCore.Http.HttpContext context, System.Reflection.ParameterInfo parameter) { }
     }
+    public interface IAlvoCommand<in TInput>
+    {
+        System.Threading.Tasks.Task HandleAsync(TInput input, MMLib.Alvo.Commands.AlvoCommandContext context, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IAlvoCommands
+    {
+        System.Threading.Tasks.Task InvokeAsync<TInput>(string name, TInput input, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
+    }
 }
 namespace MMLib.Alvo.Data
 {
@@ -515,6 +523,10 @@ namespace Microsoft.Extensions.DependencyInjection
     }
     public static class AlvoExtensionBuilderExtensions
     {
+        public static MMLib.Alvo.IAlvoBuilder AddCommand<TCommand>(this MMLib.Alvo.IAlvoBuilder builder, string name, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Events.AlvoConditionCaller, bool>> access)
+            where TCommand :  class { }
+        public static MMLib.Alvo.IAlvoBuilder AddCommand<TCommand>(this MMLib.Alvo.IAlvoBuilder builder, string name, string access)
+            where TCommand :  class { }
         public static MMLib.Alvo.IAlvoBuilder AddEventHandler(this MMLib.Alvo.IAlvoBuilder builder, string id, string eventType, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
         public static MMLib.Alvo.IAlvoBuilder AddEventHandler<THandler>(this MMLib.Alvo.IAlvoBuilder builder, string id, string eventType, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
             where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Data.AlvoRecord> { }

@@ -22,7 +22,7 @@ namespace MMLib.Alvo.Commands;
 /// </para>
 /// <para>
 /// Take it as a parameter of a handler mapped with <c>MapAlvoCommand</c>; an internal command receives it in
-/// <c>IAlvoCommand&lt;TInput&gt;.HandleAsync</c>. On any other endpoint its members throw.
+/// <see cref="IAlvoCommand{TInput}.HandleAsync"/>. On any other endpoint its members throw.
 /// </para>
 /// </remarks>
 public sealed class AlvoCommandContext : IBindableFromHttpContext<AlvoCommandContext>
