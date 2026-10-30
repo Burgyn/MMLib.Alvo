@@ -1,0 +1,195 @@
+---
+title: Commands and inbound webhooks
+description: Expose a named, access-ruled action over HTTP or in process, make its external call first and its writes in one unit, and receive Standard Webhooks verified and once.
+sidebar:
+  order: 8
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import desk from '../../../snippets/extending/commands/StayDeskCommands.cs?raw';
+import tests from '../../../snippets/extending/commands/StayDeskCommandsTests.cs?raw';
+import descriptor from '../../../snippets/extending/commands/stay-desk.alvo.json?raw';
+
+Some writes are more than a row: confirm a stay, charge the card, record the payment. The Data API's `PATCH` cannot
+charge a card, and an endpoint of your own has to resolve the caller, judge the rule and keep the retry from charging
+twice by hand. A **command** does that part for you.
+
+## When a command
+
+A command has a name, a route, an access rule judged before it runs, at most one transaction unit and a completion
+event. Use one when an action has a name in your domain and does more than the Data API's write would — an external
+call, writes to several entities, a state change the caller may make only through it.
+
+<Code code={descriptor} lang="json" title="stay-desk.alvo.json" />
+
+Commands need a relational provider (SQLite or PostgreSQL): their idempotency record and their unit live in its
+database. A host that maps or adds a command over the in-memory reference refuses to start.
+
+## Map one
+
+`MapAlvoCommand<Stay>(name, pattern, (stay, caller) => …, handler)` maps a `POST`. Before the handler runs, the row the
+route's `{id}` names is read **as the caller** — a row they cannot read is `404`, the same answer as no row — and then
+the rule is judged, `403` when it refuses. The rule here is typed; it is translated to CEL when the command is mapped,
+and the catalog lists that CEL.
+
+<SourceExcerpt code={desk} from="app.MapAlvoCommand<Stay>(" to="ConfirmAsync);" title="StayDeskCommands.cs" />
+
+The same rule as a CEL string is
+`MapAlvoCommand("confirm_stay", pattern, "stays", "status == 'requested' && 'staff' in @user.roles", ConfirmAsync)`.
+`cancel_stay` is written that way:
+
+<SourceExcerpt code={desk} from="app.MapAlvoCommand(" to="CancelAsync);" title="StayDeskCommands.cs" />
+
+- **What a rule reads.** `@user`, `@tenant` and, for a command bound to an entity, the row's fields. `old.` and
+  `changed()` are refused: a command's row has no before-image. Your [CEL functions](/guides/custom-cel-functions/) are
+  admitted, as in every condition.
+- **An empty rule is refused** when the command is mapped. Nothing is reachable without a rule: write `'true'` to admit
+  every caller, anonymous ones included.
+- **A rule that reads `@tenant` or `@user.id` refuses a caller who has none** before it is evaluated. So
+  `!(@tenant in [...])` never admits the anonymous caller.
+- **A rule may not read a field the descriptor hides from some callers.** The answer would tell a caller something
+  about a value they cannot read, so the host refuses to start; and a descriptor apply that would hide a field a bound
+  command reads is refused, naming the command.
+- **Map every command before the host serves.** One mapped after Alvo first binds its extensions — at boot, or when a
+  descriptor is applied — throws.
+- **Names** are lower-case segments separated by dots (`stays.confirm`, `confirm_stay`). The OpenAPI operationId is
+  `commands.` and the name in lower camel case: `commands.confirmStay`. A name an entity named `commands` would also
+  publish is refused at boot.
+
+### In the OpenAPI document
+
+A command appears under the tag `commands`, with every refusal it can answer: `401`, `403`, `404` (a bound command),
+`409`, `412`, `422` and `508`, each as Alvo's problem document. A command that reads a body also lists `400` and `415`:
+those are minimal API's own answers, given before Alvo runs, in the host's shape — not an Alvo problem type. An
+unexpected exception is answered `500` in Alvo's problem shape only when the host maps Alvo's problem details
+(`AddAlvoProblemDetails()` and `UseExceptionHandler()`); otherwise the `500` is the host's.
+
+Alvo writes a summary, the body's description and, for a bound command, the `{id}`'s description when you leave them
+out. Replace the summary with `.WithSummary(…)` or `.WithDescription(…)`. The rest is yours: describe any other route
+or query parameter of your own, and put `[Description]` on the input type — the API contract lint refuses an
+undescribed parameter or schema.
+
+## External call first, then one unit
+
+The handler is **not** in a transaction. Call the payment provider first, then write what it answered in one unit:
+
+<SourceExcerpt code={desk} from="private static async Task<IResult> ConfirmAsync" to="return TypedResults.Ok(new { stay = id, reference });" title="StayDeskCommands.cs" />
+
+- `ctx.Record` is the row the filter read as the caller; read it rather than reading the row again.
+- Inside `ctx.TransactAsync` use the unit. `IAlvoData` and `ctx.Data` are refused there, as in any
+  [unit](/extending/transactions/#not-inside-a-unit). A second `TransactAsync` in one run throws.
+- The completion event `alvo.command.confirm_stay.completed` and the `Idempotency-Key`'s record are written in that unit,
+  as its last writes, so they commit with the stay and the payment or not at all.
+- A command that opens no unit gets both after it answers `2xx`, in one transaction of their own. One that answers
+  anything else gets neither, and its key is given back.
+- A handler that catches the failure of its unit and still answers `2xx` gets neither too: its writes rolled back, so no
+  completion is announced, and the key is given back.
+
+Handle the completion like any event — `AddEventHandler("…", "alvo.command.confirm_stay.completed", …)`. Its payload
+carries `command` and, for a bound command, `entity` and `id`; never the input, which may hold what the caller sent the
+payment provider. A handler of a completion that no command produces refuses to start.
+
+## Who may call it
+
+The caller is resolved as the [Data API](/guides/access-rules/) resolves it: no credential is the anonymous caller, whom
+the rule judges; a key that cannot be used is `401`. An API key needs the read **and** the write scope on the command's
+entity — `stays:read` and `stays:write`, because the command reads the row before it writes — or `*:write` for a command
+bound to no entity. A key without them is `403` `out-of-scope`.
+
+<SourceExcerpt code={tests} from="public async Task A_guest_is_refused_before_anything_is_charged" to="_payments.Charges.ShouldBe(0);" title="StayDeskCommandsTests.cs" />
+
+The scopes narrow the command's own entity only. Writes the handler makes to other entities are judged by the data
+port's rules for the caller it writes as.
+
+A command can do what its caller could not do directly. The guest's own `PATCH` of a stay answers `404`, because the
+`update` rule names `staff` and `admin` only. `cancel_stay`'s rule admits the guest for their own requested stay, and its
+handler writes with `unit.AsSystem()` — so the command's rule is the gate, and it has to say everything that matters.
+
+## Retries: `Idempotency-Key`
+
+Send one key per logical request. A retry with the same key and the same input is answered with the first answer — its
+status and JSON body — and the handler does not run again:
+
+<SourceExcerpt code={tests} from="public async Task A_retried_confirmation_is_answered_without_charging_twice" to="_payments.Charges.ShouldBe(1);" title="StayDeskCommandsTests.cs" />
+
+- **A key reused for different input is `409`** `idempotency-conflict`. The input is the command, the route's `id` and
+  every bound argument — uploaded files by their content. The IETF draft answers this case `422`; Alvo answers `409`, as
+  its Data API does, so one key problem has one status everywhere.
+- **A request still running under the key is `409` too.** Retry after it answers.
+- **Keys belong to a caller and a credential.** Two API keys of one user, or one user in two tenants, never share a key.
+  A resolver of your own that gives its callers no key id files every token of one user under the same credential, so
+  they share replays.
+- **A replay is answered before the row and the rule are judged again**, so a command that changed its row can still be
+  retried. A replay returns only what that same credential was already answered.
+- **Answers are kept 24 hours.** A retry after that runs as a new request: make the command safe to run twice if a client
+  retries for longer, or send a new key.
+- **Only the status and the JSON body are replayed** — no headers, `Location` included. A result with no status (a
+  redirect, a file), a plain `string` (written as text, it could not be replayed as the same bytes) or a body over
+  64 KiB cannot be replayed: a retry is refused with `409` rather than run.
+- **A run is held for 15 minutes.** A run still going after that can be taken over by a retry. The run that lost its
+  claim cannot commit its unit — its writes and its completion roll back, and it answers `409` — but what it did outside
+  the unit stays done: a command with no unit keeps its own writes, and an external call is not undone. Keep a command
+  well inside that time.
+
+## Internal commands
+
+A command with no route, invoked in process — from a handler, a timer or a job:
+
+<SourceExcerpt code={desk} from="public sealed class RemindGuest" to="messenger.RemindAsync(input, cancellationToken);" title="StayDeskCommands.cs" />
+
+Register it with `AddCommand<RemindGuest>("remind_guest", caller => caller.HasRole("admin"))` and invoke it with
+`IAlvoCommands.InvokeAsync("remind_guest", stayId, caller)`. It has the same access rule, the same at-most-one unit and
+the same completion event; it has no route and takes no key, and it binds no entity — its input carries the ids.
+
+- In an event handler, pass `AlvoEventContext.Caller`. A handler running as the system holds `admin`; no caller is
+  otherwise exempt from the rule.
+- It is refused inside an open unit, where it would write beside it, and past the chain-depth limit.
+- The command is resolved from a fresh DI scope when it is invoked; its dependencies are not checked at boot.
+
+## Inbound webhooks
+
+`MapAlvoWebhookReceiver(pattern, secretName, handler)` receives [Standard Webhooks](https://www.standardwebhooks.com/)
+deliveries. Before your handler runs, the request must carry `webhook-id`, a `webhook-timestamp` within 5 minutes of now
+(`options.Tolerance`, at most an hour), and a `webhook-signature` whose `v1,` HMAC-SHA256 over `id.timestamp.body`
+verifies with the `whsec_` secret stored under `secretName`. Store several, separated by spaces, while you rotate. A
+request that fails the check is `401`: nothing is recorded and none of your code runs.
+
+<SourceExcerpt code={desk} from="private static async Task<IResult> RecordPaymentAsync" to="return TypedResults.Ok();" title="StayDeskCommands.cs" />
+
+The test signs a delivery the way a sender does:
+
+<SourceExcerpt code={tests} from="private async Task<HttpResponseMessage> NotifyAsync" to="return await _client.SendAsync(request, Ct);" title="StayDeskCommandsTests.cs" />
+
+- **Once per receiver and id.** A delivery already handled is acknowledged `200` without running; one still running is
+  `409`; one whose handler threw or answered non-`2xx` is given back, so the sender's retry runs it. Ids are forgotten
+  after seven days.
+- **At least once.** A handler that wrote and crashed before its id was recorded runs again. Make it idempotent on the
+  id.
+- **The handler runs as the system**, in `options.Tenant` or in the tenant
+  `await options.ResolveTenant(request, body, cancellationToken)` answers. The resolver is asynchronous, is called only
+  for a verified delivery, and is given the verified body bytes; a `null` answer falls back to `Tenant`. With neither,
+  the handler runs as the system in no tenant, which every tenant-scoped entity refuses.
+- **Only the body is signed.** Take the tenant from the body, or map one receiver per tenant with its own secret and
+  `Tenant`. Never take it from the path, the query or a header: anyone who has seen one signed delivery can change those
+  without breaking its signature.
+- **Secrets are at least 24 bytes.** Every stored secret must decode to at least 24 bytes, as Standard Webhooks asks. A
+  shorter, missing or malformed one answers `500` and logs an Error naming the receiver, the secret's name and why.
+- **The body limit** is `MaxBodyBytes`, 1 MiB unless set, at most 64 MiB; a larger body is `413`. The receiver raises the
+  server's own limit to it where the server lets it. IIS and HTTP.sys enforce their own limits
+  (`maxAllowedContentLength`), so raise those too.
+- **Receivers are not in the OpenAPI document**: the sender follows its own contract. A pattern may be mapped once.
+- **Conventions on the returned builder apply to the outer endpoint** — authorization, rate limiting, metadata. An
+  endpoint filter never reaches your handler, so put such logic in the handler. The system caller is bound to the
+  handler's `AlvoCaller` only and is not published through `IAlvoContextAccessor`: pass `caller.Context` to the code
+  that needs it.
+
+## On the dashboard and for the assistant
+
+In a host that maps a command, an entity's **Lifecycle** tab lists the commands bound to it, read-only, with their route
+and rule. The policy simulator says per command whether the simulated caller passes its rule, or that the rule reads the
+row and is decided per row. The schema assistant's `get_extensions` lists them, and the
+[extension catalog](/extending/extension-catalog/) lists each with its `route`, `httpMethod` and `access`.
+
+Commands are endpoints like any other: see [HTTP conventions](/extending/http-conventions/) for rate limits and the
+gate that stays on.

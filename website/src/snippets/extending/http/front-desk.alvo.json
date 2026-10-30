@@ -1,0 +1,16 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "front-desk",
+  "auth": { "roles": ["clerk"] },
+  "entities": {
+    "rooms": {
+      "fields": { "number": { "type": "string", "required": true, "maxLength": 10 } },
+      "rules": { "list": "'clerk' in @user.roles", "get": "'clerk' in @user.roles", "create": "'clerk' in @user.roles" }
+    },
+    "guests": {
+      "fields": { "name": { "type": "string", "required": true, "maxLength": 80 } },
+      "rules": { "list": "'clerk' in @user.roles", "get": "'clerk' in @user.roles" }
+    }
+  }
+}

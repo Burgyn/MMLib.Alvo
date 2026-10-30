@@ -18,7 +18,8 @@ call on its own, so a failure between two calls leaves half of it behind. This p
 
 `IAlvoTransactions.TransactAsync(caller, (unit, ct) => …)` runs the delegate in one transaction unit. Returning commits;
 throwing rolls back and rethrows. Resolve `IAlvoTransactions` from DI: the EF Core drivers (SQLite and PostgreSQL)
-register it; the in-memory reference `InMemoryAlvoData` does not.
+register it; the in-memory reference `InMemoryAlvoData` does not. Commands open their one unit with `ctx.TransactAsync` —
+[Commands and inbound webhooks](/extending/commands/).
 
 <Code code={descriptor} lang="json" title="invoice-desk.alvo.json" />
 
@@ -159,5 +160,4 @@ engine: a `%`, `_`, `\` or `[` in `prefix` matches itself. One-argument or `Stri
 
 ## Not yet
 
-Write hooks will receive the same unit as `write.Transaction`; commands will get `ctx.TransactAsync`; a timer scheduled
-inside a unit will join it. Each arrives with its feature.
+Write hooks will receive the same unit as `write.Transaction`; a timer scheduled inside a unit will join it. Each arrives with its feature.

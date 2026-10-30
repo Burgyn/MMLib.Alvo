@@ -1221,18 +1221,61 @@ Three properties of that seam are contract rather than implementation:
   `/health/live`, and a container probe presents no credential — that is a container killed and
   restart-looped by its own liveness gate. A host that wants conventions calls the parts.
 
-What this does **not** claim is an authorization guarantee against host code. A convention receives the
-`EndpointBuilder` and could clear its filter factories; so could `app.MapGroup("").MapAlvoDataApi()` plus
-conventions on the group, which worked before this seam existed and is how the capability was measured, and
-so could substituting `IPolicyEngine` in the host's own container. "A marked endpoint is a gated endpoint"
-is a statement about *this framework's* construction. An embedded host owns its pipeline; treating its code
-as an attacker is not this project's threat model.
+What a host convention may and may not do to Alvo's gate is no longer a prose-only invariant: a convention that
+removes Alvo's authorization filter fails the route-table build (#184) — see *Conventions, `ForEntity`, endpoint
+metadata and the gate witness (HX-08)* below. What stays outside any construction guarantee is substituting
+`IPolicyEngine` in the host's own container: an embedded host owns its pipeline, and treating its code as an attacker
+is not this project's threat model.
 
-It could nevertheless be made a *construction* guarantee again — an Alvo `Finally` convention that runs after
-the host's and verifies its own filter factory survived — which would catch an *accidental* dismantling (a
-convention that rebuilds `FilterFactories` rather than appending to it) without changing the threat model.
-Whether that is worth the cost is **#184**, filed so the prose-only invariant is a recorded decision rather
-than a caveat nobody weighed.
+## Conventions, `ForEntity`, endpoint metadata and the gate witness (HX-08)
+
+**`AlvoEndpointMetadata(Entity, Operation, Kind)`** is the public face of the internal operation marker: every
+generated route carries both, attached by `DataApiEndpoints.Protect` in the same call that attaches the authorization
+filter, so a route carrying it is a route Alvo gates. `AlvoEndpointKind` mirrors the internal `DataApiEndpointKind`
+member for member, values pinned by a test (Ruling 21); `DataApiOperationMetadata` stays the OpenAPI transformer's
+source. A convention, a middleware or a rate-limit partition reads the public record; nothing outside the core reads
+the internal one.
+
+**`ForEntity(entity, configure)` replays a recorder.** `configure` runs once against a recording builder; the recorded
+conventions are replayed on every endpoint whose `AlvoEndpointMetadata.Entity` matches, ordinary ones first and finally
+ones only when one was recorded (a plain builder's `Finally` throws by default, Ruling 20). On `MapAlvoDataApi()`'s
+own builder the name is checked against the descriptor applied when the route table is **first built**: a name it
+does not declare fails the build, readiness `Failed`, so a typo is never a rate limit the host believes it has. The
+table is built once, so an entity the dashboard applies later fails the Data API until the process restarts — the
+price of a frozen table, stated rather than discovered (Ruling 20).
+
+**On any other builder — a `MapGroup` the Data API is mapped under — `ForEntity` forwards through `Finally`** (Ruling
+50). A group's ordinary conventions run before a route's own, so `AlvoEndpointMetadata` — added by `Protect`, an entry
+convention — does not exist yet when they run, and an `Add`-forwarded convention would reach zero routes, silently.
+`Finally` runs after it exists, so ordinary and finally conventions are forwarded there, in that order; the cost is
+that they run after the route's own conventions. A builder whose `Finally` is unsupported throws, rather than reaching
+nothing. The name is not checked there: such a builder cannot know the descriptor.
+
+**The gate witness (Ruling 19).** Each generated route's authorization filter is added through a factory owned by an
+`AlvoGateWitness`, which counts its own invocation while ASP.NET Core composes the request delegate. The witness rides
+on the endpoint as metadata. The data source records every witness's count, builds the ungrouped endpoints and checks
+that each count rose; it checks again after every group build, and that grouped check is the one on the endpoints that
+actually serve under a group — a convention can behave differently there. A route whose count did not rise fails the
+existing `AlvoDataApiConventionException` path: an empty table, readiness `Failed`, a critical log naming the route.
+
+Measured on .NET 10 (`RouteEndpointDataSource.CreateRouteEndpointBuilder`): group conventions, then route conventions,
+run **before** the filter pipeline is composed, and every `Finally` — route or group — runs **after** it. So a `Finally`
+that clears `FilterFactories` removes nothing (pinned by `GateWitnessTests`), and a `Finally`-based check — #184's
+original proposal — would read the list rather than the delegate: it would refuse a harmless finally that clears the
+list, and could not tell a look-alike factory from Alvo's without an identity check. Counting the factory's own
+invocation asks the actual question.
+
+**What it does not see** (Ruling 49 L1). A convention that assigns `EndpointBuilder.RequestDelegate` outright replaces
+the endpoint, handler and gate alike; one that wraps Alvo's factory, invokes it and discards its result raises the
+count without the gate in the chain. Both are deliberate subversion rather than the accidental rewrite #184 is about,
+and both fail closed: with no filter the caller is anonymous under default-deny.
+
+**What a host convention may do**: add metadata, filters around Alvo's (before or after it), rate limiting, an
+authorization policy, output caching, telemetry. **What it may not**: clear or rebuild `FilterFactories` on a
+generated route — on `MapAlvoDataApi()`, inside a `ForEntity`, or on a group the Data API is mapped under. Command
+endpoints carry a witness of their own, checked by `CommandGateCheck` once the request pipeline is built
+(`commands.md`, Ruling 38); a `.WithAlvoCaller()` endpoint carries none, because it fails closed — its `AlvoCaller`
+throws without Alvo's filter.
 
 ## Route generation happens at *enumeration* time — half of #103 is delivered
 

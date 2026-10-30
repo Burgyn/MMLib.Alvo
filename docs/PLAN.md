@@ -87,7 +87,7 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   (`MMLib.Alvo.TestHost` and the docs-snippet harness) the second; HX-03 (event handlers on the delivery engine) the
   third; HX-04 (extension catalog, apply guard, dashboard and assistant) the fourth; HX-05 (typed layer and lambda
   translation) the fifth; HX-06 (delivery operations) the sixth; HX-07 (write unit,
-  `TransactAsync`, savepoints) the seventh.
+  `TransactAsync`, savepoints) the seventh; HX-08 (commands, inbound webhooks, HTTP conventions) the eighth.
   This line runs ahead of F5's close, the way F4 ran beside F3; the marker stays on F5.
 
 ## 3a. What closed F4

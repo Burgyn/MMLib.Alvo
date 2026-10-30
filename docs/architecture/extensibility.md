@@ -91,7 +91,8 @@ generated route a CSRF target and is refused at startup.
      The `On{Operation}` verbs (`OnCreated`, `OnUpdated`, `OnDeleted`, `OnSaved`) exist only on that builder and
      return it, not `IAlvoBuilder`. Every other registration of host code is an `Add{Thing}`: `AddEventHandler` and
      `AddRetiredExtension` from HX-03; `AddSchedule`, `AddFunction`, `AddCommand`, `AddDataMigration`,
-     `AddRequiredSecret` as they ship.
+     `AddRequiredSecret` as they ship. `MapAlvoCommand` and `MapAlvoWebhookReceiver` are endpoint verbs (`Map*`, the
+     ASP.NET Core spelling), on the route builder — rule 10's separation of the DI seam from the endpoint seam.
    - Fluent methods return `IAlvoBuilder`.
 5. **Config via the options pattern, validated at startup.** Infrastructure config
    is typed options (`AlvoOptions`, and per-provider options), bound and validated

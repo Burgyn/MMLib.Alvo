@@ -1357,7 +1357,9 @@ authority. A segment is a wildcard only when it is *entirely* `*`, because the g
 the cheap `pattern.Contains('*')` passes every other fact and is killed by its own. `alvo` is reserved beside
 the schema's three (HX-03, spec 2026-10-14 E12): the framework mints `alvo.schedule.<id>` and
 `alvo.command.<name>.completed` there, a host may not, and `$defs/eventPattern` does not admit it — framework
-events reach host handlers only.
+events reach host handlers only. `alvo.command.<name>.completed` is minted by HX-08 through the internal
+`AlvoFrameworkEvent.Create` — the one door to the `alvo` namespace — in the command's unit or, with no unit, with its
+answer.
 
 **This refuses a descriptor whose only defect is being ahead of the build, against `UnhonouredSubsystems`'
 own line** — refuse what silently produces wrong data, warn what is observably absent. It is taken anyway

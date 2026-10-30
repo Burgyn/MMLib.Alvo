@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Commands, inbound webhooks and HTTP conventions** (HX-08, #385). `MapAlvoCommand`/`MapAlvoCommand<TEntity>` — named
+  commands whose caller (as the Data API resolves it), bound row (404 when unreadable) and access rule (CEL over
+  `@user`, `@tenant` and the row, or a typed lambda; 403) are judged before the handler, which runs outside any
+  transaction and opens at most one unit with `AlvoCommandContext.TransactAsync`; the completion event
+  `alvo.command.<name>.completed` and the `Idempotency-Key` record commit in that unit; a replayed key answers the first
+  status and JSON body without running the handler, for 24 hours, per caller and credential; commands appear in the
+  OpenAPI document (`commands.<name>`), the extension catalog, the dashboard's *Commands* lane and policy simulator,
+  and `get_extensions`. `AddCommand<TCommand>` + `IAlvoCommands.InvokeAsync` for internal commands.
+  `MapAlvoWebhookReceiver` — Standard Webhooks verification (5-minute window, rotation), per-receiver dedup swept after
+  7 days, the handler run as the system in a configured tenant or one resolved from the verified body. `.WithAlvoCaller()`
+  + `AlvoCaller` on plain endpoints; `ForEntity` and the public `AlvoEndpointMetadata`/`AlvoEndpointKind`. Docs:
+  *Commands and inbound webhooks*, *HTTP conventions*. **Behaviour change:** a convention that removes Alvo's
+  authorization filter from a generated route, and a `ForEntity` naming an undeclared entity, now fail the route-table
+  build (readiness `Failed`) (#184). **Breaking for typed .NET clients:** `AlvoExtensionKind` and `AlvoExtensionStage`
+  gained members (append-only; read the raw string to tolerate a newer server). New framework tables
+  `<prefix>_command_requests`, `<prefix>_inbound_webhooks`; entity names `<prefix>_command_requests`/
+  `<prefix>_inbound_webhooks` are now reserved.
 - **Transactions in your own code** (HX-07, #384). `IAlvoTransactions.TransactAsync` runs reads, writes, batches and
   custom events (`IAlvoTransaction.PublishAsync`) as one unit that commits together or not at all, as the caller, on
   SQLite and PostgreSQL; every call runs under its own savepoint, so a caught refusal does not end the unit;
