@@ -1,12 +1,16 @@
 name: Mutation
 
 # Mutation testing of the security-relevant logic. Path-filtered so it runs only
-# when a mutated project changes. Seven targets run in parallel via a matrix, the
+# when a mutated project changes. Eight targets run in parallel via a matrix, the
 # canary first (see THE CANARY below):
 #   - "security core (expressions)"       → src/MMLib.Alvo/Expressions/**
 #                        (stryker-config.expressions.json)
 #   - "security core (rules, auth, rest)" → the rest of src/MMLib.Alvo EXCEPT Api/**
 #                        (stryker-config.json). See "DECLARED GAP" below for Api/**.
+#   - "commands and webhooks over HTTP" → the security-relevant HTTP glue of commands,
+#                        inbound webhooks and the caller gate, against
+#                        MMLib.Alvo.Api.Tests (stryker-config.commands-http.json). See
+#                        "Carved out of the gap by HX-08" under DECLARED GAP.
 #   - "data-ef-core"   → every mutated file MEASURED to have killers that live only in
 #                        MMLib.Alvo.Data.Sqlite.Tests — EfAlvoData, the outbox store and
 #                        table, the whole-row/replace guard, the batch and constraint
@@ -398,6 +402,42 @@ name: Mutation
 # Run it on demand meanwhile: cd test && dotnet tool run dotnet-stryker
 #   -f ../stryker-config.api.json --concurrency 4
 #
+# Carved out of the gap by HX-08: the command filter, the webhook receiver, the caller
+# gate, the gate witness — the security-relevant HTTP glue — run on their own leg against
+# `MMLib.Alvo.Api.Tests` (`stryker-config.commands-http.json`); the rest of `Api/**` stays
+# on #143. Six files: CommandEndpointFilter, CommandGateCheck, WebhookReceiver, CallerGate,
+# AlvoCallerFilter, AlvoGateWitness. stryker-config.json excludes the first three — its
+# suite cannot reach them — together with CommandInputs and LedgerSweeper.
+#
+# THE LEG IS NARROWER THAN ITS DESIGN, AND THAT IS A MEASUREMENT (HX-08 Ruling 42). The
+# design put ten files on it: the six above plus CommandInputs, LedgerSweeper and the two
+# map calls (AlvoCommandEndpointRouteBuilderExtensions, AlvoWebhookEndpointRouteBuilder-
+# Extensions). Run to completion, 2026-10-30, 10-core box, `--concurrency 4`, from `test/`:
+#
+#   set          mutants  Killed  Survived  Timeout  Errors  score     wall clock
+#   ten files        199      66       107        0      26  38.15 %   132.5 min
+#   six files        145      54        67        0      24  44.63 %   102.7 min
+#
+# 1034 tests, a 90 s initial run, and so ~42 s of wall clock per mutant at concurrency 4
+# — not the 6.3 s/mutant this block quotes for api.json above, which was taken before
+# #142 cleared and is therefore the cost of a run whose survivors were not running to
+# completion. Scaled to a 4-vCPU runner the way data-ef-core's 74 min was (~1.35x), ten
+# files is ~178 min of wall clock and a 2x budget of ~356, against GitHub's 360-minute
+# ceiling; six files is ~139 and 280. So the leg carries the six security files, and
+# CommandInputs and LedgerSweeper are mutated by NO leg today — they join the gap with
+# the rest of Api/** (the two map calls are in Api/** already, so api.json still covers
+# them on demand). No file moved to an on-demand config to make room.
+#
+# Per file, six-file run (K / S / errors): CallerGate 12 / 2 / 0, CommandEndpointFilter
+# 12 / 13 / 0, CommandGateCheck 8 / 6 / 1, WebhookReceiver 20 / 39 / 23, AlvoCallerFilter
+# 1 / 4 / 0, AlvoGateWitness 1 / 3 / 0. The 24 Errors are Stryker's RuntimeError — the
+# test host died under the mutant — and Stryker leaves them out of the score; 23 sit in
+# WebhookReceiver. `break` 40 is the measured 44.63 % (no timeouts, so Killed-only and
+# Stryker agree) rounded down to a multiple of 5, per Ruling 42 rather than the
+# `− max(2 pp, 2 mutants)` latch above; REAL SLACK 54 − ceil(0.40 × 121) = 5 kills.
+# `low` 44, `high` 80. The leg is far under 80 and the survivors are the debt, by file,
+# above.
+#
 # WHY data-ef IS TWO LEGS, AND WHY IT IS SPLIT BY *TEST PROJECT* RATHER THAN BY FILE.
 # The single data-ef leg was killed by `timeout-minutes: 120` on three consecutive main
 # commits (#205), and every shard's declared counts had gone stale. Re-probed
@@ -429,6 +469,27 @@ name: Mutation
 # rules/auth/rest grew 1638 -> 1713 with nothing reporting it, for the same one-sided
 # reason as last time. The two data-ef rows moved because this change re-partitioned
 # them; both were re-probed AFTER the move, not derived from it.
+#
+# RE-PROBED 2026-10-30 AFTER HX-08, discovery only, from `test/`, locally (10-core,
+# `--concurrency 4`), one Stryker at a time; the new leg ran to completion instead:
+#
+#   shard                     mutants: declared -> now    suite: declared -> now
+#   canary                           13 ->   13                 142 ->  194
+#   expressions                     900 -> 1949                1188 -> 3825
+#   rules, auth, rest              1713 -> 5715                1188 -> 3825
+#   commands and webhooks over HTTP   - ->  145 (new leg)         - -> 1034
+#   data-ef-core                    459 ->  584                1135 -> 2156
+#   data-ef-rest                    649 -> 1816                 554 -> 1286
+#   data-sqlite                      44 ->   65                 581 ->  870
+#   data-postgresql                  20 ->   33                 110 ->  180
+#
+# rules/auth/rest is measured AFTER this change took the five HTTP-glue files off it.
+# Growth on this scale is six weeks of features (HX-01..HX-08) with nothing reporting it,
+# the one-sided-floor reason again — and it is why every main run since #412 has hit a
+# leg's `timeout-minutes` (run 40948293421: expressions, rules/auth/rest and data-ef-rest
+# cancelled at their budgets). Only the counts are re-probed here; the budgets those legs
+# need are a measurement this change did not take, so their `timeout:` values are left
+# as they were and the shortfall is stated rather than guessed at.
 #
 # THE MODEL THAT ACTUALLY PREDICTS THE COST IS NOT mutants x test COUNT. Measured on
 # run 33593316805 — the last data-ef leg that SUCCEEDED: 888 mutants, mutation loop
@@ -610,10 +671,13 @@ on:
       - 'stryker-config.data-sqlite.json'
       - 'stryker-config.data-postgresql.json'
       - 'stryker-config.canary.json'
+      - 'stryker-config.commands-http.json'
       # The test projects belong in the filter too: mutation judges the test
       # suite, so deleting or loosening an adversarial test drops the score
       # without touching src/. Post-merge is now the only run that can catch it.
       - 'test/MMLib.Alvo.Tests/**'
+      # The commands-http leg's suite (HX-08) — the one Api/** suite a leg runs.
+      - 'test/MMLib.Alvo.Api.Tests/**'
       - 'test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/**'
       - 'test/MMLib.Alvo.Data.Sqlite.Tests/**'
       - 'test/MMLib.Alvo.Data.PostgreSql.Tests/**'
@@ -688,7 +752,8 @@ jobs:
           # meaningful unit, but because wall-clock is this gate's whole cost: with
           # coverage-analysis off every mutant reruns the full test project, so time is
           # mutants × suite. `Expressions/**` in one leg, everything except `Api/**` in the
-          # other, and `Api/**` in neither — see DECLARED GAP in the header.
+          # other, and `Api/**` in neither — see DECLARED GAP in the header, which also
+          # names the six HTTP-glue files that have their own leg since HX-08.
           #
           # `mutants:` and `suite:` below are MEASURED counts, not estimates — they size
           # the budget and they are what checks 3 and 4 of scripts/assert-mutation-run
@@ -712,22 +777,22 @@ jobs:
             config: stryker-config.canary.json
             project: src/MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj
             mutants: 13
-            suite: 142
+            suite: 194     # probed 2026-10-30 (was 142)
             timeout: 10     # measured ~20 s warm; the margin is cold checkout, setup-dotnet,
                             # `dotnet tool restore` and Stryker's own build, none of which this
                             # workflow caches. A timed-out job is CANCELLED, which uploads no log
                             # and still files a tracking issue, so the tight-budget rule the other
                             # legs follow is the wrong trade on the one leg that must be believed.
             canary: canary
-          # Every count below is re-probed as of 2026-09-14, against run 34828632562's own
-          # logs where CI produced one — which beats a local probe, being the runner that
-          # will be judged. `mutants:`/`suite:` grew on two legs with nothing reporting it,
-          # because check 3's and 4's floors are one-sided by design.
+          # Every count below is re-probed as of 2026-10-30, locally after HX-08 (the
+          # RE-PROBED 2026-10-30 table in the header); the 2026-09-14 values came from run
+          # 34828632562's own logs. Every leg grew with nothing reporting it, because check
+          # 3's and 4's floors are one-sided by design.
           - name: security core (expressions)
             config: stryker-config.expressions.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 900
-            suite: 1188     # same test project as the leg below, so the two must be equal
+            mutants: 1949   # probed 2026-10-30 (was 900)
+            suite: 3825     # probed 2026-10-30 (was 1188); same test project as the leg below, so the two must be equal
             timeout: 180    # measured 27, 31 and 26 min on three runs, but 68 of its 900 mutants were
                             # timing out and `additional-timeout` lets each run to the new ceiling: worst
                             # case 110 min (see THE MODEL in the header). This is the ONE leg whose
@@ -737,11 +802,24 @@ jobs:
           - name: security core (rules, auth, rest)
             config: stryker-config.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 1713   # 1638 -> 1713 on run 34828632562; growth never fails a run (check 3)
-            suite: 1188
+            mutants: 5715   # probed 2026-10-30 (was 1713), after the HTTP glue moved to the leg below
+            suite: 3825     # probed 2026-10-30 (was 1188)
             timeout: 120    # measured 28 min on run 34828632562, at 36 of 1713 timing out (2.1 %).
                             # Worst case with the raised timeout is 72 min, inside the existing budget,
                             # so this one is left alone — see THE MODEL in the header.
+          # The security-relevant HTTP glue of commands, inbound webhooks and the caller
+          # gate, against the suite that drives it over HTTP. Six files rather than the ten
+          # its design named: the ten-file set measured past the budget a 2x rule can give
+          # it — see "Carved out of the gap by HX-08" under DECLARED GAP for both runs.
+          - name: commands and webhooks over HTTP
+            config: stryker-config.commands-http.json
+            project: src/MMLib.Alvo/MMLib.Alvo.csproj
+            mutants: 145    # probed 2026-10-30, run to completion
+            suite: 1034
+            timeout: 280    # measured 102.7 min run to completion (10-core, --concurrency 4, 0
+                            # timeouts, 24 runtime errors); ~139 min scaled to a 4-vCPU runner the
+                            # way data-ef-core's was, and 2x that. Cut it to 2x a real post-merge
+                            # run's wall clock once one exists.
           # THE TWO HALVES OF THE OLD data-ef LEG. Split by test project, not by file —
           # see "WHY data-ef IS TWO LEGS" in the header for the measurement that decided
           # it and the rule that decides which leg a file lands on. 459 + 649 = 1108, the
@@ -764,8 +842,8 @@ jobs:
           - name: data-ef-core
             config: stryker-config.data-ef-core.json
             project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
-            mutants: 459   # probed 2026-09-14 after the move (was 543)
-            suite: 1135    # two test projects — the only leg that pays for a second one
+            mutants: 584   # probed 2026-10-30 (was 459)
+            suite: 2156    # probed 2026-10-30 (was 1135); two test projects — the only leg that pays for a second one
             timeout: 240   # RAISED WITH `additional-timeout`, and the two go together. Measured:
                            # 543 mutants took 60 min on CI while cutting 249 of them off at the
                            # timeout, and 74 min locally (10-core, --concurrency 4) once none were
@@ -778,8 +856,8 @@ jobs:
           - name: data-ef-rest
             config: stryker-config.data-ef-rest.json
             project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
-            mutants: 649   # probed 2026-09-14 after the move (was 565)
-            suite: 554     # one test project
+            mutants: 1816  # probed 2026-10-30 (was 649)
+            suite: 1286    # probed 2026-10-30 (was 554); one test project
             timeout: 120   # measured 2 min for 565 mutants on CI with ZERO timeouts — one fast
                            # assembly, so `additional-timeout` changes nothing here. The budget is
                            # left at 120 rather than cut to match: this is the leg the test debt
@@ -787,8 +865,8 @@ jobs:
           - name: data-sqlite
             config: stryker-config.data-sqlite.json
             project: src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj
-            mutants: 44
-            suite: 581
+            mutants: 65     # probed 2026-10-30 (was 44)
+            suite: 870      # probed 2026-10-30 (was 581)
             timeout: 60     # measured 5.5 min, but 22 of its 44 mutants were being cut off at the
                             # timeout (100.00 % reported on 22 killed / 0 survived / 22 timeout).
                             # Those 22 now run to completion, and this leg stands up real databases
@@ -796,8 +874,8 @@ jobs:
           - name: data-postgresql
             config: stryker-config.data-postgresql.json
             project: src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj
-            mutants: 20
-            suite: 110
+            mutants: 33     # probed 2026-10-30 (was 20)
+            suite: 180      # probed 2026-10-30 (was 110)
             timeout: 30     # measured 2 min
     steps:
       - name: Checkout
