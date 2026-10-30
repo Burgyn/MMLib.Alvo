@@ -17,7 +17,8 @@ namespace MMLib.Alvo.Api.Internal;
 internal sealed class CommandDocumentTransformer(IOptions<AlvoAuthOptions> auth) : IOpenApiDocumentTransformer
 {
     /// <inheritdoc/>
-    public Task TransformAsync(OpenApiDocument document, OpenApiDocumentTransformerContext context, CancellationToken cancellationToken)
+    public Task TransformAsync(
+        OpenApiDocument document, OpenApiDocumentTransformerContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(context);
@@ -38,11 +39,15 @@ internal sealed class CommandDocumentTransformer(IOptions<AlvoAuthOptions> auth)
         return Task.CompletedTask;
     }
 
-    private static List<(ApiDescription Description, CommandEndpointMetadata Marker)> Commands(OpenApiDocumentTransformerContext context) =>
+    private static List<(ApiDescription Description, CommandEndpointMetadata Marker)> Commands(
+        OpenApiDocumentTransformerContext context) =>
         [.. context.DescriptionGroups.SelectMany(group => group.Items)
-            .Select(description => (Description: description, Marker: description.ActionDescriptor.EndpointMetadata.OfType<CommandEndpointMetadata>().FirstOrDefault()))
+            .Select(description => (Description: description, Marker: MarkerOf(description)))
             .Where(entry => entry.Marker is not null)
             .Select(entry => (entry.Description, entry.Marker!))];
+
+    private static CommandEndpointMetadata? MarkerOf(ApiDescription description) =>
+        description.ActionDescriptor.EndpointMetadata.OfType<CommandEndpointMetadata>().FirstOrDefault();
 
     private static void Enrich(OpenApiDocument document, ApiDescription description, CommandEndpointMetadata marker)
     {
@@ -53,10 +58,7 @@ internal sealed class CommandDocumentTransformer(IOptions<AlvoAuthOptions> auth)
         operation.Responses ??= [];
         if (operation.RequestBody is not null)
         {
-            operation.Responses["400"] = new OpenApiResponse
-            {
-                Description = "The request body could not be bound to the command's input. Answered by ASP.NET Core's minimal APIs before Alvo runs, in the host's own shape — not a problem document Alvo writes.",
-            };
+            BindingRefusals(operation.Responses);
         }
 
         foreach (var refusal in DataApiDocumentation.CommandRefusals(marker.Entity is not null))
@@ -68,12 +70,33 @@ internal sealed class CommandDocumentTransformer(IOptions<AlvoAuthOptions> auth)
     }
 
     /// <summary>
-    /// A summary, and the bound row key's description, wherever the host's own <c>WithSummary</c>/<c>WithDescription</c>
-    /// left the operation without one — the ruleset refuses an undescribed operation or parameter.
+    /// The two refusals ASP.NET Core's minimal APIs answer for a command that reads a body, before Alvo runs (Ruling 44):
+    /// listed so a client sees them, inline because they are the framework's shape and not an Alvo problem document.
+    /// </summary>
+    private static void BindingRefusals(OpenApiResponses responses)
+    {
+        responses["400"] = new OpenApiResponse
+        {
+            Description =
+                "The request body could not be bound to the command's input. Answered by ASP.NET Core's minimal APIs "
+                + "before Alvo runs, in the host's own shape — not a problem document Alvo writes.",
+        };
+        responses["415"] = new OpenApiResponse
+        {
+            Description =
+                "The request body was not declared as JSON. Answered by ASP.NET Core's minimal APIs before Alvo runs, "
+                + "in the host's own shape — not a problem document Alvo writes. Send 'Content-Type: application/json'.",
+        };
+    }
+
+    /// <summary>
+    /// A summary, the request body's description and the bound row key's description, wherever the host left the operation
+    /// without one — the ruleset refuses an undescribed operation, body or parameter.
     /// </summary>
     /// <remarks>
-    /// Only the <c>id</c> of a bound command is described: Alvo knows what it names. Any other route or query parameter is
-    /// the host's, and so is its description.
+    /// Only what Alvo knows the meaning of is described: the operation, its body as "the command's input", and the
+    /// <c>id</c> of a bound command. Any other route or query parameter is the host's, and so is the schema of its input
+    /// type — a <c>[Description]</c> on the type describes it.
     /// </remarks>
     private static void Describe(OpenApiOperation operation, CommandEndpointMetadata marker)
     {
@@ -84,16 +107,42 @@ internal sealed class CommandDocumentTransformer(IOptions<AlvoAuthOptions> auth)
                 : $"Run the '{marker.Name}' command on one '{marker.Entity}' row";
         }
 
-        if (marker.Entity is not null
-            && operation.Parameters?.OfType<OpenApiParameter>().FirstOrDefault(IsRowKey) is { } key
-            && string.IsNullOrEmpty(key.Description))
+        if (operation.RequestBody is OpenApiRequestBody body && string.IsNullOrEmpty(body.Description))
+        {
+            body.Description = $"The input of the '{marker.Name}' command.";
+        }
+
+        if (marker.Entity is { } entity && RowKey(operation) is { } key && string.IsNullOrEmpty(key.Description))
         {
             key.Description =
-                $"The key of the '{marker.Entity}' row the command acts on. A row that does not exist and one the "
+                $"The key of the '{entity}' row the command acts on. A row that does not exist and one the "
                 + "caller's policy excludes are the same 404, so it cannot be used to prove a row exists.";
         }
     }
 
-    private static bool IsRowKey(OpenApiParameter parameter) =>
+    /// <summary>
+    /// The bound row's <c>{id}</c> path parameter — declared here when the handler does not bind it, because ApiExplorer
+    /// then leaves it out while the route still carries it, and every path template parameter must be declared.
+    /// </summary>
+    private static OpenApiParameter? RowKey(OpenApiOperation operation)
+    {
+        if (operation.Parameters?.FirstOrDefault(IsRowKey) is { } existing)
+        {
+            return existing as OpenApiParameter;
+        }
+
+        var declared = new OpenApiParameter
+        {
+            Name = "id",
+            In = ParameterLocation.Path,
+            Required = true,
+            Schema = new OpenApiSchema { Type = JsonSchemaType.String, Format = "uuid" },
+        };
+        operation.Parameters ??= [];
+        operation.Parameters.Add(declared);
+        return declared;
+    }
+
+    private static bool IsRowKey(IOpenApiParameter parameter) =>
         parameter.In == ParameterLocation.Path && string.Equals(parameter.Name, "id", StringComparison.Ordinal);
 }

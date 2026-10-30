@@ -127,4 +127,9 @@ internal static class DataApiEndpointKinds
         DataApiEndpointKind.BatchDelete => "batchDelete",
         _ => kind.ToDataOperation().ToWireName(),
     };
+
+    /// <summary>The operationId the document publishes for <paramref name="kind"/> on <paramref name="entity"/>.</summary>
+    /// <param name="kind">The endpoint kind.</param>
+    /// <param name="entity">The entity name, as the applied schema declares it.</param>
+    internal static string ToOperationId(this DataApiEndpointKind kind, string entity) => $"{entity}.{kind.ToWireName()}";
 }

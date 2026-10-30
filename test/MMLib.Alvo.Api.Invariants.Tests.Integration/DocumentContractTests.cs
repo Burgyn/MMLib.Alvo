@@ -139,7 +139,9 @@ public class DocumentContractTests
             ConfigureApp = app =>
             {
                 app.MapAlvoCommand("inspect_vehicle", "/commands/vehicles/{id:guid}/inspect", "vehicles", "'inspector' in @user.roles", (Guid id) => TypedResults.Ok(id));
+                app.MapAlvoCommand("retire_vehicle", "/commands/vehicles/{id:guid}/retire", "vehicles", "'admin' in @user.roles", () => TypedResults.NoContent());
                 app.MapAlvoCommand("fleet.recount", "/commands/fleet/recount", "'admin' in @user.roles", () => TypedResults.NoContent());
+                app.MapAlvoCommand("fleet.rename", "/commands/fleet/rename", "'admin' in @user.roles", (FleetName body) => TypedResults.Ok(body));
             },
         });
         var document = await world.OpenApiDocumentAsync();
@@ -149,6 +151,11 @@ public class DocumentContractTests
         violations.ShouldBeEmpty(string.Join("; ", violations));
         document["paths"]!["/commands/fleet/recount"]!["post"]!["operationId"]!.GetValue<string>().ShouldBe("commands.fleetRecount");
     }
+
+    /// <summary>A command's body, so the document lists the framework's 400 and 415 beside Alvo's refusals.</summary>
+    /// <param name="Name">The fleet's new name.</param>
+    [System.ComponentModel.Description("A fleet's new name.")]
+    public sealed record FleetName(string Name);
 
     /// <summary>A key carrying every scope, so nothing here turns on authorization.</summary>
     private static TestApiKey Admin => new("admin-key", ["admin", "authenticated"], ["*:read", "*:write"]);

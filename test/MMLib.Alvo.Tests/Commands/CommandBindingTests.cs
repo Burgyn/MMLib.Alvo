@@ -71,6 +71,19 @@ public sealed class CommandBindingTests
         }).Problems.Where(problem => problem.Message.Contains("operationId", StringComparison.Ordinal)).Select(problem => problem.Id)
             .ShouldBe(["a_b", "a.b"], ignoreOrder: true);
 
+    [Theory]
+    [InlineData("list")]
+    [InlineData("batch_create")]
+    public void A_command_publishing_the_operation_id_of_an_entity_named_commands_is_refused(string name) =>
+        CompileAgainst(WithCommandsEntity(), commands => commands.Map(name, "/c", null, CommandAccess.Of("true")))
+            .Problems.ShouldContain(problem => problem.Id == name && problem.Locator == $"extensions/{name}/id"
+                && problem.Message.Contains("operationId", StringComparison.Ordinal));
+
+    [Fact]
+    public void A_command_beside_an_entity_named_commands_binds_when_their_operation_ids_differ() =>
+        CompileAgainst(WithCommandsEntity(), commands => commands.Map("recount", "/c", null, CommandAccess.Of("true")))
+            .Problems.ShouldBeEmpty();
+
     [Fact]
     public void A_command_and_a_handler_deriving_one_event_segment_are_refused() =>
         Compile(
@@ -133,6 +146,44 @@ public sealed class CommandBindingTests
 
         refusals.ShouldContain(refusal => refusal.Path == "/entities/tickets" && refusal.Message.Contains("extension 'resolve_ticket' (command, in this host)", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void Adding_an_entity_named_commands_that_a_mapped_command_s_operation_id_collides_with_is_refused_at_apply()
+    {
+        var collection = new ServiceCollection();
+        collection.AddAlvo();
+        using var provider = collection.BuildServiceProvider();
+        provider.GetRequiredService<CommandRegistry>().Map("list", "/c", null, CommandAccess.Of("true"));
+        var registry = provider.GetRequiredService<ExtensionRegistry>();
+        var proposed = WithCommandsEntity();
+        var regressions = ExtensionBindingCompiler.Compile(registry, proposed, CelFixtures.Compiler, EveryService()).Problems;
+
+        var refusals = ExtensionApplyRefusals.Refusals(registry, regressions, HandlerCatalog.Schema, proposed.Schema, CelFixtures.Compiler);
+
+        refusals.ShouldContain(refusal => refusal.Message.Contains("extensions/list/id", StringComparison.Ordinal)
+            && refusal.Severity == DescriptorValidationSeverity.Error);
+    }
+
+    private static ExtensionBindingResult CompileAgainst(PolicyCatalog catalog, Action<CommandRegistry> map)
+    {
+        var collection = new ServiceCollection();
+        collection.AddAlvo();
+        using var provider = collection.BuildServiceProvider();
+        map(provider.GetRequiredService<CommandRegistry>());
+
+        return ExtensionBindingCompiler.Compile(provider.GetRequiredService<ExtensionRegistry>(), catalog, CelFixtures.Compiler, EveryService());
+    }
+
+    private static PolicyCatalog WithCommandsEntity() =>
+        CatalogOf(new([
+            .. HandlerCatalog.Schema.Entities,
+            new Alvo.Schema.EntitySchema
+            {
+                Name = "commands",
+                Tenancy = Alvo.Schema.TenancyMode.Global,
+                Fields = [new Alvo.Schema.FieldSchema { Name = "id", Type = Alvo.Schema.FieldType.Uuid }],
+            },
+        ]));
 
     private static ExtensionBindingResult Compile(
         Action<CommandRegistry> map, Action<IAlvoBuilder>? configure = null, IServiceProviderIsService? services = null)

@@ -40,11 +40,20 @@ internal static class ProblemComponents
     /// <summary>The component id of one itemised reason inside a problem document.</summary>
     internal const string ViolationId = "problemViolation";
 
-    /// <summary>Registers both components on <paramref name="document"/>.</summary>
+    /// <summary>Registers both components on <paramref name="document"/>, unless it already carries them.</summary>
+    /// <remarks>
+    /// Guarded, because two transformers call it on one document — the Data API's and the commands' — and the second
+    /// must not rebuild what the first published.
+    /// </remarks>
     /// <param name="document">The document being built.</param>
     internal static void AddTo(OpenApiDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
+        if (document.Components?.Schemas?.ContainsKey(DocumentId) == true)
+        {
+            return;
+        }
+
         document.AddComponent(ViolationId, Violation());
         document.AddComponent(DocumentId, Document(document));
     }

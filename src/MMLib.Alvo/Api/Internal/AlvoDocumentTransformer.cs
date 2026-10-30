@@ -577,7 +577,7 @@ internal sealed class AlvoDocumentTransformer(
     /// named endpoint at startup.
     /// </remarks>
     private static string OperationId(DataApiOperationMetadata marker) =>
-        $"{marker.Entity}.{marker.Kind.ToWireName()}";
+        marker.Kind.ToOperationId(marker.Entity);
 
     /// <summary>The body a write accepts, or <see langword="null"/> for the three operations that take none.</summary>
     private static OpenApiRequestBody? RequestBody(

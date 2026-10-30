@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Events.Internal;
+﻿using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Extensions.Internal;
@@ -71,8 +72,35 @@ internal sealed class CommandBinding(CommandRegistration command, ICelCompiler c
     internal BoundCommand? Bind(PolicyCatalog catalog)
     {
         var access = command.Entity is { } entity ? Compile(entity, catalog) : _unbound;
+        CheckOperationId(catalog);
         return _problems.Count == 0 && access is not null ? new BoundCommand(command, access) : null;
     }
+
+    /// <summary>
+    /// Refuses a mapped command whose operationId an entity named <c>commands</c> already publishes (Ruling 53): the Data
+    /// API's are <c>&lt;entity&gt;.&lt;operation&gt;</c>, so <c>list</c> and that entity's list would be one id in one
+    /// document. Judged against every operation the Data API can generate for the entity, whether or not it is mapped.
+    /// </summary>
+    private void CheckOperationId(PolicyCatalog catalog)
+    {
+        if (!command.IsMapped || !Declares(catalog, CommandOperationIds.Tag))
+        {
+            return;
+        }
+
+        var id = CommandOperationIds.Of(command.Id);
+        var taken = Enum.GetValues<DataApiEndpointKind>().Select(kind => kind.ToOperationId(CommandOperationIds.Tag));
+        if (taken.Contains(id, StringComparer.Ordinal))
+        {
+            Add("id",
+                $"It publishes the OpenAPI operationId '{id}', which the Data API already publishes for the entity named "
+                + $"'{CommandOperationIds.Tag}', so a client generated from the document could not tell them apart.",
+                $"Rename the command, or the entity '{CommandOperationIds.Tag}'.");
+        }
+    }
+
+    private static bool Declares(PolicyCatalog catalog, string entity) =>
+        catalog.Schema.Entities.Any(candidate => string.Equals(candidate.Name, entity, StringComparison.Ordinal));
 
     private CompiledExpression? Compile(string entity, PolicyCatalog catalog)
     {

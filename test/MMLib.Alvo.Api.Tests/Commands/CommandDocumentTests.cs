@@ -33,7 +33,7 @@ public sealed class CommandDocumentTests
         var operation = document["paths"]!["/commands/quote"]!["post"]!.AsObject();
 
         operation["operationId"]!.GetValue<string>().ShouldBe("commands.quoteStay");
-        operation["requestBody"].ShouldNotBeNull();
+        operation["requestBody"]!["description"]!.GetValue<string>().ShouldBe("The input of the 'quote_stay' command.");
         operation["responses"]!.AsObject().ContainsKey("404").ShouldBeFalse();
         operation["responses"]!.AsObject().ContainsKey("400").ShouldBeTrue("a body that cannot be bound is answered before Alvo runs");
     }
@@ -52,6 +52,43 @@ public sealed class CommandDocumentTests
             .GetValue<string>().ShouldContain("'bookings' row");
         quote["summary"].ShouldBeNull("the host described the operation itself, so Alvo adds no summary over it");
         quote["description"]!.GetValue<string>().ShouldBe("Prices a stay.");
+    }
+
+    [Fact]
+    public async Task A_command_narrows_the_shared_403_and_412_to_what_a_command_means_by_them()
+    {
+        await using var world = await DocumentedAsync();
+        var document = await world.OpenApiDocumentAsync();
+
+        var bound = document["paths"]!["/commands/bookings/{id}/confirm"]!["post"]!["responses"]!;
+        var unbound = document["paths"]!["/commands/quote"]!["post"]!["responses"]!;
+
+        bound["403"]!["$ref"]!.GetValue<string>().ShouldBe("#/components/responses/forbidden");
+        bound["403"]!["description"]!.GetValue<string>().ShouldContain("judged against the row");
+        unbound["403"]!["description"]!.GetValue<string>().ShouldNotContain("judged against the row");
+        bound["412"]!["description"]!.GetValue<string>().ShouldContain("handler");
+    }
+
+    [Fact]
+    public async Task A_command_reading_a_body_lists_the_frameworks_415_and_one_reading_none_does_not()
+    {
+        await using var world = await DocumentedAsync();
+        var document = await world.OpenApiDocumentAsync();
+
+        document["paths"]!["/commands/quote"]!["post"]!["responses"]!.AsObject().ContainsKey("415").ShouldBeTrue();
+        document["paths"]!["/commands/bookings/{id}/confirm"]!["post"]!["responses"]!.AsObject().ContainsKey("415").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task A_bound_command_whose_handler_does_not_bind_the_id_still_documents_and_describes_it()
+    {
+        await using var world = await DocumentedAsync();
+        var document = await world.OpenApiDocumentAsync();
+
+        var parameters = document["paths"]!["/commands/bookings/{id}/archive"]!["post"]!["parameters"]!.AsArray();
+
+        parameters.Single(parameter => parameter!["name"]!.GetValue<string>() == "id")!["description"]!
+            .GetValue<string>().ShouldContain("'bookings' row");
     }
 
     [Fact]
@@ -77,6 +114,7 @@ public sealed class CommandDocumentTests
             ConfigureServices: services => services.AddSingleton(new CommandProbe()).AddSingleton<PaymentGateway>(),
             ConfigureApp: app =>
             {
+                app.MapAlvoCommand("archive_booking", "/commands/bookings/{id:guid}/archive", "bookings", "true", () => TypedResults.NoContent());
                 app.MapAlvoCommand("confirm_booking", "/commands/bookings/{id:guid}/confirm", "bookings", "'staff' in @user.roles", (Guid id) => TypedResults.Ok(id));
                 app.MapAlvoCommand("quote_stay", "/commands/quote", "true", (StayRequest request) => TypedResults.Ok(new Quote(request.Nights)))
                     .WithDescription("Prices a stay.");
