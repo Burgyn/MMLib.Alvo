@@ -75,6 +75,19 @@ public sealed class ManagementExtensionsTests
     }
 
     [Fact]
+    public async Task A_simulation_answers_what_each_command_s_access_rule_says_for_the_caller()
+    {
+        await using var world = await ManagedExtensions.StartWithCommandAsync([_ops]);
+
+        var command = (await VerdictAsync(world, "vehicles", "list"))["commands"].ShouldBeOfType<JsonArray>().ShouldHaveSingleItem()!.AsObject();
+
+        command["name"]!.GetValue<string>().ShouldBe(EscalateVehicle);
+        command["entity"].ShouldBeNull();
+        command["access"]!.GetValue<string>().ShouldBe("'dispatcher' in @user.roles");
+        command["allowed"]!.GetValue<bool>().ShouldBeTrue("an internal command is simulated too: the dispatcher caller is admitted");
+    }
+
+    [Fact]
     public async Task The_capability_report_honours_the_kind_the_host_registers_after_the_blocks()
     {
         await using var registering = await ManagedExtensions.StartAsync([_ops]);
@@ -189,7 +202,10 @@ public sealed class ManagementExtensionsTests
         return [.. body["items"].ShouldBeOfType<JsonArray>().Select(item => item!.AsObject())];
     }
 
-    private static async Task<IReadOnlyList<string>> SimulatedAsync(AlvoApiWorld world, string entity, string operation)
+    private static async Task<IReadOnlyList<string>> SimulatedAsync(AlvoApiWorld world, string entity, string operation) =>
+        [.. (await VerdictAsync(world, entity, operation))["extensions"].ShouldBeOfType<JsonArray>().Select(item => item!["id"]!.GetValue<string>())];
+
+    private static async Task<JsonObject> VerdictAsync(AlvoApiWorld world, string entity, string operation)
     {
         var body = new JsonObject
         {
@@ -197,10 +213,8 @@ public sealed class ManagementExtensionsTests
             ["operation"] = operation,
             ["caller"] = new JsonObject { ["user"] = Guid.NewGuid().ToString(), ["roles"] = new JsonArray("dispatcher") },
         };
-        var verdict = await (await world.SendAsync(HttpMethod.Post, $"{ManagedFleet.Routes}/policy/simulate", _ops, body: body))
+        return await (await world.SendAsync(HttpMethod.Post, $"{ManagedFleet.Routes}/policy/simulate", _ops, body: body))
             .ReadJsonObjectAsync();
-
-        return [.. verdict["extensions"].ShouldBeOfType<JsonArray>().Select(item => item!["id"]!.GetValue<string>())];
     }
 
     private static async Task<IReadOnlyList<string>> HonouredAsync(AlvoApiWorld world) =>

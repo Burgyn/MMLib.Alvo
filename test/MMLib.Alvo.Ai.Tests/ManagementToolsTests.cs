@@ -1005,6 +1005,36 @@ public sealed class ManagementToolsTests
     private static IReadOnlyList<JsonNode> Violations(string answer) =>
         [.. JsonNode.Parse(answer)!["violations"]!.AsArray().Select(violation => violation!)];
 
+    /// <summary>The extensions tool shows a command as the catalog lists it: its route and its access rule.</summary>
+    [Fact]
+    public async Task The_extensions_tool_shows_a_command_s_route_and_access_rule()
+    {
+        var management = Substitute.For<IAlvoManagement>();
+        management.GetExtensionsAsync(Project, Arg.Any<CancellationToken>()).Returns(new ManagementExtensionCatalog
+        {
+            Items =
+            [
+                new ManagementExtension
+                {
+                    Id = "confirm_booking",
+                    Kind = AlvoExtensionKind.Command,
+                    Stage = AlvoExtensionStage.Http,
+                    Entities = ["bookings"],
+                    Route = "/commands/bookings/{id}/confirm",
+                    HttpMethod = "POST",
+                    Access = "'staff' in @user.roles && status == 'requested'",
+                },
+            ],
+        });
+
+        var answer = await InvokeAsync(management, "get_extensions", []);
+
+        answer.ShouldContain("\"command\"");
+        answer.ShouldContain("/commands/bookings/{id}/confirm");
+        answer.ShouldContain("status == 'requested'");
+        ManagementTools.For(management, Project).Functions.Single(tool => tool.Name == "get_extensions").Description.ShouldContain("commands");
+    }
+
     private static Task<string> InvokeAsync(IAlvoManagement management, string tool, Dictionary<string, object?> arguments) =>
         InvokeAsync(ManagementTools.For(management, Project), tool, arguments);
 

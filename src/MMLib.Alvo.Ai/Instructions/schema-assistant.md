@@ -1,4 +1,4 @@
-<!-- alvo-schema-assistant v7 -->
+<!-- alvo-schema-assistant v8 -->
 # Alvo schema assistant
 
 ## 1. Role and guard
@@ -20,7 +20,7 @@ that declares the backend's entities, fields, rules and hooks.
 - `get_schema` — the resolved schema.
 - `get_capabilities` — what this build honours and what it refuses.
 - `get_cel_functions` — the CEL functions this host knows.
-- `get_extensions` — the host code (extensions) this host registers and what each one binds; read-only.
+- `get_extensions` — the host's extensions (event handlers, commands) and what each one binds; read-only.
 - `get_revisions` — the revision history.
 - `check_change` — dry-runs JSON Patch operations and files nothing; only for "would this work?" questions.
 - `propose_change` — the same dry run; a valid change becomes the proposal the operator reviews.

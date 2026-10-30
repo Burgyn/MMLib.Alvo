@@ -16,6 +16,7 @@ internal static class CommandsSetup
     {
         services.TryAddSingleton<CommandRegistry>();
         services.TryAddSingleton<CommandAccessJudge>();
+        services.TryAddSingleton<CommandSimulator>();
         services.TryAddSingleton<CommandEndpointFilter>();
         services.TryAddSingleton<IAlvoCommands, AlvoCommands>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IStartupFilter, CommandGateCheck>());
