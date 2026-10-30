@@ -1,10 +1,12 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using MMLib.Alvo.Commands.Internal;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Tests.Expressions;
 using MMLib.Alvo.Tests.Extensions;
 using NSubstitute;
@@ -154,14 +156,20 @@ public sealed class CommandBindingTests
         collection.AddAlvo();
         using var provider = collection.BuildServiceProvider();
         provider.GetRequiredService<CommandRegistry>().Map("list", "/c", null, CommandAccess.Of("true"));
-        var registry = provider.GetRequiredService<ExtensionRegistry>();
-        var proposed = WithCommandsEntity();
-        var regressions = ExtensionBindingCompiler.Compile(registry, proposed, CelFixtures.Compiler, EveryService()).Problems;
+        var guard = GuardOver(provider.GetRequiredService<ExtensionRegistry>(), Catalog());
 
-        var refusals = ExtensionApplyRefusals.Refusals(registry, regressions, HandlerCatalog.Schema, proposed.Schema, CelFixtures.Compiler);
+        var refused = Should.Throw<DescriptorValidationException>(() => guard.Check(WithCommandsEntity())).Result.Errors;
 
-        refusals.ShouldContain(refusal => refusal.Message.Contains("extensions/list/id", StringComparison.Ordinal)
+        refused.ShouldContain(refusal => refusal.Message.Contains("extensions/list/id", StringComparison.Ordinal)
             && refusal.Severity == DescriptorValidationSeverity.Error);
+    }
+
+    private static ExtensionApplyGuard GuardOver(ExtensionRegistry registry, PolicyCatalog current)
+    {
+        var catalogs = new PolicyCatalogProvider();
+        catalogs.SetCurrent("handlers", current);
+        var binder = new ExtensionBinder(registry, CelFixtures.Compiler, EveryService(), NullLogger<ExtensionBinder>.Instance);
+        return new ExtensionApplyGuard(registry, binder, CelFixtures.Compiler, catalogs);
     }
 
     private static ExtensionBindingResult CompileAgainst(PolicyCatalog catalog, Action<CommandRegistry> map)

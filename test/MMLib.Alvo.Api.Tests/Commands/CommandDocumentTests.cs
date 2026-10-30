@@ -75,8 +75,11 @@ public sealed class CommandDocumentTests
         await using var world = await DocumentedAsync();
         var document = await world.OpenApiDocumentAsync();
 
-        document["paths"]!["/commands/quote"]!["post"]!["responses"]!.AsObject().ContainsKey("415").ShouldBeTrue();
+        var unsupported = document["paths"]!["/commands/quote"]!["post"]!["responses"]!["415"].ShouldNotBeNull();
         document["paths"]!["/commands/bookings/{id}/confirm"]!["post"]!["responses"]!.AsObject().ContainsKey("415").ShouldBeFalse();
+        var description = unsupported["description"]!.GetValue<string>();
+        description.ShouldContain("media types", Case.Sensitive, "a command taking uploads reads form or multipart, so the advice names no one type");
+        description.ShouldNotContain("JSON");
     }
 
     [Fact]

@@ -84,8 +84,9 @@ internal sealed class CommandDocumentTransformer(IOptions<AlvoAuthOptions> auth)
         responses["415"] = new OpenApiResponse
         {
             Description =
-                "The request body was not declared as JSON. Answered by ASP.NET Core's minimal APIs before Alvo runs, "
-                + "in the host's own shape — not a problem document Alvo writes. Send 'Content-Type: application/json'.",
+                "The request's 'Content-Type' is missing or not one of the media types this request body lists. Answered by "
+                + "ASP.NET Core's minimal APIs before Alvo runs, in the host's own shape — not a problem document Alvo writes. "
+                + "Send the body as one of the listed media types.",
         };
     }
 
