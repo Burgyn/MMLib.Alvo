@@ -144,7 +144,9 @@ the same completion event; it has no route and takes no key, and it binds no ent
 
 - In an event handler, pass `AlvoEventContext.Caller`. A handler running as the system holds `admin`; no caller is
   otherwise exempt from the rule.
-- It is refused inside an open unit, where it would write beside it, and past the chain-depth limit.
+- It is refused inside an open unit, where it would write beside it, and past the chain-depth limit. It runs one hop
+  deeper than its caller, as an event handler does — its writes and its completion event report that depth — so a
+  command that invokes itself is stopped by the limit rather than recursing until the process fails.
 - The command is resolved from a fresh DI scope when it is invoked; its dependencies are not checked at boot.
 
 ## Inbound webhooks

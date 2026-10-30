@@ -100,6 +100,23 @@ public sealed class InternalCommandTests
         seen.Escalated.ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// An internal command is one hop deeper than its caller, so a command that invokes itself with its own caller meets the
+    /// chain-depth limit — a refusal, never a stack overflow. The command stops itself well past the limit, so the fact
+    /// fails rather than crashing the run should the limit not hold.
+    /// </summary>
+    [Fact]
+    public async Task A_command_invoking_itself_is_stopped_by_the_chain_depth_limit()
+    {
+        var seen = new Seen();
+        await using var alvo = await StartAsync(seen, runAs: AlvoRunAs.System);
+        var commands = alvo.Services.GetRequiredService<IAlvoCommands>();
+
+        await Should.ThrowAsync<AlvoChainDepthExceededException>(() => commands.InvokeAsync("recurse", new Escalation(Guid.NewGuid()), AlvoContext.System(null), Ct));
+
+        seen.Escalated.Count.ShouldBe(9, "depths 0 through 8 run; the ninth hop is past the default limit of 8");
+    }
+
     [Fact]
     public async Task A_command_that_opens_no_unit_still_records_its_completion()
     {
@@ -156,6 +173,7 @@ public sealed class InternalCommandTests
                 .AddCommand<NoteEscalation>("note_escalation", "'admin' in @user.roles")
                 .AddCommand<NoteEscalation>("admin_note", caller => caller.HasRole("admin"))
                 .AddCommand<CountAnything>("count_anything", "true")
+                .AddCommand<Recurse>("recurse", "true")
                 .Entity("tickets", tickets => tickets.OnCreated(
                     "escalate-new",
                     (AlvoCreated<AlvoRecord> created, IAlvoCommands commands, AlvoEventContext context, CancellationToken ct) =>
@@ -179,6 +197,20 @@ public sealed class InternalCommandTests
         {
             seen.Escalated.Enqueue(input.Ticket);
             return Task.CompletedTask;
+        }
+    }
+
+    public sealed class Recurse(Seen seen, IAlvoCommands commands) : IAlvoCommand<Escalation>
+    {
+        private const int Runaway = 50;
+
+        public async Task HandleAsync(Escalation input, AlvoCommandContext context, CancellationToken cancellationToken)
+        {
+            seen.Escalated.Enqueue(input.Ticket);
+            if (seen.Escalated.Count < Runaway)
+            {
+                await commands.InvokeAsync("recurse", input, context.Caller, cancellationToken);
+            }
         }
     }
 

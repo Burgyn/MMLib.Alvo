@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Events;
 using MMLib.Alvo.Extensions.Internal;
 
 namespace MMLib.Alvo.Commands.Internal;
@@ -7,6 +8,8 @@ namespace MMLib.Alvo.Commands.Internal;
 /// <summary>
 /// <see cref="IAlvoCommands"/>: refused inside an open unit (it would run beside it), depth-limited, access-ruled; the
 /// command is resolved from a fresh scope and run like a mapped one, without an idempotency key (spec 2026-10-14 §4.9).
+/// It runs one hop deeper than its caller, as an event handler does, so a command that invokes itself — directly, with its
+/// own caller — meets the chain-depth limit instead of the stack's.
 /// </summary>
 internal sealed class AlvoCommands(
     ExtensionRegistry registry,
@@ -22,11 +25,15 @@ internal sealed class AlvoCommands(
         ArgumentNullException.ThrowIfNull(context);
         AlvoFlow.RefuseInsideUnit("IAlvoCommands.InvokeAsync");
         var command = Internal(name, typeof(TInput));
-        depth.EnsureWithin(context);
+        var reached = depth.EnsureWithin(context);
         judge.EnsureAdmitted(command.Id, null, context);
 
+        using var hop = AlvoFlow.Enter(OneHopDeeper(context, reached));
         await RunAsync(command, input, context, cancellationToken).ConfigureAwait(false);
     }
+
+    private static AlvoProvenance OneHopDeeper(AlvoContext context, int reached) =>
+        AlvoEventProvenance.Effective(context) with { Depth = reached + 1 };
 
     private CommandRegistration Internal(string name, Type input)
     {
