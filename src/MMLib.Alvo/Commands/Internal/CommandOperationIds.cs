@@ -8,6 +8,9 @@ internal static class CommandOperationIds
     /// <summary>The prefix every command operationId carries.</summary>
     internal const string Prefix = "commands.";
 
+    /// <summary>The OpenAPI tag every command carries.</summary>
+    internal const string Tag = "commands";
+
     /// <summary>The operationId of <paramref name="name"/>: <c>confirm_booking</c> → <c>commands.confirmBooking</c>.</summary>
     /// <param name="name">The command's name.</param>
     internal static string Of(string name)

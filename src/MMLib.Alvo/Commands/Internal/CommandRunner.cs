@@ -62,6 +62,10 @@ internal sealed partial class CommandRunner(
         };
     }
 
+    /// <summary>Gives up a key claimed for a request that was refused before its handler ran.</summary>
+    internal Task ReleaseAsync(CommandKey? key) =>
+        key is null ? Task.CompletedTask : Ledger.ReleaseAsync(key, CancellationToken.None);
+
     /// <summary>Runs the handler and records what followed from it.</summary>
     internal async Task<object?> FinishAsync(CommandRun run, Func<Task<object?>> handler)
     {

@@ -326,7 +326,7 @@ public abstract class LedgerFacts
         return [.. entries.Select(entry => entry.Type)];
     }
 
-    private static SchemaModel Schema() => new([
+    protected static SchemaModel Schema() => new([
         new EntitySchema
         {
             Name = Entity,
@@ -339,7 +339,7 @@ public abstract class LedgerFacts
         },
     ]);
 
-    private static AlvoDescriptor Descriptor() => new()
+    protected static AlvoDescriptor Descriptor() => new()
     {
         ApiVersion = "alvo.dev/v1",
         Name = "ledger-fixture",

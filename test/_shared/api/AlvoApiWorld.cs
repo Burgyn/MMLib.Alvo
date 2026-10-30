@@ -299,6 +299,7 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             // would let a world pass while the production registration was broken.
             database.Use(alvo);
             alvo.FromDescriptor(descriptorPath).AddDataApi(setup.ConfigureApi ?? (_ => { }));
+            setup.ConfigureAlvo?.Invoke(alvo);
         });
 
         if (setup.RegisterAlvoTwice)
@@ -869,6 +870,10 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 /// that declares one — exactly as a deployment does.
 /// </para>
 /// </param>
+/// <param name="ConfigureAlvo">
+/// Applied to Alvo's own builder inside <c>AddAlvo</c>, after the descriptor and the Data API — where a host registers
+/// an event handler, a command or a host function.
+/// </param>
 internal sealed record AlvoApiWorldSetup(
     Action<AlvoApiOptions>? ConfigureApi = null,
     string? RevokedKeyId = null,
@@ -887,7 +892,8 @@ internal sealed record AlvoApiWorldSetup(
     Action<WebApplication>? ConfigureApp = null,
     Action<IEndpointConventionBuilder>? ConfigureDataApiRoutes = null,
     bool MapManagementApi = false,
-    Action<IEndpointConventionBuilder>? ConfigureRouteGroup = null);
+    Action<IEndpointConventionBuilder>? ConfigureRouteGroup = null,
+    Action<IAlvoBuilder>? ConfigureAlvo = null);
 
 /// <summary>One dev API key a world issues, in the shape a test reads best.</summary>
 /// <param name="KeyId">The key's public identifier.</param>

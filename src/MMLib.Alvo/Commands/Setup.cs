@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Http.Json;
+﻿using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -15,6 +16,8 @@ internal static class CommandsSetup
     {
         services.TryAddSingleton<CommandRegistry>();
         services.TryAddSingleton<CommandAccessJudge>();
+        services.TryAddSingleton<CommandEndpointFilter>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IStartupFilter, CommandGateCheck>());
         services.TryAddSingleton(provider => new CommandCompletion(provider.GetService<TimeProvider>() ?? TimeProvider.System));
         services.TryAddSingleton(provider => new CommandRunner(
             provider.GetService<ICommandLedger>(),

@@ -117,4 +117,45 @@ public sealed class GateWitnessTests
     }
 
     private sealed class GroupMarker;
+
+    [Fact]
+    public async Task Every_mapped_command_composes_its_gate()
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync("command-desk.alvo.json", [], new AlvoApiWorldSetup(
+            ConfigureApp: app => app.MapAlvoCommand("quote_stay", "/commands/quote", "true", () => TypedResults.Ok())));
+
+        var witnesses = world.Endpoints
+            .Where(endpoint => endpoint.Metadata.GetMetadata<MMLib.Alvo.Commands.Internal.CommandEndpointMetadata>() is not null)
+            .Select(endpoint => endpoint.Metadata.GetMetadata<AlvoGateWitness>())
+            .ToList();
+
+        witnesses.ShouldHaveSingleItem().ShouldNotBeNull().Compositions.ShouldBeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task A_convention_removing_a_command_s_filter_under_a_group_refuses_the_start()
+    {
+        var refusal = await Should.ThrowAsync<Exception>(() => AlvoApiWorld.FromDescriptorAsync("command-desk.alvo.json", [], new AlvoApiWorldSetup(
+            ConfigureApp: app => app.MapGroup("/commands")
+                .MapAlvoCommand("quote_stay", "/quote", "true", () => TypedResults.Ok())
+                .Add(endpoint => endpoint.FilterFactories.Clear()))));
+
+        refusal.Message.ShouldContain("removed Alvo's filter from command 'quote_stay'");
+    }
+
+    [Fact]
+    public async Task A_group_finally_convention_clearing_the_filter_list_cannot_remove_a_command_s_gate()
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync("command-desk.alvo.json", [], new AlvoApiWorldSetup(
+            ConfigureApp: app =>
+            {
+                var group = app.MapGroup("/commands");
+                group.MapAlvoCommand("quote_stay", "/quote", "'staff' in @user.roles", () => TypedResults.Ok());
+                ((IEndpointConventionBuilder)group).Finally(endpoint => endpoint.FilterFactories.Clear());
+            }));
+
+        using var response = await world.SendAsync(HttpMethod.Post, "/commands/quote");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden, "the anonymous caller is still judged by the command's rule");
+    }
 }

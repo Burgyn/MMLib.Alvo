@@ -463,6 +463,16 @@ namespace MMLib.Alvo.Rules
 }
 namespace Microsoft.AspNetCore.Builder
 {
+    public static class AlvoCommandEndpointRouteBuilderExtensions
+    {
+        public static Microsoft.AspNetCore.Builder.RouteHandlerBuilder MapAlvoCommand(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints, string name, string pattern, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Events.AlvoConditionCaller, bool>> access, System.Delegate handler) { }
+        public static Microsoft.AspNetCore.Builder.RouteHandlerBuilder MapAlvoCommand(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints, string name, string pattern, string access, System.Delegate handler) { }
+        public static Microsoft.AspNetCore.Builder.RouteHandlerBuilder MapAlvoCommand(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints, string name, string pattern, string entity, string access, System.Delegate handler) { }
+        public static Microsoft.AspNetCore.Builder.RouteHandlerBuilder MapAlvoCommand<TEntity>(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints, string name, string pattern, System.Linq.Expressions.Expression<System.Func<TEntity, MMLib.Alvo.Events.AlvoConditionCaller, bool>> access, System.Delegate handler)
+            where TEntity :  class { }
+        public static Microsoft.AspNetCore.Builder.RouteHandlerBuilder MapAlvoCommand<TEntity>(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints, string name, string pattern, string access, System.Delegate handler)
+            where TEntity :  class { }
+    }
     public static class AlvoDataApiEndpointRouteBuilderExtensions
     {
         public static Microsoft.AspNetCore.Builder.IEndpointConventionBuilder MapAlvoDataApi(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }

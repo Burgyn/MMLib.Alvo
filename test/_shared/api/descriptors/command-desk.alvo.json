@@ -1,0 +1,34 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "command-desk",
+  "description": "Bookings a guest makes and staff confirm, for the command facts: a guest reads only their own booking, and a command writes a note beside the booking it confirms.",
+  "auth": { "providers": ["local"], "roles": ["guest", "staff"] },
+  "entities": {
+    "bookings": {
+      "fields": {
+        "guest_id": { "type": "uuid", "required": true },
+        "room": { "type": "string", "required": true, "maxLength": 40 },
+        "status": { "type": "enum", "required": true, "values": ["requested", "confirmed", "cancelled"] },
+        "nights": { "type": "integer", "required": true }
+      },
+      "rules": {
+        "list": "'staff' in @user.roles || guest_id == @user.id",
+        "get": "'staff' in @user.roles || guest_id == @user.id",
+        "create": "'staff' in @user.roles || guest_id == @user.id",
+        "update": "'staff' in @user.roles"
+      }
+    },
+    "booking_notes": {
+      "fields": {
+        "booking_id": { "type": "uuid", "required": true },
+        "text": { "type": "string", "required": true, "maxLength": 200 }
+      },
+      "rules": {
+        "list": "'staff' in @user.roles",
+        "get": "'staff' in @user.roles",
+        "create": "'staff' in @user.roles"
+      }
+    }
+  }
+}

@@ -201,6 +201,17 @@ internal static class ProblemResultFactory
         "A request with this 'Idempotency-Key' is still being processed. Retry it once that one has answered: the retry is then "
         + "answered with its result.");
 
+    /// <summary>
+    /// A command request that held its key past the claim's lease, so another request with the key took it over and this
+    /// run's completion could not be recorded under it (Ruling 36).
+    /// </summary>
+    internal static IResult IdempotencyClaimLost() => Problem(
+        StatusCodes.Status409Conflict,
+        AlvoProblemTypes.IdempotencyConflict,
+        "This request ran past the 15-minute hold on its 'Idempotency-Key' and another request with the key took it over, so "
+        + "its outcome is not recorded under the key, and a transaction it opened was rolled back. Retry with the key once that "
+        + "request has answered: the retry is then answered with its result.");
+
     /// <summary>A command request whose key's run committed and never recorded its answer.</summary>
     internal static IResult IdempotencyUnanswered() => Problem(
         StatusCodes.Status409Conflict,
