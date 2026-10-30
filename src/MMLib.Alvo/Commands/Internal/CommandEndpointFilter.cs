@@ -77,9 +77,10 @@ internal sealed class CommandEndpointFilter(
         CommandRegistration command, CommandInputs inputs, EndpointFilterInvocationContext invocation, EndpointFilterDelegate next, CallerAdmission admission)
     {
         var http = invocation.HttpContext;
-        var malformed = CommandKeys.TryRead(
-            http.Request, command, admission.Context, admission.Principal?.KeyId,
-            () => inputs.Fingerprint(command, http, invocation.Arguments, json.Value.SerializerOptions), out var key);
+        var fingerprint = CommandKeys.Sent(http.Request)
+            ? await inputs.FingerprintAsync(command, http, invocation.Arguments, json.Value.SerializerOptions).ConfigureAwait(false)
+            : string.Empty;
+        var malformed = CommandKeys.TryRead(http.Request, command, admission.Context, admission.Principal?.KeyId, fingerprint, out var key);
         if (malformed is not null)
         {
             return malformed;
@@ -100,7 +101,7 @@ internal sealed class CommandEndpointFilter(
         }
         catch
         {
-            await runner.ReleaseAsync(requested.Key).ConfigureAwait(false);
+            await runner.ReleaseAsync(requested).ConfigureAwait(false);
             throw;
         }
 
@@ -113,7 +114,23 @@ internal sealed class CommandEndpointFilter(
         AlvoCommandContext.Pending(invocation.HttpContext).Start(run);
         AlvoCaller.For(invocation.HttpContext).Resolve(admitted.Caller);
 
-        return await runner.FinishAsync(run, async () => await next(invocation).ConfigureAwait(false)).ConfigureAwait(false);
+        return await runner.FinishAsync(run, () => AnsweredAsync(invocation, next)).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The handler's answer — a data-port refusal it raised included, mapped here so that the refusal is the run's recorded
+    /// answer and a replay returns it (Ruling 51); any other exception is the handler's throw.
+    /// </summary>
+    private static async Task<object?> AnsweredAsync(EndpointFilterInvocationContext invocation, EndpointFilterDelegate next)
+    {
+        try
+        {
+            return await next(invocation).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (ProblemResultFactory.PortRefusalFor(exception) is { } refusal)
+        {
+            return refusal;
+        }
     }
 
     private async Task<AlvoRecord?> RowAsync(CommandRegistration command, HttpContext http, AlvoContext caller)

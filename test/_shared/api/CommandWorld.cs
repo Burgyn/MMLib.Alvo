@@ -84,6 +84,8 @@ internal static class CommandWorld
     internal static TestApiKey ReadOnlyStaff { get; } = new("read-only-staff-key", ["staff", "authenticated"], ["bookings:read"]);
     internal static TestApiKey WriteOnlyStaff { get; } = new("write-only-staff-key", ["staff", "authenticated"], ["bookings:write"]);
     internal static TestApiKey StaffAsGuest { get; } = new("staff-as-guest-key", ["guest", "authenticated"], ["*:read", "*:write"]) { User = Staff.User };
+    internal static TestApiKey StaffOfTenantA { get; } = new("staff-a-key", ["staff", "authenticated"], ["*:read", "*:write"], Guid.NewGuid());
+    internal static TestApiKey StaffOfTenantB { get; } = new("staff-b-key", ["staff", "authenticated"], ["*:read", "*:write"], Guid.NewGuid());
     internal const string BlockedTenant = "0b0e0c2a-1b1b-4c4c-8d8d-9e9e9e9e9e9e";
 
     internal static Task<AlvoApiWorld> StartAsync(AlvoApiEngine engine, CommandProbe probe, Action<IAlvoBuilder>? alvo = null) =>
@@ -102,10 +104,35 @@ internal static class CommandWorld
                 Record(builder, probe, "record-quote", "quote_stay");
                 Record(builder, probe, "record-fail-in", "misuse.fail_in_unit");
                 Record(builder, probe, "record-fail-after", "misuse.fail_after_unit");
+                Record(builder, probe, "record-hold", "hold.quote");
+                Record(builder, probe, "record-hold-unit", "hold.unit");
                 alvo?.Invoke(builder);
             },
             ConfigureApp: Map),
             engine);
+
+    /// <summary>A tenant-scoped world: tickets of two tenants, and a command bound to one ticket.</summary>
+    internal static Task<AlvoApiWorld> StartTenantsAsync(AlvoApiEngine engine, CommandProbe probe) =>
+        AlvoApiWorld.FromDescriptorAsync("command-tenants.alvo.json", [StaffOfTenantA, StaffOfTenantB], new AlvoApiWorldSetup(
+            MapAlvoProblemDetails: true,
+            ConfigureServices: services => services.AddSingleton(probe),
+            ConfigureApp: app => app.MapAlvoCommand("close_ticket", "/commands/tickets/{id:guid}/close", "tickets", "'staff' in @user.roles", (CommandProbe probe) =>
+            {
+                probe.Ran();
+                return TypedResults.Ok();
+            })),
+            engine);
+
+    internal static async Task<Guid> TicketAsync(AlvoApiWorld world, TestApiKey staff)
+    {
+        using var created = await world.SendAsync(HttpMethod.Post, "/api/tickets", staff, body: new JsonObject
+        {
+            ["title"] = "Leaking tap",
+            ["tenant_id"] = staff.Tenant!.Value.ToString(),
+        });
+        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.ReadTextAsync());
+        return (await created.ReadJsonObjectAsync())["id"]!.GetValue<Guid>();
+    }
 
     internal static async Task<Guid> BookAsync(AlvoApiWorld world, Guid guest, string status = "requested")
     {
@@ -140,6 +167,9 @@ internal static class CommandWorld
         app.MapAlvoCommand("confirm_booking", "/commands/bookings/{id:guid}/confirm", "bookings", "'staff' in @user.roles && status == 'requested'", ConfirmAsync);
         app.MapAlvoCommand("quote_stay", "/commands/quote", caller => caller.HasRole("guest") || caller.HasRole("staff"), QuoteStay);
         app.MapAlvoCommand("hold.quote", "/commands/hold", "'staff' in @user.roles", HoldAsync);
+        app.MapAlvoCommand("hold.unit", "/commands/hold-unit", "'staff' in @user.roles", HoldThenTransactAsync);
+        app.MapAlvoCommand("upload.attach", "/commands/upload", "'staff' in @user.roles", Upload).DisableAntiforgery();
+        app.MapAlvoCommand("misuse.refused_after_unit", "/commands/misuse/refused-after-unit", "'staff' in @user.roles", RefusedAfterUnitAsync);
         app.MapAlvoCommand("guarded.not_blocked", "/commands/guarded", $"!(string(@tenant.id) == '{BlockedTenant}')", QuoteStay);
         app.MapAlvoCommand("misuse.data_port", "/commands/misuse/data-port", "'staff' in @user.roles", DataPortInsideUnitAsync);
         app.MapAlvoCommand("misuse.two_units", "/commands/misuse/two-units", "'staff' in @user.roles", TwoUnitsAsync);
@@ -176,6 +206,31 @@ internal static class CommandWorld
         probe.Started.TrySetResult();
         await probe.Release.Task.WaitAsync(ct);
         return TypedResults.Ok(new Quote(request.Nights));
+    }
+
+    private static async Task<IResult> HoldThenTransactAsync(AlvoCommandContext ctx, CommandProbe probe, CancellationToken ct)
+    {
+        if (probe.Ran() == 1)
+        {
+            probe.Started.TrySetResult();
+            await probe.Release.Task.WaitAsync(ct);
+        }
+
+        await ctx.TransactAsync((unit, token) => unit.CreateAsync("booking_notes", Note(), token), cancellationToken: ct);
+        return TypedResults.Ok();
+    }
+
+    private static Ok<long> Upload(IFormFile file, CommandProbe probe)
+    {
+        probe.Ran();
+        return TypedResults.Ok(file.Length);
+    }
+
+    private static async Task<IResult> RefusedAfterUnitAsync(AlvoCommandContext ctx, CommandProbe probe, CancellationToken ct)
+    {
+        probe.Ran();
+        await ctx.TransactAsync((unit, token) => unit.CreateAsync("booking_notes", Note(), token), cancellationToken: ct);
+        throw new AlvoRecordNotFoundException();
     }
 
     private static async Task<IResult> DataPortInsideUnitAsync(AlvoCommandContext ctx, IAlvoData data, CommandProbe probe, CancellationToken ct)

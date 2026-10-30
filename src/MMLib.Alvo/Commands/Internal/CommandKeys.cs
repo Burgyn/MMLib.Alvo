@@ -23,9 +23,12 @@ internal static class CommandKeys
     /// <summary>The credential segment of a caller who presented no key (an internal caller, or a non-key resolver).</summary>
     internal const string NoCredential = "-";
 
+    /// <summary>Whether the request sent the header at all — only then is its fingerprint worth computing.</summary>
+    internal static bool Sent(HttpRequest request) => request.Headers.ContainsKey(Header);
+
     /// <summary>Reads the key; answers a 422 to give instead, or null with <paramref name="key"/> set (null when no header).</summary>
     internal static IResult? TryRead(
-        HttpRequest request, CommandRegistration command, AlvoContext caller, string? keyId, Func<string> fingerprint, out CommandKey? key)
+        HttpRequest request, CommandRegistration command, AlvoContext caller, string? keyId, string fingerprint, out CommandKey? key)
     {
         key = null;
         var header = request.Headers[Header];
@@ -48,7 +51,7 @@ internal static class CommandKeys
             return ProblemResultFactory.Malformed(ProblemResultFactory.WithoutArgumentDetail(refusal.Message));
         }
 
-        key = new CommandKey(ScopeOf(command, caller, keyId), header[0]!, fingerprint());
+        key = new CommandKey(ScopeOf(command, caller, keyId), header[0]!, fingerprint);
         return null;
     }
 

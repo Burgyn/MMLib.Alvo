@@ -62,9 +62,27 @@ internal sealed partial class CommandRunner(
         };
     }
 
-    /// <summary>Gives up a key claimed for a request that was refused before its handler ran.</summary>
-    internal Task ReleaseAsync(CommandKey? key) =>
-        key is null ? Task.CompletedTask : Ledger.ReleaseAsync(key, CancellationToken.None);
+    /// <summary>
+    /// Gives up the key claimed for a request that was refused before its handler ran. A failure to release is logged, never
+    /// thrown: the refusal is the answer, and the key frees itself when its lease runs out.
+    /// </summary>
+    internal async Task ReleaseAsync(CommandInvocation refused)
+    {
+        ArgumentNullException.ThrowIfNull(refused);
+        if (refused.Key is not { } key)
+        {
+            return;
+        }
+
+        try
+        {
+            await Ledger.ReleaseAsync(key, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception bookkeeping)
+        {
+            RefusedKeyNotReleased(logger, refused.Command.Id, bookkeeping);
+        }
+    }
 
     /// <summary>Runs the handler and records what followed from it.</summary>
     internal async Task<object?> FinishAsync(CommandRun run, Func<Task<object?>> handler)
@@ -156,6 +174,9 @@ internal sealed partial class CommandRunner(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Command '{Command}' answered with a result that cannot be replayed (no status, a value that cannot be serialised, or a body over 64 KiB); a retry with its Idempotency-Key will be refused, not answered.")]
     private static partial void ResultNotReplayable(ILogger logger, string command);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Command '{Command}' refused a request before its handler ran, and giving its Idempotency-Key back failed; the key is held until its lease runs out, and the refusal is still the answer.")]
+    private static partial void RefusedKeyNotReleased(ILogger logger, string command, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Command '{Command}' threw, and recording that on its Idempotency-Key failed too; the handler's own exception is rethrown.")]
     private static partial void FailureNotRecorded(ILogger logger, string command, Exception exception);

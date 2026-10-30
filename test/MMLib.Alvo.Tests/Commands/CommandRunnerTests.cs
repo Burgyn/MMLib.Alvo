@@ -281,6 +281,28 @@ public sealed class CommandRunnerTests
     }
 
     [Fact]
+    public async Task A_release_that_fails_after_a_refusal_is_logged_not_thrown_so_the_refusal_stands()
+    {
+        var runner = Runner(out _);
+        var claimed = await runner.ClaimAsync(Invocation("r1"));
+        _ledger.ReleaseFailure = new InvalidOperationException("the ledger is down");
+
+        await Should.NotThrowAsync(() => runner.ReleaseAsync(claimed.Invocation));
+
+        _ledger.Calls.ShouldBe(["claim", "release"]);
+    }
+
+    [Fact]
+    public async Task Releasing_an_invocation_with_no_key_touches_no_ledger()
+    {
+        var runner = Runner(out _);
+
+        await runner.ReleaseAsync(new CommandInvocation(_quote, _staff, null, null));
+
+        _ledger.Calls.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task A_host_without_transaction_units_refuses_the_unit_without_counting_it_as_opened()
     {
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 10, 30, 9, 0, 0, TimeSpan.Zero));

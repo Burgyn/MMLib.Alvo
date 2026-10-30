@@ -241,6 +241,76 @@ public abstract class CommandEngineFacts
         (await staleAnswer.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.IdempotencyConflict);
         retry.StatusCode.ShouldBe(HttpStatusCode.OK, "the key answers with the run that took it over");
         _probe.Runs.ShouldBe(2);
+        await world.Services.GetRequiredService<IAlvoEventPump>().DrainAsync(Ct);
+        _probe.Completions.ShouldHaveSingleItem("the stale run's completion rolled back with its refused commit").ShouldBe("hold.quote");
+    }
+
+    [Fact]
+    public async Task A_run_that_outlived_its_lease_cannot_commit_its_unit_and_is_answered_409()
+    {
+        await using var world = await StartAsync(Engine, _probe);
+
+        var stale = world.SendAsync(HttpMethod.Post, "/commands/hold-unit", Staff, headers: Key("lease-unit"));
+        await _probe.Started.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+        _probe.Clock.Advance(TimeSpan.FromMinutes(16));
+        using var takeover = await world.SendAsync(HttpMethod.Post, "/commands/hold-unit", Staff, headers: Key("lease-unit"));
+        _probe.Release.SetResult();
+        using var staleAnswer = await stale;
+        await world.Services.GetRequiredService<IAlvoEventPump>().DrainAsync(Ct);
+
+        takeover.StatusCode.ShouldBe(HttpStatusCode.OK);
+        staleAnswer.StatusCode.ShouldBe(HttpStatusCode.Conflict, "its unit's commit mark found the key taken over, so the unit rolled back");
+        (await staleAnswer.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.IdempotencyConflict);
+        (await NotesAsync(world)).ShouldBe(1, "only the run holding the key committed its note");
+        _probe.Completions.ShouldHaveSingleItem().ShouldBe("hold.unit");
+    }
+
+    [Fact]
+    public async Task A_port_refusal_after_the_unit_committed_is_the_answer_a_replay_returns()
+    {
+        await using var world = await StartAsync(Engine, _probe);
+
+        using var first = await world.SendAsync(HttpMethod.Post, "/commands/misuse/refused-after-unit", Staff, headers: Key("refused-after"));
+        using var replay = await world.SendAsync(HttpMethod.Post, "/commands/misuse/refused-after-unit", Staff, headers: Key("refused-after"));
+
+        first.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        replay.StatusCode.ShouldBe(HttpStatusCode.NotFound, "the recorded answer is the mapped refusal, not a 500");
+        (await replay.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.NotFound);
+        _probe.Runs.ShouldBe(1);
+        (await NotesAsync(world)).ShouldBe(1, "the unit committed before the refusal");
+    }
+
+    [Fact]
+    public async Task Two_different_uploads_under_one_key_are_an_idempotency_conflict()
+    {
+        await using var world = await StartAsync(Engine, _probe);
+
+        using var first = await world.SendRawAsync(HttpMethod.Post, "/commands/upload", Staff, content: Upload("aaaa"), headers: Key("upload-1"));
+        using var second = await world.SendRawAsync(HttpMethod.Post, "/commands/upload", Staff, content: Upload("bbbb"), headers: Key("upload-1"));
+        using var same = await world.SendRawAsync(HttpMethod.Post, "/commands/upload", Staff, content: Upload("aaaa"), headers: Key("upload-1"));
+
+        first.StatusCode.ShouldBe(HttpStatusCode.OK);
+        second.StatusCode.ShouldBe(HttpStatusCode.Conflict, "same name and length, different content: a different request");
+        (await second.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.IdempotencyConflict);
+        same.StatusCode.ShouldBe(HttpStatusCode.OK, "the same upload replays");
+        _probe.Runs.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_command_on_another_tenant_s_row_is_404_like_an_absent_row()
+    {
+        await using var world = await StartTenantsAsync(Engine, _probe);
+        var theirs = await TicketAsync(world, StaffOfTenantB);
+
+        using var crossTenant = await world.SendAsync(HttpMethod.Post, $"/commands/tickets/{theirs}/close", StaffOfTenantA);
+        using var absent = await world.SendAsync(HttpMethod.Post, $"/commands/tickets/{Guid.NewGuid()}/close", StaffOfTenantA);
+        using var own = await world.SendAsync(HttpMethod.Post, $"/commands/tickets/{theirs}/close", StaffOfTenantB);
+
+        crossTenant.StatusCode.ShouldBe(HttpStatusCode.NotFound, "another tenant's row is not readable, so it is not there");
+        absent.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        (await crossTenant.ReadProblemDetailAsync()).ShouldBe(await absent.ReadProblemDetailAsync(), "the two must be indistinguishable");
+        own.StatusCode.ShouldBe(HttpStatusCode.OK, "the row exists, and its own tenant's staff reach it");
+        _probe.Runs.ShouldBe(1);
     }
 
     [Fact]
@@ -311,6 +381,9 @@ public abstract class CommandEngineFacts
         _probe.Completions.ShouldHaveSingleItem("its writes and its completion committed").ShouldBe("misuse.fail_after_unit");
         (await NotesAsync(world)).ShouldBe(1);
     }
+
+    private static MultipartFormDataContent Upload(string text) =>
+        new() { { new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes(text)), "file", "receipt.txt" } };
 
     [Fact]
     public async Task A_command_s_answer_is_never_stored_by_a_cache()
