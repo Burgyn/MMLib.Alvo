@@ -6,12 +6,14 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using MMLib.Alvo.Api;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.InboundWebhooks.Internal;
 using MMLib.Alvo.Secrets;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -119,12 +121,60 @@ public sealed class WebhookReceiverTests : IDisposable
         _probe.Runs.ShouldBe(2);
     }
 
+    /// <summary>
+    /// A release that fails too is logged; it never replaces the handler's own exception, which is the one the host's
+    /// exception handler records — the id frees itself when its lease runs out.
+    /// </summary>
+    [Fact]
+    public async Task A_release_failing_after_the_handler_threw_never_hides_the_handlers_exception()
+    {
+        _probe.FailNext = true;
+        await using var world = await StartAsync(ledger: new ReleaseFailingLedger());
+
+        using var failed = await SendAsync(world, "/hooks/payments", "msg_21", "{}");
+
+        failed.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        _logs.Exceptions.ShouldContain(exception => exception.Message == "the handler failed");
+        _logs.Exceptions.ShouldContain(exception => exception.Message == ReleaseFailingLedger.Failure, "the failed release is logged");
+        _logs.Exceptions.Count(exception => exception.Message == ReleaseFailingLedger.Failure).ShouldBe(1, "and only logged, never rethrown");
+    }
+
+    [Fact]
+    public async Task A_release_failing_after_a_non_2xx_answer_keeps_the_handlers_answer()
+    {
+        _probe.StatusNext = StatusCodes.Status503ServiceUnavailable;
+        await using var world = await StartAsync(ledger: new ReleaseFailingLedger());
+
+        using var refused = await SendAsync(world, "/hooks/payments", "msg_22", "{}");
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+        _logs.Exceptions.ShouldContain(exception => exception.Message == ReleaseFailingLedger.Failure);
+    }
+
+    /// <summary>
+    /// Standard Webhooks signs <c>{id}.{timestamp}.{body}</c> with the timestamp header as it was sent, so a sender that
+    /// zero-pads it still verifies — the signed content is never a re-formatted number.
+    /// </summary>
+    [Fact]
+    public async Task A_zero_padded_timestamp_verifies_over_the_header_as_sent()
+    {
+        await using var world = await StartAsync();
+        var padded = "0" + Now();
+        var signedAsSent = "v1," + Convert.ToBase64String(HMACSHA256.HashData(
+            StandardWebhookSignature.Keys(Secret)[0], Encoding.UTF8.GetBytes($"msg_23.{padded}.{{}}")));
+
+        using var response = await SendAsync(world, "/hooks/payments", "msg_23", "{}", signature: signedAsSent, timestampText: padded);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        _probe.Runs.ShouldBe(1);
+    }
+
     [Fact]
     public async Task A_secret_shorter_than_24_bytes_is_a_500_whose_error_log_says_why_and_names_no_key()
     {
         var shortKey = Enumerable.Repeat((byte)7, 23).ToArray();
         await using var world = await StartAsync(secret: "whsec_" + Convert.ToBase64String(shortKey));
-        var signed = StandardWebhookSignature.Sign(shortKey, "msg_14", _time.GetUtcNow().ToUnixTimeSeconds(), "{}"u8);
+        var signed = StandardWebhookSignature.Sign(shortKey, "msg_14", Now(), "{}"u8);
 
         using var response = await SendAsync(world, "/hooks/payments", "msg_14", "{}", signature: signed);
 
@@ -151,7 +201,7 @@ public sealed class WebhookReceiverTests : IDisposable
     public async Task An_empty_secret_is_a_500_never_a_key_a_forger_can_sign_with()
     {
         await using var world = await StartAsync(secret: "whsec_");
-        var forged = StandardWebhookSignature.Sign([], "msg_11", _time.GetUtcNow().ToUnixTimeSeconds(), "{}"u8);
+        var forged = StandardWebhookSignature.Sign([], "msg_11", Now(), "{}"u8);
 
         using var response = await SendAsync(world, "/hooks/payments", "msg_11", "{}", signature: forged);
 
@@ -326,10 +376,21 @@ public sealed class WebhookReceiverTests : IDisposable
     }
 
     private Task<AlvoApiWorld> StartAsync(
-        string? secret = Secret, bool documented = false, Action<WebApplication>? alsoMap = null, bool answeredByAlvo = true) =>
+        string? secret = Secret,
+        bool documented = false,
+        Action<WebApplication>? alsoMap = null,
+        bool answeredByAlvo = true,
+        IInboundWebhookLedger? ledger = null) =>
         AlvoApiWorld.FromDescriptorAsync("command-desk.alvo.json", [], new AlvoApiWorldSetup(
             MapAlvoProblemDetails: answeredByAlvo,
             MapOpenApiDocument: documented,
+            ConfigureServicesAfterAlvo: services =>
+            {
+                if (ledger is not null)
+                {
+                    services.AddSingleton(ledger);
+                }
+            },
             ConfigureServices: services =>
             {
                 services.AddSingleton<TimeProvider>(_time);
@@ -364,6 +425,8 @@ public sealed class WebhookReceiverTests : IDisposable
         return ValueTask.FromResult<TenantId?>(json.RootElement.TryGetProperty("tenant", out var tenant) ? new TenantId(tenant.GetGuid()) : null);
     }
 
+    private string Now() => _time.GetUtcNow().ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
+
     /// <summary>A JSON body of exactly <paramref name="bytes"/> UTF-8 bytes.</summary>
     private static string Padded(int bytes) => "{\"pad\":\"" + new string('x', bytes - 10) + "\"}";
 
@@ -395,9 +458,16 @@ public sealed class WebhookReceiverTests : IDisposable
     }
 
     private Task<HttpResponseMessage> SendAsync(
-        AlvoApiWorld world, string path, string id, string body, DateTimeOffset? at = null, string? signature = null, bool unsized = false)
+        AlvoApiWorld world,
+        string path,
+        string id,
+        string body,
+        DateTimeOffset? at = null,
+        string? signature = null,
+        bool unsized = false,
+        string? timestampText = null)
     {
-        var timestamp = (at ?? _time.GetUtcNow()).ToUnixTimeSeconds();
+        var timestamp = timestampText ?? (at ?? _time.GetUtcNow()).ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
         var bytes = Encoding.UTF8.GetBytes(body);
         var signed = signature ?? StandardWebhookSignature.Sign(StandardWebhookSignature.Keys(Secret)[0], id, timestamp, bytes);
 
@@ -405,7 +475,7 @@ public sealed class WebhookReceiverTests : IDisposable
         return world.SendRawAsync(HttpMethod.Post, path, content: content, headers:
         [
             new(StandardWebhookSignature.IdHeader, id),
-            new(StandardWebhookSignature.TimestampHeader, timestamp.ToString(CultureInfo.InvariantCulture)),
+            new(StandardWebhookSignature.TimestampHeader, timestamp),
             new(StandardWebhookSignature.SignatureHeader, signed),
         ]);
     }
@@ -512,10 +582,30 @@ public sealed class WebhookReceiverTests : IDisposable
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
+    /// <summary>A ledger that grants every claim and fails every release — the database gone between the claim and the answer.</summary>
+    private sealed class ReleaseFailingLedger : IInboundWebhookLedger
+    {
+        internal const string Failure = "the ledger is down";
+
+        public Task<WebhookClaimResult> ClaimAsync(string receiver, string webhookId, DateTimeOffset now, CancellationToken cancellationToken) =>
+            Task.FromResult(new WebhookClaimResult(WebhookClaim.Claimed, "token"));
+
+        public Task<bool> CompleteAsync(string receiver, string webhookId, string token, DateTimeOffset now, CancellationToken cancellationToken) =>
+            Task.FromResult(true);
+
+        public Task ReleaseAsync(string receiver, string webhookId, string token, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException(Failure);
+
+        public Task<int> SweepAsync(DateTimeOffset receivedBefore, CancellationToken cancellationToken) => Task.FromResult(0);
+    }
+
     /// <summary>Every log line's level and rendered message, from every category.</summary>
     private sealed class LogCapture : ILoggerProvider, ILogger
     {
         private readonly ConcurrentQueue<(LogLevel Level, string Message)> _entries = new();
+        private readonly ConcurrentQueue<Exception> _exceptions = new();
+
+        internal IReadOnlyList<Exception> Exceptions => [.. _exceptions];
 
         public ILogger CreateLogger(string categoryName) => this;
 
@@ -523,8 +613,14 @@ public sealed class WebhookReceiverTests : IDisposable
 
         public bool IsEnabled(LogLevel logLevel) => true;
 
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
             _entries.Enqueue((logLevel, formatter(state, exception)));
+            if (exception is not null)
+            {
+                _exceptions.Enqueue(exception);
+            }
+        }
 
         public void Dispose()
         {

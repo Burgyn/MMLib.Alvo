@@ -8,7 +8,7 @@ public sealed class StandardWebhookSignatureTests
 {
     private const string Secret = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw";
     private const string Id = "msg_p5jXN8AQM9LWM0D4loKWxJek";
-    private const long Timestamp = 1614265330;
+    private const string Timestamp = "1614265330";
     private static readonly byte[] _body = Encoding.UTF8.GetBytes("{\"test\": 2432232314}");
 
     /// <summary>
@@ -40,7 +40,7 @@ public sealed class StandardWebhookSignatureTests
         const string Header = "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE=";
 
         StandardWebhookSignature.Verifies(keys, "msg_other", Timestamp, _body, Header).ShouldBeFalse();
-        StandardWebhookSignature.Verifies(keys, Id, Timestamp + 1, _body, Header).ShouldBeFalse();
+        StandardWebhookSignature.Verifies(keys, Id, "1614265331", _body, Header).ShouldBeFalse();
     }
 
     [Fact]

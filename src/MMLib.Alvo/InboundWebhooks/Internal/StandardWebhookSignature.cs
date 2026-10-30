@@ -1,5 +1,4 @@
-﻿using System.Globalization;
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 
 namespace MMLib.Alvo.InboundWebhooks.Internal;
@@ -7,7 +6,9 @@ namespace MMLib.Alvo.InboundWebhooks.Internal;
 /// <summary>
 /// The Standard Webhooks symmetric signature: <c>v1,</c> + base64(HMAC-SHA256(key, <c>{id}.{timestamp}.{body}</c>)), the key
 /// being the base64-decoded secret after its <c>whsec_</c> prefix. A header may carry several space-separated signatures
-/// (the sender's zero-downtime rotation); entries of another version (<c>v1a</c>, asymmetric) are ignored.
+/// (the sender's zero-downtime rotation); entries of another version (<c>v1a</c>, asymmetric) are ignored. The timestamp
+/// signed is the <c>webhook-timestamp</c> header as it was sent, never a re-formatted number, so a sender that pads it
+/// still verifies.
 /// </summary>
 internal static class StandardWebhookSignature
 {
@@ -35,11 +36,11 @@ internal static class StandardWebhookSignature
     }
 
     /// <summary>The <c>v1,…</c> signature of one delivery.</summary>
-    internal static string Sign(byte[] key, string id, long timestamp, ReadOnlySpan<byte> body) =>
+    internal static string Sign(byte[] key, string id, string timestamp, ReadOnlySpan<byte> body) =>
         $"{Version},{Convert.ToBase64String(Mac(key, id, timestamp, body))}";
 
     /// <summary>Whether any <c>v1</c> signature in <paramref name="header"/> is one of <paramref name="keys"/>' — compared in fixed time.</summary>
-    internal static bool Verifies(IReadOnlyList<byte[]> keys, string id, long timestamp, ReadOnlySpan<byte> body, string header)
+    internal static bool Verifies(IReadOnlyList<byte[]> keys, string id, string timestamp, ReadOnlySpan<byte> body, string header)
     {
         var offered = Offered(header);
         foreach (var key in keys)
@@ -87,9 +88,9 @@ internal static class StandardWebhookSignature
             : throw new FormatException($"A secret in it decodes to a key shorter than {MinKeyBytes} bytes; Standard Webhooks' secrets are 24 to 64 bytes.");
     }
 
-    private static byte[] Mac(byte[] key, string id, long timestamp, ReadOnlySpan<byte> body)
+    private static byte[] Mac(byte[] key, string id, string timestamp, ReadOnlySpan<byte> body)
     {
-        var prefix = Encoding.UTF8.GetBytes(string.Create(CultureInfo.InvariantCulture, $"{id}.{timestamp}."));
+        var prefix = Encoding.UTF8.GetBytes($"{id}.{timestamp}.");
         var content = new byte[prefix.Length + body.Length];
         prefix.CopyTo(content, 0);
         body.CopyTo(content.AsSpan(prefix.Length));

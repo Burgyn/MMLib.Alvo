@@ -25,7 +25,7 @@ internal sealed class WebhookReceiver(
     TimeProvider time,
     ILogger<WebhookReceiver> logger)
 {
-    private sealed record Signed(string Id, long Timestamp, string Signature);
+    private sealed record Signed(string Id, string Timestamp, long Seconds, string Signature);
 
     /// <summary>Receives one delivery.</summary>
     internal async Task ReceiveAsync(HttpContext http)
@@ -48,7 +48,7 @@ internal sealed class WebhookReceiver(
             return (null, null, Refused("it lacks one of the webhook-id, webhook-timestamp and webhook-signature headers, or one is malformed"));
         }
 
-        if (!Fresh(signed.Timestamp))
+        if (!Fresh(signed.Seconds))
         {
             return (null, null, Refused($"its timestamp is more than {options.Tolerance.TotalMinutes:0} minutes from now"));
         }
@@ -98,17 +98,33 @@ internal sealed class WebhookReceiver(
         }
         catch
         {
-            await ledger.ReleaseAsync(pattern, id, token, CancellationToken.None).ConfigureAwait(false);
+            await ReleaseAsync(id, token).ConfigureAwait(false);
             throw;
         }
 
         if (http.Response.StatusCode is not (>= 200 and < 300))
         {
-            await ledger.ReleaseAsync(pattern, id, token, CancellationToken.None).ConfigureAwait(false);
+            await ReleaseAsync(id, token).ConfigureAwait(false);
         }
         else if (!await ledger.CompleteAsync(pattern, id, token, time.GetUtcNow(), CancellationToken.None).ConfigureAwait(false))
         {
             WebhookLog.ClaimLost(logger, pattern);
+        }
+    }
+
+    /// <summary>
+    /// Gives the id back so the sender's retry runs. A failure to do so is logged, never thrown: it would replace the
+    /// handler's own exception or answer, and the id frees itself when its lease runs out.
+    /// </summary>
+    private async Task ReleaseAsync(string id, string token)
+    {
+        try
+        {
+            await ledger.ReleaseAsync(pattern, id, token, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception bookkeeping)
+        {
+            WebhookLog.NotReleased(logger, pattern, bookkeeping);
         }
     }
 
@@ -141,7 +157,7 @@ internal sealed class WebhookReceiver(
 
         return id is not null && signature is not null && Encoding.UTF8.GetByteCount(id) <= InboundWebhookLimits.MaxIdBytes
             && long.TryParse(timestamp, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds)
-            ? new Signed(id, seconds, signature)
+            ? new Signed(id, timestamp!, seconds, signature)
             : null;
     }
 

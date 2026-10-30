@@ -17,6 +17,9 @@ internal static partial class WebhookLog
     [LoggerMessage(Level = LogLevel.Warning, Message = "Webhook receiver '{Receiver}' handled a delivery after its claim lapsed to another run; that run records the id.")]
     internal static partial void ClaimLost(ILogger logger, string receiver);
 
+    [LoggerMessage(Level = LogLevel.Error, Message = "Webhook receiver '{Receiver}' could not give a delivery's id back; the sender's retry is answered 409 until its claim's lease runs out.")]
+    internal static partial void NotReleased(ILogger logger, string receiver, Exception exception);
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Swept {Webhooks} inbound webhook ids older than seven days and {Commands} command keys older than a day.")]
     internal static partial void Swept(ILogger logger, int webhooks, int commands);
 
