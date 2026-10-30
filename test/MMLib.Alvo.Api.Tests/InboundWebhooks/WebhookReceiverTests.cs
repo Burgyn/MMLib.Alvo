@@ -360,6 +360,45 @@ public sealed class WebhookReceiverTests : IDisposable
             app.MapAlvoWebhookReceiver("/hooks/payments", "pay-provider", Handle))))
             .Message.ShouldContain("'/hooks/payments'");
 
+    /// <summary>
+    /// A receiver's dedup scope is its whole route pattern, group prefix included: one receiver per tenant, each under its
+    /// own group, is two receivers whose ids never collide.
+    /// </summary>
+    [Fact]
+    public async Task Receivers_at_one_pattern_under_two_groups_are_two_receivers_each_with_its_own_ids()
+    {
+        await using var world = await StartAsync(alsoMap: app =>
+        {
+            app.MapGroup("/tenant-a").MapAlvoWebhookReceiver("/hooks", "pay-provider", Handle, options => options.Tenant = _tenant);
+            app.MapGroup("/tenant-b").MapAlvoWebhookReceiver("/hooks", "pay-provider", Handle, options => options.Tenant = _tenant);
+        });
+
+        using var first = await SendAsync(world, "/tenant-a/hooks", "msg_24", "{}");
+        using var second = await SendAsync(world, "/tenant-b/hooks", "msg_24", "{}");
+        using var repeat = await SendAsync(world, "/tenant-a/hooks", "msg_24", "{}");
+
+        first.StatusCode.ShouldBe(HttpStatusCode.OK);
+        second.StatusCode.ShouldBe(HttpStatusCode.OK);
+        repeat.StatusCode.ShouldBe(HttpStatusCode.OK);
+        _probe.Seen.Count.ShouldBe(2, "each group's receiver runs the id once, and only once");
+    }
+
+    [Fact]
+    public async Task One_pattern_mapped_twice_under_one_prefix_is_refused_naming_the_whole_pattern()
+    {
+        var refusal = await Should.ThrowAsync<InvalidOperationException>(async () =>
+        {
+            await using var world = await StartAsync(alsoMap: app =>
+            {
+                app.MapGroup("/tenant-a").MapAlvoWebhookReceiver("/hooks", "pay-provider", Handle);
+                app.MapGroup("/tenant-a").MapAlvoWebhookReceiver("/hooks", "pay-provider", Handle);
+            });
+            _ = world.Endpoints;
+        });
+
+        refusal.Message.ShouldContain("'/tenant-a/hooks'");
+    }
+
     [Fact]
     public async Task Rows_older_than_seven_days_are_swept()
     {

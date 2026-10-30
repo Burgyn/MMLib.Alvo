@@ -51,13 +51,19 @@ public static class AlvoWebhookEndpointRouteBuilderExtensions
     /// </para>
     /// </remarks>
     /// <param name="endpoints">The route builder.</param>
-    /// <param name="pattern">The route pattern; it is also the receiver's dedup scope.</param>
+    /// <param name="pattern">
+    /// The route pattern; the whole pattern — a <c>MapGroup</c>'s prefix included — is the receiver's dedup scope, so one
+    /// pattern under two groups is two receivers.
+    /// </param>
     /// <param name="secretName">The secret store name of the signing secret.</param>
     /// <param name="handler">The minimal-API handler.</param>
     /// <param name="configure">The receiver's tenant, window and body limit.</param>
     /// <returns>The endpoint's convention builder.</returns>
     /// <exception cref="ArgumentException"><paramref name="secretName"/> is not a secret name.</exception>
-    /// <exception cref="InvalidOperationException">The data provider keeps no webhook ledger, or the pattern is mapped twice.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The data provider keeps no webhook ledger, or the whole pattern is mapped twice — under a group, when its endpoint is
+    /// built.
+    /// </exception>
     public static IEndpointConventionBuilder MapAlvoWebhookReceiver(
         this IEndpointRouteBuilder endpoints, string pattern, string secretName, Delegate handler, Action<AlvoWebhookReceiverOptions>? configure = null)
     {
@@ -70,11 +76,30 @@ public static class AlvoWebhookEndpointRouteBuilderExtensions
         configure?.Invoke(options);
 
         var receiver = Receiver(endpoints, pattern, secret, options.Validated(), Inner(endpoints, pattern, handler));
-        endpoints.ServiceProvider.GetRequiredService<WebhookReceivers>().Add(pattern);
+        var receivers = endpoints.ServiceProvider.GetRequiredService<WebhookReceivers>();
+        if (endpoints is not RouteGroupBuilder)
+        {
+            receivers.Add(pattern, receiver);
+        }
 
-        return endpoints.MapPost(pattern, (RequestDelegate)receiver.ReceiveAsync)
+        var builder = endpoints.MapPost(pattern, (RequestDelegate)receiver.ReceiveAsync)
             .WithMetadata(new WebhookReceiverEndpointMetadata(pattern))
             .ExcludeFromDescription();
+        builder.Add(endpoint => Mount(receivers, receiver, endpoint));
+        return builder;
+    }
+
+    /// <summary>
+    /// Gives the receiver its whole route pattern — a group's prefix is known only once the endpoint is built — and refuses
+    /// a second receiver at it. Outside a group the pattern is whole already, so that refusal came at mapping time.
+    /// </summary>
+    private static void Mount(WebhookReceivers receivers, WebhookReceiver receiver, EndpointBuilder endpoint)
+    {
+        if (endpoint is RouteEndpointBuilder { RoutePattern.RawText: { } whole })
+        {
+            receivers.Add(whole, receiver);
+            receiver.Mount(whole);
+        }
     }
 
     private static WebhookReceiver Receiver(

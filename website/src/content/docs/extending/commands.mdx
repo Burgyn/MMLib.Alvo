@@ -183,7 +183,11 @@ The test signs a delivery the way a sender does:
 - **The body limit** is `MaxBodyBytes`, 1 MiB unless set, at most 64 MiB; a larger body is `413`. The receiver raises the
   server's own limit to it where the server lets it. IIS and HTTP.sys enforce their own limits
   (`maxAllowedContentLength`), so raise those too.
-- **Receivers are not in the OpenAPI document**: the sender follows its own contract. A pattern may be mapped once.
+- **Receivers are not in the OpenAPI document**: the sender follows its own contract.
+- **A whole route pattern may be mapped once**, and it is the receiver's dedup scope — a `MapGroup` prefix included.
+  `/tenant-a/hooks` and `/tenant-b/hooks`, each `MapAlvoWebhookReceiver("/hooks", …)` under its own group, are two
+  receivers whose ids never collide. Mapping one whole pattern twice is refused; under a group, when its endpoint is
+  built.
 - **Conventions on the returned builder apply to the outer endpoint** — authorization, rate limiting, metadata. An
   endpoint filter never reaches your handler, so put such logic in the handler. The system caller is bound to the
   handler's `AlvoCaller` only and is not published through `IAlvoContextAccessor`: pass `caller.Context` to the code

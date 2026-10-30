@@ -13,7 +13,8 @@ namespace MMLib.Alvo.InboundWebhooks.Internal;
 /// <summary>
 /// One receiver: verify (headers, window, body size, signature), then claim the id, then run the host's handler as the
 /// system in the resolved tenant over the very bytes that were verified. Verification precedes the claim and the tenant
-/// (Ruling 24): an unverified request records nothing and runs no host code.
+/// (Ruling 24): an unverified request records nothing and runs no host code. Its dedup scope is the endpoint's whole route
+/// pattern, a group's prefix included, which <see cref="Mount"/> learns when the endpoint is built.
 /// </summary>
 internal sealed class WebhookReceiver(
     string pattern,
@@ -25,6 +26,14 @@ internal sealed class WebhookReceiver(
     TimeProvider time,
     ILogger<WebhookReceiver> logger)
 {
+    private string _scope = pattern;
+
+    private string Scope => Volatile.Read(ref _scope);
+
+    /// <summary>Takes the endpoint's whole route pattern as the receiver's dedup scope.</summary>
+    /// <param name="wholePattern">The pattern the endpoint was built with, its group's prefix included.</param>
+    internal void Mount(string wholePattern) => Volatile.Write(ref _scope, wholePattern);
+
     private sealed record Signed(string Id, string Timestamp, long Seconds, string Signature);
 
     /// <summary>Receives one delivery.</summary>
@@ -68,11 +77,11 @@ internal sealed class WebhookReceiver(
 
     private async Task ClaimedAsync(HttpContext http, Signed signed, byte[] body)
     {
-        var claim = await ledger.ClaimAsync(pattern, signed.Id, time.GetUtcNow(), CancellationToken.None).ConfigureAwait(false);
+        var claim = await ledger.ClaimAsync(Scope, signed.Id, time.GetUtcNow(), CancellationToken.None).ConfigureAwait(false);
         switch (claim.State)
         {
             case WebhookClaim.Completed:
-                WebhookLog.Duplicate(logger, pattern);
+                WebhookLog.Duplicate(logger, Scope);
                 http.Response.StatusCode = StatusCodes.Status200OK;
                 return;
             case WebhookClaim.InFlight:
@@ -106,9 +115,9 @@ internal sealed class WebhookReceiver(
         {
             await ReleaseAsync(id, token).ConfigureAwait(false);
         }
-        else if (!await ledger.CompleteAsync(pattern, id, token, time.GetUtcNow(), CancellationToken.None).ConfigureAwait(false))
+        else if (!await ledger.CompleteAsync(Scope, id, token, time.GetUtcNow(), CancellationToken.None).ConfigureAwait(false))
         {
-            WebhookLog.ClaimLost(logger, pattern);
+            WebhookLog.ClaimLost(logger, Scope);
         }
     }
 
@@ -120,11 +129,11 @@ internal sealed class WebhookReceiver(
     {
         try
         {
-            await ledger.ReleaseAsync(pattern, id, token, CancellationToken.None).ConfigureAwait(false);
+            await ledger.ReleaseAsync(Scope, id, token, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception bookkeeping)
         {
-            WebhookLog.NotReleased(logger, pattern, bookkeeping);
+            WebhookLog.NotReleased(logger, Scope, bookkeeping);
         }
     }
 
@@ -237,13 +246,13 @@ internal sealed class WebhookReceiver(
 
     private IReadOnlyList<byte[]>? Unusable(string reason)
     {
-        WebhookLog.SecretUnusable(logger, pattern, secret.Value, reason);
+        WebhookLog.SecretUnusable(logger, Scope, secret.Value, reason);
         return null;
     }
 
     private IResult Refused(string reason)
     {
-        WebhookLog.Refused(logger, pattern, reason);
+        WebhookLog.Refused(logger, Scope, reason);
         return ProblemResultFactory.WebhookRefused($"The delivery was refused: {reason}.");
     }
 }
