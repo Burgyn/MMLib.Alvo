@@ -293,6 +293,61 @@ public sealed class CommandRunnerTests
     }
 
     [Fact]
+    public async Task An_answer_that_fails_to_record_after_the_unit_committed_still_answers_the_handlers_result()
+    {
+        var runner = Runner(out var unit);
+        var run = runner.Start((await runner.ClaimAsync(Invocation("a1"))).Invocation);
+        var context = new AlvoCommandContext(run);
+        _ledger.AnswerFailure = new InvalidOperationException("the ledger is down");
+        var created = TypedResults.Created("/notes/1", new { id = 1 });
+
+        var result = await runner.FinishAsync(run, async () =>
+        {
+            await context.TransactAsync((_, _) => Task.CompletedTask, cancellationToken: Ct);
+            return created;
+        });
+
+        result.ShouldBeSameAs(created, "its writes and its completion committed, so the client is told so");
+        unit.Published.ShouldHaveSingleItem();
+        (await runner.ClaimAsync(Invocation("a1"))).Early.ShouldBeAssignableTo<IStatusCodeHttpResult>()!.StatusCode
+            .ShouldBe(StatusCodes.Status409Conflict, "committed without an answer: a retry is refused, never run");
+    }
+
+    [Fact]
+    public async Task A_release_that_fails_after_a_rolled_back_unit_still_answers_the_handlers_result()
+    {
+        var runner = Runner(out _);
+        _transactions.RollBack = true;
+        var run = runner.Start((await runner.ClaimAsync(Invocation("a2"))).Invocation);
+        var context = new AlvoCommandContext(run);
+        _ledger.ReleaseFailure = new InvalidOperationException("the ledger is down");
+        var ok = TypedResults.Ok();
+
+        var result = await runner.FinishAsync(run, async () =>
+        {
+            await Should.ThrowAsync<InvalidOperationException>(() => context.TransactAsync((_, _) => Task.CompletedTask, cancellationToken: Ct));
+            return ok;
+        });
+
+        result.ShouldBeSameAs(ok);
+        _ledger.Calls.ShouldBe(["claim", "release"]);
+    }
+
+    [Fact]
+    public async Task A_release_that_fails_after_a_refusing_answer_still_answers_the_refusal()
+    {
+        var runner = Runner(out _);
+        var run = runner.Start((await runner.ClaimAsync(Invocation("a3"))).Invocation);
+        _ledger.ReleaseFailure = new InvalidOperationException("the ledger is down");
+        var refused = TypedResults.BadRequest();
+
+        var result = await runner.FinishAsync(run, () => Task.FromResult<object?>(refused));
+
+        result.ShouldBeSameAs(refused);
+        _ledger.Calls.ShouldBe(["claim", "release"]);
+    }
+
+    [Fact]
     public async Task Releasing_an_invocation_with_no_key_touches_no_ledger()
     {
         var runner = Runner(out _);

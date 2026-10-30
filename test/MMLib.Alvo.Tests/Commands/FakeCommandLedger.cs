@@ -15,6 +15,8 @@ internal sealed class FakeCommandLedger : ICommandLedger
 
     internal Exception? ReleaseFailure { get; set; }
 
+    internal Exception? AnswerFailure { get; set; }
+
     public Task<CommandClaim> ClaimAsync(CommandKey key, DateTimeOffset now, CancellationToken cancellationToken)
     {
         Calls.Add("claim");
@@ -33,6 +35,11 @@ internal sealed class FakeCommandLedger : ICommandLedger
     public Task AnswerAsync(CommandKey key, CommandAnswer answer, CancellationToken cancellationToken)
     {
         Calls.Add("answer");
+        if (AnswerFailure is { } failure)
+        {
+            throw failure;
+        }
+
         _rows[(key.Scope, key.Key)] = _rows[(key.Scope, key.Key)] with { Answer = answer };
         return Task.CompletedTask;
     }

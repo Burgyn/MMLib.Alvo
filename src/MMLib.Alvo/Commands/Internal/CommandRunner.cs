@@ -131,20 +131,40 @@ internal sealed partial class CommandRunner(
 
         if (run.Committed)
         {
-            await AnswerCommittedAsync(run, answer).ConfigureAwait(false);
+            await KeptQuietlyAsync(run, () => AnswerCommittedAsync(run, answer)).ConfigureAwait(false);
             return;
         }
 
         if (run.OpenedWithoutCommit)
         {
             UnitRolledBack(logger, run.Name);
-            await ReleaseAsync(run).ConfigureAwait(false);
+            await KeptQuietlyAsync(run, () => ReleaseAsync(run)).ConfigureAwait(false);
             return;
         }
 
-        await (CommandAnswers.IsSuccess(result)
-            ? Ledger.CompleteAsync(completion.EventOf(run.Invocation), run.Key, answer, time.GetUtcNow(), CancellationToken.None)
-            : ReleaseAsync(run)).ConfigureAwait(false);
+        if (CommandAnswers.IsSuccess(result))
+        {
+            await Ledger.CompleteAsync(completion.EventOf(run.Invocation), run.Key, answer, time.GetUtcNow(), CancellationToken.None).ConfigureAwait(false);
+            return;
+        }
+
+        await KeptQuietlyAsync(run, () => ReleaseAsync(run)).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Records what followed from an answer that stands whatever the ledger does — a committed run's answer, a key given
+    /// back — so a failure to record it is logged, never thrown: the handler's result is still the response.
+    /// </summary>
+    private async Task KeptQuietlyAsync(CommandRun run, Func<Task> bookkeeping)
+    {
+        try
+        {
+            await bookkeeping().ConfigureAwait(false);
+        }
+        catch (Exception failure)
+        {
+            AnswerNotRecorded(logger, run.Name, failure);
+        }
     }
 
     private CommandAnswer? AnswerOf(CommandRun run, object? result)
@@ -177,6 +197,9 @@ internal sealed partial class CommandRunner(
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Command '{Command}' refused a request before its handler ran, and giving its Idempotency-Key back failed; the key is held until its lease runs out, and the refusal is still the answer.")]
     private static partial void RefusedKeyNotReleased(ILogger logger, string command, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Command '{Command}' answered, and recording that on its Idempotency-Key failed; the handler's result is still the answer. A committed run's retry is refused, not run; a key not given back frees itself when its lease runs out.")]
+    private static partial void AnswerNotRecorded(ILogger logger, string command, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Command '{Command}' threw, and recording that on its Idempotency-Key failed too; the handler's own exception is rethrown.")]
     private static partial void FailureNotRecorded(ILogger logger, string command, Exception exception);
