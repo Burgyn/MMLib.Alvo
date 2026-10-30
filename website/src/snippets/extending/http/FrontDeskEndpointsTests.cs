@@ -66,9 +66,14 @@ public sealed class FrontDeskEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_plain_endpoint_reads_as_the_resolved_caller()
+    public async Task A_plain_endpoint_reads_as_the_resolved_caller_under_the_descriptor_s_rules()
     {
-        (await GetAsync<int>("/me/rooms", "clerk")).ShouldBe(0);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/rooms") { Content = JsonContent.Create(new { number = "12" }) };
+        request.Headers.Add("X-Alvo-Api-Key", $"clerk.{KeySecret}");
+        (await _client.SendAsync(request, Ct)).StatusCode.ShouldBe(HttpStatusCode.Created);
+
+        (await GetAsync<int>("/me/rooms", "clerk")).ShouldBe(1);
+        (await _client.GetFromJsonAsync<int>("/me/rooms", Ct)).ShouldBe(0, "the list rule admits clerks only");
     }
 
     [Fact]
@@ -82,6 +87,19 @@ public sealed class FrontDeskEndpointsTests : IAsyncLifetime
 
         statuses.ShouldBe([HttpStatusCode.OK, HttpStatusCode.OK, HttpStatusCode.TooManyRequests]);
         (await StatusAsync("/api/guests")).ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task One_policy_partitioned_on_the_entity_limits_each_entity_on_its_own()
+    {
+        var guests = new List<HttpStatusCode>();
+        for (var i = 0; i < 3; i++)
+        {
+            guests.Add(await StatusAsync("/api/guests"));
+        }
+
+        guests.ShouldBe([HttpStatusCode.OK, HttpStatusCode.OK, HttpStatusCode.TooManyRequests]);
+        (await StatusAsync("/api/bookings")).ShouldBe(HttpStatusCode.OK, "bookings has a partition of its own under the same policy");
     }
 
     [Fact]

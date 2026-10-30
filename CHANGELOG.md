@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transaction and opens at most one unit with `AlvoCommandContext.TransactAsync`; the completion event
   `alvo.command.<name>.completed` and the `Idempotency-Key` record commit in that unit; a replayed key answers the first
   status and JSON body without running the handler, for 24 hours, per caller and credential; commands appear in the
-  OpenAPI document (`commands.<name>`), the extension catalog, the dashboard's *Commands* lane and policy simulator,
+  OpenAPI document (`commands.<name>` in lower camel case), the extension catalog, the dashboard's *Commands* lane and policy simulator,
   and `get_extensions`. `AddCommand<TCommand>` + `IAlvoCommands.InvokeAsync` for internal commands.
   `MapAlvoWebhookReceiver` — Standard Webhooks verification (5-minute window, rotation), per-receiver dedup swept after
   7 days, the handler run as the system in a configured tenant or one resolved from the verified body. `.WithAlvoCaller()`

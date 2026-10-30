@@ -122,6 +122,19 @@ public sealed class StayDeskCommandsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_payment_sent_again_under_a_new_id_is_still_recorded_once()
+    {
+        var stay = await BookAsync();
+        var notice = $"{{\"stayId\":\"{stay}\",\"reference\":\"ch_2\",\"amount\":160}}";
+
+        using var first = await NotifyAsync("msg_3", notice);
+        using var resent = await NotifyAsync("msg_4", notice);
+
+        resent.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await ReadAsync("/api/payments", "staff"))["items"]!.AsArray().Count.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task A_notice_signed_with_another_secret_is_refused()
     {
         using var forged = await NotifyAsync("msg_2", "{}", secret: "whsec_" + Convert.ToBase64String(Encoding.UTF8.GetBytes("not-the-provider's-secret-at-all")));

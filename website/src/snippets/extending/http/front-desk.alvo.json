@@ -11,6 +11,10 @@
     "guests": {
       "fields": { "name": { "type": "string", "required": true, "maxLength": 80 } },
       "rules": { "list": "'clerk' in @user.roles", "get": "'clerk' in @user.roles" }
+    },
+    "bookings": {
+      "fields": { "nights": { "type": "integer", "required": true } },
+      "rules": { "list": "'clerk' in @user.roles", "get": "'clerk' in @user.roles" }
     }
   }
 }

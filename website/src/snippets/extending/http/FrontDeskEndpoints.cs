@@ -17,6 +17,8 @@ public static class FrontDeskEndpoints
 {
     public const string RoomsPolicy = "rooms";
 
+    public const string PerEntityPolicy = "per-entity";
+
     public static void AddFrontDeskLimits(this RateLimiterOptions limiter)
     {
         limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -26,17 +28,20 @@ public static class FrontDeskEndpoints
             window.Window = TimeSpan.FromMinutes(1);
             window.QueueLimit = 0;
         });
+        limiter.AddPerEntityLimit();
     }
 
     public static void AddPerEntityLimit(this RateLimiterOptions limiter) =>
-        limiter.AddPolicy("per-entity", http => RateLimitPartition.GetFixedWindowLimiter(
+        limiter.AddPolicy(PerEntityPolicy, http => RateLimitPartition.GetFixedWindowLimiter(
             http.GetEndpoint()?.Metadata.GetMetadata<AlvoEndpointMetadata>()?.Entity ?? "",
-            _ => new FixedWindowRateLimiterOptions { PermitLimit = 100, Window = TimeSpan.FromMinutes(1) }));
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 2, Window = TimeSpan.FromMinutes(1) }));
 
     public static WebApplication MapFrontDesk(this WebApplication app)
     {
         app.MapAlvoDataApi()
             .ForEntity("rooms", rooms => rooms.RequireRateLimiting(RoomsPolicy))
+            .ForEntity("guests", guests => guests.RequireRateLimiting(PerEntityPolicy))
+            .ForEntity("bookings", bookings => bookings.RequireRateLimiting(PerEntityPolicy))
             .Add(endpoint =>
             {
                 if (endpoint.Metadata.OfType<AlvoEndpointMetadata>().FirstOrDefault() is { Operation: not DataOperation.Get and not DataOperation.List } write)

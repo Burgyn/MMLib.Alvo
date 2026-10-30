@@ -29,6 +29,10 @@ No API-key scope is checked — your endpoint names no entity — but every `IAl
 
 <SourceExcerpt code={endpoints} from="async (AlvoCaller caller, IAlvoSessions sessions" to=".WithAlvoCaller();" title="FrontDeskEndpoints.cs" />
 
+The clerk counts the room they created; the anonymous caller counts none, because the `list` rule admits clerks only:
+
+<SourceExcerpt code={tests} from="public async Task A_plain_endpoint_reads_as_the_resolved_caller" to="the list rule admits clerks only" title="FrontDeskEndpointsTests.cs" />
+
 Forgetting `.WithAlvoCaller()` makes `AlvoCaller.Context` throw. It never answers as the anonymous caller.
 
 ## One entity's routes: `ForEntity`
@@ -53,6 +57,12 @@ routes and to no other:
 
 <SourceExcerpt code={endpoints} from="public static void AddPerEntityLimit" to="_ => new FixedWindowRateLimiterOptions" title="FrontDeskEndpoints.cs" />
 
+Attach it to the entities it should limit — here `guests` and `bookings`, two partitions of one policy:
+
+<SourceExcerpt code={endpoints} from="guests => guests.RequireRateLimiting" to="bookings => bookings.RequireRateLimiting" title="FrontDeskEndpoints.cs" />
+
+<SourceExcerpt code={tests} from="public async Task One_policy_partitioned_on_the_entity_limits_each_entity_on_its_own" to="bookings has a partition of its own" title="FrontDeskEndpointsTests.cs" />
+
 ## Reading Alvo's metadata
 
 Every generated route carries `AlvoEndpointMetadata(Entity, Operation, Kind)`: the entity it serves, the operation its
@@ -61,7 +71,9 @@ read it. This convention marks every write route of `rooms`:
 
 <SourceExcerpt code={endpoints} from=".Add(endpoint =>" to="});" title="FrontDeskEndpoints.cs" />
 
-Alvo sets it in the same call that attaches its authorization filter, so a route that carries it is a route Alvo gates.
+Alvo sets it in the same call that attaches its authorization filter, so every route Alvo generates carries it together
+with its gate. It is a public record, so an endpoint of your own can carry it too; it says which entity a route
+serves, not that Alvo gates it.
 
 ## Alvo's gate stays on
 

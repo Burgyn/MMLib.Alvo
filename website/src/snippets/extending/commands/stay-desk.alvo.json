@@ -21,7 +21,7 @@
     "payments": {
       "fields": {
         "stay_id": { "type": "uuid", "required": true },
-        "reference": { "type": "string", "required": true, "maxLength": 80 },
+        "reference": { "type": "string", "required": true, "unique": true, "maxLength": 80 },
         "amount": { "type": "decimal", "required": true, "precision": 10, "scale": 2 }
       },
       "rules": {

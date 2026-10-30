@@ -92,7 +92,7 @@ payment provider. A handler of a completion that no command produces refuses to 
 
 ## Who may call it
 
-The caller is resolved as the [Data API](/guides/access-rules/) resolves it: no credential is the anonymous caller, whom
+The caller is resolved as the [Data API](/guides/authentication/) resolves it: no credential is the anonymous caller, whom
 the rule judges; a key that cannot be used is `401`. An API key needs the read **and** the write scope on the command's
 entity — `stays:read` and `stays:write`, because the command reads the row before it writes — or `*:write` for a command
 bound to no entity. A key without them is `403` `out-of-scope`.
@@ -157,6 +157,10 @@ request that fails the check is `401`: nothing is recorded and none of your code
 
 <SourceExcerpt code={desk} from="private static async Task<IResult> RecordPaymentAsync" to="return TypedResults.Ok();" title="StayDeskCommands.cs" />
 
+The handler is idempotent on the provider's `reference`, which the descriptor declares `unique`: a notice the provider
+sends again — under the same id after a crash, or under a new one — finds its payment already recorded, and the refused
+create is caught inside the unit.
+
 The test signs a delivery the way a sender does:
 
 <SourceExcerpt code={tests} from="private async Task<HttpResponseMessage> NotifyAsync" to="return await _client.SendAsync(request, Ct);" title="StayDeskCommandsTests.cs" />
@@ -170,9 +174,10 @@ The test signs a delivery the way a sender does:
   `await options.ResolveTenant(request, body, cancellationToken)` answers. The resolver is asynchronous, is called only
   for a verified delivery, and is given the verified body bytes; a `null` answer falls back to `Tenant`. With neither,
   the handler runs as the system in no tenant, which every tenant-scoped entity refuses.
-- **Only the body is signed.** Take the tenant from the body, or map one receiver per tenant with its own secret and
-  `Tenant`. Never take it from the path, the query or a header: anyone who has seen one signed delivery can change those
-  without breaking its signature.
+- **The path, the query and the other headers are not signed** — only the id, the timestamp and the body are. Take the
+  tenant from the body, or map one receiver per tenant with its own secret and `Tenant`. Never take it from the path,
+  the query or any other header: anyone who has seen one signed delivery can change those without breaking its
+  signature.
 - **Secrets are at least 24 bytes.** Every stored secret must decode to at least 24 bytes, as Standard Webhooks asks. A
   shorter, missing or malformed one answers `500` and logs an Error naming the receiver, the secret's name and why.
 - **The body limit** is `MaxBodyBytes`, 1 MiB unless set, at most 64 MiB; a larger body is `413`. The receiver raises the

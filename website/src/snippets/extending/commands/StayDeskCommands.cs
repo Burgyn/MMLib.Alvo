@@ -101,10 +101,17 @@ public static class StayDeskCommands
 
     private static async Task<IResult> RecordPaymentAsync(PaymentNotice notice, AlvoCaller caller, IAlvoTransactions transactions, CancellationToken ct)
     {
-        await transactions.TransactAsync(
-            caller.Context,
-            (unit, token) => unit.CreateAsync("payments", Payment(notice.StayId, notice.Reference, notice.Amount), token),
-            cancellationToken: ct);
+        await transactions.TransactAsync(caller.Context, async (unit, token) =>
+        {
+            try
+            {
+                await unit.CreateAsync("payments", Payment(notice.StayId, notice.Reference, notice.Amount), token);
+            }
+            catch (AlvoConstraintViolationException recorded) when (recorded.Kind == AlvoConstraintKind.Unique)
+            {
+                // The provider sent this payment before: it is already recorded.
+            }
+        }, cancellationToken: ct);
 
         return TypedResults.Ok();
     }
