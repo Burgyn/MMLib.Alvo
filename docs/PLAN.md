@@ -87,7 +87,9 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   (`MMLib.Alvo.TestHost` and the docs-snippet harness) the second; HX-03 (event handlers on the delivery engine) the
   third; HX-04 (extension catalog, apply guard, dashboard and assistant) the fourth; HX-05 (typed layer and lambda
   translation) the fifth; HX-06 (delivery operations) the sixth; HX-07 (write unit,
-  `TransactAsync`, savepoints) the seventh; HX-08 (commands, inbound webhooks, HTTP conventions) the eighth.
+  `TransactAsync`, savepoints) the seventh; HX-08 (commands, inbound webhooks, HTTP conventions) the eighth,
+  and it settles `#184` ("a marked endpoint is a gated endpoint", held against host conventions by the gate
+  witness), which has therefore left F6's debt list below.
   This line runs ahead of F5's close, the way F4 ran beside F3; the marker stays on F5.
 
 ## 3a. What closed F4
@@ -175,7 +177,7 @@ it is now sorted by one question, applied on 2026-09-06:
   four authorities. This is the whole F3 follow-up set (`#79`–`#93`, `#101`),
   the per-engine data-layer gaps (`#87`, `#88`, `#92`, `#161`, `#162`, `#175`,
   `#178`), the correctness and disclosure items (`#100`, `#118`, `#122`,
-  `#131`, `#134`, `#139`, `#145`, `#154`, `#155`, `#183`, `#184`), and
+  `#131`, `#134`, `#139`, `#145`, `#154`, `#155`, `#183`), and
   the mutation/CI gate health (`#98`, `#99`, `#129`, `#142`, `#143`, `#181`).
 - **A capability that has to be earned → F7.** Relation embedding, aggregations,
   rate limiting, `field.default` (CEL half; the literal half landed early with #113), tenant-resolution strategies, the outbox

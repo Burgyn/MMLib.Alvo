@@ -8,8 +8,9 @@ namespace MMLib.Alvo.Api;
 /// </summary>
 /// <remarks>
 /// Read it from <c>Endpoint.Metadata</c> in a convention, a middleware or a rate-limiting partition to tell Alvo's routes
-/// apart by entity — <c>ForEntity</c> is built on it. It is set by Alvo in the same call that attaches the authorization
-/// filter, so a route carrying it is a route Alvo gates.
+/// apart by entity — <c>ForEntity</c> is built on it. Every route Alvo generates carries it together with its
+/// authorization gate, set in the same call; but it is a public record, so your own endpoints can carry it too, and
+/// carrying it is not by itself proof that a route is gated.
 /// </remarks>
 /// <param name="Entity">The entity the route serves, as the applied descriptor names it.</param>
 /// <param name="Operation">The operation the route is authorized as.</param>
