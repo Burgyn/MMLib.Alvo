@@ -17,8 +17,13 @@ public sealed class HookSetsTests
             new FieldSchema { Name = "status", Type = FieldType.Enum, EnumValues = ["open", "closed"] },
             new FieldSchema { Name = "total", Type = FieldType.Decimal, Precision = 6, Scale = 2 },
             new FieldSchema { Name = "net", Type = FieldType.Integer, Rollup = new RollupSchema { From = "lines", Via = "booking_id", Op = RollupOperation.Sum, Field = "amount" } },
+            new FieldSchema { Name = "gross", Type = FieldType.Decimal, Precision = 8, Scale = 2, ComputedExpression = "total * 2" },
+            new FieldSchema { Name = "deleted_at", Type = FieldType.DateTime, Nullable = true },
+            new FieldSchema { Name = "created_by", Type = FieldType.Uuid, Nullable = true },
             new FieldSchema { Name = "updated_at", Type = FieldType.DateTime, Nullable = true },
         ],
+        Audit = true,
+        SoftDelete = true,
     };
 
     [Theory]
@@ -26,6 +31,9 @@ public sealed class HookSetsTests
     [InlineData("id", null, "maintained")]
     [InlineData("updated_at", null, "maintained")]
     [InlineData("net", 5L, "maintained")]
+    [InlineData("gross", 5L, "maintained")]
+    [InlineData("deleted_at", null, "maintained")]
+    [InlineData("created_by", null, "maintained")]
     [InlineData("title", 42L, "type")]
     [InlineData("status", "superadmin", "enum-value")]
     [InlineData("title", "far too long a title", "max-length")]

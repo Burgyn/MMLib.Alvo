@@ -55,7 +55,7 @@ public sealed class HookDependenciesTests
         typeof(IAlvoCommands),
         typeof(IAlvoEventPump),
         typeof(IAlvoAssistant),
-        typeof(HttpClient[]),
+        typeof(IAlvoData[]),
         typeof(Func<IAlvoData>),
         typeof(Lazy<IAlvoSessions>),
     ];

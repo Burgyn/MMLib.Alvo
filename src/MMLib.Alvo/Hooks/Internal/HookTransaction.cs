@@ -99,9 +99,12 @@ internal sealed class HookTransaction(IAlvoTransaction inner, HookRun run, Bound
     private HookFailedException Poisoned(string reason)
     {
         var failure = new HookFailedException(hook.Id, reason);
-        run.Fail(failure);
-        AlvoFlow.Unit?.Poison(failure);
+        if (run.Fail(failure))
+        {
+            HookLog.HookFailed(logger, hook.Id, reason, "-");
+        }
 
+        AlvoFlow.Unit?.Poison(failure);
         return failure;
     }
 

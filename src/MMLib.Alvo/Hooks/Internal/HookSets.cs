@@ -10,6 +10,9 @@ namespace MMLib.Alvo.Hooks.Internal;
 /// </summary>
 internal static class HookSets
 {
+    /// <summary>The problem of a <c>Set</c> of a field its entity does not declare — or of any <c>Set</c> on an entity with no schema.</summary>
+    internal const string Undeclared = "undeclared";
+
     /// <summary>
     /// <paramref name="sets"/> with every lossless widening applied (Ruling 47): an integral CLR value is already a <c>long</c>
     /// (<c>RecordWriter.Field</c>), a <c>float</c> becomes a <c>double</c>, and a whole number into a <c>decimal</c> field
@@ -43,12 +46,12 @@ internal static class HookSets
     {
         if (name == AlvoManagedColumns.TenantId)
         {
-            return entity.Tenancy != TenancyMode.Scoped ? "undeclared" : value is null or Guid ? null : "type";
+            return entity.Tenancy != TenancyMode.Scoped ? Undeclared : value is null or Guid ? null : "type";
         }
 
         if (entity.Fields.FirstOrDefault(field => field.Name == name) is not { } field)
         {
-            return "undeclared";
+            return Undeclared;
         }
 
         return Maintained(field, entity) ? "maintained"

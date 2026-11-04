@@ -113,28 +113,35 @@ public sealed class WriteExtensionRunnerTests
     }
 
     [Fact]
-    public async Task A_caught_budget_refusal_still_fails_the_hook_and_poisons_the_unit()
+    public async Task A_caught_budget_refusal_still_fails_the_hook_poisons_the_unit_and_is_logged_once()
     {
         var unit = new FakeFlowUnit();
-        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t.AfterWrite("greedy", async (AfterWrite<AlvoRecord> write, CancellationToken ct) =>
-        {
-            try
+        var logs = new CapturingLogger();
+        var catches = 0;
+        await using var world = RunnerWorld.Start(
+            alvo => alvo.Entity("tickets", t => t.AfterWrite("greedy", async (AfterWrite<AlvoRecord> write, CancellationToken ct) =>
             {
-                for (var call = 0; call < 51; call++)
+                for (var call = 0; call < 52; call++)
                 {
-                    await write.Transaction.GetAsync("tickets", Guid.NewGuid(), ct);
+                    try
+                    {
+                        await write.Transaction.GetAsync("tickets", Guid.NewGuid(), ct);
+                    }
+                    catch (AlvoBudgetExceededException)
+                    {
+                        catches++;
+                    }
                 }
-            }
-            catch (AlvoBudgetExceededException)
-            {
-            }
-        })));
+            })),
+            services: services => services.AddLogging(logging => logging.AddProvider(logs)));
         using var flow = AlvoFlow.EnterUnit(unit, new AlvoProvenance());
 
         var failure = await Should.ThrowAsync<HookFailedException>(() => world.Runner.AfterWriteAsync(world.Before(RunnerWorld.Ticket()) with { Saved = RunnerWorld.Ticket() }, Ct));
 
         failure.Reason.ShouldBe(HookFailedException.Budget);
+        catches.ShouldBe(2, "the 51st and the 52nd call were each refused into the hook, which caught both");
         unit.Poisoned.ShouldContain(failure);
+        FailedLines(logs, "greedy", HookFailedException.Budget).ShouldBe(1);
     }
 
     [Fact]
@@ -165,22 +172,26 @@ public sealed class WriteExtensionRunnerTests
     public async Task A_nested_write_to_the_row_in_its_own_hook_stage_is_a_self_write_even_when_caught()
     {
         var unit = new FakeFlowUnit();
-        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t.AfterWrite("echo", async (AfterWrite<AlvoRecord> write, CancellationToken ct) =>
-        {
-            try
+        var logs = new CapturingLogger();
+        await using var world = RunnerWorld.Start(
+            alvo => alvo.Entity("tickets", t => t.AfterWrite("echo", async (AfterWrite<AlvoRecord> write, CancellationToken ct) =>
             {
-                await write.Transaction.UpdateAsync("tickets", (Guid)write.Saved["id"]!, new Dictionary<string, object?> { ["title"] = "again" }, cancellationToken: ct);
-            }
-            catch (HookFailedException)
-            {
-            }
-        })));
+                try
+                {
+                    await write.Transaction.UpdateAsync("tickets", (Guid)write.Saved["id"]!, new Dictionary<string, object?> { ["title"] = "again" }, cancellationToken: ct);
+                }
+                catch (HookFailedException)
+                {
+                }
+            })),
+            services: services => services.AddLogging(logging => logging.AddProvider(logs)));
         using var flow = AlvoFlow.EnterUnit(unit, new AlvoProvenance());
 
         var failure = await Should.ThrowAsync<HookFailedException>(() => world.Runner.AfterWriteAsync(world.Before(RunnerWorld.Ticket()) with { Saved = RunnerWorld.Ticket() }, Ct));
 
         failure.Reason.ShouldBe(HookFailedException.SelfWrite);
         unit.Poisoned.ShouldContain(failure);
+        FailedLines(logs, "echo", HookFailedException.SelfWrite).ShouldBe(1);
     }
 
     [Fact]
@@ -204,11 +215,15 @@ public sealed class WriteExtensionRunnerTests
     [Fact]
     public async Task A_registered_hook_that_does_not_bind_the_current_catalog_fails_the_write_closed()
     {
+        var unit = new FakeFlowUnit();
         await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t.BeforeWrite("typo", (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask, when: "new.stauts == 'x'")));
+        using var flow = AlvoFlow.EnterUnit(unit, new AlvoProvenance());
 
         world.Runner.RunsInTransaction("tickets", AlvoWriteOperation.Create).ShouldBeTrue("registrations, not bindings, decide that a unit is needed");
-        (await Should.ThrowAsync<HookFailedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct))).Reason
-            .ShouldBe(HookFailedException.Unbound);
+        var failure = await Should.ThrowAsync<HookFailedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct));
+
+        failure.Reason.ShouldBe(HookFailedException.Unbound);
+        unit.Poisoned.ShouldHaveSingleItem().ShouldBeSameAs(failure);
     }
 
     [Fact]
@@ -321,6 +336,154 @@ public sealed class WriteExtensionRunnerTests
 
         seen.ShouldBe(0L);
     }
+
+    [Fact]
+    public async Task A_set_on_an_entity_the_catalog_does_not_declare_fails_closed_with_invalid_set()
+    {
+        var unit = new FakeFlowUnit();
+        var logs = new CapturingLogger();
+        await using var world = RunnerWorld.Start(
+            alvo => alvo.Entity("*", every => every.BeforeWrite("stamp", (BeforeWrite<AlvoRecord> write) =>
+            {
+                write.Set("title", "stamped");
+                return ValueTask.CompletedTask;
+            })),
+            services: services => services.AddLogging(logging => logging.AddProvider(logs)));
+        using var flow = AlvoFlow.EnterUnit(unit, new AlvoProvenance());
+
+        var failure = await Should.ThrowAsync<HookFailedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()) with { Entity = "ghosts" }, Ct));
+
+        (failure.Extension, failure.Reason).ShouldBe(("stamp", HookFailedException.InvalidSet));
+        unit.Poisoned.ShouldHaveSingleItem().ShouldBeSameAs(failure);
+        logs.Entries.ShouldContain(entry => entry.Message.Contains("set title, which it may not set (undeclared)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_stage_judges_its_sets_against_the_catalog_it_started_with_not_one_applied_while_the_hook_ran()
+    {
+        IPolicyCatalogProvider? catalogs = null;
+        var tickets = HandlerCatalog.Schema.Entities.Single(entity => entity.Name == "tickets");
+        var narrowed = new MMLib.Alvo.Schema.SchemaModel([tickets with { Fields = [.. tickets.Fields.Select(field => field.Name == "title" ? field with { MaxLength = 1 } : field)] }]);
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t.BeforeWrite("retitle", (BeforeWrite<AlvoRecord> write) =>
+        {
+            catalogs!.SetCurrent("handlers", HandlerCatalog.CatalogOf(narrowed));
+            write.Set("title", "longer");
+            return ValueTask.CompletedTask;
+        })));
+        catalogs = world.Services.GetRequiredService<IPolicyCatalogProvider>();
+
+        var patch = await world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct);
+
+        patch["title"].ShouldBe("longer");
+    }
+
+    [Theory]
+    [InlineData("validate")]
+    [InlineData("before")]
+    [InlineData("after")]
+    public async Task A_condition_that_throws_fails_the_write_as_the_hook_s_exception_and_poisons_the_unit(string stage)
+    {
+        const string Throwing = "int(new.title) == 1";
+        var ran = new ConcurrentQueue<string>();
+        var unit = new FakeFlowUnit();
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => _ = stage switch
+        {
+            "validate" => t.Validate("numeric", (ValidateWrite<AlvoRecord> _) => { ran.Enqueue("numeric"); return ValueTask.CompletedTask; }, when: Throwing),
+            "before" => t.BeforeWrite("numeric", Record(ran, "numeric"), when: Throwing),
+            _ => t.AfterWrite("numeric", (AfterWrite<AlvoRecord> _) => { ran.Enqueue("numeric"); return ValueTask.CompletedTask; }, when: Throwing),
+        }));
+        using var flow = AlvoFlow.EnterUnit(unit, new AlvoProvenance());
+        var write = world.Before(RunnerWorld.Ticket(title: "not a number")) with { Saved = RunnerWorld.Ticket(title: "not a number") };
+
+        var failure = await Should.ThrowAsync<HookFailedException>(() => stage switch
+        {
+            "validate" => world.Runner.ValidateAsync(write with { Transaction = null, Services = null }, Ct),
+            "before" => world.Runner.BeforeWriteAsync(write, Ct),
+            _ => world.Runner.AfterWriteAsync(write, Ct),
+        });
+
+        (failure.Extension, failure.Reason).ShouldBe(("numeric", HookFailedException.Exception));
+        ran.ShouldBeEmpty();
+        unit.Poisoned.ShouldHaveSingleItem().ShouldBeSameAs(failure);
+    }
+
+    [Fact]
+    public async Task A_nested_hook_s_failure_escaping_a_hook_passes_unchanged()
+    {
+        var nested = new HookFailedException("inner", HookFailedException.Budget);
+        var unit = new FakeFlowUnit();
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t.BeforeWrite("outer", Throws<BeforeWrite<AlvoRecord>>(nested))));
+        using var flow = AlvoFlow.EnterUnit(unit, new AlvoProvenance());
+
+        (await Should.ThrowAsync<HookFailedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct))).ShouldBeSameAs(nested);
+        unit.Poisoned.ShouldBeEmpty("the nested hook's failure poisoned the unit where it happened");
+    }
+
+    [Fact]
+    public async Task A_client_cancellation_escaping_a_hook_passes_as_a_cancellation_not_a_timeout()
+    {
+        using var client = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        var unit = new FakeFlowUnit();
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t.BeforeWrite("patient", (BeforeWrite<AlvoRecord> _, CancellationToken ct) =>
+        {
+            client.Cancel();
+            ct.ThrowIfCancellationRequested();
+            return ValueTask.CompletedTask;
+        })));
+        using var flow = AlvoFlow.EnterUnit(unit, new AlvoProvenance());
+
+        var escaped = await Should.ThrowAsync<OperationCanceledException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), client.Token));
+
+        escaped.ShouldNotBeOfType<HookFailedException>();
+        (unit.Poisoned.Count, unit.Blamed.Count).ShouldBe((0, 0));
+    }
+
+    [Theory]
+    [InlineData(HookFailedException.Budget)]
+    [InlineData(HookFailedException.SelfWrite)]
+    [InlineData(HookFailedException.Timeout)]
+    public async Task A_failure_wins_over_a_rejection_recorded_in_the_same_run(string reason)
+    {
+        var clock = new FakeTimeProvider();
+        await using var world = RunnerWorld.Start(
+            alvo => alvo.Entity("tickets", t => t.AfterWrite("mixed", async (AfterWrite<AlvoRecord> write, CancellationToken ct) =>
+            {
+                await FailQuietlyAsync(write, reason, clock, ct);
+                write.Conflict("taken", "Taken.");
+            }, configure: o => o.MaxOperations = 1)),
+            clock);
+
+        var failure = await Should.ThrowAsync<HookFailedException>(() => world.Runner.AfterWriteAsync(world.Before(RunnerWorld.Ticket()) with { Saved = RunnerWorld.Ticket() }, Ct));
+
+        failure.Reason.ShouldBe(reason);
+        world.Rejections.Recorded.ShouldBeEmpty("a rejection that lost to a failure is not the write's answer");
+    }
+
+    private static async Task FailQuietlyAsync(AfterWrite<AlvoRecord> write, string reason, FakeTimeProvider clock, CancellationToken ct)
+    {
+        try
+        {
+            switch (reason)
+            {
+                case HookFailedException.Budget:
+                    await write.Transaction.GetAsync("tickets", Guid.NewGuid(), ct);
+                    await write.Transaction.GetAsync("tickets", Guid.NewGuid(), ct);
+                    break;
+                case HookFailedException.SelfWrite:
+                    await write.Transaction.UpdateAsync("tickets", RunnerWorld.TicketId, new Dictionary<string, object?> { ["title"] = "again" }, cancellationToken: ct);
+                    break;
+                default:
+                    clock.Advance(TimeSpan.FromMilliseconds(300));
+                    break;
+            }
+        }
+        catch (Exception refused) when (refused is AlvoBudgetExceededException or HookFailedException)
+        {
+        }
+    }
+
+    private static int FailedLines(CapturingLogger logs, string extension, string reason) =>
+        logs.Entries.Count(entry => entry.Message.Contains($"Write hook {extension} failed ({reason})", StringComparison.Ordinal));
 
     private static Func<TContext, ValueTask> Throws<TContext>(Exception exception) => _ => throw exception;
 

@@ -10,6 +10,9 @@ internal sealed class FakeHookTransaction(AlvoContext context) : IAlvoTransactio
 
     internal CancellationToken LastToken { get; private set; }
 
+    /// <summary>The system view <see cref="AsSystem"/> handed out, kept so a fact can read what reached it.</summary>
+    internal FakeHookTransaction? System { get; private set; }
+
     public AlvoContext Context => context;
 
     public Task<AlvoPage> QueryAsync(AlvoQuery query, CancellationToken cancellationToken = default) => Answer("query", AlvoPage.Empty, cancellationToken);
@@ -40,7 +43,7 @@ internal sealed class FakeHookTransaction(AlvoContext context) : IAlvoTransactio
     public Task PublishAsync(string type, string subject, IReadOnlyDictionary<string, object?>? data, CancellationToken cancellationToken = default) =>
         Answer($"publish {type}", true, cancellationToken);
 
-    public IAlvoTransaction AsSystem() => new FakeHookTransaction(AlvoContext.System(context.Tenant) with { Provenance = context.Provenance });
+    public IAlvoTransaction AsSystem() => System ??= new FakeHookTransaction(AlvoContext.System(context.Tenant) with { Provenance = context.Provenance });
 
     private Task<T> Answer<T>(string call, T answer, CancellationToken token)
     {

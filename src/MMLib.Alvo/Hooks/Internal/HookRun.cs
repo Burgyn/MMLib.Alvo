@@ -66,7 +66,8 @@ internal sealed class HookRun(
         }
     }
 
-    internal void Fail(HookFailedException failure) => Interlocked.CompareExchange(ref _failure, failure, null);
+    /// <summary>Records <paramref name="failure"/> unless the run already failed; whether it was the first.</summary>
+    internal bool Fail(HookFailedException failure) => Interlocked.CompareExchange(ref _failure, failure, null) is null;
 
     /// <summary>Replaces the recorded <c>Set</c>s with their checked, widened form (Ruling 47).</summary>
     internal void Replace(IReadOnlyDictionary<string, object?> sets)
