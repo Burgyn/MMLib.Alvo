@@ -15,7 +15,9 @@ Two shapes, one model:
   factory, `CommandEndpointMetadata`, the operationId `commands.<lowerCamel>` and the tag `commands`. A command is
   always a `POST` (Ruling 4).
 - **An internal command** is an `IAlvoCommand<TInput>` registered with `AddCommand<T>(name, access)` and invoked in
-  process through `IAlvoCommands.InvokeAsync` — the same rule, unit and completion, no route, no key (Ruling 17).
+  process through `IAlvoCommands.InvokeAsync` — the same rule, unit and completion, no route, no key (Ruling 17). It
+  runs one hop deeper than its caller (ambient `AlvoFlow`), as an event handler does, so a command that invokes itself
+  meets the chain-depth limit instead of overflowing the stack.
 
 Command names share one id namespace with every other extension (`extensions/<id>/…` pointers, one catalog), and match
 `[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*`. Mapping happens after the container is built, so mapped commands register at
@@ -113,10 +115,13 @@ refuses boot (Ruling 16).
   nothing.
 - **The fingerprint** is SHA-256 over the command name, the route's `id` and every bound argument that is not a
   service or request plumbing, serialised as JSON — uploaded files by name, length and content hash (Rulings 8, 52).
+  Only a top-level `IFormFile`/`IFormFileCollection` is hashed, so a handler binding a file below the top level — in a
+  `[FromForm]`/`[AsParameters]` type, a list, an `IFormCollection` — is refused when it is mapped (Ruling 58).
   The same key with a different fingerprint is `409 idempotency-conflict`: a deliberate deviation from the IETF
   draft's `422`, for one Alvo meaning across the Data API and commands (Ruling 7).
 - **Answers** are replayed as status + JSON body (a problem document keeps `application/problem+json`), at most
-  **64 KiB**; no headers, `Location` included. A result with no status, a plain `string`, an unserialisable value or a
+  **64 KiB**; no headers, `Location` included. A result with no status, a plain `string` or a text result
+(`Results.Text`/`Results.Content`), an unserialisable value or a
   larger body is recorded committed without an answer, and a retry is refused `409` "do not resend" rather than run
   (Rulings 9, 49 L4).
 - **Scope** is `command:<name>/<AlvoIdempotency.IdentityOf(caller)>/<API key id or ->` — per caller, tenant and
@@ -138,7 +143,8 @@ host's handler is built with `RequestDelegateFactory` and run over the replayed 
 what was signed (Ruling 25).
 
 - **Verification precedes dedup and the tenant** (Ruling 24): the three headers, the timestamp within `Tolerance`
-  (5 minutes), the body within `MaxBodyBytes`, then a `v1,` HMAC-SHA256 over `id.timestamp.body` with one of the
+  (5 minutes), the body within `MaxBodyBytes`, then a `v1,` HMAC-SHA256 over `id.timestamp.body` — the timestamp
+  header as sent, never a re-formatted number — with one of the
   space-separated `whsec_` secrets (Ruling 22). An unverified request records no id — an attacker cannot burn a real
   sender's ids — and runs no host code. A failed check is `401 unauthenticated` with no `WWW-Authenticate`.
 - **Keys of at least 24 bytes** (Ruling 54): every key of the stored value must decode to ≥ 24 bytes, Standard
@@ -149,7 +155,9 @@ what was signed (Ruling 25).
   server's own `413` is answered as the receiver's. IIS and HTTP.sys keep their own limits.
 - **Dedup** in `<prefix>_inbound_webhooks` (`receiver`, `webhook_id`, `claim_token`, `received_at`, `lease_until`,
   `completed_at`): a completed id is acknowledged `200` without running; one in flight is `409`; a handler that throws
-  or answers non-`2xx` releases its id so the sender's retry runs it (Ruling 23). Completion and release are fenced by
+  or answers non-`2xx` releases its id so the sender's retry runs it (Ruling 23); a release that fails is logged and
+  never replaces the handler's exception or answer. The `receiver` is the endpoint's whole route pattern, a `MapGroup`
+  prefix included. Completion and release are fenced by
   the claim token; a stale completion returns `false` and is logged (Ruling 36). Delivery stays at least once.
 - **The tenant comes from signed bytes** (Rulings 37, 56). Standard Webhooks signs only id, timestamp and body, so the
   path, query and headers are attacker-changeable on a replayed delivery. `ResolveTenant` is asynchronous
@@ -161,7 +169,7 @@ what was signed (Ruling 25).
 - **What the returned builder does** (Ruling 49 L8): it configures the outer endpoint; an endpoint filter never reaches
   the RDF-built handler, and the system caller is bound to the handler's `AlvoCaller` only, not published through
   `IAlvoContextAccessor`. Receivers are excluded from the OpenAPI document, are not catalogued (§4.13 has no kind for
-  them and they bind nothing in the descriptor), and a pattern may be mapped once.
+  them and they bind nothing in the descriptor), and a whole pattern (group prefix included) may be mapped once.
 
 ## What is internal and why
 

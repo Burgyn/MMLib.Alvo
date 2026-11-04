@@ -1249,7 +1249,10 @@ price of a frozen table, stated rather than discovered (Ruling 20).
 convention — does not exist yet when they run, and an `Add`-forwarded convention would reach zero routes, silently.
 `Finally` runs after it exists, so ordinary and finally conventions are forwarded there, in that order; the cost is
 that they run after the route's own conventions. A builder whose `Finally` is unsupported throws, rather than reaching
-nothing. The name is not checked there: such a builder cannot know the descriptor.
+nothing. The name is not checked there: such a builder cannot know the descriptor. Metadata conventions work there; an
+endpoint filter cannot, because a route's filters are composed before its `Finally` runs. A forwarded convention that
+changes `EndpointBuilder.FilterFactories` therefore fails the grouped route-table build (readiness `Failed`, the message
+naming `MapAlvoDataApi()`'s builder as the place for the filter) rather than adding a check that never runs.
 
 **The gate witness (Ruling 19).** Each generated route's authorization filter is added through a factory owned by an
 `AlvoGateWitness`, which counts its own invocation while ASP.NET Core composes the request delegate. The witness rides
