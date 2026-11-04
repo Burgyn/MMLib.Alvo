@@ -2,7 +2,7 @@
 title: Testing your backend
 description: Run your descriptor — rules, hooks and webhooks — through the real Alvo pipeline inside a unit test, with event delivery on your schedule.
 sidebar:
-  order: 10
+  order: 11
 ---
 
 import { Code } from '@astrojs/starlight/components';
@@ -47,8 +47,9 @@ entries whose delivery failed, subscribers attempted. Webhooks go to the handler
 
 - **No network, ever.** Without `webhooks`, every webhook attempt fails, and its entry is counted once in the result's
   `Failed`; it never leaves the process. The host does not dispose your handler, so one handler can serve several hosts.
-- **`Hooks.AssertRan(id, times)`** counts the runs of a hook inside this host's drains. A descriptor after-hook's id is
-  its JSON pointer, `/entities/tickets/hooks/afterCreate/0`. A failed attempt is not a run, and neither is one cut
+- **`Hooks.AssertRan(id, times)`** counts the runs of a hook inside this host's drains, and the runs of a
+  [write hook](/extending/write-hooks/) inside the writes made through `alvo.Data` — a write hook's rejection counts as
+  a run. A descriptor after-hook's id is its JSON pointer, `/entities/tickets/hooks/afterCreate/0`. A failed attempt is not a run, and neither is one cut
   short by the host stopping. On a mismatch it throws, listing every run it recorded. Hosts running side by side never
   see each other's runs.
 - **Loops are refused.** A subscriber that writes to what it subscribes to — a webhook receiver writing back — keeps
@@ -88,5 +89,4 @@ stops it but leaves a database it did not create.
 
 - `InMemoryAlvoData` in `MMLib.Alvo.Testing` is the double the provider contract suites run against; it enforces rules
   but runs no hooks. To test your backend's behaviour, use `AlvoTestHost`.
-- Write hooks and timers in C# arrive one release at a time; each joins the test host — and `Hooks.AssertRan` — as
-  it ships.
+- Timers in C# arrive later; they join the test host — and `Hooks.AssertRan` — when they ship.

@@ -1384,7 +1384,10 @@ and custom events commit together or not at all. The rulings cited here are the 
 
 **One seam.** Every `EfAlvoData` write site begins its transaction through one `BeginAsync(db, unit)`. A top-level write
 (`unit` is `null`) takes the write turn and its own transaction exactly as before — no savepoint, no extra statement,
-nothing put on the flow, no deadline (Ruling 2; HX-09 turns that branch into a unit). A call through a unit creates its
+nothing put on the flow, no deadline (Ruling 2). HX-09 turns that branch into a unit only where it must: a top-level
+write that a host in-transaction hook is registered for runs in a unit of its own (`OwnUnitAsync`, the 30 s default
+deadline, one DI scope), and a write with none still opens no unit ([`write-hooks.md`](./write-hooks.md)). A hook's
+`write.Transaction` is that unit seen one hop deeper, and its depth is checked lazily, when the hook writes or publishes. A call through a unit creates its
 context on the unit's connection with `SetDbConnection(…, contextOwnsConnection: false)` and joins the unit's
 `DbTransaction` with `UseTransactionAsync`, under a savepoint of its own named `alvo_unit_<n>` (`UnitSavepoint`).
 Committing that joined transaction only releases the savepoint; the unit commits once, when its delegate returns.

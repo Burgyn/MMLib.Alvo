@@ -414,7 +414,8 @@ And from two places it must **not** be called:
 | `ReplayableCreateAsync` | it is the retry loop around that method, not a write path of its own |
 
 **A hook may not run where the candidate is built.** `AuthorizedCandidate` runs *before*
-`BeginTransactionAsync`, so a hook placed next to it would judge outside the transaction its verdict is
+`BeginTransactionAsync` (on a create; since HX-09, a create with a host in-transaction hook builds it inside the
+write's own unit, which changes nothing below — the descriptor's hooks still run after it, inside the transaction), so a hook placed next to it would judge outside the transaction its verdict is
 about — and every one of the four things that verdict has to be atomic with is inside: the row-locked
 pre-image its `old.` and `changed(...)` are answered from, the `WITH CHECK` re-test of the *patched*
 candidate, the row write itself, and the outbox insert. Judged outside, the pre-image is not locked, so
@@ -1475,8 +1476,11 @@ these live.
   chasing that instruction should find out which PR did.
 - ~~**The three remaining hook refusals.**~~ **Gone — PR5b-1 lifted all three**, so
   `UnhonouredFeatures` now carries no hook entry at all (#114). Deviation 75's structural problem was solved
-  as it predicted: one pipeline behind a port, injected into the driver, with `AuthorizedCandidate` moved
-  inside the transaction. The `InMemoryAlvoData` half was discharged by HX-02 (X11): the test host, not the double, runs
+  as it predicted: one pipeline behind a port, injected into the driver, with the before-hooks run inside the
+  transaction — `AuthorizedCandidate` itself still runs before `BEGIN` on creates (updates authorize inside the
+  transaction, deletes have no pre-transaction check; with a host in-transaction hook registered for the write, the
+  create's `AuthorizedCandidate` and payload guard run inside the write's own unit, after `BEGIN` and the write turn;
+  corrected in HX-09, spec C13). The `InMemoryAlvoData` half was discharged by HX-02 (X11): the test host, not the double, runs
   hooks.
 - **F7's partitioned claim** (**#150**, which also carries Q1's same-millisecond finding and the
   cross-process half `AlvoEventId` does not close), and **`dataref`** (**#151**).

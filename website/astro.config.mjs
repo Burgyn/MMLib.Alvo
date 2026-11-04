@@ -155,6 +155,7 @@ export default defineConfig({
           page('Typed or CEL', 'extending/typed-or-cel'),
           page('See your extensions in the dashboard', 'extending/extension-catalog'),
           page('Operate deliveries', 'extending/operate-deliveries'),
+          page('Validate and guard writes', 'extending/write-hooks'),
           page('Transactions in your own code', 'extending/transactions'),
           page('Commands and inbound webhooks', 'extending/commands'),
           page('HTTP conventions', 'extending/http-conventions'),

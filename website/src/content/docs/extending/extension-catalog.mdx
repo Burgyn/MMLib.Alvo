@@ -32,8 +32,8 @@ over `Entity("vehicles", …)` with that text as a CEL string `when`, the handle
 | Member | What it says |
 |---|---|
 | `id` | the id the handler was registered under — its identity, and the key of its deliveries |
-| `kind` | `eventHandler` or `command` |
-| `stage` | `postCommit` for a handler: it runs after the write commits; `http` for a mapped command; `preTransaction` for an internal one, which runs in its invoker's flow before its own unit |
+| `kind` | `eventHandler`, `command`, or a [write hook](/extending/write-hooks/)'s phase: `validate`, `beforeWrite`, `afterWrite`, `beforeDelete`, `afterDelete` |
+| `stage` | `postCommit` for a handler: it runs after the write commits; `http` for a mapped command; `preTransaction` for an internal one, which runs in its invoker's flow before its own unit, and for a validate hook; `inTransaction` for the other write hooks |
 | `entities` | the entities it binds; `["*"]` for an every-entity handler, `[]` for an application-event handler and for a command bound to no entity |
 | `operations` | `create`, `update`, `delete`, as the policy names them; `OnSaved` lists `create` and `update`, and `OnUpdated`'s `update` covers a replace; `[]` for an application-event handler |
 | `event` | the event type an application-event handler handles; `null` otherwise |
@@ -48,6 +48,8 @@ over `Entity("vehicles", …)` with that text as a CEL string `when`, the handle
 | `httpMethod` | `POST` for a mapped command; `null` otherwise |
 | `access` | a command's access rule as CEL text — a lambda's translation; `null` for a handler |
 | `paused` | whether an operator paused the handler ([operate deliveries](/extending/operate-deliveries/#pause-and-resume)) |
+| `topLevelOnly` | `true` for a validate hook: it runs only for a write no transaction unit is open around |
+| `enabled` | `false` once an administrator switched a validate hook off ([Validate and guard writes](/extending/write-hooks/#validate-before-the-transaction)); `true` for everything else |
 
 An id retired with `AddRetiredExtension` is not an extension and is not listed. `kind` and `stage` gain values as later
 releases add kinds of host code; a typed .NET client older than the server cannot read a value it does not know, so a
@@ -78,7 +80,9 @@ client that must tolerate one reads the raw string.
       "route": null,
       "httpMethod": null,
       "access": null,
-      "paused": false
+      "paused": false,
+      "topLevelOnly": false,
+      "enabled": true
     }
   ]
 }
@@ -89,9 +93,10 @@ client that must tolerate one reads the raw string.
   so it is something you opt into. Descriptions are visible to every viewer too: put no secrets in them.
 - **The capability report names the kind.** With at least one handler registered,
   `GET …/capabilities` lists `extensions.eventHandler` in `honoured`, after the descriptor's blocks — and
-  `extensions.command` with at least one command.
+  `extensions.command` with at least one command, and `extensions.validate`, `extensions.beforeWrite` and so on with a
+  write hook of that phase.
 - **The policy simulator lists what would run.** `POST …/policy/simulate` answers with `extensions`: the entity's own
-  handlers and the every-entity ones whose `operations` contain the simulated operation. It answers with `commands` too:
+  handlers and write hooks, and the every-entity ones, whose `operations` contain the simulated operation. It answers with `commands` too:
   each command bound to the entity or to none, and whether the simulated caller passes its rule — `null` when the rule
   reads the row, which the simulator does not read.
 
@@ -107,9 +112,19 @@ which run inside the transaction, stay on **On write**:
 - in a host that maps a command, a **Commands** lane: each command bound to a row of the entity, read-only, with its
   route and its access rule.
 
+In a host that registers a write hook, two lanes come first: **Before the transaction** holds the validate hooks,
+marked *top-level writes only* and, when an administrator switched one off, *switched off*; **In the transaction** holds the
+before/after write and delete hooks, each with its phase. Every write hook shows this instance's numbers, such as
+`p95 4 ms · 0 rejections in 24 h`, once it has run; an operator the stats call refuses sees the lanes without them.
+On **On write** and **Rules**, a note under each operation says how many write hooks also run on it — a switched-off
+one does not count — and links here. The policy simulator lists the code that also runs on the simulated operation,
+and an apply's preview lists the code bound to the entities its plan touches. A rename's plan line names only the new
+entity, so the preview does not list the hooks bound to the old name; the apply still refuses to unbind them.
+
 ## An apply cannot drop what a handler reads
 
-A handler binds to the descriptor when the host starts. Alvo then refuses any change that would unbind it:
+A handler binds to the descriptor when the host starts, and so does a write hook. Alvo then refuses any change that would
+unbind either — a write hook by the entity it binds and the fields its condition reads:
 
 | The change | Pointed at |
 |---|---|
@@ -164,4 +179,4 @@ it anyway, naming the extension.
 
 ## Not yet
 
-Write hooks and reads join the Lifecycle tab in later releases, each in its own lane.
+Reads join the Lifecycle tab in a later release, in a lane of their own.

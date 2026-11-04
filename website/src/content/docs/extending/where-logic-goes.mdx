@@ -13,9 +13,9 @@ until it ships, use the row above it or an after-hook `webhook`.
 | A condition or a calculation over one row; access; whether a field is visible | descriptor: `rules`, before-hook, `computed` | Compiled to SQL, shown by the policy simulator, written by an agent on its own. | available |
 | CEL lacks a function (VAT, working hours) | `AddCelFunction` | A pure calculation: synchronous, in the transaction, no network. | available |
 | Integrity across rows: stock, capacity, numbering, overlaps | descriptor: `CHECK`, `sequence`, `exclude` | The database enforces it atomically on every engine; code would be slower and race. | planned |
-| Validation needs an external service (VIES, fraud, billing) | `IValidateWriteHook` | Before the transaction, with network and a timeout. Not atomic, so nothing integrity depends on. | planned |
-| It must happen atomically with the write and depends on other rows | `IBeforeWriteHook` | The same transaction and locks; refuses as 409/422. No network. | planned |
-| Atomic, but needs the id or the result of the write | `IAfterWriteHook` | Audit rows, children, a first sprint. Can still cancel the whole write. | planned |
+| Validation needs an external service (VIES, fraud, billing) | `IValidateWriteHook` | Before the transaction, with network and a timeout. Not atomic, so nothing integrity depends on. | available — [Validate and guard writes](/extending/write-hooks/) |
+| It must happen atomically with the write and depends on other rows | `IBeforeWriteHook` | The same transaction and locks; refuses as 422, 409 or 403. No network. | available — [Validate and guard writes](/extending/write-hooks/) |
+| Atomic, but needs the id or the result of the write | `IAfterWriteHook` | Audit rows, children, a first sprint. Can still cancel the whole write. | available — [Validate and guard writes](/extending/write-hooks/) |
 | A side effect after a successful write: mail, Slack, ERP, payment, cache | `IAlvoEventHandler` | After the commit, retried on failure, never undoes the write. | available — typed (`Entity<T>(e => e.OnCreated(…))`) and untyped (`Entity("name", e => e.OnCreated(…))`) |
 | The effect has several steps (payment → invoice → ERP) | handler + `IAlvoSteps` | Each step runs once; a retry continues where it failed. | planned |
 | The same effect must be visible and configurable in the descriptor | `IAlvoFunction` + `"type": "function"` | An agent wires it with a condition; the code is named and typed. | planned |

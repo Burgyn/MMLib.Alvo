@@ -2,7 +2,7 @@
 title: Transactions in your own code
 description: Make several writes, batches and events one unit that commits together or not at all — as the caller, under the same rules, on SQLite and PostgreSQL alike.
 sidebar:
-  order: 7
+  order: 8
 ---
 
 import { Code } from '@astrojs/starlight/components';
@@ -144,8 +144,13 @@ Once the delegate has returned and the commit is decided, the `COMMIT` runs to i
 token cancels it, and `TransactAsync` reports what the database did. A `COMMIT` that hangs is bounded by the database
 provider's command timeout, not by `Timeout`.
 
-`SuppressHostHooks` (with a system context and a `Reason` only) is for maintenance that must skip host write hooks; it
-takes effect when write hooks arrive.
+`SuppressHostHooks` (with a system context and a `Reason` only) is for maintenance that must skip host write hooks:
+every write of the unit runs without its entity's before- and after-write hooks, while the descriptor's own hooks and
+the events still run. Any other caller is refused. The unit is audited once — a row in the operations log, written in
+the unit's transaction, so a unit that rolls back skipped nothing and leaves none.
+
+A write inside a unit runs its entity's [before- and after-write hooks](/extending/write-hooks/) in that unit, one hop
+deeper; it never runs validate, which belongs before a transaction.
 
 **Keep a unit small.** On PostgreSQL every writing call in a unit is a subtransaction (its savepoint). Past about 64 of
 them in one transaction the server's per-session subtransaction cache overflows, which slows snapshots for every session
@@ -160,4 +165,4 @@ engine: a `%`, `_`, `\` or `[` in `prefix` matches itself. One-argument or `Stri
 
 ## Not yet
 
-Write hooks will receive the same unit as `write.Transaction`; a timer scheduled inside a unit will join it. Each arrives with its feature.
+A timer scheduled inside a unit will join it; it arrives with its feature.
