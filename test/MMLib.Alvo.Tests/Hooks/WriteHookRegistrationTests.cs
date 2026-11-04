@@ -17,6 +17,11 @@ public sealed class TypedGuard : IBeforeWriteHook<HookBooking>
     public ValueTask BeforeWriteAsync(BeforeWrite<HookBooking> write, CancellationToken cancellationToken) => ValueTask.CompletedTask;
 }
 
+public sealed class TypedTidy : IAfterDeleteHook<HookBooking>
+{
+    public ValueTask AfterDeleteAsync(AfterDelete<HookBooking> deletion, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+}
+
 public abstract class AbstractGuard : IBeforeWriteHook
 {
     public abstract ValueTask BeforeWriteAsync(BeforeWrite<AlvoRecord> write, CancellationToken cancellationToken);
@@ -60,8 +65,40 @@ public sealed class WriteHookRegistrationTests
         hook.Typed!.Type.ShouldBe(typeof(HookBooking));
     }
 
+    [Fact]
+    public void A_typed_delegate_s_condition_is_translated_to_cel_when_the_hook_is_registered()
+    {
+        var hook = HandlerCatalog.Registry(alvo => alvo.Entity<HookBooking>(b => b.AfterWrite(
+            "nights-audit", (AfterWrite<HookBooking> _) => ValueTask.CompletedTask, w => w.New.Nights > 14))).WriteHooks.ShouldHaveSingleItem();
+
+        (hook.Stage, hook.When, hook.Invoker.TypeName).ShouldBe((WriteHookStage.AfterWrite, "new.nights > 14", (string?)null));
+    }
+
+    [Fact]
+    public void A_typed_delete_hook_s_condition_reading_the_new_image_is_refused_at_the_call()
+    {
+        Should.Throw<AlvoTranslationException>(() => HandlerCatalog.Registry(alvo => alvo.Entity<HookBooking>(b => b.BeforeDelete(
+            "tidy", (BeforeDelete<HookBooking> _) => ValueTask.CompletedTask, w => w.New.Nights > 1))));
+        Should.Throw<AlvoTranslationException>(() => HandlerCatalog.Registry(alvo => alvo.Entity<HookBooking>(b => b.AfterDelete<TypedTidy>(
+            "tidy", w => w.New.Nights > 1))));
+    }
+
+    [Fact]
+    public async Task A_delegate_parameter_the_context_is_an_instance_of_is_a_service_both_when_checked_and_when_called()
+    {
+        object? seen = null;
+        var hook = HandlerCatalog.Registry(alvo => alvo.Entity("bookings", b => b.BeforeWrite(
+            "loose", (BeforeWrite<AlvoRecord> _, object extra) => { seen = extra; }))).WriteHooks.ShouldHaveSingleItem();
+        await using var services = new ServiceCollection().AddSingleton<object>("from-services").BuildServiceProvider();
+
+        await hook.Invoker.InvokeAsync(services, HookContextTests.Run(AlvoWriteOperation.Create, null, HookContextTests.Unsaved("Ada", 2)), TestContext.Current.CancellationToken);
+
+        (hook.Invoker.Dependencies.ShouldHaveSingleItem().Type, seen).ShouldBe((typeof(object), (object?)"from-services"));
+    }
+
     [Theory]
     [InlineData(AlvoWriteOperation.Create, true, false)]
+    [InlineData(AlvoWriteOperation.Update, true, false)]
     [InlineData(AlvoWriteOperation.Replace, true, false)]
     [InlineData(AlvoWriteOperation.Delete, false, true)]
     public void A_write_stage_runs_on_writes_and_a_delete_stage_on_deletes(AlvoWriteOperation operation, bool write, bool delete)

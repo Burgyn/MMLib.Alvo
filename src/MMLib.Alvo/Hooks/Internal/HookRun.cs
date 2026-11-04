@@ -9,8 +9,8 @@ namespace MMLib.Alvo.Hooks.Internal;
 /// transaction, and a failure its transaction raised into it (budget, self-write) that catching cannot erase.
 /// </summary>
 /// <remarks>
-/// A hook may record from tasks it starts in parallel, so every recording member is safe to call concurrently; the runner reads
-/// <see cref="Sets"/> only once the hook has returned.
+/// A hook may record from tasks it starts in parallel, so every recording member is safe to call concurrently; <see cref="Sets"/>
+/// hands a snapshot taken under the lock, so a <c>Set</c> a hook's stray task makes later never changes what the runner read.
 /// </remarks>
 internal sealed class HookRun(
     string id, WriteInvocation invocation, IReadOnlySet<string> pointable, IAlvoTransaction? transaction, IAlvoSession? data, CancellationToken token)
@@ -33,7 +33,16 @@ internal sealed class HookRun(
 
     internal HookRejections Rejections { get; } = new(id, pointable);
 
-    internal IReadOnlyDictionary<string, object?> Sets => _sets;
+    internal IReadOnlyDictionary<string, object?> Sets
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return new Dictionary<string, object?>(_sets, StringComparer.Ordinal);
+            }
+        }
+    }
 
     internal HookFailedException? Failure => Volatile.Read(ref _failure);
 

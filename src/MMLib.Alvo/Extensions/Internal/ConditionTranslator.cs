@@ -233,7 +233,7 @@ internal sealed partial class ConditionTranslator
 
     private string ImageReason(CelRecordState state) => state == CelRecordState.Old
         ? $"On{_verb} carries no record before the write (old.); register OnUpdated for a condition on the change"
-        : "OnDeleted carries no record after the write (new.)";
+        : "A delete carries no record after the write (new.)";
 
     private CelRecordState? RecordImage(Expression record) =>
         Image(record) ?? (record is MemberExpression { Member.Name: nameof(IAlvoEntity.Record) } wrapped && _shape.IsWrapper ? Image(wrapped.Expression) : null);

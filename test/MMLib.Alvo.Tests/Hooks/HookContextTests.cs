@@ -28,6 +28,30 @@ public sealed class HookAuditedBooking
     public string? UpdatedBy { get; init; }
 }
 
+[AlvoEntity("noted_bookings")]
+public sealed class HookNotedBooking
+{
+    public Guid Id { get; init; }
+
+    public required string Guest { get; init; }
+
+    public string? Notes { get; init; }
+
+    public DateTimeOffset? DeletedAt { get; init; }
+
+    public Guid? TenantId { get; init; }
+}
+
+[AlvoEntity("scoped_bookings")]
+public sealed class HookScopedBooking
+{
+    public Guid Id { get; init; }
+
+    public required string Guest { get; init; }
+
+    public Guid TenantId { get; init; }
+}
+
 /// <summary>What a hook sees and records through its context (spec 2026-10-14 §4.4.1, D2).</summary>
 public sealed class HookContextTests
 {
@@ -62,6 +86,38 @@ public sealed class HookContextTests
         (write.New.Guest, write.New.CreatedAt, write.New.UpdatedBy).ShouldBe(("Ada", (DateTimeOffset?)null, (string?)null));
     }
 
+    [Theory]
+    [InlineData(AlvoWriteOperation.Create, false)]
+    [InlineData(AlvoWriteOperation.Create, true)]
+    [InlineData(AlvoWriteOperation.Replace, false)]
+    [InlineData(AlvoWriteOperation.Replace, true)]
+    public void A_typed_image_without_an_optional_field_deleted_at_or_tenant_id_reads_them_as_null(AlvoWriteOperation operation, bool sentAsNull)
+    {
+        var fields = new Dictionary<string, object?> { ["guest"] = "Ada" };
+        if (sentAsNull)
+        {
+            fields["notes"] = null;
+        }
+
+        var write = new ValidateWrite<HookNotedBooking>(Run(operation, old: null, new AlvoRecord(fields)));
+
+        (write.New.Guest, write.New.Notes, write.New.DeletedAt, write.New.TenantId)
+            .ShouldBe(("Ada", (string?)null, (DateTimeOffset?)null, (Guid?)null));
+    }
+
+    [Fact]
+    public void A_typed_before_write_reads_a_create_without_its_optional_field_as_null() =>
+        new BeforeWrite<HookNotedBooking>(Run(AlvoWriteOperation.Create, old: null, new AlvoRecord(new Dictionary<string, object?> { ["guest"] = "Ada" })))
+            .New.Notes.ShouldBeNull();
+
+    [Fact]
+    public void A_typed_replace_image_without_tenant_id_reads_a_non_nullable_tenant_as_empty()
+    {
+        var @new = new AlvoRecord(new Dictionary<string, object?> { ["id"] = Guid.Parse("00000000-0000-0000-0000-0000000000b1"), ["guest"] = "Ada" });
+
+        new ValidateWrite<HookScopedBooking>(Run(AlvoWriteOperation.Replace, old: null, @new)).New.TenantId.ShouldBe(Guid.Empty);
+    }
+
     [Fact]
     public void A_typed_image_missing_a_field_alvo_does_not_manage_is_still_refused() =>
         Should.Throw<RecordUnreadableException>(() => new ValidateWrite<HookBooking>(
@@ -78,6 +134,18 @@ public sealed class HookContextTests
         new BeforeWrite<AlvoRecord>(run).Set("nights", 5);
 
         run.Sets.ShouldBe(new Dictionary<string, object?> { ["nights"] = 5L, ["guest"] = "Grace" });
+    }
+
+    [Fact]
+    public void Sets_hands_a_snapshot_a_later_set_does_not_change()
+    {
+        var run = Run(AlvoWriteOperation.Update, Booking("Ada", 2), Booking("Ada", 2));
+        run.Set("guest", "Grace");
+
+        var snapshot = run.Sets;
+        run.Set("nights", 3);
+
+        snapshot.Keys.ShouldBe(["guest"]);
     }
 
     [Fact]

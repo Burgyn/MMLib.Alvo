@@ -5,12 +5,12 @@ namespace MMLib.Alvo.Data.Internal;
 /// <summary>Builds a host type from a record through the constructor its shape chose, then its remaining public setters.</summary>
 /// <remarks>
 /// The host's own constructor or setter exception surfaces as itself, not wrapped in a <see cref="TargetInvocationException"/>.
-/// A field missing from the record is refused, unless the caller names it as one that may be absent: that property is left at
-/// its type's default (a hook's image of a row not yet stored has no id and no audit columns).
+/// A field missing from the record is refused, unless the caller's predicate lets its property be absent: that property is left
+/// at its type's default (a hook's image of a row not yet stored lacks its id, its audit columns and every omitted null).
 /// </remarks>
 internal static class RecordMaterializer
 {
-    internal static object Create(RecordShape shape, AlvoRecord record, IReadOnlySet<string>? mayBeAbsent = null)
+    internal static object Create(RecordShape shape, AlvoRecord record, Func<MappedProperty, bool>? mayBeAbsent = null)
     {
         if (shape.Problems.Count > 0)
         {
@@ -44,10 +44,10 @@ internal static class RecordMaterializer
         absent.Contains(property) ? Default(property) : RecordValue.Read(shape, record, property);
 
     /// <summary>The mapped properties whose field the record lacks and the caller lets be absent.</summary>
-    private static MappedProperty[] Absent(RecordShape shape, AlvoRecord record, IReadOnlySet<string>? mayBeAbsent) =>
+    private static MappedProperty[] Absent(RecordShape shape, AlvoRecord record, Func<MappedProperty, bool>? mayBeAbsent) =>
         mayBeAbsent is null
             ? []
-            : [.. shape.Properties.Where(property => mayBeAbsent.Contains(property.Field) && !record.TryGetValue(property.Field, out _))];
+            : [.. shape.Properties.Where(property => mayBeAbsent(property) && !record.TryGetValue(property.Field, out _))];
 
     private static AlvoRecord WithDefaults(AlvoRecord record, IReadOnlyList<MappedProperty> absent) =>
         absent.Aggregate(record, (filled, property) => filled.With(property.Field, Default(property)));

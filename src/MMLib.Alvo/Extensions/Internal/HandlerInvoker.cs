@@ -4,8 +4,6 @@ using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
 
 using System.Reflection;
-using System.Runtime.CompilerServices;
-using System.Runtime.ExceptionServices;
 
 namespace MMLib.Alvo.Extensions.Internal;
 
@@ -76,8 +74,7 @@ internal sealed class HandlerInvoker
     private static void EnsureReturnsTask(Delegate handler)
     {
         var method = handler.Method;
-        var returns = method.ReturnType;
-        if (returns == typeof(void) && method.IsDefined(typeof(AsyncStateMachineAttribute), inherit: false))
+        if (InvokerCalls.IsAsyncVoid(method))
         {
             throw new ArgumentException(
                 $"Handler '{method.Name}' is async void: Alvo could not wait for it or see it fail, so the delivery would "
@@ -85,13 +82,13 @@ internal sealed class HandlerInvoker
                 nameof(handler));
         }
 
-        if (returns == typeof(void) || returns == typeof(Task) || returns == typeof(ValueTask))
+        if (InvokerCalls.ReturnsAwaitableOrNothing(method))
         {
             return;
         }
 
         throw new ArgumentException(
-            $"A handler delegate returns Task, ValueTask or nothing; this one returns {Display(returns)}, whose result Alvo "
+            $"A handler delegate returns Task, ValueTask or nothing; this one returns {Display(method.ReturnType)}, whose result Alvo "
             + "would discard.",
             nameof(handler));
     }
@@ -114,23 +111,11 @@ internal sealed class HandlerInvoker
     private static bool IsMessage(Type type) =>
         type == typeof(AlvoRecord) || (type.IsGenericType && _messageDefinitions.Contains(type.GetGenericTypeDefinition()));
 
-    private static string Display(Type type) =>
-        type.IsGenericType ? $"{type.Name[..type.Name.IndexOf('`', StringComparison.Ordinal)]}<{string.Join(", ", type.GetGenericArguments().Select(Display))}>" : type.Name;
+    private static string Display(Type type) => InvokerCalls.Display(type);
 
-    private static async Task InvokeDelegateAsync(
-        Delegate handler, ParameterInfo[] parameters, IServiceProvider services, object message, AlvoEventContext context, CancellationToken ct)
-    {
-        var arguments = parameters.Select(parameter => Argument(parameter, services, message, context, ct)).ToArray();
-        switch (Invoke(handler, arguments))
-        {
-            case Task task:
-                await task.ConfigureAwait(false);
-                break;
-            case ValueTask valueTask:
-                await valueTask.ConfigureAwait(false);
-                break;
-        }
-    }
+    private static Task InvokeDelegateAsync(
+        Delegate handler, ParameterInfo[] parameters, IServiceProvider services, object message, AlvoEventContext context, CancellationToken ct) =>
+        InvokerCalls.InvokeAsync(handler, [.. parameters.Select(parameter => Argument(parameter, services, message, context, ct))]).AsTask();
 
     private static object? Argument(
         ParameterInfo parameter, IServiceProvider services, object message, AlvoEventContext context, CancellationToken ct)
@@ -142,19 +127,6 @@ internal sealed class HandlerInvoker
             : type.IsInstanceOfType(message) && IsMessage(type) ? message
             : parameter.HasDefaultValue ? services.GetService(type) ?? parameter.DefaultValue
             : services.GetRequiredService(type);
-    }
-
-    private static object? Invoke(Delegate handler, object?[] arguments)
-    {
-        try
-        {
-            return handler.DynamicInvoke(arguments);
-        }
-        catch (TargetInvocationException failure) when (failure.InnerException is not null)
-        {
-            ExceptionDispatchInfo.Capture(failure.InnerException).Throw();
-            throw;
-        }
     }
 
     private static async Task InvokeClassAsync<THandler, TMessage>(
@@ -172,22 +144,8 @@ internal sealed class HandlerInvoker
         {
             if (registered is null)
             {
-                await DisposeAsync(handler).ConfigureAwait(false);
+                await InvokerCalls.DisposeAsync(handler).ConfigureAwait(false);
             }
-        }
-    }
-
-    private static ValueTask DisposeAsync(object handler)
-    {
-        switch (handler)
-        {
-            case IAsyncDisposable asyncDisposable:
-                return asyncDisposable.DisposeAsync();
-            case IDisposable disposable:
-                disposable.Dispose();
-                return ValueTask.CompletedTask;
-            default:
-                return ValueTask.CompletedTask;
         }
     }
 

@@ -1,8 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Extensions.Internal;
 using System.Reflection;
-using System.Runtime.CompilerServices;
-using System.Runtime.ExceptionServices;
 
 namespace MMLib.Alvo.Hooks.Internal;
 
@@ -81,53 +79,29 @@ internal sealed class HookInvoker
         {
             if (registered is null)
             {
-                await DisposeAsync(hook).ConfigureAwait(false);
+                await InvokerCalls.DisposeAsync(hook).ConfigureAwait(false);
             }
         }
     }
 
-    private static async ValueTask InvokeDelegateAsync(Delegate hook, ParameterInfo[] parameters, IServiceProvider services, object context, CancellationToken ct)
-    {
-        var arguments = parameters.Select(parameter => Argument(parameter, services, context, ct)).ToArray();
-        switch (Invoke(hook, arguments))
-        {
-            case Task task:
-                await task.ConfigureAwait(false);
-                break;
-            case ValueTask valueTask:
-                await valueTask.ConfigureAwait(false);
-                break;
-        }
-    }
+    private static ValueTask InvokeDelegateAsync(Delegate hook, ParameterInfo[] parameters, IServiceProvider services, object context, CancellationToken ct) =>
+        InvokerCalls.InvokeAsync(hook, [.. parameters.Select(parameter => Argument(parameter, services, context, ct))]);
 
     private static object? Argument(ParameterInfo parameter, IServiceProvider services, object context, CancellationToken ct) =>
         parameter.ParameterType == typeof(CancellationToken) ? ct
-        : parameter.ParameterType.IsInstanceOfType(context) ? context
+        : IsSupplied(parameter.ParameterType, context.GetType()) ? context
         : parameter.HasDefaultValue ? services.GetService(parameter.ParameterType) ?? parameter.DefaultValue
         : services.GetRequiredService(parameter.ParameterType);
-
-    private static object? Invoke(Delegate hook, object?[] arguments)
-    {
-        try
-        {
-            return hook.DynamicInvoke(arguments);
-        }
-        catch (TargetInvocationException failure) when (failure.InnerException is not null)
-        {
-            ExceptionDispatchInfo.Capture(failure.InnerException).Throw();
-            throw;
-        }
-    }
 
     private static void EnsureReturnsAwaitable(Delegate hook)
     {
         var method = hook.Method;
-        if (method.ReturnType == typeof(void) && method.IsDefined(typeof(AsyncStateMachineAttribute), inherit: false))
+        if (InvokerCalls.IsAsyncVoid(method))
         {
             throw new ArgumentException($"Hook '{method.Name}' is async void: Alvo could not wait for it, so the write would go on before it ends. Make it return ValueTask.", nameof(hook));
         }
 
-        if (method.ReturnType != typeof(void) && method.ReturnType != typeof(Task) && method.ReturnType != typeof(ValueTask))
+        if (!InvokerCalls.ReturnsAwaitableOrNothing(method))
         {
             throw new ArgumentException($"A hook delegate returns ValueTask, Task or nothing; this one returns {method.ReturnType.Name}, whose result Alvo would discard.", nameof(hook));
         }
@@ -139,7 +113,7 @@ internal sealed class HookInvoker
         if (other is not null)
         {
             throw new ArgumentException(
-                $"This registration hands its delegate {Display(context)}; parameter '{other.Name}' asks for {Display(other.ParameterType)}, which it would never be given.",
+                $"This registration hands its delegate {InvokerCalls.Display(context)}; parameter '{other.Name}' asks for {InvokerCalls.Display(other.ParameterType)}, which it would never be given.",
                 nameof(hook));
         }
     }
@@ -150,20 +124,4 @@ internal sealed class HookInvoker
         && (definition == typeof(ValidateWrite<>) || definition == typeof(BeforeWrite<>) || definition == typeof(AfterWrite<>)
             || definition == typeof(BeforeDelete<>) || definition == typeof(AfterDelete<>));
 
-    private static string Display(Type type) =>
-        type.IsGenericType ? $"{type.Name[..type.Name.IndexOf('`', StringComparison.Ordinal)]}<{string.Join(", ", type.GetGenericArguments().Select(Display))}>" : type.Name;
-
-    private static ValueTask DisposeAsync(object hook)
-    {
-        switch (hook)
-        {
-            case IAsyncDisposable asyncDisposable:
-                return asyncDisposable.DisposeAsync();
-            case IDisposable disposable:
-                disposable.Dispose();
-                return ValueTask.CompletedTask;
-            default:
-                return ValueTask.CompletedTask;
-        }
-    }
 }
