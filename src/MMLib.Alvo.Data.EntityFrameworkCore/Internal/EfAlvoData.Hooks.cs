@@ -1,4 +1,6 @@
-﻿using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+﻿using Microsoft.EntityFrameworkCore;
+
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 
@@ -256,6 +258,163 @@ internal sealed partial class EfAlvoData
         {
             return row.At(index);
         }
+    }
+
+    /// <summary>
+    /// Stages 0–2 of a create: the key looked up autocommit (Ruling 14), the authorized candidate (stage 1), and the validate hooks —
+    /// before the replay loop and before any transaction (C14, C15). The candidate's id is left out: it is minted per attempt.
+    /// </summary>
+    private async Task ValidateCreateAsync(
+        string entity, IReadOnlyDictionary<string, object?> values, PolicyDecision decision, AlvoContext context, AlvoIdempotency? idempotency,
+        CancellationToken cancellationToken)
+    {
+        if (!_extensions.Validates(entity, AlvoWriteOperation.Create) || await ReplaysAsync(idempotency, context, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        using var db = _contexts.Create();
+        var now = WriteInstantNow();
+        var (_, candidate) = AuthorizedCandidate(db, entity, values, decision, context, now);
+        await _extensions.ValidateAsync(
+            Validation(entity, AlvoWriteOperation.Create, context, now) with { New = WithoutId(Unmasked(candidate)) }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Stages 0–2 of an update or a replace: the caller's own payload checks first, by the very guard the write runs
+    /// (<c>UpdatableEntity</c> or <c>ReplaceableEntity</c>; Ruling 41 — no hook sees a payload the write will refuse), E9's
+    /// pre-read — autocommit, unmasked, under the operation's own decision (Ruling 13) — and the validate hooks. An update whose
+    /// row the pre-read does not find answers 404 before any hook runs: validate never fails open (Ruling 42). A replace whose
+    /// row it does not find is validated as the create it will be.
+    /// </summary>
+    private async Task ValidateChangeAsync(
+        string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoWriteOperation operation, PolicyDecision decision,
+        Func<AlvoDataContext, EntitySchema> guard, AlvoContext context, AlvoIdempotency? idempotency, CancellationToken cancellationToken)
+    {
+        if (!_extensions.Validates(entity, operation) || await ReplaysAsync(idempotency, context, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        using var db = _contexts.Create();
+        var schema = guard(db);
+        var old = await PreReadAsync(db, schema, decision, context, id, cancellationToken).ConfigureAwait(false);
+        if (old is null && operation == AlvoWriteOperation.Update)
+        {
+            throw new AlvoRecordNotFoundException();
+        }
+
+        await _extensions.ValidateAsync(
+            Validation(entity, operation, context, WriteInstantNow()) with { Old = old, New = ValidatedNew(schema, id, old, values, decision, operation) },
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<AlvoRecord?> PreReadAsync(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context, Guid id, CancellationToken cancellationToken) =>
+        await SingleAsync(db, schema, decision, context, id, lockFor: null, cancellationToken, unmasked: true).ConfigureAwait(false) is { } row
+            ? Unmasked(row)
+            : null;
+
+    /// <summary>The row a change will store: a replace's whole row (its defaults kept off frozen fields when it replaces), or an update merged over the pre-image.</summary>
+    private static AlvoRecord ValidatedNew(
+        EntitySchema schema, Guid id, AlvoRecord? old, IReadOnlyDictionary<string, object?> values, PolicyDecision decision, AlvoWriteOperation operation) =>
+        operation == AlvoWriteOperation.Replace
+            ? new AlvoRecord(WholeRowValues(schema, values, old is null ? null : decision)).With(AlvoManagedColumns.Id, id)
+            : Merge(old!, values);
+
+    /// <summary>
+    /// A batch's stage 2: every row judged — its payload guard, its rule, its row — and every admitted row validated, once,
+    /// before the replay loop and before <c>OneBatchAsync</c> opens its transaction (C16). Every bad row is reported, whichever
+    /// check refused it (Ruling 59); any refusal refuses the batch with no transaction opened.
+    /// </summary>
+    private async Task<IReadOnlyList<AlvoRowRefusal>> ValidateRowsAsync(
+        string entity, AlvoWriteOperation operation, int count, Func<AlvoDataContext, EntitySchema, DateTimeOffset, int, Task<RowValidation>> judge,
+        AlvoContext context, AlvoIdempotency? idempotency, CancellationToken cancellationToken)
+    {
+        if (!_extensions.Validates(entity, operation) || await ReplaysAsync(idempotency, context, cancellationToken).ConfigureAwait(false))
+        {
+            return [];
+        }
+
+        using var db = _contexts.Create();
+        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        var now = WriteInstantNow();
+        var refusals = new List<AlvoRowRefusal>();
+        for (var index = 0; index < count; index++)
+        {
+            var judged = await judge(db, schema, now, index).ConfigureAwait(false);
+            var refused = judged.Refusal ?? await ValidatedRowAsync(judged.Invocation!, index, cancellationToken).ConfigureAwait(false);
+            if (refused is not null)
+            {
+                refusals.Add(refused);
+            }
+        }
+
+        return refusals;
+    }
+
+    /// <summary>One batch row's stage-1 verdict: the invocation its validate hooks see, or the refusal that keeps them from it.</summary>
+    private readonly record struct RowValidation(WriteInvocation? Invocation, AlvoRowRefusal? Refusal);
+
+    private async Task<AlvoRowRefusal?> ValidatedRowAsync(WriteInvocation invocation, int index, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _extensions.ValidateAsync(invocation, cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+        catch (Exception refused) when (refused is IRowRefusal row)
+        {
+            return row.At(index);
+        }
+    }
+
+    /// <summary>One create row: its payload and rule refusal, or its validation.</summary>
+    private Func<AlvoDataContext, EntitySchema, DateTimeOffset, int, Task<RowValidation>> CreateRowValidation(
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, PolicyDecision decision, AlvoContext context) =>
+        (db, schema, now, index) => Task.FromResult(JudgedCandidate(db, schema, decision, context, rows[index], now, index) switch
+        {
+            ({ } candidate, null) => new RowValidation(
+                Validation(schema.Name, AlvoWriteOperation.Create, context, now) with { New = WithoutId(Unmasked(candidate)) }, null),
+            (_, var refusal) => new RowValidation(null, refusal),
+        });
+
+    /// <summary>One update row: its payload refusal, the row unavailable to this caller (fail closed, Ruling 42), or its validation.</summary>
+    private Func<AlvoDataContext, EntitySchema, DateTimeOffset, int, Task<RowValidation>> UpdateRowValidation(
+        IReadOnlyList<AlvoRowPatch> rows, PolicyDecision decision, AlvoContext context, CancellationToken cancellationToken) =>
+        async (db, schema, now, index) =>
+        {
+            if (WritePayloadGuard.PayloadRefusal(rows[index].Values, schema, decision, isUpdate: true) is { } unwritable)
+            {
+                return new RowValidation(null, Forbidden(index, unwritable));
+            }
+
+            return await PreReadAsync(db, schema, decision, context, rows[index].Id, cancellationToken).ConfigureAwait(false) is { } old
+                ? new RowValidation(Validation(schema.Name, AlvoWriteOperation.Update, context, now) with { Old = old, New = Merge(old, rows[index].Values) }, null)
+                : new RowValidation(null, Unavailable(index));
+        };
+
+    private static WriteInvocation Validation(string entity, AlvoWriteOperation operation, AlvoContext context, DateTimeOffset now) =>
+        new() { Entity = entity, Operation = operation, Caller = context, Now = now };
+
+    private static AlvoRecord WithoutId(AlvoRecord record) =>
+        new(record.Values.Where(entry => entry.Key != AlvoManagedColumns.Id).ToDictionary(StringComparer.Ordinal));
+
+    /// <summary>Stage 0: whether the key is already recorded for this caller — read autocommit, before any transaction (Ruling 14).</summary>
+    private async Task<bool> ReplaysAsync(AlvoIdempotency? idempotency, AlvoContext context, CancellationToken cancellationToken)
+    {
+        if (idempotency is not { } token)
+        {
+            return false;
+        }
+
+        using var db = _contexts.Create();
+        await EnsureIdempotencyTableAsync(db, cancellationToken).ConfigureAwait(false);
+        var connection = db.Database.GetDbConnection();
+        await RelationalSqlBatch.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
+
+        return await IdempotencyTable.FindAsync(connection, transaction: null, _idempotencyTable, token.Key, AlvoIdempotency.IdentityOf(context), cancellationToken)
+            .ConfigureAwait(false) is not null;
     }
 
     /// <summary>The idempotency table, ensured before a keyed write opens its own unit — no DDL ever runs inside one.</summary>

@@ -230,6 +230,7 @@ public class ChangeTrackerReachTests
         "CommandLedgerTable.cs",
         "DeliveryTable.cs",
         "EfAlvoData.cs",
+        "EfAlvoData.Hooks.cs",
         "EfAlvoData.Units.cs",
         "EfCoreDeliveryStore.cs",
         "EfCoreDescriptorVersionStore.cs",

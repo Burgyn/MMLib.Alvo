@@ -318,6 +318,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         _depthLimit.EnsureWithin(context);
 
         var decision = Resolve(entity, DataOperation.Create, context);
+        await ValidateCreateAsync(entity, values, decision, context, idempotency, cancellationToken);
 
         return idempotency is { } token
             ? await ReplayableCreateAsync(entity, values, decision, context, token, cancellationToken)
@@ -1169,6 +1170,9 @@ internal sealed partial class EfAlvoData : IAlvoData
         _depthLimit.EnsureWithin(context);
 
         var decision = Resolve(entity, DataOperation.Update, context);
+        await ValidateChangeAsync(
+            entity, id, values, AlvoWriteOperation.Update, decision, db => UpdatableEntity(db, entity, values, decision, precondition),
+            context, idempotency, cancellationToken);
 
         if (idempotency is { } token)
         {
@@ -1353,6 +1357,9 @@ internal sealed partial class EfAlvoData : IAlvoData
 
         var branches = new ReplaceDecisions(
             Resolve(entity, DataOperation.Create, context), Resolve(entity, DataOperation.Update, context));
+        await ValidateChangeAsync(
+            entity, id, values, AlvoWriteOperation.Replace, branches.Update, db => ReplaceableEntity(db, entity, values, branches, precondition),
+            context, idempotency, cancellationToken);
 
         if (idempotency is not { } token)
         {
@@ -2418,15 +2425,21 @@ internal sealed partial class EfAlvoData : IAlvoData
     private const string UnknownEntityMessage = AlvoDataContext.UnmappedEntityMessage;
 
     /// <inheritdoc/>
-    public Task<AlvoBatchResult> CreateManyAsync(
+    public async Task<AlvoBatchResult> CreateManyAsync(
         string entity, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, AlvoContext context,
         AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(rows);
         AlvoFlow.RefuseInsideUnit("IAlvoData.CreateManyAsync", keyed: idempotency is not null);
         var decision = BatchDecision(entity, DataOperation.Create, rows.Count, context, idempotency);
+        var refused = await ValidateRowsAsync(
+            entity, AlvoWriteOperation.Create, rows.Count, CreateRowValidation(rows, decision, context), context, idempotency, cancellationToken);
+        if (refused.Count > 0)
+        {
+            return AlvoBatchResult.Refused(BatchWrite.InRequestOrder([.. refused]));
+        }
 
-        return BatchAsync(
+        return await BatchAsync(
             entity,
             AlvoWriteOperation.Create,
             context,
@@ -2439,15 +2452,21 @@ internal sealed partial class EfAlvoData : IAlvoData
     }
 
     /// <inheritdoc/>
-    public Task<AlvoBatchResult> UpdateManyAsync(
+    public async Task<AlvoBatchResult> UpdateManyAsync(
         string entity, IReadOnlyList<AlvoRowPatch> rows, AlvoContext context,
         AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(rows);
         AlvoFlow.RefuseInsideUnit("IAlvoData.UpdateManyAsync", keyed: idempotency is not null);
         var decision = BatchDecision(entity, DataOperation.Update, rows.Count, context, idempotency);
+        var refused = await ValidateRowsAsync(
+            entity, AlvoWriteOperation.Update, rows.Count, UpdateRowValidation(rows, decision, context, cancellationToken), context, idempotency, cancellationToken);
+        if (refused.Count > 0)
+        {
+            return AlvoBatchResult.Refused(BatchWrite.InRequestOrder([.. refused]));
+        }
 
-        return BatchAsync(
+        return await BatchAsync(
             entity,
             AlvoWriteOperation.Update,
             context,

@@ -260,6 +260,98 @@ public sealed class HostHookStageTests
         (await OutboxAsync(world)).ShouldBe(0L);
     }
 
+    [Fact]
+    public async Task Validate_runs_before_any_transaction_with_the_authorized_candidate_and_no_id()
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.Validating.Add((Note, AlvoWriteOperation.Create));
+        await using var world = await StartAsync(hooks);
+        world.Statements.Clear();
+
+        await world.Data.CreateAsync(Note, WritePathFixture.CreatePayload("checked"), world.Caller, cancellationToken: Ct);
+
+        var (stage, invocation, unitOnFlow, autocommit) = hooks.Calls.ShouldHaveSingleItem();
+        (stage, unitOnFlow, autocommit, invocation.Transaction).ShouldBe(("validate", false, (bool?)true, (IAlvoTransaction?)null));
+        invocation.New!["title"].ShouldBe("checked");
+        invocation.New.Values.ContainsKey("id").ShouldBeFalse("the row id is minted per attempt");
+    }
+
+    [Fact]
+    public async Task Validate_of_an_update_sees_the_row_read_before_the_transaction_and_a_row_the_rule_does_not_admit_is_404_before_any_hook()
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.Validating.Add((Note, AlvoWriteOperation.Update));
+        await using var world = await StartAsync(hooks, WritePathFixture.Descriptor(update: "title != 'locked'"));
+        var open = await world.SeedAsync("open");
+        var locked = await world.SeedAsync("locked");
+
+        await world.Data.UpdateAsync(Note, open, new Dictionary<string, object?> { ["title"] = "moved" }, world.Caller, cancellationToken: Ct);
+        await Should.ThrowAsync<AlvoRecordNotFoundException>(() => world.Data.UpdateAsync(Note, locked, new Dictionary<string, object?> { ["title"] = "x" }, world.Caller, cancellationToken: Ct));
+
+        var validated = hooks.Calls.ShouldHaveSingleItem().Invocation;
+        (validated.Old!["title"], validated.New!["title"]).ShouldBe(("open", "moved"));
+    }
+
+    [Fact]
+    public async Task A_validate_hook_never_sees_an_update_the_payload_guard_refuses()
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.Validating.Add((Note, AlvoWriteOperation.Update));
+        await using var world = await StartAsync(hooks);
+        var id = await world.SeedAsync("kept");
+
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => world.Data.UpdateAsync(
+            Note, id, new Dictionary<string, object?> { ["created_by"] = "someone else" }, world.Caller, cancellationToken: Ct));
+
+        hooks.Calls.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_batch_reports_every_bad_row_whichever_check_refused_it()
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.Validating.Add((Note, AlvoWriteOperation.Update));
+        await using var world = await StartAsync(hooks);
+        var kept = await world.SeedAsync("kept");
+
+        var result = await world.Data.UpdateManyAsync(
+            Note,
+            [new AlvoRowPatch(kept, new Dictionary<string, object?> { ["title"] = "fine" }), new AlvoRowPatch(kept, new Dictionary<string, object?> { ["created_by"] = "x" }), new AlvoRowPatch(Guid.NewGuid(), new Dictionary<string, object?> { ["title"] = "gone" })],
+            world.Caller,
+            cancellationToken: Ct);
+
+        result.Refusals.Select(refusal => refusal.Index).ShouldBe([1, 2]);
+        hooks.Calls.Count.ShouldBe(1, "only the admitted row reached the validate hook");
+    }
+
+    [Fact]
+    public async Task A_replayed_key_skips_validate()
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.Validating.Add((Note, AlvoWriteOperation.Create));
+        await using var world = await StartAsync(hooks);
+        var key = new AlvoIdempotency("create-1", "fingerprint-1");
+
+        await world.Data.CreateAsync(Note, WritePathFixture.CreatePayload("once"), world.Caller, key, Ct);
+        await world.Data.CreateAsync(Note, WritePathFixture.CreatePayload("once"), world.Caller, key, Ct);
+
+        hooks.Calls.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_batch_validates_every_row_before_its_transaction_and_a_refused_row_refuses_the_batch()
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.Validating.Add((Note, AlvoWriteOperation.Create));
+        await using var world = await StartAsync(hooks);
+        world.Statements.Clear();
+
+        var result = await world.Data.CreateManyAsync(Note, [WritePathFixture.CreatePayload("a"), WritePathFixture.CreatePayload("b")], world.Caller, cancellationToken: Ct);
+
+        result.Succeeded.ShouldBeTrue();
+        hooks.Calls.Select(call => (call.Stage, call.UnitOnFlow, call.Autocommit)).ShouldBe([("validate", false, (bool?)true), ("validate", false, (bool?)true)]);
+    }
+
     private const string ReadOnlyTitle = "Field 'title' is read-only and cannot be written.";
 
     private static Dictionary<string, object?> UntitledPayload()

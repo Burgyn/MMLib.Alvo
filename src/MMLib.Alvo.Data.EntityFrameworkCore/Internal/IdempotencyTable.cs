@@ -190,16 +190,19 @@ internal static class IdempotencyTable
         }
     }
 
-    /// <summary>Reads the record for one key in one scope, inside the caller's transaction.</summary>
+    /// <summary>Reads the record for one key in one scope, inside the caller's transaction or autocommit.</summary>
     /// <param name="connection">The write transaction's own connection.</param>
-    /// <param name="transaction">The in-flight write transaction, so the read cannot see an uncommitted rival.</param>
+    /// <param name="transaction">
+    /// The in-flight write transaction, so the read cannot see an uncommitted rival; or <see langword="null"/> for the validate
+    /// stage's autocommit pre-lookup, which only decides whether validate runs and never answers as a replay.
+    /// </param>
     /// <param name="tableName">The table name.</param>
     /// <param name="key">The caller's key, bound as a value.</param>
     /// <param name="scope">The key's scope, from <see cref="AlvoIdempotency.IdentityOf"/>.</param>
     /// <param name="ct">A token to cancel the operation.</param>
     internal static async Task<IdempotencyRecord?> FindAsync(
         DbConnection connection,
-        DbTransaction transaction,
+        DbTransaction? transaction,
         string tableName,
         string key,
         string scope,
@@ -216,11 +219,11 @@ internal static class IdempotencyTable
     /// stores something other than a row list reads its own value back verbatim.
     /// </summary>
     /// <remarks>
-    /// <b>The transaction is optional here and required on <see cref="FindAsync"/>, and the difference is the
-    /// caller's.</b> The data path reads inside its own write transaction so the check and the insert are
-    /// atomic; the management path has no transaction to enlist in, because the writer that appends the
-    /// revision owns one and exposes no seam. One statement, two callers, rather than a second copy of the
-    /// SQL that would drift the day a column moved.
+    /// <b>The transaction is optional here, and whether one is passed is the caller's call.</b> The data path
+    /// reads inside its own write transaction so the check and the insert are atomic; the management path
+    /// has no transaction to enlist in, because the writer that appends the revision owns one and exposes no
+    /// seam. One statement, several callers, rather than a second copy of the SQL that would drift the day a
+    /// column moved.
     /// </remarks>
     /// <param name="connection">An open connection.</param>
     /// <param name="transaction">The caller's transaction, or <see langword="null"/> to read outside one.</param>
