@@ -15,9 +15,9 @@ public sealed class PausedCatalogTests
         var management = world.Services.GetRequiredService<IAlvoManagement>();
 
         await world.Service.SetPausedAsync(OperationsTestWorld.Project, OperationsTestWorld.Handler, paused: true, reason: null, ct);
-        (await management.GetExtensionsAsync(OperationsTestWorld.Project, ct)).Items.ShouldHaveSingleItem().Paused.ShouldBeTrue();
+        (await management.GetExtensionsAsync(OperationsTestWorld.Project, ct)).Items.Single(item => item.Id == OperationsTestWorld.Handler).Paused.ShouldBeTrue();
 
         await world.Service.SetPausedAsync(OperationsTestWorld.Project, OperationsTestWorld.Handler, paused: false, reason: null, ct);
-        (await management.GetExtensionsAsync(OperationsTestWorld.Project, ct)).Items.ShouldHaveSingleItem().Paused.ShouldBeFalse();
+        (await management.GetExtensionsAsync(OperationsTestWorld.Project, ct)).Items.Single(item => item.Id == OperationsTestWorld.Handler).Paused.ShouldBeFalse();
     }
 }

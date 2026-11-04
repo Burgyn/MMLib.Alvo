@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Events;
+using MMLib.Alvo.Extensions.Internal;
 
 namespace MMLib.Alvo.Management.Internal;
 
@@ -15,6 +16,8 @@ internal sealed partial class AlvoOperationsService
     private const string RedeliverOperation = "redeliver";
     private const string PauseOperation = "pause";
     private const string ResumeOperation = "resume";
+    private const string DisableOperation = "disable-extension";
+    private const string EnableOperation = "enable-extension";
     private const string ChainDepthExceeded = "chain-depth-exceeded";
 
     public async Task<ManagementDelivery> RedeliverAsync(string project, Guid delivery, string? reason, CancellationToken ct = default)
@@ -45,16 +48,41 @@ internal sealed partial class AlvoOperationsService
         return handler with { Paused = paused };
     }
 
-    public Task<ManagementExtension> SetEnabledAsync(string project, string extension, bool enabled, string? reason, CancellationToken ct = default)
+    public async Task<ManagementExtension> SetEnabledAsync(string project, string extension, bool enabled, string? reason, CancellationToken ct = default)
     {
         gate.Admit(ManagementOperation.SetExtensionEnabled, project);
         OperationReasons.Ensure(reason);
-        ct.ThrowIfCancellationRequested();
         var found = Registered(extension);
+        EnsureSwitchable(found, project, enabled);
+        var entry = Entry(enabled ? EnableOperation : DisableOperation, found.Id, reason);
+        if (await Store.SetDisabledAsync(found.Id, !enabled, entry, ct).ConfigureAwait(false))
+        {
+            OperationsAudit.Write(logger, entry with { Affected = 1 });
+        }
 
-        throw new ManagementConflictException(
-            $"'{found.Id}' is an event handler, and only a validate hook can be switched {(enabled ? "on" : "off")}. To stop a handler for a while, "
-            + $"pause it instead: PUT {{m}}/projects/{project}/subscribers/{found.Id}/paused with {{\"paused\": true}}.");
+        return found with { Enabled = enabled };
+    }
+
+    /// <summary>Only a validate hook is switched (Rulings 5, 51): a handler is paused instead, and an in-transaction hook guards integrity.</summary>
+    private static void EnsureSwitchable(ManagementExtension found, string project, bool enabled)
+    {
+        if (found.Kind == AlvoExtensionKind.Validate)
+        {
+            return;
+        }
+
+        var only = $"only a validate hook can be switched {(enabled ? "on" : "off")}";
+        throw new ManagementConflictException(found.Kind switch
+        {
+            AlvoExtensionKind.EventHandler =>
+                $"'{found.Id}' is an event handler, and {only}. To stop a handler for a while, "
+                + $"pause it instead: PUT {{m}}/projects/{project}/subscribers/{found.Id}/paused with {{\"paused\": true}}.",
+            AlvoExtensionKind.Command =>
+                $"'{found.Id}' is a command, and {only}: a command is changed in the host's code and redeployed.",
+            _ =>
+                $"'{found.Id}' is a {ExtensionCatalog.WireName(found.Kind)} extension, and {only}: a hook inside the write's transaction "
+                + "guards the data's integrity, so it is changed in the host's code and redeployed.",
+        });
     }
 
     public Task<ManagementDelivery> RunScheduleAsync(string project, string schedule, CancellationToken ct = default)

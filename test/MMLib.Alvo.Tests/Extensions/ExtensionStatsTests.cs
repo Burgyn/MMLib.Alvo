@@ -2,9 +2,12 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
 
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Hooks;
+using MMLib.Alvo.Hooks.Internal;
 
 using static MMLib.Alvo.Tests.Extensions.HandlerCatalog;
 
@@ -80,6 +83,22 @@ public sealed class ExtensionStatsTests
         var item = stats.Report([_id]).Items[0];
         item.Invocations.ShouldBe(1);
         item.Failures.ShouldBe(1);
+    }
+
+    [Fact]
+    public void A_write_hook_s_runs_rejections_and_failures_are_counted_from_its_meter()
+    {
+        var id = $"hook-{Guid.NewGuid():N}"[..20];
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        using var stats = new ExtensionStats(clock, HandlerCatalog.Registry(alvo => alvo.Entity("tickets", t => t.BeforeWrite(id, (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask))));
+
+        HookTelemetry.Finish(null, id, HookTelemetry.Succeeded, TimeSpan.FromMilliseconds(4), 0);
+        HookTelemetry.Finish(null, id, HookTelemetry.Rejected, TimeSpan.FromMilliseconds(6), 0);
+        HookTelemetry.Finish(null, id, HookTelemetry.Failed, TimeSpan.FromMilliseconds(8), 0);
+
+        var stat = stats.Report([id]).Items.ShouldHaveSingleItem();
+        (stat.Invocations, stat.Rejections, stat.Failures).ShouldBe((3L, 1L, 1L));
+        stat.P95.ShouldNotBeNull();
     }
 
     [Fact]

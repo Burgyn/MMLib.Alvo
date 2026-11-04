@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Events;
+﻿using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Events;
 using MMLib.Alvo.Management;
 
 namespace MMLib.Alvo.Tests.Management;
@@ -95,6 +96,45 @@ public sealed class AlvoOperationsWritesTests
             .Message.ShouldContain($"subscribers/{Handler}/paused");
         world.Audit.Lines.ShouldBeEmpty();
     }
+
+    [Fact]
+    public async Task Switching_a_validate_hook_off_writes_one_log_row_and_one_audit_line_and_answers_it_disabled()
+    {
+        using var world = new OperationsTestWorld();
+
+        var off = await world.Service.SetEnabledAsync(Project, OperationsTestWorld.Validator, enabled: false, "VIES is down", Ct);
+        var again = await world.Service.SetEnabledAsync(Project, OperationsTestWorld.Validator, enabled: false, "VIES is down", Ct);
+
+        (off.Enabled, again.Enabled, off.Kind).ShouldBe((false, false, AlvoExtensionKind.Validate));
+        world.Store.Operations.ShouldHaveSingleItem().Operation.ShouldBe("disable-extension");
+        world.Audit.Lines.ShouldHaveSingleItem().ShouldContain("'disable-extension' on 'vat-check'");
+        (await Catalog(world)).Items.Single(item => item.Id == OperationsTestWorld.Validator).Enabled.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Switching_a_before_write_hook_off_is_refused_409_and_changes_nothing()
+    {
+        using var world = new OperationsTestWorld();
+
+        (await Should.ThrowAsync<ManagementConflictException>(() => world.Service.SetEnabledAsync(Project, OperationsTestWorld.Guard, enabled: false, "too slow", Ct)))
+            .Message.ShouldContain("only a validate hook");
+        world.Store.Operations.ShouldBeEmpty();
+        world.Audit.Lines.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Switching_it_on_again_is_audited_as_enable()
+    {
+        using var world = new OperationsTestWorld();
+        await world.Service.SetEnabledAsync(Project, OperationsTestWorld.Validator, enabled: false, null, Ct);
+
+        (await world.Service.SetEnabledAsync(Project, OperationsTestWorld.Validator, enabled: true, null, Ct)).Enabled.ShouldBeTrue();
+
+        world.Store.Operations.Select(operation => operation.Operation).ShouldBe(["disable-extension", "enable-extension"]);
+    }
+
+    private static Task<ManagementExtensionCatalog> Catalog(OperationsTestWorld world) =>
+        world.Services.GetRequiredService<IAlvoManagement>().GetExtensionsAsync(Project, Ct);
 
     [Fact]
     public async Task Running_a_schedule_this_host_lacks_is_not_found()
