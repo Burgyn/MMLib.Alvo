@@ -85,10 +85,20 @@ public sealed class RepairDeskOperationsTests
     private sealed class Supplier : IPartsSupplier
     {
         private readonly List<string> _ordered = [];
+        private readonly Lock _gate = new();
 
         public bool Down { get; set; }
 
-        public IReadOnlyList<string> Ordered => _ordered;
+        public IReadOnlyList<string> Ordered
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return [.. _ordered];
+                }
+            }
+        }
 
         public Task OrderAsync(string part, CancellationToken cancellationToken)
         {
@@ -97,7 +107,11 @@ public sealed class RepairDeskOperationsTests
                 throw new HttpRequestException("The parts supplier did not answer.");
             }
 
-            _ordered.Add(part);
+            lock (_gate)
+            {
+                _ordered.Add(part);
+            }
+
             return Task.CompletedTask;
         }
     }
