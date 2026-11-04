@@ -24,9 +24,9 @@ public class FrameworkTableReservationTests
     }
 
     [Fact]
-    public void The_reserved_set_is_the_eight_bookkeeping_tables_plus_the_seven_identity_ones()
+    public void The_reserved_set_is_the_ten_bookkeeping_tables_plus_the_seven_identity_ones()
     {
-        AlvoFrameworkTables.NamesFor("alvo").Count.ShouldBe(15);
+        AlvoFrameworkTables.NamesFor("alvo").Count.ShouldBe(17);
         AlvoFrameworkTables.IdentitySuffixes.Count.ShouldBe(7);
     }
 
@@ -39,6 +39,15 @@ public class FrameworkTableReservationTests
         names.ShouldContain("alvo_delivery_attempts");
         names.ShouldContain("alvo_subscriber_controls");
         names.ShouldContain("alvo_operations_log");
+    }
+
+    [Fact]
+    public void The_command_and_inbound_webhook_ledgers_are_reserved()
+    {
+        var names = AlvoFrameworkTables.NamesFor("alvo");
+
+        names.ShouldContain("alvo_command_requests");
+        names.ShouldContain("alvo_inbound_webhooks");
     }
 
     [Fact]

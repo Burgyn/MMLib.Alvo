@@ -164,6 +164,7 @@ public class AdminWorld : IAsyncLifetime
         Configure(new AlvoServices(builder.Services));
 
         _app = await AlvoHost.BuildAsync(builder).ConfigureAwait(false);
+        Map(_app);
         await _app.StartAsync().ConfigureAwait(false);
 
         _playwright = await Playwright.CreateAsync().ConfigureAwait(false);
@@ -193,6 +194,13 @@ public class AdminWorld : IAsyncLifetime
     /// <remarks>Empty by default, so the ordinary suite runs exactly what the container runs, which knows built-ins only.</remarks>
     /// <param name="alvo">The shipped host's Alvo builder.</param>
     protected virtual void Configure(IAlvoBuilder alvo)
+    {
+    }
+
+    /// <summary>Maps this world's own endpoints — a host's commands — on the shipped host before it starts.</summary>
+    /// <remarks>Empty by default, so the ordinary suite runs exactly what the container runs, which maps no command.</remarks>
+    /// <param name="app">The shipped host, built and not yet started.</param>
+    protected virtual void Map(WebApplication app)
     {
     }
 

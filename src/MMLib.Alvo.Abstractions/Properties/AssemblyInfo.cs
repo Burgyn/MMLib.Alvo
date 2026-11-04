@@ -45,6 +45,11 @@
 [assembly: InternalsVisibleTo("MMLib.Alvo.Data.Sqlite.Tests")]
 [assembly: InternalsVisibleTo("MMLib.Alvo.Data.EntityFrameworkCore.Tests")]
 
+// The command and inbound webhook ledgers (HX-08): ICommandLedger, IInboundWebhookLedger, IAlvoCommandUnit and their
+// records are internal seams the EF driver implements; their contract facts (test/_shared/ef/LedgerFacts.cs) run on both
+// engines, so PostgreSQL's integration suite names them as SQLite's suite above already can.
+[assembly: InternalsVisibleTo("MMLib.Alvo.Data.PostgreSql.Tests.Integration")]
+
 // The assistant's turn trace (D45): AssistantRequest.IncludeTrace and AssistantUpdate.TurnTraced are internal, a
 // seam only this family uses. MMLib.Alvo.Ai produces the trace and MMLib.Alvo.Admin, its one consumer, asks for it
 // and shows it; the Ai suite measures it, and the dashboard's end-to-end suite's scripted assistant emits one.

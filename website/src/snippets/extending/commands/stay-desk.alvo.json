@@ -1,0 +1,34 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "stay-desk",
+  "auth": { "roles": ["guest", "staff"] },
+  "entities": {
+    "stays": {
+      "fields": {
+        "guest_id": { "type": "uuid", "required": true },
+        "room": { "type": "string", "required": true, "maxLength": 20 },
+        "status": { "type": "enum", "required": true, "values": ["requested", "confirmed", "cancelled"] },
+        "nights": { "type": "integer", "required": true }
+      },
+      "rules": {
+        "list": "'staff' in @user.roles || guest_id == @user.id",
+        "get": "'staff' in @user.roles || guest_id == @user.id",
+        "create": "'staff' in @user.roles || guest_id == @user.id",
+        "update": "'staff' in @user.roles || 'admin' in @user.roles"
+      }
+    },
+    "payments": {
+      "fields": {
+        "stay_id": { "type": "uuid", "required": true },
+        "reference": { "type": "string", "required": true, "unique": true, "maxLength": 80 },
+        "amount": { "type": "decimal", "required": true, "precision": 10, "scale": 2 }
+      },
+      "rules": {
+        "list": "'staff' in @user.roles",
+        "get": "'staff' in @user.roles",
+        "create": "'staff' in @user.roles || 'admin' in @user.roles"
+      }
+    }
+  }
+}

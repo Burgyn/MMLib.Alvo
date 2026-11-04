@@ -14,8 +14,8 @@ public sealed class ExtensionCatalogScenarios(ExtensionWorld world) : IClassFixt
 
         var orders = session.Page.GetByTestId("entity-extensions-work_orders");
         await orders.WaitForAsync();
-        (await orders.InnerTextAsync()).Trim().ShouldBe("⟨/⟩ 3");
-        (await orders.GetAttributeAsync("aria-label")).ShouldBe("3 extensions from code run on this entity");
+        (await orders.InnerTextAsync()).Trim().ShouldBe("⟨/⟩ 4");
+        (await orders.GetAttributeAsync("aria-label")).ShouldBe("4 extensions from code run on this entity");
         (await session.Page.GetByTestId("entity-extensions-regions").InnerTextAsync()).Trim()
             .ShouldBe("⟨/⟩ 1", "an every-entity handler runs on regions too");
         session.AssertConsoleClean();

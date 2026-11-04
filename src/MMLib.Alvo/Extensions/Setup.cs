@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Commands.Internal;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Extensions.Internal;
 
@@ -30,7 +31,8 @@ internal static class ExtensionsSetup
             ServiceDescriptor.Singleton<IValidateOptions<AlvoDeliveryOptions>, AlvoDeliveryOptionsConfiguration>(Deliveries));
         services.TryAddSingleton(DepthLimit);
         services.TryAddSingleton<IAlvoSessions, AlvoSessions>();
-        services.TryAddSingleton(provider => new ExtensionRegistry(provider.GetServices<ExtensionRegistration>()));
+        services.TryAddSingleton(provider => new ExtensionRegistry(
+            provider.GetServices<ExtensionRegistration>(), provider.GetRequiredService<CommandRegistry>()));
         services.TryAddSingleton<ExtensionBinder>();
         services.TryAddSingleton<ExtensionCatalog>();
         services.TryAddSingleton<ExtensionApplyGuard>();

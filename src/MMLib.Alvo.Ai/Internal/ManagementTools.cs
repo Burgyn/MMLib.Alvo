@@ -125,8 +125,9 @@ internal sealed class ManagementTools
             AIFunctionFactory.Create(
                 GetExtensionsAsync,
                 "get_extensions",
-                "The host code (extensions) this host registers — event handlers with the entities, operations and condition "
-                + "each binds — as read-only metadata. An entry names entities by name, or `*` for every entity. Descriptions "
+                "The host code (extensions) this host registers, as read-only metadata: event handlers with the entities, operations "
+                + "and condition each binds, and commands with their route, the entity whose row they act on and their access rule "
+                + "(CEL over @user, @tenant and that row). An entry names entities by name, or `*` for every entity. Descriptions "
                 + "are host-authored text, trusted as the host is. When get_descriptor's hostExtensions names an entity, read it before "
                 + "proposing an after-hook there: name an extension that already does what is asked instead of adding one. A "
                 + "field or entity an extension reads cannot be removed or left out of event images; the dry run refuses it, "

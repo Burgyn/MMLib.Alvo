@@ -105,6 +105,45 @@ public sealed class ExtensionCatalogTests
             })
         .AddRetiredExtension("old-sync", AlvoRetirement.Discard));
 
+    [Fact]
+    public void A_mapped_command_is_listed_after_the_handlers_with_its_route_method_and_access()
+    {
+        var services = new ServiceCollection();
+        services.AddAlvo(alvo => alvo.Entity("tickets", tickets => tickets.OnCreated("on-ticket", OnCreated)));
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<MMLib.Alvo.Commands.Internal.CommandRegistry>().Map(
+            "resolve_ticket", "/commands/tickets/{id:guid}/resolve", "tickets", MMLib.Alvo.Commands.Internal.CommandAccess.Of("'staff' in @user.roles"));
+
+        var items = Catalog(provider.GetRequiredService<ExtensionRegistry>()).Items;
+
+        items.Select(item => item.Id).ShouldBe(["on-ticket", "resolve_ticket"]);
+        var command = items[1];
+        command.Kind.ShouldBe(AlvoExtensionKind.Command);
+        command.Stage.ShouldBe(AlvoExtensionStage.Http);
+        command.Entities.ShouldBe(["tickets"]);
+        command.Operations.ShouldBeEmpty();
+        command.Route.ShouldBe("/commands/tickets/{id:guid}/resolve");
+        command.HttpMethod.ShouldBe("POST");
+        command.Access.ShouldBe("'staff' in @user.roles");
+    }
+
+    [Fact]
+    public void An_internal_command_runs_before_any_transaction_and_has_no_route()
+    {
+        var catalog = Catalog(Registry(alvo => alvo.AddCommand<Escalate>("escalate_ticket", "true")));
+        var item = catalog.Items.ShouldHaveSingleItem();
+
+        item.Stage.ShouldBe(AlvoExtensionStage.PreTransaction);
+        item.Route.ShouldBeNull();
+        item.HttpMethod.ShouldBeNull();
+        catalog.HonouredKinds.ShouldBe(["extensions.command"]);
+    }
+
+    private sealed class Escalate : MMLib.Alvo.Commands.IAlvoCommand<Guid>
+    {
+        public Task HandleAsync(Guid input, MMLib.Alvo.Commands.AlvoCommandContext context, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
     private static ExtensionCatalog Catalog(ExtensionRegistry registry, bool exposeTypeNames = false) =>
         new(registry, Options.Create(new AlvoExtensionOptions { ExposeTypeNames = exposeTypeNames }));
 

@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Rules;
+using System.Data.Common;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
@@ -270,6 +271,63 @@ internal sealed partial class EfAlvoData
         return unit.RunAsync(token => PublishedAsync(unit, type, subject, data, context, token), cancellationToken);
     }
 
+    /// <summary>One framework event (a command's completion) written into <paramref name="unit"/>'s transaction.</summary>
+    internal Task PublishFrameworkInUnitAsync(WriteUnit unit, AlvoEvent @event, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(@event);
+        return unit.RunAsync(
+            token => InUnitAsync(
+                unit, (connection, transaction, ct) => OutboxTable.InsertAsync(connection, transaction, _outboxTable, @event, ct), token),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// A command key's commit mark written into <paramref name="unit"/>'s transaction, only while the run holds its claim;
+    /// otherwise the unit is poisoned and <see cref="CommandClaimLostException"/> thrown (Ruling 36).
+    /// </summary>
+    internal Task CommitCommandInUnitAsync(WriteUnit unit, CommandKey key, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        CommandLedgerTable.Claimed(key);
+        return unit.RunAsync(
+            token => InUnitAsync(
+                unit, (connection, transaction, ct) => CommittedOrLostAsync(unit, connection, transaction, key, now, ct), token),
+            cancellationToken);
+    }
+
+    /// <summary>Marks <paramref name="key"/> committed, or poisons the unit when its claim was taken over.</summary>
+    /// <remarks>
+    /// A lost claim <b>poisons</b> the unit: even a caller that caught the exception cannot commit the run's writes beside
+    /// the run that took the key over.
+    /// </remarks>
+    private async Task CommittedOrLostAsync(
+        WriteUnit unit, DbConnection connection, DbTransaction transaction, CommandKey key, DateTimeOffset now, CancellationToken ct)
+    {
+        if (await CommandLedgerTable.CommitAsync(connection, transaction, _commandTable, key, now, ct).ConfigureAwait(false) == 1)
+        {
+            return;
+        }
+
+        var lost = new CommandClaimLostException();
+        unit.Poison(lost);
+        throw lost;
+    }
+
+    /// <summary>
+    /// One raw write inside <paramref name="unit"/>, under a savepoint of its own — the shape every outbox insert of a unit
+    /// takes.
+    /// </summary>
+    private async Task<bool> InUnitAsync(
+        WriteUnit unit, Func<DbConnection, DbTransaction, CancellationToken, Task> write, CancellationToken cancellationToken)
+    {
+        using var db = ContextFor(unit);
+        await using var transaction = await BeginAsync(db, unit, cancellationToken).ConfigureAwait(false);
+        await write(unit.Connection, transaction.GetDbTransaction(), cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+
+        return true;
+    }
+
     /// <summary>
     /// <paramref name="context"/> one hop deeper in its causation chain — the context of a write made under another write's
     /// stage (HX-09's hooks) — refused, and the unit failed, past the limit.
@@ -291,18 +349,17 @@ internal sealed partial class EfAlvoData
         return deeper;
     }
 
-    private async Task<bool> PublishedAsync(
+    private Task<bool> PublishedAsync(
         WriteUnit unit, string type, string subject, IReadOnlyDictionary<string, object?>? data, AlvoContext context,
         CancellationToken cancellationToken)
     {
         _depthLimit.EnsureWithin(context);
         var custom = AlvoCustomEnvelope.Build(type, subject, data, context, _time.GetUtcNow());
-        using var db = ContextFor(unit);
-        await using var transaction = await BeginAsync(db, unit, cancellationToken).ConfigureAwait(false);
-        await OutboxTable.InsertAsync(unit.Connection, transaction.GetDbTransaction(), _outboxTable, custom.Envelope, cancellationToken).ConfigureAwait(false);
-        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
-        return true;
+        return InUnitAsync(
+            unit,
+            (connection, transaction, ct) => OutboxTable.InsertAsync(connection, transaction, _outboxTable, custom.Envelope, ct),
+            cancellationToken);
     }
 
     private PolicyDecision Decided(string entity, DataOperation operation, AlvoContext context)

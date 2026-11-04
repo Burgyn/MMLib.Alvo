@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using MMLib.Alvo.Ai;
 using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Auth;
+using MMLib.Alvo.Commands.Internal;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events;
@@ -89,6 +90,7 @@ namespace MMLib.Alvo.Management.Internal;
 /// <see cref="EnsureServed"/> has already answered 404.
 /// </param>
 /// <param name="deliveries">The delivery store, read for which handlers are paused; none without a driver.</param>
+/// <param name="commands">What each command's access rule answers in a policy simulation; none in a container built without it.</param>
 internal sealed partial class AlvoManagementService(
     IOptions<AlvoOptions> alvo,
     IOptions<AlvoManagementOptions> management,
@@ -109,7 +111,8 @@ internal sealed partial class AlvoManagementService(
     IAiConnectionResolver ai,
     ISecretStore secrets,
     Func<RuntimeSchemaService> runtime,
-    IDeliveryStore? deliveries) : IAlvoManagement
+    IDeliveryStore? deliveries,
+    CommandSimulator? commands = null) : IAlvoManagement
 {
     /// <summary>What <see cref="ManagementInfo.DataProvider"/> reports when no driver is registered.</summary>
     private const string NoDriverRegistered = "none";
@@ -233,11 +236,14 @@ internal sealed partial class AlvoManagementService(
         EnsureServed(project);
         EnsureAnswerable(simulation);
 
-        var decision = policies.Resolve(
-            simulation.Entity, Operation(simulation.Operation), Caller(simulation.Caller));
+        var caller = Caller(simulation.Caller);
+        var decision = policies.Resolve(simulation.Entity, Operation(simulation.Operation), caller);
 
-        return Task.FromResult(
-            Verdict(decision) with { Extensions = extensions.RunningOn(simulation.Entity, simulation.Operation) });
+        return Task.FromResult(Verdict(decision) with
+        {
+            Extensions = extensions.RunningOn(simulation.Entity, simulation.Operation),
+            Commands = commands?.Simulate(simulation.Entity, caller) ?? [],
+        });
     }
 
     /// <inheritdoc/>

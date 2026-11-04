@@ -41,6 +41,8 @@
          where Directory.Build.props would otherwise have brought Verify in — so it takes the reference
          directly, exactly as MMLib.Alvo.Schema.Tests does for the same reason. -->
     <PackageReference Include="Verify.XunitV3" />
+    <!-- An inbound webhook's five-minute window and seven-day sweep are facts about time, so the clock is a fake. -->
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
   </ItemGroup>
 
   <!-- The statement recorder, linked rather than copied for the same reason the engine test projects

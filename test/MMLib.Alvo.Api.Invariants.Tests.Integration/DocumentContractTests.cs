@@ -1,4 +1,6 @@
-﻿using MMLib.Alvo.Descriptor;
+﻿using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using MMLib.Alvo.Descriptor;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Api.Tests.Invariants;
@@ -123,6 +125,37 @@ public class DocumentContractTests
 
         return found;
     }
+
+    /// <summary>
+    /// Acceptance (7): a document that lists commands beside the generated routes still holds the ruleset — every command
+    /// operation's operationId, responses and refusals included.
+    /// </summary>
+    [Fact]
+    public async Task A_document_with_commands_holds_the_ruleset()
+    {
+        var descriptor = Path.Combine(RepositoryRoot.Find(), "examples", "vehicle-registry", "vehicles.alvo.json");
+        await using var world = await AlvoApiWorld.FromDescriptorPathAsync(descriptor, [Admin], _documented with
+        {
+            ConfigureApp = app =>
+            {
+                app.MapAlvoCommand("inspect_vehicle", "/commands/vehicles/{id:guid}/inspect", "vehicles", "'inspector' in @user.roles", (Guid id) => TypedResults.Ok(id));
+                app.MapAlvoCommand("retire_vehicle", "/commands/vehicles/{id:guid}/retire", "vehicles", "'admin' in @user.roles", () => TypedResults.NoContent());
+                app.MapAlvoCommand("fleet.recount", "/commands/fleet/recount", "'admin' in @user.roles", () => TypedResults.NoContent());
+                app.MapAlvoCommand("fleet.rename", "/commands/fleet/rename", "'admin' in @user.roles", (FleetName body) => TypedResults.Ok(body));
+            },
+        });
+        var document = await world.OpenApiDocumentAsync();
+
+        var violations = VacuumRunner.Lint(document, "vehicles-with-commands");
+
+        violations.ShouldBeEmpty(string.Join("; ", violations));
+        document["paths"]!["/commands/fleet/recount"]!["post"]!["operationId"]!.GetValue<string>().ShouldBe("commands.fleetRecount");
+    }
+
+    /// <summary>A command's body, so the document lists the framework's 400 and 415 beside Alvo's refusals.</summary>
+    /// <param name="Name">The fleet's new name.</param>
+    [System.ComponentModel.Description("A fleet's new name.")]
+    public sealed record FleetName(string Name);
 
     /// <summary>A key carrying every scope, so nothing here turns on authorization.</summary>
     private static TestApiKey Admin => new("admin-key", ["admin", "authenticated"], ["*:read", "*:write"]);

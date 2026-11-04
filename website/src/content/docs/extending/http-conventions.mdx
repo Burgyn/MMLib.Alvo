@@ -1,0 +1,99 @@
+---
+title: HTTP conventions
+description: Resolve Alvo's caller on your own endpoints, scope conventions to one entity's routes, and rely on Alvo's gate staying on every generated route.
+sidebar:
+  order: 9
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import endpoints from '../../../snippets/extending/http/FrontDeskEndpoints.cs?raw';
+import tests from '../../../snippets/extending/http/FrontDeskEndpointsTests.cs?raw';
+import descriptor from '../../../snippets/extending/http/front-desk.alvo.json?raw';
+
+Your host has endpoints of its own beside the Data API, and you want ASP.NET Core's conventions — rate limits,
+authorization policies, telemetry — on some of Alvo's routes. This page is how the two meet.
+
+<Code code={descriptor} lang="json" title="front-desk.alvo.json" />
+
+## Your endpoint, Alvo's caller
+
+Map the endpoint with `.WithAlvoCaller()` and take an `AlvoCaller` parameter. The caller is resolved exactly as the
+Data API resolves it: no credential is `AlvoContext.Anonymous`, and a key that cannot be used is `401` before your
+handler runs. The caller is also published through `IAlvoContextAccessor` while the handler runs.
+
+<SourceExcerpt code={endpoints} from="new CallerView(caller.Context.User.Value" to=".WithAlvoCaller();" title="FrontDeskEndpoints.cs" />
+
+No API-key scope is checked — your endpoint names no entity — but every `IAlvoData` call and every
+`IAlvoSessions.For(caller.Context)` session is still judged by the descriptor's rules:
+
+<SourceExcerpt code={endpoints} from="async (AlvoCaller caller, IAlvoSessions sessions" to=".WithAlvoCaller();" title="FrontDeskEndpoints.cs" />
+
+The clerk counts the room they created; the anonymous caller counts none, because the `list` rule admits clerks only:
+
+<SourceExcerpt code={tests} from="public async Task A_plain_endpoint_reads_as_the_resolved_caller" to="the list rule admits clerks only" title="FrontDeskEndpointsTests.cs" />
+
+Forgetting `.WithAlvoCaller()` makes `AlvoCaller.Context` throw. It never answers as the anonymous caller.
+
+## One entity's routes: `ForEntity`
+
+`app.MapAlvoDataApi().ForEntity("rooms", r => r.RequireRateLimiting("rooms"))` applies the conventions to the `rooms`
+routes and to no other:
+
+<SourceExcerpt code={endpoints} from="app.MapAlvoDataApi()" to=".ForEntity(" title="FrontDeskEndpoints.cs" />
+
+<SourceExcerpt code={tests} from="public async Task ForEntity_limits_the_rooms_routes_and_no_other" to="ShouldBe(HttpStatusCode.OK);" title="FrontDeskEndpointsTests.cs" />
+
+- **A name the descriptor does not declare fails the route-table build** — on `MapAlvoDataApi()`'s builder — and
+  readiness reports `Failed`. A typo is never a rate limit you believe you have.
+- **The table is built once**, on the first routed request, against the descriptor applied then. Naming an entity the
+  dashboard applies only later fails the Data API until the process restarts.
+- **On a `MapGroup`** the Data API is mapped under, `ForEntity` cannot know the descriptor and checks no name, but it
+  still reaches the entity's routes: its conventions are forwarded through the group's `Finally`, so they run after the
+  route's own conventions. That works for metadata — rate limiting, authorization, `WithMetadata` — but not for an
+  endpoint filter: a route's filters are composed before its `Finally` runs, so the filter could never run. A filter
+  added through `ForEntity` on a group fails the route-table build and readiness reports `Failed`. Put it on
+  `MapAlvoDataApi()`'s builder: `app.MapAlvoDataApi().ForEntity("rooms", r => r.AddEndpointFilter(…))`.
+- **A named rate-limit policy is one partition** across every endpoint that names it. `RequireRateLimiting("rooms")` on
+  two entities would share one budget. To limit each entity on its own, partition the limiter on
+  `AlvoEndpointMetadata.Entity`:
+
+<SourceExcerpt code={endpoints} from="public static void AddPerEntityLimit" to="_ => new FixedWindowRateLimiterOptions" title="FrontDeskEndpoints.cs" />
+
+Attach it to the entities it should limit — here `guests` and `bookings`, two partitions of one policy:
+
+<SourceExcerpt code={endpoints} from="guests => guests.RequireRateLimiting" to="bookings => bookings.RequireRateLimiting" title="FrontDeskEndpoints.cs" />
+
+<SourceExcerpt code={tests} from="public async Task One_policy_partitioned_on_the_entity_limits_each_entity_on_its_own" to="bookings has a partition of its own" title="FrontDeskEndpointsTests.cs" />
+
+## Reading Alvo's metadata
+
+Every generated route carries `AlvoEndpointMetadata(Entity, Operation, Kind)`: the entity it serves, the operation its
+authorization gates it as, and which of the ten routes it is. A convention, a middleware or a rate-limit partition can
+read it. This convention marks every write route of `rooms`:
+
+<SourceExcerpt code={endpoints} from=".Add(endpoint =>" to="});" title="FrontDeskEndpoints.cs" />
+
+Alvo sets it in the same call that attaches its authorization filter, so every route Alvo generates carries it together
+with its gate. It is a public record, so an endpoint of your own can carry it too; it says which entity a route
+serves, not that Alvo gates it.
+
+## Alvo's gate stays on
+
+A convention may add filters around Alvo's authorization filter. One that removes it — clearing or rebuilding
+`EndpointBuilder.FilterFactories`, on `MapAlvoDataApi()`, in a `ForEntity`, or on a `MapGroup` the Data API is mapped
+under — fails the route-table build: no routes, readiness `Failed`, and a critical log naming the route.
+
+- **Commands too.** A command endpoint stripped of its access filter fails the host's start. The check runs once the
+  request pipeline is built, over every command route.
+- **`.WithAlvoCaller()` fails closed.** An endpoint stripped of Alvo's filter has an `AlvoCaller` that throws.
+- **What the check sees.** It checks that the endpoint's request delegate was composed with Alvo's filter. A convention
+  that assigns an endpoint's `RequestDelegate` outright replaces Alvo's handler with its own, and is outside what the
+  check sees.
+
+A `Finally` convention runs after the filters are composed, so it cannot remove the gate even when it clears the list.
+
+## Commands are endpoints too
+
+`MapAlvoCommand` returns a `RouteHandlerBuilder`: `.WithSummary`, `.RequireRateLimiting` and `.RequireAuthorization`
+apply as on any endpoint. See [Commands and inbound webhooks](/extending/commands/).

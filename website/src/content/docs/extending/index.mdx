@@ -24,12 +24,14 @@ Start with [Where logic goes](/extending/where-logic-goes/): the first question 
   guard.
 - [Operate deliveries](/extending/operate-deliveries/) — history, pause, redeliver, replay and fixtures for your handlers.
 - [Transactions in your own code](/extending/transactions/) — several writes, batches and events as one unit, with savepoints and a time limit.
+- [Commands and inbound webhooks](/extending/commands/) — named, access-ruled actions over HTTP or in process; Standard Webhooks received verified and once.
+- [HTTP conventions](/extending/http-conventions/) — Alvo's caller on your own endpoints, conventions on one entity's routes, and the gate that stays on.
 - [Testing your backend](/extending/testing/) — `MMLib.Alvo.TestHost`: your descriptor through the real pipeline,
   inside a unit test, with event delivery on your schedule.
 
 ## What lands next
 
-Write hooks in three phases, commands, timers and schedules arrive one release at a time; each page
+Write hooks in three phases, timers and schedules arrive one release at a time; each page
 appears here when its feature ships. The design is public:
 [host extensibility](https://github.com/Burgyn/MMLib.Alvo/issues/370).
 

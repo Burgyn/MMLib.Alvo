@@ -58,6 +58,52 @@ public sealed class ManagementExtensionTests
         ((int)AlvoExtensionStage.PostCommit).ShouldBe(0);
     }
 
+    [Fact]
+    public void A_command_serialises_its_kind_stage_route_and_access()
+    {
+        var command = Minimal() with
+        {
+            Id = "confirm_booking",
+            Kind = AlvoExtensionKind.Command,
+            Stage = AlvoExtensionStage.Http,
+            Entities = ["bookings"],
+            Route = "/commands/bookings/{id}/confirm",
+            HttpMethod = "POST",
+            Access = "'staff' in @user.roles",
+        };
+
+        var wire = JsonSerializer.SerializeToNode(command, JsonSerializerOptions.Web)!;
+
+        wire["kind"]!.GetValue<string>().ShouldBe("command");
+        wire["stage"]!.GetValue<string>().ShouldBe("http");
+        wire["route"]!.GetValue<string>().ShouldBe("/commands/bookings/{id}/confirm");
+        wire["httpMethod"]!.GetValue<string>().ShouldBe("POST");
+        wire["access"]!.GetValue<string>().ShouldBe("'staff' in @user.roles");
+    }
+
+    [Fact]
+    public void The_appended_members_keep_their_numbers()
+    {
+        ((int)AlvoExtensionKind.Command).ShouldBe(1);
+        ((int)AlvoExtensionStage.Http).ShouldBe(1);
+        ((int)AlvoExtensionStage.PreTransaction).ShouldBe(2);
+        JsonSerializer.Serialize(AlvoExtensionStage.PreTransaction).ShouldBe("\"preTransaction\"");
+    }
+
+    [Fact]
+    public void A_verdict_lists_no_commands_unless_given_and_carries_them_when_given()
+    {
+        var verdict = new ManagementPolicyVerdict(true, null, "true", null, null, [], []);
+        var commands = verdict with
+        {
+            Commands = [new ManagementCommandVerdict { Name = "quote_stay", Access = "true", Allowed = true }],
+        };
+
+        verdict.Commands.ShouldBeEmpty();
+        var wire = JsonSerializer.SerializeToNode(commands, JsonSerializerOptions.Web)!;
+        wire["commands"]![0]!["allowed"]!.GetValue<bool>().ShouldBeTrue();
+    }
+
     private static ManagementExtension Minimal() => new()
     {
         Id = "ticket-resolved",

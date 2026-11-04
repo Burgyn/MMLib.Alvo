@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Schema;
+﻿using MMLib.Alvo.Events;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
@@ -6,7 +7,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// <param name="port">The data port the calls run through.</param>
 /// <param name="unit">The unit they run in.</param>
 /// <param name="context">The caller they run as.</param>
-internal sealed class EfAlvoTransaction(EfAlvoData port, WriteUnit unit, AlvoContext context) : IAlvoTransaction, IAlvoSessionSchema
+internal sealed class EfAlvoTransaction(EfAlvoData port, WriteUnit unit, AlvoContext context) : IAlvoTransaction, IAlvoSessionSchema, IAlvoCommandUnit
 {
     /// <inheritdoc/>
     public AlvoContext Context => context;
@@ -59,6 +60,14 @@ internal sealed class EfAlvoTransaction(EfAlvoData port, WriteUnit unit, AlvoCon
     /// <inheritdoc/>
     public Task PublishAsync(string type, string subject, IReadOnlyDictionary<string, object?>? data, CancellationToken cancellationToken = default) =>
         port.PublishInUnitAsync(unit, type, subject, data, context, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task PublishFrameworkAsync(AlvoEvent @event, CancellationToken cancellationToken) =>
+        port.PublishFrameworkInUnitAsync(unit, @event, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task CommitCommandAsync(CommandKey key, DateTimeOffset now, CancellationToken cancellationToken) =>
+        port.CommitCommandInUnitAsync(unit, key, now, cancellationToken);
 
     /// <inheritdoc/>
     public IAlvoTransaction AsSystem() =>

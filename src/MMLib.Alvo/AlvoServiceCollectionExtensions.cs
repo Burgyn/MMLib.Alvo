@@ -8,11 +8,13 @@ using MMLib.Alvo.Ai;
 using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Api;
 using MMLib.Alvo.Auth;
+using MMLib.Alvo.Commands;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.InboundWebhooks;
 using MMLib.Alvo.Internal;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Migrations;
@@ -74,6 +76,8 @@ public static class AlvoServiceCollectionExtensions
         services.AddAlvoRules();
         services.AddAlvoManagement();
         services.AddAlvoExtensions();
+        services.AddAlvoCommands();
+        services.AddAlvoInboundWebhooks();
         services.AddAlvoEvents();
         services.AddAlvoApi();
 

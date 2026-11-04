@@ -94,6 +94,29 @@ else
     </div>
 }
 
+@if (Verdict.Commands.Count > 0)
+{
+    <div class="a-field" data-testid="verdict-commands">
+        <span class="a-label">Commands — may this caller invoke them?</span>
+        @foreach (var command in Verdict.Commands)
+        {
+            @* Stacked like the Commands lane: the rule on its own line, so at a phone's width the name and the rule are
+               never squeezed beside the badge and broken mid-identifier. *@
+            <div class="a-field" data-testid="@($"verdict-command-{command.Name}")">
+                <div class="a-row a-row--wrap">
+                    <span class="a-badge @CommandVerdicts.Tone(command)" data-testid="verdict-command-answer">@CommandVerdicts.Answer(command)</span>
+                    <span class="a-mono a-name" data-testid="verdict-command-name">@command.Name</span>
+                </div>
+                <code class="a-mono" data-testid="verdict-command-access">@command.Access</code>
+            </div>
+        }
+        <span class="a-section__sub">
+            Judged with the same compiled rule a command checks before it runs. A rule that reads the row is decided per row,
+            and a row the caller cannot read answers 404 first — this screen scores no row.
+        </span>
+    </div>
+}
+
 @code {
     /// <summary>The verdict the engine returned.</summary>
     [Parameter, EditorRequired]

@@ -60,6 +60,8 @@ internal sealed partial class SystemSchemaInitializer
         _deliveryAttemptsTableName = DeliveryTable.AttemptsNameFor(schemaPrefix);
         _subscriberControlsTableName = DeliveryOperationsTable.ControlsNameFor(schemaPrefix);
         _operationsLogTableName = DeliveryOperationsTable.LogNameFor(schemaPrefix);
+        _commandRequestsTableName = CommandLedgerTable.NameFor(schemaPrefix);
+        _inboundWebhooksTableName = InboundWebhookTable.NameFor(schemaPrefix);
     }
 
     private readonly string _idempotencyTableName;
@@ -69,6 +71,8 @@ internal sealed partial class SystemSchemaInitializer
     private readonly string _deliveryAttemptsTableName;
     private readonly string _subscriberControlsTableName;
     private readonly string _operationsLogTableName;
+    private readonly string _commandRequestsTableName;
+    private readonly string _inboundWebhooksTableName;
 
     /// <summary>Gets the fully-prefixed descriptor-versions table name, e.g. <c>alvo_descriptor_versions</c>.</summary>
     public string TableName { get; }
@@ -131,6 +135,12 @@ internal sealed partial class SystemSchemaInitializer
         await CreateIfMissingAsync(
             _operationsLogTableName, DeliveryOperationsTable.LogDdl(_operationsLogTableName), ct).ConfigureAwait(false);
         await CreateIndexIfMissingAsync(DeliveryOperationsTable.LogKeyIndexDdl(_operationsLogTableName), ct).ConfigureAwait(false);
+        await CreateIfMissingAsync(
+            _commandRequestsTableName, CommandLedgerTable.Ddl(_commandRequestsTableName), ct).ConfigureAwait(false);
+        await CreateIndexIfMissingAsync(CommandLedgerTable.IndexDdl(_commandRequestsTableName), ct).ConfigureAwait(false);
+        await CreateIfMissingAsync(
+            _inboundWebhooksTableName, InboundWebhookTable.Ddl(_inboundWebhooksTableName), ct).ConfigureAwait(false);
+        await CreateIndexIfMissingAsync(InboundWebhookTable.IndexDdl(_inboundWebhooksTableName), ct).ConfigureAwait(false);
     }
 
     /// <summary>

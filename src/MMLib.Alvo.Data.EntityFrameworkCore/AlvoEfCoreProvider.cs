@@ -80,6 +80,14 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton<IAppliedSchemaStore>(sp => sp.GetRequiredService<EfCoreDescriptorVersionStore>());
         builder.Services.TryAddSingleton<IRuntimeSchemaWriter>(CreateRuntimeSchemaWriter);
         builder.Services.TryAddSingleton<IManagementIdempotencyStore>(CreateManagementIdempotencyStore);
+        builder.Services.TryAddSingleton<ICommandLedger>(services => new EfCoreCommandLedger(
+            services.GetRequiredService<RelationalConnectionFactory>(),
+            services.GetRequiredService<IAlvoSqlDialect>(),
+            services.GetRequiredService<IOptions<AlvoOptions>>().Value));
+        builder.Services.TryAddSingleton<IInboundWebhookLedger>(services => new EfCoreInboundWebhookLedger(
+            services.GetRequiredService<RelationalConnectionFactory>(),
+            services.GetRequiredService<IAlvoSqlDialect>(),
+            services.GetRequiredService<IOptions<AlvoOptions>>().Value));
         builder.Services.TryAddSingleton(services => new AlvoDataContextFactory(
             services.GetRequiredService<ISchemaRegistry>(),
             options => registration.ConfigureProvider(options, registration.ConnectionString(services))));

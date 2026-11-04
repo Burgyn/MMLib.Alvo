@@ -196,6 +196,129 @@ public class DataApiConventionTests
         Should.Throw<InvalidOperationException>(() => routes!.WithMetadata(new HostMarker()));
     }
 
+    /// <summary>
+    /// Acceptance (5): <c>ForEntity</c> scopes a convention to one entity's routes — a rate limit on <c>owners</c> refuses
+    /// the second owners request and leaves vehicles alone.
+    /// </summary>
+    [Fact]
+    public async Task ForEntity_rate_limits_only_that_entity_s_routes()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin], new AlvoApiWorldSetup(
+            ConfigureServices: AddOnePerWindowLimiter,
+            ConfigureApp: app => app.UseRateLimiter(),
+            ConfigureDataApiRoutes: routes => routes.ForEntity("owners", owners => owners.RequireRateLimiting(OnePerWindow))));
+
+        using var firstOwners = await world.SendAsync(HttpMethod.Get, "/api/owners", _admin);
+        using var secondOwners = await world.SendAsync(HttpMethod.Get, "/api/owners", _admin);
+        using var firstVehicles = await world.SendAsync(HttpMethod.Get, "/api/vehicles", _admin);
+        using var secondVehicles = await world.SendAsync(HttpMethod.Get, "/api/vehicles", _admin);
+
+        firstOwners.StatusCode.ShouldBe(HttpStatusCode.OK);
+        secondOwners.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests, "the limit reaches the entity ForEntity named");
+        firstVehicles.StatusCode.ShouldBe(HttpStatusCode.OK);
+        secondVehicles.StatusCode.ShouldBe(HttpStatusCode.OK, "and no other entity's route");
+    }
+
+    /// <summary>A <c>ForEntity</c> convention reaches every route of its entity — the ten of them — and nothing else.</summary>
+    [Fact]
+    public async Task ForEntity_reaches_all_ten_routes_of_its_entity_and_no_other()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin], new AlvoApiWorldSetup(
+            ConfigureDataApiRoutes: routes => routes.ForEntity("vehicles", vehicles => vehicles.WithMetadata(new HostMarker()))));
+
+        var marked = Generated(world).Where(endpoint => endpoint.Metadata.GetMetadata<HostMarker>() is not null).ToList();
+
+        marked.Count.ShouldBe(10);
+        marked.ShouldAllBe(endpoint => endpoint.Metadata.GetMetadata<AlvoEndpointMetadata>()!.Entity == "vehicles");
+    }
+
+    /// <summary>Review focus (5): a typo in <c>ForEntity</c> is a rate limiter the host believes it has, so the build fails.</summary>
+    [Fact]
+    public async Task A_ForEntity_naming_no_declared_entity_fails_the_route_table_build()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin], new AlvoApiWorldSetup(
+            ConfigureDataApiRoutes: routes => routes.ForEntity("ownres", owners => owners.WithMetadata(new HostMarker()))));
+
+        using var response = await world.SendAsync(HttpMethod.Get, "/api/owners", _admin);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        var boot = world.Services.GetRequiredService<AlvoBootState>();
+        boot.Phase.ShouldBe(AlvoBootPhase.Failed);
+        boot.Failure.ShouldNotBeNull().ShouldContain("ForEntity('ownres')");
+    }
+
+    /// <summary>
+    /// A <c>Finally</c> convention passed through <c>ForEntity</c> is forwarded too, and reaches that entity's ten
+    /// routes and no other.
+    /// </summary>
+    [Fact]
+    public async Task ForEntity_forwards_a_finally_convention_to_that_entity_only()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin], new AlvoApiWorldSetup(
+            ConfigureDataApiRoutes: routes => routes.ForEntity("vehicles", vehicles => vehicles.Finally(
+                endpoint => endpoint.Metadata.Add(new FinallyMarker(SawTheOrdinaryOne: false))))));
+
+        var marked = Generated(world).Where(endpoint => endpoint.Metadata.GetMetadata<FinallyMarker>() is not null).ToList();
+
+        marked.Count.ShouldBe(10);
+        marked.ShouldAllBe(endpoint => endpoint.Metadata.GetMetadata<AlvoEndpointMetadata>()!.Entity == "vehicles");
+    }
+
+    /// <summary>
+    /// Ruling 50: <c>ForEntity</c> on the <c>MapGroup</c> builder the Data API is mounted under reaches that entity's
+    /// routes. A group's ordinary conventions run before a route's own metadata exists, so without forwarding they
+    /// would match nothing — a rate limit the host believes it has.
+    /// </summary>
+    [Fact]
+    public async Task ForEntity_on_a_group_the_data_api_is_mapped_under_reaches_that_entity()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin], new AlvoApiWorldSetup(
+            ConfigureServices: AddOnePerWindowLimiter,
+            ConfigureApp: app => app.UseRateLimiter(),
+            RouteGroupPrefix: "/v1",
+            ConfigureRouteGroup: group => group.ForEntity("owners", owners => owners
+                .RequireRateLimiting(OnePerWindow)
+                .WithMetadata(new HostMarker()))));
+
+        using var firstOwners = await world.SendAsync(HttpMethod.Get, "/v1/api/owners", _admin);
+        using var secondOwners = await world.SendAsync(HttpMethod.Get, "/v1/api/owners", _admin);
+        using var firstVehicles = await world.SendAsync(HttpMethod.Get, "/v1/api/vehicles", _admin);
+        using var secondVehicles = await world.SendAsync(HttpMethod.Get, "/v1/api/vehicles", _admin);
+
+        Generated(world).Count(endpoint => endpoint.Metadata.GetMetadata<HostMarker>() is not null).ShouldBe(10);
+        firstOwners.StatusCode.ShouldBe(HttpStatusCode.OK);
+        secondOwners.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests, "the group's ForEntity reaches the owners routes");
+        firstVehicles.StatusCode.ShouldBe(HttpStatusCode.OK);
+        secondVehicles.StatusCode.ShouldBe(HttpStatusCode.OK, "and no other entity's");
+    }
+
+    /// <summary>
+    /// A group's <c>Finally</c> runs after the route's filter pipeline is composed, so a filter a group <c>ForEntity</c>
+    /// adds would never run — a host's own check that fails open. The build refuses it instead, and names the fix.
+    /// </summary>
+    [Fact]
+    public async Task ForEntity_on_a_group_refuses_a_filter_that_could_never_run()
+    {
+        var runs = 0;
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin], new AlvoApiWorldSetup(
+            RouteGroupPrefix: "/v1",
+            ConfigureRouteGroup: group => group.ForEntity("owners", owners => owners.AddEndpointFilter(
+                (invocation, next) =>
+                {
+                    Interlocked.Increment(ref runs);
+                    return next(invocation);
+                }))));
+
+        using var response = await world.SendAsync(HttpMethod.Get, "/v1/api/owners", _admin);
+
+        runs.ShouldBe(0);
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound, "a filter that cannot run fails the grouped build");
+        var boot = world.Services.GetRequiredService<AlvoBootState>();
+        boot.Phase.ShouldBe(AlvoBootPhase.Failed);
+        boot.Failure.ShouldNotBeNull().ShouldContain("ForEntity('owners')");
+        boot.Failure.ShouldContain("MapAlvoDataApi()");
+    }
+
     /// <summary>Every endpoint Alvo generated, identified by the marker it attaches to each of them.</summary>
     private static List<RouteEndpoint> Generated(AlvoApiWorld world) =>
         [.. world.Endpoints.Where(

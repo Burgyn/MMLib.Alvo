@@ -116,7 +116,8 @@ internal static class ManagementSetup
             provider.GetRequiredService<Ai.IAiConnectionResolver>(),
             provider.GetRequiredService<Secrets.ISecretStore>(),
             provider.GetRequiredService<Migrations.RuntimeSchemaService>,
-            provider.GetService<Events.IDeliveryStore>()));
+            provider.GetService<Events.IDeliveryStore>(),
+            provider.GetService<Commands.Internal.CommandSimulator>()));
 
     /// <summary>
     /// Registers <see cref="AlvoManagementOptions"/>, bound from its configuration section and validated at

@@ -34,6 +34,31 @@ namespace MMLib.Alvo.Api
         public int MaxRequestBodyBytes { get; set; }
         public string RoutePrefix { get; set; }
     }
+    public sealed class AlvoCaller : Microsoft.AspNetCore.Http.IBindableFromHttpContext<MMLib.Alvo.Api.AlvoCaller>
+    {
+        public MMLib.Alvo.AlvoContext Context { get; }
+        public static System.Threading.Tasks.ValueTask<MMLib.Alvo.Api.AlvoCaller?> BindAsync(Microsoft.AspNetCore.Http.HttpContext context, System.Reflection.ParameterInfo parameter) { }
+    }
+    public enum AlvoEndpointKind
+    {
+        List = 0,
+        Query = 1,
+        Get = 2,
+        Create = 3,
+        Update = 4,
+        Replace = 5,
+        Delete = 6,
+        BatchCreate = 7,
+        BatchUpdate = 8,
+        BatchDelete = 9,
+    }
+    public sealed class AlvoEndpointMetadata : System.IEquatable<MMLib.Alvo.Api.AlvoEndpointMetadata>
+    {
+        public AlvoEndpointMetadata(string Entity, MMLib.Alvo.Rules.DataOperation Operation, MMLib.Alvo.Api.AlvoEndpointKind Kind) { }
+        public string Entity { get; init; }
+        public MMLib.Alvo.Api.AlvoEndpointKind Kind { get; init; }
+        public MMLib.Alvo.Rules.DataOperation Operation { get; init; }
+    }
     public static class AlvoHealth
     {
         public const string LivenessPath = "/health/live";
@@ -74,6 +99,14 @@ namespace MMLib.Alvo.Api
         [System.Text.Json.Serialization.JsonPropertyName("pointer")]
         public string Pointer { get; init; }
     }
+    public sealed class AlvoWebhookReceiverOptions
+    {
+        public AlvoWebhookReceiverOptions() { }
+        public long MaxBodyBytes { get; set; }
+        public System.Func<Microsoft.AspNetCore.Http.HttpRequest, System.ReadOnlyMemory<byte>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<MMLib.Alvo.TenantId?>>? ResolveTenant { get; set; }
+        public MMLib.Alvo.TenantId? Tenant { get; set; }
+        public System.TimeSpan Tolerance { get; set; }
+    }
 }
 namespace MMLib.Alvo.Auth
 {
@@ -104,6 +137,27 @@ namespace MMLib.Alvo.Auth
     {
         public TenantResolver() { }
         public bool TryResolve(MMLib.Alvo.Auth.ApiKeyRecord key, string? requestedTenant, out MMLib.Alvo.TenantId? tenant) { }
+    }
+}
+namespace MMLib.Alvo.Commands
+{
+    public sealed class AlvoCommandContext : Microsoft.AspNetCore.Http.IBindableFromHttpContext<MMLib.Alvo.Commands.AlvoCommandContext>
+    {
+        public MMLib.Alvo.AlvoContext Caller { get; }
+        public MMLib.Alvo.Data.IAlvoSession Data { get; }
+        public string Name { get; }
+        public MMLib.Alvo.Data.AlvoRecord? Record { get; }
+        public System.Threading.Tasks.Task TransactAsync(System.Func<MMLib.Alvo.Data.IAlvoTransaction, System.Threading.CancellationToken, System.Threading.Tasks.Task> work, MMLib.Alvo.Data.AlvoTransactionOptions? options = null, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task<T> TransactAsync<T>(System.Func<MMLib.Alvo.Data.IAlvoTransaction, System.Threading.CancellationToken, System.Threading.Tasks.Task<T>> work, MMLib.Alvo.Data.AlvoTransactionOptions? options = null, System.Threading.CancellationToken cancellationToken = default) { }
+        public static System.Threading.Tasks.ValueTask<MMLib.Alvo.Commands.AlvoCommandContext?> BindAsync(Microsoft.AspNetCore.Http.HttpContext context, System.Reflection.ParameterInfo parameter) { }
+    }
+    public interface IAlvoCommand<in TInput>
+    {
+        System.Threading.Tasks.Task HandleAsync(TInput input, MMLib.Alvo.Commands.AlvoCommandContext context, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IAlvoCommands
+    {
+        System.Threading.Tasks.Task InvokeAsync<TInput>(string name, TInput input, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
     }
 }
 namespace MMLib.Alvo.Data
@@ -425,9 +479,26 @@ namespace MMLib.Alvo.Rules
 }
 namespace Microsoft.AspNetCore.Builder
 {
+    public static class AlvoCommandEndpointRouteBuilderExtensions
+    {
+        public static Microsoft.AspNetCore.Builder.RouteHandlerBuilder MapAlvoCommand(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints, string name, string pattern, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Events.AlvoConditionCaller, bool>> access, System.Delegate handler) { }
+        public static Microsoft.AspNetCore.Builder.RouteHandlerBuilder MapAlvoCommand(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints, string name, string pattern, string access, System.Delegate handler) { }
+        public static Microsoft.AspNetCore.Builder.RouteHandlerBuilder MapAlvoCommand(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints, string name, string pattern, string entity, string access, System.Delegate handler) { }
+        public static Microsoft.AspNetCore.Builder.RouteHandlerBuilder MapAlvoCommand<TEntity>(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints, string name, string pattern, System.Linq.Expressions.Expression<System.Func<TEntity, MMLib.Alvo.Events.AlvoConditionCaller, bool>> access, System.Delegate handler)
+            where TEntity :  class { }
+        public static Microsoft.AspNetCore.Builder.RouteHandlerBuilder MapAlvoCommand<TEntity>(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints, string name, string pattern, string access, System.Delegate handler)
+            where TEntity :  class { }
+    }
     public static class AlvoDataApiEndpointRouteBuilderExtensions
     {
         public static Microsoft.AspNetCore.Builder.IEndpointConventionBuilder MapAlvoDataApi(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
+    }
+    public static class AlvoEndpointConventionBuilderExtensions
+    {
+        public static TBuilder ForEntity<TBuilder>(this TBuilder builder, string entity, System.Action<Microsoft.AspNetCore.Builder.IEndpointConventionBuilder> configure)
+            where TBuilder : Microsoft.AspNetCore.Builder.IEndpointConventionBuilder { }
+        public static TBuilder WithAlvoCaller<TBuilder>(this TBuilder builder)
+            where TBuilder : Microsoft.AspNetCore.Builder.IEndpointConventionBuilder { }
     }
     public static class AlvoEndpointRouteBuilderExtensions
     {
@@ -440,6 +511,10 @@ namespace Microsoft.AspNetCore.Builder
     public static class AlvoManagementEndpointRouteBuilderExtensions
     {
         public static Microsoft.AspNetCore.Builder.IEndpointConventionBuilder MapAlvoManagementApi(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
+    }
+    public static class AlvoWebhookEndpointRouteBuilderExtensions
+    {
+        public static Microsoft.AspNetCore.Builder.IEndpointConventionBuilder MapAlvoWebhookReceiver(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints, string pattern, string secretName, System.Delegate handler, System.Action<MMLib.Alvo.Api.AlvoWebhookReceiverOptions>? configure = null) { }
     }
 }
 namespace Microsoft.Extensions.DependencyInjection
@@ -460,6 +535,10 @@ namespace Microsoft.Extensions.DependencyInjection
     }
     public static class AlvoExtensionBuilderExtensions
     {
+        public static MMLib.Alvo.IAlvoBuilder AddCommand<TCommand>(this MMLib.Alvo.IAlvoBuilder builder, string name, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Events.AlvoConditionCaller, bool>> access)
+            where TCommand :  class { }
+        public static MMLib.Alvo.IAlvoBuilder AddCommand<TCommand>(this MMLib.Alvo.IAlvoBuilder builder, string name, string access)
+            where TCommand :  class { }
         public static MMLib.Alvo.IAlvoBuilder AddEventHandler(this MMLib.Alvo.IAlvoBuilder builder, string id, string eventType, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
         public static MMLib.Alvo.IAlvoBuilder AddEventHandler<THandler>(this MMLib.Alvo.IAlvoBuilder builder, string id, string eventType, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
             where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Data.AlvoRecord> { }

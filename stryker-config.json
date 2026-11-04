@@ -18,7 +18,12 @@
       "!**/Rules/Setup.cs",
       "!**/Auth/Setup.cs",
       "!**/Expressions/**",
-      "!**/Api/**"
+      "!**/Api/**",
+      "!**/Commands/Internal/CommandEndpointFilter.cs",
+      "!**/Commands/Internal/CommandInputs.cs",
+      "!**/Commands/Internal/CommandGateCheck.cs",
+      "!**/InboundWebhooks/Internal/WebhookReceiver.cs",
+      "!**/InboundWebhooks/Internal/LedgerSweeper.cs"
     ],
     "thresholds": {
       "high": 80,

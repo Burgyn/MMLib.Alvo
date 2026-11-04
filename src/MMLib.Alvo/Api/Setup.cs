@@ -52,6 +52,8 @@ internal static class ApiSetup
             ServiceDescriptor.Singleton<IValidateOptions<AlvoApiOptions>, AlvoApiOptionsValidator>());
         services.TryAddSingleton<EntityRouteCatalog>();
         services.TryAddSingleton<AlvoContextFilterFactory>();
+        services.TryAddSingleton<CallerGate>();
+        services.TryAddSingleton<AlvoCallerFilter>();
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IConfigureOptions<OpenApiOptions>, AlvoOpenApiSetup>());
         return services;
@@ -59,7 +61,8 @@ internal static class ApiSetup
 }
 
 /// <summary>
-/// Attaches <see cref="AlvoDocumentTransformer"/> to <b>every</b> OpenAPI document this host defines.
+/// Attaches <see cref="AlvoDocumentTransformer"/>, then <see cref="CommandDocumentTransformer"/>, to <b>every</b> OpenAPI
+/// document this host defines.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -93,5 +96,6 @@ internal sealed class AlvoOpenApiSetup : IConfigureNamedOptions<OpenApiOptions>
     {
         ArgumentNullException.ThrowIfNull(options);
         options.AddDocumentTransformer<AlvoDocumentTransformer>();
+        options.AddDocumentTransformer<CommandDocumentTransformer>();
     }
 }

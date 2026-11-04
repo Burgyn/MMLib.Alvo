@@ -156,6 +156,8 @@ export default defineConfig({
           page('See your extensions in the dashboard', 'extending/extension-catalog'),
           page('Operate deliveries', 'extending/operate-deliveries'),
           page('Transactions in your own code', 'extending/transactions'),
+          page('Commands and inbound webhooks', 'extending/commands'),
+          page('HTTP conventions', 'extending/http-conventions'),
           page('Testing your backend', 'extending/testing'),
           page('Use your own authentication', 'guides/own-authentication'),
           page('Call Alvo from your endpoints', 'guides/call-from-endpoints'),

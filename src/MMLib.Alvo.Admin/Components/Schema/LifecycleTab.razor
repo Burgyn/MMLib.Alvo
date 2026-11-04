@@ -1,8 +1,10 @@
 ﻿@*
-    What runs on this entity, by when it runs. This build draws one lane, After commit: the descriptor's after-hooks,
+    What runs on this entity, by when it runs. This build draws two lanes. After commit: the descriptor's after-hooks,
     which the On write tab edits (one editor, not two), and the host's event handlers, which live in its C# and are
     read-only here — marked by the accent badge every piece of host code wears, as the function list's "this host"
-    does. The other lanes appear with the host code that can run in them.
+    does. And Commands — the commands the host maps on a row of this entity, read-only — drawn only in a host that
+    maps a command on some route (HX-08 Ruling 57), so the container never shows it. The other lanes appear with the
+    host code that can run in them.
 *@
 <div data-testid="lifecycle-after-commit">
     <SectionHead Title="After commit">
@@ -55,9 +57,43 @@
     }
 </div>
 
+@if (_showsCommands)
+{
+    <div data-testid="lifecycle-commands">
+        <SectionHead Title="Commands">
+            <Subtitle>
+                Named actions the host's code exposes on a row of this entity. Each runs only for a caller its access rule admits
+                — judged before it runs — outside any transaction, and records its completion as an event.
+            </Subtitle>
+        </SectionHead>
+
+        @if (_commands.Count == 0)
+        {
+            <div data-testid="lifecycle-commands-empty">
+                <EmptyState Title="No command acts on this entity" Body="The host maps no command bound to a row of it." />
+            </div>
+        }
+
+        @foreach (var command in _commands)
+        {
+            <ListRow class="a-listrow--roomy a-listrow--stacked" data-testid="@($"lane-command-{command.Id}")">
+                <div class="a-row">
+                    <span class="a-badge a-badge--accent">⟨/⟩ from code</span>
+                    <span class="a-mono a-name">@command.Id</span>
+                </div>
+                <code class="a-mono" data-testid="lane-command-route">@LifecycleLane.Route(command)</code>
+                <code class="a-mono" data-testid="lane-command-access">access @command.Access</code>
+                <p class="a-note">Registered in the host's C#: it is changed there, never here.</p>
+            </ListRow>
+        }
+    </div>
+}
+
 @code {
     private IReadOnlyList<LaneHook> _hooks = [];
     private IReadOnlyList<ManagementExtension> _extensions = [];
+    private IReadOnlyList<ManagementExtension> _commands = [];
+    private bool _showsCommands;
 
     /// <summary>The entity whose lane this is.</summary>
     [Parameter, EditorRequired]
@@ -75,5 +111,7 @@
     {
         _hooks = LifecycleLane.AfterCommitHooks(Hooks);
         _extensions = LifecycleLane.AfterCommit(Entity, Extensions);
+        _commands = LifecycleLane.Commands(Entity, Extensions);
+        _showsCommands = LifecycleLane.HasMappedCommands(Extensions);
     }
 }

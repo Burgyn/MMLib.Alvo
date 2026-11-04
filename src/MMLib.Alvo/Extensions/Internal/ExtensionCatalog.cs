@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Options;
 
+using MMLib.Alvo.Commands.Internal;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Management;
 
@@ -53,9 +54,20 @@ internal sealed class ExtensionCatalog(ExtensionRegistry registry, IOptions<Alvo
         item.Entities.Contains(entity, StringComparer.Ordinal)
         || item.Entities.Contains(EntityEvents.AllEntities, StringComparer.Ordinal);
 
-    private static ManagementExtension[] Describe(ExtensionRegistry registry, bool exposeTypeNames) =>
+    private static ManagementExtension[] Describe(ExtensionRegistry registry, bool exposeTypeNames)
+    {
+        registry.Seal();
+        return [.. Handlers(registry, exposeTypeNames), .. Commands(registry, exposeTypeNames)];
+    }
+
+    private static ManagementExtension[] Handlers(ExtensionRegistry registry, bool exposeTypeNames) =>
         [.. registry.Handlers
             .OrderBy(handler => handler.Settings.Order)
             .ThenBy(handler => handler.Sequence)
             .Select(handler => HandlerDescription.Of(handler, exposeTypeNames))];
+
+    private static ManagementExtension[] Commands(ExtensionRegistry registry, bool exposeTypeNames) =>
+        [.. registry.Commands
+            .OrderBy(command => command.Sequence)
+            .Select(command => CommandDescription.Of(command, exposeTypeNames))];
 }

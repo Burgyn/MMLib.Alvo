@@ -1,0 +1,22 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "command-tenants",
+  "description": "Tickets of two tenants and a command bound to one ticket, for the cross-tenant command fact: staff of one tenant must not reach another tenant's ticket through a command.",
+  "tenancy": { "enabled": true },
+  "auth": { "providers": ["local"], "roles": ["staff"] },
+  "entities": {
+    "tickets": {
+      "tenancy": "scoped",
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 120 }
+      },
+      "rules": {
+        "list": "'staff' in @user.roles",
+        "get": "'staff' in @user.roles",
+        "create": "'staff' in @user.roles",
+        "update": "'staff' in @user.roles"
+      }
+    }
+  }
+}

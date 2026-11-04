@@ -715,13 +715,17 @@ internal static class DataApiEndpoints
         AlvoContextFilterFactory filters,
         AlvoDataApiConventions conventions)
     {
+        var witness = new AlvoGateWitness(entity.Name, kind);
         var route = builder
             // First, so it wraps the authorization filter and stamps the 401 and 403 that filter answers
             // with too — see NoStoreResponseFilter for why an uncacheable response is what pays for a
             // strong entity tag minted over a row version rather than over the response bytes.
             .AddEndpointFilter(NoStoreResponseFilter.Instance)
-            .AddEndpointFilter(filters.For(entity.Name, kind.ToDataOperation()))
-            .WithMetadata(new DataApiOperationMetadata(entity.Name, kind))
+            .AddEndpointFilterFactory(witness.Wrap(filters.For(entity.Name, kind.ToDataOperation())))
+            .WithMetadata(
+                new DataApiOperationMetadata(entity.Name, kind),
+                new AlvoEndpointMetadata(entity.Name, kind.ToDataOperation(), kind.ToPublic()),
+                witness)
             .Documenting(entity, kind);
 
         conventions.ApplyTo(route);

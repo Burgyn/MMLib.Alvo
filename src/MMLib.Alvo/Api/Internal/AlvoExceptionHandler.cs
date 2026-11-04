@@ -1,8 +1,10 @@
 ﻿using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using MMLib.Alvo.Commands.Internal;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.InboundWebhooks.Internal;
 
 namespace MMLib.Alvo.Api.Internal;
 
@@ -59,7 +61,8 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
     }
 
     /// <summary>
-    /// Whether the endpoint this request failed on is one Alvo generated.
+    /// Whether the endpoint this request failed on is one Alvo generated, a command <c>MapAlvoCommand</c> mapped, or a
+    /// receiver <c>MapAlvoWebhookReceiver</c> mapped.
     /// </summary>
     /// <remarks>
     /// Read off <see cref="IExceptionHandlerFeature"/> rather than off the context: the middleware records
@@ -69,8 +72,10 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
     /// </remarks>
     /// <param name="httpContext">The failed request's context.</param>
     private static bool FailedInsideAlvo(HttpContext httpContext) =>
-        httpContext.Features.Get<IExceptionHandlerFeature>()?.Endpoint?.Metadata
-            .GetMetadata<DataApiOperationMetadata>() is not null;
+        httpContext.Features.Get<IExceptionHandlerFeature>()?.Endpoint?.Metadata is { } metadata
+        && (metadata.GetMetadata<DataApiOperationMetadata>() is not null
+            || metadata.GetMetadata<CommandEndpointMetadata>() is not null
+            || metadata.GetMetadata<WebhookReceiverEndpointMetadata>() is not null);
 
     /// <summary>Logs the failure at the level it deserves and writes the document it maps to.</summary>
     /// <param name="httpContext">The failed request's context.</param>

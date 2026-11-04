@@ -24,7 +24,8 @@ minutes, starting from an app that embeds Alvo as in [Embed Alvo in ASP.NET Core
 ## 1. Call `IAlvoData` from an endpoint
 
 `IAlvoData` is the one port every Alvo read and write goes through, the same one the generated API calls. Resolve it
-in a minimal-API delegate like any service, and pass the caller you built. A read:
+in a minimal-API delegate like any service, and pass the caller you built. To resolve the caller the way the Data API
+does, map the endpoint with [`.WithAlvoCaller()`](/extending/http-conventions/) and take an `AlvoCaller`. A read:
 
 <SourceExcerpt code={program} from="app.MapGet(" to="}).RequireAuthorization();" dropComments={true} title="Program.cs" />
 

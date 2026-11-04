@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Events;
+﻿using MMLib.Alvo.Commands.Internal;
+using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
@@ -44,14 +45,16 @@ internal sealed record BoundHandler(
     };
 }
 
-/// <summary>Every handler bound to one catalog, by <c>Order</c> and then registration order.</summary>
+/// <summary>Every handler bound to one catalog, by <c>Order</c> and then registration order, and every bound command.</summary>
 internal sealed class ExtensionBindings
 {
     private readonly Dictionary<string, BoundHandler> _byId;
 
-    internal ExtensionBindings(IEnumerable<BoundHandler> handlers, IEnumerable<HandlerRegistration>? unbound = null)
+    internal ExtensionBindings(
+        IEnumerable<BoundHandler> handlers, IEnumerable<HandlerRegistration>? unbound = null, IEnumerable<BoundCommand>? commands = null)
     {
         Unbound = [.. unbound ?? []];
+        Commands = (commands ?? []).ToDictionary(command => command.Name, StringComparer.Ordinal);
         Handlers = [.. handlers.OrderBy(handler => handler.Settings.Order).ThenBy(handler => handler.Registration.Sequence)];
         _byId = Handlers.ToDictionary(handler => handler.Id, StringComparer.Ordinal);
     }
@@ -63,9 +66,15 @@ internal sealed class ExtensionBindings
     /// <summary>The registered handlers that do not fit this catalog; the fan-out records their events dead (<c>unbound</c>).</summary>
     internal IReadOnlyList<HandlerRegistration> Unbound { get; }
 
+    /// <summary>The commands bound to this catalog, by name.</summary>
+    internal IReadOnlyDictionary<string, BoundCommand> Commands { get; }
+
     internal TimeSpan LongestTimeout => Handlers.Count == 0 ? TimeSpan.Zero : Handlers.Max(handler => handler.Settings.Timeout);
 
     internal BoundHandler? Handler(string id) => _byId.GetValueOrDefault(id);
+
+    /// <summary>The bound command named <paramref name="name"/>, or null when it does not bind this catalog.</summary>
+    internal BoundCommand? Command(string name) => Commands.GetValueOrDefault(name);
 
     /// <summary>The bound handlers whose source selects <paramref name="event"/>, in order, each with the condition to judge.</summary>
     internal IEnumerable<(BoundHandler Handler, BoundCondition Condition)> Selecting(AlvoEvent @event)

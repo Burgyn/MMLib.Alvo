@@ -35,6 +35,21 @@ internal static class LifecycleLane
     public static IReadOnlyList<ManagementExtension> AfterCommit(string entity, IReadOnlyList<ManagementExtension> extensions) =>
         [.. Binding(entity, extensions).Where(extension => extension.Stage == AlvoExtensionStage.PostCommit)];
 
+    /// <summary>The commands the Commands lane draws for <paramref name="entity"/>: those bound to a row of it.</summary>
+    public static IReadOnlyList<ManagementExtension> Commands(string entity, IReadOnlyList<ManagementExtension> extensions) =>
+        [.. extensions.Where(extension => extension.Kind == AlvoExtensionKind.Command && extension.Entities.Contains(entity, StringComparer.Ordinal))];
+
+    /// <summary>
+    /// Whether the Commands lane is drawn at all: only in a host that maps a command on some route (HX-08 Ruling 57), so
+    /// the standalone container, which has no C# extension point, never shows a lane that can only be empty.
+    /// </summary>
+    public static bool HasMappedCommands(IReadOnlyList<ManagementExtension> extensions) =>
+        extensions.Any(extension => extension.Kind == AlvoExtensionKind.Command && extension.Route is not null);
+
+    /// <summary>A command's route line: its method and pattern, or that it is invoked in process.</summary>
+    public static string Route(ManagementExtension command) =>
+        command.Route is { } route ? $"{command.HttpMethod ?? "POST"} {route}" : "invoked in process";
+
     /// <summary>One line saying where, when, how long and as whom an extension runs.</summary>
     public static string Summary(ManagementExtension extension) => string.Join(Separator, Parts(extension));
 

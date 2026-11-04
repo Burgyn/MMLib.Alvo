@@ -15,6 +15,7 @@ internal static class ManagedExtensions
     internal const string EveryWrite = "every-write-audited";
     internal const string FleetAlerted = "fleet-alerted";
     internal const string PlateChangedDescription = "Re-registers the vehicle when its plate changes.";
+    internal const string EscalateVehicle = "escalate_vehicle";
 
     /// <summary>Starts the world; the boot binds the three handlers strictly, as a code-first host's does.</summary>
     /// <param name="keys">The dev API keys the world issues.</param>
@@ -24,6 +25,18 @@ internal static class ManagedExtensions
             keys,
             new AlvoApiWorldSetup(MapBeforePriming: true, MapManagementApi: true, ConfigureServicesAfterAlvo: Register));
 
+    /// <summary>Starts a world whose host adds one internal command — no route — that admits dispatchers.</summary>
+    /// <param name="keys">The dev API keys the world issues.</param>
+    internal static Task<AlvoApiWorld> StartWithCommandAsync(IReadOnlyList<TestApiKey> keys) =>
+        AlvoApiWorld.FromDescriptorAsync(
+            ManagedFleet.Descriptor,
+            keys,
+            new AlvoApiWorldSetup(
+                MapBeforePriming: true,
+                MapManagementApi: true,
+                ConfigureServicesAfterAlvo: services => new Builder(services)
+                    .AddCommand<Escalate>(EscalateVehicle, "'dispatcher' in @user.roles")));
+
     private static void Register(IServiceCollection services) => new Builder(services)
         .Entity("vehicles", vehicles => vehicles.OnUpdated(
             PlateChanged,
@@ -32,6 +45,11 @@ internal static class ManagedExtensions
             configure: options => options.Description = PlateChangedDescription))
         .Entity("*", every => every.OnSaved(EveryWrite, (AlvoSaved<AlvoRecord> _) => Task.CompletedTask))
         .AddEventHandler(FleetAlerted, "fleet.alerted", (AlvoRecord _) => Task.CompletedTask);
+
+    private sealed class Escalate : MMLib.Alvo.Commands.IAlvoCommand<Guid>
+    {
+        public Task HandleAsync(Guid input, MMLib.Alvo.Commands.AlvoCommandContext context, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
 
     /// <summary>The builder a host holds; the registration verbs read only <see cref="Services"/>.</summary>
     private sealed class Builder(IServiceCollection services) : IAlvoBuilder

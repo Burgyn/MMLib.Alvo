@@ -190,6 +190,56 @@ internal static class DataApiDocumentation
     internal static IReadOnlyList<Response> SharedRefusals { get; } =
         [Unauthenticated, Forbidden, Absent, Precondition, Conflict, Malformed, UnsupportedMediaType];
 
+    /// <summary>
+    /// The refusals every command can answer with (Ruling 45): 401, 403, 404 for a command bound to a row, 409, 412 (a
+    /// precondition its handler's own write sent), 422 and 508 (the chain-depth limit).
+    /// </summary>
+    /// <remarks>
+    /// The 403 and the 412 reference the shared components but narrow them, as <see cref="ForbiddenOnBatch"/> does: the
+    /// shared 403 says a policy refusal is never per row, which a bound command's access rule is, and the shared 412 is
+    /// about the caller's own <c>If-Match</c>, which a command does not take.
+    /// </remarks>
+    /// <param name="boundToRow">Whether the command reads a row its route names.</param>
+    internal static IReadOnlyList<Response> CommandRefusals(bool boundToRow) =>
+        boundToRow
+            ? [Unauthenticated, ForbiddenOnCommand(boundToRow), Absent, Conflict, PreconditionOnCommand, Malformed, LoopDetected]
+            : [Unauthenticated, ForbiddenOnCommand(boundToRow), Conflict, PreconditionOnCommand, Malformed, LoopDetected];
+
+    /// <summary>The 403 as a command answers it: its access rule, judged against the bound row when there is one.</summary>
+    /// <param name="boundToRow">Whether the command reads a row its route names.</param>
+    private static Response ForbiddenOnCommand(bool boundToRow) => Forbidden with
+    {
+        SharedNarrowing = boundToRow
+            ? "The command is refused. Two kinds, told apart by the problem 'type': 'out-of-scope' means the presented "
+            + "key's scopes do not cover reading and writing this command's entity (grant the key both); 'forbidden' "
+            + "means the command's access rule — the host's, where it maps the command — refused this caller, judged "
+            + "against the row the route names. So here, unlike the Data API's single-row operations, it CAN mean "
+            + "'the rule excluded this row'; a row the caller cannot read at all is the 404. 'forbidden' also answers a "
+            + "command not bound to the applied descriptor, and a write the handler made that policy refused."
+            : "The command is refused. Two kinds, told apart by the problem 'type': 'out-of-scope' means the presented "
+            + "key's scopes do not cover writing (grant it '*:write'); 'forbidden' means the command's access rule — "
+            + "the host's, where it maps the command — refused this caller, the command is not bound to the applied "
+            + "descriptor, or a write the handler made was refused by policy.",
+    };
+
+    /// <summary>The 412 as a command answers it: a precondition on its handler's own write, never the caller's.</summary>
+    private static Response PreconditionOnCommand => Precondition with
+    {
+        SharedNarrowing =
+            "A precondition the command's handler sent on its own write did not hold, or could not be evaluated. The "
+            + "command takes no 'If-Match' of its own: the condition is the handler's, and so is the decision to retry.",
+    };
+
+    /// <summary>
+    /// The chain-depth refusal; published only where a command can answer it, so the Data API's document is unchanged.
+    /// </summary>
+    private static Response LoopDetected => new(
+        StatusCodes.Status508LoopDetected,
+        ResponseBody.Problem,
+        "The request would extend a chain of writes, events and handlers past the configured depth. It is not retryable: "
+        + "'retryable' is false. Break the loop rather than retrying.",
+        SharedId: "loopDetected");
+
     private static Response Ok(ResponseBody body, string description) =>
         new(StatusCodes.Status200OK, body, description);
 

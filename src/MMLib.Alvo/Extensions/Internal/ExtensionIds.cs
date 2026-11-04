@@ -10,6 +10,8 @@ internal static partial class ExtensionIds
 {
     internal static bool IsExtensionId(string id) => Extension().IsMatch(id);
 
+    internal static bool IsCommandName(string id) => Command().IsMatch(id);
+
     internal static bool IsRetirableId(string id) => Extension().IsMatch(id) || Function().IsMatch(id) || Command().IsMatch(id);
 
     internal static string DerivedSegment(string id) => id.Replace('-', '_');
