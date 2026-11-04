@@ -127,7 +127,7 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
     /// </summary>
     private async Task<(string ConnectionString, string Database)> CreateDatabaseAsync()
     {
-        var adminConnectionString = _container!.GetConnectionString();
+        var adminConnectionString = PostgresTestContainer.ConnectionStringOf(_container!);
         var name = $"alvo_{Guid.NewGuid():N}";
         await using var admin = new NpgsqlConnection(adminConnectionString);
         await admin.OpenAsync(TestContext.Current.CancellationToken);

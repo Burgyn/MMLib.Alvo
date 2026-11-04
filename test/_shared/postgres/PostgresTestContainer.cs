@@ -1,4 +1,6 @@
-﻿using Testcontainers.PostgreSql;
+﻿using Npgsql;
+
+using Testcontainers.PostgreSql;
 
 namespace MMLib.Alvo.Tests.Data;
 
@@ -29,4 +31,13 @@ internal static class PostgresTestContainer
         await container.StartAsync();
         return container;
     }
+
+    /// <summary>The container's connection string with GSS encryption switched off.</summary>
+    /// <remarks>
+    /// Npgsql's default <c>GSS Encryption Mode=Prefer</c> asks Kerberos for a ticket before it connects; on a domain-joined
+    /// host whose KDC is unreachable that request waits about 80 seconds and the connect times out. The container offers no
+    /// GSS, so disabling it changes nothing but the wait.
+    /// </remarks>
+    public static string ConnectionStringOf(PostgreSqlContainer container) =>
+        new NpgsqlConnectionStringBuilder(container.GetConnectionString()) { GssEncryptionMode = GssEncryptionMode.Disable }.ToString();
 }

@@ -67,7 +67,7 @@ public sealed class PostgresApiEngine : AlvoApiEngine, IAsyncLifetime
             Available,
             $"No reachable Docker daemon, so the PostgreSQL engine could not be started: {_unavailableReason}.");
 
-        var admin = _container!.GetConnectionString();
+        var admin = PostgresTestContainer.ConnectionStringOf(_container!);
         var name = $"alvo_api_{Guid.NewGuid():N}";
         await CreateAsync(admin, name);
 
