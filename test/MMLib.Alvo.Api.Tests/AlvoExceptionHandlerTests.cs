@@ -197,6 +197,37 @@ public class AlvoExceptionHandlerTests
     }
 
     /// <summary>
+    /// A write hook's failure is <c>hook-failed</c> with its id and reason wherever it sits in what escaped — bare, or
+    /// wrapped by an aggregate or an inner exception — and is not logged again: the runner logged it when it failed.
+    /// </summary>
+    [Theory]
+    [InlineData("bare")]
+    [InlineData("inner")]
+    [InlineData("aggregate")]
+    public async Task A_hook_failure_anywhere_in_the_chain_is_500_hook_failed_with_its_id_and_reason(string shape)
+    {
+        var logs = new RecordingLoggerProvider();
+        var context = Context(aborted: false, _alvoEndpoint);
+        var failure = new HookFailedException("guard", HookFailedException.Budget);
+        Exception escaped = shape switch
+        {
+            "bare" => failure,
+            "inner" => new InvalidOperationException("wrapped", failure),
+            _ => new AggregateException(new InvalidOperationException("other"), failure),
+        };
+
+        await Handle(logs, context, escaped);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status500InternalServerError);
+        context.Response.Body.Position = 0;
+        var body = await new StreamReader(context.Response.Body).ReadToEndAsync(TestContext.Current.CancellationToken);
+        body.ShouldContain("errors/hook-failed");
+        body.ShouldContain("\"extensions\":[\"guard\"]");
+        body.ShouldContain("\"reason\":\"budget\"");
+        logs.Records.ShouldNotContain(LogLevel.Error, "the runner logged the hook's failure where it happened");
+    }
+
+    /// <summary>
     /// Invokes the handler exactly the way <c>ExceptionHandlerMiddleware</c> does: the matched endpoint
     /// recorded onto <see cref="IExceptionHandlerFeature"/>, and then cleared off the context.
     /// </summary>

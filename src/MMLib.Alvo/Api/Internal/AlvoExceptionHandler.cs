@@ -5,6 +5,7 @@ using MMLib.Alvo.Commands.Internal;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.InboundWebhooks.Internal;
+using MMLib.Alvo.Rules;
 
 namespace MMLib.Alvo.Api.Internal;
 
@@ -100,6 +101,12 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
             return;
         }
 
+        if (HookFailure(exception, MaxWrapperDepth) is { } hook)
+        {
+            await ProblemResultFactory.HookFailed(hook.Extension, hook.Reason).ExecuteAsync(httpContext).ConfigureAwait(false);
+            return;
+        }
+
         if (!ClientDisconnected(httpContext, exception))
         {
             Failed(logger, exception, httpContext.Request.Method, httpContext.Request.Path.Value);
@@ -155,6 +162,19 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
     }
 
     private const int MaxWrapperDepth = 16;
+
+    /// <summary>
+    /// A hook failure in <paramref name="exception"/> or in what wraps it, found the way a function's failure is. The hook's
+    /// failure was already logged by the runner (<c>HookLog.HookFailed</c>), so it is answered without a second Error line.
+    /// </summary>
+    private static HookFailedException? HookFailure(Exception? exception, int depth) =>
+        exception switch
+        {
+            null => null,
+            HookFailedException hook => hook,
+            _ when depth <= 0 => null,
+            _ => Children(exception).Select(child => HookFailure(child, depth - 1)).FirstOrDefault(found => found is not null),
+        };
 
     /// <summary>
     /// Answers a CEL function's failure: logged at Error with the host's exception (its stack is the operator's), and a

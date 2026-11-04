@@ -75,6 +75,7 @@ violation's `code` is stable. Take the part after the last `/` and switch on it:
 | [`unsupported-media-type`](/reference/problem-types/#unsupported-media-type) | 415 | The body was not declared as JSON. | Send `Content-Type: application/json`. |
 | [`unreadable-request`](/reference/problem-types/#unreadable-request) | 413, 408, 400 | The web server refused the body. | Send a smaller body, in one go. |
 | [`function-failed`](/reference/problem-types/#function-failed) | 500 | A CEL function failed while the write was checked; nothing was written. | Check the input the function reads. |
+| [`hook-failed`](/reference/problem-types/#hook-failed) | 500 | A write hook in the host's code failed; nothing was written. | Nothing in the request is at fault; the host's log has the hook's error. |
 | [`internal`](/reference/problem-types/#internal) | 500 | Something inside Alvo broke. | Nothing in the request is at fault; the host's log has the details. |
 | [`chain-depth-exceeded`](/reference/problem-types/#chain-depth-exceeded) | 508 | A loop of hooks, handlers or timers went deeper than the chain limit; nothing was written. | Never retry it (`retryable: false`); break the loop. |
 
@@ -165,14 +166,14 @@ requested tenant, or a key with a role the descriptor does not declare. A reques
 
 ## Errors in an embedded host
 
-Three problem types come from Alvo's exception handler rather than from an endpoint: `unreadable-request`, `internal`
-and `function-failed`. The standalone host registers that handler:
+Four problem types come from Alvo's exception handler rather than from an endpoint: `unreadable-request`, `internal`,
+`function-failed` and `hook-failed`. The standalone host registers that handler:
 
 <SourceExcerpt code={alvoHost} from="builder.Services.AddAlvoProblemDetails();" to="builder.Services.AddAlvoProblemDetails();" title="AlvoHost.cs (registration)" />
 
 <SourceExcerpt code={alvoHost} from="app.UseExceptionHandler();" to="app.UseExceptionHandler();" title="AlvoHost.cs (pipeline)" />
 
-An embedded host decides for itself. With both calls, those three failures on Alvo's own routes get the documents
+An embedded host decides for itself. With both calls, those four failures on Alvo's own routes get the documents
 above, and a failure on the host's own routes is left to the host's handlers. Without them, which is the default, Alvo
 writes nothing for them: the exception reaches your own error handling and logging, and your app renders the 500 or 400
 it always would. Every other problem type on this page comes from the endpoints themselves and is the same in both
@@ -194,6 +195,7 @@ how to render them.
 | 401 | [`unauthenticated`](/reference/problem-types/#unauthenticated) | The key cannot be used. | Check the secret and the key's roles. | every host |
 | 413, 408, 400 | [`unreadable-request`](/reference/problem-types/#unreadable-request) | The web server refused the body before Alvo read it. | Send a smaller body, in one go. | standalone; embedded only with `AddAlvoProblemDetails()` |
 | 500 | [`function-failed`](/reference/problem-types/#function-failed) | A CEL function failed during a write. | Check the function's input; the exception is in the host's log. | standalone; embedded only with `AddAlvoProblemDetails()` |
+| 500 | [`hook-failed`](/reference/problem-types/#hook-failed) | A write hook in the host's code failed during a write. | Read the host's log for the hook the `extensions` member names. | standalone; embedded only with `AddAlvoProblemDetails()` |
 | 500 | [`internal`](/reference/problem-types/#internal) | An invariant inside Alvo broke. | Read the host's log. | standalone; embedded only with `AddAlvoProblemDetails()` |
 | 508 | [`chain-depth-exceeded`](/reference/problem-types/#chain-depth-exceeded) | A loop of hooks, handlers or timers went deeper than `Alvo:Extensions:MaxDepth`. | Never retry it (`retryable: false`); break the loop. | every host |
 

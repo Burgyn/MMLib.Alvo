@@ -6,6 +6,7 @@ using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Auth.Internal;
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Hooks;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -447,6 +448,7 @@ public sealed class ProblemDetailsTests
         reached.Add(await UnsupportedMediaTypeSlugAnsweredByANonJsonBodyAsync(world));
         reached.AddRange(await ManagementSlugsAnsweredByTheDescriptorWriteAsync());
         reached.Add(await ChainDepthSlugAnsweredByACallerDeepInAChainAsync());
+        reached.Add(await HookFailedSlugAnsweredByAThrowingWriteHookAsync());
 
         reached.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ShouldBe(
             AlvoProblemTypes.All.Except(PendingUntilALaterTask, StringComparer.Ordinal).Order(StringComparer.Ordinal),
@@ -534,6 +536,25 @@ public sealed class ProblemDetailsTests
             await inner.ResolveAsync(presentedKey, requestedTenant, cancellationToken) is { } principal
                 ? principal with { Context = principal.Context with { Provenance = new AlvoProvenance { Depth = 9 } } }
                 : null;
+    }
+
+    /// <summary>
+    /// The <c>hook-failed</c> slug's probe: its own world, because only a host that registered a throwing write hook can
+    /// produce it.
+    /// </summary>
+    private static async Task<string> HookFailedSlugAnsweredByAThrowingWriteHookAsync()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin],
+            new AlvoApiWorldSetup(
+                MapAlvoProblemDetails: true,
+                ConfigureAlvo: alvo => alvo.Entity("owners", owners => owners.BeforeWrite(
+                    "probe", ValueTask (BeforeWrite<AlvoRecord> _) => throw new InvalidOperationException("probe")))));
+
+        using var response = await world.SendAsync(HttpMethod.Post, "/api/owners", _admin, body: new JsonObject { ["name"] = "Ada" });
+
+        ((int)response.StatusCode).ShouldBe(StatusCodes.Status500InternalServerError, "or this probe reached some other refusal");
+        return await response.ReadProblemTypeAsync();
     }
 
     /// <summary>
@@ -722,6 +743,8 @@ public sealed class ProblemDetailsTests
         ProblemResultFactory.Internal(),
         ProblemResultFactory.FunctionFailed("A CEL function failed."),
         ProblemResultFactory.ChainDepthExceeded("too deep"),
+        ProblemResultFactory.HookFailed("probe", "exception"),
+        ProblemResultFactory.HookRejected(new AlvoWriteRejectedException(AlvoWriteRejectionKind.Conflict, "probe", [Violation()])),
         ProblemResultFactory.Unreadable(StatusCodes.Status413PayloadTooLarge),
         ProblemResultFactory.UnsupportedMediaType(HttpMethods.Post),
         ProblemResultFactory.PreconditionRequired("send If-Match"),
@@ -735,6 +758,7 @@ public sealed class ProblemDetailsTests
         Guarded(new AlvoIdempotencyConflictException("reused")),
         Guarded(new AlvoConstraintViolationException(AlvoConstraintKind.Unique, ["email"])),
         Guarded(new AlvoChainDepthExceededException("too deep")),
+        Guarded(new AlvoWriteRejectedException(AlvoWriteRejectionKind.Forbidden, "probe", [Violation()])),
         Guarded(new ArgumentException("malformed")),
     ];
 

@@ -29,7 +29,7 @@ public class ProblemTypeNotesTests
     [Fact]
     public void Only_the_opt_in_slugs_need_problem_details() =>
         _notes.Where(n => n.Value.NeedsProblemDetails).Select(n => n.Key).Order(StringComparer.Ordinal)
-            .ShouldBe(["function-failed", "internal", "unreadable-request"]);
+            .ShouldBe(["function-failed", "hook-failed", "internal", "unreadable-request"]);
 
     [Fact]
     public void Only_the_management_slugs_are_management_api_only() =>
