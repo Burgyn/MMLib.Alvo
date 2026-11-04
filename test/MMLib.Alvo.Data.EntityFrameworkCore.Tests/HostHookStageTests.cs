@@ -1,6 +1,8 @@
 ﻿using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Rules;
 
+using System.Collections.Concurrent;
+
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 
 /// <summary>
@@ -350,6 +352,28 @@ public sealed class HostHookStageTests
 
         result.Succeeded.ShouldBeTrue();
         hooks.Calls.Select(call => (call.Stage, call.UnitOnFlow, call.Autocommit)).ShouldBe([("validate", false, (bool?)true), ("validate", false, (bool?)true)]);
+    }
+
+    [Theory]
+    [InlineData(AlvoWriteOperation.Update)]
+    [InlineData(AlvoWriteOperation.Delete)]
+    public async Task Every_row_of_a_hooked_batch_is_held_while_its_hooks_run(AlvoWriteOperation operation)
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.InTransaction.Add((Note, operation));
+        await using var world = await StartAsync(hooks);
+        Guid[] ids = [await world.SeedAsync("a"), await world.SeedAsync("b")];
+        var held = new ConcurrentQueue<bool>();
+        hooks.OnBefore = _ => held.Enqueue(ids.All(id => HeldRows.Holds(Note, id)));
+
+        var result = operation == AlvoWriteOperation.Update
+            ? await world.Data.UpdateManyAsync(
+                Note, [.. ids.Select(id => new AlvoRowPatch(id, new Dictionary<string, object?> { ["title"] = "x" }))], world.Caller, cancellationToken: Ct)
+            : await world.Data.DeleteManyAsync(Note, ids, world.Caller, cancellationToken: Ct);
+
+        result.Succeeded.ShouldBeTrue();
+        held.ToArray().ShouldBe([true, true], "a hook writing a sibling row of its batch is a self-write (Ruling 43)");
+        ids.ShouldAllBe(id => !HeldRows.Holds(Note, id));
     }
 
     private const string ReadOnlyTitle = "Field 'title' is read-only and cannot be written.";

@@ -21,6 +21,9 @@ internal sealed class RecordingWriteExtensions : IWriteExtensionRunner
 
     internal Exception? RejectBefore { get; set; }
 
+    /// <summary>Runs inside every before-write call, so a fact can look at what the flow carries while a hook runs.</summary>
+    internal Action<WriteInvocation>? OnBefore { get; set; }
+
     public bool Validates(string entity, AlvoWriteOperation operation) => Validating.Contains((entity, operation));
 
     public bool RunsInTransaction(string entity, AlvoWriteOperation operation) => InTransaction.Contains((entity, operation));
@@ -34,6 +37,7 @@ internal sealed class RecordingWriteExtensions : IWriteExtensionRunner
     public Task<IReadOnlyDictionary<string, object?>> BeforeWriteAsync(WriteInvocation invocation, CancellationToken cancellationToken)
     {
         Calls.Enqueue(("before", invocation, AlvoFlow.Unit is not null, Autocommit?.Invoke()));
+        OnBefore?.Invoke(invocation);
         if (RejectBefore is { } rejection)
         {
             throw rejection;

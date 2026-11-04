@@ -87,6 +87,24 @@ public sealed class HookRejectionLogTests
     }
 
     [Fact]
+    public async Task A_rejection_recorded_on_a_flow_still_carrying_its_released_unit_is_inserted_at_once()
+    {
+        var primed = await PrimedLogAsync();
+        await using var keeper = primed.Keeper;
+        var log = primed.Log;
+        await using var world = await WritePathWorld.StartAsync(WritePathFixture.Descriptor(), WritePathFixture.Schema(), rejections: log);
+        var unit = await world.Data.OpenUnitAsync(world.Caller, new AlvoTransactionOptions(), world.Scopes, Ct);
+        using (unit.EnterFlow())
+        {
+            await unit.DisposeAsync();
+            await log.RecordAsync(_rejection, Ct);
+            (await RowsAsync(keeper)).ShouldBe(2L, "a released unit keeps nothing more, so the row is inserted at once");
+        }
+
+        unit.Rejections.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task The_table_holds_no_payload_and_no_message()
     {
         var database = $"Data Source=hook-rejections-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";

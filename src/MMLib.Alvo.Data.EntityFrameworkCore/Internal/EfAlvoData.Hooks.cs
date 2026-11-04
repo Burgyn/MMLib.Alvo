@@ -245,6 +245,32 @@ internal sealed partial class EfAlvoData
         }
     }
 
+    /// <summary>A batch's after-delete for each removed row: the first refusal is the batch's, and keeps every row (Ruling 4).</summary>
+    private async Task<AlvoRowRefusal?> HostAfterDeleteRowsAsync(
+        EntitySchema schema, AlvoContext context, IReadOnlyList<(int Index, AlvoRecord PreImage)> rows, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        foreach (var (index, preImage) in rows)
+        {
+            try
+            {
+                await HostAfterDeleteAsync(schema, context, preImage, now, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception refused) when (refused is IRowRefusal row)
+            {
+                return row.At(index);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Every row of a batch held as in a hook stage while its hooks run (Ruling 43), so a hook writing a sibling row is a
+    /// self-write; a batch no host hook runs on holds nothing — no hook of it can make a nested write.
+    /// </summary>
+    private IDisposable? HeldWhileHooksRun(EntitySchema schema, AlvoWriteOperation operation, IEnumerable<Guid> ids) =>
+        HostHooksRun(schema.Name, operation) ? HeldRows.HoldAll(schema.Name, ids) : null;
+
     /// <summary>A batch row's before-delete, its refusal the row's.</summary>
     private async Task<AlvoRowRefusal?> HostBeforeDeleteOrRefuseAsync(
         EntitySchema schema, AlvoContext context, AlvoRecord preImage, DateTimeOffset now, int index, CancellationToken cancellationToken)
@@ -420,6 +446,11 @@ internal sealed partial class EfAlvoData
     /// <summary>The idempotency table, ensured before a keyed write opens its own unit — no DDL ever runs inside one.</summary>
     private async Task EnsureIdempotencyTableOutsideAsync(CancellationToken cancellationToken)
     {
+        if (_idempotencyTableEnsured)
+        {
+            return;
+        }
+
         using var db = _contexts.Create();
         await EnsureIdempotencyTableAsync(db, cancellationToken).ConfigureAwait(false);
     }

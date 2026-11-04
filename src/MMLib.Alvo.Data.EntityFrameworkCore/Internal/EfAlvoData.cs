@@ -2751,7 +2751,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         var stored = await InsertManyAsync(db, schema, decision, context, judged, cancellationToken);
 
         await RecomputeRollupsAsync(db, schema, stored!, cancellationToken);
-        using var held = HeldRows.HoldAll(schema.Name, stored.Select(RowIdOf));
+        using var held = HeldWhileHooksRun(schema, AlvoWriteOperation.Create, stored.Select(RowIdOf));
         var (saved, refusedAfter) = await AfterSavedRowsAsync(
             db, schema, decision, context, AlvoWriteOperation.Create, [.. stored.Select((row, index) => (index, (AlvoRecord?)null, row))], now, cancellationToken);
         if (refusedAfter is not null)
@@ -2904,7 +2904,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             return BatchOutcome.Refused(repeats);
         }
 
-        using var held = HeldRows.HoldAll(schema.Name, rows.Select(row => row.Id));
+        using var held = HeldWhileHooksRun(schema, AlvoWriteOperation.Update, rows.Select(row => row.Id));
 
         var judged = new List<(int Index, Guid Id, AlvoRecord PreImage, IReadOnlyDictionary<string, object?> Values)>(rows.Count);
         var refusals = new List<AlvoRowRefusal>();
@@ -3055,7 +3055,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             return BatchOutcome.Refused(repeats);
         }
 
-        using var held = HeldRows.HoldAll(schema.Name, ids);
+        using var held = HeldWhileHooksRun(schema, AlvoWriteOperation.Delete, ids);
 
         var judged = new List<(int Index, Guid Id, AlvoRecord PreImage)>(ids.Count);
         var refusals = new List<AlvoRowRefusal>();
@@ -3109,16 +3109,9 @@ internal sealed partial class EfAlvoData : IAlvoData
         }
 
         await RecomputeRollupsAsync(db, schema, [.. judged.Select(row => row.PreImage.Values)], cancellationToken);
-        foreach (var (index, _, preImage) in judged)
+        if (await HostAfterDeleteRowsAsync(schema, context, [.. judged.Select(row => (row.Index, row.PreImage))], now, cancellationToken) is { } refusedAfter)
         {
-            try
-            {
-                await HostAfterDeleteAsync(schema, context, preImage, now, cancellationToken);
-            }
-            catch (Exception refused) when (refused is IRowRefusal row)
-            {
-                return BatchOutcome.Refused([row.At(index)]);
-            }
+            return BatchOutcome.Refused([refusedAfter]);
         }
 
         foreach (var (_, _, preImage) in judged)
