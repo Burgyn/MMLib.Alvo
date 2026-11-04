@@ -393,6 +393,14 @@ namespace MMLib.Alvo.Extensions
         public MMLib.Alvo.Extensions.AlvoRunAs RunAs { get; set; }
         public System.TimeSpan Timeout { get; set; }
     }
+    public sealed class AlvoHookOptions
+    {
+        public AlvoHookOptions() { }
+        public string? Description { get; set; }
+        public int MaxOperations { get; set; }
+        public int Order { get; set; }
+        public System.TimeSpan? Timeout { get; set; }
+    }
     public enum AlvoOrdering
     {
         PerRecord = 0,
@@ -415,6 +423,146 @@ namespace MMLib.Alvo.Extensions
     {
         System = 0,
         EventActor = 1,
+    }
+}
+namespace MMLib.Alvo.Hooks
+{
+    public sealed class AfterDelete<T>
+        where T :  class
+    {
+        public MMLib.Alvo.AlvoContext Caller { get; }
+        public System.DateTimeOffset Now { get; }
+        public T Old { get; }
+        public MMLib.Alvo.Data.IAlvoTransaction Transaction { get; }
+        public void Conflict(string code, string message, string? field = null) { }
+        public void Forbidden(string code, string message) { }
+        public void Invalid(string code, string message, string? field = null) { }
+        public System.Threading.Tasks.Task PublishAsync(string type, string subject, System.Collections.Generic.IReadOnlyDictionary<string, object?>? data, System.Threading.CancellationToken cancellationToken = default) { }
+    }
+    public sealed class AfterWrite<T>
+        where T :  class
+    {
+        public MMLib.Alvo.AlvoContext Caller { get; }
+        public System.DateTimeOffset Now { get; }
+        public T Old { get; }
+        public MMLib.Alvo.Data.AlvoWriteOperation Operation { get; }
+        public T Saved { get; }
+        public MMLib.Alvo.Data.IAlvoTransaction Transaction { get; }
+        public void Conflict(string code, string message, string? field = null) { }
+        public void Forbidden(string code, string message) { }
+        public void Invalid(string code, string message, string? field = null) { }
+        public System.Threading.Tasks.Task PublishAsync(string type, string subject, System.Collections.Generic.IReadOnlyDictionary<string, object?>? data, System.Threading.CancellationToken cancellationToken = default) { }
+    }
+    public sealed class AlvoWriteRejectedException : System.Exception
+    {
+        public AlvoWriteRejectedException() { }
+        public AlvoWriteRejectedException(string message) { }
+        public AlvoWriteRejectedException(string message, System.Exception innerException) { }
+        public string Code { get; }
+        public string ExtensionId { get; }
+        public MMLib.Alvo.Hooks.AlvoWriteRejectionKind Kind { get; }
+        public string Pointer { get; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Api.AlvoViolation> Violations { get; }
+    }
+    public enum AlvoWriteRejectionKind
+    {
+        Invalid = 0,
+        Conflict = 1,
+        Forbidden = 2,
+    }
+    public sealed class BeforeDelete<T>
+        where T :  class
+    {
+        public MMLib.Alvo.AlvoContext Caller { get; }
+        public System.DateTimeOffset Now { get; }
+        public T Old { get; }
+        public MMLib.Alvo.Data.IAlvoTransaction Transaction { get; }
+        public void Conflict(string code, string message, string? field = null) { }
+        public void Forbidden(string code, string message) { }
+        public void Invalid(string code, string message, string? field = null) { }
+        public System.Threading.Tasks.Task PublishAsync(string type, string subject, System.Collections.Generic.IReadOnlyDictionary<string, object?>? data, System.Threading.CancellationToken cancellationToken = default) { }
+    }
+    public sealed class BeforeWrite<T>
+        where T :  class
+    {
+        public MMLib.Alvo.AlvoContext Caller { get; }
+        public T New { get; }
+        public System.DateTimeOffset Now { get; }
+        public T Old { get; }
+        public MMLib.Alvo.Data.AlvoWriteOperation Operation { get; }
+        public MMLib.Alvo.Data.IAlvoTransaction Transaction { get; }
+        public void Conflict(string code, string message, string? field = null) { }
+        public void Forbidden(string code, string message) { }
+        public void Invalid(string code, string message, string? field = null) { }
+        public System.Threading.Tasks.Task PublishAsync(string type, string subject, System.Collections.Generic.IReadOnlyDictionary<string, object?>? data, System.Threading.CancellationToken cancellationToken = default) { }
+        public void Set(string field, object? value) { }
+        public void Set<TValue>(System.Linq.Expressions.Expression<System.Func<T, TValue>> field, TValue value) { }
+    }
+    public interface IAfterDeleteHook
+    {
+        System.Threading.Tasks.ValueTask AfterDeleteAsync(MMLib.Alvo.Hooks.AfterDelete<MMLib.Alvo.Data.AlvoRecord> deletion, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IAfterDeleteHook<T>
+        where T :  class
+    {
+        System.Threading.Tasks.ValueTask AfterDeleteAsync(MMLib.Alvo.Hooks.AfterDelete<T> deletion, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IAfterWriteHook
+    {
+        System.Threading.Tasks.ValueTask AfterWriteAsync(MMLib.Alvo.Hooks.AfterWrite<MMLib.Alvo.Data.AlvoRecord> write, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IAfterWriteHook<T>
+        where T :  class
+    {
+        System.Threading.Tasks.ValueTask AfterWriteAsync(MMLib.Alvo.Hooks.AfterWrite<T> write, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IBeforeDeleteHook
+    {
+        System.Threading.Tasks.ValueTask BeforeDeleteAsync(MMLib.Alvo.Hooks.BeforeDelete<MMLib.Alvo.Data.AlvoRecord> deletion, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IBeforeDeleteHook<T>
+        where T :  class
+    {
+        System.Threading.Tasks.ValueTask BeforeDeleteAsync(MMLib.Alvo.Hooks.BeforeDelete<T> deletion, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IBeforeWriteHook
+    {
+        System.Threading.Tasks.ValueTask BeforeWriteAsync(MMLib.Alvo.Hooks.BeforeWrite<MMLib.Alvo.Data.AlvoRecord> write, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IBeforeWriteHook<T>
+        where T :  class
+    {
+        System.Threading.Tasks.ValueTask BeforeWriteAsync(MMLib.Alvo.Hooks.BeforeWrite<T> write, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IValidateWriteHook
+    {
+        System.Threading.Tasks.ValueTask ValidateAsync(MMLib.Alvo.Hooks.ValidateWrite<MMLib.Alvo.Data.AlvoRecord> write, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IValidateWriteHook<T>
+        where T :  class
+    {
+        System.Threading.Tasks.ValueTask ValidateAsync(MMLib.Alvo.Hooks.ValidateWrite<T> write, System.Threading.CancellationToken cancellationToken);
+    }
+    public sealed class ValidateWrite<T>
+        where T :  class
+    {
+        public MMLib.Alvo.AlvoContext Caller { get; }
+        public MMLib.Alvo.Data.IAlvoSession Data { get; }
+        public T New { get; }
+        public System.DateTimeOffset Now { get; }
+        public T Old { get; }
+        public MMLib.Alvo.Data.AlvoWriteOperation Operation { get; }
+        public void Conflict(string code, string message, string? field = null) { }
+        public void Forbidden(string code, string message) { }
+        public void Invalid(string code, string message, string? field = null) { }
+    }
+    public sealed class WriteCondition<T>
+        where T :  class
+    {
+        public MMLib.Alvo.Events.AlvoConditionCaller Caller { get; }
+        public T New { get; }
+        public T Old { get; }
+        public bool Changed(params System.Linq.Expressions.Expression<System.Func<T, object?>>[] fields) { }
     }
 }
 namespace MMLib.Alvo.Management
