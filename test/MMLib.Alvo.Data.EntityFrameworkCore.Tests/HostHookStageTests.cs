@@ -381,6 +381,24 @@ public sealed class HostHookStageTests
         hooks.Calls.ShouldHaveSingleItem("a replace of a stored row is judged by the update rule").Invocation.Old.ShouldNotBeNull();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_replace_that_creates_with_a_precondition_answers_412_before_the_create_rule_whether_or_not_it_validates(bool validated)
+    {
+        var hooks = new RecordingWriteExtensions();
+        if (validated)
+        {
+            hooks.Validating.Add((Note, AlvoWriteOperation.Replace));
+        }
+
+        await using var world = await StartAsync(hooks, WritePathFixture.Descriptor(create: "title != 'refused'"));
+
+        await Should.ThrowAsync<AlvoPreconditionFailedException>(() => world.Data.ReplaceAsync(
+            Note, Guid.NewGuid(), WritePathFixture.Payload("refused"), world.Caller, new AlvoPrecondition(DateTimeOffset.UnixEpoch), cancellationToken: Ct));
+        hooks.Calls.ShouldBeEmpty("a version names a row that is not there: 412, and no outbound call (Ruling 61)");
+    }
+
     [Fact]
     public async Task A_replayed_key_skips_validate()
     {

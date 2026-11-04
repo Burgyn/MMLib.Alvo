@@ -25,7 +25,7 @@ public sealed class BeforeWrite<T>
     /// <summary>Gets the row before the write, read under the write's lock; null on a create.</summary>
     public T? Old { get; }
 
-    /// <summary>Gets the row the write would store, with the earlier hooks' sets; on a create it has no id yet.</summary>
+    /// <summary>Gets the row the write would store, with the earlier hooks' sets; on a create it has no id yet, so a typed row's <c>Id</c> is empty.</summary>
     public T New { get; }
 
     /// <summary>Gets the write's transaction, as the caller, one hop deeper in the causation chain: every call counts toward the hook's budget.</summary>
@@ -37,12 +37,19 @@ public sealed class BeforeWrite<T>
     /// <summary>Gets the instant the write is stamped with.</summary>
     public DateTimeOffset Now => _run.Invocation.Now;
 
-    /// <summary>Sets a field of the row to be stored; the row is then judged by the entity's rules and the field's facets again.</summary>
+    /// <summary>
+    /// Sets a field of the row to be stored; the row is then judged by the entity's rules and the field's facets again. A field
+    /// the caller's policy makes read-only is refused 403, as the caller's own payload would be; an undeclared field, one Alvo
+    /// manages, or a value the field cannot hold fails the write (500 <c>invalid-set</c>).
+    /// </summary>
     /// <param name="field">The field's name.</param>
     /// <param name="value">The value, as the field holds it.</param>
     public void Set(string field, object? value) => _run.Set(field, value);
 
-    /// <summary>Sets a mapped property's field of the row to be stored; refused at the call for a field Alvo manages.</summary>
+    /// <summary>
+    /// Sets a mapped property's field of the row to be stored; refused at the call for a field Alvo manages. Judged as
+    /// <see cref="Set(string, object?)"/> is: a read-only field is refused 403, a value the field cannot hold is <c>invalid-set</c>.
+    /// </summary>
     /// <typeparam name="TValue">The property's type.</typeparam>
     /// <param name="field">The property, such as <c>x =&gt; x.Status</c>.</param>
     /// <param name="value">The value.</param>

@@ -8,10 +8,17 @@ namespace MMLib.Alvo.Hooks.Internal;
 /// One invocation of one hook: what it was handed, and what it recorded — rejections, <c>Set</c>s, its calls through the
 /// transaction, and a failure its transaction raised into it (budget, self-write) that catching cannot erase.
 /// </summary>
+/// <remarks>
+/// A hook may record from tasks it starts in parallel, so every recording member is safe to call concurrently; the runner reads
+/// <see cref="Sets"/> only once the hook has returned.
+/// </remarks>
 internal sealed class HookRun(
     string id, WriteInvocation invocation, IReadOnlySet<string> pointable, IAlvoTransaction? transaction, IAlvoSession? data, CancellationToken token)
 {
     private readonly Dictionary<string, object?> _sets = new(StringComparer.Ordinal);
+    private readonly Lock _gate = new();
+    private HookFailedException? _failure;
+    private bool _wrote;
     private int _operations;
 
     internal string Id { get; } = id;
@@ -28,31 +35,38 @@ internal sealed class HookRun(
 
     internal IReadOnlyDictionary<string, object?> Sets => _sets;
 
-    internal HookFailedException? Failure { get; private set; }
+    internal HookFailedException? Failure => Volatile.Read(ref _failure);
 
     internal int Operations => Volatile.Read(ref _operations);
 
-    internal bool Wrote { get; private set; }
+    internal bool Wrote => Volatile.Read(ref _wrote);
 
     internal void Set(string field, object? value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(field);
-        _sets[field] = RecordWriter.Field(field, value);
+        var normalised = RecordWriter.Field(field, value);
+        lock (_gate)
+        {
+            _sets[field] = normalised;
+        }
     }
 
-    internal void Fail(HookFailedException failure) => Failure ??= failure;
+    internal void Fail(HookFailedException failure) => Interlocked.CompareExchange(ref _failure, failure, null);
 
     /// <summary>Replaces the recorded <c>Set</c>s with their checked, widened form (Ruling 47).</summary>
     internal void Replace(IReadOnlyDictionary<string, object?> sets)
     {
-        _sets.Clear();
-        foreach (var (field, value) in sets)
+        lock (_gate)
         {
-            _sets[field] = value;
+            _sets.Clear();
+            foreach (var (field, value) in sets)
+            {
+                _sets[field] = value;
+            }
         }
     }
 
     internal int Count() => Interlocked.Increment(ref _operations);
 
-    internal void MarkWrote() => Wrote = true;
+    internal void MarkWrote() => Volatile.Write(ref _wrote, true);
 }

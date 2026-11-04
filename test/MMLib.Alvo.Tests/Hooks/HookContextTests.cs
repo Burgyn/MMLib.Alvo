@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Data.Internal;
 using MMLib.Alvo.Hooks;
 using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.Rules;
@@ -15,6 +16,18 @@ public sealed class HookBooking
     public long Nights { get; init; }
 }
 
+[AlvoEntity("audited_bookings")]
+public sealed class HookAuditedBooking
+{
+    public Guid Id { get; init; }
+
+    public required string Guest { get; init; }
+
+    public DateTimeOffset? CreatedAt { get; init; }
+
+    public string? UpdatedBy { get; init; }
+}
+
 /// <summary>What a hook sees and records through its context (spec 2026-10-14 §4.4.1, D2).</summary>
 public sealed class HookContextTests
 {
@@ -25,10 +38,34 @@ public sealed class HookContextTests
     [Fact]
     public void A_typed_before_write_reads_its_images_as_the_host_type_and_has_no_old_record_on_a_create()
     {
-        var write = new BeforeWrite<HookBooking>(Run(AlvoWriteOperation.Create, old: null, @new: Booking("Ada", 2)));
+        var write = new BeforeWrite<HookBooking>(Run(AlvoWriteOperation.Create, old: null, @new: Unsaved("Ada", 2)));
 
-        (write.Operation, write.Old, write.New.Guest, write.New.Nights).ShouldBe((AlvoWriteOperation.Create, (HookBooking?)null, "Ada", 2L));
+        (write.Operation, write.Old, write.New.Id, write.New.Guest, write.New.Nights)
+            .ShouldBe((AlvoWriteOperation.Create, (HookBooking?)null, Guid.Empty, "Ada", 2L));
     }
+
+    [Fact]
+    public void A_typed_validate_reads_a_create_s_id_less_row_with_an_empty_id()
+    {
+        var write = new ValidateWrite<HookBooking>(Run(AlvoWriteOperation.Create, old: null, @new: Unsaved("Ada", 2)));
+
+        (write.New.Id, write.New.Guest, write.New.Nights).ShouldBe((Guid.Empty, "Ada", 2L));
+    }
+
+    [Fact]
+    public void A_typed_validate_reads_a_replace_s_row_without_audit_columns_as_null_ones()
+    {
+        var @new = new AlvoRecord(new Dictionary<string, object?> { ["id"] = Guid.Parse("00000000-0000-0000-0000-0000000000b1"), ["guest"] = "Ada" });
+
+        var write = new ValidateWrite<HookAuditedBooking>(Run(AlvoWriteOperation.Replace, old: null, @new));
+
+        (write.New.Guest, write.New.CreatedAt, write.New.UpdatedBy).ShouldBe(("Ada", (DateTimeOffset?)null, (string?)null));
+    }
+
+    [Fact]
+    public void A_typed_image_missing_a_field_alvo_does_not_manage_is_still_refused() =>
+        Should.Throw<RecordUnreadableException>(() => new ValidateWrite<HookBooking>(
+            Run(AlvoWriteOperation.Create, old: null, new AlvoRecord(new Dictionary<string, object?> { ["guest"] = "Ada" }))));
 
     [Fact]
     public void A_typed_set_names_the_mapped_field_and_an_untyped_one_normalises_its_number()
@@ -41,6 +78,16 @@ public sealed class HookContextTests
         new BeforeWrite<AlvoRecord>(run).Set("nights", 5);
 
         run.Sets.ShouldBe(new Dictionary<string, object?> { ["nights"] = 5L, ["guest"] = "Grace" });
+    }
+
+    [Fact]
+    public void Sets_recorded_from_parallel_tasks_are_all_kept()
+    {
+        var run = Run(AlvoWriteOperation.Update, Booking("Ada", 2), Booking("Ada", 2));
+
+        Parallel.For(0, 1000, index => run.Set($"field_{index}", index));
+
+        run.Sets.Count.ShouldBe(1000);
     }
 
     [Fact]
@@ -82,6 +129,12 @@ public sealed class HookContextTests
     internal static AlvoRecord Booking(string guest, long nights) => new(new Dictionary<string, object?>
     {
         ["id"] = Guid.Parse("00000000-0000-0000-0000-0000000000b1"),
+        ["guest"] = guest,
+        ["nights"] = nights,
+    });
+
+    internal static AlvoRecord Unsaved(string guest, long nights) => new(new Dictionary<string, object?>
+    {
         ["guest"] = guest,
         ["nights"] = nights,
     });

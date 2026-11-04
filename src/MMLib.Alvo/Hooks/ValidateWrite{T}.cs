@@ -23,7 +23,7 @@ public sealed class ValidateWrite<T>
     /// <summary>Gets the row before the write, read with no lock — another write may move it before this one runs; null on a create.</summary>
     public T? Old { get; }
 
-    /// <summary>Gets the row the write would store; on a create it has no id yet.</summary>
+    /// <summary>Gets the row the write would store; on a create it has no id yet, so a typed row's <c>Id</c> is empty.</summary>
     public T New { get; }
 
     /// <summary>Gets data access as the caller, one hop deeper in the causation chain; each call commits on its own.</summary>

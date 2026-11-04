@@ -126,6 +126,8 @@ Rulings taken during execution (continuing the numbering):
 
 60. **(Task 4 review, Minor 1) A replace that becomes a create is judged by the create rule before validate.** When E9's pre-read finds no row, `ValidateChangeAsync` builds the candidate `CreatedByReplaceAsync` will insert (`ReplaceCandidate` under the create decision) and runs the create rule's `WITH CHECK` and the tenant scope over it (`EnsureCreatable`) before any validate hook — exactly what a plain create's `AuthorizedCandidate` does, so no path makes an outbound call for a create the write will refuse. The validate hook's `New` still differs by operation: a create's is the stamped candidate without `id` (audit columns, no id — Ruling 13), a replace's the unstamped whole row with the path's `id`. Fact: `HostHookStageTests.A_replace_that_creates_is_judged_by_the_create_rule_before_validate`.
 
+61. **(Task 5 review, Minor 1) On a replace that creates, an `If-Match` answers 412 before the create rule, whether or not a validate hook is registered.** `CreatedByReplaceAsync` checks the precondition against no stored version before `WITH CHECK`; `EnsureCreatable` now does the same before it judges the candidate (the write's `precondition` is passed to `ValidateChangeAsync`), so registering a validate hook never changes a replace's status from 412 to 403, and no hook runs for a version that names a row that is not there. A replace or update of a stored row whose version no longer matches still validates first and answers 412 from the write. Fact: `HostHookStageTests.A_replace_that_creates_with_a_precondition_answers_412_before_the_create_rule_whether_or_not_it_validates`.
+
 ---
 
 ## File structure
@@ -7525,7 +7527,8 @@ a `CancellationToken` or services.
 violation of that kind. `field` becomes the violation's JSON pointer (`/starts_at`) — **except on a field the descriptor
 hides from some callers**, which is never pointed at; do not name it in your message either. In `IAlvoData` the refusal
 is an `AlvoWriteRejectedException`; in a batch it is that row's refusal and the batch writes nothing. Every refusal is
-recorded in `alvo_hook_rejections` — ids and your code, never the payload.
+recorded in `alvo_hook_rejections` — ids and your code, never the payload. Record a refusal on the context: an
+`AlvoWriteRejectedException` your hook *throws* is a failure like any other exception — 500 `hook-failed`, not a rejection.
 
 ## Setting fields
 
@@ -7576,7 +7579,8 @@ call never holds a lock. It does **not** run for a write inside a [transaction u
 validate hook saw — its `Old` was read without a lock — may change before the write runs: never rest integrity on it;
 an invariant belongs in a before-write hook. A validate hook never sees a payload the caller may not send, and an update
 of a row the caller cannot reach answers 404 before any validate hook runs. A replace of a row that does not exist is
-validated as the create it will be, after the create rule admits it. An `If-Match` that no longer matches is checked by
+validated as the create it will be, after the create rule admits it; an `If-Match` on it answers 412 before any validate
+hook, since a version names a row that is not there. An `If-Match` that no longer matches a stored row is checked by
 the write, so the validate hook still runs before the answer is 412. `New` differs by operation: on a create it is
 the stamped row with no id yet; on a replace it is the whole row as sent, with the path's id and no audit columns.
 
@@ -7605,6 +7609,8 @@ Any other caller is refused; the descriptor's hooks and events still run; the un
 <SourceExcerpt code={tests} from="public async Task A_booking_outside_opening_hours" to="Items.ShouldBeEmpty();" title="OpeningDeskHooksTests.cs" />
 
 `alvo.Hooks.AssertRan(id, times)` counts write-hook runs made through `alvo.Data` — a rejection counts as a run.
+Test a hook through `AlvoTestHost` and a real write, as above: Alvo has no public factory for hook contexts, so a hook
+class is not unit-tested by constructing its context.
 
 :::note[Not yet]
 An analyzer that flags network use inside a hook arrives later; until then the start-up check covers direct
@@ -7626,7 +7632,7 @@ Run: `cd website && npm run build` → passes (link validation included).
 
 - [ ] **Step 4: Architecture, C13, CHANGELOG, PLAN**
 
-`docs/architecture/write-hooks.md` — sections, each a few paragraphs: *The stages and where they live* (the §4.1 map with the file that runs each stage: `EfAlvoData.Hooks.cs`, `WriteExtensionRunner`); *A unit of the write's own* (Ruling 1, the `OwnUnitAsync`/`UnitRun` shape, the 30 s default); *What a hook's transaction is* (lazy hop, budget, token, self-write, `AsSystem`); *What poisons* (a table: budget, self-write, timeout (via `Blame`), escaping exception, invalid-set, unbound, row-vanished, depth — each with its reason string; and the stated limit of Ruling 55: a hook that ignores its token and never returns keeps its call running, and the unit's deadline rolls back only when no call is running, so it holds SQLite's writer lock); *Cascades* (Ruling 45: declared `onDelete` cascades and set-null run no host hooks — a deviation from PostgreSQL row triggers); *Rejections* (precedence, pointers, Ruling X, batches, the log and its flush after the unit); *Validate* (stage 0/2, pre-read, batch hoisting, switch-off; a replace that creates is judged by the create rule first (Ruling 60); an If-Match mismatch still validates before answering 412; `New` differs by operation — create: stamped, no id; replace: unstamped, with id); *SuppressHostHooks*; *The boot ban*; *Telemetry and the test host's recorder*; *Engine parity* (no new SQL dialect; the facts that run on both); *Deviations* (a pointer to the spec's *HX-09 settled details*). `extensibility.md`: the rule-4 verb list names the hook verbs as `Entity`-builder members. `data-path.md`'s *A transaction unit spans several writes (HX-07)* gains two sentences: a top-level write with a host in-transaction hook runs in a unit of its own; the hook's view is one hop deeper.
+`docs/architecture/write-hooks.md` — sections, each a few paragraphs: *The stages and where they live* (the §4.1 map with the file that runs each stage: `EfAlvoData.Hooks.cs`, `WriteExtensionRunner`); *A unit of the write's own* (Ruling 1, the `OwnUnitAsync`/`UnitRun` shape, the 30 s default); *What a hook's transaction is* (lazy hop, budget, token, self-write, `AsSystem`); *What poisons* (a table: budget, self-write, timeout (via `Blame`), escaping exception, invalid-set, unbound, row-vanished, depth — each with its reason string; and the stated limit of Ruling 55: a hook that ignores its token and never returns keeps its call running, and the unit's deadline rolls back only when no call is running, so it holds SQLite's writer lock); *Cascades* (Ruling 45: declared `onDelete` cascades and set-null run no host hooks — a deviation from PostgreSQL row triggers); *Rejections* (precedence, pointers, Ruling X, batches, the log and its flush after the unit); *Validate* (stage 0/2, pre-read, batch hoisting, switch-off; a replace that creates is judged by the create rule first (Ruling 60), after its If-Match answers 412 (Ruling 61); an If-Match mismatch on a stored row still validates before answering 412; a host-thrown `AlvoWriteRejectedException` is 500 `hook-failed`, never a rejection; no public hook-context factory in HX-09 — hooks are tested through `AlvoTestHost`; `New` differs by operation — create: stamped, no id; replace: unstamped, with id); *SuppressHostHooks*; *The boot ban*; *Telemetry and the test host's recorder*; *Engine parity* (no new SQL dialect; the facts that run on both); *Deviations* (a pointer to the spec's *HX-09 settled details*). `extensibility.md`: the rule-4 verb list names the hook verbs as `Entity`-builder members. `data-path.md`'s *A transaction unit spans several writes (HX-07)* gains two sentences: a top-level write with a host in-transaction hook runs in a unit of its own; the hook's view is one hop deeper.
 
 `docs/architecture/events.md` — the C13 correction (§2.2, HX-09's scope). In the *Gone — PR5b-1 lifted all three* bullet (search `AuthorizedCandidate\` moved`), replace "with `AuthorizedCandidate` moved inside the transaction" by "with the before-hooks run inside the transaction — `AuthorizedCandidate` itself still runs before `BEGIN` on creates (updates authorize inside the transaction, deletes have no pre-transaction check; with a host in-transaction hook registered for the write, the create's `AuthorizedCandidate` and payload guard run inside the write's own unit, after `BEGIN` and the write turn; corrected in HX-09, spec C13)". Grep the file for any other sentence claiming `AuthorizedCandidate` runs inside a transaction (`grep -n 'AuthorizedCandidate' docs/architecture/*.md`) and correct each the same way (sweep for the claim, not the file).
 

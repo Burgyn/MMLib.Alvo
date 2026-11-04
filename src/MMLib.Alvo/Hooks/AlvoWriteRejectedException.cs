@@ -8,6 +8,10 @@ namespace MMLib.Alvo.Hooks;
 /// A host write hook refused the write: nothing was written and no event was emitted. Over HTTP it is answered 422, 409 or
 /// 403 by its <see cref="Kind"/>, with every violation of that kind; in a batch it is the refused row's refusal.
 /// </summary>
+/// <remarks>
+/// Alvo raises it from what a hook records on its context (<c>Invalid</c>, <c>Conflict</c>, <c>Forbidden</c>). A hook that
+/// <em>throws</em> one itself has failed like any other exception — 500 <c>hook-failed</c>, not a rejection.
+/// </remarks>
 public sealed class AlvoWriteRejectedException : Exception, IRowRefusal
 {
     /// <summary>Initializes a new instance of the <see cref="AlvoWriteRejectedException"/> class.</summary>

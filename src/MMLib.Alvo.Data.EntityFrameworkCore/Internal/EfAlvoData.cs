@@ -1171,7 +1171,7 @@ internal sealed partial class EfAlvoData : IAlvoData
 
         var decision = Resolve(entity, DataOperation.Update, context);
         await ValidateChangeAsync(
-            entity, id, values, AlvoWriteOperation.Update, decision, createsWith: null, db => UpdatableEntity(db, entity, values, decision, precondition),
+            entity, id, values, AlvoWriteOperation.Update, decision, createsWith: null, precondition, db => UpdatableEntity(db, entity, values, decision, precondition),
             context, idempotency, cancellationToken);
 
         if (idempotency is { } token)
@@ -1358,7 +1358,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         var branches = new ReplaceDecisions(
             Resolve(entity, DataOperation.Create, context), Resolve(entity, DataOperation.Update, context));
         await ValidateChangeAsync(
-            entity, id, values, AlvoWriteOperation.Replace, branches.Update, branches.Create, db => ReplaceableEntity(db, entity, values, branches, precondition),
+            entity, id, values, AlvoWriteOperation.Replace, branches.Update, branches.Create, precondition, db => ReplaceableEntity(db, entity, values, branches, precondition),
             context, idempotency, cancellationToken);
 
         if (idempotency is not { } token)
