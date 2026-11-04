@@ -34,7 +34,7 @@
   - Core `MMLib.Alvo.Api`: `AlvoProblemTypes.HookFailed` (`"hook-failed"`, in `All`).
   - Admin: no new component type; Razor parameters are public by construction (HX-04 Ruling 19), so the Admin baseline grows by exactly `LifecycleTab.Stats`, `HooksTab.Extensions`, `RulesTab.Extensions`.
   Everything else is `internal`.
-- **Wire and naming constants (verbatim):** problem type `hook-failed` (500), members `extensions` (array of one extension id) and `reason` ∈ {`exception`, `timeout`, `budget`, `invalid-set`, `self-write`, `unbound`}; rejections answer `422 validation` / `409 conflict` / `403 forbidden` with `violations` (`pointer`, `code`, `message`, `fixSuggestion: null`) and `extensions`; precedence 403 > 409 > 422; default timeouts **250 ms** (before/after/delete) and **5 s** (validate); bounds: in-transaction `Timeout` in (0, 30 s], validate `Timeout` in (0, 60 s], `MaxOperations` 1–1 000, default **50**; the 51st call throws `AlvoBudgetExceededException`; catalog wire names `validate`, `beforeWrite`, `afterWrite`, `beforeDelete`, `afterDelete`, `inTransaction`; framework table `<prefix>_hook_rejections (id, at, extension, entity, operation, kind, code, actor)` (`AlvoFrameworkTables.HookRejectionsSuffix = "_hook_rejections"`), index `ix_<prefix>_hook_rejections_extension_at (extension, at)`; operations-log operations `disable-extension`, `enable-extension`, `suppress-host-hooks`; telemetry: `ActivitySource("MMLib.Alvo.Hooks")` span `alvo.hook` (display `alvo.hook {id}`, kind `Internal`) with tags `alvo.subscriber` (the id), `alvo.entity`, `alvo.operation`, `alvo.stage`, `alvo.outcome` ∈ {`succeeded`, `rejected`, `failed`}; `Meter("MMLib.Alvo.Hooks")` instruments `alvo.hook.duration` (ms, histogram), `alvo.hook.rejections`, `alvo.hook.operations`, `alvo.hook.system_access` (counters); log events `HookFailed` (Error), `ExtensionSystemAccess` (Warning), `HookRejectionNotRecorded` (Warning), `ManagementAudit` (Warning, E11), `HookSetRefused` (Error).
+- **Wire and naming constants (verbatim):** problem type `hook-failed` (500), members `extensions` (array of one extension id) and `reason` ∈ {`exception`, `timeout`, `budget`, `invalid-set`, `self-write`, `unbound`, `row-vanished`}; rejections answer `422 validation` / `409 conflict` / `403 forbidden` with `violations` (`pointer`, `code`, `message`, `fixSuggestion: null`) and `extensions`; precedence 403 > 409 > 422; default timeouts **250 ms** (before/after/delete) and **5 s** (validate); bounds: in-transaction `Timeout` in (0, 30 s], validate `Timeout` in (0, 60 s], `MaxOperations` 1–1 000, default **50**; the 51st call throws `AlvoBudgetExceededException`; catalog wire names `validate`, `beforeWrite`, `afterWrite`, `beforeDelete`, `afterDelete`, `inTransaction`; framework table `<prefix>_hook_rejections (id, at, extension, entity, operation, kind, code, actor)` (`AlvoFrameworkTables.HookRejectionsSuffix = "_hook_rejections"`), index `ix_<prefix>_hook_rejections_extension_at (extension, at)`; operations-log operations `disable-extension`, `enable-extension`, `suppress-host-hooks`; telemetry: `ActivitySource("MMLib.Alvo.Hooks")` span `alvo.hook` (display `alvo.hook {id}`, kind `Internal`) with tags `alvo.subscriber` (the id), `alvo.entity`, `alvo.operation`, `alvo.stage`, `alvo.outcome` ∈ {`succeeded`, `rejected`, `failed`}; `Meter("MMLib.Alvo.Hooks")` instruments `alvo.hook.duration` (ms, histogram), `alvo.hook.rejections`, `alvo.hook.operations`, `alvo.hook.system_access` (counters); log events `HookFailed` (Error), `ExtensionSystemAccess` (Warning), `HookRejectionNotRecorded` (Warning), `ManagementAudit` (Warning, E11), `HookSetRefused` (Error).
 - **Engine parity:** every end-to-end hook fact runs on SQLite (`MMLib.Alvo.TestHost.Tests`) and PostgreSQL (`MMLib.Alvo.Data.PostgreSql.Tests.Integration`) through one shared abstract class `test/_shared/testhost/WriteHookFacts.cs`; every HTTP status fact runs through `test/_shared/api/DataApiEngineTests.WriteHooks.cs` on both engines; the delivery-store rows run through `DeliveryStoreContractTests` on both engines. New SQL is ANSI (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `INSERT`, `UPDATE … WHERE`, `SELECT`); no dialect member is added.
 - **Security core (§6.2 lists HX-09):** a hook's `write.Transaction` acts as the caller; every `Set` is re-judged by `WITH CHECK` + tenant scope (stage 5) and by the field's facets (`MutationTarget.Violation`); `AsSystem()` is `AlvoContext.System(caller.Tenant)` with the caller's provenance — never another tenant — logged and metered; in-transaction hook types may not take a network or data-port dependency (boot refusal); timeout, budget, depth, self-write and any escaping exception poison the unit; validate never runs with a transaction open; a registered hook that does not bind the current catalog **fails closed** (Ruling 7); a rejection on a hidden field carries no pointer (Ruling X). Task 14 runs the `alvo-security-core-review` checklist, a labelled `/security-review` substitute, and labels the PR `needs-deep-review`.
 - **Data-package allow-lists:** `ChangeTrackerReachTests._sqlComposingFiles` gains exactly `HookRejectionTable.cs` and `EfAlvoData.Hooks.cs` (the latter patches the write's candidate through `WritePropertyBag` and re-reads rows with `SingleAsync`, as `EfAlvoData.cs` does); `EfCoreHookRejectionLog.cs` calls the table's helpers and composes no SQL.
@@ -47,20 +47,20 @@
 
 ## Review Focus
 
-0. **A hook that catches the failure meant to stop it** — a `try { … } catch { }` around a budget refusal, a self-write refusal, a cancelled call after its 250 ms, or a depth refusal from `AsSystem()` recursion — must still roll the write back and answer 500 (or 508 for depth), never commit what the hook did before it caught: `WriteHookFacts.A_hook_that_catches_its_budget_refusal_still_rolls_back_with_reason_budget`, `…_catches_its_timeout_…_reason_timeout`, `…_catches_a_self_write_refusal_…`, `A_before_write_hook_writing_its_own_entity_as_the_system_recursively_is_refused_508` (Task 10, both engines); `WriteExtensionRunnerTests.A_caught_budget_refusal_still_fails_the_hook_and_poisons_the_unit` (Task 8). A fact that only asserts the exception would pass for a hook that let it escape; each asserts **no row and no outbox row** too.
+0. **A hook that catches the failure meant to stop it** — a `try { … } catch { }` around a budget refusal, a self-write refusal, a cancelled call after its 250 ms, or a depth refusal from `AsSystem()` recursion — must still roll the write back and answer 500 (or 508 for depth), never commit what the hook did before it caught: `WriteHookFacts.A_hook_that_catches_its_budget_refusal_still_rolls_back_with_reason_budget`, `…_catches_its_timeout_…_reason_timeout`, `…_catches_a_self_write_refusal_…`, `A_before_write_hook_writing_its_own_entity_as_the_system_recursively_is_refused_508` (Task 11, both engines); `WriteExtensionRunnerTests.A_caught_budget_refusal_still_fails_the_hook_and_poisons_the_unit` (Task 8). A fact that only asserts the exception would pass for a hook that let it escape; each asserts **no row and no outbox row** too.
 1. **A `Set` the caller could not have written themselves** — `owner_id` set to another user, `tenant_id` set to another tenant, a value of an undeclared enum member, a 5 000-character string into `maxLength: 40` — must be refused on both engines with the same answer (403 for the policy, 500 `invalid-set` for the facet), and SQLite (which enforces no length) must not store it: `DataApiEngineTests.A_set_of_another_owner_is_forbidden_on_every_engine`, `A_set_of_an_undeclared_enum_value_is_invalid_set_on_every_engine`, `A_set_moving_a_row_to_another_tenant_is_forbidden_on_every_engine` (Task 9); `HookSetsTests` (Task 8).
-2. **A validate hook and an idempotent retry or a batch** — a client retrying a keyed create after a timeout, a 200-row import with a fraud check — must call the external service once per **new** write and never with a transaction holding SQLite's write lock or PostgreSQL row locks: `WriteHookFacts.A_validate_hook_never_runs_on_an_idempotent_replay`, `A_batch_validate_hook_runs_once_per_row_with_no_transaction_open` (the hook writes through its own `Data` mid-batch; on SQLite a held write lock would block it until the busy timeout) (Task 10).
+2. **A validate hook and an idempotent retry or a batch** — a client retrying a keyed create after a timeout, a 200-row import with a fraud check — must call the external service once per **new** write and never with a transaction holding SQLite's write lock or PostgreSQL row locks: `WriteHookFacts.A_validate_hook_never_runs_on_an_idempotent_replay`, `A_batch_validate_hook_runs_once_per_row_with_no_transaction_open` (the hook writes through its own `Data` mid-batch; on SQLite a held write lock would block it until the busy timeout) (Task 11).
 3. **A write-hook registration the descriptor stops fitting** — a dashboard-first host booting `Awaiting`, then applying a descriptor that lacks the hooked entity's field the `when` reads — must not let writes through unvalidated: the write is refused 500 `unbound`, not silently unguarded: `WriteExtensionRunnerTests.A_registered_hook_that_does_not_bind_the_current_catalog_fails_the_write_closed` (Task 8), `WriteHookBindingTests.Removing_a_field_a_bound_write_hook_reads_is_refused_at_apply` (Task 7).
-4. **A hook that names a hidden field** — `Invalid("too-low", "…", field: "internal_score")` on a field the descriptor hides from some callers, or a `Set` into it that breaks its facet — must answer without the pointer and without Alvo naming the field anywhere (the host's own message is the host's): `WriteHookFacts.A_rejection_on_a_hidden_field_carries_no_pointer` (Task 10), `DataApiEngineTests.A_rejection_on_a_hidden_field_answers_with_no_pointer_on_every_engine` (Task 9), `HookRejectionsTests.A_hidden_field_gets_the_body_pointer` (Task 5).
+4. **A hook that names a hidden field** — `Invalid("too-low", "…", field: "internal_score")` on a field the descriptor hides from some callers, or a `Set` into it that breaks its facet — must answer without the pointer and without Alvo naming the field anywhere (the host's own message is the host's): `WriteHookFacts.A_rejection_on_a_hidden_field_carries_no_pointer` (Task 11), `DataApiEngineTests.A_rejection_on_a_hidden_field_answers_with_no_pointer_on_every_engine` (Task 9), `HookRejectionsTests.A_hidden_field_gets_the_body_pointer` (Task 5).
 
 ---
 
 ## Rulings and deviations this plan takes
 
-Each is recorded in the spec amendment (Task 13) as *HX-09 settled details*, so a later reader can tell a decision from an oversight.
+Each is recorded in the spec amendment (Task 13) as *HX-09 settled details* (1–59), so a later reader can tell a decision from an oversight.
 
 1. **A top-level write runs in a unit of its own only when a host in-transaction hook is registered for its entity and operation** (`IWriteExtensionRunner.RunsInTransaction`). §4.5 says "a top-level write opens and commits its own unit", and HX-07 Ruling 2 left "the one place to change" to HX-09. Making *every* write a flow-visible unit would add a DI scope, a deadline timer and a `SAVEPOINT`/`RELEASE` pair to every write of every host — measurable on the hot path — and change shipped behaviour for hosts with no hook (HX-07 acceptance (7)). With a hook registered the write gets the whole unit: on the flow (R-B1 refuses a hook's `IAlvoData` call), the default 30 s `Timeout` (§4.5's deferred clause, applied here), one DI scope, poisoning, and its events share the unit's correlation id (HX-07 Ruling 12). Without one it is byte-for-byte HX-07. Cost if wrong: a host CEL function's data call inside a hook-free write still waits on the write gate instead of being refused (pre-existing, `IBeforeHookRunner`'s remarks).
-2. **Hooks may call `AsSystem()` on `write.Transaction`** (the security decision HX-07's final review left open, *HX-07 settled details* (14)). §4.4.6 specifies it and the booking recipe needs it: a guard must read reference data (`opening_hours`) the caller may not read. It is bounded so it grants nothing beyond "the system, in the caller's tenant": the view's context is `AlvoContext.System(caller.Tenant) with { Provenance = caller.Provenance }` — never another tenant, and a tenantless caller's view is `System(null)`, which every tenant-scoped entity refuses; its calls still count against the budget, still pass the self-write check and the hook's token, still run the nested write's declarative and host hooks (as the system), and still raise depth. Each `AsSystem()` call logs `ExtensionSystemAccess` (Warning: extension, entity, operation) and increments `alvo.hook.system_access`. Host code is trusted operator code (Q6), and the boot ban (§4.4.5) removes every other escalation route an in-transaction hook could take (`IAlvoSessions`, `IAlvoData`, `IAlvoTransactions`), so `AsSystem()` is the one, audited door.
+2. **Hooks may call `AsSystem()` on `write.Transaction`** (its log line carries the caller — Ruling 46) (the security decision HX-07's final review left open, *HX-07 settled details* (14)). §4.4.6 specifies it and the booking recipe needs it: a guard must read reference data (`opening_hours`) the caller may not read. It is bounded so it grants nothing beyond "the system, in the caller's tenant": the view's context is `AlvoContext.System(caller.Tenant) with { Provenance = caller.Provenance }` — never another tenant, and a tenantless caller's view is `System(null)`, which every tenant-scoped entity refuses; its calls still count against the budget, still pass the self-write check and the hook's token, still run the nested write's declarative and host hooks (as the system), and still raise depth. Each `AsSystem()` call logs `ExtensionSystemAccess` (Warning: extension, entity, operation) and increments `alvo.hook.system_access`. Host code is trusted operator code (Q6), and the boot ban (§4.4.5) removes every other escalation route an in-transaction hook could take (`IAlvoSessions`, `IAlvoData`, `IAlvoTransactions`), so `AsSystem()` is the one, audited door.
 3. **A hook failure is an internal `HookFailedException : InvalidOperationException`** — `IAlvoData`'s family for "an invariant the implementation relies on", so an `IAlvoData` caller meets no new public type — carrying the extension id and one fixed `reason`. `AlvoExceptionHandler` answers it 500 `hook-failed` with `extensions` and `reason`, never the host's message; `HookFailed` logs the host exception's **type** only. §5 lists no public type for it.
 4. **A rejection in a batch is that row's `AlvoRowRefusal`** (`Code` = the hook's code, `Message` = the hook's, no fix), through an internal Abstractions interface `IRowRefusal` that `AlvoWriteRejectedException` implements — the driver cannot name a core type. The batch answers what every refused batch answers, 403 `forbidden` with one violation per row (`BatchViolations.FromPort`); a batch does not carry the kind. A rejection at after-write refuses the batch after its rows were inserted, which rolls them back (no commit), all-or-nothing as today.
 5. **Disabled validate hooks live in `alvo_subscriber_controls.disabled_at/disabled_by`** (the columns HX-06 Ruling 21 created for this), through two new abstract `IDeliveryStore` members, `SetDisabledAsync` and `DisabledAsync` — HX-06 Ruling 1's precedent: one port per provider, abstract (a default that did nothing would report a hook off while it still ran). The runner reads the disabled set with one autocommit read per write that has a validate hook to run, so a switch made on one replica is honoured by every replica on its next write.
@@ -71,32 +71,56 @@ Each is recorded in the spec amendment (Task 13) as *HX-09 settled details*, so 
 10. **Every call through `write.Transaction` counts toward `MaxOperations`** — reads, writes, batches, `PublishAsync`, and calls through the `AsSystem()` view (X8: "counts port calls"). The 51st throws `AlvoBudgetExceededException` into the hook *and* poisons the unit with `HookFailedException(budget)`, so catching it changes nothing; the runner raises the failure when the hook returns.
 11. **The timeout is enforced through the token and measured on return; the hook is always awaited.** Every call through `write.Transaction` runs under the hook's token (the unit's token, linked with `Timeout` on the host's `TimeProvider`); the runner never abandons a hook (a hook's calls share the unit's one connection — abandoning one would put two commands on it, the defect HX-07 Ruling 54 closed), so a hook that ignores its token is failed when it returns. A cancelled call poisons the unit with its `OperationCanceledException` first (HX-07 Ruling 9); the new internal `IAlvoFlowUnit.Blame` lets the runner replace a recorded cancellation — and only a cancellation — with the hook's timeout, so the unit fails as `timeout`, not as a client cancel. Validate hooks have no unit; their timeout fails the write before it starts.
 12. **What escapes a hook.** `AlvoChainDepthExceededException` passes unchanged (508, X17); a `HookFailedException` from a nested write's own hook passes unchanged (it names the innermost hook); **everything else** — a host exception, a nested write's rejection or policy refusal the hook did not catch — is `HookFailedException(exception)` naming the hook it escaped, and poisons the unit. A nested rejection is not passed through: its pointer names a field of a write the caller never made.
-13. **Stage 2 runs in the driver's public entry points**, the only code that knows where the replay loop and `BEGIN` are: once per top-level write, before `ReplayableWriteAsync` and before `OneBatchAsync`'s transaction (C14, C16). E9's pre-read for update, replace and delete is an autocommit, non-locking, **unmasked** read under the operation's own decision (replace reads under update's): a row the decision does not admit is not validated, and the write then answers as it always would (404; a replace creates). A create's `New` is the authorized candidate (stage 1) **without `id`**: the row id is minted per attempt. Validate's `Data` is `IAlvoSessions.For(caller one hop deeper)`, so a validate hook writing what it validates stops at the depth limit instead of recursing.
+13. **Stage 2 runs in the driver's public entry points** (amended by Rulings 41, 42, 49), the only code that knows where the replay loop and `BEGIN` are: once per top-level write, before `ReplayableWriteAsync` and before `OneBatchAsync`'s transaction (C14, C16). E9's pre-read for update, replace and delete is an autocommit, non-locking, **unmasked** read under the operation's own decision (replace reads under update's): a row the decision does not admit is not validated, and the write then answers as it always would (404; a replace creates). A create's `New` is the authorized candidate (stage 1) **without `id`**: the row id is minted per attempt. Validate's `Data` is `IAlvoSessions.For(caller one hop deeper)`, so a validate hook writing what it validates stops at the depth limit instead of recursing.
 14. **Stage 0 decides only whether validate runs.** A keyed write with a validate hook first looks its key up autocommit (`IdempotencyTable.FindAsync` with no transaction): a hit skips stage 2 and proceeds to the in-transaction lookup, which replays with no hook at all, exactly as today; a miss validates. One replay path, not two; a race between the two lookups is resolved by the existing loop (C15).
 15. **A replace's operation is `Replace` on both branches**; a replace that creates the row has `Old == null`.
-16. **What a `Set` may write.** Undeclared fields, `id`, the audit columns, `deleted_at`, the version column, `computed` and `rollup` fields are refused — 500 `invalid-set` — as are values whose CLR type the field cannot hold (`FieldClrType.Of`; `long` into `decimal` is the one widening, Ruling V's) and values outside the field's facets (`MutationTarget.Violation`: `maxLength`, enum values, `format`, precision/scale, `required`). `tenant_id` and fields a policy freezes for callers are **allowed** and judged by stage 5 (`WITH CHECK`, tenant scope → 403) — deviation 75's ruling (a hook is not the caller; `WritePayloadGuard` is not re-run). A rejecting hook's `Set`s are discarded; a later hook sees an earlier hook's `Set`s in `New`. The `invalid-set` log line names the field and the facet unless the field is hidden (Ruling X), and never the value.
-17. **Pointers.** `field:` becomes `PayloadViolations.PointerTo(field)` (RFC 6901, `/starts_at`); a field the descriptor carries any `hidden` flag for gets `PayloadViolations.BodyPointer` (`""`), decided from the descriptor, not the caller's mask (Ruling X). Alvo never echoes the field name of a hidden field; the host's own `message` is the host's text, and the docs say not to name hidden fields in it.
+16. **What a `Set` may write** (amended by Rulings 47, 48, 52). Undeclared fields, `id`, the audit columns, `deleted_at`, the version column, `computed` and `rollup` fields are refused — 500 `invalid-set` — as are values whose CLR type the field cannot hold (`FieldClrType.Of`; `long` into `decimal` is the one widening, Ruling V's) and values outside the field's facets (`MutationTarget.Violation`: `maxLength`, enum values, `format`, precision/scale, `required`). `tenant_id` and fields a policy freezes for callers are **allowed** and judged by stage 5 (`WITH CHECK`, tenant scope → 403) — deviation 75's ruling (a hook is not the caller; `WritePayloadGuard` is not re-run). A rejecting hook's `Set`s are discarded; a later hook sees an earlier hook's `Set`s in `New`. The `invalid-set` log line names the field and the facet unless the field is hidden (Ruling X), and never the value.
+17. **Pointers** (amended by Ruling 53). `field:` becomes `PayloadViolations.PointerTo(field)` (RFC 6901, `/starts_at`); a field the descriptor carries any `hidden` flag for gets `PayloadViolations.BodyPointer` (`""`), decided from the descriptor, not the caller's mask (Ruling X). Alvo never echoes the field name of a hidden field; the host's own `message` is the host's text, and the docs say not to name hidden fields in it.
 18. **A rejection is always an error.** PostgreSQL's `BEFORE` trigger can return `NULL` to skip a row silently; a host hook cannot — a write either happens or the caller is told why. A host that wants "skip" rejects with `Conflict`.
 19. **`AlvoWriteRejectionKind`** is a public enum §5 does not list: `AlvoWriteRejectedException.Kind` needs a type, and the three wire statuses are its only values. Append only; precedence is computed, never read from the numeric value.
 20. **`write.Publish` is `PublishAsync`**, the .NET async naming, on `BeforeWrite<T>`, `AfterWrite<T>`, `BeforeDelete<T>` and `AfterDelete<T>`; it publishes through the hook's transaction (one operation of the budget), so the event commits with the write or not at all (X13).
 21. **Delegate hooks ship beside class hooks** on both builders (§4.4.5 names "delegate parameters (inline hooks)"): parameters bind to the context, a `CancellationToken` or a service; a delegate returns `ValueTask`, `Task` or nothing. Class hooks are built per invocation from the hook's scope (`ActivatorUtilities`, disposed after) unless registered — the handler precedent (HX-03).
 22. **Hook DI scopes.** In-transaction hooks resolve from the unit's scope — the write's own unit, or the `TransactAsync` unit it runs in — so every hook of one unit shares one scope, which is never the HTTP request's (acceptance (13)). Validate hooks resolve from one fresh scope per write, shared by that write's validate hooks.
-23. **The boot ban list** is §4.4.5's — `HttpClient`, `IHttpClientFactory`, every type of `System.Net.Sockets` and `System.Net.Http`, `DbConnection` and its subclasses, `IEmailSender` (matched by name: Alvo references no mail package), `IAlvoEvents`, `IAlvoData`, `IAlvoSessions`, `IAlvoTransactions`, `IOutboxStore` — plus `IDeliveryStore` and `IAlvoCommands`, recorded additions: both write outside the unit (R-B1 would refuse them at runtime; boot refuses them earlier). Every public constructor's parameters of a class hook and every non-supplied parameter of a delegate hook are checked; validate hooks are exempt (they run before any transaction). Direct dependencies only — an `IServiceProvider` the hook resolves from later is the analyzer's (HX-10).
+23. **The boot ban list** (widened by Ruling 54) is §4.4.5's — `HttpClient`, `IHttpClientFactory`, every type of `System.Net.Sockets` and `System.Net.Http`, `DbConnection` and its subclasses, `IEmailSender` (matched by name: Alvo references no mail package), `IAlvoEvents`, `IAlvoData`, `IAlvoSessions`, `IAlvoTransactions`, `IOutboxStore` — plus `IDeliveryStore` and `IAlvoCommands`, recorded additions: both write outside the unit (R-B1 would refuse them at runtime; boot refuses them earlier). Every public constructor's parameters of a class hook and every non-supplied parameter of a delegate hook are checked; validate hooks are exempt (they run before any transaction). Direct dependencies only — an `IServiceProvider` the hook resolves from later is the analyzer's (HX-10).
 24. **Option bounds**, refused at boot (catalog-free, so an `Awaiting` boot refuses too — HX-03 (39)): in-transaction `Timeout` in (0, 30 s] (a hook must end inside its unit's 30 s default), validate `Timeout` in (0, 60 s], `MaxOperations` 1–1 000.
-25. **`when` for write hooks** is CEL in `CelProfile.Condition`, compiled per entity like a declarative before-hook condition and evaluated with `CelInterpreter.EvaluatePredicate` — `new.` is the candidate (validate, before) or the stored row (after), `old.` the pre-image, `changed(f)` false on a create; delete stages refuse `new.` (#325's rule, `AfterImagePhase`); a `"*"` registration's `when` tests only `@user`/`@tenant`. A typed `when` is `Expression<Func<WriteCondition<T>, bool>>`, rewritten into an `EventCondition<T>` lambda and translated by HX-05's `ConditionTranslator` with the `Updated` verb (HX-08 Ruling 2's precedent), so a typed and a CEL condition compile to one tree. A CEL function failing in a `when` is the existing 500 `function-failed` (fail closed).
+25. **`when` for write hooks** (each judged against the row as earlier hooks left it — Ruling 39) is CEL in `CelProfile.Condition`, compiled per entity like a declarative before-hook condition and evaluated with `CelInterpreter.EvaluatePredicate` — `new.` is the candidate (validate, before) or the stored row (after), `old.` the pre-image, `changed(f)` false on a create; delete stages refuse `new.` (#325's rule, `AfterImagePhase`); a `"*"` registration's `when` tests only `@user`/`@tenant`. A typed `when` is `Expression<Func<WriteCondition<T>, bool>>`, rewritten into an `EventCondition<T>` lambda and translated by HX-05's `ConditionTranslator` with the `Updated` verb (HX-08 Ruling 2's precedent), so a typed and a CEL condition compile to one tree. A CEL function failing in a `when` is the existing 500 `function-failed` (fail closed).
 26. **Order.** Declarative before-hooks run first (stage 3, unchanged); host hooks then by `Order`, entity-specific before `"*"` at one `Order`, then registration order (§4.4.3). Equal stated `Order`s on one entity and stage log `ExtensionOrderTie` (HX-03 (10)).
 27. **Telemetry.** One `alvo.hook` span per invocation carries the extension id in `alvo.subscriber` — the tag `AlvoHookRecorder` reads — so `Hooks.AssertRan` counts write hooks with no recorder change; `rejected` counts as ran (*HX-02 settled details*). `AlvoTestHost.Data` becomes an internal tracking decorator that opens a recorded root activity per call, so a write's hooks are this host's runs; a write through `Services.GetRequiredService<IAlvoData>()` stays outside the recorder, as HX-02 stated. No public member changes.
 28. **Stats.** `ExtensionStats` lists write hooks beside handlers and reads `alvo.hook.duration`: `Invocations`, `Failures` (`failed`), `Rejections` (`rejected`) and p50/p95, this instance, 24 hourly buckets (HX-06 (16)).
 29. **The dashboard slice.** The Lifecycle tab draws *Before the transaction* (validate) and *In the transaction* (before/after/delete) lanes only in a host that registers a write hook (HX-08 Ruling 57's rule: a lane appears with the host code that can run in it), each code item read-only with its `when`, timeout, `TopLevelOnly`/disabled badges, and its p95 and 24 h rejections from `GetExtensionStatsAsync` (absent when the stats call is refused); the On write tab and the Rules tab say "n extension(s) from code also run on create/update/delete"; the policy simulator lists `ManagementPolicyVerdict.Extensions` (HX-04 (12)); the apply preview lists the code extensions bound to every entity its plan touches. No new Razor component type.
 30. **`SuppressHostHooks`** (validated since HX-07) now skips stages 4 and 7 for every write of the unit (stage 2 never runs inside a unit); declarative hooks and emission still run. It is audited once per unit: an `alvo_operations_log` row (`suppress-host-hooks`, actor `system`, target `unit:<correlation id>`, the reason) written **in the unit's transaction** — a rolled-back unit skipped nothing durably and leaves no row — and a `ManagementAudit` Warning after the commit.
 31. **`Validates` and `RunsInTransaction` answer from registrations, not bindings**, so an unbound hook still opens the write's unit and then fails closed (Ruling 7) instead of being skipped by an early "nothing to run".
-32. **Stage 7b** re-reads the post-image only when an after-write hook called a writing member of `write.Transaction` (`AfterWriteAsync` answers `true`), so the event and the echo carry rollups the hook's child writes moved; otherwise no extra read.
+32. **Stage 7b** (a miss fails the write — Ruling 45) re-reads the post-image only when an after-write hook called a writing member of `write.Transaction` (`AfterWriteAsync` answers `true`), so the event and the echo carry rollups the hook's child writes moved; otherwise no extra read.
 33. **The assistant is untouched** (see Global Constraints).
 34. **Write hooks need a relational provider**, as commands do (HX-08 Ruling 12): with no `IAlvoTransactions`, or no `IHookRejectionLog`, registered (the in-memory reference), a write-hook registration refuses boot at `extensions/<id>/provider` — `InMemoryAlvoData` would otherwise skip every guard silently (X11).
-35. **Self-write.** A row is "in a hook stage" while one of its host hooks runs; the core keeps those rows in an `AsyncLocal` set that flows into the hook's nested calls. A nested update, replace or delete (single or batch) of such a row through `write.Transaction` throws `HookFailedException(self-write)` into the hook and poisons the unit. A create cannot address an existing row (the payload guard refuses `id`). An after-write hook therefore never writes its own row (§4.5).
+35. **Self-write** (a batch's rows too — Ruling 43). A row is "in a hook stage" while one of its host hooks runs; the core keeps those rows in an `AsyncLocal` set that flows into the hook's nested calls. A nested update, replace or delete (single or batch) of such a row through `write.Transaction` throws `HookFailedException(self-write)` into the hook and poisons the unit. A create cannot address an existing row (the payload guard refuses `id`). An after-write hook therefore never writes its own row (§4.5).
 36. **The hook context of a delete has no `Operation`** (it is always a delete) and a non-null `Old`; the write contexts' `Old` is `T?` (X18).
 37. **Mutation is configured, not probed.** The runner, contexts, rejections, sets and bindings live in `MMLib.Alvo/Hooks/**`, already inside the core shard's `mutate` glob (killers in `MMLib.Alvo.Tests`); `EfAlvoData.Hooks.cs` and `UnitRun.cs` are added to `data-ef-core`'s `mutate` list (killers in `MMLib.Alvo.Data.EntityFrameworkCore.Tests`) and excluded from `data-ef-rest`; `EfCoreHookRejectionLog.cs` and `HookRejectionTable.cs` fall into `data-ef-rest`. No local Stryker run and no re-probe: mutation runs post-merge on `main` in CI, and the shard budgets are being re-sharded separately (coordinator's instruction, superseding HX-07 Ruling 38's re-probe for this PR).
 38. **C13 is corrected in `events.md`**: the declarative before-hooks moved inside the transaction; `AuthorizedCandidate` did not — it runs before `BEGIN` on creates, updates authorize inside, deletes have no pre-transaction check.
+
+Rulings taken after the plan review (`.superpowers/sdd/hx-09-plan-review.md`; H = high, M = medium, L = low finding; M8 by the coordinator's ruling):
+
+39. **(H1) Each hook's `when` is judged against the row as the earlier hooks left it.** The runner selects the bound hooks and checks for unbound ones up front, then evaluates each hook's condition inside the loop, just before it would run, over `current` — PostgreSQL's rule for a `BEFORE` trigger's `WHEN`, which sees `NEW` as earlier triggers modified it. A guard an earlier `Set` makes applicable runs; one it makes inapplicable does not. Amends Ruling 25. Fact: `WriteExtensionRunnerTests.A_later_hook_s_condition_sees_an_earlier_hook_s_set_both_ways`.
+40. **(H2) No end-to-end fact races a hook deadline.** `WriteHookFacts` start every host on a `FakeTimeProvider` nothing advances; only the timeout fact advances its own clock. `DataApiEngineTests.WriteHooks` registers every hook with a 30 s `Timeout`; the docs snippets' host runs on a never-advanced `FakeTimeProvider`. HX-07 Ruling 35's rule, applied to hooks.
+41. **(M1) The caller's payload guard runs before validate.** `ValidateChangeAsync` runs `WritePayloadGuard.EnsureWritable` (and a replace's whole-row guard) before E9's pre-read; a batch's update row with a payload refusal is reported, not validated. No hook ever makes an outbound call for a payload the write will refuse — fail closed (§4.1: the policy pre-check is stage 1). Facts: `HostHookStageTests.A_validate_hook_never_sees_an_update_the_payload_guard_refuses`, `WriteHookFacts.Validate_never_runs_on_an_update_the_payload_guard_refuses_nor_on_a_row_the_caller_cannot_reach`.
+42. **(M2, coordinator's form) Validate never fails open.** An update whose E9 pre-read finds no row answers 404 before any validate hook runs, so a row that becomes visible between the pre-read and the transaction cannot commit unvalidated; a batch update row not found is that row's `Unavailable` refusal. A replace whose pre-read finds no row is validated as the create it will be (`Old` null), so it is validated either way. Validate's `Old` is read without a lock and may be stale by the time the transaction runs; the docs and the architecture doc say an invariant belongs in a before-write hook. Amends Ruling 13.
+43. **(M3) Every row of a batch is in a hook stage while the batch's hooks run.** `HeldRows` (now internal in Abstractions, so the driver can use it) is held by the core runner for the running row and by the driver for every id of an update or delete batch, and for every stored id of a create batch's after pass. A hook writing a sibling row of its batch is a self-write. Amends Ruling 35. Fact: `WriteHookFacts.A_batch_row_s_hook_writing_a_sibling_row_is_a_self_write` (both engines).
+44. **(M4) Acceptance (8)'s "no transaction open" is proven on the connection, on both engines.** Driver facts record SQLite's own `sqlite3_get_autocommit` on the world's one connection at each validate call (`RecordingWriteExtensions.Autocommit`), not only whether a unit is on the flow; the end-to-end PostgreSQL leg asserts from inside the validate hook that no other backend of the database is `idle in transaction` (`pg_stat_activity`); the SQLite leg's hook write would block on a held writer lock.
+45. **(M5, L12) Cascades run no hooks; a vanished row fails the write.** Rows a declared `onDelete` cascade or set-null changes run no host hook — a recorded deviation from PostgreSQL row triggers, which fire on cascaded rows. `IWriteExtensionRunner.AfterWriteAsync` answers the id of the last hook that wrote (not a `bool`), and when stage 7b's re-read finds no row the write fails with `HookFailedException(that id, row-vanished)` and poisons the unit — never an event or an echo of a row that no longer exists (no `?? stored` fallback). `HookFailedException` moves to Abstractions (internal) so the driver can raise it. Fact: `WriteHookFacts.An_after_write_whose_cascade_removes_its_own_row_fails_with_row_vanished_and_emits_nothing` (both engines).
+46. **(M6) `AsSystem()` is audited with the caller.** `ExtensionSystemAccess` carries the extension, the tenant, the entity, the operation, the actor (`AlvoIdempotency.IdentityOf(caller)`) and the correlation id; the level stays Warning (§4.4.6). Amends Ruling 2.
+47. **(M7) `Set` widens losslessly.** An integral CLR value is a `long` (`RecordWriter.Field`, as `AlvoPatch`), a `float` a `double`, and a whole number into a `decimal` field a `decimal`; anything lossy or of another type stays `invalid-set`. The widened values are the patch the driver applies. Amends Ruling 16. Facts: `HookSetsTests.An_untyped_int_or_short_set_is_a_whole_number_its_field_holds`, `A_fractional_double_into_a_decimal_field_stays_refused`.
+48. **(M8, coordinator's ruling) `Set` honours `readOnly` exactly as the caller's payload would.** The driver runs the read-only half of `WritePayloadGuard` (`ReadOnlyRefusal`, made internal) over every hook patch: a field the caller's policy makes read-only is refused with the same 403 and message the caller would get (a batch row: that row's refusal). Fields constrained only by a rule's `WITH CHECK` stay judged by stage 5. Amends Ruling 16 (deviation 75 no longer covers `readOnly` for host hooks). Fact: `DataApiEngineTests.A_set_of_a_read_only_field_is_refused_as_the_caller_s_own_payload_would_be_on_every_engine`; docs caution on *Validate and guard writes*.
+49. **(L1) No validate stage on deletes.** `RunsOn` gives validate hooks create and update only and §4.4.1 has no validate-delete context, so the delete entry points run no stage 2 and the delete pre-read code is not written.
+50. **(L2) Tasks 10 and 11 are swapped**, so the operations task (validate switch-off) lands before the end-to-end facts that use it and every task commits green.
+51. **(L3) Switching off any hook but a validate hook is refused 409**, pinned for a before-write hook: a guard cannot be disabled from the dashboard or the Management API. Fact: `AlvoOperationsWritesTests.Switching_a_before_write_hook_off_is_refused_409_and_changes_nothing`.
+52. **(L4) `Set("tenant_id", …)` on an entity that is not tenant-scoped is `invalid-set` (`undeclared`)**, never an unmapped-column 500. Amends Ruling 16.
+53. **(L5) A rejection points only at a declared field the descriptor never hides**; an undeclared name or a case variant gets the body pointer. Amends Ruling 17.
+54. **(L6) The boot ban is wider**: also `System.Net.WebSockets`, `System.Net.Mail`, `System.Net.Quic`, `WebClient`/`WebRequest`/`HttpWebRequest`/`FtpWebRequest` (matched by name: naming the obsolete types fails the Release build), `IAlvoManagement`, `IAlvoOperations`, and the identity stores (`Microsoft.AspNetCore.Identity.*`, `MMLib.Alvo.Identity.*`). Amends Ruling 23.
+55. **(L7) A hook that ignores its token and never returns holds the write open** — Alvo awaits it because it shares the write's connection (Ruling 11), and the unit's deadline rolls back only when no call is running (HX-07 Ruling 10), so on SQLite the writer lock stays held past the 30 s limit. Stated in the architecture doc and on the page; enforcing it needs out-of-process hooks (#35) or the analyzer (HX-10).
+56. **(L8) Mutation entries are appended in order** at the end of the `mutate` arrays (core entries, then their `!` exclusions in the same order), because `scripts/test-assert-mutation-run` compares arrays in order; the script runs in Task 14. Extends Ruling 37.
+57. **(L9) Acceptance (13)'s "request-scoped service" is read as any scope other than the unit's** — the fact opens one as an HTTP request would; the unit's scope is never the caller's.
+58. **(L10) The `IDeliveryStore` break is folded into HX-06's [Unreleased] entry**, not a second "breaks implementers" line: nothing is released, so both ship in one version. Amends Ruling 5's CHANGELOG note.
+59. **(L11) A batch's validate stage reports every bad row** — payload and rule refusals (`JudgedCandidate`, `PayloadRefusal`), a row not found, and validate refusals together — instead of only the validate ones.
 
 ---
 
@@ -110,7 +134,7 @@ Created — Abstractions `src/MMLib.Alvo.Abstractions`:
 | `Data/AlvoBudgetExceededException.cs` | the 51st call through a hook's transaction |
 | `Rules/IWriteExtensionRunner.cs`, `Rules/WriteInvocation.cs` | the driver port and its call shape |
 | `Rules/NoWriteExtensions.cs` (internal) | the driver's default when no core runner is registered |
-| `Rules/IRowRefusal.cs`, `Rules/IHookRejectionLog.cs`, `Rules/HookRejection.cs` (internal) | batch refusal seam; rejection-log seam |
+| `Rules/IRowRefusal.cs`, `Rules/IHookRejectionLog.cs`, `Rules/HookRejection.cs`, `Rules/HookFailedException.cs`, `Rules/HeldRows.cs` (internal) | batch refusal seam; rejection-log seam; the hook failure the driver also raises (Ruling 45); rows in a hook stage, held by the runner and by a batch (Ruling 43) |
 
 Created — EF driver `src/MMLib.Alvo.Data.EntityFrameworkCore`: `Internal/EfAlvoData.Hooks.cs` (stages 0, 2, 4/5, 7/7b), `Internal/UnitRun.cs` (one run-and-commit mapping for `TransactAsync` and a write's own unit), `Internal/HookRejectionTable.cs`, `EfCoreHookRejectionLog.cs`.
 
@@ -124,7 +148,7 @@ Created — core `src/MMLib.Alvo/Hooks`:
 | `Internal/HookRun.cs`, `Internal/HookRejections.cs`, `Internal/HookImage.cs` | one invocation's state: recorded rejections, `Set`s, images |
 | `Internal/WriteHookStage.cs`, `Internal/WriteHookRegistration.cs`, `Internal/HookInvoker.cs`, `Internal/HookContexts.cs`, `Internal/WriteConditionTranslator.cs` | registration |
 | `Internal/WriteHookBinding.cs`, `Internal/BoundWriteHook.cs`, `Internal/HookDependencies.cs`, `Internal/WriteHookApplyRefusals.cs`, `Internal/HookDescription.cs` | boot, apply guard, catalog |
-| `Internal/WriteExtensionRunner.cs`, `Internal/HookTransaction.cs`, `Internal/HeldRows.cs`, `Internal/HookSets.cs`, `Internal/HookFailedException.cs`, `Internal/HookTelemetry.cs`, `Internal/HookLog.cs`, `Internal/Setup.cs` | running hooks |
+| `Internal/WriteExtensionRunner.cs`, `Internal/HookTransaction.cs`, `Internal/HookSets.cs`, `Internal/HookTelemetry.cs`, `Internal/HookLog.cs`, `Internal/Setup.cs` | running hooks |
 
 Created — core `src/MMLib.Alvo/Extensions`: `AlvoHookOptions.cs`, `AlvoEntityBuilder.WriteHooks.cs`, `AlvoEntityBuilder{T}.WriteHooks.cs`. TestHost: `src/MMLib.Alvo.TestHost/Internal/TrackedData.cs`.
 
@@ -138,13 +162,13 @@ Modified: Abstractions `Identity/IAlvoFlowUnit.cs`, `AlvoFrameworkTables.cs`, `M
 ## Task 1: Abstractions — the driver port, the verb, the budget refusal, the catalog vocabulary and the switch-off store members
 
 **Files:**
-- Create: `src/MMLib.Alvo.Abstractions/Data/AlvoWriteOperation.cs`, `src/MMLib.Alvo.Abstractions/Data/AlvoBudgetExceededException.cs`, `src/MMLib.Alvo.Abstractions/Rules/IWriteExtensionRunner.cs`, `src/MMLib.Alvo.Abstractions/Rules/WriteInvocation.cs`, `src/MMLib.Alvo.Abstractions/Rules/NoWriteExtensions.cs`, `src/MMLib.Alvo.Abstractions/Rules/IRowRefusal.cs`, `src/MMLib.Alvo.Abstractions/Rules/IHookRejectionLog.cs`, `src/MMLib.Alvo.Abstractions/Rules/HookRejection.cs`
+- Create: `src/MMLib.Alvo.Abstractions/Data/AlvoWriteOperation.cs`, `src/MMLib.Alvo.Abstractions/Data/AlvoBudgetExceededException.cs`, `src/MMLib.Alvo.Abstractions/Rules/IWriteExtensionRunner.cs`, `src/MMLib.Alvo.Abstractions/Rules/WriteInvocation.cs`, `src/MMLib.Alvo.Abstractions/Rules/NoWriteExtensions.cs`, `src/MMLib.Alvo.Abstractions/Rules/IRowRefusal.cs`, `src/MMLib.Alvo.Abstractions/Rules/IHookRejectionLog.cs`, `src/MMLib.Alvo.Abstractions/Rules/HookRejection.cs`, `src/MMLib.Alvo.Abstractions/Rules/HeldRows.cs`, `src/MMLib.Alvo.Abstractions/Rules/HookFailedException.cs` (internal: the core's runner and the driver both fail a write with it — Ruling 45)
 - Modify: `src/MMLib.Alvo.Abstractions/Identity/IAlvoFlowUnit.cs`, `src/MMLib.Alvo.Abstractions/AlvoFrameworkTables.cs`, `src/MMLib.Alvo.Abstractions/Management/AlvoExtensionKind.cs`, `src/MMLib.Alvo.Abstractions/Management/AlvoExtensionStage.cs`, `src/MMLib.Alvo.Abstractions/Management/ManagementExtension.cs`, `src/MMLib.Alvo.Abstractions/Events/IDeliveryStore.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/WriteUnit.cs` (the `Blame` member only), every `IAlvoFlowUnit`/`IDeliveryStore` implementer the compiler names (`test/MMLib.Alvo.Tests/Data/FakeFlowUnit.cs`, `test/MMLib.Alvo.Tests/Events/FakeDeliveryStore.cs`, `test/MMLib.Alvo.Tests/Management/RacedReplayStore.cs`, `test/_shared/testhost/FailingFirstFanOut.cs`, `test/_shared/ef/DeliveryStoreWorld.cs` and the EF store — the EF store's real implementation is Task 2; here it throws `NotImplementedException` only until Task 2, which this task's commit must not ship: Task 1 and Task 2 commit together if ring0 needs it)
 - Test: `test/MMLib.Alvo.Abstractions.Tests/Rules/WriteInvocationTests.cs`, `test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt`
 
 **Interfaces:**
 - Consumes: `AlvoContext`, `AlvoRecord`, `IAlvoTransaction`, `AlvoRowRefusal`, `DeliveryOperationEntry` (existing).
-- Produces: `AlvoWriteOperation`; `IWriteExtensionRunner { bool Validates(string, AlvoWriteOperation); bool RunsInTransaction(string, AlvoWriteOperation); Task ValidateAsync(WriteInvocation, CancellationToken); Task<IReadOnlyDictionary<string, object?>> BeforeWriteAsync(WriteInvocation, CancellationToken); Task<bool> AfterWriteAsync(WriteInvocation, CancellationToken); }`; `WriteInvocation`; internal `NoWriteExtensions.Instance`; `AlvoBudgetExceededException`; internal `IRowRefusal { AlvoRowRefusal At(int index); }`; internal `HookRejection(DateTimeOffset At, string Extension, string Entity, string Operation, string Kind, string Code, string Actor)`; internal `IHookRejectionLog { Task RecordAsync(HookRejection, CancellationToken); }`; `IAlvoFlowUnit.Blame(Exception)`; `AlvoFrameworkTables.HookRejectionsSuffix`; the catalog members; `IDeliveryStore.SetDisabledAsync(string, bool, DeliveryOperationEntry, CancellationToken)` → `Task<bool>`, `IDeliveryStore.DisabledAsync(CancellationToken)` → `Task<IReadOnlyList<string>>`.
+- Produces: `AlvoWriteOperation`; `IWriteExtensionRunner { bool Validates(string, AlvoWriteOperation); bool RunsInTransaction(string, AlvoWriteOperation); Task ValidateAsync(WriteInvocation, CancellationToken); Task<IReadOnlyDictionary<string, object?>> BeforeWriteAsync(WriteInvocation, CancellationToken); Task<string?> AfterWriteAsync(WriteInvocation, CancellationToken); }`; `WriteInvocation`; internal `NoWriteExtensions.Instance`; `AlvoBudgetExceededException`; internal `IRowRefusal { AlvoRowRefusal At(int index); }`; internal `HookRejection(DateTimeOffset At, string Extension, string Entity, string Operation, string Kind, string Code, string Actor)`; internal `IHookRejectionLog { Task RecordAsync(HookRejection, CancellationToken); }`; internal `HookFailedException(string extension, string reason)` with `Extension`, `Reason` and the reason constants `Exception`, `Timeout`, `Budget`, `InvalidSet`, `SelfWrite`, `Unbound`, `RowVanished`; internal `HeldRows.Hold(string, Guid?)`, `.HoldAll(string, IEnumerable<Guid>)`, `.Holds(string, Guid)`, `.RowOf(WriteInvocation)`; `IAlvoFlowUnit.Blame(Exception)`; `AlvoFrameworkTables.HookRejectionsSuffix`; the catalog members; `IDeliveryStore.SetDisabledAsync(string, bool, DeliveryOperationEntry, CancellationToken)` → `Task<bool>`, `IDeliveryStore.DisabledAsync(CancellationToken)` → `Task<IReadOnlyList<string>>`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -202,7 +226,7 @@ public sealed class WriteInvocationTests
         NoWriteExtensions.Instance.RunsInTransaction("bookings", AlvoWriteOperation.Delete).ShouldBeFalse();
         await NoWriteExtensions.Instance.ValidateAsync(invocation, Ct);
         (await NoWriteExtensions.Instance.BeforeWriteAsync(invocation, Ct)).ShouldBeEmpty();
-        (await NoWriteExtensions.Instance.AfterWriteAsync(invocation, Ct)).ShouldBeFalse();
+        (await NoWriteExtensions.Instance.AfterWriteAsync(invocation, Ct)).ShouldBeNull();
     }
 
     [Fact]
@@ -403,8 +427,11 @@ public interface IWriteExtensionRunner
     /// <summary>Runs the after-write (or after-delete) hooks of the write, inside its transaction, after the row and its rollups.</summary>
     /// <param name="invocation">The write, with the stored row in <see cref="WriteInvocation.Saved"/> (a delete: <see cref="WriteInvocation.Old"/>).</param>
     /// <param name="cancellationToken">The write's token.</param>
-    /// <returns>Whether any hook wrote through the transaction — the stored row must then be read again before it is emitted.</returns>
-    Task<bool> AfterWriteAsync(WriteInvocation invocation, CancellationToken cancellationToken);
+    /// <returns>
+    /// The id of the last hook that wrote through the transaction — the stored row must then be read again before it is
+    /// emitted — or <see langword="null"/> when none wrote.
+    /// </returns>
+    Task<string?> AfterWriteAsync(WriteInvocation invocation, CancellationToken cancellationToken);
 }
 ```
 
@@ -435,7 +462,7 @@ internal sealed class NoWriteExtensions : IWriteExtensionRunner
     public Task<IReadOnlyDictionary<string, object?>> BeforeWriteAsync(WriteInvocation invocation, CancellationToken cancellationToken) =>
         Task.FromResult(_none);
 
-    public Task<bool> AfterWriteAsync(WriteInvocation invocation, CancellationToken cancellationToken) => Task.FromResult(false);
+    public Task<string?> AfterWriteAsync(WriteInvocation invocation, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
 }
 ```
 
@@ -471,6 +498,76 @@ namespace MMLib.Alvo.Rules;
 /// <param name="Actor">The caller's identity, as <c>AlvoIdempotency.IdentityOf</c> spells it.</param>
 internal sealed record HookRejection(
     DateTimeOffset At, string Extension, string Entity, string Operation, string Kind, string Code, string Actor);
+```
+
+`src/MMLib.Alvo.Abstractions/Rules/HeldRows.cs`:
+
+```csharp
+using System.Collections.Immutable;
+
+namespace MMLib.Alvo.Rules;
+
+/// <summary>
+/// The rows in a hook stage on this flow (Rulings 35, 43) — an <see cref="AsyncLocal{T}"/> set that flows into a hook's nested
+/// calls: the row whose hooks are running (held by the core's runner) and every row of a batch while its hooks run (held by
+/// the driver). A nested write to a held row is a self-write, however deep it is made.
+/// </summary>
+internal static class HeldRows
+{
+    private static readonly AsyncLocal<ImmutableHashSet<(string Entity, Guid Id)>?> _held = new();
+
+    internal static bool Holds(string entity, Guid id) => _held.Value?.Contains((entity, id)) == true;
+
+    internal static IDisposable Hold(string entity, Guid? id) => HoldAll(entity, id is { } row ? [row] : []);
+
+    internal static IDisposable HoldAll(string entity, IEnumerable<Guid> ids)
+    {
+        var previous = _held.Value;
+        var held = previous ?? [];
+        foreach (var id in ids)
+        {
+            held = held.Add((entity, id));
+        }
+
+        _held.Value = held;
+        return new Restore(previous);
+    }
+
+    internal static Guid? RowOf(WriteInvocation invocation) => (invocation.Saved ?? invocation.New ?? invocation.Old)?[AlvoManagedColumns.Id] as Guid?;
+
+    private sealed class Restore(ImmutableHashSet<(string Entity, Guid Id)>? previous) : IDisposable
+    {
+        public void Dispose() => _held.Value = previous;
+    }
+}
+```
+
+`src/MMLib.Alvo.Abstractions/Rules/HookFailedException.cs` (every core file that names it adds `using MMLib.Alvo.Rules;`):
+
+```csharp
+namespace MMLib.Alvo.Rules;
+
+/// <summary>
+/// A host write hook failed, so the write failed — answered 500 <c>hook-failed</c> with the extension id and one fixed reason
+/// (Ruling 3). An <see cref="InvalidOperationException"/>, the data port's family for an invariant the implementation relies on.
+/// </summary>
+/// <param name="extension">The hook's id.</param>
+/// <param name="reason">One of the reason constants.</param>
+internal sealed class HookFailedException(string extension, string reason)
+    : InvalidOperationException($"The write hook '{extension}' failed ({reason}), so the write was rolled back.")
+{
+    internal const string Exception = "exception";
+    internal const string Timeout = "timeout";
+    internal const string Budget = "budget";
+    internal const string InvalidSet = "invalid-set";
+    internal const string SelfWrite = "self-write";
+    internal const string Unbound = "unbound";
+    internal const string RowVanished = "row-vanished";
+
+    internal string Extension { get; } = extension;
+
+    internal string Reason { get; } = reason;
+}
 ```
 
 `src/MMLib.Alvo.Abstractions/Rules/IHookRejectionLog.cs`:
@@ -1008,7 +1105,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 **Files:**
 - Create: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.Hooks.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/UnitRun.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/RecordingWriteExtensions.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/HostHookStageTests.cs`
-- Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.Units.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoTransaction.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoTransactions.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/WriteUnit.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/AlvoEfCoreProvider.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/WritePathWorld.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/EfAlvoTransactionsTests.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/ChangeTrackerReachTests.cs`
+- Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.Units.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoTransaction.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoTransactions.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/WriteUnit.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/WritePayloadGuard.cs` (`ReadOnlyRefusal` internal), `src/MMLib.Alvo.Data.EntityFrameworkCore/AlvoEfCoreProvider.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/WritePathWorld.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/EfAlvoTransactionsTests.cs`, `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/ChangeTrackerReachTests.cs`
 
 **Interfaces:**
 - Consumes: Task 1's `IWriteExtensionRunner`, `WriteInvocation`, `NoWriteExtensions`, `IRowRefusal`; Task 2's `EfCoreHookRejectionLog.FlushAsync`, `WriteUnit.Rejections`, `DeliveryOperationsTable.BindLogEntry`.
@@ -1031,11 +1128,14 @@ internal sealed class RecordingWriteExtensions : IWriteExtensionRunner
 
     internal HashSet<(string Entity, AlvoWriteOperation Operation)> Validating { get; } = [];
 
-    internal ConcurrentQueue<(string Stage, WriteInvocation Invocation, bool UnitOnFlow)> Calls { get; } = new();
+    internal ConcurrentQueue<(string Stage, WriteInvocation Invocation, bool UnitOnFlow, bool? Autocommit)> Calls { get; } = new();
+
+    /// <summary>Whether the world's connection holds no open transaction at the moment of a call (Ruling 44); set by the fact.</summary>
+    internal Func<bool>? Autocommit { get; set; }
 
     internal Dictionary<string, object?> Patch { get; } = new(StringComparer.Ordinal);
 
-    internal Func<WriteInvocation, CancellationToken, Task<bool>>? After { get; set; }
+    internal Func<WriteInvocation, CancellationToken, Task<string?>>? After { get; set; }
 
     internal Exception? RejectBefore { get; set; }
 
@@ -1045,13 +1145,13 @@ internal sealed class RecordingWriteExtensions : IWriteExtensionRunner
 
     public Task ValidateAsync(WriteInvocation invocation, CancellationToken cancellationToken)
     {
-        Calls.Enqueue(("validate", invocation, AlvoFlow.Unit is not null));
+        Calls.Enqueue(("validate", invocation, AlvoFlow.Unit is not null, Autocommit?.Invoke()));
         return Task.CompletedTask;
     }
 
     public Task<IReadOnlyDictionary<string, object?>> BeforeWriteAsync(WriteInvocation invocation, CancellationToken cancellationToken)
     {
-        Calls.Enqueue(("before", invocation, AlvoFlow.Unit is not null));
+        Calls.Enqueue(("before", invocation, AlvoFlow.Unit is not null, Autocommit?.Invoke()));
         if (RejectBefore is { } rejection)
         {
             throw rejection;
@@ -1060,10 +1160,10 @@ internal sealed class RecordingWriteExtensions : IWriteExtensionRunner
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(invocation.Operation == AlvoWriteOperation.Delete ? new Dictionary<string, object?>() : Patch);
     }
 
-    public Task<bool> AfterWriteAsync(WriteInvocation invocation, CancellationToken cancellationToken)
+    public Task<string?> AfterWriteAsync(WriteInvocation invocation, CancellationToken cancellationToken)
     {
-        Calls.Enqueue(("after", invocation, AlvoFlow.Unit is not null));
-        return After?.Invoke(invocation, cancellationToken) ?? Task.FromResult(false);
+        Calls.Enqueue(("after", invocation, AlvoFlow.Unit is not null, Autocommit?.Invoke()));
+        return After?.Invoke(invocation, cancellationToken) ?? Task.FromResult<string?>(null);
     }
 
     internal IReadOnlyList<string> Stages => [.. Calls.Select(call => call.Stage)];
@@ -1076,7 +1176,12 @@ internal sealed class RowScopedRefusal() : Exception("refused by a hook"), IRowR
 }
 ```
 
-`WritePathWorld.StartAsync` gains `IWriteExtensionRunner? extensions = null` (last parameter); `BuildAsync` and `Port` pass it on, and `Port` builds the port with `writeGate: null, extensions: extensions, scopes: world.Scopes`.
+`WritePathWorld.StartAsync` gains `IWriteExtensionRunner? extensions = null` (last parameter); `BuildAsync` and `Port` pass it on, and `Port` builds the port with `writeGate: null, extensions: extensions, scopes: world.Scopes`. The world also gains the discriminating probe of Ruling 44 — SQLite's own answer to "is a transaction open on this connection", which every write of this world shares:
+
+```csharp
+    /// <summary>Whether the world's one connection is in autocommit mode — no transaction open on it (sqlite3_get_autocommit).</summary>
+    internal bool InAutocommit => SQLitePCL.raw.sqlite3_get_autocommit(_connection.Handle) != 0;
+```
 
 `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/HostHookStageTests.cs`:
 
@@ -1120,7 +1225,7 @@ public sealed class HostHookStageTests
 
         hooks.Stages.ShouldBe(["before", "after"]);
         hooks.Calls.ShouldAllBe(call => call.UnitOnFlow);
-        var (_, before, _) = hooks.Calls.First();
+        var (_, before, _, _) = hooks.Calls.First();
         before.New!["title"].ShouldBe("hooked");
         before.Old.ShouldBeNull();
         before.Transaction!.Context.Provenance.Depth.ShouldBe(1);
@@ -1154,7 +1259,7 @@ public sealed class HostHookStageTests
 
         await world.Data.UpdateAsync(Note, id, new Dictionary<string, object?> { ["title"] = "after" }, world.Caller, cancellationToken: Ct);
 
-        var (_, before, _) = hooks.Calls.First();
+        var (_, before, _, _) = hooks.Calls.First();
         (before.Operation, before.Old!["title"], before.New!["title"]).ShouldBe((AlvoWriteOperation.Update, "before", "after"));
     }
 
@@ -1194,7 +1299,7 @@ public sealed class HostHookStageTests
     {
         var hooks = new RecordingWriteExtensions();
         hooks.InTransaction.Add((Note, AlvoWriteOperation.Create));
-        hooks.After = (_, _) => Task.FromResult(true);
+        hooks.After = (_, _) => Task.FromResult<string?>("writer");
         await using var world = await StartAsync(hooks);
         world.Statements.Clear();
 
@@ -1217,12 +1322,17 @@ public sealed class HostHookStageTests
         hooks.Calls.First().Invocation.Transaction!.Context.Provenance.Depth.ShouldBe(1);
     }
 
-    private static Task<WritePathWorld> StartAsync(RecordingWriteExtensions hooks, Descriptor.AlvoDescriptor? descriptor = null) =>
-        WritePathWorld.StartAsync(descriptor ?? WritePathFixture.Descriptor(), WritePathFixture.Schema(), extensions: hooks);
+    private static async Task<WritePathWorld> StartAsync(RecordingWriteExtensions hooks, Descriptor.AlvoDescriptor? descriptor = null)
+    {
+        var world = await WritePathWorld.StartAsync(descriptor ?? WritePathFixture.Descriptor(), WritePathFixture.Schema(), extensions: hooks);
+        hooks.Autocommit = () => world.InAutocommit;
+
+        return world;
+    }
 }
 ```
 
-(`world.Statements.Seen`/`Clear()` are `StatementFailureInterceptor`'s recorded statements — read the interceptor's members and use their names. `SuppressHostHooks` needs the operations log table, which only a real boot creates: its fact is `WriteHookFacts.Suppressing_host_hooks_as_the_system_skips_them_and_writes_one_audit_row` (Task 10).)
+(`world.Statements.Seen`/`Clear()` are `StatementFailureInterceptor`'s recorded statements — read the interceptor's members and use their names. `SuppressHostHooks` needs the operations log table, which only a real boot creates: its fact is `WriteHookFacts.Suppressing_host_hooks_as_the_system_skips_them_and_writes_one_audit_row` (Task 11).)
 
 In `EfAlvoTransactionsTests`, rewrite the HX-07 depth fact for the lazy hop (Ruling 9):
 
@@ -1525,6 +1635,7 @@ internal sealed partial class EfAlvoData
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context, Dictionary<string, object> candidate,
         IReadOnlyDictionary<string, object?> patch)
     {
+        EnsureHookMayWrite(patch, decision);
         var patched = Patched(db.Rows(schema.Name).EntityType, candidate, patch);
         EnsureWriteAllowed(decision, Unmasked(patched), previous: null, context);
 
@@ -1557,15 +1668,33 @@ internal sealed partial class EfAlvoData
             return (candidate, null);
         }
 
+        if (WritePayloadGuard.ReadOnlyRefusal(patch, decision.ReadOnlyFields) is { } frozen)
+        {
+            return (null, Forbidden(index, frozen));
+        }
+
         var patched = Patched(db.Rows(schema.Name).EntityType, candidate, patch);
 
         return WriteRefusal(decision, Unmasked(patched), previous: null, context) is { } refusal ? (null, Forbidden(index, refusal)) : (patched, null);
     }
 
+    /// <summary>
+    /// The read-only half of the caller's payload guard over a hook's patch (Ruling 48): a field the policy makes read-only for
+    /// this caller is refused exactly as the caller's own payload would be — the same 403 and message. Fields frozen only by a
+    /// rule's <c>WITH CHECK</c> are judged by stage 5.
+    /// </summary>
+    private static void EnsureHookMayWrite(IReadOnlyDictionary<string, object?> patch, PolicyDecision decision)
+    {
+        if (WritePayloadGuard.ReadOnlyRefusal(patch, decision.ReadOnlyFields) is { } refusal)
+        {
+            throw new AlvoAuthorizationException(refusal);
+        }
+    }
+
     /// <summary>Stage 4 of an update or a replace of an existing row: the host's patch over the declarative one.</summary>
     private async Task<IReadOnlyDictionary<string, object?>> HostBeforeUpdateAsync(
-        EntitySchema schema, AlvoContext context, AlvoWriteOperation operation, AlvoRecord preImage, IReadOnlyDictionary<string, object?> values,
-        DateTimeOffset now, CancellationToken cancellationToken)
+        EntitySchema schema, PolicyDecision decision, AlvoContext context, AlvoWriteOperation operation, AlvoRecord preImage,
+        IReadOnlyDictionary<string, object?> values, DateTimeOffset now, CancellationToken cancellationToken)
     {
         if (!HostHooksRun(schema.Name, operation))
         {
@@ -1575,7 +1704,13 @@ internal sealed partial class EfAlvoData
         var patch = await _extensions.BeforeWriteAsync(
             Invocation(schema, operation, context, now) with { Old = preImage, New = Merge(preImage, values) }, cancellationToken);
 
-        return patch.Count == 0 ? values : Overlaid(values, patch);
+        if (patch.Count == 0)
+        {
+            return values;
+        }
+
+        EnsureHookMayWrite(patch, decision);
+        return Overlaid(values, patch);
     }
 
     private static Dictionary<string, object?> Overlaid(IReadOnlyDictionary<string, object?> values, IReadOnlyDictionary<string, object?> patch)
@@ -1591,16 +1726,20 @@ internal sealed partial class EfAlvoData
 
     /// <summary>A batch row's update stage 4, its refusal the row's.</summary>
     private async Task<(IReadOnlyDictionary<string, object?>? Values, AlvoRowRefusal? Refusal)> HostBeforeUpdateOrRefuseAsync(
-        EntitySchema schema, AlvoContext context, AlvoRecord preImage, IReadOnlyDictionary<string, object?> values, DateTimeOffset now, int index,
-        CancellationToken cancellationToken)
+        EntitySchema schema, PolicyDecision decision, AlvoContext context, AlvoRecord preImage, IReadOnlyDictionary<string, object?> values,
+        DateTimeOffset now, int index, CancellationToken cancellationToken)
     {
         try
         {
-            return (await HostBeforeUpdateAsync(schema, context, AlvoWriteOperation.Update, preImage, values, now, cancellationToken), null);
+            return (await HostBeforeUpdateAsync(schema, decision, context, AlvoWriteOperation.Update, preImage, values, now, cancellationToken), null);
         }
         catch (Exception refused) when (refused is IRowRefusal row)
         {
             return (null, row.At(index));
+        }
+        catch (AlvoAuthorizationException frozen)
+        {
+            return (null, Forbidden(index, frozen.Message));
         }
     }
 
@@ -1614,12 +1753,25 @@ internal sealed partial class EfAlvoData
             return stored;
         }
 
-        var wrote = await _extensions.AfterWriteAsync(
+        var writer = await _extensions.AfterWriteAsync(
             Invocation(schema, operation, context, now) with { Old = preImage, Saved = Unmasked(stored) }, cancellationToken);
 
-        return wrote
-            ? await SingleAsync(db, schema, decision, context, RowIdOf(stored), lockFor: null, cancellationToken, unmasked: true) ?? stored
-            : stored;
+        return writer is null
+            ? stored
+            : await SingleAsync(db, schema, decision, context, RowIdOf(stored), lockFor: null, cancellationToken, unmasked: true)
+                ?? throw Vanished(writer);
+    }
+
+    /// <summary>
+    /// The row a hook's write made disappear from the write's own read (Ruling 45): the write fails and its unit is poisoned —
+    /// never an event or an echo of a row that no longer exists.
+    /// </summary>
+    private static HookFailedException Vanished(string writer)
+    {
+        var failure = new HookFailedException(writer, HookFailedException.RowVanished);
+        FlowUnit?.Poison(failure);
+
+        return failure;
     }
 
     /// <summary>A batch's stage 7 for each written row: the first refusal is the batch's, and rolls every row back (Ruling 4).</summary>
@@ -1753,7 +1905,7 @@ Then the write paths. Each edit below is the whole new text of the named lines; 
 ```csharp
         var preImage = Unmasked(stored);
         var vetted = RunBeforeUpdate(schema, context, preImage, values, now);
-        vetted = await HostBeforeUpdateAsync(schema, context, operation, preImage, vetted, now, cancellationToken);
+        vetted = await HostBeforeUpdateAsync(schema, decision, context, operation, preImage, vetted, now, cancellationToken);
         EnsureWriteAllowed(decision, Merge(preImage, vetted), preImage, context);
 ```
 
@@ -1855,6 +2007,7 @@ The three public batch methods and the three `*ManyInUnitAsync` methods pass `Al
   and after `await RecomputeRollupsAsync(db, schema, stored!, cancellationToken);`:
 
 ```csharp
+        using var held = HeldRows.HoldAll(schema.Name, stored.Select(RowIdOf));
         var (saved, refusedAfter) = await AfterSavedRowsAsync(
             db, schema, decision, context, AlvoWriteOperation.Create, [.. stored.Select((row, index) => (index, (AlvoRecord?)null, row))], now, cancellationToken);
         if (refusedAfter is not null)
@@ -1867,10 +2020,11 @@ The three public batch methods and the three `*ManyInUnitAsync` methods pass `Al
 
   (`judged` holds every row in request order once no row was refused, so a stored row's position is its request index.)
 
+- **Every row of a batch is in a hook stage while the batch's hooks run (Ruling 43).** `UpdatedRowsAsync` and `RemovedRowsAsync` hold every id of the batch, right after their repeated-row check and for the rest of the method (which covers `WrittenRowsAsync`'s after pass): `using var held = HeldRows.HoldAll(schema.Name, rows.Select(row => row.Id));` (`ids` for a delete). `CreatedRowsAsync` holds the stored ids around its after pass (below). A hook of one row that writes a sibling row is then a self-write, and the sibling's echo and event can never be stale.
 - `UpdatedRowsAsync` — after the `RunBeforeUpdate` try/catch:
 
 ```csharp
-            var (hostVetted, refusedByHost) = await HostBeforeUpdateOrRefuseAsync(schema, context, preImage, vetted, now, index, cancellationToken);
+            var (hostVetted, refusedByHost) = await HostBeforeUpdateOrRefuseAsync(schema, decision, context, preImage, vetted, now, index, cancellationToken);
             if (refusedByHost is not null)
             {
                 refusals.Add(refusedByHost);
@@ -1912,7 +2066,7 @@ The three public batch methods and the three `*ManyInUnitAsync` methods pass `Al
 
 A batch's refused outcome returns before `transaction.CommitAsync`, so its own transaction (or savepoint) rolls back: the rows the after-write refused never commit.
 
-`ChangeTrackerReachTests._sqlComposingFiles` gains `"EfAlvoData.Hooks.cs"`; any other scan in that class that pins the files naming `db.Rows(`, `.Where(` or `SingleAsync` gains it too (read the failures, add the file to exactly the lists that name `EfAlvoData.cs` for the same reason).
+`WritePayloadGuard.ReadOnlyRefusal(IReadOnlyDictionary<string, object?>, IReadOnlySet<string>)` becomes `internal static` (it is private today; body unchanged), so a hook's patch is refused with the caller's own message (Ruling 48). `ChangeTrackerReachTests._sqlComposingFiles` gains `"EfAlvoData.Hooks.cs"`; any other scan in that class that pins the files naming `db.Rows(`, `.Where(` or `SingleAsync` gains it too (read the failures, add the file to exactly the lists that name `EfAlvoData.cs` for the same reason).
 
 - [ ] **Step 5: Run the driver facts, the HX-07 suites and ring1**
 
@@ -1936,7 +2090,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 **Files:**
 - Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.Hooks.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/IdempotencyTable.cs`
-- Test: `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/HostHookStageTests.cs` (four more facts)
+- Test: `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/HostHookStageTests.cs` (six more facts)
 
 **Interfaces:**
 - Consumes: Task 3's `HookedAsync`, `RecordingWriteExtensions`.
@@ -1955,14 +2109,14 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
         await world.Data.CreateAsync(Note, WritePathFixture.CreatePayload("checked"), world.Caller, cancellationToken: Ct);
 
-        var (stage, invocation, unitOnFlow) = hooks.Calls.ShouldHaveSingleItem();
-        (stage, unitOnFlow, invocation.Transaction).ShouldBe(("validate", false, (IAlvoTransaction?)null));
+        var (stage, invocation, unitOnFlow, autocommit) = hooks.Calls.ShouldHaveSingleItem();
+        (stage, unitOnFlow, autocommit, invocation.Transaction).ShouldBe(("validate", false, (bool?)true, (IAlvoTransaction?)null));
         invocation.New!["title"].ShouldBe("checked");
         invocation.New.Values.ContainsKey("id").ShouldBeFalse("the row id is minted per attempt");
     }
 
     [Fact]
-    public async Task Validate_of_an_update_sees_the_row_read_before_the_transaction_and_skips_a_row_the_rule_does_not_admit()
+    public async Task Validate_of_an_update_sees_the_row_read_before_the_transaction_and_a_row_the_rule_does_not_admit_is_404_before_any_hook()
     {
         var hooks = new RecordingWriteExtensions();
         hooks.Validating.Add((Note, AlvoWriteOperation.Update));
@@ -1975,6 +2129,38 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
         var validated = hooks.Calls.ShouldHaveSingleItem().Invocation;
         (validated.Old!["title"], validated.New!["title"]).ShouldBe(("open", "moved"));
+    }
+
+    [Fact]
+    public async Task A_validate_hook_never_sees_an_update_the_payload_guard_refuses()
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.Validating.Add((Note, AlvoWriteOperation.Update));
+        await using var world = await StartAsync(hooks);
+        var id = await world.SeedAsync("kept");
+
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => world.Data.UpdateAsync(
+            Note, id, new Dictionary<string, object?> { ["created_by"] = "someone else" }, world.Caller, cancellationToken: Ct));
+
+        hooks.Calls.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_batch_reports_every_bad_row_whichever_check_refused_it()
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.Validating.Add((Note, AlvoWriteOperation.Update));
+        await using var world = await StartAsync(hooks);
+        var kept = await world.SeedAsync("kept");
+
+        var result = await world.Data.UpdateManyAsync(
+            Note,
+            [new AlvoRowPatch(kept, new Dictionary<string, object?> { ["title"] = "fine" }), new AlvoRowPatch(kept, new Dictionary<string, object?> { ["created_by"] = "x" }), new AlvoRowPatch(Guid.NewGuid(), new Dictionary<string, object?> { ["title"] = "gone" })],
+            world.Caller,
+            cancellationToken: Ct);
+
+        result.Refusals.Select(refusal => refusal.Index).ShouldBe([1, 2]);
+        hooks.Calls.Count.ShouldBe(1, "only the admitted row reached the validate hook");
     }
 
     [Fact]
@@ -2002,7 +2188,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
         var result = await world.Data.CreateManyAsync(Note, [WritePathFixture.CreatePayload("a"), WritePathFixture.CreatePayload("b")], world.Caller, cancellationToken: Ct);
 
         result.Succeeded.ShouldBeTrue();
-        hooks.Calls.Select(call => (call.Stage, call.UnitOnFlow)).ShouldBe([("validate", false), ("validate", false)]);
+        hooks.Calls.Select(call => (call.Stage, call.UnitOnFlow, call.Autocommit)).ShouldBe([("validate", false, (bool?)true), ("validate", false, (bool?)true)]);
     }
 ```
 
@@ -2034,11 +2220,13 @@ Expected: the four new facts FAIL (no validate call).
     }
 
     /// <summary>
-    /// Stages 0–2 of an update, a replace or a delete: E9's pre-read — autocommit, unmasked, under the operation's own decision
-    /// (Ruling 13) — and the validate hooks; a row the decision does not admit is not validated, and the write answers as it would.
+    /// Stages 0–2 of an update or a replace: the caller's payload guard first (Ruling 41 — no hook sees a payload the write will
+    /// refuse), E9's pre-read — autocommit, unmasked, under the operation's own decision (Ruling 13) — and the validate hooks.
+    /// An update whose row the pre-read does not find answers 404 before any hook runs: validate never fails open (Ruling 42).
+    /// A replace whose row it does not find is validated as the create it will be.
     /// </summary>
     private async Task ValidateChangeAsync(
-        string entity, Guid id, IReadOnlyDictionary<string, object?>? values, AlvoWriteOperation operation, PolicyDecision decision,
+        string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoWriteOperation operation, PolicyDecision decision,
         AlvoContext context, AlvoIdempotency? idempotency, CancellationToken cancellationToken)
     {
         if (!_extensions.Validates(entity, operation) || await ReplaysAsync(idempotency, context, cancellationToken))
@@ -2047,11 +2235,11 @@ Expected: the four new facts FAIL (no validate call).
         }
 
         using var db = _contexts.Create();
-        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        var schema = GuardedPayload(db, entity, values, operation, decision);
         var old = await PreReadAsync(db, schema, decision, context, id, cancellationToken);
-        if (old is null && operation != AlvoWriteOperation.Replace)
+        if (old is null && operation == AlvoWriteOperation.Update)
         {
-            return;
+            throw new AlvoRecordNotFoundException();
         }
 
         await _extensions.ValidateAsync(
@@ -2059,22 +2247,36 @@ Expected: the four new facts FAIL (no validate call).
             cancellationToken);
     }
 
+    /// <summary>The checks a caller's payload meets before anything else (stage 1): the payload guard, and a replace's whole-row guard.</summary>
+    private static EntitySchema GuardedPayload(
+        AlvoDataContext db, string entity, IReadOnlyDictionary<string, object?> values, AlvoWriteOperation operation, PolicyDecision decision)
+    {
+        var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
+        WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: true);
+        if (operation == AlvoWriteOperation.Replace)
+        {
+            WholeRowGuard.EnsureWholeRow(WholeRowValues(schema, values), schema);
+        }
+
+        return schema;
+    }
+
     private async Task<AlvoRecord?> PreReadAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context, Guid id, CancellationToken cancellationToken) =>
         await SingleAsync(db, schema, decision, context, id, lockFor: null, cancellationToken, unmasked: true) is { } row ? Unmasked(row) : null;
 
-    private static AlvoRecord? ValidatedNew(
-        EntitySchema schema, Guid id, AlvoRecord? old, IReadOnlyDictionary<string, object?>? values, AlvoWriteOperation operation) =>
-        values is null ? null
-        : operation == AlvoWriteOperation.Replace ? new AlvoRecord(WholeRowValues(schema, values)).With(AlvoManagedColumns.Id, id)
-        : Merge(old!, values);
+    private static AlvoRecord ValidatedNew(
+        EntitySchema schema, Guid id, AlvoRecord? old, IReadOnlyDictionary<string, object?> values, AlvoWriteOperation operation) =>
+        operation == AlvoWriteOperation.Replace ? new AlvoRecord(WholeRowValues(schema, values)).With(AlvoManagedColumns.Id, id) : Merge(old!, values);
 
     /// <summary>
-    /// A batch's stage 2: every row validated once, before the replay loop and before <c>OneBatchAsync</c> opens its transaction
-    /// (C16); a refusal is the row's, and refuses the batch with no transaction opened.
+    /// A batch's stage 2: every row judged — its payload guard, its rule, its row — and every admitted row validated, once,
+    /// before the replay loop and before <c>OneBatchAsync</c> opens its transaction (C16). Every bad row is reported, whichever
+    /// check refused it (Ruling 59); any refusal refuses the batch with no transaction opened.
     /// </summary>
     private async Task<IReadOnlyList<AlvoRowRefusal>> ValidateRowsAsync(
-        string entity, AlvoWriteOperation operation, int count, Func<AlvoDataContext, EntitySchema, int, Task<WriteInvocation?>> invocationAt,
+        string entity, AlvoWriteOperation operation, int count,
+        Func<AlvoDataContext, EntitySchema, int, Task<(WriteInvocation? Invocation, AlvoRowRefusal? Refusal)>> judge,
         AlvoContext context, AlvoIdempotency? idempotency, CancellationToken cancellationToken)
     {
         if (!_extensions.Validates(entity, operation) || await ReplaysAsync(idempotency, context, cancellationToken))
@@ -2087,9 +2289,10 @@ Expected: the four new facts FAIL (no validate call).
         var refusals = new List<AlvoRowRefusal>();
         for (var index = 0; index < count; index++)
         {
-            if (await invocationAt(db, schema, index) is { } invocation && await ValidatedRowAsync(invocation, index, cancellationToken) is { } refusal)
+            var (invocation, refusal) = await judge(db, schema, index);
+            if ((refusal ?? (invocation is null ? null : await ValidatedRowAsync(invocation, index, cancellationToken))) is { } refused)
             {
-                refusals.Add(refusal);
+                refusals.Add(refused);
             }
         }
 
@@ -2109,26 +2312,29 @@ Expected: the four new facts FAIL (no validate call).
         }
     }
 
-    /// <summary>One create row's validation, or none when the row's payload or rule already refuses it (the batch says so later).</summary>
-    private Func<AlvoDataContext, EntitySchema, int, Task<WriteInvocation?>> CreateRowValidation(
+    /// <summary>One create row: its payload and rule refusal, or its validation.</summary>
+    private Func<AlvoDataContext, EntitySchema, int, Task<(WriteInvocation?, AlvoRowRefusal?)>> CreateRowValidation(
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, PolicyDecision decision, AlvoContext context, DateTimeOffset now) =>
-        (db, schema, index) => Task.FromResult(JudgedCandidate(db, schema, decision, context, rows[index], now, index) is ({ } candidate, null)
-            ? Validation(schema.Name, AlvoWriteOperation.Create, context, now) with { New = WithoutId(Unmasked(candidate)) }
-            : null);
+        (db, schema, index) => Task.FromResult<(WriteInvocation?, AlvoRowRefusal?)>(JudgedCandidate(db, schema, decision, context, rows[index], now, index) switch
+        {
+            ({ } candidate, null) => (Validation(schema.Name, AlvoWriteOperation.Create, context, now) with { New = WithoutId(Unmasked(candidate)) }, null),
+            (_, var refusal) => (null, refusal),
+        });
 
-    /// <summary>One update row's validation over its pre-read row; none when the row is not there for this caller.</summary>
-    private Func<AlvoDataContext, EntitySchema, int, Task<WriteInvocation?>> UpdateRowValidation(
+    /// <summary>One update row: its payload refusal, the row unavailable to this caller (fail closed, Ruling 42), or its validation.</summary>
+    private Func<AlvoDataContext, EntitySchema, int, Task<(WriteInvocation?, AlvoRowRefusal?)>> UpdateRowValidation(
         IReadOnlyList<AlvoRowPatch> rows, PolicyDecision decision, AlvoContext context, DateTimeOffset now) =>
-        async (db, schema, index) => await PreReadAsync(db, schema, decision, context, rows[index].Id, CancellationToken.None) is { } old
-            ? Validation(schema.Name, AlvoWriteOperation.Update, context, now) with { Old = old, New = Merge(old, rows[index].Values) }
-            : null;
+        async (db, schema, index) =>
+        {
+            if (WritePayloadGuard.PayloadRefusal(rows[index].Values, schema, decision, isUpdate: true) is { } unwritable)
+            {
+                return (null, Forbidden(index, unwritable));
+            }
 
-    /// <summary>One delete row's validation over its pre-read row; none when the row is not there for this caller.</summary>
-    private Func<AlvoDataContext, EntitySchema, int, Task<WriteInvocation?>> DeleteRowValidation(
-        IReadOnlyList<Guid> ids, PolicyDecision decision, AlvoContext context, DateTimeOffset now) =>
-        async (db, schema, index) => await PreReadAsync(db, schema, decision, context, ids[index], CancellationToken.None) is { } old
-            ? Validation(schema.Name, AlvoWriteOperation.Delete, context, now) with { Old = old }
-            : null;
+            return await PreReadAsync(db, schema, decision, context, rows[index].Id, CancellationToken.None) is { } old
+                ? (Validation(schema.Name, AlvoWriteOperation.Update, context, now) with { Old = old, New = Merge(old, rows[index].Values) }, null)
+                : (null, Unavailable(index));
+        };
 
     private static WriteInvocation Validation(string entity, AlvoWriteOperation operation, AlvoContext context, DateTimeOffset now) =>
         new() { Entity = entity, Operation = operation, Caller = context, Now = now };
@@ -2161,10 +2367,10 @@ Expected: the four new facts FAIL (no validate call).
 `EfAlvoData.cs` — the public entries run stage 2 right after their decisions:
 
 - `CreateAsync`: after `var decision = …`: `await ValidateCreateAsync(entity, values, decision, context, idempotency, cancellationToken);`
-- `UpdateAsync`: `await ValidateChangeAsync(entity, id, values, AlvoWriteOperation.Update, decision, context, idempotency, cancellationToken);`
+- `UpdateAsync` (the payload guard runs inside `ValidateChangeAsync` first, Ruling 41): `await ValidateChangeAsync(entity, id, values, AlvoWriteOperation.Update, decision, context, idempotency, cancellationToken);`
 - `ReplaceAsync`: after `var branches = …`: `await ValidateChangeAsync(entity, id, values, AlvoWriteOperation.Replace, branches.Update, context, idempotency, cancellationToken);`
-- `DeleteAsync`: `await ValidateChangeAsync(entity, id, values: null, AlvoWriteOperation.Delete, decision, context, idempotency, cancellationToken);`
-- The three public batch methods become `async` and, after their `BatchDecision`:
+- `DeleteAsync` and `DeleteManyAsync` run no validate stage: no validate hook runs on a delete (§4.4.1 has no validate-delete context; `RunsOn` gives validate create and update only — Ruling 49).
+- `CreateManyAsync` and `UpdateManyAsync` become `async` and, after their `BatchDecision`:
 
 ```csharp
         var refused = await ValidateRowsAsync(
@@ -2175,7 +2381,7 @@ Expected: the four new facts FAIL (no validate call).
         }
 ```
 
-  (`UpdateRowValidation(rows, decision, …)` for `UpdateManyAsync`, `DeleteRowValidation(ids, decision, …)` for `DeleteManyAsync`). The `*InUnitAsync` methods never validate (§4.1: no unit on the flow is the definition of top-level).
+  (`UpdateRowValidation(rows, decision, …)` for `UpdateManyAsync`). The `*InUnitAsync` methods never validate (§4.1: no unit on the flow is the definition of top-level).
 
 - [ ] **Step 4: Run them and ring0**
 
@@ -2196,12 +2402,12 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 ## Task 5: The core's public hook surface — interfaces, contexts, the typed condition, the rejection, `AlvoHookOptions`
 
 **Files:**
-- Create: `src/MMLib.Alvo/Hooks/IValidateWriteHook.cs`, `IValidateWriteHook{T}.cs`, `IBeforeWriteHook.cs`, `IBeforeWriteHook{T}.cs`, `IAfterWriteHook.cs`, `IAfterWriteHook{T}.cs`, `IBeforeDeleteHook.cs`, `IBeforeDeleteHook{T}.cs`, `IAfterDeleteHook.cs`, `IAfterDeleteHook{T}.cs`, `ValidateWrite{T}.cs`, `BeforeWrite{T}.cs`, `AfterWrite{T}.cs`, `BeforeDelete{T}.cs`, `AfterDelete{T}.cs`, `WriteCondition{T}.cs`, `AlvoWriteRejectedException.cs`, `AlvoWriteRejectionKind.cs`, `Internal/HookRun.cs`, `Internal/HookRejections.cs`, `Internal/HookImage.cs`, `Internal/HookFailedException.cs`; `src/MMLib.Alvo/Extensions/AlvoHookOptions.cs`
+- Create: `src/MMLib.Alvo/Hooks/IValidateWriteHook.cs`, `IValidateWriteHook{T}.cs`, `IBeforeWriteHook.cs`, `IBeforeWriteHook{T}.cs`, `IAfterWriteHook.cs`, `IAfterWriteHook{T}.cs`, `IBeforeDeleteHook.cs`, `IBeforeDeleteHook{T}.cs`, `IAfterDeleteHook.cs`, `IAfterDeleteHook{T}.cs`, `ValidateWrite{T}.cs`, `BeforeWrite{T}.cs`, `AfterWrite{T}.cs`, `BeforeDelete{T}.cs`, `AfterDelete{T}.cs`, `WriteCondition{T}.cs`, `AlvoWriteRejectedException.cs`, `AlvoWriteRejectionKind.cs`, `Internal/HookRun.cs`, `Internal/HookRejections.cs`, `Internal/HookImage.cs`; `src/MMLib.Alvo/Extensions/AlvoHookOptions.cs`
 - Test: `test/MMLib.Alvo.Tests/Hooks/HookRejectionsTests.cs`, `test/MMLib.Alvo.Tests/Hooks/HookContextTests.cs`, `test/MMLib.Alvo.Tests/Hooks/FakeHookTransaction.cs`
 
 **Interfaces:**
 - Consumes: Task 1's `WriteInvocation`, `AlvoWriteOperation`, `IRowRefusal`; `AlvoViolation`, `PayloadViolations.PointerTo/BodyPointer`, `RecordShape.Of(...).Materialize<T>`, `TypedPatch<T>`, `RecordWriter.Field` (existing).
-- Produces: `HookRun(string id, WriteInvocation invocation, IReadOnlySet<string> hidden, IAlvoTransaction? transaction, IAlvoSession? data, CancellationToken token)` with `Id`, `Invocation`, `Transaction`, `Data`, `Token`, `Rejections`, `Sets`, `Set(string, object?)`, `Failure`, `Fail(HookFailedException)`, `Operations`, `Wrote`; `HookRejections.Record(kind, code, message, field)`, `.Winner()`; `HookImage<T>.Of(AlvoRecord?)`; `HookFailedException(string extension, string reason)` with `Extension`, `Reason` and the reason constants `Exception`, `Timeout`, `Budget`, `InvalidSet`, `SelfWrite`, `Unbound`; the public types listed in Global Constraints.
+- Produces: `HookRun(string id, WriteInvocation invocation, IReadOnlySet<string> pointable, IAlvoTransaction? transaction, IAlvoSession? data, CancellationToken token)` with `Id`, `Invocation`, `Transaction`, `Data`, `Token`, `Rejections`, `Sets`, `Set(string, object?)`, `Failure`, `Fail(HookFailedException)`, `Operations`, `Wrote`; `HookRejections.Record(kind, code, message, field)`, `.Winner()`; `HookImage<T>.Of(AlvoRecord?)`; the public types listed in Global Constraints.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2275,7 +2481,7 @@ namespace MMLib.Alvo.Tests.Hooks;
 /// <summary>The rejection model (spec 2026-10-14 §4.4.2): precedence, every violation of the winning kind, RFC 6901 pointers, Ruling X.</summary>
 public sealed class HookRejectionsTests
 {
-    private static readonly IReadOnlySet<string> _hidden = new HashSet<string>(StringComparer.Ordinal) { "internal_score" };
+    private static readonly IReadOnlySet<string> _hidden = new HashSet<string>(StringComparer.Ordinal) { "title", "slot", "starts_at", "a/b~c" };
 
     [Fact]
     public void Nothing_recorded_is_no_rejection() => new HookRejections("guard", _hidden).Winner().ShouldBeNull();
@@ -2300,6 +2506,12 @@ public sealed class HookRejectionsTests
     [Fact]
     public void A_hidden_field_gets_the_body_pointer() =>
         Recorded(AlvoWriteRejectionKind.Invalid, "too-low", "Below the bar.", "internal_score").Pointer.ShouldBe(string.Empty);
+
+    [Theory]
+    [InlineData("undeclared_field")]
+    [InlineData("Title")]
+    public void A_name_that_is_not_a_declared_visible_field_gets_the_body_pointer(string field) =>
+        Recorded(AlvoWriteRejectionKind.Invalid, "bad", "Bad.", field).Pointer.ShouldBe(string.Empty);
 
     [Fact]
     public void A_field_name_is_escaped_as_a_json_pointer() =>
@@ -2427,7 +2639,7 @@ public sealed class HookContextTests
         new(
             "guard",
             new WriteInvocation { Entity = "bookings", Operation = operation, Caller = _caller, Now = DateTimeOffset.UnixEpoch, Old = old, New = @new, Saved = saved },
-            new HashSet<string>(StringComparer.Ordinal),
+            new HashSet<string>(StringComparer.Ordinal) { "guest", "nights" },
             transaction ?? new FakeHookTransaction(_caller),
             data: null,
             CancellationToken.None);
@@ -2441,32 +2653,7 @@ Expected: FAIL — the namespace `MMLib.Alvo.Hooks` does not exist.
 
 - [ ] **Step 3: Write the internals**
 
-`src/MMLib.Alvo/Hooks/Internal/HookFailedException.cs`:
-
-```csharp
-namespace MMLib.Alvo.Hooks.Internal;
-
-/// <summary>
-/// A host write hook failed, so the write failed — answered 500 <c>hook-failed</c> with the extension id and one fixed reason
-/// (Ruling 3). An <see cref="InvalidOperationException"/>, the data port's family for an invariant the implementation relies on.
-/// </summary>
-/// <param name="extension">The hook's id.</param>
-/// <param name="reason">One of the reason constants.</param>
-internal sealed class HookFailedException(string extension, string reason)
-    : InvalidOperationException($"The write hook '{extension}' failed ({reason}), so the write was rolled back.")
-{
-    internal const string Exception = "exception";
-    internal const string Timeout = "timeout";
-    internal const string Budget = "budget";
-    internal const string InvalidSet = "invalid-set";
-    internal const string SelfWrite = "self-write";
-    internal const string Unbound = "unbound";
-
-    internal string Extension { get; } = extension;
-
-    internal string Reason { get; } = reason;
-}
-```
+(`HookFailedException` is Task 1's, in Abstractions.)
 
 `src/MMLib.Alvo/Hooks/Internal/HookRejections.cs`:
 
@@ -2478,11 +2665,12 @@ namespace MMLib.Alvo.Hooks.Internal;
 
 /// <summary>
 /// What one hook recorded with <c>Invalid</c>, <c>Conflict</c> and <c>Forbidden</c> (spec 2026-10-14 §4.4.2): the winning kind by
-/// precedence — 403 over 409 over 422 — with every violation of that kind; a hidden field gets the body pointer (Ruling 17).
+/// precedence — 403 over 409 over 422 — with every violation of that kind. Only a declared field the descriptor never hides is
+/// pointed at; anything else — a hidden field, an undeclared name, a case variant — gets the body pointer (Rulings 17, 53).
 /// </summary>
 /// <param name="extension">The hook's id.</param>
-/// <param name="hidden">The entity's fields the descriptor carries any <c>hidden</c> flag for.</param>
-internal sealed class HookRejections(string extension, IReadOnlySet<string> hidden)
+/// <param name="pointable">The entity's declared fields that carry no <c>hidden</c> flag, compared ordinally.</param>
+internal sealed class HookRejections(string extension, IReadOnlySet<string> pointable)
 {
     private readonly List<(AlvoWriteRejectionKind Kind, AlvoViolation Violation)> _recorded = [];
 
@@ -2506,7 +2694,7 @@ internal sealed class HookRejections(string extension, IReadOnlySet<string> hidd
     }
 
     private string PointerOf(string? field) =>
-        field is null || hidden.Contains(field) ? PayloadViolations.BodyPointer : PayloadViolations.PointerTo(field);
+        field is not null && pointable.Contains(field) ? PayloadViolations.PointerTo(field) : PayloadViolations.BodyPointer;
 
     private static int Precedence(AlvoWriteRejectionKind kind) => kind switch
     {
@@ -2553,7 +2741,7 @@ namespace MMLib.Alvo.Hooks.Internal;
 /// transaction, and a failure its transaction raised into it (budget, self-write) that catching cannot erase.
 /// </summary>
 internal sealed class HookRun(
-    string id, WriteInvocation invocation, IReadOnlySet<string> hidden, IAlvoTransaction? transaction, IAlvoSession? data, CancellationToken token)
+    string id, WriteInvocation invocation, IReadOnlySet<string> pointable, IAlvoTransaction? transaction, IAlvoSession? data, CancellationToken token)
 {
     private readonly Dictionary<string, object?> _sets = new(StringComparer.Ordinal);
     private int _operations;
@@ -2568,7 +2756,7 @@ internal sealed class HookRun(
 
     internal CancellationToken Token { get; } = token;
 
-    internal HookRejections Rejections { get; } = new(id, hidden);
+    internal HookRejections Rejections { get; } = new(id, pointable);
 
     internal IReadOnlyDictionary<string, object?> Sets => _sets;
 
@@ -2585,6 +2773,16 @@ internal sealed class HookRun(
     }
 
     internal void Fail(HookFailedException failure) => Failure ??= failure;
+
+    /// <summary>Replaces the recorded <c>Set</c>s with their checked, widened form (Ruling 47).</summary>
+    internal void Replace(IReadOnlyDictionary<string, object?> sets)
+    {
+        _sets.Clear();
+        foreach (var (field, value) in sets)
+        {
+            _sets[field] = value;
+        }
+    }
 
     internal int Count() => Interlocked.Increment(ref _operations);
 
@@ -3746,7 +3944,7 @@ public sealed class WriteHookBindingTests
     }
 ```
 
-(`hook-desk.alvo.json` is created in Task 10 Step 1; create it now if Task 10 has not run — its content is in Task 10.)
+(`hook-desk.alvo.json` is created in Task 11 Step 1; create it now if Task 11 has not run — its content is in Task 11.)
 
 - [ ] **Step 2: Run them to verify they fail**
 
@@ -3774,11 +3972,21 @@ internal static class HookDependencies
     private static readonly Type[] _banned =
     [
         typeof(DbConnection), typeof(IAlvoEvents), typeof(IAlvoData), typeof(IAlvoSessions), typeof(IAlvoTransactions),
-        typeof(IOutboxStore), typeof(IDeliveryStore), typeof(IAlvoCommands),
+        typeof(IOutboxStore), typeof(IDeliveryStore), typeof(IAlvoCommands), typeof(Management.IAlvoManagement),
+        typeof(Management.IAlvoOperations),
     ];
 
+    private static readonly string[] _networkNamespaces =
+        ["System.Net.Sockets", "System.Net.Http", "System.Net.WebSockets", "System.Net.Mail", "System.Net.Quic"];
+
+    /// <summary>Matched by name: naming the obsolete types would raise SYSLIB0014 in the Release build.</summary>
+    private static readonly string[] _webRequestTypes = ["WebClient", "WebRequest", "HttpWebRequest", "FtpWebRequest"];
+
     internal static bool IsBanned(Type type) =>
-        type.Namespace is "System.Net.Sockets" or "System.Net.Http"
+        _networkNamespaces.Contains(type.Namespace)
+        || (type.Namespace == "System.Net" && _webRequestTypes.Contains(type.Name))
+        || type.Namespace?.StartsWith("Microsoft.AspNetCore.Identity", StringComparison.Ordinal) == true
+        || type.Namespace?.StartsWith("MMLib.Alvo.Identity", StringComparison.Ordinal) == true
         || _banned.Any(banned => banned.IsAssignableFrom(type))
         || IsMailSender(type)
         || (type.IsGenericType && type.GetGenericArguments().Any(IsBanned))
@@ -4155,13 +4363,13 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 ## Task 8: The runner — selection, order, budget, timeout, poisoning, self-write, `AsSystem`, `Set` checks, rejections, telemetry **[slice end]**
 
 **Files:**
-- Create: `src/MMLib.Alvo/Hooks/Internal/WriteExtensionRunner.cs`, `src/MMLib.Alvo/Hooks/Internal/HookTransaction.cs`, `src/MMLib.Alvo/Hooks/Internal/HeldRows.cs`, `src/MMLib.Alvo/Hooks/Internal/HookSets.cs`, `src/MMLib.Alvo/Hooks/Internal/HookTelemetry.cs`, `src/MMLib.Alvo/Hooks/Internal/HookLog.cs`, `src/MMLib.Alvo/Hooks/Internal/Setup.cs`
+- Create: `src/MMLib.Alvo/Hooks/Internal/WriteExtensionRunner.cs`, `src/MMLib.Alvo/Hooks/Internal/HookTransaction.cs`, `src/MMLib.Alvo/Hooks/Internal/HookSets.cs`, `src/MMLib.Alvo/Hooks/Internal/HookTelemetry.cs`, `src/MMLib.Alvo/Hooks/Internal/HookLog.cs`, `src/MMLib.Alvo/Hooks/Internal/Setup.cs`
 - Modify: `src/MMLib.Alvo/Hooks/Internal/HookRun.cs` (`Transaction` gets a private setter and `Attach`), `src/MMLib.Alvo/AlvoServiceCollectionExtensions.cs` (calls `AddAlvoWriteHooks()` beside `AddAlvoExtensions()`), `test/MMLib.Alvo.Tests/Data/FakeFlowUnit.cs` (`Blamed`)
 - Test: `test/MMLib.Alvo.Tests/Hooks/WriteExtensionRunnerTests.cs`, `test/MMLib.Alvo.Tests/Hooks/HookTransactionTests.cs`, `test/MMLib.Alvo.Tests/Hooks/HookSetsTests.cs`, `test/MMLib.Alvo.Tests/Hooks/RunnerWorld.cs`
 
 **Interfaces:**
 - Consumes: Tasks 5–7 (`HookRun`, `HookRejections`, `HookFailedException`, `BoundWriteHook`, `ExtensionBindings.WriteHooks/WriteHook`, `HookInvoker.InvokeAsync`); `IPolicyCatalogProvider.Current`, `ExtensionBinder.For`, `CelInterpreter.EvaluatePredicate`, `EntityPolicy.Flagged`, `FormatCatalog.Build`, `MutationTarget`, `AlvoFlow.Unit`, `IAlvoSessions`, `IDeliveryStore.DisabledAsync`, `IHookRejectionLog`.
-- Produces: `WriteExtensionRunner : IWriteExtensionRunner` (singleton, registered by `AddAlvoWriteHooks`); `HookTransaction(IAlvoTransaction inner, HookRun run, BoundWriteHook hook, ILogger logger)`; `HeldRows.Hold(string, Guid?)`, `.Holds(string, Guid)`, `.RowOf(WriteInvocation)`; `HookSets.FirstProblem(IReadOnlyDictionary<string, object?>, EntitySchema)` → `(string Field, string Problem)?`; `HookTelemetry.MeterName`, `.DurationName`, `.Succeeded/Rejected/Failed`, `.SubscriberTag`, `.OutcomeTag`.
+- Produces: `WriteExtensionRunner : IWriteExtensionRunner` (singleton, registered by `AddAlvoWriteHooks`); `HookTransaction(IAlvoTransaction inner, HookRun run, BoundWriteHook hook, ILogger logger)`; `HookSets.FirstProblem(IReadOnlyDictionary<string, object?>, EntitySchema)` → `(string Field, string Problem)?`; `HookTelemetry.MeterName`, `.DurationName`, `.Succeeded/Rejected/Failed`, `.SubscriberTag`, `.OutcomeTag`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -4315,6 +4523,20 @@ public sealed class WriteExtensionRunnerTests
     }
 
     [Fact]
+    public async Task A_later_hook_s_condition_sees_an_earlier_hook_s_set_both_ways()
+    {
+        var ran = new ConcurrentQueue<string>();
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t
+            .BeforeWrite("resolve", (BeforeWrite<AlvoRecord> write) => { write.Set("status", "resolved"); return ValueTask.CompletedTask; })
+            .BeforeWrite("guard-resolved", Record(ran, "guard-resolved"), when: "new.status == 'resolved'")
+            .BeforeWrite("guard-open", Record(ran, "guard-open"), when: "new.status == 'open'")));
+
+        await world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket("open")), Ct);
+
+        ran.ShouldBe(["guard-resolved"], "a guard an earlier Set made applicable runs, and one it made inapplicable does not");
+    }
+
+    [Fact]
     public async Task A_rejection_stops_the_stage_discards_its_sets_and_is_logged_with_ids_and_the_code_only()
     {
         var ran = new ConcurrentQueue<string>();
@@ -4435,7 +4657,9 @@ public sealed class WriteExtensionRunnerTests
         await world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket(), transaction: new FakeHookTransaction(caller)) with { Caller = caller }, Ct);
 
         (seen!.ActorKind, seen.Tenant, seen.Provenance).ShouldBe((AlvoActorKind.System, caller.Tenant, caller.Provenance));
-        logs.EventNames.ShouldContain("ExtensionSystemAccess");
+        var line = logs.Messages.Single(message => message.Contains("acted as the system", StringComparison.Ordinal));
+        line.ShouldContain(AlvoIdempotency.IdentityOf(caller));
+        line.ShouldContain("correlation c-1");
     }
 
     [Fact]
@@ -4498,11 +4722,12 @@ public sealed class WriteExtensionRunnerTests
 }
 ```
 
-(`RecordingLoggerProvider` with `EventNames` — the core suite has a recording logger used by the extension tests (`grep -rn 'class Recording.*Logger' test/MMLib.Alvo.Tests`); use it, or add a 25-line provider that queues `eventId.Name`. `AddAlvo` registers `IAlvoSessions` with `TryAdd`, so the fact's registration before it wins.)
+(`RecordingLoggerProvider` with `EventNames` and `Messages` (the formatted lines) — the core suite has a recording logger used by the extension tests (`grep -rn 'class Recording.*Logger' test/MMLib.Alvo.Tests`); use it, or add a 25-line provider that queues `eventId.Name`. `AddAlvo` registers `IAlvoSessions` with `TryAdd`, so the fact's registration before it wins.)
 
 `test/MMLib.Alvo.Tests/Hooks/HookSetsTests.cs`:
 
 ```csharp
+using MMLib.Alvo.Hooks;
 using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.Schema;
 
@@ -4537,9 +4762,38 @@ public sealed class HookSetsTests
         HookSets.FirstProblem(new Dictionary<string, object?> { [field] = value }, _entity).ShouldBe((field, problem));
 
     [Fact]
-    public void A_whole_number_into_a_decimal_field_a_tenant_and_a_declared_value_are_accepted() =>
-        HookSets.FirstProblem(
-            new Dictionary<string, object?> { ["total"] = 12L, ["tenant_id"] = Guid.NewGuid(), ["status"] = "closed", ["title"] = "ok" }, _entity).ShouldBeNull();
+    public void A_whole_number_into_a_decimal_field_and_a_declared_value_are_accepted_and_widened()
+    {
+        var sets = new Dictionary<string, object?> { ["total"] = 12L, ["status"] = "closed", ["title"] = "ok" };
+
+        HookSets.FirstProblem(sets, _entity).ShouldBeNull();
+        HookSets.Coerced(sets, _entity)["total"].ShouldBe(12m);
+    }
+
+    [Theory]
+    [InlineData(3)]
+    [InlineData((short)3)]
+    public void An_untyped_int_or_short_set_is_a_whole_number_its_field_holds(object value)
+    {
+        var run = HookContextTests.Run(MMLib.Alvo.Data.AlvoWriteOperation.Create, null, HookContextTests.Booking("Ada", 1));
+        new BeforeWrite<MMLib.Alvo.Data.AlvoRecord>(run).Set("total", value);
+
+        HookSets.FirstProblem(run.Sets, _entity).ShouldBeNull();
+        HookSets.Coerced(run.Sets, _entity)["total"].ShouldBe(3m);
+    }
+
+    [Fact]
+    public void A_fractional_double_into_a_decimal_field_stays_refused() =>
+        HookSets.FirstProblem(new Dictionary<string, object?> { ["total"] = 1.5d }, _entity).ShouldBe(("total", "type"));
+
+    [Fact]
+    public void A_tenant_is_accepted_on_a_scoped_entity_and_refused_on_a_global_one()
+    {
+        var tenant = new Dictionary<string, object?> { ["tenant_id"] = Guid.NewGuid() };
+
+        HookSets.FirstProblem(tenant, _entity with { Tenancy = TenancyMode.Scoped }).ShouldBeNull();
+        HookSets.FirstProblem(tenant, _entity with { Tenancy = TenancyMode.Global }).ShouldBe(("tenant_id", "undeclared"));
+    }
 }
 ```
 
@@ -4569,9 +4823,9 @@ public sealed class HookTransactionTests
         }, configure: o => o.MaxOperations = 3)));
         var inner = new FakeHookTransaction(RunnerWorld.Caller);
 
-        var wrote = await world.Runner.AfterWriteAsync(world.Before(RunnerWorld.Ticket(), transaction: inner) with { Saved = RunnerWorld.Ticket() }, Ct);
+        var writer = await world.Runner.AfterWriteAsync(world.Before(RunnerWorld.Ticket(), transaction: inner) with { Saved = RunnerWorld.Ticket() }, Ct);
 
-        wrote.ShouldBeTrue();
+        writer.ShouldBe("audit");
         inner.Calls.Count.ShouldBe(2, "the system view's call went to its own fake");
         inner.LastToken.CanBeCanceled.ShouldBeTrue("the hook's token, not the CancellationToken.None the hook passed");
     }
@@ -4585,7 +4839,7 @@ public sealed class HookTransactionTests
             await write.PublishAsync("tickets.seen", "tickets/1", null, ct);
         })));
 
-        (await world.Runner.AfterWriteAsync(world.Before(RunnerWorld.Ticket()) with { Saved = RunnerWorld.Ticket() }, Ct)).ShouldBeFalse();
+        (await world.Runner.AfterWriteAsync(world.Before(RunnerWorld.Ticket()) with { Saved = RunnerWorld.Ticket() }, Ct)).ShouldBeNull();
     }
 }
 ```
@@ -4599,43 +4853,7 @@ Expected: FAIL — no `IWriteExtensionRunner` is registered.
 
 `HookRun.cs` — `Transaction` becomes `internal IAlvoTransaction? Transaction { get; private set; } = transaction;` and gains `internal void Attach(IAlvoTransaction view) => Transaction = view;`.
 
-`src/MMLib.Alvo/Hooks/Internal/HeldRows.cs`:
-
-```csharp
-using MMLib.Alvo.Rules;
-using System.Collections.Immutable;
-
-namespace MMLib.Alvo.Hooks.Internal;
-
-/// <summary>
-/// The rows whose host hooks are running on this flow (Ruling 35) — an <see cref="AsyncLocal{T}"/> set that flows into a hook's
-/// nested calls, so a nested write to a held row is a self-write, however deep it is made.
-/// </summary>
-internal static class HeldRows
-{
-    private static readonly AsyncLocal<ImmutableHashSet<(string Entity, Guid Id)>?> _held = new();
-
-    internal static bool Holds(string entity, Guid id) => _held.Value?.Contains((entity, id)) == true;
-
-    internal static IDisposable Hold(string entity, Guid? id)
-    {
-        var previous = _held.Value;
-        if (id is { } row)
-        {
-            _held.Value = (previous ?? []).Add((entity, row));
-        }
-
-        return new Restore(previous);
-    }
-
-    internal static Guid? RowOf(WriteInvocation invocation) => (invocation.Saved ?? invocation.New ?? invocation.Old)?[AlvoManagedColumns.Id] as Guid?;
-
-    private sealed class Restore(ImmutableHashSet<(string Entity, Guid Id)>? previous) : IDisposable
-    {
-        public void Dispose() => _held.Value = previous;
-    }
-}
-```
+(`HeldRows` is Task 1's, in Abstractions — the driver holds a batch's rows with it too, Ruling 43.)
 
 `src/MMLib.Alvo/Hooks/Internal/HookSets.cs`:
 
@@ -4652,10 +4870,18 @@ namespace MMLib.Alvo.Hooks.Internal;
 /// </summary>
 internal static class HookSets
 {
+    /// <summary>
+    /// <paramref name="sets"/> with every lossless widening applied (Ruling 47): an integral CLR value is already a <c>long</c>
+    /// (<c>RecordWriter.Field</c>), a <c>float</c> becomes a <c>double</c>, and a whole number into a <c>decimal</c> field
+    /// becomes a <c>decimal</c>. Nothing lossy is converted; it stays for <see cref="FirstProblem"/> to refuse.
+    /// </summary>
+    internal static Dictionary<string, object?> Coerced(IReadOnlyDictionary<string, object?> sets, EntitySchema entity) =>
+        sets.ToDictionary(entry => entry.Key, entry => Coerce(entity.Fields.FirstOrDefault(field => field.Name == entry.Key), entry.Value), StringComparer.Ordinal);
+
     internal static (string Field, string Problem)? FirstProblem(IReadOnlyDictionary<string, object?> sets, EntitySchema entity)
     {
         FormatCatalog? formats = null;
-        foreach (var (name, value) in sets)
+        foreach (var (name, value) in Coerced(sets, entity))
         {
             if (Problem(name, value, entity, () => formats ??= FormatCatalog.Build([entity])) is { } problem)
             {
@@ -4666,11 +4892,18 @@ internal static class HookSets
         return null;
     }
 
+    private static object? Coerce(FieldSchema? field, object? value) => (field?.Type, value) switch
+    {
+        (_, float single) => (double)single,
+        (FieldType.Decimal, long whole) => (decimal)whole,
+        _ => value,
+    };
+
     private static string? Problem(string name, object? value, EntitySchema entity, Func<FormatCatalog> formats)
     {
         if (name == AlvoManagedColumns.TenantId)
         {
-            return value is null or Guid ? null : "type";
+            return entity.Tenancy != TenancyMode.Scoped ? "undeclared" : value is null or Guid ? null : "type";
         }
 
         if (entity.Fields.FirstOrDefault(field => field.Name == name) is not { } field)
@@ -4691,8 +4924,7 @@ internal static class HookSets
         || field.ComputedExpression is not null
         || field.Rollup is not null;
 
-    private static bool Holds(FieldSchema field, object? value) =>
-        value is null || FieldClrType.Of(field).IsInstanceOfType(value) || (field.Type == FieldType.Decimal && value is long);
+    private static bool Holds(FieldSchema field, object? value) => value is null || FieldClrType.Of(field).IsInstanceOfType(value);
 }
 ```
 
@@ -4787,8 +5019,11 @@ internal static partial class HookLog
     [LoggerMessage(Level = LogLevel.Error, Message = "Write hook {Extension} set {Field}, which it may not set ({Problem}); the write was rolled back.")]
     internal static partial void HookSetRefused(ILogger logger, string extension, string field, string problem);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Write hook {Extension} acted as the system in the caller's tenant on {Entity} ({Operation}).")]
-    internal static partial void ExtensionSystemAccess(ILogger logger, string extension, string entity, string operation);
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Write hook {Extension} acted as the system in tenant {Tenant} on {Entity} ({Operation}) for {Actor}, correlation {CorrelationId}.")]
+    internal static partial void ExtensionSystemAccess(
+        ILogger logger, string extension, string tenant, string entity, string operation, string actor, string correlationId);
 }
 ```
 
@@ -4797,6 +5032,7 @@ internal static partial class HookLog
 ```csharp
 using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Events;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Hooks.Internal;
@@ -4856,7 +5092,10 @@ internal sealed class HookTransaction(IAlvoTransaction inner, HookRun run, Bound
     public IAlvoTransaction AsSystem()
     {
         HookTelemetry.SystemAccess(hook.Id);
-        HookLog.ExtensionSystemAccess(logger, hook.Id, run.Invocation.Entity, run.Invocation.Operation.ToString().ToLowerInvariant());
+        var caller = run.Invocation.Caller;
+        HookLog.ExtensionSystemAccess(
+            logger, hook.Id, caller.Tenant?.Value.ToString() ?? "-", run.Invocation.Entity, run.Invocation.Operation.ToString().ToLowerInvariant(),
+            AlvoIdempotency.IdentityOf(caller), AlvoEventProvenance.Effective(caller).CorrelationId ?? "-");
 
         return new HookTransaction(inner.AsSystem(), run, hook, logger);
     }
@@ -4959,7 +5198,7 @@ internal sealed class WriteExtensionRunner(
         var disabled = await DisabledAsync(cancellationToken).ConfigureAwait(false);
         await using var scope = services.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
         var scoped = invocation with { Services = scope.ServiceProvider };
-        foreach (var hook in hooks.Where(hook => !disabled.Contains(hook.Id)))
+        foreach (var hook in hooks.Where(hook => !disabled.Contains(hook.Id) && Fires(hook, scoped, WriteHookStage.Validate)))
         {
             await RunAsync(hook, scoped, WriteHookStage.Validate, cancellationToken).ConfigureAwait(false);
         }
@@ -4973,6 +5212,11 @@ internal sealed class WriteExtensionRunner(
         var current = invocation;
         foreach (var hook in Selected(invocation, stage))
         {
+            if (!Fires(hook, current, stage))
+            {
+                continue;
+            }
+
             var sets = (await RunAsync(hook, current, stage, cancellationToken).ConfigureAwait(false)).Sets;
             foreach (var (field, value) in sets)
             {
@@ -4985,23 +5229,26 @@ internal sealed class WriteExtensionRunner(
         return patch.Count == 0 ? _none : patch;
     }
 
-    public async Task<bool> AfterWriteAsync(WriteInvocation invocation, CancellationToken cancellationToken)
+    public async Task<string?> AfterWriteAsync(WriteInvocation invocation, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(invocation);
         var stage = invocation.Operation == AlvoWriteOperation.Delete ? WriteHookStage.AfterDelete : WriteHookStage.AfterWrite;
-        var wrote = false;
-        foreach (var hook in Selected(invocation, stage))
+        string? writer = null;
+        foreach (var hook in Selected(invocation, stage).Where(hook => Fires(hook, invocation, stage)))
         {
-            wrote |= (await RunAsync(hook, invocation, stage, cancellationToken).ConfigureAwait(false)).Wrote;
+            writer = (await RunAsync(hook, invocation, stage, cancellationToken).ConfigureAwait(false)).Wrote ? hook.Id : writer;
         }
 
-        return wrote;
+        return writer;
     }
 
     private bool Registered(string entity, AlvoWriteOperation operation, bool inTransaction) =>
         registry.WriteHooks.Any(hook => hook.InTransaction == inTransaction && hook.Covers(entity) && hook.RunsOn(operation));
 
-    /// <summary>The bound hooks of the stage whose condition holds, in order; a registered hook not bound fails the write closed (Ruling 7).</summary>
+    /// <summary>
+    /// The bound hooks of the stage, in order; a registered hook not bound fails the write closed (Ruling 7). Conditions are
+    /// judged by the caller, per hook, against the row as the earlier hooks left it (Ruling 39).
+    /// </summary>
     private List<BoundWriteHook> Selected(WriteInvocation invocation, WriteHookStage stage)
     {
         var registered = registry.WriteHooks.Where(hook => hook.Stage == stage && hook.Covers(invocation.Entity)).Select(hook => hook.Id).ToHashSet(StringComparer.Ordinal);
@@ -5016,7 +5263,7 @@ internal sealed class WriteExtensionRunner(
             throw Fail(unbound, HookFailedException.Unbound, cause: null);
         }
 
-        return [.. bindings.WriteHooks.Where(hook => registered.Contains(hook.Id) && Fires(hook, invocation, stage))];
+        return [.. bindings.WriteHooks.Where(hook => registered.Contains(hook.Id))];
     }
 
     private static bool Fires(BoundWriteHook hook, WriteInvocation invocation, WriteHookStage stage) =>
@@ -5086,7 +5333,7 @@ internal sealed class WriteExtensionRunner(
     private HookRun NewRun(BoundWriteHook hook, WriteInvocation invocation, WriteHookStage stage, CancellationToken token)
     {
         var data = stage == WriteHookStage.Validate ? services.GetRequiredService<IAlvoSessions>().For(OneHopDeeper(invocation.Caller)) : null;
-        var run = new HookRun(hook.Id, invocation, Hidden(invocation.Entity), transaction: null, data, token);
+        var run = new HookRun(hook.Id, invocation, Pointable(invocation.Entity), transaction: null, data, token);
         if (invocation.Transaction is { } inner)
         {
             run.Attach(new HookTransaction(inner, run, hook, logger));
@@ -5097,8 +5344,14 @@ internal sealed class WriteExtensionRunner(
 
     private HookFailedException? InvalidSet(HookRun run)
     {
-        if (run.Sets.Count == 0 || Entity(run.Invocation.Entity) is not { } entity || HookSets.FirstProblem(run.Sets, entity) is not { } problem)
+        if (run.Sets.Count == 0 || Entity(run.Invocation.Entity) is not { } entity)
         {
+            return null;
+        }
+
+        if (HookSets.FirstProblem(run.Sets, entity) is not { } problem)
+        {
+            run.Replace(HookSets.Coerced(run.Sets, entity));
             return null;
         }
 
@@ -5145,6 +5398,14 @@ internal sealed class WriteExtensionRunner(
         catalogs.Current is { } catalog && catalog.TryGetEntity(entity, out var policy)
             ? EntityPolicy.Flagged(policy.Hidden)
             : new HashSet<string>(StringComparer.Ordinal);
+
+    /// <summary>The fields a rejection may point at: declared and never hidden (Ruling 53).</summary>
+    private IReadOnlySet<string> Pointable(string entity)
+    {
+        var hidden = Hidden(entity);
+        return Entity(entity)?.Fields.Select(field => field.Name).Where(name => !hidden.Contains(name)).ToHashSet(StringComparer.Ordinal)
+            ?? new HashSet<string>(StringComparer.Ordinal);
+    }
 
     private EntitySchema? Entity(string entity) =>
         catalogs.Current?.Schema.Entities.FirstOrDefault(candidate => string.Equals(candidate.Name, entity, StringComparison.Ordinal));
@@ -5199,7 +5460,7 @@ Expected: PASS. `scripts/test-ring1`.
 - [ ] **Step 6: Commit**
 
 ```bash
-dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo/Hooks/Internal/WriteExtensionRunner.cs src/MMLib.Alvo/Hooks/Internal/HookTransaction.cs src/MMLib.Alvo/Hooks/Internal/HeldRows.cs src/MMLib.Alvo/Hooks/Internal/HookSets.cs src/MMLib.Alvo/Hooks/Internal/HookTelemetry.cs src/MMLib.Alvo/Hooks/Internal/HookLog.cs src/MMLib.Alvo/Hooks/Internal/Setup.cs src/MMLib.Alvo/Hooks/Internal/HookRun.cs src/MMLib.Alvo/AlvoServiceCollectionExtensions.cs test/MMLib.Alvo.Tests/Hooks/WriteExtensionRunnerTests.cs test/MMLib.Alvo.Tests/Hooks/HookTransactionTests.cs test/MMLib.Alvo.Tests/Hooks/HookSetsTests.cs test/MMLib.Alvo.Tests/Hooks/RunnerWorld.cs test/MMLib.Alvo.Tests/Data/FakeFlowUnit.cs
+dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo/Hooks/Internal/WriteExtensionRunner.cs src/MMLib.Alvo/Hooks/Internal/HookTransaction.cs src/MMLib.Alvo/Hooks/Internal/HookSets.cs src/MMLib.Alvo/Hooks/Internal/HookTelemetry.cs src/MMLib.Alvo/Hooks/Internal/HookLog.cs src/MMLib.Alvo/Hooks/Internal/Setup.cs src/MMLib.Alvo/Hooks/Internal/HookRun.cs src/MMLib.Alvo/AlvoServiceCollectionExtensions.cs test/MMLib.Alvo.Tests/Hooks/WriteExtensionRunnerTests.cs test/MMLib.Alvo.Tests/Hooks/HookTransactionTests.cs test/MMLib.Alvo.Tests/Hooks/HookSetsTests.cs test/MMLib.Alvo.Tests/Hooks/RunnerWorld.cs test/MMLib.Alvo.Tests/Data/FakeFlowUnit.cs
 scripts/test-ring1
 git add src/MMLib.Alvo/Hooks src/MMLib.Alvo/AlvoServiceCollectionExtensions.cs test/MMLib.Alvo.Tests
 git commit -m "feat(hooks): run write hooks under a budget, a timeout and the self-write rule
@@ -5238,7 +5499,8 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
         "title": { "type": "string", "required": true, "maxLength": 40 },
         "status": { "type": "enum", "values": ["open", "closed"] },
         "owner_id": { "type": "uuid" },
-        "score": { "type": "integer", "hidden": "!('auditor' in @user.roles)" }
+        "score": { "type": "integer", "hidden": "!('auditor' in @user.roles)" },
+        "reference": { "type": "string", "maxLength": 20, "readOnly": true }
       },
       "rules": {
         "list": "'writer' in @user.roles",
@@ -5321,6 +5583,21 @@ public abstract partial class DataApiEngineTests
     }
 
     [Fact]
+    public async Task A_set_of_a_read_only_field_is_refused_as_the_caller_s_own_payload_would_be_on_every_engine()
+    {
+        await using var world = await StartHookGuardsAsync();
+        var asCaller = new JsonObject { ["title"] = "plain", ["owner_id"] = _orderWriter.User, ["reference"] = "R-1" };
+
+        using var byCaller = await world.SendAsync(HttpMethod.Post, "/api/orders", _orderWriter, body: asCaller);
+        using var byHook = await world.SendAsync(HttpMethod.Post, "/api/orders", _orderWriter, body: Order("freeze"));
+
+        byHook.StatusCode.ShouldBe(byCaller.StatusCode);
+        byHook.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await byHook.ReadTextAsync());
+        (await byHook.ReadProblemDetailAsync()).ShouldBe(await byCaller.ReadProblemDetailAsync());
+        (await world.CountRowsAsync("orders")).ShouldBe(0);
+    }
+
+    [Fact]
     public async Task A_set_of_an_undeclared_enum_value_is_invalid_set_on_every_engine()
     {
         await using var world = await StartHookGuardsAsync();
@@ -5368,15 +5645,19 @@ public abstract partial class DataApiEngineTests
             new AlvoApiWorldSetup(MapAlvoProblemDetails: true, ConfigureAlvo: RegisterGuards),
             Engine);
 
+    /// <summary>A hook limit no CI runner reaches: these facts are about answers, not time (Ruling 40).</summary>
+    private static void Roomy(MMLib.Alvo.Extensions.AlvoHookOptions options) => options.Timeout = TimeSpan.FromSeconds(30);
+
     private static void RegisterGuards(IAlvoBuilder alvo) => alvo.Entity("orders", orders => orders
-        .Validate("validate-guard", (ValidateWrite<AlvoRecord> write) => Reject(() => write.Invalid("too-plain", "Pick a better title.", "title")), when: "new.title == 'validate'")
-        .BeforeWrite("before-guard", (BeforeWrite<AlvoRecord> write) => Reject(() => write.Conflict("taken", "Taken.", "title")), when: "new.title == 'before'")
-        .BeforeWrite("steal-guard", (BeforeWrite<AlvoRecord> write) => Reject(() => write.Set("owner_id", Guid.NewGuid())), when: "new.title == 'steal'")
-        .BeforeWrite("promote-guard", (BeforeWrite<AlvoRecord> write) => Reject(() => write.Set("status", "superadmin")), when: "new.title == 'promote'")
-        .BeforeWrite("score-guard", (BeforeWrite<AlvoRecord> write) => Reject(() => write.Invalid("too-low", "Below the bar.", "score")), when: "new.title == 'score'")
-        .BeforeWrite("crash-guard", (BeforeWrite<AlvoRecord> _) => throw new InvalidOperationException("SECRET connection string"), when: "new.title == 'crash'")
-        .AfterWrite("after-guard", (AfterWrite<AlvoRecord> write) => Reject(() => write.Forbidden("not-now", "Not now.")), when: "new.title == 'after'")
-        .BeforeDelete("delete-guard", (BeforeDelete<AlvoRecord> write) => Reject(() => write.Conflict("kept", "Kept.")), when: "old.title == 'keep'"));
+        .Validate("validate-guard", (ValidateWrite<AlvoRecord> write) => Reject(() => write.Invalid("too-plain", "Pick a better title.", "title")), when: "new.title == 'validate'", configure: Roomy)
+        .BeforeWrite("before-guard", (BeforeWrite<AlvoRecord> write) => Reject(() => write.Conflict("taken", "Taken.", "title")), when: "new.title == 'before'", configure: Roomy)
+        .BeforeWrite("steal-guard", (BeforeWrite<AlvoRecord> write) => Reject(() => write.Set("owner_id", Guid.NewGuid())), when: "new.title == 'steal'", configure: Roomy)
+        .BeforeWrite("promote-guard", (BeforeWrite<AlvoRecord> write) => Reject(() => write.Set("status", "superadmin")), when: "new.title == 'promote'", configure: Roomy)
+        .BeforeWrite("freeze-guard", (BeforeWrite<AlvoRecord> write) => Reject(() => write.Set("reference", "R-1")), when: "new.title == 'freeze'", configure: Roomy)
+        .BeforeWrite("score-guard", (BeforeWrite<AlvoRecord> write) => Reject(() => write.Invalid("too-low", "Below the bar.", "score")), when: "new.title == 'score'", configure: Roomy)
+        .BeforeWrite("crash-guard", (BeforeWrite<AlvoRecord> _) => throw new InvalidOperationException("SECRET connection string"), when: "new.title == 'crash'", configure: Roomy)
+        .AfterWrite("after-guard", (AfterWrite<AlvoRecord> write) => Reject(() => write.Forbidden("not-now", "Not now.")), when: "new.title == 'after'", configure: Roomy)
+        .BeforeDelete("delete-guard", (BeforeDelete<AlvoRecord> write) => Reject(() => write.Conflict("kept", "Kept.")), when: "old.title == 'keep'", configure: Roomy));
 
     private static ValueTask Reject(Action record)
     {
@@ -5493,7 +5774,152 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
-## Task 10: End to end on both engines — the acceptance facts through `AlvoTestHost`, and `Hooks.AssertRan` for write hooks **[slice end]**
+## Task 10: Operations — switching a validate hook off and on, `Enabled` in the catalog, write hooks in the stats
+
+**Files:**
+- Modify: `src/MMLib.Alvo/Management/Internal/AlvoOperationsService.Writes.cs`, `src/MMLib.Alvo/Extensions/Internal/ExtensionStats.cs`, `src/MMLib.Alvo/Extensions/Setup.cs` (nothing if `ExtensionStats` keeps its constructor), `test/MMLib.Alvo.Tests/Management/OperationsTestWorld.cs`, `test/MMLib.Alvo.Tests/Management/AlvoOperationsWritesTests.cs`, `test/MMLib.Alvo.Tests/Extensions/ExtensionStatsTests.cs`
+- Test: the facts below; the both-engine fact `WriteHookFacts.Switching_a_validate_hook_off_is_audited_and_the_next_write_skips_it` arrives with Task 11 and passes there, because this task has landed first (Ruling 50)
+
+**Interfaces:**
+- Consumes: Task 1's `IDeliveryStore.SetDisabledAsync/DisabledAsync`, `ManagementExtension.Enabled`; Task 7's catalog entries; Task 8's `HookTelemetry` names.
+- Produces: `SetEnabledAsync` that switches validate hooks (audited, idempotent) and refuses every other kind 409; `ManagementExtensionStat.Rejections` filled for write hooks.
+
+- [ ] **Step 1: Write the failing facts**
+
+`OperationsTestWorld` registers a validate hook and a before-write hook beside its handler: `internal const string Validator = "vat-check";`, `internal const string Guard = "stamp-guard";` and, in `AddAlvo`, `alvo.Entity("tickets", tickets => tickets.Validate(Validator, (ValidateWrite<AlvoRecord> _) => ValueTask.CompletedTask).BeforeWrite(Guard, (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask));` (a fact that counts the catalog's items gains one; adjust its expectation by name, not by number).
+
+`AlvoOperationsWritesTests` gains:
+
+```csharp
+    [Fact]
+    public async Task Switching_a_validate_hook_off_writes_one_log_row_and_one_audit_line_and_answers_it_disabled()
+    {
+        using var world = new OperationsTestWorld();
+
+        var off = await world.Service.SetEnabledAsync(Project, OperationsTestWorld.Validator, enabled: false, "VIES is down", Ct);
+        var again = await world.Service.SetEnabledAsync(Project, OperationsTestWorld.Validator, enabled: false, "VIES is down", Ct);
+
+        (off.Enabled, again.Enabled, off.Kind).ShouldBe((false, false, AlvoExtensionKind.Validate));
+        world.Store.Operations.ShouldHaveSingleItem().Operation.ShouldBe("disable-extension");
+        world.Audit.Lines.ShouldHaveSingleItem().ShouldContain("'disable-extension' on 'vat-check'");
+        (await world.Service.GetExtensionsAsync(Project, Ct)).Items.Single(item => item.Id == OperationsTestWorld.Validator).Enabled.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Switching_a_before_write_hook_off_is_refused_409_and_changes_nothing()
+    {
+        using var world = new OperationsTestWorld();
+
+        (await Should.ThrowAsync<ManagementConflictException>(() => world.Service.SetEnabledAsync(Project, OperationsTestWorld.Guard, enabled: false, "too slow", Ct)))
+            .Message.ShouldContain("only a validate hook");
+        world.Store.Operations.ShouldBeEmpty();
+        world.Audit.Lines.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Switching_it_on_again_is_audited_as_enable()
+    {
+        using var world = new OperationsTestWorld();
+        await world.Service.SetEnabledAsync(Project, OperationsTestWorld.Validator, enabled: false, null, Ct);
+
+        (await world.Service.SetEnabledAsync(Project, OperationsTestWorld.Validator, enabled: true, null, Ct)).Enabled.ShouldBeTrue();
+
+        world.Store.Operations.Select(operation => operation.Operation).ShouldBe(["disable-extension", "enable-extension"]);
+    }
+```
+
+(The existing `…handler…409` fact stays: a handler is still refused with the pause hint. If `GetExtensionsAsync` is not on `AlvoOperationsService`, read the catalog through `IAlvoManagement.GetExtensionsAsync` from `world.Services`.)
+
+`ExtensionStatsTests` gains:
+
+```csharp
+    [Fact]
+    public void A_write_hook_s_runs_rejections_and_failures_are_counted_from_its_meter()
+    {
+        var id = $"hook-{Guid.NewGuid():N}"[..20];
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        using var stats = new ExtensionStats(clock, HandlerCatalog.Registry(alvo => alvo.Entity("tickets", t => t.BeforeWrite(id, (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask))));
+
+        HookTelemetry.Finish(null, id, HookTelemetry.Succeeded, TimeSpan.FromMilliseconds(4), 0);
+        HookTelemetry.Finish(null, id, HookTelemetry.Rejected, TimeSpan.FromMilliseconds(6), 0);
+        HookTelemetry.Finish(null, id, HookTelemetry.Failed, TimeSpan.FromMilliseconds(8), 0);
+
+        var stat = stats.Report([id]).Items.ShouldHaveSingleItem();
+        (stat.Invocations, stat.Rejections, stat.Failures).ShouldBe((3L, 1L, 1L));
+        stat.P95.ShouldNotBeNull();
+    }
+```
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*AlvoOperationsWritesTests'` and `--filter-class '*ExtensionStatsTests'`
+Expected: FAIL — `SetEnabledAsync` refuses every kind; the stats know no hook.
+
+- [ ] **Step 3: Write the switch and the stats**
+
+`AlvoOperationsService.Writes.cs` — replace `SetEnabledAsync`:
+
+```csharp
+    private const string DisableOperation = "disable-extension";
+    private const string EnableOperation = "enable-extension";
+
+    public async Task<ManagementExtension> SetEnabledAsync(string project, string extension, bool enabled, string? reason, CancellationToken ct = default)
+    {
+        gate.Admit(ManagementOperation.SetExtensionEnabled, project);
+        OperationReasons.Ensure(reason);
+        var found = Registered(extension);
+        EnsureSwitchable(found, project, enabled);
+        var entry = Entry(enabled ? EnableOperation : DisableOperation, found.Id, reason);
+        if (await Store.SetDisabledAsync(found.Id, !enabled, entry, ct).ConfigureAwait(false))
+        {
+            OperationsAudit.Write(logger, entry with { Affected = 1 });
+        }
+
+        return found with { Enabled = enabled };
+    }
+
+    private static void EnsureSwitchable(ManagementExtension found, string project, bool enabled)
+    {
+        if (found.Kind == AlvoExtensionKind.Validate)
+        {
+            return;
+        }
+
+        throw new ManagementConflictException(found.Kind == AlvoExtensionKind.EventHandler
+            ? $"'{found.Id}' is an event handler, and only a validate hook can be switched {(enabled ? "on" : "off")}. To stop a handler for a while, "
+              + $"pause it instead: PUT {{m}}/projects/{project}/subscribers/{found.Id}/paused with {{\"paused\": true}}."
+            : $"'{found.Id}' is a {ExtensionCatalog.WireName(found.Kind)} extension, and only a validate hook can be switched {(enabled ? "on" : "off")}: "
+              + "a hook inside the write's transaction guards the data's integrity, so it is changed in the host's code and redeployed.");
+    }
+```
+
+(`Store` is the operations service's `IDeliveryStore`; the method is now `async`.)
+
+`ExtensionStats.cs`:
+
+- the constructor's id set becomes `registry.Handlers.Select(handler => handler.Id).Concat(registry.WriteHooks.Select(hook => hook.Id)).Distinct(StringComparer.Ordinal)`;
+- `Publish` also enables `instrument.Meter.Name == HookTelemetry.MeterName && instrument.Name == HookTelemetry.DurationName`;
+- `OnDuration` passes `rejected: outcome == HookTelemetry.Rejected` and `failed: outcome is AlvoDeliveryMetrics.FailedOutcome or AlvoDeliveryMetrics.DeadOutcome` (a hook's `failed` is the same word) to `Record`;
+- `Record(string subscriber, double milliseconds, bool failed, bool rejected = false)`; `Buckets` gains `private readonly long[] _rejections = new long[Hours];`, incremented in `Record`, cleared in `Slot`, summed in `Stat` into `Rejections = rejections`.
+
+- [ ] **Step 4: Run them**
+
+Run: the two classes above → PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo/Management/Internal/AlvoOperationsService.Writes.cs src/MMLib.Alvo/Extensions/Internal/ExtensionStats.cs test/MMLib.Alvo.Tests/Management/OperationsTestWorld.cs test/MMLib.Alvo.Tests/Management/AlvoOperationsWritesTests.cs test/MMLib.Alvo.Tests/Extensions/ExtensionStatsTests.cs
+scripts/test-ring0
+git add src/MMLib.Alvo/Management src/MMLib.Alvo/Extensions/Internal/ExtensionStats.cs test/MMLib.Alvo.Tests/Management test/MMLib.Alvo.Tests/Extensions/ExtensionStatsTests.cs
+git commit -m "feat(operations): switch validate hooks off and on, and count hook runs
+
+Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
+```
+
+---
+
+## Task 11: End to end on both engines — the acceptance facts through `AlvoTestHost`, and `Hooks.AssertRan` for write hooks **[slice end]**
 
 **Files:**
 - Create: `test/_shared/testhost/WriteHookFacts.cs`, `test/_shared/testhost/WriteHookRows.cs`, `test/_shared/testhost/descriptors/hook-desk.alvo.json`, `test/MMLib.Alvo.TestHost.Tests/SqliteWriteHookTests.cs`, `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlWriteHookTests.cs`, `src/MMLib.Alvo.TestHost/Internal/TrackedData.cs`
@@ -5537,7 +5963,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
     "booking_lines": {
       "tenancy": "scoped",
       "fields": {
-        "booking_id": { "type": "ref", "entity": "bookings", "required": true },
+        "booking_id": { "type": "ref", "entity": "bookings", "required": true, "onDelete": "cascade" },
         "amount": { "type": "integer", "required": true }
       },
       "rules": {
@@ -5829,6 +6255,7 @@ public abstract class WriteHookFacts
         await using var alvo = await StartAsync(database, alvo => alvo.Entity(Bookings, b => b.Validate("probe", async (ValidateWrite<AlvoRecord> write, CancellationToken ct) =>
         {
             await write.Data.CreateAsync("audits", Audit(write.Caller, $"checked {write.New["title"]}"), ct).WaitAsync(_immediately, ct);
+            await AssertNoOpenTransactionAsync(database);
             if ((string?)write.New["title"] == "bad")
             {
                 write.Invalid("bad-title", "Bad title.", "title");
@@ -5842,6 +6269,70 @@ public abstract class WriteHookFacts
         result.Refusals.ShouldHaveSingleItem().ShouldSatisfyAllConditions(refusal => refusal.Index.ShouldBe(1), refusal => refusal.Code.ShouldBe("bad-title"));
         (await WriteHookRows.CountAsync(database.Connect, "audits")).ShouldBe(2, "each row's check committed on its own, outside any transaction");
         (await WriteHookRows.CountAsync(database.Connect, Bookings)).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_batch_row_s_hook_writing_a_sibling_row_is_a_self_write()
+    {
+        var database = await DatabaseAsync();
+        var ids = new Guid[2];
+        await using var alvo = await StartAsync(database, alvo => alvo.Entity(Bookings, b => b.BeforeWrite("sibling", async (BeforeWrite<AlvoRecord> write, CancellationToken ct) =>
+        {
+            var sibling = ids.First(id => id != (Guid)write.New["id"]!);
+            await write.Transaction.UpdateAsync(Bookings, sibling, new Dictionary<string, object?> { ["title"] = "touched" }, cancellationToken: ct);
+        }, when: "changed(title)")));
+        var clerk = Clerk();
+        ids[0] = (Guid)(await alvo.Data.CreateAsync(Bookings, Booking(clerk, "first"), clerk, cancellationToken: Ct))["id"]!;
+        ids[1] = (Guid)(await alvo.Data.CreateAsync(Bookings, Booking(clerk, "second"), clerk, cancellationToken: Ct))["id"]!;
+
+        (await Should.ThrowAsync<InvalidOperationException>(() => alvo.Data.UpdateManyAsync(
+            Bookings,
+            [new AlvoRowPatch(ids[0], new Dictionary<string, object?> { ["title"] = "first, renamed" }), new AlvoRowPatch(ids[1], new Dictionary<string, object?> { ["title"] = "second, renamed" })],
+            clerk,
+            cancellationToken: Ct))).Message.ShouldContain("self-write");
+        (await WriteHookRows.CountAsync(database.Connect, Bookings, "title IN ('first', 'second')")).ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task An_after_write_whose_cascade_removes_its_own_row_fails_with_row_vanished_and_emits_nothing()
+    {
+        var database = await DatabaseAsync();
+        await using var alvo = await StartAsync(database, alvo => alvo.Entity("booking_lines", lines => lines.AfterWrite("drop-parent", (AfterWrite<AlvoRecord> write, CancellationToken ct) =>
+            write.Transaction.DeleteAsync(Bookings, (Guid)write.Saved["booking_id"]!, cancellationToken: ct))));
+        var clerk = Clerk();
+        var booking = await alvo.Data.CreateAsync(Bookings, Booking(clerk, "parent"), clerk, cancellationToken: Ct);
+        var outbox = await WriteHookRows.CountAsync(database.Connect, "alvo_outbox");
+
+        (await Should.ThrowAsync<InvalidOperationException>(() => alvo.Data.CreateAsync("booking_lines", new Dictionary<string, object?>
+        {
+            ["booking_id"] = booking["id"],
+            ["amount"] = 1L,
+            ["tenant_id"] = clerk.Tenant!.Value.Value,
+        }, clerk, cancellationToken: Ct))).Message.ShouldContain("row-vanished");
+        (await WriteHookRows.CountAsync(database.Connect, Bookings)).ShouldBe(1);
+        (await WriteHookRows.CountAsync(database.Connect, "booking_lines")).ShouldBe(0);
+        (await WriteHookRows.CountAsync(database.Connect, "alvo_outbox")).ShouldBe(outbox);
+    }
+
+    [Fact]
+    public async Task Validate_never_runs_on_an_update_the_payload_guard_refuses_nor_on_a_row_the_caller_cannot_reach()
+    {
+        var database = await DatabaseAsync();
+        var runs = 0;
+        await using var alvo = await StartAsync(database, alvo => alvo.Entity(Bookings, b => b.Validate("count", (ValidateWrite<AlvoRecord> _) =>
+        {
+            Interlocked.Increment(ref runs);
+            return ValueTask.CompletedTask;
+        })));
+        var clerk = Clerk();
+        var created = await alvo.Data.CreateAsync(Bookings, Booking(clerk, "kept"), clerk, cancellationToken: Ct);
+
+        await Should.ThrowAsync<AlvoAuthorizationException>(() => alvo.Data.UpdateAsync(
+            Bookings, (Guid)created["id"]!, new Dictionary<string, object?> { ["lines_total"] = 9L }, clerk, cancellationToken: Ct));
+        await Should.ThrowAsync<AlvoRecordNotFoundException>(() => alvo.Data.UpdateAsync(
+            Bookings, Guid.NewGuid(), new Dictionary<string, object?> { ["title"] = "nowhere" }, clerk, cancellationToken: Ct));
+
+        runs.ShouldBe(1, "only the create was validated");
     }
 
     [Fact]
@@ -5965,6 +6456,10 @@ public abstract class WriteHookFacts
             .ShouldBe(1);
     }
 
+    /// <summary>
+    /// Acceptance (13), read as Ruling 57 states: "a request-scoped service" is any scope other than the unit's — here a scope
+    /// the test opens as an HTTP request would; the hooks' scope is the unit's, never the caller's.
+    /// </summary>
     [Fact]
     public async Task Two_hooks_of_one_unit_share_its_scope_and_a_request_scope_is_another()
     {
@@ -6028,6 +6523,14 @@ public abstract class WriteHookFacts
 
     protected abstract Task<HookDatabase> DatabaseAsync();
 
+    /// <summary>
+    /// Proves, from inside a validate hook, that no transaction of the write is open (acceptance (8), Ruling 44). SQLite: the
+    /// hook's own write above would wait on the held writer lock and fail its <c>WaitAsync</c>, so nothing more is needed;
+    /// PostgreSQL overrides this to find no other backend of the database <c>idle in transaction</c>.
+    /// </summary>
+    protected virtual Task AssertNoOpenTransactionAsync(HookDatabase database) => Task.CompletedTask;
+
+    /// <summary>A host whose hooks run on a clock that never moves unless a fact moves it: no fact here races the 250 ms default (Ruling 40).</summary>
     private static Task<AlvoTestHost> StartAsync(HookDatabase database, Action<IAlvoBuilder> hooks, TimeProvider? time = null) =>
         AlvoTestHost.StartAsync(
             alvo =>
@@ -6036,7 +6539,7 @@ public abstract class WriteHookFacts
                 alvo.FromDescriptor(Path.Combine(AppContext.BaseDirectory, "descriptors", "hook-desk.alvo.json"));
                 hooks(alvo);
             },
-            time,
+            time ?? new FakeTimeProvider(DateTimeOffset.UtcNow),
             cancellationToken: Ct);
 
     private static void Rejecting(MMLib.Alvo.Extensions.AlvoEntityBuilder bookings, string stage)
@@ -6087,7 +6590,20 @@ public abstract class WriteHookFacts
 }
 ```
 
-`test/MMLib.Alvo.TestHost.Tests/SqliteWriteHookTests.cs` — the `SqliteTransactionTests` shape (a temp file per fact, pools cleared and files deleted on dispose), answering `new HookDatabase(alvo => alvo.UseSqlite(connectionString), () => new SqliteConnection(connectionString))`. `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlWriteHookTests.cs` — the `PostgreSqlTransactionTests` shape (`[Collection(DispatchedEventCollection.Name)]`, a database per fact, `Assert.SkipWhen` without Docker), answering `new HookDatabase(alvo => alvo.UsePostgreSql(connectionString), () => new NpgsqlConnection(connectionString))`.
+`test/MMLib.Alvo.TestHost.Tests/SqliteWriteHookTests.cs` — the `SqliteTransactionTests` shape (a temp file per fact, pools cleared and files deleted on dispose), answering `new HookDatabase(alvo => alvo.UseSqlite(connectionString), () => new SqliteConnection(connectionString))`. `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlWriteHookTests.cs` — the `PostgreSqlTransactionTests` shape (`[Collection(DispatchedEventCollection.Name)]`, a database per fact, `Assert.SkipWhen` without Docker), answering `new HookDatabase(alvo => alvo.UsePostgreSql(connectionString), () => new NpgsqlConnection(connectionString))`, and overriding the probe:
+
+```csharp
+    protected override async Task AssertNoOpenTransactionAsync(HookDatabase database)
+    {
+        await using var connection = database.Connect();
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND state LIKE 'idle in transaction%'";
+
+        Convert.ToInt64(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken), CultureInfo.InvariantCulture)
+            .ShouldBe(0, "a validate hook runs with no transaction of the write open");
+    }
+```
 
 - [ ] **Step 2: Run them to verify which fail**
 
@@ -6192,141 +6708,7 @@ git commit -m "test(hooks): write hooks end to end on SQLite and PostgreSQL
 Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 ```
 
-(`Switching_a_validate_hook_off_is_audited_and_the_next_write_skips_it` passes only after Task 11; run Task 11 before this commit, or mark that one fact `Skip = "Task 11"` here and remove the skip in Task 11 — prefer the order Task 11 → commit.)
-
----
-
-## Task 11: Operations — switching a validate hook off and on, `Enabled` in the catalog, write hooks in the stats
-
-**Files:**
-- Modify: `src/MMLib.Alvo/Management/Internal/AlvoOperationsService.Writes.cs`, `src/MMLib.Alvo/Extensions/Internal/ExtensionStats.cs`, `src/MMLib.Alvo/Extensions/Setup.cs` (nothing if `ExtensionStats` keeps its constructor), `test/MMLib.Alvo.Tests/Management/OperationsTestWorld.cs`, `test/MMLib.Alvo.Tests/Management/AlvoOperationsWritesTests.cs`, `test/MMLib.Alvo.Tests/Extensions/ExtensionStatsTests.cs`
-- Test: the facts below; `WriteHookFacts.Switching_a_validate_hook_off_is_audited_and_the_next_write_skips_it` (Task 10) on both engines
-
-**Interfaces:**
-- Consumes: Task 1's `IDeliveryStore.SetDisabledAsync/DisabledAsync`, `ManagementExtension.Enabled`; Task 7's catalog entries; Task 8's `HookTelemetry` names.
-- Produces: `SetEnabledAsync` that switches validate hooks (audited, idempotent) and refuses every other kind 409; `ManagementExtensionStat.Rejections` filled for write hooks.
-
-- [ ] **Step 1: Write the failing facts**
-
-`OperationsTestWorld` registers a validate hook beside its handler: `internal const string Validator = "vat-check";` and, in `AddAlvo`, `alvo.Entity("tickets", tickets => tickets.Validate(Validator, (ValidateWrite<AlvoRecord> _) => ValueTask.CompletedTask));` (a fact that counts the catalog's items gains one; adjust its expectation by name, not by number).
-
-`AlvoOperationsWritesTests` gains:
-
-```csharp
-    [Fact]
-    public async Task Switching_a_validate_hook_off_writes_one_log_row_and_one_audit_line_and_answers_it_disabled()
-    {
-        using var world = new OperationsTestWorld();
-
-        var off = await world.Service.SetEnabledAsync(Project, OperationsTestWorld.Validator, enabled: false, "VIES is down", Ct);
-        var again = await world.Service.SetEnabledAsync(Project, OperationsTestWorld.Validator, enabled: false, "VIES is down", Ct);
-
-        (off.Enabled, again.Enabled, off.Kind).ShouldBe((false, false, AlvoExtensionKind.Validate));
-        world.Store.Operations.ShouldHaveSingleItem().Operation.ShouldBe("disable-extension");
-        world.Audit.Lines.ShouldHaveSingleItem().ShouldContain("'disable-extension' on 'vat-check'");
-        (await world.Service.GetExtensionsAsync(Project, Ct)).Items.Single(item => item.Id == OperationsTestWorld.Validator).Enabled.ShouldBeFalse();
-    }
-
-    [Fact]
-    public async Task Switching_it_on_again_is_audited_as_enable()
-    {
-        using var world = new OperationsTestWorld();
-        await world.Service.SetEnabledAsync(Project, OperationsTestWorld.Validator, enabled: false, null, Ct);
-
-        (await world.Service.SetEnabledAsync(Project, OperationsTestWorld.Validator, enabled: true, null, Ct)).Enabled.ShouldBeTrue();
-
-        world.Store.Operations.Select(operation => operation.Operation).ShouldBe(["disable-extension", "enable-extension"]);
-    }
-```
-
-(The existing `…handler…409` fact stays: a handler is still refused with the pause hint. If `GetExtensionsAsync` is not on `AlvoOperationsService`, read the catalog through `IAlvoManagement.GetExtensionsAsync` from `world.Services`.)
-
-`ExtensionStatsTests` gains:
-
-```csharp
-    [Fact]
-    public void A_write_hook_s_runs_rejections_and_failures_are_counted_from_its_meter()
-    {
-        var id = $"hook-{Guid.NewGuid():N}"[..20];
-        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
-        using var stats = new ExtensionStats(clock, HandlerCatalog.Registry(alvo => alvo.Entity("tickets", t => t.BeforeWrite(id, (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask))));
-
-        HookTelemetry.Finish(null, id, HookTelemetry.Succeeded, TimeSpan.FromMilliseconds(4), 0);
-        HookTelemetry.Finish(null, id, HookTelemetry.Rejected, TimeSpan.FromMilliseconds(6), 0);
-        HookTelemetry.Finish(null, id, HookTelemetry.Failed, TimeSpan.FromMilliseconds(8), 0);
-
-        var stat = stats.Report([id]).Items.ShouldHaveSingleItem();
-        (stat.Invocations, stat.Rejections, stat.Failures).ShouldBe((3L, 1L, 1L));
-        stat.P95.ShouldNotBeNull();
-    }
-```
-
-- [ ] **Step 2: Run them to verify they fail**
-
-Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*AlvoOperationsWritesTests'` and `--filter-class '*ExtensionStatsTests'`
-Expected: FAIL — `SetEnabledAsync` refuses every kind; the stats know no hook.
-
-- [ ] **Step 3: Write the switch and the stats**
-
-`AlvoOperationsService.Writes.cs` — replace `SetEnabledAsync`:
-
-```csharp
-    private const string DisableOperation = "disable-extension";
-    private const string EnableOperation = "enable-extension";
-
-    public async Task<ManagementExtension> SetEnabledAsync(string project, string extension, bool enabled, string? reason, CancellationToken ct = default)
-    {
-        gate.Admit(ManagementOperation.SetExtensionEnabled, project);
-        OperationReasons.Ensure(reason);
-        var found = Registered(extension);
-        EnsureSwitchable(found, project, enabled);
-        var entry = Entry(enabled ? EnableOperation : DisableOperation, found.Id, reason);
-        if (await Store.SetDisabledAsync(found.Id, !enabled, entry, ct).ConfigureAwait(false))
-        {
-            OperationsAudit.Write(logger, entry with { Affected = 1 });
-        }
-
-        return found with { Enabled = enabled };
-    }
-
-    private static void EnsureSwitchable(ManagementExtension found, string project, bool enabled)
-    {
-        if (found.Kind == AlvoExtensionKind.Validate)
-        {
-            return;
-        }
-
-        throw new ManagementConflictException(found.Kind == AlvoExtensionKind.EventHandler
-            ? $"'{found.Id}' is an event handler, and only a validate hook can be switched {(enabled ? "on" : "off")}. To stop a handler for a while, "
-              + $"pause it instead: PUT {{m}}/projects/{project}/subscribers/{found.Id}/paused with {{\"paused\": true}}."
-            : $"'{found.Id}' is a {ExtensionCatalog.WireName(found.Kind)} extension, and only a validate hook can be switched {(enabled ? "on" : "off")}: "
-              + "a hook inside the write's transaction guards the data's integrity, so it is changed in the host's code and redeployed.");
-    }
-```
-
-(`Store` is the operations service's `IDeliveryStore`; the method is now `async`.)
-
-`ExtensionStats.cs`:
-
-- the constructor's id set becomes `registry.Handlers.Select(handler => handler.Id).Concat(registry.WriteHooks.Select(hook => hook.Id)).Distinct(StringComparer.Ordinal)`;
-- `Publish` also enables `instrument.Meter.Name == HookTelemetry.MeterName && instrument.Name == HookTelemetry.DurationName`;
-- `OnDuration` passes `rejected: outcome == HookTelemetry.Rejected` and `failed: outcome is AlvoDeliveryMetrics.FailedOutcome or AlvoDeliveryMetrics.DeadOutcome` (a hook's `failed` is the same word) to `Record`;
-- `Record(string subscriber, double milliseconds, bool failed, bool rejected = false)`; `Buckets` gains `private readonly long[] _rejections = new long[Hours];`, incremented in `Record`, cleared in `Slot`, summed in `Stat` into `Rejections = rejections`.
-
-- [ ] **Step 4: Run them, then the Task 10 fact on both engines**
-
-Run: the two classes above → PASS; `dotnet test --project test/MMLib.Alvo.TestHost.Tests --filter-class '*SqliteWriteHookTests'` and the PostgreSQL leg → PASS (`Switching_a_validate_hook_off…`).
-
-- [ ] **Step 5: Commit** (then commit Task 10 if it waited for this)
-
-```bash
-dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo/Management/Internal/AlvoOperationsService.Writes.cs src/MMLib.Alvo/Extensions/Internal/ExtensionStats.cs test/MMLib.Alvo.Tests/Management/OperationsTestWorld.cs test/MMLib.Alvo.Tests/Management/AlvoOperationsWritesTests.cs test/MMLib.Alvo.Tests/Extensions/ExtensionStatsTests.cs
-scripts/test-ring0
-git add src/MMLib.Alvo/Management src/MMLib.Alvo/Extensions/Internal/ExtensionStats.cs test/MMLib.Alvo.Tests/Management test/MMLib.Alvo.Tests/Extensions/ExtensionStatsTests.cs
-git commit -m "feat(operations): switch validate hooks off and on, and count hook runs
-
-Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
-```
+(Every fact passes at this commit: Task 10, which switches validate hooks off, has landed — Ruling 50.)
 
 ---
 
@@ -6946,6 +7328,7 @@ public sealed class SendBookingConfirmation(IGuestMail mail) : IAlvoEventHandler
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Time.Testing;
 using MMLib.Alvo;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Hooks;
@@ -7013,7 +7396,7 @@ public sealed class OpeningDeskHooksTests
             builder.FromDescriptor(Descriptor).AddOpeningDesk();
             builder.Services.AddSingleton<IVatRegistry>(new FixedRegistry(registered));
             builder.Services.AddSingleton<IGuestMail>(mail);
-        }, cancellationToken: ct);
+        }, time: new FakeTimeProvider(_monday), cancellationToken: ct);
         await alvo.Data.CreateAsync(
             "opening_hours",
             new Dictionary<string, object?> { ["resource_id"] = _court, ["weekday"] = 1L, ["opens_hour"] = 8L, ["closes_hour"] = 18L },
@@ -7066,7 +7449,7 @@ public sealed class OpeningDeskHooksTests
 }
 ```
 
-Run: `dotnet test --project test/MMLib.Alvo.DocsSnippets.Tests --filter-class '*OpeningDeskHooksTests'` → PASS (three facts), and `--filter-class '*SnippetCoverageTests'` → PASS (each `.cs` declares a type named after its file). A `"vat_id": null` in a create payload is accepted as "no value" — if the payload guard refuses an explicit null on an optional field, drop the key when `vatId` is null.
+The host runs on a `FakeTimeProvider` that nothing advances, so no hook's 250 ms races a cold runner (Ruling 40) — the page shows the same `StartAsync` a reader copies. Run: `dotnet test --project test/MMLib.Alvo.DocsSnippets.Tests --filter-class '*OpeningDeskHooksTests'` → PASS (three facts), and `--filter-class '*SnippetCoverageTests'` → PASS (each `.cs` declares a type named after its file). A `"vat_id": null` in a create payload is accepted as "no value" — if the payload guard refuses an explicit null on an optional field, drop the key when `vatId` is null.
 
 - [ ] **Step 2: Write the page**
 
@@ -7144,9 +7527,15 @@ recorded in `alvo_hook_rejections` — ids and your code, never the payload.
 
 `write.Set("status", "confirmed")`, or `write.Set(x => x.Status, "confirmed")` on a typed hook. The row is then judged
 again by the entity's `create`/`update` rule and its tenant scope — a hook cannot place a row the caller could not — and
-every value by its field's facets (`maxLength`, enum values, format, precision). A field Alvo maintains (`id`, the audit
-columns, `computed`, `rollup`) cannot be set. A value the field cannot hold fails the write with 500 `hook-failed`,
-reason `invalid-set`.
+every value by its field's facets (`maxLength`, enum values, format, precision). A field the caller's policy makes
+`readOnly` is refused exactly as the caller's own payload would be (403). A field Alvo maintains (`id`, the audit columns,
+`computed`, `rollup`) cannot be set. A whole number goes into a `decimal` field; a value the field cannot hold without
+loss fails the write with 500 `hook-failed`, reason `invalid-set`.
+
+:::caution[What binds a hook]
+`readOnly` binds a hook as it binds the caller; the rule's `WITH CHECK` is judged again over every row a hook produces. A
+field you only constrain elsewhere — in your own code, or in a field nobody marks `readOnly` — is not protected from a hook.
+:::
 
 ## Writing other rows
 
@@ -7159,6 +7548,9 @@ writes commits with the write or not at all, runs the other entity's rules and h
   `AlvoBudgetExceededException` — write many rows with one batch call.
 - **Depth.** A hook writing what triggers itself stops at the chain limit (`Alvo:Extensions:MaxDepth`, 8) with
   **508** `chain-depth-exceeded`.
+- **Cascades run no hooks.** Rows a declared `onDelete: cascade` or `set-null` removes or changes run no host hook —
+  unlike a PostgreSQL row trigger. A hook whose write makes its own row disappear (deleting its parent through a cascade)
+  fails the write (`row-vanished`).
 
 Catching any of these changes nothing: the write is already failed and rolls back.
 
@@ -7166,7 +7558,9 @@ Catching any of these changes nothing: the write is already failed and rolls bac
 
 A before/after hook has **250 ms**, a validate hook **5 s** (`AlvoHookOptions.Timeout`, at most 30 s inside the
 transaction and 60 s for validate). The token a hook receives ends at its limit, and every call through
-`write.Transaction` honours it; a hook that ignores it is failed when it returns (`timeout`). An exception escaping a
+`write.Transaction` honours it; a hook that ignores it is failed when it returns (`timeout`). Alvo waits for a hook to
+return — it shares the write's connection — so a hook that ignores its token and never returns holds the write open, and
+on SQLite the database's one writer lock with it, past even the unit's 30-second limit. Pass the token on. An exception escaping a
 hook fails the write with 500 `hook-failed`, reason `exception`; its message stays in your log.
 
 ## Validate: before the transaction
@@ -7175,7 +7569,9 @@ Validate runs once per write, before the write's transaction and before an idemp
 call never holds a lock. It does **not** run for a write inside a [transaction unit](/extending/transactions/) — a
 [command](/extending/commands/) makes its external check before `ctx.TransactAsync` — nor for a replayed
 `Idempotency-Key`. A batch validates every row first; a refused row refuses the batch with nothing opened. What a
-validate hook saw may change before the write runs: never rest integrity on it.
+validate hook saw — its `Old` was read without a lock — may change before the write runs: never rest integrity on it;
+an invariant belongs in a before-write hook. A validate hook never sees a payload the caller may not send, and an update
+of a row the caller cannot reach answers 404 before any validate hook runs.
 
 An administrator can switch a validate hook off while its service is down:
 `PUT {management}/projects/{project}/extensions/{id}/enabled` with `{"enabled": false, "reason": "…"}` — audited, and
@@ -7184,7 +7580,8 @@ honoured by the next write on every instance. Other hooks cannot be switched off
 ## What refuses the start
 
 A before/after/delete hook that takes `HttpClient`, `IHttpClientFactory`, a socket, a `DbConnection`, a mail sender,
-`IAlvoData`, `IAlvoSessions`, `IAlvoTransactions`, `IAlvoEvents`, `IAlvoCommands` or a delivery/outbox store — in its
+`IAlvoData`, `IAlvoSessions`, `IAlvoTransactions`, `IAlvoEvents`, `IAlvoCommands`, `IAlvoManagement`, `IAlvoOperations`, an
+identity store, web sockets, `SmtpClient`, `WebClient`/`WebRequest`, or a delivery/outbox store — in its
 constructor or as a delegate parameter — refuses the start, naming the parameter. So do an unknown entity, a condition
 that does not compile or reads `new.` on a delete, a timeout or budget out of range, and an in-memory provider (write
 hooks need SQLite or PostgreSQL). A registration the descriptor stops fitting is refused at apply; one that never fit
@@ -7222,7 +7619,7 @@ Run: `cd website && npm run build` → passes (link validation included).
 
 - [ ] **Step 4: Architecture, C13, CHANGELOG, PLAN**
 
-`docs/architecture/write-hooks.md` — sections, each a few paragraphs: *The stages and where they live* (the §4.1 map with the file that runs each stage: `EfAlvoData.Hooks.cs`, `WriteExtensionRunner`); *A unit of the write's own* (Ruling 1, the `OwnUnitAsync`/`UnitRun` shape, the 30 s default); *What a hook's transaction is* (lazy hop, budget, token, self-write, `AsSystem`); *What poisons* (a table: budget, self-write, timeout (via `Blame`), escaping exception, invalid-set, unbound, depth — each with its reason string); *Rejections* (precedence, pointers, Ruling X, batches, the log and its flush after the unit); *Validate* (stage 0/2, pre-read, batch hoisting, switch-off); *SuppressHostHooks*; *The boot ban*; *Telemetry and the test host's recorder*; *Engine parity* (no new SQL dialect; the facts that run on both); *Deviations* (a pointer to the spec's *HX-09 settled details*). `extensibility.md`: the rule-4 verb list names the hook verbs as `Entity`-builder members. `data-path.md`'s *A transaction unit spans several writes (HX-07)* gains two sentences: a top-level write with a host in-transaction hook runs in a unit of its own; the hook's view is one hop deeper.
+`docs/architecture/write-hooks.md` — sections, each a few paragraphs: *The stages and where they live* (the §4.1 map with the file that runs each stage: `EfAlvoData.Hooks.cs`, `WriteExtensionRunner`); *A unit of the write's own* (Ruling 1, the `OwnUnitAsync`/`UnitRun` shape, the 30 s default); *What a hook's transaction is* (lazy hop, budget, token, self-write, `AsSystem`); *What poisons* (a table: budget, self-write, timeout (via `Blame`), escaping exception, invalid-set, unbound, row-vanished, depth — each with its reason string; and the stated limit of Ruling 55: a hook that ignores its token and never returns keeps its call running, and the unit's deadline rolls back only when no call is running, so it holds SQLite's writer lock); *Cascades* (Ruling 45: declared `onDelete` cascades and set-null run no host hooks — a deviation from PostgreSQL row triggers); *Rejections* (precedence, pointers, Ruling X, batches, the log and its flush after the unit); *Validate* (stage 0/2, pre-read, batch hoisting, switch-off); *SuppressHostHooks*; *The boot ban*; *Telemetry and the test host's recorder*; *Engine parity* (no new SQL dialect; the facts that run on both); *Deviations* (a pointer to the spec's *HX-09 settled details*). `extensibility.md`: the rule-4 verb list names the hook verbs as `Entity`-builder members. `data-path.md`'s *A transaction unit spans several writes (HX-07)* gains two sentences: a top-level write with a host in-transaction hook runs in a unit of its own; the hook's view is one hop deeper.
 
 `docs/architecture/events.md` — the C13 correction (§2.2, HX-09's scope). In the *Gone — PR5b-1 lifted all three* bullet (search `AuthorizedCandidate\` moved`), replace "with `AuthorizedCandidate` moved inside the transaction" by "with the before-hooks run inside the transaction — `AuthorizedCandidate` itself still runs before `BEGIN` on creates (updates authorize inside the transaction, deletes have no pre-transaction check; corrected in HX-09, spec C13)". Grep the file for any other sentence claiming `AuthorizedCandidate` runs inside a transaction (`grep -n 'AuthorizedCandidate' docs/architecture/*.md`) and correct each the same way (sweep for the claim, not the file).
 
@@ -7242,11 +7639,12 @@ Run: `cd website && npm run build` → passes (link validation included).
   framework table `<prefix>_hook_rejections` (the entity name is now reserved). The dashboard's Lifecycle tab draws
   *Before the transaction* and *In the transaction* lanes with p95 and 24 h rejections; the editors, the policy
   simulator and the apply preview name the code that also runs. Docs: *Validate and guard writes*.
-  **Breaking for `IDeliveryStore` implementers:** two abstract members, `SetDisabledAsync` and `DisabledAsync`.
   **Breaking for typed .NET clients:** `AlvoExtensionKind` and `AlvoExtensionStage` gained members (append-only).
   **Behaviour change:** a top-level write on an entity with a host in-transaction hook runs in a transaction unit of
   its own — a 30 s limit, one DI scope, and an `IAlvoData` call from the hook is refused.
 ```
+
+The two new abstract `IDeliveryStore` members are folded into HX-06's existing *[Unreleased]* entry that already names the port's breaking growth (search `IDeliveryStore` in `CHANGELOG.md`): append ", and `SetDisabledAsync`/`DisabledAsync` (HX-09)" to its list rather than adding a second "breaks implementers" line (Ruling 58) — nothing is released, so both breaks ship in one version.
 
 `docs/PLAN.md` — the HX sentence gains "HX-09 (write hooks in three phases) the ninth".
 
@@ -7254,7 +7652,7 @@ Run: `cd website && npm run build` → passes (link validation included).
 
 In `docs/superpowers/specs/2026-10-14-host-extensibility-design.md`:
 
-- after §4.4.6, a new block **HX-09 settled details.** "Rulings and deviations taken while planning (1–38, verbatim from `docs/superpowers/plans/2026-11-04-hx-09-write-hooks.md`), so a later reader can tell a decision from an oversight. Where a ruling and §4.1 or §4.4 disagree, the ruling is what shipped." followed by the 38 rulings of this plan, verbatim, numbered; and "Rulings taken during execution continue the numbering." as its last line;
+- after §4.4.6, a new block **HX-09 settled details.** "Rulings and deviations taken while planning and after the plan review (1–59, verbatim from `docs/superpowers/plans/2026-11-04-hx-09-write-hooks.md`), so a later reader can tell a decision from an oversight. Where a ruling and §4.1 or §4.4 disagree, the ruling is what shipped." followed by the 59 rulings of this plan, verbatim, numbered; and "Rulings taken during execution continue the numbering." as its last line;
 - §4.5's "top-level units use the same default — **not in HX-07:** …" gains "— **HX-09:** applied to a top-level write a host in-transaction hook runs on (*HX-09 settled details* (1)); a write with none still opens no unit";
 - §4.5 *HX-07 settled details* (14)'s last sentence gains "— **decided in HX-09:** hooks may call `AsSystem()`, bounded and audited (*HX-09 settled details* (2))";
 - §4.13 *HX-04 settled details* (1)'s last sentence gains "**HX-09 appended** `AlvoExtensionKind.Validate`…`AfterDelete`, `AlvoExtensionStage.InTransaction`, and `TopLevelOnly`, `Enabled` (*HX-09 settled details* (6))";
@@ -7295,8 +7693,8 @@ The container runs as you, so its `bin`/`obj` output is yours — **no `git clea
 Mutation runs post-merge on `main` in CI; **do not run Stryker locally and do not re-probe any shard** (a local probe costs ~4 h; budgets are being re-sharded separately). Only make sure the new security-relevant code sits in a CI leg, by configuration:
 
 1. *Core shard:* `stryker-config.json` mutates `**/*.cs` minus its exclusions, so `Hooks/**` is already in (killers: `WriteExtensionRunnerTests`, `HookTransactionTests`, `HookSetsTests`, `HookRejectionsTests`, `HookContextTests`, `WriteHookBindingTests`, `WriteHookRegistrationTests`, `WriteConditionTranslatorTests` in `MMLib.Alvo.Tests`). Confirm by reading the config that no exclusion catches `Hooks/`; change nothing.
-2. *data-ef-core:* add `"Internal/EfAlvoData.Hooks.cs"` and `"Internal/UnitRun.cs"` to `stryker-config.data-ef-core.json`'s `mutate` (killers `HostHookStageTests`, `EfAlvoTransactionsTests` in `MMLib.Alvo.Data.EntityFrameworkCore.Tests`, already that leg's test project), and `"!Internal/EfAlvoData.Hooks.cs"`, `"!Internal/UnitRun.cs"` to `stryker-config.data-ef-rest.json`. `HookRejectionTable.cs`/`EfCoreHookRejectionLog.cs` stay in data-ef-rest by its glob.
-3. Leave the `mutants:`/`suite:` values in `.github/workflows/mutation.yml` untouched. Commit as `ci(mutation): mutate the write-hook stages in data-ef-core`.
+2. *data-ef-core:* **append**, at the end of `stryker-config.data-ef-core.json`'s `mutate` array and in this order, `"Internal/EfAlvoData.Hooks.cs"` then `"Internal/UnitRun.cs"` (killers `HostHookStageTests`, `EfAlvoTransactionsTests` in `MMLib.Alvo.Data.EntityFrameworkCore.Tests`, already that leg's test project); **append** at the end of `stryker-config.data-ef-rest.json`'s `mutate`, in the same order, `"!Internal/EfAlvoData.Hooks.cs"` then `"!Internal/UnitRun.cs"`. `scripts/test-assert-mutation-run` compares the arrays in order (`$whole + ($core | map("!"+.))`), so the order matters (Ruling 56). `HookRejectionTable.cs`/`EfCoreHookRejectionLog.cs` stay in data-ef-rest by its glob; note in the PR that `DeliveryOperationsTable`'s new switch statements land in data-ef-rest, whose killers (the contract rows) live in `Sqlite.Tests`, so survivors there are expected, and that data-ef-core is the leg nearest its time ceiling.
+3. Run `scripts/test-assert-mutation-run` (it reads the configs; it runs no mutation) and fix any mismatch it names. Leave the `mutants:`/`suite:` values in `.github/workflows/mutation.yml` untouched. Commit as `ci(mutation): mutate the write-hook stages in data-ef-core`.
 
 - [ ] **Step 4: Reviews (labelled substitutes) and the security-core checklist**
 
@@ -7329,23 +7727,24 @@ git push -u origin hx/09-write-hooks
 
 | HX-09 criterion | Task(s) | Test |
 |---|---|---|
-| (1) per stage, both engines: reject → no row, no outbox row, correct status and pointer | 3, 4, 8, 9, 10 | `WriteHookFacts.A_rejection_at_each_write_stage_leaves_no_row_no_outbox_row_and_its_kind_and_pointer` (validate, beforeWrite, afterWrite), `A_rejection_at_each_delete_stage_keeps_the_row_and_emits_nothing` (beforeDelete, afterDelete) — SQLite + PostgreSQL; `DataApiEngineTests.A_rejection_at_each_write_stage_answers_its_status_and_pointer_and_writes_nothing_on_every_engine`, `A_rejection_before_a_delete_answers_409_and_keeps_the_row_on_every_engine` (both engines); `HostHookStageTests.A_rejected_batch_row_is_that_row_s_refusal_and_nothing_is_written`; snippet `A_booking_outside_opening_hours_is_refused_at_its_field_and_nothing_is_written` |
-| (2) a `Set` of a forbidden `owner_id` → 403 (adversarial); a `Set` of an undeclared enum value → 500 `invalid-set` identically on both engines | 3, 8, 9, 10 | `DataApiEngineTests.A_set_of_another_owner_is_forbidden_on_every_engine`, `A_set_of_an_undeclared_enum_value_is_invalid_set_on_every_engine` (both engines); `WriteHookFacts.A_set_of_an_undeclared_enum_value_is_invalid_set_and_writes_nothing` (both engines); `HostHookStageTests.A_patch_is_stored_and_judged_by_the_create_rule_again`; `HookSetsTests` |
-| (3) a rejection on a hidden field carries no pointer | 5, 9, 10 | `HookRejectionsTests.A_hidden_field_gets_the_body_pointer`; `WriteHookFacts.A_rejection_on_a_hidden_field_carries_no_pointer` (both engines); `DataApiEngineTests.A_rejection_on_a_hidden_field_answers_with_no_pointer_on_every_engine` (both engines) |
-| (4) after-write sees id/defaults/rollups and can roll back; an after-write child's event carries the committed parent rollup | 3, 8, 10 | `WriteHookFacts.An_after_write_sees_the_id_the_defaults_and_its_child_s_rollup_reaches_the_event_and_the_row`, `An_after_write_that_rejects_rolls_its_child_back_too` (both engines); `HostHookStageTests.An_after_write_that_wrote_makes_the_driver_read_the_row_again` |
-| (5) self-write refused | 8, 10 | `WriteExtensionRunnerTests.A_nested_write_to_the_row_in_its_own_hook_stage_is_a_self_write_even_when_caught`; `WriteHookFacts.A_hook_that_catches_a_self_write_refusal_still_rolls_back_with_reason_self_write` (both engines) |
-| (6) a 250 ms overrun and a 51st operation → 500 with reason and rollback, even when caught | 8, 9, 10 | `WriteExtensionRunnerTests.A_hook_that_overruns_its_timeout_fails_with_timeout_even_when_it_catches_the_cancellation`, `A_caught_budget_refusal_still_fails_the_hook_and_poisons_the_unit`; `WriteHookFacts.A_hook_that_catches_its_timeout_still_rolls_back_with_reason_timeout`, `A_hook_that_catches_its_budget_refusal_still_rolls_back_with_reason_budget` (both engines); `DataApiEngineTests.A_hook_exception_answers_500_hook_failed_and_never_its_message_on_every_engine` |
+| (1) per stage, both engines: reject → no row, no outbox row, correct status and pointer | 3, 4, 8, 9, 11 | `WriteHookFacts.A_rejection_at_each_write_stage_leaves_no_row_no_outbox_row_and_its_kind_and_pointer` (validate, beforeWrite, afterWrite), `A_rejection_at_each_delete_stage_keeps_the_row_and_emits_nothing` (beforeDelete, afterDelete) — SQLite + PostgreSQL; `DataApiEngineTests.A_rejection_at_each_write_stage_answers_its_status_and_pointer_and_writes_nothing_on_every_engine`, `A_rejection_before_a_delete_answers_409_and_keeps_the_row_on_every_engine` (both engines); `HostHookStageTests.A_rejected_batch_row_is_that_row_s_refusal_and_nothing_is_written`; snippet `A_booking_outside_opening_hours_is_refused_at_its_field_and_nothing_is_written` |
+| (2) a `Set` of a forbidden `owner_id` → 403 (adversarial); a `Set` of an undeclared enum value → 500 `invalid-set` identically on both engines | 3, 8, 9, 11 | `DataApiEngineTests.A_set_of_another_owner_is_forbidden_on_every_engine`, `A_set_of_an_undeclared_enum_value_is_invalid_set_on_every_engine` (both engines); `WriteHookFacts.A_set_of_an_undeclared_enum_value_is_invalid_set_and_writes_nothing` (both engines); `HostHookStageTests.A_patch_is_stored_and_judged_by_the_create_rule_again`; `HookSetsTests` |
+| (3) a rejection on a hidden field carries no pointer | 5, 9, 11 | `HookRejectionsTests.A_hidden_field_gets_the_body_pointer`; `WriteHookFacts.A_rejection_on_a_hidden_field_carries_no_pointer` (both engines); `DataApiEngineTests.A_rejection_on_a_hidden_field_answers_with_no_pointer_on_every_engine` (both engines) |
+| (4) after-write sees id/defaults/rollups and can roll back; an after-write child's event carries the committed parent rollup | 3, 8, 11 | `WriteHookFacts.An_after_write_sees_the_id_the_defaults_and_its_child_s_rollup_reaches_the_event_and_the_row`, `An_after_write_that_rejects_rolls_its_child_back_too` (both engines); `HostHookStageTests.An_after_write_that_wrote_makes_the_driver_read_the_row_again` |
+| (5) self-write refused | 8, 11 | `WriteExtensionRunnerTests.A_nested_write_to_the_row_in_its_own_hook_stage_is_a_self_write_even_when_caught`; `WriteHookFacts.A_hook_that_catches_a_self_write_refusal_still_rolls_back_with_reason_self_write` (both engines) |
+| (6) a 250 ms overrun and a 51st operation → 500 with reason and rollback, even when caught | 8, 9, 11 | `WriteExtensionRunnerTests.A_hook_that_overruns_its_timeout_fails_with_timeout_even_when_it_catches_the_cancellation`, `A_caught_budget_refusal_still_fails_the_hook_and_poisons_the_unit`; `WriteHookFacts.A_hook_that_catches_its_timeout_still_rolls_back_with_reason_timeout`, `A_hook_that_catches_its_budget_refusal_still_rolls_back_with_reason_budget` (both engines); `DataApiEngineTests.A_hook_exception_answers_500_hook_failed_and_never_its_message_on_every_engine` |
 | (7) a hook injecting `HttpClient` refuses boot | 7 | `WriteHookBindingTests.An_in_transaction_hook_taking_a_network_dependency_refuses_the_start_and_a_validate_hook_may`; `ExtensionBootRefusalTests.A_write_hook_injecting_an_http_client_refuses_boot_naming_the_parameter` |
-| (8) batch validate with no transaction open; never on an idempotent replay; not for a nested write inside `TransactAsync` | 4, 10 | `WriteHookFacts.A_batch_validate_hook_runs_once_per_row_with_no_transaction_open`, `A_validate_hook_never_runs_on_an_idempotent_replay`, `A_write_inside_a_unit_never_runs_validate` (both engines); `HostHookStageTests.Validate_runs_before_any_transaction_with_the_authorized_candidate_and_no_id`, `A_replayed_key_skips_validate`, `A_batch_validates_every_row_before_its_transaction_and_a_refused_row_refuses_the_batch` |
-| (9) a before-write `AsSystem()` recursion → 508 | 3, 8, 10 | `WriteHookFacts.A_before_write_hook_writing_its_own_entity_as_the_system_recursively_is_refused_508` (both engines); `EfAlvoTransactionsTests.A_write_one_hop_deeper_past_the_limit_is_refused_when_it_writes_and_a_caught_refusal_still_rolls_back`; `WriteExtensionRunnerTests.A_depth_refusal_escaping_a_hook_passes_unchanged_and_a_nested_rejection_is_the_hook_s_failure` |
-| (10) `SuppressHostHooks` non-system → `ArgumentException`; system → hooks skipped, one audit row | 3, 10 | `WriteHookFacts.Suppressing_host_hooks_needs_the_system_and_skips_them_with_one_audit_row` (both engines) |
-| (11) disabling a validate hook writes an audit row and the next write skips it | 2, 8, 11, 10 | `WriteHookFacts.Switching_a_validate_hook_off_is_audited_and_the_next_write_skips_it` (both engines); `AlvoOperationsWritesTests.Switching_a_validate_hook_off_writes_one_log_row_and_one_audit_line_and_answers_it_disabled`, `Switching_it_on_again_is_audited_as_enable`; `WriteExtensionRunnerTests.A_switched_off_validate_hook_is_skipped`; `DeliveryStoreContractTests.Switching_an_extension_off_lists_it_and_logs_the_change_once` (+ two rows, both engines) |
-| (12) a rejection log row exists after rollback | 2, 3, 8, 10 | `WriteHookFacts.A_rejection_is_logged_after_the_rollback_with_ids_and_its_code` (both engines); `HookRejectionLogTests`; `WriteExtensionRunnerTests.A_rejection_stops_the_stage_discards_its_sets_and_is_logged_with_ids_and_the_code_only` |
-| (13) two hooks of one unit share the unit's scope; a request-scoped service differs | 3, 10 | `WriteHookFacts.Two_hooks_of_one_unit_share_its_scope_and_a_request_scope_is_another` (both engines) |
-| Scope: `AsSystem` tenant-bound and audited (Ruling 2) | 8, 10 | `WriteExtensionRunnerTests.AsSystem_is_the_system_in_the_caller_s_tenant_with_the_caller_s_provenance_and_it_is_logged`; `WriteHookFacts.A_guard_reads_reference_data_the_caller_cannot_as_the_system_and_no_other_tenant_s` (both engines) |
-| Scope: `write.Publish`, `Hooks.AssertRan` for write hooks | 5, 10 | `HookContextTests.Publish_goes_through_the_hook_s_transaction`; `WriteHookFacts.A_rejected_run_counts_as_ran_for_the_recorder`; snippet `A_booking_in_opening_hours_is_stored_audited_and_confirmed_after_the_commit` |
+| (8) batch validate with no transaction open; never on an idempotent replay; not for a nested write inside `TransactAsync` | 4, 11 | `WriteHookFacts.A_batch_validate_hook_runs_once_per_row_with_no_transaction_open`, `A_validate_hook_never_runs_on_an_idempotent_replay`, `A_write_inside_a_unit_never_runs_validate` (both engines); `HostHookStageTests.Validate_runs_before_any_transaction_with_the_authorized_candidate_and_no_id`, `A_replayed_key_skips_validate`, `A_batch_validates_every_row_before_its_transaction_and_a_refused_row_refuses_the_batch` |
+| (9) a before-write `AsSystem()` recursion → 508 | 3, 8, 11 | `WriteHookFacts.A_before_write_hook_writing_its_own_entity_as_the_system_recursively_is_refused_508` (both engines); `EfAlvoTransactionsTests.A_write_one_hop_deeper_past_the_limit_is_refused_when_it_writes_and_a_caught_refusal_still_rolls_back`; `WriteExtensionRunnerTests.A_depth_refusal_escaping_a_hook_passes_unchanged_and_a_nested_rejection_is_the_hook_s_failure` |
+| (10) `SuppressHostHooks` non-system → `ArgumentException`; system → hooks skipped, one audit row | 3, 11 | `WriteHookFacts.Suppressing_host_hooks_needs_the_system_and_skips_them_with_one_audit_row` (both engines) |
+| (11) disabling a validate hook writes an audit row and the next write skips it | 2, 8, 10, 11 | `WriteHookFacts.Switching_a_validate_hook_off_is_audited_and_the_next_write_skips_it` (both engines); `AlvoOperationsWritesTests.Switching_a_validate_hook_off_writes_one_log_row_and_one_audit_line_and_answers_it_disabled`, `Switching_it_on_again_is_audited_as_enable`; `WriteExtensionRunnerTests.A_switched_off_validate_hook_is_skipped`; `DeliveryStoreContractTests.Switching_an_extension_off_lists_it_and_logs_the_change_once` (+ two rows, both engines) |
+| (12) a rejection log row exists after rollback | 2, 3, 8, 11 | `WriteHookFacts.A_rejection_is_logged_after_the_rollback_with_ids_and_its_code` (both engines); `HookRejectionLogTests`; `WriteExtensionRunnerTests.A_rejection_stops_the_stage_discards_its_sets_and_is_logged_with_ids_and_the_code_only` |
+| (13) two hooks of one unit share the unit's scope; a request-scoped service differs | 3, 11 | `WriteHookFacts.Two_hooks_of_one_unit_share_its_scope_and_a_request_scope_is_another` (both engines) |
+| Scope: `AsSystem` tenant-bound and audited (Ruling 2) | 8, 11 | `WriteExtensionRunnerTests.AsSystem_is_the_system_in_the_caller_s_tenant_with_the_caller_s_provenance_and_it_is_logged`; `WriteHookFacts.A_guard_reads_reference_data_the_caller_cannot_as_the_system_and_no_other_tenant_s` (both engines) |
+| Scope: `write.Publish`, `Hooks.AssertRan` for write hooks | 5, 11 | `HookContextTests.Publish_goes_through_the_hook_s_transaction`; `WriteHookFacts.A_rejected_run_counts_as_ran_for_the_recorder`; snippet `A_booking_in_opening_hours_is_stored_audited_and_confirmed_after_the_commit` |
 | Scope: boot validation, apply guard, catalog, unbound fails closed | 6, 7, 8 | `WriteHookBindingTests` (incl. `Removing_a_field_a_bound_write_hook_reads_is_refused_at_apply`, `The_catalog_describes_each_stage_…`), `WriteHookRegistrationTests`, `WriteConditionTranslatorTests`, `WriteExtensionRunnerTests.A_registered_hook_that_does_not_bind_the_current_catalog_fails_the_write_closed` |
 | Scope: `events.md:1164` corrected (C13) | 13 | the edit in Task 13 Step 4 (reviewed by plan-guard) |
-| Dashboard: write lanes, editor note, simulator/dry-run list, p95 and 24 h rejections | 11, 12 | `LifecycleLaneWriteHookTests`, `ExtensionStatsTests.A_write_hook_s_runs_rejections_and_failures_are_counted_from_its_meter`; e2e `WriteHookScenarios` (three), `WriteLaneAbsenceScenarios` |
+| Dashboard: write lanes, editor note, simulator/dry-run list, p95 and 24 h rejections | 10, 12 | `LifecycleLaneWriteHookTests`, `ExtensionStatsTests.A_write_hook_s_runs_rejections_and_failures_are_counted_from_its_meter`; e2e `WriteHookScenarios` (three), `WriteLaneAbsenceScenarios` |
 | Docs: *Validate and guard writes*, *Where logic goes*, the booking recipe | 13 | `OpeningDeskHooksTests` (three) in `MMLib.Alvo.DocsSnippets.Tests`; website build |
+| Review hardening (Rulings 39–59) | 3, 4, 8, 9, 10, 11 | `WriteExtensionRunnerTests.A_later_hook_s_condition_sees_an_earlier_hook_s_set_both_ways`; `HostHookStageTests.A_validate_hook_never_sees_an_update_the_payload_guard_refuses`, `A_batch_reports_every_bad_row_whichever_check_refused_it`; `WriteHookFacts.A_batch_row_s_hook_writing_a_sibling_row_is_a_self_write`, `An_after_write_whose_cascade_removes_its_own_row_fails_with_row_vanished_and_emits_nothing`, `Validate_never_runs_on_an_update_the_payload_guard_refuses_nor_on_a_row_the_caller_cannot_reach` (both engines); `DataApiEngineTests.A_set_of_a_read_only_field_is_refused_as_the_caller_s_own_payload_would_be_on_every_engine` (both engines); `HookSetsTests` (widening, tenant on a global entity); `HookRejectionsTests.A_name_that_is_not_a_declared_visible_field_gets_the_body_pointer`; `AlvoOperationsWritesTests.Switching_a_before_write_hook_off_is_refused_409_and_changes_nothing` |
 | Security core (§6.2) | 14 | `alvo-security-core-review` checklist, `/security-review` substitute, `needs-deep-review` |
