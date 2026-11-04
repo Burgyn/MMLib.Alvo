@@ -4,9 +4,11 @@ using Microsoft.Extensions.Time.Testing;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Hooks;
 using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Schema;
 using MMLib.Alvo.Tests.Data;
 using MMLib.Alvo.Tests.Extensions;
 using NSubstitute;
@@ -414,6 +416,60 @@ public sealed class WriteExtensionRunnerTests
         (unit.Poisoned.Count, unit.Blamed.Count).ShouldBe((0, 0));
     }
 
+    /// <summary>
+    /// The interpreter's own failure of a condition — a present value that is no Bool — is Alvo's, never the hook's: it escapes
+    /// as a built-in's failure, so a change to which side it lands on cannot move it to <c>hook-failed</c> silently.
+    /// </summary>
+    [Theory]
+    [InlineData("validate")]
+    [InlineData("before")]
+    [InlineData("after")]
+    public async Task A_condition_whose_value_is_a_present_non_bool_escapes_as_the_interpreter_s_failure_and_poisons_nothing(string stage)
+    {
+        var ran = new ConcurrentQueue<string>();
+        var unit = new FakeFlowUnit();
+        await using var world = ConditionWorld(stage, "new.urgent", ran);
+        world.Services.GetRequiredService<IPolicyCatalogProvider>().SetCurrent("handlers", HandlerCatalog.CatalogOf(WithUrgent()));
+        using var flow = AlvoFlow.EnterUnit(unit, new AlvoProvenance());
+
+        var escaped = await Should.ThrowAsync<CelFunctionException>(() => RunStage(world, stage, Urgent("yes")));
+
+        (escaped.FunctionName, escaped.IsHost).ShouldBe((CelInterpreter.WholeCondition, false));
+        ran.ShouldBeEmpty();
+        (unit.Poisoned.Count, unit.Blamed.Count).ShouldBe((0, 0));
+    }
+
+    /// <summary>A hook that fails before it runs — unbound, or on its own condition — is still a failed run in the stats.</summary>
+    [Theory]
+    [InlineData("unbound")]
+    [InlineData("condition")]
+    public async Task A_hook_failing_before_it_runs_is_counted_as_a_failed_run(string where)
+    {
+        var id = $"early-{Guid.NewGuid():N}"[..20];
+        var condition = where == "unbound" ? "new.stauts == 'x'" : "explode(new.title)";
+        await using var world = RunnerWorld.Start(alvo => alvo
+            .AddCelFunction("explode", (string value) => value.Length > 0 ? throw new InvalidOperationException("boom") : true)
+            .Entity("tickets", t => t.BeforeWrite(id, (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask, when: condition)));
+        using var stats = new ExtensionStats(new FakeTimeProvider(DateTimeOffset.UtcNow), world.Services.GetRequiredService<ExtensionRegistry>());
+
+        await Should.ThrowAsync<HookFailedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct));
+
+        var stat = stats.Report([id]).Items.ShouldHaveSingleItem();
+        (stat.Invocations, stat.Failures).ShouldBe((1L, 1L));
+    }
+
+    private static SchemaModel WithUrgent() => new([.. HandlerCatalog.Schema.Entities.Select(entity => entity.Name == "tickets"
+        ? entity with { Fields = [.. entity.Fields, new FieldSchema { Name = "urgent", Type = MMLib.Alvo.Schema.FieldType.Boolean, Nullable = true }] }
+        : entity)]);
+
+    private static AlvoRecord Urgent(object value) => new(new Dictionary<string, object?>
+    {
+        ["id"] = RunnerWorld.TicketId,
+        ["title"] = "t",
+        ["status"] = "open",
+        ["urgent"] = value,
+    });
+
     private static RunnerWorld ConditionWorld(string stage, string when, ConcurrentQueue<string> ran) => RunnerWorld.Start(alvo => alvo
         .AddCelFunction("explode", (string value) => value.Length > 0 ? throw new InvalidOperationException("SECRET " + value) : true)
         .Entity("tickets", t => _ = stage switch
@@ -423,9 +479,10 @@ public sealed class WriteExtensionRunnerTests
             _ => t.AfterWrite("numeric", (AfterWrite<AlvoRecord> _) => { ran.Enqueue("numeric"); return ValueTask.CompletedTask; }, when: when),
         }));
 
-    private static Task RunStage(RunnerWorld world, string stage)
+    private static Task RunStage(RunnerWorld world, string stage, AlvoRecord? row = null)
     {
-        var write = world.Before(RunnerWorld.Ticket(title: "not a number")) with { Saved = RunnerWorld.Ticket(title: "not a number") };
+        row ??= RunnerWorld.Ticket(title: "not a number");
+        var write = world.Before(row) with { Saved = row };
 
         return stage switch
         {

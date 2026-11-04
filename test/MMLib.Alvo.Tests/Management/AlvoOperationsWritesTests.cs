@@ -123,6 +123,17 @@ public sealed class AlvoOperationsWritesTests
     }
 
     [Fact]
+    public async Task Switching_a_validate_hook_off_without_admission_is_forbidden_and_changes_nothing()
+    {
+        using var world = new OperationsTestWorld(admitted: false);
+
+        await Should.ThrowAsync<ManagementForbiddenException>(() => world.Service.SetEnabledAsync(Project, OperationsTestWorld.Validator, enabled: false, "VIES is down", Ct));
+
+        world.Store.Operations.ShouldBeEmpty();
+        world.Audit.Lines.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Switching_it_on_again_is_audited_as_enable()
     {
         using var world = new OperationsTestWorld();

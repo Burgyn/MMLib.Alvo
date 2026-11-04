@@ -28,8 +28,11 @@ internal sealed partial class EfAlvoData
         _extensions.RunsInTransaction(entity, operation) ? OwnUnitAsync(context, write, cancellationToken) : write(null, cancellationToken);
 
     /// <summary>Whether host hooks run now: registered, inside a unit, and not suppressed by it.</summary>
-    private bool HostHooksRun(string entity, AlvoWriteOperation operation) =>
-        FlowUnit is { SuppressesHostHooks: false } && _extensions.RunsInTransaction(entity, operation);
+    private bool HostHooksRun(string entity, AlvoWriteOperation operation) => HookUnit(entity, operation) is not null;
+
+    /// <summary>The unit host hooks run in now; <see langword="null"/> when <see cref="HostHooksRun"/> would answer no.</summary>
+    private WriteUnit? HookUnit(string entity, AlvoWriteOperation operation) =>
+        FlowUnit is { SuppressesHostHooks: false } unit && _extensions.RunsInTransaction(entity, operation) ? unit : null;
 
     private WriteInvocation Invocation(EntitySchema schema, AlvoWriteOperation operation, AlvoContext context, DateTimeOffset now)
     {
@@ -196,7 +199,7 @@ internal sealed partial class EfAlvoData
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context, AlvoWriteOperation operation, AlvoRecord? preImage,
         Dictionary<string, object> stored, DateTimeOffset now, CancellationToken cancellationToken)
     {
-        if (!HostHooksRun(schema.Name, operation))
+        if (HookUnit(schema.Name, operation) is not { } unit)
         {
             return stored;
         }
@@ -207,22 +210,20 @@ internal sealed partial class EfAlvoData
         return writer is null
             ? stored
             : await SingleAsync(db, schema, decision, context, RowIdOf(stored), lockFor: null, cancellationToken, unmasked: true).ConfigureAwait(false)
-                ?? throw Vanished(writer);
+                ?? throw Vanished(unit, writer);
     }
 
     /// <summary>
     /// The row a hook's write made disappear from the write's own read (Ruling 45): the write fails and its unit is poisoned —
     /// never an event or an echo of a row that no longer exists. Logged here: no runner saw this failure, and the HTTP
-    /// handler answers every hook failure without a second Error line.
+    /// handler answers every hook failure without a second Error line. The unit is a parameter, not a lookup, so no path can
+    /// reach this without one to poison and log through.
     /// </summary>
-    private static HookFailedException Vanished(string writer)
+    private static HookFailedException Vanished(WriteUnit unit, string writer)
     {
         var failure = new HookFailedException(writer, HookFailedException.RowVanished);
-        if (FlowUnit is { } unit)
-        {
-            unit.Poison(failure);
-            RowVanished(unit.Logger(), writer);
-        }
+        unit.Poison(failure);
+        RowVanished(unit.Logger(), writer);
 
         return failure;
     }

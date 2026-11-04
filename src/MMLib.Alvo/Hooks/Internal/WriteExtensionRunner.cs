@@ -109,7 +109,7 @@ internal sealed class WriteExtensionRunner(
         var bindings = catalog is null ? ExtensionBindings.None : binder.For(catalog);
         if (registered.FirstOrDefault(id => bindings.WriteHook(id) is null) is { } unbound)
         {
-            throw Fail(unbound, HookFailedException.Unbound, cause: null);
+            throw FailBeforeRun(unbound, HookFailedException.Unbound, cause: null);
         }
 
         return [.. bindings.WriteHooks.Where(hook => registered.Contains(hook.Id))];
@@ -132,7 +132,7 @@ internal sealed class WriteExtensionRunner(
         }
         catch (Exception thrown) when (thrown is not CelFunctionException { IsHost: false })
         {
-            throw Fail(hook.Id, HookFailedException.Exception, thrown);
+            throw FailBeforeRun(hook.Id, HookFailedException.Exception, thrown);
         }
     }
 
@@ -248,6 +248,14 @@ internal sealed class WriteExtensionRunner(
         HookLog.HookFailed(logger, run.Id, HookFailedException.Timeout, "-");
 
         return failure;
+    }
+
+    /// <summary>A hook that fails before its run starts is still a failed run for the meters and the stats (Ruling 28).</summary>
+    private HookFailedException FailBeforeRun(string id, string reason, Exception? cause)
+    {
+        HookTelemetry.Finish(activity: null, id, HookTelemetry.Failed, TimeSpan.Zero, operations: 0);
+
+        return Fail(id, reason, cause);
     }
 
     private HookFailedException Fail(string id, string reason, Exception? cause)
