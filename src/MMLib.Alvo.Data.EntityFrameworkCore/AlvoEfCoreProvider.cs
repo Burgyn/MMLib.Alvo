@@ -101,7 +101,9 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton(CreateData);
         builder.Services.TryAddSingleton<IAlvoData>(services => services.GetRequiredService<EfAlvoData>());
         builder.Services.TryAddSingleton<IAlvoTransactions>(services => new EfAlvoTransactions(
-            services.GetRequiredService<EfAlvoData>(), services.GetRequiredService<IServiceScopeFactory>()));
+            services.GetRequiredService<EfAlvoData>(),
+            services.GetRequiredService<IServiceScopeFactory>(),
+            services.GetService<ILogger<EfAlvoTransactions>>()));
         builder.Services.TryAddSingleton<IAlvoDataReachability>(CreateReachability);
         builder.Services.TryAddSingleton<IOutboxStore>(CreateOutboxStore);
         builder.Services.TryAddSingleton<IDeliveryStore>(CreateDeliveryStore);
@@ -121,7 +123,10 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<TimeProvider>(),
         services.GetRequiredService<IOptions<AlvoOptions>>().Value,
         services.GetRequiredService<AlvoChainDepthLimit>(),
-        services.GetRequiredService<IRelationalWriteGate>());
+        services.GetRequiredService<IRelationalWriteGate>(),
+        services.GetService<IWriteExtensionRunner>(),
+        services.GetRequiredService<IServiceScopeFactory>(),
+        services.GetService<EfCoreHookRejectionLog>());
 
     /// <summary>Creates the readiness probe every EF-backed driver shares (#133).</summary>
     /// <remarks>

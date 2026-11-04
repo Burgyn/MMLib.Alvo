@@ -550,7 +550,7 @@ public sealed class WriteUnitTests
         var probe = scope.ServiceProvider.GetRequiredService<DisposalProbe>();
         var unit = new WriteUnit(
             new WriteUnitParts(root, root.Database.GetDbConnection(), transaction, turn, scope),
-            world.Caller, AlvoProvenance.None, TimeSpan.FromHours(1), TimeProvider.System, Ct);
+            world.Caller, AlvoProvenance.None, new AlvoTransactionOptions { Timeout = TimeSpan.FromHours(1) }, owned: false, TimeProvider.System, Ct);
 
         return (unit, turn, probe);
     }

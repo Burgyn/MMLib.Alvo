@@ -109,20 +109,30 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
     /// <param name="parts">The opened connection, the begun transaction, the turn and the scope.</param>
     /// <param name="caller">The caller who opened it.</param>
     /// <param name="provenance">The unit's provenance, which every write inside it reports.</param>
-    /// <param name="timeout">How long the unit may run.</param>
+    /// <param name="options">The checked options: how long the unit may run, and whether it suppresses host hooks.</param>
+    /// <param name="owned">Whether the unit was opened for one top-level write rather than by <c>TransactAsync</c>.</param>
     /// <param name="time">The clock the deadline runs on.</param>
     /// <param name="cancellationToken">The caller's token; cancelling it cancels every call of the unit.</param>
     internal WriteUnit(
-        WriteUnitParts parts, AlvoContext caller, AlvoProvenance provenance, TimeSpan timeout, TimeProvider time, CancellationToken cancellationToken)
+        WriteUnitParts parts, AlvoContext caller, AlvoProvenance provenance, AlvoTransactionOptions options, bool owned, TimeProvider time,
+        CancellationToken cancellationToken)
     {
         _parts = parts;
         Caller = caller;
         Provenance = provenance;
-        _timeout = timeout;
-        _deadline = new CancellationTokenSource(timeout, time);
+        _timeout = options.Timeout;
+        SuppressesHostHooks = options.SuppressHostHooks;
+        Owned = owned;
+        _deadline = new CancellationTokenSource(_timeout, time);
         _lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _deadline.Token);
         _onDeadline = _deadline.Token.Register(static state => ((WriteUnit)state!).OnDeadline(), this);
     }
+
+    /// <summary>Gets a value indicating whether the unit was opened for one top-level write rather than by <c>TransactAsync</c> (Ruling 1).</summary>
+    internal bool Owned { get; }
+
+    /// <summary>Gets a value indicating whether host write hooks are skipped for every write in the unit (Ruling 30).</summary>
+    internal bool SuppressesHostHooks { get; }
 
     /// <summary>Gets the connection every call of the unit runs on.</summary>
     internal DbConnection Connection => _parts.Connection;
