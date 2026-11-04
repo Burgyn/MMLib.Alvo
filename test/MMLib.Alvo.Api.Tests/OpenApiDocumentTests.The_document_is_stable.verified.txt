@@ -1946,7 +1946,7 @@
           },
           "detail": {
             "type": "string",
-            "description": "What went wrong, in prose. Built from constants and server-owned values only — it never echoes a caller-supplied field name or value, because a refusal is answered before authorization on some paths and would otherwise be the cheapest oracle in the API."
+            "description": "What went wrong, in prose. Built from constants and server-owned values only — it never echoes a caller-supplied field name or value, because a refusal is answered before authorization on some paths and would otherwise be the cheapest oracle in the API. The one exception is a host write hook's refusal, whose `detail` is that hook's own message."
           },
           "violations": {
             "type": "array",
@@ -1954,6 +1954,13 @@
               "$ref": "#/components/schemas/problemViolation"
             },
             "description": "Every itemised reason the request was refused, not only the first — so one round trip is enough to repair it. Present on a refusal that has itemised reasons (a malformed query string, a body the entity's declared shape refuses) and absent on one that does not."
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The host extension that refused or failed, by its id, when one did — such as a write hook's refusal answered `validation`, `conflict` or `forbidden`. Absent when no extension was involved."
           },
           "retryable": {
             "type": "boolean",

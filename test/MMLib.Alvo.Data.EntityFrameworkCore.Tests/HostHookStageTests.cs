@@ -1,4 +1,6 @@
-﻿using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Rules;
 
 using System.Collections.Concurrent;
@@ -124,6 +126,28 @@ public sealed class HostHookStageTests
     }
 
     [Fact]
+    public async Task A_row_an_after_write_made_vanish_fails_the_write_as_row_vanished_and_logs_it_at_error()
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.InTransaction.Add((Note, AlvoWriteOperation.Create));
+        hooks.After = async (write, ct) =>
+        {
+            await write.Transaction!.DeleteAsync(Note, (Guid)write.Saved!["id"]!, cancellationToken: ct);
+            return "eraser";
+        };
+        var logs = new HookLogRecorder();
+        await using var world = await WritePathWorld.StartAsync(
+            WritePathFixture.Descriptor(), WritePathFixture.Schema(), services => services.AddLogging(logging => logging.AddProvider(logs)), extensions: hooks);
+
+        var failure = await Should.ThrowAsync<HookFailedException>(() => world.Data.CreateAsync(Note, WritePathFixture.CreatePayload("gone"), world.Caller, cancellationToken: Ct));
+
+        (failure.Extension, failure.Reason).ShouldBe(("eraser", HookFailedException.RowVanished));
+        logs.Errors.ShouldHaveSingleItem().ShouldBe(
+            "Write hook eraser failed (row-vanished): after its writes, the write could no longer read back the row it ran on; the write was rolled back.");
+        (await NotesAsync(world)).ShouldBe(0L);
+    }
+
+    [Fact]
     public async Task A_write_inside_a_unit_runs_its_hooks_in_that_unit_one_hop_deeper()
     {
         var hooks = new RecordingWriteExtensions();
@@ -204,6 +228,26 @@ public sealed class HostHookStageTests
 
         created.Refusals.Single().Message.ShouldBe(ReadOnlyTitle);
         updated.Refusals.Single().Message.ShouldBe(ReadOnlyTitle);
+        (await world.ScalarAsync("SELECT title FROM \"note\"")).ShouldBe("kept");
+    }
+
+    [Fact]
+    public async Task A_patch_of_a_field_hidden_and_read_only_for_the_caller_is_refused_without_naming_it()
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.InTransaction.Add((Note, AlvoWriteOperation.Create));
+        hooks.InTransaction.Add((Note, AlvoWriteOperation.Update));
+        await using var world = await StartAsync(hooks, HiddenReadOnlyTitle());
+        var id = await world.SeedAsync("kept");
+        hooks.Patch["title"] = "set by the hook";
+
+        var created = await Should.ThrowAsync<AlvoAuthorizationException>(
+            () => world.Data.CreateAsync(Note, UntitledPayload(), world.Caller, cancellationToken: Ct));
+        var updated = await Should.ThrowAsync<AlvoAuthorizationException>(
+            () => world.Data.UpdateAsync(Note, id, new Dictionary<string, object?> { ["owner_id"] = world.Caller.User.Value }, world.Caller, cancellationToken: Ct));
+        var batch = await world.Data.CreateManyAsync(Note, [UntitledPayload()], world.Caller, cancellationToken: Ct);
+
+        (created.Message, updated.Message, batch.Refusals.Single().Message).ShouldBe((HiddenRefusal, HiddenRefusal, HiddenRefusal));
         (await world.ScalarAsync("SELECT title FROM \"note\"")).ShouldBe("kept");
     }
 
@@ -451,6 +495,23 @@ public sealed class HostHookStageTests
 
     private const string ReadOnlyTitle = "Field 'title' is read-only and cannot be written.";
 
+    private const string HiddenRefusal = "A write hook set a field this caller may not write.";
+
+    private static Descriptor.AlvoDescriptor HiddenReadOnlyTitle()
+    {
+        var descriptor = WritePathFixture.Descriptor(readOnlyField: "title");
+        var note = descriptor.Entities[Note];
+        var fields = new Dictionary<string, Descriptor.FieldDescriptor>(note.Fields, StringComparer.Ordinal)
+        {
+            ["title"] = note.Fields["title"] with { Hidden = Descriptor.BoolOrCel.FromBoolean(true) },
+        };
+
+        return descriptor with
+        {
+            Entities = new Dictionary<string, Descriptor.EntityDescriptor>(StringComparer.Ordinal) { [Note] = note with { Fields = fields } },
+        };
+    }
+
     private static Dictionary<string, object?> UntitledPayload()
     {
         var payload = WritePathFixture.CreatePayload("unused");
@@ -476,5 +537,36 @@ public sealed class HostHookStageTests
         hooks.Autocommit = () => world.InAutocommit;
 
         return world;
+    }
+
+    /// <summary>Records the Error lines the port writes, by their rendered text.</summary>
+    private sealed class HookLogRecorder : ILoggerProvider
+    {
+        private readonly ConcurrentQueue<string> _errors = new();
+
+        internal IReadOnlyList<string> Errors => [.. _errors];
+
+        public ILogger CreateLogger(string categoryName) => new Recording(this);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class Recording(HookLogRecorder owner) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state)
+                where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => logLevel == LogLevel.Error;
+
+            public void Log<TState>(
+                LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                if (IsEnabled(logLevel))
+                {
+                    owner._errors.Enqueue(formatter(state, exception));
+                }
+            }
+        }
     }
 }

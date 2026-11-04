@@ -565,7 +565,8 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
         }
     }
 
-    private ILogger Logger() =>
+    /// <summary>The unit scope's logger, so a failure the driver raises inside the unit is logged where the unit's own are.</summary>
+    internal ILogger Logger() =>
         _parts.Scope.ServiceProvider.GetService<ILoggerFactory>()?.CreateLogger(typeof(WriteUnit).FullName!) ?? NullLogger.Instance;
 
     [LoggerMessage(

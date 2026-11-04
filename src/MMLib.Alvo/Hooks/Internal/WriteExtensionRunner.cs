@@ -115,7 +115,10 @@ internal sealed class WriteExtensionRunner(
         return [.. bindings.WriteHooks.Where(hook => registered.Contains(hook.Id))];
     }
 
-    /// <summary>Whether <paramref name="hook"/>'s <c>when</c> holds; a condition that throws is the hook's failure, never a skip (Ruling 63).</summary>
+    /// <summary>
+    /// Whether <paramref name="hook"/>'s <c>when</c> holds. A host function failing in it is the hook's failure, never a skip;
+    /// a built-in failing on the caller's data escapes unchanged, answered as any condition's built-in failure (Ruling 63).
+    /// </summary>
     private bool Fires(BoundWriteHook hook, WriteInvocation invocation, WriteHookStage stage)
     {
         if (hook.ConditionFor(invocation.Entity) is not { } condition)
@@ -127,7 +130,7 @@ internal sealed class WriteExtensionRunner(
         {
             return CelInterpreter.EvaluatePredicate(condition, Current(invocation, stage), invocation.Old, invocation.Caller);
         }
-        catch (Exception thrown)
+        catch (Exception thrown) when (thrown is not CelFunctionException { IsHost: false })
         {
             throw Fail(hook.Id, HookFailedException.Exception, thrown);
         }

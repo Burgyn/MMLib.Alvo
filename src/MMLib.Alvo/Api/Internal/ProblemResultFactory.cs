@@ -544,7 +544,8 @@ internal static class ProblemResultFactory
 
     /// <summary>
     /// The refusal for one of the data port's documented families thrown by a call the caller can fix — authorization,
-    /// not-found, precondition, idempotency, constraint, chain depth — or null for anything else.
+    /// not-found, precondition, idempotency, constraint, chain depth, a host write hook's rejection — or null for anything else.
+    /// A rejection host code constructed itself names no hook, so it is no refusal: it stays a failure (500).
     /// </summary>
     /// <param name="exception">What the port threw.</param>
     internal static IResult? PortRefusalFor(Exception exception) => exception switch
@@ -557,7 +558,7 @@ internal static class ProblemResultFactory
         AlvoIdempotencyConflictException conflict => Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.IdempotencyConflict, conflict.Message),
         AlvoConstraintViolationException constraint => Conflict(constraint),
         AlvoChainDepthExceededException loop => ChainDepthExceeded(loop.Message),
-        AlvoWriteRejectedException rejected => HookRejected(rejected),
+        AlvoWriteRejectedException { ExtensionId.Length: > 0 } rejected => HookRejected(rejected),
         _ => null,
     };
 

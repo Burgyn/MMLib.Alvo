@@ -726,6 +726,14 @@ public sealed class ProblemDetailsTests
             "the key must really be recorded, or the probe that reuses it is answered 201 and measures nothing");
     }
 
+    [Fact]
+    public void A_rejection_host_code_constructed_itself_is_no_port_refusal_so_it_stays_a_500()
+    {
+        ProblemResultFactory.PortRefusalFor(new AlvoWriteRejectedException("thrown by a command handler")).ShouldBeNull();
+        ProblemResultFactory.RefusalFor(new AlvoWriteRejectedException()).ShouldBeNull();
+        Should.Throw<AlvoWriteRejectedException>(() => Guarded(new AlvoWriteRejectedException("thrown by a command handler")));
+    }
+
     /// <summary>Every problem the factory can render, one per entry point and per <c>GuardAsync</c> arm.</summary>
     /// <remarks>
     /// Written out rather than discovered by reflection: a reflective enumeration would pass over a new entry

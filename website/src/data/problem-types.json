@@ -176,7 +176,7 @@
   },
   "hook-failed": {
     "causes": [
-      "A write hook the host registered in code failed, so the write was rolled back and nothing was written. The document's `extensions` names the hook and its `reason` says how: `exception` (it threw, or its `when` did), `timeout`, `budget` (too many calls through the write's transaction), `invalid-set` (it set a field it may not, or a value the field cannot hold), `self-write` (it wrote the row it runs on), `unbound` (it does not fit the current schema) or `row-vanished` (after its writes, the write could no longer read back the row it ran on)."
+      "A write hook the host registered in code failed, so the write was rolled back and nothing was written. The document's `extensions` names the hook and its `reason` says how: `exception` (it threw, or a host function in its `when` did), `timeout`, `budget` (too many calls through the write's transaction), `invalid-set` (it set a field it may not, or a value the field cannot hold), `self-write` (it wrote the row it runs on), `unbound` (it does not fit the current schema) or `row-vanished` (after its writes, the write could no longer read back the row it ran on)."
     ],
     "fix": "Nothing in the request is at fault: the hook is the host's code. Its own error is in the host's log under the hook's id, never in the response. A hook that refuses a write on purpose answers `validation`, `conflict` or `forbidden` instead.",
     "violationCodes": [],

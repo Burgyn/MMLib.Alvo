@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
+using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Hooks;
 using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.Rules;
@@ -381,30 +382,57 @@ public sealed class WriteExtensionRunnerTests
     [InlineData("validate")]
     [InlineData("before")]
     [InlineData("after")]
-    public async Task A_condition_that_throws_fails_the_write_as_the_hook_s_exception_and_poisons_the_unit(string stage)
+    public async Task A_condition_whose_host_function_throws_fails_the_write_as_the_hook_s_exception_and_poisons_the_unit(string stage)
     {
-        const string Throwing = "int(new.title) == 1";
         var ran = new ConcurrentQueue<string>();
         var unit = new FakeFlowUnit();
-        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => _ = stage switch
-        {
-            "validate" => t.Validate("numeric", (ValidateWrite<AlvoRecord> _) => { ran.Enqueue("numeric"); return ValueTask.CompletedTask; }, when: Throwing),
-            "before" => t.BeforeWrite("numeric", Record(ran, "numeric"), when: Throwing),
-            _ => t.AfterWrite("numeric", (AfterWrite<AlvoRecord> _) => { ran.Enqueue("numeric"); return ValueTask.CompletedTask; }, when: Throwing),
-        }));
+        await using var world = ConditionWorld(stage, "explode(new.title)", ran);
         using var flow = AlvoFlow.EnterUnit(unit, new AlvoProvenance());
-        var write = world.Before(RunnerWorld.Ticket(title: "not a number")) with { Saved = RunnerWorld.Ticket(title: "not a number") };
 
-        var failure = await Should.ThrowAsync<HookFailedException>(() => stage switch
-        {
-            "validate" => world.Runner.ValidateAsync(write with { Transaction = null, Services = null }, Ct),
-            "before" => world.Runner.BeforeWriteAsync(write, Ct),
-            _ => world.Runner.AfterWriteAsync(write, Ct),
-        });
+        var failure = await Should.ThrowAsync<HookFailedException>(() => RunStage(world, stage));
 
         (failure.Extension, failure.Reason).ShouldBe(("numeric", HookFailedException.Exception));
         ran.ShouldBeEmpty();
         unit.Poisoned.ShouldHaveSingleItem().ShouldBeSameAs(failure);
+    }
+
+    [Theory]
+    [InlineData("validate")]
+    [InlineData("before")]
+    [InlineData("after")]
+    public async Task A_condition_whose_built_in_function_fails_escapes_unchanged_and_poisons_nothing(string stage)
+    {
+        var ran = new ConcurrentQueue<string>();
+        var unit = new FakeFlowUnit();
+        await using var world = ConditionWorld(stage, "int(new.title) == 1", ran);
+        using var flow = AlvoFlow.EnterUnit(unit, new AlvoProvenance());
+
+        var escaped = await Should.ThrowAsync<CelFunctionException>(() => RunStage(world, stage));
+
+        (escaped.FunctionName, escaped.IsHost).ShouldBe(("int", false));
+        ran.ShouldBeEmpty();
+        (unit.Poisoned.Count, unit.Blamed.Count).ShouldBe((0, 0));
+    }
+
+    private static RunnerWorld ConditionWorld(string stage, string when, ConcurrentQueue<string> ran) => RunnerWorld.Start(alvo => alvo
+        .AddCelFunction("explode", (string value) => value.Length > 0 ? throw new InvalidOperationException("SECRET " + value) : true)
+        .Entity("tickets", t => _ = stage switch
+        {
+            "validate" => t.Validate("numeric", (ValidateWrite<AlvoRecord> _) => { ran.Enqueue("numeric"); return ValueTask.CompletedTask; }, when: when),
+            "before" => t.BeforeWrite("numeric", Record(ran, "numeric"), when: when),
+            _ => t.AfterWrite("numeric", (AfterWrite<AlvoRecord> _) => { ran.Enqueue("numeric"); return ValueTask.CompletedTask; }, when: when),
+        }));
+
+    private static Task RunStage(RunnerWorld world, string stage)
+    {
+        var write = world.Before(RunnerWorld.Ticket(title: "not a number")) with { Saved = RunnerWorld.Ticket(title: "not a number") };
+
+        return stage switch
+        {
+            "validate" => world.Runner.ValidateAsync(write with { Transaction = null, Services = null }, Ct),
+            "before" => world.Runner.BeforeWriteAsync(write, Ct),
+            _ => world.Runner.AfterWriteAsync(write, Ct),
+        };
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Rules;
@@ -100,7 +101,7 @@ internal sealed partial class EfAlvoData
             return (candidate, null);
         }
 
-        if (WritePayloadGuard.ReadOnlyRefusal(patch, decision.ReadOnlyFields) is { } frozen)
+        if (HookReadOnlyRefusal(patch, decision) is { } frozen)
         {
             return (null, Forbidden(index, frozen));
         }
@@ -117,11 +118,26 @@ internal sealed partial class EfAlvoData
     /// </summary>
     private static void EnsureHookMayWrite(IReadOnlyDictionary<string, object?> patch, PolicyDecision decision)
     {
-        if (WritePayloadGuard.ReadOnlyRefusal(patch, decision.ReadOnlyFields) is { } refusal)
+        if (HookReadOnlyRefusal(patch, decision) is { } refusal)
         {
             throw new AlvoAuthorizationException(refusal);
         }
     }
+
+    /// <summary>
+    /// The port's read-only refusal of a hook's patch, except that a field the caller may not see is never named (Ruling 17):
+    /// the caller never sent it, so naming it would disclose it.
+    /// </summary>
+    private static string? HookReadOnlyRefusal(IReadOnlyDictionary<string, object?> patch, PolicyDecision decision)
+    {
+        var refused = patch.Keys.FirstOrDefault(decision.ReadOnlyFields.Contains);
+
+        return refused is null ? null
+            : decision.HiddenFields.Contains(refused) ? HiddenFieldRefusal
+            : WritePayloadGuard.ReadOnlyRefusal(patch, decision.ReadOnlyFields);
+    }
+
+    private const string HiddenFieldRefusal = "A write hook set a field this caller may not write.";
 
     /// <summary>Stage 4 of an update or a replace of an existing row: the host's patch over the declarative one.</summary>
     private async Task<IReadOnlyDictionary<string, object?>> HostBeforeUpdateAsync(
@@ -196,15 +212,26 @@ internal sealed partial class EfAlvoData
 
     /// <summary>
     /// The row a hook's write made disappear from the write's own read (Ruling 45): the write fails and its unit is poisoned —
-    /// never an event or an echo of a row that no longer exists.
+    /// never an event or an echo of a row that no longer exists. Logged here: no runner saw this failure, and the HTTP
+    /// handler answers every hook failure without a second Error line.
     /// </summary>
     private static HookFailedException Vanished(string writer)
     {
         var failure = new HookFailedException(writer, HookFailedException.RowVanished);
-        FlowUnit?.Poison(failure);
+        if (FlowUnit is { } unit)
+        {
+            unit.Poison(failure);
+            RowVanished(unit.Logger(), writer);
+        }
 
         return failure;
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "Write hook {Extension} failed (row-vanished): after its writes, the write could no longer read back the row it ran on; "
+            + "the write was rolled back.")]
+    private static partial void RowVanished(ILogger logger, string extension);
 
     /// <summary>A batch's stage 7 for each written row: the first refusal is the batch's, and rolls every row back (Ruling 4).</summary>
     private async Task<(List<Dictionary<string, object>> Stored, AlvoRowRefusal? Refusal)> AfterSavedRowsAsync(
