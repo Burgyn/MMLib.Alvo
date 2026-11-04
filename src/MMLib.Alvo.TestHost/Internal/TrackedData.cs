@@ -4,8 +4,9 @@ using System.Diagnostics;
 namespace MMLib.Alvo.TestHost.Internal;
 
 /// <summary>
-/// The test host's <see cref="AlvoTestHost.Data"/>: the host's own port, each call inside a recorded root activity, so the write
-/// hooks a call runs are this host's runs for <see cref="AlvoHookRecorder"/> (Ruling 27).
+/// The test host's <see cref="AlvoTestHost.Data"/>: the host's own port, each call inside the caller's ambient trace or, without
+/// one, a recorded root activity of its own, so the write hooks a call runs are this host's runs for
+/// <see cref="AlvoHookRecorder"/> (Rulings 27 and 64).
 /// </summary>
 internal sealed class TrackedData(IAlvoData inner, Func<Activity?> track) : IAlvoData
 {

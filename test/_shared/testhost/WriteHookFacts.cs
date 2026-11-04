@@ -417,6 +417,7 @@ public abstract class WriteHookFacts
             await unit.CreateAsync(Bookings, Booking(clerk, "repaired two"), ct);
         }, suppress, Ct);
 
+        (await WriteHookRows.CountAsync(database.Connect, Bookings)).ShouldBe(2, "the suppressed unit ran its writes");
         runs.ShouldBe(0);
         (await WriteHookRows.CountAsync(database.Connect, "alvo_operations_log", "operation = 'suppress-host-hooks'")).ShouldBe(1);
         audit.Lines.ShouldHaveSingleItem().ShouldContain("nightly repair");
@@ -457,6 +458,7 @@ public abstract class WriteHookFacts
         await alvo.Data.CreateAsync(Bookings, Booking(clerk, "scoped"), clerk, cancellationToken: Ct);
         await using var request = alvo.Services.CreateAsyncScope();
 
+        seen.Count.ShouldBe(2, "both hooks ran");
         seen.Distinct().ShouldHaveSingleItem().ShouldNotBe(request.ServiceProvider.GetRequiredService<ScopeProbe>().Id);
     }
 

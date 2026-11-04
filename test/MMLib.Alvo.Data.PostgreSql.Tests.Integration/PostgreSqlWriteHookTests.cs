@@ -45,6 +45,12 @@ public sealed class PostgreSqlWriteHookTests(PostgresFixture postgres)
         return new HookDatabase(alvo => alvo.UsePostgreSql(connectionString), () => new NpgsqlConnection(connectionString));
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The probe sees only a transaction that has run a statement: Npgsql sends <c>BEGIN</c> with the next command, so a
+    /// transaction begun but not yet used reads as <c>idle</c>. The SQLite leg (<c>BEGIN IMMEDIATE</c>) and the driver facts
+    /// (<c>sqlite3_get_autocommit</c>) catch that case.
+    /// </remarks>
     protected override async Task AssertNoOpenTransactionAsync(HookDatabase database)
     {
         await using var connection = database.Connect();

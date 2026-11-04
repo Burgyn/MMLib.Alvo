@@ -441,9 +441,9 @@ public sealed class WriteExtensionRunnerTests
 
     /// <summary>A hook that fails before it runs — unbound, or on its own condition — is still a failed run in the stats.</summary>
     [Theory]
-    [InlineData("unbound")]
-    [InlineData("condition")]
-    public async Task A_hook_failing_before_it_runs_is_counted_as_a_failed_run(string where)
+    [InlineData("unbound", HookFailedException.Unbound)]
+    [InlineData("condition", HookFailedException.Exception)]
+    public async Task A_hook_failing_before_it_runs_is_counted_as_a_failed_run(string where, string reason)
     {
         var id = $"early-{Guid.NewGuid():N}"[..20];
         var condition = where == "unbound" ? "new.stauts == 'x'" : "explode(new.title)";
@@ -452,8 +452,9 @@ public sealed class WriteExtensionRunnerTests
             .Entity("tickets", t => t.BeforeWrite(id, (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask, when: condition)));
         using var stats = new ExtensionStats(new FakeTimeProvider(DateTimeOffset.UtcNow), world.Services.GetRequiredService<ExtensionRegistry>());
 
-        await Should.ThrowAsync<HookFailedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct));
+        var failure = await Should.ThrowAsync<HookFailedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct));
 
+        failure.Reason.ShouldBe(reason, "each row reaches its own early path");
         var stat = stats.Report([id]).Items.ShouldHaveSingleItem();
         (stat.Invocations, stat.Failures).ShouldBe((1L, 1L));
     }
