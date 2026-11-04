@@ -309,13 +309,14 @@ internal sealed partial class EfAlvoData
     /// <summary>
     /// Stages 0–2 of an update or a replace: the caller's own payload checks first, by the very guard the write runs
     /// (<c>UpdatableEntity</c> or <c>ReplaceableEntity</c>; Ruling 41 — no hook sees a payload the write will refuse), E9's
-    /// pre-read — autocommit, unmasked, under the operation's own decision (Ruling 13) — and the validate hooks. An update whose
-    /// row the pre-read does not find answers 404 before any hook runs: validate never fails open (Ruling 42). A replace whose
-    /// row it does not find is validated as the create it will be.
+    /// pre-read — autocommit, unmasked, under the operation's own decision (Ruling 13) — and the validate hooks. A row the pre-read
+    /// does not find is judged by <see cref="EnsureCreatable"/> before any hook runs, against <c>createsWith</c> — a replace's
+    /// create decision, or <see langword="null"/> for an update, which never creates.
     /// </summary>
     private async Task ValidateChangeAsync(
         string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoWriteOperation operation, PolicyDecision decision,
-        Func<AlvoDataContext, EntitySchema> guard, AlvoContext context, AlvoIdempotency? idempotency, CancellationToken cancellationToken)
+        PolicyDecision? createsWith, Func<AlvoDataContext, EntitySchema> guard, AlvoContext context, AlvoIdempotency? idempotency,
+        CancellationToken cancellationToken)
     {
         if (!_extensions.Validates(entity, operation) || await ReplaysAsync(idempotency, context, cancellationToken).ConfigureAwait(false))
         {
@@ -324,15 +325,34 @@ internal sealed partial class EfAlvoData
 
         using var db = _contexts.Create();
         var schema = guard(db);
+        var now = WriteInstantNow();
         var old = await PreReadAsync(db, schema, decision, context, id, cancellationToken).ConfigureAwait(false);
-        if (old is null && operation == AlvoWriteOperation.Update)
+        if (old is null)
+        {
+            EnsureCreatable(db, schema, createsWith, context, id, values, now);
+        }
+
+        await _extensions.ValidateAsync(
+            Validation(entity, operation, context, now) with { Old = old, New = ValidatedNew(schema, id, old, values, decision, operation) },
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A change whose row the pre-read did not find. An update answers 404 before any hook runs: validate never fails open
+    /// (Ruling 42). A replace is validated as the create it will be, so it is judged first by the create rule's <c>WITH CHECK</c>
+    /// and the tenant scope over the candidate <c>CreatedByReplaceAsync</c> inserts — no outbound call for a create the write
+    /// will refuse, exactly as a plain create (Ruling 60).
+    /// </summary>
+    private void EnsureCreatable(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision? createsWith, AlvoContext context, Guid id, IReadOnlyDictionary<string, object?> values,
+        DateTimeOffset now)
+    {
+        if (createsWith is null)
         {
             throw new AlvoRecordNotFoundException();
         }
 
-        await _extensions.ValidateAsync(
-            Validation(entity, operation, context, WriteInstantNow()) with { Old = old, New = ValidatedNew(schema, id, old, values, decision, operation) },
-            cancellationToken).ConfigureAwait(false);
+        EnsureWriteAllowed(createsWith, Unmasked(ReplaceCandidate(db, schema, createsWith, context, id, values, now)), previous: null, context);
     }
 
     private async Task<AlvoRecord?> PreReadAsync(
@@ -405,11 +425,23 @@ internal sealed partial class EfAlvoData
             (_, var refusal) => new RowValidation(null, refusal),
         });
 
-    /// <summary>One update row: its payload refusal, the row unavailable to this caller (fail closed, Ruling 42), or its validation.</summary>
+    /// <summary>
+    /// One update row: a repeat of an earlier row's id, its payload refusal, the row unavailable to this caller (fail closed,
+    /// Ruling 42), or its validation. A repeat is that row's own refusal, never the batch's, so every other row is still judged
+    /// (Ruling 59) and no id is validated twice.
+    /// </summary>
     private Func<AlvoDataContext, EntitySchema, DateTimeOffset, int, Task<RowValidation>> UpdateRowValidation(
-        IReadOnlyList<AlvoRowPatch> rows, PolicyDecision decision, AlvoContext context, CancellationToken cancellationToken) =>
-        async (db, schema, now, index) =>
+        IReadOnlyList<AlvoRowPatch> rows, PolicyDecision decision, AlvoContext context, CancellationToken cancellationToken)
+    {
+        var repeats = BatchWrite.RepeatedRows(rows, row => row.Id, NamedTwice).ToDictionary(refusal => refusal.Index);
+
+        return async (db, schema, now, index) =>
         {
+            if (repeats.TryGetValue(index, out var repeat))
+            {
+                return new RowValidation(null, repeat);
+            }
+
             if (WritePayloadGuard.PayloadRefusal(rows[index].Values, schema, decision, isUpdate: true) is { } unwritable)
             {
                 return new RowValidation(null, Forbidden(index, unwritable));
@@ -419,6 +451,7 @@ internal sealed partial class EfAlvoData
                 ? new RowValidation(Validation(schema.Name, AlvoWriteOperation.Update, context, now) with { Old = old, New = Merge(old, rows[index].Values) }, null)
                 : new RowValidation(null, Unavailable(index));
         };
+    }
 
     private static WriteInvocation Validation(string entity, AlvoWriteOperation operation, AlvoContext context, DateTimeOffset now) =>
         new() { Entity = entity, Operation = operation, Caller = context, Now = now };

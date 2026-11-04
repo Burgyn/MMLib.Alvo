@@ -315,15 +315,70 @@ public sealed class HostHookStageTests
         hooks.Validating.Add((Note, AlvoWriteOperation.Update));
         await using var world = await StartAsync(hooks);
         var kept = await world.SeedAsync("kept");
+        var other = await world.SeedAsync("other");
 
         var result = await world.Data.UpdateManyAsync(
             Note,
-            [new AlvoRowPatch(kept, new Dictionary<string, object?> { ["title"] = "fine" }), new AlvoRowPatch(kept, new Dictionary<string, object?> { ["created_by"] = "x" }), new AlvoRowPatch(Guid.NewGuid(), new Dictionary<string, object?> { ["title"] = "gone" })],
+            [
+                new AlvoRowPatch(kept, new Dictionary<string, object?> { ["title"] = "fine" }),
+                new AlvoRowPatch(other, new Dictionary<string, object?> { ["created_by"] = "x" }),
+                new AlvoRowPatch(Guid.NewGuid(), new Dictionary<string, object?> { ["title"] = "gone" }),
+                new AlvoRowPatch(kept, new Dictionary<string, object?> { ["title"] = "again" }),
+            ],
             world.Caller,
             cancellationToken: Ct);
 
-        result.Refusals.Select(refusal => refusal.Index).ShouldBe([1, 2]);
-        hooks.Calls.Count.ShouldBe(1, "only the admitted row reached the validate hook");
+        result.Refusals.Select(refusal => (refusal.Index, refusal.Code)).ShouldBe([(1, "forbidden"), (2, "forbidden"), (3, "duplicate-row")]);
+        hooks.Calls.ShouldHaveSingleItem("only the admitted row reached the validate hook").Invocation.New!["title"].ShouldBe("fine");
+    }
+
+    [Fact]
+    public async Task Validate_of_a_replace_sees_the_stored_row_and_validates_a_missing_row_as_the_create_it_will_be()
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.Validating.Add((Note, AlvoWriteOperation.Replace));
+        await using var world = await StartAsync(hooks);
+        var stored = await world.SeedAsync("stored");
+        var fresh = Guid.NewGuid();
+
+        await world.Data.ReplaceAsync(Note, stored, WritePathFixture.Payload("replaced"), world.Caller, cancellationToken: Ct);
+        await world.Data.ReplaceAsync(Note, fresh, WritePathFixture.Payload("created"), world.Caller, cancellationToken: Ct);
+
+        var calls = hooks.Calls.Select(call => call.Invocation).ToArray();
+        calls.Select(call => call.Operation).ShouldBe([AlvoWriteOperation.Replace, AlvoWriteOperation.Replace]);
+        (calls[0].Old!["title"], calls[0].New!["title"], calls[0].New!["id"]).ShouldBe(("stored", "replaced", stored));
+        (calls[1].Old, calls[1].New!["title"], calls[1].New!["id"]).ShouldBe(((AlvoRecord?)null, "created", fresh));
+    }
+
+    [Fact]
+    public async Task A_validate_hook_never_sees_a_replace_the_whole_row_guard_refuses()
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.Validating.Add((Note, AlvoWriteOperation.Replace));
+        await using var world = await WritePathWorld.StartAsync(WritePathFixture.Descriptor(), RequiredTitleSchema(), extensions: hooks);
+        var stored = await world.SeedAsync("stored");
+        var untitled = new Dictionary<string, object?> { ["owner_id"] = world.Caller.User.Value };
+
+        await Should.ThrowAsync<ArgumentException>(() => world.Data.ReplaceAsync(Note, stored, untitled, world.Caller, cancellationToken: Ct));
+        await Should.ThrowAsync<ArgumentException>(() => world.Data.ReplaceAsync(Note, Guid.NewGuid(), untitled, world.Caller, cancellationToken: Ct));
+
+        hooks.Calls.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_replace_that_creates_is_judged_by_the_create_rule_before_validate()
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.Validating.Add((Note, AlvoWriteOperation.Replace));
+        await using var world = await StartAsync(hooks, WritePathFixture.Descriptor(create: "title != 'refused'"));
+        var stored = await world.SeedAsync("stored");
+
+        await Should.ThrowAsync<AlvoAuthorizationException>(
+            () => world.Data.ReplaceAsync(Note, Guid.NewGuid(), WritePathFixture.Payload("refused"), world.Caller, cancellationToken: Ct));
+        hooks.Calls.ShouldBeEmpty("the create rule refuses before any outbound call (Ruling 60)");
+
+        await world.Data.ReplaceAsync(Note, stored, WritePathFixture.Payload("refused"), world.Caller, cancellationToken: Ct);
+        hooks.Calls.ShouldHaveSingleItem("a replace of a stored row is judged by the update rule").Invocation.Old.ShouldNotBeNull();
     }
 
     [Fact]
@@ -384,6 +439,13 @@ public sealed class HostHookStageTests
         payload.Remove("title");
 
         return payload;
+    }
+
+    private static Schema.SchemaModel RequiredTitleSchema()
+    {
+        var note = WritePathFixture.Note();
+
+        return new([note with { Fields = [.. note.Fields.Select(field => field.Name == "title" ? field with { Nullable = false } : field)] }]);
     }
 
     private static async Task<long> NotesAsync(WritePathWorld world) => (long)(await world.ScalarAsync("SELECT COUNT(*) FROM \"note\""))!;
