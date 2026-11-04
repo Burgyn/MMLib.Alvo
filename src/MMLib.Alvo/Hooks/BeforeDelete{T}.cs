@@ -13,7 +13,7 @@ public sealed class BeforeDelete<T>
     internal BeforeDelete(HookRun run)
     {
         _run = run;
-        Old = HookImage<T>.Of(run.Invocation.Old)!;
+        Old = HookImage<T>.Of(run.Invocation.Old, run.Derived)!;
     }
 
     /// <summary>Gets the row being deleted.</summary>

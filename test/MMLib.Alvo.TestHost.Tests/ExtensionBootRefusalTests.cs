@@ -70,5 +70,6 @@ public sealed class ExtensionBootRefusalTests
         refusal.Message.ShouldContain("'network-guard'");
         refusal.Message.ShouldContain("extensions/network-guard/dependencies");
         refusal.Message.ShouldContain("'http'");
+        refusal.Message.ShouldNotContain("/provider", customMessage: "the real SQLite composition is relational");
     }
 }

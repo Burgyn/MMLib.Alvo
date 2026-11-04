@@ -102,11 +102,13 @@ public sealed class WriteHookBindingTests
         Compile(alvo => alvo.Entity("tickets", t => t.Validate("slow", (ValidateWrite<AlvoRecord> _) => ValueTask.CompletedTask, configure: o => o.Timeout = TimeSpan.FromSeconds(61))))
             .Problems.ShouldHaveSingleItem().Locator.ShouldBe("extensions/slow/timeout");
 
-    [Fact]
-    public void A_composition_with_no_relational_provider_refuses_a_write_hook()
+    [Theory]
+    [InlineData(typeof(IAlvoTransactions))]
+    [InlineData(typeof(IHookRejectionLog))]
+    public void A_composition_with_no_relational_provider_refuses_a_write_hook(Type missing)
     {
         var services = Substitute.For<IServiceProviderIsService>();
-        services.IsService(Arg.Any<Type>()).Returns(call => (Type)call[0] != typeof(IAlvoTransactions));
+        services.IsService(Arg.Any<Type>()).Returns(call => (Type)call[0] != missing);
 
         HandlerCatalog.Compile(alvo => alvo.Entity("tickets", t => t.BeforeWrite("guard", _before)), services)
             .Problems.ShouldHaveSingleItem().Locator.ShouldBe("extensions/guard/provider");
@@ -115,16 +117,28 @@ public sealed class WriteHookBindingTests
     [Fact]
     public void Removing_a_field_a_bound_write_hook_reads_is_refused_at_apply()
     {
-        var registry = HandlerCatalog.Registry(alvo => alvo.Entity("tickets", t => t.BeforeWrite("guard", _before, when: "new.status == 'open'")));
-        var binder = new ExtensionBinder(registry, CelFixtures.Compiler, HandlerCatalog.EveryService(), NullLogger<ExtensionBinder>.Instance);
-        var catalogs = Substitute.For<IPolicyCatalogProvider>();
-        catalogs.Current.Returns(HandlerCatalog.Catalog());
-        var tickets = HandlerCatalog.Schema.Entities.Single(entity => entity.Name == "tickets");
-        var proposed = HandlerCatalog.CatalogOf(new SchemaModel([tickets with { Fields = [.. tickets.Fields.Where(field => field.Name != "status")] }]));
-
-        var refusal = Should.Throw<DescriptorValidationException>(() => new ExtensionApplyGuard(registry, binder, CelFixtures.Compiler, catalogs).Check(proposed));
+        var refusal = Should.Throw<DescriptorValidationException>(() => Guard(HandlerCatalog.Catalog()).Check(WithoutStatus()));
 
         refusal.Message.ShouldContain("'guard'");
+    }
+
+    [Fact]
+    public void Removing_the_entity_a_bound_write_hook_guards_is_refused_at_apply_pointing_at_the_entity()
+    {
+        var others = HandlerCatalog.Schema.Entities.Where(entity => entity.Name != "tickets");
+
+        var refusal = Should.Throw<DescriptorValidationException>(() => Guard(HandlerCatalog.Catalog()).Check(HandlerCatalog.CatalogOf(new SchemaModel([.. others]))));
+
+        refusal.Result.Errors.Select(error => error.Path).ShouldContain("/entities/tickets");
+    }
+
+    [Fact]
+    public void A_write_hook_that_was_already_unbound_is_a_warning_and_blocks_nothing()
+    {
+        var check = Guard(WithoutStatus()).Check(WithoutStatus());
+
+        check.Warnings.ShouldNotBeEmpty();
+        check.Warnings.ShouldAllBe(warning => warning.Severity == DescriptorValidationSeverity.Warning && warning.Message.Contains("'guard'"));
     }
 
     [Fact]
@@ -151,4 +165,20 @@ public sealed class WriteHookBindingTests
     }
 
     private static ExtensionBindingResult Compile(Action<IAlvoBuilder> configure) => HandlerCatalog.Compile(configure);
+
+    private static ExtensionApplyGuard Guard(PolicyCatalog current)
+    {
+        var registry = HandlerCatalog.Registry(alvo => alvo.Entity("tickets", t => t.BeforeWrite("guard", _before, when: "new.status == 'open'")));
+        var binder = new ExtensionBinder(registry, CelFixtures.Compiler, HandlerCatalog.EveryService(), NullLogger<ExtensionBinder>.Instance);
+        var catalogs = Substitute.For<IPolicyCatalogProvider>();
+        catalogs.Current.Returns(current);
+
+        return new ExtensionApplyGuard(registry, binder, CelFixtures.Compiler, catalogs);
+    }
+
+    private static PolicyCatalog WithoutStatus()
+    {
+        var tickets = HandlerCatalog.Schema.Entities.Single(entity => entity.Name == "tickets");
+        return HandlerCatalog.CatalogOf(new SchemaModel([tickets with { Fields = [.. tickets.Fields.Where(field => field.Name != "status")] }]));
+    }
 }

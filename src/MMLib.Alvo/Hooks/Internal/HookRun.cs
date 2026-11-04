@@ -31,6 +31,12 @@ internal sealed class HookRun(
 
     internal CancellationToken Token { get; } = token;
 
+    /// <summary>
+    /// The entity's <c>computed</c> and <c>rollup</c> fields: the store fills them, so an image of a row not yet stored lacks
+    /// them even when the descriptor declares them required.
+    /// </summary>
+    internal IReadOnlySet<string> Derived { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+
     internal HookRejections Rejections { get; } = new(id, pointable);
 
     internal IReadOnlyDictionary<string, object?> Sets

@@ -9,12 +9,13 @@ using MMLib.Alvo.Schema;
 namespace MMLib.Alvo.Extensions.Internal;
 
 /// <summary>
-/// Turns binding problems into descriptor findings. A refusal names, for a handler the change unbinds, the entity, the
+/// Turns binding problems into descriptor findings; a command's and a write hook's refusals are their own
+/// (<see cref="CommandApplyRefusals"/>, <see cref="WriteHookApplyRefusals"/>). A refusal names, for a handler the change unbinds, the entity, the
 /// field or the <c>events.exclude</c> item the change removed or excluded, or the field whose new type the condition no
 /// longer compiles against, or that its typed record maps and could no longer fill — each existed before the change,
 /// since the handler bound it — and keeps the compiler's own
 /// sentence beside it, so a second cause is not hidden behind the first. A warning is the compiler's sentence alone,
-/// for a handler that bound neither catalog.
+/// for a handler or hook that bound neither catalog.
 /// </summary>
 internal static class ExtensionApplyRefusals
 {

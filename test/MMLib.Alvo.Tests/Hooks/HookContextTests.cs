@@ -119,6 +119,14 @@ public sealed class HookContextTests
     }
 
     [Fact]
+    public void A_typed_image_of_an_unsaved_row_reads_a_required_computed_or_rollup_field_it_lacks_as_its_default()
+    {
+        var run = Run(AlvoWriteOperation.Create, old: null, new AlvoRecord(new Dictionary<string, object?> { ["guest"] = "Ada" }), derived: ["nights"]);
+
+        new BeforeWrite<HookBooking>(run).New.Nights.ShouldBe(0L);
+    }
+
+    [Fact]
     public void A_typed_image_missing_a_field_alvo_does_not_manage_is_still_refused() =>
         Should.Throw<RecordUnreadableException>(() => new ValidateWrite<HookBooking>(
             Run(AlvoWriteOperation.Create, old: null, new AlvoRecord(new Dictionary<string, object?> { ["guest"] = "Ada" }))));
@@ -208,12 +216,16 @@ public sealed class HookContextTests
     });
 
     internal static HookRun Run(
-        AlvoWriteOperation operation, AlvoRecord? old, AlvoRecord? @new, AlvoRecord? saved = null, IAlvoTransaction? transaction = null) =>
+        AlvoWriteOperation operation, AlvoRecord? old, AlvoRecord? @new, AlvoRecord? saved = null, IAlvoTransaction? transaction = null,
+        string[]? derived = null) =>
         new(
             "guard",
             new WriteInvocation { Entity = "bookings", Operation = operation, Caller = _caller, Now = DateTimeOffset.UnixEpoch, Old = old, New = @new, Saved = saved },
             new HashSet<string>(StringComparer.Ordinal) { "guest", "nights" },
             transaction ?? new FakeHookTransaction(_caller),
             data: null,
-            CancellationToken.None);
+            CancellationToken.None)
+        {
+            Derived = new HashSet<string>(derived ?? [], StringComparer.Ordinal),
+        };
 }

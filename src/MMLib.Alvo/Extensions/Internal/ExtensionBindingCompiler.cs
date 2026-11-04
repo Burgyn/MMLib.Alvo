@@ -49,8 +49,7 @@ internal static class ExtensionBindingCompiler
             binds,
             registry.Handlers.Where(handler => refused.Contains(handler.Id)),
             commands.Where(command => !refused.Contains(command.Name)),
-            boundHooks,
-            registry.WriteHooks.Where(hook => refused.Contains(hook.Id)));
+            boundHooks);
 
         return new(bindings, problems, [.. Ties(binds.Select(handler => handler.Registration)), .. HookTies(boundHooks.Select(hook => hook.Registration))]);
     }

@@ -59,8 +59,7 @@ internal sealed class ExtensionBindings
         IEnumerable<BoundHandler> handlers,
         IEnumerable<HandlerRegistration>? unbound = null,
         IEnumerable<BoundCommand>? commands = null,
-        IEnumerable<BoundWriteHook>? writeHooks = null,
-        IEnumerable<WriteHookRegistration>? unboundWriteHooks = null)
+        IEnumerable<BoundWriteHook>? writeHooks = null)
     {
         Unbound = [.. unbound ?? []];
         Commands = (commands ?? []).ToDictionary(command => command.Name, StringComparer.Ordinal);
@@ -70,7 +69,6 @@ internal sealed class ExtensionBindings
             .OrderBy(hook => hook.Registration.Settings.Order)
             .ThenBy(hook => hook.Registration.IsEveryEntity ? 1 : 0)
             .ThenBy(hook => hook.Registration.Sequence)];
-        UnboundWriteHooks = [.. unboundWriteHooks ?? []];
         _hooksById = WriteHooks.ToDictionary(hook => hook.Id, StringComparer.Ordinal);
     }
 
@@ -84,9 +82,6 @@ internal sealed class ExtensionBindings
     /// <summary>The write hooks bound to this catalog, in the order they run.</summary>
     internal IReadOnlyList<BoundWriteHook> WriteHooks { get; }
 
-    /// <summary>The registered write hooks that do not fit this catalog; a write they cover fails closed (Ruling 7).</summary>
-    internal IReadOnlyList<WriteHookRegistration> UnboundWriteHooks { get; }
-
     /// <summary>The commands bound to this catalog, by name.</summary>
     internal IReadOnlyDictionary<string, BoundCommand> Commands { get; }
 
@@ -94,7 +89,10 @@ internal sealed class ExtensionBindings
 
     internal BoundHandler? Handler(string id) => _byId.GetValueOrDefault(id);
 
-    /// <summary>The bound write hook <paramref name="id"/>, or null when it does not bind this catalog.</summary>
+    /// <summary>
+    /// The bound write hook <paramref name="id"/>, or null when it does not bind this catalog — the one answer to "unbound": a
+    /// write a registered, unbound hook covers fails closed (Ruling 7).
+    /// </summary>
     internal BoundWriteHook? WriteHook(string id) => _hooksById.GetValueOrDefault(id);
 
     /// <summary>The bound command named <paramref name="name"/>, or null when it does not bind this catalog.</summary>

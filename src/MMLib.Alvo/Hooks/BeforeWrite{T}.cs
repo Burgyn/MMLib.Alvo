@@ -15,8 +15,8 @@ public sealed class BeforeWrite<T>
     internal BeforeWrite(HookRun run)
     {
         _run = run;
-        Old = HookImage<T>.Of(run.Invocation.Old);
-        New = HookImage<T>.Of(run.Invocation.New)!;
+        Old = HookImage<T>.Of(run.Invocation.Old, run.Derived);
+        New = HookImage<T>.Of(run.Invocation.New, run.Derived)!;
     }
 
     /// <summary>Gets the write: a create, an update or a replace.</summary>

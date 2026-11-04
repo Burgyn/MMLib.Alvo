@@ -13,8 +13,8 @@ public sealed class AfterWrite<T>
     internal AfterWrite(HookRun run)
     {
         _run = run;
-        Old = HookImage<T>.Of(run.Invocation.Old);
-        Saved = HookImage<T>.Of(run.Invocation.Saved)!;
+        Old = HookImage<T>.Of(run.Invocation.Old, run.Derived);
+        Saved = HookImage<T>.Of(run.Invocation.Saved, run.Derived)!;
     }
 
     /// <summary>Gets the write: a create, an update or a replace.</summary>

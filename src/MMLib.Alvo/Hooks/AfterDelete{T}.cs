@@ -13,7 +13,7 @@ public sealed class AfterDelete<T>
     internal AfterDelete(HookRun run)
     {
         _run = run;
-        Old = HookImage<T>.Of(run.Invocation.Old)!;
+        Old = HookImage<T>.Of(run.Invocation.Old, run.Derived)!;
     }
 
     /// <summary>Gets the row that was deleted.</summary>
