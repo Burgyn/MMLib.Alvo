@@ -43,6 +43,7 @@ public sealed class HookDependenciesTests
         typeof(IAlvoUserAdministration),
         typeof(IAlvoBootstrapAdmin),
         typeof(IEmailSender),
+        typeof(MMLib.Alvo.Events.IEmailSender),
         typeof(IAlvoData),
         typeof(IAlvoSessions),
         typeof(IAlvoTransactions),

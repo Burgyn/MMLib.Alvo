@@ -25,7 +25,7 @@ internal sealed class HookRun(
 
     internal WriteInvocation Invocation { get; } = invocation;
 
-    internal IAlvoTransaction? Transaction { get; } = transaction;
+    internal IAlvoTransaction? Transaction { get; private set; } = transaction;
 
     internal IAlvoSession? Data { get; } = data;
 
@@ -82,6 +82,9 @@ internal sealed class HookRun(
     }
 
     internal int Count() => Interlocked.Increment(ref _operations);
+
+    /// <summary>Hands the hook <paramref name="view"/> — the counted, token-bound view of the write's transaction — in place of the raw one.</summary>
+    internal void Attach(IAlvoTransaction view) => Transaction = view;
 
     internal void MarkWrote() => Volatile.Write(ref _wrote, true);
 }

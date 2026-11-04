@@ -1,4 +1,7 @@
-﻿using MMLib.Alvo.Events;
+﻿using Microsoft.Extensions.Logging;
+using MMLib.Alvo.Events;
+using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
 using System.Net.Http;
@@ -70,6 +73,25 @@ public class BeforeHookIsolationArchitectureTests
     public void A_host_function_reaches_a_hook_through_the_compiled_tree_not_the_runners_constructor() =>
         typeof(BeforeHookRunner).GetConstructors().ShouldHaveSingleItem().GetParameters()
             .Select(parameter => parameter.ParameterType).ShouldBe([typeof(IPolicyCatalogProvider)]);
+
+    /// <summary>
+    /// The write-hook runner's own dependencies (spec 2026-10-14 §4.4.5): none reaches the network or writes beside the unit.
+    /// Its <see cref="IServiceProvider"/> is the root, from which it resolves only <c>IServiceScopeFactory</c>,
+    /// <see cref="IAlvoSessions"/>, <see cref="IDeliveryStore"/> and <see cref="IHookRejectionLog"/>, each where it is used.
+    /// </summary>
+    [Fact]
+    public void The_write_hook_runner_depends_on_nothing_an_in_transaction_hook_may_not()
+    {
+        var parameters = typeof(WriteExtensionRunner).GetConstructors().ShouldHaveSingleItem().GetParameters()
+            .Select(parameter => parameter.ParameterType).ToList();
+
+        parameters.ShouldBe(
+        [
+            typeof(ExtensionRegistry), typeof(ExtensionBinder), typeof(IPolicyCatalogProvider), typeof(IServiceProvider), typeof(TimeProvider),
+            typeof(ILogger<WriteExtensionRunner>),
+        ]);
+        parameters.Where(HookDependencies.IsBanned).ShouldBeEmpty();
+    }
 
     /// <summary>
     /// The fact. Nothing reachable from <c>BeforeHookRunner</c>'s constructor closure can reach a network.
