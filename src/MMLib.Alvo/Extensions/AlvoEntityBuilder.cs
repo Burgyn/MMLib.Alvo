@@ -15,7 +15,7 @@ namespace MMLib.Alvo.Extensions;
 /// <c>changed(field)</c> on updates, <c>@user</c> and <c>@tenant</c>. It is judged after the write commits, before any
 /// delivery exists: an event it does not match costs no delivery.
 /// </remarks>
-public sealed class AlvoEntityBuilder
+public sealed partial class AlvoEntityBuilder
 {
     private readonly IServiceCollection _services;
     private readonly IReadOnlyList<string> _entities;

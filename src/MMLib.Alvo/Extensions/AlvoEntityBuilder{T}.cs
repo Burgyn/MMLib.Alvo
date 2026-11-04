@@ -19,7 +19,7 @@ namespace MMLib.Alvo.Extensions;
 /// Pass a lambda or a CEL string as <c>when</c>, or leave it out; an explicit <c>when: null</c> matches both overloads and
 /// does not compile (CS0121).
 /// </remarks>
-public sealed class AlvoEntityBuilder<T>
+public sealed partial class AlvoEntityBuilder<T>
     where T : class
 {
     private readonly IServiceCollection _services;

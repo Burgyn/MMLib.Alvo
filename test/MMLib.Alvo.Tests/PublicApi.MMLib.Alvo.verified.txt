@@ -335,6 +335,18 @@ namespace MMLib.Alvo.Extensions
     }
     public sealed class AlvoEntityBuilder
     {
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder AfterDelete(string id, System.Delegate hook, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder AfterDelete<THook>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
+            where THook :  class, MMLib.Alvo.Hooks.IAfterDeleteHook { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder AfterWrite(string id, System.Delegate hook, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder AfterWrite<THook>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
+            where THook :  class, MMLib.Alvo.Hooks.IAfterWriteHook { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder BeforeDelete(string id, System.Delegate hook, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder BeforeDelete<THook>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
+            where THook :  class, MMLib.Alvo.Hooks.IBeforeDeleteHook { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder BeforeWrite(string id, System.Delegate hook, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder BeforeWrite<THook>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
+            where THook :  class, MMLib.Alvo.Hooks.IBeforeWriteHook { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder OnCreated(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder OnCreated<THandler>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
             where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoCreated<MMLib.Alvo.Data.AlvoRecord>> { }
@@ -347,10 +359,37 @@ namespace MMLib.Alvo.Extensions
         public MMLib.Alvo.Extensions.AlvoEntityBuilder OnUpdated(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder OnUpdated<THandler>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
             where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoUpdated<MMLib.Alvo.Data.AlvoRecord>> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder Validate(string id, System.Delegate hook, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder Validate<THook>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
+            where THook :  class, MMLib.Alvo.Hooks.IValidateWriteHook { }
     }
     public sealed class AlvoEntityBuilder<T>
         where T :  class
     {
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> AfterDelete(string id, System.Delegate hook, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Hooks.WriteCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> AfterDelete(string id, System.Delegate hook, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> AfterDelete<THook>(string id, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Hooks.WriteCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
+            where THook :  class, MMLib.Alvo.Hooks.IAfterDeleteHook<T> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> AfterDelete<THook>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
+            where THook :  class, MMLib.Alvo.Hooks.IAfterDeleteHook<T> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> AfterWrite(string id, System.Delegate hook, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Hooks.WriteCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> AfterWrite(string id, System.Delegate hook, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> AfterWrite<THook>(string id, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Hooks.WriteCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
+            where THook :  class, MMLib.Alvo.Hooks.IAfterWriteHook<T> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> AfterWrite<THook>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
+            where THook :  class, MMLib.Alvo.Hooks.IAfterWriteHook<T> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> BeforeDelete(string id, System.Delegate hook, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Hooks.WriteCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> BeforeDelete(string id, System.Delegate hook, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> BeforeDelete<THook>(string id, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Hooks.WriteCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
+            where THook :  class, MMLib.Alvo.Hooks.IBeforeDeleteHook<T> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> BeforeDelete<THook>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
+            where THook :  class, MMLib.Alvo.Hooks.IBeforeDeleteHook<T> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> BeforeWrite(string id, System.Delegate hook, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Hooks.WriteCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> BeforeWrite(string id, System.Delegate hook, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> BeforeWrite<THook>(string id, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Hooks.WriteCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
+            where THook :  class, MMLib.Alvo.Hooks.IBeforeWriteHook<T> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> BeforeWrite<THook>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
+            where THook :  class, MMLib.Alvo.Hooks.IBeforeWriteHook<T> { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnCreated(string id, System.Delegate handler, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Events.EventCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnCreated(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnCreated<THandler>(string id, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Events.EventCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
@@ -375,6 +414,12 @@ namespace MMLib.Alvo.Extensions
             where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoUpdated<T>> { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnUpdated<THandler>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
             where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoUpdated<T>> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> Validate(string id, System.Delegate hook, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Hooks.WriteCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> Validate(string id, System.Delegate hook, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> Validate<THook>(string id, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Hooks.WriteCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
+            where THook :  class, MMLib.Alvo.Hooks.IValidateWriteHook<T> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> Validate<THook>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
+            where THook :  class, MMLib.Alvo.Hooks.IValidateWriteHook<T> { }
     }
     public sealed class AlvoExtensionOptions
     {

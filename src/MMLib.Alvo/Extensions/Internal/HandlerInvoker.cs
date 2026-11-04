@@ -191,7 +191,7 @@ internal sealed class HandlerInvoker
         }
     }
 
-    private static IReadOnlyList<Type> ClassUnresolvable(Type handler, IServiceProviderIsService isService)
+    internal static IReadOnlyList<Type> ClassUnresolvable(Type handler, IServiceProviderIsService isService)
     {
         if (isService.IsService(handler))
         {
