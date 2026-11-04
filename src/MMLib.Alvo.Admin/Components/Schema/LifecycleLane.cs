@@ -11,8 +11,9 @@ namespace MMLib.Alvo.Admin.Components.Schema;
 internal sealed record LaneHook(string Point, int Number, string Json);
 
 /// <summary>
-/// What runs on an entity after a commit, and the entity list's count of host code — the logic behind the Lifecycle tab
-/// and the <c>⟨/⟩ n</c> badge, kept out of the markup so it can be tested.
+/// What runs on an entity before, inside and after a write's transaction, and the entity list's count of host code — the
+/// logic behind the Lifecycle tab, the editors' note, the simulator's and the preview's code lists and the <c>⟨/⟩ n</c>
+/// badge, kept out of the markup so it can be tested.
 /// </summary>
 internal static class LifecycleLane
 {
@@ -45,6 +46,59 @@ internal static class LifecycleLane
     /// </summary>
     public static bool HasMappedCommands(IReadOnlyList<ManagementExtension> extensions) =>
         extensions.Any(extension => extension.Kind == AlvoExtensionKind.Command && extension.Route is not null);
+
+    /// <summary>The validate hooks the Before the transaction lane draws for <paramref name="entity"/>.</summary>
+    public static IReadOnlyList<ManagementExtension> BeforeTransaction(string entity, IReadOnlyList<ManagementExtension> extensions) =>
+        [.. Binding(entity, extensions).Where(extension => extension.Kind == AlvoExtensionKind.Validate)];
+
+    /// <summary>The before/after write and delete hooks the In the transaction lane draws for <paramref name="entity"/>.</summary>
+    public static IReadOnlyList<ManagementExtension> InTransaction(string entity, IReadOnlyList<ManagementExtension> extensions) =>
+        [.. Binding(entity, extensions).Where(extension => extension.Stage == AlvoExtensionStage.InTransaction)];
+
+    /// <summary>Whether the write lanes are drawn: only in a host that registers a write hook (Ruling 29, HX-08 Ruling 57's rule).</summary>
+    public static bool HasWriteHooks(IReadOnlyList<ManagementExtension> extensions) => extensions.Any(IsWriteHook);
+
+    /// <summary>Whether <paramref name="extension"/> is a write hook of any stage.</summary>
+    public static bool IsWriteHook(ManagementExtension extension) => extension.Kind is AlvoExtensionKind.Validate or AlvoExtensionKind.BeforeWrite
+        or AlvoExtensionKind.AfterWrite or AlvoExtensionKind.BeforeDelete or AlvoExtensionKind.AfterDelete;
+
+    /// <summary>When, in a write, <paramref name="extension"/> runs, in two words.</summary>
+    public static string StageLabel(ManagementExtension extension) => extension.Kind switch
+    {
+        AlvoExtensionKind.Validate => "validate",
+        AlvoExtensionKind.BeforeWrite => "before write",
+        AlvoExtensionKind.AfterWrite => "after write",
+        AlvoExtensionKind.BeforeDelete => "before delete",
+        AlvoExtensionKind.AfterDelete => "after delete",
+        AlvoExtensionKind.Command => "command",
+        _ => "after commit",
+    };
+
+    /// <summary>A code item's numbers on this instance — its p95 and its rejections in the last day — or nothing without them.</summary>
+    public static string? Numbers(ManagementExtension extension, ManagementExtensionStats? stats) =>
+        stats?.Items.FirstOrDefault(item => item.Id == extension.Id) is { P95: { } p95 } stat
+            ? string.Create(CultureInfo.InvariantCulture, $"p95 {p95.TotalMilliseconds:0.#} ms · {stat.Rejections} rejection{(stat.Rejections == 1 ? "" : "s")} in 24 h")
+            : null;
+
+    /// <summary>The editors' note: how many write hooks also run on <paramref name="operation"/>, or nothing.</summary>
+    public static string? AlsoRuns(string entity, string operation, IReadOnlyList<ManagementExtension> extensions)
+    {
+        var count = Binding(entity, extensions).Count(extension => IsWriteHook(extension) && extension.Operations.Contains(operation, StringComparer.Ordinal));
+
+        return count switch
+        {
+            0 => null,
+            1 => "1 extension from code also runs on this operation",
+            _ => string.Create(CultureInfo.InvariantCulture, $"{count} extensions from code also run on this operation"),
+        };
+    }
+
+    /// <summary>The extensions bound to any of <paramref name="entities"/>, each once, in catalog order.</summary>
+    public static IReadOnlyList<ManagementExtension> Touching(IEnumerable<string> entities, IReadOnlyList<ManagementExtension> extensions)
+    {
+        var touched = entities.ToHashSet(StringComparer.Ordinal);
+        return [.. extensions.Where(extension => touched.Any(entity => Binding(entity, [extension]).Count > 0))];
+    }
 
     /// <summary>A command's route line: its method and pattern, or that it is invoked in process.</summary>
     public static string Route(ManagementExtension command) =>

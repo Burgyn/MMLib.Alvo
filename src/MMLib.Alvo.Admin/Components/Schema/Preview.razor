@@ -108,6 +108,22 @@
                             <code class="a-mono">@name</code> — @(_storageSentence ?? DynamicStorageWords.ListNote)
                         </p>
                     }
+                    @* The host code bound to what the change touches: an apply that would unbind one is refused, naming it. *@
+                    @if (_plan is { } preview && LifecycleLane.Touching(preview.Plan.Steps.Select(step => PlanStep.Parse(step).Entity), _extensions) is { Count: > 0 } touched)
+                    {
+                        <div class="a-field" data-testid="preview-extensions">
+                            <span class="a-label">Code bound to what this change touches</span>
+                            @foreach (var extension in touched)
+                            {
+                                <div class="a-row a-row--wrap" data-testid="@($"preview-extension-{extension.Id}")">
+                                    <span class="a-badge a-badge--accent">⟨/⟩ from code</span>
+                                    <span class="a-mono a-name">@extension.Id</span>
+                                    <span class="a-section__sub">@LifecycleLane.StageLabel(extension) · @string.Join(", ", extension.Entities)</span>
+                                </div>
+                            }
+                            <span class="a-section__sub">A change that would unbind one of them is refused when you apply it, naming it.</span>
+                        </div>
+                    }
                 </ChildContent>
             </Panel>
 
@@ -357,6 +373,9 @@
     /// <summary>The build's <c>entity.storage</c> sentence, when it reports one.</summary>
     private string? _storageSentence;
 
+    /// <summary>Every extension this instance registers, read with the plan, for the code bound to what it touches.</summary>
+    private IReadOnlyList<ManagementExtension> _extensions = [];
+
     /// <summary>Reads what the plan on screen says about dynamic entities, for the copy it is of.</summary>
     private async Task ReadDynamicAsync(string sent)
     {
@@ -461,6 +480,7 @@
             {
                 _plan = result;
                 _planned = (sent, revision);
+                _extensions = await Gateway.ExtensionsAsync(CancellationToken.None);
                 await ReadDynamicAsync(sent);
                 _stale = CopyMovedPastThePlan();
                 _planRuns++;

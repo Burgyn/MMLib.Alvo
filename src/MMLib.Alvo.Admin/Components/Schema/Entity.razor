@@ -1,6 +1,7 @@
 ﻿@page "/admin/schema/{EntityName}"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
+@inject OperationsGateway Operations
 @inject AdminSession Session
 @inject NavigationManager Navigation
 @inject ILogger<Entity> Logger
@@ -256,14 +257,14 @@
                                AppliedJson="@(Copy.Loaded ? Copy.AppliedJson : null)" />
                 break;
             case EntityTabs.Rules:
-                <RulesTab @key="EntityName" Rules="_working" Entity="@EntityName" Editable="DeclaredHere" OnChanged="SetRule" />
+                <RulesTab @key="EntityName" Rules="_working" Entity="@EntityName" Editable="DeclaredHere" OnChanged="SetRule" Extensions="@_extensions" />
                 break;
             case EntityTabs.OnWrite:
                 <HooksTab @key="EntityName" Hooks="@_hooks" Entity="@EntityName" Editable="DeclaredHere" Refused="_refused"
-                          OnAdd="AddHook" OnRemove="RemoveHook" />
+                          Extensions="@_extensions" OnAdd="AddHook" OnRemove="RemoveHook" />
                 break;
             case EntityTabs.Lifecycle:
-                <LifecycleTab @key="EntityName" Entity="@EntityName" Hooks="@_hooks" Extensions="@_extensions" />
+                <LifecycleTab @key="EntityName" Entity="@EntityName" Hooks="@_hooks" Extensions="@_extensions" Stats="@_stats" />
                 break;
             case EntityTabs.Indexes:
                 <Indexes Entity="@IndexView(_entity!)" Declared="_indexes" Editable="DeclaredHere"

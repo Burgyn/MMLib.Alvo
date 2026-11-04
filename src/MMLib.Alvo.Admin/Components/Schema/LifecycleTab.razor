@@ -1,17 +1,60 @@
 ﻿@*
-    What runs on this entity, by when it runs. This build draws two lanes. After commit: the descriptor's after-hooks,
-    which the On write tab edits (one editor, not two), and the host's event handlers, which live in its C# and are
-    read-only here — marked by the accent badge every piece of host code wears, as the function list's "this host"
-    does. And Commands — the commands the host maps on a row of this entity, read-only — drawn only in a host that
-    maps a command on some route (HX-08 Ruling 57), so the container never shows it. The other lanes appear with the
-    host code that can run in them.
+    What runs on this entity, by when it runs. Up to four lanes. Before the transaction and In the transaction: the host's
+    write hooks — validate hooks outside the write's transaction, before/after-write and delete hooks inside it — drawn
+    only in a host that registers a write hook (Ruling 29, HX-08 Ruling 57's rule), so the container never shows them.
+    After commit: the descriptor's after-hooks, which the On write tab edits (one editor, not two), and the host's event
+    handlers. And Commands — the commands the host maps on a row of this entity — drawn only in a host that maps a
+    command on some route (HX-08 Ruling 57). Host code is read-only here, marked by the accent badge every piece of host
+    code wears, as the function list's "this host" does, and carries this instance's p95 and 24 h rejections when the
+    operator may read them.
 *@
+@if (_showsWriteLanes)
+{
+    <div data-testid="lifecycle-before-transaction">
+        <SectionHead Title="Before the transaction">
+            <Subtitle>
+                Validate hooks run before a write opens its transaction — they may call another service, so they hold no lock —
+                and only for a write no transaction unit is open around. They can only refuse the write.
+            </Subtitle>
+        </SectionHead>
+        @if (_before.Count == 0)
+        {
+            <div data-testid="lifecycle-before-empty">
+                <EmptyState Title="Nothing checks a write before its transaction" Body="The host registers no validate hook for this entity." />
+            </div>
+        }
+        @foreach (var extension in _before)
+        {
+            @CodeItem(extension)
+        }
+    </div>
+
+    <div data-testid="lifecycle-in-transaction">
+        <SectionHead Title="In the transaction">
+            <Subtitle>
+                Before- and after-write hooks run inside the write's own transaction, after the descriptor's before-hooks: they
+                may refuse, change the row or write other rows, and anything they do rolls back with the write. They never
+                leave the process.
+            </Subtitle>
+        </SectionHead>
+        @if (_inside.Count == 0)
+        {
+            <div data-testid="lifecycle-in-empty">
+                <EmptyState Title="No host code runs inside a write to this entity" Body="The host registers no before- or after-write hook for it." />
+            </div>
+        }
+        @foreach (var extension in _inside)
+        {
+            @CodeItem(extension)
+        }
+    </div>
+}
+
 <div data-testid="lifecycle-after-commit">
     <SectionHead Title="After commit">
         <Subtitle>
             Runs once the write has committed, from the outbox: it can never undo the write, and it may leave the process.
-            This tab shows what runs after the commit only — before-hooks, which run inside the transaction, are on the
-            On write tab.
+            @(_showsWriteLanes ? "The descriptor's before-hooks are on the On write tab." : "This tab shows what runs after the commit only — before-hooks, which run inside the transaction, are on the On write tab.")
         </Subtitle>
     </SectionHead>
 
@@ -38,22 +81,7 @@
 
     @foreach (var extension in _extensions)
     {
-        <ListRow class="a-listrow--roomy a-listrow--stacked" data-testid="@($"lane-extension-{extension.Id}")">
-            <div class="a-row">
-                <span class="a-badge a-badge--accent">⟨/⟩ from code</span>
-                <span class="a-mono a-name">@extension.Id</span>
-            </div>
-            @if (extension.Description is { } description)
-            {
-                <span class="a-meta">@description</span>
-            }
-            <span class="a-section__sub" data-testid="lane-extension-summary">@LifecycleLane.Summary(extension)</span>
-            @if (extension.When is { } when)
-            {
-                <code class="a-mono" data-testid="lane-extension-when">when @when</code>
-            }
-            <p class="a-note">Registered in the host's C#: it is changed there, never here.</p>
-        </ListRow>
+        @CodeItem(extension)
     }
 </div>
 
@@ -94,6 +122,9 @@
     private IReadOnlyList<ManagementExtension> _extensions = [];
     private IReadOnlyList<ManagementExtension> _commands = [];
     private bool _showsCommands;
+    private IReadOnlyList<ManagementExtension> _before = [];
+    private IReadOnlyList<ManagementExtension> _inside = [];
+    private bool _showsWriteLanes;
 
     /// <summary>The entity whose lane this is.</summary>
     [Parameter, EditorRequired]
@@ -107,11 +138,49 @@
     [Parameter]
     public IReadOnlyList<ManagementExtension> Extensions { get; set; } = [];
 
+    /// <summary>This instance's numbers per extension over the last day; <see langword="null"/> when they could not be read.</summary>
+    [Parameter]
+    public ManagementExtensionStats? Stats { get; set; }
+
     protected override void OnParametersSet()
     {
         _hooks = LifecycleLane.AfterCommitHooks(Hooks);
         _extensions = LifecycleLane.AfterCommit(Entity, Extensions);
         _commands = LifecycleLane.Commands(Entity, Extensions);
         _showsCommands = LifecycleLane.HasMappedCommands(Extensions);
+        _before = LifecycleLane.BeforeTransaction(Entity, Extensions);
+        _inside = LifecycleLane.InTransaction(Entity, Extensions);
+        _showsWriteLanes = LifecycleLane.HasWriteHooks(Extensions);
     }
+
+    /// <summary>One piece of host code as every code lane draws it: read-only, with its stage and this instance's numbers.</summary>
+    private RenderFragment CodeItem(ManagementExtension extension) => @<ListRow class="a-listrow--roomy a-listrow--stacked" data-testid="@($"lane-extension-{extension.Id}")">
+        <div class="a-row a-row--wrap">
+            <span class="a-badge a-badge--accent">⟨/⟩ from code</span>
+            <span class="a-mono a-name">@extension.Id</span>
+            <span class="a-badge" data-testid="lane-extension-stage">@LifecycleLane.StageLabel(extension)</span>
+            @if (extension.TopLevelOnly)
+            {
+                <span class="a-badge" data-testid="lane-extension-top-level">top-level writes only</span>
+            }
+            @if (!extension.Enabled)
+            {
+                <span class="a-badge a-badge--warn" data-testid="lane-extension-off">switched off</span>
+            }
+        </div>
+        @if (extension.Description is { } description)
+        {
+            <span class="a-meta">@description</span>
+        }
+        <span class="a-section__sub" data-testid="lane-extension-summary">@LifecycleLane.Summary(extension)</span>
+        @if (extension.When is { } when)
+        {
+            <code class="a-mono" data-testid="lane-extension-when">when @when</code>
+        }
+        @if (LifecycleLane.Numbers(extension, Stats) is { } numbers)
+        {
+            <span class="a-section__sub" data-testid="lane-extension-numbers">@numbers</span>
+        }
+        <p class="a-note">Registered in the host's C#: it is changed there, never here.</p>
+    </ListRow>;
 }

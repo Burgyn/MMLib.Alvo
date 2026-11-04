@@ -16,6 +16,14 @@
     </Subtitle>
 </SectionHead>
 
+@foreach (var operation in new[] { "create", "update", "delete" })
+{
+    @if (LifecycleLane.AlsoRuns(Entity, operation, Extensions) is { } note)
+    {
+        <p class="a-note" data-testid="@($"code-also-runs-{operation}")">On @operation: @note — <a class="a-link" href="@AdminPaths.Entity(Entity, EntityTabs.FromSlug(EntityTabs.Lifecycle))">see the Lifecycle tab</a>.</p>
+    }
+}
+
 @if (Rules.Count == 0 && !Editable)
 {
     <EmptyState Title="This entity has no rules"
@@ -137,6 +145,10 @@ else
     /// <summary>Raised with the operation and its new CEL, when <see cref="Editable"/>.</summary>
     [Parameter]
     public EventCallback<(string Operation, string Cel)> OnChanged { get; set; }
+
+    /// <summary>Every extension this instance registers, for the note on the write hooks that also run here.</summary>
+    [Parameter]
+    public IReadOnlyList<ManagementExtension> Extensions { get; set; } = [];
 
     private string? Declared(string operation) => Rules
         .FirstOrDefault(rule => string.Equals(rule.Key, operation, StringComparison.Ordinal)).Value;

@@ -51,6 +51,10 @@ public partial class HooksTab
     [Parameter]
     public IReadOnlyList<ManagementRefusedFeature> Refused { get; set; } = [];
 
+    /// <summary>Every extension this instance registers, for the note on the write hooks that also run here.</summary>
+    [Parameter]
+    public IReadOnlyList<ManagementExtension> Extensions { get; set; } = [];
+
     /// <summary>Raised with the hook to declare.</summary>
     [Parameter]
     public EventCallback<NewHook> OnAdd { get; set; }

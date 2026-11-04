@@ -29,6 +29,7 @@ public partial class Entity
     private IReadOnlyList<string> _entities = [];
     private IReadOnlyList<ManagementRefusedFeature> _refused = [];
     private IReadOnlyList<ManagementExtension> _extensions = [];
+    private ManagementExtensionStats? _stats;
 
     /// <summary>The build's sentence on a <c>storage: dynamic</c> entity, when it reports one (§8d item 21).</summary>
     private ManagementWarnedBlock? _storageWarning;
@@ -105,6 +106,7 @@ public partial class Entity
         var capabilities = await Gateway.CapabilitiesAsync(ct);
         _refused = capabilities.Refused;
         _extensions = await Gateway.ExtensionsAsync(ct);
+        _stats = LifecycleLane.HasWriteHooks(_extensions) ? await StatsOrNoneAsync(ct) : null;
         _storageWarning = capabilities.Warned.FirstOrDefault(
             block => string.Equals(block.Block, DeclaredSlots.EntityStorage, StringComparison.Ordinal));
         _rules = DescriptorLens.Rules((await Gateway.DescriptorAsync(ct)).DescriptorJson, EntityName);
@@ -119,6 +121,19 @@ public partial class Entity
            just created one. */
         _pending = _entity is null;
         ReadPendingEntity();
+    }
+
+    /// <summary>This instance's numbers, or none when the operator may not read them — the lanes then draw no numbers.</summary>
+    private async Task<ManagementExtensionStats?> StatsOrNoneAsync(CancellationToken ct)
+    {
+        try
+        {
+            return await Operations.StatsAsync(ct);
+        }
+        catch (ManagementForbiddenException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
