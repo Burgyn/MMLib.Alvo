@@ -22,6 +22,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     private readonly List<(Guid Delivery, DateTimeOffset StartedAt, TimeSpan Duration, string Outcome, string? ErrorType)> _history = [];
     private readonly List<DeliveryOperationEntry> _operations = [];
     private readonly Dictionary<string, SubscriberControl> _paused = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _disabled = new(StringComparer.Ordinal);
 
     internal int FanOutFailures { get; set; }
 
@@ -309,6 +310,33 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         lock (_gate)
         {
             return Task.FromResult<IReadOnlyList<SubscriberControl>>([.. _paused.Values.OrderBy(control => control.Subscriber, StringComparer.Ordinal)]);
+        }
+    }
+
+    public Task<bool> SetDisabledAsync(string subscriber, bool disabled, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subscriber);
+        EnsureEntry(entry);
+        lock (_gate)
+        {
+            if (_disabled.Contains(subscriber) == disabled)
+            {
+                return Task.FromResult(false);
+            }
+
+            EnsureLoggable(entry);
+            _ = disabled ? _disabled.Add(subscriber) : _disabled.Remove(subscriber);
+            _operations.Add(entry with { Affected = 1 });
+
+            return Task.FromResult(true);
+        }
+    }
+
+    public Task<IReadOnlyList<string>> DisabledAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<string>>([.. _disabled.Order(StringComparer.Ordinal)]);
         }
     }
 

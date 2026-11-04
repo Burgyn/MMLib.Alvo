@@ -237,6 +237,7 @@ public class ChangeTrackerReachTests
         "EfCoreRuntimeSchemaWriter.cs",
         "EfCoreSchemaMigrator.cs",
         "EfCoreSecretStore.cs",
+        "HookRejectionTable.cs",
         "IdempotencyTable.cs",
         "InboundWebhookTable.cs",
         "MigrationFramingScope.cs",

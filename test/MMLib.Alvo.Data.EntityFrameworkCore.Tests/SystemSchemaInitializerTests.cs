@@ -59,6 +59,20 @@ public sealed class SystemSchemaInitializerTests : IDisposable
         objects.ShouldContain("alvo_inbound_webhooks_received");
     }
 
+    /// <summary>The boot creates the write hooks' rejection log with its per-hook index (HX-09 Ruling 8).</summary>
+    [Fact]
+    public async Task The_boot_creates_the_hook_rejection_log_and_its_index()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        await new SystemSchemaInitializer(_keepAlive, "alvo").EnsureAsync(ct);
+
+        var objects = await SchemaObjectsAsync(ct);
+
+        objects.ShouldContain("alvo_hook_rejections");
+        objects.ShouldContain("ix_alvo_hook_rejections_extension_at");
+    }
+
     public void Dispose()
     {
         _keepAlive.Dispose();

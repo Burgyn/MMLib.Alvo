@@ -85,4 +85,13 @@ public sealed record ManagementExtension
     /// Gets whether an operator paused it: its deliveries are still recorded, wait, and run in order once it is resumed.
     /// </summary>
     public bool Paused { get; init; }
+
+    /// <summary>
+    /// Gets whether it runs only for a write no transaction unit is open around — a validate hook, whose network call must
+    /// never hold a transaction open; a write made inside a unit skips it.
+    /// </summary>
+    public bool TopLevelOnly { get; init; }
+
+    /// <summary>Gets whether it runs: only a validate hook can be switched off, by an administrator.</summary>
+    public bool Enabled { get; init; } = true;
 }

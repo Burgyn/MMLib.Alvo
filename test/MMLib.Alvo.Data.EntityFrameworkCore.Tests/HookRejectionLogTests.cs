@@ -1,0 +1,83 @@
+﻿using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+using MMLib.Alvo.Rules;
+
+using System.Collections.Concurrent;
+
+namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
+
+/// <summary>The rejection log's table (HX-09 Ruling 8): ids and codes only, written autocommit, and a failed insert never thrown.</summary>
+public sealed class HookRejectionLogTests
+{
+    private static readonly HookRejection _rejection =
+        new(DateTimeOffset.UnixEpoch, "within-opening-hours", "bookings", "create", "conflict", "outside-hours", "tenant/user");
+
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    [Fact]
+    public async Task A_rejection_outside_a_unit_is_inserted_at_once()
+    {
+        var database = $"Data Source=hook-rejections-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        await using var keeper = new SqliteConnection(database);
+        await keeper.OpenAsync(Ct);
+        var log = EfCoreHookRejectionLog.ForTests(() => new SqliteConnection(database), "alvo", NullLogger<EfCoreHookRejectionLog>.Instance);
+
+        await log.RecordAsync(_rejection, Ct);
+
+        await using var command = keeper.CreateCommand();
+        command.CommandText = "SELECT extension, entity, operation, kind, code, actor FROM alvo_hook_rejections";
+        await using var reader = await command.ExecuteReaderAsync(Ct);
+        (await reader.ReadAsync(Ct)).ShouldBeTrue();
+        Enumerable.Range(0, 6).Select(reader.GetString).ShouldBe(["within-opening-hours", "bookings", "create", "conflict", "outside-hours", "tenant/user"]);
+        (await reader.ReadAsync(Ct)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task The_table_holds_no_payload_and_no_message()
+    {
+        var database = $"Data Source=hook-rejections-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        await using var keeper = new SqliteConnection(database);
+        await keeper.OpenAsync(Ct);
+        await EfCoreHookRejectionLog.ForTests(() => new SqliteConnection(database), "alvo", NullLogger<EfCoreHookRejectionLog>.Instance)
+            .RecordAsync(_rejection, Ct);
+
+        await using var command = keeper.CreateCommand();
+        command.CommandText = "SELECT name FROM pragma_table_info('alvo_hook_rejections') ORDER BY cid";
+        await using var reader = await command.ExecuteReaderAsync(Ct);
+        var columns = new List<string>();
+        while (await reader.ReadAsync(Ct))
+        {
+            columns.Add(reader.GetString(0));
+        }
+
+        columns.ShouldBe(["id", "at", "extension", "entity", "operation", "kind", "code", "actor"]);
+    }
+
+    [Fact]
+    public async Task A_failed_insert_is_logged_not_thrown()
+    {
+        var logger = new RecordingLogger();
+        var log = EfCoreHookRejectionLog.ForTests(
+            () => new SqliteConnection("Data Source=/nonexistent/dir/alvo.db;Mode=ReadOnly"), "alvo", logger);
+
+        await log.RecordAsync(_rejection, Ct);
+
+        logger.EventNames.ShouldContain("HookRejectionNotRecorded");
+    }
+
+    private sealed class RecordingLogger : ILogger<EfCoreHookRejectionLog>
+    {
+        internal ConcurrentQueue<string?> EventNames { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            EventNames.Enqueue(eventId.Name);
+    }
+}

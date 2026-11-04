@@ -559,6 +559,49 @@ public abstract partial class DeliveryStoreContractTests
         (await world.Store.ControlsAsync(Ct)).ShouldBeEmpty();
     }
 
+    /// <summary>A switched-off extension is listed, and switching it off again changes nothing and logs nothing (HX-09).</summary>
+    [Fact]
+    public async Task Switching_an_extension_off_lists_it_and_logs_the_change_once()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+
+        (await world.Store.SetDisabledAsync(Confirm, disabled: true, Entry("disable-extension", Confirm), Ct)).ShouldBeTrue();
+        (await world.Store.SetDisabledAsync(Confirm, disabled: true, Entry("disable-extension", Confirm), Ct)).ShouldBeFalse();
+
+        (await world.Store.DisabledAsync(Ct)).ShouldBe([Confirm]);
+        (await world.OperationsAsync()).Select(row => row.Operation).ShouldBe(["disable-extension"]);
+    }
+
+    /// <summary>Switching an extension on again removes it from the list and leaves its pause as it was.</summary>
+    [Fact]
+    public async Task Switching_an_extension_on_again_removes_it_and_leaves_its_pause_alone()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        await world.Store.SetPausedAsync(Confirm, paused: true, Entry("pause", Confirm), Ct);
+        await world.Store.SetDisabledAsync(Confirm, disabled: true, Entry("disable-extension", Confirm), Ct);
+
+        (await world.Store.SetDisabledAsync(Confirm, disabled: false, Entry("enable-extension", Confirm), Ct)).ShouldBeTrue();
+        (await world.Store.SetDisabledAsync(Confirm, disabled: false, Entry("enable-extension", Confirm), Ct)).ShouldBeFalse();
+
+        (await world.Store.DisabledAsync(Ct)).ShouldBeEmpty();
+        (await world.Store.ControlsAsync(Ct)).Select(control => control.Subscriber).ShouldBe([Confirm]);
+    }
+
+    /// <summary>A paused extension is not a switched-off one, and a switched-off extension is not a paused one.</summary>
+    [Fact]
+    public async Task A_paused_extension_is_not_listed_as_switched_off()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        await world.Store.SetPausedAsync(Confirm, paused: true, Entry("pause", Confirm), Ct);
+        await world.Store.SetDisabledAsync(Audit, disabled: true, Entry("disable-extension", Audit), Ct);
+
+        (await world.Store.DisabledAsync(Ct)).ShouldBe([Audit]);
+        (await world.Store.ControlsAsync(Ct)).Select(control => control.Subscriber).ShouldBe([Confirm]);
+    }
+
     private static DeliveryOperationEntry Entry(string operation, string target, string? key = null) => new()
     {
         Id = AlvoEventId.Create(_operatedAt),

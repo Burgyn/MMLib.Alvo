@@ -21,4 +21,24 @@ public enum AlvoExtensionKind
     /// </summary>
     [JsonStringEnumMemberName("command")]
     Command = 1,
+
+    /// <summary>A validate hook: host C# run before a top-level write's transaction opens, network allowed; it can only refuse.</summary>
+    [JsonStringEnumMemberName("validate")]
+    Validate = 2,
+
+    /// <summary>A before-write hook: host C# run inside a create, update or replace's transaction before the row is written.</summary>
+    [JsonStringEnumMemberName("beforeWrite")]
+    BeforeWrite = 3,
+
+    /// <summary>An after-write hook: host C# run inside a create, update or replace's transaction after the row and its rollups.</summary>
+    [JsonStringEnumMemberName("afterWrite")]
+    AfterWrite = 4,
+
+    /// <summary>A before-delete hook: host C# run inside a delete's transaction before the row is removed.</summary>
+    [JsonStringEnumMemberName("beforeDelete")]
+    BeforeDelete = 5,
+
+    /// <summary>An after-delete hook: host C# run inside a delete's transaction after the row is removed.</summary>
+    [JsonStringEnumMemberName("afterDelete")]
+    AfterDelete = 6,
 }

@@ -60,6 +60,12 @@ internal sealed class RacedReplayStore(IDeliveryStore inner, string? racingFinge
     public Task<IReadOnlyList<SubscriberControl>> ControlsAsync(CancellationToken cancellationToken = default) =>
         inner.ControlsAsync(cancellationToken);
 
+    public Task<bool> SetDisabledAsync(string subscriber, bool disabled, DeliveryOperationEntry entry, CancellationToken cancellationToken = default) =>
+        inner.SetDisabledAsync(subscriber, disabled, entry, cancellationToken);
+
+    public Task<IReadOnlyList<string>> DisabledAsync(CancellationToken cancellationToken = default) =>
+        inner.DisabledAsync(cancellationToken);
+
     public Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default) =>
         inner.FindOperationAsync(scope, key, cancellationToken);
 }

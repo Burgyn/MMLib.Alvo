@@ -96,6 +96,7 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
     private readonly CancellationTokenRegistration _onDeadline;
     private readonly SemaphoreSlim _calls = new(1, 1);
     private readonly Lock _gate = new();
+    private readonly List<HookRejection> _rejections = [];
     private IBeforeHookRunner? _hooks;
     private Exception? _failure;
     private bool _ended;
@@ -184,6 +185,42 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
             {
                 _failure ??= failure;
             }
+        }
+    }
+
+    /// <inheritdoc/>
+    public void Blame(Exception cause)
+    {
+        ArgumentNullException.ThrowIfNull(cause);
+        lock (_gate)
+        {
+            if (!_ended && _failure is null or OperationCanceledException)
+            {
+                _failure = cause;
+            }
+        }
+    }
+
+    /// <summary>Gets the rejections by host write hooks remembered while the unit ran, in the order they were made.</summary>
+    internal IReadOnlyList<HookRejection> Rejections
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _rejections];
+            }
+        }
+    }
+
+    /// <summary>Keeps a host hook's rejection until the unit has ended, whatever it ends with (HX-09 Ruling 8).</summary>
+    /// <param name="rejection">The rejection.</param>
+    internal void Remember(HookRejection rejection)
+    {
+        ArgumentNullException.ThrowIfNull(rejection);
+        lock (_gate)
+        {
+            _rejections.Add(rejection);
         }
     }
 

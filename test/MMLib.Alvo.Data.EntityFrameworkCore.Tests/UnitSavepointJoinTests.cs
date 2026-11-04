@@ -90,5 +90,9 @@ public sealed class UnitSavepointJoinTests
         public void Poison(Exception failure)
         {
         }
+
+        public void Blame(Exception cause)
+        {
+        }
     }
 }

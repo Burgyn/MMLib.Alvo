@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Events;
@@ -88,6 +90,8 @@ public static class AlvoEfCoreProvider
             services.GetRequiredService<RelationalConnectionFactory>(),
             services.GetRequiredService<IAlvoSqlDialect>(),
             services.GetRequiredService<IOptions<AlvoOptions>>().Value));
+        builder.Services.TryAddSingleton(CreateHookRejectionLog);
+        builder.Services.TryAddSingleton<IHookRejectionLog>(services => services.GetRequiredService<EfCoreHookRejectionLog>());
         builder.Services.TryAddSingleton(services => new AlvoDataContextFactory(
             services.GetRequiredService<ISchemaRegistry>(),
             options => registration.ConfigureProvider(options, registration.ConnectionString(services))));
@@ -185,6 +189,11 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<IAlvoSqlDialect>(),
         services.GetRequiredService<IOptions<AlvoOptions>>().Value,
         services.GetRequiredService<TimeProvider>());
+
+    private static EfCoreHookRejectionLog CreateHookRejectionLog(IServiceProvider services) => new(
+        services.GetRequiredService<RelationalConnectionFactory>(),
+        services.GetRequiredService<IOptions<AlvoOptions>>().Value.SchemaPrefix,
+        services.GetService<ILogger<EfCoreHookRejectionLog>>() ?? NullLogger<EfCoreHookRejectionLog>.Instance);
 
     private static RelationalConnectionFactory CreateConnectionFactory(IServiceProvider services, RelationalProviderRegistration registration)
     {

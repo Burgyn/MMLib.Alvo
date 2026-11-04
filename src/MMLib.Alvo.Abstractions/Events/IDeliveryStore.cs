@@ -319,6 +319,24 @@ public interface IDeliveryStore
     /// <returns>The controls.</returns>
     Task<IReadOnlyList<SubscriberControl>> ControlsAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>Switches an extension off or on, recording <paramref name="entry"/> in the same transaction when the state changed.</summary>
+    /// <remarks>
+    /// Used for validate hooks: a switched-off hook is skipped by every write that reads <see cref="DisabledAsync"/> after the
+    /// change commits, on every replica. Writes the control's <c>disabled_at</c> and <c>disabled_by</c>; a pause is untouched.
+    /// </remarks>
+    /// <param name="subscriber">The extension id.</param>
+    /// <param name="disabled">Whether it should be off.</param>
+    /// <param name="entry">The log row; switching off also stores its instant and actor on the control.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>Whether the state changed; switching off an extension that is off, or on one that is on, records nothing.</returns>
+    /// <exception cref="InvalidOperationException">The log refused <paramref name="entry"/>; the change is rolled back with it.</exception>
+    Task<bool> SetDisabledAsync(string subscriber, bool disabled, DeliveryOperationEntry entry, CancellationToken cancellationToken = default);
+
+    /// <summary>The ids of the extensions switched off, in ordinal order.</summary>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The ids.</returns>
+    Task<IReadOnlyList<string>> DisabledAsync(CancellationToken cancellationToken = default);
+
     /// <summary>The log row a caller's key was recorded under.</summary>
     /// <param name="scope">The caller's identity.</param>
     /// <param name="key">The caller's key.</param>

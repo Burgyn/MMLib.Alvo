@@ -1,5 +1,6 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Abstractions.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Admin")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Admin.Tests.EndToEnd")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Ai")]
@@ -370,6 +371,12 @@ namespace MMLib.Alvo.Data
         public static MMLib.Alvo.Data.AlvoBatchResult Refused(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRowRefusal> refusals) { }
         public static MMLib.Alvo.Data.AlvoBatchResult Wrote(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord> rows, int affected) { }
     }
+    public sealed class AlvoBudgetExceededException : System.InvalidOperationException
+    {
+        public AlvoBudgetExceededException() { }
+        public AlvoBudgetExceededException(string message) { }
+        public AlvoBudgetExceededException(string message, System.Exception innerException) { }
+    }
     public sealed class AlvoChainDepthExceededException : System.Exception
     {
         public AlvoChainDepthExceededException() { }
@@ -547,6 +554,13 @@ namespace MMLib.Alvo.Data
         public AlvoUnitInProgressException() { }
         public AlvoUnitInProgressException(string message) { }
         public AlvoUnitInProgressException(string message, System.Exception innerException) { }
+    }
+    public enum AlvoWriteOperation
+    {
+        Create = 0,
+        Update = 1,
+        Replace = 2,
+        Delete = 3,
     }
     public interface IAlvoData
     {
@@ -1223,6 +1237,7 @@ namespace MMLib.Alvo.Events
         System.Threading.Tasks.Task<bool> CompleteAsync(MMLib.Alvo.Events.DeliveryAttempt attempt, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.SubscriberControl>> ControlsAsync(System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<int> DeadLetterPendingAsync(string subscriber, string reason, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> DisabledAsync(System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task EnsureAsync(System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> FailAsync(MMLib.Alvo.Events.DeliveryAttempt attempt, MMLib.Alvo.Events.DeliveryFailure failure, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<int> FanOutAsync(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.DeliveryRequest> requests, System.Threading.CancellationToken cancellationToken = default);
@@ -1233,6 +1248,7 @@ namespace MMLib.Alvo.Events
         System.Threading.Tasks.Task<bool> RedeliverAsync(System.Guid id, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliveryOperationEntry?> ReplayAsync(MMLib.Alvo.Events.DeliveryFilter filter, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliverySelection> SelectAsync(MMLib.Alvo.Events.DeliveryFilter filter, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<bool> SetDisabledAsync(string subscriber, bool disabled, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> SetPausedAsync(string subscriber, bool paused, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
     }
     public interface IEmailSender
@@ -1515,6 +1531,16 @@ namespace MMLib.Alvo.Management
         EventHandler = 0,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("command")]
         Command = 1,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("validate")]
+        Validate = 2,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("beforeWrite")]
+        BeforeWrite = 3,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("afterWrite")]
+        AfterWrite = 4,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("beforeDelete")]
+        BeforeDelete = 5,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("afterDelete")]
+        AfterDelete = 6,
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Management.AlvoExtensionStage>))]
     public enum AlvoExtensionStage
@@ -1525,6 +1551,8 @@ namespace MMLib.Alvo.Management
         Http = 1,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("preTransaction")]
         PreTransaction = 2,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("inTransaction")]
+        InTransaction = 3,
     }
     public sealed class DeliveryFixture : System.IEquatable<MMLib.Alvo.Management.DeliveryFixture>
     {
@@ -1702,6 +1730,7 @@ namespace MMLib.Alvo.Management
         public ManagementExtension() { }
         public string? Access { get; init; }
         public string? Description { get; init; }
+        public bool Enabled { get; init; }
         public System.Collections.Generic.IReadOnlyList<string> Entities { get; init; }
         public string? Event { get; init; }
         public string? HttpMethod { get; init; }
@@ -1715,6 +1744,7 @@ namespace MMLib.Alvo.Management
         public string? RunAs { get; init; }
         public required MMLib.Alvo.Management.AlvoExtensionStage Stage { get; init; }
         public System.TimeSpan? Timeout { get; init; }
+        public bool TopLevelOnly { get; init; }
         public string? TypeName { get; init; }
         public string? When { get; init; }
     }
@@ -2036,6 +2066,14 @@ namespace MMLib.Alvo.Rules
     {
         MMLib.Alvo.Rules.PolicyDecision Resolve(string entity, MMLib.Alvo.Rules.DataOperation operation, MMLib.Alvo.AlvoContext context);
     }
+    public interface IWriteExtensionRunner
+    {
+        System.Threading.Tasks.Task<string?> AfterWriteAsync(MMLib.Alvo.Rules.WriteInvocation invocation, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<string, object?>> BeforeWriteAsync(MMLib.Alvo.Rules.WriteInvocation invocation, System.Threading.CancellationToken cancellationToken);
+        bool RunsInTransaction(string entity, MMLib.Alvo.Data.AlvoWriteOperation operation);
+        System.Threading.Tasks.Task ValidateAsync(MMLib.Alvo.Rules.WriteInvocation invocation, System.Threading.CancellationToken cancellationToken);
+        bool Validates(string entity, MMLib.Alvo.Data.AlvoWriteOperation operation);
+    }
     public sealed class PolicyDecision : System.IEquatable<MMLib.Alvo.Rules.PolicyDecision>
     {
         public string? DenyReason { get; }
@@ -2046,6 +2084,19 @@ namespace MMLib.Alvo.Rules
         public MMLib.Alvo.Expressions.CompiledExpression? Using { get; }
         public MMLib.Alvo.Expressions.CompiledExpression? WithCheck { get; }
         public static MMLib.Alvo.Rules.PolicyDecision Deny(string reason) { }
+    }
+    public sealed class WriteInvocation : System.IEquatable<MMLib.Alvo.Rules.WriteInvocation>
+    {
+        public WriteInvocation() { }
+        public required MMLib.Alvo.AlvoContext Caller { get; init; }
+        public required string Entity { get; init; }
+        public MMLib.Alvo.Data.AlvoRecord? New { get; init; }
+        public required System.DateTimeOffset Now { get; init; }
+        public MMLib.Alvo.Data.AlvoRecord? Old { get; init; }
+        public required MMLib.Alvo.Data.AlvoWriteOperation Operation { get; init; }
+        public MMLib.Alvo.Data.AlvoRecord? Saved { get; init; }
+        public System.IServiceProvider? Services { get; init; }
+        public MMLib.Alvo.Data.IAlvoTransaction? Transaction { get; init; }
     }
 }
 namespace MMLib.Alvo.Schema
