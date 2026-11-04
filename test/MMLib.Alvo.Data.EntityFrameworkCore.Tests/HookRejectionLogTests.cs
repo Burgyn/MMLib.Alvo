@@ -35,6 +35,57 @@ public sealed class HookRejectionLogTests
         (await reader.ReadAsync(Ct)).ShouldBeFalse();
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_rejection_inside_a_unit_is_held_by_the_unit_and_recorded_once_it_ends_whether_it_commits_or_not(bool commits)
+    {
+        var primed = await PrimedLogAsync();
+        await using var keeper = primed.Keeper;
+        var log = primed.Log;
+        await using var world = await WritePathWorld.StartAsync(WritePathFixture.Descriptor(), WritePathFixture.Schema(), rejections: log);
+
+        var run = world.Transactions.TransactAsync(world.Caller, async (_, ct) =>
+        {
+            await log.RecordAsync(_rejection, ct);
+            ((WriteUnit)AlvoFlow.Unit!).Rejections.ShouldBe([_rejection]);
+            (await RowsAsync(keeper)).ShouldBe(1L, "held by the unit, not inserted while it runs");
+            return commits ? true : throw new InvalidOperationException("rolled back");
+        }, cancellationToken: Ct);
+
+        if (commits)
+        {
+            await run;
+        }
+        else
+        {
+            await Should.ThrowAsync<InvalidOperationException>(run);
+        }
+
+        (await RowsAsync(keeper)).ShouldBe(2L);
+    }
+
+    [Fact]
+    public async Task A_rejection_recorded_after_its_unit_s_commit_but_before_its_release_is_still_held_and_flushed()
+    {
+        var primed = await PrimedLogAsync();
+        await using var keeper = primed.Keeper;
+        var log = primed.Log;
+        await using var world = await WritePathWorld.StartAsync(WritePathFixture.Descriptor(), WritePathFixture.Schema(), rejections: log);
+        var unit = await world.Data.OpenUnitAsync(world.Caller, new AlvoTransactionOptions(), world.Scopes, Ct);
+        using (unit.EnterFlow())
+        {
+            await unit.CommitAsync();
+            await log.RecordAsync(_rejection, Ct);
+        }
+
+        unit.Rejections.ShouldBe([_rejection]);
+        (await RowsAsync(keeper)).ShouldBe(1L);
+        await unit.DisposeAsync();
+        await world.Data.FlushRejectionsAsync(unit);
+        (await RowsAsync(keeper)).ShouldBe(2L);
+    }
+
     [Fact]
     public async Task The_table_holds_no_payload_and_no_message()
     {
@@ -66,6 +117,26 @@ public sealed class HookRejectionLogTests
         await log.RecordAsync(_rejection, Ct);
 
         logger.EventNames.ShouldContain("HookRejectionNotRecorded");
+    }
+
+    /// <summary>A log over a shared in-memory database, its table created by one rejection recorded outside any unit.</summary>
+    private static async Task<(SqliteConnection Keeper, EfCoreHookRejectionLog Log)> PrimedLogAsync()
+    {
+        var database = $"Data Source=hook-rejections-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        var keeper = new SqliteConnection(database);
+        await keeper.OpenAsync(Ct);
+        var log = EfCoreHookRejectionLog.ForTests(() => new SqliteConnection(database), "alvo", NullLogger<EfCoreHookRejectionLog>.Instance);
+        await log.RecordAsync(_rejection with { Code = "primer" }, Ct);
+
+        return (keeper, log);
+    }
+
+    private static async Task<long> RowsAsync(SqliteConnection keeper)
+    {
+        await using var command = keeper.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM alvo_hook_rejections";
+
+        return (long)(await command.ExecuteScalarAsync(Ct))!;
     }
 
     private sealed class RecordingLogger : ILogger<EfCoreHookRejectionLog>

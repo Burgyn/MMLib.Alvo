@@ -10,7 +10,8 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
 /// <summary>
 /// The relational <see cref="IHookRejectionLog"/> (HX-09 Ruling 8): outside a unit a rejection is inserted at once; inside one
-/// it is handed to the unit, and the driver flushes it after the unit has released its write turn and left the flow.
+/// it is handed to the unit, and the driver flushes it after the unit has released its write turn and left the flow. A unit
+/// already released keeps nothing more, so a rejection that raced its release is inserted at once.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -45,13 +46,7 @@ internal sealed partial class EfCoreHookRejectionLog : IHookRejectionLog
     public Task RecordAsync(HookRejection rejection, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(rejection);
-        if (AlvoFlow.Unit is WriteUnit unit)
-        {
-            unit.Remember(rejection);
-            return Task.CompletedTask;
-        }
-
-        return InsertAsync(rejection, cancellationToken);
+        return AlvoFlow.Unit is WriteUnit unit && unit.Remember(rejection) ? Task.CompletedTask : InsertAsync(rejection, cancellationToken);
     }
 
     /// <summary>Inserts every rejection a unit remembered, once the unit has ended and left the flow.</summary>

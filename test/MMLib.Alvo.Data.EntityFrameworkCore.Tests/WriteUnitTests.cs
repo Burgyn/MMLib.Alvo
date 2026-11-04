@@ -79,6 +79,66 @@ public sealed class WriteUnitTests
         unit.HasEnded.ShouldBeTrue();
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Blame_replaces_a_recorded_cancellation_and_fills_an_empty_failure(bool cancelledFirst)
+    {
+        await using var world = await StartAsync();
+        await using var unit = await OpenAsync(world);
+        var timeout = new HookFailedException("guard", HookFailedException.Timeout);
+
+        if (cancelledFirst)
+        {
+            unit.Poison(new OperationCanceledException());
+        }
+
+        unit.Blame(timeout);
+
+        (await Record.ExceptionAsync(() => unit.CommitAsync())).ShouldBeSameAs(timeout);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Blame_never_replaces_a_timeout_or_another_failure(bool timedOut)
+    {
+        await using var world = await StartAsync();
+        await using var unit = await OpenAsync(world);
+        Exception original = timedOut ? new TimeoutException("deadline") : new AlvoUnitInProgressException("refused");
+
+        unit.Poison(original);
+        unit.Blame(new HookFailedException("guard", HookFailedException.Timeout));
+
+        (await Record.ExceptionAsync(() => unit.CommitAsync())).ShouldBeSameAs(original);
+    }
+
+    [Fact]
+    public async Task Blame_is_ignored_once_the_unit_s_end_is_decided()
+    {
+        await using var world = await StartAsync();
+        await using var unit = await OpenAsync(world);
+        await unit.CommitAsync();
+
+        unit.Blame(new HookFailedException("guard", HookFailedException.Timeout));
+
+        (await Record.ExceptionAsync(() => unit.CommitAsync())).ShouldBeOfType<InvalidOperationException>("the unit's own 'has ended', not the late blame");
+    }
+
+    [Fact]
+    public async Task A_released_unit_keeps_no_more_rejections()
+    {
+        await using var world = await StartAsync();
+        var unit = await OpenAsync(world);
+        var rejection = new HookRejection(DateTimeOffset.UnixEpoch, "guard", "note", "create", "conflict", "late", "t/u");
+        unit.Remember(rejection).ShouldBeTrue();
+
+        await unit.DisposeAsync();
+
+        unit.Remember(rejection with { Code = "later" }).ShouldBeFalse();
+        unit.Rejections.ShouldBe([rejection]);
+    }
+
     [Fact]
     public async Task A_second_call_while_one_runs_is_refused_and_poisons_the_unit()
     {

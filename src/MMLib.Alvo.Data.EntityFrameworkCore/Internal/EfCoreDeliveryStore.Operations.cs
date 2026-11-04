@@ -260,7 +260,7 @@ internal sealed partial class EfCoreDeliveryStore
         {
             RelationalSqlBatch.AddParameter(command, "@at", StoredInstant.Text(entry.At));
             RelationalSqlBatch.AddParameter(command, "@actor", entry.Actor);
-            RelationalSqlBatch.AddParameter(command, "@reason", Nullable(entry.Reason));
+            RelationalSqlBatch.AddParameter(command, "@reason", DeliveryOperationsTable.Nullable(entry.Reason));
         }
     }
 
@@ -320,8 +320,6 @@ internal sealed partial class EfCoreDeliveryStore
 
     private Task<int> LogAsync(DbConnection connection, DbTransaction transaction, DeliveryOperationEntry entry, CancellationToken ct) =>
         ExecuteInAsync(connection, transaction, DeliveryOperationsTable.InsertLogSql(_log), command => DeliveryOperationsTable.BindLogEntry(command, entry), ct);
-
-    private static object Nullable(string? value) => (object?)value ?? DBNull.Value;
 
     private static void EnsureRows(DeliveryFilter filter)
     {

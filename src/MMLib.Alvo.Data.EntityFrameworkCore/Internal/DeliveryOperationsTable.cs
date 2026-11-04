@@ -209,6 +209,7 @@ internal static class DeliveryOperationsTable
     internal static string EnableSql(string controls) =>
         $"UPDATE {controls} SET disabled_at = NULL, disabled_by = NULL WHERE subscriber = @subscriber AND disabled_at IS NOT NULL";
 
+    /// <summary>The extensions switched off now; unordered — the caller sorts them ordinally, as a collation never would.</summary>
     internal static string DisabledSql(string controls) =>
         $"SELECT subscriber FROM {controls} WHERE disabled_at IS NOT NULL";
 
@@ -238,7 +239,9 @@ internal static class DeliveryOperationsTable
         RelationalSqlBatch.AddParameter(command, "@log_sample", entry.Sample.Count == 0 ? DBNull.Value : string.Join(',', entry.Sample));
     }
 
-    private static object Nullable(string? value) => (object?)value ?? DBNull.Value;
+    /// <summary>A text parameter's value: the text, or <see cref="DBNull"/> for none.</summary>
+    /// <param name="value">The text, if any.</param>
+    internal static object Nullable(string? value) => (object?)value ?? DBNull.Value;
 
     internal static string AllOperationsSql(string log) => $"SELECT {LogColumns} FROM {log} ORDER BY at, id";
 

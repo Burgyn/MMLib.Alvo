@@ -225,12 +225,23 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
 
     /// <summary>Keeps a host hook's rejection until the unit has ended, whatever it ends with (HX-09 Ruling 8).</summary>
     /// <param name="rejection">The rejection.</param>
-    internal void Remember(HookRejection rejection)
+    /// <returns>
+    /// Whether the unit kept it: <see langword="false"/> once the unit is released — the flush reads <see cref="Rejections"/>
+    /// only after that, under this lock, so a rejection it no longer keeps is the caller's to record, and the flow no longer
+    /// carries the unit to refuse that insert.
+    /// </returns>
+    internal bool Remember(HookRejection rejection)
     {
         ArgumentNullException.ThrowIfNull(rejection);
         lock (_gate)
         {
+            if (_released)
+            {
+                return false;
+            }
+
             _rejections.Add(rejection);
+            return true;
         }
     }
 
