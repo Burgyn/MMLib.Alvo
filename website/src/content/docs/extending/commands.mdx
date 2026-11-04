@@ -116,6 +116,9 @@ status and JSON body — and the handler does not run again:
 - **A key reused for different input is `409`** `idempotency-conflict`. The input is the command, the route's `id` and
   every bound argument — uploaded files by their content. The IETF draft answers this case `422`; Alvo answers `409`, as
   its Data API does, so one key problem has one status everywhere.
+- **Take an upload as a top-level parameter** — `IFormFile` or `IFormFileCollection`. Only there is it fingerprinted by
+  its content. A handler that binds a file inside a `[FromForm]` or `[AsParameters]` type, in a list, or through an
+  `IFormCollection` is refused with an `ArgumentException` when it is mapped.
 - **A request still running under the key is `409` too.** Retry after it answers.
 - **Keys belong to a caller and a credential.** Two API keys of one user, or one user in two tenants, never share a key.
   A resolver of your own that gives its callers no key id files every token of one user under the same credential, so

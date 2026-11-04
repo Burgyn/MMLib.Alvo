@@ -33,6 +33,11 @@ namespace Microsoft.AspNetCore.Builder;
 /// document (500, its message never echoed) only when the host calls <c>AddAlvoProblemDetails()</c> and
 /// <c>UseExceptionHandler()</c>, and otherwise with the host's own 500.
 /// </para>
+/// <para>
+/// An uploaded file is part of a key's fingerprint by its content only as a top-level <c>IFormFile</c> or
+/// <c>IFormFileCollection</c> parameter. A handler that binds one inside a <c>[FromForm]</c> or <c>[AsParameters]</c> type, in a
+/// list, or through an <c>IFormCollection</c> is refused with an <see cref="ArgumentException"/> when it is mapped.
+/// </para>
 /// </remarks>
 public static class AlvoCommandEndpointRouteBuilderExtensions
 {
@@ -116,6 +121,7 @@ public static class AlvoCommandEndpointRouteBuilderExtensions
         ArgumentNullException.ThrowIfNull(handler);
         var registry = endpoints.ServiceProvider.GetService<CommandRegistry>()
             ?? throw new InvalidOperationException("Alvo is not registered. Call services.AddAlvo(...) before MapAlvoCommand(...).");
+        CommandInputs.EnsureUploadsAreTopLevel(name, handler, endpoints.ServiceProvider.GetRequiredService<IServiceProviderIsService>());
         var command = registry.Map(name, pattern, entity, access);
         var filter = endpoints.ServiceProvider.GetRequiredService<CommandEndpointFilter>();
         var witness = new AlvoGateWitness($"command '{command.Id}'");
