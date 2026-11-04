@@ -74,16 +74,20 @@ internal static class LifecycleLane
         _ => "after commit",
     };
 
-    /// <summary>A code item's numbers on this instance — its p95 and its rejections in the last day — or nothing without them.</summary>
+    /// <summary>
+    /// A write hook's numbers on this instance — its p95 and its rejections in the last day — or nothing without them, and
+    /// nothing for any other code: rejections are a write hook's, and Ruling 29 scopes the numbers to the write lanes.
+    /// </summary>
     public static string? Numbers(ManagementExtension extension, ManagementExtensionStats? stats) =>
-        stats?.Items.FirstOrDefault(item => item.Id == extension.Id) is { P95: { } p95 } stat
+        !IsWriteHook(extension) ? null
+        : stats?.Items.FirstOrDefault(item => item.Id == extension.Id) is { P95: { } p95 } stat
             ? string.Create(CultureInfo.InvariantCulture, $"p95 {p95.TotalMilliseconds:0.#} ms · {stat.Rejections} rejection{(stat.Rejections == 1 ? "" : "s")} in 24 h")
             : null;
 
-    /// <summary>The editors' note: how many write hooks also run on <paramref name="operation"/>, or nothing.</summary>
+    /// <summary>The editors' note: how many write hooks also run on <paramref name="operation"/> — a switched-off one does not — or nothing.</summary>
     public static string? AlsoRuns(string entity, string operation, IReadOnlyList<ManagementExtension> extensions)
     {
-        var count = Binding(entity, extensions).Count(extension => IsWriteHook(extension) && extension.Operations.Contains(operation, StringComparer.Ordinal));
+        var count = Binding(entity, extensions).Count(extension => IsWriteHook(extension) && extension.Enabled && extension.Operations.Contains(operation, StringComparer.Ordinal));
 
         return count switch
         {
@@ -94,9 +98,13 @@ internal static class LifecycleLane
     }
 
     /// <summary>The extensions bound to any of <paramref name="entities"/>, each once, in catalog order.</summary>
+    /// <remarks>
+    /// An empty name — a plan line the preview does not recognise — touches nothing, not even an every-entity hook. A rename's
+    /// line carries only the new name, so the hooks bound to the old one are not listed; apply still refuses to unbind them.
+    /// </remarks>
     public static IReadOnlyList<ManagementExtension> Touching(IEnumerable<string> entities, IReadOnlyList<ManagementExtension> extensions)
     {
-        var touched = entities.ToHashSet(StringComparer.Ordinal);
+        var touched = entities.Where(entity => entity.Length > 0).ToHashSet(StringComparer.Ordinal);
         return [.. extensions.Where(extension => touched.Any(entity => Binding(entity, [extension]).Count > 0))];
     }
 

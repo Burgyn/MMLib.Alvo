@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Time.Testing;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
+using MMLib.Alvo.Hooks;
 using System.Diagnostics;
 
 namespace MMLib.Alvo.TestHost.Tests;
@@ -115,13 +116,15 @@ public sealed class AlvoHookRecorderTests
     {
         string? traceParent = null;
         await using var alvo = await AlvoTestHost.StartAsync(
-            builder => builder.FromDescriptor(HelpDesk).Entity("tickets", tickets => tickets.OnCreated(
-                "reads-the-trace",
-                (AlvoCreated<AlvoRecord> _, AlvoEventContext context) =>
-                {
-                    traceParent = context.Event.TraceParent;
-                    return Task.CompletedTask;
-                })),
+            builder => builder.FromDescriptor(HelpDesk).Entity("tickets", tickets => tickets
+                .BeforeWrite("in-the-ambient-trace", (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask)
+                .OnCreated(
+                    "reads-the-trace",
+                    (AlvoCreated<AlvoRecord> _, AlvoEventContext context) =>
+                    {
+                        traceParent = context.Event.TraceParent;
+                        return Task.CompletedTask;
+                    })),
             cancellationToken: Ct);
         using var listener = SampleEverythingFrom(AmbientSource);
         using var source = new ActivitySource(AmbientSource);
@@ -135,6 +138,7 @@ public sealed class AlvoHookRecorderTests
         }
 
         alvo.Hooks.AssertRan("reads-the-trace");
+        alvo.Hooks.AssertRan("in-the-ambient-trace");
     }
 
     private static ActivityListener SampleEverythingFrom(string name)

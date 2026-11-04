@@ -46,6 +46,25 @@ public sealed class LifecycleLaneWriteHookTests
         LifecycleLane.Numbers(_extensions[0], stats).ShouldBeNull();
     }
 
+    [Fact]
+    public void An_event_handler_has_no_numbers_even_when_the_stats_list_it()
+    {
+        var stats = new ManagementExtensionStats
+        {
+            Scope = "this-instance",
+            Window = TimeSpan.FromHours(24),
+            Since = DateTimeOffset.UnixEpoch,
+            Items = [new ManagementExtensionStat { Id = "notify", Invocations = 4, Rejections = 0, P95 = TimeSpan.FromMilliseconds(9) }],
+        };
+
+        LifecycleLane.Numbers(_extensions[^1], stats).ShouldBeNull("rejections are a write hook's, and the numbers belong to the write lanes");
+    }
+
+    [Fact]
+    public void The_editors_note_does_not_count_a_switched_off_hook() =>
+        LifecycleLane.AlsoRuns("work_orders", "create", [.. _extensions.Select(item => item.Id == "check-region" ? item with { Enabled = false } : item)])
+            .ShouldBe("2 extensions from code also run on this operation");
+
     [Theory]
     [InlineData("create", "3 extensions from code also run on this operation")]
     [InlineData("delete", "1 extension from code also runs on this operation")]
@@ -58,6 +77,7 @@ public sealed class LifecycleLaneWriteHookTests
     {
         LifecycleLane.Touching(["work_orders", "work_orders"], _extensions).Select(item => item.Id).ShouldBe(["check-region", "stamp", "audit", "tidy", "notify"]);
         LifecycleLane.Touching(["regions"], _extensions).Select(item => item.Id).ShouldBe(["audit"]);
+        LifecycleLane.Touching([""], _extensions).ShouldBeEmpty("a plan line the preview does not recognise names no entity, so no every-entity hook either");
     }
 
     [Fact]

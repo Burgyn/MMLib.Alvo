@@ -1,4 +1,5 @@
 ﻿using Microsoft.Playwright;
+using MMLib.Alvo.Data;
 
 namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
@@ -21,7 +22,31 @@ public sealed class WriteHookScenarios(WriteHookWorld world) : IClassFixture<Wri
         (await inside.GetByTestId($"lane-extension-{WriteHookWorld.Stamp}").GetByTestId("lane-extension-when").InnerTextAsync()).Trim().ShouldBe("when changed(status)");
         (await inside.GetByTestId($"lane-extension-{WriteHookWorld.Tidy}").GetByTestId("lane-extension-stage").InnerTextAsync()).Trim().ShouldBe("after delete");
         (await session.Page.GetByTestId("lifecycle-before-transaction").GetByRole(AriaRole.Button).CountAsync()).ShouldBe(0, "host code is read-only on the dashboard");
+        (await inside.GetByRole(AriaRole.Button).CountAsync()).ShouldBe(0, "host code is read-only on the dashboard");
         await session.AssertNoHorizontalScrollAsync();
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>A hook that ran shows this instance's p95 and its rejections in a day (Ruling 29).</summary>
+    /// <remarks>
+    /// The stats call is refused only below the Viewer level, which already keeps the schema — and so this tab — shut, so
+    /// no operator who can open the tab is refused its numbers; the refused-stats fallback is a unit's, not a scenario's.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_hook_that_ran_shows_its_p95_and_its_rejections_on_the_lifecycle_tab()
+    {
+        var tenant = TenantId.New();
+        await RecordEditorScenarios.SeedWorkOrderAsync(world, tenant, "WO-0901");
+        await RecordConflictScenarios.ElsewhereAsync(world, tenant, "work_orders", "reference", "WO-0901",
+            (data, id, system) => data.UpdateAsync("work_orders", id, new Dictionary<string, object?> { ["status"] = "in_progress" }, system));
+
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders?tab=lifecycle");
+
+        var numbers = session.Page.GetByTestId("lifecycle-in-transaction")
+            .GetByTestId($"lane-extension-{WriteHookWorld.Stamp}").GetByTestId("lane-extension-numbers");
+        await numbers.WaitForAsync();
+        (await numbers.InnerTextAsync()).Trim().ShouldMatch(@"^p95 [\d.]+ ms · 0 rejections in 24 h$");
         session.AssertConsoleClean();
     }
 
@@ -35,6 +60,22 @@ public sealed class WriteHookScenarios(WriteHookWorld world) : IClassFixture<Wri
         await note.WaitForAsync();
         (await note.InnerTextAsync()).ShouldContain("2 extensions from code also run on this operation");
         (await session.Page.GetByTestId("code-also-runs-delete").InnerTextAsync()).ShouldContain("1 extension from code also runs");
+
+        await note.GetByRole(AriaRole.Link).ClickAsync();
+        await session.Page.GetByTestId("lifecycle-in-transaction").WaitForAsync();
+        session.AssertConsoleClean();
+    }
+
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_rules_tab_says_code_also_runs_on_an_operation()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders?tab=rules");
+
+        var note = session.Page.GetByTestId("code-also-runs-update");
+        await note.WaitForAsync();
+        (await note.InnerTextAsync()).ShouldContain("2 extensions from code also run on this operation");
+        (await note.GetByRole(AriaRole.Link).GetAttributeAsync("href")).ShouldNotBeNull().ShouldEndWith("?tab=lifecycle");
         session.AssertConsoleClean();
     }
 
