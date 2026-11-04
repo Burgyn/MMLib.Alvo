@@ -2,6 +2,7 @@
 
 using MMLib.Alvo.Commands.Internal;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.Rules;
 
 namespace MMLib.Alvo.Extensions.Internal;
@@ -26,9 +27,11 @@ internal static class ExtensionBindingCompiler
         var relational = CommandProblems.Relational(services);
         problems.AddRange(registry.Commands.SelectMany(command => new CommandBinding(command, compiler).CheckRegistration(relational).Problems));
         problems.AddRange(CommandProblems.Shared(registry));
+        var relationalHooks = WriteHookBinding.Relational(services);
+        problems.AddRange(registry.WriteHooks.SelectMany(hook => new WriteHookBinding(hook, compiler).CheckRegistration(services, relationalHooks).Problems));
         var refused = Refused(problems);
 
-        return new(problems, Ties(registry.Handlers.Where(handler => !refused.Contains(handler.Id))));
+        return new(problems, [.. Ties(registry.Handlers.Where(handler => !refused.Contains(handler.Id))), .. HookTies(registry.WriteHooks.Where(hook => !refused.Contains(hook.Id)))]);
     }
 
     /// <summary>Both passes against <paramref name="catalog"/>: what binds, what is left unbound, and why.</summary>
@@ -38,14 +41,18 @@ internal static class ExtensionBindingCompiler
         var problems = new List<ExtensionProblem>(ExtensionIdProblems.Of(registry));
         var bound = BindHandlers(registry, catalog, compiler, services, problems);
         var commands = BindCommands(registry, catalog, compiler, services, problems);
+        var hooks = BindWriteHooks(registry, catalog, compiler, services, problems);
         var refused = Refused(problems);
         List<BoundHandler> binds = [.. bound.Where(handler => !refused.Contains(handler.Id))];
+        List<BoundWriteHook> boundHooks = [.. hooks.Where(hook => !refused.Contains(hook.Id))];
         var bindings = new ExtensionBindings(
             binds,
             registry.Handlers.Where(handler => refused.Contains(handler.Id)),
-            commands.Where(command => !refused.Contains(command.Name)));
+            commands.Where(command => !refused.Contains(command.Name)),
+            boundHooks,
+            registry.WriteHooks.Where(hook => refused.Contains(hook.Id)));
 
-        return new(bindings, problems, Ties(binds.Select(handler => handler.Registration)));
+        return new(bindings, problems, [.. Ties(binds.Select(handler => handler.Registration)), .. HookTies(boundHooks.Select(hook => hook.Registration))]);
     }
 
     private static List<BoundHandler> BindHandlers(
@@ -86,6 +93,25 @@ internal static class ExtensionBindingCompiler
         return bound;
     }
 
+    private static List<BoundWriteHook> BindWriteHooks(
+        ExtensionRegistry registry, PolicyCatalog catalog, ICelCompiler compiler, IServiceProviderIsService services, List<ExtensionProblem> problems)
+    {
+        var relational = WriteHookBinding.Relational(services);
+        var bound = new List<BoundWriteHook>();
+        foreach (var hook in registry.WriteHooks)
+        {
+            var binding = new WriteHookBinding(hook, compiler).CheckRegistration(services, relational);
+            if (binding.Bind(catalog) is { } boundHook)
+            {
+                bound.Add(boundHook);
+            }
+
+            problems.AddRange(binding.Problems);
+        }
+
+        return bound;
+    }
+
     private static HashSet<string> Refused(IEnumerable<ExtensionProblem> problems) =>
         problems.Select(problem => problem.Id).ToHashSet(StringComparer.Ordinal);
 
@@ -95,6 +121,13 @@ internal static class ExtensionBindingCompiler
             .GroupBy(entry => (entry.Target, entry.Handler.Settings.Order))
             .Where(group => group.Count() > 1 && group.Any(entry => entry.Handler.Settings.OrderStated))
             .Select(group => new OrderTie(group.Key.Target, group.Key.Order, [.. group.Select(entry => entry.Handler.Id)]))];
+
+    private static IReadOnlyList<OrderTie> HookTies(IEnumerable<WriteHookRegistration> hooks) =>
+        [.. hooks
+            .SelectMany(hook => hook.Entities.Select(entity => (Target: $"{entity} {WriteHookBinding.KindOf(hook.Stage)}", Hook: hook)))
+            .GroupBy(entry => (entry.Target, entry.Hook.Settings.Order))
+            .Where(group => group.Count() > 1 && group.Any(entry => entry.Hook.Settings.OrderStated))
+            .Select(group => new OrderTie(group.Key.Target, group.Key.Order, [.. group.Select(entry => entry.Hook.Id)]))];
 
     private static IEnumerable<string> Targets(HandlerSource source) => source switch
     {

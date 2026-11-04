@@ -2,6 +2,7 @@
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.Rules;
 
 namespace MMLib.Alvo.Extensions.Internal;
@@ -45,18 +46,32 @@ internal sealed record BoundHandler(
     };
 }
 
-/// <summary>Every handler bound to one catalog, by <c>Order</c> and then registration order, and every bound command.</summary>
+/// <summary>
+/// Every handler bound to one catalog, by <c>Order</c> and then registration order, every bound command, and every bound write
+/// hook — by <c>Order</c>, entity-specific before <c>"*"</c>, then registration order (Ruling 26).
+/// </summary>
 internal sealed class ExtensionBindings
 {
     private readonly Dictionary<string, BoundHandler> _byId;
+    private readonly Dictionary<string, BoundWriteHook> _hooksById;
 
     internal ExtensionBindings(
-        IEnumerable<BoundHandler> handlers, IEnumerable<HandlerRegistration>? unbound = null, IEnumerable<BoundCommand>? commands = null)
+        IEnumerable<BoundHandler> handlers,
+        IEnumerable<HandlerRegistration>? unbound = null,
+        IEnumerable<BoundCommand>? commands = null,
+        IEnumerable<BoundWriteHook>? writeHooks = null,
+        IEnumerable<WriteHookRegistration>? unboundWriteHooks = null)
     {
         Unbound = [.. unbound ?? []];
         Commands = (commands ?? []).ToDictionary(command => command.Name, StringComparer.Ordinal);
         Handlers = [.. handlers.OrderBy(handler => handler.Settings.Order).ThenBy(handler => handler.Registration.Sequence)];
         _byId = Handlers.ToDictionary(handler => handler.Id, StringComparer.Ordinal);
+        WriteHooks = [.. (writeHooks ?? [])
+            .OrderBy(hook => hook.Registration.Settings.Order)
+            .ThenBy(hook => hook.Registration.IsEveryEntity ? 1 : 0)
+            .ThenBy(hook => hook.Registration.Sequence)];
+        UnboundWriteHooks = [.. unboundWriteHooks ?? []];
+        _hooksById = WriteHooks.ToDictionary(hook => hook.Id, StringComparer.Ordinal);
     }
 
     internal static ExtensionBindings None { get; } = new([]);
@@ -66,12 +81,21 @@ internal sealed class ExtensionBindings
     /// <summary>The registered handlers that do not fit this catalog; the fan-out records their events dead (<c>unbound</c>).</summary>
     internal IReadOnlyList<HandlerRegistration> Unbound { get; }
 
+    /// <summary>The write hooks bound to this catalog, in the order they run.</summary>
+    internal IReadOnlyList<BoundWriteHook> WriteHooks { get; }
+
+    /// <summary>The registered write hooks that do not fit this catalog; a write they cover fails closed (Ruling 7).</summary>
+    internal IReadOnlyList<WriteHookRegistration> UnboundWriteHooks { get; }
+
     /// <summary>The commands bound to this catalog, by name.</summary>
     internal IReadOnlyDictionary<string, BoundCommand> Commands { get; }
 
     internal TimeSpan LongestTimeout => Handlers.Count == 0 ? TimeSpan.Zero : Handlers.Max(handler => handler.Settings.Timeout);
 
     internal BoundHandler? Handler(string id) => _byId.GetValueOrDefault(id);
+
+    /// <summary>The bound write hook <paramref name="id"/>, or null when it does not bind this catalog.</summary>
+    internal BoundWriteHook? WriteHook(string id) => _hooksById.GetValueOrDefault(id);
 
     /// <summary>The bound command named <paramref name="name"/>, or null when it does not bind this catalog.</summary>
     internal BoundCommand? Command(string name) => Commands.GetValueOrDefault(name);

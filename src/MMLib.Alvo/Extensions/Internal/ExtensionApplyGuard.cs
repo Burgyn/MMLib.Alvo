@@ -75,6 +75,6 @@ internal sealed class ExtensionApplyGuard(
         }
 
         var bindings = binder.Result(current).Bindings;
-        return [.. bindings.Handlers.Select(handler => handler.Id), .. bindings.Commands.Keys];
+        return [.. bindings.Handlers.Select(handler => handler.Id), .. bindings.Commands.Keys, .. bindings.WriteHooks.Select(hook => hook.Id)];
     }
 }
