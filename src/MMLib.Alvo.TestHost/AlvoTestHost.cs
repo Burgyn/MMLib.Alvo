@@ -15,14 +15,14 @@ namespace MMLib.Alvo.TestHost;
 /// <para>
 /// <b>Nothing above the database is faked.</b> <see cref="Data"/> behaves exactly as the host's own <c>IAlvoData</c>:
 /// a descriptor <c>reject</c> refuses, a <c>mutate</c> applies and a rule hides rows as in production. Write through
-/// <see cref="Data"/> rather than through <see cref="Services"/>: from write hooks on, it is what scopes a write's hooks
-/// to <see cref="Hooks"/>. Unless the builder registers a provider of its own — <c>UsePostgreSql</c>, for parity runs —
+/// <see cref="Data"/> rather than through <see cref="Services"/>: it is what scopes a write's hooks to
+/// <see cref="Hooks"/>. Unless the builder registers a provider of its own — <c>UsePostgreSql</c>, for parity runs —
 /// each host gets a fresh SQLite database in memory, private to it and dropped when the host is disposed.
 /// </para>
 /// <para>
 /// <b>Events wait for the test.</b> The dispatcher runs in the manual dispatch mode, so nothing is delivered until the
 /// test drains. Webhooks go to the handler passed as <c>webhooks</c>; without one, every webhook attempt fails without
-/// touching the network. <see cref="Hooks"/> records which hooks ran inside this host's drains.
+/// touching the network. <see cref="Hooks"/> records which hooks ran inside this host's drains and its <see cref="Data"/> calls.
 /// </para>
 /// </remarks>
 public sealed class AlvoTestHost : IAsyncDisposable
@@ -43,7 +43,7 @@ public sealed class AlvoTestHost : IAsyncDisposable
     {
         _composition = composition;
         _pump = composition.Host.Services.GetRequiredService<IAlvoEventPump>();
-        _data = composition.Host.Services.GetRequiredService<IAlvoData>();
+        _data = new TrackedData(composition.Host.Services.GetRequiredService<IAlvoData>(), StartDrain);
     }
 
     /// <summary>Gets the data port, behaving exactly as the host's own endpoints and services reach it.</summary>
@@ -70,7 +70,7 @@ public sealed class AlvoTestHost : IAsyncDisposable
         }
     }
 
-    /// <summary>Gets the record of which hooks and subscribers ran in this host's drains.</summary>
+    /// <summary>Gets the record of which hooks and subscribers ran in this host's drains and its <see cref="Data"/> calls.</summary>
     /// <exception cref="ObjectDisposedException">The host was disposed.</exception>
     public AlvoHookRecorder Hooks
     {
@@ -258,8 +258,8 @@ public sealed class AlvoTestHost : IAsyncDisposable
     }
 
     /// <summary>
-    /// Opens the drain's root activity on a fresh trace and hands its id to <see cref="Hooks"/>, so the runs inside it —
-    /// and only those — are this host's.
+    /// Opens a root activity on a fresh trace — a drain's, or one <see cref="Data"/> call's — and hands its id to
+    /// <see cref="Hooks"/>, so the runs inside it — and only those — are this host's.
     /// </summary>
     private Activity? StartDrain()
     {
