@@ -494,12 +494,14 @@ internal static class WritePathFixture
     /// <param name="get">The <c>get</c> rule.</param>
     /// <param name="list">The <c>list</c> rule.</param>
     /// <param name="delete">The <c>delete</c> rule.</param>
+    /// <param name="readOnlyField">A field the descriptor makes <c>readOnly</c> for every caller, or <see langword="null"/>.</param>
     internal static AlvoDescriptor Descriptor(
         string? create = "true",
         string? update = "true",
         string? get = "true",
         string? list = "true",
-        string? delete = "true") => new()
+        string? delete = "true",
+        string? readOnlyField = null) => new()
         {
             ApiVersion = "alvo.dev/v1",
             Name = "write-path-fixture",
@@ -509,8 +511,8 @@ internal static class WritePathFixture
                 {
                     Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
                     {
-                        ["title"] = new() { Type = DescriptorFieldType.String },
-                        ["owner_id"] = new() { Type = DescriptorFieldType.Uuid },
+                        ["title"] = DescriptorField(DescriptorFieldType.String, readOnlyField == "title"),
+                        ["owner_id"] = DescriptorField(DescriptorFieldType.Uuid, readOnlyField == "owner_id"),
                     },
                     Rules = new AccessRules
                     {
@@ -523,6 +525,9 @@ internal static class WritePathFixture
                 },
             },
         };
+
+    private static FieldDescriptor DescriptorField(DescriptorFieldType type, bool readOnly) =>
+        new() { Type = type, ReadOnly = readOnly ? BoolOrCel.FromBoolean(true) : null };
 
     /// <summary>The caller every write is performed as.</summary>
     internal static AlvoContext Caller() => new()

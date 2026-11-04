@@ -54,8 +54,7 @@ internal sealed partial class EfAlvoTransactions(EfAlvoData data, IServiceScopeF
         }
         finally
         {
-            await unit.DisposeAsync().ConfigureAwait(false);
-            await data.FlushRejectionsAsync(unit).ConfigureAwait(false);
+            await data.ReleasedAndFlushedAsync(unit).ConfigureAwait(false);
         }
     }
 

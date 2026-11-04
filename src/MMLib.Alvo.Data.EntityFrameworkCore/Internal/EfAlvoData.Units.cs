@@ -352,13 +352,25 @@ internal sealed partial class EfAlvoData
         }
         finally
         {
-            await unit.DisposeAsync().ConfigureAwait(false);
-            await FlushRejectionsAsync(unit).ConfigureAwait(false);
+            await ReleasedAndFlushedAsync(unit).ConfigureAwait(false);
         }
     }
 
     private IServiceScopeFactory Scopes => _scopes ?? throw new InvalidOperationException(
         "A write a host hook runs on needs the host's IServiceScopeFactory, and this data port was built without one.");
+
+    /// <summary>Releases <paramref name="unit"/> and then records its rejections — even when the release throws (Ruling 8: whatever the outcome).</summary>
+    internal async Task ReleasedAndFlushedAsync(WriteUnit unit)
+    {
+        try
+        {
+            await unit.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            await FlushRejectionsAsync(unit).ConfigureAwait(false);
+        }
+    }
 
     /// <summary>Records the rejections a unit remembered, after it released its write turn and left the flow (Ruling 8).</summary>
     internal Task FlushRejectionsAsync(WriteUnit unit) =>

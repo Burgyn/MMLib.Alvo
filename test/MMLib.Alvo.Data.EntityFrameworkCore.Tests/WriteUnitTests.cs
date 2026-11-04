@@ -1,7 +1,9 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Rules;
@@ -381,6 +383,25 @@ public sealed class WriteUnitTests
         turn.Disposed.ShouldBeTrue();
         probe.Disposed.ShouldBeTrue();
         unit.HasEnded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task A_unit_s_rejections_are_recorded_even_when_releasing_it_throws()
+    {
+        var database = $"Data Source=hook-rejections-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        await using var keeper = new SqliteConnection(database);
+        await keeper.OpenAsync(Ct);
+        var log = EfCoreHookRejectionLog.ForTests(() => new SqliteConnection(database), "alvo", NullLogger<EfCoreHookRejectionLog>.Instance);
+        await using var world = await WritePathWorld.StartAsync(
+            WritePathFixture.Descriptor(), WritePathFixture.Schema(), services => services.AddScoped<DisposalProbe>(), rejections: log);
+        var (unit, _, _) = await DisposeFailingUnitAsync(world);
+        unit.Remember(new HookRejection(DateTimeOffset.UnixEpoch, "guard", "note", "create", "conflict", "kept", "t/u")).ShouldBeTrue();
+
+        await Should.ThrowAsync<CleanupFailure>(() => world.Data.ReleasedAndFlushedAsync(unit));
+
+        await using var command = keeper.CreateCommand();
+        command.CommandText = "SELECT code FROM alvo_hook_rejections";
+        (await command.ExecuteScalarAsync(Ct)).ShouldBe("kept");
     }
 
     [Fact]

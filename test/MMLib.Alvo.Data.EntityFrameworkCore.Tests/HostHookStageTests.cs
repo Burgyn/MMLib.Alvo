@@ -122,7 +122,7 @@ public sealed class HostHookStageTests
     }
 
     [Fact]
-    public async Task A_write_inside_a_unit_runs_its_hooks_in_that_unit_and_none_when_it_suppresses_them()
+    public async Task A_write_inside_a_unit_runs_its_hooks_in_that_unit_one_hop_deeper()
     {
         var hooks = new RecordingWriteExtensions();
         hooks.InTransaction.Add((Note, AlvoWriteOperation.Create));
@@ -133,6 +133,146 @@ public sealed class HostHookStageTests
         hooks.Stages.ShouldBe(["before", "after"]);
         hooks.Calls.First().Invocation.Transaction!.Context.Provenance.Depth.ShouldBe(1);
     }
+
+    [Fact]
+    public async Task An_update_patch_moving_the_row_to_another_owner_is_refused_by_the_update_rule_and_changes_nothing()
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.InTransaction.Add((Note, AlvoWriteOperation.Update));
+        await using var world = await StartAsync(hooks, WritePathFixture.Descriptor(update: "owner_id == @user.id"));
+        var id = await world.SeedAsync("kept");
+        hooks.Patch["owner_id"] = Guid.NewGuid();
+
+        await Should.ThrowAsync<AlvoAuthorizationException>(
+            () => world.Data.UpdateAsync(Note, id, new Dictionary<string, object?> { ["title"] = "moved" }, world.Caller, cancellationToken: Ct));
+
+        (await world.ScalarAsync("SELECT title FROM \"note\"")).ShouldBe("kept");
+        (await OutboxAsync(world)).ShouldBe(0L);
+    }
+
+    [Theory]
+    [InlineData("owner_id")]
+    [InlineData("tenant_id")]
+    public async Task A_batch_create_patch_placing_rows_under_another_owner_or_tenant_refuses_each_row_and_writes_none(string field)
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.InTransaction.Add((Note, AlvoWriteOperation.Create));
+        await using var world = await StartAsync(hooks, WritePathFixture.Descriptor(create: "owner_id == @user.id"));
+        hooks.Patch[field] = Guid.NewGuid();
+
+        var result = await world.Data.CreateManyAsync(Note, [WritePathFixture.CreatePayload("a"), WritePathFixture.CreatePayload("b")], world.Caller, cancellationToken: Ct);
+
+        result.Refusals.Select(refusal => (refusal.Index, refusal.Code)).ShouldBe([(0, "forbidden"), (1, "forbidden")]);
+        (await NotesAsync(world)).ShouldBe(0L);
+    }
+
+    [Fact]
+    public async Task A_patch_of_a_read_only_field_is_refused_as_the_caller_s_own_payload_would_be_on_a_create_and_an_update()
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.InTransaction.Add((Note, AlvoWriteOperation.Create));
+        hooks.InTransaction.Add((Note, AlvoWriteOperation.Update));
+        await using var world = await StartAsync(hooks, WritePathFixture.Descriptor(readOnlyField: "title"));
+        var id = await world.SeedAsync("kept");
+        hooks.Patch["title"] = "set by the hook";
+
+        var created = await Should.ThrowAsync<AlvoAuthorizationException>(
+            () => world.Data.CreateAsync(Note, UntitledPayload(), world.Caller, cancellationToken: Ct));
+        var updated = await Should.ThrowAsync<AlvoAuthorizationException>(
+            () => world.Data.UpdateAsync(Note, id, new Dictionary<string, object?> { ["owner_id"] = world.Caller.User.Value }, world.Caller, cancellationToken: Ct));
+
+        (created.Message, updated.Message).ShouldBe((ReadOnlyTitle, ReadOnlyTitle));
+        (await NotesAsync(world)).ShouldBe(1L);
+        (await world.ScalarAsync("SELECT title FROM \"note\"")).ShouldBe("kept");
+    }
+
+    [Fact]
+    public async Task A_patch_of_a_read_only_field_is_that_batch_row_s_refusal_on_a_create_and_an_update()
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.InTransaction.Add((Note, AlvoWriteOperation.Create));
+        hooks.InTransaction.Add((Note, AlvoWriteOperation.Update));
+        await using var world = await StartAsync(hooks, WritePathFixture.Descriptor(readOnlyField: "title"));
+        var id = await world.SeedAsync("kept");
+        hooks.Patch["title"] = "set by the hook";
+
+        var created = await world.Data.CreateManyAsync(Note, [UntitledPayload()], world.Caller, cancellationToken: Ct);
+        var updated = await world.Data.UpdateManyAsync(
+            Note, [new AlvoRowPatch(id, new Dictionary<string, object?> { ["owner_id"] = world.Caller.User.Value })], world.Caller, cancellationToken: Ct);
+
+        created.Refusals.Single().Message.ShouldBe(ReadOnlyTitle);
+        updated.Refusals.Single().Message.ShouldBe(ReadOnlyTitle);
+        (await world.ScalarAsync("SELECT title FROM \"note\"")).ShouldBe("kept");
+    }
+
+    [Fact]
+    public async Task An_after_write_rejection_of_a_create_or_an_update_leaves_no_row_change_and_no_event()
+    {
+        var hooks = new RecordingWriteExtensions { After = (_, _) => throw new RowScopedRefusal() };
+        hooks.InTransaction.Add((Note, AlvoWriteOperation.Create));
+        hooks.InTransaction.Add((Note, AlvoWriteOperation.Update));
+        await using var world = await StartAsync(hooks);
+        var id = await world.SeedAsync("kept");
+
+        await Should.ThrowAsync<RowScopedRefusal>(() => world.Data.CreateAsync(Note, WritePathFixture.CreatePayload("refused"), world.Caller, cancellationToken: Ct));
+        await Should.ThrowAsync<RowScopedRefusal>(
+            () => world.Data.UpdateAsync(Note, id, new Dictionary<string, object?> { ["title"] = "refused" }, world.Caller, cancellationToken: Ct));
+
+        (await NotesAsync(world)).ShouldBe(1L);
+        (await world.ScalarAsync("SELECT title FROM \"note\"")).ShouldBe("kept");
+        (await OutboxAsync(world)).ShouldBe(0L);
+    }
+
+    [Fact]
+    public async Task An_after_write_rejection_in_a_batch_is_that_row_s_refusal_and_rolls_every_row_back()
+    {
+        var hooks = new RecordingWriteExtensions();
+        hooks.InTransaction.Add((Note, AlvoWriteOperation.Create));
+        hooks.InTransaction.Add((Note, AlvoWriteOperation.Update));
+        hooks.After = (write, _) => Equals(write.Saved!["title"], "b") ? throw new RowScopedRefusal() : Task.FromResult<string?>(null);
+        await using var world = await StartAsync(hooks);
+        var id = await world.SeedAsync("kept");
+
+        var created = await world.Data.CreateManyAsync(Note, [WritePathFixture.CreatePayload("a"), WritePathFixture.CreatePayload("b")], world.Caller, cancellationToken: Ct);
+        var updated = await world.Data.UpdateManyAsync(
+            Note, [new AlvoRowPatch(id, new Dictionary<string, object?> { ["title"] = "b" })], world.Caller, cancellationToken: Ct);
+
+        created.Refusals.Select(refusal => (refusal.Index, refusal.Code)).ShouldBe([(1, "refused-by-hook")]);
+        updated.Refusals.Select(refusal => (refusal.Index, refusal.Code)).ShouldBe([(0, "refused-by-hook")]);
+        (await NotesAsync(world)).ShouldBe(1L);
+        (await world.ScalarAsync("SELECT title FROM \"note\"")).ShouldBe("kept");
+        (await OutboxAsync(world)).ShouldBe(0L);
+    }
+
+    [Fact]
+    public async Task An_after_delete_rejection_in_a_batch_is_that_row_s_refusal_and_keeps_every_row()
+    {
+        var hooks = new RecordingWriteExtensions { After = (_, _) => throw new RowScopedRefusal() };
+        hooks.InTransaction.Add((Note, AlvoWriteOperation.Delete));
+        await using var world = await StartAsync(hooks);
+        Guid[] ids = [await world.SeedAsync("a"), await world.SeedAsync("b")];
+
+        var result = await world.Data.DeleteManyAsync(Note, ids, world.Caller, cancellationToken: Ct);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Refusals.Single().Code.ShouldBe("refused-by-hook");
+        (await NotesAsync(world)).ShouldBe(2L);
+        (await OutboxAsync(world)).ShouldBe(0L);
+    }
+
+    private const string ReadOnlyTitle = "Field 'title' is read-only and cannot be written.";
+
+    private static Dictionary<string, object?> UntitledPayload()
+    {
+        var payload = WritePathFixture.CreatePayload("unused");
+        payload.Remove("title");
+
+        return payload;
+    }
+
+    private static async Task<long> NotesAsync(WritePathWorld world) => (long)(await world.ScalarAsync("SELECT COUNT(*) FROM \"note\""))!;
+
+    private static async Task<long> OutboxAsync(WritePathWorld world) => (long)(await world.ScalarAsync("SELECT COUNT(*) FROM alvo_outbox"))!;
 
     private static async Task<WritePathWorld> StartAsync(RecordingWriteExtensions hooks, Descriptor.AlvoDescriptor? descriptor = null)
     {
