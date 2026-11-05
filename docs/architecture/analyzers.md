@@ -143,7 +143,8 @@ transaction. When HX-13 adds `IAlvoScheduler`, its methods must join the allowed
 - A `DiagnosticDescriptor` **field** in `AlvoDiagnostics` (RS2002 matches release tracking against field initializers
   only), with `helpLinkUri: HelpRoot + "#alvo1xxx"`.
 - A row in `AnalyzerReleases.Unshipped.md` (RS2008); it moves to `Shipped.md` at release.
-- A `## ALVO1xxx — …` section on *Analyzer rules*, and a help-link fact beside `Alvo1001DocsTests`.
+- A section on *Analyzer rules* headed exactly `## ALVO1xxx` (Starlight slugs the whole heading, and the help link is
+  `#alvo1xxx`), with the rule's title as a bold first sentence, and a help-link fact beside `Alvo1001DocsTests`.
 - Scope and reach tests in `test/MMLib.Alvo.Analyzers.Tests`, a false-positive fact for every documented-compliant
   shape, and a marked line in `scripts/fixtures/packed-consumer/Hooks.cs` if the rule must be proven on a packed
   consumer.

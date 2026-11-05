@@ -978,7 +978,7 @@ one document-wide list of every classification Alvo can mint, not a per-operatio
 
 Problem documents are RFC 9457, media type `application/problem+json`, with an Alvo `violations` array.
 Every `type` is `https://alvo.dev/errors/<slug>`; the slugs are exactly `AlvoProblemTypes.All`, and the
-table below is that list. Three of them — `unreadable-request`, `internal` and `function-failed` — are emitted only by
+table below is that list. Four of them — `unreadable-request`, `internal`, `function-failed` and `hook-failed` — are emitted only by
 `AlvoExceptionHandler`, so only a host that called `AddAlvoProblemDetails()` can produce one, which is
 why none is documented on any operation. `chain-depth-exceeded` is not one of them: `AlvoExceptionHandler` also answers it (for a
 refusal raised outside `GuardAsync` on an Alvo route), but `GuardAsync` maps `AlvoChainDepthExceededException` itself,
@@ -1006,6 +1006,7 @@ so every host answers it on the generated routes, opt-in or not.
 | 413, 408, 400 | `unreadable-request` | the **web server** refused the request before Alvo read it (a body over `MaxRequestBodySize`, one arriving too slowly, one whose framing broke) — same opt-in as `internal`, and likewise documented on no operation |
 | 500 | `internal` | an invariant Alvo relies on is broken — **only** in a host that called `AddAlvoProblemDetails()`; no endpoint produces it and no operation documents it |
 | 500 | `function-failed` | a host function failed (it threw, ran past `Alvo:Extensions:CelFunctionBudget`, or got an argument its parameter cannot hold) or Alvo's own evaluation of a hook failed — or a built-in refused a value that is not the caller's own (the `expression-failed` row's exceptions) — nothing was written; the detail names the function, never the host's exception text; same opt-in as `internal` |
+| 500 | `hook-failed` | a write hook the host registered in code failed (it threw, ran past its time limit or call budget, set a value or field it may not, wrote the row it runs on, does not fit the current schema, or the row vanished under it) — nothing was written; the document carries `extensions` (the hook's id) and a fixed `reason`, never the hook's own message; a host hook's *refusal* is not this (`validation`, `conflict` or `forbidden`); same opt-in as `internal` (`docs/architecture/write-hooks.md`) |
 | 508 | `chain-depth-exceeded` | the write or publish sits deeper in one causation chain than `Alvo:Extensions:MaxDepth` (default 8) allows — a hook, handler or timer writing in a loop; nothing was written. The document carries `"retryable": false` (RFC 5842's Loop Detected: the same request arrives at the same depth). Answered by `GuardAsync` on every host, and by `AlvoExceptionHandler` for one escaping an Alvo route |
 
 **Two rows are marked *Management API only*, and they are in this table because the sentence above is

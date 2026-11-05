@@ -479,17 +479,23 @@ assert_valid_summary() {
 # that silently serves the standalone composition or whose `when` never matches — and that arm would publish a hook-free
 # write as a hook's cost (HX-10, Ruling 20's p99 rule). So, before k6, one `WO-89…` work order is posted: the hooks
 # image's `calibration-probe` refuses exactly that prefix with 409, through the same `when` gating as the measured
-# hooks. Any other answer refuses the arm. The probe writes nothing, and reset_created_rows covers WO-8… anyway.
+# hooks, naming itself in `extensions`. Any other answer refuses the arm. The probe writes nothing, and
+# reset_created_rows covers WO-8… anyway.
 assert_hooks_fire() {
     local body status
     body=$(jq -cn --arg tenant "$ALVO_FS_TENANT_NORTH" '{
         tenant_id: $tenant, reference: "WO-89000001", title: "Hooks probe", status: "scheduled", priority: 3,
         access_code: "AC-LOAD", customer_id: "22222222-0001-4000-8000-000000000001",
         region_id: "11111111-0000-4000-8000-000000000001" }')
-    status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "X-Alvo-Api-Key: $KEY_DISPATCHER" \
-        -H 'Content-Type: application/json' --data "$body" "$BASE_URL/api/work_orders")
+    status=$(curl -sS --max-time 30 -o "$OUT_DIR/probe.json" -w '%{http_code}' -X POST \
+        -H "X-Alvo-Api-Key: $KEY_DISPATCHER" -H 'Content-Type: application/json' --data "$body" \
+        "$BASE_URL/api/work_orders") \
+        || die "the hooks probe (WO-89000001) could not reach $BASE_URL: the hooks image is not serving, so the hooks arm would measure nothing"
     [ "$status" = "409" ] \
         || die "the hooks probe (WO-89000001) answered $status, not calibration-probe's 409: the hooks image is not running its gated calibration hooks, so the hooks arm would measure nothing"
+    # A unique `reference` violation is also a 409 `conflict`; only the hook's refusal names it in `extensions`.
+    jq -e '.extensions == ["calibration-probe"]' "$OUT_DIR/probe.json" >/dev/null \
+        || die "the hooks probe (WO-89000001) answered 409 without calibration-probe in its extensions: the conflict is not the gated hook's, so the hooks arm would measure nothing"
     say "hooks probe refused with 409: the gated calibration hooks are live"
 }
 

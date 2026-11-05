@@ -160,9 +160,9 @@ Validity is the head arm's — a failed request or a dropped iteration voids the
 shape must have produced samples. A missing customer also voids it (the `ref` refuses the write, or `calibration-read`
 throws). **A clean arm does not prove the hooks ran**: an image serving the standalone composition, or a `when` that
 never matches, would measure a hook-free write just as cleanly. What proves it is the probe: before k6 starts, the
-script posts one `WO-89000001` work order and refuses the arm unless `calibration-probe` answers 409 — the same `when`
-gating as the measured hooks, so a hooks image that is not running them fails loudly instead of publishing a false hook
-cost. The arm prints a table — min, med, p95, p99, max per shape, and each min over `create`'s — and tees it into
+script posts one `WO-89000001` work order and refuses the arm unless `calibration-probe` answers 409 naming itself in
+`extensions` (a unique `reference` violation is a 409 too, without it) — the same `when` gating as the measured hooks,
+so a hooks image that is not running them fails loudly instead of publishing a false hook cost. The arm prints a table — min, med, p95, p99, max per shape, and each min over `create`'s — and tees it into
 `artifacts/load/hooks.md`, which CI appends to `calibration.md` and uploads; it is **copied by hand** from there into
 `docs/performance.md`, never edited.
 

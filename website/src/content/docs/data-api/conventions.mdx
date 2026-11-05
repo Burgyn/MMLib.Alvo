@@ -171,7 +171,7 @@ or a 403 whose `violations` name each row a rule refused. A `409 conflict` names
 Every refusal is an RFC 9457 problem document, `application/problem+json`, with `type`, `title`, `status`, `detail`
 and, when there are reasons to itemise, `violations`: each with `pointer`, `code`, `message` and `fixSuggestion`. Branch
 on the slug at the end of `type`. Every slug, its causes and its fix are in [Problem types](/reference/problem-types/);
-`unreadable-request`, `internal` and `function-failed` come only from a host that called `AddAlvoProblemDetails()`,
+`unreadable-request`, `internal`, `function-failed` and `hook-failed` come only from a host that called `AddAlvoProblemDetails()`,
 which the standalone host does.
 
 Design notes: [`docs/architecture/data-api.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md).

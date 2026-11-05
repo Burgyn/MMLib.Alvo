@@ -55,11 +55,11 @@
 Each is recorded in the spec amendment (Task 9) as *HX-10 settled details* (1–44), so a later reader can tell a decision from an oversight.
 
 1. **No new `AddCelFunction` overload; the `Delegate` method accepts a trailing `CancellationToken`.** §5 row `10` lists "`AddCelFunction` overload with trailing `CancellationToken`", but the method already takes `Delegate`, which admits every shape: a second overload over `Delegate` cannot exist, and typed `Func<…, CancellationToken, TResult>` overloads (four arities) would add eight public members for no shape the current one refuses. A lambda `(string currency, CancellationToken ct) => …` binds by its natural type. The token is never a CEL parameter (four CEL parameters plus the token are accepted); a token that is not last, or two tokens, refuse at the call. §5 row `10` is amended.
-2. **The budget bounds every host function call, token-aware or not.** A token-aware function receives a token that cancels at the pass's deadline (linked with the caller's token where one exists); every function — one that ignores the token, one that takes none, one that catches its cancellation and returns — is **measured on return** and fails if it returned after the deadline (HX-09 Ruling 11's rule, X15's reasoning). Measuring the token-free ones too is a behaviour change for existing hosts (CHANGELOG *Changed*): §1.2's "before = in-transaction, time budget" was otherwise unenforced for exactly the code that can block. *(Amended by Rulings 29, 30, 36.)*
+2. **The budget bounds every host function call, token-aware or not.** A token-aware function receives a token that cancels at the pass's deadline (linked with the caller's token where one exists); every function — one that ignores the token, one that takes none, one that catches its cancellation and returns — is **measured on return** and fails if it returned after the deadline (HX-09 Ruling 11's rule, X15's reasoning). Measuring the token-free ones too is a behaviour change for existing hosts (CHANGELOG *Changed*): §1.2's "before = in-transaction, time budget" was otherwise unenforced for exactly the code that can block. *(Amended by Rulings 29, 30, 34, 36.)*
 3. **"Per evaluation" is one pass, opened by three sites.** A pass is `BeforeHookRunner.Run` (all declarative before-hooks of one row), one write hook's `when`, and one `Condition`-profile evaluation by `PredicateEvaluator` (after-hook and handler conditions at fan-out). Every host call in a pass shares one deadline, whose clock starts at the pass's **first host call** (a pass that calls none reads no clock and creates no token source; the pass object and the `AsyncLocal` set/restore still allocate — Ruling 35). `Rule` and `Access` expressions cannot call host functions (the profiles refuse them), so `PredicateEvaluator` opens no pass for them and the rule hot path is unchanged. Outside a pass (unit tests, tooling) a host function gets `CancellationToken.None` and no limit; `CelEvaluationSitesTests` pins the three sites so a fourth caller of the interpreter's hook entry points is a deliberate change. *(Amended by Ruling 35.)*
 4. **`AlvoExtensionOptions.CelFunctionBudget`** (`TimeSpan`, default `AlvoHookOptions.DefaultTimeout` = 250 ms, bounds (0, `AlvoHookOptions.MaxTimeout` = 30 s], refused at start naming `Alvo:Extensions:CelFunctionBudget` and `Alvo__Extensions__CelFunctionBudget`). A public property §5 does not list: #309 asks for "an option", and `Alvo:Extensions` is the section that already bounds host code (`MaxDepth`). One number for all in-transaction host code: a before-write hook and a host function get the same 250 ms, and Q5's calibration (Ruling 20) judges both.
 5. **An overrun is the host function's failure.** It is a `CelFunctionException` with `IsHost: true` and Alvo's reason: in a declarative before-hook the write rolls back with 500 `function-failed`; in a write hook's `when` it is that hook's failure, 500 `hook-failed`, reason `exception` (HX-09 Ruling 63, unchanged); in a post-commit condition the after-hook is dropped with a Warning, as any function failure there. A cancellation that is **not** the deadline (the unit's 30 s, a client abort) is not an overrun: it is the function's exception, as today.
-6. **E1's line: `CelFunctionException.OnCallerData`.** True for a built-in's refusal (`int('x')`, `substring` past the end, `timestamp()` of a malformed value, `math.round` digits), a built-in argument that does not fit its parameter, hook arithmetic (overflow, division by zero, a non-number operand), an operator's refusal on the fail-closed path (`!_`, a comparison of incomparable values, `changed` that cannot compare), and a whole condition that is a present non-Bool (`<condition>` — HX-09 Ruling 63's amendment counts it as the caller's). False for anything a host function did (threw, argument mismatch, budget), for a built-in body that threw an unexpected exception, and for the interpreter's defect wrapper (`<hook>`, Ruling Y-D) — those are 500 `function-failed`. *(Amended by Rulings 26, 28.)*
+6. **E1's line: `CelFunctionException.OnCallerData`.** True for a built-in's refusal (`int('x')`, `substring` past the end, `timestamp()` of a malformed value, `math.round` digits), a built-in argument that does not fit its parameter, hook arithmetic (overflow, division by zero, a non-number operand), an operator's refusal on the fail-closed path (`!_`, a comparison of incomparable values, `changed` that cannot compare), and a whole condition that is a present non-Bool (`<condition>` — HX-09 Ruling 63's amendment counts it as the caller's). False for anything a host function did (threw, argument mismatch, budget), for a built-in body that threw an unexpected exception, and for the interpreter's defect wrapper (`<hook>`, Ruling Y-D) — those are 500 `function-failed`. *(Amended by Rulings 26, 28, 44.)*
 7. **`expression-failed` is answered on every host, not opt-in.** `ProblemResultFactory.PortRefusalFor` maps it (so `GuardAsync` on every generated route and `CommandEndpointFilter` on every command answer it), walking wrappers the way `AlvoExceptionHandler.FunctionFailure` does; `AlvoExceptionHandler` answers it too for a failure that escapes elsewhere on an Alvo route. Not logged — like every caller refusal (a 422 pages nobody); the previous Error line for a built-in failure is gone (CHANGELOG). The `detail` names the function and Alvo's reason, never the value (built-in reasons never carry one); no `violations` member, because no field is known — the function's argument is an expression, not a payload field. *(Amended by Rulings 27, 28, 37.)*
 8. **A host function's argument that does not fit its parameter stays 500.** The value is the caller's, but the type is the host's signature: the fix is the host's (widen the parameter) or the descriptor author's, never something the caller can learn from a 422. One rule for agents: anything about a host function is 500.
 9. **A single-row `DELETE` that answers 422 `expression-failed` does not document 422 in OpenAPI.** Reachable only through a before-delete condition (descriptor or host `when`) whose built-in refuses the stored row; the OpenAPI generator reads the schema model, which carries no hooks, so documenting it would document a status unreachable for every hook-free entity, which `OpenApiDocumentTests.Every_documented_status_code_is_one_the_endpoint_can_actually_return` refuses. The `unprocessable` response's description names the new kind; the `type` enum gains the slug. Recorded deviation; follow-up issue (Task 10 Step 8). *(Moot under Ruling 44: a DELETE carries no body, so no field of it was sent and it never answers 422 — the OpenAPI document is right as it stands, and the follow-up issue is dropped.)*
@@ -82,9 +82,9 @@ Each is recorded in the spec amendment (Task 9) as *HX-10 settled details* (1–
 Rulings taken after the plan review (`.superpowers/sdd/hx-10-plan-review.md`; H = high, M = medium, L = low finding):
 
 25. **(H1) The await rule exempts only the hook's own code.** A source-declared method is exempt from the await rule only when its containing type is the scope's hook type or a type nested in it (Ruling 33), or it is a local function declared inside the analysed body; for a delegate scope only such local functions. Everything else the host wrote — a typed HTTP client `IRatesClient.EuroAsync`, a repository, a helper class — is reported when awaited ("'IRatesClient.EuroAsync' is awaited, and only the write's transaction may be"), which is §4.4.5's rule and keeps HX-09 Ruling 62's promise ("a typed HTTP client … is the HX-10 analyzer's"). The documented blind spot is a *synchronous* call into the host's own code. `HookDependencies`' remarks and HX-09 Ruling 62 are amended to match (Task 9). Amends Ruling 12.
-26. **(H2) E1 is decided by whose data was refused, not by which function threw.** A refusal that would be the caller's (`OnCallerData`) is re-attributed as not the caller's — 500 `function-failed` — when (a) the refusing node's subtree calls a host function or reads the stored row (`old.`, `changed`), judged once, at the innermost node that sees the failure, from the compiled tree (`CelDataOrigin.IsCallersOwn`; computed on the failure path, not stored at compile time — the same answer, no change to a tree node, X7's "no new CEL AST node", and no cost unless a refusal happens); or (b) the failing expression reads a field a hook wrote earlier in the same write — `BeforeHookRunner` attributes against the fields its earlier hooks mutated, `WriteExtensionRunner` against the declarative before-hooks' mutate targets plus earlier host `Set`s for the before stages, and treats every refusal in an after-write `when` as not the caller's (the saved row carries defaults, rollups and hook writes). Conservative toward 500: an expression that reads a hook-written field anywhere is attributed as a whole. `BeforeHookRunner.Refusal`'s own remark ("the field … may be one they never sent") is the precedent. Amends Ruling 6.
+26. **(H2) E1 is decided by whose data was refused, not by which function threw.** A refusal that would be the caller's (`OnCallerData`) is re-attributed as not the caller's — 500 `function-failed` — when (a) the refusing node's subtree calls a host function or reads the stored row (`old.`, `changed`), judged once, at the innermost node that sees the failure, from the compiled tree (`CelDataOrigin.IsCallersOwn`; computed on the failure path, not stored at compile time — the same answer, no change to a tree node, X7's "no new CEL AST node", and no cost unless a refusal happens); or (b) the failing expression reads a field a hook wrote earlier in the same write — `BeforeHookRunner` attributes against the fields its earlier hooks mutated, `WriteExtensionRunner` against the declarative before-hooks' mutate targets plus earlier host `Set`s for the before stages, and treats every refusal in an after-write `when` as not the caller's (the saved row carries defaults, rollups and hook writes). Conservative toward 500: an expression that reads a hook-written field anywhere is attributed as a whole. `BeforeHookRunner.Refusal`'s own remark ("the field … may be one they never sent") is the precedent. Amends Ruling 6. *(Amended by Ruling 44.)*
 27. **(H2) Only the Data API's generated routes answer 422.** `expression-failed` is mapped in `ProblemResultFactory.RefusalFor` (the `GuardAsync` path), **not** in `PortRefusalFor`, so `CommandEndpointFilter` and the webhook receiver do not answer it; `AlvoExceptionHandler` answers it only when the failed endpoint carries `DataApiOperationMetadata`, and `function-failed` otherwise. A command handler builds its own writes, so a built-in refusing them is the handler's data, not the command caller's. Amends Ruling 7.
-28. **(L2) An aggregate answers 422 only when every function failure in it is the caller's.** `AlvoExceptionHandler.CallerDataFailure` walks the wrappers, collects every `CelFunctionException`, and answers 422 only when there is at least one and all have `OnCallerData`; a mix answers 500 and logs the host's failure. Amends Rulings 6 and 7.
+28. **(L2) An aggregate answers 422 only when every function failure in it is the caller's.** `AlvoExceptionHandler.CallerDataFailure` walks the wrappers, collects every `CelFunctionException`, and answers 422 only when there is at least one and all have `OnCallerData`; a mix answers 500 and logs the host's failure. Amends Rulings 6 and 7. *(Amended by Ruling 44.)*
 29. **(H3) One boundary: at the limit is over.** An evaluation overran when `elapsed >= Limit` — the same instant the deadline token cancels (`CancellationTokenSource(Limit, time)` fires when the clock reaches it). The inside-budget fact advances `Limit − 1 ms`; a new fact pins that exactly `Limit` is an overrun. Amends Ruling 2.
 30. **(M4) Once the deadline has passed, whatever the body threw is the overrun.** `CelFunctionBudget.Call` catches `Exception` (not only `OperationCanceledException`) when `Overran`, so `.Result`/`.Wait()` on a cancelled task (`AggregateException`) and a function that converts its cancellation into its own exception both read the budget sentence. Amends Ruling 2.
 31. **(M1) One diagnostic per reached symbol per body.** References to constant fields and to static fields/properties of a value or enum type (`SocketType.Stream`, `ProtocolType.Tcp`) are not reported; a reached field, property, parameter or local is reported once per operation block (per lambda body for a delegate scope), at its first use. Creations, static calls, generic arguments, `typeof`, awaits and task calls are reported where they occur. Amends Ruling 14.
@@ -3483,7 +3483,7 @@ function selected() {
 
 - [ ] **Step 5: Add the hooks arm to `scripts/test-load`**
 
-Do **not** run `scripts/test-load` in this task (Global Constraints). Edits:
+Do **not** run `scripts/test-load` in this task (Global Constraints). Edits: *(The two code blocks below are refreshed to the shipped script, as amended by the Task 8 and Task 9 review carries — the script is authoritative.)*
 
 1. Constants near `IMAGE_BASE`: `IMAGE_HOOKS=alvo-load:hooks` and `HOOK_SCENARIOS=hook_unit,hook_noop,hook_read,hook_after`.
 2. After the `HEAD_SCENARIOS` block, split hook shapes out of an explicit `--scenarios`:
@@ -3491,13 +3491,31 @@ Do **not** run `scripts/test-load` in this task (Global Constraints). Edits:
 ```bash
 # The hook shapes run against the hooks image (tools/MMLib.Alvo.Load.Host), never the standalone one: they mean "what an
 # in-transaction hook costs" only beside `create`, measured on the same dataset minutes earlier (HX-10, Q5). They run in
-# the calibration tier, or when --scenarios names them; never in the gate (a gate ceiling must be measured on the gate tier).
+# the calibration tier, or when --scenarios names them; never judged by the gate (a gate ceiling must be measured on the
+# gate tier, and the verdict reads only head-1.json), and never beside --baseline-ref.
 HOOKS_RUN=""
 if [ -n "$SCENARIOS_OVERRIDE" ]; then
     HOOKS_RUN="$(tr ',' '\n' <<<"$SCENARIOS_OVERRIDE" | grep '^hook_' | paste -sd, - || true)"
     HEAD_SCENARIOS="$(tr ',' '\n' <<<"$SCENARIOS_OVERRIDE" | grep -v '^hook_' | paste -sd, - || true)"
 elif [ "$TIER" = calibration ]; then
     HOOKS_RUN="$HOOK_SCENARIOS"
+fi
+if [ -n "$BASELINE_REF" ] && [ -n "$HOOKS_RUN" ]; then
+    say "no hooks arm with --baseline-ref: the A/B gate compares two standalone images, and a hook shape is measured only against create in a single-arm run"
+    HOOKS_RUN=""
+fi
+# Refused before any image is built: an empty head list would mean "every scenario" to scenarios.js, and the hook table
+# is published against `create` from the same run, so a hooks arm without it is ten minutes spent on nothing publishable.
+[ -n "$HEAD_SCENARIOS" ] || die "--scenarios names only hook shapes: add create, the shape they are published against"
+if [ -n "$HOOKS_RUN" ]; then
+    grep -qx create <<<"${HEAD_SCENARIOS//,/$'\n'}" \
+        || die "the hook shapes are published against \`create\`: add it to --scenarios"
+    # A misspelt shape (`hook_reed`) passes `^hook_`, and k6 silently skips a name it does not know — the arm would then
+    # publish a table without the shape that was asked for.
+    for shape in ${HOOKS_RUN//,/ }; do
+        grep -qx "$shape" <<<"${HOOK_SCENARIOS//,/$'\n'}" \
+            || die "unknown hook shape '$shape' (expected one of $HOOK_SCENARIOS)"
+    done
 fi
 ```
 
@@ -3508,13 +3526,43 @@ fi
 6. After the head arm (single-arm branch), the hooks arm and its report:
 
 ```bash
-# Validity first, exactly as the guard enforces it for the head arm: a dropped iteration or a failed request voids the
-# arm, and a void arm publishes garbage. `calibration-read` throws when it finds no customer, so a failed request here is
-# also the proof that the read hook ran.
+# Validity first, as the guard enforces it for the head arm: a dropped iteration or a failed request voids the arm, and a
+# void arm publishes garbage. Beyond the guard, every shape the arm was asked for must have produced samples — k6 skips
+# a scenario it does not run, and a table missing a shape is not the table that was asked for. A missing customer also
+# voids the arm (the `ref` refuses it, or `calibration-read` throws); a clean arm proves nothing about the hooks firing —
+# assert_hooks_fire does.
 assert_valid_summary() {
-    local file="$1"
+    local file="$1" shape
     jq -e '(.http_req_failed.rate // 0) == 0 and (.dropped_iterations.count // 0) == 0' "$file" >/dev/null \
         || die "$(basename "$file") is void: failed requests or dropped iterations — publish nothing from it"
+    for shape in ${HOOKS_RUN//,/ }; do
+        jq -e --arg s "$shape" '.scenarios[$s].min != null' "$file" >/dev/null \
+            || die "$(basename "$file") is void: \`$shape\` produced no samples — publish nothing from it"
+    done
+}
+
+# THE HOOKS TRIPWIRE, the hooks arm's `row_policy`: a clean arm cannot tell an image that runs the gated hooks from one
+# that silently serves the standalone composition or whose `when` never matches — and that arm would publish a hook-free
+# write as a hook's cost (HX-10, Ruling 20's p99 rule). So, before k6, one `WO-89…` work order is posted: the hooks
+# image's `calibration-probe` refuses exactly that prefix with 409, through the same `when` gating as the measured
+# hooks, naming itself in `extensions`. Any other answer refuses the arm. The probe writes nothing, and
+# reset_created_rows covers WO-8… anyway.
+assert_hooks_fire() {
+    local body status
+    body=$(jq -cn --arg tenant "$ALVO_FS_TENANT_NORTH" '{
+        tenant_id: $tenant, reference: "WO-89000001", title: "Hooks probe", status: "scheduled", priority: 3,
+        access_code: "AC-LOAD", customer_id: "22222222-0001-4000-8000-000000000001",
+        region_id: "11111111-0000-4000-8000-000000000001" }')
+    status=$(curl -sS --max-time 30 -o "$OUT_DIR/probe.json" -w '%{http_code}' -X POST \
+        -H "X-Alvo-Api-Key: $KEY_DISPATCHER" -H 'Content-Type: application/json' --data "$body" \
+        "$BASE_URL/api/work_orders") \
+        || die "the hooks probe (WO-89000001) could not reach $BASE_URL: the hooks image is not serving, so the hooks arm would measure nothing"
+    [ "$status" = "409" ] \
+        || die "the hooks probe (WO-89000001) answered $status, not calibration-probe's 409: the hooks image is not running its gated calibration hooks, so the hooks arm would measure nothing"
+    # A unique `reference` violation is also a 409 `conflict`; only the hook's refusal names it in `extensions`.
+    jq -e '.extensions == ["calibration-probe"]' "$OUT_DIR/probe.json" >/dev/null \
+        || die "the hooks probe (WO-89000001) answered 409 without calibration-probe in its extensions: the conflict is not the gated hook's, so the hooks arm would measure nothing"
+    say "hooks probe refused with 409: the gated calibration hooks are live"
 }
 
 hook_table() {
@@ -3526,15 +3574,20 @@ hook_table() {
         | "| `\(.key)` | \(.value.min*100|round/100) | \(.value.med*100|round/100) | \(.value["p(95)"]*100|round/100) | \(.value["p(99)"]*100|round/100) | \(.value.max*100|round/100) | \((.value.min / $base)*100|round/100)x |"' "$hooks"
 }
 
+# The hooks arm: the alvo container swapped for the hooks image in place, PostgreSQL and its rows untouched, so the hook
+# shapes and the head arm's `create` measure the same dataset. The head image is put back afterwards for --keep.
 if [ -n "$HOOKS_RUN" ]; then
     use_image "$IMAGE_HOOKS"
     reset_created_rows
+    assert_hooks_fire
     run_k6 hooks-1.json "$HOOKS_RUN" "$CURSOR"
     use_image "$IMAGE_HEAD"
     assert_valid_summary "$OUT_DIR/hooks-1.json"
     [ -f "$OUT_DIR/head-1.json" ] && jq -e '.scenarios.create' "$OUT_DIR/head-1.json" >/dev/null \
         || die "the hook shapes are published against \`create\`: run it in the same invocation"
-    hook_table "$OUT_DIR/head-1.json" "$OUT_DIR/hooks-1.json"
+    # Teed into the artifacts as well as stdout: CI appends hooks.md to calibration.md and uploads it, so the table is
+    # copied from the published artifact rather than scraped out of a step log.
+    hook_table "$OUT_DIR/head-1.json" "$OUT_DIR/hooks-1.json" | tee "$OUT_DIR/hooks.md"
 fi
 ```
 

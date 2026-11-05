@@ -319,7 +319,8 @@ and the budget bounds what it cannot — except a function that never returns.
   44): a built-in refusing a host function's output (`int(rateOf(new.c))`), the stored row (`old.`, `changed`), or a value
   an earlier hook wrote is 500; and a refusal is 422 only when every field of the written row its subtree reads was in
   this request's body — a field an update left alone, a default, a literal or `@user`, and any refusal on a DELETE, is
-  500. An aggregate answers 422 only when every function failure in it is the caller's. An **after-hook condition** is
+  500. An aggregate answers 422 only when every leaf of it is such a refusal — a failure of anything else beside it (a
+  host function, a storage exception) makes it 500 (Ruling 44). An **after-hook condition** is
   already post-commit, so the after-hook is dropped and a Warning is logged, whatever the origin.
 - **Time budget (HX-10, #309).** Every host function call in one evaluation pass shares one deadline,
   `Alvo:Extensions:CelFunctionBudget` (default 250 ms, bounds (0, 30 s], refused at start naming the key). A pass is

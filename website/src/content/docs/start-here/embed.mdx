@@ -140,7 +140,7 @@ Alvo adds no authentication, authorization or routing middleware on your behalf.
   decide: [Use your own authentication](/guides/own-authentication/).
 - **Error rendering.** The code above deliberately does not call `AddAlvoProblemDetails()`, because an embedded host owns
   the shape of its error responses. Without it, Alvo's endpoints still answer their own refusals as problem documents,
-  but three problem types are only produced with it: `unreadable-request`, `internal` and `function-failed`
+  but four problem types are only produced with it: `unreadable-request`, `internal`, `function-failed` and `hook-failed`
   ([Problem types](/reference/problem-types/)).
 - **Your own endpoints.** They call Alvo in process through `IAlvoData`, with no HTTP round trip and no second
   authorization model: [Call Alvo from your endpoints](/guides/call-from-endpoints/).

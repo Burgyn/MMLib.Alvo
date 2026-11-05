@@ -474,7 +474,7 @@ commit and therefore holds no lock.
 
 ### What bounds a hook's execution time — the grammar, not a timeout
 
-There is no wall-clock budget and no cancellation token to carry one, and that is a decision rather
+A descriptor's own expressions carry no wall-clock budget and no cancellation token to carry one, and that is a decision rather
 than an omission. **The bound is structural.** A hook is a fixed number of compiled CEL expressions —
 the count fixed by the descriptor at apply, never by the request — and the profiles they compile in
 (`Condition` for the gate, `Mutate` for the values) have no loop, no comprehension macro, no
@@ -491,7 +491,7 @@ So the work is **O(descriptor), not O(caller input)**: no request can make a hoo
 wall-clock budget could only fire on a machine that had already stopped serving. A timeout would buy a
 clock read per hook plus a second failure mode *inside a transaction*, to guard against an overrun the
 grammar cannot express. Recorded as deviation 81, because the addendum's DoD names a "budget-overrun
-rollback" and a reader is owed the reason there is no budget to overrun. The claim is only as good as
+rollback" and a reader is owed the reason there is no budget to overrun (host functions do carry one since HX-10, above). The claim is only as good as
 the grammar it rests on: **the PR that admits a loop, a comprehension or a call that can block into a
 before-hook profile owes a budget with it.**
 
