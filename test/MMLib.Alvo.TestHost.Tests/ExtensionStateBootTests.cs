@@ -40,8 +40,7 @@ public sealed class ExtensionStateBootTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
-            File.Delete(file);
+            SqliteTempFile.Delete(file);
         }
     }
 
@@ -59,7 +58,7 @@ public sealed class ExtensionStateBootTests
     private static Task<AlvoTestHost> StartOnFileAsync(string file, Action<IAlvoBuilder> extensions) => AlvoTestHost.StartAsync(
         alvo =>
         {
-            alvo.UseSqlite($"Data Source={file}").FromDescriptor(HelpDesk);
+            alvo.UseSqlite(SqliteTempFile.ConnectionStringFor(file)).FromDescriptor(HelpDesk);
             extensions(alvo);
         },
         new FakeTimeProvider(new DateTimeOffset(2026, 10, 23, 9, 0, 0, TimeSpan.Zero)),
@@ -67,7 +66,7 @@ public sealed class ExtensionStateBootTests
 
     private static async Task<(string Status, string? LastErrorType)> DeliveryOfAsync(string file)
     {
-        await using var connection = new SqliteConnection($"Data Source={file}");
+        await using var connection = new SqliteConnection(SqliteTempFile.ConnectionStringFor(file));
         await connection.OpenAsync(Ct);
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT status, last_error_type FROM alvo_deliveries";

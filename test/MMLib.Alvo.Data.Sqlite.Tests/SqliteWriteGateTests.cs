@@ -203,7 +203,12 @@ public sealed class SqliteWriteGateTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
+        // Only this file's pool: clearing every pool disposes a handle another fact is opening (see SqliteTempFile in TestHost.Tests).
+        using (var connection = new SqliteConnection($"Data Source={_databasePath}"))
+        {
+            SqliteConnection.ClearPool(connection);
+        }
+
         try
         {
             File.Delete(_databasePath);

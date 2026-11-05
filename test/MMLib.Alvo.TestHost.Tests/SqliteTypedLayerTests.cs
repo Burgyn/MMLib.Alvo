@@ -1,5 +1,4 @@
-﻿using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 
 namespace MMLib.Alvo.TestHost.Tests;
 
@@ -10,16 +9,9 @@ public sealed class SqliteTypedLayerTests : TypedLayerFacts, IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
         foreach (var file in _files)
         {
-            try
-            {
-                File.Delete(file);
-            }
-            catch (IOException)
-            {
-            }
+            SqliteTempFile.Delete(file);
         }
 
         GC.SuppressFinalize(this);
@@ -29,7 +21,7 @@ public sealed class SqliteTypedLayerTests : TypedLayerFacts, IDisposable
     {
         var path = Path.Combine(Path.GetTempPath(), $"alvo-typed-{Guid.NewGuid():N}.db");
         _files.Add(path);
-        var connectionString = $"Data Source={path}";
+        var connectionString = SqliteTempFile.ConnectionStringFor(path);
 
         return Task.FromResult(new TypedDatabase(alvo => alvo.UseSqlite(connectionString), Path.GetFileName(path)));
     }

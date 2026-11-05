@@ -43,8 +43,7 @@ public sealed class AlvoTestHostStartTests
         }
         finally
         {
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-            File.Delete(file);
+            SqliteTempFile.Delete(file);
         }
     }
 
@@ -151,7 +150,7 @@ public sealed class AlvoTestHostStartTests
     }
 
     private static Task<AlvoTestHost> StartOnFileAsync(string file) => AlvoTestHost.StartAsync(
-        alvo => alvo.UseSqlite($"Data Source={file}").FromDescriptor(HelpDesk), cancellationToken: Ct);
+        alvo => alvo.UseSqlite(SqliteTempFile.ConnectionStringFor(file)).FromDescriptor(HelpDesk), cancellationToken: Ct);
 
     private static Dictionary<string, object?> Title(string title) => new(StringComparer.Ordinal) { ["title"] = title };
 
