@@ -140,6 +140,10 @@
   references `MMLib.Alvo.Host` so that it can boot the real composition. Its suite,
   `test/MMLib.Alvo.DocsGen.Tests`, is an ordinary ring0 module. Design:
   [`2026-10-09-f6-docs-site-design.md`](../superpowers/specs/2026-10-09-f6-docs-site-design.md).
+  `tools/MMLib.Alvo.Load.Host`, the load harness's hooks arm (the standalone composition plus three calibration
+  hooks, built into its own image by `scripts/test-load` and never published), is **not a package** by the same
+  reasoning: `IsPackable=false`, run and never referenced — its `CalibrationHooks.cs` is linked as source into
+  `test/MMLib.Alvo.TestHost.Tests`, not referenced as an assembly.
 - `test/` — one `*.Tests` per shipped project (arch + public-API approval
   auto-linked), `MMLib.Alvo.Conventions.Tests` (solution-structure checks),
   `MMLib.Alvo.Api.Tests`, and the `*.Tests.Integration` projects

@@ -8,6 +8,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/testhost/*.cs" Link="_shared/testhost/%(Filename)%(Extension)" />
     <None Include="$(MSBuildThisFileDirectory)../_shared/testhost/descriptors/*.alvo.json" Link="descriptors/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/SqlCapture.cs" Link="_shared/SqlCapture.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../../tools/MMLib.Alvo.Load.Host/CalibrationHooks.cs" Link="_load/CalibrationHooks.cs" />
   </ItemGroup>
 
   <ItemGroup>

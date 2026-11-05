@@ -48,5 +48,6 @@
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/MMLib.Alvo.DocsGen/MMLib.Alvo.DocsGen.csproj" />
+    <Project Path="tools/MMLib.Alvo.Load.Host/MMLib.Alvo.Load.Host.csproj" />
   </Folder>
 </Solution>

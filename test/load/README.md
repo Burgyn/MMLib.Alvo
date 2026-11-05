@@ -17,6 +17,7 @@ scripts/test-load                                # gate tier, ratios only
 scripts/test-load --baseline-ref origin/main     # + the absolute A/B half
 scripts/test-load --tier calibration             # the publishable numbers
 scripts/test-load --keep                         # leave the stack up at :8091 afterwards
+scripts/test-load --tier calibration --scenarios create,hook_unit,hook_noop,hook_read,hook_after   # the hook calibration
 ```
 
 `--tier calibration --rows 1000000 --scenarios page_shallow,page_deep` is the 1 M-row keyset
@@ -127,6 +128,43 @@ pushdown (#117, where the number should drop *below* 1.0), native `NULLS FIRST/L
 virtual entity against a physical one, which turns the analysis's *"identically over both"*
 criterion into a number).
 
+## The hooks arm (HX-10)
+
+What an in-transaction write hook costs, measured so Q5's 250 ms default can be judged against a number rather than a
+guess. The standalone image registers no hook — hooks are C# registered at composition, not descriptor content — so
+`tools/MMLib.Alvo.Load.Host` is a second image: `AlvoHost`'s own composition plus three hooks on `work_orders`, each
+gated by a `when` on the work order's reference prefix so one host serves every shape. `scripts/test-load` builds it
+(`alvo-load:hooks`, from HEAD only) and removes it afterwards; it is never published.
+
+The arm swaps the alvo container for the hooks image in place, exactly as the A/B arms swap, so the hook shapes measure
+the **same dataset** as the head arm's `create` a few minutes earlier. Five shapes, each meaningful only as a
+difference from its neighbour:
+
+| Shape | Image | Reference | What it adds over its neighbour |
+|---|---|---|---|
+| `create` | standalone | `WO-9…` | — a write with no hook at all |
+| `hook_unit` | hooks | `WO-80…` | `hook_unit − create` = a write's own transaction unit + three `when` evaluations (none matches) |
+| `hook_noop` | hooks | `WO-81…` | `hook_noop − hook_unit` = invoking one before-write hook (`calibration-noop`, no work) |
+| `hook_read` | hooks | `WO-82…` | `hook_read − hook_noop` = one read through `write.Transaction` (`calibration-read` loads the work order's customer) |
+| `hook_after` | hooks | `WO-83…` | `hook_after − hook_unit` = an after-write invocation (`calibration-after`, no work) |
+
+**Calibration tier only** — it runs there by default, or when `--scenarios` names a hook shape; never in the gate (a
+gate ceiling must be measured on the gate tier, and Q5 asks for a calibrated default, not a regression gate), and never
+beside `--baseline-ref`. A hook shape is published against `create` from the same run, so a `--scenarios` with hook
+shapes but no `create` is refused before any image is built. An unfiltered `scenarios.js` run leaves the hook shapes
+out: against the standalone image they would measure `create` four more times under other names.
+
+Validity is the head arm's: a failed request or a dropped iteration voids the arm. `calibration-read` throws when it
+finds no customer, so a clean arm is also the proof that the read hook ran and read something. The arm prints a table
+— min, med, p95, p99, max per shape, and each min over `create`'s — which is **copied by hand** into
+`docs/performance.md`, never edited.
+
+**The Q5 decision rule** (HX-10 plan, Ruling 20): keep the 250 ms in-transaction default (hooks and host functions
+alike) when `hook_read`'s p99 on the calibration rig is ≤ 25 ms — a tenfold headroom over a hook that does one read;
+otherwise raise `AlvoHookOptions.DefaultTimeout` (and with it `CelFunctionBudget`'s default) to the smallest of 500 ms
+or 1 s that restores tenfold headroom, amend Q5, and record it in the CHANGELOG. Validate's 5 s is not calibrated here:
+it bounds a network call this rig cannot represent.
+
 ## What the harness refuses to measure
 
 A run is **void, not slow**, and the guard exits 2 rather than 1, when:
@@ -170,6 +208,7 @@ the generator is off-box.
 | `seed.sql` | the bulk seed, parameterised by `:rows` |
 | `baselines/gate.json` | ratio ceilings and A/B factors — the reviewable artifact |
 | `docker-compose.load.yml` | the field-service stack with a pre-built image, so the A/B can swap arms |
+| `../../tools/MMLib.Alvo.Load.Host` | the hooks arm's host: the standalone composition plus three calibration hooks |
 | `../../scripts/test-load` | the driver: image, stack, seed, cursor walk, k6, verdict |
 | `../../scripts/assert-load-baseline` | the verdict — the one authority on pass/fail |
 | `../../scripts/test-assert-load-baseline` | the guard's own suite |

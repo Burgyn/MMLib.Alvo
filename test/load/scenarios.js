@@ -63,6 +63,10 @@ const CATALOGUE = [
     { name: 'select_projection', exec: 'selectProjection', rate: LIST_RATE },
     { name: 'unindexed_filter', exec: 'unindexedFilter', rate: LIST_RATE },
     { name: 'create', exec: 'createWorkOrder', rate: WRITE_RATE },
+    { name: 'hook_unit', exec: 'hookUnit', rate: WRITE_RATE, arm: 'hooks' },
+    { name: 'hook_noop', exec: 'hookNoop', rate: WRITE_RATE, arm: 'hooks' },
+    { name: 'hook_read', exec: 'hookRead', rate: WRITE_RATE, arm: 'hooks' },
+    { name: 'hook_after', exec: 'hookAfter', rate: WRITE_RATE, arm: 'hooks' },
     { name: 'openapi', exec: 'openapiDocument', rate: DOC_RATE },
 ];
 
@@ -171,10 +175,11 @@ export function unindexedFilter() {
     record('unindexed_filter', http.get(url, dispatcher));
 }
 
-// References must not collide with the seed's (1..ROWS north, 50 000 001.. south) nor with each
-// other, and must stay inside the descriptor's four-to-eight digit `work-order-ref` format.
-export function createWorkOrder() {
-    const ordinal = 90000000 + (exec.scenario.iterationInTest % 9000000);
+// References must not collide with the seed's (1..ROWS north, 50 000 001.. south) nor with each other, and must stay
+// inside the descriptor's four-to-eight digit `work-order-ref` format. The standalone image's `create` owns 9xxxxxxx;
+// the hooks arm owns 80…83 xxxxxx, one million each, whose prefix selects the calibration hook (tools/MMLib.Alvo.Load.Host).
+function postWorkOrder(name, base, span) {
+    const ordinal = base + (exec.scenario.iterationInTest % span);
     const body = JSON.stringify({
         tenant_id: TENANT,
         reference: `WO-${ordinal}`,
@@ -189,8 +194,14 @@ export function createWorkOrder() {
         timeout: TIMEOUT,
         headers: { 'X-Alvo-Api-Key': KEY_DISPATCHER, 'Content-Type': 'application/json' },
     };
-    record('create', http.post(`${BASE}/api/work_orders`, body, options));
+    record(name, http.post(`${BASE}/api/work_orders`, body, options));
 }
+
+export function createWorkOrder() { postWorkOrder('create', 90000000, 9000000); }
+export function hookUnit() { postWorkOrder('hook_unit', 80000000, 1000000); }
+export function hookNoop() { postWorkOrder('hook_noop', 81000000, 1000000); }
+export function hookRead() { postWorkOrder('hook_read', 82000000, 1000000); }
+export function hookAfter() { postWorkOrder('hook_after', 83000000, 1000000); }
 
 export function openapiDocument() {
     record('openapi', http.get(`${BASE}/openapi/v1.json`, dispatcher));
@@ -205,7 +216,9 @@ export function warmup() {
 }
 
 function selected() {
-    const wanted = CATALOGUE.filter((s) => REQUESTED.length === 0 || REQUESTED.includes(s.name));
+    // A hook shape means something only against the hooks image (tools/MMLib.Alvo.Load.Host), so an unfiltered run —
+    // the standalone image's — leaves them out; scripts/test-load names them for the hooks arm.
+    const wanted = CATALOGUE.filter((s) => (REQUESTED.length === 0 ? s.arm !== 'hooks' : REQUESTED.includes(s.name)));
     return wanted.filter((s) => !s.needsCursor || DEEP_CURSOR !== '');
 }
 

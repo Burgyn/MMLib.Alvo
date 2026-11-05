@@ -26,6 +26,7 @@
 #   scripts/test-load --baseline-ref origin/main       # gate tier with the absolute A/B half
 #   scripts/test-load --tier calibration               # the publishable numbers
 #   scripts/test-load --tier calibration --rows 1000000 --scenarios page_shallow,page_deep
+#   scripts/test-load --tier calibration --scenarios create,hook_unit,hook_noop,hook_read,hook_after   # the hook calibration (HX-10)
 
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -43,6 +44,8 @@ OUT_DIR="$ROOT/artifacts/load"
 PROJECT=alvo-load
 IMAGE_HEAD=alvo-load:head
 IMAGE_BASE=alvo-load:base
+IMAGE_HOOKS=alvo-load:hooks
+HOOK_SCENARIOS=hook_unit,hook_noop,hook_read,hook_after
 BASELINE_FILE="$ROOT/test/load/baselines/gate.json"
 
 die() { printf 'test-load: %s\n' "$1" >&2; exit 2; }
@@ -113,6 +116,28 @@ else
     HEAD_SCENARIOS="$GATE_SCENARIOS"
 fi
 
+# The hook shapes run against the hooks image (tools/MMLib.Alvo.Load.Host), never the standalone one: they mean "what an
+# in-transaction hook costs" only beside `create`, measured on the same dataset minutes earlier (HX-10, Q5). They run in
+# the calibration tier, or when --scenarios names them; never in the gate (a gate ceiling must be measured on the gate tier).
+HOOKS_RUN=""
+if [ -n "$SCENARIOS_OVERRIDE" ]; then
+    HOOKS_RUN="$(tr ',' '\n' <<<"$SCENARIOS_OVERRIDE" | grep '^hook_' | paste -sd, - || true)"
+    HEAD_SCENARIOS="$(tr ',' '\n' <<<"$SCENARIOS_OVERRIDE" | grep -v '^hook_' | paste -sd, - || true)"
+elif [ "$TIER" = calibration ]; then
+    HOOKS_RUN="$HOOK_SCENARIOS"
+fi
+if [ -n "$BASELINE_REF" ] && [ -n "$HOOKS_RUN" ]; then
+    say "no hooks arm with --baseline-ref: the A/B gate compares two standalone images, and a hook shape is measured only against create in a single-arm run"
+    HOOKS_RUN=""
+fi
+# Refused before any image is built: an empty head list would mean "every scenario" to scenarios.js, and the hook table
+# is published against `create` from the same run, so a hooks arm without it is ten minutes spent on nothing publishable.
+[ -n "$HEAD_SCENARIOS" ] || die "--scenarios names only hook shapes: add create, the shape they are published against"
+if [ -n "$HOOKS_RUN" ]; then
+    grep -qx create <<<"${HEAD_SCENARIOS//,/$'\n'}" \
+        || die "the hook shapes are published against \`create\`: add it to --scenarios"
+fi
+
 for tool in docker curl jq openssl; do
     command -v "$tool" >/dev/null || die "$tool is required"
 done
@@ -159,6 +184,9 @@ cleanup() {
         rm -rf "$(dirname "$WORKTREE")" >/dev/null 2>&1 || true
         docker image rm -f "$IMAGE_BASE" >/dev/null 2>&1 || true
     fi
+    if [ -n "${HOOKS_RUN:-}" ]; then
+        docker image rm -f "$IMAGE_HOOKS" >/dev/null 2>&1 || true
+    fi
     if [ "$KEEP" -eq 0 ]; then
         ALVO_LOAD_IMAGE="$IMAGE_HEAD" docker compose "${COMPOSE[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
     else
@@ -178,6 +206,14 @@ build_image() {
     [ -f "$dockerfile" ] || die "no Dockerfile at $dockerfile — the arm's own build configuration is what makes an A/B a comparison"
     say "building $tag"
     docker build --quiet -f "$dockerfile" -t "$tag" "$context" >/dev/null
+}
+
+# The hooks arm's image: the standalone composition plus three calibration hooks. Its Dockerfile is not in
+# src/MMLib.Alvo.Host, so build_image's context-relative lookup does not apply; it is built from HEAD only, because the
+# hooks arm never runs beside --baseline-ref.
+build_hooks_image() {
+    say "building $IMAGE_HOOKS"
+    docker build --quiet -f "$ROOT/tools/MMLib.Alvo.Load.Host/Dockerfile" -t "$IMAGE_HOOKS" "$ROOT" >/dev/null
 }
 
 # The alvo service is recreated with the other arm's image while PostgreSQL and its data stay put.
@@ -214,11 +250,12 @@ seed() {
         -f - < "$ROOT/test/load/seed.sql" >/dev/null
 }
 
-# Rows the `create` scenario added, removed between arms so arm two does not measure a slightly
-# larger table than arm one. The seed's own references never start with 9.
+# Rows the `create` scenario (WO-9…) and the hook shapes (WO-80… to WO-83…) added, removed between arms so arm two does
+# not measure a slightly larger table than arm one. The seed's own references never start with 8 or 9: north is
+# zero-padded from WO-00000001, south starts at WO-50000001.
 reset_created_rows() {
     ALVO_LOAD_IMAGE="$IMAGE_HEAD" psql_in_container \
-        -c "DELETE FROM work_orders WHERE reference LIKE 'WO-9%';" >/dev/null
+        -c "DELETE FROM work_orders WHERE reference LIKE 'WO-9%' OR reference LIKE 'WO-8%';" >/dev/null
 }
 
 # The seed writes the physical tables directly, so it knows a layout DescriptorToSchemaMapper
@@ -371,6 +408,9 @@ run_k6() {
 
 rm -f "$OUT_DIR"/*.json 2>/dev/null || true
 build_image "$IMAGE_HEAD" "$ROOT"
+if [ -n "$HOOKS_RUN" ]; then
+    build_hooks_image
+fi
 
 if [ -n "$BASELINE_REF" ]; then
     WORKTREE="$(mktemp -d "${TMPDIR:-/tmp}/alvo-load-base.XXXXXX")/tree"
@@ -407,6 +447,37 @@ else
         run_k6 "base-$rep.json" "$ABSOLUTE_SCENARIOS" "$CURSOR"
         BASE_ARGS+=(--base "$OUT_DIR/base-$rep.json")
     done
+fi
+
+# Validity first, exactly as the guard enforces it for the head arm: a dropped iteration or a failed request voids the
+# arm, and a void arm publishes garbage. `calibration-read` throws when it finds no customer, so a failed request here is
+# also the proof that the read hook ran.
+assert_valid_summary() {
+    local file="$1"
+    jq -e '(.http_req_failed.rate // 0) == 0 and (.dropped_iterations.count // 0) == 0' "$file" >/dev/null \
+        || die "$(basename "$file") is void: failed requests or dropped iterations — publish nothing from it"
+}
+
+hook_table() {
+    local head="$1" hooks="$2"
+    printf '\n| Shape | min | med | p95 | p99 | max | min / create min |\n|---|---|---|---|---|---|---|\n'
+    jq -r --slurpfile head "$head" '
+        ($head[0].scenarios.create.min) as $base
+        | ([{key: "create", value: $head[0].scenarios.create}] + (.scenarios | to_entries))[]
+        | "| `\(.key)` | \(.value.min*100|round/100) | \(.value.med*100|round/100) | \(.value["p(95)"]*100|round/100) | \(.value["p(99)"]*100|round/100) | \(.value.max*100|round/100) | \((.value.min / $base)*100|round/100)x |"' "$hooks"
+}
+
+# The hooks arm: the alvo container swapped for the hooks image in place, PostgreSQL and its rows untouched, so the hook
+# shapes and the head arm's `create` measure the same dataset. The head image is put back afterwards for --keep.
+if [ -n "$HOOKS_RUN" ]; then
+    use_image "$IMAGE_HOOKS"
+    reset_created_rows
+    run_k6 hooks-1.json "$HOOKS_RUN" "$CURSOR"
+    use_image "$IMAGE_HEAD"
+    assert_valid_summary "$OUT_DIR/hooks-1.json"
+    [ -f "$OUT_DIR/head-1.json" ] && jq -e '.scenarios.create' "$OUT_DIR/head-1.json" >/dev/null \
+        || die "the hook shapes are published against \`create\`: run it in the same invocation"
+    hook_table "$OUT_DIR/head-1.json" "$OUT_DIR/hooks-1.json"
 fi
 
 # The calibration tier REPORTS; only the gate tier judges. The ceilings in the baseline file were
