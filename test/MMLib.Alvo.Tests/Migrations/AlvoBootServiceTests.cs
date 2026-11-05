@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Migrations.Internal;
 using System.Reflection;
@@ -335,6 +336,57 @@ public sealed class AlvoBootServiceTests
 
         world.State.Phase.ShouldBe(AlvoBootPhase.Failed);
         world.State.Failure.ShouldNotBeNull().ShouldContain("the driver refused");
+    }
+
+    /// <summary>
+    /// <c>Skip</c> serves the recorded schema even when the descriptor adds a validation the database's rows break: it
+    /// applies nothing, so the pre-apply count is never run and cannot fail the start (HX-11 Ruling 66).
+    /// </summary>
+    [Fact]
+    public async Task Skip_keeps_serving_over_a_validation_existing_rows_break()
+    {
+        using var world = new BootServiceWorld()
+            .Applied(BootServiceWorld.City)
+            .BootingFrom(BootServiceWorld.ValidatedCity);
+        world.Options.Startup = AlvoSchemaStartupMode.Skip;
+        world.RowsBreakNewValidations = true;
+
+        await world.BootOrFailAsync();
+
+        world.State.Phase.ShouldBe(AlvoBootPhase.Ready);
+        world.State.AppliedRevision.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// An older pod whose descriptor still declares a validation the newer revision removed — and rows written since break
+    /// — stands down without stopping, as any older pod does (#145): it applies nothing, so it never counts (Ruling 66).
+    /// </summary>
+    [Fact]
+    public async Task An_older_pod_over_a_validation_existing_rows_break_stands_down_without_stopping()
+    {
+        using var world = new BootServiceWorld()
+            .Applied(BootServiceWorld.ValidatedCity, BootServiceWorld.City)
+            .BootingFrom(BootServiceWorld.ValidatedCity);
+        world.RowsBreakNewValidations = true;
+
+        (await world.BootAsync()).ShouldBeNull("a pod that is one deploy behind must be drained, not killed");
+
+        world.State.Phase.ShouldBe(AlvoBootPhase.Failed);
+        world.RecordedRevisions().ShouldBe([1, 2]);
+        world.PrimedEntities.ShouldBeEmpty();
+    }
+
+    /// <summary>The counterweight: a boot that does apply the validation counts first, and the breaking rows refuse it.</summary>
+    [Fact]
+    public async Task A_boot_that_applies_a_validation_existing_rows_break_is_refused_by_the_count()
+    {
+        using var world = new BootServiceWorld()
+            .Applied(BootServiceWorld.City)
+            .BootingFrom(BootServiceWorld.ValidatedCity);
+        world.RowsBreakNewValidations = true;
+
+        (await world.BootAsync()).ShouldBeOfType<DescriptorValidationException>();
+        world.RecordedRevisions().ShouldBe([1]);
     }
 
     /// <summary>

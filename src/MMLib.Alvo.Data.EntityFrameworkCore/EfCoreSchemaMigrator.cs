@@ -37,7 +37,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// locking (PR-B), not by this type.
 /// </para>
 /// </remarks>
-public sealed class EfCoreSchemaMigrator : ISchemaMigrator
+public sealed class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSchemaPlanner
 {
     private readonly IMigrationsModelDiffer _differ;
     private readonly IMigrationsSqlGenerator _sqlGenerator;
@@ -102,14 +102,26 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
     /// constraint is counted against the table (<see cref="CheckViolationScan"/>), and a positive count refuses the plan at
     /// the validation's pointer, so a dry run reports it before anything is applied (HX-11 Rulings 22, 49).
     /// </remarks>
-    public async Task<MigrationPlan> PlanAsync(SchemaModel current, SchemaModel desired, MigrationOptions options, CancellationToken ct = default)
+    public Task<MigrationPlan> PlanAsync(SchemaModel current, SchemaModel desired, MigrationOptions options, CancellationToken ct = default) =>
+        PlanAsync(current, desired, counted: true, ct);
+
+    /// <inheritdoc/>
+    Task<MigrationPlan> IUncountedSchemaPlanner.PlanWithoutCountingAsync(
+        SchemaModel current, SchemaModel desired, MigrationOptions options, CancellationToken ct) =>
+        PlanAsync(current, desired, counted: false, ct);
+
+    private async Task<MigrationPlan> PlanAsync(SchemaModel current, SchemaModel desired, bool counted, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(current);
         ArgumentNullException.ThrowIfNull(desired);
         ct.ThrowIfCancellationRequested();
 
         var (prePass, desiredModel, residual) = ComputeResidualDiff(current, desired);
-        await RefuseRowsThatBreakNewChecksAsync(current, desired, prePass, residual, ct).ConfigureAwait(false);
+        if (counted)
+        {
+            await RefuseRowsThatBreakNewChecksAsync(current, desired, prePass, residual, ct).ConfigureAwait(false);
+        }
+
         var operations = ForThisEngine(AssembleOperations(prePass, residual));
         var steps = BuildSemanticSteps(prePass, desired, residual);
         var sql = GenerateSql(operations, desiredModel);

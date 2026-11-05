@@ -607,11 +607,24 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         BootPlan boot, AppliedSchema? applied, CancellationToken ct)
     {
         var current = applied?.Schema ?? await _introspector.IntrospectAsync(ct).ConfigureAwait(false);
-        var plan = await _migrator.PlanAsync(current, boot.Desired, MigrationOptions, ct).ConfigureAwait(false);
+        var plan = await PlanUncountedAsync(current, boot.Desired, ct).ConfigureAwait(false);
         var outOfOrder = await AmIAnOlderPodAsync(boot, plan, ct).ConfigureAwait(false);
+        var decision = SchemaStartupPolicy.Decide(applied, plan, _options.Value, outOfOrder);
 
-        return SchemaStartupPolicy.Decide(applied, plan, _options.Value, outOfOrder);
+        return decision.Outcome is SchemaStartupOutcome.Apply or SchemaStartupOutcome.Initialize
+            ? decision with { Plan = await _migrator.PlanAsync(current, boot.Desired, MigrationOptions, ct).ConfigureAwait(false) }
+            : decision;
     }
+
+    /// <summary>
+    /// The plan stage 2 judges, without the pre-apply violation scan: a boot that will not act — <c>Skip</c>, an older pod
+    /// standing down (#145), a refusal — must not be failed by a count over rows it never touches. Only a decision to
+    /// initialize or apply plans again with the count (HX-11 Ruling 66).
+    /// </summary>
+    private Task<MigrationPlan> PlanUncountedAsync(SchemaModel current, SchemaModel desired, CancellationToken ct) =>
+        _migrator is IUncountedSchemaPlanner uncounted
+            ? uncounted.PlanWithoutCountingAsync(current, desired, MigrationOptions, ct)
+            : _migrator.PlanAsync(current, desired, MigrationOptions, ct);
 
     /// <summary>
     /// Whether this process is holding a descriptor the database has already moved on from — the ordering the
