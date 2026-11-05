@@ -4,7 +4,7 @@
 
 **Goal:** In-transaction host code gets the three guards the spec promised it: a Roslyn analyzer (`ALVO1001`, shipped inside the `MMLib.Alvo` nupkg) that flags the network, a database connection, the file system, a second data port, and any `await` that is not the write's transaction in a before/after-write or before/after-delete hook and in an `AddCelFunction` delegate; a per-evaluation **time budget** for host CEL functions, with a trailing `CancellationToken` a function may take; and a caller-fixable answer — **422 `expression-failed`** — when a built-in CEL function or hook arithmetic refuses the caller's data (E1, #315), while host failures stay 500. The 250 ms in-transaction default (Q5) is calibrated by a `scripts/test-load` hook scenario published in `docs/performance.md`.
 
-**Architecture:** The budget is an internal, `AsyncLocal` **evaluation pass** (`CelFunctionBudget`) opened by the three places that evaluate host-callable CEL — `BeforeHookRunner.Run` (declarative before-hooks, in the write's transaction), `WriteExtensionRunner`'s write-hook `when`, and `PredicateEvaluator` for `Condition`-profile expressions (post-commit after-hook and handler conditions) — from one DI singleton, `CelFunctionBudgetPolicy` (`Alvo:Extensions:CelFunctionBudget` on the host's `TimeProvider`). `HostCelFunction`'s body runs every call through the ambient pass: it hands a token-aware delegate the pass's token, and fails the call as the host function's `CelFunctionException` when the deadline cancels it or when it returns late; `IBeforeHookRunner.Run` stays synchronous and token-free (#309). E1 is one classification on the internal `CelFunctionException` (`OnCallerData`: a built-in's or the interpreter's refusal) read by `ProblemResultFactory.PortRefusalFor` — so every host answers it, no opt-in — and by `AlvoExceptionHandler`. The analyzer is a new **project, not a package** (E6): `src/MMLib.Alvo.Analyzers` (netstandard2.0, `IsPackable=false`), packed by `MMLib.Alvo`'s pack into `analyzers/dotnet/cs`, proven by a script that builds a packed consumer on the minimum SDK in a container. Calibration runs a tiny host in `tools/MMLib.Alvo.Load.Host` — the standalone composition plus three no-op/one-read hooks gated by the work order's reference prefix — as a second arm of `scripts/test-load --tier calibration`.
+**Architecture:** The budget is an internal, `AsyncLocal` **evaluation pass** (`CelFunctionBudget`) opened by the three places that evaluate host-callable CEL — `BeforeHookRunner.Run` (declarative before-hooks, in the write's transaction), `WriteExtensionRunner`'s write-hook `when`, and `PredicateEvaluator` for `Condition`-profile expressions (post-commit after-hook and handler conditions) — from one DI singleton, `CelFunctionBudgetPolicy` (`Alvo:Extensions:CelFunctionBudget` on the host's `TimeProvider`). `HostCelFunction`'s body runs every call through the ambient pass: it hands a token-aware delegate the pass's token, and fails the call as the host function's `CelFunctionException` when the deadline cancels it or when it returns late; `IBeforeHookRunner.Run` stays synchronous and token-free (#309). E1 is one classification on the internal `CelFunctionException` (`OnCallerData`: a built-in's or the interpreter's refusal of a value the caller sent — not of a host function's output, the stored row, or a value a hook wrote, judged from the compiled tree on the failure path) read by `ProblemResultFactory.RefusalFor` on the generated Data API routes — so every host answers it, no opt-in — and by `AlvoExceptionHandler` for those routes only; commands keep 500. The analyzer is a new **project, not a package** (E6): `src/MMLib.Alvo.Analyzers` (netstandard2.0, `IsPackable=false`), packed by `MMLib.Alvo`'s pack into `analyzers/dotnet/cs`, proven by a script that builds a packed consumer on the minimum SDK in a container. Calibration runs a tiny host in `tools/MMLib.Alvo.Load.Host` — the standalone composition plus three no-op/one-read hooks gated by the work order's reference prefix — as a second arm of `scripts/test-load --tier calibration`.
 
 **Tech Stack:** .NET 10 (C# 14), Roslyn (`Microsoft.CodeAnalysis.CSharp` 4.14.0 — the floor any .NET 10 SDK compiler loads; `Microsoft.CodeAnalysis.Analyzers` 3.11.0), `System.Threading.CancellationTokenSource(TimeSpan, TimeProvider)`, `Microsoft.Extensions.TimeProvider.Testing`, xUnit v3 on Microsoft.Testing.Platform, Shouldly, Verify + PublicApiGenerator, Testcontainers (PostgreSQL leg), k6 2.2.0 + Docker (load), Astro/Starlight (docs).
 
@@ -41,32 +41,33 @@
 
 ## Review Focus
 
-0. **A host function that catches its own cancellation and returns a value after the budget** — `try { client.Wait(ct); } catch (OperationCanceledException) { return "fallback"; }` — must still fail the write: the overrun is measured on return, not only observed through the token. `CelFunctionBudgetTests.A_function_that_catches_its_cancellation_and_returns_is_still_an_overrun` (Task 1); `DataApiEngineTests.A_host_function_that_ignores_its_token_past_the_budget_is_function_failed_and_rolls_back_on_every_engine` (Task 4, both engines).
-1. **A failure that is not the caller's, answered 422** — a host function throwing, a host function's argument not fitting its parameter, an interpreter defect (`<hook>`), or a write hook's own failure (`hook-failed`) must stay 500: a 422 tells an agent to change its input and retry, forever. `CelFailureOriginTests` (all seven origins, Task 3); `ExpressionFailedAnswerTests.A_hook_failure_and_a_host_function_failure_are_never_a_port_refusal` (Task 3).
-2. **Documented, compliant hook code reported by `ALVO1001`** — awaiting `write.Transaction` (incl. `AsSystem()`), the typed `QueryAsync<T>`/`CreateAsync<T>` extensions on `IAlvoSession`, a context's `PublishAsync`, and the hook type's own private helper must not be reported; a false positive under `TreatWarningsAsErrors` breaks a consumer's build. `Alvo1001AwaitTests.Awaiting_the_write_s_transaction_its_typed_extensions_publish_and_own_helpers_is_not_reported` (Task 6); every `website/src/snippets/extending/**` snippet compiled with the analyzer as an error (Task 7).
-3. **The service-locator route around the boot ban** — `services.GetRequiredService<HttpClient>()`, `provider.GetService(typeof(IAlvoData))`, `Lazy<HttpClient>`, `IEnumerable<IAlvoData>` inside a before-write hook — is exactly what HX-09 Ruling 62 deferred to the analyzer and must be reported; a typed client the host wrote itself (`IRatesClient`) is not, and the docs say so. `Alvo1001ReachTests.A_service_locator_lookup_or_a_wrapper_of_a_banned_type_is_reported` (Task 6).
+0. **A host function that catches its own cancellation and returns a value after the budget** — `try { client.Wait(ct); } catch (OperationCanceledException) { return "fallback"; }` — must still fail the write: the overrun is measured on return, not only observed through the token. `CelFunctionBudgetTests.A_function_that_catches_its_cancellation_and_returns_is_still_an_overrun` (Task 1); `DataApiEngineTests.A_host_function_that_catches_its_cancellation_and_returns_a_fallback_is_still_function_failed_on_every_engine` (Task 4, both engines).
+1. **A failure that is not the caller's, answered 422** — a host function throwing, a host function's argument not fitting its parameter, an interpreter defect (`<hook>`), a write hook's own failure (`hook-failed`), **a built-in refusing a value a host function produced (`int(rateOf(new.c))`, `new.qty / hostZero()`), the stored row (`int(old.qty_text)`), or a value an earlier hook wrote**, a command handler's own write, or an aggregate that also holds a host failure — must stay 500: a 422 tells an agent to change its input and retry, forever. `CelFailureOriginTests` (every origin, incl. `A_built_in_refusing_a_host_function_s_output_is_not_the_caller_s`, `…the_stored_row…`, `…a_value_an_earlier_hook_wrote…`, Task 3); `ExpressionFailedAnswerTests.A_hook_failure_and_a_host_function_failure_are_never_a_port_refusal`, `…An_aggregate_that_also_holds_a_host_failure_is_not_422`, `…A_command_s_own_write_is_never_422` (Task 3).
+2. **Documented, compliant hook code reported by `ALVO1001`** — awaiting `write.Transaction` (incl. `AsSystem()`), the typed `QueryAsync<T>`/`CreateAsync<T>` extensions on `IAlvoSession`, a context's `PublishAsync`, and the hook type's own private helper (or a nested helper type's) must not be reported; a false positive under `TreatWarningsAsErrors` breaks a consumer's build. `Alvo1001AwaitTests.Awaiting_the_write_s_transaction_its_typed_extensions_publish_and_own_helpers_is_not_reported` (Task 6); every `website/src/snippets/extending/**` snippet compiled with the analyzer as an error (Task 7).
+3. **The service-locator route around the boot ban** — `services.GetRequiredService<HttpClient>()`, `provider.GetService(typeof(IAlvoData))`, `Lazy<HttpClient>`, `IEnumerable<IAlvoData>` inside a before-write hook — is exactly what HX-09 Ruling 62 deferred to the analyzer and must be reported — and so is **awaiting a typed client the host wrote itself** (`await rates.EuroAsync(ct)`), the case Ruling 62 named; only a *synchronous* call into one is a documented blind spot. `Alvo1001ReachTests.A_service_locator_lookup_or_a_wrapper_of_a_banned_type_is_reported`, `Alvo1001AwaitTests.Awaiting_a_typed_client_the_host_wrote_itself_is_reported` (Task 6).
 4. **A misconfigured budget** — `Alvo__Extensions__CelFunctionBudget=0`, `-00:00:01`, `01:00:00` — must refuse the start with a sentence naming the key and its environment variable, never run with no limit or a one-hour transaction. `AlvoExtensionOptionsTests.A_cel_function_budget_outside_its_bounds_refuses_the_start_naming_the_key` (Task 1).
+5. **A host function that blocks on a task with `.Result` past the budget** — the most common sync-over-async shape — throws an `AggregateException`, not an `OperationCanceledException`, and must still be reported as the budget overrun, not as an anonymous host failure. `CelFunctionBudgetTests.A_function_that_blocks_with_result_past_the_budget_is_an_overrun` (Task 1).
 
 ---
 
 ## Rulings and deviations this plan takes
 
-Each is recorded in the spec amendment (Task 9) as *HX-10 settled details* (1–24), so a later reader can tell a decision from an oversight.
+Each is recorded in the spec amendment (Task 9) as *HX-10 settled details* (1–43), so a later reader can tell a decision from an oversight.
 
 1. **No new `AddCelFunction` overload; the `Delegate` method accepts a trailing `CancellationToken`.** §5 row `10` lists "`AddCelFunction` overload with trailing `CancellationToken`", but the method already takes `Delegate`, which admits every shape: a second overload over `Delegate` cannot exist, and typed `Func<…, CancellationToken, TResult>` overloads (four arities) would add eight public members for no shape the current one refuses. A lambda `(string currency, CancellationToken ct) => …` binds by its natural type. The token is never a CEL parameter (four CEL parameters plus the token are accepted); a token that is not last, or two tokens, refuse at the call. §5 row `10` is amended.
-2. **The budget bounds every host function call, token-aware or not.** A token-aware function receives a token that cancels at the pass's deadline (linked with the caller's token where one exists); every function — one that ignores the token, one that takes none, one that catches its cancellation and returns — is **measured on return** and fails if it returned after the deadline (HX-09 Ruling 11's rule, X15's reasoning). Measuring the token-free ones too is a behaviour change for existing hosts (CHANGELOG *Changed*): §1.2's "before = in-transaction, time budget" was otherwise unenforced for exactly the code that can block.
-3. **"Per evaluation" is one pass, opened by three sites.** A pass is `BeforeHookRunner.Run` (all declarative before-hooks of one row), one write hook's `when`, and one `Condition`-profile evaluation by `PredicateEvaluator` (after-hook and handler conditions at fan-out). Every host call in a pass shares one deadline, whose clock starts at the pass's **first host call** (a pass that calls none allocates nothing and reads no clock). `Rule` and `Access` expressions cannot call host functions (the profiles refuse them), so `PredicateEvaluator` opens no pass for them and the rule hot path is unchanged. Outside a pass (unit tests, tooling) a host function gets `CancellationToken.None` and no limit; `CelEvaluationSitesTests` pins the three sites so a fourth caller of the interpreter's hook entry points is a deliberate change.
+2. **The budget bounds every host function call, token-aware or not.** A token-aware function receives a token that cancels at the pass's deadline (linked with the caller's token where one exists); every function — one that ignores the token, one that takes none, one that catches its cancellation and returns — is **measured on return** and fails if it returned after the deadline (HX-09 Ruling 11's rule, X15's reasoning). Measuring the token-free ones too is a behaviour change for existing hosts (CHANGELOG *Changed*): §1.2's "before = in-transaction, time budget" was otherwise unenforced for exactly the code that can block. *(Amended by Rulings 29, 30, 36.)*
+3. **"Per evaluation" is one pass, opened by three sites.** A pass is `BeforeHookRunner.Run` (all declarative before-hooks of one row), one write hook's `when`, and one `Condition`-profile evaluation by `PredicateEvaluator` (after-hook and handler conditions at fan-out). Every host call in a pass shares one deadline, whose clock starts at the pass's **first host call** (a pass that calls none reads no clock and creates no token source; the pass object and the `AsyncLocal` set/restore still allocate — Ruling 35). `Rule` and `Access` expressions cannot call host functions (the profiles refuse them), so `PredicateEvaluator` opens no pass for them and the rule hot path is unchanged. Outside a pass (unit tests, tooling) a host function gets `CancellationToken.None` and no limit; `CelEvaluationSitesTests` pins the three sites so a fourth caller of the interpreter's hook entry points is a deliberate change. *(Amended by Ruling 35.)*
 4. **`AlvoExtensionOptions.CelFunctionBudget`** (`TimeSpan`, default `AlvoHookOptions.DefaultTimeout` = 250 ms, bounds (0, `AlvoHookOptions.MaxTimeout` = 30 s], refused at start naming `Alvo:Extensions:CelFunctionBudget` and `Alvo__Extensions__CelFunctionBudget`). A public property §5 does not list: #309 asks for "an option", and `Alvo:Extensions` is the section that already bounds host code (`MaxDepth`). One number for all in-transaction host code: a before-write hook and a host function get the same 250 ms, and Q5's calibration (Ruling 20) judges both.
 5. **An overrun is the host function's failure.** It is a `CelFunctionException` with `IsHost: true` and Alvo's reason: in a declarative before-hook the write rolls back with 500 `function-failed`; in a write hook's `when` it is that hook's failure, 500 `hook-failed`, reason `exception` (HX-09 Ruling 63, unchanged); in a post-commit condition the after-hook is dropped with a Warning, as any function failure there. A cancellation that is **not** the deadline (the unit's 30 s, a client abort) is not an overrun: it is the function's exception, as today.
-6. **E1's line: `CelFunctionException.OnCallerData`.** True for a built-in's refusal (`int('x')`, `substring` past the end, `timestamp()` of a malformed value, `math.round` digits), a built-in argument that does not fit its parameter, hook arithmetic (overflow, division by zero, a non-number operand), an operator's refusal on the fail-closed path (`!_`, a comparison of incomparable values, `changed` that cannot compare), and a whole condition that is a present non-Bool (`<condition>` — HX-09 Ruling 63's amendment counts it as the caller's). False for anything a host function did (threw, argument mismatch, budget), for a built-in body that threw an unexpected exception, and for the interpreter's defect wrapper (`<hook>`, Ruling Y-D) — those are 500 `function-failed`.
-7. **`expression-failed` is answered on every host, not opt-in.** `ProblemResultFactory.PortRefusalFor` maps it (so `GuardAsync` on every generated route and `CommandEndpointFilter` on every command answer it), walking wrappers the way `AlvoExceptionHandler.FunctionFailure` does; `AlvoExceptionHandler` answers it too for a failure that escapes elsewhere on an Alvo route. Not logged — like every caller refusal (a 422 pages nobody); the previous Error line for a built-in failure is gone (CHANGELOG). The `detail` names the function and Alvo's reason, never the value (built-in reasons never carry one); no `violations` member, because no field is known — the function's argument is an expression, not a payload field.
+6. **E1's line: `CelFunctionException.OnCallerData`.** True for a built-in's refusal (`int('x')`, `substring` past the end, `timestamp()` of a malformed value, `math.round` digits), a built-in argument that does not fit its parameter, hook arithmetic (overflow, division by zero, a non-number operand), an operator's refusal on the fail-closed path (`!_`, a comparison of incomparable values, `changed` that cannot compare), and a whole condition that is a present non-Bool (`<condition>` — HX-09 Ruling 63's amendment counts it as the caller's). False for anything a host function did (threw, argument mismatch, budget), for a built-in body that threw an unexpected exception, and for the interpreter's defect wrapper (`<hook>`, Ruling Y-D) — those are 500 `function-failed`. *(Amended by Rulings 26, 28.)*
+7. **`expression-failed` is answered on every host, not opt-in.** `ProblemResultFactory.PortRefusalFor` maps it (so `GuardAsync` on every generated route and `CommandEndpointFilter` on every command answer it), walking wrappers the way `AlvoExceptionHandler.FunctionFailure` does; `AlvoExceptionHandler` answers it too for a failure that escapes elsewhere on an Alvo route. Not logged — like every caller refusal (a 422 pages nobody); the previous Error line for a built-in failure is gone (CHANGELOG). The `detail` names the function and Alvo's reason, never the value (built-in reasons never carry one); no `violations` member, because no field is known — the function's argument is an expression, not a payload field. *(Amended by Rulings 27, 28, 37.)*
 8. **A host function's argument that does not fit its parameter stays 500.** The value is the caller's, but the type is the host's signature: the fix is the host's (widen the parameter) or the descriptor author's, never something the caller can learn from a 422. One rule for agents: anything about a host function is 500.
 9. **A single-row `DELETE` that answers 422 `expression-failed` does not document 422 in OpenAPI.** Reachable only through a before-delete condition (descriptor or host `when`) whose built-in refuses the stored row; the OpenAPI generator reads the schema model, which carries no hooks, so documenting it would document a status unreachable for every hook-free entity, which `OpenApiDocumentTests.Every_documented_status_code_is_one_the_endpoint_can_actually_return` refuses. The `unprocessable` response's description names the new kind; the `type` enum gains the slug. Recorded deviation; follow-up issue (Task 10 Step 8).
-10. **`ALVO1001`'s scope.** (a) Every operation block whose containing type implements `IBeforeWriteHook`, `IAfterWriteHook`, `IBeforeDeleteHook` or `IAfterDeleteHook` (generic or not) — the whole type, constructors and field initializers included, matching the boot ban's "in-transaction hook type"; (b) the delegate passed as `hook` to `AlvoEntityBuilder`/`AlvoEntityBuilder<T>`'s `BeforeWrite`, `AfterWrite`, `BeforeDelete`, `AfterDelete`; (c) the delegate passed as `function` to `AddCelFunction`. For (b) and (c) a lambda's body is analysed, and a method group whose method is declared **in the same file** (through `IOperation.SemanticModel`); a method group declared elsewhere is not (documented limit, like "direct dependencies only"). Validate hooks, event handlers and commands are out of scope — they run outside any transaction.
-11. **What `ALVO1001` reports — the boot ban's list, plus files.** A type is reached when it (or an array element, a generic argument, a base type or an implemented interface of it) is in `System.Net.Http`, `System.Net.Sockets`, `System.Net.WebSockets`, `System.Net.Mail`, `System.Net.Quic`, `System.Net.{WebClient,WebRequest,HttpWebRequest,FtpWebRequest}`, `Microsoft.AspNetCore.Identity*`, `MMLib.Alvo.Identity*`, is named `IEmailSender`, or is one of `HookDependencies`' types (`DbConnection`, `DbDataSource`, `IAlvoEvents`, `IAlvoData`, `IAlvoSessions`, `IAlvoTransactions`, `IOutboxStore`, `IDeliveryStore`, `IAlvoCommands`, `IAlvoEventPump`, `IAlvoManagement`, `IAlvoOperations`, `IAlvoUserStore`, `IAlvoUserAdministration`, `IAlvoBootstrapAdmin`, `IAlvoAssistant`) — plus `System.Data.IDbConnection` and `System.IO.{File,FileInfo,FileStream,Directory,DirectoryInfo}` (#309 names `System.IO.File*`). `BootBanParityTests` holds the analyzer's list a superset of `HookDependencies`' (core IVT to the analyzer's tests). Reported operations: an object creation, a field/property/parameter/local reference of a reached type, a static call on one, a generic argument (`GetRequiredService<HttpClient>()`), a `typeof` (`GetService(typeof(IAlvoData))`).
-12. **The await rule (hooks only).** An `await` (through `ConfigureAwait`) of a call to a method declared in metadata is reported unless the method belongs to `IAlvoSession` (so `IAlvoTransaction`), is an extension method whose `this` parameter is an `IAlvoSession` (the typed reads/writes), or is declared in `MMLib.Alvo.Hooks` (a context's `PublishAsync`). An await of the host's own source method is not reported — its body is analysed where it belongs to a hook type. An await of a local, field or property is not reported (no call to judge). §4.4.5's "any `await` on a task not produced by `write.Transaction`", narrowed to what an operation tree can decide without data flow.
+10. **`ALVO1001`'s scope.** (a) Every operation block whose containing type implements `IBeforeWriteHook`, `IAfterWriteHook`, `IBeforeDeleteHook` or `IAfterDeleteHook` (generic or not) — the whole type, constructors and field initializers included, matching the boot ban's "in-transaction hook type"; (b) the delegate passed as `hook` to `AlvoEntityBuilder`/`AlvoEntityBuilder<T>`'s `BeforeWrite`, `AfterWrite`, `BeforeDelete`, `AfterDelete`; (c) the delegate passed as `function` to `AddCelFunction`. For (b) and (c) a lambda's body is analysed, and a method group whose method is declared **in the same file** (through `IOperation.SemanticModel`); a method group declared elsewhere is not (documented limit, like "direct dependencies only"). Validate hooks, event handlers and commands are out of scope — they run outside any transaction. *(Amended by Rulings 33, 39.)*
+11. **What `ALVO1001` reports — the boot ban's list, plus files.** A type is reached when it (or an array element, a generic argument, a base type or an implemented interface of it) is in `System.Net.Http`, `System.Net.Sockets`, `System.Net.WebSockets`, `System.Net.Mail`, `System.Net.Quic`, `System.Net.{WebClient,WebRequest,HttpWebRequest,FtpWebRequest}`, `Microsoft.AspNetCore.Identity*`, `MMLib.Alvo.Identity*`, is named `IEmailSender`, or is one of `HookDependencies`' types (`DbConnection`, `DbDataSource`, `IAlvoEvents`, `IAlvoData`, `IAlvoSessions`, `IAlvoTransactions`, `IOutboxStore`, `IDeliveryStore`, `IAlvoCommands`, `IAlvoEventPump`, `IAlvoManagement`, `IAlvoOperations`, `IAlvoUserStore`, `IAlvoUserAdministration`, `IAlvoBootstrapAdmin`, `IAlvoAssistant`) — plus `System.Data.IDbConnection` and `System.IO.{File,FileInfo,FileStream,Directory,DirectoryInfo}` (#309 names `System.IO.File*`). `BootBanParityTests` holds the analyzer's list a superset of `HookDependencies`' (core IVT to the analyzer's tests). Reported operations: an object creation, a field/property/parameter/local reference of a reached type, a static call on one, a generic argument (`GetRequiredService<HttpClient>()`), a `typeof` (`GetService(typeof(IAlvoData))`). *(Amended by Ruling 32.)*
+12. **The await rule (hooks only).** An `await` (through `ConfigureAwait`) of a call to a method declared in metadata is reported unless the method belongs to `IAlvoSession` (so `IAlvoTransaction`), is an extension method whose `this` parameter is an `IAlvoSession` (the typed reads/writes), or is declared in `MMLib.Alvo.Hooks` (a context's `PublishAsync`). An await of the host's own source method is not reported — its body is analysed where it belongs to a hook type. An await of a local, field or property is not reported (no call to judge). §4.4.5's "any `await` on a task not produced by `write.Transaction`", narrowed to what an operation tree can decide without data flow. *(Amended by Ruling 25.)*
 13. **The CEL-function task rule.** In an `AddCelFunction` delegate, any call returning `Task`, `Task<T>`, `ValueTask` or `ValueTask<T>` is reported: the delegate is synchronous (async delegates are refused at registration), so it can only block on it (VSTHRD002's reasoning). #309's "`Task`-returning calls".
-14. **One diagnostic per use.** A call on a reached receiver (`http.GetStringAsync(…)`) is reported once, at the receiver; the invocation and an `await` of it are not reported again.
+14. **One diagnostic per use.** A call on a reached receiver (`http.GetStringAsync(…)`) is reported once, at the receiver; the invocation and an `await` of it are not reported again. *(Amended by Ruling 31.)*
 15. **Analyzer packaging (E6).** A project, not a package: `src/MMLib.Alvo.Analyzers` is `IsPackable=false`, targets `netstandard2.0` (the one target a compiler loads; `SolutionConventionTests` gains an exemption keyed on `<IsRoslynComponent>true</IsRoslynComponent>` allowing exactly `TargetFramework=netstandard2.0`), references `Microsoft.CodeAnalysis.CSharp` **4.14.0** (`PrivateAssets=all`; older than the compiler of the minimum SDK 10.0.100, so every supported SDK loads it), and is placed by `MMLib.Alvo`'s pack at `analyzers/dotnet/cs/` through a `TargetsForTfmSpecificContentInPackage` target, behind a `ProjectReference` with `ReferenceOutputAssembly="false"` and `PrivateAssets="all"` (build order only; no runtime reference, no nuspec dependency — `Core_depends_only_on_Abstractions` keeps proving the first). The analyzer class is `public`: Roslyn instantiates it by reflection and every Microsoft analyzer is public; the assembly is never a compile reference of a consumer, so the public type is not API a consumer can call. Rule (a) names Roslyn because a *runtime* Roslyn dependency is heavy; an analyzer asset adds nothing to the runtime closure.
 16. **Acceptance (2) is a script, not a ring.** `scripts/test-packed-analyzer` packs `MMLib.Alvo.Abstractions` and `MMLib.Alvo` (or takes CI's `artifacts/`), checks the nupkg layout and nuspec, and builds a consumer generated in a temp directory inside `mcr.microsoft.com/dotnet/sdk:<global.json version>` (10.0.100), asserting `warning ALVO1001` on exactly the marked lines of `scripts/fixtures/packed-consumer/Hooks.cs` and a successful build. In no ring (it needs Docker and nuget.org); CI runs it on the Linux leg right after `Pack`, inside the required **Build & test** check.
 17. **The analyzer is applied in-repo only to the docs snippets.** `MMLib.Alvo.DocsSnippets.Tests` references it as an analyzer, so every `website/src/snippets/extending/**` snippet compiles with `ALVO1001` as an error — the code users copy is clean, and a false positive fails the build. No other in-repo project gets it: test suites deliberately inject banned types into hooks to prove the boot ban.
@@ -78,6 +79,28 @@ Each is recorded in the spec amendment (Task 9) as *HX-10 settled details* (1–
 23. **Security-core treatment** although §6.2 omits HX-10 (see Global Constraints).
 24. **`IBeforeHookRunner.Run` stays synchronous and token-free** (#309: "`BeforeHookRunner` mints the budgeted token itself"); its remarks, which said "Alvo offers no timeout around [a host function]", are rewritten, and `BeforeHookIsolationArchitectureTests` gains `CelFunctionBudgetPolicy` as the runner's second constructor dependency (its closure still reaches no network).
 
+Rulings taken after the plan review (`.superpowers/sdd/hx-10-plan-review.md`; H = high, M = medium, L = low finding):
+
+25. **(H1) The await rule exempts only the hook's own code.** A source-declared method is exempt from the await rule only when its containing type is the scope's hook type or a type nested in it (Ruling 33), or it is a local function declared inside the analysed body; for a delegate scope only such local functions. Everything else the host wrote — a typed HTTP client `IRatesClient.EuroAsync`, a repository, a helper class — is reported when awaited ("'IRatesClient.EuroAsync' is awaited, and only the write's transaction may be"), which is §4.4.5's rule and keeps HX-09 Ruling 62's promise ("a typed HTTP client … is the HX-10 analyzer's"). The documented blind spot is a *synchronous* call into the host's own code. `HookDependencies`' remarks and HX-09 Ruling 62 are amended to match (Task 9). Amends Ruling 12.
+26. **(H2) E1 is decided by whose data was refused, not by which function threw.** A refusal that would be the caller's (`OnCallerData`) is re-attributed as not the caller's — 500 `function-failed` — when (a) the refusing node's subtree calls a host function or reads the stored row (`old.`, `changed`), judged once, at the innermost node that sees the failure, from the compiled tree (`CelDataOrigin.IsCallersOwn`; computed on the failure path, not stored at compile time — the same answer, no change to a tree node, X7's "no new CEL AST node", and no cost unless a refusal happens); or (b) the failing expression reads a field a hook wrote earlier in the same write — `BeforeHookRunner` attributes against the fields its earlier hooks mutated, `WriteExtensionRunner` against the declarative before-hooks' mutate targets plus earlier host `Set`s for the before stages, and treats every refusal in an after-write `when` as not the caller's (the saved row carries defaults, rollups and hook writes). Conservative toward 500: an expression that reads a hook-written field anywhere is attributed as a whole. `BeforeHookRunner.Refusal`'s own remark ("the field … may be one they never sent") is the precedent. Amends Ruling 6.
+27. **(H2) Only the Data API's generated routes answer 422.** `expression-failed` is mapped in `ProblemResultFactory.RefusalFor` (the `GuardAsync` path), **not** in `PortRefusalFor`, so `CommandEndpointFilter` and the webhook receiver do not answer it; `AlvoExceptionHandler` answers it only when the failed endpoint carries `DataApiOperationMetadata`, and `function-failed` otherwise. A command handler builds its own writes, so a built-in refusing them is the handler's data, not the command caller's. Amends Ruling 7.
+28. **(L2) An aggregate answers 422 only when every function failure in it is the caller's.** `AlvoExceptionHandler.CallerDataFailure` walks the wrappers, collects every `CelFunctionException`, and answers 422 only when there is at least one and all have `OnCallerData`; a mix answers 500 and logs the host's failure. Amends Rulings 6 and 7.
+29. **(H3) One boundary: at the limit is over.** An evaluation overran when `elapsed >= Limit` — the same instant the deadline token cancels (`CancellationTokenSource(Limit, time)` fires when the clock reaches it). The inside-budget fact advances `Limit − 1 ms`; a new fact pins that exactly `Limit` is an overrun. Amends Ruling 2.
+30. **(M4) Once the deadline has passed, whatever the body threw is the overrun.** `CelFunctionBudget.Call` catches `Exception` (not only `OperationCanceledException`) when `Overran`, so `.Result`/`.Wait()` on a cancelled task (`AggregateException`) and a function that converts its cancellation into its own exception both read the budget sentence. Amends Ruling 2.
+31. **(M1) One diagnostic per reached symbol per body.** References to constant fields and to static fields/properties of a value or enum type (`SocketType.Stream`, `ProtocolType.Tcp`) are not reported; a reached field, property, parameter or local is reported once per operation block (per lambda body for a delegate scope), at its first use. Creations, static calls, generic arguments, `typeof`, awaits and task calls are reported where they occur. Amends Ruling 14.
+32. **(M2, L3, L7) Every reach rule applies to base types and interfaces, and the list grows.** `IsReachedItself`'s namespace, web-request, file, identity and `IEmailSender` checks run over the type and all its ancestors (`class RatesHttp : HttpClient`, a `DelegatingHandler` subclass, `SendGridSender : IEmailSender` are reached); `Microsoft.EntityFrameworkCore.DbContext` and `IDbContextFactory`1` join the type list by metadata name (the analyzer may be wider than the boot ban); the identity prefixes match by `StartsWith` exactly as the boot ban does. `BootBanParityTests` also compares the web-request names and the identity prefixes. Synchronous use of other clients (Redis `IDatabase`, gRPC `ClientBase`, `new StreamReader(path)`) is listed under *What it cannot see*. Amends Ruling 11.
+33. **(L5) A hook's nested types are in its scope.** The scope of an operation block is the nearest type in its containing-type chain that implements an in-transaction hook contract, so a private nested helper inside a hook is analysed — and its methods count as the hook's own for Ruling 25. Amends Ruling 10.
+34. **(M5) The budget is labelled breaking, with its post-commit effects.** CHANGELOG, `cel.md` and the CEL functions guide say: a host function past the budget fails the write (500); in an after-hook condition the after-hook is dropped with a Warning; in a handler's `when` the delivery is recorded dead (`HandlerVerdict.Failed`). Amends Ruling 2's CHANGELOG note.
+35. **(L1) A pass is cheap, not free.** Opening one allocates the pass and sets an `AsyncLocal` on every before-hook run and every `Condition` evaluation at fan-out, host function or not; no clock is read and no token source is created until the first host call. Measured by the calibration's `hook_unit` shape only indirectly; recorded rather than optimised (a compile-time "calls a host function" flag would remove it, and is the follow-up if it ever shows). Corrects Ruling 3's wording.
+36. **(L9) What the budget cannot do.** A function that never returns holds the write's transaction until it does (.NET cannot stop it; measured-on-return needs a return), and `BeforeHookRunner`'s pass links no outer token (`IBeforeHookRunner.Run` is token-free, Ruling 24), so a client abort never reaches a token-aware function in a declarative before-hook — only the deadline does. Both are stated in `cel.md`'s *Time budget* bullet and on *Analyzer rules*.
+37. **(L10) The 422 stays unlogged.** `RefusalFor` is a static mapping with no logger, and no other 422 (`validation`, `malformed-query`) is logged; an operator sees a descriptor whose built-in refuses most writes in the HTTP request log by status and `type`. A counter is a follow-up if one is asked for. Amends Ruling 7 (recorded, unchanged).
+38. **(L8) The no-Bool sentence stays reachable under 500.** A whole condition that is a present non-Bool and reads `old.` or a host function is not the caller's (Ruling 26), so `FunctionFailedDetail`'s `<condition>` arm still answers it; the 422 path has its own sentence.
+39. **(L4, L6) The documented blind spots grow, and one is owed.** *What it cannot see* also lists a delegate held in a local or returned by a factory before it is passed to `AddCelFunction` or a hook verb, and a synchronous call into the host's own code; `docs/architecture/analyzers.md` records that HX-13 must add `IAlvoScheduler` to the await allow-list (§4.4.5 allows it in-transaction), or every scheduler call becomes a false positive. Amends Ruling 10.
+40. **(L13) The Roslyn pin is repository-wide.** `CentralPackageTransitivePinningEnabled` makes the `Microsoft.CodeAnalysis.CSharp` 4.14.0 `PackageVersion` a transitive pin for every project; no current restore graph uses Roslyn, and the `Directory.Packages.props` comment says a future dependency on a newer Roslyn must move the analyzer to a separate pin (`VersionOverride` is banned) or raise the floor deliberately.
+41. **(M3) The prototype fixtures follow the problem types.** `scripts/gen-prototype-fixtures` copies `AlvoProblemTypes`' constants into `docs/design/f5-admin/generated/schema-facets.js`, which CI checks with `--check`; Task 3 regenerates it after adding `ExpressionFailed`, and Task 10 re-checks after the rebase onto `main` (which carries HX-09's own regeneration).
+42. **(M6, L11) The engine facts cannot race.** The overrun facts use a 200 ms budget against a 1 s sleep or a 10 s token wait; the inside-budget fact uses 2 s; the token-free fact is named for what it is, and a both-engine fact covers Review Focus 0's shape (a function that catches its cancellation and returns a fallback).
+43. **(L12) The snippet type is `CurrencyDeskHooks`**, in `CurrencyDeskHooks.cs` (tests `CurrencyDeskHooksTests.cs`), so no type shares its namespace's name — `OpeningDeskHooks`' precedent.
+
 ---
 
 ## File structure
@@ -88,8 +111,9 @@ Created — core `src/MMLib.Alvo`:
 |---|---|
 | `Expressions/Internal/CelFunctionBudget.cs` | one evaluation pass: `AsyncLocal` current, lazy deadline, the budgeted host call |
 | `Expressions/Internal/CelFunctionBudgetPolicy.cs` | DI singleton: opens a pass from `Alvo:Extensions:CelFunctionBudget` on the host's clock |
+| `Expressions/Internal/CelDataOrigin.cs` | whose data a refusal read: the caller's, or a host function's output, the stored row, a hook-written value (E1, Ruling 26) |
 
-Created — analyzer `src/MMLib.Alvo.Analyzers`: `MMLib.Alvo.Analyzers.csproj`, `AnalyzerReleases.Shipped.md`, `AnalyzerReleases.Unshipped.md`, `Properties/AssemblyInfo.cs`, `AlvoDiagnostics.cs` (the descriptor), `AlvoSymbols.cs` (the framework symbols of one compilation, scopes, allowed awaits), `AnalysisScope.cs`, `IoReach.cs` (what an operation reaches), `InTransactionIoAnalyzer.cs` (the entry).
+Created — analyzer `src/MMLib.Alvo.Analyzers`: `MMLib.Alvo.Analyzers.csproj`, `AnalyzerReleases.Shipped.md`, `AnalyzerReleases.Unshipped.md`, `Properties/AssemblyInfo.cs`, `AlvoDiagnostics.cs` (the descriptor), `AlvoSymbols.cs` (the framework symbols of one compilation, scopes, allowed awaits), `AnalysisScope.cs`, `IoReach.cs` (what an operation reaches), `ReportedSymbols.cs` (one diagnostic per reached symbol per body), `InTransactionIoAnalyzer.cs` (the entry).
 
 Created — load host `tools/MMLib.Alvo.Load.Host`: `MMLib.Alvo.Load.Host.csproj`, `Program.cs`, `CalibrationHooks.cs`, `Dockerfile`, `Dockerfile.dockerignore`.
 
@@ -97,9 +121,9 @@ Created — tests: `test/MMLib.Alvo.Tests/Expressions/{CelFunctionBudgetTests.cs
 
 Created — scripts: `scripts/test-packed-analyzer`, `scripts/fixtures/packed-consumer/Hooks.cs`.
 
-Created — docs: `website/src/content/docs/extending/analyzer-rules.mdx`; `website/src/snippets/extending/analyzer-rules/{CurrencyDesk.cs,CurrencyDeskTests.cs,currency-desk.alvo.json}`; `docs/architecture/analyzers.md`.
+Created — docs: `website/src/content/docs/extending/analyzer-rules.mdx`; `website/src/snippets/extending/analyzer-rules/{CurrencyDeskHooks.cs,CurrencyDeskHooksTests.cs,currency-desk.alvo.json}`; `docs/architecture/analyzers.md`.
 
-Modified: core `Extensions/AlvoExtensionOptions.cs`, `Extensions/Internal/AlvoExtensionOptionsConfiguration.cs`, `Expressions/Setup.cs`, `Expressions/Internal/{HostCelFunction.cs,CelFunctionException.cs,PredicateEvaluator.cs}`, `AlvoBuilderExtensions.cs` (docs), `Rules/Internal/BeforeHookRunner.cs`, `Hooks/Internal/{WriteExtensionRunner.cs,HookDependencies.cs}`, `Api/AlvoProblemTypes.cs`, `Api/Internal/{ProblemResultFactory.cs,AlvoExceptionHandler.cs,DataApiDocumentation.cs}`, `Properties/AssemblyInfo.cs`, `MMLib.Alvo.csproj`; Abstractions `Rules/IBeforeHookRunner.cs` (remarks only); `Directory.Packages.props`; `MMLib.Alvo.slnx`; tests `test/MMLib.Alvo.Tests/{Extensions/AlvoExtensionOptionsTests.cs,Rules/BeforeHookFacetTests.cs,Rules/BeforeHookCompilerTests.cs,Rules/BeforeHookIsolationArchitectureTests.cs,Hooks/WriteExtensionRunnerTests.cs,Expressions/CelFunctionRegistrationTests.cs,PublicApi.MMLib.Alvo.verified.txt}`, `test/MMLib.Alvo.Api.Tests/{CelBuiltInWriteTests.cs,ProblemDetailsTests.cs,AlvoExceptionHandlerTests.cs,OpenApiDocumentTests.The_document_is_stable.verified.txt}`, `test/MMLib.Alvo.Conventions.Tests/SolutionConventionTests.cs`, `test/MMLib.Alvo.TestHost.Tests/MMLib.Alvo.TestHost.Tests.csproj`, `test/MMLib.Alvo.DocsSnippets.Tests/MMLib.Alvo.DocsSnippets.Tests.csproj`, any other `*.verified.txt` the `type` enum moves (found by the approval runs); load `test/load/{scenarios.js,README.md}`, `scripts/test-load`; CI `.github/workflows/ci.yml`; docs `website/src/data/problem-types.json`, `website/astro.config.mjs`, `website/src/content/docs/extending/{index.mdx,write-hooks.mdx}`, the `function-failed` sweep (`website/src/content/docs/{guides/before-hooks.mdx,guides/custom-cel-functions.mdx,guides/handle-errors.mdx,guides/call-from-endpoints.mdx,data-api/conventions.mdx,concepts/security-model.md}`, `samples/MMLib.Alvo.Samples.EmbeddedHost/README.md` — whatever `git grep` finds), `docs/architecture/{cel.md,data-api.md,extensibility.md,write-hooks.md,package-boundary.md}`, `docs/performance.md`, `CHANGELOG.md`, `CLAUDE.md` (repo map: `tools/` and `src/MMLib.Alvo.Analyzers`), the spec.
+Modified: core `Expressions/Internal/CelInterpreter.cs` (the judging catch), `Extensions/AlvoExtensionOptions.cs`, `Extensions/Internal/AlvoExtensionOptionsConfiguration.cs`, `Expressions/Setup.cs`, `Expressions/Internal/{HostCelFunction.cs,CelFunctionException.cs,PredicateEvaluator.cs}`, `AlvoBuilderExtensions.cs` (docs), `Rules/Internal/BeforeHookRunner.cs`, `Hooks/Internal/{WriteExtensionRunner.cs,HookDependencies.cs}` (also its remarks), `Api/AlvoProblemTypes.cs`, `Api/Internal/{ProblemResultFactory.cs,AlvoExceptionHandler.cs,DataApiDocumentation.cs}`, `Properties/AssemblyInfo.cs`, `MMLib.Alvo.csproj`; Abstractions `Rules/IBeforeHookRunner.cs` (remarks only); `Directory.Packages.props`; `MMLib.Alvo.slnx`; tests `test/MMLib.Alvo.Tests/{Extensions/AlvoExtensionOptionsTests.cs,Rules/BeforeHookFacetTests.cs,Rules/BeforeHookCompilerTests.cs,Rules/BeforeHookIsolationArchitectureTests.cs,Hooks/WriteExtensionRunnerTests.cs,Expressions/CelFunctionRegistrationTests.cs,PublicApi.MMLib.Alvo.verified.txt}`, `test/MMLib.Alvo.Api.Tests/{CelBuiltInWriteTests.cs,ProblemDetailsTests.cs,AlvoExceptionHandlerTests.cs,OpenApiDocumentTests.The_document_is_stable.verified.txt}`, `test/MMLib.Alvo.Conventions.Tests/SolutionConventionTests.cs`, `test/MMLib.Alvo.TestHost.Tests/MMLib.Alvo.TestHost.Tests.csproj`, `test/MMLib.Alvo.DocsSnippets.Tests/MMLib.Alvo.DocsSnippets.Tests.csproj`, any other `*.verified.txt` the `type` enum moves (found by the approval runs); load `test/load/{scenarios.js,README.md}`, `scripts/test-load`; CI `.github/workflows/ci.yml`; docs `website/src/data/problem-types.json`, `website/astro.config.mjs`, `website/src/content/docs/extending/{index.mdx,write-hooks.mdx}`, the `function-failed` sweep (`website/src/content/docs/{guides/before-hooks.mdx,guides/custom-cel-functions.mdx,guides/handle-errors.mdx,guides/call-from-endpoints.mdx,data-api/conventions.mdx,concepts/security-model.md}`, `samples/MMLib.Alvo.Samples.EmbeddedHost/README.md` — whatever `git grep` finds), `docs/architecture/{cel.md,data-api.md,extensibility.md,write-hooks.md,package-boundary.md}`, `docs/design/f5-admin/generated/schema-facets.js` (regenerated), `docs/superpowers/plans/2026-11-04-hx-09-write-hooks.md` (Ruling 62's amendment note), `docs/performance.md`, `CHANGELOG.md`, `CLAUDE.md` (repo map: `tools/` and `src/MMLib.Alvo.Analyzers`), the spec.
 
 ---
 
@@ -269,14 +293,56 @@ public sealed class CelFunctionBudgetTests
         var function = Function((s, ct) =>
         {
             seen = ct;
-            _clock.Advance(TimeSpan.FromMilliseconds(250));
+            _clock.Advance(TimeSpan.FromMilliseconds(249));
             return s + "!";
         });
         using var pass = Pass();
 
         function.Invoke(["x"]).ShouldBe("x!");
         seen.CanBeCanceled.ShouldBeTrue("the pass hands a real, cancellable token");
-        seen.IsCancellationRequested.ShouldBeFalse("exactly the limit is still inside it");
+        seen.IsCancellationRequested.ShouldBeFalse("one millisecond before the limit is still inside it");
+    }
+
+    [Fact]
+    public void Exactly_the_limit_is_an_overrun_and_the_token_has_fired()
+    {
+        var seen = CancellationToken.None;
+        var function = Function((s, ct) =>
+        {
+            seen = ct;
+            _clock.Advance(TimeSpan.FromMilliseconds(250));
+            return s;
+        });
+        using var pass = Pass();
+
+        Should.Throw<CelFunctionException>(() => function.Invoke(["x"])).Reason.ShouldStartWith("it ran past");
+        seen.IsCancellationRequested.ShouldBeTrue("the token and the measurement share one boundary");
+    }
+
+    [Fact]
+    public void A_function_that_blocks_with_result_past_the_budget_is_an_overrun()
+    {
+        var function = Function((s, ct) =>
+        {
+            _clock.Advance(TimeSpan.FromMilliseconds(300));
+            return Task.Run(() => s, ct).Result;
+        });
+        using var pass = Pass();
+
+        Should.Throw<CelFunctionException>(() => function.Invoke(["x"])).Reason.ShouldStartWith("it ran past");
+    }
+
+    [Fact]
+    public void A_function_that_turns_its_cancellation_into_its_own_exception_is_still_an_overrun()
+    {
+        var function = Function((s, ct) =>
+        {
+            _clock.Advance(TimeSpan.FromMilliseconds(300));
+            return ct.IsCancellationRequested ? throw new TimeoutException("rates service") : s;
+        });
+        using var pass = Pass();
+
+        Should.Throw<CelFunctionException>(() => function.Invoke(["x"])).Reason.ShouldStartWith("it ran past");
     }
 
     [Fact]
@@ -493,7 +559,10 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// </summary>
 /// <remarks>
 /// A token-aware function receives a token cancelled at the deadline (linked with the caller's); every function is
-/// measured when it returns, because .NET cannot stop a thread that ignores its token and the write must still fail.
+/// measured when it returns, because .NET cannot stop a thread that ignores its token and the write must still fail. One
+/// boundary for both: reaching the limit is over it. Once the deadline has passed, whatever the body threw — an
+/// <see cref="OperationCanceledException"/>, an <see cref="AggregateException"/> from <c>.Result</c>, its own exception —
+/// is the overrun. A function that never returns holds the evaluation until it does.
 /// </remarks>
 internal sealed class CelFunctionBudget : IDisposable
 {
@@ -521,7 +590,7 @@ internal sealed class CelFunctionBudget : IDisposable
     internal TimeSpan Limit { get; }
 
     private bool Overran =>
-        _deadline is not null && (_deadline.IsCancellationRequested || _time.GetElapsedTime(_startedAt) > Limit);
+        _deadline is not null && (_deadline.IsCancellationRequested || _time.GetElapsedTime(_startedAt) >= Limit);
 
     /// <summary>Opens a pass; dispose it to restore the one around it.</summary>
     /// <param name="limit">The time host calls share.</param>
@@ -553,7 +622,7 @@ internal sealed class CelFunctionBudget : IDisposable
         {
             result = body(tokenAware ? [.. arguments, token] : arguments);
         }
-        catch (OperationCanceledException) when (pass is { Overran: true })
+        catch (Exception) when (pass is { Overran: true })
         {
             throw pass.Overrun(function);
         }
@@ -970,26 +1039,29 @@ If any other test constructs `BeforeHookRunner`, `WriteExtensionRunner` or `Pred
 ## Task 3: E1 — `expression-failed` (422) for a refusal of the caller's data
 
 **Files:**
-- Modify: `src/MMLib.Alvo/Expressions/Internal/CelFunctionException.cs`, `src/MMLib.Alvo/Api/AlvoProblemTypes.cs`, `src/MMLib.Alvo/Api/Internal/ProblemResultFactory.cs`, `src/MMLib.Alvo/Api/Internal/AlvoExceptionHandler.cs`, `src/MMLib.Alvo/Api/Internal/DataApiDocumentation.cs`, `website/src/data/problem-types.json`
-- Test: `test/MMLib.Alvo.Tests/Expressions/CelFailureOriginTests.cs`, `test/MMLib.Alvo.Tests/Expressions/CelFunctionBudgetTests.cs`, `test/MMLib.Alvo.Api.Tests/ExpressionFailedAnswerTests.cs`, `test/MMLib.Alvo.Api.Tests/CelBuiltInWriteTests.cs`, `test/MMLib.Alvo.Api.Tests/ProblemDetailsTests.cs`, `test/MMLib.Alvo.Api.Tests/AlvoExceptionHandlerTests.cs`, `test/MMLib.Alvo.Api.Tests/OpenApiDocumentTests.The_document_is_stable.verified.txt`, `test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.verified.txt`
+- Create: `src/MMLib.Alvo/Expressions/Internal/CelDataOrigin.cs`
+- Modify: `src/MMLib.Alvo/Expressions/Internal/CelFunctionException.cs`, `src/MMLib.Alvo/Expressions/Internal/CelInterpreter.cs`, `src/MMLib.Alvo/Rules/Internal/BeforeHookRunner.cs`, `src/MMLib.Alvo/Hooks/Internal/WriteExtensionRunner.cs`, `src/MMLib.Alvo/Api/AlvoProblemTypes.cs`, `src/MMLib.Alvo/Api/Internal/ProblemResultFactory.cs`, `src/MMLib.Alvo/Api/Internal/AlvoExceptionHandler.cs`, `src/MMLib.Alvo/Api/Internal/DataApiDocumentation.cs`, `website/src/data/problem-types.json`, `docs/design/f5-admin/generated/schema-facets.js` (regenerated)
+- Test: `test/MMLib.Alvo.Tests/Expressions/CelFailureOriginTests.cs`, `test/MMLib.Alvo.Tests/Rules/BeforeHookFacetTests.cs`, `test/MMLib.Alvo.Tests/Hooks/WriteExtensionRunnerTests.cs`, `test/MMLib.Alvo.Tests/Expressions/CelFunctionBudgetTests.cs`, `test/MMLib.Alvo.Api.Tests/ExpressionFailedAnswerTests.cs`, `test/MMLib.Alvo.Api.Tests/CelBuiltInWriteTests.cs`, `test/MMLib.Alvo.Api.Tests/ProblemDetailsTests.cs`, `test/MMLib.Alvo.Api.Tests/AlvoExceptionHandlerTests.cs`, `test/MMLib.Alvo.Api.Tests/OpenApiDocumentTests.The_document_is_stable.verified.txt`, `test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.verified.txt`
 
 **Interfaces:**
 - Consumes: `AlvoExceptionHandler.FunctionFailure(Exception)` (wrapper walk), `ProblemResultFactory.Problem(int, string, string)`.
-- Produces: `internal bool CelFunctionException.OnCallerData { get; }`; `public const string AlvoProblemTypes.ExpressionFailed = "expression-failed"`; `internal static IResult ProblemResultFactory.ExpressionFailed(string detail)`; `internal static string AlvoExceptionHandler.ExpressionFailedDetail(CelFunctionException failure)`.
+- Produces: `public bool CelFunctionException.OnCallerData { get; }` (on the internal type), `internal CelFunctionException CelFunctionException.JudgedBy(bool callersOwn)`, `internal CelFunctionException CelFunctionException.NotTheCallers()`; `internal static class CelDataOrigin { IsCallersOwn(CelNode), Reads(CelNode, IReadOnlySet<string>), Attributed<T>(CompiledExpression, IReadOnlySet<string>, Func<T>) }`; `public const string AlvoProblemTypes.ExpressionFailed = "expression-failed"`; `internal static IResult ProblemResultFactory.ExpressionFailed(string detail)`; `internal static CelFunctionException? AlvoExceptionHandler.CallerDataFailure(Exception)`; `internal static string AlvoExceptionHandler.ExpressionFailedDetail(CelFunctionException failure)`.
 
 - [ ] **Step 1: Write the failing origin facts**
 
 Add `failure.OnCallerData.ShouldBeFalse();` back to `CelFunctionBudgetTests.A_token_aware_function_receives_the_pass_s_token_and_its_cancellation_is_an_overrun` (Task 1 left it out). Create `test/MMLib.Alvo.Tests/Expressions/CelFailureOriginTests.cs`:
 
 ```csharp
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 
 namespace MMLib.Alvo.Tests.Expressions;
 
 /// <summary>
-/// E1's line, decided once on the failure itself: what the caller's data made a built-in or the interpreter refuse is
-/// theirs to fix (422); anything a host function did, and Alvo's own defect, is not (500).
+/// E1's line, decided by whose data was refused: a built-in or the interpreter refusing a value the caller sent is theirs
+/// to fix (422); anything a host function did or produced, the stored row, a value a hook wrote, and Alvo's own defect are
+/// not (500).
 /// </summary>
 public sealed class CelFailureOriginTests
 {
@@ -1026,6 +1098,73 @@ public sealed class CelFailureOriginTests
     public void A_built_in_body_that_threw_unexpectedly_is_not() =>
         new CelFunctionException("math.round", isHost: false, new ArgumentOutOfRangeException()).OnCallerData.ShouldBeFalse();
 
+    [Fact]
+    public void A_built_in_refusing_the_caller_s_own_value_is_the_caller_s()
+    {
+        var condition = TestCelFunctions.Compile("int(new.name) > 1", CelProfile.Condition);
+
+        Should.Throw<CelFunctionException>(() => CelInterpreter.EvaluatePredicate(condition, Row("x"), null, _caller)).OnCallerData.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_built_in_refusing_a_host_function_s_output_is_not_the_caller_s()
+    {
+        var condition = TestCelFunctions.Compile("int(echo(new.name)) > 1", CelProfile.Condition, TestCelFunctions.Echo);
+
+        Should.Throw<CelFunctionException>(() => CelInterpreter.EvaluatePredicate(condition, Row("x"), null, _caller)).OnCallerData.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Arithmetic_over_a_host_function_s_output_is_not_the_caller_s()
+    {
+        var condition = TestCelFunctions.Compile("new.qty / half(new.price) > 1", CelProfile.Condition, TestCelFunctions.Half);
+        var row = new AlvoRecord(new Dictionary<string, object?> { ["qty"] = 4L, ["price"] = 0m });
+
+        Should.Throw<CelFunctionException>(() => CelInterpreter.EvaluatePredicate(condition, row, null, _caller)).OnCallerData.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_built_in_refusing_the_stored_row_is_not_the_caller_s()
+    {
+        var condition = TestCelFunctions.Compile("int(old.name) > 1", CelProfile.Condition);
+
+        Should.Throw<CelFunctionException>(() => CelInterpreter.EvaluatePredicate(condition, Row("12"), Row("x"), _caller)).OnCallerData.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void An_inner_refusal_is_judged_by_its_own_subtree_not_by_a_host_call_beside_it()
+    {
+        var condition = TestCelFunctions.Compile("echo(new.name) == 'a' || int(new.name) > 1", CelProfile.Condition, TestCelFunctions.Echo);
+
+        Should.Throw<CelFunctionException>(() => CelInterpreter.EvaluatePredicate(condition, Row("x"), null, _caller)).OnCallerData.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_value_an_earlier_hook_wrote_is_not_the_caller_s()
+    {
+        var condition = TestCelFunctions.Compile("int(new.name) > 1", CelProfile.Condition);
+
+        Should.Throw<CelFunctionException>(() => CelDataOrigin.Attributed(
+                condition, new HashSet<string>(StringComparer.Ordinal) { "name" },
+                () => CelInterpreter.EvaluatePredicate(condition, Row("x"), null, _caller)))
+            .OnCallerData.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_value_no_hook_wrote_stays_the_caller_s()
+    {
+        var condition = TestCelFunctions.Compile("int(new.name) > 1", CelProfile.Condition);
+
+        Should.Throw<CelFunctionException>(() => CelDataOrigin.Attributed(
+                condition, new HashSet<string>(StringComparer.Ordinal) { "qty" },
+                () => CelInterpreter.EvaluatePredicate(condition, Row("x"), null, _caller)))
+            .OnCallerData.ShouldBeTrue();
+    }
+
+    private static readonly AlvoContext _caller = new() { Roles = new HashSet<Role> { Role.Authenticated } };
+
+    private static AlvoRecord Row(string name) => new(new Dictionary<string, object?> { ["name"] = name });
+
     private static CelFunction Builtin(string name) =>
         CelFunctionCatalog.BuiltIns.Overloads(name).First(function => function.Parameters.Count == 1 && function.Parameters[0].Type == CelValueType.String);
 }
@@ -1045,7 +1184,10 @@ using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Api.Tests;
 
-/// <summary>422 <c>expression-failed</c> is a port refusal every host answers; a host's failure never is.</summary>
+/// <summary>
+/// 422 <c>expression-failed</c> is a Data API refusal every host answers; a host's failure, a command's own write and an
+/// aggregate holding any failure that is not the caller's never are.
+/// </summary>
 public sealed class ExpressionFailedAnswerTests
 {
     private static readonly CelFunctionException _intOfText = new("int", "the text is not a whole number such as 42 or -7");
@@ -1053,7 +1195,7 @@ public sealed class ExpressionFailedAnswerTests
     [Fact]
     public async Task A_built_in_refusal_is_a_422_naming_the_function_and_its_reason()
     {
-        var (status, document) = await WrittenAsync(ProblemResultFactory.PortRefusalFor(_intOfText).ShouldNotBeNull());
+        var (status, document) = await WrittenAsync(ProblemResultFactory.RefusalFor(_intOfText).ShouldNotBeNull());
 
         status.ShouldBe(StatusCodes.Status422UnprocessableEntity);
         document["type"]!.GetValue<string>().ShouldBe("https://alvo.dev/errors/expression-failed");
@@ -1064,25 +1206,35 @@ public sealed class ExpressionFailedAnswerTests
 
     [Fact]
     public async Task A_wrapped_refusal_is_found_through_its_wrapper() =>
-        (await WrittenAsync(ProblemResultFactory.PortRefusalFor(new AggregateException(new InvalidOperationException("w", _intOfText))).ShouldNotBeNull()))
+        (await WrittenAsync(ProblemResultFactory.RefusalFor(new AggregateException(new InvalidOperationException("w", _intOfText))).ShouldNotBeNull()))
             .Status.ShouldBe(StatusCodes.Status422UnprocessableEntity);
+
+    [Fact]
+    public void An_aggregate_that_also_holds_a_host_failure_is_not_422() =>
+        ProblemResultFactory.RefusalFor(new AggregateException(_intOfText, new CelFunctionException("rate", isHost: true, new FormatException())))
+            .ShouldBeNull();
+
+    [Fact]
+    public void A_command_s_own_write_is_never_422() =>
+        ProblemResultFactory.PortRefusalFor(_intOfText).ShouldBeNull("PortRefusalFor is the command filter's mapping (Ruling 27)");
 
     [Fact]
     public async Task A_condition_with_no_bool_answers_its_own_sentence()
     {
         var failure = new CelFunctionException(CelInterpreter.WholeCondition, CelInterpreter.WholeConditionReason);
 
-        (await WrittenAsync(ProblemResultFactory.PortRefusalFor(failure).ShouldNotBeNull())).Document["detail"]!.GetValue<string>().ShouldBe(
+        (await WrittenAsync(ProblemResultFactory.RefusalFor(failure).ShouldNotBeNull())).Document["detail"]!.GetValue<string>().ShouldBe(
             "The hook's condition evaluated to a present value that is not a Bool, so nothing was written. Correct the values it reads.");
     }
 
     [Fact]
     public void A_hook_failure_and_a_host_function_failure_are_never_a_port_refusal()
     {
-        ProblemResultFactory.PortRefusalFor(new HookFailedException("guard", HookFailedException.Exception)).ShouldBeNull();
-        ProblemResultFactory.PortRefusalFor(new CelFunctionException("rate", isHost: true, new FormatException())).ShouldBeNull();
-        ProblemResultFactory.PortRefusalFor(new CelFunctionException(CelInterpreter.HookEvaluation, CelInterpreter.HookEvaluationReason, new InvalidCastException()))
+        ProblemResultFactory.RefusalFor(new HookFailedException("guard", HookFailedException.Exception)).ShouldBeNull();
+        ProblemResultFactory.RefusalFor(new CelFunctionException("rate", isHost: true, new FormatException())).ShouldBeNull();
+        ProblemResultFactory.RefusalFor(new CelFunctionException(CelInterpreter.HookEvaluation, CelInterpreter.HookEvaluationReason, new InvalidCastException()))
             .ShouldBeNull();
+        ProblemResultFactory.RefusalFor(_intOfText.NotTheCallers()).ShouldBeNull("a refusal of a value a hook wrote is not the caller's");
     }
 
     private static Task<(int Status, JsonObject Document)> WrittenAsync(IResult result) =>
@@ -1138,24 +1290,136 @@ and create `test/_shared/api/descriptors/expression-failed.alvo.json`:
 }
 ```
 
-In `AlvoExceptionHandlerTests`, every fact that feeds a built-in refusal (`new CelFunctionException("<built-in>", "<reason>")` or an interpreter `<condition>` failure) and asserts `function-failed` now asserts 422 `expression-failed` and that **no** Error record was logged; the `<hook>` defect fact (line ~162) stays `function-failed`. Find them with `grep -n "CelFunctionException(" test/MMLib.Alvo.Api.Tests/AlvoExceptionHandlerTests.cs`.
+In `AlvoExceptionHandlerTests`, every fact that feeds a built-in refusal (`new CelFunctionException("<built-in>", "<reason>")` or an interpreter `<condition>` failure) on a **Data API** endpoint (`DataApiOperationMetadata`) and asserts `function-failed` now asserts 422 `expression-failed` and that **no** Error record was logged; add `A_caller_data_refusal_on_a_command_endpoint_answers_function_failed` (the same failure on a `CommandEndpointMetadata` endpoint → 500 `function-failed`, logged — Ruling 27); the `<hook>` defect fact (line ~162) stays `function-failed`. Find them with `grep -n "CelFunctionException(" test/MMLib.Alvo.Api.Tests/AlvoExceptionHandlerTests.cs`.
+
+Append to `BeforeHookFacetTests` (Ruling 26 (b)) — the first hook mutates `note`, the second's condition refuses it:
+
+```csharp
+    [Fact]
+    public void A_later_hook_refusing_a_value_an_earlier_hook_wrote_is_not_the_caller_s()
+    {
+        var hooks = BeforeCreate(Mutate("note", Cel("'x'")), Reject("int(new.note) > 1", "Too many."));
+
+        Should.Throw<CelFunctionException>(() => Run(hooks, Row(("note", "5")))).OnCallerData.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_hook_refusing_the_caller_s_own_value_stays_the_caller_s()
+    {
+        var hooks = BeforeCreate(Reject("int(new.note) > 1", "Too many."));
+
+        Should.Throw<CelFunctionException>(() => Run(hooks, Row(("note", "x")))).OnCallerData.ShouldBeTrue();
+    }
+```
+
+(`Reject(condition, message)` builds a conditional reject action the way the class's existing reject facts do; if the class has no such helper, add it beside `Mutate`.) Append to `WriteExtensionRunnerTests`: `A_built_in_failing_in_an_after_write_condition_is_not_the_caller_s` (an after-write hook `when: "int(new.status) > 1"` over a saved ticket with status `"open"` → the escaping `CelFunctionException` has `OnCallerData` false) and `A_built_in_failing_on_a_field_an_earlier_hook_set_is_not_the_caller_s` (hook A `Set("status", "x")`, hook B `when: "int(new.status) > 1"` → `OnCallerData` false); and keep HX-09's `A_condition_whose_built_in_function_fails_escapes_unchanged_and_poisons_nothing`, now also asserting `OnCallerData` true for a value the caller sent.
 
 - [ ] **Step 3: Run them to verify they fail**
 
-Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*CelFailureOriginTests' --filter-class '*CelFunctionBudgetTests'` and `dotnet test --project test/MMLib.Alvo.Api.Tests --filter-class '*ExpressionFailedAnswerTests' --filter-class '*CelBuiltInWriteTests' --filter-class '*ProblemDetailsTests' --filter-class '*AlvoExceptionHandlerTests'`
+Run: `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*CelFailureOriginTests' --filter-class '*CelFunctionBudgetTests' --filter-class '*BeforeHookFacetTests' --filter-class '*WriteExtensionRunnerTests'` and `dotnet test --project test/MMLib.Alvo.Api.Tests --filter-class '*ExpressionFailedAnswerTests' --filter-class '*CelBuiltInWriteTests' --filter-class '*ProblemDetailsTests' --filter-class '*AlvoExceptionHandlerTests'`
 Expected: compile errors (`OnCallerData`, `ExpressionFailed`), then FAIL on status/type.
 
 - [ ] **Step 4: Classify, catalogue, answer**
 
-`CelFunctionException`: add the property and set it in the constructors — the `(functionName, isHost, Exception failure)` and `(functionName, reason, Exception failure)` constructors leave it `false`; the `(functionName, isHost, string reason)` constructor sets `OnCallerData = !isHost;` (the two-argument built-in constructor chains to it). Update the class summary's last sentences: "A Data API caller receives `…/errors/expression-failed` (422) when `OnCallerData` holds and `…/errors/function-failed` (500) otherwise."
+`CelFunctionException`: add the property and set it in the constructors — the `(functionName, isHost, Exception failure)` and `(functionName, reason, Exception failure)` constructors leave it `false`; the `(functionName, isHost, string reason)` constructor sets `OnCallerData = !isHost;` (the two-argument built-in constructor chains to it). Add the re-attribution (a copy, because an exception is immutable once thrown) — Ruling 26. Update the class summary's last sentences: "A Data API caller receives `…/errors/expression-failed` (422) when `OnCallerData` holds and `…/errors/function-failed` (500) otherwise."
 
 ```csharp
+    private CelFunctionException(CelFunctionException original, bool onCallerData)
+        : base(original.Message, original.InnerException)
+    {
+        FunctionName = original.FunctionName;
+        IsHost = original.IsHost;
+        Reason = original.Reason;
+        OnCallerData = onCallerData;
+        Judged = true;
+    }
+
     /// <summary>
-    /// Gets a value indicating whether the caller's data made a built-in, hook arithmetic or the interpreter refuse — a
-    /// failure the caller can fix by sending other data (422). Never for anything a host function did, nor for a defect.
+    /// Gets a value indicating whether the refused value is the caller's own — a built-in, hook arithmetic or the interpreter
+    /// refused what the request carries — so the caller fixes it by sending other data (422). Never for anything a host
+    /// function did or produced, the stored row, a value a hook wrote, nor a defect.
     /// </summary>
     public bool OnCallerData { get; }
+
+    /// <summary>Gets a value indicating whether a node has already decided whose data this is.</summary>
+    internal bool Judged { get; }
+
+    /// <summary>The failure as the innermost node that saw it attributes it; an already judged failure is returned as is.</summary>
+    /// <param name="callersOwn">Whether that node's subtree reads only the caller's data.</param>
+    /// <returns>The attributed failure.</returns>
+    internal CelFunctionException JudgedBy(bool callersOwn) => Judged || !OnCallerData ? this : new(this, callersOwn);
+
+    /// <summary>The failure, attributed as not the caller's (a value a hook wrote).</summary>
+    /// <returns>A copy with <see cref="OnCallerData"/> false.</returns>
+    internal CelFunctionException NotTheCallers() => OnCallerData ? new(this, onCallerData: false) : this;
 ```
+
+Create `src/MMLib.Alvo/Expressions/Internal/CelDataOrigin.cs`:
+
+```csharp
+namespace MMLib.Alvo.Expressions.Internal;
+
+/// <summary>
+/// Whose data a refusing node read (E1, Ruling 26): only the caller's when its subtree calls no host function and reads no
+/// stored row. Decided on the failure path from the compiled tree, so a write that refuses nothing pays nothing.
+/// </summary>
+internal static class CelDataOrigin
+{
+    /// <summary>Whether <paramref name="node"/> reads only what the request carries.</summary>
+    internal static bool IsCallersOwn(CelNode node) => node switch
+    {
+        CelCall { Function.IsHost: true } => false,
+        CelFieldRef { State: CelRecordState.Old } => false,
+        CelChanged => false,
+        _ => CelTree.Children(node).All(IsCallersOwn),
+    };
+
+    /// <summary>Whether <paramref name="node"/> reads one of <paramref name="fields"/> from the row being written.</summary>
+    internal static bool Reads(CelNode node, IReadOnlySet<string> fields) => node switch
+    {
+        CelFieldRef { State: not CelRecordState.Old } field => fields.Contains(field.FieldName),
+        _ => CelTree.Children(node).Any(child => Reads(child, fields)),
+    };
+
+    /// <summary>
+    /// Runs <paramref name="evaluate"/>; a refusal of the caller's data whose expression reads a field a hook wrote earlier
+    /// in this write is re-attributed as not the caller's. Conservative: the whole expression is judged, not the node.
+    /// </summary>
+    internal static T Attributed<T>(CompiledExpression expression, IReadOnlySet<string> writtenByHooks, Func<T> evaluate)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        ArgumentNullException.ThrowIfNull(evaluate);
+        try
+        {
+            return evaluate();
+        }
+        catch (CelFunctionException failure) when (failure.OnCallerData && writtenByHooks.Count > 0 && Reads(expression.Root, writtenByHooks))
+        {
+            throw failure.NotTheCallers();
+        }
+    }
+}
+```
+
+`CelInterpreter`: rename the node `switch` method `Evaluate` to `EvaluateNode` and make `Evaluate` judge at the innermost node that sees an unjudged refusal; and judge the whole-condition refusal in `EvaluateVerdict` by the root:
+
+```csharp
+    private static object? Evaluate(CelNode node, in EvalState state)
+    {
+        try
+        {
+            return EvaluateNode(node, state);
+        }
+        catch (CelFunctionException failure) when (failure is { OnCallerData: true, Judged: false })
+        {
+            throw failure.JudgedBy(CelDataOrigin.IsCallersOwn(node));
+        }
+    }
+```
+
+and in `EvaluateVerdict`, around `Truth(Evaluate(expression.Root, state), WholeCondition, …)`, add `catch (CelFunctionException failure) when (failure is { OnCallerData: true, Judged: false }) { throw failure.JudgedBy(CelDataOrigin.IsCallersOwn(expression.Root)); }` before the existing defence-in-depth catch (which already lets `CelFunctionException` through). `EvaluateMutation` needs nothing more: its failures come from nodes.
+
+`BeforeHookRunner.Applied`: evaluate each hook's condition and each mutation value through `CelDataOrigin.Attributed(expression, patch.Keys…, () => …)` with the fields earlier hooks of this run have mutated (`patch.Keys` as an ordinal `HashSet`, built once per hook iteration only when `patch.Count > 0`). `WriteExtensionRunner.Fires` takes the hook-written set: empty for validate; for before-write/before-delete, the mutate targets of the entity's declarative before-hooks for the operation (`catalog.TryGetEntity(entity, out var policy)` → `policy.BeforeHooks.For(op).SelectMany(h => h.Mutations).Select(m => m.Field)`, with `Create → Create`, `Update`/`Replace → Update`, `Delete → Delete`) plus the keys of the stage's host `patch` so far; for after-write and after-delete, every refusal is re-attributed (`failure.NotTheCallers()`), because the saved row carries defaults, rollups and hook writes. The existing `catch … when (thrown is not CelFunctionException { IsHost: false })` stays as it is.
 
 `AlvoProblemTypes`: add after `HookFailed`, and append `ExpressionFailed` as the **last** element of `All`; reword `FunctionFailed`'s summary/remarks to "a host function (`AddCelFunction`) failed — it threw, ran past its time budget, or was handed an argument its parameter cannot hold — or Alvo's own evaluation of a hook failed. A built-in function refusing the caller's data is `ExpressionFailed` instead.":
 
@@ -1180,25 +1444,51 @@ Expected: compile errors (`OnCallerData`, `ExpressionFailed`), then FAIL on stat
         Problem(StatusCodes.Status422UnprocessableEntity, AlvoProblemTypes.ExpressionFailed, detail);
 ```
 
+`PortRefusalFor` stays as it is — it is also the command filter's mapping (Ruling 27). `RefusalFor` (the `GuardAsync` path of the generated routes) gains the arm before the malformed-request arm:
+
 ```csharp
-        AlvoWriteRejectedException { ExtensionId.Length: > 0 } rejected => HookRejected(rejected),
-        _ when AlvoExceptionHandler.FunctionFailure(exception) is { OnCallerData: true } refused =>
-            ExpressionFailed(AlvoExceptionHandler.ExpressionFailedDetail(refused)),
-        _ => null,
+    internal static IResult? RefusalFor(Exception exception) =>
+        PortRefusalFor(exception)
+        ?? (AlvoExceptionHandler.CallerDataFailure(exception) is { } refused
+            ? ExpressionFailed(AlvoExceptionHandler.ExpressionFailedDetail(refused))
+            : null)
+        ?? <the existing malformed-request arm, unchanged>;
 ```
 
-and extend `PortRefusalFor`'s summary with "a built-in CEL function refusing the caller's data,".
+(keep the existing expression's shape; only the middle arm is new) and extend `RefusalFor`'s summary with "a built-in CEL function refusing the caller's own data (422 `expression-failed`, generated routes only),".
 
 `AlvoExceptionHandler`: in `AnswerAsync`, inside the `FunctionFailure` branch, answer the caller's refusal before logging:
 
 ```csharp
         if (FunctionFailure(exception) is { } function)
         {
-            await (function.OnCallerData
-                ? ProblemResultFactory.ExpressionFailed(ExpressionFailedDetail(function)).ExecuteAsync(httpContext)
+            await (IsDataApi(httpContext) && CallerDataFailure(exception) is { } refused
+                ? ProblemResultFactory.ExpressionFailed(ExpressionFailedDetail(refused)).ExecuteAsync(httpContext)
                 : AnswerFunctionFailureAsync(httpContext, function)).ConfigureAwait(false);
             return;
         }
+```
+
+with `IsDataApi` reading `IExceptionHandlerFeature.Endpoint` metadata for `DataApiOperationMetadata` (as `FailedInsideAlvo` does), and the aggregate rule (Ruling 28):
+
+```csharp
+    /// <summary>
+    /// The caller's refusal in <paramref name="exception"/>, when every function failure in it (and in what wraps it) is
+    /// the caller's; <see langword="null"/> when there is none, or when any is a host's or a defect.
+    /// </summary>
+    internal static CelFunctionException? CallerDataFailure(Exception exception)
+    {
+        var failures = FunctionFailures(exception, MaxWrapperDepth).ToList();
+        return failures.Count > 0 && failures.All(failure => failure.OnCallerData) ? failures[0] : null;
+    }
+
+    private static IEnumerable<CelFunctionException> FunctionFailures(Exception? exception, int depth) => exception switch
+    {
+        null => [],
+        CelFunctionException function => [function],
+        _ when depth <= 0 => [],
+        _ => Children(exception).SelectMany(child => FunctionFailures(child, depth - 1)),
+    };
 ```
 
 and add:
@@ -1247,11 +1537,13 @@ Expected: the facts PASS; `OpenApiDocumentTests.The_document_is_stable` FAILS wi
 
 - [ ] **Step 6: Format, ring0, commit**
 
+Regenerate the prototype's copy of the problem types (Ruling 41) and prove it current: `python3 scripts/gen-prototype-fixtures && python3 scripts/gen-prototype-fixtures --check` (expected: no "stale"); the only change in `docs/design/f5-admin/generated/schema-facets.js` is the new constant (and `HookFailed`, if this branch predates HX-09's own regeneration). Nothing in the prototype renders it, so `scripts/test-prototype` is not needed; if `git grep -n "hook-failed\|function-failed" docs/design/f5-admin/*.js` shows a screen that lists problem types, run it.
+
 ```bash
-dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo/Expressions/Internal/CelFunctionException.cs src/MMLib.Alvo/Api/AlvoProblemTypes.cs src/MMLib.Alvo/Api/Internal/ProblemResultFactory.cs src/MMLib.Alvo/Api/Internal/AlvoExceptionHandler.cs src/MMLib.Alvo/Api/Internal/DataApiDocumentation.cs test/MMLib.Alvo.Tests/Expressions/CelFailureOriginTests.cs test/MMLib.Alvo.Tests/Expressions/CelFunctionBudgetTests.cs test/MMLib.Alvo.Api.Tests/ExpressionFailedAnswerTests.cs test/MMLib.Alvo.Api.Tests/CelBuiltInWriteTests.cs test/MMLib.Alvo.Api.Tests/ProblemDetailsTests.cs test/MMLib.Alvo.Api.Tests/AlvoExceptionHandlerTests.cs
+dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo/Expressions/Internal/CelDataOrigin.cs src/MMLib.Alvo/Expressions/Internal/CelInterpreter.cs src/MMLib.Alvo/Rules/Internal/BeforeHookRunner.cs src/MMLib.Alvo/Hooks/Internal/WriteExtensionRunner.cs test/MMLib.Alvo.Tests/Rules/BeforeHookFacetTests.cs test/MMLib.Alvo.Tests/Hooks/WriteExtensionRunnerTests.cs src/MMLib.Alvo/Expressions/Internal/CelFunctionException.cs src/MMLib.Alvo/Api/AlvoProblemTypes.cs src/MMLib.Alvo/Api/Internal/ProblemResultFactory.cs src/MMLib.Alvo/Api/Internal/AlvoExceptionHandler.cs src/MMLib.Alvo/Api/Internal/DataApiDocumentation.cs test/MMLib.Alvo.Tests/Expressions/CelFailureOriginTests.cs test/MMLib.Alvo.Tests/Expressions/CelFunctionBudgetTests.cs test/MMLib.Alvo.Api.Tests/ExpressionFailedAnswerTests.cs test/MMLib.Alvo.Api.Tests/CelBuiltInWriteTests.cs test/MMLib.Alvo.Api.Tests/ProblemDetailsTests.cs test/MMLib.Alvo.Api.Tests/AlvoExceptionHandlerTests.cs
 scripts/test-ring0
 git branch --show-current
-git add src/MMLib.Alvo/Expressions/Internal/CelFunctionException.cs src/MMLib.Alvo/Api/AlvoProblemTypes.cs src/MMLib.Alvo/Api/Internal/ProblemResultFactory.cs src/MMLib.Alvo/Api/Internal/AlvoExceptionHandler.cs src/MMLib.Alvo/Api/Internal/DataApiDocumentation.cs website/src/data/problem-types.json test/_shared/api/descriptors/expression-failed.alvo.json test/MMLib.Alvo.Tests/Expressions/CelFailureOriginTests.cs test/MMLib.Alvo.Tests/Expressions/CelFunctionBudgetTests.cs test/MMLib.Alvo.Api.Tests/ExpressionFailedAnswerTests.cs test/MMLib.Alvo.Api.Tests/CelBuiltInWriteTests.cs test/MMLib.Alvo.Api.Tests/ProblemDetailsTests.cs test/MMLib.Alvo.Api.Tests/AlvoExceptionHandlerTests.cs test/MMLib.Alvo.Api.Tests/OpenApiDocumentTests.The_document_is_stable.verified.txt test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.verified.txt
+git add src/MMLib.Alvo/Expressions/Internal/CelDataOrigin.cs src/MMLib.Alvo/Expressions/Internal/CelInterpreter.cs src/MMLib.Alvo/Rules/Internal/BeforeHookRunner.cs src/MMLib.Alvo/Hooks/Internal/WriteExtensionRunner.cs test/MMLib.Alvo.Tests/Rules/BeforeHookFacetTests.cs test/MMLib.Alvo.Tests/Hooks/WriteExtensionRunnerTests.cs docs/design/f5-admin/generated/schema-facets.js src/MMLib.Alvo/Expressions/Internal/CelFunctionException.cs src/MMLib.Alvo/Api/AlvoProblemTypes.cs src/MMLib.Alvo/Api/Internal/ProblemResultFactory.cs src/MMLib.Alvo/Api/Internal/AlvoExceptionHandler.cs src/MMLib.Alvo/Api/Internal/DataApiDocumentation.cs website/src/data/problem-types.json test/_shared/api/descriptors/expression-failed.alvo.json test/MMLib.Alvo.Tests/Expressions/CelFailureOriginTests.cs test/MMLib.Alvo.Tests/Expressions/CelFunctionBudgetTests.cs test/MMLib.Alvo.Api.Tests/ExpressionFailedAnswerTests.cs test/MMLib.Alvo.Api.Tests/CelBuiltInWriteTests.cs test/MMLib.Alvo.Api.Tests/ProblemDetailsTests.cs test/MMLib.Alvo.Api.Tests/AlvoExceptionHandlerTests.cs test/MMLib.Alvo.Api.Tests/OpenApiDocumentTests.The_document_is_stable.verified.txt test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.verified.txt
 git commit -m "feat(api): answer a built-in CEL refusal of the caller's data with 422 expression-failed
 
 Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
@@ -1316,8 +1608,9 @@ namespace MMLib.Alvo.Api.Tests;
 /// <c>function-failed</c>; a built-in refusing the caller's own data answers 422 <c>expression-failed</c> and writes nothing.
 /// </summary>
 /// <remarks>
-/// The budget facts run on the real clock with a 20 ms budget and functions that wait far longer (or for their token):
-/// they can only ever overrun, never race. The rollback is read back through storage, which is what differs per engine.
+/// The budget facts run on the real clock: the overrun facts give 200 ms against a 1 s sleep or a 10 s token wait, and the
+/// inside-budget fact gives 2 s to a function that returns at once (Ruling 42) — a margin on both sides that a loaded CI
+/// runner cannot cross. The rollback is read back through storage, which is what differs per engine.
 /// </remarks>
 public abstract partial class DataApiEngineTests
 {
@@ -1327,7 +1620,7 @@ public abstract partial class DataApiEngineTests
     [Fact]
     public async Task A_token_aware_host_function_past_its_budget_is_function_failed_and_rolls_back_on_every_engine()
     {
-        await using var world = await StartCelBudgetAsync((string currency, CancellationToken ct) =>
+        await using var world = await StartCelBudgetAsync(TightBudget, (string currency, CancellationToken ct) =>
         {
             ct.WaitHandle.WaitOne(TimeSpan.FromSeconds(10));
             ct.ThrowIfCancellationRequested();
@@ -1340,11 +1633,33 @@ public abstract partial class DataApiEngineTests
     }
 
     [Fact]
-    public async Task A_host_function_that_ignores_its_token_past_the_budget_is_function_failed_and_rolls_back_on_every_engine()
+    public async Task A_token_free_host_function_past_the_budget_is_function_failed_and_rolls_back_on_every_engine()
     {
-        await using var world = await StartCelBudgetAsync((string currency) =>
+        await using var world = await StartCelBudgetAsync(TightBudget, (string currency) =>
         {
-            Thread.Sleep(TimeSpan.FromMilliseconds(80));
+            Thread.Sleep(TimeSpan.FromSeconds(1));
+            return "1.0";
+        });
+
+        using var refused = await world.SendAsync(HttpMethod.Post, "/api/quotes", _quotesWriter, body: new JsonObject { ["currency"] = "EUR" });
+
+        await ShouldBeBudgetOverrunAsync(world, refused);
+    }
+
+    [Fact]
+    public async Task A_host_function_that_catches_its_cancellation_and_returns_a_fallback_is_still_function_failed_on_every_engine()
+    {
+        await using var world = await StartCelBudgetAsync(TightBudget, (string currency, CancellationToken ct) =>
+        {
+            try
+            {
+                Task.Delay(TimeSpan.FromSeconds(10), ct).Wait(ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return "fallback";
+            }
+
             return "1.0";
         });
 
@@ -1356,7 +1671,7 @@ public abstract partial class DataApiEngineTests
     [Fact]
     public async Task A_host_function_inside_its_budget_stamps_the_row_on_every_engine()
     {
-        await using var world = await StartCelBudgetAsync((string currency, CancellationToken ct) => currency == "EUR" ? "1.0" : "0.5");
+        await using var world = await StartCelBudgetAsync(TimeSpan.FromSeconds(2), (string currency, CancellationToken ct) => currency == "EUR" ? "1.0" : "0.5");
 
         using var created = await world.SendAsync(HttpMethod.Post, "/api/quotes", _quotesWriter, body: new JsonObject { ["currency"] = "EUR" });
 
@@ -1394,14 +1709,16 @@ public abstract partial class DataApiEngineTests
         (await read.ReadJsonObjectAsync())["quantity_text"]!.GetValue<string>().ShouldBe("12");
     }
 
-    private Task<AlvoApiWorld> StartCelBudgetAsync(Delegate rateOf) =>
+    private static readonly TimeSpan TightBudget = TimeSpan.FromMilliseconds(200);
+
+    private Task<AlvoApiWorld> StartCelBudgetAsync(TimeSpan budget, Delegate rateOf) =>
         AlvoApiWorld.FromDescriptorAsync(
             "cel-budget.alvo.json",
             [_quotesWriter],
             new AlvoApiWorldSetup(
                 MapAlvoProblemDetails: true,
                 ConfigureAlvo: alvo => alvo.AddCelFunction("rateOf", rateOf),
-                ConfigureServicesAfterAlvo: services => services.Configure<AlvoExtensionOptions>(o => o.CelFunctionBudget = TimeSpan.FromMilliseconds(20))),
+                ConfigureServicesAfterAlvo: services => services.Configure<AlvoExtensionOptions>(o => o.CelFunctionBudget = budget)),
             Engine);
 
     private static async Task ShouldBeBudgetOverrunAsync(AlvoApiWorld world, HttpResponseMessage refused)
@@ -1410,7 +1727,7 @@ public abstract partial class DataApiEngineTests
         var problem = await refused.ReadJsonObjectAsync();
         problem["type"]!.GetValue<string>().ShouldBe("https://alvo.dev/errors/function-failed");
         problem["detail"]!.GetValue<string>().ShouldBe(
-            "The CEL function 'rateOf' failed: it ran past the 20 ms that host functions have in one evaluation. Nothing was written.");
+            "The CEL function 'rateOf' failed: it ran past the 200 ms that host functions have in one evaluation. Nothing was written.");
         (await world.CountRowsAsync("quotes")).ShouldBe(0, "the write rolled back");
     }
 }
@@ -1420,7 +1737,7 @@ public abstract partial class DataApiEngineTests
 
 - [ ] **Step 2: Run them on SQLite and PostgreSQL**
 
-Run: `dotnet test --project test/MMLib.Alvo.Api.Tests --filter-class '*SqliteDataApiTests' --filter-method '*on_every_engine'` then `dotnet test --project test/MMLib.Alvo.Api.Tests.Integration --filter-class '*DataApiOnPostgresTests' --filter-method '*budget*' --filter-method '*expression_failed*' --filter-method '*built_in_refuses*' --filter-method '*inside_its_budget*'` (Docker running).
+Run: `dotnet test --project test/MMLib.Alvo.Api.Tests --filter-class '*SqliteDataApiTests' --filter-method '*on_every_engine'` then `dotnet test --project test/MMLib.Alvo.Api.Tests.Integration --filter-class '*DataApiOnPostgresTests' --filter-method '*budget*' --filter-method '*expression_failed*' --filter-method '*built_in_refuses*' --filter-method '*cancellation*'` (Docker running).
 Expected: PASS on both. A FAIL here is a defect in Tasks 1–3 (fix it in place and say which); these facts assert nothing new.
 
 - [ ] **Step 3: ring0, ring1, commit**
@@ -1446,7 +1763,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks; matches the core's types by metadata name (the analyzer references no Alvo assembly).
-- Produces: `public sealed class InTransactionIoAnalyzer : DiagnosticAnalyzer`; `internal static class AlvoDiagnostics { Alvo1001, HelpLink }`; `internal sealed class AnalysisScope(string name, string fix, bool isCelFunction)`; `internal sealed class AlvoSymbols { static From(Compilation), HookScopeOf(INamedTypeSymbol), RegistrationOf(IInvocationOperation, out IOperation?), IsTransactionCall(IMethodSymbol) }`; `internal static class IoReach { BannedTypes, NetworkNamespaces, IsReached(ITypeSymbol?), Describe(IOperation, AnalysisScope, AlvoSymbols) }`; test helper `AnalyzerHarness.Alvo1001Async(params string[] sources)`, `AnalyzerHarness.MarkedLines(string source)`, `AnalyzerHarness.Lines(IEnumerable<Diagnostic>)`.
+- Produces: `public sealed class InTransactionIoAnalyzer : DiagnosticAnalyzer`; `internal static class AlvoDiagnostics { Alvo1001, HelpLink }`; `internal sealed class AnalysisScope { CelFunction, OfHookType(string, INamedTypeSymbol), HookDelegate(string), HookType, IsOwnCode(IMethodSymbol) }`; `internal sealed class AlvoSymbols { static From(Compilation), HookScopeOf(INamedTypeSymbol), RegistrationOf(IInvocationOperation, out IOperation?), IsTransactionCall(IMethodSymbol, AnalysisScope) }`; `internal static class IoReach { BannedTypes, NetworkNamespaces, IsReached(ITypeSymbol?), Describe(IOperation, AnalysisScope, AlvoSymbols) }`; test helper `AnalyzerHarness.Alvo1001Async(params string[] sources)`, `AnalyzerHarness.MarkedLines(string source)`, `AnalyzerHarness.Lines(IEnumerable<Diagnostic>)`.
 
 This is the project the package rule earns, as E6 decided: a compiler loads an analyzer only from a `netstandard2.0` assembly of its own, so it cannot be a namespace of the `net10.0` core; it is **not** a package (Ruling 15).
 
@@ -1532,7 +1849,10 @@ dotnet sln MMLib.Alvo.slnx add --solution-folder test test/MMLib.Alvo.Analyzers.
 `Directory.Packages.props` (in the alphabetical block of build-time packages):
 
 ```xml
-    <!-- The analyzer's Roslyn floor: the oldest compiler a .NET 10 SDK carries loads an analyzer built against this. -->
+    <!-- The analyzer's Roslyn floor: the oldest compiler a .NET 10 SDK carries loads an analyzer built against this.
+         CentralPackageTransitivePinningEnabled makes it a transitive pin for EVERY project: a future dependency on a newer
+         Roslyn (Workspaces, a generator test kit) must raise this floor deliberately — and re-run
+         scripts/test-packed-analyzer — rather than fail restore with NU1109. -->
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" />
 ```
@@ -1810,6 +2130,8 @@ internal static class AlvoDiagnostics
 `AnalysisScope.cs`:
 
 ```csharp
+using Microsoft.CodeAnalysis;
+
 namespace MMLib.Alvo.Analyzers;
 
 /// <summary>Where an operation runs, as a diagnostic names it, and what to do instead.</summary>
@@ -1818,14 +2140,15 @@ internal sealed class AnalysisScope
     private const string HookFix = "call the service from a validate hook, which runs before the transaction, or from an event handler after the commit";
     private const string FunctionFix = "a CEL function must be synchronous and pure: read the value before the write, or check it in a validate hook";
 
-    private AnalysisScope(string name, string fix, bool isCelFunction)
+    private AnalysisScope(string name, string fix, bool isCelFunction, INamedTypeSymbol? hookType)
     {
         Name = name;
         Fix = fix;
         IsCelFunction = isCelFunction;
+        HookType = hookType;
     }
 
-    internal static AnalysisScope CelFunction { get; } = new("a CEL function registered with AddCelFunction", FunctionFix, isCelFunction: true);
+    internal static AnalysisScope CelFunction { get; } = new("a CEL function registered with AddCelFunction", FunctionFix, isCelFunction: true, hookType: null);
 
     internal string Name { get; }
 
@@ -1833,9 +2156,31 @@ internal sealed class AnalysisScope
 
     internal bool IsCelFunction { get; }
 
-    internal static AnalysisScope HookType(string stage, string type) => new($"the {stage} hook '{type}'", HookFix, isCelFunction: false);
+    /// <summary>Gets the hook type whose own members (and nested types' members) count as the hook's code; none for a delegate.</summary>
+    internal INamedTypeSymbol? HookType { get; }
 
-    internal static AnalysisScope HookDelegate(string stage) => new($"a {stage} hook delegate", HookFix, isCelFunction: false);
+    internal static AnalysisScope OfHookType(string stage, INamedTypeSymbol type) => new($"the {stage} hook '{type.Name}'", HookFix, isCelFunction: false, type);
+
+    internal static AnalysisScope HookDelegate(string stage) => new($"a {stage} hook delegate", HookFix, isCelFunction: false, hookType: null);
+
+    /// <summary>Whether <paramref name="method"/> is the hook's own code — a member of the hook type or a type nested in it, or a local function.</summary>
+    internal bool IsOwnCode(IMethodSymbol method)
+    {
+        if (method.MethodKind == MethodKind.LocalFunction)
+        {
+            return true;
+        }
+
+        for (var type = method.ContainingType; type is not null && HookType is not null; type = type.ContainingType)
+        {
+            if (SymbolEqualityComparer.Default.Equals(type.OriginalDefinition, HookType.OriginalDefinition))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }
 ```
 
@@ -1896,14 +2241,20 @@ internal sealed class AlvoSymbols
         return hooks.IsEmpty ? null : new AlvoSymbols(compilation, hooks);
     }
 
-    /// <summary>The scope of <paramref name="type"/> when it implements an in-transaction hook contract.</summary>
+    /// <summary>
+    /// The scope of code declared in <paramref name="type"/>: the nearest type in its containing-type chain that implements
+    /// an in-transaction hook contract, so a helper type nested in a hook is the hook's code.
+    /// </summary>
     internal AnalysisScope? HookScopeOf(INamedTypeSymbol type)
     {
-        foreach (var contract in type.AllInterfaces)
+        for (var current = type; current is not null; current = current.ContainingType)
         {
-            if (_hooks.TryGetValue(contract.OriginalDefinition, out var stage))
+            foreach (var contract in current.AllInterfaces)
             {
-                return AnalysisScope.HookType(stage, type.Name);
+                if (_hooks.TryGetValue(contract.OriginalDefinition, out var stage))
+                {
+                    return AnalysisScope.OfHookType(stage, current);
+                }
             }
         }
 
@@ -1931,9 +2282,9 @@ internal sealed class AlvoSymbols
         return null;
     }
 
-    /// <summary>Whether awaiting a call to <paramref name="method"/> is the write's own transaction (or the host's own code).</summary>
-    internal bool IsTransactionCall(IMethodSymbol method) =>
-        !method.DeclaringSyntaxReferences.IsEmpty
+    /// <summary>Whether awaiting a call to <paramref name="method"/> is the write's own transaction, or the hook's own code.</summary>
+    internal bool IsTransactionCall(IMethodSymbol method, AnalysisScope scope) =>
+        scope.IsOwnCode(method)
         || IsSession(method.ContainingType)
         || (method.IsExtensionMethod && method.Parameters.Length > 0 && IsSession(method.Parameters[0].Type))
         || method.ContainingType?.ContainingNamespace?.ToDisplayString() == "MMLib.Alvo.Hooks";
@@ -1970,19 +2321,22 @@ internal static class IoReach
         "MMLib.Alvo.Events.IAlvoEventPump", "MMLib.Alvo.Commands.IAlvoCommands", "MMLib.Alvo.Management.IAlvoManagement",
         "MMLib.Alvo.Management.IAlvoOperations", "MMLib.Alvo.IAlvoUserStore", "MMLib.Alvo.IAlvoUserAdministration",
         "MMLib.Alvo.IAlvoBootstrapAdmin", "MMLib.Alvo.Ai.IAlvoAssistant",
+        "Microsoft.EntityFrameworkCore.DbContext", "Microsoft.EntityFrameworkCore.IDbContextFactory`1",
     ];
 
     /// <summary>Every type of these namespaces is reached.</summary>
     internal static readonly ImmutableArray<string> NetworkNamespaces =
         ["System.Net.Http", "System.Net.Sockets", "System.Net.WebSockets", "System.Net.Mail", "System.Net.Quic"];
 
-    private static readonly ImmutableHashSet<string> _webRequestTypes =
+    /// <summary>The <c>System.Net</c> types reached by name, as the boot ban names them.</summary>
+    internal static readonly ImmutableHashSet<string> WebRequestTypes =
         ImmutableHashSet.Create(StringComparer.Ordinal, "WebClient", "WebRequest", "HttpWebRequest", "FtpWebRequest");
 
     private static readonly ImmutableHashSet<string> _fileTypes =
         ImmutableHashSet.Create(StringComparer.Ordinal, "File", "FileInfo", "FileStream", "Directory", "DirectoryInfo");
 
-    private static readonly ImmutableArray<string> _identityNamespaces = ["Microsoft.AspNetCore.Identity", "MMLib.Alvo.Identity"];
+    /// <summary>Every namespace starting with one of these is reached — the boot ban's own <c>StartsWith</c> rule.</summary>
+    internal static readonly ImmutableArray<string> IdentityPrefixes = ["Microsoft.AspNetCore.Identity", "MMLib.Alvo.Identity"];
 
     /// <summary>Whether <paramref name="type"/> — or an element, generic argument, base type or interface of it — is reached.</summary>
     internal static bool IsReached(ITypeSymbol? type) => type switch
@@ -1997,6 +2351,9 @@ internal static class IoReach
     internal static string? Describe(IOperation operation, AnalysisScope scope, AlvoSymbols symbols) => operation switch
     {
         IObjectCreationOperation creation when IsReached(creation.Type) => $"'{Name(creation.Type)}' is created",
+        IFieldReferenceOperation { Field.HasConstantValue: true } => null,
+        IFieldReferenceOperation { Field.IsStatic: true, Type.IsValueType: true } => null,
+        IPropertyReferenceOperation { Property.IsStatic: true, Type.IsValueType: true } => null,
         IFieldReferenceOperation field when IsReached(field.Type) => $"'{Name(field.Type)}' is used",
         IPropertyReferenceOperation property when IsReached(property.Type) => $"'{Name(property.Type)}' is used",
         IParameterReferenceOperation parameter when IsReached(parameter.Type) => $"'{Name(parameter.Type)}' is used",
@@ -2017,15 +2374,17 @@ internal static class IoReach
         return method.TypeArguments.FirstOrDefault(IsReached) is { } resolved ? $"'{Name(resolved)}' is resolved" : null;
     }
 
-    private static bool IsReachedItself(ITypeSymbol type)
+    private static bool IsReachedItself(ITypeSymbol type) => SelfAndAncestors(type).Any(IsBannedByItself);
+
+    private static bool IsBannedByItself(ITypeSymbol type)
     {
         var space = type.ContainingNamespace?.ToDisplayString() ?? string.Empty;
         return NetworkNamespaces.Contains(space)
-            || (space == "System.Net" && _webRequestTypes.Contains(type.Name))
+            || (space == "System.Net" && WebRequestTypes.Contains(type.Name))
             || (space == "System.IO" && _fileTypes.Contains(type.Name))
-            || _identityNamespaces.Any(prefix => space == prefix || space.StartsWith(prefix + ".", StringComparison.Ordinal))
+            || IdentityPrefixes.Any(prefix => space.StartsWith(prefix, StringComparison.Ordinal))
             || type.Name == "IEmailSender"
-            || SelfAndAncestors(type).Any(ancestor => BannedTypes.Contains(MetadataName(ancestor)));
+            || BannedTypes.Contains(MetadataName(type.OriginalDefinition));
     }
 
     private static IEnumerable<ITypeSymbol> SelfAndAncestors(ITypeSymbol type)
@@ -2102,7 +2461,8 @@ public sealed class InTransactionIoAnalyzer : DiagnosticAnalyzer
     {
         if (block.OwningSymbol.ContainingType is { } type && symbols.HookScopeOf(type) is { } scope)
         {
-            block.RegisterOperationAction(operation => Report(operation.ReportDiagnostic, operation.Operation, scope, symbols), _reaching);
+            var seen = new ReportedSymbols();
+            block.RegisterOperationAction(operation => Report(operation.ReportDiagnostic, operation.Operation, scope, symbols, seen), _reaching);
         }
     }
 
@@ -2114,9 +2474,10 @@ public sealed class InTransactionIoAnalyzer : DiagnosticAnalyzer
             return;
         }
 
+        var seen = new ReportedSymbols();
         foreach (var operation in body.DescendantsAndSelf())
         {
-            Report(context.ReportDiagnostic, operation, scope, symbols);
+            Report(context.ReportDiagnostic, operation, scope, symbols, seen);
         }
     }
 
@@ -2147,15 +2508,45 @@ public sealed class InTransactionIoAnalyzer : DiagnosticAnalyzer
         return declaration is null ? null : invocation.SemanticModel?.GetOperation(declaration.GetSyntax());
     }
 
-    private static void Report(Action<Diagnostic> report, IOperation operation, AnalysisScope scope, AlvoSymbols symbols)
+    private static void Report(Action<Diagnostic> report, IOperation operation, AnalysisScope scope, AlvoSymbols symbols, ReportedSymbols seen)
     {
-        if (IoReach.Describe(operation, scope, symbols) is { } what)
+        if (IoReach.Describe(operation, scope, symbols) is { } what && seen.FirstUse(operation))
         {
             report(Diagnostic.Create(AlvoDiagnostics.Alvo1001, operation.Syntax.GetLocation(), what, scope.Name, scope.Fix));
         }
     }
 }
 ```
+
+`ReportedSymbols.cs` (Ruling 31 — one diagnostic per reached symbol per body; block operation actions may run concurrently, so the set is concurrent):
+
+```csharp
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Operations;
+using System.Collections.Concurrent;
+
+namespace MMLib.Alvo.Analyzers;
+
+/// <summary>The reached symbols one body has already reported, so a field, property, parameter or local is reported at its first use only.</summary>
+internal sealed class ReportedSymbols
+{
+    private readonly ConcurrentDictionary<ISymbol, byte> _reported = new(SymbolEqualityComparer.Default);
+
+    /// <summary>Whether <paramref name="operation"/> should be reported: anything but a symbol reference always; a reference the first time.</summary>
+    internal bool FirstUse(IOperation operation) => SymbolOf(operation) is not { } symbol || _reported.TryAdd(symbol, 0);
+
+    private static ISymbol? SymbolOf(IOperation operation) => operation switch
+    {
+        IFieldReferenceOperation field => field.Field,
+        IPropertyReferenceOperation property => property.Property,
+        IParameterReferenceOperation parameter => parameter.Parameter,
+        ILocalReferenceOperation local => local.Local,
+        _ => null,
+    };
+}
+```
+
+(Block operation actions are invoked in no guaranteed order, so "first use" is the first one *analysed*; the diagnostic still lands on a real use, and facts assert lines with one marker per reached symbol per body.)
 
 - [ ] **Step 5: Run the facts, accept the analyzer baseline**
 
@@ -2183,7 +2574,7 @@ Expected: `Alvo1001ScopeTests` PASS; `PublicApiApprovalTests` writes a new `Publ
 - [ ] **Step 7: Format, ring0, commit**
 
 ```bash
-dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo.Analyzers/AlvoDiagnostics.cs src/MMLib.Alvo.Analyzers/AnalysisScope.cs src/MMLib.Alvo.Analyzers/AlvoSymbols.cs src/MMLib.Alvo.Analyzers/IoReach.cs src/MMLib.Alvo.Analyzers/InTransactionIoAnalyzer.cs src/MMLib.Alvo.Analyzers/Properties/AssemblyInfo.cs src/MMLib.Alvo/Properties/AssemblyInfo.cs test/MMLib.Alvo.Analyzers.Tests/AnalyzerHarness.cs test/MMLib.Alvo.Analyzers.Tests/Alvo1001ScopeTests.cs test/MMLib.Alvo.Conventions.Tests/SolutionConventionTests.cs
+dotnet format whitespace MMLib.Alvo.slnx --include src/MMLib.Alvo.Analyzers/AlvoDiagnostics.cs src/MMLib.Alvo.Analyzers/AnalysisScope.cs src/MMLib.Alvo.Analyzers/AlvoSymbols.cs src/MMLib.Alvo.Analyzers/IoReach.cs src/MMLib.Alvo.Analyzers/ReportedSymbols.cs src/MMLib.Alvo.Analyzers/InTransactionIoAnalyzer.cs src/MMLib.Alvo.Analyzers/Properties/AssemblyInfo.cs src/MMLib.Alvo/Properties/AssemblyInfo.cs test/MMLib.Alvo.Analyzers.Tests/AnalyzerHarness.cs test/MMLib.Alvo.Analyzers.Tests/Alvo1001ScopeTests.cs test/MMLib.Alvo.Conventions.Tests/SolutionConventionTests.cs
 scripts/test-ring0
 git branch --show-current
 git add src/MMLib.Alvo.Analyzers test/MMLib.Alvo.Analyzers.Tests src/MMLib.Alvo/MMLib.Alvo.csproj src/MMLib.Alvo/Properties/AssemblyInfo.cs Directory.Packages.props MMLib.Alvo.slnx test/MMLib.Alvo.Conventions.Tests/SolutionConventionTests.cs docs/architecture/package-boundary.md CLAUDE.md
@@ -2204,7 +2595,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 **Interfaces:**
 - Consumes: `AnalyzerHarness`, `AlvoSymbols.IsTransactionCall`, `AnalysisScope.IsCelFunction` (Task 5).
-- Produces: `IoReach.Describe` gains the await and task rules; `internal static IReadOnlyList<Type> HookDependencies.Banned` and `internal static IReadOnlyList<string> HookDependencies.NetworkNamespaces` (for the parity fact).
+- Produces: `IoReach.Describe` gains the await and task rules; `internal static IReadOnlyList<Type> HookDependencies.Banned`, `NetworkNamespaces`, `WebRequestTypes`, `IdentityPrefixes` (for the parity facts).
 
 - [ ] **Step 1: Write the failing facts**
 
@@ -2339,21 +2730,80 @@ Create `Alvo1001ReachTests.cs` (Usings as in the scope tests, plus `using System
     }
 
     [Fact]
-    public async Task A_typed_client_the_host_wrote_itself_is_not_reported()
+    public async Task A_reference_to_a_typed_client_the_host_wrote_is_not_reported_by_itself()
     {
         const string source = Usings + """
-            public interface IRatesClient { Task<decimal> EuroAsync(CancellationToken ct); }
+            public interface IRatesClient { decimal Euro(); }
             public sealed class Guard(IRatesClient rates) : IBeforeWriteHook
             {
                 public ValueTask BeforeWriteAsync(BeforeWrite<AlvoRecord> write, CancellationToken cancellationToken)
                 {
-                    _ = rates;
+                    write.Set("rate", rates.Euro());
                     return ValueTask.CompletedTask;
                 }
             }
             """;
 
-        (await AnalyzerHarness.Alvo1001Async(source)).ShouldBeEmpty();
+        (await AnalyzerHarness.Alvo1001Async(source)).ShouldBeEmpty("a synchronous call into the host's own code is the documented blind spot");
+    }
+
+    [Fact]
+    public async Task A_subclass_of_a_reached_type_and_an_implementation_of_a_reached_interface_are_reached()
+    {
+        const string source = Usings + """
+            public interface IEmailSender { void Send(string to); }
+            public sealed class RatesHttp : HttpClient { }
+            public sealed class Mailer : IEmailSender { public void Send(string to) { } }
+            public sealed class Guard(RatesHttp http, Mailer mail) : IBeforeWriteHook
+            {
+                public ValueTask BeforeWriteAsync(BeforeWrite<AlvoRecord> write, CancellationToken cancellationToken)
+                {
+                    _ = http.Timeout; // ALVO1001
+                    mail.Send("a@b.example"); // ALVO1001
+                    return ValueTask.CompletedTask;
+                }
+            }
+            """;
+
+        AnalyzerHarness.Lines(await AnalyzerHarness.Alvo1001Async(source)).ShouldBe(AnalyzerHarness.MarkedLines(source));
+    }
+
+    [Fact]
+    public async Task An_ef_core_context_is_reached_by_its_metadata_name()
+    {
+        const string source = Usings + """
+            namespace Microsoft.EntityFrameworkCore { public class DbContext { } }
+            public sealed class ShopContext : Microsoft.EntityFrameworkCore.DbContext { }
+            public sealed class Guard(ShopContext shop) : IBeforeWriteHook
+            {
+                public ValueTask BeforeWriteAsync(BeforeWrite<AlvoRecord> write, CancellationToken cancellationToken)
+                {
+                    _ = shop; // ALVO1001
+                    return ValueTask.CompletedTask;
+                }
+            }
+            """;
+
+        AnalyzerHarness.Lines(await AnalyzerHarness.Alvo1001Async(source)).ShouldBe(AnalyzerHarness.MarkedLines(source));
+    }
+
+    [Fact]
+    public async Task A_reached_local_is_reported_once_however_often_it_is_used()
+    {
+        const string source = Usings + """
+            public sealed class Guard(IHttpClientFactory clients) : IBeforeWriteHook
+            {
+                public async ValueTask BeforeWriteAsync(BeforeWrite<AlvoRecord> write, CancellationToken cancellationToken)
+                {
+                    var answer = await clients.CreateClient().GetAsync("https://rates.example", cancellationToken); // ALVO1001
+                    write.Set("ok", answer.IsSuccessStatusCode);
+                    write.Set("status", (int)answer.StatusCode);
+                }
+            }
+            """;
+
+        AnalyzerHarness.Lines(await AnalyzerHarness.Alvo1001Async(source)).Distinct().Count().ShouldBe(2,
+            "the factory parameter on the marked line, and the reached local `answer` once — not at each of its uses");
     }
 ```
 
@@ -2381,6 +2831,47 @@ Create `Alvo1001AwaitTests.cs`:
             """;
 
         (await AnalyzerHarness.Alvo1001Async(source)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Awaiting_a_typed_client_the_host_wrote_itself_is_reported()
+    {
+        const string source = Usings + """
+            public interface IRatesClient { Task<decimal> EuroAsync(CancellationToken ct); }
+            public sealed class Guard(IRatesClient rates) : IBeforeWriteHook
+            {
+                public async ValueTask BeforeWriteAsync(BeforeWrite<AlvoRecord> write, CancellationToken cancellationToken) =>
+                    write.Set("rate", await rates.EuroAsync(cancellationToken)); // ALVO1001
+            }
+            """;
+
+        var reported = await AnalyzerHarness.Alvo1001Async(source);
+
+        AnalyzerHarness.Lines(reported).ShouldBe(AnalyzerHarness.MarkedLines(source));
+        reported[0].GetMessage(System.Globalization.CultureInfo.InvariantCulture).ShouldStartWith("'IRatesClient.EuroAsync' is awaited");
+    }
+
+    [Fact]
+    public async Task A_helper_type_nested_in_the_hook_is_the_hook_s_own_code_and_is_analysed()
+    {
+        const string source = Usings + """
+            public sealed class Guard : IBeforeWriteHook
+            {
+                public async ValueTask BeforeWriteAsync(BeforeWrite<AlvoRecord> write, CancellationToken cancellationToken) =>
+                    await Checks.RunAsync(write, cancellationToken);
+
+                private static class Checks
+                {
+                    public static async Task RunAsync(BeforeWrite<AlvoRecord> write, CancellationToken cancellationToken)
+                    {
+                        _ = await write.Transaction.GetAsync("tickets", Guid.Empty, cancellationToken);
+                        await Task.Delay(1, cancellationToken); // ALVO1001
+                    }
+                }
+            }
+            """;
+
+        AnalyzerHarness.Lines(await AnalyzerHarness.Alvo1001Async(source)).ShouldBe(AnalyzerHarness.MarkedLines(source));
     }
 
     [Fact]
@@ -2453,10 +2944,18 @@ public sealed class BootBanParityTests
     [Fact]
     public void The_analyzer_names_every_network_namespace_the_boot_ban_refuses() =>
         HookDependencies.NetworkNamespaces.Except(IoReach.NetworkNamespaces, StringComparer.Ordinal).ShouldBeEmpty();
+
+    [Fact]
+    public void The_analyzer_names_every_web_request_type_the_boot_ban_refuses() =>
+        HookDependencies.WebRequestTypes.Except(IoReach.WebRequestTypes, StringComparer.Ordinal).ShouldBeEmpty();
+
+    [Fact]
+    public void The_analyzer_matches_the_identity_namespaces_by_the_boot_ban_s_own_prefixes() =>
+        HookDependencies.IdentityPrefixes.Order(StringComparer.Ordinal).ShouldBe(IoReach.IdentityPrefixes.Order(StringComparer.Ordinal));
 }
 ```
 
-In `src/MMLib.Alvo/Hooks/Internal/HookDependencies.cs` expose the two lists (no behaviour change):
+In `src/MMLib.Alvo/Hooks/Internal/HookDependencies.cs` expose the lists (no behaviour change; `IsBanned`'s two `StartsWith` literals become `IdentityPrefixes.Any(prefix => type.Namespace?.StartsWith(prefix, StringComparison.Ordinal) == true)`):
 
 ```csharp
     /// <summary>Gets the types refused by name, for the analyzer's parity fact.</summary>
@@ -2464,6 +2963,12 @@ In `src/MMLib.Alvo/Hooks/Internal/HookDependencies.cs` expose the two lists (no 
 
     /// <summary>Gets the namespaces every type of which is refused.</summary>
     internal static IReadOnlyList<string> NetworkNamespaces => _networkNamespaces;
+
+    /// <summary>Gets the <c>System.Net</c> type names refused by name.</summary>
+    internal static IReadOnlyList<string> WebRequestTypes => _webRequestTypes;
+
+    /// <summary>Gets the namespace prefixes of the identity stores.</summary>
+    internal static IReadOnlyList<string> IdentityPrefixes { get; } = ["Microsoft.AspNetCore.Identity", "MMLib.Alvo.Identity"];
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
@@ -2477,7 +2982,7 @@ In `IoReach.Describe` add two arms before `IInvocationOperation call => Describe
 
 ```csharp
         IAwaitOperation wait when !scope.IsCelFunction && AwaitedCall(wait.Operation) is { } awaited
-            && !HasReachedReceiver(awaited) && !symbols.IsTransactionCall(awaited.TargetMethod) =>
+            && !HasReachedReceiver(awaited) && !symbols.IsTransactionCall(awaited.TargetMethod, scope) =>
             $"'{Name(awaited.TargetMethod.ContainingType)}.{awaited.TargetMethod.Name}' is awaited, and only the write's transaction may be",
         IInvocationOperation call when scope.IsCelFunction && ReturnsTask(call.TargetMethod) && !HasReachedReceiver(call) =>
             $"'{Name(call.TargetMethod.ContainingType)}.{call.TargetMethod.Name}' returns a task, which a synchronous CEL function can only block on",
@@ -3019,7 +3524,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 ## Task 9: Docs — *Analyzer rules*, the `function-failed` sweep, the architecture docs, CHANGELOG, the spec amendment **[slice end]**
 
 **Files:**
-- Create: `website/src/content/docs/extending/analyzer-rules.mdx`, `website/src/snippets/extending/analyzer-rules/{CurrencyDesk.cs,CurrencyDeskTests.cs,currency-desk.alvo.json}`, `docs/architecture/analyzers.md`, `test/MMLib.Alvo.Analyzers.Tests/Alvo1001DocsTests.cs`
+- Create: `website/src/content/docs/extending/analyzer-rules.mdx`, `website/src/snippets/extending/analyzer-rules/{CurrencyDeskHooks.cs,CurrencyDeskHooksTests.cs,currency-desk.alvo.json}`, `docs/architecture/analyzers.md`, `test/MMLib.Alvo.Analyzers.Tests/Alvo1001DocsTests.cs`
 - Modify: `website/astro.config.mjs`, `website/src/content/docs/extending/{index.mdx,write-hooks.mdx}`, every page the sweep finds, `docs/architecture/{cel.md,data-api.md,extensibility.md,write-hooks.md}`, `CHANGELOG.md`, `docs/superpowers/specs/2026-10-14-host-extensibility-design.md`
 
 **Interfaces:**
@@ -3078,7 +3583,7 @@ Run: `dotnet test --project test/MMLib.Alvo.Analyzers.Tests --filter-class '*Alv
 }
 ```
 
-`website/src/snippets/extending/analyzer-rules/CurrencyDesk.cs`:
+`website/src/snippets/extending/analyzer-rules/CurrencyDeskHooks.cs`:
 
 ```csharp
 using System.Net;
@@ -3108,7 +3613,7 @@ public sealed class Invoice
     public decimal? PerEuro { get; init; }
 }
 
-public static class CurrencyDesk
+public static class CurrencyDeskHooks
 {
     public static IAlvoBuilder AddCurrencyDesk(this IAlvoBuilder alvo) => alvo
         .Entity<Invoice>(invoices => invoices
@@ -3145,7 +3650,7 @@ public sealed class StampTheRate : IBeforeWriteHook<Invoice>
 }
 ```
 
-`website/src/snippets/extending/analyzer-rules/CurrencyDeskTests.cs`:
+`website/src/snippets/extending/analyzer-rules/CurrencyDeskHooksTests.cs`:
 
 ```csharp
 using System.Net;
@@ -3160,7 +3665,7 @@ using Xunit;
 
 namespace CurrencyDesk.Tests;
 
-public sealed class CurrencyDeskTests
+public sealed class CurrencyDeskHooksTests
 {
     private static string Descriptor => Path.Combine(AppContext.BaseDirectory, "currency-desk.alvo.json");
 
@@ -3215,11 +3720,11 @@ Run: `dotnet test --project test/MMLib.Alvo.DocsSnippets.Tests` — expected: PA
 `website/src/content/docs/extending/analyzer-rules.mdx` (sidebar order after *Validate and guard writes*; `astro.config.mjs` gains `page('Analyzer rules', 'extending/analyzer-rules'),` after the write-hooks entry; `extending/index.mdx` lists it). Frontmatter `title: Analyzer rules`, `description: ALVO1001 — what the analyzer that ships with MMLib.Alvo reports in hooks and CEL functions, what it cannot see, and what to write instead.` Content, in this order:
 
 1. Intro: the `MMLib.Alvo` package carries a Roslyn analyzer; nothing to install; it runs in the IDE and in `dotnet build`; rules are warnings (a project with `TreatWarningsAsErrors` gets errors).
-2. `## ALVO1001 — no network, connection, file or data port inside the write's transaction`: where it looks (the table: before-write / after-write / before-delete / after-delete hook classes — the whole type; the same four as delegates on `Entity(…)`/`Entity<T>(…)`; `AddCelFunction` delegates; **not** validate hooks, event handlers, commands); what it reports (the Ruling 11 list in prose: `HttpClient` and the rest of `System.Net.Http`, sockets, web sockets, mail, QUIC, `WebClient`/`WebRequest`; `DbConnection`, `DbDataSource`, `IDbConnection`; `File`/`FileInfo`/`FileStream`/`Directory`/`DirectoryInfo`; `IAlvoData`, `IAlvoSessions`, `IAlvoTransactions`, `IAlvoEvents`, `IOutboxStore`, `IDeliveryStore`, `IAlvoCommands`, `IAlvoEventPump`, `IAlvoManagement`, `IAlvoOperations`, the identity stores, `IAlvoAssistant`, any `IEmailSender`; also through `GetRequiredService<T>()`, `GetService(typeof(T))`, `Lazy<T>`, arrays and collections); awaits (only `write.Transaction` — incl. `AsSystem()` and the typed `QueryAsync<T>`/`CreateAsync<T>` — and the context's `PublishAsync`; your own methods are judged where they are); in a CEL function, any call that returns a task.
-3. A flagged example as a plain ```` ```csharp ```` block — a `RateGuard : IBeforeWriteHook<Invoice>` fetching the rate with an injected `HttpClient`, with the warning text it produces in a `:::caution` aside — then "Do this instead": `<SourceExcerpt code={desk} from="public static class CurrencyDesk" title="CurrencyDesk.cs" />` and the paragraph explaining the split (the exchange call moves to a validate hook, which may use the network and runs before the transaction; the rate is read from a table inside it), plus `<Code code={tests} lang="csharp" title="CurrencyDeskTests.cs" />` collapsed or excerpted.
-4. `### What it cannot see`: a typed client or service you wrote (`IRatesClient`) — the analyzer checks Alvo's and the framework's types, not yours; a method group declared in another file; code in another class your hook calls. The boot refusal (*Validate and guard writes*) covers a hook's constructor; the time budget covers whatever runs.
+2. `## ALVO1001 — no network, connection, file or data port inside the write's transaction`: where it looks (the table: before-write / after-write / before-delete / after-delete hook classes — the whole type; the same four as delegates on `Entity(…)`/`Entity<T>(…)`; `AddCelFunction` delegates; **not** validate hooks, event handlers, commands); what it reports (the Ruling 11 list in prose: `HttpClient` and the rest of `System.Net.Http`, sockets, web sockets, mail, QUIC, `WebClient`/`WebRequest`; `DbConnection`, `DbDataSource`, `IDbConnection`; `File`/`FileInfo`/`FileStream`/`Directory`/`DirectoryInfo`; `IAlvoData`, `IAlvoSessions`, `IAlvoTransactions`, `IAlvoEvents`, `IOutboxStore`, `IDeliveryStore`, `IAlvoCommands`, `IAlvoEventPump`, `IAlvoManagement`, `IAlvoOperations`, the identity stores, `IAlvoAssistant`, any `IEmailSender`; also through `GetRequiredService<T>()`, `GetService(typeof(T))`, `Lazy<T>`, arrays and collections); awaits (only `write.Transaction` — incl. `AsSystem()` and the typed `QueryAsync<T>`/`CreateAsync<T>` — the context's `PublishAsync`, and the hook's own methods and the methods of types nested in it; awaiting anything else, **your own typed clients and services included** (`await rates.EuroAsync(ct)`), is reported); in a CEL function, any call that returns a task. A base type or interface counts: a subclass of `HttpClient`, an implementation of `IEmailSender`, an EF Core `DbContext`. One warning per thing reached per method.
+3. A flagged example as a plain ```` ```csharp ```` block — a `RateGuard : IBeforeWriteHook<Invoice>` fetching the rate with an injected `HttpClient`, with the warning text it produces in a `:::caution` aside — then "Do this instead": `<SourceExcerpt code={desk} from="public static class CurrencyDeskHooks" title="CurrencyDeskHooks.cs" />` and the paragraph explaining the split (the exchange call moves to a validate hook, which may use the network and runs before the transaction; the rate is read from a table inside it), plus `<Code code={tests} lang="csharp" title="CurrencyDeskHooksTests.cs" />` collapsed or excerpted.
+4. `### What it cannot see`: a *synchronous* call into your own code (`rates.Euro()` on a typed client you wrote) — it sees the await of one, not what a synchronous method does inside; synchronous use of other clients it does not list (Redis `IDatabase`, gRPC `ClientBase`, `new StreamReader(path)`); a method group declared in another file; a delegate held in a local or returned by a factory before it is passed to `AddCelFunction` or a hook verb; code in another class your hook calls synchronously. The boot refusal (*Validate and guard writes*) covers a hook's constructor; the time budget covers a CEL function whatever it does — except one that never returns, which holds the write until it does.
 5. `### Turning it off`: `#pragma warning disable ALVO1001` around one line, or `dotnet_diagnostic.ALVO1001.severity = none` in `.editorconfig` — and why not to (one sentence).
-6. `## The time budget for host functions` (short, links to the CEL functions guide): 250 ms per evaluation shared by every call, the trailing `CancellationToken`, `Alvo:Extensions:CelFunctionBudget`, an overrun is 500 `function-failed`.
+6. `## The time budget for host functions` (short, links to the CEL functions guide): 250 ms per evaluation shared by every call, the trailing `CancellationToken`, `Alvo:Extensions:CelFunctionBudget`; an overrun fails the write with 500 `function-failed`, drops an after-hook (Warning), or records a handler's delivery dead; reaching the limit is over it.
 
 - [ ] **Step 4: Sweep every claim that a built-in failure is 500**
 
@@ -3230,9 +3735,9 @@ git grep -n -i "built-in.*500\|500.*built-in\|a built-in refused\|built-in refus
 
 For each hit (memory: sweep for the claim, not a file list): a sentence attributing 500 `function-failed` to a built-in, to hook arithmetic or to a condition with no Bool now says 422 `expression-failed` (link `/reference/problem-types/#expression-failed`); tables of statuses gain a 422 `expression-failed` row (`guides/before-hooks.mdx`, `guides/handle-errors.mdx` both tables, `guides/custom-cel-functions.mdx` — which also gains the budget and the trailing-token paragraph and the `ALVO1001` link —, `guides/call-from-endpoints.mdx` — an in-process `IAlvoData` caller still receives the internal exception, unchanged —, `data-api/conventions.mdx` (a 422 row; `expression-failed` is **not** one of the slugs that need `AddAlvoProblemDetails()`), `concepts/security-model.md`). `modes.mdx` and `start-here/embed.mdx` list only opt-in slugs — unchanged, check the list still reads true. `samples/MMLib.Alvo.Samples.EmbeddedHost/README.md`: same rule. `extending/write-hooks.mdx`: the *Time limits* section names the host-function budget, and the network-ban paragraph links *Analyzer rules* ("the boot refusal checks a hook's constructor; `ALVO1001` checks its code"); a built-in failing in a `when` answers 422.
 
-`docs/architecture/data-api.md`: the slug table gains `| 422 | expression-failed | a built-in CEL function or hook arithmetic refused the request's data (int('x'), substring past the end, overflow, division by zero, a condition that is no Bool) — nothing was written; the detail names the function and Alvo's reason, never the value; answered on every host (GuardAsync, the command filter), not opt-in; a single-row DELETE can answer it without documenting 422 (HX-10 Ruling 9) |`; the `function-failed` row becomes "a host function failed (it threw, ran past `Alvo:Extensions:CelFunctionBudget`, or got an argument its parameter cannot hold) or Alvo's own evaluation of a hook failed — …"; the "Three of them" sentence is unchanged. `docs/architecture/cel.md`: the *Failure fails closed* bullet splits by origin (E1) and gains a *Time budget* bullet (Rulings 2–5, the pass sites, measured on return, the trailing token); the *Throw when you cannot answer* bullet's "The price of a throw is a 500" stays (host). `docs/architecture/extensibility.md:274`: name 422 for built-ins beside 500 for host functions. `docs/architecture/write-hooks.md`: HX-09 Ruling 63's "until HX-10's E1" becomes "422 `expression-failed`"; the network-ban section links `analyzers.md`; L7's sentence becomes "…needs out-of-process hooks (#35); `ALVO1001` reports the awaits that cause it."
+`docs/architecture/data-api.md`: the slug table gains `| 422 | expression-failed | a built-in CEL function or hook arithmetic refused the request's data (int('x'), substring past the end, overflow, division by zero, a condition that is no Bool) — nothing was written; the detail names the function and Alvo's reason, never the value; answered on every host on the generated routes (GuardAsync), not opt-in, and never on a command or webhook receiver (500 there, Ruling 27); a refusal of a host function's output, of `old.` or of a hook-written value stays 500 (Ruling 26); a single-row DELETE can answer it without documenting 422 (HX-10 Ruling 9) |`; the `function-failed` row becomes "a host function failed (it threw, ran past `Alvo:Extensions:CelFunctionBudget`, or got an argument its parameter cannot hold) or Alvo's own evaluation of a hook failed — …"; the "Three of them" sentence is unchanged. `docs/architecture/cel.md`: the *Failure fails closed* bullet splits by origin (E1) and gains a *Time budget* bullet (Rulings 2–5, 29, 30, 35, 36: the pass sites, measured on return, at the limit is over, any exception after the deadline is the overrun, the post-commit effects — an after-hook dropped, a handler delivery dead —, a function that never returns, no outer token in a declarative before-hook) and an *Origin* sentence (Ruling 26: a built-in over a host function's output, over `old.`, or over a hook-written value is 500); the *Throw when you cannot answer* bullet's "The price of a throw is a 500" stays (host). `docs/architecture/extensibility.md:274`: name 422 for built-ins beside 500 for host functions. `src/MMLib.Alvo/Hooks/Internal/HookDependencies.cs` remarks: "What a direct check cannot see is the HX-10 analyzer's: a typed HTTP client …" becomes "…is `ALVO1001`'s: an awaited call into a typed client, a service-locator lookup, a captured closure — and not a synchronous call into the host's own code (docs: *Analyzer rules*)." `docs/superpowers/plans/2026-11-04-hx-09-write-hooks.md` Ruling 62 gains "*(HX-10 amendment: `ALVO1001` reports an awaited typed client, a service-locator lookup and a captured closure; a synchronous call into host code is its documented blind spot — HX-10 Ruling 25.)*". `docs/architecture/write-hooks.md`: HX-09 Ruling 63's "until HX-10's E1" becomes "422 `expression-failed` when the refused value is the caller's own, 500 otherwise (HX-10 Ruling 26; every refusal in an after-write `when` is 500)"; the network-ban section links `analyzers.md`; L7's sentence becomes "…needs out-of-process hooks (#35); `ALVO1001` reports the awaits that cause it."
 
-Create `docs/architecture/analyzers.md`: what the project is and why it is not a package (Ruling 15); `ALVO1001`'s scope, reach list, await rule, CEL rule and limits (Rulings 10–14); parity with the boot ban (`BootBanParityTests`); how acceptance (2) is proven (Ruling 16); the in-repo wiring (Ruling 17); the mutation gap (Ruling 18); how to add a rule (id `ALVO1xxx`, a section on *Analyzer rules*, `AnalyzerReleases.Unshipped.md`, the help-link fact).
+Create `docs/architecture/analyzers.md`: what the project is and why it is not a package (Ruling 15); `ALVO1001`'s scope, reach list, await rule, CEL rule and limits (Rulings 10–14); parity with the boot ban (`BootBanParityTests`); how acceptance (2) is proven (Ruling 16); the in-repo wiring (Ruling 17); the mutation gap (Ruling 18); the blind spots (Rulings 25, 39); **HX-13 owes `IAlvoScheduler` on the await allow-list** (§4.4.5 allows it in-transaction; Ruling 39); how to add a rule (id `ALVO1xxx`, a section on *Analyzer rules*, `AnalyzerReleases.Unshipped.md`, the help-link fact).
 
 - [ ] **Step 5: CHANGELOG and the spec amendment**
 
@@ -3248,7 +3753,7 @@ Create `docs/architecture/analyzers.md`: what the project is and why it is not a
   returns a task. A warning; validate hooks and event handlers are not checked. Docs: *Analyzer rules*.
 - **A time budget for host CEL functions** (#309). Every host function call in one evaluation shares
   `Alvo:Extensions:CelFunctionBudget` (default 250 ms, at most 30 s); a function may take a trailing `CancellationToken`,
-  cancelled when the budget is spent. An overrun fails the write with 500 `function-failed`.
+  cancelled when the budget is spent.
 - **`expression-failed` (422)** (#315): a built-in CEL function or hook arithmetic refusing the request's own data —
   `int('x')`, a `substring` past the end, an overflow, a division by zero — is now a caller-fixable 422 on every host,
   without `AddAlvoProblemDetails()`.
@@ -3257,18 +3762,23 @@ Create `docs/architecture/analyzers.md`: what the project is and why it is not a
 
 - **Breaking for clients that branch on 500:** a built-in CEL function's refusal of the caller's data answered 500
   `function-failed`; it answers 422 `expression-failed`, and is no longer logged at Error. Host functions keep 500.
-- **Behaviour change:** host CEL functions that run past 250 ms in one evaluation now fail the write, with or without a
-  cancellation token. Raise `Alvo:Extensions:CelFunctionBudget` if a function legitimately needs longer.
+- **Breaking:** host CEL functions that reach 250 ms in one evaluation — with or without a cancellation token, and
+  whatever they do when it fires — now fail: in a before-hook or a write hook's `when` the write is refused (500
+  `function-failed` / `hook-failed`); in an after-hook condition, after the commit, the after-hook is dropped with a
+  Warning; in an event handler's `when` the delivery is recorded dead. Raise `Alvo:Extensions:CelFunctionBudget` if a
+  function legitimately needs longer.
+- A built-in refusing a value a host function produced, the stored row (`old.`), or a value a hook wrote stays 500
+  `function-failed`; only the caller's own data answers 422, and only on the generated Data API routes (commands keep 500).
 ```
 
-Spec (`docs/superpowers/specs/2026-10-14-host-extensibility-design.md`): §5 row `10` becomes "`AlvoProblemTypes.ExpressionFailed`; `AddCelFunction` accepts a trailing `CancellationToken` (no new overload); `AlvoExtensionOptions.CelFunctionBudget` | core | 10 | #315, #309; *HX-10 settled details* (1), (4)"; §3.3 E6 gains "(a project packed into the core's nupkg — *HX-10 settled details* (15))"; §4.4.5's analyzer sentence gains "(scope, reach list and limits: *HX-10 settled details* (10)–(14))"; §3.1 Q5's reason gains the calibration result once Task 10 has it (a placeholder line here is **not** written — Task 10 Step 5 adds the sentence); and a new subsection after §7 *HX-10*: `#### HX-10 settled details` listing Rulings 1–24 of this plan, one paragraph each (copy them; amend wording only where Task 1–8 reviews changed a decision).
+Spec (`docs/superpowers/specs/2026-10-14-host-extensibility-design.md`): §5 row `10` becomes "`AlvoProblemTypes.ExpressionFailed`; `AddCelFunction` accepts a trailing `CancellationToken` (no new overload); `AlvoExtensionOptions.CelFunctionBudget` | core | 10 | #315, #309; *HX-10 settled details* (1), (4)"; §3.3 E6 gains "(a project packed into the core's nupkg — *HX-10 settled details* (15))"; §4.4.5's analyzer sentence gains "(scope, reach list and limits: *HX-10 settled details* (10)–(14))"; §3.1 Q5's reason gains the calibration result once Task 10 has it (a placeholder line here is **not** written — Task 10 Step 5 adds the sentence); and a new subsection after §7 *HX-10*: `#### HX-10 settled details` listing Rulings 1–43 of this plan, one paragraph each (copy them; amend wording only where Task 1–8 reviews changed a decision).
 
 - [ ] **Step 6: Build the site, run the docs facts, ring0, ring1, commit**
 
 Run: `dotnet test --project test/MMLib.Alvo.Analyzers.Tests --filter-class '*Alvo1001DocsTests'` (PASS), `dotnet test --project test/MMLib.Alvo.DocsGen.Tests` (PASS — the problem-type page now has `expression-failed`), `cd website && npm run build` (PASS; link validation covers the new anchors), then:
 
 ```bash
-dotnet format whitespace MMLib.Alvo.slnx --include website/src/snippets/extending/analyzer-rules/CurrencyDesk.cs website/src/snippets/extending/analyzer-rules/CurrencyDeskTests.cs test/MMLib.Alvo.Analyzers.Tests/Alvo1001DocsTests.cs
+dotnet format whitespace MMLib.Alvo.slnx --include website/src/snippets/extending/analyzer-rules/CurrencyDeskHooks.cs website/src/snippets/extending/analyzer-rules/CurrencyDeskHooksTests.cs test/MMLib.Alvo.Analyzers.Tests/Alvo1001DocsTests.cs
 scripts/test-ring0 && scripts/test-ring1
 git branch --show-current
 git add website/src/content/docs website/src/snippets/extending/analyzer-rules website/astro.config.mjs docs/architecture CHANGELOG.md docs/superpowers/specs/2026-10-14-host-extensibility-design.md test/MMLib.Alvo.Analyzers.Tests/Alvo1001DocsTests.cs samples/MMLib.Alvo.Samples.EmbeddedHost/README.md
@@ -3285,7 +3795,7 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 - [ ] **Step 1: Take `main`**
 
-PR #431 (HX-09) merges into `main` first. `git fetch origin`; `git rebase --onto origin/main origin/hx/09-write-hooks hx/10-hook-guards` if `main` now contains HX-09 as a merge commit of that branch (otherwise `git merge origin/main`, merge-commit style); resolve only what the base change touched, re-run `scripts/test-ring0`. Every diff below is against `origin/main`; the PR targets `main`.
+PR #431 (HX-09) merges into `main` first. `git fetch origin`; `git rebase --onto origin/main origin/hx/09-write-hooks hx/10-hook-guards` if `main` now contains HX-09 as a merge commit of that branch (otherwise `git merge origin/main`, merge-commit style); resolve only what the base change touched, re-run `scripts/test-ring0` and `python3 scripts/gen-prototype-fixtures --check` (Ruling 41 — `main` carries HX-09's own regeneration and its late fix for concurrent idempotency-table DDL on PostgreSQL; regenerate and commit if it reports stale). Every diff below is against `origin/main`; the PR targets `main`.
 
 - [ ] **Step 2: CI-parity Release build, rings, packed analyzer, admin e2e**
 
@@ -3342,9 +3852,9 @@ Do **not** run Stryker and do not re-probe a shard. Read `stryker-config.express
 
 Freeze the tree (no edits while a reviewer reads it). `/code-review` and `/security-review` are user-only: dispatch two reviewer subagents over `git diff origin/main...HEAD`, labelled **"substitute for /code-review high"** and **"substitute for /security-review"**, and check `git branch --show-current` after each returns (a reviewer can switch branches).
 
-Point the code reviewer at: `CelFunctionBudget` — the `AsyncLocal` restored on every path, both token sources disposed, the clock read only after the first host call, `Overran` true for a late return and for a deadline-cancelled token but not for an outer cancellation; `HostCelFunction.TakesToken`/`Parameters` (a token never a CEL parameter, four plus the token accepted); the three pass sites and nothing else (`CelEvaluationSitesTests`); `PortRefusalFor`'s new arm placed after the hook rejection and before `null`; `ExpressionFailedDetail` never echoing a value; the analyzer's `RegistrationOf` (extension call shapes), the receiver-once rule, `IsTransactionCall`'s source-method clause, `SameFileBody`; `scripts/test-packed-analyzer`'s line comparison; `scripts/test-load`'s hooks arm (restores the head image, deletes both reference ranges, no hooks arm with `--baseline-ref`).
+Point the code reviewer at: `CelFunctionBudget` — the `AsyncLocal` restored on every path, both token sources disposed, the clock read only after the first host call, `Overran` true for a late return and for a deadline-cancelled token but not for an outer cancellation; `HostCelFunction.TakesToken`/`Parameters` (a token never a CEL parameter, four plus the token accepted); the three pass sites and nothing else (`CelEvaluationSitesTests`); `RefusalFor`'s new arm (and its absence from `PortRefusalFor`, so commands keep 500); `CelInterpreter.Evaluate`'s judging catch (innermost node decides, `Judged` stops outer nodes) and `CelDataOrigin.Attributed` at every hook evaluation in both runners; `CallerDataFailure`'s all-or-nothing rule; `ExpressionFailedDetail` never echoing a value; the analyzer's `RegistrationOf` (extension call shapes), the receiver-once rule, `IsTransactionCall`'s source-method clause (only the hook type, its nested types and local functions — Ruling 25), the per-block dedupe, `SameFileBody`; `scripts/test-packed-analyzer`'s line comparison; `scripts/test-load`'s hooks arm (restores the head image, deletes both reference ranges, no hooks arm with `--baseline-ref`).
 
-Run the `alvo-security-core-review` checklist and give the security reviewer Rulings 2, 3, 5, 6, 7, 8, 11, 12, 24. Questions to answer explicitly: can a host function run in a before-hook with no budget (a fourth evaluation site; a pass disposed before the function runs)? Can catching the budget's cancellation, or ignoring the token, let a write commit after the deadline? Can a 422 `expression-failed` be produced for a host's failure or a hook failure (wrapper walking into a `HookFailedException`'s cause, an `AggregateException` holding both kinds — the first found wins: is it ever the caller-data one when a host failure is also inside)? Can the 422's detail carry a stored or submitted value, or a hidden field's name? Does the budget change what a before-hook can observe of another tenant (it must not: no new data access)? Does `ALVO1001` claim a guarantee the docs then repeat — the page must say it is a warning with stated blind spots, and that the boot refusal and the budget are the enforcement. Fix every finding before the PR; record any accepted risk as a ruling in the spec's *HX-10 settled details*. End the checklist with **mark this change `needs-deep-review`**.
+Run the `alvo-security-core-review` checklist and give the security reviewer Rulings 2, 3, 5, 6, 7, 8, 11, 12, 24, 25–30. Questions to answer explicitly: can a host function run in a before-hook with no budget (a fourth evaluation site; a pass disposed before the function runs)? Can catching the budget's cancellation, or ignoring the token, let a write commit after the deadline? Can a 422 `expression-failed` be produced for a host's failure or a hook failure (wrapper walking into a `HookFailedException`'s cause, an `AggregateException` holding both kinds must answer 500 (Ruling 28); a built-in over a host function's output, over `old.`, or over a field a declarative or host hook wrote must answer 500 (Ruling 26) — is there an evaluation path that bypasses `Evaluate`'s judging catch or `Attributed`)? Can the 422's detail carry a stored or submitted value, or a hidden field's name? Does the budget change what a before-hook can observe of another tenant (it must not: no new data access)? Does `ALVO1001` claim a guarantee the docs then repeat — the page must say it is a warning with stated blind spots, and that the boot refusal and the budget are the enforcement. Fix every finding before the PR; record any accepted risk as a ruling in the spec's *HX-10 settled details*. End the checklist with **mark this change `needs-deep-review`**.
 
 - [ ] **Step 7: `alvo-plan-guard`**
 
@@ -3375,12 +3885,12 @@ git push -u origin hx/10-hook-guards
 |---|---|---|
 | (1) `ALVO1001` on `HttpClient` use in a before-write hook and in an `AddCelFunction` delegate; none in a handler | 5, 6, 7 | `Alvo1001ScopeTests.An_http_client_in_a_before_write_hook_is_reported_once_at_its_use`, `An_http_client_captured_by_a_cel_function_is_reported`, `An_event_handler_may_call_the_network`, `A_validate_delegate_and_a_handler_delegate_are_not_in_scope`; `scripts/fixtures/packed-consumer/Hooks.cs` (handler line unmarked) |
 | (2) A packed consumer on the minimum SDK builds and reports it | 5, 7, 10 | `scripts/test-packed-analyzer` (nupkg layout, nuspec, consumer on `mcr.microsoft.com/dotnet/sdk:10.0.100`, warnings on exactly the marked lines); CI step *Packed analyzer on the minimum SDK* inside **Build & test** |
-| (3) A token-aware host CEL function over budget → `function-failed` and rollback, both engines | 1, 2, 4 | `DataApiEngineTests.A_token_aware_host_function_past_its_budget_is_function_failed_and_rolls_back_on_every_engine` (+ `…ignores_its_token…`, `…inside_its_budget…`) on `SqliteDataApiTests` and `DataApiOnPostgresTests`; `CelFunctionBudgetTests`; `BeforeHookFacetTests.A_before_hook_s_host_functions_share_one_budget_and_an_overrun_refuses_the_write` |
+| (3) A token-aware host CEL function over budget → `function-failed` and rollback, both engines | 1, 2, 4 | `DataApiEngineTests.A_token_aware_host_function_past_its_budget_is_function_failed_and_rolls_back_on_every_engine` (+ `…token_free…`, `…catches_its_cancellation…`, `…inside_its_budget…`) on `SqliteDataApiTests` and `DataApiOnPostgresTests`; `CelFunctionBudgetTests`; `BeforeHookFacetTests.A_before_hook_s_host_functions_share_one_budget_and_an_overrun_refuses_the_write` |
 | (4) `int('x')` on caller data → 422 `expression-failed`, both engines | 3, 4 | `DataApiEngineTests.An_int_of_text_on_the_caller_s_data_is_422_expression_failed_and_writes_nothing_on_every_engine`, `An_update_whose_data_a_built_in_refuses_is_422_and_leaves_the_row_on_every_engine` (both engines); `ExpressionFailedAnswerTests`; `CelFailureOriginTests`; `ProblemDetailsTests` (slug emitted and reachable) |
 | (5) `docs/performance.md` has the calibrated overhead | 8, 10 | `scripts/test-load --tier calibration --scenarios create,hook_unit,hook_noop,hook_read,hook_after` run once (Ruling 21); the *In-transaction hooks* section with the table and Q5's verdict (Ruling 20); `CalibrationHooksTests` (each shape runs its own hook) |
 | Scope: `ALVO1001` beyond (1) — every stage, awaits, service lookups, files, CEL task calls, parity with the boot ban | 5, 6 | `Alvo1001ScopeTests` (stages, typed hook, field initializer, method groups), `Alvo1001ReachTests`, `Alvo1001AwaitTests`, `Alvo1001CelFunctionTests`, `BootBanParityTests` |
 | Scope: the budget at every evaluation site; `IBeforeHookRunner` token-free | 2 | `WriteExtensionRunnerTests.A_condition_whose_host_function_overruns_its_budget_fails_the_hook_with_reason_exception`, `PredicateEvaluatorBudgetTests`, `CelEvaluationSitesTests`, `BeforeHookIsolationArchitectureTests` |
 | Scope: E1 documented in `data-api.md` and `cel.md` (#315's acceptance) | 9 | the two architecture docs; `website/src/data/problem-types.json` + DocsGen's problem-type page |
-| Docs: *Analyzer rules* with executed snippets | 7, 9 | `CurrencyDeskTests` (two, in `MMLib.Alvo.DocsSnippets.Tests`, compiled under `ALVO1001`); `Alvo1001DocsTests`; website build |
+| Docs: *Analyzer rules* with executed snippets | 7, 9 | `CurrencyDeskHooksTests` (two, in `MMLib.Alvo.DocsSnippets.Tests`, compiled under `ALVO1001`); `Alvo1001DocsTests`; website build |
 | Every PR: plan, CHANGELOG, architecture doc, plan-guard, PR report | 9, 10 | this file; `CHANGELOG.md`; `docs/architecture/analyzers.md`; Task 10 Steps 7 and 9 |
 | Security core (Ruling 23) | 10 | `alvo-security-core-review` checklist, `/security-review` substitute, `needs-deep-review` |
