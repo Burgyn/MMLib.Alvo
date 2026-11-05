@@ -109,6 +109,15 @@ public class AdminProblemTests
     }
 
     [Fact]
+    public void A_broken_validation_names_the_field_or_nothing()
+    {
+        AdminProblem.From(new AlvoConstraintViolationException(AlvoConstraintKind.Check, ["stock"]), ProblemSite.RecordWrite)!.Fix.ShouldBe(
+            "The value for stock breaks the validation the descriptor declares for it. The field's validation is on the entity's Fields tab.");
+        AdminProblem.From(new AlvoConstraintViolationException(AlvoConstraintKind.Check, []), ProblemSite.RecordWrite)!.Fix.ShouldBe(
+            "A value breaks a validation the descriptor declares. Each field's validation is on the entity's Fields tab.");
+    }
+
+    [Fact]
     public void An_argument_exception_is_the_data_ports_refusal_only_where_the_data_port_was_called()
     {
         var invalid = new ArgumentException("values omits a required field");

@@ -89,6 +89,9 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
     /// <summary>SQLSTATE 23503 — <c>foreign_key_violation</c>, what <c>ON DELETE RESTRICT</c> raises.</summary>
     private const string ForeignKeyViolation = "23503";
 
+    /// <summary>SQLSTATE 23514 — <c>check_violation</c>, what a field's validation raises.</summary>
+    private const string CheckViolation = "23514";
+
     /// <inheritdoc/>
     /// <remarks>
     /// <para>
@@ -126,6 +129,11 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
                 ConstraintName = NullIfEmpty(postgres.ConstraintName),
             },
             ForeignKeyViolation => new SqlConstraintViolation { Kind = AlvoConstraintKind.Referenced },
+            CheckViolation => new SqlConstraintViolation
+            {
+                Kind = AlvoConstraintKind.Check,
+                ConstraintName = NullIfEmpty(postgres.ConstraintName),
+            },
             _ => null,
         };
     }

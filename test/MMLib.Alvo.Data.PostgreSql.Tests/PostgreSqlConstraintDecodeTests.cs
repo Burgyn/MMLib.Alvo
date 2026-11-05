@@ -26,6 +26,7 @@ public class PostgreSqlConstraintDecodeTests
 
     private const string UniqueViolation = "23505";
     private const string ForeignKeyViolation = "23503";
+    private const string CheckViolation = "23514";
 
     private static PostgresException Failure(string sqlState, string? constraintName) =>
         new(
@@ -75,6 +76,19 @@ public class PostgreSqlConstraintDecodeTests
         decoded.ShouldNotBeNull();
         decoded.Kind.ShouldBe(AlvoConstraintKind.Referenced);
         decoded.ConstraintName.ShouldBeNull();
+    }
+
+    /// <summary>A field's validation is a CHECK the decode claims (HX-11), carrying its name, or none for an empty field.</summary>
+    /// <param name="reported">What the server put in the constraint field.</param>
+    /// <param name="expected">The name the decode carries.</param>
+    [Theory]
+    [InlineData("ck_products_stock_7b86837d", "ck_products_stock_7b86837d")]
+    [InlineData("", null)]
+    public void A_check_violation_carries_its_constraint_name(string reported, string? expected)
+    {
+        var decoded = _dialect.DecodeConstraintViolation(Failure(CheckViolation, reported)).ShouldNotBeNull();
+
+        (decoded.Kind, decoded.ConstraintName).ShouldBe((AlvoConstraintKind.Check, expected));
     }
 
     /// <summary>Anything else is not a constraint violation this driver claims to understand.</summary>

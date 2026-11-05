@@ -94,6 +94,10 @@ internal static class AdminProblemFixes
     {
         AlvoConstraintViolationException { Kind: AlvoConstraintKind.Unique } violation
             => $"Another record already has this value for {string.Join(", ", violation.Fields)}. The field is declared unique on the entity's Fields tab.",
+        AlvoConstraintViolationException { Kind: AlvoConstraintKind.Check, Fields.Count: > 0 } violation
+            => $"The value for {string.Join(", ", violation.Fields)} breaks the validation the descriptor declares for it. The field's validation is on the entity's Fields tab.",
+        AlvoConstraintViolationException { Kind: AlvoConstraintKind.Check }
+            => "A value breaks a validation the descriptor declares. Each field's validation is on the entity's Fields tab.",
         AlvoConstraintViolationException violation
             => $"The value does not satisfy {violation.Kind} on {string.Join(", ", violation.Fields)}.",
         AlvoAuthorizationException

@@ -351,7 +351,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         candidate = RunBeforeCreate(db, schema, decision, context, candidate, now);
         candidate = await HostBeforeCreateAsync(db, schema, decision, context, candidate, AlvoWriteOperation.Create, now, cancellationToken);
         var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
-        await RecomputeRollupsAsync(db, schema, [stored!], cancellationToken);
+        await RecomputeRollupsAsync(db, schema, [stored!], decision.Unnameable, cancellationToken);
         stored = await AfterSavedAsync(db, schema, decision, context, AlvoWriteOperation.Create, preImage: null, stored, now, cancellationToken);
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
@@ -666,7 +666,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         candidate = RunBeforeCreate(db, schema, decision, context, candidate, now);
         candidate = await HostBeforeCreateAsync(db, schema, decision, context, candidate, AlvoWriteOperation.Create, now, cancellationToken);
         var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
-        await RecomputeRollupsAsync(db, schema, [stored!], cancellationToken);
+        await RecomputeRollupsAsync(db, schema, [stored!], decision.Unnameable, cancellationToken);
         stored = await AfterSavedAsync(db, schema, decision, context, AlvoWriteOperation.Create, preImage: null, stored, now, cancellationToken);
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
@@ -1018,7 +1018,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         db.Rows(schema.Name).Add(candidate);
         await ConstraintViolationTranslator.TranslatedAsync(
             () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema,
-            callerKeyed);
+            callerKeyed, db.AppliedSchema, decision.Unnameable);
 
         var id = (Guid)candidate[AlvoDataContext.IdColumn];
         return await SingleAsync(db, schema, decision, context, id, lockFor: null, cancellationToken, unmasked: true)
@@ -1061,7 +1061,7 @@ internal sealed partial class EfAlvoData : IAlvoData
 
         await ConstraintViolationTranslator.TranslatedAsync(
             () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema,
-            callerKeyed: false);
+            callerKeyed: false, db.AppliedSchema, decision.Unnameable);
 
         var stored = new List<Dictionary<string, object>>(candidates.Count);
         foreach (var candidate in candidates)
@@ -1145,16 +1145,30 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// The fast path is a schema question, not a row question: an entity nothing rolls up issues no statement
     /// at all, which is nearly every write this port performs.
     /// </para>
+    /// <para>
+    /// <b>Translated once, here, around the whole recompute</b> (HX-11 Ruling 45): a parent's validation the new aggregate
+    /// breaks is the engine refusing the child write, so it answers the caller like any other broken validation — pointed at
+    /// the child field the rollup aggregates — rather than escaping as the provider's exception. The write lambdas are not
+    /// widened to reach it, because they would then capture the row's read-back too.
+    /// </para>
     /// </remarks>
     /// <param name="db">The context whose open transaction the recompute joins.</param>
     /// <param name="schema">The child entity that was written.</param>
     /// <param name="images">The child row's images — post, pre, or both.</param>
+    /// <param name="unnameable">The fields the write's decision says a refusal never names.</param>
     /// <param name="cancellationToken">The caller's token.</param>
     private Task RecomputeRollupsAsync(
         AlvoDataContext db, EntitySchema schema, IReadOnlyList<IReadOnlyDictionary<string, object?>> images,
-        CancellationToken cancellationToken) =>
+        IReadOnlySet<string> unnameable, CancellationToken cancellationToken) =>
         RollupRecompute.IsRolledUp(db.AppliedSchema, schema)
-            ? _rollups.ForChildWriteAsync(db, schema, images, cancellationToken)
+            ? ConstraintViolationTranslator.TranslatedAsync(
+                () => _rollups.ForChildWriteAsync(db, schema, images, cancellationToken),
+                _dialect,
+                db.Rows(schema.Name).EntityType,
+                schema,
+                callerKeyed: false,
+                db.AppliedSchema,
+                unnameable)
             : Task.CompletedTask;
 
     /// <inheritdoc/>
@@ -1607,7 +1621,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         }
 
         var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken, callerKeyed: true);
-        await RecomputeRollupsAsync(db, schema, [stored!], cancellationToken);
+        await RecomputeRollupsAsync(db, schema, [stored!], decision.Unnameable, cancellationToken);
         stored = await AfterSavedAsync(db, schema, decision, context, AlvoWriteOperation.Replace, preImage: null, stored, now, cancellationToken);
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
@@ -1952,13 +1966,13 @@ internal sealed partial class EfAlvoData : IAlvoData
             _dialect,
             db.Rows(schema.Name).EntityType,
             schema,
-            callerKeyed: false);
+            callerKeyed: false, db.AppliedSchema, decision.Unnameable);
         if (affected == 0)
         {
             throw new AlvoRecordNotFoundException();
         }
 
-        await RecomputeRollupsAsync(db, schema, [stored!], cancellationToken);
+        await RecomputeRollupsAsync(db, schema, [stored!], decision.Unnameable, cancellationToken);
         await HostAfterDeleteAsync(schema, context, Unmasked(stored), now, cancellationToken);
 
         return Unmasked(stored);
@@ -2060,7 +2074,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         var postImage = await SingleAsync(
             db, schema, decision, context, id, lockFor: null, cancellationToken, unmasked: true)
             ?? throw new AlvoRecordNotFoundException();
-        await RecomputeRollupsAsync(db, schema, [preImage.Values, postImage!], cancellationToken);
+        await RecomputeRollupsAsync(db, schema, [preImage.Values, postImage!], decision.Unnameable, cancellationToken);
         postImage = await AfterSavedAsync(db, schema, decision, context, operation, preImage, postImage, now, cancellationToken);
 
         return (preImage, postImage);
@@ -2131,7 +2145,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             _dialect,
             db.Rows(schema.Name).EntityType,
             schema,
-            callerKeyed: false);
+            callerKeyed: false, db.AppliedSchema, decision.Unnameable);
 
     /// <summary>
     /// The queryable a write is composed over: a <c>FromSql</c> root whose <c>WHERE</c> already carries the
@@ -2776,7 +2790,7 @@ internal sealed partial class EfAlvoData : IAlvoData
 
         var stored = await InsertManyAsync(db, schema, decision, context, judged, cancellationToken);
 
-        await RecomputeRollupsAsync(db, schema, stored!, cancellationToken);
+        await RecomputeRollupsAsync(db, schema, stored!, decision.Unnameable, cancellationToken);
         using var held = HeldWhileHooksRun(schema, AlvoWriteOperation.Create, stored.Select(RowIdOf));
         var (saved, refusedAfter) = await AfterSavedRowsAsync(
             db, schema, decision, context, AlvoWriteOperation.Create, [.. stored.Select((row, index) => (index, (AlvoRecord?)null, row))], now, cancellationToken);
@@ -3023,6 +3037,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             db,
             schema,
             [.. written.SelectMany(row => new IReadOnlyDictionary<string, object?>[] { row.PreImage.Values, row.PostImage! })],
+            decision.Unnameable,
             cancellationToken);
         var (saved, refusedAfter) = await AfterSavedRowsAsync(
             db, schema, decision, context, AlvoWriteOperation.Update,
@@ -3127,14 +3142,14 @@ internal sealed partial class EfAlvoData : IAlvoData
                 _dialect,
                 db.Rows(schema.Name).EntityType,
                 schema,
-                callerKeyed: false);
+                callerKeyed: false, db.AppliedSchema, decision.Unnameable);
             if (affected == 0)
             {
                 throw new AlvoRecordNotFoundException();
             }
         }
 
-        await RecomputeRollupsAsync(db, schema, [.. judged.Select(row => row.PreImage.Values)], cancellationToken);
+        await RecomputeRollupsAsync(db, schema, [.. judged.Select(row => row.PreImage.Values)], decision.Unnameable, cancellationToken);
         if (await HostAfterDeleteRowsAsync(schema, context, [.. judged.Select(row => (row.Index, row.PreImage))], now, cancellationToken) is { } refusedAfter)
         {
             return BatchOutcome.Refused([refusedAfter]);

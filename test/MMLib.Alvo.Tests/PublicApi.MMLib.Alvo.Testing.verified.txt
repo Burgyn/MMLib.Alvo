@@ -193,9 +193,16 @@ namespace MMLib.Alvo.Testing.Data
         protected static MMLib.Alvo.AlvoContext Caller { get; }
         protected static MMLib.Alvo.Descriptor.AlvoDescriptor Descriptor { get; }
         protected static MMLib.Alvo.Schema.SchemaModel Schema { get; }
+        public System.Threading.Tasks.Task A_duration_validation_holds_in_the_engine() { }
+        public System.Threading.Tasks.Task A_hidden_field_s_refusal_names_nothing() { }
+        public System.Threading.Tasks.Task A_negative_bound_holds_and_reads_back_exactly() { }
+        public System.Threading.Tasks.Task A_rollup_pushing_a_parent_past_its_validation_is_refused_at_the_child_field() { }
         public System.Threading.Tasks.Task A_validation_on_a_computed_field_holds_in_the_engine() { }
+        public System.Threading.Tasks.Task A_validation_reading_an_empty_other_field_refuses_the_row() { }
+        public System.Threading.Tasks.Task A_write_that_breaks_a_validation_is_refused_naming_the_field() { }
         public System.Threading.Tasks.Task Adding_and_dropping_a_validation_are_steps_naming_the_field() { }
         public System.Threading.Tasks.Task An_empty_validated_field_passes_its_check() { }
+        public System.Threading.Tasks.Task An_update_that_breaks_it_leaves_the_row_as_it_was() { }
         protected abstract System.Threading.Tasks.Task ApplyAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired, MMLib.Alvo.Migrations.MigrationOptions options);
         public System.Threading.Tasks.Task Changing_a_validation_drops_and_re_adds_its_constraint() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);

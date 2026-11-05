@@ -35,7 +35,9 @@ public class ConstraintViolationTranslatorTests
             Decoding(null),
             Rows,
             Part,
-            callerKeyed: false);
+            callerKeyed: false,
+            Applied,
+            Nothing);
 
         ran.ShouldBeTrue();
     }
@@ -49,7 +51,7 @@ public class ConstraintViolationTranslatorTests
     {
         var refused = await Should.ThrowAsync<AlvoConstraintViolationException>(
             async () => await ConstraintViolationTranslator.TranslatedAsync(
-                () => Task.FromException(Collision()), Decoding(OnColumns("code")), Rows, Part, callerKeyed: false));
+                () => Task.FromException(Collision()), Decoding(OnColumns("code")), Rows, Part, callerKeyed: false, Applied, Nothing));
 
         refused.Kind.ShouldBe(AlvoConstraintKind.Unique);
         refused.Fields.ShouldBe(["code"]);
@@ -116,9 +118,118 @@ public class ConstraintViolationTranslatorTests
         refused.Fields.ShouldBe(["id"]);
     }
 
+    /// <summary>A broken validation on the written entity's own field names that field (HX-11 Ruling 24).</summary>
+    [Fact]
+    public async Task A_check_on_the_written_entity_names_its_validated_field()
+    {
+        var refused = await Should.ThrowAsync<AlvoConstraintViolationException>(
+            async () => await Checked(CheckConstraintNames.For("part", "code"), Part, Nothing));
+
+        refused.Kind.ShouldBe(AlvoConstraintKind.Check);
+        refused.Fields.ShouldBe(["code"]);
+    }
+
+    /// <summary>A field the descriptor hides is never named, whatever this caller's own mask resolves to.</summary>
+    [Fact]
+    public async Task A_check_on_a_hidden_field_names_nothing() =>
+        (await Should.ThrowAsync<AlvoConstraintViolationException>(
+            async () => await Checked(CheckConstraintNames.For("part", "code"), Part, new HashSet<string>(StringComparer.Ordinal) { "code" })))
+            .Fields.ShouldBeEmpty();
+
+    /// <summary>
+    /// A CHECK this schema cannot place — no name, or a name no validated field recomputes to — is still the caller's 422
+    /// naming nothing, never the provider's exception: the descriptor's integrity held.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("ck_someone_elses")]
+    public async Task A_check_that_cannot_be_placed_is_still_a_refusal_naming_nothing(string? name)
+    {
+        var refused = await Should.ThrowAsync<AlvoConstraintViolationException>(async () => await Checked(name, Part, Nothing));
+
+        (refused.Kind, refused.Fields.Count).ShouldBe((AlvoConstraintKind.Check, 0));
+    }
+
+    /// <summary>
+    /// A parent's validation broken by a rollup recompute points at the child field the rollup aggregates — the value the
+    /// caller sent — and never at the parent's field (HX-11 Ruling 25).
+    /// </summary>
+    [Fact]
+    public async Task A_parent_check_broken_through_a_sum_names_the_child_field()
+    {
+        var refused = await Should.ThrowAsync<AlvoConstraintViolationException>(
+            async () => await Checked(CheckConstraintNames.For("bin", "reserved"), Line, Nothing));
+
+        refused.Fields.ShouldBe(["quantity"]);
+    }
+
+    /// <summary>A <c>count</c> aggregates no child field, so there is nothing of the caller's to point at.</summary>
+    [Fact]
+    public async Task A_parent_check_broken_through_a_count_names_nothing() =>
+        (await Should.ThrowAsync<AlvoConstraintViolationException>(
+            async () => await Checked(CheckConstraintNames.For("bin", "lines"), Line, Nothing)))
+            .Fields.ShouldBeEmpty();
+
+    /// <summary>The child field the rollup reads is named only when the caller may know of it.</summary>
+    [Fact]
+    public async Task A_parent_check_broken_through_a_hidden_child_field_names_nothing() =>
+        (await Should.ThrowAsync<AlvoConstraintViolationException>(
+            async () => await Checked(CheckConstraintNames.For("bin", "reserved"), Line, new HashSet<string>(StringComparer.Ordinal) { "quantity" })))
+            .Fields.ShouldBeEmpty();
+
+    private static Task Checked(string? constraintName, EntitySchema written, IReadOnlySet<string> unnameable) =>
+        ConstraintViolationTranslator.TranslatedAsync(
+            () => Task.FromException(Collision()),
+            Decoding(new SqlConstraintViolation { Kind = AlvoConstraintKind.Check, ConstraintName = constraintName }),
+            Rows,
+            written,
+            callerKeyed: false,
+            Applied,
+            unnameable);
+
     private static Task Translated(SqlConstraintViolation decoded, IEntityType rows, bool callerKeyed) =>
         ConstraintViolationTranslator.TranslatedAsync(
-            () => Task.FromException(Collision()), Decoding(decoded), rows, Part, callerKeyed);
+            () => Task.FromException(Collision()), Decoding(decoded), rows, Part, callerKeyed, Applied, Nothing);
+
+    private static IReadOnlySet<string> Nothing { get; } = new HashSet<string>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// <see cref="Part"/> with its <c>code</c> validated, and a bin whose validated <c>reserved</c> sums the lines'
+    /// <c>quantity</c> and whose validated <c>lines</c> counts them.
+    /// </summary>
+    private static SchemaModel Applied => new([
+        Part with { Fields = [.. Part.Fields.Select(declared => declared.Name == "code" ? declared with { CheckExpression = "code != ''" } : declared)] },
+        new EntitySchema
+        {
+            Name = "bin",
+            Fields =
+            [
+                new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
+                new FieldSchema
+                {
+                    Name = "reserved", Type = FieldType.Integer, CheckExpression = "reserved <= 10",
+                    Rollup = new RollupSchema { From = "line", Op = RollupOperation.Sum, Field = "quantity", Via = "bin_id" },
+                },
+                new FieldSchema
+                {
+                    Name = "lines", Type = FieldType.Integer, CheckExpression = "lines <= 3",
+                    Rollup = new RollupSchema { From = "line", Op = RollupOperation.Count, Via = "bin_id" },
+                },
+            ],
+        },
+        Line,
+    ]);
+
+    private static EntitySchema Line => new()
+    {
+        Name = "line",
+        Fields =
+        [
+            new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
+            new FieldSchema { Name = "bin_id", Type = FieldType.Uuid, Required = true },
+            new FieldSchema { Name = "quantity", Type = FieldType.Integer, Required = true },
+        ],
+    };
 
     private static SqlConstraintViolation OnColumns(params string[] columns) =>
         new() { Kind = AlvoConstraintKind.Unique, Columns = columns };

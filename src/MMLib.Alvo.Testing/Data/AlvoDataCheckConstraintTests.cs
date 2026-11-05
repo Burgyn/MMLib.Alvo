@@ -214,12 +214,190 @@ public abstract class AlvoDataCheckConstraintTests
         },
     ]);
 
+    /// <summary>A write the engine refuses for a validation is the port's refusal, naming the field, and leaves nothing behind.</summary>
+    [Fact]
+    public async Task A_write_that_breaks_a_validation_is_refused_naming_the_field()
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+
+        var refusal = await Should.ThrowAsync<AlvoConstraintViolationException>(
+            () => data.CreateAsync("products", Row(stock: -1), Caller, cancellationToken: Ct));
+
+        refusal.Kind.ShouldBe(AlvoConstraintKind.Check);
+        refusal.Fields.ShouldBe(["stock"]);
+        (await data.QueryAsync(new AlvoQuery { Entity = "products" }, Caller, Ct)).Items.ShouldBeEmpty();
+    }
+
+    /// <summary>A validation reading another field the row leaves empty follows CEL: the comparison is false (Ruling 15).</summary>
+    [Fact]
+    public async Task A_validation_reading_an_empty_other_field_refuses_the_row()
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+        var refusal = await Should.ThrowAsync<AlvoConstraintViolationException>(() => data.CreateAsync(
+            "products",
+            new Dictionary<string, object?>(StringComparer.Ordinal) { ["stock"] = 3L, ["sale_ends_at"] = Instant },
+            Caller,
+            cancellationToken: Ct));
+        refusal.Fields.ShouldBe(["sale_ends_at"]);
+    }
+
+    /// <summary>A field the descriptor hides is never named by a refusal, whoever the caller is (Ruling 24).</summary>
+    [Fact]
+    public async Task A_hidden_field_s_refusal_names_nothing()
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+        var refusal = await Should.ThrowAsync<AlvoConstraintViolationException>(() => data.CreateAsync(
+            "products",
+            new Dictionary<string, object?>(StringComparer.Ordinal) { ["stock"] = 3L, ["margin"] = -1m },
+            Caller,
+            cancellationToken: Ct));
+        (refusal.Kind, refusal.Fields.Count).ShouldBe((AlvoConstraintKind.Check, 0));
+    }
+
+    /// <summary>An update the engine refuses rolls back: the stored row keeps its value.</summary>
+    [Fact]
+    public async Task An_update_that_breaks_it_leaves_the_row_as_it_was()
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+        var id = (Guid)(await data.CreateAsync("products", Row(stock: 3), Caller, cancellationToken: Ct))["id"]!;
+
+        await Should.ThrowAsync<AlvoConstraintViolationException>(() => data.UpdateAsync(
+            "products", id, new Dictionary<string, object?>(StringComparer.Ordinal) { ["stock"] = -1L }, Caller, cancellationToken: Ct));
+
+        (await data.GetAsync("products", id, Caller, Ct))!["stock"].ShouldBe(3L);
+    }
+
+    /// <summary>A duration validation holds in the engine at its bound: 31 days refused, 30 days written.</summary>
+    [Fact]
+    public async Task A_duration_validation_holds_in_the_engine()
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+        var refusal = await Should.ThrowAsync<AlvoConstraintViolationException>(() => data.CreateAsync(
+            "products",
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["stock"] = 1L,
+                ["sale_starts_at"] = Instant,
+                ["sale_ends_at"] = Instant.AddDays(31),
+            },
+            Caller,
+            cancellationToken: Ct));
+        refusal.Fields.ShouldBe(["sale_ends_at"]);
+        await data.CreateAsync("products", new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["stock"] = 1L,
+            ["sale_starts_at"] = Instant,
+            ["sale_ends_at"] = Instant.AddDays(30),
+        }, Caller, cancellationToken: Ct);
+    }
+
+    /// <summary>A negative constant is a constant: -40 is written and -41 refused at the field (Ruling 16).</summary>
+    [Fact]
+    public async Task A_negative_bound_holds_and_reads_back_exactly()
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+        await data.CreateAsync("products", new Dictionary<string, object?>(StringComparer.Ordinal) { ["stock"] = 1L, ["temperature"] = -40L }, Caller, cancellationToken: Ct);
+        (await Should.ThrowAsync<AlvoConstraintViolationException>(() => data.CreateAsync(
+            "products", new Dictionary<string, object?>(StringComparer.Ordinal) { ["stock"] = 1L, ["temperature"] = -41L }, Caller, cancellationToken: Ct)))
+            .Fields.ShouldBe(["temperature"]);
+    }
+
+    /// <summary>
+    /// A child write whose rollup recompute pushes the parent past its validation is refused whole, pointed at the child
+    /// field the rollup aggregates — the value the caller sent — never the parent's (Rulings 25, 45): the recompute is
+    /// translated like the write itself, so the engine's refusal is never a 500.
+    /// </summary>
+    [Fact]
+    public async Task A_rollup_pushing_a_parent_past_its_validation_is_refused_at_the_child_field()
+    {
+        var data = await CreateAsync(ReservedSchema, ReservedDescriptor);
+        var product = (Guid)(await data.CreateAsync("products", Row(1), Caller, cancellationToken: Ct))["id"]!;
+        await data.CreateAsync("reservations", Reservation(product, 1), Caller, cancellationToken: Ct);
+
+        var refusal = await Should.ThrowAsync<AlvoConstraintViolationException>(
+            () => data.CreateAsync("reservations", Reservation(product, 1), Caller, cancellationToken: Ct));
+
+        refusal.Kind.ShouldBe(AlvoConstraintKind.Check);
+        refusal.Fields.ShouldBe(["quantity"]);
+        (await data.QueryAsync(new AlvoQuery { Entity = "reservations" }, Caller, Ct)).Items.Count.ShouldBe(1);
+    }
+
+    private static Dictionary<string, object?> Reservation(Guid product, long quantity) =>
+        new(StringComparer.Ordinal) { ["product_id"] = product, ["quantity"] = quantity };
+
+    /// <summary>
+    /// <see cref="Descriptor"/> plus reservations, whose quantities products.reserved sums under the validation
+    /// "value &lt;= stock".
+    /// </summary>
+    private static AlvoDescriptor ReservedDescriptor => Descriptor with
+    {
+        Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
+        {
+            ["products"] = Descriptor.Entities["products"] with
+            {
+                Fields = new Dictionary<string, FieldDescriptor>(Descriptor.Entities["products"].Fields, StringComparer.Ordinal)
+                {
+                    ["reserved"] = new()
+                    {
+                        Type = DescField.Integer,
+                        Rollup = new Rollup { From = "reservations", Op = RollupOp.Sum, Field = "quantity" },
+                        Validation = "value <= stock",
+                    },
+                },
+            },
+            ["reservations"] = new()
+            {
+                Tenancy = EntityTenancy.Global,
+                Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+                {
+                    ["product_id"] = new() { Type = DescField.Ref, Entity = "products", Required = true },
+                    ["quantity"] = new() { Type = DescField.Integer, Required = true },
+                },
+                Rules = new AccessRules { List = "true", Get = "true", Create = "true", Update = "true", Delete = "true" },
+            },
+        },
+    };
+
+    /// <summary>The same two entities as a schema.</summary>
+    private static SchemaModel ReservedSchema => new([
+        Schema.Entities[0] with
+        {
+            Fields =
+            [
+                .. Schema.Entities[0].Fields,
+                new FieldSchema
+                {
+                    Name = "reserved", Type = SchemaField.Integer, Nullable = true, CheckExpression = "reserved <= stock",
+                    Rollup = new RollupSchema { From = "reservations", Op = RollupOperation.Sum, Field = "quantity", Via = "product_id" },
+                },
+            ],
+        },
+        new EntitySchema
+        {
+            Name = "reservations",
+            Tenancy = TenancyMode.Global,
+            Fields =
+            [
+                new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true },
+                new FieldSchema
+                {
+                    Name = "product_id", Type = SchemaField.Ref, Required = true,
+                    Reference = new RefSchema("products", MMLib.Alvo.Schema.OnDelete.Cascade),
+                },
+                new FieldSchema { Name = "quantity", Type = SchemaField.Integer, Required = true },
+            ],
+        },
+    ]);
+
+    private static DateTimeOffset Instant => new(2026, 11, 1, 9, 0, 0, TimeSpan.Zero);
+
     private static Dictionary<string, object?> Row(long stock) => new(StringComparer.Ordinal) { ["stock"] = stock };
 
     /// <summary>
     /// products: stock (validation "value >= 0"), discount (optional, "value &lt;= 50"), margin (hidden, "value >= 0"),
     /// sale_starts_at / sale_ends_at (sale_ends_at: "value - sale_starts_at &lt;= duration('720h')"), and the computed
-    /// stock_value (stock + stock — a computed field carries no numeric constant, "value &lt;= 500").
+    /// stock_value (stock + stock — a computed field carries no numeric constant, "value &lt;= 500"), and temperature
+    /// ("value >= -40" — a negative constant, Ruling 16).
     /// </summary>
     protected static AlvoDescriptor Descriptor => new()
     {
@@ -238,6 +416,7 @@ public abstract class AlvoDataCheckConstraintTests
                     ["sale_starts_at"] = new() { Type = DescField.DateTime },
                     ["sale_ends_at"] = new() { Type = DescField.DateTime, Validation = "value - sale_starts_at <= duration('720h')" },
                     ["stock_value"] = new() { Type = DescField.Integer, Computed = "stock + stock", Validation = "value <= 500" },
+                    ["temperature"] = new() { Type = DescField.Integer, Validation = "value >= -40" },
                 },
                 Rules = new AccessRules { List = "true", Get = "true", Create = "true", Update = "true", Delete = "true" },
             },
@@ -267,6 +446,7 @@ public abstract class AlvoDataCheckConstraintTests
                     Name = "stock_value", Type = SchemaField.Integer, Nullable = true,
                     ComputedExpression = "stock + stock", CheckExpression = "stock_value <= 500",
                 },
+                new FieldSchema { Name = "temperature", Type = SchemaField.Integer, Nullable = true, CheckExpression = "temperature >= -40" },
             ],
         },
     ]);

@@ -5,12 +5,11 @@
 /// only one <see cref="AlvoConstraintViolationException"/> commits to.
 /// </summary>
 /// <remarks>
-/// Two members rather than one flag or a free-text reason, because the two have <em>different fixes</em> and
-/// nothing else about them differs: a <see cref="Unique"/> collision is repaired by sending another value,
-/// and a <see cref="Referenced"/> one by removing the records that point at this one. A third member
-/// encoding <em>which</em> constraint, or a string carrying the engine's own constraint name, would key the
-/// refusal on its reason rather than its kind — the schema-and-data oracle every deny reason in this
-/// framework is worded to avoid.
+/// One member per <em>fix</em>, and nothing else: a <see cref="Unique"/> collision is repaired by sending another
+/// value, a <see cref="Referenced"/> one by removing the records that point at this one, and a <see cref="Check"/>
+/// one by sending a value the field's validation accepts. A member encoding <em>which</em> constraint, or a string
+/// carrying the engine's own constraint name, would key the refusal on its reason rather than its kind — the
+/// schema-and-data oracle every deny reason in this framework is worded to avoid.
 /// </remarks>
 public enum AlvoConstraintKind
 {
@@ -22,4 +21,10 @@ public enum AlvoConstraintKind
     /// declaring <c>onDelete: "restrict"</c> asked the store for.
     /// </summary>
     Referenced,
+
+    /// <summary>
+    /// A row broke a CHECK constraint — a field's validation. The write is refused whole and nothing it sent is
+    /// stored; the refusal names the validated field when the caller may know it, and never a value.
+    /// </summary>
+    Check,
 }

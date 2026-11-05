@@ -152,8 +152,14 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     /// <summary><c>SQLITE_CONSTRAINT_FOREIGNKEY</c> (787): what a <c>RESTRICT</c>-ed reference raises.</summary>
     private const int ConstraintForeignKey = 787;
 
+    /// <summary><c>SQLITE_CONSTRAINT_CHECK</c> (275): a <c>CHECK</c> constraint — a field's validation — refused the row.</summary>
+    private const int ConstraintCheck = 275;
+
     /// <summary>SQLite's own prefix on the one message that names columns.</summary>
     private const string UniqueFailurePrefix = "UNIQUE constraint failed: ";
+
+    /// <summary>SQLite's own prefix on a CHECK failure, followed by the constraint's name.</summary>
+    private const string CheckFailurePrefix = "CHECK constraint failed: ";
 
     /// <inheritdoc/>
     /// <remarks>
@@ -200,6 +206,7 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
                 Columns = ViolatedColumns(sqlite.Message),
             },
             ConstraintForeignKey => new SqlConstraintViolation { Kind = AlvoConstraintKind.Referenced },
+            ConstraintCheck => CheckViolation(sqlite.Message),
             _ => WithoutAnExtendedCode(sqlite),
         };
     }
@@ -225,9 +232,9 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     /// </para>
     /// <para>
     /// The narrowing is still the numeric code: only <see cref="Constraint"/> reaches here, so a message match
-    /// can never promote an unrelated failure. Within that class the two prefixes are SQLite's own generated
-    /// text, unlocalized and free of caller values — and anything else in the class (a <c>CHECK</c>, a
-    /// <c>NOT NULL</c>, a trigger) still answers <see langword="null"/>.
+    /// can never promote an unrelated failure. Within that class the three prefixes are SQLite's own generated
+    /// text, unlocalized and free of caller values — and anything else in the class (a <c>NOT NULL</c>, a trigger)
+    /// still answers <see langword="null"/>.
     /// </para>
     /// </remarks>
     /// <param name="sqlite">The engine's exception.</param>
@@ -241,6 +248,11 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
         if (sqlite.Message.Contains(ForeignKeyFailurePrefix, StringComparison.Ordinal))
         {
             return new SqlConstraintViolation { Kind = AlvoConstraintKind.Referenced };
+        }
+
+        if (sqlite.Message.Contains(CheckFailurePrefix, StringComparison.Ordinal))
+        {
+            return CheckViolation(sqlite.Message);
         }
 
         return sqlite.Message.Contains(UniqueFailurePrefix, StringComparison.Ordinal)
@@ -273,6 +285,27 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
         return [.. list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(Unqualified)
             .Where(column => column.Length > 0)];
+    }
+
+    /// <summary>A CHECK failure, carrying the constraint's name when the message names one.</summary>
+    /// <param name="message">The exception's message.</param>
+    private static SqlConstraintViolation CheckViolation(string message) =>
+        new() { Kind = AlvoConstraintKind.Check, ConstraintName = CheckName(message) };
+
+    /// <summary>
+    /// The name after <c>CHECK constraint failed: </c> to the end of SQLite's text, or <see langword="null"/> when the
+    /// message is not that shape.
+    /// </summary>
+    /// <remarks>
+    /// The name is only ever compared with the names the shared path recomputes, never shown, so a constraint SQLite
+    /// reports by its expression rather than a name simply matches none.
+    /// </remarks>
+    /// <param name="message">The exception's message.</param>
+    private static string? CheckName(string message)
+    {
+        var start = message.IndexOf(CheckFailurePrefix, StringComparison.Ordinal);
+        var name = start < 0 ? string.Empty : message[(start + CheckFailurePrefix.Length)..].TrimEnd('\'', '.', ' ');
+        return name.Length == 0 ? null : name;
     }
 
     /// <summary>The column half of a <c>table.column</c> pair.</summary>
