@@ -1,0 +1,23 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "currency-desk",
+  "auth": { "roles": ["clerk"] },
+  "entities": {
+    "rates": {
+      "fields": {
+        "currency": { "type": "string", "required": true, "maxLength": 3 },
+        "per_euro": { "type": "decimal", "required": true, "precision": 12, "scale": 6 }
+      },
+      "rules": { "list": "'clerk' in @user.roles", "get": "'clerk' in @user.roles", "create": "'clerk' in @user.roles" }
+    },
+    "invoices": {
+      "fields": {
+        "currency": { "type": "string", "required": true, "maxLength": 3 },
+        "amount": { "type": "decimal", "required": true, "precision": 12, "scale": 2 },
+        "per_euro": { "type": "decimal", "precision": 12, "scale": 6 }
+      },
+      "rules": { "list": "'clerk' in @user.roles", "get": "'clerk' in @user.roles", "create": "'clerk' in @user.roles" }
+    }
+  }
+}

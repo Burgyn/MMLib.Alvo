@@ -480,7 +480,10 @@ the count fixed by the descriptor at apply, never by the request — and the pro
 (`Condition` for the gate, `Mutate` for the values) have no loop, no comprehension macro, no
 recursion, no user-defined function and no I/O. The built-in functions are pure and bounded (an ASCII fold, a trim, a bounded replace, a read of an instant the caller
 already bound). A function a *host* registers with `AddCelFunction` is host code and is not bounded by this grammar: the
-descriptor author still cannot express a loop or I/O, the host developer can, by contract (spec 2026-10-05 §5.8). Each expression's tree is walked
+descriptor author still cannot express a loop or I/O, the host developer can, by contract (spec 2026-10-05 §5.8) — so
+host functions, the one call into a before-hook that can block, carry the budget the last paragraph below asks for: since
+HX-10 every host call in one `BeforeHookRunner.Run` shares `Alvo:Extensions:CelFunctionBudget` (250 ms), measured on
+return and offered as a token (`cel.md`, *Time budget*). The descriptor's own expressions still carry none. Each expression's tree is walked
 once and its node count is bounded by its source length, which the frozen schema caps at 2000
 characters.
 

@@ -86,8 +86,8 @@ that locked everyone out of its own `access` block would otherwise be unrecovera
 The two **escape hatches** are both the host developer's: a [custom CEL function](/guides/custom-cel-functions/)
 and a [custom endpoint](/guides/call-from-endpoints/). They let you outgrow the descriptor without leaving the
 runtime, and they are as trustworthy as the code you write in them. A host function is not bounded by CEL's grammar:
-it runs inside the write's transaction with no time budget, can loop or block, and Alvo's tenant filter does not reach
-inside it, so a function that reads stored data must filter by the tenant itself. That is why only a host developer can
+it runs inside the write's transaction, can loop or block until its time budget fails the write, and Alvo's tenant
+filter does not reach inside it, so a function that reads stored data must filter by the tenant itself. That is why only a host developer can
 add one.
 
 An API key's scopes narrow what it reaches on the Data API only. On the Management API a key reaches whatever its
@@ -146,16 +146,20 @@ A before-hook runs inside the transaction of the write it judges, over the row l
 
 - A `reject` that fires refuses the write with `403 forbidden` and the author's own message. Nothing is written and no
   event is recorded.
-- A function that fails, or arithmetic that overflows or divides by zero, aborts the evaluation and the write. A host
-  that renders Alvo's errors answers `500 function-failed`, naming the function and never the host's exception text.
+- A function that fails, or arithmetic that overflows or divides by zero, aborts the evaluation and the write. A
+  built-in refusing a value the request's body sent answers `422 expression-failed`, on every host — the caller can fix
+  it; anything else — a host function's failure, a refusal of a value the caller did not send — is a host that renders
+  Alvo's errors answering `500 function-failed`. Both name the function, never the value or the host's exception text.
 - A `mutate` value the target field's declared facets refuse is a `403`, not a silently truncated value.
 
 **Nothing a descriptor author writes in a before-hook can reach the network.** The port a before-hook runs through
 returns no task and takes no cancellation token, so it cannot await anything, and an architecture test fails the build
 if anything it depends on can reach an HTTP client, a socket or a mail sender. A hook's run time is bounded by its
 grammar, not by a timeout: a fixed number of expressions, each without loops or I/O. **The exception is a host
-function** registered with `AddCelFunction`: it is host code, runs inside the transaction with no time budget and no
-cancellation, and is trusted to be pure and fast; Alvo cannot check that it is. Network work belongs in an
+function** registered with `AddCelFunction`: it is host code that runs inside the transaction and is trusted to be pure
+and fast. Alvo bounds it two ways — a time budget per evaluation (250 ms by default) that fails the write when it is
+spent, and the [`ALVO1001`](/extending/analyzer-rules/) analyzer, which reports the network, a connection, a file or a
+data port in its code at build time — but cannot prove it pure. Network work belongs in an
 after-hook, which runs after the commit from the outbox, holds no lock, and is retried; a webhook is delivered only to
 a publicly reachable address unless the operator allows a network.
 

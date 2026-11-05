@@ -185,7 +185,8 @@ The stored row holds what the hook computed, not what the caller sent. Two thing
   the write is refused as the hook's refusal (**403**), naming the hook and the field, never the value.
 - **A function that throws fails the write closed.** The transaction rolls back and the Data API answers **500**
   `function-failed`, naming the function and carrying none of the exception's text. An in-process `IAlvoData` caller
-  gets an exception instead.
+  gets an exception instead. (A *built-in* function refusing a value the caller sent — `int('x')` over a field in the
+  body — answers **422** `expression-failed` instead, on every host: the caller can fix that one.)
 
 ### 4. Discover it
 
@@ -223,8 +224,11 @@ Alvo cannot check these. They are your promise, and breaking one breaks writes, 
 - **Pure.** The same arguments give the same result, with no side effects. The function runs inside the write's
   transaction, and a rolled-back write must leave nothing behind. A side effect — an email, a call to another
   service — belongs in an after-hook or a webhook, never here.
-- **Fast.** It runs while the row's locks are held, with no time budget and no `CancellationToken`. A slow function
-  is a slow write for everyone touching that row. No network calls, no unbounded loops.
+- **Fast.** It runs while the row's locks are held. Every host function call in one evaluation shares a time budget —
+  250 ms by default, `Alvo:Extensions:CelFunctionBudget` — and a function that returns after it fails the write; a
+  trailing `CancellationToken` parameter, if you take one, is cancelled when the budget is spent. A slow function is a
+  slow write for everyone touching that row. No network calls, no unbounded loops: the `ALVO1001` analyzer that ships
+  in `MMLib.Alvo` reports them at build time.
 - **Thread-safe.** One instance serves every request thread at once. A static method over its arguments, like
   `NormalizeVin`, is safe by construction. The delegate is a singleton closure, so it cannot use a scoped service.
 - **Tenant-aware.** Alvo's tenant filter governs what *Alvo* reads; it does not reach inside your code. A function that

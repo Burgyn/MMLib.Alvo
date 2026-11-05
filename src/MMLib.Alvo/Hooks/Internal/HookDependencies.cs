@@ -12,8 +12,8 @@ namespace MMLib.Alvo.Hooks.Internal;
 /// (<c>Lazy&lt;IAlvoData&gt;</c>, <c>HttpClient[]</c>).
 /// </summary>
 /// <remarks>
-/// What a direct check cannot see is the HX-10 analyzer's: a typed HTTP client whose own constructor takes the
-/// <c>HttpClient</c>, a service resolved later from an <c>IServiceProvider</c>, and whatever a delegate hook's closure captured.
+/// What a direct check cannot see is <c>ALVO1001</c>'s: an awaited call into a typed client, a service-locator lookup, a
+/// captured closure — and not a synchronous call into the host's own code (docs: <em>Analyzer rules</em>).
 /// </remarks>
 internal static class HookDependencies
 {

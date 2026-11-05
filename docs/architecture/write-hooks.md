@@ -79,14 +79,16 @@ never its message.
 | stage 7b's re-read finds no row (the hook's write cascaded it away) | `row-vanished` | names the last hook that wrote (Ruling 45) |
 
 Two failures pass through unchanged: `AlvoChainDepthExceededException` (508 `chain-depth-exceeded`) and a nested write's
-own `HookFailedException`, which names the innermost hook. A built-in CEL function failing on the caller's data inside a
-`when` escapes unchanged and unpoisoned, answered as any condition's built-in failure (Ruling 63's amendment).
+own `HookFailedException`, which names the innermost hook. A built-in CEL function failing inside a
+`when` escapes unchanged and unpoisoned, answered as any condition's built-in failure (Ruling 63's amendment): 422
+`expression-failed` when the refused value is the caller's own, 500 otherwise (HX-10 Ruling 26; every refusal in an
+after-write `when` is 500, and only a field the request's body sent is the caller's — HX-10 Ruling 44).
 
 **The stated limit (Ruling 55).** Alvo awaits a hook — its calls share the unit's one connection, so abandoning it would
 put two commands on that connection — and the unit's deadline rolls back only when no call is running (HX-07 Ruling 10).
 A hook that ignores its token and never returns therefore keeps its call running, and the unit open: on SQLite it holds
-the database's one writer lock past the 30 s limit. Enforcing it needs out-of-process hooks (#35) or the analyzer
-(HX-10); the page tells the host to pass the token on.
+the database's one writer lock past the 30 s limit. Enforcing it needs out-of-process hooks (#35); `ALVO1001` reports
+the awaits that cause it ([`analyzers.md`](analyzers.md)); the page tells the host to pass the token on.
 
 ## Cascades
 
@@ -166,7 +168,9 @@ operations ports (`IAlvoData`, `IAlvoSessions`, `IAlvoTransactions`, `IAlvoEvent
 `IAlvoBootstrapAdmin`). Validate hooks are exempt: they run before any transaction.
 
 The check sees **direct dependencies only**. A typed HTTP client that wraps an `HttpClient`, a service the hook resolves
-later from `IServiceProvider`, and whatever a delegate's closure captured are not caught; they are the HX-10 analyzer's.
+later from `IServiceProvider`, and whatever a delegate's closure captured are not caught at boot; they are `ALVO1001`'s,
+at build time — an awaited typed client, a service-locator lookup, a captured closure — except a synchronous call into
+the host's own code, its documented blind spot ([`analyzers.md`](analyzers.md)).
 The boot also refuses an unknown entity, a `when` that does not compile or reads `new.` on a delete, options out of
 bounds (in-transaction `Timeout` in (0, 30 s], validate in (0, 60 s], `MaxOperations` 1–1000; Ruling 24), and a
 composition without `IAlvoTransactions` or `IHookRejectionLog` — the in-memory reference (Ruling 34). An apply that

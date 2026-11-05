@@ -124,7 +124,7 @@ public static class SampleHost
 
     /// <summary>
     /// <c>normalizeVin</c>: pure, fast and thread-safe, as every CEL function must be — it runs inside the write's
-    /// transaction, on any request thread, with no time budget and no cancellation.
+    /// transaction, on any request thread, within the time budget every host function call of one evaluation shares.
     /// </summary>
     /// <remarks>
     /// It reads nothing but its argument, so it needs no tenant: a function that looks stored data up must take the
