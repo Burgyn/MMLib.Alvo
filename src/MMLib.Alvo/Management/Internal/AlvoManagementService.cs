@@ -91,6 +91,10 @@ namespace MMLib.Alvo.Management.Internal;
 /// </param>
 /// <param name="deliveries">The delivery store, read for which handlers are paused; none without a driver.</param>
 /// <param name="commands">What each command's access rule answers in a policy simulation; none in a container built without it.</param>
+/// <param name="time">
+/// The clock a policy simulation binds its <c>now()</c> instant from when its caller bound none (HX-11 Ruling 1), so a
+/// <c>now()</c> rule or field mask previews as production judges it; the system clock when omitted.
+/// </param>
 internal sealed partial class AlvoManagementService(
     IOptions<AlvoOptions> alvo,
     IOptions<AlvoManagementOptions> management,
@@ -112,7 +116,8 @@ internal sealed partial class AlvoManagementService(
     ISecretStore secrets,
     Func<RuntimeSchemaService> runtime,
     IDeliveryStore? deliveries,
-    CommandSimulator? commands = null) : IAlvoManagement
+    CommandSimulator? commands = null,
+    TimeProvider? time = null) : IAlvoManagement
 {
     /// <summary>What <see cref="ManagementInfo.DataProvider"/> reports when no driver is registered.</summary>
     private const string NoDriverRegistered = "none";
@@ -235,6 +240,7 @@ internal sealed partial class AlvoManagementService(
         EnsureMayPerform(ManagementOperation.SimulatePolicy);
         EnsureServed(project);
         EnsureAnswerable(simulation);
+        using var instant = AlvoFlow.EnsureInstant(time ?? TimeProvider.System);
 
         var caller = Caller(simulation.Caller);
         var decision = policies.Resolve(simulation.Entity, Operation(simulation.Operation), caller);

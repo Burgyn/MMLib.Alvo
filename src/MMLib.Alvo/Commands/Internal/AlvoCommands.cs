@@ -9,14 +9,16 @@ namespace MMLib.Alvo.Commands.Internal;
 /// <see cref="IAlvoCommands"/>: refused inside an open unit (it would run beside it), depth-limited, access-ruled; the
 /// command is resolved from a fresh scope and run like a mapped one, without an idempotency key (spec 2026-10-14 §4.9).
 /// It runs one hop deeper than its caller, as an event handler does, so a command that invokes itself — directly, with its
-/// own caller — meets the chain-depth limit instead of the stack's.
+/// own caller — meets the chain-depth limit instead of the stack's. It binds the flow's instant unless its caller did, so a
+/// <c>now()</c> access rule reads one instant (HX-11 Ruling 1).
 /// </summary>
 internal sealed class AlvoCommands(
     ExtensionRegistry registry,
     CommandAccessJudge judge,
     AlvoChainDepthLimit depth,
     CommandRunner runner,
-    IServiceScopeFactory scopes) : IAlvoCommands
+    IServiceScopeFactory scopes,
+    TimeProvider time) : IAlvoCommands
 {
     /// <inheritdoc/>
     public async Task InvokeAsync<TInput>(string name, TInput input, AlvoContext context, CancellationToken cancellationToken = default)
@@ -24,6 +26,7 @@ internal sealed class AlvoCommands(
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(context);
         AlvoFlow.RefuseInsideUnit("IAlvoCommands.InvokeAsync");
+        using var instant = AlvoFlow.EnsureInstant(time);
         var command = Internal(name, typeof(TInput));
         var reached = depth.EnsureWithin(context);
         judge.EnsureAdmitted(command.Id, null, context);

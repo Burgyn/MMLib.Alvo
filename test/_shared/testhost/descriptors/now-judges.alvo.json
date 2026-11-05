@@ -1,0 +1,17 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "now-judges",
+  "description": "The judges outside the data port that read now() (HX-11 Task 2 review C1, I1): a command's access rule, run by IAlvoCommands and by the policy simulator, and a field mask the simulator previews.",
+  "auth": { "providers": ["local"], "roles": ["clerk"] },
+  "access": { "admin": "'clerk' in @user.roles" },
+  "entities": {
+    "notes": {
+      "fields": {
+        "body": { "type": "string", "maxLength": 200 },
+        "secret": { "type": "string", "maxLength": 200, "hidden": "now() != now()" }
+      },
+      "rules": { "list": "true", "get": "true", "create": "true", "update": "true", "delete": "true" }
+    }
+  }
+}

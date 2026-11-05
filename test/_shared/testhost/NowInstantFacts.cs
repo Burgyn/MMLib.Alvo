@@ -98,7 +98,7 @@ public abstract class NowInstantFacts
             return (one, two);
         }, cancellationToken: Ct);
 
-        after2["updated_at"].ShouldNotBe(after1["updated_at"], "a version (ETag) never repeats for two writes (review I5, Ruling 2)");
+        Instant(after2, "updated_at").ShouldBeGreaterThan(Instant(after1, "updated_at"), "a version (ETag) strictly increases per row (review I5, Ruling 2)");
     }
 
     private static Dictionary<string, object?> Body(string body) => new(StringComparer.Ordinal) { ["body"] = body };
