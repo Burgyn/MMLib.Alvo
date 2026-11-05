@@ -124,6 +124,8 @@ fi
 # the calibration tier, or when --scenarios names them; never judged by the gate (a gate ceiling must be measured on the
 # gate tier, and the verdict reads only head-1.json), and never beside --baseline-ref.
 HOOKS_RUN=""
+# 1 while the alvo container runs the hooks image: cleanup puts the head image back if the arm dies there (--keep).
+HOOKS_SERVING=0
 if [ -n "$SCENARIOS_OVERRIDE" ]; then
     HOOKS_RUN="$(tr ',' '\n' <<<"$SCENARIOS_OVERRIDE" | grep '^hook_' | paste -sd, - || true)"
     HEAD_SCENARIOS="$(tr ',' '\n' <<<"$SCENARIOS_OVERRIDE" | grep -v '^hook_' | paste -sd, - || true)"
@@ -194,13 +196,20 @@ cleanup() {
         rm -rf "$(dirname "$WORKTREE")" >/dev/null 2>&1 || true
         docker image rm -f "$IMAGE_BASE" >/dev/null 2>&1 || true
     fi
-    if [ -n "${HOOKS_RUN:-}" ]; then
-        docker image rm -f "$IMAGE_HOOKS" >/dev/null 2>&1 || true
+    # A hooks arm that died mid-way (a k6 threshold, a refused probe) left the hooks image serving: the kept stack must
+    # be the head composition the run reports, and a running container would also keep the image below from going.
+    if [ "${HOOKS_SERVING:-0}" -eq 1 ] && [ "$KEEP" -eq 1 ]; then
+        use_image "$IMAGE_HEAD" >/dev/null 2>&1 \
+            || say "could not put $IMAGE_HEAD back after the hooks arm failed: the kept stack still serves $IMAGE_HOOKS"
     fi
     if [ "$KEEP" -eq 0 ]; then
         ALVO_LOAD_IMAGE="$IMAGE_HEAD" docker compose "${COMPOSE[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
     else
         say "stack left running at $BASE_URL (--keep)"
+    fi
+    # After the stack is down or back on the head image: no container holds the hooks image any more.
+    if [ -n "${HOOKS_RUN:-}" ]; then
+        docker image rm -f "$IMAGE_HOOKS" >/dev/null 2>&1 || true
     fi
     exit "$status"
 }
@@ -509,13 +518,16 @@ hook_table() {
 }
 
 # The hooks arm: the alvo container swapped for the hooks image in place, PostgreSQL and its rows untouched, so the hook
-# shapes and the head arm's `create` measure the same dataset. The head image is put back afterwards for --keep.
+# shapes and the head arm's `create` measure the same dataset. The head image is put back afterwards for --keep — by
+# cleanup too, when the arm fails before this block's own swap back (HOOKS_SERVING).
 if [ -n "$HOOKS_RUN" ]; then
+    HOOKS_SERVING=1
     use_image "$IMAGE_HOOKS"
     reset_created_rows
     assert_hooks_fire
     run_k6 hooks-1.json "$HOOKS_RUN" "$CURSOR"
     use_image "$IMAGE_HEAD"
+    HOOKS_SERVING=0
     assert_valid_summary "$OUT_DIR/hooks-1.json"
     [ -f "$OUT_DIR/head-1.json" ] && jq -e '.scenarios.create' "$OUT_DIR/head-1.json" >/dev/null \
         || die "the hook shapes are published against \`create\`: run it in the same invocation"
