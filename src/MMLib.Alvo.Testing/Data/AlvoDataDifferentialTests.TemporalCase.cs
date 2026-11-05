@@ -9,7 +9,9 @@ public abstract partial class AlvoDataDifferentialTests
     /// One draw of the agreement property (HX-11 acceptance (6)): a rule from a fixed set of duration and <c>now()</c>
     /// shapes over <see cref="DifferentialEntity"/>, a row, and the instant <c>now()</c> reads. <b>Stratified</b> (Ruling
     /// 50): the dependent operand lands on the admitted side of the rule's boundary half the time and on the refused side
-    /// otherwise, so neither verdict is rare; every value is millisecond-aligned (Ruling 11).
+    /// otherwise, so neither verdict is rare; every value is millisecond-aligned (Ruling 11). <b>An edge stratum</b> (review
+    /// I1, M3): about one instant in ten is drawn from years 20–100 or 9000–9980, where a double of epoch microseconds no
+    /// longer holds every millisecond exactly, yet every shift by ±10 years and a month stays inside CEL's range.
     /// </summary>
     /// <param name="Rule">The CEL rule.</param>
     /// <param name="Row">The candidate row.</param>
@@ -20,13 +22,22 @@ public abstract partial class AlvoDataDifferentialTests
         private const long LatestMs = 4_102_444_800_000L;
         private const long TenYearsMs = 315_360_000_000L;
         private const long MonthMs = 30 * DayMs;
+        private const long Year20Ms = -61_536_067_200_000L;
+        private const long Year100Ms = -59_011_459_200_000L;
+        private const long Year9000Ms = 221_845_392_000_000L;
+        private const long Year9980Ms = 252_771_148_800_000L;
+
+        /// <summary>An instant in 1970–2100, or — one time in ten — near an end of CEL's range.</summary>
+        private static readonly Gen<long> _instantMs = Gen.Frequency(
+            (9, Gen.Long[0, LatestMs]),
+            (1, Gen.OneOf(Gen.Long[Year20Ms, Year100Ms], Gen.Long[Year9000Ms, Year9980Ms])));
 
         private static readonly TimeSpan[] _offsets =
             [TimeSpan.Zero, TimeSpan.FromHours(2), new TimeSpan(-5, -30, 0), TimeSpan.FromHours(14)];
 
         /// <summary>The generator: template, instants, offsets, a duration within ±10 years, the side, and a rare null.</summary>
         public static Gen<TemporalCase> Any { get; } =
-            Gen.Select(Gen.Int[0, 6], Gen.Long[0, LatestMs], Gen.Long[0, LatestMs], Gen.Long[-TenYearsMs, TenYearsMs])
+            Gen.Select(Gen.Int[0, 7], _instantMs, _instantMs, Gen.Long[-TenYearsMs, TenYearsMs])
                 .SelectMany(head => Gen.Select(
                     Gen.Long[1, MonthMs], Gen.Bool, Gen.Int[0, 9], Gen.Int[0, _offsets.Length - 1], Gen.Int[0, _offsets.Length - 1])
                     .Select(tail => new Draw(
@@ -49,6 +60,7 @@ public abstract partial class AlvoDataDifferentialTests
                 3 => Window($"created_at > now() - {d}", draw, now),
                 4 => DateShifted($"due_on + {d} <= created_at", draw, now),
                 5 => DateWindow($"due_on > now() - {d}", draw, now),
+                6 => Shifted($"created_at + {d} < now()", draw, now),
                 _ => Pair($"approved_at - created_at == {d}", draw, now, admitAt: 0, refuseAt: draw.Delta % 2 == 0 ? draw.Delta : -draw.Delta),
             };
         }
@@ -64,6 +76,13 @@ public abstract partial class AlvoDataDifferentialTests
         {
             var boundary = draw.NowMs - draw.DurationMs;
             return Of(rule, now, draw, ("created_at", Instant(boundary + (draw.Admit ? draw.Delta : 1 - draw.Delta), draw.DependentOffset)));
+        }
+
+        /// <summary>A <c>datetime</c> shifted in the microsecond domain against a folded <c>now()</c> (review M3).</summary>
+        private static TemporalCase Shifted(string rule, Draw draw, DateTimeOffset now)
+        {
+            var boundary = draw.NowMs - draw.DurationMs;
+            return Of(rule, now, draw, ("created_at", Instant(boundary + (draw.Admit ? -draw.Delta : draw.Delta - 1), draw.DependentOffset)));
         }
 
         private static TemporalCase DateShifted(string rule, Draw draw, DateTimeOffset now)
