@@ -153,8 +153,9 @@ public sealed class CelFunctionTypeCheckTests
         Compile("name(name) == name", CelProfile.Condition, title).IsSuccess.ShouldBeTrue();
     }
 
-    [Fact]
-    public void The_legacy_call_s_refusal_names_why_its_profile_has_no_instant() =>
-        Compile("now()", CelProfile.Computed).Errors[0].Message
-            .ShouldBe("'now()' is not legal in the Computed profile. A computed column is maintained by the database and an access level has no row; neither has an instant to read.");
+    [Theory]
+    [InlineData(CelProfile.Computed, "'now()' is not legal in the Computed profile. A computed column is maintained by the database and has no instant to read.")]
+    [InlineData(CelProfile.Access, "'now()' is not legal in the Access profile. An access level is a predicate over the caller alone, judged with no row and no instant.")]
+    public void The_legacy_call_s_refusal_names_why_its_own_profile_has_no_instant(CelProfile profile, string message) =>
+        Compile("now()", profile).Errors[0].Message.ShouldBe(message);
 }

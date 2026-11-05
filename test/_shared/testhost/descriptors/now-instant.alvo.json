@@ -25,8 +25,8 @@
         "list": "expires_at > now()",
         "get": "expires_at > now()",
         "create": "true",
-        "update": "true",
-        "delete": "true"
+        "update": "expires_at > now()",
+        "delete": "expires_at > now()"
       }
     }
   }

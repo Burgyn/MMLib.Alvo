@@ -222,8 +222,11 @@ internal static class CelTypeChecker
         private const string AccessNoRowMessage =
             "An access level is a predicate over the caller alone; a field reference has no row to read here.";
 
-        private const string NoInstantMessage =
-            "A computed column is maintained by the database and an access level has no row; neither has an instant to read.";
+        private const string ComputedNoInstantMessage =
+            "A computed column is maintained by the database and has no instant to read.";
+
+        private const string AccessNoInstantMessage =
+            "An access level is a predicate over the caller alone, judged with no row and no instant.";
 
         private const string DurationProfileFix =
             "A computed column and an access level carry no duration; compare durations in a rule, a hook condition or a mutate.";
@@ -1108,7 +1111,7 @@ internal static class CelTypeChecker
             var position = FindPosition(call.Name);
             var profileBad = CheckConstruct(
                 CelConstructKind.Call,
-                $"'{call.Name}()' is not legal in the {profile} profile. {NoInstantMessage}",
+                $"'{call.Name}()' is not legal in the {profile} profile. {NoInstantReason()}",
                 "Use now() in a rule, a hook condition or a before-hook mutate.",
                 position);
 
@@ -1119,6 +1122,10 @@ internal static class CelTypeChecker
                 _ => UnrecognizedNode(call),
             };
         }
+
+        /// <summary>Why this profile has no instant for <c>now()</c> to read, in its own words (Task 2 review M4).</summary>
+        private string NoInstantReason() =>
+            profile == CelProfile.Access ? AccessNoInstantMessage : ComputedNoInstantMessage;
 
         private (CelNode, CelValueType, bool, int) CheckCall(CelCall call) => call.Name switch
         {

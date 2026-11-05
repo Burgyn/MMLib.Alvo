@@ -101,6 +101,51 @@ public abstract class NowInstantFacts
         Instant(after2, "updated_at").ShouldBeGreaterThan(Instant(after1, "updated_at"), "a version (ETag) strictly increases per row (review I5, Ruling 2)");
     }
 
+    /// <summary>
+    /// Every data-port entry binds an instant before it judges a <c>now()</c> rule or runs a <c>now()</c> before-hook (Task 2
+    /// review M3): a missing binding fails closed, so the call would throw instead of answering.
+    /// </summary>
+    /// <param name="entry">The <see cref="IAlvoData"/> entry under test.</param>
+    [Theory]
+    [InlineData(nameof(IAlvoData.GetAsync))]
+    [InlineData(nameof(IAlvoData.UpdateAsync))]
+    [InlineData(nameof(IAlvoData.ReplaceAsync))]
+    [InlineData(nameof(IAlvoData.DeleteAsync))]
+    [InlineData(nameof(IAlvoData.CreateManyAsync))]
+    [InlineData(nameof(IAlvoData.UpdateManyAsync))]
+    [InlineData(nameof(IAlvoData.DeleteManyAsync))]
+    public async Task Every_data_port_entry_judges_now_at_an_instant_it_binds(string entry)
+    {
+        var clock = new FakeTimeProvider(_t);
+        await using var alvo = await StartAsync(clock, _ => { });
+        var clerk = AlvoTestHost.Caller("clerk");
+        var id = (Guid)(await alvo.Data.CreateAsync(Notes, Body("a"), clerk, cancellationToken: Ct))["id"]!;
+
+        (await DriveAsync(alvo.Data, entry, id, clerk)).ShouldBe(1, $"{entry} answered over a live note");
+    }
+
+    /// <summary>Calls one entry over the note <paramref name="id"/> and answers how many rows it reached.</summary>
+    private static async Task<int> DriveAsync(IAlvoData data, string entry, Guid id, AlvoContext clerk) => entry switch
+    {
+        nameof(IAlvoData.GetAsync) => await data.GetAsync(Notes, id, clerk, Ct) is null ? 0 : 1,
+        nameof(IAlvoData.UpdateAsync) => await data.UpdateAsync(Notes, id, Body("b"), clerk, cancellationToken: Ct) is null ? 0 : 1,
+        nameof(IAlvoData.ReplaceAsync) => await data.ReplaceAsync(Notes, id, Live("b"), clerk, cancellationToken: Ct) is null ? 0 : 1,
+        nameof(IAlvoData.DeleteAsync) => await DeletedAsync(data, id, clerk),
+        nameof(IAlvoData.CreateManyAsync) => (await data.CreateManyAsync(Notes, [Body("b")], clerk, cancellationToken: Ct)).Affected,
+        nameof(IAlvoData.UpdateManyAsync) => (await data.UpdateManyAsync(Notes, [new AlvoRowPatch(id, Body("b"))], clerk, cancellationToken: Ct)).Affected,
+        nameof(IAlvoData.DeleteManyAsync) => (await data.DeleteManyAsync(Notes, [id], clerk, cancellationToken: Ct)).Affected,
+        _ => throw new ArgumentOutOfRangeException(nameof(entry), entry, "not an IAlvoData entry"),
+    };
+
+    /// <summary>A whole row a replace keeps live under the rules' window.</summary>
+    private static Dictionary<string, object?> Live(string body) => new(Body(body), StringComparer.Ordinal) { ["expires_at"] = _t.AddHours(1) };
+
+    private static async Task<int> DeletedAsync(IAlvoData data, Guid id, AlvoContext clerk)
+    {
+        await data.DeleteAsync(Notes, id, clerk, cancellationToken: Ct);
+        return 1;
+    }
+
     private static Dictionary<string, object?> Body(string body) => new(StringComparer.Ordinal) { ["body"] = body };
 
     private static DateTimeOffset Instant(AlvoRecord row, string field) => (DateTimeOffset)row[field]!;

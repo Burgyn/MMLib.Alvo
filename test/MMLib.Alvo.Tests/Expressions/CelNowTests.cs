@@ -25,7 +25,7 @@ public sealed class CelNowTests
     [Fact]
     public void A_computed_column_s_refusal_names_why_it_has_no_instant() =>
         CelFixtures.Compiler.Compile("now()", CelProfile.Computed, CelFixtures.Orders).Errors
-            .ShouldContain(error => error.Message.Contains("neither has an instant to read", StringComparison.Ordinal));
+            .ShouldContain(error => error.Message.Contains("maintained by the database and has no instant to read", StringComparison.Ordinal));
 
     [Fact]
     public void A_rule_reads_the_bound_instant()
