@@ -55,7 +55,7 @@ internal static class IoReach
         ILocalReferenceOperation local when IsReached(local.Type) => $"'{Name(local.Type)}' is used",
         ITypeOfOperation typeOf when IsReached(typeOf.TypeOperand) => $"'{Name(typeOf.TypeOperand)}' is looked up",
         IAwaitOperation wait when !scope.IsCelFunction && AwaitedCall(wait.Operation) is { } awaited
-            && !HasReachedReceiver(awaited) && !symbols.IsTransactionCall(awaited.TargetMethod, scope) =>
+            && !HasReachedReceiver(awaited) && DescribeCall(awaited) is null && !symbols.IsTransactionCall(awaited.TargetMethod, scope) =>
             $"'{Name(awaited.TargetMethod.ContainingType)}.{awaited.TargetMethod.Name}' is awaited, and only the write's transaction may be",
         IInvocationOperation call when scope.IsCelFunction && ReturnsTask(call.TargetMethod) && !HasReachedReceiver(call) =>
             $"'{Name(call.TargetMethod.ContainingType)}.{call.TargetMethod.Name}' returns a task, which a synchronous CEL function can only block on",

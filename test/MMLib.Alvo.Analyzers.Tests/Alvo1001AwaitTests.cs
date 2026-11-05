@@ -118,6 +118,23 @@ public sealed class Alvo1001AwaitTests
     }
 
     [Fact]
+    public async Task Awaiting_a_static_call_into_a_reached_type_is_reported_once_at_the_call()
+    {
+        const string source = Usings + """
+            public sealed class Guard : IBeforeWriteHook
+            {
+                public async ValueTask BeforeWriteAsync(BeforeWrite<AlvoRecord> write, CancellationToken cancellationToken) =>
+                    write.Set("note", await System.IO.File.ReadAllTextAsync("note.txt", cancellationToken)); // ALVO1001
+            }
+            """;
+
+        var reported = await AnalyzerHarness.Alvo1001Async(source);
+
+        AnalyzerHarness.Lines(reported).ShouldBe(AnalyzerHarness.MarkedLines(source), "the call is reported, not the await on top of it (Ruling 14)");
+        reported[0].GetMessage(System.Globalization.CultureInfo.InvariantCulture).ShouldStartWith("'File.ReadAllTextAsync' is called");
+    }
+
+    [Fact]
     public async Task Awaiting_a_local_function_declared_outside_a_hook_delegate_is_reported()
     {
         const string source = Usings + """
