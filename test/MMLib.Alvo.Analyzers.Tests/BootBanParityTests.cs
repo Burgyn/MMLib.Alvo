@@ -1,4 +1,6 @@
-﻿using MMLib.Alvo.Hooks.Internal;
+﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using MMLib.Alvo.Hooks.Internal;
 
 namespace MMLib.Alvo.Analyzers.Tests;
 
@@ -21,4 +23,34 @@ public sealed class BootBanParityTests
     [Fact]
     public void The_analyzer_matches_the_identity_namespaces_by_the_boot_ban_s_own_prefixes() =>
         HookDependencies.IdentityPrefixes.Order(StringComparer.Ordinal).ShouldBe(IoReach.IdentityPrefixes.Order(StringComparer.Ordinal));
+
+    /// <summary>
+    /// Both sides refuse a mail sender by its name alone, in any namespace and generic or not; the boot ban sees the
+    /// reflection name (<c>IEmailSender`1</c>), the analyzer the symbol name (<c>IEmailSender</c>), and they must agree.
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(Mail.IEmailSender), "Acme.Mail.IEmailSender")]
+    [InlineData(typeof(Mail.IEmailSender<>), "Acme.Mail.IEmailSender`1")]
+    [InlineData(typeof(Mail.IEmailSenderFactory), "Acme.Mail.IEmailSenderFactory")]
+    public void The_analyzer_matches_a_mail_sender_by_the_boot_ban_s_own_name(Type type, string metadataName)
+    {
+        var symbol = _mail.Value.GetTypeByMetadataName(metadataName).ShouldNotBeNull();
+
+        IoReach.IsReached(symbol).ShouldBe(HookDependencies.IsBanned(type));
+    }
+
+    private static readonly Lazy<Compilation> _mail = new(() => CSharpCompilation.Create(
+        "Mail",
+        [CSharpSyntaxTree.ParseText("namespace Acme.Mail { public interface IEmailSender; public interface IEmailSender<T>; public interface IEmailSenderFactory; }", cancellationToken: TestContext.Current.CancellationToken)],
+        [MetadataReference.CreateFromFile(typeof(object).Assembly.Location)]));
+
+    /// <summary>The reflection twins of the source <see cref="_mail"/> compiles.</summary>
+    public static class Mail
+    {
+        public interface IEmailSender;
+
+        public interface IEmailSender<T>;
+
+        public interface IEmailSenderFactory;
+    }
 }

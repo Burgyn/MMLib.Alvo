@@ -1890,7 +1890,9 @@ In `src/MMLib.Alvo/MMLib.Alvo.csproj`, add (after the `Corvus` item groups):
 ```xml
   <!--
     ALVO1001 ships inside this package (E6): built before the core, never referenced by it (no runtime reference, no
-    nuspec dependency), and packed at analyzers/dotnet/cs so every consumer's compiler runs it.
+    nuspec dependency), and packed at analyzers/dotnet/cs so the compiler of every project referencing this package directly runs it (NuGet
+    does not flow analyzers transitively). The inner build's
+    TargetFramework=net10.0 is removed from the call, or it would ask the netstandard2.0 project for a net10.0 path.
   -->
   <ItemGroup>
     <ProjectReference Include="../MMLib.Alvo.Analyzers/MMLib.Alvo.Analyzers.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
@@ -1901,7 +1903,7 @@ In `src/MMLib.Alvo/MMLib.Alvo.csproj`, add (after the `Corvus` item groups):
   </PropertyGroup>
 
   <Target Name="PackAlvoAnalyzers">
-    <MSBuild Projects="../MMLib.Alvo.Analyzers/MMLib.Alvo.Analyzers.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+    <MSBuild Projects="../MMLib.Alvo.Analyzers/MMLib.Alvo.Analyzers.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)" RemoveProperties="TargetFramework">
       <Output TaskParameter="TargetOutputs" ItemName="AlvoAnalyzerAssembly" />
     </MSBuild>
     <ItemGroup>

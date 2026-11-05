@@ -634,6 +634,26 @@ public sealed class WriteExtensionRunnerTests
         world.Rejections.Recorded.ShouldBeEmpty("a rejection that lost to a failure is not the write's answer");
     }
 
+    /// <summary>
+    /// The pair of the theory's timeout case: one millisecond short of the 250 ms deadline the rejection is the write's
+    /// answer, so a timeout outranks a rejection only once the deadline has passed.
+    /// </summary>
+    [Fact]
+    public async Task A_rejection_just_below_the_timeout_is_the_answer()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t.BeforeWrite("guard", (BeforeWrite<AlvoRecord> write) =>
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(249));
+            write.Conflict("taken", "This title is taken.");
+            return ValueTask.CompletedTask;
+        })), clock);
+
+        var rejection = await Should.ThrowAsync<AlvoWriteRejectedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct));
+
+        rejection.Code.ShouldBe("taken");
+    }
+
     private static async Task FailQuietlyAsync(AfterWrite<AlvoRecord> write, string reason, FakeTimeProvider clock, CancellationToken ct)
     {
         try

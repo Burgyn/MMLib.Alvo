@@ -29,6 +29,32 @@ public sealed class Alvo1001CelFunctionTests
         reported[0].GetMessage(System.Globalization.CultureInfo.InvariantCulture).ShouldStartWith("'Task.FromResult' returns a task");
     }
 
+    /// <summary>
+    /// In a CEL function the await arm stands down for the task-returning call arm: the awaited <c>Task.Delay</c> is one
+    /// finding, not two.
+    /// </summary>
+    [Fact]
+    public async Task An_awaited_task_in_an_async_cel_function_is_reported_once()
+    {
+        const string source = Usings + """
+            public static class Waits
+            {
+                public static IAlvoBuilder AddWaits(this IAlvoBuilder alvo) =>
+                    alvo.AddCelFunction("later", async (string s) =>
+                    {
+                        await Task.Delay(1); // ALVO1001
+                        return s;
+                    });
+            }
+            """;
+
+        var reported = await AnalyzerHarness.Alvo1001Async(source);
+
+        reported.ShouldHaveSingleItem();
+        AnalyzerHarness.Lines(reported).ShouldBe(AnalyzerHarness.MarkedLines(source));
+        reported[0].GetMessage(System.Globalization.CultureInfo.InvariantCulture).ShouldStartWith("'Task.Delay' returns a task");
+    }
+
     [Fact]
     public async Task A_pure_cel_function_with_a_token_is_not_reported() =>
         (await AnalyzerHarness.Alvo1001Async(Usings + """

@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Time.Testing;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Tests.Extensions;
@@ -28,11 +29,15 @@ internal sealed class RunnerWorld : IAsyncDisposable
 
     internal IServiceProvider Services => _provider;
 
+    /// <summary>
+    /// Starts a world on <paramref name="time"/>, or on a fake clock that never moves unless a test advances it: a hook's
+    /// timeout on the real clock fires under parallel load and outranks the rejection a fact asserts (Ruling 51).
+    /// </summary>
     internal static RunnerWorld Start(Action<IAlvoBuilder> configure, TimeProvider? time = null, Action<IServiceCollection>? services = null)
     {
         var log = new RecordingRejectionLog();
         var collection = new ServiceCollection();
-        collection.AddSingleton(time ?? TimeProvider.System);
+        collection.AddSingleton(time ?? new FakeTimeProvider(DateTimeOffset.UnixEpoch));
         collection.AddSingleton(Substitute.For<IAlvoTransactions>());
         collection.AddSingleton<IHookRejectionLog>(log);
         services?.Invoke(collection);
