@@ -91,6 +91,7 @@ public sealed class FilterTranslationTests
             { "method on a field", x => x.Note.Trim() == "a", "method 'Trim' has no filter equivalent" },
             { "clock", x => DateTimeOffset.UtcNow > x.DueAt, "a query has no clock" },
             { "clock in a list", x => new[] { DateTimeOffset.UtcNow }.Contains(x.DueAt!.Value), "a query has no clock" },
+            { "shifted clock a condition reads as now()", x => x.DueAt < DateTimeOffset.Now - TimeSpan.FromHours(1), "a query has no clock" },
             { "relational enum", x => x.Status > OrderStatus.Draft, "an enum field compares with == and != only" },
             { "relational enum on the left", x => OrderStatus.Draft <= x.Previous, "an enum field compares with == and != only" },
             { "too many candidates", x => many.Contains(x.Quantity), "it lists 1001 candidates" },

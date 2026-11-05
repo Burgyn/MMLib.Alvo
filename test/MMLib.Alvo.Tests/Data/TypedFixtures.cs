@@ -31,6 +31,8 @@ public sealed class Order
 
     public DateTimeOffset? DueAt { get; init; }
 
+    public DateTimeOffset? ClosedAt { get; init; }
+
     public DateOnly? ShipOn { get; init; }
 
     [AlvoField("ref_no")]
@@ -337,6 +339,7 @@ public static class TypedFixtures
             new FieldSchema { Name = "note", Type = FieldType.String },
             new FieldSchema { Name = "code", Type = FieldType.String, Nullable = true },
             new FieldSchema { Name = "due_at", Type = FieldType.DateTime, Nullable = true },
+            new FieldSchema { Name = "closed_at", Type = FieldType.DateTime, Nullable = true },
             new FieldSchema { Name = "ship_on", Type = FieldType.Date, Nullable = true },
             new FieldSchema { Name = "ref_no", Type = FieldType.String, Nullable = true },
             new FieldSchema { Name = "legacy_code", Type = FieldType.String, Nullable = true },
@@ -371,6 +374,7 @@ public static class TypedFixtures
             ["note"] = "fragile",
             ["code"] = null,
             ["due_at"] = "2026-11-02T08:30:00Z",
+            ["closed_at"] = null,
             ["ship_on"] = "2026-11-03",
             ["ref_no"] = "R-1",
         };

@@ -14,6 +14,8 @@ public sealed class HookBooking
     public required string Guest { get; init; }
 
     public long Nights { get; init; }
+
+    public DateTimeOffset? StartsAt { get; init; }
 }
 
 [AlvoEntity("audited_bookings")]

@@ -14,8 +14,12 @@ namespace MMLib.Alvo.Extensions.Internal;
 internal sealed partial class ConditionTranslator
 {
     private const string ConstantFix = "make it a const or a static readonly field, or write the condition as a CEL string — when: \"…\".";
-    private const string ClockReason = "a condition is judged after the commit, and conditions have no clock yet";
-    private const string ClockFix = "compare against a field the write stored, or check the time inside the handler body.";
+    private const string ClockReason = "this clock has no single instant in CEL";
+    private const string ClockFix = "use DateTimeOffset.UtcNow, which a condition reads as now(): the instant of the request, or of the event after the commit.";
+    private const string NowShapeReason = "DateTimeOffset.UtcNow translates to now() only as an operand: compared, or shifted by a TimeSpan";
+    private const string NowShapeFix = "compare against DateTimeOffset.UtcNow itself, such as e.New.DueAt < DateTimeOffset.UtcNow - grace.";
+    private const string SpanReason = "a TimeSpan finer than a microsecond or longer than ten thousand years has no CEL duration";
+    private const string SpanFix = "use a whole number of microseconds within about ten thousand years.";
 
     private static readonly FrozenDictionary<string, string> _textTests = new Dictionary<string, string>(StringComparer.Ordinal)
     {
@@ -126,9 +130,9 @@ internal sealed partial class ConditionTranslator
 
     private CelNode Constant(Expression node)
     {
-        if (LambdaShape.FindClock(node) is { } clock)
+        if (LambdaShape.FindAnyClock(node) is { } clock)
         {
-            throw Refuse(clock, ClockReason, ClockFix);
+            throw LambdaShape.IsCelNow(clock) ? Refuse(clock, NowShapeReason, NowShapeFix) : Refuse(clock, ClockReason, ClockFix);
         }
 
         return LambdaValues.TryConstant(node, out var value, out var reason) ? Literal(node, value) : throw Refuse(node, reason, ConstantFix);
@@ -146,10 +150,20 @@ internal sealed partial class ConditionTranslator
         decimal number => Signed(CelValueType.Decimal, number),
         Guid id => new CelLiteral(CelValueType.Uuid, id),
         DateTimeOffset instant => new CelCall("timestamp", [new CelLiteral(CelValueType.String, Rfc3339(instant))]),
+        TimeSpan span => Duration(node, span),
         double or float => throw Refuse(node, "a binary floating-point constant has no exact CEL literal", "use a decimal constant, such as 99.5m."),
         DateTime => throw Refuse(node, "a DateTime has no offset, so it names no single instant", "use a DateTimeOffset."),
         _ => throw Refuse(node, $"a {value.GetType().Name} constant has no CEL literal", TranslationRefusal.WhenFix),
     };
+
+    /// <summary>A <see cref="TimeSpan"/> constant as CEL's <c>duration('&lt;seconds&gt;s')</c>, refused when its text does not read back to it.</summary>
+    private CelCall Duration(Expression node, TimeSpan span)
+    {
+        var text = CelDuration.Text(span);
+        return CelDuration.TryParse(text, out var back, out _) && back == span
+            ? new CelCall(CelBuiltInFunctions.DurationName, [new CelLiteral(CelValueType.String, text)])
+            : throw Refuse(node, SpanReason, SpanFix);
+    }
 
     private static CelNode Signed(CelValueType type, long number) => number < 0
         ? new CelUnary(CelUnaryOperator.Negate, new CelLiteral(type, -number))

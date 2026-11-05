@@ -87,8 +87,7 @@ public sealed class ConditionTranslationTests
         return new()
         {
             { "method on a field", "Updated", e => e.New.Note.GetHashCode() == 1, "method 'GetHashCode' has no CEL equivalent" },
-            { "clock", "Updated", e => e.New.DueAt < DateTimeOffset.UtcNow, "conditions have no clock yet" },
-            { "local clock", "Updated", e => e.New.DueAt < DateTime.Now, "conditions have no clock yet" },
+            { "local clock", "Updated", e => e.New.DueAt < DateTime.Now, "DateTimeOffset.UtcNow" },
             { "captured variable", "Updated", e => e.New.Total > threshold, "'threshold' is a captured variable" },
             { "static property", "Updated", e => e.New.Note == Environment.NewLine, "'NewLine' is a static property" },
             { "pre-image on create", "Created", e => e.Old.Total > 0m, "carries no record before the write" },

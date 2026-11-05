@@ -79,6 +79,7 @@ internal sealed partial class ConditionTranslator
 
     private string Write(Expression body)
     {
+        RefuseClock(body);
         var tree = Predicate(body);
         try
         {
@@ -87,6 +88,18 @@ internal sealed partial class ConditionTranslator
         catch (ArgumentException failure)
         {
             throw Refuse(body, $"its CEL cannot be written: {failure.Message}", TranslationRefusal.WhenFix);
+        }
+    }
+
+    /// <summary>
+    /// A clock a condition cannot read is refused first, wherever it sits, so the refusal names the clock and its fix rather
+    /// than whichever operand beside it the walk reached first (HX-11 Ruling 34).
+    /// </summary>
+    private void RefuseClock(Expression body)
+    {
+        if (LambdaShape.FindClock(body) is { } clock)
+        {
+            throw Refuse(clock, ClockReason, ClockFix);
         }
     }
 
@@ -174,6 +187,11 @@ internal sealed partial class ConditionTranslator
         }
 
         var unwrapped = LambdaShape.Unwrapped(node);
+        if (Temporal(unwrapped) is { } temporal)
+        {
+            return temporal;
+        }
+
         if (!LambdaShape.Touches(unwrapped, _event))
         {
             return Constant(LambdaShape.HidesEnum(node) ? node : unwrapped);
@@ -187,6 +205,27 @@ internal sealed partial class ConditionTranslator
             _ => Field(unwrapped),
         };
     }
+
+    /// <summary>
+    /// <c>DateTimeOffset.UtcNow</c> as <c>now()</c>, and <c>+</c>/<c>-</c> over instants and spans kept as CEL's operators
+    /// even between two constants, so a shift of <c>now()</c> is never folded at registration (HX-11 Ruling 34).
+    /// </summary>
+    private CelNode? Temporal(Expression node) => node switch
+    {
+        _ when LambdaShape.IsCelNow(node) => new CelCall(CelCall.Now, []),
+        BinaryExpression arithmetic when IsTemporalArithmetic(arithmetic, out var op) => new CelBinary(op, Operand(arithmetic.Left), Operand(arithmetic.Right)),
+        _ => null,
+    };
+
+    private static bool IsTemporalArithmetic(BinaryExpression node, out CelBinaryOperator op)
+    {
+        op = default;
+        return (IsTemporal(node.Left.Type) || IsTemporal(node.Right.Type))
+            && _arithmetic.TryGetValue(node.NodeType, out op)
+            && op is CelBinaryOperator.Add or CelBinaryOperator.Subtract;
+    }
+
+    private static bool IsTemporal(Type type) => LambdaShape.Underlying(type) is var underlying && (underlying == typeof(DateTimeOffset) || underlying == typeof(TimeSpan));
 
     private CelContextRef? CallerValue(MemberExpression member) => IsEventCaller(member.Expression)
         ? member.Member.Name switch

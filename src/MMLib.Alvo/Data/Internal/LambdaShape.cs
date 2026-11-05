@@ -11,6 +11,7 @@ internal static class LambdaShape
 {
     private static readonly HashSet<Type> _clockTypes = [typeof(DateTime), typeof(DateTimeOffset), typeof(DateOnly), typeof(TimeOnly)];
     private static readonly HashSet<string> _clockMembers = ["Now", "UtcNow", "Today"];
+    private static readonly HashSet<string> _celNowMembers = [nameof(DateTimeOffset.UtcNow), nameof(DateTimeOffset.Now)];
     private static readonly HashSet<Type> _integral = [typeof(sbyte), typeof(byte), typeof(short), typeof(ushort), typeof(int), typeof(uint), typeof(long)];
     private static readonly HashSet<Type> _small = [typeof(sbyte), typeof(byte), typeof(short), typeof(ushort)];
     private static readonly HashSet<Type> _collections = [typeof(List<>), typeof(HashSet<>), typeof(ICollection<>)];
@@ -44,9 +45,23 @@ internal static class LambdaShape
         return true;
     }
 
-    internal static Expression? FindClock(Expression node) => new ClockFinder().Find(node);
+    /// <summary>The first clock a condition refuses: every clock but <see cref="IsCelNow"/>'s (HX-11 Ruling 34).</summary>
+    internal static Expression? FindClock(Expression node) => new ClockFinder(IsClock).Find(node);
 
-    internal static bool IsClock(Expression node) => node switch
+    /// <summary>The first clock of any kind, <see cref="DateTimeOffset.UtcNow"/> included — what a query refuses.</summary>
+    internal static Expression? FindAnyClock(Expression node) => new ClockFinder(IsAnyClock).Find(node);
+
+    /// <summary>
+    /// Whether a node is <see cref="DateTimeOffset.UtcNow"/> or <see cref="DateTimeOffset.Now"/>: one instant with an offset,
+    /// which a condition reads as CEL's <c>now()</c> (HX-11 Ruling 34).
+    /// </summary>
+    internal static bool IsCelNow(Expression node) =>
+        node is MemberExpression { Expression: null, Member: var member } && member.DeclaringType == typeof(DateTimeOffset) && _celNowMembers.Contains(member.Name);
+
+    /// <summary>Whether a node reads a clock a condition refuses: no offset, a calendar day, or a host clock CEL does not have.</summary>
+    internal static bool IsClock(Expression node) => !IsCelNow(node) && IsAnyClock(node);
+
+    internal static bool IsAnyClock(Expression node) => node switch
     {
         MemberExpression { Expression: null, Member: var member } => _clockTypes.Contains(member.DeclaringType!) && _clockMembers.Contains(member.Name),
         MethodCallExpression { Method: var method } => method.DeclaringType == typeof(TimeProvider) && method.Name is "GetUtcNow" or "GetLocalNow",
@@ -217,7 +232,7 @@ internal static class LambdaShape
         }
     }
 
-    private sealed class ClockFinder : ExpressionVisitor
+    private sealed class ClockFinder(Func<Expression, bool> isClock) : ExpressionVisitor
     {
         private Expression? _clock;
 
@@ -230,7 +245,7 @@ internal static class LambdaShape
 
         public override Expression? Visit(Expression? node)
         {
-            if (_clock is null && node is not null && IsClock(node))
+            if (_clock is null && node is not null && isClock(node))
             {
                 _clock = node;
             }
