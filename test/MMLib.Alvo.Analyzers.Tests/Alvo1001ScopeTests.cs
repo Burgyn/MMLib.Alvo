@@ -1,6 +1,6 @@
 ﻿namespace MMLib.Alvo.Analyzers.Tests;
 
-/// <summary>Where ALVO1001 looks: in-transaction hook types (here), delegates and CEL functions (Task 6) — and not elsewhere.</summary>
+/// <summary>Where ALVO1001 looks: in-transaction hook types, in-transaction hook delegates and CEL functions — and not elsewhere.</summary>
 public sealed class Alvo1001ScopeTests
 {
     private const string Usings = """
@@ -125,4 +125,87 @@ public sealed class Alvo1001ScopeTests
             public interface IBeforeWriteHook { }
             public sealed class Hook(HttpClient http) : IBeforeWriteHook { public object Client => http; }
             """)).ShouldBeEmpty();
+
+    [Fact]
+    public async Task An_http_client_captured_by_a_cel_function_is_reported()
+    {
+        const string source = Usings + """
+            public static class Rates
+            {
+                public static IAlvoBuilder AddRates(this IAlvoBuilder alvo, HttpClient http) =>
+                    alvo.AddCelFunction("rateOf", (string currency) =>
+                        http.GetStringAsync("https://rates.example/" + currency).Result); // ALVO1001
+            }
+            """;
+
+        var reported = await AnalyzerHarness.Alvo1001Async(source);
+
+        AnalyzerHarness.Lines(reported).ShouldBe(AnalyzerHarness.MarkedLines(source));
+        reported[0].GetMessage(System.Globalization.CultureInfo.InvariantCulture).ShouldContain("a CEL function registered with AddCelFunction");
+    }
+
+    [Theory]
+    [InlineData("BeforeWrite", "BeforeWrite<AlvoRecord>", "before-write")]
+    [InlineData("AfterWrite", "AfterWrite<AlvoRecord>", "after-write")]
+    [InlineData("BeforeDelete", "BeforeDelete<AlvoRecord>", "before-delete")]
+    [InlineData("AfterDelete", "AfterDelete<AlvoRecord>", "after-delete")]
+    public async Task Every_in_transaction_delegate_verb_is_in_scope(string verb, string context, string stage)
+    {
+        var source = Usings + $$"""
+            public static class Orders
+            {
+                public static IAlvoBuilder AddOrders(this IAlvoBuilder alvo) =>
+                    alvo.Entity("orders", e => e.{{verb}}("ping", async ({{context}} write, HttpClient http, CancellationToken ct) =>
+                        await http.GetAsync("https://ping.example", ct))); // ALVO1001
+            }
+            """;
+
+        var reported = await AnalyzerHarness.Alvo1001Async(source);
+
+        AnalyzerHarness.Lines(reported).ShouldBe(AnalyzerHarness.MarkedLines(source));
+        reported[0].GetMessage(System.Globalization.CultureInfo.InvariantCulture).ShouldContain($"a {stage} hook delegate");
+    }
+
+    [Fact]
+    public async Task A_validate_delegate_and_a_handler_delegate_are_not_in_scope()
+    {
+        const string source = Usings + """
+            public static class Desk
+            {
+                public static IAlvoBuilder AddDesk(this IAlvoBuilder alvo) => alvo
+                    .Entity("orders", e => e.Validate("vies", async (ValidateWrite<AlvoRecord> write, HttpClient http, CancellationToken ct) =>
+                        await http.GetAsync("https://vies.example", ct)))
+                    .AddEventHandler("notify", "orders.created", async (HttpClient http, CancellationToken ct) =>
+                        await http.GetAsync("https://hooks.example", ct));
+            }
+            """;
+
+        (await AnalyzerHarness.Alvo1001Async(source)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_method_group_declared_in_the_same_file_is_analysed_and_one_elsewhere_is_not()
+    {
+        const string registration = Usings + """
+            public static class Desk
+            {
+                public static IAlvoBuilder AddDesk(this IAlvoBuilder alvo) => alvo
+                    .AddCelFunction("near", Near)
+                    .AddCelFunction("far", Far.Lookup);
+
+                private static string Near(string key) => System.IO.File.ReadAllText(key); // ALVO1001
+            }
+            """;
+        const string elsewhere = """
+            public static class Far
+            {
+                public static string Lookup(string key) => System.IO.File.ReadAllText(key);
+            }
+            """;
+
+        var reported = await AnalyzerHarness.Alvo1001Async(registration, elsewhere);
+
+        AnalyzerHarness.Lines(reported).ShouldBe(AnalyzerHarness.MarkedLines(registration));
+        reported.ShouldAllBe(d => d.Location.SourceTree!.FilePath == "Consumer0.cs");
+    }
 }

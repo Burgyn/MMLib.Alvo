@@ -31,11 +31,22 @@ internal static class HookDependencies
     /// <summary>Matched by name: naming the obsolete types would raise SYSLIB0014 in the Release build.</summary>
     private static readonly string[] _webRequestTypes = ["WebClient", "WebRequest", "HttpWebRequest", "FtpWebRequest"];
 
+    /// <summary>Gets the types refused by name, for the analyzer's parity fact.</summary>
+    internal static IReadOnlyList<Type> Banned => _banned;
+
+    /// <summary>Gets the namespaces every type of which is refused.</summary>
+    internal static IReadOnlyList<string> NetworkNamespaces => _networkNamespaces;
+
+    /// <summary>Gets the <c>System.Net</c> type names refused by name.</summary>
+    internal static IReadOnlyList<string> WebRequestTypes => _webRequestTypes;
+
+    /// <summary>Gets the namespace prefixes of the identity stores.</summary>
+    internal static IReadOnlyList<string> IdentityPrefixes { get; } = ["Microsoft.AspNetCore.Identity", "MMLib.Alvo.Identity"];
+
     internal static bool IsBanned(Type type) =>
         _networkNamespaces.Contains(type.Namespace)
         || (type.Namespace == "System.Net" && _webRequestTypes.Contains(type.Name))
-        || type.Namespace?.StartsWith("Microsoft.AspNetCore.Identity", StringComparison.Ordinal) == true
-        || type.Namespace?.StartsWith("MMLib.Alvo.Identity", StringComparison.Ordinal) == true
+        || IdentityPrefixes.Any(prefix => type.Namespace?.StartsWith(prefix, StringComparison.Ordinal) == true)
         || _banned.Any(banned => banned.IsAssignableFrom(type))
         || IsMailSender(type)
         || (type.IsGenericType && type.GetGenericArguments().Any(IsBanned))
