@@ -248,15 +248,15 @@ internal sealed partial class SqlPredicateRenderer : IPredicateRenderer
     }
 
     private PredicateFragment RenderPredicate(
-        CelNode node, EntitySchema entity, AlvoContext context, IFieldSqlRenderer fields, ParameterBag bag) => node switch
+        CelNode node, EntitySchema entity, AlvoContext? context, IFieldSqlRenderer fields, ILiteralSink sink) => node switch
         {
             CelLiteral { Type: CelValueType.Bool } literal => RenderBoolLiteral(literal, fields),
             CelFieldRef { Type: CelValueType.Bool } fieldRef => RenderBoolField(fieldRef, entity, fields),
-            CelUnary { Operator: CelUnaryOperator.Not } unary => RenderNot(unary, entity, context, fields, bag),
+            CelUnary { Operator: CelUnaryOperator.Not } unary => RenderNot(unary, entity, context, fields, sink),
             CelBinary { Operator: CelBinaryOperator.And or CelBinaryOperator.Or } logical =>
-                RenderLogical(logical, entity, context, fields, bag),
-            CelBinary { Operator: CelBinaryOperator.In } inNode => RenderIn(inNode, entity, context, fields, bag),
-            CelBinary comparison => RenderComparison(comparison, entity, context, fields, bag),
+                RenderLogical(logical, entity, context, fields, sink),
+            CelBinary { Operator: CelBinaryOperator.In } inNode => RenderIn(inNode, entity, context, fields, sink),
+            CelBinary comparison => RenderComparison(comparison, entity, context, fields, sink),
             CelHas has => RenderHas(has, entity, fields),
             _ => throw Unsupported(node),
         };
@@ -271,17 +271,17 @@ internal sealed partial class SqlPredicateRenderer : IPredicateRenderer
     }
 
     private PredicateFragment RenderNot(
-        CelUnary unary, EntitySchema entity, AlvoContext context, IFieldSqlRenderer fields, ParameterBag bag)
+        CelUnary unary, EntitySchema entity, AlvoContext? context, IFieldSqlRenderer fields, ILiteralSink sink)
     {
-        var operand = RenderPredicate(unary.Operand, entity, context, fields, bag);
+        var operand = RenderPredicate(unary.Operand, entity, context, fields, sink);
         return new PredicateFragment($"(NOT {operand.Sql})", true);
     }
 
     private PredicateFragment RenderLogical(
-        CelBinary binary, EntitySchema entity, AlvoContext context, IFieldSqlRenderer fields, ParameterBag bag)
+        CelBinary binary, EntitySchema entity, AlvoContext? context, IFieldSqlRenderer fields, ILiteralSink sink)
     {
-        var left = RenderPredicate(binary.Left, entity, context, fields, bag);
-        var right = RenderPredicate(binary.Right, entity, context, fields, bag);
+        var left = RenderPredicate(binary.Left, entity, context, fields, sink);
+        var right = RenderPredicate(binary.Right, entity, context, fields, sink);
         var op = binary.Operator == CelBinaryOperator.And ? "AND" : "OR";
         return new PredicateFragment($"({left.Sql} {op} {right.Sql})", true);
     }
@@ -293,7 +293,7 @@ internal sealed partial class SqlPredicateRenderer : IPredicateRenderer
     }
 
     private static PredicateFragment RenderComparison(
-        CelBinary binary, EntitySchema entity, AlvoContext context, IFieldSqlRenderer fields, ParameterBag bag)
+        CelBinary binary, EntitySchema entity, AlvoContext? context, IFieldSqlRenderer fields, ILiteralSink sink)
     {
         if (IsAbsentContextOperand(binary.Left, context) || IsAbsentContextOperand(binary.Right, context))
         {
@@ -302,12 +302,12 @@ internal sealed partial class SqlPredicateRenderer : IPredicateRenderer
 
         if (IsTemporalComparison(binary))
         {
-            return RenderTemporalComparison(binary, entity, fields, bag);
+            return RenderTemporalComparison(binary, entity, fields, sink);
         }
 
         var (left, right) = fields.RenderComparableOperands(
-            RenderOperand(binary.Left, entity, context, fields, bag),
-            RenderOperand(binary.Right, entity, context, fields, bag),
+            RenderOperand(binary.Left, entity, context, fields, sink),
+            RenderOperand(binary.Right, entity, context, fields, sink),
             PromotedType(binary.Left, binary.Right));
         var sql = $"{left} {ComparisonOperatorText(binary.Operator)} {right}";
         return new PredicateFragment(fields.RenderTwoValued(sql), true);
@@ -356,30 +356,39 @@ internal sealed partial class SqlPredicateRenderer : IPredicateRenderer
     /// <see cref="RoleMembership"/> asserts that the operand really is <c>@user.roles</c> first.
     /// </summary>
     private static PredicateFragment RenderIn(
-        CelBinary binary, EntitySchema entity, AlvoContext context, IFieldSqlRenderer fields, ParameterBag bag)
+        CelBinary binary, EntitySchema entity, AlvoContext? context, IFieldSqlRenderer fields, ILiteralSink sink)
     {
         RoleMembership.RequireUserRolesOperand(binary.Right);
+        var caller = Caller(context, binary);
 
         if (binary.Left is CelLiteral { Type: CelValueType.String, Value: string text })
         {
-            var isMember = context.Roles.Select(role => role.Name).Contains(text, StringComparer.Ordinal);
+            var isMember = caller.Roles.Select(role => role.Name).Contains(text, StringComparer.Ordinal);
             return new PredicateFragment(fields.RenderBooleanPredicate(isMember), true);
         }
 
-        var roleNames = context.Roles.Select(role => role.Name).OrderBy(name => name, StringComparer.Ordinal).ToList();
+        var roleNames = caller.Roles.Select(role => role.Name).OrderBy(name => name, StringComparer.Ordinal).ToList();
         if (roleNames.Count == 0)
         {
             return new PredicateFragment(fields.RenderBooleanPredicate(false), true);
         }
 
-        var left = RenderOperand(binary.Left, entity, context, fields, bag);
-        var roleParameters = roleNames.Select(name => RenderLiteralOperand(new CelLiteral(CelValueType.String, name), fields, bag));
+        var left = RenderOperand(binary.Left, entity, context, fields, sink);
+        var roleParameters = roleNames.Select(name => RenderLiteralOperand(new CelLiteral(CelValueType.String, name), fields, sink));
         var sql = $"{left} IN ({string.Join(", ", roleParameters)})";
         return new PredicateFragment(fields.RenderTwoValued(sql), true);
     }
 
-    private static bool IsAbsentContextOperand(CelNode node, AlvoContext context) =>
-        node is CelContextRef contextRef && !TryResolveContext(contextRef, context, out _);
+    private static bool IsAbsentContextOperand(CelNode node, AlvoContext? context) =>
+        node is CelContextRef contextRef && !TryResolveContext(contextRef, Caller(context, contextRef), out _);
+
+    /// <summary>
+    /// The caller a context read resolves against. A constraint render has none (<see langword="null"/>), so a context read
+    /// reaching it throws rather than resolve against anyone — defence in depth behind the stored-predicate surface.
+    /// </summary>
+    private static AlvoContext Caller(AlvoContext? context, CelNode reader) =>
+        context ?? throw new NotSupportedException(
+            $"'{reader.GetType().Name}' reads the caller, and a constraint has no caller; it cannot be written into one.");
 
     private static bool TryResolveContext(CelContextRef contextRef, AlvoContext context, out object value)
     {
@@ -416,12 +425,12 @@ internal sealed partial class SqlPredicateRenderer : IPredicateRenderer
     /// authored CEL can reach through the compiler.
     /// </summary>
     private static string RenderOperand(
-        CelNode node, EntitySchema entity, AlvoContext context, IFieldSqlRenderer fields, ParameterBag bag) => node switch
+        CelNode node, EntitySchema entity, AlvoContext? context, IFieldSqlRenderer fields, ILiteralSink sink) => node switch
         {
-            CelLiteral literal => RenderLiteralOperand(literal, fields, bag),
+            CelLiteral literal => RenderLiteralOperand(literal, fields, sink),
             CelFieldRef fieldRef => RenderField(fieldRef, entity, fields),
-            CelContextRef contextRef => RenderContextOperand(contextRef, context, fields, bag),
-            CelCall { Name: CelCall.Now, Arguments: [] } => RenderNowOperand(fields, bag),
+            CelContextRef contextRef => RenderContextOperand(contextRef, context, fields, sink),
+            CelCall { Name: CelCall.Now, Arguments: [] } => RenderNowOperand(fields, sink),
             _ => throw Unsupported(node),
         };
 
@@ -466,9 +475,9 @@ internal sealed partial class SqlPredicateRenderer : IPredicateRenderer
     }
 
     private static string RenderContextOperand(
-        CelContextRef contextRef, AlvoContext context, IFieldSqlRenderer fields, ILiteralSink sink)
+        CelContextRef contextRef, AlvoContext? context, IFieldSqlRenderer fields, ILiteralSink sink)
     {
-        TryResolveContext(contextRef, context, out var value);
+        TryResolveContext(contextRef, Caller(context, contextRef), out var value);
         return sink.Constant(value, fields);
     }
 

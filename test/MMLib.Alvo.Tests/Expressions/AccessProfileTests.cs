@@ -151,8 +151,13 @@ public class AccessProfileTests
     public void Arithmetic_does_not_compile()
     {
         Compile("1 + 1 == 2", _project).IsSuccess.ShouldBeFalse();
-        Compile("-1 == -1", _project).IsSuccess.ShouldBeFalse();
+        Compile("-(1 + 1) == 2", _project).IsSuccess.ShouldBeFalse();
     }
+
+    /// <summary>A negated number constant is one constant in every profile, not arithmetic (HX-11 Ruling 16).</summary>
+    [Fact]
+    public void A_negative_constant_is_a_constant_here_too() =>
+        Compile("-1 == -1", _project).IsSuccess.ShouldBe(Compile("1 == 1", _project).IsSuccess);
 
     [Fact]
     public void The_ternary_does_not_compile()

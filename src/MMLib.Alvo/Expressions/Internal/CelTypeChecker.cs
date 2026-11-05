@@ -439,6 +439,11 @@ internal static class CelTypeChecker
         private (CelNode, CelValueType, bool, int) CheckUnary(CelUnary unary)
         {
             var (operand, operandType, operandError, position) = CheckNode(unary.Operand);
+            if (unary.Operator == CelUnaryOperator.Negate && !operandError && operand is CelLiteral { Type: CelValueType.Int or CelValueType.Decimal } constant)
+            {
+                return NegativeConstant(constant, position);
+            }
+
             var rewritten = unary with { Operand = operand };
 
             return unary.Operator switch
@@ -447,6 +452,28 @@ internal static class CelTypeChecker
                 CelUnaryOperator.Negate => CheckNegate(rewritten, operandType, operandError, position),
                 _ => UnrecognizedNode(rewritten),
             };
+        }
+
+        /// <summary>
+        /// A negated number constant is one constant, in every profile (HX-11 Ruling 16, review I6): <c>value &gt;= -40</c> is
+        /// a field compared with a literal, which a Rule renders and a <c>CHECK</c> writes inline — not arithmetic, which a Rule
+        /// refuses. <c>-(-9223372036854775808)</c> has no <c>int</c> and is refused, as its literal is.
+        /// </summary>
+        private (CelNode, CelValueType, bool, int) NegativeConstant(CelLiteral constant, int position)
+        {
+            if (constant.Value is long.MinValue)
+            {
+                Errors.Add(new CelCompilationError("Integer constant -(-9223372036854775808) is out of range.", null, position));
+                return (constant, CelValueType.Int, true, position);
+            }
+
+            var negated = constant.Value switch
+            {
+                long number => new CelLiteral(CelValueType.Int, -number),
+                decimal number => new CelLiteral(CelValueType.Decimal, -number),
+                _ => constant,
+            };
+            return (negated, negated.Type, false, position);
         }
 
         private (CelNode, CelValueType, bool, int) CheckLogicalNot(CelUnary unary, CelValueType operandType, bool operandError, int position)

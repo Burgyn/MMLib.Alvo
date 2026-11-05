@@ -19,6 +19,10 @@ internal sealed class EpochFields : IFieldSqlRenderer
     public string RenderCaseInsensitiveLike(string left, string right) => $"{left} LIKE {right}";
 
     public string? RenderEpochMicroseconds(string timestampSql) => $"EPOCH_US({timestampSql})";
+
+    /// <summary>The standard literal, declining a control character as <c>AlvoSqlStringLiteral</c> does.</summary>
+    public string? RenderStringLiteral(string value) =>
+        value.Any(char.IsControl) ? null : $"'{value.Replace("'", "''", StringComparison.Ordinal)}'";
 }
 
 /// <summary><see cref="EpochFields"/> without the epoch: a dialect that inherits the port's refusal.</summary>

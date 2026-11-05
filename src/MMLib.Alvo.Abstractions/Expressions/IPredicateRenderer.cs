@@ -57,4 +57,20 @@ public interface IPredicateRenderer
     /// <param name="fields">The storage driver's field/dialect renderer.</param>
     /// <exception cref="InvalidOperationException"><paramref name="expression"/> was not compiled for the Computed profile.</exception>
     SqlExpression Render(CompiledExpression expression, IFieldSqlRenderer fields);
+
+    /// <summary>
+    /// Renders a Rule-profile expression that reads the row alone — no caller, no tenant, no now() — as a SQL predicate
+    /// with every constant written inline, for a place that has no bind parameters: a CHECK constraint, a stored filter.
+    /// </summary>
+    /// <remarks>
+    /// Internal until a second consumer needs it public (HX-11 Ruling 17): the core implements it and the EF driver reaches
+    /// it through this assembly's <c>InternalsVisibleTo</c>, so a third-party renderer inherits this refusal.
+    /// </remarks>
+    /// <param name="expression">A compiled Rule-profile expression.</param>
+    /// <param name="fields">The engine's field, literal and epoch rendering.</param>
+    /// <returns>A two-valued SQL predicate with no parameters.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="expression"/> was not compiled for the Rule profile.</exception>
+    /// <exception cref="NotSupportedException">The expression reads the caller, the tenant or the clock, or holds a constant this engine cannot write inline.</exception>
+    internal string RenderConstraint(CompiledExpression expression, IFieldSqlRenderer fields) =>
+        throw new NotSupportedException($"{GetType().Name} does not render constraints.");
 }

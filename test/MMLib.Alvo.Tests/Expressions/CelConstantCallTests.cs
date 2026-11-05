@@ -105,6 +105,7 @@ public sealed class CelConstantCallTests
     /// <summary>
     /// Ruling N (preflight S-3): in the two profiles whose division fails closed (spec §5.6), a literal zero divisor can
     /// never produce a value, so it is refused at apply — an Int zero, a decimal zero, and a decimal zero with a scale.
+    /// <c>-0</c> is the literal zero too: a negated constant is one constant (HX-11 Ruling 16).
     /// </summary>
     [Theory]
     [InlineData("new.qty / 0 > 1", CelProfile.Condition)]
@@ -113,6 +114,7 @@ public sealed class CelConstantCallTests
     [InlineData("qty / 0", CelProfile.Mutate)]
     [InlineData("price / 0.0", CelProfile.Mutate)]
     [InlineData("qty / 0.00", CelProfile.Mutate)]
+    [InlineData("qty / -0", CelProfile.Mutate)]
     public void A_literal_zero_divisor_in_a_hook_is_refused_at_apply(string source, CelProfile profile)
     {
         var error = TestCelFunctions.Compiler().Compile(source, profile, TestCelFunctions.Items).Errors.ShouldHaveSingleItem();
@@ -125,7 +127,6 @@ public sealed class CelConstantCallTests
     /// <summary>The refusal is shallow (spec §5.6): a divisor that is not itself a literal fails each write at run time.</summary>
     [Theory]
     [InlineData("qty / (1 - 1)")]
-    [InlineData("qty / -0")]
     [InlineData("qty / 2")]
     public void A_divisor_that_is_not_a_literal_zero_compiles(string source) =>
         TestCelFunctions.Compiler().Compile(source, CelProfile.Mutate, TestCelFunctions.Items).IsSuccess.ShouldBeTrue();
