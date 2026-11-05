@@ -160,9 +160,13 @@ internal sealed class WriteExtensionRunner(
     /// Whether <paramref name="thrown"/> is the write's cancellation as a host function received it — not an overrun, which
     /// carries Alvo's reason. Rethrown bare: a wrapped function failure would be answered <c>function-failed</c> and logged.
     /// </summary>
+    /// <remarks>
+    /// Only the wrapped shape is reachable: <c>CelFunction.Run</c> wraps whatever a host body throws, and anything else that
+    /// escapes the interpreter on this fail-closed path is its defect, never a bare <see cref="OperationCanceledException"/>.
+    /// </remarks>
     private static bool WriteCancelled(Exception thrown, CancellationToken cancellationToken) =>
         cancellationToken.IsCancellationRequested
-        && thrown is OperationCanceledException or CelFunctionException { IsHost: true, Reason: null, InnerException: OperationCanceledException };
+        && thrown is CelFunctionException { IsHost: true, Reason: null, InnerException: OperationCanceledException };
 
     /// <summary>
     /// Whether a refusal in <paramref name="condition"/> stays the caller's, judged on the failure path only: never after the
