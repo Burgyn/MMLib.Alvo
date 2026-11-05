@@ -185,8 +185,9 @@ public abstract class AlvoDataBeforeHookTests
     }
 
     /// <summary>
-    /// A <c>mutate</c> on the update face reaches the stored row, and its <c>now()</c> is that write's own
-    /// instant — the update's <c>updated_at</c>, not the create's <c>created_at</c>.
+    /// A <c>mutate</c> on the update face reaches the stored row, and its <c>now()</c> is the update call's own
+    /// instant — after the create's <c>created_at</c>, and no later than the update's <c>updated_at</c>, which is the
+    /// write's separate clock read (HX-11 Rulings 1, 2): the advancing clock tells all three apart.
     /// </summary>
     /// <remarks>
     /// The hook is gated on <c>changed(stage) &amp;&amp; new.stage == 'won'</c>, so this also pins that a
@@ -202,8 +203,9 @@ public abstract class AlvoDataBeforeHookTests
         await UpdateStageAsync(world, created, Won);
 
         var stored = await StoredAsync(world, created);
-        stored["closed_at"].ShouldBe(stored["updated_at"]);
-        stored["closed_at"].ShouldNotBe(stored["created_at"], "the update's instant, not the create's");
+        var closedAt = (DateTimeOffset)stored["closed_at"]!;
+        closedAt.ShouldBeGreaterThan((DateTimeOffset)stored["created_at"]!, "the update's instant, not the create's");
+        closedAt.ShouldBeLessThan((DateTimeOffset)stored["updated_at"]!, "the call's instant is read before the write's stamp");
     }
 
     /// <summary>

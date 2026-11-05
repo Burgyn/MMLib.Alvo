@@ -168,6 +168,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(context);
         AlvoFlow.RefuseInsideUnit("IAlvoData.QueryAsync");
+        using var instant = AlvoFlow.EnsureInstant(_time);
 
         return await QueriedAsync(query, context, unit: null, cancellationToken);
     }
@@ -291,6 +292,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(context);
         AlvoFlow.RefuseInsideUnit("IAlvoData.GetAsync");
+        using var instant = AlvoFlow.EnsureInstant(_time);
 
         return await GotAsync(entity, id, context, unit: null, cancellationToken);
     }
@@ -318,6 +320,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
         AlvoFlow.RefuseInsideUnit("IAlvoData.CreateAsync", keyed: idempotency is not null);
+        using var instant = AlvoFlow.EnsureInstant(_time);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
         _depthLimit.EnsureWithin(context);
 
@@ -396,7 +399,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
         Dictionary<string, object> candidate, DateTimeOffset now)
     {
-        var patch = Hooks.Run(schema.Name, DataOperation.Create, Unmasked(candidate), previous: null, context, now);
+        var patch = Hooks.Run(schema.Name, DataOperation.Create, Unmasked(candidate), previous: null, context, ExpressionInstant(now));
         if (patch.Count == 0)
         {
             return candidate;
@@ -1171,6 +1174,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
         AlvoFlow.RefuseInsideUnit("IAlvoData.UpdateAsync", keyed: idempotency is not null);
+        using var instant = AlvoFlow.EnsureInstant(_time);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
         _depthLimit.EnsureWithin(context);
 
@@ -1357,6 +1361,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
         AlvoFlow.RefuseInsideUnit("IAlvoData.ReplaceAsync", keyed: idempotency is not null);
+        using var instant = AlvoFlow.EnsureInstant(_time);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
         _depthLimit.EnsureWithin(context);
 
@@ -1752,9 +1757,21 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// hands the value it reads to <em>both</em> the audit stamp and the event it emits, and the two are only
     /// the same instant if the value survives being stored — a <c>timestamptz</c> keeps microseconds and a
     /// .NET clock keeps 100-nanosecond ticks. See <see cref="StoredInstant.Storable"/> for the measurement and
-    /// for why the stored value is the authoritative one.
+    /// for why the stored value is the authoritative one. It is not the flow's instant that <c>now()</c> reads: a
+    /// version must never repeat (HX-11 Ruling 2), so each write reads the clock.
     /// </remarks>
     private DateTimeOffset WriteInstantNow() => StoredInstant.Storable(_time.GetUtcNow());
+
+    /// <summary>
+    /// The instant a before-hook's <c>now()</c> reads: the flow's (HX-11 Ruling 1), which every entry point bound — the one
+    /// the write's rules and conditions read too — and never <paramref name="stamp"/>, the write's own clock read (Ruling 2).
+    /// </summary>
+    /// <param name="stamp">The write's stamp, which a hook's <c>now()</c> does not read.</param>
+    /// <returns>The flow's instant.</returns>
+    /// <exception cref="InvalidOperationException">No instant is bound: a missing binding site, never a clock read (Ruling 5).</exception>
+    private static DateTimeOffset ExpressionInstant(DateTimeOffset stamp) =>
+        AlvoFlow.Instant ?? throw new InvalidOperationException(
+            $"A write stamped {stamp:O} ran its before-hooks with no instant bound to the flow; every Alvo entry point binds one.");
 
     /// <summary>
     /// The write's own instant, in the shape <see cref="AlvoAuditStamp.Applied"/> takes it.
@@ -1781,6 +1798,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(context);
         AlvoFlow.RefuseInsideUnit("IAlvoData.DeleteAsync", keyed: idempotency is not null);
+        using var instant = AlvoFlow.EnsureInstant(_time);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
         _depthLimit.EnsureWithin(context);
 
@@ -1967,7 +1985,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     private void RunBeforeDelete(
         EntitySchema schema, AlvoContext context, AlvoRecord preImage, DateTimeOffset now)
     {
-        var patch = Hooks.Run(schema.Name, DataOperation.Delete, preImage, preImage, context, now);
+        var patch = Hooks.Run(schema.Name, DataOperation.Delete, preImage, preImage, context, ExpressionInstant(now));
         if (patch.Count > 0)
         {
             throw new InvalidOperationException(
@@ -2064,7 +2082,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         IReadOnlyDictionary<string, object?> values, DateTimeOffset now)
     {
         var patch = Hooks.Run(
-            schema.Name, DataOperation.Update, Merge(preImage, values), preImage, context, now);
+            schema.Name, DataOperation.Update, Merge(preImage, values), preImage, context, ExpressionInstant(now));
         if (patch.Count == 0)
         {
             return values;
@@ -2436,6 +2454,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     {
         ArgumentNullException.ThrowIfNull(rows);
         AlvoFlow.RefuseInsideUnit("IAlvoData.CreateManyAsync", keyed: idempotency is not null);
+        using var instant = AlvoFlow.EnsureInstant(_time);
         var decision = BatchDecision(entity, DataOperation.Create, rows.Count, context, idempotency);
         var refused = await ValidateRowsAsync(
             entity, AlvoWriteOperation.Create, rows.Count, CreateRowValidation(rows, decision, context), context, idempotency, cancellationToken);
@@ -2463,6 +2482,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     {
         ArgumentNullException.ThrowIfNull(rows);
         AlvoFlow.RefuseInsideUnit("IAlvoData.UpdateManyAsync", keyed: idempotency is not null);
+        using var instant = AlvoFlow.EnsureInstant(_time);
         var decision = BatchDecision(entity, DataOperation.Update, rows.Count, context, idempotency);
         var refused = await ValidateRowsAsync(
             entity, AlvoWriteOperation.Update, rows.Count, UpdateRowValidation(rows, decision, context, cancellationToken), context, idempotency, cancellationToken);
@@ -2484,15 +2504,16 @@ internal sealed partial class EfAlvoData : IAlvoData
     }
 
     /// <inheritdoc/>
-    public Task<AlvoBatchResult> DeleteManyAsync(
+    public async Task<AlvoBatchResult> DeleteManyAsync(
         string entity, IReadOnlyList<Guid> ids, AlvoContext context, AlvoIdempotency? idempotency = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(ids);
         AlvoFlow.RefuseInsideUnit("IAlvoData.DeleteManyAsync", keyed: idempotency is not null);
+        using var instant = AlvoFlow.EnsureInstant(_time);
         var decision = BatchDecision(entity, DataOperation.Delete, ids.Count, context, idempotency);
 
-        return BatchAsync(
+        return await BatchAsync(
             entity,
             AlvoWriteOperation.Delete,
             context,
@@ -2847,7 +2868,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         IReadOnlyDictionary<string, object?> patch;
         try
         {
-            patch = Hooks.Run(schema.Name, DataOperation.Create, Unmasked(candidate), previous: null, context, now);
+            patch = Hooks.Run(schema.Name, DataOperation.Create, Unmasked(candidate), previous: null, context, ExpressionInstant(now));
         }
         catch (AlvoAuthorizationException refusedByHook)
         {

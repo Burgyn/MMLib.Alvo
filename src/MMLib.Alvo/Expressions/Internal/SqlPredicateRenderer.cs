@@ -173,6 +173,10 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
 
     private const string DefaultParameterPrefix = "p";
 
+    private const string UnboundNow =
+        "now() was rendered to SQL with no instant bound to this flow; every Alvo entry point binds one, and a host that "
+        + "renders a now() rule itself must bind one first.";
+
     /// <summary>
     /// The parameter prefix reaches the SQL text unparameterized — a bind parameter's own name has no
     /// bind-parameter form — so it is validated as a plain identifier rather than trusted, in case a
@@ -321,6 +325,7 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
         CelLiteral literal => literal.Type,
         CelFieldRef fieldRef => fieldRef.Type,
         CelContextRef contextRef => contextRef.Type,
+        CelCall { Name: CelCall.Now } => CelValueType.Timestamp,
         _ => CelValueType.Null,
     };
 
@@ -394,8 +399,19 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
             CelLiteral literal => RenderLiteralOperand(literal, fields, bag),
             CelFieldRef fieldRef => RenderField(fieldRef, entity, fields),
             CelContextRef contextRef => RenderContextOperand(contextRef, context, fields, bag),
+            CelCall { Name: CelCall.Now, Arguments: [] } => RenderNowOperand(fields, bag),
             _ => throw Unsupported(node),
         };
+
+    /// <summary>
+    /// <c>now()</c> as one bound parameter: the flow's instant (HX-11 Ruling 1), the same one the in-process evaluation of
+    /// this rule reads. With none bound it throws rather than read a clock (Ruling 5).
+    /// </summary>
+    private static string RenderNowOperand(IFieldSqlRenderer fields, ParameterBag bag)
+    {
+        var name = bag.Add(AlvoFlow.Instant ?? throw new InvalidOperationException(UnboundNow));
+        return fields.RenderParameter(name);
+    }
 
     private static string RenderLiteralOperand(CelLiteral literal, IFieldSqlRenderer fields, ParameterBag bag)
     {

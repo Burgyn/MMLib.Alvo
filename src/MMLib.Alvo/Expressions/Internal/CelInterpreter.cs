@@ -244,13 +244,13 @@ internal static class CelInterpreter
     /// </param>
     /// <param name="previous">The row as it was before the change, or <see langword="null"/> on a create.</param>
     /// <param name="now">
-    /// The instant <c>now()</c> resolves to: the one this write is stamped with, bound <b>once</b> by the
-    /// caller that already computed the audit stamp — never read here. That is what makes a
-    /// <see cref="CelProfile.Mutate"/> expression referentially transparent within a write, and therefore
-    /// safe to evaluate inside a transaction that may be retried: a retry re-stamps, but one attempt cannot
-    /// disagree with itself, two hooks on one write agree, and the value a hook writes agrees with the row's
-    /// own <c>updated_at</c>. An interpreter that read <see cref="TimeProvider"/> itself would give up all
-    /// three, and could not be asserted on at all.
+    /// The instant <c>now()</c> resolves to: the flow's one instant (HX-11 Ruling 1), bound <b>once</b> by the
+    /// caller — never read here, and preferred over <see cref="AlvoFlow.Instant"/> when both are present. That is what
+    /// makes a <see cref="CelProfile.Mutate"/> expression referentially transparent within a request, and therefore
+    /// safe to evaluate inside a transaction that may be retried: one attempt cannot disagree with itself, two hooks on
+    /// one write agree, and a mutate agrees with every rule and condition the request meets. It is not the row's
+    /// <c>updated_at</c>, which is the write's own clock read (Ruling 2). An interpreter that read
+    /// <see cref="TimeProvider"/> itself would give up all three, and could not be asserted on at all.
     /// </param>
     /// <returns>
     /// The value to assign, or <see langword="null"/>. <see langword="null"/> is a value here rather than a
@@ -339,15 +339,19 @@ internal static class CelInterpreter
 
     /// <summary>
     /// Evaluates a catalogued call through the overload the type checker bound, or <c>now()</c>, the one call left with
-    /// its own grammar. <c>now()</c> reads the instant the caller bound for this write — it is <b>not</b> a clock read,
-    /// and there is deliberately no <see cref="TimeProvider"/> in reach of this class to make one from.
+    /// its own grammar. <c>now()</c> reads the instant a mutate's caller passed, else the flow's (HX-11 Ruling 1) — it is
+    /// <b>not</b> a clock read, and there is deliberately no <see cref="TimeProvider"/> in reach of this class to make one
+    /// from. With neither bound it fails closed as a defect (Ruling 5): a missing binding site, never the caller's data.
     /// </summary>
     private static object? EvaluateCall(CelCall call, in EvalState state) => call switch
     {
         { Function: { IsLegacy: false } function } => function.Invoke(EvaluateArguments(call.Arguments, state)),
-        { Name: CelCall.Now, Arguments: [] } => state.Now,
+        { Name: CelCall.Now, Arguments: [] } => state.Now ?? AlvoFlow.Instant ?? throw UnboundInstant(),
         _ => null,
     };
+
+    private static CelFunctionException UnboundInstant() => HookDefect(new InvalidOperationException(
+        "now() was evaluated with no instant bound to this flow; every Alvo entry point binds one."));
 
     /// <summary>Evaluates every argument eagerly, left to right — CEL functions are strict.</summary>
     private static object?[] EvaluateArguments(IReadOnlyList<CelNode> arguments, in EvalState state)
@@ -846,12 +850,9 @@ internal static class CelInterpreter
         public AlvoContext? Context { get; } = context;
 
         /// <summary>
-        /// The instant <c>now()</c> resolves to, bound once per write by the caller, or
-        /// <see langword="null"/> on every entry point that is not a <see cref="CelProfile.Mutate"/>
-        /// evaluation — where a call node cannot appear at all, because the type checker allows the call
-        /// construct in <see cref="CelProfile.Mutate"/> and nowhere else. <see langword="null"/> is
-        /// therefore unreachable rather than a default anyone can observe, and it evaluates to a missing
-        /// value rather than to some substitute instant if a defect ever makes it reachable.
+        /// The instant a <see cref="CelProfile.Mutate"/> evaluation's caller passed for <c>now()</c>, or
+        /// <see langword="null"/> on every other entry point, where <c>now()</c> reads the flow's instant
+        /// (<see cref="AlvoFlow.Instant"/>) instead.
         /// </summary>
         public DateTimeOffset? Now { get; } = now;
 

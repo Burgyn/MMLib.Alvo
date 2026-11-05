@@ -93,9 +93,9 @@ public interface IBeforeHookRunner
     /// </param>
     /// <param name="context">The caller the write is performed as; what <c>@user</c>/<c>@tenant</c> resolve against.</param>
     /// <param name="now">
-    /// The instant <c>now()</c> resolves to inside a <c>mutate</c>: the one this write is already stamped
-    /// with, so a value a hook writes and the row's own <c>updated_at</c> cannot disagree. Bound once by the
-    /// caller, never read here.
+    /// The instant <c>now()</c> resolves to inside a <c>mutate</c>: the one instant of the request (or of the data-port
+    /// call) the write belongs to, which every rule and condition it meets reads too. Bound once by the caller, never read
+    /// here. It is not the row's <c>updated_at</c>: a stamp is the write's own clock read, so the two may differ.
     /// </param>
     /// <returns>
     /// The fields a <c>mutate</c> set, keyed by field name, and empty when no hook fired or none mutated. A

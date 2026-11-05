@@ -176,8 +176,8 @@ internal static partial class CelBuiltInFunctions
 
     private static CelFunction Now => new(
         CelCall.Now, [], CelValueType.Timestamp, ResultNullable: false,
-        "The instant this write is stamped with — the same one its audit columns get, never a clock read.",
-        IsHost: false, MutateOnly, Body: null);
+        "The instant this request — or, after the commit, the event — happened at: one instant, never a clock read.",
+        IsHost: false, RuleConditionAndMutate, Body: null);
 
     /// <summary>A non-nullable parameter of a CEL type, with the CLR type a body receives for it.</summary>
     /// <param name="name">The parameter's name.</param>

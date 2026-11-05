@@ -1,0 +1,33 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "now-instant",
+  "description": "One now() per request (HX-11 acceptance (4)): a rule, a before-hook condition and its mutate, and a write hook's when all read now(), while host hooks move the clock in between. Until temporal arithmetic renders to SQL, the rule's window is the mutate's expires_at, so the rule compares a field with now() alone.",
+  "auth": { "providers": ["local"], "roles": ["clerk"] },
+  "entities": {
+    "notes": {
+      "audit": true,
+      "fields": {
+        "body": { "type": "string", "maxLength": 200 },
+        "stamped_at": { "type": "datetime" },
+        "expires_at": { "type": "datetime" },
+        "judged_at": { "type": "datetime" }
+      },
+      "hooks": {
+        "beforeCreate": [
+          {
+            "condition": "now() == now()",
+            "action": { "mutate": { "stamped_at": { "$cel": "now()" }, "expires_at": { "$cel": "now() + duration('1h')" } } }
+          }
+        ]
+      },
+      "rules": {
+        "list": "expires_at > now()",
+        "get": "expires_at > now()",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      }
+    }
+  }
+}

@@ -34,12 +34,13 @@ public sealed class CelFunctionCatalogTests
         CelFunctionCatalog.BuiltIns.Functions.Where(function => function.ConstantCheck is not null)
             .ShouldHaveSingleItem().Signature().ShouldBe("math.round(x: Decimal, digits: Int) -> Decimal");
 
+    /// <summary><c>now()</c> reads the flow's one instant in every row profile at an instant (HX-11 Ruling 3).</summary>
     [Fact]
-    public void Now_is_the_one_legacy_call_and_offered_in_mutate_only() =>
+    public void Now_is_the_one_legacy_call_and_offered_in_rule_condition_and_mutate() =>
         CelFunctionCatalog.BuiltIns.Functions.Where(function => function.IsLegacy).ShouldHaveSingleItem()
             .ShouldSatisfyAllConditions(
                 now => now.Name.ShouldBe(CelCall.Now),
-                now => now.Profiles.SetEquals(new[] { CelProfile.Mutate }).ShouldBeTrue());
+                now => now.Profiles.SetEquals(new[] { CelProfile.Rule, CelProfile.Condition, CelProfile.Mutate }).ShouldBeTrue());
 
     [Fact]
     public void Every_built_in_but_now_and_duration_is_offered_in_condition_and_mutate_only() =>

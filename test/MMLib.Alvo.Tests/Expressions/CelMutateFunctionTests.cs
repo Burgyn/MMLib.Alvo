@@ -100,8 +100,6 @@ public class CelMutateFunctionTests
         refused.Errors[0].Message.ShouldStartWith($"'lowerAscii(...)' is not available in the {profile} profile");
     }
 
-    public static TheoryData<CelProfile> EveryProfileButMutate() => EveryProfileBut(CelProfile.Mutate);
-
     public static TheoryData<CelProfile> EveryProfileButConditionAndMutate() => EveryProfileBut(CelProfile.Condition, CelProfile.Mutate);
 
     private static TheoryData<CelProfile> EveryProfileBut(params CelProfile[] excluded)
@@ -204,14 +202,16 @@ public class CelMutateFunctionTests
         CelFixtures.CompileMutate("now()").ResultType.ShouldBe(CelValueType.Timestamp);
     }
 
+    /// <summary>A rule and a condition read <c>now()</c> too (HX-11 Ruling 3); a computed column and an access level have no instant.</summary>
     [Theory]
-    [MemberData(nameof(EveryProfileButMutate))]
-    public void Now_is_refused_in_every_profile_but_mutate(CelProfile profile)
+    [InlineData(CelProfile.Computed)]
+    [InlineData(CelProfile.Access)]
+    public void Now_is_refused_where_there_is_no_instant(CelProfile profile)
     {
         var refused = Compile("now()", profile);
 
         refused.IsSuccess.ShouldBeFalse();
-        refused.Errors[0].Message.ShouldContain(nameof(CelProfile.Mutate));
+        refused.Errors[0].Message.ShouldContain("instant");
     }
 
     [Fact]

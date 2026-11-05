@@ -42,6 +42,7 @@ internal sealed partial class EfAlvoTransactions(EfAlvoData data, IServiceScopeF
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(work);
         AlvoFlow.RefuseInsideUnit("IAlvoTransactions.TransactAsync");
+        using var instant = data.EnsureInstant();
         var settings = AlvoTransactionOptions.Validated(options, context);
 
         var unit = await data.OpenUnitAsync(context, settings, scopes, cancellationToken).ConfigureAwait(false);

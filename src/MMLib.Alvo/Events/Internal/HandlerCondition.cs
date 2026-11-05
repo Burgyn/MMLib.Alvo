@@ -47,6 +47,7 @@ internal static class HandlerCondition
 
         try
         {
+            using var instant = AlvoFlow.EnterInstant(@event.Time);
             return EnvelopeReading.Holds(condition.Expression, @event.Data, evaluator, caller.Context) ? HandlerJudgement.Match : HandlerJudgement.NoMatch;
         }
         catch (Exception failure)

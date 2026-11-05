@@ -126,8 +126,6 @@ internal static class CelTypeChecker
 
     private static readonly IReadOnlySet<CelProfile> _conditionOnly = new HashSet<CelProfile> { CelProfile.Condition };
 
-    private static readonly IReadOnlySet<CelProfile> _mutateOnly = new HashSet<CelProfile> { CelProfile.Mutate };
-
     private static readonly IReadOnlySet<CelProfile> _ruleAndCondition =
         new HashSet<CelProfile> { CelProfile.Rule, CelProfile.Condition };
 
@@ -189,7 +187,7 @@ internal static class CelTypeChecker
             [CelConstructKind.Concatenation] = _computedAndMutate,
             [CelConstructKind.Conditional] = _computedOnly,
             [CelConstructKind.Changed] = _conditionOnly,
-            [CelConstructKind.Call] = _mutateOnly,
+            [CelConstructKind.Call] = _ruleConditionAndMutate,
             [CelConstructKind.FunctionCall] = _conditionAndMutate,
             [CelConstructKind.DurationLiteral] = _ruleConditionAndMutate,
             [CelConstructKind.TemporalArithmetic] = _ruleConditionAndMutate,
@@ -223,6 +221,9 @@ internal static class CelTypeChecker
 
         private const string AccessNoRowMessage =
             "An access level is a predicate over the caller alone; a field reference has no row to read here.";
+
+        private const string NoInstantMessage =
+            "A computed column is maintained by the database and an access level has no row; neither has an instant to read.";
 
         private const string DurationProfileFix =
             "A computed column and an access level carry no duration; compare durations in a rule, a hook condition or a mutate.";
@@ -1099,15 +1100,16 @@ internal static class CelTypeChecker
 
         /// <summary>
         /// Checks <c>now()</c>, the one call left with its own grammar and the <see cref="CelConstructKind.Call"/> row's
-        /// only member, so it is legal in <see cref="CelProfile.Mutate"/> alone.
+        /// only member: legal in every profile evaluated against a row at an instant — a rule, a hook condition and a mutate
+        /// (HX-11 Ruling 3).
         /// </summary>
         private (CelNode, CelValueType, bool, int) CheckLegacyCall(CelCall call)
         {
             var position = FindPosition(call.Name);
             var profileBad = CheckConstruct(
                 CelConstructKind.Call,
-                $"'{call.Name}(...)' is legal only in the {CelProfile.Mutate} profile (a before-hook mutate value).",
-                "Move this into hooks.before*.mutate, or write the value without a function call.",
+                $"'{call.Name}()' is not legal in the {profile} profile. {NoInstantMessage}",
+                "Use now() in a rule, a hook condition or a before-hook mutate.",
                 position);
 
             return call switch

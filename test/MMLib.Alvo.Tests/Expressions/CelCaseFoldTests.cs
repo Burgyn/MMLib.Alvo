@@ -63,7 +63,7 @@ public sealed class CelCaseFoldTests
             .ShouldBe("'lowerAscii' takes 1 argument; this call passes 0.");
 
     [Fact]
-    public void Now_is_still_the_one_legacy_call_and_mutate_only() =>
-        TestCelFunctions.Compiler().Compile("now() == now()", CelProfile.Condition, TestCelFunctions.Items).Errors[0].Message
-            .ShouldStartWith("'now(...)' is legal only in the Mutate profile");
+    public void Now_is_still_the_one_legacy_call_and_refused_where_there_is_no_instant() =>
+        TestCelFunctions.Compiler().Compile("now()", CelProfile.Computed, TestCelFunctions.Items).Errors[0].Message
+            .ShouldStartWith("'now()' is not legal in the Computed profile.");
 }
