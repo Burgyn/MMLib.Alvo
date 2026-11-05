@@ -524,6 +524,33 @@ public sealed class WriteExtensionRunnerTests
         (unit.Poisoned.Count, unit.Blamed.Count).ShouldBe((0, 0));
     }
 
+    /// <summary>
+    /// A client abort that reaches a token-aware host function in a <c>when</c> is the write's cancellation, as it is when it
+    /// reaches the hook's body: not the hook's failure, so nothing is logged at Error for a caller that hung up.
+    /// </summary>
+    [Fact]
+    public async Task A_client_cancellation_reaching_a_condition_s_host_function_passes_as_a_cancellation_not_a_hook_failure()
+    {
+        using var client = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        var unit = new FakeFlowUnit();
+        await using var world = RunnerWorld.Start(alvo => alvo
+            .AddCelFunction("patientStatus", (string status, CancellationToken ct) =>
+            {
+                client.Cancel();
+                ct.ThrowIfCancellationRequested();
+                return status;
+            })
+            .Entity("tickets", e => e.BeforeWrite("guard", (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask, when: "patientStatus(new.status) == 'open'")));
+        using var flow = AlvoFlow.EnterUnit(unit, new AlvoProvenance());
+
+        var escaped = await Should.ThrowAsync<OperationCanceledException>(
+            () => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket("open")), client.Token));
+
+        escaped.ShouldNotBeOfType<HookFailedException>();
+        escaped.InnerException.ShouldBeNull("a wrapped function failure would be answered function-failed and logged");
+        (unit.Poisoned.Count, unit.Blamed.Count).ShouldBe((0, 0));
+    }
+
     [Theory]
     [InlineData(HookFailedException.Budget)]
     [InlineData(HookFailedException.SelfWrite)]

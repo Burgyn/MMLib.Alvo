@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Time.Testing;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Time.Testing;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
@@ -27,6 +28,30 @@ public sealed class PredicateEvaluatorBudgetTests
 
         Should.Throw<CelFunctionException>(
             () => new PredicateEvaluator(TestBudgets.Default(clock)).Evaluate(condition, AlvoRecord.Empty, null, _caller))
+            .Reason.ShouldStartWith("it ran past");
+    }
+
+    /// <summary>
+    /// The evaluator the container builds carries the budget: nothing else pins it, and an evaluator built without the policy
+    /// runs host functions unbudgeted with every hand-built fact still green.
+    /// </summary>
+    [Fact]
+    public void The_container_built_evaluator_runs_a_condition_s_host_function_under_the_budget()
+    {
+        var clock = new FakeTimeProvider();
+        var services = new ServiceCollection();
+        services.AddSingleton<TimeProvider>(clock);
+        services.AddAlvo(alvo => alvo.AddCelFunction("slow", (string s) =>
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(251));
+            return s;
+        }));
+        using var provider = services.BuildServiceProvider();
+        var condition = provider.GetRequiredService<ICelCompiler>()
+            .Compile("slow('x') == 'x'", CelProfile.Condition, TestCelFunctions.Items).Expression!;
+
+        Should.Throw<CelFunctionException>(
+            () => provider.GetRequiredService<IPredicateEvaluator>().Evaluate(condition, AlvoRecord.Empty, null, _caller))
             .Reason.ShouldStartWith("it ran past");
     }
 

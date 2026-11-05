@@ -215,10 +215,11 @@ public sealed class BeforeHookFacetTests
             clock.Advance(TimeSpan.FromMilliseconds(200));
             return "ok";
         }, summary: null);
-        var hooks = BeforeCreate(Mutate("code", Cel("slow(new.note)")));
+        var runner = Runner(BeforeCreate(Mutate("code", Cel("slow(new.note)"))), TestCelFunctions.Compiler(slow), TestBudgets.Default(clock));
 
-        Run(hooks, Row(("note", "x")), compiler: TestCelFunctions.Compiler(slow), budget: TestBudgets.Default(clock))["code"].ShouldBe("ok");
-        Run(hooks, Row(("note", "y")), compiler: TestCelFunctions.Compiler(slow), budget: TestBudgets.Default(clock))["code"].ShouldBe("ok");
+        Write(runner, Row(("note", "x")))["code"].ShouldBe("ok");
+        CelFunctionBudget.Current.ShouldBeNull("the write's pass is left behind it");
+        Write(runner, Row(("note", "y")))["code"].ShouldBe("ok");
     }
 
     private static AlvoRecord Row(params (string Field, object? Value)[] fields)
@@ -234,14 +235,20 @@ public sealed class BeforeHookFacetTests
 
     private static IReadOnlyDictionary<string, object?> Run(
         EntityHooks hooks, AlvoRecord candidate, DataOperation operation = DataOperation.Create,
-        CelCompiler? compiler = null, CelFunctionBudgetPolicy? budget = null)
+        CelCompiler? compiler = null, CelFunctionBudgetPolicy? budget = null) =>
+        Write(Runner(hooks, compiler ?? Compiler, budget ?? TestBudgets.Default()), candidate, operation);
+
+    private static BeforeHookRunner Runner(EntityHooks hooks, CelCompiler compiler, CelFunctionBudgetPolicy budget)
     {
         var provider = new PolicyCatalogProvider();
-        provider.SetCurrent(Contacts, PolicyCatalog.Build(Descriptor(hooks), Schema, compiler ?? Compiler));
+        provider.SetCurrent(Contacts, PolicyCatalog.Build(Descriptor(hooks), Schema, compiler));
 
-        return new BeforeHookRunner(provider, budget ?? TestBudgets.Default()).Run(
-            Contacts, operation, candidate, operation == DataOperation.Create ? null : candidate, _caller, DateTimeOffset.UnixEpoch);
+        return new BeforeHookRunner(provider, budget);
     }
+
+    private static IReadOnlyDictionary<string, object?> Write(
+        BeforeHookRunner runner, AlvoRecord candidate, DataOperation operation = DataOperation.Create) =>
+        runner.Run(Contacts, operation, candidate, operation == DataOperation.Create ? null : candidate, _caller, DateTimeOffset.UnixEpoch);
 
     private static BeforeHookAction Mutate(string field, ValueOrExpr value) => new()
     {

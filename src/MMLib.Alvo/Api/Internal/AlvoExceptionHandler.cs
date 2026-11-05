@@ -184,9 +184,17 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
     /// <param name="failure">The function's failure.</param>
     private async Task AnswerFunctionFailureAsync(HttpContext httpContext, CelFunctionException failure)
     {
-        FunctionFailed(logger, failure.InnerException ?? failure, failure.FunctionName, httpContext.Request.Method, httpContext.Request.Path.Value);
+        FunctionFailed(logger, Logged(failure), failure.FunctionName, httpContext.Request.Method, httpContext.Request.Path.Value);
         await ProblemResultFactory.FunctionFailed(FunctionFailedDetail(failure)).ExecuteAsync(httpContext).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// The exception the record carries: a host function's failure with Alvo's reason (an overrun) is logged whole, so the
+    /// reason is in the record and what the body threw follows as its inner exception — a cancelled token-aware function
+    /// would otherwise read as a client abort; anything else logs what was thrown, the operator's stack.
+    /// </summary>
+    private static Exception Logged(CelFunctionException failure) =>
+        failure is { IsHost: true, Reason: not null } ? failure : failure.InnerException ?? failure;
 
     /// <summary>The caller-facing sentence for a whole condition that evaluated to no Bool.</summary>
     private const string WholeConditionDetail = "The hook's condition evaluated to a present value that is not a Bool. Nothing was written.";

@@ -119,6 +119,7 @@ internal sealed class WriteExtensionRunner(
     /// Whether <paramref name="hook"/>'s <c>when</c> holds. A host function failing in it is the hook's failure, never a skip;
     /// a built-in failing on the caller's data escapes unchanged, answered as any condition's built-in failure (Ruling 63). The
     /// <c>when</c> is one host-function budget pass, linked with the write's token; past the budget it is the hook's failure.
+    /// The write's own cancellation reaching a token-aware function is the write's cancellation, as in a hook's body.
     /// </summary>
     private bool Fires(BoundWriteHook hook, WriteInvocation invocation, WriteHookStage stage, CancellationToken cancellationToken)
     {
@@ -132,11 +133,23 @@ internal sealed class WriteExtensionRunner(
             using var pass = budget.Enter(cancellationToken);
             return CelInterpreter.EvaluatePredicate(condition, Current(invocation, stage), invocation.Old, invocation.Caller);
         }
+        catch (Exception thrown) when (WriteCancelled(thrown, cancellationToken))
+        {
+            throw new OperationCanceledException(cancellationToken);
+        }
         catch (Exception thrown) when (thrown is not CelFunctionException { IsHost: false })
         {
             throw FailBeforeRun(hook.Id, HookFailedException.Exception, thrown);
         }
     }
+
+    /// <summary>
+    /// Whether <paramref name="thrown"/> is the write's cancellation as a host function received it — not an overrun, which
+    /// carries Alvo's reason. Rethrown bare: a wrapped function failure would be answered <c>function-failed</c> and logged.
+    /// </summary>
+    private static bool WriteCancelled(Exception thrown, CancellationToken cancellationToken) =>
+        cancellationToken.IsCancellationRequested
+        && thrown is OperationCanceledException or CelFunctionException { IsHost: true, Reason: null, InnerException: OperationCanceledException };
 
     private static AlvoRecord Current(WriteInvocation invocation, WriteHookStage stage) => stage switch
     {
