@@ -1,4 +1,6 @@
-﻿CREATE TABLE products (
+﻿SET LOCAL lock_timeout = '5s'
+;
+CREATE TABLE products (
     id uuid NOT NULL,
     stock bigint NOT NULL,
     CONSTRAINT "PK_products" PRIMARY KEY (id),

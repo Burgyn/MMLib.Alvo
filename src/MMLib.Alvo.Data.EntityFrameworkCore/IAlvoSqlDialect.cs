@@ -439,4 +439,29 @@ public interface IAlvoSqlDialect
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="failure"/> is <see langword="null"/>.</exception>
     SqlConstraintViolation? DecodeConstraintViolation(DbException failure);
+
+    /// <summary>
+    /// The statement that bounds how long an apply waits for a table lock, run first in every apply transaction — or
+    /// <see langword="null"/> for an engine with no lock queue to bound (HX-11 Ruling 20).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why it exists.</b> Adding a <c>CHECK</c> constraint in place takes the strongest table lock, and on an engine
+    /// whose lock requests queue, an apply waiting behind a long reader also stalls every reader that arrives after it.
+    /// Bounding the wait turns that into a retryable refusal (<see cref="IsLockTimeout"/>) instead of a stalled table.
+    /// SQLite has one writer and no queue, so it answers <see langword="null"/>.
+    /// </para>
+    /// <para>
+    /// <b>Internal</b>, reachable by the in-family drivers through <c>InternalsVisibleTo</c>, so the published dialect
+    /// port does not grow: a third-party driver keeps the unbounded wait until the member is earned publicly.
+    /// </para>
+    /// </remarks>
+    internal string? ApplyLockTimeoutStatement => null;
+
+    /// <summary>
+    /// Whether <paramref name="failure"/> is this engine giving up on a lock after <see cref="ApplyLockTimeoutStatement"/>'s
+    /// bound — <see langword="false"/> for an engine that sets none.
+    /// </summary>
+    /// <param name="failure">The provider's own exception, unwrapped.</param>
+    internal bool IsLockTimeout(DbException failure) => false;
 }

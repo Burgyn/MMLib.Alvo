@@ -69,6 +69,45 @@ internal sealed class CheckConstraintSql
         return $"({_fields.RenderField(entity, field.Name)} IS NULL OR {rendered})";
     }
 
+    /// <summary>
+    /// The columns <paramref name="field"/>'s CHECK constraint reads — the field itself and every field its validation
+    /// names — or <see langword="null"/> when the field declares none or the compiled tree holds a node this walk does not
+    /// know, so a caller deciding whether the columns exist yet cannot be told a partial answer.
+    /// </summary>
+    /// <param name="entity">The entity the field belongs to.</param>
+    /// <param name="field">The validated field.</param>
+    internal IReadOnlySet<string>? Reads(EntitySchema entity, FieldSchema field)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        ArgumentNullException.ThrowIfNull(field);
+
+        if (field.CheckExpression is not { } source)
+        {
+            return null;
+        }
+
+        var reads = new HashSet<string>(StringComparer.Ordinal) { field.Name };
+        return Collect(Compiled(entity, field, source).Root, reads) ? reads : null;
+    }
+
+    private static bool Collect(CelNode node, HashSet<string> reads) => node switch
+    {
+        CelFieldRef fieldRef => Read(reads, fieldRef.FieldName),
+        CelHas has => Read(reads, has.Field.FieldName),
+        CelLiteral or CelContextRef => true,
+        CelUnary unary => Collect(unary.Operand, reads),
+        CelBinary binary => Collect(binary.Left, reads) & Collect(binary.Right, reads),
+        CelConditional conditional =>
+            Collect(conditional.Condition, reads) & Collect(conditional.WhenTrue, reads) & Collect(conditional.WhenFalse, reads),
+        _ => false,
+    };
+
+    private static bool Read(HashSet<string> reads, string field)
+    {
+        reads.Add(field);
+        return true;
+    }
+
     private CompiledExpression Compiled(EntitySchema entity, FieldSchema field, string source)
     {
         var result = _compiler.Compile(source, CelProfile.Rule, entity);

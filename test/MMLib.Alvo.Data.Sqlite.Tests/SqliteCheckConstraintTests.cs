@@ -41,6 +41,15 @@ public sealed class SqliteCheckConstraintTests : AlvoDataCheckConstraintTests, I
 
     protected override Task ExecuteAsync(MigrationPlan plan) => ApplyAsync(plan, new MigrationOptions());
 
+    protected override async Task ApplyThroughTheRuntimeWriterAsync(SchemaModel current, SchemaModel desired)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var plan = await PlanAsync(current, desired);
+        var candidate = new DescriptorVersion(desired, "{}", Revision: 0, DateTimeOffset.UnixEpoch);
+        await _host!.Services.GetRequiredService<IRuntimeSchemaWriter>()
+            .ApplyAndAppendAsync("check-constraints", plan, candidate, expectedRevision: 0, new MigrationOptions(), ct);
+    }
+
     private Task<MigrationResult> ApplyAsync(MigrationPlan plan, MigrationOptions options) =>
         Migrator.ApplyAsync(plan, options, TestContext.Current.CancellationToken);
 

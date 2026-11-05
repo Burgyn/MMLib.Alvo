@@ -818,11 +818,33 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
 
         var candidate = new DescriptorVersion(
             boot.Desired, boot.DescriptorJson, Revision: 0, DateTimeOffset.UtcNow);
-        var written = await _writer
-            .ApplyAndAppendAsync(project, decision.Plan, candidate, applied?.Revision ?? 0, MigrationOptions, ct)
-            .ConfigureAwait(false);
+        try
+        {
+            var written = await _writer
+                .ApplyAndAppendAsync(project, decision.Plan, candidate, applied?.Revision ?? 0, MigrationOptions, ct)
+                .ConfigureAwait(false);
 
-        return Prime(boot, written.Revision);
+            return Prime(boot, written.Revision);
+        }
+        catch (AlvoApplyLockTimeoutException timedOut)
+        {
+            throw RefusedForTheLock(project, timedOut);
+        }
+    }
+
+    /// <summary>
+    /// A boot whose apply gave up waiting for a table lock is a refused start naming that reason, never an unexplained
+    /// crash (HX-11 Ruling 20): nothing was applied, and a restart once the holding transactions finish succeeds.
+    /// </summary>
+    /// <remarks>Recorded first, because <see cref="StartingAsync"/> rethrows an <see cref="AlvoStartupRefusedException"/> untouched.</remarks>
+    private AlvoStartupRefusedException RefusedForTheLock(string project, AlvoApplyLockTimeoutException timedOut)
+    {
+        var refusal = new AlvoStartupRefusedException(
+            $"Project '{project}': {timedOut.Message}",
+            "Restart once the transactions holding the project's tables have finished; nothing was applied.");
+        _state.Failed(project, refusal.Message);
+        BootRefused(_logger, refusal.Message);
+        return refusal;
     }
 
     /// <summary>The last guard before the DDL runs: a plan that discards data needs an explicit allowance.</summary>

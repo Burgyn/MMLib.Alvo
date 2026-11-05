@@ -1,4 +1,6 @@
-﻿CREATE TABLE documents (
+﻿SET LOCAL lock_timeout = '5s'
+;
+CREATE TABLE documents (
     id uuid NOT NULL,
     created_at timestamp with time zone NOT NULL,
     created_by uuid,

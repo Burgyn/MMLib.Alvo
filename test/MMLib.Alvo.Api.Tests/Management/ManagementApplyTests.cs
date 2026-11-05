@@ -1,6 +1,9 @@
-﻿using MMLib.Alvo.Management;
+﻿using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Management;
+using MMLib.Alvo.Migrations;
 
 using System.Net;
+using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Api.Tests.Management;
@@ -109,6 +112,46 @@ public class ManagementApplyTests
         response.StatusCode.ShouldBe(HttpStatusCode.PreconditionFailed);
         (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.PreconditionFailed);
         (await RevisionAsync(world)).ShouldBe(1);
+    }
+
+    /// <summary>
+    /// An apply that gave up waiting for a table lock is a retryable 409 <c>conflict</c> carrying <c>Retry-After</c>, and
+    /// changes nothing — never the 500 of a broken invariant (HX-11 Ruling 20).
+    /// </summary>
+    [Fact]
+    public async Task An_apply_that_timed_out_on_a_table_lock_is_409_with_retry_after_and_changes_nothing()
+    {
+        var timingOut = new StrongBox<bool>();
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            ManagedFleet.Descriptor,
+            [_dev],
+            new AlvoApiWorldSetup(MapBeforePriming: true, MapManagementApi: true, ConfigureServicesAfterAlvo: services => TimingOut(services, timingOut)));
+        timingOut.Value = true;
+
+        var response = await ApplyAsync(world, WithExtraField(await CurrentAsync(world)), ifMatch: "\"1\"");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        response.Headers.RetryAfter.ShouldNotBeNull().Delta.ShouldBe(TimeSpan.FromSeconds(5));
+        (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Conflict);
+        (await RevisionAsync(world)).ShouldBe(1);
+    }
+
+    /// <summary>Wraps the registered writer so it throws the lock timeout once <paramref name="armed"/> is set — after the boot.</summary>
+    private static void TimingOut(IServiceCollection services, StrongBox<bool> armed)
+    {
+        var registered = services.Last(service => service.ServiceType == typeof(IRuntimeSchemaWriter));
+        services.AddSingleton<IRuntimeSchemaWriter>(provider =>
+            new TimingOutWriter((IRuntimeSchemaWriter)registered.ImplementationFactory!(provider), armed));
+    }
+
+    private sealed class TimingOutWriter(IRuntimeSchemaWriter inner, StrongBox<bool> armed) : IRuntimeSchemaWriter
+    {
+        public Task<DescriptorVersion> ApplyAndAppendAsync(
+            string project, MigrationPlan plan, DescriptorVersion candidate, int expectedRevision, MigrationOptions options,
+            CancellationToken ct = default) =>
+            armed.Value
+                ? Task.FromException<DescriptorVersion>(new AlvoApplyLockTimeoutException())
+                : inner.ApplyAndAppendAsync(project, plan, candidate, expectedRevision, options, ct);
     }
 
     [Theory]

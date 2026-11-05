@@ -1,4 +1,6 @@
-﻿ALTER TABLE products RENAME COLUMN stock TO on_hand;
+﻿SET LOCAL lock_timeout = '5s'
+;
+ALTER TABLE products RENAME COLUMN stock TO on_hand;
 
 ;
 ALTER TABLE products DROP CONSTRAINT ck_products_stock_7b86837d;

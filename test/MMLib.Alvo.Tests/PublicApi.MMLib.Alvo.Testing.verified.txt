@@ -200,12 +200,18 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_negative_bound_holds_and_reads_back_exactly() { }
         public System.Threading.Tasks.Task A_rollup_pushing_a_parent_past_its_validation_is_refused_at_the_child_field() { }
         public System.Threading.Tasks.Task A_validation_on_a_computed_field_holds_in_the_engine() { }
+        public System.Threading.Tasks.Task A_validation_on_a_field_added_in_the_same_apply_is_guarded_by_the_ddl_alone() { }
+        public System.Threading.Tasks.Task A_validation_reading_a_sibling_renamed_in_the_same_apply_is_refused_at_its_pointer_and_never_500() { }
         public System.Threading.Tasks.Task A_validation_reading_an_empty_other_field_refuses_the_row() { }
         public System.Threading.Tasks.Task A_write_that_breaks_a_validation_is_refused_naming_the_field() { }
+        public System.Threading.Tasks.Task Adding_a_validation_over_compliant_rows_applies_and_holds_from_then_on() { }
+        public System.Threading.Tasks.Task Adding_a_validation_over_rows_that_break_it_is_refused_with_their_count() { }
+        public System.Threading.Tasks.Task Adding_a_validation_to_a_populated_indexed_table_keeps_its_rows_and_its_index() { }
         public System.Threading.Tasks.Task Adding_and_dropping_a_validation_are_steps_naming_the_field() { }
         public System.Threading.Tasks.Task An_empty_validated_field_passes_its_check() { }
         public System.Threading.Tasks.Task An_update_that_breaks_it_leaves_the_row_as_it_was() { }
         protected abstract System.Threading.Tasks.Task ApplyAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired, MMLib.Alvo.Migrations.MigrationOptions options);
+        protected abstract System.Threading.Tasks.Task ApplyThroughTheRuntimeWriterAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired);
         public System.Threading.Tasks.Task Changing_a_validation_drops_and_re_adds_its_constraint() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
         protected abstract System.Threading.Tasks.Task ExecuteAsync(MMLib.Alvo.Migrations.MigrationPlan plan);
@@ -213,9 +219,12 @@ namespace MMLib.Alvo.Testing.Data
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationPlan> PlanAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired);
         public System.Threading.Tasks.Task Re_applying_an_unchanged_descriptor_plans_no_step() { }
         public System.Threading.Tasks.Task Renaming_a_validated_field_keeps_it_enforced_under_its_new_name() { }
+        public System.Threading.Tasks.Task Renaming_a_validated_field_over_compliant_rows_applies_and_over_violating_rows_is_refused_at_its_validation() { }
         public System.Threading.Tasks.Task Renaming_rolling_back_and_renaming_again_keeps_the_validation_enforced() { }
+        public System.Threading.Tasks.Task Rows_written_after_the_count_are_still_refused_at_the_validation() { }
         public System.Threading.Tasks.Task The_engine_accepts_the_same_out_of_band_write_when_it_keeps_the_validation() { }
         public System.Threading.Tasks.Task The_engine_itself_refuses_an_out_of_band_write_that_breaks_it() { }
+        public System.Threading.Tasks.Task The_runtime_writer_refuses_a_violating_apply_at_the_validation_too() { }
     }
     public abstract class AlvoDataComparisonTests
     {
@@ -591,6 +600,12 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task The_row_key_is_read_whatever_the_projection_named() { }
         public System.Threading.Tasks.Task The_tenant_scope_is_bound_inside_the_same_where_clause() { }
         public System.Threading.Tasks.Task The_update_statement_itself_carries_the_policy_predicate() { }
+    }
+    public static class CheckSchemas
+    {
+        public static MMLib.Alvo.Descriptor.AlvoDescriptor Descriptor { get; }
+        public static MMLib.Alvo.Schema.SchemaModel Unvalidated { get; }
+        public static MMLib.Alvo.Schema.SchemaModel Validated { get; }
     }
     public interface IAlvoDataBeforeHookWorld
     {

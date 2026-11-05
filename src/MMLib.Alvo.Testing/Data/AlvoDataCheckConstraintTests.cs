@@ -14,9 +14,10 @@ namespace MMLib.Alvo.Testing.Data;
 /// the adversarial suite: the in-memory reference implementation has no engine to refuse a write (Ruling 28).
 /// </summary>
 /// <remarks>
-/// The facts here need only the DDL: that the constraint exists in the engine, that an empty validated field passes it,
-/// that it holds over a stored generated column, and that its name is stable across applies. How a write the engine
-/// refuses is answered through the port, and how an apply over breaking rows is refused, are facts of their own.
+/// Three groups: the DDL (the constraint exists in the engine, an empty validated field passes it, it holds over a stored
+/// generated column, its name is stable across applies); a write the engine refuses, answered through the port; and an
+/// apply over rows that break a validation — counted before the apply where the table and every column it reads already
+/// exist, and otherwise refused by the engine and translated at the same pointer (HX-11 Ruling 22).
 /// </remarks>
 public abstract class AlvoDataCheckConstraintTests
 {
@@ -46,6 +47,14 @@ public abstract class AlvoDataCheckConstraintTests
     /// <summary>Applies an already planned migration.</summary>
     /// <param name="plan">The plan <see cref="PlanAsync"/> produced.</param>
     protected abstract Task ExecuteAsync(MigrationPlan plan);
+
+    /// <summary>
+    /// Plans a migration and applies it through this engine's <see cref="IRuntimeSchemaWriter"/> — the executor the
+    /// Management API, the dashboard, rollback, restore and the boot take — as the project's first revision.
+    /// </summary>
+    /// <param name="current">The schema the store currently holds.</param>
+    /// <param name="desired">The schema to migrate it to, recorded as the appended version's schema.</param>
+    protected abstract Task ApplyThroughTheRuntimeWriterAsync(SchemaModel current, SchemaModel desired);
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -385,6 +394,201 @@ public abstract class AlvoDataCheckConstraintTests
         (await data.QueryAsync(new AlvoQuery { Entity = "reservations" }, Caller, Ct)).Items.Count.ShouldBe(1);
     }
 
+    /// <summary>
+    /// Adding a validation to a table whose rows break it is refused when it is planned, at the validation, with the
+    /// number of breaking rows (acceptance 2) — and nothing is applied.
+    /// </summary>
+    [Fact]
+    public async Task Adding_a_validation_over_rows_that_break_it_is_refused_with_their_count()
+    {
+        var data = await CreateAsync(CheckSchemas.Unvalidated, Descriptor);
+        foreach (var stock in new long[] { -1, -2, 5 })
+        {
+            await data.CreateAsync("products", Row(stock), Caller, cancellationToken: Ct);
+        }
+
+        var refusal = await Should.ThrowAsync<DescriptorValidationException>(() => PlanAsync(CheckSchemas.Unvalidated, Schema));
+
+        var error = refusal.Result.Errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe("/entities/products/fields/stock/validation");
+        error.Message.ShouldStartWith("2 row(s) of 'products' break this validation");
+        (await data.QueryAsync(new AlvoQuery { Entity = "products" }, Caller, Ct)).Items.Count.ShouldBe(3, "nothing was applied");
+    }
+
+    /// <summary>The counterweight: over compliant rows the same apply succeeds, and the engine holds the validation from then on.</summary>
+    [Fact]
+    public async Task Adding_a_validation_over_compliant_rows_applies_and_holds_from_then_on()
+    {
+        var data = await CreateAsync(CheckSchemas.Unvalidated, Descriptor);
+        await data.CreateAsync("products", Row(5), Caller, cancellationToken: Ct);
+
+        await ApplyAsync(CheckSchemas.Unvalidated, Schema);
+
+        (await ExecuteOutsideThePortAsync("UPDATE \"products\" SET \"stock\" = -1")).ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// A row written between the count and the apply is still refused — by the engine, translated by the apply into the
+    /// same refusal at the validation, never a 500.
+    /// </summary>
+    [Fact]
+    public async Task Rows_written_after_the_count_are_still_refused_at_the_validation()
+    {
+        var data = await CreateAsync(CheckSchemas.Unvalidated, Descriptor);
+        var plan = await PlanAsync(CheckSchemas.Unvalidated, Schema);
+        await data.CreateAsync("products", Row(-1), Caller, cancellationToken: Ct);
+
+        var refusal = await Should.ThrowAsync<DescriptorValidationException>(() => ExecuteAsync(plan));
+
+        var error = refusal.Result.Errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe("/entities/products/fields/stock/validation");
+        error.Message.ShouldStartWith("Rows of 'products' break this validation");
+    }
+
+    /// <summary>
+    /// A validation on a field renamed in the same apply cannot be counted — the column does not exist under its new name
+    /// yet — so the engine guards it: compliant rows apply, and violating rows are refused at the renamed field's
+    /// validation (Review Focus 5).
+    /// </summary>
+    [Fact]
+    public async Task Renaming_a_validated_field_over_compliant_rows_applies_and_over_violating_rows_is_refused_at_its_validation()
+    {
+        var data = await CreateAsync(Plain, PlainDescriptor);
+        await data.CreateAsync("products", Row(5), Caller, cancellationToken: Ct);
+        await ApplyAsync(Plain, PlainRenamed("on_hand >= 0", heldCheck: null));
+
+        var violating = await CreateAsync(Plain, PlainDescriptor);
+        await violating.CreateAsync("products", Row(-1), Caller, cancellationToken: Ct);
+        var refusal = await Should.ThrowAsync<DescriptorValidationException>(() => ApplyAsync(Plain, PlainRenamed("on_hand >= 0", heldCheck: null)));
+        refusal.Result.Errors.ShouldHaveSingleItem().Path.ShouldBe("/entities/products/fields/on_hand/validation");
+    }
+
+    /// <summary>
+    /// The runtime writer answers an engine refusal exactly as the migrator does — at the validation, its pointer resolved
+    /// from the schema it was appending, never from the plan (reviews I1, I3).
+    /// </summary>
+    [Fact]
+    public async Task The_runtime_writer_refuses_a_violating_apply_at_the_validation_too()
+    {
+        var data = await CreateAsync(Plain, PlainDescriptor);
+        await data.CreateAsync("products", Row(-1), Caller, cancellationToken: Ct);
+
+        var refusal = await Should.ThrowAsync<DescriptorValidationException>(
+            () => ApplyThroughTheRuntimeWriterAsync(Plain, PlainRenamed("on_hand >= 0", heldCheck: null)));
+
+        var error = refusal.Result.Errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe("/entities/products/fields/on_hand/validation");
+        error.Message.ShouldStartWith("Rows of 'products' break this validation");
+        (await data.QueryAsync(new AlvoQuery { Entity = "products" }, Caller, Ct)).Items.ShouldHaveSingleItem()["stock"].ShouldBe(-1L);
+    }
+
+    /// <summary>A validation on a field the same apply adds is not counted (the column does not exist yet): the DDL alone guards it.</summary>
+    [Fact]
+    public async Task A_validation_on_a_field_added_in_the_same_apply_is_guarded_by_the_ddl_alone()
+    {
+        var data = await CreateAsync(WithoutDiscount, Descriptor);
+        await data.CreateAsync("products", Row(5), Caller, cancellationToken: Ct);
+
+        await ApplyAsync(WithoutDiscount, Schema);
+
+        (await InsertDiscountAsync("discount", "00000000-0000-0000-0000-000000000030", 51)).ShouldNotBeNull("the added field's validation is the engine's");
+    }
+
+    /// <summary>
+    /// A validation that reads a sibling renamed in the same apply cannot be counted either (review I2): counting it would
+    /// name a column that does not exist yet. The engine refuses it, and the refusal points at the validation — never a 500.
+    /// </summary>
+    [Fact]
+    public async Task A_validation_reading_a_sibling_renamed_in_the_same_apply_is_refused_at_its_pointer_and_never_500()
+    {
+        var data = await CreateAsync(Plain, PlainDescriptor);
+        await data.CreateAsync("products", new Dictionary<string, object?>(StringComparer.Ordinal) { ["stock"] = 1L, ["held"] = 5L }, Caller, cancellationToken: Ct);
+
+        var refusal = await Should.ThrowAsync<DescriptorValidationException>(() => ApplyAsync(Plain, PlainRenamed(onHandCheck: null, "held <= on_hand")));
+
+        refusal.Result.Errors.ShouldHaveSingleItem().Path.ShouldBe("/entities/products/fields/held/validation");
+    }
+
+    /// <summary>
+    /// Adding a validation to a populated table that carries an index — on SQLite, a table rebuild that copies the rows and
+    /// re-creates the index — keeps every row and keeps the index enforced (Task 7 review m4).
+    /// </summary>
+    [Fact]
+    public async Task Adding_a_validation_to_a_populated_indexed_table_keeps_its_rows_and_its_index()
+    {
+        var data = await CreateAsync(PlainIndexed(stockCheck: null), PlainDescriptor);
+        foreach (var held in new long[] { 1, 2 })
+        {
+            await data.CreateAsync("products", new Dictionary<string, object?>(StringComparer.Ordinal) { ["stock"] = 3L, ["held"] = held }, Caller, cancellationToken: Ct);
+        }
+
+        await ApplyAsync(PlainIndexed(stockCheck: null), PlainIndexed("stock >= 0"));
+
+        (await data.QueryAsync(new AlvoQuery { Entity = "products" }, Caller, Ct)).Items.Count.ShouldBe(2, "the rebuild copies every row");
+        (await InsertHeldAsync("00000000-0000-0000-0000-000000000040", stock: 1, held: 1)).ShouldNotBeNull("the unique index survived the rebuild");
+        (await InsertHeldAsync("00000000-0000-0000-0000-000000000041", stock: -1, held: 9)).ShouldNotBeNull("and the new validation holds");
+        (await InsertHeldAsync("00000000-0000-0000-0000-000000000042", stock: 1, held: 9)).ShouldBeNull();
+    }
+
+    private Task<Exception?> InsertHeldAsync(string id, long stock, long held) =>
+        ExecuteOutsideThePortAsync($"INSERT INTO \"products\" (\"id\", \"stock\", \"held\") VALUES ('{id}', {stock}, {held})");
+
+    /// <summary><see cref="Schema"/> without the discount field.</summary>
+    private static SchemaModel WithoutDiscount => new([
+        Schema.Entities[0] with { Fields = [.. Schema.Entities[0].Fields.Where(declared => declared.Name != "discount")] },
+    ]);
+
+    /// <summary>
+    /// A products entity with nothing a rename could break — no computed field reading stock, no hidden flag — for the
+    /// facts that rename stock: stock (required) and held.
+    /// </summary>
+    private static SchemaModel Plain => new([PlainProducts(new FieldSchema { Name = "stock", Type = SchemaField.Integer, Required = true }, heldCheck: null)]);
+
+    /// <summary><see cref="Plain"/> with stock renamed to on_hand, and the given validations.</summary>
+    private static SchemaModel PlainRenamed(string? onHandCheck, string? heldCheck) => new([
+        PlainProducts(
+            new FieldSchema { Name = "on_hand", RenamedFrom = "stock", Type = SchemaField.Integer, Required = true, CheckExpression = onHandCheck },
+            heldCheck),
+    ]);
+
+    /// <summary><see cref="Plain"/> with a unique index on held and the given validation on stock.</summary>
+    private static SchemaModel PlainIndexed(string? stockCheck) => new([
+        PlainProducts(new FieldSchema { Name = "stock", Type = SchemaField.Integer, Required = true, CheckExpression = stockCheck }, heldCheck: null)
+            with { Indexes = [new IndexSchema(["held"], Unique: true)] },
+    ]);
+
+    private static EntitySchema PlainProducts(FieldSchema stock, string? heldCheck) => new()
+    {
+        Name = "products",
+        Tenancy = TenancyMode.Global,
+        Fields =
+        [
+            new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true },
+            stock,
+            new FieldSchema { Name = "held", Type = SchemaField.Integer, Nullable = true, CheckExpression = heldCheck },
+        ],
+    };
+
+    /// <summary>The descriptor <see cref="Plain"/> is primed with: both fields writable, every rule open.</summary>
+    private static AlvoDescriptor PlainDescriptor => new()
+    {
+        ApiVersion = "alvo.dev/v1",
+        Name = "check-constraints-plain",
+        Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
+        {
+            ["products"] = new()
+            {
+                Tenancy = EntityTenancy.Global,
+                Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+                {
+                    ["stock"] = new() { Type = DescField.Integer, Required = true },
+                    ["held"] = new() { Type = DescField.Integer },
+                },
+                Rules = new AccessRules { List = "true", Get = "true", Create = "true", Update = "true", Delete = "true" },
+            },
+        },
+    };
+
     private static Dictionary<string, object?> Reservation(Guid product, long quantity) =>
         new(StringComparer.Ordinal) { ["product_id"] = product, ["quantity"] = quantity };
 
@@ -456,63 +660,9 @@ public abstract class AlvoDataCheckConstraintTests
 
     private static Dictionary<string, object?> Row(long stock) => new(StringComparer.Ordinal) { ["stock"] = stock };
 
-    /// <summary>
-    /// products: stock (validation "value >= 0"), discount (optional, "value &lt;= 50"), margin (hidden, "value >= 0"),
-    /// sale_starts_at / sale_ends_at (sale_ends_at: "value - sale_starts_at &lt;= duration('720h')"), and the computed
-    /// stock_value (stock + stock — a computed field carries no numeric constant, "value &lt;= 500"), and temperature
-    /// ("value >= -40" — a negative constant, Ruling 16), and rating (hidden from admins only, "value &lt;= 5").
-    /// </summary>
-    protected static AlvoDescriptor Descriptor => new()
-    {
-        ApiVersion = "alvo.dev/v1",
-        Name = "check-constraints",
-        Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
-        {
-            ["products"] = new()
-            {
-                Tenancy = EntityTenancy.Global,
-                Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
-                {
-                    ["stock"] = new() { Type = DescField.Integer, Required = true, Validation = "value >= 0" },
-                    ["discount"] = new() { Type = DescField.Integer, Validation = "value <= 50" },
-                    ["margin"] = new() { Type = DescField.Decimal, Precision = 10, Scale = 2, Hidden = BoolOrCel.FromBoolean(true), Validation = "value >= 0" },
-                    ["sale_starts_at"] = new() { Type = DescField.DateTime },
-                    ["sale_ends_at"] = new() { Type = DescField.DateTime, Validation = "value - sale_starts_at <= duration('720h')" },
-                    ["stock_value"] = new() { Type = DescField.Integer, Computed = "stock + stock", Validation = "value <= 500" },
-                    ["temperature"] = new() { Type = DescField.Integer, Validation = "value >= -40" },
-                    ["rating"] = new() { Type = DescField.Integer, Hidden = BoolOrCel.FromExpression("'admin' in @user.roles"), Validation = "value <= 5" },
-                },
-                Rules = new AccessRules { List = "true", Get = "true", Create = "true", Update = "true", Delete = "true" },
-            },
-        },
-    };
+    /// <summary>The suite's descriptor, <see cref="CheckSchemas.Descriptor"/>.</summary>
+    protected static AlvoDescriptor Descriptor => CheckSchemas.Descriptor;
 
-    /// <summary>The same entity as a schema; each CheckExpression is the canonical form the mapper would write.</summary>
-    protected static SchemaModel Schema => new([
-        new EntitySchema
-        {
-            Name = "products",
-            Tenancy = TenancyMode.Global,
-            Fields =
-            [
-                new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true },
-                new FieldSchema { Name = "stock", Type = SchemaField.Integer, Required = true, CheckExpression = "stock >= 0" },
-                new FieldSchema { Name = "discount", Type = SchemaField.Integer, Nullable = true, CheckExpression = "discount <= 50" },
-                new FieldSchema { Name = "margin", Type = SchemaField.Decimal, Nullable = true, Precision = 10, Scale = 2, CheckExpression = "margin >= 0" },
-                new FieldSchema { Name = "sale_starts_at", Type = SchemaField.DateTime, Nullable = true },
-                new FieldSchema
-                {
-                    Name = "sale_ends_at", Type = SchemaField.DateTime, Nullable = true,
-                    CheckExpression = "sale_ends_at - sale_starts_at <= duration('2592000s')",
-                },
-                new FieldSchema
-                {
-                    Name = "stock_value", Type = SchemaField.Integer, Nullable = true,
-                    ComputedExpression = "stock + stock", CheckExpression = "stock_value <= 500",
-                },
-                new FieldSchema { Name = "temperature", Type = SchemaField.Integer, Nullable = true, CheckExpression = "temperature >= -40" },
-                new FieldSchema { Name = "rating", Type = SchemaField.Integer, Nullable = true, CheckExpression = "rating <= 5" },
-            ],
-        },
-    ]);
+    /// <summary>The suite's schema with every validation, <see cref="CheckSchemas.Validated"/>.</summary>
+    protected static SchemaModel Schema => CheckSchemas.Validated;
 }

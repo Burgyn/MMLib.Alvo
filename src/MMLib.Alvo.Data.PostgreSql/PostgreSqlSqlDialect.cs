@@ -138,6 +138,21 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
         };
     }
 
+    /// <summary>SQLSTATE 55P03 — <c>lock_not_available</c>, what a statement raises when <c>lock_timeout</c> runs out.</summary>
+    private const string LockNotAvailable = "55P03";
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <c>SET LOCAL</c>, so the bound ends with the apply's transaction and never leaks onto a pooled connection. Five
+    /// seconds is long enough for an ordinary request transaction ahead of the apply to finish and short enough that the
+    /// readers queued behind the apply's lock request stall at most that long (HX-11 Ruling 20).
+    /// </remarks>
+    string? IAlvoSqlDialect.ApplyLockTimeoutStatement => "SET LOCAL lock_timeout = '5s'";
+
+    /// <inheritdoc/>
+    /// <remarks>Decided from the SQLSTATE alone, like <see cref="DecodeConstraintViolation"/>.</remarks>
+    bool IAlvoSqlDialect.IsLockTimeout(DbException failure) => failure is PostgresException { SqlState: LockNotAvailable };
+
     /// <summary>
     /// <see langword="null"/> for an absent name, because <c>PostgresException</c> answers
     /// <see cref="string.Empty"/> rather than <see langword="null"/> when the server sent no constraint

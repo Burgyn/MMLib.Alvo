@@ -146,6 +146,9 @@ internal sealed class BootServiceWorld : IDisposable
     /// <summary>How many optimistic-lock losses the writer reports before the append is allowed to land.</summary>
     internal int ConflictsBeforeTheWriteLands { get; set; }
 
+    /// <summary>What the writer throws instead of applying, when a fact asked it to.</summary>
+    internal Exception? WriteFailure { get; set; }
+
     /// <summary>The configured startup mode, project and destructive allowance.</summary>
     internal AlvoSchemaOptions Options { get; } = new();
 
@@ -263,7 +266,7 @@ internal sealed class BootServiceWorld : IDisposable
 
     private ConflictingRuntimeSchemaWriter Writer() =>
         new ConflictingRuntimeSchemaWriter(
-            new InMemoryRuntimeSchemaWriter(_appends), ConflictsBeforeTheWriteLands);
+            new InMemoryRuntimeSchemaWriter(_appends), ConflictsBeforeTheWriteLands, WriteFailure);
 
     /// <summary>Runs the boot the way a host does, and hands back what it threw, if anything.</summary>
     internal async Task<Exception?> BootAsync()
@@ -370,7 +373,8 @@ internal sealed class BootServiceWorld : IDisposable
     /// </summary>
     /// <param name="inner">The writer the surviving attempt delegates to.</param>
     /// <param name="conflicts">How many attempts lose the race before one is allowed to win.</param>
-    private sealed class ConflictingRuntimeSchemaWriter(IRuntimeSchemaWriter inner, int conflicts)
+    /// <param name="failure">What every attempt throws instead, or <see langword="null"/>.</param>
+    private sealed class ConflictingRuntimeSchemaWriter(IRuntimeSchemaWriter inner, int conflicts, Exception? failure)
         : IRuntimeSchemaWriter
     {
         private int _attempts;
@@ -384,6 +388,10 @@ internal sealed class BootServiceWorld : IDisposable
             CancellationToken ct = default)
         {
             _attempts++;
+            if (failure is not null)
+            {
+                return Task.FromException<DescriptorVersion>(failure);
+            }
 
             return _attempts <= conflicts
                 ? Task.FromException<DescriptorVersion>(new DescriptorConcurrencyException(project, expectedRevision, expectedRevision + 1))

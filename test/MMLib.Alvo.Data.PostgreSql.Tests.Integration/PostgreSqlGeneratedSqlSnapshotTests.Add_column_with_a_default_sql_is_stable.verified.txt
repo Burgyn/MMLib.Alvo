@@ -1,4 +1,6 @@
-﻿ALTER TABLE vehicles ADD note character varying(80) DEFAULT 'o''; DROP TABLE vehicles; --';
+﻿SET LOCAL lock_timeout = '5s'
+;
+ALTER TABLE vehicles ADD note character varying(80) DEFAULT 'o''; DROP TABLE vehicles; --';
 
 ;
 ALTER TABLE vehicles ADD roadworthy boolean DEFAULT TRUE;

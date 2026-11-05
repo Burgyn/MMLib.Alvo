@@ -48,12 +48,27 @@ public sealed class SqliteCheckDdlTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Plans against a database that holds <paramref name="current"/> — planning counts the rows a new validation would
+    /// refuse, so it reads the table — and leaves the database empty again for the next fact.
+    /// </summary>
     private async Task VerifyPlanAsync(SchemaModel current, SchemaModel desired)
     {
-        var plan = await _services.GetRequiredService<ISchemaMigrator>()
-            .PlanAsync(current, desired, new MigrationOptions(), TestContext.Current.CancellationToken);
+        var empty = new SchemaModel([]);
+        await MigrateAsync(empty, current);
+        var plan = await Migrator.PlanAsync(current, desired, new MigrationOptions(), TestContext.Current.CancellationToken);
+        await MigrateAsync(current, empty);
         await Verify(string.Join("\n;\n", plan.Sql));
     }
+
+    private async Task MigrateAsync(SchemaModel from, SchemaModel to)
+    {
+        var options = new MigrationOptions { AllowDestructive = true };
+        var plan = await Migrator.PlanAsync(from, to, options, TestContext.Current.CancellationToken);
+        await Migrator.ApplyAsync(plan, options, TestContext.Current.CancellationToken);
+    }
+
+    private ISchemaMigrator Migrator => _services.GetRequiredService<ISchemaMigrator>();
 
     private static SchemaModel Products(bool validated) => new([
         new EntitySchema

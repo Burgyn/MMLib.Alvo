@@ -744,6 +744,10 @@ internal static partial class ManagementEndpoints
         {
             return ProblemResultFactory.PreconditionFailed(refusal.Message);
         }
+        catch (AlvoApplyLockTimeoutException)
+        {
+            return ProblemResultFactory.ManagementApplyLockTimeout();
+        }
         catch (Data.AlvoPreconditionFailedException refusal)
         {
             /* A user write that lost a race to another administrator's. The same exception the Data API

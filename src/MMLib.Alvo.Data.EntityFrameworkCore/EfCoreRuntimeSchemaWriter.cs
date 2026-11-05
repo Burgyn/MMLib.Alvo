@@ -39,6 +39,7 @@ internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposa
     private readonly RelationalConnectionFactory _connections;
     private readonly VersionRowWriter _rows;
     private readonly MigrationBatchFraming _framing;
+    private readonly IAlvoSqlDialect _dialect;
 
     public EfCoreRuntimeSchemaWriter(RelationalConnectionFactory connections, AlvoOptions options, IAlvoSqlDialect dialect)
     {
@@ -48,6 +49,7 @@ internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposa
         _connections = connections;
         _rows = new VersionRowWriter(connections, options);
         _framing = dialect.MigrationFraming;
+        _dialect = dialect;
     }
 
     /// <inheritdoc/>
@@ -92,6 +94,7 @@ internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposa
         DbConnection connection, DbTransaction transaction, string project, MigrationPlan plan,
         DescriptorVersion candidate, int expectedRevision, CancellationToken ct)
     {
+        await RelationalSqlBatch.ExecuteAsync(connection, LockTimeout, transaction, ct).ConfigureAwait(false);
         var current = await _rows.ReadCurrentRevisionAsync(connection, transaction, project, ct).ConfigureAwait(false);
         if (current != expectedRevision)
         {
@@ -110,12 +113,24 @@ internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposa
             await MigrationFramingScope.VerifyAsync(connection, transaction, _framing, plan, ct).ConfigureAwait(false);
             await transaction.CommitAsync(ct).ConfigureAwait(false);
         }
-        catch (DbException)
+        catch (DbException failure)
         {
             await _rows.ThrowIfConcurrencyConflictAsync(transaction, project, expectedRevision, ct).ConfigureAwait(false);
+            if (CheckApplyRefusal.Translate(failure, _dialect, candidate.Schema) is { } refused)
+            {
+                throw refused;
+            }
+
             throw;
         }
 
         return appended;
     }
+
+    /// <summary>
+    /// The dialect's lock-timeout bound, run before anything else in the transaction — the revision read and the version
+    /// row included — so no statement of the apply waits on a lock unbounded (HX-11 Ruling 20).
+    /// </summary>
+    private IReadOnlyList<string> LockTimeout =>
+        _dialect.ApplyLockTimeoutStatement is { } statement ? [statement] : [];
 }

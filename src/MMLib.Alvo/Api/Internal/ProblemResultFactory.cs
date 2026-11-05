@@ -293,6 +293,15 @@ internal static class ProblemResultFactory
         StatusCodes.Status409Conflict, AlvoProblemTypes.Conflict, detail);
 
     /// <summary>
+    /// The 409 for an apply that gave up waiting for a table lock and changed nothing, with the <c>Retry-After</c> the
+    /// apply's own bound suggests (HX-11 Ruling 20) — a retryable refusal, never the 500 of a broken invariant.
+    /// </summary>
+    internal static IResult ManagementApplyLockTimeout() => new AdvertisingResult(
+        Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.Conflict, Migrations.AlvoApplyLockTimeoutException.Refusal),
+        HeaderNames.RetryAfter,
+        Migrations.AlvoApplyLockTimeoutException.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    /// <summary>
     /// The 404 for a row that does not exist <em>or</em> that the caller's policy excludes — one
     /// wording and one type, because <c>IAlvoData</c>'s contract makes the two indistinguishable and the
     /// HTTP layer must not undo that.

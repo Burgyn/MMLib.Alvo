@@ -1,1 +1,3 @@
-﻿ALTER TABLE vehicles RENAME COLUMN colour TO color;
+﻿SET LOCAL lock_timeout = '5s'
+;
+ALTER TABLE vehicles RENAME COLUMN colour TO color;

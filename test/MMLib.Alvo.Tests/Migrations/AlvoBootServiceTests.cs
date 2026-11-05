@@ -338,6 +338,24 @@ public sealed class AlvoBootServiceTests
     }
 
     /// <summary>
+    /// An apply that gave up waiting for a table lock is a refused start naming that reason, recorded for a probe — never
+    /// an unexplained crash, and never retried as if another replica had won (HX-11 Ruling 20).
+    /// </summary>
+    [Fact]
+    public async Task An_apply_that_timed_out_on_a_table_lock_is_a_refused_start_naming_it()
+    {
+        using var world = new BootServiceWorld().BootingFrom(BootServiceWorld.City);
+        world.WriteFailure = new AlvoApplyLockTimeoutException();
+
+        var refusal = (await world.BootAsync()).ShouldBeOfType<AlvoStartupRefusedException>();
+
+        refusal.Message.ShouldContain(AlvoApplyLockTimeoutException.Refusal);
+        refusal.FixSuggestion.ShouldNotBeNullOrWhiteSpace();
+        world.State.Phase.ShouldBe(AlvoBootPhase.Failed);
+        world.State.Failure.ShouldNotBeNull().ShouldContain(AlvoApplyLockTimeoutException.Refusal);
+    }
+
+    /// <summary>
     /// A host that configured <b>both</b> a descriptor source and a project name is refused, because the two
     /// can disagree and picking one silently is how a deployment serves a project nobody chose.
     /// </summary>

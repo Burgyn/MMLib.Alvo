@@ -1,4 +1,6 @@
-﻿CREATE TABLE lines (
+﻿SET LOCAL lock_timeout = '5s'
+;
+CREATE TABLE lines (
     id uuid NOT NULL,
     amount bigint NOT NULL,
     total numeric(18,2) GENERATED ALWAYS AS (("unit_price" * "amount")) STORED,

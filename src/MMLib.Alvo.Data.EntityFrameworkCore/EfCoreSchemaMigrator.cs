@@ -4,9 +4,11 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
 using System.Data.Common;
+using System.Runtime.CompilerServices;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
@@ -45,6 +47,7 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
     private readonly IAlvoSqlDialect _dialect;
     private readonly ComputedColumnSql? _computed;
     private readonly CheckConstraintSql? _checks;
+    private readonly ConditionalWeakTable<MigrationPlan, SchemaModel> _plannedAgainst = [];
 
     /// <summary>
     /// Initializes a new migrator from a provider's EF Core services and a per-call connection factory.
@@ -94,19 +97,73 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
     }
 
     /// <inheritdoc/>
-    public Task<MigrationPlan> PlanAsync(SchemaModel current, SchemaModel desired, MigrationOptions options, CancellationToken ct = default)
+    /// <remarks>
+    /// <b>Planning reads the database when the plan adds a validation to a table that already holds rows</b>: each such
+    /// constraint is counted against the table (<see cref="CheckViolationScan"/>), and a positive count refuses the plan at
+    /// the validation's pointer, so a dry run reports it before anything is applied (HX-11 Rulings 22, 49).
+    /// </remarks>
+    public async Task<MigrationPlan> PlanAsync(SchemaModel current, SchemaModel desired, MigrationOptions options, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(current);
         ArgumentNullException.ThrowIfNull(desired);
         ct.ThrowIfCancellationRequested();
 
         var (prePass, desiredModel, residual) = ComputeResidualDiff(current, desired);
+        await RefuseRowsThatBreakNewChecksAsync(current, desired, prePass, residual, ct).ConfigureAwait(false);
         var operations = ForThisEngine(AssembleOperations(prePass, residual));
         var steps = BuildSemanticSteps(prePass, desired, residual);
         var sql = GenerateSql(operations, desiredModel);
 
-        return Task.FromResult(new MigrationPlan { Steps = steps, Sql = sql });
+        var plan = new MigrationPlan { Steps = steps, Sql = sql };
+        _plannedAgainst.AddOrUpdate(plan, desired);
+        return plan;
     }
+
+    private async Task RefuseRowsThatBreakNewChecksAsync(
+        SchemaModel current, SchemaModel desired, RenamePrePass.Result prePass, IReadOnlyList<MigrationOperation> residual,
+        CancellationToken ct)
+    {
+        var targets = _checks is null
+            ? []
+            : CheckViolationScan.Targets(current, desired, [.. prePass.Renames.Select(rename => rename.Operation)], residual, _checks);
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        var connection = _connections.Create();
+        await using (connection.ConfigureAwait(false))
+        {
+            await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
+            var errors = await BreakingRowsAsync(connection, targets, ct).ConfigureAwait(false);
+            if (errors.Count > 0)
+            {
+                throw new DescriptorValidationException(new DescriptorValidationResult(errors));
+            }
+        }
+    }
+
+    private static async Task<List<DescriptorValidationError>> BreakingRowsAsync(
+        DbConnection connection, IReadOnlyList<CheckViolationScan.Target> targets, CancellationToken ct)
+    {
+        var errors = new List<DescriptorValidationError>();
+        foreach (var target in targets)
+        {
+            var count = await CheckViolationScan.CountAsync(connection, target.Add.Table, target.Add.Sql, ct).ConfigureAwait(false);
+            if (count > 0)
+            {
+                errors.Add(BreakingRows(target, count));
+            }
+        }
+
+        return errors;
+    }
+
+    private static DescriptorValidationError BreakingRows(CheckViolationScan.Target target, long count) => new(
+        $"/entities/{target.Entity.Name}/fields/{target.Field.Name}/validation",
+        $"{count} row(s) of '{target.Entity.Name}' break this validation, so the CHECK constraint cannot be added. Nothing was applied.",
+        "Correct those rows first — or relax the expression — then apply again.",
+        DescriptorValidationSeverity.Error);
 
     // Pre-applies the descriptor's DECLARED renames to the current schema so the differ sees the
     // renamed members already aligned by name (no drop+add), diffs the aligned pair, then
@@ -190,10 +247,15 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
     // resolve interdependent operations correctly (e.g. a SQLite table rebuild triggered by a drop
     // excludes a not-yet-added column from its INSERT ... SELECT). Generating per operation would
     // emit SQL referencing columns that do not exist at that point.
+    // The dialect's lock-timeout statement leads, so it is the first statement of the apply's transaction on either executor
+    // and a dry run shows it (HX-11 Ruling 20).
     private IReadOnlyList<string> GenerateSql(List<MigrationOperation> operations, IModel desiredModel) =>
         operations.Count == 0
             ? []
-            : [.. _sqlGenerator.Generate(operations, desiredModel).Select(command => command.CommandText)];
+            : [.. LockTimeout, .. _sqlGenerator.Generate(operations, desiredModel).Select(command => command.CommandText)];
+
+    private IEnumerable<string> LockTimeout =>
+        _dialect.ApplyLockTimeoutStatement is { } statement ? [statement] : [];
 
     /// <inheritdoc/>
     public async Task<MigrationResult> ApplyAsync(MigrationPlan plan, MigrationOptions options, CancellationToken ct = default)
@@ -219,14 +281,36 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
         // concurrent ApplyAsync calls never race on a shared connection. The open->begin->execute
         // -each->commit sequence lives in the shared RelationalSqlBatch, which both this migrator
         // and the atomic runtime writer reuse (an uncommitted transaction rolls back on disposal).
-        var connection = _connections.Create();
-        await using (connection.ConfigureAwait(false))
-        {
-            await ExecuteFramedAsync(connection, plan, ct).ConfigureAwait(false);
-        }
-
+        await ExecuteTranslatedAsync(plan, ct).ConfigureAwait(false);
         return new MigrationResult(true, plan, false);
     }
+
+    /// <summary>
+    /// Runs the plan on its own connection, answering a refusal the engine raised the way the runtime writer does
+    /// (<see cref="CheckApplyRefusal"/>), with the pointer resolved from the schema the plan was made for.
+    /// </summary>
+    /// <remarks>
+    /// A plan this migrator did not make — or a copy of one — carries no schema, so a refused validation is then reported
+    /// at the document's root rather than guessed at.
+    /// </remarks>
+    private async Task ExecuteTranslatedAsync(MigrationPlan plan, CancellationToken ct)
+    {
+        try
+        {
+            var connection = _connections.Create();
+            await using (connection.ConfigureAwait(false))
+            {
+                await ExecuteFramedAsync(connection, plan, ct).ConfigureAwait(false);
+            }
+        }
+        catch (Exception failure) when (CheckApplyRefusal.Translate(failure, _dialect, PlannedAgainst(plan)) is { } refused)
+        {
+            throw refused;
+        }
+    }
+
+    private SchemaModel PlannedAgainst(MigrationPlan plan) =>
+        _plannedAgainst.TryGetValue(plan, out var desired) ? desired : new SchemaModel([]);
 
     /// <summary>
     /// Runs the plan's SQL in one transaction, framed by the statements this engine only honours
