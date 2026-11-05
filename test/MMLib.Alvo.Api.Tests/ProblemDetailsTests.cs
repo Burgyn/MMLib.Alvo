@@ -740,7 +740,7 @@ public sealed class ProblemDetailsTests
     public void A_rejection_host_code_constructed_itself_is_no_port_refusal_so_it_stays_a_500()
     {
         ProblemResultFactory.PortRefusalFor(new AlvoWriteRejectedException("thrown by a command handler")).ShouldBeNull();
-        ProblemResultFactory.RefusalFor(new AlvoWriteRejectedException()).ShouldBeNull();
+        ProblemResultFactory.RefusalFor(new AlvoWriteRejectedException(), sent: null).ShouldBeNull();
         Should.Throw<AlvoWriteRejectedException>(() => Guarded(new AlvoWriteRejectedException("thrown by a command handler")));
     }
 

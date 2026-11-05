@@ -33,8 +33,14 @@ internal sealed class CallerSentFields(IReadOnlySet<string> names)
         HashSet<string>? common = null;
         foreach (var row in rows)
         {
-            common ??= row.ToHashSet(StringComparer.Ordinal);
-            common.IntersectWith(row);
+            if (common is null)
+            {
+                common = row.ToHashSet(StringComparer.Ordinal);
+            }
+            else
+            {
+                common.IntersectWith(row);
+            }
         }
 
         if (common is not null)

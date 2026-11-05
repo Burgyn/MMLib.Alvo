@@ -183,10 +183,16 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
         leaf is CelFunctionException { OnCallerData: true, ReadFields: { Count: > 0 } read } && read.IsSubsetOf(sent);
 
     /// <summary>What <paramref name="exception"/> comes down to: a function failure, or anything that wraps nothing more.</summary>
-    private static IEnumerable<Exception> Leaves(Exception exception, int depth) =>
-        exception is CelFunctionException || depth <= 0 || !Children(exception).Any()
-            ? [exception]
-            : Children(exception).SelectMany(child => Leaves(child, depth - 1));
+    private static IEnumerable<Exception> Leaves(Exception exception, int depth)
+    {
+        if (exception is CelFunctionException || depth <= 0)
+        {
+            return [exception];
+        }
+
+        var children = Children(exception).ToList();
+        return children.Count == 0 ? [exception] : children.SelectMany(child => Leaves(child, depth - 1));
+    }
 
     /// <summary>What <paramref name="exception"/> wraps: every member of an aggregate, otherwise its inner exception.</summary>
     /// <param name="exception">The wrapper.</param>

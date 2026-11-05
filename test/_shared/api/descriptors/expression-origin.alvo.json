@@ -2,7 +2,7 @@
   "$schema": "https://alvo.dev/schema/v1/project.json",
   "apiVersion": "alvo.dev/v1",
   "name": "expression-origin",
-  "description": "One entity whose update and delete conditions refuse values the request may not have sent: only a refusal of a field the body carried is the caller's 422 expression-failed; the stored row, a literal, @user and a delete are 500 function-failed on every engine (HX-10 Ruling 44).",
+  "description": "One entity whose update and delete conditions refuse values the request may not have sent: only a refusal of a field the body carried is the caller's 422 expression-failed; the stored row, a default, a literal, @user and a delete are 500 function-failed on every engine (HX-10 Ruling 44).",
   "auth": { "providers": ["local"], "roles": ["writer"] },
   "access": { "viewer": "'writer' in @user.roles" },
   "entities": {
@@ -11,10 +11,14 @@
       "fields": {
         "code": { "type": "string", "maxLength": 20 },
         "weight_text": { "type": "string", "maxLength": 20 },
-        "note": { "type": "string", "maxLength": 200 }
+        "note": { "type": "string", "maxLength": 200 },
+        "label_text": { "type": "string", "maxLength": 20, "default": "x" }
       },
       "rules": { "list": "true", "get": "true", "create": "true", "update": "true", "delete": "true" },
       "hooks": {
+        "beforeCreate": [
+          { "condition": "new.code == 'defaulted' && int(new.label_text) > 9999", "action": { "reject": "Never." } }
+        ],
         "beforeUpdate": [
           { "condition": "int(new.weight_text) > 9999", "action": { "reject": "A parcel weighs at most 9999 g." } },
           { "condition": "new.note == 'literal' && int(substring('xy', 0, 1)) > 1", "action": { "reject": "Never." } },

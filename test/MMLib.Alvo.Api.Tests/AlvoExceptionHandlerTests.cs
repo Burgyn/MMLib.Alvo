@@ -225,6 +225,20 @@ public class AlvoExceptionHandlerTests
         logs.Records.ShouldNotContain(LogLevel.Error);
     }
 
+    /// <summary>A batch records the fields every row carried, and a batch with no rows records nothing (Ruling 44).</summary>
+    [Fact]
+    public void A_batch_records_the_fields_common_to_its_rows()
+    {
+        var context = new DefaultHttpContext();
+        var empty = new DefaultHttpContext();
+
+        CallerSentFields.RecordCommon(context, [["a", "b"], ["b", "c"], ["b"]]);
+        CallerSentFields.RecordCommon(empty, []);
+
+        CallerSentFields.Of(context).ShouldBe(["b"], ignoreOrder: true);
+        CallerSentFields.Of(empty).ShouldBeNull();
+    }
+
     /// <summary>
     /// The same refusal on a request whose body did not carry the field it read — or that had no body, a delete — refused
     /// the stored row or a default, not the caller's data: 500 <c>function-failed</c>, logged (Ruling 44).

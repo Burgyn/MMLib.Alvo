@@ -85,6 +85,54 @@ public abstract partial class DataApiEngineTests
         await ShouldBeAsync(unsent, HttpStatusCode.InternalServerError, "function-failed");
     }
 
+    /// <summary>
+    /// Two rows that each send one field: the refusal of the stored weight is the caller's only if every row sent the
+    /// weight, so the batch is 500 in either order and writes neither row. A union of the rows' fields, the first row's or
+    /// the last row's would each answer 422 in at least one of the orders (Ruling 44, Task 4 review I1).
+    /// </summary>
+    /// <param name="weightFirst">Whether the row that sends the weight comes first.</param>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_batch_whose_rows_sent_different_fields_is_judged_by_the_fields_every_row_sent_on_every_engine(bool weightFirst)
+    {
+        await using var world = await StartExpressionOriginAsync();
+        var weighed = await CreateParcelAsync(world, weight: "x");
+        var noted = await CreateParcelAsync(world, weight: "x");
+        var weightRow = new JsonObject { ["id"] = weighed, ["weight_text"] = "y" };
+        var noteRow = new JsonObject { ["id"] = noted, ["note"] = "n" };
+        var rows = weightFirst ? new JsonArray(weightRow, noteRow) : new JsonArray(noteRow, weightRow);
+
+        using var refused = await world.SendAsync(HttpMethod.Patch, "/api/parcels/batch", _parcelsWriter, body: new JsonObject { ["rows"] = rows });
+
+        await ShouldBeAsync(refused, HttpStatusCode.InternalServerError, "function-failed");
+        foreach (var id in new[] { weighed, noted })
+        {
+            var parcel = await ParcelAsync(world, id);
+            parcel["weight_text"]!.GetValue<string>().ShouldBe("x");
+            parcel["note"].ShouldBeNull();
+        }
+    }
+
+    /// <summary>
+    /// The create omits the label, so <c>new.label_text</c> reads the descriptor's default — the author's value, not the
+    /// caller's: 500 <c>function-failed</c>, and no row; the same label sent is 422 (Ruling 44, Task 4 review m1).
+    /// </summary>
+    [Fact]
+    public async Task A_create_refusing_a_default_it_did_not_send_is_500_function_failed_on_every_engine()
+    {
+        await using var world = await StartExpressionOriginAsync();
+
+        using var refused = await world.SendAsync(HttpMethod.Post, "/api/parcels", _parcelsWriter, body: new JsonObject { ["code"] = "defaulted", ["weight_text"] = "12" });
+
+        using var sent = await world.SendAsync(
+            HttpMethod.Post, "/api/parcels", _parcelsWriter, body: new JsonObject { ["code"] = "defaulted", ["weight_text"] = "12", ["label_text"] = "x" });
+
+        await ShouldBeAsync(refused, HttpStatusCode.InternalServerError, "function-failed");
+        await ShouldBeAsync(sent, HttpStatusCode.UnprocessableEntity, "expression-failed");
+        (await world.CountRowsAsync("parcels")).ShouldBe(0);
+    }
+
     private Task<AlvoApiWorld> StartExpressionOriginAsync() =>
         AlvoApiWorld.FromDescriptorAsync("expression-origin.alvo.json", [_parcelsWriter], new AlvoApiWorldSetup(MapAlvoProblemDetails: true), Engine);
 

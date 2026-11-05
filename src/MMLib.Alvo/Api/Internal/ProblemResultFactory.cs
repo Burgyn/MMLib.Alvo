@@ -585,7 +585,7 @@ internal static class ProblemResultFactory
     /// </remarks>
     /// <param name="exception">What the port threw.</param>
     /// <param name="sent">The fields the request's body carried, or <see langword="null"/> when it carried none.</param>
-    internal static IResult? RefusalFor(Exception exception, IReadOnlySet<string>? sent = null) =>
+    internal static IResult? RefusalFor(Exception exception, IReadOnlySet<string>? sent) =>
         PortRefusalFor(exception)
         ?? (AlvoExceptionHandler.CallerDataFailure(exception, sent) is { } refused
             ? ExpressionFailed(AlvoExceptionHandler.ExpressionFailedDetail(refused))
