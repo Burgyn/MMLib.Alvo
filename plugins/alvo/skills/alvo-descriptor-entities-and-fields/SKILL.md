@@ -27,9 +27,10 @@ built-in auth entity (a `ref` may still point at it):
 `order` `limit` `offset` `after` `select` `or` `and` `not`
 <!-- /gen:reserved-fields -->
 
-The schema declares every key above, and this build refuses one of them outright: a field's `validation` is not
-evaluated yet, so it is refused at apply rather than accepted as a constraint that holds nothing. Express the rule
-with a facet the API does check (`maxLength`, `precision` and `scale`, enum `values`, a `format`) or a before-hook.
+A field's `validation` is a CEL condition over its own row that the database enforces as a `CHECK` constraint:
+`value` is the field, other fields by name (`"validation": "value <= stock"`). An empty field passes its own
+validation — use `required` for presence. It reads no caller and no `now()`; adding one is refused at apply if
+existing rows break it, with their count.
 Types and facets are in `alvo-descriptor-field-types-and-formats`; `computed` and `rollup` have their own skill.
 
 - `required` makes the field NOT NULL; `nullable` is derived from it and is rarely written.
@@ -88,20 +89,18 @@ The same holds for an entity: `move` it under `/entities` and set its `renamedFr
 ```
 
 A `remove` of a field or an entity drops its data. Such a plan is destructive, and only the operator can allow it:
-say first what data it loses. `validation` is refused the same way whatever its expression:
+say first what data it loses.
 
-<!-- example: validation-refused -->
-**A field's `validation` is refused.**
+<!-- example: validation-accepted -->
+**A technician's hourly rate is never negative.**
 
 ```json
 {"tool": "check_change", "baseRevision": 1,
- "operations": [{"op": "add", "path": "/entities/technicians/fields/hourly_rate/validation", "value": "value > 0"}]}
+ "operations": [{"op": "add", "path": "/entities/technicians/fields/hourly_rate/validation", "value": "value >= 0"}]}
 ```
 
 ```json
-{"valid": false, "changedPaths": ["/entities/technicians/fields/hourly_rate/validation"],
- "violations": [{"pointer": "/entities/technicians/fields/hourly_rate/validation",
-                 "message": "is not evaluated yet", "severity": "error"}]}
+{"valid": true, "changedPaths": ["/entities/technicians/fields/hourly_rate/validation"]}
 ```
 
 In the dashboard: read with `get_descriptor`, then `check_change` or `propose_change` the operations.

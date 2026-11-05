@@ -333,8 +333,10 @@ public class DescriptorValidatorTests
     };
 
     /// <summary>
-    /// A field declaring two of them reports <b>both</b>, not the first — the same every-violation promise
-    /// the Data API keeps, one layer down.
+    /// A field declaring two refusals the mapper would throw for reports <b>both</b>, not the first — the same
+    /// every-violation promise the Data API keeps, one layer down. Since HX-11 honours <c>validation</c>, the second
+    /// refusal is a validation the mapper cannot rewrite (<c>old.</c>, which a <c>CHECK</c> never sees) beside the
+    /// unhonoured <c>$cel</c> default.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -358,7 +360,7 @@ public class DescriptorValidatorTests
           "entities": { "invoices": { "fields": {
             "amount": {
               "type": "decimal", "precision": 18, "scale": 2,
-              "validation": "value >= 0", "default": { "$cel": "now()" } } } } } }
+              "validation": "old.amount >= 0", "default": { "$cel": "now()" } } } } } }
         """;
 
         var reported = _validator.Validate(json).Errors.Select(error => error.Path).ToList();

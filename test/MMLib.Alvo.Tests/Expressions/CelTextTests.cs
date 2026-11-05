@@ -96,8 +96,8 @@ public sealed class CelTextTests
         CelText.Write(new CelLiteral(CelValueType.Decimal, 10m)).ShouldBe("10.0");
 
     [Fact]
-    public void The_smallest_long_has_no_spelling() =>
-        Should.Throw<ArgumentOutOfRangeException>(() => CelText.Write(new CelLiteral(CelValueType.Int, long.MinValue)));
+    public void The_smallest_long_is_spelled_as_the_one_literal_the_parser_reads_back() =>
+        CelParser.Parse(CelText.Write(new CelLiteral(CelValueType.Int, long.MinValue))).ShouldBe(new CelLiteral(CelValueType.Int, long.MinValue));
 
     [Fact]
     public void A_literal_the_lexer_has_no_spelling_for_is_refused() =>

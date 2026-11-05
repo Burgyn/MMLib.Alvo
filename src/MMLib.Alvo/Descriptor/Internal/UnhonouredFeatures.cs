@@ -36,8 +36,9 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// refusal with no alternative sends an agent hunting for a flag to flip.
 /// </para>
 /// <para>
-/// Entries leave as features land, and five already have: PR5a removed the three <c>after*</c> hook points it
-/// implements, and PR6 removed <c>computed</c> and <c>rollup</c>. PR5b owns the three <c>before*</c> ones,
+/// Entries leave as features land, and six already have: PR5a removed the three <c>after*</c> hook points it
+/// implements, PR6 removed <c>computed</c> and <c>rollup</c>, and HX-11 removed <c>validation</c>, now a <c>CHECK</c>
+/// constraint (<see cref="FieldValidation"/>). PR5b owns the three <c>before*</c> ones,
 /// <c>default</c> is still unowned, and soft delete leaves with its own implementation. Shrinking this table is
 /// the whole of "implementing" one of them from this layer's point of view — and note that <c>computed</c> and
 /// <c>rollup</c> did not leave as a bare deletion: their refusals were <em>replaced</em> by
@@ -53,13 +54,6 @@ internal static class UnhonouredFeatures
     /// </summary>
     internal static IReadOnlyList<UnhonouredFeature<FieldDescriptor>> OnAField { get; } =
     [
-        new(
-            "validation",
-            field => field.Validation is not null,
-            "Field 'validation' is not evaluated yet, so a value the expression forbids is accepted — the "
-            + "field is not constrained at all.",
-            "Remove 'validation'. Enforce the rule in a before-hook once #22 lands, or express it with a facet "
-            + "the API does validate — 'maxLength', 'precision'/'scale', enum 'values' or a 'format'."),
         new(
             "default",
             field => field.Default is { IsExpression: true },

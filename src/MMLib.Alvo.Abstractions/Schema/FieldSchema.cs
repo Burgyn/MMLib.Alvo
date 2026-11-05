@@ -128,6 +128,17 @@ public sealed record FieldSchema
     public string? ComputedExpression { get; init; }
 
     /// <summary>
+    /// Gets the field's <c>validation</c>, as a CEL predicate over the row that a provider enforces as a <c>CHECK</c>
+    /// constraint — the declaring field's own empty value passes it; <see langword="null"/> when the field declares none.
+    /// </summary>
+    /// <remarks>
+    /// <b>Canonical CEL over the row, never SQL.</b> The descriptor's <c>value</c> and <c>new.</c> spellings are already
+    /// rewritten to the row's own field names, so a provider compiles it against the entity like any other rule and
+    /// renders it per engine — the same reason <see cref="ComputedExpression"/> carries CEL rather than a dialect's text.
+    /// </remarks>
+    public string? CheckExpression { get; init; }
+
+    /// <summary>
     /// Gets the aggregate over a child entity's records this field holds, or <see langword="null"/> when the
     /// field is not a rollup.
     /// </summary>

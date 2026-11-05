@@ -36,6 +36,7 @@ internal static class DescriptorToSchemaMapper
         bool tenancyEnabled = d.Tenancy?.Enabled == true;
         var formats = DeclaredFormats(d);
         EnsureNoWildcardSubscription(d);
+        EnsureNoValidationOnADynamicEntity(d);
 
         // Built once, from the WHOLE descriptor: resolving a rollup's foreign key needs the CHILD entity's
         // fields, which the per-entity pass below cannot see. See RollupResolver's own remarks for why the
@@ -86,6 +87,30 @@ internal static class DescriptorToSchemaMapper
         foreach (var (name, function) in d.Functions ?? Empty<FunctionDescriptor>.Map)
         {
             RefuseWildcard($"Function '{name}'", function?.Trigger?.Event);
+        }
+    }
+
+    /// <summary>
+    /// Refuses, at apply, a <c>validation</c> on a <c>storage: dynamic</c> entity — before the physical filter drops the
+    /// entity and the declaration with it (HX-11 Ruling 30).
+    /// </summary>
+    /// <remarks>
+    /// A validation becomes a database <c>CHECK</c> constraint, and a dynamic entity has no table to hold one. Silently
+    /// dropping it would leave the field unconstrained; the validator reports the same refusal at its pointer.
+    /// </remarks>
+    /// <param name="d">The parsed descriptor.</param>
+    /// <exception cref="InvalidDataException">A dynamic entity's field declares a validation.</exception>
+    private static void EnsureNoValidationOnADynamicEntity(AlvoDescriptor d)
+    {
+        var declared = d.Entities
+            .Where(entity => !IsPhysical(entity.Value))
+            .SelectMany(entity => entity.Value.Fields
+                .Where(field => field.Value.Validation is not null)
+                .Select(field => (Entity: entity.Key, Field: field.Key)))
+            .FirstOrDefault();
+        if (declared.Entity is not null)
+        {
+            throw new InvalidDataException(FieldValidation.DynamicMessage(declared.Entity, declared.Field));
         }
     }
 
@@ -417,6 +442,9 @@ internal static class DescriptorToSchemaMapper
             // so the translation to a generated column's DDL happens per driver when the migration model is
             // built. See FieldSchema.ComputedExpression.
             ComputedExpression = f.Computed,
+            CheckExpression = f.Validation is { } validation
+                ? FieldValidation.Canonical(entity, name, validation, [.. declaring.Fields.Keys])
+                : null,
             Rollup = rollups.Resolve(entity, declaring, name, f),
 
             // The literal as declared. See FieldSchema.Default for why it is not converted here, and

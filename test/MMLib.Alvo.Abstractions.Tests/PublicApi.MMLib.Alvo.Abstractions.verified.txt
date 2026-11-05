@@ -2150,6 +2150,7 @@ namespace MMLib.Alvo.Schema
     public sealed class FieldSchema : System.IEquatable<MMLib.Alvo.Schema.FieldSchema>
     {
         public FieldSchema() { }
+        public string? CheckExpression { get; init; }
         public string? ComputedExpression { get; init; }
         public System.Text.Json.JsonElement? Default { get; init; }
         public string? Description { get; init; }

@@ -25,7 +25,9 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// A literal is spelled by its type and value together — a String holding a string, an Int holding a long, a Decimal
 /// holding a decimal, a Bool holding a bool — and any other pairing is refused. CEL has no negative number token: a
 /// negative literal is written <c>-n</c> and reads back as <c>CelUnary(Negate, n)</c>, the same meaning in a different
-/// shape. A translator should therefore emit a negation over a non-negative literal, or accept that shape back.
+/// shape. A translator should therefore emit a negation over a non-negative literal, or accept that shape back. The one
+/// exception is <see cref="long.MinValue"/>, written <c>-9223372036854775808</c>, which the parser reads back as that one
+/// literal because its magnitude alone is not an Int (HX-11 Ruling 16).
 /// </para>
 /// </remarks>
 internal static class CelText
@@ -44,7 +46,6 @@ internal static class CelText
     /// <param name="node">A tree of literals, field and context references, operators, <c>has</c>, <c>changed</c> and calls.</param>
     /// <returns>The text <see cref="CelParser"/> reads back as the same tree.</returns>
     /// <exception cref="ArgumentException">The tree holds a name, a literal or a node kind with no canonical spelling.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">The tree holds <see cref="long.MinValue"/>.</exception>
     internal static string Write(CelNode node)
     {
         ArgumentNullException.ThrowIfNull(node);
@@ -172,7 +173,6 @@ internal static class CelText
     {
         (CelValueType.String, string text) => StringLiteral(text),
         (CelValueType.Bool, bool flag) => flag ? "true" : "false",
-        (CelValueType.Int, long.MinValue) => throw new ArgumentOutOfRangeException(nameof(literal), "long.MinValue has no CEL spelling: its magnitude is not an Int."),
         (CelValueType.Int, long number) => number.ToString(CultureInfo.InvariantCulture),
         (CelValueType.Decimal, decimal number) => DecimalText(number),
         (CelValueType.Duration, TimeSpan span) => $"{CelBuiltInFunctions.DurationName}({StringLiteral(CelDuration.Text(span))})",

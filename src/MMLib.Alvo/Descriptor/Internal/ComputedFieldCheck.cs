@@ -133,32 +133,4 @@ internal static class ComputedFieldCheck
     private static DescriptorValidationError Refusal(
         EntitySchema entity, FieldSchema field, string message, string fix) =>
         new($"/entities/{entity.Name}/fields/{field.Name}/computed", message, fix, DescriptorValidationSeverity.Error);
-
-    /// <summary>
-    /// A field renderer that spells nothing a dialect would: the pass asks whether the expression renders and what it
-    /// binds, never what the SQL text is, so a driver's quoting and casting are not its business.
-    /// </summary>
-    private sealed class NeutralFields : IFieldSqlRenderer
-    {
-        public static NeutralFields Instance { get; } = new();
-
-        public string TrueLiteral => "TRUE";
-
-        public string FalseLiteral => "FALSE";
-
-        public string RenderField(EntitySchema entity, string fieldName) => fieldName;
-
-        public string RenderParameter(string parameterName) => parameterName;
-
-        public string RenderCaseInsensitiveLike(string left, string right) => $"{left} LIKE {right}";
-
-        /// <summary>
-        /// Answers every text constant, as every shipped dialect does for the text the compiler admits — so the pass
-        /// refuses what a constant <em>means</em> in a column (see <see cref="ComputedValueShape"/>), never how a
-        /// dialect would quote it.
-        /// </summary>
-        public string? RenderStringLiteral(string value) => "'…'";
-
-        public string RenderStringConcatenation(string left, string right) => $"({left} || {right})";
-    }
 }
