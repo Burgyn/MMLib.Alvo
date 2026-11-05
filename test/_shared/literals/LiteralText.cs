@@ -30,9 +30,47 @@ internal static class LiteralText
         Gen.Char['\uE000', '\uFFFF'].Select(character => character.ToString()),
         Gen.Int[0x10000, 0x10FFFF].Select(char.ConvertFromUtf32));
 
+    private static readonly Gen<string> _sqlSyntax = Gen.OneOfConst(
+        "'", "''", "\\", "\\'", "\\\\", "E'", "e'", "N'", "U&'", "$", "$$", "$x$", "--", "/*", "*/", ";", "(", ")", "\"", " ",
+        "DROP TABLE sentinel", "'); DROP TABLE sentinel; --");
+
+    private static readonly Gen<string> _acceptedPiece = Gen.Frequency(
+        (6, _sqlSyntax),
+        (2, Gen.Char.Where(character => !MustBeDeclined(character.ToString())).Select(character => character.ToString())),
+        (1, Gen.OneOfConst("ž", "中", "é")),
+        (1, Gen.Int[0x10000, 0x10FFFF].Select(char.ConvertFromUtf32)));
+
+    private static readonly Gen<string> _declinedPiece = Gen.OneOf(
+        Gen.Const("\0"),
+        Gen.Char['\u0001', '\u001F'].Select(character => character.ToString()),
+        Gen.Char['\u007F', '\u009F'].Select(character => character.ToString()),
+        Gen.OneOfConst("\u2028", "\u2029"),
+        Gen.Char['\uD800', '\uDBFF'].Select(character => character.ToString()),
+        Gen.Char['\uDC00', '\uDFFF'].Select(character => character.ToString()));
+
     /// <summary>Strings of up to <paramref name="maxPieces"/> pieces from the whole space.</summary>
     public static Gen<string> Any(int maxPieces = 24) =>
         _piece.Array[0, maxPieces].Select(pieces => string.Concat(pieces));
+
+    /// <summary>
+    /// Text aimed at a SQL literal: two draws in three only from pieces a literal must carry — weighted toward the quote,
+    /// the backslash, <c>$</c>, the comment openers and a payload naming the sentinel table — and one in three the same
+    /// with exactly one piece a literal must decline (NUL, a C0 or C1 control, U+2028/U+2029, a lone surrogate) inserted at
+    /// a drawn position.
+    /// </summary>
+    /// <remarks>
+    /// Built for a property that judges both branches, so nothing is filtered away: a filter over <see cref="Any"/> keeps a
+    /// draw of <c>n</c> pieces with probability about <c>0.65^n</c> and shrinks the accepted samples toward the empty string.
+    /// </remarks>
+    public static Gen<string> Hostile(int maxPieces = 24) =>
+        Gen.Frequency((2, Accepted(maxPieces)), (1, DeclinedOnce(maxPieces)));
+
+    private static Gen<string> Accepted(int maxPieces) =>
+        _acceptedPiece.Array[0, maxPieces].Select(pieces => string.Concat(pieces));
+
+    private static Gen<string> DeclinedOnce(int maxPieces) =>
+        Gen.Select(_acceptedPiece.Array[0, maxPieces - 1], _declinedPiece, Gen.Int[0, maxPieces - 1], (pieces, declined, at) =>
+            string.Concat(pieces.Take(at % (pieces.Length + 1)).Append(declined).Concat(pieces.Skip(at % (pieces.Length + 1)))));
 
     /// <summary>
     /// Whether a literal must decline <paramref name="value"/>: a control character, a line or paragraph separator

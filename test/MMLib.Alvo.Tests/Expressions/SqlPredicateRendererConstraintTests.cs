@@ -39,6 +39,25 @@ public sealed class SqlPredicateRendererConstraintTests
         Should.Throw<NotSupportedException>(() => Constraint("created_at + duration('1h') <= now()")).Message.ShouldContain("now()");
     }
 
+    /// <summary>
+    /// Ruling 59: a constant duration fold outside CEL's range refuses the constraint rather than writing one that refuses
+    /// every row. The compiler refuses such a constant first, so the tree is built past it.
+    /// </summary>
+    [Fact]
+    public void A_constant_duration_fold_outside_the_range_refuses_the_constraint()
+    {
+        var limit = new CelLiteral(CelValueType.Duration, CelDuration.MaxMagnitude);
+        var elapsed = new CelBinary(
+            CelBinaryOperator.Subtract,
+            new CelFieldRef("approved_at", CelValueType.Timestamp, CelRecordState.Current),
+            new CelFieldRef("created_at", CelValueType.Timestamp, CelRecordState.Current));
+        var root = new CelBinary(CelBinaryOperator.LessOrEqual, elapsed, new CelBinary(CelBinaryOperator.Add, limit, limit));
+        var expression = new CompiledExpression(root, CelProfile.Rule, CelValueType.Bool, "elapsed <= max + max", CelFixtures.Orders);
+
+        Should.Throw<NotSupportedException>(() => _renderer.RenderConstraint(expression, EpochFields.Instance))
+            .Message.ShouldContain(CelTemporal.DurationRange);
+    }
+
     [Fact]
     public void Only_a_rule_renders_as_a_constraint() =>
         Should.Throw<InvalidOperationException>(() => _renderer.RenderConstraint(CelFixtures.CompileCondition("new.total >= 0"), EpochFields.Instance));
