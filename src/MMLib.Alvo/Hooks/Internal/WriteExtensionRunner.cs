@@ -16,13 +16,13 @@ namespace MMLib.Alvo.Hooks.Internal;
 /// that has already poisoned the unit on the flow.
 /// </summary>
 /// <remarks>
-/// <b>Nothing it holds reaches the network:</b> its own dependencies are the catalog, the binder, the clock, a logger and the
-/// root provider it resolves the session factory, the delivery store and the rejection log from — the architecture fact over
-/// <c>WriteExtensionRunner</c>'s constructor (§4.4.5) pins that list.
+/// <b>Nothing it holds reaches the network:</b> its own dependencies are the catalog, the binder, the clock, the host-function
+/// budget, a logger and the root provider it resolves the session factory, the delivery store and the rejection log from — the
+/// architecture fact over <c>WriteExtensionRunner</c>'s constructor (§4.4.5) pins that list.
 /// </remarks>
 internal sealed class WriteExtensionRunner(
     ExtensionRegistry registry, ExtensionBinder binder, IPolicyCatalogProvider catalogs, IServiceProvider services, TimeProvider time,
-    ILogger<WriteExtensionRunner> logger) : IWriteExtensionRunner
+    CelFunctionBudgetPolicy budget, ILogger<WriteExtensionRunner> logger) : IWriteExtensionRunner
 {
     private static readonly IReadOnlyDictionary<string, object?> _none = new Dictionary<string, object?>(StringComparer.Ordinal);
 
@@ -43,7 +43,7 @@ internal sealed class WriteExtensionRunner(
         var disabled = await DisabledAsync(cancellationToken).ConfigureAwait(false);
         await using var scope = services.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
         var scoped = invocation with { Services = scope.ServiceProvider };
-        foreach (var hook in hooks.Where(hook => !disabled.Contains(hook.Id) && Fires(hook, scoped, WriteHookStage.Validate)))
+        foreach (var hook in hooks.Where(hook => !disabled.Contains(hook.Id) && Fires(hook, scoped, WriteHookStage.Validate, cancellationToken)))
         {
             await RunAsync(hook, scoped, WriteHookStage.Validate, catalog, cancellationToken).ConfigureAwait(false);
         }
@@ -58,7 +58,7 @@ internal sealed class WriteExtensionRunner(
         var catalog = catalogs.Current;
         foreach (var hook in Selected(invocation, stage, catalog))
         {
-            if (!Fires(hook, current, stage))
+            if (!Fires(hook, current, stage, cancellationToken))
             {
                 continue;
             }
@@ -81,7 +81,7 @@ internal sealed class WriteExtensionRunner(
         var stage = invocation.Operation == AlvoWriteOperation.Delete ? WriteHookStage.AfterDelete : WriteHookStage.AfterWrite;
         string? writer = null;
         var catalog = catalogs.Current;
-        foreach (var hook in Selected(invocation, stage, catalog).Where(hook => Fires(hook, invocation, stage)))
+        foreach (var hook in Selected(invocation, stage, catalog).Where(hook => Fires(hook, invocation, stage, cancellationToken)))
         {
             writer = (await RunAsync(hook, invocation, stage, catalog, cancellationToken).ConfigureAwait(false)).Wrote ? hook.Id : writer;
         }
@@ -117,9 +117,10 @@ internal sealed class WriteExtensionRunner(
 
     /// <summary>
     /// Whether <paramref name="hook"/>'s <c>when</c> holds. A host function failing in it is the hook's failure, never a skip;
-    /// a built-in failing on the caller's data escapes unchanged, answered as any condition's built-in failure (Ruling 63).
+    /// a built-in failing on the caller's data escapes unchanged, answered as any condition's built-in failure (Ruling 63). The
+    /// <c>when</c> is one host-function budget pass, linked with the write's token; past the budget it is the hook's failure.
     /// </summary>
-    private bool Fires(BoundWriteHook hook, WriteInvocation invocation, WriteHookStage stage)
+    private bool Fires(BoundWriteHook hook, WriteInvocation invocation, WriteHookStage stage, CancellationToken cancellationToken)
     {
         if (hook.ConditionFor(invocation.Entity) is not { } condition)
         {
@@ -128,6 +129,7 @@ internal sealed class WriteExtensionRunner(
 
         try
         {
+            using var pass = budget.Enter(cancellationToken);
             return CelInterpreter.EvaluatePredicate(condition, Current(invocation, stage), invocation.Old, invocation.Caller);
         }
         catch (Exception thrown) when (thrown is not CelFunctionException { IsHost: false })

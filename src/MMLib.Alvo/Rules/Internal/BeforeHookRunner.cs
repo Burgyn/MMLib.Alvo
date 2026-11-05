@@ -37,6 +37,9 @@ namespace MMLib.Alvo.Rules.Internal;
 /// catalog is unprimed — so an unprimed catalog here is unreachable on the write path, and answering with an
 /// empty patch keeps this type from being a second, differently-worded copy of that default-deny decision.
 /// </para>
+/// <para>
+/// <b>Every host function the hooks call shares one budget pass, opened here, so the port stays token-free.</b>
+/// </para>
 /// </remarks>
 internal sealed class BeforeHookRunner : IBeforeHookRunner
 {
@@ -44,13 +47,17 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
         new Dictionary<string, object?>(StringComparer.Ordinal);
 
     private readonly IPolicyCatalogProvider _catalog;
+    private readonly CelFunctionBudgetPolicy _budget;
 
     /// <summary>Initializes a new instance of the <see cref="BeforeHookRunner"/> class.</summary>
     /// <param name="catalog">Holds the catalog this runner reads compiled hooks from; read once per call.</param>
-    public BeforeHookRunner(IPolicyCatalogProvider catalog)
+    /// <param name="budget">Opens the one host-function budget pass every hook of a call shares.</param>
+    public BeforeHookRunner(IPolicyCatalogProvider catalog, CelFunctionBudgetPolicy budget)
     {
         ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(budget);
         _catalog = catalog;
+        _budget = budget;
     }
 
     /// <inheritdoc/>
@@ -67,8 +74,13 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
         ArgumentNullException.ThrowIfNull(context);
 
         var hooks = Declared(entity, operation);
+        if (hooks.Count == 0)
+        {
+            return _noPatch;
+        }
 
-        return hooks.Count == 0 ? _noPatch : Applied(hooks, candidate, previous, context, now);
+        using var pass = _budget.Enter();
+        return Applied(hooks, candidate, previous, context, now);
     }
 
     private IReadOnlyList<CompiledBeforeHook> Declared(string entity, DataOperation operation) =>

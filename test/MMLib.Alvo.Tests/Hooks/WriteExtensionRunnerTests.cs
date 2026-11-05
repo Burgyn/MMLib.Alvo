@@ -568,6 +568,25 @@ public sealed class WriteExtensionRunnerTests
         }
     }
 
+    [Fact]
+    public async Task A_condition_whose_host_function_overruns_its_budget_fails_the_hook_with_reason_exception()
+    {
+        var clock = new FakeTimeProvider();
+        await using var world = RunnerWorld.Start(alvo => alvo
+            .AddCelFunction("slowStatus", (string status, CancellationToken ct) =>
+            {
+                clock.Advance(TimeSpan.FromMilliseconds(300));
+                ct.ThrowIfCancellationRequested();
+                return status;
+            })
+            .Entity("tickets", e => e.BeforeWrite("guard", (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask, when: "slowStatus(new.status) == 'open'")), clock);
+
+        var failure = await Should.ThrowAsync<HookFailedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket("open")), Ct));
+
+        failure.Extension.ShouldBe("guard");
+        failure.Reason.ShouldBe(HookFailedException.Exception);
+    }
+
     private static int FailedLines(CapturingLogger logs, string extension, string reason) =>
         logs.Entries.Count(entry => entry.Message.Contains($"Write hook {extension} failed ({reason})", StringComparison.Ordinal));
 

@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Events;
+using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.Rules;
@@ -70,9 +71,9 @@ public class BeforeHookIsolationArchitectureTests
     /// dependency of the runner — so the walk above still measures everything the runner itself can reach.
     /// </summary>
     [Fact]
-    public void A_host_function_reaches_a_hook_through_the_compiled_tree_not_the_runners_constructor() =>
+    public void A_host_function_reaches_a_hook_through_the_compiled_tree_and_the_budget_is_the_runner_s_only_other_dependency() =>
         typeof(BeforeHookRunner).GetConstructors().ShouldHaveSingleItem().GetParameters()
-            .Select(parameter => parameter.ParameterType).ShouldBe([typeof(IPolicyCatalogProvider)]);
+            .Select(parameter => parameter.ParameterType).ShouldBe([typeof(IPolicyCatalogProvider), typeof(CelFunctionBudgetPolicy)]);
 
     /// <summary>
     /// The write-hook runner's own dependencies (spec 2026-10-14 §4.4.5): none reaches the network or writes beside the unit.
@@ -88,7 +89,7 @@ public class BeforeHookIsolationArchitectureTests
         parameters.ShouldBe(
         [
             typeof(ExtensionRegistry), typeof(ExtensionBinder), typeof(IPolicyCatalogProvider), typeof(IServiceProvider), typeof(TimeProvider),
-            typeof(ILogger<WriteExtensionRunner>),
+            typeof(CelFunctionBudgetPolicy), typeof(ILogger<WriteExtensionRunner>),
         ]);
         parameters.Where(HookDependencies.IsBanned).ShouldBeEmpty();
     }

@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Data;
+﻿using Microsoft.Extensions.Time.Testing;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
@@ -186,6 +187,40 @@ public sealed class BeforeHookFacetTests
         Roles = new HashSet<Role> { Role.Authenticated },
     };
 
+    [Fact]
+    public void A_before_hook_s_host_functions_share_one_budget_and_an_overrun_refuses_the_write()
+    {
+        var clock = new FakeTimeProvider();
+        var slow = HostCelFunction.Create("slow", (string s, CancellationToken ct) =>
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(150));
+            ct.ThrowIfCancellationRequested();
+            return "ok";
+        }, summary: null);
+        var hooks = BeforeCreate(Mutate("code", Cel("slow(new.note)")), Mutate("title", Cel("slow(new.note)")));
+
+        var failure = Should.Throw<CelFunctionException>(
+            () => Run(hooks, Row(("note", "x")), compiler: TestCelFunctions.Compiler(slow), budget: TestBudgets.Default(clock)));
+
+        failure.FunctionName.ShouldBe("slow");
+        failure.Reason.ShouldStartWith("it ran past the 250 ms");
+    }
+
+    [Fact]
+    public void Each_write_gets_a_fresh_budget()
+    {
+        var clock = new FakeTimeProvider();
+        var slow = HostCelFunction.Create("slow", (string s) =>
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(200));
+            return "ok";
+        }, summary: null);
+        var hooks = BeforeCreate(Mutate("code", Cel("slow(new.note)")));
+
+        Run(hooks, Row(("note", "x")), compiler: TestCelFunctions.Compiler(slow), budget: TestBudgets.Default(clock))["code"].ShouldBe("ok");
+        Run(hooks, Row(("note", "y")), compiler: TestCelFunctions.Compiler(slow), budget: TestBudgets.Default(clock))["code"].ShouldBe("ok");
+    }
+
     private static AlvoRecord Row(params (string Field, object? Value)[] fields)
     {
         var values = new Dictionary<string, object?>(StringComparer.Ordinal) { ["title"] = "A title" };
@@ -198,12 +233,13 @@ public sealed class BeforeHookFacetTests
     }
 
     private static IReadOnlyDictionary<string, object?> Run(
-        EntityHooks hooks, AlvoRecord candidate, DataOperation operation = DataOperation.Create)
+        EntityHooks hooks, AlvoRecord candidate, DataOperation operation = DataOperation.Create,
+        CelCompiler? compiler = null, CelFunctionBudgetPolicy? budget = null)
     {
         var provider = new PolicyCatalogProvider();
-        provider.SetCurrent(Contacts, PolicyCatalog.Build(Descriptor(hooks), Schema, Compiler));
+        provider.SetCurrent(Contacts, PolicyCatalog.Build(Descriptor(hooks), Schema, compiler ?? Compiler));
 
-        return new BeforeHookRunner(provider).Run(
+        return new BeforeHookRunner(provider, budget ?? TestBudgets.Default()).Run(
             Contacts, operation, candidate, operation == DataOperation.Create ? null : candidate, _caller, DateTimeOffset.UnixEpoch);
     }
 
