@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Extensions;
 
 namespace MMLib.Alvo.Api.Tests;
 
@@ -35,20 +36,28 @@ internal static class CelFunctionsWorld
             [OrdersWriter],
             new AlvoApiWorldSetup(
                 MapAlvoProblemDetails: true,
-                ConfigureServicesAfterAlvo: services => new Builder(services).AddCelFunction("tooMany", (int n) => n > 100, "True above 100.")));
+                ConfigureServicesAfterAlvo: services => Roomy(new Builder(services).AddCelFunction("tooMany", (int n) => n > 100, "True above 100.").Services)));
+
+    /// <summary>
+    /// Gives host functions the longest budget the option allows, so one that returns at once cannot cross it on a loaded
+    /// runner; these worlds test what a function answers, and the budget itself is HookGuards' (Ruling 42).
+    /// </summary>
+    private static IServiceCollection Roomy(IServiceCollection services) =>
+        services.Configure<AlvoExtensionOptions>(options => options.CelFunctionBudget = TimeSpan.FromSeconds(30));
 
     /// <summary>Registers <c>normalizePhone</c> into <paramref name="services"/>, as a host's <c>AddAlvo().AddCelFunction(…)</c> would.</summary>
     /// <param name="services">The host's services, after <c>AddAlvo</c>.</param>
     /// <param name="normalizePhone">The implementation.</param>
     internal static void Register(IServiceCollection services, Func<string, string?> normalizePhone) =>
-        new Builder(services).AddCelFunction("normalizePhone", (string phone) => normalizePhone(phone), Summary);
+        Roomy(new Builder(services).AddCelFunction("normalizePhone", (string phone) => normalizePhone(phone), Summary).Services);
 
     /// <summary>Registers <c>yes(bool)</c> and <c>isMe(Guid)</c>, the two functions that let a test put a context value inside a call.</summary>
     /// <param name="services">The host's services, after <c>AddAlvo</c>.</param>
     internal static void RegisterContextProbes(IServiceCollection services) =>
-        new Builder(services)
+        Roomy(new Builder(services)
             .AddCelFunction("yes", (bool value) => value, "Answers its argument.")
-            .AddCelFunction("isMe", (Guid id) => id != Guid.Empty, "True for any identity.");
+            .AddCelFunction("isMe", (Guid id) => id != Guid.Empty, "True for any identity.")
+            .Services);
 
     /// <summary>The builder a host holds; <c>AddCelFunction</c> reads only <see cref="Services"/>.</summary>
     private sealed class Builder(IServiceCollection services) : IAlvoBuilder

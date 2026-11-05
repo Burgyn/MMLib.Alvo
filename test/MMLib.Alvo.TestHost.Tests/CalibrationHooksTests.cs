@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Time.Testing;
 
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Hooks;
@@ -17,9 +18,7 @@ public sealed class CalibrationHooksTests
     public async Task Each_prefix_runs_exactly_its_own_hook()
     {
         var ct = TestContext.Current.CancellationToken;
-        await using var alvo = await AlvoTestHost.StartAsync(
-            builder => builder.FromDescriptor(Path.Combine(AppContext.BaseDirectory, "descriptors", "calibration-desk.alvo.json")).AddCalibrationHooks(),
-            cancellationToken: ct);
+        await using var alvo = await StartDeskAsync(ct);
         var dispatcher = AlvoTestHost.Caller("dispatcher");
         var customer = (Guid)(await alvo.Data.CreateAsync("customers", new Dictionary<string, object?> { ["name"] = "Ada" }, dispatcher, cancellationToken: ct))["id"]!;
 
@@ -37,9 +36,7 @@ public sealed class CalibrationHooksTests
     public async Task The_read_hook_fails_the_write_when_it_finds_no_customer()
     {
         var ct = TestContext.Current.CancellationToken;
-        await using var alvo = await AlvoTestHost.StartAsync(
-            builder => builder.FromDescriptor(Path.Combine(AppContext.BaseDirectory, "descriptors", "calibration-desk.alvo.json")).AddCalibrationHooks(),
-            cancellationToken: ct);
+        await using var alvo = await StartDeskAsync(ct);
 
         var failed = await Should.ThrowAsync<InvalidOperationException>(() => alvo.Data.CreateAsync(
             "work_orders", new Dictionary<string, object?> { ["reference"] = "WO-82000002", ["customer_id"] = Guid.NewGuid() },
@@ -52,9 +49,7 @@ public sealed class CalibrationHooksTests
     public async Task The_probe_prefix_is_refused_with_a_conflict_and_runs_no_measured_hook()
     {
         var ct = TestContext.Current.CancellationToken;
-        await using var alvo = await AlvoTestHost.StartAsync(
-            builder => builder.FromDescriptor(Path.Combine(AppContext.BaseDirectory, "descriptors", "calibration-desk.alvo.json")).AddCalibrationHooks(),
-            cancellationToken: ct);
+        await using var alvo = await StartDeskAsync(ct);
         var dispatcher = AlvoTestHost.Caller("dispatcher");
         var customer = (Guid)(await alvo.Data.CreateAsync("customers", new Dictionary<string, object?> { ["name"] = "Ada" }, dispatcher, cancellationToken: ct))["id"]!;
 
@@ -68,4 +63,14 @@ public sealed class CalibrationHooksTests
         alvo.Hooks.AssertRan("calibration-read", times: 0);
         alvo.Hooks.AssertRan("calibration-after", times: 0);
     }
+
+    /// <summary>
+    /// The load host's desk on a clock that never moves: the hooks keep their 250 ms default timeout, which a loaded runner
+    /// could cross on the real clock and turn a fact about which hook ran into a timeout.
+    /// </summary>
+    private static Task<AlvoTestHost> StartDeskAsync(CancellationToken ct) =>
+        AlvoTestHost.StartAsync(
+            builder => builder.FromDescriptor(Path.Combine(AppContext.BaseDirectory, "descriptors", "calibration-desk.alvo.json")).AddCalibrationHooks(),
+            time: new FakeTimeProvider(DateTimeOffset.UtcNow),
+            cancellationToken: ct);
 }

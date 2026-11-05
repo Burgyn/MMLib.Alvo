@@ -559,7 +559,7 @@ public sealed class ProblemDetailsTests
             new AlvoApiWorldSetup(
                 MapAlvoProblemDetails: true,
                 ConfigureAlvo: alvo => alvo.Entity("owners", owners => owners.BeforeWrite(
-                    "probe", ValueTask (BeforeWrite<AlvoRecord> _) => throw new InvalidOperationException("probe")))));
+                    "probe", ValueTask (BeforeWrite<AlvoRecord> _) => throw new InvalidOperationException("probe"), configure: o => o.Timeout = TimeSpan.FromSeconds(30)))));
 
         using var response = await world.SendAsync(HttpMethod.Post, "/api/owners", _admin, body: new JsonObject { ["name"] = "Ada" });
 
