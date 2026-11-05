@@ -86,8 +86,9 @@ that locked everyone out of its own `access` block would otherwise be unrecovera
 The two **escape hatches** are both the host developer's: a [custom CEL function](/guides/custom-cel-functions/)
 and a [custom endpoint](/guides/call-from-endpoints/). They let you outgrow the descriptor without leaving the
 runtime, and they are as trustworthy as the code you write in them. A host function is not bounded by CEL's grammar:
-it runs inside the write's transaction, can loop or block until its time budget fails the write, and Alvo's tenant
-filter does not reach inside it, so a function that reads stored data must filter by the tenant itself. That is why only a host developer can
+it runs inside the write's transaction, can loop or block until its time budget fails the write — the budget is judged
+when it returns, so one that never returns holds the write until it does —, and Alvo's tenant filter does not reach
+inside it, so a function that reads stored data must filter by the tenant itself. That is why only a host developer can
 add one.
 
 An API key's scopes narrow what it reaches on the Data API only. On the Management API a key reaches whatever its
