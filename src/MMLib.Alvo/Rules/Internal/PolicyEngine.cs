@@ -130,7 +130,7 @@ internal sealed class PolicyEngine : IPolicyEngine
             ResolveFieldMask(policy.Hidden, context),
             ResolveFieldMask(policy.ReadOnly, context)) with
         {
-            Unnameable = EntityPolicy.Flagged(policy.Hidden),
+            Unnameable = policy.FlaggedHidden,
         };
 
     private static bool IsUnconfigured(DataOperation operation, OperationPolicy policy) => operation switch

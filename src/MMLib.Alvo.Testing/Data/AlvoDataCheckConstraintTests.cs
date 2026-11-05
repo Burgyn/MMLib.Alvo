@@ -273,6 +273,50 @@ public abstract class AlvoDataCheckConstraintTests
         (refusal.Kind, refusal.Fields.Count).ShouldBe((AlvoConstraintKind.Check, 0));
     }
 
+    /// <summary>
+    /// A value a before-hook wrote is held to the validation like any other (Ruling 26): the engine cannot tell whose value
+    /// it was, so the write is the caller's refusal at the field, and nothing is stored.
+    /// </summary>
+    [Fact]
+    public async Task A_before_hook_value_that_breaks_a_validation_is_refused_at_the_field()
+    {
+        var data = await CreateAsync(Schema, DiscountingDescriptor);
+
+        var refusal = await Should.ThrowAsync<AlvoConstraintViolationException>(
+            () => data.CreateAsync("products", Row(stock: 1), Caller, cancellationToken: Ct));
+
+        refusal.Kind.ShouldBe(AlvoConstraintKind.Check);
+        refusal.Fields.ShouldBe(["discount"]);
+        (await data.QueryAsync(new AlvoQuery { Entity = "products" }, Caller, Ct)).Items.ShouldBeEmpty();
+    }
+
+    /// <summary><see cref="Descriptor"/> whose beforeCreate hook sets discount to stock + 50 — past its "value &lt;= 50".</summary>
+    private static AlvoDescriptor DiscountingDescriptor => Descriptor with
+    {
+        Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
+        {
+            ["products"] = Descriptor.Entities["products"] with
+            {
+                Hooks = new EntityHooks
+                {
+                    BeforeCreate =
+                    [
+                        new BeforeHook
+                        {
+                            Action = new BeforeHookAction
+                            {
+                                Mutate = new Dictionary<string, ValueOrExpr>(StringComparer.Ordinal)
+                                {
+                                    ["discount"] = ValueOrExpr.FromExpression("new.stock + 50"),
+                                },
+                            },
+                        },
+                    ],
+                },
+            },
+        },
+    };
+
     /// <summary>An update the engine refuses rolls back: the stored row keeps its value.</summary>
     [Fact]
     public async Task An_update_that_breaks_it_leaves_the_row_as_it_was()

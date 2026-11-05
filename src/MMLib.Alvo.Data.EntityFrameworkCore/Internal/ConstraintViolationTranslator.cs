@@ -51,15 +51,19 @@ internal static class ConstraintViolationTranslator
     /// </param>
     /// <param name="applied">The applied schema, whose validated fields a CHECK constraint's name is recomputed from.</param>
     /// <param name="unnameable">The fields the descriptor hides, which a CHECK refusal never names (the write's decision).</param>
+    /// <param name="bodySent">
+    /// Whether the request carried values a refusal may point at. A delete sends none, so a parent's validation its rollup
+    /// recompute breaks names no child field: there is no value of the caller's to change.
+    /// </param>
     internal static async Task<T> TranslatedAsync<T>(
         Func<Task<T>> write, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema, bool callerKeyed,
-        SchemaModel applied, IReadOnlySet<string> unnameable)
+        SchemaModel applied, IReadOnlySet<string> unnameable, bool bodySent = true)
     {
         try
         {
             return await write();
         }
-        catch (Exception failure) when (Translate(failure, dialect, new Written(rows, schema, callerKeyed, applied, unnameable)) is { } violation)
+        catch (Exception failure) when (Translate(failure, dialect, new Written(rows, schema, callerKeyed, applied, unnameable, bodySent)) is { } violation)
         {
             throw violation;
         }
@@ -68,13 +72,13 @@ internal static class ConstraintViolationTranslator
     /// <inheritdoc cref="TranslatedAsync{T}"/>
     internal static async Task TranslatedAsync(
         Func<Task> write, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema, bool callerKeyed,
-        SchemaModel applied, IReadOnlySet<string> unnameable)
+        SchemaModel applied, IReadOnlySet<string> unnameable, bool bodySent = true)
     {
         try
         {
             await write();
         }
-        catch (Exception failure) when (Translate(failure, dialect, new Written(rows, schema, callerKeyed, applied, unnameable)) is { } violation)
+        catch (Exception failure) when (Translate(failure, dialect, new Written(rows, schema, callerKeyed, applied, unnameable, bodySent)) is { } violation)
         {
             throw violation;
         }
@@ -86,8 +90,10 @@ internal static class ConstraintViolationTranslator
     /// <param name="CallerKeyed">Whether the caller chose this row's key.</param>
     /// <param name="Applied">The applied schema.</param>
     /// <param name="Unnameable">The fields a refusal never names.</param>
+    /// <param name="BodySent">Whether the request carried values a refusal may point at.</param>
     private sealed record Written(
-        IEntityType Rows, EntitySchema Schema, bool CallerKeyed, SchemaModel Applied, IReadOnlySet<string> Unnameable);
+        IEntityType Rows, EntitySchema Schema, bool CallerKeyed, SchemaModel Applied, IReadOnlySet<string> Unnameable,
+        bool BodySent);
 
     /// <summary>
     /// The translated exception, or <see langword="null"/> when <paramref name="failure"/> is not a
@@ -180,7 +186,7 @@ internal static class ConstraintViolationTranslator
     /// <summary>
     /// The field a CHECK refusal points at: the written entity's own validated field, or — when a rollup recompute broke a
     /// parent's validation — the child field it aggregates; nothing for a name this schema cannot place, a <c>count</c>
-    /// rollup, or a field the descriptor hides (HX-11 Rulings 24, 25).
+    /// rollup, a write that sent no body (a delete), or a field the descriptor hides (HX-11 Rulings 24, 25).
     /// </summary>
     /// <remarks>
     /// <b>Always a refusal, even naming nothing.</b> Unlike a unique collision confined to managed columns, a broken CHECK is
@@ -199,7 +205,7 @@ internal static class ConstraintViolationTranslator
 
         var field = string.Equals(owner.Entity.Name, written.Schema.Name, StringComparison.Ordinal)
             ? owner.Field.Name
-            : RolledUpChildField(owner.Field, written.Schema);
+            : written.BodySent ? RolledUpChildField(owner.Field, written.Schema) : null;
         return field is null || written.Unnameable.Contains(field) ? [] : [field];
     }
 

@@ -47,18 +47,32 @@ internal static class RenameGuessSplitter
         var splits = residual
             .Where(operation => operation is RenameColumnOperation or RenameTableOperation)
             .ToDictionary(operation => operation, operation => SplitRenameGuess(operation, alignedCurrent, desired, buildModel, differ).ToList());
-        var splitChecks = splits.Values.SelectMany(operations => operations).Select(CheckKey).OfType<CheckConstraintKey>().ToHashSet();
+        var superseded = SupersededChecks(splits.Values.SelectMany(operations => operations), splits.Keys);
 
         var normalized = new List<MigrationOperation>(residual.Count + 2);
         foreach (var operation in residual)
         {
             normalized.AddRange(
                 splits.TryGetValue(operation, out var split) ? split
-                : CheckKey(operation) is { } key && splitChecks.Contains(key) ? []
+                : superseded(operation) ? []
                 : [operation]);
         }
 
         return normalized;
+    }
+
+    // The residual's CHECK operations the split already carries: one the scoped diffs re-emitted under the same key, or any
+    // on a table a guessed table rename splits — its DropTable takes the old constraints with it and its CreateTable
+    // declares the new ones inline, so a residual ADD CONSTRAINT would add one twice and a residual DROP would name a
+    // table that no longer exists.
+    private static Func<MigrationOperation, bool> SupersededChecks(
+        IEnumerable<MigrationOperation> splitOperations, IEnumerable<MigrationOperation> guesses)
+    {
+        var keys = splitOperations.Select(CheckKey).OfType<CheckConstraintKey>().ToHashSet();
+        var tables = guesses.OfType<RenameTableOperation>().SelectMany(rename => new[] { rename.Name, rename.NewName! })
+            .ToHashSet(StringComparer.Ordinal);
+
+        return operation => CheckKey(operation) is { } key && (keys.Contains(key) || tables.Contains(key.Table));
     }
 
     // A guessed rename's residual already carries the drop and add of the column's CHECK constraint, and the scoped diffs

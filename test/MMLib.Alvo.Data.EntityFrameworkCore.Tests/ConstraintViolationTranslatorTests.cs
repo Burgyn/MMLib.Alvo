@@ -177,7 +177,20 @@ public class ConstraintViolationTranslatorTests
             async () => await Checked(CheckConstraintNames.For("bin", "reserved"), Line, new HashSet<string>(StringComparer.Ordinal) { "quantity" })))
             .Fields.ShouldBeEmpty();
 
-    private static Task Checked(string? constraintName, EntitySchema written, IReadOnlySet<string> unnameable) =>
+    /// <summary>
+    /// A delete sends no body, so a parent's validation its rollup recompute breaks points at nothing: the child field is
+    /// not a value this caller sent and could change (HX-11 Ruling 25).
+    /// </summary>
+    [Fact]
+    public async Task A_parent_check_broken_by_a_delete_names_nothing()
+    {
+        var refused = await Should.ThrowAsync<AlvoConstraintViolationException>(
+            async () => await Checked(CheckConstraintNames.For("bin", "reserved"), Line, Nothing, bodySent: false));
+
+        (refused.Kind, refused.Fields.Count).ShouldBe((AlvoConstraintKind.Check, 0));
+    }
+
+    private static Task Checked(string? constraintName, EntitySchema written, IReadOnlySet<string> unnameable, bool bodySent = true) =>
         ConstraintViolationTranslator.TranslatedAsync(
             () => Task.FromException(Collision()),
             Decoding(new SqlConstraintViolation { Kind = AlvoConstraintKind.Check, ConstraintName = constraintName }),
@@ -185,7 +198,8 @@ public class ConstraintViolationTranslatorTests
             written,
             callerKeyed: false,
             Applied,
-            unnameable);
+            unnameable,
+            bodySent);
 
     private static Task Translated(SqlConstraintViolation decoded, IEntityType rows, bool callerKeyed) =>
         ConstraintViolationTranslator.TranslatedAsync(

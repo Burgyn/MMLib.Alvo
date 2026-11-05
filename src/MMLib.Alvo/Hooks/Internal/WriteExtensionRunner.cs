@@ -353,7 +353,7 @@ internal sealed class WriteExtensionRunner(
 
     private static IReadOnlySet<string> Hidden(PolicyCatalog? catalog, string entity) =>
         catalog is not null && catalog.TryGetEntity(entity, out var policy)
-            ? EntityPolicy.Flagged(policy.Hidden)
+            ? policy.FlaggedHidden
             : new HashSet<string>(StringComparer.Ordinal);
 
     /// <summary>The fields a rejection may point at: declared and never hidden (Ruling 53).</summary>

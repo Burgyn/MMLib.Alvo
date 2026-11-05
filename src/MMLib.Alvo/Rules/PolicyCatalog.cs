@@ -165,6 +165,12 @@ internal sealed record EntityPolicy(
     /// <returns>The flagged field names, compared ordinally.</returns>
     internal static IReadOnlySet<string> Flagged(IReadOnlyDictionary<string, FieldMask> flags) =>
         flags.Keys.ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// <see cref="Flagged"/> over <see cref="Hidden"/>, computed once per compiled policy rather than on every allow
+    /// decision — a catalog is immutable once built, so the set cannot go stale.
+    /// </summary>
+    internal IReadOnlySet<string> FlaggedHidden { get; } = Flagged(Hidden);
 }
 
 /// <summary>

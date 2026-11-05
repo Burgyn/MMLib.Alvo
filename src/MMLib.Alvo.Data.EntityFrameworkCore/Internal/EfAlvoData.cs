@@ -1160,6 +1160,20 @@ internal sealed partial class EfAlvoData : IAlvoData
     private Task RecomputeRollupsAsync(
         AlvoDataContext db, EntitySchema schema, IReadOnlyList<IReadOnlyDictionary<string, object?>> images,
         IReadOnlySet<string> unnameable, CancellationToken cancellationToken) =>
+        TranslatedRecomputeAsync(db, schema, images, unnameable, bodySent: true, cancellationToken);
+
+    /// <summary>
+    /// The recompute after a delete: the request sent no values, so a parent validation it breaks names no child field
+    /// (HX-11 Ruling 25 — the pointer is the value the caller sent, and a delete sent none).
+    /// </summary>
+    private Task RecomputeRollupsAfterDeleteAsync(
+        AlvoDataContext db, EntitySchema schema, IReadOnlyList<IReadOnlyDictionary<string, object?>> images,
+        IReadOnlySet<string> unnameable, CancellationToken cancellationToken) =>
+        TranslatedRecomputeAsync(db, schema, images, unnameable, bodySent: false, cancellationToken);
+
+    private Task TranslatedRecomputeAsync(
+        AlvoDataContext db, EntitySchema schema, IReadOnlyList<IReadOnlyDictionary<string, object?>> images,
+        IReadOnlySet<string> unnameable, bool bodySent, CancellationToken cancellationToken) =>
         RollupRecompute.IsRolledUp(db.AppliedSchema, schema)
             ? ConstraintViolationTranslator.TranslatedAsync(
                 () => _rollups.ForChildWriteAsync(db, schema, images, cancellationToken),
@@ -1168,7 +1182,8 @@ internal sealed partial class EfAlvoData : IAlvoData
                 schema,
                 callerKeyed: false,
                 db.AppliedSchema,
-                unnameable)
+                unnameable,
+                bodySent)
             : Task.CompletedTask;
 
     /// <inheritdoc/>
@@ -1972,7 +1987,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             throw new AlvoRecordNotFoundException();
         }
 
-        await RecomputeRollupsAsync(db, schema, [stored!], decision.Unnameable, cancellationToken);
+        await RecomputeRollupsAfterDeleteAsync(db, schema, [stored!], decision.Unnameable, cancellationToken);
         await HostAfterDeleteAsync(schema, context, Unmasked(stored), now, cancellationToken);
 
         return Unmasked(stored);
@@ -3149,7 +3164,8 @@ internal sealed partial class EfAlvoData : IAlvoData
             }
         }
 
-        await RecomputeRollupsAsync(db, schema, [.. judged.Select(row => row.PreImage.Values)], decision.Unnameable, cancellationToken);
+        await RecomputeRollupsAfterDeleteAsync(
+            db, schema, [.. judged.Select(row => row.PreImage.Values)], decision.Unnameable, cancellationToken);
         if (await HostAfterDeleteRowsAsync(schema, context, [.. judged.Select(row => (row.Index, row.PreImage))], now, cancellationToken) is { } refusedAfter)
         {
             return BatchOutcome.Refused([refusedAfter]);
