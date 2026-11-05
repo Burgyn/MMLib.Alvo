@@ -115,7 +115,8 @@ export const SCHEMA_FACETS = {
       "UnsupportedMediaType": "unsupported-media-type",
       "Internal": "internal",
       "FunctionFailed": "function-failed",
-      "ChainDepthExceeded": "chain-depth-exceeded"
+      "ChainDepthExceeded": "chain-depth-exceeded",
+      "HookFailed": "hook-failed"
     }
   }
 };

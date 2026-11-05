@@ -70,6 +70,9 @@ internal sealed partial class EfAlvoData : IAlvoData
     private readonly AlvoDataContextFactory _contexts;
     private readonly TimeProvider _time;
     private readonly string _idempotencyTable;
+
+    /// <summary>The idempotency table's ensure outside any write, once per process — see <see cref="EnsureIdempotencyTableOutsideAsync"/>.</summary>
+    private readonly OnceDdl _idempotencyDdl;
     private readonly string _outboxTable;
     private readonly string _commandTable;
 
@@ -120,6 +123,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         _contexts = contexts;
         _time = time;
         _idempotencyTable = IdempotencyTable.NameFor(options.SchemaPrefix);
+        _idempotencyDdl = new OnceDdl(EnsureIdempotencyTableOnOwnContextAsync);
         _outboxTable = OutboxTable.NameFor(options.SchemaPrefix);
         _commandTable = CommandLedgerTable.NameFor(options.SchemaPrefix);
         _operationsLog = DeliveryOperationsTable.LogNameFor(options.SchemaPrefix);
@@ -925,10 +929,11 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// its own, so remembering that it succeeded is honest rather than a claim a later rollback could undo.
     /// </para>
     /// <para>
-    /// A plain <see langword="volatile"/> flag with no gate around it: two callers racing the first create both
-    /// run <c>CREATE TABLE IF NOT EXISTS</c>, which is idempotent by construction, and a genuine collision on
-    /// the very first one is a storage write failure the caller's retry already handles. A semaphore would buy
-    /// nothing and would make this type disposable.
+    /// A plain <see langword="volatile"/> flag here; the gate is one level up. A keyed write reaches this first through
+    /// <see cref="EnsureIdempotencyTableOutsideAsync"/>, which serialises a process's concurrent first callers, and
+    /// <see cref="IdempotencyTable.EnsureAsync"/> takes a rival process's freshly created table as its own — on
+    /// PostgreSQL two concurrent <c>IF NOT EXISTS</c> creates collide in <c>pg_type</c> rather than skip, and that
+    /// ensure runs outside the retry loop, so nothing else would absorb it.
     /// </para>
     /// <para>
     /// It is only reached by a create that carries a token; an ordinary create never touches this table.

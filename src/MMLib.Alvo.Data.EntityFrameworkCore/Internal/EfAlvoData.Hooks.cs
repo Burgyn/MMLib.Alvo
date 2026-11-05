@@ -498,8 +498,8 @@ internal sealed partial class EfAlvoData
             return false;
         }
 
+        await EnsureIdempotencyTableOutsideAsync(cancellationToken).ConfigureAwait(false);
         using var db = _contexts.Create();
-        await EnsureIdempotencyTableAsync(db, cancellationToken).ConfigureAwait(false);
         var connection = db.Database.GetDbConnection();
         await RelationalSqlBatch.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
@@ -507,14 +507,18 @@ internal sealed partial class EfAlvoData
             .ConfigureAwait(false) is not null;
     }
 
-    /// <summary>The idempotency table, ensured before a keyed write opens its own unit — no DDL ever runs inside one.</summary>
-    private async Task EnsureIdempotencyTableOutsideAsync(CancellationToken cancellationToken)
-    {
-        if (_idempotencyTableEnsured)
-        {
-            return;
-        }
+    /// <summary>
+    /// The idempotency table, ensured before a keyed write opens its own unit — no DDL ever runs inside one — and once per
+    /// process: concurrent first callers share one run (<see cref="OnceDdl"/>, Ruling 47), so two first writes of one
+    /// process never race each other on the engine's catalog. Other processes still can; <see cref="IfNotExistsDdl"/>
+    /// answers that.
+    /// </summary>
+    private Task EnsureIdempotencyTableOutsideAsync(CancellationToken cancellationToken) =>
+        _idempotencyTableEnsured ? Task.CompletedTask : _idempotencyDdl.EnsureAsync(cancellationToken);
 
+    /// <summary><see cref="EnsureIdempotencyTableAsync"/> on a context of its own, which no write transaction holds.</summary>
+    private async Task EnsureIdempotencyTableOnOwnContextAsync(CancellationToken cancellationToken)
+    {
         using var db = _contexts.Create();
         await EnsureIdempotencyTableAsync(db, cancellationToken).ConfigureAwait(false);
     }

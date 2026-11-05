@@ -58,15 +58,8 @@ internal static class SecretsTable
     /// run inside one, this DDL serialises two concurrent creates on PostgreSQL instead of reaching the
     /// row-level control that is the actual guard.
     /// </remarks>
-    internal static async Task EnsureAsync(DbConnection connection, string tableName, CancellationToken ct)
-    {
-        var command = connection.CreateCommand();
-        await using (command.ConfigureAwait(false))
-        {
-            command.CommandText = Ddl(tableName);
-            await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
-    }
+    internal static Task EnsureAsync(DbConnection connection, string tableName, CancellationToken ct) =>
+        IfNotExistsDdl.CreateTableAsync(connection, tableName, Ddl(tableName), ct);
 
     /// <summary>Reads one secret's stored value.</summary>
     /// <param name="tableName">The table name, already prefixed by <see cref="NameFor"/>.</param>

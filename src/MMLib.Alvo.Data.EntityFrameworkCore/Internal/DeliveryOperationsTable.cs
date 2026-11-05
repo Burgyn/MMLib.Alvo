@@ -79,6 +79,18 @@ internal static class DeliveryOperationsTable
     internal static IReadOnlyList<string> Statements(string deliveries, string controls, string log) =>
         [SubscriberPageIndexDdl(deliveries), ControlsDdl(controls), LogDdl(log), LogKeyIndexDdl(log)];
 
+    /// <summary>
+    /// Every statement of <see cref="Statements"/>, each through <see cref="IfNotExistsDdl"/> so a replica that loses the
+    /// race to create one of them to another replica takes the rival's object as its own.
+    /// </summary>
+    internal static async Task EnsureAsync(DbConnection connection, string deliveries, string controls, string log, CancellationToken ct)
+    {
+        await IfNotExistsDdl.CreateIndexAsync(connection, SubscriberPageIndexDdl(deliveries), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateTableAsync(connection, controls, ControlsDdl(controls), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateTableAsync(connection, log, LogDdl(log), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateIndexAsync(connection, LogKeyIndexDdl(log), ct).ConfigureAwait(false);
+    }
+
     internal const int MaxPage = 1000;
 
     internal const string DeliveryColumns =

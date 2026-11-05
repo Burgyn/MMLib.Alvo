@@ -175,20 +175,17 @@ internal static class IdempotencyTable
     /// <para>
     /// Outside a transaction it commits on its own, which is also what makes a caller's ensure-once memo
     /// honest: a memo set inside a transaction that later rolls back would claim a table exists that was
-    /// rolled back with everything else. Two connections racing the very first create may still collide here
-    /// — a duplicate-relation error on PostgreSQL — which is a storage write failure like any other and is
-    /// retried by the caller, whose next attempt finds the table in place.
+    /// rolled back with everything else.
+    /// </para>
+    /// <para>
+    /// <b>Two connections racing the very first create do collide on PostgreSQL</b> — <c>23505</c> on
+    /// <c>pg_type_typname_nsp_index</c> or <c>42P07</c> — and no retry absorbs it: the data path ensures this table
+    /// before its retry loop (the stage-0 lookup). So the create goes through <see cref="IfNotExistsDdl"/>, which
+    /// takes the rival's committed table as the outcome asked for.
     /// </para>
     /// </remarks>
-    internal static async Task EnsureAsync(DbConnection connection, string tableName, CancellationToken ct)
-    {
-        var command = connection.CreateCommand();
-        await using (command.ConfigureAwait(false))
-        {
-            command.CommandText = Ddl(tableName);
-            await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
-    }
+    internal static Task EnsureAsync(DbConnection connection, string tableName, CancellationToken ct) =>
+        IfNotExistsDdl.CreateTableAsync(connection, tableName, Ddl(tableName), ct);
 
     /// <summary>Reads the record for one key in one scope, inside the caller's transaction or autocommit.</summary>
     /// <param name="connection">The write transaction's own connection.</param>

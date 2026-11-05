@@ -38,8 +38,8 @@ internal static class HookRejectionTable
     /// <summary>Creates the table and its index when missing, autocommit.</summary>
     internal static async Task EnsureAsync(DbConnection connection, string table, CancellationToken ct)
     {
-        await ExecutedAsync(connection, Ddl(table), _ => { }, ct).ConfigureAwait(false);
-        await ExecutedAsync(connection, IndexDdl(table), _ => { }, ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateTableAsync(connection, table, Ddl(table), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateIndexAsync(connection, IndexDdl(table), ct).ConfigureAwait(false);
     }
 
     /// <summary>Inserts <paramref name="rejection"/> on <paramref name="connection"/>, autocommit.</summary>

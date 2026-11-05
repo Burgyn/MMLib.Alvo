@@ -33,8 +33,8 @@ internal static class InboundWebhookTable
 
     internal static async Task EnsureAsync(DbConnection connection, string table, CancellationToken ct)
     {
-        await ExecutedAsync(Command(connection, null, Ddl(table), null), ct).ConfigureAwait(false);
-        await ExecutedAsync(Command(connection, null, IndexDdl(table), null), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateTableAsync(connection, table, Ddl(table), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateIndexAsync(connection, IndexDdl(table), ct).ConfigureAwait(false);
     }
 
     internal static async Task<WebhookClaim?> FindAsync(
