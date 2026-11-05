@@ -32,7 +32,11 @@ if [ -z "$FEED" ]; then
     FEED="$WORK/feed"
     say "packing MMLib.Alvo.Abstractions and MMLib.Alvo"
     for project in MMLib.Alvo.Abstractions MMLib.Alvo; do
-        dotnet pack "$ROOT/src/$project/$project.csproj" -c Release -o "$FEED" -p:MinVerVersionOverride=0.0.0-packed -p:HUSKY=0 >/dev/null
+        if ! dotnet pack "$ROOT/src/$project/$project.csproj" -c Release -o "$FEED" -p:MinVerVersionOverride=0.0.0-packed -p:HUSKY=0 \
+            >"$WORK/pack.log" 2>&1; then
+            cat "$WORK/pack.log" >&2
+            fail "packing $project failed"
+        fi
     done
 fi
 FEED="$(cd "$FEED" && pwd)"
@@ -75,6 +79,15 @@ cat > "$WORK/consumer/nuget.config" <<'EOF'
     <add key="local" value="/feed" />
     <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
   </packageSources>
+  <!-- The packages under test come from the feed only: a published MMLib.Alvo of the same version never stands in. -->
+  <packageSourceMapping>
+    <packageSource key="local">
+      <package pattern="MMLib.Alvo*" />
+    </packageSource>
+    <packageSource key="nuget.org">
+      <package pattern="*" />
+    </packageSource>
+  </packageSourceMapping>
 </configuration>
 EOF
 
@@ -90,7 +103,7 @@ if grep -q 'warning CS8032' "$WORK/build.log"; then
     fail "the SDK could not load the analyzer (CS8032): the Roslyn pin is above the $SDK_VERSION compiler"
 fi
 
-expected="$(grep -n '// ALVO1001' "$FIXTURE" | cut -d: -f1 | sort -n | paste -sd ' ' -)"
+expected="$(grep -n '// ALVO1001' "$FIXTURE" | cut -d: -f1 | sort -n | paste -sd ' ' - || true)"
 actual="$(grep -oE 'Hooks\.cs\(([0-9]+),[0-9]+\): warning ALVO1001' "$WORK/build.log" | sed -E 's/Hooks\.cs\(([0-9]+),.*/\1/' | sort -nu | paste -sd ' ' - || true)"
 [ -n "$expected" ] || fail "the fixture marks no line"
 [ "$expected" = "$actual" ] || { cat "$WORK/build.log" >&2; fail "ALVO1001 on lines [$actual], expected [$expected]"; }

@@ -635,8 +635,9 @@ public sealed class WriteExtensionRunnerTests
     }
 
     /// <summary>
-    /// The pair of the theory's timeout case: one millisecond short of the 250 ms deadline the rejection is the write's
-    /// answer, so a timeout outranks a rejection only once the deadline has passed.
+    /// Below the deadline, on the before-write stage: one millisecond short of the 250 ms deadline the rejection is the
+    /// write's answer. The theory's timeout case pins the other side — past the deadline a timeout outranks a rejection —
+    /// on the after-write stage; each half is pinned on one stage only, and both stages share the runner's deadline.
     /// </summary>
     [Fact]
     public async Task A_rejection_just_below_the_timeout_is_the_answer()

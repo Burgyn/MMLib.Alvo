@@ -3100,6 +3100,11 @@ public sealed class Notify(HttpClient http) : IAlvoEventHandler<AlvoCreated<Alvo
 #   - a consumer compiled by the SDK global.json pins (the oldest a contributor may use) loads it: the build succeeds,
 #     and warns ALVO1001 on exactly the lines scripts/fixtures/packed-consumer/Hooks.cs marks — the before-write hook and
 #     the AddCelFunction delegate, and not the event handler.
+#
+# The consumer references MMLib.Alvo directly: NuGet does not flow an analyzer to a project that only reaches the core
+# through another package (docs/architecture/package-boundary.md).
+#
+# Portable bash + GNU/BSD coreutils alike: CI runs it on Linux, contributors on macOS.
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$DIR/.." && pwd)"
@@ -3118,18 +3123,29 @@ if [ -z "$FEED" ]; then
     FEED="$WORK/feed"
     say "packing MMLib.Alvo.Abstractions and MMLib.Alvo"
     for project in MMLib.Alvo.Abstractions MMLib.Alvo; do
-        dotnet pack "$ROOT/src/$project/$project.csproj" -c Release -o "$FEED" -p:MinVerVersionOverride=0.0.0-packed -p:HUSKY=0 >/dev/null
+        if ! dotnet pack "$ROOT/src/$project/$project.csproj" -c Release -o "$FEED" -p:MinVerVersionOverride=0.0.0-packed -p:HUSKY=0 \
+            >"$WORK/pack.log" 2>&1; then
+            cat "$WORK/pack.log" >&2
+            fail "packing $project failed"
+        fi
     done
 fi
 FEED="$(cd "$FEED" && pwd)"
-nupkg="$(find "$FEED" -maxdepth 1 -name 'MMLib.Alvo.[0-9]*.nupkg' | head -1)"
-[ -n "$nupkg" ] || fail "no MMLib.Alvo package in $FEED"
+# Globs and here-strings, never `producer | grep -q` / `| head`: under pipefail the producer's SIGPIPE fails the check.
+shopt -s nullglob
+packages=("$FEED"/MMLib.Alvo.[0-9]*.nupkg)
+shopt -u nullglob
+[ "${#packages[@]}" -eq 1 ] || fail "expected one MMLib.Alvo package in $FEED, found ${#packages[@]}"
+nupkg="${packages[0]}"
 version="${nupkg##*/MMLib.Alvo.}"; version="${version%.nupkg}"
 
-unzip -l "$nupkg" | grep -q 'analyzers/dotnet/cs/MMLib.Alvo.Analyzers.dll' || fail "the analyzer is not at analyzers/dotnet/cs/ in $nupkg"
-if unzip -p "$nupkg" '*.nuspec' | grep -Eq 'MMLib\.Alvo\.Analyzers|Microsoft\.CodeAnalysis'; then
-    fail "the nuspec declares a dependency on the analyzer or on Roslyn"
-fi
+listing="$(unzip -l "$nupkg")" || fail "cannot list $nupkg"
+grep -q 'analyzers/dotnet/cs/MMLib.Alvo.Analyzers.dll' <<<"$listing" || fail "the analyzer is not at analyzers/dotnet/cs/ in $nupkg"
+nuspec="$(unzip -p "$nupkg" '*.nuspec')" || fail "cannot read the nuspec of $nupkg"
+grep -q '<id>MMLib.Alvo</id>' <<<"$nuspec" || fail "the nuspec of $nupkg is not MMLib.Alvo's"
+# Ruling 46: name the packages, not the word — NuGet's own exclude="Build,Analyzers" attributes say "Analyzers".
+dependencies="$(grep -c 'MMLib\.Alvo\.Analyzers\|CodeAnalysis' <<<"$nuspec" || true)"
+[ "$dependencies" = "0" ] || fail "the nuspec names the analyzer or Roslyn ($dependencies lines)"
 say "layout ok: MMLib.Alvo $version carries the analyzer and no dependency on it"
 
 mkdir -p "$WORK/consumer"
@@ -3154,19 +3170,33 @@ cat > "$WORK/consumer/nuget.config" <<'EOF'
     <add key="local" value="/feed" />
     <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
   </packageSources>
+  <!-- The packages under test come from the feed only: a published MMLib.Alvo of the same version never stands in. -->
+  <packageSourceMapping>
+    <packageSource key="local">
+      <package pattern="MMLib.Alvo*" />
+    </packageSource>
+    <packageSource key="nuget.org">
+      <package pattern="*" />
+    </packageSource>
+  </packageSourceMapping>
 </configuration>
 EOF
 
 say "building the consumer on mcr.microsoft.com/dotnet/sdk:$SDK_VERSION"
 if ! docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -e DOTNET_CLI_HOME=/tmp -e NUGET_PACKAGES=/tmp/nuget \
-    -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -v "$WORK/consumer:/work" -v "$FEED:/feed:ro" -w /work \
+    -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 -v "$WORK/consumer:/work" -v "$FEED:/feed:ro" -w /work \
     "mcr.microsoft.com/dotnet/sdk:$SDK_VERSION" dotnet build -nologo >"$WORK/build.log" 2>&1; then
     cat "$WORK/build.log" >&2
     fail "the consumer did not build"
 fi
+if grep -q 'warning CS8032' "$WORK/build.log"; then
+    cat "$WORK/build.log" >&2
+    fail "the SDK could not load the analyzer (CS8032): the Roslyn pin is above the $SDK_VERSION compiler"
+fi
 
-expected="$(grep -n '// ALVO1001' "$FIXTURE" | cut -d: -f1 | sort -n | tr '\n' ' ')"
-actual="$(grep -oE 'Hooks\.cs\(([0-9]+),[0-9]+\): warning ALVO1001' "$WORK/build.log" | sed -E 's/Hooks\.cs\(([0-9]+),.*/\1/' | sort -nu | tr '\n' ' ')"
+expected="$(grep -n '// ALVO1001' "$FIXTURE" | cut -d: -f1 | sort -n | paste -sd ' ' - || true)"
+actual="$(grep -oE 'Hooks\.cs\(([0-9]+),[0-9]+\): warning ALVO1001' "$WORK/build.log" | sed -E 's/Hooks\.cs\(([0-9]+),.*/\1/' | sort -nu | paste -sd ' ' - || true)"
+[ -n "$expected" ] || fail "the fixture marks no line"
 [ "$expected" = "$actual" ] || { cat "$WORK/build.log" >&2; fail "ALVO1001 on lines [$actual], expected [$expected]"; }
 say "ALVO1001 reported on lines $expected and nowhere else"
 ```
