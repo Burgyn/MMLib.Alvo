@@ -18,6 +18,7 @@ public abstract partial class DataApiEngineTests
 {
     private static readonly TestApiKey _quotesWriter = new("quotes-writer", ["writer"], ["quotes:read", "quotes:write"]);
     private static readonly TestApiKey _lotsWriter = new("lots-writer", ["writer"], ["lots:read", "lots:write"]);
+    private static readonly TestApiKey _cratesWriter = new("crates-writer", ["writer"], ["crates:read", "crates:write"]);
 
     [Fact]
     public async Task A_token_aware_host_function_past_its_budget_is_function_failed_and_rolls_back_on_every_engine()
@@ -109,6 +110,24 @@ public abstract partial class DataApiEngineTests
         refused.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await refused.ReadTextAsync());
         using var read = await world.SendAsync(HttpMethod.Get, $"/api/lots/{id}", _lotsWriter);
         (await read.ReadJsonObjectAsync())["quantity_text"]!.GetValue<string>().ShouldBe("12");
+    }
+
+    [Theory]
+    [InlineData("open")]
+    [InlineData("shut")]
+    public async Task A_refusal_of_a_field_an_earlier_hook_would_write_is_500_whatever_the_stored_row_says_on_every_engine(string seal)
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            "expression-failed.alvo.json", [_cratesWriter], new AlvoApiWorldSetup(MapAlvoProblemDetails: true), Engine);
+        using var created = await world.SendAsync(
+            HttpMethod.Post, "/api/crates", _cratesWriter, body: new JsonObject { ["code"] = "C1", ["seal"] = seal, ["quantity_text"] = "12" });
+        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.ReadTextAsync());
+        var id = (await created.ReadJsonObjectAsync())["id"]!.GetValue<Guid>();
+
+        using var refused = await world.SendAsync(HttpMethod.Patch, $"/api/crates/{id}", _cratesWriter, body: new JsonObject { ["quantity_text"] = "twelve" });
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.InternalServerError, "the status must not reveal whether the stored seal opened the first hook (L1)");
+        (await refused.ReadJsonObjectAsync())["type"]!.GetValue<string>().ShouldBe("https://alvo.dev/errors/function-failed");
     }
 
     private static readonly TimeSpan _tightBudget = TimeSpan.FromMilliseconds(200);

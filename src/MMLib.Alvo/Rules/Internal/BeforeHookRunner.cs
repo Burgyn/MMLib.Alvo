@@ -112,23 +112,23 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
         var patch = new Dictionary<string, object?>(StringComparer.Ordinal);
         var writers = new Dictionary<string, (CompiledBeforeHook Hook, CompiledMutation Mutation)>(StringComparer.Ordinal);
         var current = candidate;
+        var written = _nothingWritten;
 
         foreach (var hook in hooks)
         {
-            var written = WrittenSoFar(patch);
-            if (!Fires(hook, current, previous, context, written))
+            if (Fires(hook, current, previous, context, written))
             {
-                continue;
+                EnsureNotRejected(hook);
+                foreach (var mutation in hook.Mutations)
+                {
+                    patch[mutation.Field] = Value(mutation, current, previous, now, written);
+                    writers[mutation.Field] = (hook, mutation);
+                }
+
+                current = Patched(current, patch);
             }
 
-            EnsureNotRejected(hook);
-            foreach (var mutation in hook.Mutations)
-            {
-                patch[mutation.Field] = Value(mutation, current, previous, now, written);
-                writers[mutation.Field] = (hook, mutation);
-            }
-
-            current = Patched(current, patch);
+            written = WithTargetsOf(hook, written);
         }
 
         EnsureEveryValueFits(patch, writers);
@@ -211,11 +211,26 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
         || CelDataOrigin.Attributed(condition, written, () => CelInterpreter.EvaluatePredicate(condition, candidate, previous, context));
 
     /// <summary>
-    /// The fields earlier hooks of this write mutated: a built-in refusing one of them refuses a value a hook wrote, not the
-    /// caller's (E1, Ruling 26), so the failure is attributed as not the caller's.
+    /// The fields earlier hooks of this write may have mutated, with <paramref name="hook"/>'s mutate targets added: a built-in
+    /// refusing one of them may refuse a value a hook wrote, not the caller's (E1, Ruling 26), so the failure is attributed as
+    /// not the caller's.
     /// </summary>
-    private static IReadOnlySet<string> WrittenSoFar(Dictionary<string, object?> patch) =>
-        patch.Count == 0 ? _nothingWritten : patch.Keys.ToHashSet(StringComparer.Ordinal);
+    /// <remarks>
+    /// <b>Every earlier hook's targets, whether it fired or not</b> — the set <c>WriteExtensionRunner.HookWritten</c> also uses.
+    /// A hook's condition can read <c>old.</c>, the stored row, including fields the caller may not read; attributing against
+    /// only the hooks that fired would make 422 against 500 a one-bit answer about that stored data.
+    /// </remarks>
+    private static IReadOnlySet<string> WithTargetsOf(CompiledBeforeHook hook, IReadOnlySet<string> written)
+    {
+        if (hook.Mutations.Count == 0)
+        {
+            return written;
+        }
+
+        var fields = new HashSet<string>(written, StringComparer.Ordinal);
+        fields.UnionWith(hook.Mutations.Select(mutation => mutation.Field));
+        return fields;
+    }
 
     /// <summary>
     /// Refuses the write when the hook that fired is a <c>reject</c>, carrying the author's own text and the

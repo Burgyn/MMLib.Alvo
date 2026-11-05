@@ -2,7 +2,7 @@
   "$schema": "https://alvo.dev/schema/v1/project.json",
   "apiVersion": "alvo.dev/v1",
   "name": "expression-failed",
-  "description": "One entity whose before-hooks read a quantity a client sends as text with int(): a text that is no whole number is the caller's own data refusing a built-in, which answers 422 expression-failed on every engine and writes nothing.",
+  "description": "Entities whose before-hooks read a quantity a client sends as text with int(): a text that is no whole number is the caller's own data refusing a built-in, which answers 422 expression-failed on every engine and writes nothing.",
   "auth": { "providers": ["local"], "roles": ["writer"] },
   "access": { "viewer": "'writer' in @user.roles" },
   "entities": {
@@ -19,6 +19,21 @@
         ],
         "beforeUpdate": [
           { "condition": "int(new.quantity_text) > 9999", "action": { "reject": "A lot holds at most 9999 pieces." } }
+        ]
+      }
+    },
+    "crates": {
+      "description": "A crate whose first update hook rewrites the quantity only when a stored seal is open: a later refusal of that quantity answers 500 whether or not the first hook fired, so the status reveals nothing about the stored seal.",
+      "fields": {
+        "code": { "type": "string", "maxLength": 20 },
+        "seal": { "type": "string", "maxLength": 20 },
+        "quantity_text": { "type": "string", "maxLength": 20 }
+      },
+      "rules": { "list": "true", "get": "true", "create": "true", "update": "true", "delete": "true" },
+      "hooks": {
+        "beforeUpdate": [
+          { "condition": "old.seal == 'open'", "action": { "mutate": { "quantity_text": { "$cel": "new.quantity_text" } } } },
+          { "condition": "int(new.quantity_text) > 9999", "action": { "reject": "A crate holds at most 9999 pieces." } }
         ]
       }
     }

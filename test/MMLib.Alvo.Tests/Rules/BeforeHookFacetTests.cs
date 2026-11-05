@@ -214,6 +214,18 @@ public sealed class BeforeHookFacetTests
         Should.Throw<CelFunctionException>(() => Run(hooks, Row(("note", "5")))).OnCallerData.ShouldBeFalse();
     }
 
+    [Theory]
+    [InlineData("A title")]
+    [InlineData("Another title")]
+    public void A_refusal_of_a_field_an_earlier_hook_would_write_is_not_the_caller_s_whether_or_not_that_hook_fired(string firesOn)
+    {
+        var earlier = new BeforeHook { Condition = $"new.title == '{firesOn}'", Action = Mutate("note", Cel("new.note")) };
+        var hooks = BeforeCreate(earlier, Reject("int(new.note) > 1", "Too many."));
+
+        Should.Throw<CelFunctionException>(() => Run(hooks, Row(("note", "abc")))).OnCallerData.ShouldBeFalse(
+            "the answer must not reveal whether the earlier hook's condition held (L1)");
+    }
+
     [Fact]
     public void A_hook_refusing_the_caller_s_own_value_stays_the_caller_s()
     {
