@@ -66,6 +66,7 @@ compresses out. Violating one of these is a bug, not a style nit.
 ## Repo map
 
 - `src/` — shipped library code (the ports and, once earned, the core).
+- `src/MMLib.Alvo.Analyzers` is the analyzers project, packed inside the `MMLib.Alvo` nupkg (not a package of its own).
 - `test/` — tests, mirroring `src/`.
 - `docs/product/` — full spec (`alvo-specifikacia.md`) + domain analysis (`baas-analyza.md`), SK, read rarely.
 - `docs/architecture/` — architecture notes, e.g. `package-boundary.md`.

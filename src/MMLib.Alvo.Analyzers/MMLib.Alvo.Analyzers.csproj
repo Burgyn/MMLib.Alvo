@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ALVO1001 (and, from HX-17, the typed-entity generator). Not a package: MMLib.Alvo packs this assembly at
+    analyzers/dotnet/cs, so every consumer of the core gets it and its runtime closure gains nothing. netstandard2.0 is
+    the only target a compiler loads an analyzer from (SolutionConventionTests exempts a Roslyn component from the
+    inherited TargetFramework for exactly that value). Microsoft.CodeAnalysis.CSharp is pinned to the oldest compiler a
+    supported .NET 10 SDK carries, so every SDK at or above global.json's loads it.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+    <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
+  </ItemGroup>
+
+</Project>

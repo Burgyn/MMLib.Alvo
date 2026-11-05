@@ -43,3 +43,7 @@
 // And a second: CapabilityReport, which DeclaredSlotsAgreementTests holds against the dashboard's own reader of
 // the warned slots — the one suite that sees both assemblies' internals (docs/todo-admin.md §8d item 27).
 [assembly: InternalsVisibleTo("MMLib.Alvo.Host.Tests")]
+
+// The analyzer's parity fact reads the boot ban's own list (HookDependencies), so ALVO1001's reach list is held a
+// superset of what the core refuses at start, rather than a copy that drifts from it.
+[assembly: InternalsVisibleTo("MMLib.Alvo.Analyzers.Tests")]

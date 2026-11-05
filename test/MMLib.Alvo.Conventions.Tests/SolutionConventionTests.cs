@@ -38,12 +38,24 @@ public class SolutionConventionTests
     public void No_project_redeclares_an_inherited_msbuild_property()
     {
         var offenders = _projects
-            .Where(project => project.RedeclaredInheritedProperties.Count > 0)
-            .Select(project => $"{project.RelativePath} ({string.Join(", ", project.RedeclaredInheritedProperties)})")
+            .Select(project => (project.RelativePath, Redeclared: Redeclared(project)))
+            .Where(project => project.Redeclared.Count > 0)
+            .Select(project => $"{project.RelativePath} ({string.Join(", ", project.Redeclared)})")
             .ToList();
 
         offenders.ShouldBeEmpty(
             "These properties are inherited from Directory.Build.props — do not re-declare them per project.");
+    }
+
+    [Fact]
+    public void A_roslyn_component_may_target_only_netstandard2_0()
+    {
+        var offenders = _projects
+            .Where(project => project.IsRoslynComponent && project.TargetFramework != "netstandard2.0")
+            .Select(project => project.RelativePath)
+            .ToList();
+
+        offenders.ShouldBeEmpty("A compiler loads an analyzer or generator only from netstandard2.0.");
     }
 
     [Fact]
@@ -103,6 +115,13 @@ public class SolutionConventionTests
             + "or mark the project <IsPackable>false</IsPackable> if it is internal.");
     }
 
+    /// <summary>
+    /// The inherited properties <paramref name="project"/> redeclares, less the one exemption: a Roslyn component's
+    /// <c>TargetFramework</c>, which <see cref="A_roslyn_component_may_target_only_netstandard2_0"/> holds to netstandard2.0.
+    /// </summary>
+    private static List<string> Redeclared(ProjectDescriptor project) =>
+        [.. project.RedeclaredInheritedProperties.Where(property => !(project.IsRoslynComponent && property == "TargetFramework"))];
+
     private static List<ProjectDescriptor> LoadProjects()
     {
         var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);
@@ -150,6 +169,8 @@ public class SolutionConventionTests
             Path.GetFileNameWithoutExtension(projectFilePath),
             relativePath.Split('/')[0],
             IsPackable(document),
+            IsTrue(document, "IsRoslynComponent"),
+            ElementsNamed(document, "TargetFramework").FirstOrDefault()?.Value.Trim(),
             pinsPackageVersion,
             declaresAssemblyVersion,
             redeclaredInheritedProperties,
@@ -162,6 +183,9 @@ public class SolutionConventionTests
             "false",
             StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsTrue(XDocument project, string property) =>
+        string.Equals(ElementsNamed(project, property).FirstOrDefault()?.Value.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+
     private static IEnumerable<XElement> ElementsNamed(XContainer document, string localName) =>
         document.Descendants().Where(element => element.Name.LocalName == localName);
 
@@ -170,6 +194,8 @@ public class SolutionConventionTests
         string Name,
         string TopLevelFolder,
         bool IsPackable,
+        bool IsRoslynComponent,
+        string? TargetFramework,
         bool PinsPackageVersion,
         bool DeclaresAssemblyVersion,
         IReadOnlyList<string> RedeclaredInheritedProperties,
