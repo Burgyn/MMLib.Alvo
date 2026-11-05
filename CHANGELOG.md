@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`ALVO1001`, an analyzer shipped inside `MMLib.Alvo`** (HX-10, #387). Before-write, after-write, before-delete and
+  after-delete hooks — classes and delegates — and `AddCelFunction` delegates are checked at build time for the network
+  (`HttpClient`, sockets, mail…), a database connection, a file, a second Alvo data port (`IAlvoData`, `IAlvoEvents`…),
+  a service-locator lookup of one, an `await` of anything but the write's transaction and, in a CEL function, a call that
+  returns a task. A warning; validate hooks and event handlers are not checked. It reaches projects that reference
+  `MMLib.Alvo` directly — NuGet does not pass an analyzer on through another package. Docs: *Analyzer rules*.
+
+- **A time budget for host CEL functions** (#309). Every host function call in one evaluation shares
+  `Alvo:Extensions:CelFunctionBudget` (default 250 ms, at most 30 s); a function may take a trailing `CancellationToken`,
+  cancelled when the budget is spent.
+
+- **`expression-failed` (422)** (#315): a built-in CEL function or hook arithmetic refusing the request's own data —
+  `int('x')`, a `substring` past the end, an overflow, a division by zero — is now a caller-fixable 422 on every host,
+  without `AddAlvoProblemDetails()`.
+
 - **Write hooks in three phases** (HX-09, #386). `Entity<T>(…)`/`Entity("name", …)`/`Entities`/`Entity("*", …)` gain
   `Validate`, `BeforeWrite`, `AfterWrite`, `BeforeDelete` and `AfterDelete` — class (`IValidateWriteHook<T>`, …) or
   delegate hooks, with a lambda or CEL `when`. Validate runs before a top-level write's transaction (network allowed,
@@ -249,6 +264,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the docs site's tutorial and the source of the README's "See it" section.
 
 ### Changed (breaking)
+
+- **Breaking for clients that branch on 500:** a built-in CEL function's refusal of the caller's data answered 500
+  `function-failed`; it answers 422 `expression-failed`, and is no longer logged at Error. Host functions keep 500.
+- **Breaking:** host CEL functions that reach 250 ms in one evaluation — with or without a cancellation token, and
+  whatever they do when it fires — now fail: in a before-hook or a write hook's `when` the write is refused (500
+  `function-failed` / `hook-failed`); in an after-hook condition, after the commit, the after-hook is dropped with a
+  Warning; in an event handler's `when` the delivery is recorded dead. Raise `Alvo:Extensions:CelFunctionBudget` if a
+  function legitimately needs longer.
 
 - **`IAlvoManagement` gains `GetExtensionsAsync`** (HX-04). A third-party implementer or decorator of the public port
   must add it; a caller is unaffected.
@@ -500,6 +523,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the warning is dropped silently — a startup crash traded for a silent drop.
 
 ### Changed
+
+- A built-in refusing a value a host function produced, the stored row (`old.`), or a value a hook wrote stays 500
+  `function-failed`; only the caller's own data answers 422, and only on the generated Data API routes (commands keep 500).
+  The caller's own data is a field the request's body sent: a refusal of a field an update left alone, of a default, a
+  literal or `@user`, and any refusal on a delete, stays 500.
 
 - **The `alvo.` event namespace is reserved** (HX-03). `IAlvoEvents.PublishAsync("alvo.…")` is refused, as
   `entity.…` already was: Alvo mints schedule runs and command completions there.

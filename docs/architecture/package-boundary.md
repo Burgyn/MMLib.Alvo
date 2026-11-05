@@ -21,6 +21,17 @@
   PR3, the generated **HTTP Data API** and its OpenAPI enrichment. EF-free
   (enforced by an arch test), but **an ASP.NET Core library** — see Hard
   dependency rules.
+- `src/MMLib.Alvo.Analyzers` — the Roslyn analyzers (`ALVO1001` from HX-10; the typed-entity generator joins it in
+  HX-17). **A project, not a package** (spec 2026-10-14 E6): `IsPackable=false`, and `MMLib.Alvo`'s pack places its
+  assembly at `analyzers/dotnet/cs/`, so every project that references `MMLib.Alvo` directly gets the rule — NuGet does
+  not flow an analyzer asset transitively (a package depending on the core gets `exclude="Build,Analyzers"` by default),
+  so a consumer reaching the core only through another package does not — while the core neither references it nor
+  declares a dependency on it. It is a separate project only because a compiler
+  loads an analyzer from a `netstandard2.0` assembly of its own; rule (a) names Roslyn because a *runtime* Roslyn
+  dependency is heavy, and an analyzer asset adds nothing to a consumer's runtime closure. `Microsoft.CodeAnalysis.CSharp`
+  is pinned to 4.14.0, older than the compiler of the minimum SDK in `global.json`, and `scripts/test-packed-analyzer`
+  builds a packed consumer on that SDK. `SolutionConventionTests` lets a `<IsRoslynComponent>` project declare
+  `TargetFramework=netstandard2.0`, and nothing else.
 - `src/MMLib.Alvo.Data.EntityFrameworkCore` — shared EF-based host (the
   descriptor→`IModel` builder, the EF-differ migrator, the introspector, the
   applied-schema store); drags `Microsoft.EntityFrameworkCore.Relational`.
@@ -129,6 +140,10 @@
   references `MMLib.Alvo.Host` so that it can boot the real composition. Its suite,
   `test/MMLib.Alvo.DocsGen.Tests`, is an ordinary ring0 module. Design:
   [`2026-10-09-f6-docs-site-design.md`](../superpowers/specs/2026-10-09-f6-docs-site-design.md).
+  `tools/MMLib.Alvo.Load.Host`, the load harness's hooks arm (the standalone composition plus three calibration
+  hooks, built into its own image by `scripts/test-load` and never published), is **not a package** by the same
+  reasoning: `IsPackable=false`, run and never referenced — its `CalibrationHooks.cs` is linked as source into
+  `test/MMLib.Alvo.TestHost.Tests`, not referenced as an assembly.
 - `test/` — one `*.Tests` per shipped project (arch + public-API approval
   auto-linked), `MMLib.Alvo.Conventions.Tests` (solution-structure checks),
   `MMLib.Alvo.Api.Tests`, and the `*.Tests.Integration` projects

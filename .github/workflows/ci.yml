@@ -141,6 +141,12 @@ jobs:
         if: runner.os == 'Linux'
         run: dotnet pack --configuration Release --no-build --output artifacts
 
+      # HX-10 acceptance (2): the packed analyzer reaches a consumer built on the minimum SDK (global.json's), from the
+      # very packages the step above produced. Linux only: it builds the consumer in that SDK's container.
+      - name: Packed analyzer on the minimum SDK
+        if: runner.os == 'Linux'
+        run: ALVO_FEED=artifacts scripts/test-packed-analyzer
+
       - name: Upload packages
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7

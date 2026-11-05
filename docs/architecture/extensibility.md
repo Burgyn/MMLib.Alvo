@@ -260,19 +260,26 @@ Then call it from a hook — a `condition`, or a before-hook `mutate` value:
 What the registration checks, at the call (an `ArgumentException`): the name
 (`^[a-z][a-zA-Z0-9_]*`, at most 64 characters, not a built-in or a reserved CEL
 word), at most four parameters of `string long int decimal bool DateTimeOffset Guid`
-or their nullable forms, the same set for the result, no `Task`, `ref`, `out` or
-multicast delegate.
+or their nullable forms (plus an optional trailing `CancellationToken`, which is not a
+CEL parameter), the same set for the result, no `Task`, `ref`, `out` or multicast
+delegate.
 
 What you promise, because Alvo cannot check it: the function is **pure, fast and
 thread-safe**. It runs inside the write's transaction, once per evaluation, on any
-request thread, with no time budget and no cancellation; it captures singletons only.
+request thread, inside a time budget every host call of one evaluation shares
+(`Alvo:Extensions:CelFunctionBudget`, 250 ms; a trailing token is cancelled when it is
+spent, and a function returning after it fails anyway — see `cel.md`'s *Time budget*);
+it captures singletons only. `ALVO1001` reports the network, a connection, a file, a
+data port or a task-returning call inside it at build time ([`analyzers.md`](analyzers.md)).
 A function that reads stored data must filter by the tenant itself — Alvo's tenant
 filter does not reach inside — so give it the tenant as an argument: in a
 `condition`, pass `@tenant.id`; in a `mutate`, pass `new.tenant_id` (a column of a
 tenant-scoped row), because a mutate cannot read `@tenant` or `@user` (the refusal's
 wording is tracked in #310). A function that throws refuses the write with
 `500 …/errors/function-failed`, naming the function and never your exception text
-(that goes to the log). So throw on a present input you cannot answer for: a `null`
+(that goes to the log) — a host function's failure is always 500; only a **built-in**
+refusing a value the request's body sent answers `422 …/errors/expression-failed`
+(HX-10, E1; `cel.md`'s *Failure fails closed*). So throw on a present input you cannot answer for: a `null`
 return makes the call `null`, a condition over `null` does not fire, and a `reject`
 gated on the function would let that input through. Keep `null` for an input that
 really has no value.

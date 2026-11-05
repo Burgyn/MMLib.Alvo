@@ -107,3 +107,44 @@ read. Everything above is that floor plus query work.
 `create`'s max of 119 ms against a min of 2.9 ms is worth knowing rather than discovering: the
 write path carries validation, the unique check, the audit stamp and the outbox insert, and its
 tail is genuinely wider than any read's.
+
+## In-transaction hooks — 2026-11-05, pre-v0.1 (`hx/10-hook-guards`)
+
+**What it answers.** Q5 of the host-extensibility design: is 250 ms the right default time limit for a before-write or
+after-write hook (and for the host CEL functions of one evaluation)? Measured as what a hook adds to a create.
+
+**Rig.** Apple M4 laptop (10 cores), Docker Desktop 28.5.1 with an 8 GB VM, generator co-resident with the server and
+PostgreSQL 16 in the same Docker VM. k6 v2.2.0 (the `grafana/k6` image). Like the baseline, not a GitHub runner.
+
+**Data and load.** As the baseline (100 000 work orders per tenant, field-service, PostgreSQL 16), `constant-arrival-rate`
+10 req/s, 60 s per shape, 10 s warm-up. `create` runs on the standalone image; the four hook shapes on
+`tools/MMLib.Alvo.Load.Host` over the same rows, minutes later. 3 205 iterations (701 `create`, 2 504 across the hook
+shapes), **0 dropped**, **0 failed**. The probe (`calibration-probe` refusing `WO-89000001` with 409) passed before the
+hooks arm was measured.
+
+All values in milliseconds.
+
+| Shape | min | med | p95 | p99 | max | min / create min |
+|---|---|---|---|---|---|---|
+| `create` | 4.55 | 10.37 | 13.6 | 17.1 | 202.89 | 1x |
+| `hook_noop` | 5.07 | 11.91 | 15.44 | 27.17 | 154.59 | 1.11x |
+| `hook_unit` | 4.79 | 11.77 | 14.57 | 18.01 | 162.5 | 1.05x |
+| `hook_after` | 4.66 | 11.7 | 15.3 | 18.12 | 25.34 | 1.02x |
+| `hook_read` | 5.43 | 12.41 | 15.97 | 21.85 | 76.38 | 1.19x |
+
+**What each step costs, on `min`:** `hook_unit − create` = the write's own transaction unit and three `when`
+evaluations (0.24 ms); `hook_noop − hook_unit` = invoking one hook (0.28 ms); `hook_read − hook_noop` = one read through
+`write.Transaction` (0.36 ms); `hook_after − hook_unit` = one after-write hook (−0.13 ms — below this rig's resolution,
+so read it as "not measurable here", not as a saving). A before-write hook that does one read costs about 0.9 ms of
+service time over a hook-free create.
+
+**The tails are the rig's, not the hooks'.** `hook_noop`'s p99 (27.17 ms) is above `hook_read`'s (21.85 ms) although it
+does strictly less work, and `create`'s max (202.89 ms) is the widest in the table: at these rates p99 and max carry the
+same scheduling and container jitter as every shape (qualification 2 above). The per-step costs are read on `min` for
+that reason.
+
+**Verdict.** 250 ms stays: `hook_read`'s p99 is 21.85 ms, a tenfold headroom is 218.5 ms ≤ 250 ms. Rule (HX-10
+Ruling 20): keep 250 ms while `hook_read`'s p99 ≤ 25 ms on the calibration rig; otherwise the smallest of 500 ms or 1 s
+that restores tenfold headroom. The margin is real but not wide (21.85 against 25), and it was measured once, on this
+rig: a slower rig, or a hook that does more than one read, is what `AlvoHookOptions.Timeout` per registration and
+`Alvo:Extensions:CelFunctionBudget` are for.

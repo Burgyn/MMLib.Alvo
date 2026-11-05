@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
@@ -16,13 +17,13 @@ namespace MMLib.Alvo.Hooks.Internal;
 /// that has already poisoned the unit on the flow.
 /// </summary>
 /// <remarks>
-/// <b>Nothing it holds reaches the network:</b> its own dependencies are the catalog, the binder, the clock, a logger and the
-/// root provider it resolves the session factory, the delivery store and the rejection log from — the architecture fact over
-/// <c>WriteExtensionRunner</c>'s constructor (§4.4.5) pins that list.
+/// <b>Nothing it holds reaches the network:</b> its own dependencies are the catalog, the binder, the clock, the host-function
+/// budget, a logger and the root provider it resolves the session factory, the delivery store and the rejection log from — the
+/// architecture fact over <c>WriteExtensionRunner</c>'s constructor (§4.4.5) pins that list.
 /// </remarks>
 internal sealed class WriteExtensionRunner(
     ExtensionRegistry registry, ExtensionBinder binder, IPolicyCatalogProvider catalogs, IServiceProvider services, TimeProvider time,
-    ILogger<WriteExtensionRunner> logger) : IWriteExtensionRunner
+    CelFunctionBudgetPolicy budget, ILogger<WriteExtensionRunner> logger) : IWriteExtensionRunner
 {
     private static readonly IReadOnlyDictionary<string, object?> _none = new Dictionary<string, object?>(StringComparer.Ordinal);
 
@@ -43,7 +44,7 @@ internal sealed class WriteExtensionRunner(
         var disabled = await DisabledAsync(cancellationToken).ConfigureAwait(false);
         await using var scope = services.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
         var scoped = invocation with { Services = scope.ServiceProvider };
-        foreach (var hook in hooks.Where(hook => !disabled.Contains(hook.Id) && Fires(hook, scoped, WriteHookStage.Validate)))
+        foreach (var hook in hooks.Where(hook => !disabled.Contains(hook.Id) && Fires(hook, scoped, WriteHookStage.Validate, (catalog, _none), cancellationToken)))
         {
             await RunAsync(hook, scoped, WriteHookStage.Validate, catalog, cancellationToken).ConfigureAwait(false);
         }
@@ -58,7 +59,7 @@ internal sealed class WriteExtensionRunner(
         var catalog = catalogs.Current;
         foreach (var hook in Selected(invocation, stage, catalog))
         {
-            if (!Fires(hook, current, stage))
+            if (!Fires(hook, current, stage, (catalog, patch), cancellationToken))
             {
                 continue;
             }
@@ -81,7 +82,7 @@ internal sealed class WriteExtensionRunner(
         var stage = invocation.Operation == AlvoWriteOperation.Delete ? WriteHookStage.AfterDelete : WriteHookStage.AfterWrite;
         string? writer = null;
         var catalog = catalogs.Current;
-        foreach (var hook in Selected(invocation, stage, catalog).Where(hook => Fires(hook, invocation, stage)))
+        foreach (var hook in Selected(invocation, stage, catalog).Where(hook => Fires(hook, invocation, stage, (catalog, _none), cancellationToken)))
         {
             writer = (await RunAsync(hook, invocation, stage, catalog, cancellationToken).ConfigureAwait(false)).Wrote ? hook.Id : writer;
         }
@@ -117,9 +118,19 @@ internal sealed class WriteExtensionRunner(
 
     /// <summary>
     /// Whether <paramref name="hook"/>'s <c>when</c> holds. A host function failing in it is the hook's failure, never a skip;
-    /// a built-in failing on the caller's data escapes unchanged, answered as any condition's built-in failure (Ruling 63).
+    /// a built-in failing on the caller's data escapes unchanged, answered as any condition's built-in failure (Ruling 63). The
+    /// <c>when</c> is one host-function budget pass, linked with the write's token; past the budget it is the hook's failure.
+    /// The write's own cancellation reaching a token-aware function is the write's cancellation, as in a hook's body. A
+    /// built-in's refusal is the caller's only when the <c>when</c> reads no value a hook wrote (E1, Ruling 26).
     /// </summary>
-    private bool Fires(BoundWriteHook hook, WriteInvocation invocation, WriteHookStage stage)
+    /// <param name="hook">The hook whose <c>when</c> is judged.</param>
+    /// <param name="invocation">The write, as the earlier hooks of the stage left it.</param>
+    /// <param name="stage">The stage.</param>
+    /// <param name="written">The stage's catalog and the host <c>Set</c>s so far — what a refusal is attributed against.</param>
+    /// <param name="cancellationToken">The write's token.</param>
+    private bool Fires(
+        BoundWriteHook hook, WriteInvocation invocation, WriteHookStage stage,
+        (PolicyCatalog? Catalog, IReadOnlyDictionary<string, object?> Sets) written, CancellationToken cancellationToken)
     {
         if (hook.ConditionFor(invocation.Entity) is not { } condition)
         {
@@ -128,13 +139,69 @@ internal sealed class WriteExtensionRunner(
 
         try
         {
+            using var pass = budget.Enter(cancellationToken);
             return CelInterpreter.EvaluatePredicate(condition, Current(invocation, stage), invocation.Old, invocation.Caller);
+        }
+        catch (Exception thrown) when (WriteCancelled(thrown, cancellationToken))
+        {
+            throw new OperationCanceledException(cancellationToken);
+        }
+        catch (CelFunctionException refused) when (refused.OnCallerData && !OnCallersData(condition, invocation, stage, written))
+        {
+            throw refused.NotTheCallers();
         }
         catch (Exception thrown) when (thrown is not CelFunctionException { IsHost: false })
         {
             throw FailBeforeRun(hook.Id, HookFailedException.Exception, thrown);
         }
     }
+
+    /// <summary>
+    /// Whether <paramref name="thrown"/> is the write's cancellation as a host function received it — not an overrun, which
+    /// carries Alvo's reason. Rethrown bare: a wrapped function failure would be answered <c>function-failed</c> and logged.
+    /// </summary>
+    /// <remarks>
+    /// Only the wrapped shape is reachable: <c>CelFunction.Run</c> wraps whatever a host body throws, and anything else that
+    /// escapes the interpreter on this fail-closed path is its defect, never a bare <see cref="OperationCanceledException"/>.
+    /// </remarks>
+    private static bool WriteCancelled(Exception thrown, CancellationToken cancellationToken) =>
+        cancellationToken.IsCancellationRequested
+        && thrown is CelFunctionException { IsHost: true, Reason: null, InnerException: OperationCanceledException };
+
+    /// <summary>
+    /// Whether a refusal in <paramref name="condition"/> stays the caller's, judged on the failure path only: never after the
+    /// write (the saved row carries defaults, rollups and hook writes), always in validate (no hook has written yet), and
+    /// before it only when the <c>when</c> reads no field a declarative before-hook of this operation mutates or an earlier
+    /// host hook set. Conservative: the whole expression is judged.
+    /// </summary>
+    private static bool OnCallersData(
+        CompiledExpression condition, WriteInvocation invocation, WriteHookStage stage,
+        (PolicyCatalog? Catalog, IReadOnlyDictionary<string, object?> Sets) written) => stage switch
+        {
+            WriteHookStage.Validate => true,
+            WriteHookStage.AfterWrite or WriteHookStage.AfterDelete => false,
+            _ => !CelDataOrigin.Reads(condition.Root, HookWritten(written.Catalog, invocation, written.Sets)),
+        };
+
+    /// <summary>The fields hooks may have written before this <c>when</c>: the declarative before-hooks' mutate targets and the host <c>Set</c>s so far.</summary>
+    private static HashSet<string> HookWritten(PolicyCatalog? catalog, WriteInvocation invocation, IReadOnlyDictionary<string, object?> sets)
+    {
+        var fields = sets.Keys.ToHashSet(StringComparer.Ordinal);
+        if (catalog is not null && catalog.TryGetEntity(invocation.Entity, out var policy))
+        {
+            fields.UnionWith(policy.BeforeHooks.For(DeclarativeOperation(invocation)).SelectMany(hook => hook.Mutations).Select(mutation => mutation.Field));
+        }
+
+        return fields;
+    }
+
+    /// <summary>The declarative before-hook list a write runs: a replace that creates runs the create list.</summary>
+    private static DataOperation DeclarativeOperation(WriteInvocation invocation) => invocation.Operation switch
+    {
+        AlvoWriteOperation.Create => DataOperation.Create,
+        AlvoWriteOperation.Delete => DataOperation.Delete,
+        _ => invocation.Old is null ? DataOperation.Create : DataOperation.Update,
+    };
 
     private static AlvoRecord Current(WriteInvocation invocation, WriteHookStage stage) => stage switch
     {

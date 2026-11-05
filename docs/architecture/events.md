@@ -474,13 +474,16 @@ commit and therefore holds no lock.
 
 ### What bounds a hook's execution time — the grammar, not a timeout
 
-There is no wall-clock budget and no cancellation token to carry one, and that is a decision rather
+A descriptor's own expressions carry no wall-clock budget and no cancellation token to carry one, and that is a decision rather
 than an omission. **The bound is structural.** A hook is a fixed number of compiled CEL expressions —
 the count fixed by the descriptor at apply, never by the request — and the profiles they compile in
 (`Condition` for the gate, `Mutate` for the values) have no loop, no comprehension macro, no
 recursion, no user-defined function and no I/O. The built-in functions are pure and bounded (an ASCII fold, a trim, a bounded replace, a read of an instant the caller
 already bound). A function a *host* registers with `AddCelFunction` is host code and is not bounded by this grammar: the
-descriptor author still cannot express a loop or I/O, the host developer can, by contract (spec 2026-10-05 §5.8). Each expression's tree is walked
+descriptor author still cannot express a loop or I/O, the host developer can, by contract (spec 2026-10-05 §5.8) — so
+host functions, the one call into a before-hook that can block, carry the budget the last paragraph below asks for: since
+HX-10 every host call in one `BeforeHookRunner.Run` shares `Alvo:Extensions:CelFunctionBudget` (250 ms), measured on
+return and offered as a token (`cel.md`, *Time budget*). The descriptor's own expressions still carry none. Each expression's tree is walked
 once and its node count is bounded by its source length, which the frozen schema caps at 2000
 characters.
 
@@ -488,7 +491,7 @@ So the work is **O(descriptor), not O(caller input)**: no request can make a hoo
 wall-clock budget could only fire on a machine that had already stopped serving. A timeout would buy a
 clock read per hook plus a second failure mode *inside a transaction*, to guard against an overrun the
 grammar cannot express. Recorded as deviation 81, because the addendum's DoD names a "budget-overrun
-rollback" and a reader is owed the reason there is no budget to overrun. The claim is only as good as
+rollback" and a reader is owed the reason there is no budget to overrun (host functions do carry one since HX-10, above). The claim is only as good as
 the grammar it rests on: **the PR that admits a loop, a comprehension or a call that can block into a
 before-hook profile owes a budget with it.**
 

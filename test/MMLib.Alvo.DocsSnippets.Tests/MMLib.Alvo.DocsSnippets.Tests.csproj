@@ -15,6 +15,8 @@
   <ItemGroup>
     <ProjectReference Include="../../src/MMLib.Alvo.TestHost/MMLib.Alvo.TestHost.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <!-- Every snippet a reader copies compiles under ALVO1001, which TreatWarningsAsErrors makes an error here. -->
+    <ProjectReference Include="../../src/MMLib.Alvo.Analyzers/MMLib.Alvo.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>

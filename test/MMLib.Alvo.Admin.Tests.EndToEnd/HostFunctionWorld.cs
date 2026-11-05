@@ -34,7 +34,14 @@ public sealed class HostFunctionWorld : RecordingWorld
     public HttpClient Api() => _key.Client(BaseAddress);
 
     /// <inheritdoc/>
-    protected override void Configure(IDictionary<string, string?> settings) => _key.Configure(settings);
+    protected override void Configure(IDictionary<string, string?> settings)
+    {
+        _key.Configure(settings);
+
+        // The longest budget the option allows: these scenarios render and call the functions, and a loaded runner must not
+        // turn a call that returns at once into a budget overrun (the budget itself is HookGuards', Ruling 42).
+        settings["Alvo:Extensions:CelFunctionBudget"] = "00:00:30";
+    }
 
     /// <inheritdoc/>
     protected override void Configure(IAlvoBuilder alvo) => alvo

@@ -141,6 +141,10 @@ internal static class CelInterpreter
             var state = new EvalState(current, previous, context, failClosed: FailsClosed(expression), changed: changed);
             return Truth(Evaluate(expression.Root, state), WholeCondition, state.FailClosed, WholeConditionReason);
         }
+        catch (CelFunctionException failure) when (failure is { OnCallerData: true, Judged: false })
+        {
+            throw failure.JudgedBy(expression.Root);
+        }
 #pragma warning disable CA1031
         catch (Exception failure) when (failure is not CelFunctionException)
 #pragma warning restore CA1031
@@ -261,7 +265,7 @@ internal static class CelInterpreter
     /// from a catalogued function, an operator's overflow, division by zero or present non-number operand (spec §5.6,
     /// Ruling P) and a join past the text cap (preflight S-2) — each a <see cref="CelFunctionException"/> — nothing in a
     /// <see cref="CelProfile.Mutate"/> tree can throw: the profile admits literals, field references, calls,
-    /// arithmetic and joins; <see cref="Evaluate"/>'s node switch ends in <c>_ =&gt; null</c>; and <c>now()</c> reads a
+    /// arithmetic and joins; <see cref="EvaluateNode"/>'s node switch ends in <c>_ =&gt; null</c>; and <c>now()</c> reads a
     /// value the caller already bound. The remaining <c>catch</c> is defence-in-depth, as <see cref="EvaluatePredicate"/>'s is,
     /// and on this path it rethrows what it meets as a <see cref="CelFunctionException"/> rather than answering
     /// <see langword="null"/>.
@@ -302,7 +306,24 @@ internal static class CelInterpreter
     /// <param name="failure">What was thrown.</param>
     private static CelFunctionException HookDefect(Exception failure) => new(HookEvaluation, HookEvaluationReason, failure);
 
-    private static object? Evaluate(CelNode node, in EvalState state) => node switch
+    /// <summary>
+    /// Evaluates <paramref name="node"/>; a refusal of what looks like the caller's data is judged here, by the innermost node
+    /// that sees it (Ruling 26): when this node's subtree calls a host function or reads the stored row, the refused value is
+    /// not the caller's. Once judged, outer nodes let it pass unchanged.
+    /// </summary>
+    private static object? Evaluate(CelNode node, in EvalState state)
+    {
+        try
+        {
+            return EvaluateNode(node, state);
+        }
+        catch (CelFunctionException failure) when (failure is { OnCallerData: true, Judged: false })
+        {
+            throw failure.JudgedBy(node);
+        }
+    }
+
+    private static object? EvaluateNode(CelNode node, in EvalState state) => node switch
     {
         CelLiteral literal => literal.Value,
         CelFieldRef fieldRef => ResolveField(fieldRef, state),

@@ -1,0 +1,13 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Analyzers.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETStandard,Version=v2.0", FrameworkDisplayName=".NET Standard 2.0")]
+namespace MMLib.Alvo.Analyzers
+{
+    [Microsoft.CodeAnalysis.Diagnostics.DiagnosticAnalyzer("C#", new string[0])]
+    public sealed class InTransactionIoAnalyzer : Microsoft.CodeAnalysis.Diagnostics.DiagnosticAnalyzer
+    {
+        public InTransactionIoAnalyzer() { }
+        public override System.Collections.Immutable.ImmutableArray<Microsoft.CodeAnalysis.DiagnosticDescriptor> SupportedDiagnostics { get; }
+        public override void Initialize(Microsoft.CodeAnalysis.Diagnostics.AnalysisContext context) { }
+    }
+}

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
 
@@ -179,6 +180,129 @@ public class AlvoExceptionHandlerTests
         logs.Logged.ShouldContain((LogLevel.Error, original));
     }
 
+    /// <summary>
+    /// A host function past its budget answers Alvo's budget sentence, and the log at <see cref="LogLevel.Error"/> carries
+    /// the overrun — whose message names the budget — with what the function itself threw after the deadline as its inner
+    /// exception: a token-aware function's <see cref="OperationCanceledException"/> alone would read as a client abort.
+    /// </summary>
+    [Fact]
+    public async Task A_budget_overrun_answers_the_budget_sentence_and_logs_the_overrun_with_what_the_function_threw()
+    {
+        var logs = new RecordingLoggerProvider();
+        var context = Context(aborted: false, _alvoEndpoint);
+        var thrown = new TimeoutException("rates service");
+        const string reason = "it ran past the 250 ms that host functions have in one evaluation";
+        var overrun = new CelFunctionException("rates", isHost: true, reason, thrown);
+
+        await Handle(logs, context, overrun);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status500InternalServerError);
+        context.Response.Body.Position = 0;
+        var body = await new StreamReader(context.Response.Body).ReadToEndAsync(TestContext.Current.CancellationToken);
+        body.ShouldContain(reason);
+        body.ShouldNotContain(thrown.Message);
+        logs.Logged.ShouldContain((LogLevel.Error, overrun));
+        overrun.InnerException.ShouldBeSameAs(thrown);
+    }
+
+    /// <summary>
+    /// A built-in refusing the caller's own data that escapes a generated route is the caller's to fix: 422
+    /// <c>expression-failed</c>, and nothing at <see cref="LogLevel.Error"/> — a 422 pages nobody (Ruling 37).
+    /// </summary>
+    [Theory]
+    [InlineData("bare")]
+    [InlineData("wrapped")]
+    public async Task A_caller_data_refusal_on_a_data_api_endpoint_answers_expression_failed_unlogged(string shape)
+    {
+        var logs = new RecordingLoggerProvider();
+        var context = Context(aborted: false, _alvoEndpoint);
+        CallerSentFields.Record(context, ["quantity_text"]);
+
+        await Handle(logs, context, shape == "bare" ? _sentRefusal : new InvalidOperationException("storage", _sentRefusal));
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status422UnprocessableEntity);
+        (await BodyAsync(context)).ShouldContain("errors/expression-failed");
+        logs.Records.ShouldNotContain(LogLevel.Error);
+    }
+
+    /// <summary>A batch records the fields every row carried, and a batch with no rows records nothing (Ruling 44).</summary>
+    [Fact]
+    public void A_batch_records_the_fields_common_to_its_rows()
+    {
+        var context = new DefaultHttpContext();
+        var empty = new DefaultHttpContext();
+
+        CallerSentFields.RecordCommon(context, [["a", "b"], ["b", "c"], ["b"]]);
+        CallerSentFields.RecordCommon(empty, []);
+
+        CallerSentFields.Of(context).ShouldBe(["b"], ignoreOrder: true);
+        CallerSentFields.Of(empty).ShouldBeNull();
+    }
+
+    /// <summary>
+    /// The same refusal on a request whose body did not carry the field it read — or that had no body, a delete — refused
+    /// the stored row or a default, not the caller's data: 500 <c>function-failed</c>, logged (Ruling 44).
+    /// </summary>
+    [Theory]
+    [InlineData("unsent")]
+    [InlineData("no body")]
+    public async Task A_refusal_of_values_the_request_did_not_send_answers_function_failed(string shape)
+    {
+        var logs = new RecordingLoggerProvider();
+        var context = Context(aborted: false, _alvoEndpoint);
+        if (shape == "unsent")
+        {
+            CallerSentFields.Record(context, ["code"]);
+        }
+
+        await Handle(logs, context, _sentRefusal);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status500InternalServerError);
+        (await BodyAsync(context)).ShouldContain("errors/function-failed");
+        logs.Records.ShouldContain(LogLevel.Error);
+    }
+
+    /// <summary>A refusal of the caller's data, judged by its node, that read <c>new.quantity_text</c>.</summary>
+    private static readonly CelFunctionException _sentRefusal =
+        new CelFunctionException("int", "the text is not a whole number such as 42 or -7")
+            .JudgedBy(new CelFieldRef("quantity_text", CelValueType.String, CelRecordState.New));
+
+    /// <summary>
+    /// The same refusal on a command's endpoint is the handler's own write, not the command caller's data: 500
+    /// <c>function-failed</c>, logged (Ruling 27).
+    /// </summary>
+    [Fact]
+    public async Task A_caller_data_refusal_on_a_command_endpoint_answers_function_failed()
+    {
+        var logs = new RecordingLoggerProvider();
+        var context = Context(aborted: false, _commandEndpoint);
+        CallerSentFields.Record(context, ["quantity_text"]);
+
+        await Handle(logs, context, _sentRefusal);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status500InternalServerError);
+        (await BodyAsync(context)).ShouldContain("errors/function-failed");
+        logs.Records.ShouldContain(LogLevel.Error);
+    }
+
+    /// <summary>
+    /// An aggregate holding the caller's refusal and a host function's failure is not the caller's to fix: 500
+    /// <c>function-failed</c>, logged (Ruling 28).
+    /// </summary>
+    [Fact]
+    public async Task An_aggregate_with_a_host_failure_beside_a_caller_refusal_answers_function_failed()
+    {
+        var logs = new RecordingLoggerProvider();
+        var context = Context(aborted: false, _alvoEndpoint);
+        CallerSentFields.Record(context, ["quantity_text"]);
+
+        await Handle(logs, context, new AggregateException(_sentRefusal, new CelFunctionException("rate", isHost: true, new FormatException())));
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status500InternalServerError);
+        (await BodyAsync(context)).ShouldContain("errors/function-failed");
+        logs.Records.ShouldContain(LogLevel.Error);
+    }
+
     /// <summary>A chain-depth refusal escaping an Alvo route is a 508 the caller is told not to retry, never a 500.</summary>
     [Fact]
     public async Task A_chain_depth_refusal_escaping_an_alvo_route_is_508_and_non_retryable()
@@ -263,6 +387,19 @@ public class AlvoExceptionHandlerTests
         requestDelegate: null,
         new EndpointMetadataCollection(new DataApiOperationMetadata("owners", DataApiEndpointKind.List)),
         "GET /api/owners");
+
+    /// <summary>A command <c>MapAlvoCommand</c> mapped, identified the way the handler identifies one.</summary>
+    private static readonly Endpoint _commandEndpoint = new(
+        requestDelegate: null,
+        new EndpointMetadataCollection(new MMLib.Alvo.Commands.Internal.CommandEndpointMetadata("quote_stay", null)),
+        "POST /commands/quote_stay");
+
+    /// <summary>What the handler wrote into the response.</summary>
+    private static async Task<string> BodyAsync(HttpContext context)
+    {
+        context.Response.Body.Position = 0;
+        return await new StreamReader(context.Response.Body).ReadToEndAsync(TestContext.Current.CancellationToken);
+    }
 
     /// <summary>An endpoint the host mapped itself, which carries no marker of Alvo's.</summary>
     private static readonly Endpoint _hostEndpoint = new(

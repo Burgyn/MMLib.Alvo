@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Extensions;
 using System.Net;
 using System.Text.Json.Nodes;
 
@@ -206,8 +207,15 @@ public abstract partial class DataApiEngineTests
             new AlvoApiWorldSetup(
                 MapAlvoProblemDetails: true,
                 ConfigureServicesAfterAlvo: services => new HookFacetsBuilder(services)
-                    .AddCelFunction("pad", (string phone) => new string('x', 5000), "Answers 5,000 characters.")),
+                    .AddCelFunction("pad", (string phone) => new string('x', 5000), "Answers 5,000 characters.")
+                    .Services.Configure<AlvoExtensionOptions>(RoomyCelBudget)),
             Engine);
+
+    /// <summary>
+    /// The longest budget the option allows, so a function that returns at once cannot cross it on a loaded runner; these
+    /// facts are about facets, and the budget itself is HookGuards' (Ruling 42).
+    /// </summary>
+    private static void RoomyCelBudget(AlvoExtensionOptions options) => options.CelFunctionBudget = TimeSpan.FromSeconds(30);
 
     /// <summary>The builder a host holds; <c>AddCelFunction</c> reads only <see cref="Services"/>.</summary>
     private sealed class HookFacetsBuilder(IServiceCollection services) : IAlvoBuilder

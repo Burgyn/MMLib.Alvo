@@ -117,7 +117,7 @@ public sealed class AlvoHookRecorderTests
         string? traceParent = null;
         await using var alvo = await AlvoTestHost.StartAsync(
             builder => builder.FromDescriptor(HelpDesk).Entity("tickets", tickets => tickets
-                .BeforeWrite("in-the-ambient-trace", (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask)
+                .BeforeWrite("in-the-ambient-trace", (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask, configure: o => o.Timeout = TimeSpan.FromSeconds(30))
                 .OnCreated(
                     "reads-the-trace",
                     (AlvoCreated<AlvoRecord> _, AlvoEventContext context) =>

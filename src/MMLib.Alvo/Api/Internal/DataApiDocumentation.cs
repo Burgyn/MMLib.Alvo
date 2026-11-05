@@ -412,9 +412,9 @@ internal static class DataApiDocumentation
         StatusCodes.Status422UnprocessableEntity,
         ResponseBody.Problem,
         "The request could not be acted on: a query string or body that is malformed, a body the entity's "
-        + "declared shape refuses, or a header this API cannot honour. The 'violations' array carries every "
-        + "reason at once — a pointer, a stable code and a fix suggestion each — never only the first, so one "
-        + "round trip is enough to repair the request.",
+        + "declared shape refuses, a header this API cannot honour, or data a hook's built-in CEL function refuses "
+        + "(`expression-failed`). The 'violations' array carries every reason at once — a pointer, a stable code and "
+        + "a fix suggestion each — never only the first, so one round trip is enough to repair the request.",
         SharedId: "unprocessable");
 
     /// <summary>The one-line summary of an operation, as the document's <c>summary</c>.</summary>

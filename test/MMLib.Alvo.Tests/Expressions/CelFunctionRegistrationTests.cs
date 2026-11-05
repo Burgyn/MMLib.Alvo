@@ -212,6 +212,42 @@ public sealed class CelFunctionRegistrationTests
             .ShouldBe(CelFunctionCatalog.BuiltIns.Names);
     }
 
+    [Fact]
+    public void A_trailing_cancellation_token_is_not_a_cel_parameter()
+    {
+        var function = HostCelFunction.Create("rate", (string currency, CancellationToken ct) => currency, summary: null);
+
+        function.Parameters.Select(p => p.Name).ShouldBe(["currency"]);
+        function.Signature().ShouldBe("rate(currency: String) -> String?");
+    }
+
+    [Fact]
+    public void Four_cel_parameters_and_a_token_are_accepted()
+    {
+        var function = HostCelFunction.Create(
+            "four", (string a, long b, decimal c, bool d, CancellationToken ct) => a, summary: null);
+
+        function.Parameters.Count.ShouldBe(4);
+    }
+
+    [Fact]
+    public void A_token_that_is_not_the_last_parameter_is_refused()
+    {
+        var refused = Should.Throw<ArgumentException>(
+            () => HostCelFunction.Create("early", (CancellationToken ct, string s) => s, summary: null));
+
+        refused.ParamName.ShouldBe("function");
+        refused.Message.ShouldContain("not its last parameter");
+    }
+
+    [Fact]
+    public void Two_tokens_are_refused()
+    {
+        Should.Throw<ArgumentException>(
+            () => HostCelFunction.Create("twice", (string s, CancellationToken a, CancellationToken b) => s, summary: null))
+            .Message.ShouldContain("2 CancellationTokens");
+    }
+
     private static Delegate Multicast()
     {
         Func<string, string> first = s => s;

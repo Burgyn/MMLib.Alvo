@@ -44,17 +44,17 @@ public sealed class CelBuiltInWriteTests
 
     /// <summary>The fail-open spec D-7 closes: a zero divisor in a reject condition refuses the write, never skips the reject.</summary>
     [Fact]
-    public async Task A_division_by_zero_in_a_condition_fails_the_write_closed()
+    public async Task A_division_by_zero_in_a_condition_refuses_the_write_as_expression_failed()
     {
         await using var world = await StartAsync();
 
         using var refused = await world.SendAsync(HttpMethod.Post, "/api/frames", Writer,
             body: new JsonObject { ["code"] = "DIV0", ["ratio"] = 50, ["divisor"] = 0 });
 
-        refused.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        refused.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
         var problem = await refused.ReadJsonObjectAsync();
-        problem["type"]!.GetValue<string>().ShouldEndWith("/errors/function-failed");
-        problem["detail"]!.GetValue<string>().ShouldBe("The CEL function '_/_' failed: the divisor is zero. Nothing was written.");
+        problem["type"]!.GetValue<string>().ShouldEndWith("/errors/expression-failed");
+        problem["detail"]!.GetValue<string>().ShouldBe("The CEL function '_/_' refused this request's data: the divisor is zero. Nothing was written.");
 
         using var listed = await world.SendAsync(HttpMethod.Get, "/api/frames", Writer);
         (await listed.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))
@@ -74,7 +74,7 @@ public sealed class CelBuiltInWriteTests
     }
 
     [Fact]
-    public async Task A_substring_past_the_end_of_the_data_fails_the_write_closed()
+    public async Task A_substring_past_the_end_of_the_data_refuses_the_write_as_expression_failed()
     {
         await using var world = await StartAsync();
         using var created = await world.SendAsync(HttpMethod.Post, "/api/frames", Writer, body: new JsonObject { ["code"] = "A1" });
@@ -83,9 +83,9 @@ public sealed class CelBuiltInWriteTests
 
         using var refused = await world.SendAsync(HttpMethod.Patch, $"/api/frames/{id}", Writer, body: new JsonObject { ["code"] = "B2" });
 
-        refused.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        refused.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
         var problem = await refused.ReadJsonObjectAsync();
-        problem["type"]!.GetValue<string>().ShouldEndWith("/errors/function-failed");
+        problem["type"]!.GetValue<string>().ShouldEndWith("/errors/expression-failed");
         problem["detail"]!.GetValue<string>().ShouldContain("substring");
         problem["detail"]!.GetValue<string>().ShouldNotContain("B2", Case.Sensitive, "never the caller's data");
     }

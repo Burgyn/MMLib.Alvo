@@ -14,7 +14,7 @@ public class ChainDepthProblemTests
     [Fact]
     public async Task A_chain_depth_refusal_is_508_with_its_own_type_and_marked_non_retryable()
     {
-        var result = await ProblemResultFactory.GuardAsync(() => throw new AlvoChainDepthExceededException("too deep"));
+        var result = await ProblemResultFactory.GuardAsync(new DefaultHttpContext(), () => throw new AlvoChainDepthExceededException("too deep"));
 
         var (status, document) = await WrittenAsync(result);
 

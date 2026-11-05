@@ -91,13 +91,14 @@ complete list, with what the generated API answers for each:
 | `AlvoIdempotencyConflictException` | The idempotency key was used for a different request. | 409 `idempotency-conflict` |
 | `AlvoConstraintViolationException` | A `unique` value or a `restrict` reference is in the way. | 409 `conflict` |
 | `InvalidOperationException`, `ArgumentNullException` | An invariant inside Alvo, or your call, is broken. | 500 `internal`, with `AddAlvoProblemDetails()` |
-| `Exception` | A CEL function failed: a built-in refused its input, or a custom function threw. | 500 `function-failed`, with `AddAlvoProblemDetails()` |
+| `Exception` | A CEL function failed: a built-in refused its input, or a custom function threw or ran past its time budget. | 422 `expression-failed` when a built-in refused a value the request's body sent (every host); otherwise 500 `function-failed`, with `AddAlvoProblemDetails()` |
 
 Catch the ones your endpoint can cause. The write sends no precondition, no idempotency key and no unique field, so
 it catches three. Let `InvalidOperationException` and `ArgumentNullException` propagate: they mean a bug, and your
 logging needs the stack trace. A CEL function that fails during your write (a built-in refusing its input, or a
 [custom function](/guides/custom-cel-functions/) that throws) reaches you as a plain `Exception`, outside
-these families, and nothing is written.
+these families, and nothing is written — in process, a built-in's refusal is the same exception: the 422 is the
+generated API's answer to its own caller, not a different exception for yours.
 
 The messages of `AlvoAuthorizationException` and `AlvoRecordNotFoundException` are safe to pass on: they never name
 the entity, the row or whether it exists.

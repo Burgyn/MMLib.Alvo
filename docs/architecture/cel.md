@@ -275,7 +275,7 @@ Since slice D, arithmetic is legal in `Condition` and `Mutate`, and string `+` i
 | name `^[a-z][a-zA-Z0-9_]*\z`, at most 64 characters, not reserved | the reserved set is `has changed now in true false null`, `old`, `new`, `math` (the namespace of the math built-ins), CEL's macros, keywords and standard type and function names; a built-in's name is refused first, as a built-in ("it is a built-in function"), never as a standard CEL name |
 | at most 4 parameters of `string long int decimal bool DateTimeOffset Guid` (and nullable forms); same result set | no `DateOnly` yet; no async, `ref`, `out`, `params` or multicast delegate |
 | singleton closure, no DI scope | a function cannot use a scoped service |
-| synchronous, no `CancellationToken`, no timeout | a slow function holds the write's transaction; it must be thread-safe |
+| synchronous; an optional trailing `CancellationToken` (not a CEL parameter); bounded by the evaluation's budget (HX-10) | a slow function fails the write once the budget is spent; one that never returns holds the transaction until it does; it must be thread-safe |
 | embedded only | the standalone image and `alvo validate` refuse a host-function name as unknown |
 | `Condition` and `Mutate` only | refused in `Rule`, `Computed` and `Access`, with the recipe: store the value in a field with a `mutate`, compare that field |
 
@@ -284,13 +284,14 @@ exposed and still cannot express a network call; the host developer who register
 process. Purity, speed and thread-safety are by contract, not enforced (spec §5.8). **This narrows a product-spec
 guarantee, deliberately:** `alvo-specifikacia.md` §1.2 promises before-hooks a time budget and a network ban enforced
 by an analyzer or structurally for both faces, C# included, and `baas-analyza.md` §2.7 a `CancellationToken` the
-framework enforces. For a host function there is **no time budget, no `CancellationToken` and no analyzer** — host
+framework enforces. Until HX-10 a host function had **no time budget, no `CancellationToken` and no analyzer** — host
 code is trusted code (the embedded host's own process, §2.7's in-process trust model). The descriptor author's face
 has no millisecond budget and no `CancellationToken` either; it needs neither, because it can express no I/O and its
 work is bounded by the descriptor. Trust does not remove the budget: §2.7 keeps it even for fully trusted csx, as a
-liveness guarantee — a before-hook runs while the row's locks are held — so a slow host function is an open gap, not
-a covered case. The open mitigations — an analyzer over registered delegates, and a token-aware delegate shape with a
-framework budget (#309) — are follow-ups (spec §5.8, X14).
+liveness guarantee — a before-hook runs while the row's locks are held. HX-10 (#309) closes the gap X14 left open: a
+per-evaluation **time budget** with a token a function may take (*Time budget* below), and the `ALVO1001` analyzer over
+registered delegates ([`analyzers.md`](analyzers.md)). Purity stays by contract: the analyzer reports what it can see,
+and the budget bounds what it cannot — except a function that never returns.
 
 #### Resolution, null and failure
 
@@ -301,13 +302,45 @@ framework budget (#309) — are follow-ups (spec §5.8, X14).
   `int`'s range for an `int` parameter, a fraction for an `Int` one, a text that is no `Guid`) is never read as null —
   null would make a `reject` condition `false` and let the write through — it fails the call closed, the reason naming
   the parameter and its type (`an argument does not fit parameter 'n' (Int32)`), never the value.
-- **Failure fails closed.** A function that throws aborts evaluation as a `CelFunctionException`, which the
-  interpreter's catch-alls let through. In a before-hook condition or `mutate` the write is refused and the
-  transaction rolls back; what the caller sees depends on who wrote: a **Data API** request answers HTTP 500
-  `function-failed`, naming the function and carrying no exception text; an **in-process `IAlvoData` caller** (a host
-  endpoint, the dashboard) receives an exception (the internal type surfaces as a plain `Exception`; the dashboard shows
-  its generic fault). An **after-hook condition** is already post-commit, so the after-hook is dropped and a Warning is
-  logged.
+- **Failure fails closed, and its answer depends on whose failure it is (E1, #315).** A function that throws aborts
+  evaluation as a `CelFunctionException`, which the interpreter's catch-alls let through. In a before-hook condition or
+  `mutate` the write is refused and the transaction rolls back; an **in-process `IAlvoData` caller** (a host endpoint,
+  the dashboard) receives an exception (the internal type surfaces as a plain `Exception`; the dashboard shows its
+  generic fault), whoever failed. A **Data API** request answers by origin:
+  - **a host function's failure** — it threw, ran past the budget, or got an argument its parameter cannot hold — and a
+    defect in Alvo's own evaluation (`<hook>`, Ruling Y-D) answer HTTP 500 `function-failed`, naming the function and
+    carrying no exception text;
+  - **a built-in's or the interpreter's refusal of the caller's data** — `int('x')`, `substring` past the end, overflow,
+    division by zero, a whole condition that is a present non-Bool — answers HTTP **422 `expression-failed`**, on every
+    host, without `AddAlvoProblemDetails()`, and is not logged (a 422 pages nobody). Only on the generated Data API
+    routes: a command's or a webhook receiver's own writes are the handler's data, so they keep 500 (HX-10 Ruling 27).
+
+  **Origin.** "The caller's data" is decided by whose value was refused, not by which function threw (HX-10 Rulings 26,
+  44): a built-in refusing a host function's output (`int(rateOf(new.c))`), the stored row (`old.`, `changed`), or a value
+  an earlier hook wrote is 500; and a refusal is 422 only when every field of the written row its subtree reads was in
+  this request's body — a field an update left alone, a default, a literal or `@user`, and any refusal on a DELETE, is
+  500. An aggregate answers 422 only when every leaf of it is such a refusal — a failure of anything else beside it (a
+  host function, a storage exception) makes it 500 (Ruling 44). An **after-hook condition** is
+  already post-commit, so the after-hook is dropped and a Warning is logged, whatever the origin.
+- **Time budget (HX-10, #309).** Every host function call in one evaluation pass shares one deadline,
+  `Alvo:Extensions:CelFunctionBudget` (default 250 ms, bounds (0, 30 s], refused at start naming the key). A pass is
+  opened by three sites only: `BeforeHookRunner.Run` (one row's declarative before-hooks, in the write's transaction),
+  one write hook's `when` (`WriteExtensionRunner`), and one `Condition`-profile evaluation by `PredicateEvaluator`
+  (after-hook and handler conditions at fan-out); `Rule` and `Access` expressions cannot call host functions, so they
+  open none. The clock starts at the pass's first host call — a pass that makes none reads no clock and creates no token
+  source, though the pass object and its `AsyncLocal` still allocate (HX-10 Ruling 35). A function with a trailing
+  `CancellationToken` receives one that cancels at the deadline; **every** function — one that takes no token, ignores
+  it, or catches its cancellation and returns a fallback — is **measured on return**, and **at the limit is over**
+  (`elapsed >= limit`, the instant the token fires). Once the deadline has passed, whatever the body threw (an
+  `AggregateException` from `.Result`, its own exception) is the overrun. An overrun is the host function's failure,
+  with the reason `it ran past the <n> ms that host functions have in one evaluation`: 500 `function-failed` in a
+  declarative before-hook; 500 `hook-failed` (reason `exception`) in a write hook's `when`; post-commit, the after-hook
+  is dropped with a Warning, and a handler's delivery is recorded dead. A cancellation that is not the deadline (a
+  client abort, the unit's 30 s) is the function's own exception, as before. **What it cannot do** (Ruling 36): a
+  function that never returns holds the write's transaction until it does — .NET cannot stop a thread, and
+  measured-on-return needs a return — and `BeforeHookRunner`'s pass links no outer token, because
+  `IBeforeHookRunner.Run` is synchronous and token-free, so a client abort never reaches a token-aware function in a
+  declarative before-hook; only the deadline does.
 - **A `mutate` value honours its field's facets** (Ruling V, #308). Whatever produced it — a literal, a field copy,
   `replace`, a host function — the value a before-hook writes is measured by the same checks a caller's payload passes:
   `maxLength` (code points), enum membership, `format`, decimal precision and scale (an `Int` widened into a `decimal`

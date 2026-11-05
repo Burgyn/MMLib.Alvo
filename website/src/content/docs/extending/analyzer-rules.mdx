@@ -1,0 +1,119 @@
+---
+title: Analyzer rules
+description: ALVO1001 — what the analyzer that ships with MMLib.Alvo reports in hooks and CEL functions, what it cannot see, and what to write instead.
+sidebar:
+  order: 8
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import desk from '../../../snippets/extending/analyzer-rules/CurrencyDeskHooks.cs?raw';
+import tests from '../../../snippets/extending/analyzer-rules/CurrencyDeskHooksTests.cs?raw';
+
+The `MMLib.Alvo` package carries a Roslyn analyzer. There is nothing to install: a project that references `MMLib.Alvo`
+gets it, and it runs in the IDE as you type and in every `dotnet build`. Its rules are **warnings**; a project with
+`TreatWarningsAsErrors` gets them as errors.
+
+The analyzer reaches the projects that reference `MMLib.Alvo` **directly**. NuGet does not pass an analyzer on to a
+project that only references something built on the core, so a test project that references only
+`MMLib.Alvo.TestHost`, or a library that gets the core through another package, is not checked. Register your hooks in a
+project that references `MMLib.Alvo` itself, and the rule follows them.
+
+## ALVO1001
+
+**No network, connection, file or data port inside the write's transaction.** Some host code runs while the write's
+transaction holds its row locks. A network call, a database connection, a file or a second Alvo data port there holds
+those locks for as long as it takes — and does work a rollback cannot undo.
+`ALVO1001` looks at exactly that code:
+
+| Where it looks | What it analyses |
+|---|---|
+| A class implementing `IBeforeWriteHook`, `IAfterWriteHook`, `IBeforeDeleteHook` or `IAfterDeleteHook` (typed or not) | the whole type — constructors, field initializers, every method, and the types nested in it |
+| A delegate passed to `BeforeWrite`, `AfterWrite`, `BeforeDelete` or `AfterDelete` on `Entity(…)` / `Entity<T>(…)` | the lambda's body, or the method a method group names when it is declared in the same file |
+| A delegate passed to `AddCelFunction` | the same |
+
+It does **not** look at validate hooks, [event handlers](/extending/event-handlers/) or
+[commands](/extending/commands/): they run outside the write's transaction, which is where such calls belong.
+
+**What it reports.** A use of the network — `HttpClient` and the rest of `System.Net.Http`, sockets, web sockets, mail,
+QUIC, `WebClient` and `WebRequest`; a database connection — `DbConnection`, `DbDataSource`, `IDbConnection`, an EF Core
+`DbContext` or its factory; a file — `File`, `FileInfo`, `FileStream`, `Directory`, `DirectoryInfo`; or a second Alvo
+data port — `IAlvoData`, `IAlvoSessions`, `IAlvoTransactions`, `IAlvoEvents`, `IOutboxStore`, `IDeliveryStore`,
+`IAlvoCommands`, `IAlvoEventPump`, `IAlvoManagement`, `IAlvoOperations`, the identity stores, `IAlvoAssistant` and any
+`IEmailSender`. It counts a type that derives from or implements one of them — a subclass of `HttpClient`, your own
+`IEmailSender` — and it sees one fetched around the constructor: `GetRequiredService<HttpClient>()`,
+`GetService(typeof(IAlvoData))`, `Lazy<HttpClient>`, an array or a collection of one.
+
+**Awaits.** A hook may await the write's own transaction — any method of `write.Transaction` or of `AsSystem()` on it,
+and the extension methods over it, such as the typed `QueryAsync<T>` and `CreateAsync<T>` —, the context's methods
+(`PublishAsync`, and anything else declared in `MMLib.Alvo.Hooks`), and its own code: its methods, those of a type nested
+in it, and local functions declared inside it (for a delegate, inside the lambda itself). Awaiting anything else is reported, **your own typed clients and services included**:
+`await rates.EuroAsync(ct)` holds the locks exactly as long as the HTTP call inside it.
+
+**CEL functions.** A CEL function is synchronous, so a call in it that returns a `Task` or a `ValueTask` can only block
+on it, and is reported.
+
+One warning per thing reached per method: an `HttpClient` used three times is reported once, at its first use.
+
+```csharp
+public sealed class RateGuard(HttpClient exchange) : IBeforeWriteHook<Invoice>
+{
+    public async ValueTask BeforeWriteAsync(BeforeWrite<Invoice> write, CancellationToken cancellationToken)
+    {
+        var rate = await exchange.GetFromJsonAsync<decimal>($"/rates/{write.New.Currency}", cancellationToken);
+        write.Set(x => x.PerEuro, rate);
+    }
+}
+```
+
+:::caution[What the build says]
+`warning ALVO1001: 'HttpClient' is used inside the before-write hook 'RateGuard', which runs while the write's
+transaction holds its locks; call the service from a validate hook, which runs before the transaction, or from an event
+handler after the commit`
+:::
+
+### Do this instead
+
+Split the work by what it needs. The exchange call moves to a **validate hook**, which may use the network and runs
+before the transaction opens. The rate the invoice is stamped with is read from a table, **inside** the transaction,
+through `write.Transaction` — the one await a before-write hook may make:
+
+<SourceExcerpt code={desk} from="public static class CurrencyDeskHooks" title="CurrencyDeskHooks.cs" />
+
+Both run through a real write in a test — the exchange is a fake `HttpMessageHandler`:
+
+<SourceExcerpt code={tests} from="public async Task An_invoice_is_stamped" to="stamp-the-rate" title="CurrencyDeskHooksTests.cs" />
+
+### What it cannot see
+
+The analyzer reads your code, not what it does at run time. It does not see:
+
+- **A synchronous call into your own code.** It reports an *await* of your typed client, not what `rates.Euro()` does
+  inside if it is synchronous — nor what any other class your hook calls synchronously does.
+- **Synchronous use of a client it does not list** — a Redis `IDatabase`, a gRPC `ClientBase`, `new StreamReader(path)`.
+- **A method group declared in another file**, passed to a hook verb or to `AddCelFunction`.
+- **A delegate held in a local, or returned by a factory**, before it is passed to `AddCelFunction` or a hook verb.
+
+Two other guards cover part of that. [The boot refusal](/extending/write-hooks/#what-refuses-the-start) refuses a
+hook whose constructor or delegate parameters take the network, a connection or a data port, whatever the code does.
+[The time budget](#the-time-budget-for-host-functions) bounds a CEL function whatever it does — except one that never
+returns, which holds the write until it does.
+
+### Turning it off
+
+Around one line, `#pragma warning disable ALVO1001` … `#pragma warning restore ALVO1001`; for a whole project,
+`dotnet_diagnostic.ALVO1001.severity = none` in `.editorconfig`. Do it only when you have read the code: the warning is
+the only thing between a slow service and every write of that entity waiting on it with its locks held.
+
+## The time budget for host functions
+
+Every [custom CEL function](/guides/custom-cel-functions/#5-keep-the-functions-promises) call in one evaluation — one
+row's declarative before-hooks, one write hook's `when`, one after-hook or handler condition — shares one budget:
+**250 ms** by default, `Alvo:Extensions:CelFunctionBudget` (at most 30 s). A function may take a trailing
+`CancellationToken`, which is cancelled when the budget is spent; a function that takes none, or ignores it, is measured
+when it returns. Reaching the limit is over it.
+
+An overrun is the function's failure: in a before-hook or a write hook's `when` the write is refused with 500
+[`function-failed`](/reference/problem-types/#function-failed) or
+[`hook-failed`](/reference/problem-types/#hook-failed); in an after-hook's condition, after the commit, the after-hook
+is dropped with a Warning in the log; in an event handler's `when`, the delivery is recorded dead.

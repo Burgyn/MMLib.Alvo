@@ -38,7 +38,7 @@ result may be `null`, from the nullable annotations. Everything is checked at th
 | What | Allowed |
 |---|---|
 | Name | A lower-case ASCII letter, then letters, digits or `_`; at most 64 characters; not a built-in function (such as `now`), a CEL keyword or macro, or a reserved name such as `has`, `changed`, `old`, `new` or `math`. |
-| Parameters | At most four, each `string`, `long`, `int`, `decimal`, `bool`, `DateTimeOffset` or `Guid`, or a nullable one of those. |
+| Parameters | At most four, each `string`, `long`, `int`, `decimal`, `bool`, `DateTimeOffset` or `Guid`, or a nullable one of those — plus, optionally, a trailing `CancellationToken`, which is not a CEL argument. |
 | Result | One of the same types. |
 | Shape | A synchronous delegate: no `Task`, `ref`, `out` or `params`, and not a multicast delegate. |
 
@@ -95,8 +95,15 @@ Alvo cannot check these, and breaking one breaks writes, not only your function.
 - **Pure.** The same arguments give the same result, with no side effects. It runs inside the write's transaction,
   and a write that rolls back must leave nothing behind. Sending mail or calling a service belongs in an
   [after-hook](/guides/after-hooks-and-webhooks/).
-- **Fast.** It runs while the row's locks are held, with no time budget and no `CancellationToken`. No network calls,
-  no unbounded loops.
+- **Fast.** It runs while the row's locks are held, inside a time budget: every host function call in one evaluation —
+  one row's before-hooks, one write hook's `when`, one after-hook or handler condition — shares **250 ms**
+  (`Alvo:Extensions:CelFunctionBudget`, at most 30 s). Take a trailing `CancellationToken` —
+  `(string vin, CancellationToken ct) => …` — and it is cancelled when the budget is spent. A function that returns
+  after the budget fails whether it took the token or not, and whatever it does when the token fires: in a before-hook
+  the write is refused (500 `function-failed`), in an after-hook's condition the after-hook is dropped with a Warning,
+  in an event handler's `when` the delivery is recorded dead. One that never returns holds the write until it does. No
+  network calls, no unbounded loops — the [`ALVO1001`](/extending/analyzer-rules/) analyzer reports the network, a
+  database connection, a file, a data port or a call returning a task inside the function at build time.
 - **Thread-safe.** One instance serves every request at once, and it cannot use a scoped service: it is a singleton
   closure.
 - **Tenant-aware.** Alvo's tenant filter does not reach inside your code. A function that reads stored data must take
@@ -119,10 +126,8 @@ rules and computed fields are compiled to SQL, which is why they cannot.
 [CEL in Alvo](/concepts/cel/) explains the profiles.
 
 :::caution[Not in this build]
-Built-in functions are not translated to SQL yet; host functions never run in rules, computed fields or `access`. A
-custom function runs with no time budget and no cancellation, so a slow one holds the write's transaction and its row
-locks ([#309](https://github.com/Burgyn/MMLib.Alvo/issues/309)). The standalone image and `alvo validate` know the
-built-in functions only. See [Capabilities in this build](/reference/capabilities/) for the descriptor
+Built-in functions are not translated to SQL yet; host functions never run in rules, computed fields or `access`. The
+standalone image and `alvo validate` know the built-in functions only. See [Capabilities in this build](/reference/capabilities/) for the descriptor
 blocks this build does not run.
 :::
 
@@ -130,7 +135,8 @@ blocks this build does not run.
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 500 | [`function-failed`](/reference/problem-types/#function-failed) | The function threw, or a present argument does not fit its parameter (a fraction for an `int`, a text that is no `Guid`). Nothing was written; the detail names the function and never your exception's text. | Fix the input the function reads, or guard the call with a `condition`; the exception is in the host's log. | standalone; embedded only with `AddAlvoProblemDetails()` |
+| 500 | [`function-failed`](/reference/problem-types/#function-failed) | The function threw, ran past its time budget, or a present argument does not fit its parameter (a fraction for an `int`, a text that is no `Guid`). A built-in refusing your function's result is this too. Nothing was written; the detail names the function and never your exception's text. | Fix the function or the input it reads, or guard the call with a `condition`; the exception is in the host's log. | standalone; embedded only with `AddAlvoProblemDetails()` |
+| 422 | [`expression-failed`](/reference/problem-types/#expression-failed) | A **built-in** function in the same hook refused a value the request's body sent (`int('x')`, a division by zero). Your function is never the cause of this one. | Send a value the built-in accepts. | every host |
 | 403 | [`forbidden`](/reference/problem-types/#forbidden) | The value a `mutate` computed breaks a facet of its field, such as `maxLength`. | Make the function's result fit the field. | every host |
 | 422 | [`validation`](/reference/problem-types/#validation) | The caller's own value breaks the field before the hook runs. | Send a value that fits the field. | every host |
 
@@ -146,8 +152,10 @@ the Management API, the apply answers 422 `validation`.
 ## Reference
 
 - C# API: [`AddCelFunction`](/reference/csharp/mmlib-alvo/#addcelfunction).
+- Build-time check: [`ALVO1001`](/extending/analyzer-rules/#alvo1001).
 - Functions: [the CEL function catalog](/reference/cel-functions/).
 - Problem types: [`function-failed`](/reference/problem-types/#function-failed),
+  [`expression-failed`](/reference/problem-types/#expression-failed),
   [`forbidden`](/reference/problem-types/#forbidden),
   [`validation`](/reference/problem-types/#validation).
 - Design notes: [host functions in `cel.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/cel.md#host-functions)

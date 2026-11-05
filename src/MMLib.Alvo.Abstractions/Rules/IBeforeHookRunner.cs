@@ -44,10 +44,12 @@ namespace MMLib.Alvo.Rules;
 /// caps at 2000 characters. So, <b>for everything Alvo itself evaluates</b>, the work is O(descriptor), not
 /// O(caller input): no request can make a hook slower, and a wall-clock budget could only fire on a machine that
 /// had already stopped serving. A timeout would add a clock read per hook plus a second failure mode inside a
-/// transaction, to guard against an overrun the grammar cannot express. <b>A host function is the one exception
-/// and the bound does not extend to it:</b> its cost may depend on the caller's input and it may block, so it is
-/// the host developer's contract to keep it synchronous, fast and free of side effects — Alvo offers no timeout
-/// around it.
+/// transaction, to guard against an overrun the grammar cannot express. <b>A host function is the one exception,
+/// and it has a budget of its own:</b> its cost may depend on the caller's input and it may block, so the
+/// implementation runs every host call of one <c>Run</c> under one time budget
+/// (<c>Alvo:Extensions:CelFunctionBudget</c>) — handing a token-aware function a token it cancels, and failing the
+/// write when any function returns late. The budget lives in the implementation, so this signature stays
+/// synchronous and token-free.
 /// </para>
 /// <para>
 /// <b>Nothing a hook runs may write through Alvo</b> — neither a host function nor a replacement for this runner. A

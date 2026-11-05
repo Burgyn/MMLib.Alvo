@@ -78,6 +78,14 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
             || metadata.GetMetadata<CommandEndpointMetadata>() is not null
             || metadata.GetMetadata<WebhookReceiverEndpointMetadata>() is not null);
 
+    /// <summary>
+    /// Whether the endpoint this request failed on is one of the Data API's generated routes — the only place a refusal of
+    /// the caller's data answers 422 (Ruling 27): a command's or a receiver's handler builds its own writes.
+    /// </summary>
+    /// <param name="httpContext">The failed request's context.</param>
+    private static bool IsDataApi(HttpContext httpContext) =>
+        httpContext.Features.Get<IExceptionHandlerFeature>()?.Endpoint?.Metadata.GetMetadata<DataApiOperationMetadata>() is not null;
+
     /// <summary>Logs the failure at the level it deserves and writes the document it maps to.</summary>
     /// <param name="httpContext">The failed request's context.</param>
     /// <param name="exception">The failure.</param>
@@ -97,7 +105,9 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
 
         if (FunctionFailure(exception) is { } function)
         {
-            await AnswerFunctionFailureAsync(httpContext, function).ConfigureAwait(false);
+            await (IsDataApi(httpContext) && CallerDataFailure(exception, CallerSentFields.Of(httpContext)) is { } refused
+                ? ProblemResultFactory.ExpressionFailed(ExpressionFailedDetail(refused)).ExecuteAsync(httpContext)
+                : AnswerFunctionFailureAsync(httpContext, function)).ConfigureAwait(false);
             return;
         }
 
@@ -144,6 +154,46 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
         return Children(exception).Select(child => FunctionFailure(child, depth - 1)).FirstOrDefault(found => found is not null);
     }
 
+    /// <summary>
+    /// The caller's refusal in <paramref name="exception"/>, when every leaf of it (and of what wraps it) is a refusal of
+    /// values the caller sent in this request; <see langword="null"/> otherwise (Rulings 28 and 44).
+    /// </summary>
+    /// <remarks>
+    /// A leaf is the caller's when it is a <see cref="CelFunctionException.OnCallerData"/> refusal whose
+    /// <see cref="CelFunctionException.ReadFields"/> is non-empty and every one of them is in <paramref name="sent"/>: a
+    /// refusal of a literal or of <c>@user</c>, of the stored row an update did not touch, or of a default is not the
+    /// caller's to fix. Any other leaf — a host's failure, a defect, a storage exception beside the refusal, a graph
+    /// deeper than the walk — disqualifies the whole, so the 500 path logs it.
+    /// </remarks>
+    /// <param name="exception">The failure the pipeline raised.</param>
+    /// <param name="sent">The fields the request's body carried, or <see langword="null"/> when it carried none (a delete).</param>
+    /// <returns>The first refusal, or <see langword="null"/>.</returns>
+    internal static CelFunctionException? CallerDataFailure(Exception exception, IReadOnlySet<string>? sent)
+    {
+        if (sent is null)
+        {
+            return null;
+        }
+
+        var leaves = Leaves(exception, MaxWrapperDepth).ToList();
+        return leaves.All(leaf => IsSentDataRefusal(leaf, sent)) ? (CelFunctionException)leaves[0] : null;
+    }
+
+    private static bool IsSentDataRefusal(Exception leaf, IReadOnlySet<string> sent) =>
+        leaf is CelFunctionException { OnCallerData: true, ReadFields: { Count: > 0 } read } && read.IsSubsetOf(sent);
+
+    /// <summary>What <paramref name="exception"/> comes down to: a function failure, or anything that wraps nothing more.</summary>
+    private static IEnumerable<Exception> Leaves(Exception exception, int depth)
+    {
+        if (exception is CelFunctionException || depth <= 0)
+        {
+            return [exception];
+        }
+
+        var children = Children(exception).ToList();
+        return children.Count == 0 ? [exception] : children.SelectMany(child => Leaves(child, depth - 1));
+    }
+
     /// <summary>What <paramref name="exception"/> wraps: every member of an aggregate, otherwise its inner exception.</summary>
     /// <param name="exception">The wrapper.</param>
     private static IEnumerable<Exception> Children(Exception exception)
@@ -184,8 +234,32 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
     /// <param name="failure">The function's failure.</param>
     private async Task AnswerFunctionFailureAsync(HttpContext httpContext, CelFunctionException failure)
     {
-        FunctionFailed(logger, failure.InnerException ?? failure, failure.FunctionName, httpContext.Request.Method, httpContext.Request.Path.Value);
+        FunctionFailed(logger, Logged(failure), failure.FunctionName, httpContext.Request.Method, httpContext.Request.Path.Value);
         await ProblemResultFactory.FunctionFailed(FunctionFailedDetail(failure)).ExecuteAsync(httpContext).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The exception the record carries: a host function's failure with Alvo's reason (an overrun) is logged whole, so the
+    /// reason is in the record and what the body threw follows as its inner exception — a cancelled token-aware function
+    /// would otherwise read as a client abort; anything else logs what was thrown, the operator's stack.
+    /// </summary>
+    private static Exception Logged(CelFunctionException failure) =>
+        failure is { IsHost: true, Reason: not null } ? failure : failure.InnerException ?? failure;
+
+    /// <summary>The caller-facing sentence for a whole condition of the caller's data that evaluated to no Bool.</summary>
+    private const string NoBoolDetail =
+        "The hook's condition evaluated to a present value that is not a Bool, so nothing was written. Correct the values it reads.";
+
+    /// <summary>The caller-facing sentence for a refusal of the caller's data.</summary>
+    /// <param name="failure">The refusal (<see cref="CelFunctionException.OnCallerData"/>).</param>
+    /// <returns>The detail text; it names the function and Alvo's reason, never the value.</returns>
+    internal static string ExpressionFailedDetail(CelFunctionException failure)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+
+        return failure.FunctionName == CelInterpreter.WholeCondition
+            ? NoBoolDetail
+            : $"The CEL function '{failure.FunctionName}' refused this request's data: {failure.Reason}. Nothing was written.";
     }
 
     /// <summary>The caller-facing sentence for a whole condition that evaluated to no Bool.</summary>

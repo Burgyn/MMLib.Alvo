@@ -35,11 +35,14 @@ internal static partial class HostCelFunction
         ArgumentNullException.ThrowIfNull(function);
         var invoke = InvokeMethodOf(function, name);
         var (result, resultNullable) = Result(function, invoke, name);
+        var tokenAware = TakesToken(invoke, name);
 
         return new CelFunction(
-            name, Parameters(function, invoke, name), result, resultNullable, summary ?? string.Empty,
+            name, Parameters(function, invoke, name, tokenAware), result, resultNullable, summary ?? string.Empty,
             IsHost: true, CelBuiltInFunctions.ConditionAndMutate,
-            arguments => invoke.Invoke(function, BindingFlags.DoNotWrapExceptions, binder: null, arguments, culture: null));
+            arguments => CelFunctionBudget.Call(
+                name, tokenAware, arguments,
+                values => invoke.Invoke(function, BindingFlags.DoNotWrapExceptions, binder: null, values, culture: null)));
     }
 
     private static void EnsureValidName(string name)
@@ -93,16 +96,30 @@ internal static partial class HostCelFunction
             : function.GetType().GetMethod("Invoke")!;
     }
 
-    private static List<CelFunctionArgument> Parameters(Delegate function, MethodInfo invoke, string name)
+    private static bool TakesToken(MethodInfo invoke, string name)
+    {
+        var parameters = invoke.GetParameters();
+        var tokens = parameters.Count(parameter => parameter.ParameterType == typeof(CancellationToken));
+        return tokens switch
+        {
+            0 => false,
+            1 when parameters[^1].ParameterType == typeof(CancellationToken) => true,
+            1 => throw Refused(name, "takes a CancellationToken that is not its last parameter; put the token last"),
+            _ => throw Refused(name, $"takes {tokens} CancellationTokens; a CEL function takes at most one, as its last parameter"),
+        };
+    }
+
+    private static List<CelFunctionArgument> Parameters(Delegate function, MethodInfo invoke, string name, bool tokenAware)
     {
         var signature = invoke.GetParameters();
-        if (signature.Length > MaxParameters)
+        var cel = tokenAware ? signature[..^1] : signature;
+        if (cel.Length > MaxParameters)
         {
-            throw Refused(name, $"takes {signature.Length} parameters; a CEL function takes at most {MaxParameters}");
+            throw Refused(name, $"takes {cel.Length} parameters; a CEL function takes at most {MaxParameters}");
         }
 
         var declared = DeclaredParameters(function, signature);
-        return [.. signature.Select((parameter, index) => Parameter(parameter, declared?[index], name))];
+        return [.. cel.Select((parameter, index) => Parameter(parameter, declared?[index], name))];
     }
 
     /// <summary>

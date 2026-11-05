@@ -89,7 +89,8 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   translation) the fifth; HX-06 (delivery operations) the sixth; HX-07 (write unit,
   `TransactAsync`, savepoints) the seventh; HX-08 (commands, inbound webhooks, HTTP conventions) the eighth,
   and it settles `#184` ("a marked endpoint is a gated endpoint", held against host conventions by the gate
-  witness), which has therefore left F6's debt list below; HX-09 (write hooks in three phases) the ninth.
+  witness), which has therefore left F6's debt list below; HX-09 (write hooks in three phases) the ninth; HX-10
+  (the `ALVO1001` analyzer, the host-function budget, `expression-failed`, hook calibration) the tenth.
   This line runs ahead of F5's close, the way F4 ran beside F3; the marker stays on F5.
 
 ## 3a. What closed F4

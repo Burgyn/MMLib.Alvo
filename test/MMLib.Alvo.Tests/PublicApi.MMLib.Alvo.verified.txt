@@ -1,4 +1,5 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Analyzers.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Api.Invariants.Tests.Integration")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Api.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Api.Tests.Integration")]
@@ -71,6 +72,7 @@ namespace MMLib.Alvo.Api
         public const string ChainDepthExceeded = "chain-depth-exceeded";
         public const string Conflict = "conflict";
         public const string DestructiveChange = "destructive-change";
+        public const string ExpressionFailed = "expression-failed";
         public const string Forbidden = "forbidden";
         public const string FunctionFailed = "function-failed";
         public const string HookFailed = "hook-failed";
@@ -426,6 +428,7 @@ namespace MMLib.Alvo.Extensions
     {
         public const string SectionName = "Alvo:Extensions";
         public AlvoExtensionOptions() { }
+        public System.TimeSpan CelFunctionBudget { get; set; }
         public bool ExposeTypeNames { get; set; }
         public int MaxDepth { get; set; }
     }

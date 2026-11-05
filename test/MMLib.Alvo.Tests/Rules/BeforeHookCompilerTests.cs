@@ -361,7 +361,7 @@ public class BeforeHookCompilerTests
         var provider = new PolicyCatalogProvider();
         provider.SetCurrent(Deals, PolicyCatalog.Build(Descriptor(hooks, fields), Schema, CelFixtures.Compiler));
 
-        return new BeforeHookRunner(provider)
+        return new BeforeHookRunner(provider, TestBudgets.Default())
             .Run(Deals, DataOperation.Create, candidate, previous: null, _caller, Stamp);
     }
 

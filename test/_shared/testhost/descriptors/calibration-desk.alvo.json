@@ -1,0 +1,20 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "calibration-desk",
+  "description": "The two entities the load host's calibration hooks touch, with the field-service names: a work order's reference selects which hook runs, and the read hook loads its customer.",
+  "auth": { "roles": ["dispatcher"] },
+  "entities": {
+    "customers": {
+      "fields": { "name": { "type": "string", "required": true, "maxLength": 80 } },
+      "rules": { "list": "'dispatcher' in @user.roles", "get": "'dispatcher' in @user.roles", "create": "'dispatcher' in @user.roles" }
+    },
+    "work_orders": {
+      "fields": {
+        "reference": { "type": "string", "required": true, "maxLength": 12 },
+        "customer_id": { "type": "uuid", "required": true }
+      },
+      "rules": { "list": "'dispatcher' in @user.roles", "get": "'dispatcher' in @user.roles", "create": "'dispatcher' in @user.roles" }
+    }
+  }
+}

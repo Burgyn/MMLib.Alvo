@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Data;
+﻿using Microsoft.Extensions.Time.Testing;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
@@ -186,6 +187,77 @@ public sealed class BeforeHookFacetTests
         Roles = new HashSet<Role> { Role.Authenticated },
     };
 
+    [Fact]
+    public void A_before_hook_s_host_functions_share_one_budget_and_an_overrun_refuses_the_write()
+    {
+        var clock = new FakeTimeProvider();
+        var slow = HostCelFunction.Create("slow", (string s, CancellationToken ct) =>
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(150));
+            ct.ThrowIfCancellationRequested();
+            return "ok";
+        }, summary: null);
+        var hooks = BeforeCreate(Mutate("code", Cel("slow(new.note)")), Mutate("title", Cel("slow(new.note)")));
+
+        var failure = Should.Throw<CelFunctionException>(
+            () => Run(hooks, Row(("note", "x")), compiler: TestCelFunctions.Compiler(slow), budget: TestBudgets.Default(clock)));
+
+        failure.FunctionName.ShouldBe("slow");
+        failure.Reason.ShouldStartWith("it ran past the 250 ms");
+    }
+
+    [Fact]
+    public void A_later_hook_refusing_a_value_an_earlier_hook_wrote_is_not_the_caller_s()
+    {
+        var hooks = BeforeCreate(Always(Mutate("note", Cel("'x'"))), Reject("int(new.note) > 1", "Too many."));
+
+        Should.Throw<CelFunctionException>(() => Run(hooks, Row(("note", "5")))).OnCallerData.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("A title")]
+    [InlineData("Another title")]
+    public void A_refusal_of_a_field_an_earlier_hook_would_write_is_not_the_caller_s_whether_or_not_that_hook_fired(string firesOn)
+    {
+        var earlier = new BeforeHook { Condition = $"new.title == '{firesOn}'", Action = Mutate("note", Cel("new.note")) };
+        var hooks = BeforeCreate(earlier, Reject("int(new.note) > 1", "Too many."));
+
+        Should.Throw<CelFunctionException>(() => Run(hooks, Row(("note", "abc")))).OnCallerData.ShouldBeFalse(
+            "the answer must not reveal whether the earlier hook's condition held (L1)");
+    }
+
+    [Fact]
+    public void A_hook_refusing_the_caller_s_own_value_stays_the_caller_s()
+    {
+        var hooks = BeforeCreate(Reject("int(new.note) > 1", "Too many."));
+
+        Should.Throw<CelFunctionException>(() => Run(hooks, Row(("note", "x")))).OnCallerData.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_later_hook_s_mutation_over_a_value_an_earlier_hook_wrote_is_not_the_caller_s()
+    {
+        var hooks = BeforeCreate(Mutate("note", Cel("'x'")), Mutate("qty", Cel("int(new.note)")));
+
+        Should.Throw<CelFunctionException>(() => Run(hooks, Row(("note", "5")))).OnCallerData.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Each_write_gets_a_fresh_budget()
+    {
+        var clock = new FakeTimeProvider();
+        var slow = HostCelFunction.Create("slow", (string s) =>
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(200));
+            return "ok";
+        }, summary: null);
+        var runner = Runner(BeforeCreate(Mutate("code", Cel("slow(new.note)"))), TestCelFunctions.Compiler(slow), TestBudgets.Default(clock));
+
+        Write(runner, Row(("note", "x")))["code"].ShouldBe("ok");
+        CelFunctionBudget.Current.ShouldBeNull("the write's pass is left behind it");
+        Write(runner, Row(("note", "y")))["code"].ShouldBe("ok");
+    }
+
     private static AlvoRecord Row(params (string Field, object? Value)[] fields)
     {
         var values = new Dictionary<string, object?>(StringComparer.Ordinal) { ["title"] = "A title" };
@@ -198,14 +270,21 @@ public sealed class BeforeHookFacetTests
     }
 
     private static IReadOnlyDictionary<string, object?> Run(
-        EntityHooks hooks, AlvoRecord candidate, DataOperation operation = DataOperation.Create)
+        EntityHooks hooks, AlvoRecord candidate, DataOperation operation = DataOperation.Create,
+        CelCompiler? compiler = null, CelFunctionBudgetPolicy? budget = null) =>
+        Write(Runner(hooks, compiler ?? Compiler, budget ?? TestBudgets.Default()), candidate, operation);
+
+    private static BeforeHookRunner Runner(EntityHooks hooks, CelCompiler compiler, CelFunctionBudgetPolicy budget)
     {
         var provider = new PolicyCatalogProvider();
-        provider.SetCurrent(Contacts, PolicyCatalog.Build(Descriptor(hooks), Schema, Compiler));
+        provider.SetCurrent(Contacts, PolicyCatalog.Build(Descriptor(hooks), Schema, compiler));
 
-        return new BeforeHookRunner(provider).Run(
-            Contacts, operation, candidate, operation == DataOperation.Create ? null : candidate, _caller, DateTimeOffset.UnixEpoch);
+        return new BeforeHookRunner(provider, budget);
     }
+
+    private static IReadOnlyDictionary<string, object?> Write(
+        BeforeHookRunner runner, AlvoRecord candidate, DataOperation operation = DataOperation.Create) =>
+        runner.Run(Contacts, operation, candidate, operation == DataOperation.Create ? null : candidate, _caller, DateTimeOffset.UnixEpoch);
 
     private static BeforeHookAction Mutate(string field, ValueOrExpr value) => new()
     {
@@ -217,7 +296,14 @@ public sealed class BeforeHookFacetTests
     private static ValueOrExpr Literal(string json) => ValueOrExpr.FromLiteral(JsonDocument.Parse(json).RootElement);
 
     private static EntityHooks BeforeCreate(params BeforeHookAction[] actions) =>
-        new() { BeforeCreate = [.. actions.Select(action => new BeforeHook { Action = action })] };
+        BeforeCreate([.. actions.Select(action => new BeforeHook { Action = action })]);
+
+    private static EntityHooks BeforeCreate(params BeforeHook[] hooks) => new() { BeforeCreate = [.. hooks] };
+
+    private static BeforeHook Always(BeforeHookAction action) => new() { Action = action };
+
+    private static BeforeHook Reject(string condition, string message) =>
+        new() { Condition = condition, Action = new BeforeHookAction { Reject = message } };
 
     private static AlvoDescriptor Descriptor(EntityHooks hooks) => new()
     {

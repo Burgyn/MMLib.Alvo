@@ -12,8 +12,8 @@ namespace MMLib.Alvo.Hooks.Internal;
 /// (<c>Lazy&lt;IAlvoData&gt;</c>, <c>HttpClient[]</c>).
 /// </summary>
 /// <remarks>
-/// What a direct check cannot see is the HX-10 analyzer's: a typed HTTP client whose own constructor takes the
-/// <c>HttpClient</c>, a service resolved later from an <c>IServiceProvider</c>, and whatever a delegate hook's closure captured.
+/// What a direct check cannot see is <c>ALVO1001</c>'s: an awaited call into a typed client, a service-locator lookup, a
+/// captured closure — and not a synchronous call into the host's own code (docs: <em>Analyzer rules</em>).
 /// </remarks>
 internal static class HookDependencies
 {
@@ -31,11 +31,22 @@ internal static class HookDependencies
     /// <summary>Matched by name: naming the obsolete types would raise SYSLIB0014 in the Release build.</summary>
     private static readonly string[] _webRequestTypes = ["WebClient", "WebRequest", "HttpWebRequest", "FtpWebRequest"];
 
+    /// <summary>Gets the types refused by name, for the analyzer's parity fact.</summary>
+    internal static IReadOnlyList<Type> Banned => _banned;
+
+    /// <summary>Gets the namespaces every type of which is refused.</summary>
+    internal static IReadOnlyList<string> NetworkNamespaces => _networkNamespaces;
+
+    /// <summary>Gets the <c>System.Net</c> type names refused by name.</summary>
+    internal static IReadOnlyList<string> WebRequestTypes => _webRequestTypes;
+
+    /// <summary>Gets the namespace prefixes of the identity stores.</summary>
+    internal static IReadOnlyList<string> IdentityPrefixes { get; } = ["Microsoft.AspNetCore.Identity", "MMLib.Alvo.Identity"];
+
     internal static bool IsBanned(Type type) =>
         _networkNamespaces.Contains(type.Namespace)
         || (type.Namespace == "System.Net" && _webRequestTypes.Contains(type.Name))
-        || type.Namespace?.StartsWith("Microsoft.AspNetCore.Identity", StringComparison.Ordinal) == true
-        || type.Namespace?.StartsWith("MMLib.Alvo.Identity", StringComparison.Ordinal) == true
+        || IdentityPrefixes.Any(prefix => type.Namespace?.StartsWith(prefix, StringComparison.Ordinal) == true)
         || _banned.Any(banned => banned.IsAssignableFrom(type))
         || IsMailSender(type)
         || (type.IsGenericType && type.GetGenericArguments().Any(IsBanned))

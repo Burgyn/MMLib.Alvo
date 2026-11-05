@@ -37,20 +37,29 @@ namespace MMLib.Alvo.Rules.Internal;
 /// catalog is unprimed — so an unprimed catalog here is unreachable on the write path, and answering with an
 /// empty patch keeps this type from being a second, differently-worded copy of that default-deny decision.
 /// </para>
+/// <para>
+/// <b>Every host function the hooks call shares one budget pass, opened here, so the port stays token-free.</b>
+/// </para>
 /// </remarks>
 internal sealed class BeforeHookRunner : IBeforeHookRunner
 {
     private static readonly IReadOnlyDictionary<string, object?> _noPatch =
         new Dictionary<string, object?>(StringComparer.Ordinal);
 
+    private static readonly IReadOnlySet<string> _nothingWritten = new HashSet<string>(StringComparer.Ordinal);
+
     private readonly IPolicyCatalogProvider _catalog;
+    private readonly CelFunctionBudgetPolicy _budget;
 
     /// <summary>Initializes a new instance of the <see cref="BeforeHookRunner"/> class.</summary>
     /// <param name="catalog">Holds the catalog this runner reads compiled hooks from; read once per call.</param>
-    public BeforeHookRunner(IPolicyCatalogProvider catalog)
+    /// <param name="budget">Opens the one host-function budget pass every hook of a call shares.</param>
+    public BeforeHookRunner(IPolicyCatalogProvider catalog, CelFunctionBudgetPolicy budget)
     {
         ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(budget);
         _catalog = catalog;
+        _budget = budget;
     }
 
     /// <inheritdoc/>
@@ -67,8 +76,13 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
         ArgumentNullException.ThrowIfNull(context);
 
         var hooks = Declared(entity, operation);
+        if (hooks.Count == 0)
+        {
+            return _noPatch;
+        }
 
-        return hooks.Count == 0 ? _noPatch : Applied(hooks, candidate, previous, context, now);
+        using var pass = _budget.Enter();
+        return Applied(hooks, candidate, previous, context, now);
     }
 
     private IReadOnlyList<CompiledBeforeHook> Declared(string entity, DataOperation operation) =>
@@ -98,22 +112,23 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
         var patch = new Dictionary<string, object?>(StringComparer.Ordinal);
         var writers = new Dictionary<string, (CompiledBeforeHook Hook, CompiledMutation Mutation)>(StringComparer.Ordinal);
         var current = candidate;
+        var written = _nothingWritten;
 
         foreach (var hook in hooks)
         {
-            if (!Fires(hook, current, previous, context))
+            if (Fires(hook, current, previous, context, written))
             {
-                continue;
+                EnsureNotRejected(hook);
+                foreach (var mutation in hook.Mutations)
+                {
+                    patch[mutation.Field] = Value(mutation, current, previous, now, written);
+                    writers[mutation.Field] = (hook, mutation);
+                }
+
+                current = Patched(current, patch);
             }
 
-            EnsureNotRejected(hook);
-            foreach (var mutation in hook.Mutations)
-            {
-                patch[mutation.Field] = Value(mutation, current, previous, now);
-                writers[mutation.Field] = (hook, mutation);
-            }
-
-            current = Patched(current, patch);
+            written = WithTargetsOf(hook, written);
         }
 
         EnsureEveryValueFits(patch, writers);
@@ -191,9 +206,31 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
     /// </para>
     /// </remarks>
     private static bool Fires(
-        CompiledBeforeHook hook, AlvoRecord candidate, AlvoRecord? previous, AlvoContext context) =>
-        hook.Condition is null
-        || CelInterpreter.EvaluatePredicate(hook.Condition, candidate, previous, context);
+        CompiledBeforeHook hook, AlvoRecord candidate, AlvoRecord? previous, AlvoContext context, IReadOnlySet<string> written) =>
+        hook.Condition is not { } condition
+        || CelDataOrigin.Attributed(condition, written, () => CelInterpreter.EvaluatePredicate(condition, candidate, previous, context));
+
+    /// <summary>
+    /// The fields earlier hooks of this write may have mutated, with <paramref name="hook"/>'s mutate targets added: a built-in
+    /// refusing one of them may refuse a value a hook wrote, not the caller's (E1, Ruling 26), so the failure is attributed as
+    /// not the caller's.
+    /// </summary>
+    /// <remarks>
+    /// <b>Every earlier hook's targets, whether it fired or not</b> — the set <c>WriteExtensionRunner.HookWritten</c> also uses.
+    /// A hook's condition can read <c>old.</c>, the stored row, including fields the caller may not read; attributing against
+    /// only the hooks that fired would make 422 against 500 a one-bit answer about that stored data.
+    /// </remarks>
+    private static IReadOnlySet<string> WithTargetsOf(CompiledBeforeHook hook, IReadOnlySet<string> written)
+    {
+        if (hook.Mutations.Count == 0)
+        {
+            return written;
+        }
+
+        var fields = new HashSet<string>(written, StringComparer.Ordinal);
+        fields.UnionWith(hook.Mutations.Select(mutation => mutation.Field));
+        return fields;
+    }
 
     /// <summary>
     /// Refuses the write when the hook that fired is a <c>reject</c>, carrying the author's own text and the
@@ -252,9 +289,9 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
     /// compiler already converted into the target field's own representation.
     /// </summary>
     private static object? Value(
-        CompiledMutation mutation, AlvoRecord candidate, AlvoRecord? previous, DateTimeOffset now) =>
+        CompiledMutation mutation, AlvoRecord candidate, AlvoRecord? previous, DateTimeOffset now, IReadOnlySet<string> written) =>
         mutation.Expression is { } expression
-            ? CelInterpreter.EvaluateMutation(expression, candidate, previous, now)
+            ? CelDataOrigin.Attributed(expression, written, () => CelInterpreter.EvaluateMutation(expression, candidate, previous, now))
             : mutation.Value;
 
     private static AlvoRecord Patched(AlvoRecord candidate, Dictionary<string, object?> patch)

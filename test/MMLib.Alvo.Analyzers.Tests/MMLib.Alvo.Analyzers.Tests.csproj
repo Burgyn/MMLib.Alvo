@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MMLib.Alvo.Analyzers/MMLib.Alvo.Analyzers.csproj" />
+    <!-- The analyzer's subject: its tests compile consumer sources against the real core and abstractions. -->
+    <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+  </ItemGroup>
+
+</Project>

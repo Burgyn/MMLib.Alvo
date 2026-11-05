@@ -120,6 +120,13 @@ return — it shares the write's connection — so a hook that ignores its token
 and on SQLite the database's one writer lock with it, past even the write's 30-second limit. Pass the token on. An
 exception escaping a hook fails the write with 500 `hook-failed`, reason `exception`; its message stays in your log.
 
+A hook's `when` has a limit of its own: the [custom CEL functions](/guides/custom-cel-functions/) it calls share one
+budget, 250 ms by default (`Alvo:Extensions:CelFunctionBudget`), and one that runs past it fails the hook — 500
+`hook-failed`, reason `exception`. A built-in function in a validate or before-write `when` that refuses a field the
+request's body sent — `int('x')`, a division by zero — answers 422 [`expression-failed`](/reference/problem-types/#expression-failed)
+instead: the caller can fix it. A refusal of anything else — a field the request left alone, a default, a value a hook
+wrote, any refusal on a delete or in an after-write `when` — stays 500.
+
 A top-level write that an in-transaction hook is registered for — its entity and its operation — runs in a transaction
 unit of its own: the 30-second limit, one DI scope for its hooks, and an `IAlvoData` call from inside it is refused —
 use `write.Transaction`. A write with no such hook is unchanged.
@@ -155,8 +162,9 @@ mail sender, `IAlvoData`, `IAlvoSessions`, `IAlvoTransactions`, `IAlvoEvents`, `
 its constructor or as a delegate parameter — refuses the start, naming the parameter. Validate hooks may take them.
 
 The check sees direct dependencies only: a typed HTTP client that wraps an `HttpClient`, a service resolved later from
-`IServiceProvider`, and whatever a delegate's closure captured are not caught at boot, so keep them out of
-in-transaction hooks yourself.
+`IServiceProvider`, and whatever a delegate's closure captured are not caught at boot. The boot refusal checks a hook's
+constructor; [`ALVO1001`](/extending/analyzer-rules/) checks its code — at build time, an awaited typed client, a
+service-locator lookup and a captured `HttpClient` included.
 
 The start is refused too for an unknown entity, a condition that does not compile or reads `new.` on a delete, a
 timeout or budget out of range, and the in-memory reference provider: write hooks need SQLite or PostgreSQL. A change
@@ -180,8 +188,3 @@ Any other caller is refused; the descriptor's hooks and events still run; the un
 host runs on a `FakeTimeProvider` nothing advances, so no hook's 250 ms races a slow test machine. Test a hook through
 `AlvoTestHost` and a real write, as above: Alvo has no public factory for hook contexts, so a hook class is not
 unit-tested by constructing its context.
-
-:::note[Not yet]
-An analyzer that flags network use inside a hook arrives later; until then the start-up check covers direct
-dependencies only.
-:::

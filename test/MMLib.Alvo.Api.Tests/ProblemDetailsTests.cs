@@ -192,13 +192,13 @@ public sealed class ProblemDetailsTests
     public async Task A_malformed_argument_is_rendered_but_a_null_argument_propagates()
     {
         var malformed = await ProblemResultFactory.GuardAsync(
-            () => throw new ArgumentException("the filter is not a filter", "query"));
+            new DefaultHttpContext(), () => throw new ArgumentException("the filter is not a filter", "query"));
 
         (await SlugWrittenByAsync(malformed)).ShouldBe(
             AlvoProblemTypes.MalformedQuery, "the port's malformed-query channel is a 422 the caller can act on");
 
         var propagated = await Should.ThrowAsync<ArgumentNullException>(
-            () => ProblemResultFactory.GuardAsync(() => throw new ArgumentNullException("values")));
+            () => ProblemResultFactory.GuardAsync(new DefaultHttpContext(), () => throw new ArgumentNullException("values")));
 
         propagated.ParamName.ShouldBe(
             "values",
@@ -449,6 +449,7 @@ public sealed class ProblemDetailsTests
         reached.AddRange(await ManagementSlugsAnsweredByTheDescriptorWriteAsync());
         reached.Add(await ChainDepthSlugAnsweredByACallerDeepInAChainAsync());
         reached.Add(await HookFailedSlugAnsweredByAThrowingWriteHookAsync());
+        reached.Add(await ExpressionFailedSlugAnsweredByAnIntOfTextAsync());
 
         reached.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ShouldBe(
             AlvoProblemTypes.All.Except(PendingUntilALaterTask, StringComparer.Ordinal).Order(StringComparer.Ordinal),
@@ -538,6 +539,15 @@ public sealed class ProblemDetailsTests
                 : null;
     }
 
+    /// <summary>The <c>expression-failed</c> slug's probe: a built-in refusing the caller's own data, on a host with no opt-in.</summary>
+    private static async Task<string> ExpressionFailedSlugAnsweredByAnIntOfTextAsync()
+    {
+        var writer = new TestApiKey("lots-writer", ["writer"], ["lots:read", "lots:write"]);
+        await using var world = await AlvoApiWorld.FromDescriptorAsync("expression-failed.alvo.json", [writer]);
+
+        return await SlugAnsweredByAsync(world, new Probe(HttpMethod.Post, "/api/lots", writer, new JsonObject { ["quantity_text"] = "x" }));
+    }
+
     /// <summary>
     /// The <c>hook-failed</c> slug's probe: its own world, because only a host that registered a throwing write hook can
     /// produce it.
@@ -549,7 +559,7 @@ public sealed class ProblemDetailsTests
             new AlvoApiWorldSetup(
                 MapAlvoProblemDetails: true,
                 ConfigureAlvo: alvo => alvo.Entity("owners", owners => owners.BeforeWrite(
-                    "probe", ValueTask (BeforeWrite<AlvoRecord> _) => throw new InvalidOperationException("probe")))));
+                    "probe", ValueTask (BeforeWrite<AlvoRecord> _) => throw new InvalidOperationException("probe"), configure: o => o.Timeout = TimeSpan.FromSeconds(30)))));
 
         using var response = await world.SendAsync(HttpMethod.Post, "/api/owners", _admin, body: new JsonObject { ["name"] = "Ada" });
 
@@ -730,7 +740,7 @@ public sealed class ProblemDetailsTests
     public void A_rejection_host_code_constructed_itself_is_no_port_refusal_so_it_stays_a_500()
     {
         ProblemResultFactory.PortRefusalFor(new AlvoWriteRejectedException("thrown by a command handler")).ShouldBeNull();
-        ProblemResultFactory.RefusalFor(new AlvoWriteRejectedException()).ShouldBeNull();
+        ProblemResultFactory.RefusalFor(new AlvoWriteRejectedException(), sent: null).ShouldBeNull();
         Should.Throw<AlvoWriteRejectedException>(() => Guarded(new AlvoWriteRejectedException("thrown by a command handler")));
     }
 
@@ -752,6 +762,7 @@ public sealed class ProblemDetailsTests
         ProblemResultFactory.FunctionFailed("A CEL function failed."),
         ProblemResultFactory.ChainDepthExceeded("too deep"),
         ProblemResultFactory.HookFailed("probe", "exception"),
+        ProblemResultFactory.ExpressionFailed("The CEL function 'int' refused this request's data: x. Nothing was written."),
         ProblemResultFactory.HookRejected(new AlvoWriteRejectedException(AlvoWriteRejectionKind.Conflict, "probe", [Violation()])),
         ProblemResultFactory.Unreadable(StatusCodes.Status413PayloadTooLarge),
         ProblemResultFactory.UnsupportedMediaType(HttpMethods.Post),
@@ -774,7 +785,7 @@ public sealed class ProblemDetailsTests
 
     /// <summary>The result <c>GuardAsync</c> renders for one of the port's failure families.</summary>
     private static IResult Guarded(Exception failure) =>
-        ProblemResultFactory.GuardAsync(() => throw failure).GetAwaiter().GetResult();
+        ProblemResultFactory.GuardAsync(new DefaultHttpContext(), () => throw failure).GetAwaiter().GetResult();
 
     /// <summary>The slug in the <c>type</c> of the document <paramref name="result"/> writes.</summary>
     private static async Task<string> SlugWrittenByAsync(IResult result)
@@ -791,7 +802,7 @@ public sealed class ProblemDetailsTests
     }
 
     /// <summary>The status and document <paramref name="result"/> writes.</summary>
-    private static async Task<(int Status, JsonObject Document)> DocumentWrittenByAsync(IResult result)
+    internal static async Task<(int Status, JsonObject Document)> DocumentWrittenByAsync(IResult result)
     {
         await using var services = new ServiceCollection().AddLogging().AddProblemDetails().BuildServiceProvider();
         var context = new DefaultHttpContext { RequestServices = services };

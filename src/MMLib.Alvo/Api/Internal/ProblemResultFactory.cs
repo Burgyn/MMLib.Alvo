@@ -375,6 +375,12 @@ internal static class ProblemResultFactory
             $"The write hook '{extension}' failed ({reason}), so nothing was written. Its own error is in the server log.",
             new Dictionary<string, object?>(StringComparer.Ordinal) { [ExtensionsMember] = new[] { extension }, ["reason"] = reason });
 
+    /// <summary>The 422 for a built-in CEL function or hook arithmetic that refused the request's data.</summary>
+    /// <param name="detail">Names the function and Alvo's reason, never the value.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult ExpressionFailed(string detail) =>
+        Problem(StatusCodes.Status422UnprocessableEntity, AlvoProblemTypes.ExpressionFailed, detail);
+
     /// <summary>
     /// The refusal for a request the web server would not read — rendered at <em>its</em> status, not 500.
     /// </summary>
@@ -528,15 +534,17 @@ internal static class ProblemResultFactory
     /// Runs <paramref name="operation"/> and maps every refusal <c>IAlvoData</c> is allowed to raise
     /// onto its status code and problem type (<see cref="RefusalFor"/>).
     /// </summary>
+    /// <param name="http">The request, whose body's fields (<see cref="CallerSentFields"/>) decide a CEL refusal's owner.</param>
     /// <param name="operation">The port call, plus the rendering of its success.</param>
-    internal static async Task<IResult> GuardAsync(Func<Task<IResult>> operation)
+    internal static async Task<IResult> GuardAsync(HttpContext http, Func<Task<IResult>> operation)
     {
+        ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(operation);
         try
         {
             return await operation().ConfigureAwait(false);
         }
-        catch (Exception exception) when (RefusalFor(exception) is { } refusal)
+        catch (Exception exception) when (RefusalFor(exception, CallerSentFields.Of(http)) is { } refusal)
         {
             return refusal;
         }
@@ -563,7 +571,8 @@ internal static class ProblemResultFactory
     };
 
     /// <summary>
-    /// <see cref="PortRefusalFor"/>, plus the malformed-request family (an <see cref="ArgumentException"/> that is not an
+    /// <see cref="PortRefusalFor"/>, plus a built-in CEL function refusing values the caller sent in this request (422
+    /// <c>expression-failed</c>, generated routes only, Rulings 27 and 44), plus the malformed-request family (an <see cref="ArgumentException"/> that is not an
     /// <see cref="ArgumentNullException"/>).
     /// </summary>
     /// <remarks>
@@ -575,8 +584,12 @@ internal static class ProblemResultFactory
     /// <c>ThrowIfNull</c> calls of its own when validation and the format catalogue landed inside it.
     /// </remarks>
     /// <param name="exception">What the port threw.</param>
-    internal static IResult? RefusalFor(Exception exception) =>
+    /// <param name="sent">The fields the request's body carried, or <see langword="null"/> when it carried none.</param>
+    internal static IResult? RefusalFor(Exception exception, IReadOnlySet<string>? sent) =>
         PortRefusalFor(exception)
+        ?? (AlvoExceptionHandler.CallerDataFailure(exception, sent) is { } refused
+            ? ExpressionFailed(AlvoExceptionHandler.ExpressionFailedDetail(refused))
+            : null)
         ?? (exception is ArgumentException argument and not ArgumentNullException ? Malformed(WithoutArgumentDetail(argument.Message)) : null);
 
     /// <summary>

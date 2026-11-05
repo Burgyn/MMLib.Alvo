@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Extensions.Internal;
@@ -10,6 +11,7 @@ using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Tests.Data;
+using MMLib.Alvo.Tests.Expressions;
 using MMLib.Alvo.Tests.Extensions;
 using NSubstitute;
 using System.Collections.Concurrent;
@@ -412,8 +414,68 @@ public sealed class WriteExtensionRunnerTests
         var escaped = await Should.ThrowAsync<CelFunctionException>(() => RunStage(world, stage));
 
         (escaped.FunctionName, escaped.IsHost).ShouldBe(("int", false));
+        escaped.OnCallerData.ShouldBe(stage != "after", "the caller sent the title; an after-write when reads the saved row");
         ran.ShouldBeEmpty();
         (unit.Poisoned.Count, unit.Blamed.Count).ShouldBe((0, 0));
+    }
+
+    [Fact]
+    public async Task A_built_in_failing_in_an_after_write_condition_is_not_the_caller_s()
+    {
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t
+            .AfterWrite("notify", (AfterWrite<AlvoRecord> _) => ValueTask.CompletedTask, when: "int(new.title) > 1")));
+        var saved = RunnerWorld.Ticket(title: "open");
+
+        var escaped = await Should.ThrowAsync<CelFunctionException>(() => world.Runner.AfterWriteAsync(world.Before(saved) with { Saved = saved }, Ct));
+
+        escaped.FunctionName.ShouldBe("int");
+        escaped.OnCallerData.ShouldBeFalse("the saved row carries defaults, rollups and hook writes");
+    }
+
+    [Fact]
+    public async Task A_built_in_failing_on_a_field_an_earlier_hook_set_is_not_the_caller_s()
+    {
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t
+            .BeforeWrite("mark", (BeforeWrite<AlvoRecord> write) => { write.Set("title", "x"); return ValueTask.CompletedTask; })
+            .BeforeWrite("guard", (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask, when: "int(new.title) > 1")));
+
+        var escaped = await Should.ThrowAsync<CelFunctionException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket(title: "5")), Ct));
+
+        escaped.FunctionName.ShouldBe("int");
+        escaped.OnCallerData.ShouldBeFalse("the refused title is the one the earlier hook set");
+    }
+
+    [Fact]
+    public async Task A_built_in_failing_on_a_field_a_declarative_before_hook_mutates_is_not_the_caller_s()
+    {
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t
+            .BeforeWrite("guard", (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask, when: "int(new.title) > 1")));
+        world.Services.GetRequiredService<IPolicyCatalogProvider>().SetCurrent("handlers", TitleMutatedOnCreate());
+
+        var escaped = await Should.ThrowAsync<CelFunctionException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket(title: "x")), Ct));
+
+        escaped.OnCallerData.ShouldBeFalse("a declarative before-hook of this create mutates title");
+    }
+
+    /// <summary>The handlers catalog with a declarative before-create hook on tickets that mutates <c>title</c>.</summary>
+    private static PolicyCatalog TitleMutatedOnCreate()
+    {
+        var mutate = new BeforeHookAction { Mutate = new Dictionary<string, ValueOrExpr>(StringComparer.Ordinal) { ["title"] = ValueOrExpr.FromExpression("'x'") } };
+        var descriptor = new AlvoDescriptor
+        {
+            ApiVersion = "alvo.dev/v1",
+            Name = "handlers",
+            Entities = HandlerCatalog.Schema.Entities.ToDictionary(
+                entity => entity.Name,
+                entity => new EntityDescriptor
+                {
+                    Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal),
+                    Hooks = entity.Name == "tickets" ? new EntityHooks { BeforeCreate = [new BeforeHook { Action = mutate }] } : null,
+                },
+                StringComparer.Ordinal),
+        };
+
+        return PolicyCatalog.Build(descriptor, HandlerCatalog.Schema, CelFixtures.Compiler);
     }
 
     /// <summary>
@@ -524,6 +586,33 @@ public sealed class WriteExtensionRunnerTests
         (unit.Poisoned.Count, unit.Blamed.Count).ShouldBe((0, 0));
     }
 
+    /// <summary>
+    /// A client abort that reaches a token-aware host function in a <c>when</c> is the write's cancellation, as it is when it
+    /// reaches the hook's body: not the hook's failure, so nothing is logged at Error for a caller that hung up.
+    /// </summary>
+    [Fact]
+    public async Task A_client_cancellation_reaching_a_condition_s_host_function_passes_as_a_cancellation_not_a_hook_failure()
+    {
+        using var client = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        var unit = new FakeFlowUnit();
+        await using var world = RunnerWorld.Start(alvo => alvo
+            .AddCelFunction("patientStatus", (string status, CancellationToken ct) =>
+            {
+                client.Cancel();
+                ct.ThrowIfCancellationRequested();
+                return status;
+            })
+            .Entity("tickets", e => e.BeforeWrite("guard", (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask, when: "patientStatus(new.status) == 'open'")));
+        using var flow = AlvoFlow.EnterUnit(unit, new AlvoProvenance());
+
+        var escaped = await Should.ThrowAsync<OperationCanceledException>(
+            () => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket("open")), client.Token));
+
+        escaped.ShouldNotBeOfType<HookFailedException>();
+        escaped.InnerException.ShouldBeNull("a wrapped function failure would be answered function-failed and logged");
+        (unit.Poisoned.Count, unit.Blamed.Count).ShouldBe((0, 0));
+    }
+
     [Theory]
     [InlineData(HookFailedException.Budget)]
     [InlineData(HookFailedException.SelfWrite)]
@@ -543,6 +632,27 @@ public sealed class WriteExtensionRunnerTests
 
         failure.Reason.ShouldBe(reason);
         world.Rejections.Recorded.ShouldBeEmpty("a rejection that lost to a failure is not the write's answer");
+    }
+
+    /// <summary>
+    /// Below the deadline, on the before-write stage: one millisecond short of the 250 ms deadline the rejection is the
+    /// write's answer. The theory's timeout case pins the other side — past the deadline a timeout outranks a rejection —
+    /// on the after-write stage; each half is pinned on one stage only, and both stages share the runner's deadline.
+    /// </summary>
+    [Fact]
+    public async Task A_rejection_just_below_the_timeout_is_the_answer()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t.BeforeWrite("guard", (BeforeWrite<AlvoRecord> write) =>
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(249));
+            write.Conflict("taken", "This title is taken.");
+            return ValueTask.CompletedTask;
+        })), clock);
+
+        var rejection = await Should.ThrowAsync<AlvoWriteRejectedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct));
+
+        rejection.Code.ShouldBe("taken");
     }
 
     private static async Task FailQuietlyAsync(AfterWrite<AlvoRecord> write, string reason, FakeTimeProvider clock, CancellationToken ct)
@@ -566,6 +676,25 @@ public sealed class WriteExtensionRunnerTests
         catch (Exception refused) when (refused is AlvoBudgetExceededException or HookFailedException)
         {
         }
+    }
+
+    [Fact]
+    public async Task A_condition_whose_host_function_overruns_its_budget_fails_the_hook_with_reason_exception()
+    {
+        var clock = new FakeTimeProvider();
+        await using var world = RunnerWorld.Start(alvo => alvo
+            .AddCelFunction("slowStatus", (string status, CancellationToken ct) =>
+            {
+                clock.Advance(TimeSpan.FromMilliseconds(300));
+                ct.ThrowIfCancellationRequested();
+                return status;
+            })
+            .Entity("tickets", e => e.BeforeWrite("guard", (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask, when: "slowStatus(new.status) == 'open'")), clock);
+
+        var failure = await Should.ThrowAsync<HookFailedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket("open")), Ct));
+
+        failure.Extension.ShouldBe("guard");
+        failure.Reason.ShouldBe(HookFailedException.Exception);
     }
 
     private static int FailedLines(CapturingLogger logs, string extension, string reason) =>

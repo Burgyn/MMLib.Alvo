@@ -1,0 +1,23 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "cel-budget",
+  "description": "One entity whose before-hook mutate calls a host function the test registers: a function past the host-function time budget must roll the write back with function-failed on every engine.",
+  "auth": { "providers": ["local"], "roles": ["writer"] },
+  "access": { "viewer": "'writer' in @user.roles" },
+  "entities": {
+    "quotes": {
+      "description": "A price quote stamped with an exchange rate a host function looks up.",
+      "fields": {
+        "currency": { "type": "string", "maxLength": 3 },
+        "rate": { "type": "string", "maxLength": 20 }
+      },
+      "rules": { "list": "true", "get": "true", "create": "true", "update": "true", "delete": "true" },
+      "hooks": {
+        "beforeCreate": [
+          { "action": { "mutate": { "rate": { "$cel": "rateOf(new.currency)" } } } }
+        ]
+      }
+    }
+  }
+}

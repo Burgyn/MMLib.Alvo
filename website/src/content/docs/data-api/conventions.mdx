@@ -161,7 +161,7 @@ or a 403 whose `violations` name each row a rule refused. A `409 conflict` names
 | 409 | A `unique` or `restrict` conflict (`conflict`), or a reused `Idempotency-Key` (`idempotency-conflict`). |
 | 412 | A precondition that does not hold or cannot be evaluated. |
 | 415 | A body not declared as JSON. |
-| 422 | A malformed body (`validation`) or query (`malformed-query`). |
+| 422 | A malformed body (`validation`) or query (`malformed-query`), or a built-in CEL function in a hook that refused a value the body sent (`expression-failed`). |
 | 413, 408, 400 | The web server refused the request before Alvo read it (`unreadable-request`). |
 | 500 | `internal` or `function-failed`. |
 | 508 | A loop of hooks, handlers or timers went deeper than the chain limit (`chain-depth-exceeded`); never retry it (`"retryable": false`). |
@@ -171,7 +171,7 @@ or a 403 whose `violations` name each row a rule refused. A `409 conflict` names
 Every refusal is an RFC 9457 problem document, `application/problem+json`, with `type`, `title`, `status`, `detail`
 and, when there are reasons to itemise, `violations`: each with `pointer`, `code`, `message` and `fixSuggestion`. Branch
 on the slug at the end of `type`. Every slug, its causes and its fix are in [Problem types](/reference/problem-types/);
-`unreadable-request`, `internal` and `function-failed` come only from a host that called `AddAlvoProblemDetails()`,
+`unreadable-request`, `internal`, `function-failed` and `hook-failed` come only from a host that called `AddAlvoProblemDetails()`,
 which the standalone host does.
 
 Design notes: [`docs/architecture/data-api.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md).
