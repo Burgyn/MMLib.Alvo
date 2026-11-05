@@ -31,6 +31,7 @@ namespace MMLib.Alvo.Testing
         public static System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Testing.DifferentialRuleCase> All { get; }
         public static MMLib.Alvo.AlvoContext Bob { get; }
         public static MMLib.Alvo.AlvoContext Editor { get; }
+        public static System.DateTimeOffset Now { get; }
         public static MMLib.Alvo.AlvoContext OtherTenantUser { get; }
         public static MMLib.Alvo.AlvoContext TenantlessAlice { get; }
         public static MMLib.Alvo.AlvoContext ContextFor(string name) { }
@@ -334,6 +335,7 @@ namespace MMLib.Alvo.Testing.Data
         protected abstract MMLib.Alvo.Expressions.IPredicateRenderer Renderer { get; }
         public static MMLib.Alvo.Schema.EntitySchema DifferentialEntity { get; }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Data.IDifferentialProbe> CreateProbeAsync(MMLib.Alvo.Schema.EntitySchema entity);
+        public System.Threading.Tasks.Task Durations_and_now_agree_between_this_engine_and_the_interpreter_for_any_instants() { }
         public System.Threading.Tasks.Task This_engine_and_the_in_memory_backend_agree_on_every_case() { }
     }
     public abstract class AlvoDataFixture

@@ -172,15 +172,31 @@ public sealed class CelTemporalArithmeticTests
     }
 
     /// <summary>
-    /// Until temporal comparisons render as integer microseconds, a duration never reaches SQL as a bound
-    /// <see cref="TimeSpan"/>: SQLite would compare its text form, so <c>duration('24h') &lt; duration('23h')</c> would hold.
+    /// A constant shift of <c>now()</c> that leaves CEL's range for every instant from 1970 to 9999 would fail on every
+    /// request, so it is refused at apply (Ruling 10, review M8) — folded against both ends.
     /// </summary>
     [Theory]
-    [InlineData("duration('24h') < duration('23h')")]
-    [InlineData("duration('24h') == duration('24h')")]
-    public void A_duration_literal_refuses_to_render_rather_than_bind_a_time_span(string source) =>
-        Should.Throw<NotSupportedException>(() =>
-            new SqlPredicateRenderer().Render(Compile(source, CelProfile.Rule).Expression!, AlvoContext.Anonymous, new TestFieldSqlRenderer()));
+    [InlineData("starts_at < now() + duration('315576000000s')", CelProfile.Rule)]
+    [InlineData("now() - duration('315576000000s') < starts_at", CelProfile.Rule)]
+    [InlineData("new.starts_at < now() + duration('315576000000s')", CelProfile.Condition)]
+    [InlineData("now() + duration('315576000000s')", CelProfile.Mutate)]
+    public void A_shift_of_now_that_can_overflow_is_refused_at_compile(string source, CelProfile profile)
+    {
+        var result = Compile(source, profile);
+        result.IsSuccess.ShouldBeFalse();
+        result.Errors.ShouldContain(error => error.Message.Contains("now() shifted by this constant", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A shift that a real <c>now()</c> survives compiles: folding only at year 9999 would refuse <c>now() + duration('1h')</c>,
+    /// the shape an expiry is written in.
+    /// </summary>
+    [Theory]
+    [InlineData("starts_at < now() + duration('1h')", CelProfile.Rule)]
+    [InlineData("starts_at > now() - duration('24h')", CelProfile.Rule)]
+    [InlineData("now() + duration('1h')", CelProfile.Mutate)]
+    public void A_shift_of_now_a_real_instant_survives_compiles(string source, CelProfile profile) =>
+        Compile(source, profile).IsSuccess.ShouldBeTrue();
 
     [Theory]
     [InlineData(CelBinaryOperator.Add, 1L)]

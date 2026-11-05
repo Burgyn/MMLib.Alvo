@@ -1494,6 +1494,7 @@ namespace MMLib.Alvo.Expressions
                 "Left",
                 "Right"})]
         System.ValueTuple<string, string> RenderComparableOperands(string left, string right, MMLib.Alvo.Expressions.CelValueType type);
+        string? RenderEpochMicroseconds(string timestampSql);
         string RenderField(MMLib.Alvo.Schema.EntitySchema entity, string fieldName);
         string RenderParameter(string parameterName);
         string RenderStringConcatenation(string left, string right);

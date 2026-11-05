@@ -56,7 +56,7 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// error.
 /// </para>
 /// </remarks>
-internal sealed class SqlPredicateRenderer : IPredicateRenderer
+internal sealed partial class SqlPredicateRenderer : IPredicateRenderer
 {
     /// <inheritdoc />
     public SqlPredicate Render(
@@ -69,9 +69,16 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
         RequireIdentifierPrefix(parameterPrefix);
 
         var bag = new ParameterBag(parameterPrefix);
-        var rendered = RenderPredicate(expression.Root, expression.Entity, context, fields, bag);
-        var sql = rendered.IsTwoValued ? rendered.Sql : fields.RenderTwoValued(rendered.Sql);
-        return new SqlPredicate(sql, bag.Snapshot());
+        try
+        {
+            var rendered = RenderPredicate(expression.Root, expression.Entity, context, fields, bag);
+            var sql = rendered.IsTwoValued ? rendered.Sql : fields.RenderTwoValued(rendered.Sql);
+            return new SqlPredicate(sql, bag.Snapshot());
+        }
+        catch (CelFunctionException failure) when (IsTemporalRangeError(failure))
+        {
+            return DeniedWhole(fields);
+        }
     }
 
     /// <inheritdoc />
@@ -202,23 +209,33 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
     private static NotSupportedException Unsupported(CelNode node) =>
         new($"'{node.GetType().Name}' cannot be rendered to SQL by this entry point.");
 
-    /// <summary>
-    /// A duration has no SQL operand form yet (HX-11 Ruling 11 renders it as integer microseconds): bound as a
-    /// <see cref="TimeSpan"/>, SQLite would compare its text, so <c>duration('24h') &lt; duration('23h')</c> would hold.
-    /// </summary>
-    private static NotSupportedException UnsupportedDuration() =>
-        new("A duration cannot be rendered to SQL by this entry point.");
-
     private readonly record struct PredicateFragment(string Sql, bool IsTwoValued);
+
+    /// <summary>
+    /// Where a constant goes when it reaches SQL: the one seam between the predicate path, which binds every constant
+    /// (<see cref="ParameterBag"/>), and a constraint path that has no bind parameters (HX-11 Task 5).
+    /// </summary>
+    private interface ILiteralSink
+    {
+        /// <summary>A constant value, rendered as this sink carries it.</summary>
+        string Constant(object? value, IFieldSqlRenderer fields);
+
+        /// <summary>A whole number of microseconds — the SQL temporal domain (HX-11 Ruling 11).</summary>
+        string Integer(long value, IFieldSqlRenderer fields);
+    }
 
     /// <summary>
     /// Collects a single render's bound values, naming them <c>&lt;prefix&gt;0</c>, <c>&lt;prefix&gt;1</c>,
     /// … The prefix is per render, never global, which is what lets a caller compose several predicates
     /// into one command without two of them claiming the same name (see <see cref="SqlPredicate"/>).
     /// </summary>
-    private sealed class ParameterBag(string prefix)
+    private sealed class ParameterBag(string prefix) : ILiteralSink
     {
         private readonly Dictionary<string, object?> _values = [];
+
+        public string Constant(object? value, IFieldSqlRenderer fields) => fields.RenderParameter(Add(value));
+
+        public string Integer(long value, IFieldSqlRenderer fields) => fields.RenderParameter(Add(value));
 
         public string Add(object? value)
         {
@@ -281,6 +298,11 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
         if (IsAbsentContextOperand(binary.Left, context) || IsAbsentContextOperand(binary.Right, context))
         {
             return new PredicateFragment(fields.RenderBooleanPredicate(false), true);
+        }
+
+        if (IsTemporalComparison(binary))
+        {
+            return RenderTemporalComparison(binary, entity, fields, bag);
         }
 
         var (left, right) = fields.RenderComparableOperands(
@@ -407,17 +429,20 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
     /// <c>now()</c> as one bound parameter: the flow's instant (HX-11 Ruling 1), the same one the in-process evaluation of
     /// this rule reads. With none bound it throws rather than read a clock (Ruling 5).
     /// </summary>
-    private static string RenderNowOperand(IFieldSqlRenderer fields, ParameterBag bag)
-    {
-        var name = bag.Add(AlvoFlow.Instant ?? throw new InvalidOperationException(UnboundNow));
-        return fields.RenderParameter(name);
-    }
+    private static string RenderNowOperand(IFieldSqlRenderer fields, ILiteralSink sink) => sink.Constant(BoundInstant(), fields);
 
-    private static string RenderLiteralOperand(CelLiteral literal, IFieldSqlRenderer fields, ParameterBag bag)
+    private static DateTimeOffset BoundInstant() => AlvoFlow.Instant ?? throw new InvalidOperationException(UnboundNow);
+
+    /// <summary>
+    /// A leaf constant. A duration never reaches here as a <see cref="TimeSpan"/> — SQLite would compare its text, so
+    /// <c>duration('24h') &lt; duration('23h')</c> would hold — because every comparison over one takes the microsecond
+    /// path (<see cref="IsTemporalComparison"/>); the guard keeps that true if a new caller forgets.
+    /// </summary>
+    private static string RenderLiteralOperand(CelLiteral literal, IFieldSqlRenderer fields, ILiteralSink sink)
     {
         if (literal.Type == CelValueType.Duration)
         {
-            throw UnsupportedDuration();
+            return sink.Integer(ToMicroseconds(literal.Value!), fields);
         }
 
         if (literal.Type == CelValueType.Bool)
@@ -425,8 +450,7 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
             return literal.Value is true ? fields.TrueLiteral : fields.FalseLiteral;
         }
 
-        var name = bag.Add(literal.Value);
-        return fields.RenderParameter(name);
+        return sink.Constant(literal.Value, fields);
     }
 
     private static string RenderField(CelFieldRef fieldRef, EntitySchema entity, IFieldSqlRenderer fields)
@@ -442,11 +466,10 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
     }
 
     private static string RenderContextOperand(
-        CelContextRef contextRef, AlvoContext context, IFieldSqlRenderer fields, ParameterBag bag)
+        CelContextRef contextRef, AlvoContext context, IFieldSqlRenderer fields, ILiteralSink sink)
     {
         TryResolveContext(contextRef, context, out var value);
-        var name = bag.Add(value);
-        return fields.RenderParameter(name);
+        return sink.Constant(value, fields);
     }
 
     private string RenderScalar(CelNode node, EntitySchema entity, IFieldSqlRenderer fields, ParameterBag bag) => node switch

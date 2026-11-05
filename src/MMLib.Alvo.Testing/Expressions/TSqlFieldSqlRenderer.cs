@@ -82,4 +82,12 @@ public sealed class TSqlFieldSqlRenderer : IFieldSqlRenderer
         ArgumentNullException.ThrowIfNull(value);
         return TextLiteralRule.IsCarried(value) ? $"N'{value.Replace("'", "''", StringComparison.Ordinal)}'" : null;
     }
+
+    /// <inheritdoc/>
+    /// <remarks>T-SQL's microsecond count from the Unix epoch, as a <c>bigint</c> (HX-11 Ruling 11).</remarks>
+    string? IFieldSqlRenderer.RenderEpochMicroseconds(string timestampSql)
+    {
+        ArgumentNullException.ThrowIfNull(timestampSql);
+        return $"DATEDIFF_BIG(microsecond, '1970-01-01T00:00:00', {timestampSql})";
+    }
 }

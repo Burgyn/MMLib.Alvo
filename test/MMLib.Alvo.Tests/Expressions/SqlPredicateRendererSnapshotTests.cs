@@ -38,7 +38,16 @@ public class SqlPredicateRendererSnapshotTests
         ("owner_id == @user.id && status == 'approved'", "Alice", CelFixtures.Alice),
         ("owner_id == @user.id || 'editor' in @user.roles", "Editor", CelFixtures.Editor),
         ("(owner_id == @user.id || status == 'approved') && !has(owner_id)", "Alice", CelFixtures.Alice),
+        ("created_at > now() - duration('24h')", "Alice", CelFixtures.Alice),
+        ("created_at <= now()", "Alice", CelFixtures.Alice),
+        ("approved_at - created_at <= duration('8h')", "Alice", CelFixtures.Alice),
+        ("created_at + duration('1h') < now()", "Alice", CelFixtures.Alice),
+        ("due_on > now() - duration('24h')", "Alice", CelFixtures.Alice),
+        ("duration('24h') < duration('23h')", "Alice", CelFixtures.Alice),
     ];
+
+    /// <summary>The instant every <c>now()</c> row reads, so the golden is stable.</summary>
+    private static readonly DateTimeOffset _now = new(2026, 11, 9, 10, 0, 0, TimeSpan.Zero);
 
     private static readonly string[] _computedRows =
     [
@@ -53,6 +62,7 @@ public class SqlPredicateRendererSnapshotTests
     [Fact]
     public Task Cel_to_sql_core()
     {
+        using var instant = AlvoFlow.EnterInstant(_now);
         var predicateRows = _predicateRows.Select(row =>
         {
             var predicate = _renderer.Render(CelFixtures.CompileRule(row.Source), row.AlvoContext, _fields);
@@ -81,7 +91,8 @@ public class SqlPredicateRendererSnapshotTests
             };
         });
 
-        return Verify(predicateRows.Concat(computedRows).ToList()).UseFileName("cel-to-sql-core");
+        var rows = predicateRows.Concat(computedRows).ToList();
+        return Verify(rows).UseFileName("cel-to-sql-core");
     }
 
     /// <summary>

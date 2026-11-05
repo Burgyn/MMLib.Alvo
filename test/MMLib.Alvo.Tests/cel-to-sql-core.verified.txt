@@ -192,6 +192,80 @@
     ]
   },
   {
+    source: created_at > now() - duration('24h'),
+    context: Alice,
+    Sql: COALESCE("created_at" > @alvo_p0, FALSE),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: DateTimeOffset_1
+      }
+    ]
+  },
+  {
+    source: created_at <= now(),
+    context: Alice,
+    Sql: COALESCE("created_at" <= @alvo_p0, FALSE),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: DateTimeOffset_2
+      }
+    ]
+  },
+  {
+    source: approved_at - created_at <= duration('8h'),
+    context: Alice,
+    Sql: COALESCE((EPOCH_US("approved_at") - EPOCH_US("created_at")) <= @alvo_p0, FALSE),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: 28800000000
+      }
+    ]
+  },
+  {
+    source: created_at + duration('1h') < now(),
+    context: Alice,
+    Sql: COALESCE((EPOCH_US("created_at") + @alvo_p0) < @alvo_p1, FALSE),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: 3600000000
+      },
+      {
+        Key: alvo_p1,
+        Value: 1794218400000000
+      }
+    ]
+  },
+  {
+    source: due_on > now() - duration('24h'),
+    context: Alice,
+    Sql: COALESCE(EPOCH_US("due_on") > @alvo_p0, FALSE),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: 1794132000000000
+      }
+    ]
+  },
+  {
+    source: duration('24h') < duration('23h'),
+    context: Alice,
+    Sql: COALESCE(@alvo_p0 < @alvo_p1, FALSE),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: 86400000000
+      },
+      {
+        Key: alvo_p1,
+        Value: 82800000000
+      }
+    ]
+  },
+  {
     source: total + 1,
     context: (scalar),
     Sql: ("total" + @p0),

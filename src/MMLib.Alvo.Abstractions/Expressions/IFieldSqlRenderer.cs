@@ -158,6 +158,21 @@ public interface IFieldSqlRenderer
     string? RenderStringLiteral(string value) => null;
 
     /// <summary>
+    /// Renders a timestamp or date expression as whole microseconds since 1970-01-01T00:00:00Z, as a SQL integer — the
+    /// domain duration arithmetic and comparisons are evaluated in. <see langword="null"/> (the default) declares that this
+    /// dialect cannot, and a rule, a validation or a rollup filter using a duration over a field is then refused by name.
+    /// </summary>
+    /// <remarks>
+    /// Integers make <c>==</c> on a duration exact, which a difference of two fractional epoch seconds is not. A
+    /// <c>date</c> operand reads as midnight UTC of its day, as the interpreter reads it; a <c>NULL</c> operand stays
+    /// <c>NULL</c>. An engine whose date functions are coarser than the microsecond (SQLite's are millisecond-precise)
+    /// rounds to its own precision, and that is a stated divergence, not a contract breach.
+    /// </remarks>
+    /// <param name="timestampSql">A rendered timestamp or date column, parameter or literal.</param>
+    /// <returns>The integer expression, or <see langword="null"/>.</returns>
+    string? RenderEpochMicroseconds(string timestampSql) => null;
+
+    /// <summary>
     /// Wraps <b>both</b> already-rendered operands of one comparison so this dialect compares them by
     /// <b>value</b>. A dialect whose storage for <paramref name="type"/> does not order the way the type
     /// does repairs the comparison here, in one place. The default returns the pair unchanged, which is

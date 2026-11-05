@@ -25,7 +25,7 @@ internal enum SqlTri
 /// <see cref="MMLib.Alvo.Expressions.Internal.SqlPredicateRenderer"/> emits: <c>COALESCE</c>,
 /// <c>AND</c>/<c>OR</c>/<c>NOT</c>, <c>IS NOT NULL</c>, the six comparison operators,
 /// <c>TRUE</c>/<c>FALSE</c>, <c>@pN</c> parameters, <c>"quoted"</c> identifiers, and
-/// <c>field IN (...)</c>. It models PostgreSQL/SQLite's own <c>NULL</c>-propagating logic directly —
+/// <c>field IN (...)</c>, and the temporal domain's <c>EPOCH_US(x)</c> and <c>(a ± b)</c>. It models PostgreSQL/SQLite's own <c>NULL</c>-propagating logic directly —
 /// it does not call <see cref="MMLib.Alvo.Expressions.Internal.CelInterpreter"/> or reuse any of its
 /// normalization code — so the differential test this backs proves something real: a bug that made
 /// both backends agree by sharing logic could never show up here.
@@ -203,6 +203,18 @@ file sealed class SqlCursor(string text, AlvoRecord row, IReadOnlyDictionary<str
     /// </summary>
     private object? ParseValue()
     {
+        if (TryConsume("EPOCH_US("))
+        {
+            var instant = ParseValue();
+            Expect(")");
+            return SqlTriLogic.EpochMicroseconds(instant);
+        }
+
+        if (TryConsume("("))
+        {
+            return ParseArithmetic();
+        }
+
         if (TryConsume("CAST("))
         {
             var inner = ParseValue();
@@ -234,6 +246,24 @@ file sealed class SqlCursor(string text, AlvoRecord row, IReadOnlyDictionary<str
         }
 
         throw Unexpected("a quoted field, an @parameter, TRUE, or FALSE");
+    }
+
+    /// <summary>
+    /// <c>(a + b)</c> or <c>(a - b)</c> over integer microseconds, the temporal domain (HX-11 Ruling 11); a
+    /// <see langword="null"/> operand makes the whole value <see langword="null"/>, as SQL's arithmetic does.
+    /// </summary>
+    private object? ParseArithmetic()
+    {
+        var left = ParseValue();
+        var isAdd = TryConsume(" + ");
+        if (!isAdd)
+        {
+            Expect(" - ");
+        }
+
+        var right = ParseValue();
+        Expect(")");
+        return left is long l && right is long r ? (isAdd ? l + r : l - r) : null;
     }
 
     /// <summary>The store type a repair casts to, consumed and discarded — only the value matters here.</summary>
@@ -423,6 +453,12 @@ internal static class SqlTriLogic
             _ => null,
         };
     }
+
+    /// <summary><c>EPOCH_US(x)</c>: whole microseconds since the Unix epoch, or <see langword="null"/> for a null instant.</summary>
+    internal static long? EpochMicroseconds(object? value) =>
+        value is not null && TryToInstant(value, out var instant)
+            ? (instant.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) / TimeSpan.TicksPerMicrosecond
+            : value is null ? null : throw new InvalidOperationException($"EPOCH_US cannot read {value} ({value.GetType()}).");
 
     private static bool TryToDecimal(object value, out decimal result)
     {

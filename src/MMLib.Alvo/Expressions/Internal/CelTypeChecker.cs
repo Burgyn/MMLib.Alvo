@@ -234,6 +234,13 @@ internal static class CelTypeChecker
         private const string TemporalFix =
             "CEL defines timestamp ± duration, duration + timestamp, timestamp - timestamp and duration ± duration.";
 
+        private const string NowShiftMessage =
+            "now() shifted by this constant leaves the range of a Timestamp for every instant from 1970 to 9999.";
+
+        private static readonly DateTimeOffset _earliestNow = DateTimeOffset.UnixEpoch;
+
+        private static readonly DateTimeOffset _latestNow = new(9999, 12, 31, 23, 59, 59, TimeSpan.Zero);
+
         private const string ConstantTemporalFix =
             "Use constants whose result stays within CEL's range: a timestamp in the years 1 to 9999, a duration within about ten thousand years.";
 
@@ -584,21 +591,43 @@ internal static class CelTypeChecker
         /// </summary>
         private bool RefusesOutOfRangeConstant(CelBinary binary, int position)
         {
-            var reason = ConstantRangeError(binary);
-            if (reason is null)
+            if (ConstantRangeError(binary, now: null) is { } reason)
+            {
+                Errors.Add(new CelCompilationError($"This arithmetic over constants always fails: {reason}.", ConstantTemporalFix, position));
+                return true;
+            }
+
+            if (!ShiftOfNowAlwaysFails(binary))
             {
                 return false;
             }
 
-            Errors.Add(new CelCompilationError($"This arithmetic over constants always fails: {reason}.", ConstantTemporalFix, position));
+            Errors.Add(new CelCompilationError(NowShiftMessage, ConstantTemporalFix, position));
             return true;
         }
 
-        private static string? ConstantRangeError(CelBinary binary)
+        /// <summary>
+        /// A constant shift of <c>now()</c> that leaves CEL's range for every instant from 1970 to 9999 would fail on every
+        /// request (Ruling 10, review M8), so it is the author's error: folded against both ends, refused when both fail.
+        /// Refusing when only one end fails would refuse <c>now() + duration('1h')</c>, which year 9999 cannot carry.
+        /// </summary>
+        private static bool ShiftOfNowAlwaysFails(CelBinary binary) =>
+            ReadsNow(binary)
+            && ConstantRangeError(binary, _earliestNow) is not null
+            && ConstantRangeError(binary, _latestNow) is not null;
+
+        private static bool ReadsNow(CelNode node) => node switch
+        {
+            CelCall { Name: CelCall.Now } => true,
+            CelBinary binary => ReadsNow(binary.Left) || ReadsNow(binary.Right),
+            _ => false,
+        };
+
+        private static string? ConstantRangeError(CelBinary binary, DateTimeOffset? now)
         {
             try
             {
-                _ = ConstantTemporalValue(binary);
+                _ = ConstantTemporalValue(binary, now);
                 return null;
             }
             catch (CelFunctionException failure)
@@ -607,11 +636,12 @@ internal static class CelTypeChecker
             }
         }
 
-        private static object? ConstantTemporalValue(CelNode node) => node switch
+        private static object? ConstantTemporalValue(CelNode node, DateTimeOffset? now) => node switch
         {
             CelLiteral literal => literal.Value,
+            CelCall { Name: CelCall.Now } => now,
             CelBinary binary when CelTemporal.IsTemporal(binary) => CelTemporal.Apply(
-                binary.Operator, ConstantTemporalValue(binary.Left), ConstantTemporalValue(binary.Right), failClosed: true),
+                binary.Operator, ConstantTemporalValue(binary.Left, now), ConstantTemporalValue(binary.Right, now), failClosed: true),
             _ => null,
         };
 

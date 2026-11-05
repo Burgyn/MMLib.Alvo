@@ -58,7 +58,7 @@ public abstract class NowInstantFacts
 
         (await alvo.Data.QueryAsync(new AlvoQuery { Entity = Notes }, clerk, Ct)).Items.Count.ShouldBe(1);
         clock.Advance(TimeSpan.FromHours(2));
-        (await alvo.Data.QueryAsync(new AlvoQuery { Entity = Notes }, clerk, Ct)).Items.ShouldBeEmpty("the list rule is expires_at > now(), and the note expired an hour ago");
+        (await alvo.Data.QueryAsync(new AlvoQuery { Entity = Notes }, clerk, Ct)).Items.ShouldBeEmpty("the list rule is created_at > now() - duration('1h'), and the note was created two hours ago");
     }
 
     [Fact]
@@ -129,16 +129,13 @@ public abstract class NowInstantFacts
     {
         nameof(IAlvoData.GetAsync) => await data.GetAsync(Notes, id, clerk, Ct) is null ? 0 : 1,
         nameof(IAlvoData.UpdateAsync) => await data.UpdateAsync(Notes, id, Body("b"), clerk, cancellationToken: Ct) is null ? 0 : 1,
-        nameof(IAlvoData.ReplaceAsync) => await data.ReplaceAsync(Notes, id, Live("b"), clerk, cancellationToken: Ct) is null ? 0 : 1,
+        nameof(IAlvoData.ReplaceAsync) => await data.ReplaceAsync(Notes, id, Body("b"), clerk, cancellationToken: Ct) is null ? 0 : 1,
         nameof(IAlvoData.DeleteAsync) => await DeletedAsync(data, id, clerk),
         nameof(IAlvoData.CreateManyAsync) => (await data.CreateManyAsync(Notes, [Body("b")], clerk, cancellationToken: Ct)).Affected,
         nameof(IAlvoData.UpdateManyAsync) => (await data.UpdateManyAsync(Notes, [new AlvoRowPatch(id, Body("b"))], clerk, cancellationToken: Ct)).Affected,
         nameof(IAlvoData.DeleteManyAsync) => (await data.DeleteManyAsync(Notes, [id], clerk, cancellationToken: Ct)).Affected,
         _ => throw new ArgumentOutOfRangeException(nameof(entry), entry, "not an IAlvoData entry"),
     };
-
-    /// <summary>A whole row a replace keeps live under the rules' window.</summary>
-    private static Dictionary<string, object?> Live(string body) => new(Body(body), StringComparer.Ordinal) { ["expires_at"] = _t.AddHours(1) };
 
     private static async Task<int> DeletedAsync(IAlvoData data, Guid id, AlvoContext clerk)
     {

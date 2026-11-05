@@ -2,7 +2,7 @@
   "$schema": "https://alvo.dev/schema/v1/project.json",
   "apiVersion": "alvo.dev/v1",
   "name": "now-instant",
-  "description": "One now() per request (HX-11 acceptance (4)): a rule, a before-hook condition and its mutate, and a write hook's when all read now(), while host hooks move the clock in between. Until temporal arithmetic renders to SQL, the rule's window is the mutate's expires_at, so the rule compares a field with now() alone.",
+  "description": "One now() per request (HX-11 acceptance (4)): a rule, a before-hook condition and its mutate, and a write hook's when all read now(), while host hooks move the clock in between. Every rule is the window created_at > now() - duration('1h'), so each data-port entry judges a now() rule.",
   "auth": { "providers": ["local"], "roles": ["clerk"] },
   "entities": {
     "notes": {
@@ -10,23 +10,22 @@
       "fields": {
         "body": { "type": "string", "maxLength": 200 },
         "stamped_at": { "type": "datetime" },
-        "expires_at": { "type": "datetime" },
         "judged_at": { "type": "datetime" }
       },
       "hooks": {
         "beforeCreate": [
           {
             "condition": "now() == now()",
-            "action": { "mutate": { "stamped_at": { "$cel": "now()" }, "expires_at": { "$cel": "now() + duration('1h')" } } }
+            "action": { "mutate": { "stamped_at": { "$cel": "now()" } } }
           }
         ]
       },
       "rules": {
-        "list": "expires_at > now()",
-        "get": "expires_at > now()",
+        "list": "created_at > now() - duration('1h')",
+        "get": "created_at > now() - duration('1h')",
         "create": "true",
-        "update": "expires_at > now()",
-        "delete": "expires_at > now()"
+        "update": "created_at > now() - duration('1h')",
+        "delete": "created_at > now() - duration('1h')"
       }
     }
   }
