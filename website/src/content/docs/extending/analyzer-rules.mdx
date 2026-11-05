@@ -47,7 +47,7 @@ data port — `IAlvoData`, `IAlvoSessions`, `IAlvoTransactions`, `IAlvoEvents`, 
 **Awaits.** A hook may await the write's own transaction — any method of `write.Transaction` or of `AsSystem()` on it,
 and the extension methods over it, such as the typed `QueryAsync<T>` and `CreateAsync<T>` —, the context's methods
 (`PublishAsync`, and anything else declared in `MMLib.Alvo.Hooks`), and its own code: its methods, those of a type nested
-in it, and local functions. Awaiting anything else is reported, **your own typed clients and services included**:
+in it, and local functions declared inside it (for a delegate, inside the lambda itself). Awaiting anything else is reported, **your own typed clients and services included**:
 `await rates.EuroAsync(ct)` holds the locks exactly as long as the HTTP call inside it.
 
 **CEL functions.** A CEL function is synchronous, so a call in it that returns a `Task` or a `ValueTask` can only block

@@ -116,4 +116,70 @@ public sealed class Alvo1001AwaitTests
         AnalyzerHarness.Lines(reported).ShouldBe(AnalyzerHarness.MarkedLines(source), "the receiver is reported, not the await on top of it (Ruling 14)");
         reported[0].GetMessage(System.Globalization.CultureInfo.InvariantCulture).ShouldStartWith("'HttpClient' is used");
     }
+
+    [Fact]
+    public async Task Awaiting_a_local_function_declared_outside_a_hook_delegate_is_reported()
+    {
+        const string source = Usings + """
+            public static class Rates
+            {
+                public static IAlvoBuilder AddRates(this IAlvoBuilder alvo, HttpClient http)
+                {
+                    async Task<decimal> Euro(CancellationToken ct) => decimal.Parse(await http.GetStringAsync("https://rates.example", ct));
+                    return alvo.Entity("invoices", e => e.BeforeWrite("rate", async (BeforeWrite<AlvoRecord> write, CancellationToken ct) =>
+                        write.Set("rate", await Euro(ct)))); // ALVO1001
+                }
+            }
+            """;
+
+        var reported = await AnalyzerHarness.Alvo1001Async(source);
+
+        AnalyzerHarness.Lines(reported).ShouldBe(AnalyzerHarness.MarkedLines(source), "its body is outside the analysed lambda, so it is not the hook's own code (Ruling 25)");
+        reported[0].GetMessage(System.Globalization.CultureInfo.InvariantCulture).ShouldStartWith("'Rates.Euro' is awaited");
+    }
+
+    [Fact]
+    public async Task A_local_function_declared_inside_a_hook_delegate_is_its_own_code_and_is_analysed()
+    {
+        const string source = Usings + """
+            public static class Tickets
+            {
+                public static IAlvoBuilder AddTickets(this IAlvoBuilder alvo) =>
+                    alvo.Entity("tickets", e => e.BeforeWrite("check", async (BeforeWrite<AlvoRecord> write, CancellationToken ct) =>
+                    {
+                        await CheckAsync(ct);
+
+                        async Task CheckAsync(CancellationToken token)
+                        {
+                            _ = await write.Transaction.GetAsync("tickets", Guid.Empty, token);
+                            await Task.Delay(1, token); // ALVO1001
+                        }
+                    }));
+            }
+            """;
+
+        AnalyzerHarness.Lines(await AnalyzerHarness.Alvo1001Async(source)).ShouldBe(AnalyzerHarness.MarkedLines(source));
+    }
+
+    [Fact]
+    public async Task A_local_function_declared_inside_a_hook_type_is_its_own_code_and_is_analysed()
+    {
+        const string source = Usings + """
+            public sealed class Guard : IBeforeWriteHook
+            {
+                public async ValueTask BeforeWriteAsync(BeforeWrite<AlvoRecord> write, CancellationToken cancellationToken)
+                {
+                    await CheckAsync(cancellationToken);
+
+                    async Task CheckAsync(CancellationToken token)
+                    {
+                        _ = await write.Transaction.GetAsync("tickets", Guid.Empty, token);
+                        await Task.Delay(1, token); // ALVO1001
+                    }
+                }
+            }
+            """;
+
+        AnalyzerHarness.Lines(await AnalyzerHarness.Alvo1001Async(source)).ShouldBe(AnalyzerHarness.MarkedLines(source));
+    }
 }

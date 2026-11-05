@@ -61,9 +61,10 @@ public sealed class InTransactionIoAnalyzer : DiagnosticAnalyzer
         }
 
         var seen = new ReportedSymbols();
+        var within = scope.Within(body.Syntax);
         foreach (var operation in body.DescendantsAndSelf())
         {
-            Report(context.ReportDiagnostic, operation, scope, symbols, seen);
+            Report(context.ReportDiagnostic, operation, within, symbols, seen);
         }
     }
 
