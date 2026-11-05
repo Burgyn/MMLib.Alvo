@@ -133,13 +133,15 @@ without `id` (the id is minted per attempt), a replace's the unstamped whole row
 
 A batch validates every row first and reports every bad row together — payload and rule refusals, rows not found, and
 validate refusals (Ruling 59) — without opening a transaction. Validate's `Data` is a session as the caller one hop
-deeper, so a validate hook writing what it validates stops at the depth limit. Validate hooks resolve from one fresh DI
-scope per write (Ruling 22).
+deeper, so a validate hook writing what it validates stops at the depth limit; what it writes through `Data` commits on
+its own, before the write's transaction exists, and stays even when a later stage refuses the write (Ruling 13). Validate
+hooks resolve from one fresh DI scope per write (Ruling 22) — per row of a batch: a batch validates row by row, so each
+row gets its own scope and its own disabled-set read.
 
 **Switching off.** `PUT …/extensions/{id}/enabled` (Admin level) records the switch in
 `alvo_subscriber_controls.disabled_at/disabled_by` through two abstract `IDeliveryStore` members, `SetDisabledAsync` and
 `DisabledAsync` (Ruling 5); the runner reads the disabled set with one autocommit read per write that has a validate hook
-to run, so a switch on one replica is honoured by every replica on its next write. Any other hook is refused 409
+to run (per row of a batch), so a switch on one replica is honoured by every replica on its next write. Any other hook is refused 409
 (Ruling 51): a guard cannot be disabled from outside the code.
 
 There is no public factory for hook contexts in HX-09: a hook is tested through `AlvoTestHost` and a real write.

@@ -17,7 +17,7 @@ the descriptor's own hooks, in one of three phases:
 
 | Phase | Runs | May | May not |
 |---|---|---|---|
-| **validate** | before a create, update or replace opens its transaction; only for a write no transaction unit is open around | call another service; refuse | change anything |
+| **validate** | before a create, update or replace opens its transaction; only for a write no transaction unit is open around | call another service; refuse; write other rows through `Data`, which commit on their own, outside the write | change the row being written |
 | **before-write** / **before-delete** | inside the write's transaction, after the descriptor's before-hooks | refuse; set fields; write other rows; publish an event | call the network |
 | **after-write** / **after-delete** | inside the transaction, after the row and its rollups exist | refuse — rolling the write back; write other rows; publish | write its own row; call the network |
 
@@ -58,7 +58,7 @@ class (`IBeforeWriteHook<T>` and its siblings) or a delegate whose parameters ar
 services, and which returns `ValueTask`, `Task` or nothing — a delegate returning a value is refused, so give an
 `async` lambda a block body, as `audit-booking` does. A class hook is built for each run from a DI scope that is never
 the HTTP request's: every in-transaction hook of one write shares the write's scope, and a write's validate hooks share
-one of their own.
+one of their own — one per row of a batch, which validates row by row.
 
 ## Refusing a write
 
@@ -131,7 +131,9 @@ call never holds a lock. It does **not** run for a delete, for a write inside a
 [transaction unit](/extending/transactions/) — a [command](/extending/commands/) makes its external check before
 `ctx.TransactAsync` — nor for a replayed `Idempotency-Key`. A batch validates every row first; a refused row refuses the
 batch with nothing opened, listing every bad row. What a validate hook saw — its `Old` was read without a lock — may
-change before the write runs: never rest integrity on it; an invariant belongs in a before-write hook.
+change before the write runs: never rest integrity on it; an invariant belongs in a before-write hook. A row a validate
+hook writes through `Data` commits on its own, before the write's transaction exists, and stays even when a later stage
+refuses the write.
 
 A validate hook never sees a payload the caller may not send, and an update of a row the caller cannot reach answers
 404 before any validate hook runs. A replace of a row that does not exist is validated as the create it will be, after
