@@ -23,14 +23,32 @@ public class CompiledRendersPropertyTests
     private static readonly TestFieldSqlRenderer _fields = new();
 
     /// <summary>
-    /// Every leaf kind a rule can hold — fields of every type, literals of every type, and every context
-    /// value — so the type checker, not the generator, decides what is well-typed.
+    /// Every leaf kind a rule can hold — fields of every type, literals of every type, every context
+    /// value, and the temporal ones (<c>now()</c>, duration constants, a <c>date</c> field; Task 3 review M4) —
+    /// so the type checker, not the generator, decides what is well-typed.
     /// </summary>
     private static readonly string[] _ruleLeaves =
     [
         "id", "owner_id", "status", "total", "title", "tenant_id", "created_at", "is_public",
         "'draft'", "'x'", "1", "2.5", "true", "false", "null", "@user.id", "@tenant.id", "@user.roles",
+        "approved_at", "due_on", "now()", "duration('90m')", "duration('-1.5h')",
     ];
+
+    /// <summary>
+    /// Bound instants for <c>now()</c>: an ordinary one and both edges of CEL's range, where a folded shift leaves the
+    /// range and the whole predicate must render as denied rather than throw (Ruling 57).
+    /// </summary>
+    private static readonly DateTimeOffset[] _instants =
+    [
+        new(2026, 11, 9, 10, 0, 0, TimeSpan.Zero),
+        new(9999, 12, 31, 23, 0, 0, TimeSpan.Zero),
+        new(1, 1, 1, 1, 0, 0, TimeSpan.Zero),
+    ];
+
+    private static readonly string[] _temporalLeaves =
+        ["created_at", "approved_at", "due_on", "now()", "duration('90m')", "duration('-1.5h')", "duration('0')", "null"];
+
+    private static readonly string[] _comparisons = ["==", "!=", "<", "<=", ">", ">="];
 
     /// <summary>
     /// The numeric and boolean leaves only. A computed expression must be a non-boolean scalar built from
@@ -70,14 +88,67 @@ public class CompiledRendersPropertyTests
             }
 
             Interlocked.Increment(ref accepted);
-            foreach (var caller in _callers)
-            {
-                _renderer.Render(result.Expression!, caller, _fields);
-            }
+            RenderForEveryCaller(result.Expression!);
         },
         iter: Iterations);
 
         accepted.ShouldBeGreaterThan(Iterations / 50, "too few generated rules compiled for the property to mean anything.");
+    }
+
+    /// <summary>
+    /// Random trees over every leaf rarely type as temporal arithmetic, so durations, <c>now()</c> and their operators get
+    /// their own generator: arithmetic over the temporal leaves, compared and combined, rendered under each bound instant
+    /// (Task 3 review M4).
+    /// </summary>
+    [Fact]
+    public void Every_temporal_rule_the_compiler_accepts_renders_to_a_predicate()
+    {
+        long accepted = 0;
+
+        TemporalRules.Sample(source =>
+        {
+            var result = CelFixtures.Compiler.Compile(source, CelProfile.Rule, CelFixtures.Orders);
+            if (!result.IsSuccess)
+            {
+                return;
+            }
+
+            Interlocked.Increment(ref accepted);
+            RenderForEveryCaller(result.Expression!);
+        },
+        iter: Iterations);
+
+        accepted.ShouldBeGreaterThan(Iterations / 50, "too few generated temporal rules compiled for the property to mean anything.");
+    }
+
+    private static Gen<string> TemporalTerms => Gen.Recursive<string>((depth, self) =>
+        depth >= 3
+            ? Gen.OneOfConst(_temporalLeaves)
+            : Gen.Frequency(
+                (2, Gen.OneOfConst(_temporalLeaves)),
+                (3, Gen.Select(self, Gen.OneOfConst("+", "-"), self, (left, op, right) => $"({left} {op} {right})"))));
+
+    private static Gen<string> TemporalRules => Gen.Recursive<string>((depth, self) =>
+        depth >= 3
+            ? TemporalComparisons
+            : Gen.Frequency(
+                (3, TemporalComparisons),
+                (2, Gen.Select(self, Gen.OneOfConst("&&", "||"), self, (left, op, right) => $"({left} {op} {right})")),
+                (1, self.Select(operand => $"!({operand})"))));
+
+    private static Gen<string> TemporalComparisons =>
+        Gen.Select(TemporalTerms, Gen.OneOfConst(_comparisons), TemporalTerms, (left, op, right) => $"({left} {op} {right})");
+
+    private static void RenderForEveryCaller(CompiledExpression expression)
+    {
+        foreach (var now in _instants)
+        {
+            using var instant = AlvoFlow.EnterInstant(now);
+            foreach (var caller in _callers)
+            {
+                _renderer.Render(expression, caller, _fields);
+            }
+        }
     }
 
     [Fact]

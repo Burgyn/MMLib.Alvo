@@ -235,7 +235,7 @@ internal static class CelTypeChecker
             "CEL defines timestamp ± duration, duration + timestamp, timestamp - timestamp and duration ± duration.";
 
         private const string NowShiftMessage =
-            "now() shifted by this constant leaves the range of a Timestamp for every instant from 1970 to 9999.";
+            "now() shifted by this constant leaves the range of a Timestamp at both 1970 and 9999.";
 
         private static readonly DateTimeOffset _earliestNow = DateTimeOffset.UnixEpoch;
 
@@ -607,9 +607,10 @@ internal static class CelTypeChecker
         }
 
         /// <summary>
-        /// A constant shift of <c>now()</c> that leaves CEL's range for every instant from 1970 to 9999 would fail on every
-        /// request (Ruling 10, review M8), so it is the author's error: folded against both ends, refused when both fail.
+        /// A constant shift of <c>now()</c> that leaves CEL's range at both 1970 and 9999 fails on every realistic request
+        /// (Ruling 10, review M8), so it is the author's error: folded against both ends, refused when both fail.
         /// Refusing when only one end fails would refuse <c>now() + duration('1h')</c>, which year 9999 cannot carry.
+        /// A shift that passes at one end still fails closed at runtime (Ruling 57).
         /// </summary>
         private static bool ShiftOfNowAlwaysFails(CelBinary binary) =>
             ReadsNow(binary)

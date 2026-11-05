@@ -172,19 +172,19 @@ public sealed class CelTemporalArithmeticTests
     }
 
     /// <summary>
-    /// A constant shift of <c>now()</c> that leaves CEL's range for every instant from 1970 to 9999 would fail on every
-    /// request, so it is refused at apply (Ruling 10, review M8) — folded against both ends.
+    /// A constant shift of <c>now()</c> that leaves CEL's range at both 1970 and 9999 fails on every realistic request,
+    /// so it is refused at apply (Ruling 10, review M8) — folded against both ends, refused only when both fail.
     /// </summary>
     [Theory]
     [InlineData("starts_at < now() + duration('315576000000s')", CelProfile.Rule)]
     [InlineData("now() - duration('315576000000s') < starts_at", CelProfile.Rule)]
     [InlineData("new.starts_at < now() + duration('315576000000s')", CelProfile.Condition)]
     [InlineData("now() + duration('315576000000s')", CelProfile.Mutate)]
-    public void A_shift_of_now_that_can_overflow_is_refused_at_compile(string source, CelProfile profile)
+    public void A_shift_of_now_that_always_overflows_is_refused_at_compile(string source, CelProfile profile)
     {
         var result = Compile(source, profile);
         result.IsSuccess.ShouldBeFalse();
-        result.Errors.ShouldContain(error => error.Message.Contains("now() shifted by this constant", StringComparison.Ordinal));
+        result.Errors.ShouldContain(error => error.Message.Contains("now() shifted by this constant leaves the range of a Timestamp at both 1970 and 9999", StringComparison.Ordinal));
     }
 
     /// <summary>

@@ -1,5 +1,7 @@
-﻿using MMLib.Alvo.Expressions;
+﻿using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Tests.Expressions;
 
@@ -46,6 +48,18 @@ public class SqlPredicateRendererSnapshotTests
         ("duration('24h') < duration('23h')", "Alice", CelFixtures.Alice),
     ];
 
+    /// <summary>
+    /// Rows over an entity whose <c>created_at</c> is not declared but injected by <c>audit: true</c>, through the real
+    /// descriptor mapper: the managed column is a <c>datetime</c>, so a <c>now()</c> window over it takes the sargable leaf
+    /// path (HX-11 Ruling 4, Task 3 review M5) — a mapper change that moved it to the microsecond domain moves this row.
+    /// </summary>
+    private static readonly string[] _auditedRows = ["created_at > now() - duration('24h')"];
+
+    private const string AuditedDescriptor = """
+        { "apiVersion": "alvo.dev/v1", "name": "golden",
+          "entities": { "notes": { "audit": true, "fields": { "body": { "type": "string" } } } } }
+        """;
+
     /// <summary>The instant every <c>now()</c> row reads, so the golden is stable.</summary>
     private static readonly DateTimeOffset _now = new(2026, 11, 9, 10, 0, 0, TimeSpan.Zero);
 
@@ -91,8 +105,30 @@ public class SqlPredicateRendererSnapshotTests
             };
         });
 
-        var rows = predicateRows.Concat(computedRows).ToList();
+        var notes = DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(AuditedDescriptor)).Entities.Single();
+        var auditedRows = _auditedRows.Select(source =>
+        {
+            var predicate = _renderer.Render(Compile(source, notes), CelFixtures.Alice, _fields);
+            return new
+            {
+                source,
+                context = "Alice (audited notes)",
+                predicate.Sql,
+                Parameters = predicate.Parameters
+                    .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                    .Select(pair => new { pair.Key, Value = Scrub(pair.Value) }),
+            };
+        });
+
+        var rows = predicateRows.Concat(auditedRows).Concat(computedRows).ToList();
         return Verify(rows).UseFileName("cel-to-sql-core");
+    }
+
+    private static CompiledExpression Compile(string source, EntitySchema entity)
+    {
+        var result = CelFixtures.Compiler.Compile(source, CelProfile.Rule, entity);
+        result.IsSuccess.ShouldBeTrue(string.Join("; ", result.Errors.Select(error => error.Message)));
+        return result.Expression!;
     }
 
     /// <summary>

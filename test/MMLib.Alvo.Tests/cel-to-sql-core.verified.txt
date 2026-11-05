@@ -266,6 +266,17 @@
     ]
   },
   {
+    source: created_at > now() - duration('24h'),
+    context: Alice (audited notes),
+    Sql: COALESCE("created_at" > @alvo_p0, FALSE),
+    Parameters: [
+      {
+        Key: alvo_p0,
+        Value: DateTimeOffset_1
+      }
+    ]
+  },
+  {
     source: total + 1,
     context: (scalar),
     Sql: ("total" + @p0),

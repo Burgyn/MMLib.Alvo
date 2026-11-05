@@ -1,6 +1,7 @@
 ﻿using CsCheck;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
+using System.Globalization;
 
 namespace MMLib.Alvo.Tests.Expressions;
 
@@ -23,6 +24,28 @@ public class NoInterpolationPropertyTests
 
     private static readonly Gen<string> _literals =
         Gen.Char["abcXYZ01_ '\"%;-()"].Array[1, 12].Select(characters => new string(characters));
+
+    private static readonly DateTimeOffset _now = new(2026, 11, 9, 10, 0, 0, TimeSpan.Zero);
+
+    private static readonly Dictionary<string, long> _microsecondsPer = new(StringComparer.Ordinal)
+    {
+        ["h"] = 3_600_000_000L,
+        ["m"] = 60_000_000L,
+        ["s"] = 1_000_000L,
+        ["ms"] = 1_000L,
+        ["us"] = 1L,
+    };
+
+    private static readonly Gen<(long Amount, string Unit)> _durations =
+        Gen.Select(Gen.Long[0, 1_000_000], Gen.OneOfConst([.. _microsecondsPer.Keys]));
+
+    private static SqlPredicate RenderTemporal(string source)
+    {
+        var result = CelFixtures.Compiler.Compile(source, CelProfile.Rule, CelFixtures.Orders);
+        result.IsSuccess.ShouldBeTrue($"'{source}' must compile so the temporal shape is actually rendered.");
+        using var instant = AlvoFlow.EnterInstant(_now);
+        return _renderer.Render(result.Expression!, CelFixtures.Alice, _fields, "p");
+    }
 
     /// <summary>
     /// CEL escapes a quote inside a single-quoted string literal with a backslash (see
@@ -73,6 +96,49 @@ public class NoInterpolationPropertyTests
         iter: 10_000);
 
         rendered.ShouldBe(10_000);
+    }
+
+    /// <summary>
+    /// A duration constant and the bound <c>now()</c> (HX-11 Rulings 4, 11) reach the SQL only as parameters: over arbitrary
+    /// generated durations, the rendered text of both temporal shapes — a field difference in microseconds and a folded window
+    /// of <c>now()</c> — is byte-identical, and the value sits in a parameter (Task 3 review M4).
+    /// </summary>
+    [Fact]
+    public void No_duration_or_instant_ever_appears_in_the_rendered_sql()
+    {
+        const string DifferenceSql = "COALESCE((EPOCH_US(\"approved_at\") - EPOCH_US(\"created_at\")) <= @p0, FALSE)";
+        const string WindowSql = "COALESCE(\"created_at\" > @p0, FALSE)";
+        long rendered = 0;
+
+        _durations.Sample((amount, unit) =>
+        {
+            var micros = amount * _microsecondsPer[unit];
+            var difference = RenderTemporal($"approved_at - created_at <= duration('{amount}{unit}')");
+            var window = RenderTemporal($"created_at > now() - duration('{amount}{unit}')");
+            Interlocked.Increment(ref rendered);
+
+            return difference.Sql == DifferenceSql && difference.Parameters.Values.Contains(micros)
+                && window.Sql == WindowSql && window.Parameters.Values.Contains(_now.AddTicks(-micros * 10));
+        },
+        iter: 10_000);
+
+        rendered.ShouldBe(10_000);
+    }
+
+    /// <summary>
+    /// <c>duration()</c> takes a constant whose grammar has no slot for arbitrary text (Ruling 7), and a string cannot meet a
+    /// timestamp or a duration in arithmetic, so a payload aimed at a temporal shape is refused before any SQL exists.
+    /// </summary>
+    [Theory]
+    [InlineData("approved_at - created_at <= duration('{0}')")]
+    [InlineData("created_at > now() - duration('{0}')")]
+    [InlineData("created_at > now() - '{0}'")]
+    [InlineData("approved_at - created_at <= duration('1h') + '{0}'")]
+    public void A_temporal_injection_attempt_is_refused_at_compile_time(string template)
+    {
+        var source = string.Format(CultureInfo.InvariantCulture, template, EscapeForCel(Payload));
+
+        CelFixtures.Compiler.Compile(source, CelProfile.Rule, CelFixtures.Orders).IsSuccess.ShouldBeFalse(source);
     }
 
     [Theory]
