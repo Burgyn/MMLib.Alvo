@@ -24,6 +24,7 @@ internal sealed class CelFunctionBudget : IDisposable
     private CancellationTokenSource? _deadline;
     private CancellationTokenSource? _linked;
     private long _startedAt;
+    private bool _disposed;
 
     private CelFunctionBudget(TimeSpan limit, TimeProvider time, CancellationToken outer)
     {
@@ -33,8 +34,12 @@ internal sealed class CelFunctionBudget : IDisposable
         _previous = _current.Value;
     }
 
-    /// <summary>Gets the pass the current evaluation runs in, or <see langword="null"/>.</summary>
-    internal static CelFunctionBudget? Current => _current.Value;
+    /// <summary>
+    /// Gets the pass the current evaluation runs in, or <see langword="null"/> — also when the flow still holds a pass that
+    /// was disposed (a task or timer started during the evaluation captured it): that evaluation is over, so a late call
+    /// runs as outside any pass, and never touches the pass's disposed token sources.
+    /// </summary>
+    internal static CelFunctionBudget? Current => _current.Value is { _disposed: false } pass ? pass : null;
 
     /// <summary>Gets the time every host call of this pass shares.</summary>
     internal TimeSpan Limit { get; }
@@ -72,18 +77,31 @@ internal sealed class CelFunctionBudget : IDisposable
         {
             result = body(tokenAware ? [.. arguments, token] : arguments);
         }
-        catch (Exception) when (pass is not null && pass.Overran)
+        catch (Exception thrown) when (pass is not null && pass.Overran)
         {
-            throw pass.Overrun(function);
+            throw pass.Overrun(function, thrown);
         }
 
-        return pass is not null && pass.Overran ? throw pass.Overrun(function) : result;
+        return pass is not null && pass.Overran ? throw pass.Overrun(function, failure: null) : result;
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Leaves the pass: restores the one around it when this pass is still the flow's current one, so a second or an
+    /// out-of-order dispose never restores a stale pass.
+    /// </summary>
     public void Dispose()
     {
-        _current.Value = _previous;
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        if (ReferenceEquals(_current.Value, this))
+        {
+            _current.Value = _previous;
+        }
+
         _linked?.Dispose();
         _deadline?.Dispose();
     }
@@ -100,7 +118,8 @@ internal sealed class CelFunctionBudget : IDisposable
         return _linked.Token;
     }
 
-    private CelFunctionException Overrun(string function) =>
+    private CelFunctionException Overrun(string function, Exception? failure) =>
         new(function, isHost: true,
-            $"it ran past the {Limit.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture)} ms that host functions have in one evaluation");
+            $"it ran past the {Limit.TotalMilliseconds.ToString("0.###", CultureInfo.InvariantCulture)} ms that host functions have in one evaluation",
+            failure);
 }

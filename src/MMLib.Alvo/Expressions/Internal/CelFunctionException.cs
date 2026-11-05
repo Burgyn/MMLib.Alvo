@@ -41,7 +41,20 @@ internal sealed class CelFunctionException : Exception
     /// <param name="isHost">Whether the host registered it.</param>
     /// <param name="reason">Why, in Alvo's own words — safe to show the caller, so it never carries a row's value.</param>
     internal CelFunctionException(string functionName, bool isHost, string reason)
-        : base($"The CEL function '{functionName}' failed: {reason}.")
+        : this(functionName, isHost, reason, failure: null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CelFunctionException"/> class for a call Alvo refused after the body
+    /// threw — a host function past its budget: Alvo's reason for the caller, what the body threw for the log.
+    /// </summary>
+    /// <param name="functionName">The function's name.</param>
+    /// <param name="isHost">Whether the host registered it.</param>
+    /// <param name="reason">Why, in Alvo's own words — safe to show the caller, so it never carries a row's value.</param>
+    /// <param name="failure">What the body threw, if anything; kept for the log, never shown to the caller.</param>
+    internal CelFunctionException(string functionName, bool isHost, string reason, Exception? failure)
+        : base($"The CEL function '{functionName}' failed: {reason}.", failure)
     {
         FunctionName = functionName;
         IsHost = isHost;

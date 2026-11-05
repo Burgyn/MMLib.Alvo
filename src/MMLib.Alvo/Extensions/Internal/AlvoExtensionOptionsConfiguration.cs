@@ -1,7 +1,7 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
-
 using MMLib.Alvo.Data;
+using System.Globalization;
 
 namespace MMLib.Alvo.Extensions.Internal;
 
@@ -46,6 +46,8 @@ internal sealed class AlvoExtensionOptionsConfiguration(IConfiguration? configur
 
     private static string BudgetRefusal(TimeSpan configured) =>
         $"'{configured}' is not a usable {CelFunctionBudgetKey}. Set it (as an environment variable, "
-        + $"{CelFunctionBudgetKey.Replace(":", "__", StringComparison.Ordinal)}) to more than zero and at most 30 s, for "
-        + "example 00:00:00.250: host functions run inside the write's transaction, which must not wait on them longer.";
+        + $"{CelFunctionBudgetKey.Replace(":", "__", StringComparison.Ordinal)}) to more than zero and at most "
+        + $"{AlvoHookOptions.MaxTimeout.TotalSeconds.ToString(CultureInfo.InvariantCulture)} s, for example "
+        + $"{AlvoHookOptions.DefaultTimeout.ToString(@"hh\:mm\:ss\.fff", CultureInfo.InvariantCulture)}: host functions run "
+        + "inside the write's transaction, which must not wait on them longer.";
 }

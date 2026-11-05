@@ -236,4 +236,148 @@ public sealed class CelFunctionBudgetTests
         Should.Throw<CelFunctionException>(() => function.Invoke(["x"])).Reason
             .ShouldBe("it ran past the 40 ms that host functions have in one evaluation");
     }
+
+    [Fact]
+    public void Exactly_the_limit_is_an_overrun_even_when_the_deadline_timer_has_not_fired()
+    {
+        var clock = new SilentClock();
+        var seen = CancellationToken.None;
+        var function = Function((s, ct) =>
+        {
+            seen = ct;
+            clock.Advance(TimeSpan.FromMilliseconds(250));
+            return s;
+        });
+        using var pass = TestBudgets.Default(clock).Enter(TestContext.Current.CancellationToken);
+
+        Should.Throw<CelFunctionException>(() => function.Invoke(["x"])).Reason.ShouldStartWith("it ran past");
+        seen.IsCancellationRequested.ShouldBeFalse("a starved timer has not fired; the measurement on return decides");
+    }
+
+    [Fact]
+    public void One_millisecond_under_the_limit_answers_when_the_deadline_timer_has_not_fired()
+    {
+        var clock = new SilentClock();
+        var function = TokenFree(s =>
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(249));
+            return s;
+        });
+        using var pass = TestBudgets.Default(clock).Enter(TestContext.Current.CancellationToken);
+
+        function.Invoke(["x"]).ShouldBe("x");
+    }
+
+    [Fact]
+    public void An_overrun_keeps_what_the_function_threw_for_the_log()
+    {
+        var thrown = new TimeoutException("rates service");
+        var function = Function((s, ct) =>
+        {
+            _clock.Advance(TimeSpan.FromMilliseconds(300));
+            throw thrown;
+        });
+        using var pass = Pass();
+
+        var failure = Should.Throw<CelFunctionException>(() => function.Invoke(["x"]));
+
+        failure.Reason.ShouldStartWith("it ran past");
+        failure.IsHost.ShouldBeTrue();
+        failure.InnerException.ShouldBeSameAs(thrown);
+    }
+
+    [Fact]
+    public void A_sub_millisecond_budget_is_named_as_configured()
+    {
+        var function = TokenFree(s =>
+        {
+            _clock.Advance(TimeSpan.FromMilliseconds(1));
+            return s;
+        });
+        using var pass = TestBudgets.Default(_clock, TimeSpan.FromTicks(4_000)).Enter(TestContext.Current.CancellationToken);
+
+        Should.Throw<CelFunctionException>(() => function.Invoke(["x"])).Reason
+            .ShouldBe("it ran past the 0.4 ms that host functions have in one evaluation");
+    }
+
+    [Fact]
+    public void Disposing_a_pass_twice_does_not_restore_a_stale_pass()
+    {
+        using var outer = Pass();
+        var inner = Pass();
+        inner.Dispose();
+        using var next = Pass();
+
+        inner.Dispose();
+
+        CelFunctionBudget.Current.ShouldBeSameAs(next);
+    }
+
+    [Fact]
+    public void A_flow_captured_inside_a_pass_sees_no_pass_once_it_is_disposed()
+    {
+        var seen = new CancellationTokenSource().Token;
+        var function = Function((s, ct) =>
+        {
+            seen = ct;
+            _clock.Advance(TimeSpan.FromSeconds(10));
+            return s;
+        });
+        ExecutionContext captured;
+        using (Pass())
+        {
+            captured = ExecutionContext.Capture()!;
+        }
+
+        object? answered = null;
+        ExecutionContext.Run(captured, _ => answered = function.Invoke(["x"]), state: null);
+
+        answered.ShouldBe("x");
+        seen.CanBeCanceled.ShouldBeFalse("a disposed pass is no pass: no token, no limit, no disposed token source");
+    }
+
+    [Fact]
+    public async Task A_pass_survives_an_await_and_is_left_behind_after_it()
+    {
+        var function = TokenFree(s =>
+        {
+            _clock.Advance(TimeSpan.FromMilliseconds(251));
+            return s;
+        });
+
+        using (var pass = Pass())
+        {
+            await Task.Yield();
+
+            CelFunctionBudget.Current.ShouldBeSameAs(pass);
+            Should.Throw<CelFunctionException>(() => function.Invoke(["x"])).Reason.ShouldStartWith("it ran past");
+        }
+
+        CelFunctionBudget.Current.ShouldBeNull();
+    }
+
+    /// <summary>A clock whose timers never fire — a starved thread pool, where only the measurement on return can tell.</summary>
+    private sealed class SilentClock : TimeProvider
+    {
+        private long _now;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => _now;
+
+        public void Advance(TimeSpan by) => _now += by.Ticks;
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) => new SilentTimer();
+
+        private sealed class SilentTimer : ITimer
+        {
+            public bool Change(TimeSpan dueTime, TimeSpan period) => true;
+
+            public void Dispose()
+            {
+            }
+
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+    }
 }

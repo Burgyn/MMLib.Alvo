@@ -3,6 +3,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Extensions;
+using MMLib.Alvo.Extensions.Internal;
+using System.Globalization;
 
 namespace MMLib.Alvo.Tests.Extensions;
 
@@ -88,6 +90,16 @@ public class AlvoExtensionOptionsTests
         refused.Message.ShouldContain("Alvo:Extensions:CelFunctionBudget");
         refused.Message.ShouldContain("Alvo__Extensions__CelFunctionBudget");
         refused.Message.ShouldContain("30 s");
+    }
+
+    [Fact]
+    public void The_budget_refusal_reads_the_hook_maximum_and_default_rather_than_restating_them()
+    {
+        var refusal = new AlvoExtensionOptionsConfiguration(configuration: null)
+            .Validate(name: null, new AlvoExtensionOptions { CelFunctionBudget = TimeSpan.Zero }).FailureMessage!;
+
+        refusal.ShouldContain($"at most {AlvoHookOptions.MaxTimeout.TotalSeconds.ToString(CultureInfo.InvariantCulture)} s");
+        refusal.ShouldContain($"for example {AlvoHookOptions.DefaultTimeout.ToString(@"hh\:mm\:ss\.fff", CultureInfo.InvariantCulture)}");
     }
 
     [Fact]

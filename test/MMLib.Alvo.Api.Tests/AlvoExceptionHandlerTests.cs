@@ -179,6 +179,28 @@ public class AlvoExceptionHandlerTests
         logs.Logged.ShouldContain((LogLevel.Error, original));
     }
 
+    /// <summary>
+    /// A host function past its budget answers Alvo's budget sentence, and what the function itself threw after the
+    /// deadline still reaches the log at <see cref="LogLevel.Error"/>.
+    /// </summary>
+    [Fact]
+    public async Task A_budget_overrun_answers_the_budget_sentence_and_logs_what_the_function_threw()
+    {
+        var logs = new RecordingLoggerProvider();
+        var context = Context(aborted: false, _alvoEndpoint);
+        var thrown = new TimeoutException("rates service");
+        const string reason = "it ran past the 250 ms that host functions have in one evaluation";
+
+        await Handle(logs, context, new CelFunctionException("rates", isHost: true, reason, thrown));
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status500InternalServerError);
+        context.Response.Body.Position = 0;
+        var body = await new StreamReader(context.Response.Body).ReadToEndAsync(TestContext.Current.CancellationToken);
+        body.ShouldContain(reason);
+        body.ShouldNotContain(thrown.Message);
+        logs.Logged.ShouldContain((LogLevel.Error, thrown));
+    }
+
     /// <summary>A chain-depth refusal escaping an Alvo route is a 508 the caller is told not to retry, never a 500.</summary>
     [Fact]
     public async Task A_chain_depth_refusal_escaping_an_alvo_route_is_508_and_non_retryable()
