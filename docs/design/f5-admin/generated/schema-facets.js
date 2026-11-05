@@ -116,7 +116,8 @@ export const SCHEMA_FACETS = {
       "Internal": "internal",
       "FunctionFailed": "function-failed",
       "ChainDepthExceeded": "chain-depth-exceeded",
-      "HookFailed": "hook-failed"
+      "HookFailed": "hook-failed",
+      "ExpressionFailed": "expression-failed"
     }
   }
 };

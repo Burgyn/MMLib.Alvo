@@ -34,6 +34,7 @@ public sealed class CelFunctionBudgetTests
         failure.IsHost.ShouldBeTrue();
         failure.FunctionName.ShouldBe("slow");
         failure.Reason.ShouldBe("it ran past the 250 ms that host functions have in one evaluation");
+        failure.OnCallerData.ShouldBeFalse();
     }
 
     [Fact]

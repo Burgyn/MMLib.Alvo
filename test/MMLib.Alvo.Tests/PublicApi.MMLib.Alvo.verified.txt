@@ -71,6 +71,7 @@ namespace MMLib.Alvo.Api
         public const string ChainDepthExceeded = "chain-depth-exceeded";
         public const string Conflict = "conflict";
         public const string DestructiveChange = "destructive-change";
+        public const string ExpressionFailed = "expression-failed";
         public const string Forbidden = "forbidden";
         public const string FunctionFailed = "function-failed";
         public const string HookFailed = "hook-failed";

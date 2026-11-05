@@ -204,6 +204,61 @@ public class AlvoExceptionHandlerTests
         overrun.InnerException.ShouldBeSameAs(thrown);
     }
 
+    /// <summary>
+    /// A built-in refusing the caller's own data that escapes a generated route is the caller's to fix: 422
+    /// <c>expression-failed</c>, and nothing at <see cref="LogLevel.Error"/> — a 422 pages nobody (Ruling 37).
+    /// </summary>
+    [Theory]
+    [InlineData("bare")]
+    [InlineData("wrapped")]
+    public async Task A_caller_data_refusal_on_a_data_api_endpoint_answers_expression_failed_unlogged(string shape)
+    {
+        var logs = new RecordingLoggerProvider();
+        var context = Context(aborted: false, _alvoEndpoint);
+        var refusal = new CelFunctionException("int", "the text is not a whole number such as 42 or -7");
+
+        await Handle(logs, context, shape == "bare" ? refusal : new InvalidOperationException("storage", refusal));
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status422UnprocessableEntity);
+        (await BodyAsync(context)).ShouldContain("errors/expression-failed");
+        logs.Records.ShouldNotContain(LogLevel.Error);
+    }
+
+    /// <summary>
+    /// The same refusal on a command's endpoint is the handler's own write, not the command caller's data: 500
+    /// <c>function-failed</c>, logged (Ruling 27).
+    /// </summary>
+    [Fact]
+    public async Task A_caller_data_refusal_on_a_command_endpoint_answers_function_failed()
+    {
+        var logs = new RecordingLoggerProvider();
+        var context = Context(aborted: false, _commandEndpoint);
+
+        await Handle(logs, context, new CelFunctionException("int", "the text is not a whole number such as 42 or -7"));
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status500InternalServerError);
+        (await BodyAsync(context)).ShouldContain("errors/function-failed");
+        logs.Records.ShouldContain(LogLevel.Error);
+    }
+
+    /// <summary>
+    /// An aggregate holding the caller's refusal and a host function's failure is not the caller's to fix: 500
+    /// <c>function-failed</c>, logged (Ruling 28).
+    /// </summary>
+    [Fact]
+    public async Task An_aggregate_with_a_host_failure_beside_a_caller_refusal_answers_function_failed()
+    {
+        var logs = new RecordingLoggerProvider();
+        var context = Context(aborted: false, _alvoEndpoint);
+        var refusal = new CelFunctionException("int", "the text is not a whole number such as 42 or -7");
+
+        await Handle(logs, context, new AggregateException(refusal, new CelFunctionException("rate", isHost: true, new FormatException())));
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status500InternalServerError);
+        (await BodyAsync(context)).ShouldContain("errors/function-failed");
+        logs.Records.ShouldContain(LogLevel.Error);
+    }
+
     /// <summary>A chain-depth refusal escaping an Alvo route is a 508 the caller is told not to retry, never a 500.</summary>
     [Fact]
     public async Task A_chain_depth_refusal_escaping_an_alvo_route_is_508_and_non_retryable()
@@ -288,6 +343,19 @@ public class AlvoExceptionHandlerTests
         requestDelegate: null,
         new EndpointMetadataCollection(new DataApiOperationMetadata("owners", DataApiEndpointKind.List)),
         "GET /api/owners");
+
+    /// <summary>A command <c>MapAlvoCommand</c> mapped, identified the way the handler identifies one.</summary>
+    private static readonly Endpoint _commandEndpoint = new(
+        requestDelegate: null,
+        new EndpointMetadataCollection(new MMLib.Alvo.Commands.Internal.CommandEndpointMetadata("quote_stay", null)),
+        "POST /commands/quote_stay");
+
+    /// <summary>What the handler wrote into the response.</summary>
+    private static async Task<string> BodyAsync(HttpContext context)
+    {
+        context.Response.Body.Position = 0;
+        return await new StreamReader(context.Response.Body).ReadToEndAsync(TestContext.Current.CancellationToken);
+    }
 
     /// <summary>An endpoint the host mapped itself, which carries no marker of Alvo's.</summary>
     private static readonly Endpoint _hostEndpoint = new(

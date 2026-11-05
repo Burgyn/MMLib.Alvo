@@ -375,6 +375,12 @@ internal static class ProblemResultFactory
             $"The write hook '{extension}' failed ({reason}), so nothing was written. Its own error is in the server log.",
             new Dictionary<string, object?>(StringComparer.Ordinal) { [ExtensionsMember] = new[] { extension }, ["reason"] = reason });
 
+    /// <summary>The 422 for a built-in CEL function or hook arithmetic that refused the request's data.</summary>
+    /// <param name="detail">Names the function and Alvo's reason, never the value.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult ExpressionFailed(string detail) =>
+        Problem(StatusCodes.Status422UnprocessableEntity, AlvoProblemTypes.ExpressionFailed, detail);
+
     /// <summary>
     /// The refusal for a request the web server would not read — rendered at <em>its</em> status, not 500.
     /// </summary>
@@ -563,7 +569,8 @@ internal static class ProblemResultFactory
     };
 
     /// <summary>
-    /// <see cref="PortRefusalFor"/>, plus the malformed-request family (an <see cref="ArgumentException"/> that is not an
+    /// <see cref="PortRefusalFor"/>, plus a built-in CEL function refusing the caller's own data (422 <c>expression-failed</c>,
+    /// generated routes only, Ruling 27), plus the malformed-request family (an <see cref="ArgumentException"/> that is not an
     /// <see cref="ArgumentNullException"/>).
     /// </summary>
     /// <remarks>
@@ -577,6 +584,9 @@ internal static class ProblemResultFactory
     /// <param name="exception">What the port threw.</param>
     internal static IResult? RefusalFor(Exception exception) =>
         PortRefusalFor(exception)
+        ?? (AlvoExceptionHandler.CallerDataFailure(exception) is { } refused
+            ? ExpressionFailed(AlvoExceptionHandler.ExpressionFailedDetail(refused))
+            : null)
         ?? (exception is ArgumentException argument and not ArgumentNullException ? Malformed(WithoutArgumentDetail(argument.Message)) : null);
 
     /// <summary>

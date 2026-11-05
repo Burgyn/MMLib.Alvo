@@ -207,6 +207,30 @@ public sealed class BeforeHookFacetTests
     }
 
     [Fact]
+    public void A_later_hook_refusing_a_value_an_earlier_hook_wrote_is_not_the_caller_s()
+    {
+        var hooks = BeforeCreate(Always(Mutate("note", Cel("'x'"))), Reject("int(new.note) > 1", "Too many."));
+
+        Should.Throw<CelFunctionException>(() => Run(hooks, Row(("note", "5")))).OnCallerData.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_hook_refusing_the_caller_s_own_value_stays_the_caller_s()
+    {
+        var hooks = BeforeCreate(Reject("int(new.note) > 1", "Too many."));
+
+        Should.Throw<CelFunctionException>(() => Run(hooks, Row(("note", "x")))).OnCallerData.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_later_hook_s_mutation_over_a_value_an_earlier_hook_wrote_is_not_the_caller_s()
+    {
+        var hooks = BeforeCreate(Mutate("note", Cel("'x'")), Mutate("qty", Cel("int(new.note)")));
+
+        Should.Throw<CelFunctionException>(() => Run(hooks, Row(("note", "5")))).OnCallerData.ShouldBeFalse();
+    }
+
+    [Fact]
     public void Each_write_gets_a_fresh_budget()
     {
         var clock = new FakeTimeProvider();
@@ -260,7 +284,14 @@ public sealed class BeforeHookFacetTests
     private static ValueOrExpr Literal(string json) => ValueOrExpr.FromLiteral(JsonDocument.Parse(json).RootElement);
 
     private static EntityHooks BeforeCreate(params BeforeHookAction[] actions) =>
-        new() { BeforeCreate = [.. actions.Select(action => new BeforeHook { Action = action })] };
+        BeforeCreate([.. actions.Select(action => new BeforeHook { Action = action })]);
+
+    private static EntityHooks BeforeCreate(params BeforeHook[] hooks) => new() { BeforeCreate = [.. hooks] };
+
+    private static BeforeHook Always(BeforeHookAction action) => new() { Action = action };
+
+    private static BeforeHook Reject(string condition, string message) =>
+        new() { Condition = condition, Action = new BeforeHookAction { Reject = message } };
 
     private static AlvoDescriptor Descriptor(EntityHooks hooks) => new()
     {

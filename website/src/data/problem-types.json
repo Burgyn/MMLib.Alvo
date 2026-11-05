@@ -161,7 +161,7 @@
   },
   "function-failed": {
     "causes": [
-      "A CEL function failed while a write was evaluated: a host function threw, a built-in refused (an overflow, a result too long), or an argument did not fit its parameter's type. Nothing was written."
+      "A host function (`AddCelFunction`) failed while a write was evaluated: it threw, ran past its time budget, or was handed an argument its parameter cannot hold — or Alvo's own evaluation of a hook failed. Nothing was written."
     ],
     "fix": "Check the function the detail names and the values the write passes to it; the host's own exception is in its log, never in the response.",
     "violationCodes": [],
@@ -185,5 +185,16 @@
     "violationCodes": [],
     "guides": ["extending/write-hooks", "guides/handle-errors"],
     "needsProblemDetails": true
+  },
+  "expression-failed": {
+    "causes": [
+      "A built-in CEL function refused a value the write carries, while a hook's condition or a `mutate` evaluated it: `int('x')`, a `substring` past the end of the text, `timestamp()` of a malformed value.",
+      "Hook arithmetic failed on the data: an overflow, a division by zero, or an operand that is not a number.",
+      "A hook's whole condition evaluated to a present value that is not a Bool."
+    ],
+    "fix": "Correct the value the function in the detail reads. The detail names the function and why it refused, never the value; the same request fails the same way every time.",
+    "violationCodes": [],
+    "guides": ["guides/before-hooks", "guides/custom-cel-functions", "guides/handle-errors"],
+    "needsProblemDetails": false
   }
 }

@@ -449,6 +449,7 @@ public sealed class ProblemDetailsTests
         reached.AddRange(await ManagementSlugsAnsweredByTheDescriptorWriteAsync());
         reached.Add(await ChainDepthSlugAnsweredByACallerDeepInAChainAsync());
         reached.Add(await HookFailedSlugAnsweredByAThrowingWriteHookAsync());
+        reached.Add(await ExpressionFailedSlugAnsweredByAnIntOfTextAsync());
 
         reached.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ShouldBe(
             AlvoProblemTypes.All.Except(PendingUntilALaterTask, StringComparer.Ordinal).Order(StringComparer.Ordinal),
@@ -536,6 +537,15 @@ public sealed class ProblemDetailsTests
             await inner.ResolveAsync(presentedKey, requestedTenant, cancellationToken) is { } principal
                 ? principal with { Context = principal.Context with { Provenance = new AlvoProvenance { Depth = 9 } } }
                 : null;
+    }
+
+    /// <summary>The <c>expression-failed</c> slug's probe: a built-in refusing the caller's own data, on a host with no opt-in.</summary>
+    private static async Task<string> ExpressionFailedSlugAnsweredByAnIntOfTextAsync()
+    {
+        var writer = new TestApiKey("lots-writer", ["writer"], ["lots:read", "lots:write"]);
+        await using var world = await AlvoApiWorld.FromDescriptorAsync("expression-failed.alvo.json", [writer]);
+
+        return await SlugAnsweredByAsync(world, new Probe(HttpMethod.Post, "/api/lots", writer, new JsonObject { ["quantity_text"] = "x" }));
     }
 
     /// <summary>
@@ -752,6 +762,7 @@ public sealed class ProblemDetailsTests
         ProblemResultFactory.FunctionFailed("A CEL function failed."),
         ProblemResultFactory.ChainDepthExceeded("too deep"),
         ProblemResultFactory.HookFailed("probe", "exception"),
+        ProblemResultFactory.ExpressionFailed("The CEL function 'int' refused this request's data: x. Nothing was written."),
         ProblemResultFactory.HookRejected(new AlvoWriteRejectedException(AlvoWriteRejectionKind.Conflict, "probe", [Violation()])),
         ProblemResultFactory.Unreadable(StatusCodes.Status413PayloadTooLarge),
         ProblemResultFactory.UnsupportedMediaType(HttpMethods.Post),
@@ -791,7 +802,7 @@ public sealed class ProblemDetailsTests
     }
 
     /// <summary>The status and document <paramref name="result"/> writes.</summary>
-    private static async Task<(int Status, JsonObject Document)> DocumentWrittenByAsync(IResult result)
+    internal static async Task<(int Status, JsonObject Document)> DocumentWrittenByAsync(IResult result)
     {
         await using var services = new ServiceCollection().AddLogging().AddProblemDetails().BuildServiceProvider();
         var context = new DefaultHttpContext { RequestServices = services };

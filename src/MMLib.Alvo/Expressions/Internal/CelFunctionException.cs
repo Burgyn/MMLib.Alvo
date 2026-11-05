@@ -3,10 +3,11 @@
 /// <summary>
 /// A catalogued CEL function failed while an expression was evaluated. Deliberately <b>not</b> collapsed into a value
 /// the way every other evaluation surprise is (false, null, masked): a function is the one construct whose failure is
-/// reachable, so it fails closed — the interpreter lets it escape and the write rolls back. A Data API caller receives
-/// <c>…/errors/function-failed</c> (spec §5.6); an in-process <c>IAlvoData</c> caller receives it as a plain
-/// <see cref="Exception"/>; an after-hook condition drops the hook with a Warning. Internal: only the core throws it and
-/// names it — no public signature exposes the type.
+/// reachable, so it fails closed — the interpreter lets it escape and the write rolls back. An in-process <c>IAlvoData</c>
+/// caller receives it as a plain <see cref="Exception"/>; an after-hook condition drops the hook with a Warning. Internal:
+/// only the core throws it and names it — no public signature exposes the type. A Data API caller receives
+/// <c>…/errors/expression-failed</c> (422) when <see cref="OnCallerData"/> holds and <c>…/errors/function-failed</c> (500)
+/// otherwise.
 /// </summary>
 /// <remarks>
 /// <see cref="Exception.Message"/> always reads <c>The CEL function '…' failed…</c>, also for a whole hook condition that
@@ -59,6 +60,7 @@ internal sealed class CelFunctionException : Exception
         FunctionName = functionName;
         IsHost = isHost;
         Reason = reason;
+        OnCallerData = !isHost && failure is null;
     }
 
     /// <summary>
@@ -75,6 +77,16 @@ internal sealed class CelFunctionException : Exception
         Reason = reason;
     }
 
+    private CelFunctionException(CelFunctionException original, bool onCallerData)
+        : base(original.Message, original.InnerException)
+    {
+        FunctionName = original.FunctionName;
+        IsHost = original.IsHost;
+        Reason = original.Reason;
+        OnCallerData = onCallerData;
+        Judged = true;
+    }
+
     /// <summary>Gets the failed function's name.</summary>
     public string FunctionName { get; }
 
@@ -83,5 +95,24 @@ internal sealed class CelFunctionException : Exception
 
     /// <summary>Gets Alvo's own reason for a built-in's refusal, or <see langword="null"/> when a body threw.</summary>
     public string? Reason { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether the refused value is the caller's own — a built-in, hook arithmetic or the interpreter
+    /// refused what the request carries — so the caller fixes it by sending other data (422). Never for anything a host
+    /// function did or produced, the stored row, a value a hook wrote, nor a defect.
+    /// </summary>
+    public bool OnCallerData { get; }
+
+    /// <summary>Gets a value indicating whether a node has already decided whose data this is.</summary>
+    internal bool Judged { get; }
+
+    /// <summary>The failure as the innermost node that saw it attributes it; an already judged failure is returned as is.</summary>
+    /// <param name="callersOwn">Whether that node's subtree reads only the caller's data.</param>
+    /// <returns>The attributed failure.</returns>
+    internal CelFunctionException JudgedBy(bool callersOwn) => Judged || !OnCallerData ? this : new(this, callersOwn);
+
+    /// <summary>The failure, attributed as not the caller's (a value a hook wrote).</summary>
+    /// <returns>A copy with <see cref="OnCallerData"/> false.</returns>
+    internal CelFunctionException NotTheCallers() => OnCallerData ? new(this, onCallerData: false) : this;
 }
 #pragma warning restore RCS1194

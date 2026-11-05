@@ -166,12 +166,16 @@ public static class AlvoProblemTypes
     /// </remarks>
     public const string Internal = "internal";
 
-    /// <summary>A CEL function failed while the write was evaluated, so nothing was written (500).</summary>
+    /// <summary>
+    /// A host function (<c>AddCelFunction</c>) failed — it threw, ran past its time budget, or was handed an argument its
+    /// parameter cannot hold — or Alvo's own evaluation of a hook failed, so nothing was written (500).
+    /// </summary>
     /// <remarks>
-    /// Distinct from <see cref="Internal"/> because the failing party is a function — host code registered with
-    /// <c>AddCelFunction</c>, or a built-in that refused (an overflow, a result too long) — not an Alvo invariant. The
-    /// detail names the function (descriptor-authored) and, for a built-in, Alvo's own reason; never the host's
-    /// exception text, which is the log's. Emitted only by <c>AlvoExceptionHandler</c>.
+    /// Distinct from <see cref="Internal"/> because the failing party is a function, not an Alvo invariant. A built-in
+    /// function refusing the caller's data is <see cref="ExpressionFailed"/> instead; a built-in refusing a host
+    /// function's output, the stored row or a value a hook wrote stays here, as does any refusal on a command's or a
+    /// webhook receiver's endpoint. The detail names the function (descriptor-authored) and Alvo's own reason; never the
+    /// host's exception text, which is the log's. Emitted only by <c>AlvoExceptionHandler</c>.
     /// </remarks>
     public const string FunctionFailed = "function-failed";
 
@@ -194,6 +198,15 @@ public static class AlvoProblemTypes
     /// <see cref="Conflict"/> or <see cref="Forbidden"/>.
     /// </remarks>
     public const string HookFailed = "hook-failed";
+
+    /// <summary>A built-in CEL function or hook arithmetic refused the request's own data, so nothing was written (422).</summary>
+    /// <remarks>
+    /// <c>int('x')</c>, a <c>substring</c> past the end of the text, a <c>timestamp()</c> of a malformed value, an overflow, a
+    /// division by zero, a condition that is no Bool: the caller fixes it by sending other data. The detail names the
+    /// function and Alvo's reason, never the value. Answered on every host, without opting in. A host function's failure
+    /// is <see cref="FunctionFailed"/> (500), because only the host can fix it.
+    /// </remarks>
+    public const string ExpressionFailed = "expression-failed";
 
     /// <summary>
     /// Every slug this catalogue declares. Enumerated rather than discovered by reflection so a fact can
@@ -218,6 +231,7 @@ public static class AlvoProblemTypes
         FunctionFailed,
         ChainDepthExceeded,
         HookFailed,
+        ExpressionFailed,
     ];
 
     /// <summary>The full problem <c>type</c> URI for one slug.</summary>

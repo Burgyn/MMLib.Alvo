@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Extensions.Internal;
@@ -10,6 +11,7 @@ using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Tests.Data;
+using MMLib.Alvo.Tests.Expressions;
 using MMLib.Alvo.Tests.Extensions;
 using NSubstitute;
 using System.Collections.Concurrent;
@@ -412,8 +414,68 @@ public sealed class WriteExtensionRunnerTests
         var escaped = await Should.ThrowAsync<CelFunctionException>(() => RunStage(world, stage));
 
         (escaped.FunctionName, escaped.IsHost).ShouldBe(("int", false));
+        escaped.OnCallerData.ShouldBe(stage != "after", "the caller sent the title; an after-write when reads the saved row");
         ran.ShouldBeEmpty();
         (unit.Poisoned.Count, unit.Blamed.Count).ShouldBe((0, 0));
+    }
+
+    [Fact]
+    public async Task A_built_in_failing_in_an_after_write_condition_is_not_the_caller_s()
+    {
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t
+            .AfterWrite("notify", (AfterWrite<AlvoRecord> _) => ValueTask.CompletedTask, when: "int(new.title) > 1")));
+        var saved = RunnerWorld.Ticket(title: "open");
+
+        var escaped = await Should.ThrowAsync<CelFunctionException>(() => world.Runner.AfterWriteAsync(world.Before(saved) with { Saved = saved }, Ct));
+
+        escaped.FunctionName.ShouldBe("int");
+        escaped.OnCallerData.ShouldBeFalse("the saved row carries defaults, rollups and hook writes");
+    }
+
+    [Fact]
+    public async Task A_built_in_failing_on_a_field_an_earlier_hook_set_is_not_the_caller_s()
+    {
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t
+            .BeforeWrite("mark", (BeforeWrite<AlvoRecord> write) => { write.Set("title", "x"); return ValueTask.CompletedTask; })
+            .BeforeWrite("guard", (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask, when: "int(new.title) > 1")));
+
+        var escaped = await Should.ThrowAsync<CelFunctionException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket(title: "5")), Ct));
+
+        escaped.FunctionName.ShouldBe("int");
+        escaped.OnCallerData.ShouldBeFalse("the refused title is the one the earlier hook set");
+    }
+
+    [Fact]
+    public async Task A_built_in_failing_on_a_field_a_declarative_before_hook_mutates_is_not_the_caller_s()
+    {
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t
+            .BeforeWrite("guard", (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask, when: "int(new.title) > 1")));
+        world.Services.GetRequiredService<IPolicyCatalogProvider>().SetCurrent("handlers", TitleMutatedOnCreate());
+
+        var escaped = await Should.ThrowAsync<CelFunctionException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket(title: "x")), Ct));
+
+        escaped.OnCallerData.ShouldBeFalse("a declarative before-hook of this create mutates title");
+    }
+
+    /// <summary>The handlers catalog with a declarative before-create hook on tickets that mutates <c>title</c>.</summary>
+    private static PolicyCatalog TitleMutatedOnCreate()
+    {
+        var mutate = new BeforeHookAction { Mutate = new Dictionary<string, ValueOrExpr>(StringComparer.Ordinal) { ["title"] = ValueOrExpr.FromExpression("'x'") } };
+        var descriptor = new AlvoDescriptor
+        {
+            ApiVersion = "alvo.dev/v1",
+            Name = "handlers",
+            Entities = HandlerCatalog.Schema.Entities.ToDictionary(
+                entity => entity.Name,
+                entity => new EntityDescriptor
+                {
+                    Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal),
+                    Hooks = entity.Name == "tickets" ? new EntityHooks { BeforeCreate = [new BeforeHook { Action = mutate }] } : null,
+                },
+                StringComparer.Ordinal),
+        };
+
+        return PolicyCatalog.Build(descriptor, HandlerCatalog.Schema, CelFixtures.Compiler);
     }
 
     /// <summary>

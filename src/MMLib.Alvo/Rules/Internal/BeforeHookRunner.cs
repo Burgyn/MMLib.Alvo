@@ -46,6 +46,8 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
     private static readonly IReadOnlyDictionary<string, object?> _noPatch =
         new Dictionary<string, object?>(StringComparer.Ordinal);
 
+    private static readonly IReadOnlySet<string> _nothingWritten = new HashSet<string>(StringComparer.Ordinal);
+
     private readonly IPolicyCatalogProvider _catalog;
     private readonly CelFunctionBudgetPolicy _budget;
 
@@ -113,7 +115,8 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
 
         foreach (var hook in hooks)
         {
-            if (!Fires(hook, current, previous, context))
+            var written = WrittenSoFar(patch);
+            if (!Fires(hook, current, previous, context, written))
             {
                 continue;
             }
@@ -121,7 +124,7 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
             EnsureNotRejected(hook);
             foreach (var mutation in hook.Mutations)
             {
-                patch[mutation.Field] = Value(mutation, current, previous, now);
+                patch[mutation.Field] = Value(mutation, current, previous, now, written);
                 writers[mutation.Field] = (hook, mutation);
             }
 
@@ -203,9 +206,16 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
     /// </para>
     /// </remarks>
     private static bool Fires(
-        CompiledBeforeHook hook, AlvoRecord candidate, AlvoRecord? previous, AlvoContext context) =>
-        hook.Condition is null
-        || CelInterpreter.EvaluatePredicate(hook.Condition, candidate, previous, context);
+        CompiledBeforeHook hook, AlvoRecord candidate, AlvoRecord? previous, AlvoContext context, IReadOnlySet<string> written) =>
+        hook.Condition is not { } condition
+        || CelDataOrigin.Attributed(condition, written, () => CelInterpreter.EvaluatePredicate(condition, candidate, previous, context));
+
+    /// <summary>
+    /// The fields earlier hooks of this write mutated: a built-in refusing one of them refuses a value a hook wrote, not the
+    /// caller's (E1, Ruling 26), so the failure is attributed as not the caller's.
+    /// </summary>
+    private static IReadOnlySet<string> WrittenSoFar(Dictionary<string, object?> patch) =>
+        patch.Count == 0 ? _nothingWritten : patch.Keys.ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
     /// Refuses the write when the hook that fired is a <c>reject</c>, carrying the author's own text and the
@@ -264,9 +274,9 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
     /// compiler already converted into the target field's own representation.
     /// </summary>
     private static object? Value(
-        CompiledMutation mutation, AlvoRecord candidate, AlvoRecord? previous, DateTimeOffset now) =>
+        CompiledMutation mutation, AlvoRecord candidate, AlvoRecord? previous, DateTimeOffset now, IReadOnlySet<string> written) =>
         mutation.Expression is { } expression
-            ? CelInterpreter.EvaluateMutation(expression, candidate, previous, now)
+            ? CelDataOrigin.Attributed(expression, written, () => CelInterpreter.EvaluateMutation(expression, candidate, previous, now))
             : mutation.Value;
 
     private static AlvoRecord Patched(AlvoRecord candidate, Dictionary<string, object?> patch)

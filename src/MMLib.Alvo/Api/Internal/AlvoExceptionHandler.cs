@@ -78,6 +78,14 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
             || metadata.GetMetadata<CommandEndpointMetadata>() is not null
             || metadata.GetMetadata<WebhookReceiverEndpointMetadata>() is not null);
 
+    /// <summary>
+    /// Whether the endpoint this request failed on is one of the Data API's generated routes — the only place a refusal of
+    /// the caller's data answers 422 (Ruling 27): a command's or a receiver's handler builds its own writes.
+    /// </summary>
+    /// <param name="httpContext">The failed request's context.</param>
+    private static bool IsDataApi(HttpContext httpContext) =>
+        httpContext.Features.Get<IExceptionHandlerFeature>()?.Endpoint?.Metadata.GetMetadata<DataApiOperationMetadata>() is not null;
+
     /// <summary>Logs the failure at the level it deserves and writes the document it maps to.</summary>
     /// <param name="httpContext">The failed request's context.</param>
     /// <param name="exception">The failure.</param>
@@ -97,7 +105,9 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
 
         if (FunctionFailure(exception) is { } function)
         {
-            await AnswerFunctionFailureAsync(httpContext, function).ConfigureAwait(false);
+            await (IsDataApi(httpContext) && CallerDataFailure(exception) is { } refused
+                ? ProblemResultFactory.ExpressionFailed(ExpressionFailedDetail(refused)).ExecuteAsync(httpContext)
+                : AnswerFunctionFailureAsync(httpContext, function)).ConfigureAwait(false);
             return;
         }
 
@@ -143,6 +153,26 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
 
         return Children(exception).Select(child => FunctionFailure(child, depth - 1)).FirstOrDefault(found => found is not null);
     }
+
+    /// <summary>
+    /// The caller's refusal in <paramref name="exception"/>, when every function failure in it (and in what wraps it) is
+    /// the caller's; <see langword="null"/> when there is none, or when any is a host's or a defect (Ruling 28).
+    /// </summary>
+    /// <param name="exception">The failure the pipeline raised.</param>
+    /// <returns>The first refusal, or <see langword="null"/>.</returns>
+    internal static CelFunctionException? CallerDataFailure(Exception exception)
+    {
+        var failures = FunctionFailures(exception, MaxWrapperDepth).ToList();
+        return failures.Count > 0 && failures.All(failure => failure.OnCallerData) ? failures[0] : null;
+    }
+
+    private static IEnumerable<CelFunctionException> FunctionFailures(Exception? exception, int depth) => exception switch
+    {
+        null => [],
+        CelFunctionException function => [function],
+        _ when depth <= 0 => [],
+        _ => Children(exception).SelectMany(child => FunctionFailures(child, depth - 1)),
+    };
 
     /// <summary>What <paramref name="exception"/> wraps: every member of an aggregate, otherwise its inner exception.</summary>
     /// <param name="exception">The wrapper.</param>
@@ -195,6 +225,22 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
     /// </summary>
     private static Exception Logged(CelFunctionException failure) =>
         failure is { IsHost: true, Reason: not null } ? failure : failure.InnerException ?? failure;
+
+    /// <summary>The caller-facing sentence for a whole condition of the caller's data that evaluated to no Bool.</summary>
+    private const string NoBoolDetail =
+        "The hook's condition evaluated to a present value that is not a Bool, so nothing was written. Correct the values it reads.";
+
+    /// <summary>The caller-facing sentence for a refusal of the caller's data.</summary>
+    /// <param name="failure">The refusal (<see cref="CelFunctionException.OnCallerData"/>).</param>
+    /// <returns>The detail text; it names the function and Alvo's reason, never the value.</returns>
+    internal static string ExpressionFailedDetail(CelFunctionException failure)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+
+        return failure.FunctionName == CelInterpreter.WholeCondition
+            ? NoBoolDetail
+            : $"The CEL function '{failure.FunctionName}' refused this request's data: {failure.Reason}. Nothing was written.";
+    }
 
     /// <summary>The caller-facing sentence for a whole condition that evaluated to no Bool.</summary>
     private const string WholeConditionDetail = "The hook's condition evaluated to a present value that is not a Bool. Nothing was written.";
