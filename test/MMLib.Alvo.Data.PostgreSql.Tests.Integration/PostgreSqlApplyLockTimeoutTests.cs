@@ -49,5 +49,37 @@ public sealed class PostgreSqlApplyLockTimeoutTests : IAsyncLifetime
             "products", new Dictionary<string, object?>(StringComparer.Ordinal) { ["stock"] = -1L }, Caller, cancellationToken: ct);
     }
 
+    [Fact]
+    public async Task A_runtime_apply_queued_behind_a_reader_gives_up_as_a_retryable_refusal_and_appends_no_version()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var host = await _fixture.StartAsync(CheckSchemas.Unvalidated, CheckSchemas.Descriptor);
+        var plan = await host.Services.GetRequiredService<ISchemaMigrator>()
+            .PlanAsync(CheckSchemas.Unvalidated, CheckSchemas.Validated, new MigrationOptions(), ct);
+        var candidate = new DescriptorVersion(CheckSchemas.Validated, "{}", Revision: 0, DateTimeOffset.UnixEpoch);
+
+        await using var reader = await HoldAReadLockAsync(host, ct);
+        var refusal = await Should.ThrowAsync<AlvoApplyLockTimeoutException>(
+            () => host.Services.GetRequiredService<IRuntimeSchemaWriter>()
+                .ApplyAndAppendAsync("lock-timeout", plan, candidate, expectedRevision: 0, new MigrationOptions(), ct));
+        await reader.DisposeAsync();
+
+        refusal.Message.ShouldBe(AlvoApplyLockTimeoutException.Refusal);
+        (await host.Services.GetRequiredService<IDescriptorVersionStore>().ListAsync("lock-timeout", ct))
+            .ShouldBeEmpty("the version row is written in the apply's transaction, so the timeout rolls it back with the DDL");
+        await host.Data.CreateAsync(
+            "products", new Dictionary<string, object?>(StringComparer.Ordinal) { ["stock"] = -1L }, Caller, cancellationToken: ct);
+    }
+
+    private static async Task<NpgsqlConnection> HoldAReadLockAsync(PostgreSqlAlvoDataHost host, CancellationToken ct)
+    {
+        var reader = new NpgsqlConnection(host.Services.GetRequiredService<IOptions<PostgreSqlProviderOptions>>().Value.ConnectionString);
+        await reader.OpenAsync(ct);
+        var holding = await reader.BeginTransactionAsync(ct);
+        await using var read = new NpgsqlCommand("SELECT 1 FROM \"products\" LIMIT 1", reader, holding);
+        await read.ExecuteScalarAsync(ct);
+        return reader;
+    }
+
     private static AlvoContext Caller { get; } = new() { User = UserId.New(), Roles = new HashSet<Role> { Role.Authenticated } };
 }

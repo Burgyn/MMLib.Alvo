@@ -20,7 +20,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// <b>The pointer comes from the desired schema, never from the plan's steps.</b> The constraint the engine names may be
 /// one the plan adds, one a rename re-creates, or one that existed before the plan and is broken by something it does —
 /// a rollup backfill has no step of its own — so it is found by recomputing names over the schema being applied
-/// (<see cref="CheckConstraintNames.Owner"/>), and the message says "could not be added or kept". A name no validated field
+/// (<see cref="CheckConstraintNames.Owner(SchemaModel, string)"/>), and the message says "could not be added or kept". A name no validated field
 /// recomputes to still refuses, at the document's root: the engine refused the apply, and nothing was applied.
 /// </para>
 /// </remarks>
@@ -51,7 +51,7 @@ internal static class CheckApplyRefusal
     }
 
     private static DescriptorValidationException Refused(SchemaModel desired, string? name) =>
-        name is not null && Owner(desired, name) is { } owner
+        name is not null && CheckConstraintNames.Owner(desired, name) is { } owner
             ? new(new DescriptorValidationResult([new(
                 $"/entities/{owner.Entity.Name}/fields/{owner.Field.Name}/validation",
                 $"Rows of '{owner.Entity.Name}' break this validation, so the CHECK constraint could not be added or kept. Nothing was applied.",
@@ -62,9 +62,6 @@ internal static class CheckApplyRefusal
                 "A row breaks a validation this apply needs to hold. Nothing was applied.",
                 Fix,
                 DescriptorValidationSeverity.Error)]));
-
-    private static (EntitySchema Entity, FieldSchema Field)? Owner(SchemaModel desired, string name) =>
-        desired.Entities.Count == 0 ? null : CheckConstraintNames.Owner(desired, desired.Entities[0], name);
 
     private static DbException? Provider(Exception failure)
     {

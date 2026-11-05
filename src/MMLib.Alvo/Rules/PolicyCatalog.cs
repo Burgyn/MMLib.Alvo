@@ -3,6 +3,7 @@ using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
+using System.Runtime.CompilerServices;
 
 namespace MMLib.Alvo.Rules;
 
@@ -166,11 +167,19 @@ internal sealed record EntityPolicy(
     internal static IReadOnlySet<string> Flagged(IReadOnlyDictionary<string, FieldMask> flags) =>
         flags.Keys.ToHashSet(StringComparer.Ordinal);
 
+    private static readonly ConditionalWeakTable<IReadOnlyDictionary<string, FieldMask>, IReadOnlySet<string>> _flaggedByHidden = new();
+
     /// <summary>
-    /// <see cref="Flagged"/> over <see cref="Hidden"/>, computed once per compiled policy rather than on every allow
-    /// decision — a catalog is immutable once built, so the set cannot go stale.
+    /// <see cref="Flagged"/> over <see cref="Hidden"/>, computed once per <see cref="Hidden"/> instance rather than on
+    /// every allow decision.
     /// </summary>
-    internal IReadOnlySet<string> FlaggedHidden { get; } = Flagged(Hidden);
+    /// <remarks>
+    /// Derived from <see cref="Hidden"/> and cached against that very dictionary, never stored on the record: a
+    /// <c>with</c> copies every field, so a stored set would follow a copy given other <see cref="Hidden"/> flags — and
+    /// the set is the write's <c>Unnameable</c>, so a stale one would let a refusal name a hidden field. Outside the
+    /// record's fields, it leaves the record's equality untouched too.
+    /// </remarks>
+    internal IReadOnlySet<string> FlaggedHidden => _flaggedByHidden.GetValue(Hidden, static hidden => Flagged(hidden));
 }
 
 /// <summary>

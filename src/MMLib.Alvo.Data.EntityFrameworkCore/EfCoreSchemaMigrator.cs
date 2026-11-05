@@ -161,15 +161,36 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSchemaPlan
         var errors = new List<DescriptorValidationError>();
         foreach (var target in targets)
         {
-            var count = await CheckViolationScan.CountAsync(connection, target.Add.Table, target.Add.Sql, ct).ConfigureAwait(false);
-            if (count > 0)
+            if (await BreakingRowsAsync(connection, target, ct).ConfigureAwait(false) is { } error)
             {
-                errors.Add(BreakingRows(target, count));
+                errors.Add(error);
             }
         }
 
         return errors;
     }
+
+    // A count the database cannot run (a drifted table missing a column `current` still names) refuses at the validation
+    // it was counting for, rather than escaping as a provider exception: fail-closed, and a 422 a dry run can show (Ruling 67).
+    private static async Task<DescriptorValidationError?> BreakingRowsAsync(
+        DbConnection connection, CheckViolationScan.Target target, CancellationToken ct)
+    {
+        try
+        {
+            var count = await CheckViolationScan.CountAsync(connection, target.Add.Table, target.Add.Sql, ct).ConfigureAwait(false);
+            return count > 0 ? BreakingRows(target, count) : null;
+        }
+        catch (DbException)
+        {
+            return Uncountable(target);
+        }
+    }
+
+    private static DescriptorValidationError Uncountable(CheckViolationScan.Target target) => new(
+        $"/entities/{target.Entity.Name}/fields/{target.Field.Name}/validation",
+        $"Could not count the rows of '{target.Entity.Name}' that break this validation, so the CHECK constraint cannot be added. Nothing was applied.",
+        "Check that the database still matches the applied schema — a column this validation reads may be missing — then apply again.",
+        DescriptorValidationSeverity.Error);
 
     private static DescriptorValidationError BreakingRows(CheckViolationScan.Target target, long count) => new(
         $"/entities/{target.Entity.Name}/fields/{target.Field.Name}/validation",

@@ -415,6 +415,25 @@ public abstract class AlvoDataCheckConstraintTests
         (await data.QueryAsync(new AlvoQuery { Entity = "products" }, Caller, Ct)).Items.Count.ShouldBe(3, "nothing was applied");
     }
 
+    /// <summary>
+    /// A count the database cannot run — a drifted table missing a column the applied schema still names — is refused at
+    /// the validation it was counting for, never a provider exception, and fails closed: nothing is applied (Ruling 67).
+    /// </summary>
+    [Fact]
+    public async Task A_count_the_database_cannot_run_is_refused_at_the_validation_and_applies_nothing()
+    {
+        var data = await CreateAsync(CheckSchemas.Unvalidated, Descriptor);
+        await data.CreateAsync("products", Row(5), Caller, cancellationToken: Ct);
+        (await ExecuteOutsideThePortAsync("ALTER TABLE \"products\" DROP COLUMN \"temperature\"")).ShouldBeNull();
+
+        var refusal = await Should.ThrowAsync<DescriptorValidationException>(() => PlanAsync(CheckSchemas.Unvalidated, Schema));
+
+        var error = refusal.Result.Errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe("/entities/products/fields/temperature/validation");
+        error.Message.ShouldStartWith("Could not count the rows of 'products' that break this validation");
+        (await ExecuteOutsideThePortAsync("UPDATE \"products\" SET \"stock\" = -1")).ShouldBeNull("nothing was applied");
+    }
+
     /// <summary>The counterweight: over compliant rows the same apply succeeds, and the engine holds the validation from then on.</summary>
     [Fact]
     public async Task Adding_a_validation_over_compliant_rows_applies_and_holds_from_then_on()

@@ -54,6 +54,19 @@ public sealed class CheckConstraintNamesTests
     }
 
     [Fact]
+    public void With_no_written_entity_every_entity_is_searched()
+    {
+        var owner = CheckConstraintNames.Owner(CheckSchemas.Reserved, CheckConstraintNames.For("products", "reserved"));
+
+        owner.ShouldNotBeNull();
+        (owner.Value.Entity.Name, owner.Value.Field.Name).ShouldBe(("products", "reserved"));
+    }
+
+    [Fact]
+    public void With_no_written_entity_an_empty_schema_owns_nothing() =>
+        CheckConstraintNames.Owner(new SchemaModel([]), CheckConstraintNames.For("products", "reserved")).ShouldBeNull();
+
+    [Fact]
     public void A_name_no_validated_field_has_owns_nothing() =>
         CheckConstraintNames.Owner(CheckSchemas.Products, CheckSchemas.Products.Entities[0], CheckConstraintNames.For("products", "id"))
             .ShouldBeNull();

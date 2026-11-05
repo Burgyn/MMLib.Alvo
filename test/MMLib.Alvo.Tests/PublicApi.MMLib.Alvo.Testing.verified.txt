@@ -194,6 +194,7 @@ namespace MMLib.Alvo.Testing.Data
         protected static MMLib.Alvo.Descriptor.AlvoDescriptor Descriptor { get; }
         protected static MMLib.Alvo.Schema.SchemaModel Schema { get; }
         public System.Threading.Tasks.Task A_before_hook_value_that_breaks_a_validation_is_refused_at_the_field() { }
+        public System.Threading.Tasks.Task A_count_the_database_cannot_run_is_refused_at_the_validation_and_applies_nothing() { }
         public System.Threading.Tasks.Task A_duration_validation_holds_in_the_engine() { }
         public System.Threading.Tasks.Task A_field_hidden_from_other_roles_is_never_named_even_to_a_caller_who_reads_it() { }
         public System.Threading.Tasks.Task A_hidden_field_s_refusal_names_nothing() { }

@@ -17,7 +17,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// </para>
 /// <para>
 /// <b>Found again by recomputing, never by reading the name back.</b> The readable part may be cut and may contain
-/// underscores from either name, so a name cannot be split into its entity and field; <see cref="Owner"/> walks the
+/// underscores from either name, so a name cannot be split into its entity and field; <see cref="Owner(SchemaModel, EntitySchema, string)"/> walks the
 /// validated fields and recomputes each one's name instead.
 /// </para>
 /// </remarks>
@@ -45,6 +45,18 @@ internal static class CheckConstraintNames
     /// <param name="constraintName">The name the engine reported.</param>
     internal static (EntitySchema Entity, FieldSchema Field)? Owner(SchemaModel schema, EntitySchema written, string constraintName) =>
         Candidates(schema, written).FirstOrDefault(pair => string.Equals(For(pair.Entity.Name, pair.Field.Name), constraintName, StringComparison.Ordinal))
+            is { Entity: not null } found
+            ? found
+            : null;
+
+    /// <summary>
+    /// The validated field whose constraint is named <paramref name="constraintName"/>, or <see langword="null"/> — every
+    /// entity searched in declaration order, for a refusal no single write caused (an apply, a backfill).
+    /// </summary>
+    /// <param name="schema">The schema the constraint belongs to.</param>
+    /// <param name="constraintName">The name the engine reported.</param>
+    internal static (EntitySchema Entity, FieldSchema Field)? Owner(SchemaModel schema, string constraintName) =>
+        Validated(schema.Entities).FirstOrDefault(pair => string.Equals(For(pair.Entity.Name, pair.Field.Name), constraintName, StringComparison.Ordinal))
             is { Entity: not null } found
             ? found
             : null;
