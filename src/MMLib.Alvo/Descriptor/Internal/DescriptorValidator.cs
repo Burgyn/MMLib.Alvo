@@ -246,7 +246,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             ? []
             : ruleErrors.ToList();
         errors.AddRange(ComputedFieldCheck.Errors(schema, _compiler));
-        errors.AddRange(CheckConstraintCheck.Errors(schema, _compiler));
+        errors.AddRange(CheckConstraintCheck.Errors(schema, _compiler, descriptor));
         errors.AddRange(OwnerWarnings(descriptor, schema, errors));
 
         return errors;

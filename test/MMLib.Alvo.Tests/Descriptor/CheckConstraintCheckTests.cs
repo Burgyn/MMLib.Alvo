@@ -46,6 +46,35 @@ public sealed class CheckConstraintCheckTests
         error.Message.ShouldContain("cannot be written into a CHECK constraint");
     }
 
+    /// <summary>
+    /// A validation reading another field is refused when either side is hidden — static or per role — because the 422 or
+    /// success on an update would let a caller bisect a hidden stored value (HX-11 Ruling 61, spec H1 for validations).
+    /// </summary>
+    /// <param name="fieldsJson">The entity's fields.</param>
+    /// <param name="validated">The field whose validation is refused.</param>
+    [Theory]
+    [InlineData("""{"margin": {"type": "integer", "hidden": true}, "discount": {"type": "integer", "validation": "value <= margin"}}""", "discount")]
+    [InlineData("""{"price": {"type": "integer"}, "margin": {"type": "integer", "hidden": true, "validation": "value <= price"}}""", "margin")]
+    [InlineData("""{"margin": {"type": "integer", "hidden": "!('admin' in @user.roles)"}, "discount": {"type": "integer", "validation": "value <= margin"}}""", "discount")]
+    [InlineData("""{"stock": {"type": "integer", "hidden": true}, "reserved": {"type": "integer", "validation": "value <= stock"}}""", "reserved")]
+    public void A_validation_reading_across_a_hidden_field_is_refused(string fieldsJson, string validated)
+    {
+        var error = Validate(fieldsJson).ShouldHaveSingleItem();
+        error.Path.ShouldBe($"/entities/products/fields/{validated}/validation");
+        error.Message.ShouldContain("hidden");
+        error.FixSuggestion!.ShouldContain("before-hook");
+    }
+
+    /// <summary>A hidden field's validation over its own value only discloses nothing the caller did not send (Ruling 61).</summary>
+    [Fact]
+    public void A_hidden_field_validated_against_itself_alone_is_valid() =>
+        Validate("""{"margin": {"type": "integer", "hidden": "!('admin' in @user.roles)", "validation": "value >= 0"}}""").ShouldBeEmpty();
+
+    /// <summary>A static <c>hidden: false</c> hides nothing, so the cross-field validation stays legal.</summary>
+    [Fact]
+    public void A_field_declared_not_hidden_may_be_read_across() =>
+        Validate("""{"margin": {"type": "integer", "hidden": false}, "discount": {"type": "integer", "validation": "value <= margin"}}""").ShouldBeEmpty();
+
     [Fact]
     public void A_validation_on_a_dynamic_entity_is_refused_naming_41()
     {

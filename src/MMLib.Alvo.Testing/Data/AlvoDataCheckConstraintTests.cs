@@ -254,6 +254,25 @@ public abstract class AlvoDataCheckConstraintTests
         (refusal.Kind, refusal.Fields.Count).ShouldBe((AlvoConstraintKind.Check, 0));
     }
 
+    /// <summary>
+    /// The descriptor decides what a refusal may name, not the caller's mask (Ruling 24): rating is hidden only from admins,
+    /// so this caller reads it — and its broken validation still names nothing, because a name published to the callers who
+    /// may read a field is published to those who may not.
+    /// </summary>
+    [Fact]
+    public async Task A_field_hidden_from_other_roles_is_never_named_even_to_a_caller_who_reads_it()
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+        var written = await data.CreateAsync(
+            "products", new Dictionary<string, object?>(StringComparer.Ordinal) { ["stock"] = 1L, ["rating"] = 5L }, Caller, cancellationToken: Ct);
+        written["rating"].ShouldBe(5L, "the caller's own mask does not hide rating");
+
+        var refusal = await Should.ThrowAsync<AlvoConstraintViolationException>(() => data.CreateAsync(
+            "products", new Dictionary<string, object?>(StringComparer.Ordinal) { ["stock"] = 1L, ["rating"] = 6L }, Caller, cancellationToken: Ct));
+
+        (refusal.Kind, refusal.Fields.Count).ShouldBe((AlvoConstraintKind.Check, 0));
+    }
+
     /// <summary>An update the engine refuses rolls back: the stored row keeps its value.</summary>
     [Fact]
     public async Task An_update_that_breaks_it_leaves_the_row_as_it_was()
@@ -397,7 +416,7 @@ public abstract class AlvoDataCheckConstraintTests
     /// products: stock (validation "value >= 0"), discount (optional, "value &lt;= 50"), margin (hidden, "value >= 0"),
     /// sale_starts_at / sale_ends_at (sale_ends_at: "value - sale_starts_at &lt;= duration('720h')"), and the computed
     /// stock_value (stock + stock — a computed field carries no numeric constant, "value &lt;= 500"), and temperature
-    /// ("value >= -40" — a negative constant, Ruling 16).
+    /// ("value >= -40" — a negative constant, Ruling 16), and rating (hidden from admins only, "value &lt;= 5").
     /// </summary>
     protected static AlvoDescriptor Descriptor => new()
     {
@@ -417,6 +436,7 @@ public abstract class AlvoDataCheckConstraintTests
                     ["sale_ends_at"] = new() { Type = DescField.DateTime, Validation = "value - sale_starts_at <= duration('720h')" },
                     ["stock_value"] = new() { Type = DescField.Integer, Computed = "stock + stock", Validation = "value <= 500" },
                     ["temperature"] = new() { Type = DescField.Integer, Validation = "value >= -40" },
+                    ["rating"] = new() { Type = DescField.Integer, Hidden = BoolOrCel.FromExpression("'admin' in @user.roles"), Validation = "value <= 5" },
                 },
                 Rules = new AccessRules { List = "true", Get = "true", Create = "true", Update = "true", Delete = "true" },
             },
@@ -447,6 +467,7 @@ public abstract class AlvoDataCheckConstraintTests
                     ComputedExpression = "stock + stock", CheckExpression = "stock_value <= 500",
                 },
                 new FieldSchema { Name = "temperature", Type = SchemaField.Integer, Nullable = true, CheckExpression = "temperature >= -40" },
+                new FieldSchema { Name = "rating", Type = SchemaField.Integer, Nullable = true, CheckExpression = "rating <= 5" },
             ],
         },
     ]);
