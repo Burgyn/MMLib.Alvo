@@ -96,14 +96,15 @@
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.400" />
     <PackageVersion Include="MinVer" Version="8.0.0" />
     <!-- The analyzer's Roslyn floor: the oldest compiler a .NET 10 SDK carries loads an analyzer built against this.
-         Raising it is deliberate, and re-runs scripts/test-packed-analyzer. Scoped to the analyzer and its tests (an item
-         condition sees the project's own name) because CentralPackageTransitivePinningEnabled makes a PackageVersion a
-         transitive pin for EVERY project, and two suites already reach Roslyn transitively at versions no single pin
+         Raising it is deliberate, and re-runs scripts/test-packed-analyzer. Scoped to exactly the analyzer and its tests,
+         by name (an item condition sees the project's own name; a new Roslyn component joins the list deliberately),
+         because CentralPackageTransitivePinningEnabled makes a PackageVersion a transitive pin for EVERY project, and two
+         suites already reach Roslyn transitively at versions no single pin
          satisfies: MMLib.Alvo.Schema.Tests through Corvus.Json.Validator (>= 5.3.0) and the EF suites through
          Microsoft.EntityFrameworkCore.Design (Workspaces, = 4.14.0). An unscoped pin fails one of them with NU1109 or
          NU1107; scoped, every other project resolves exactly what it did before the analyzer existed. -->
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" Condition="$(MSBuildProjectName.StartsWith('MMLib.Alvo.Analyzers'))" />
-    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" Condition="$(MSBuildProjectName.StartsWith('MMLib.Alvo.Analyzers'))" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" Condition="'$(MSBuildProjectName)' == 'MMLib.Alvo.Analyzers' Or '$(MSBuildProjectName)' == 'MMLib.Alvo.Analyzers.Tests'" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" Condition="'$(MSBuildProjectName)' == 'MMLib.Alvo.Analyzers' Or '$(MSBuildProjectName)' == 'MMLib.Alvo.Analyzers.Tests'" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.10" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.10" />
     <!-- Test-only: bootstraps each provider's design-time services (IDatabaseModelFactory is

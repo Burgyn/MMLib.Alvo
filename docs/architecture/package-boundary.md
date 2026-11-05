@@ -23,8 +23,10 @@
   dependency rules.
 - `src/MMLib.Alvo.Analyzers` — the Roslyn analyzers (`ALVO1001` from HX-10; the typed-entity generator joins it in
   HX-17). **A project, not a package** (spec 2026-10-14 E6): `IsPackable=false`, and `MMLib.Alvo`'s pack places its
-  assembly at `analyzers/dotnet/cs/`, so every consumer of the core — and of anything depending on it — gets the rule,
-  while the core neither references it nor declares a dependency on it. It is a separate project only because a compiler
+  assembly at `analyzers/dotnet/cs/`, so every project that references `MMLib.Alvo` directly gets the rule — NuGet does
+  not flow an analyzer asset transitively (a package depending on the core gets `exclude="Build,Analyzers"` by default),
+  so a consumer reaching the core only through another package does not — while the core neither references it nor
+  declares a dependency on it. It is a separate project only because a compiler
   loads an analyzer from a `netstandard2.0` assembly of its own; rule (a) names Roslyn because a *runtime* Roslyn
   dependency is heavy, and an analyzer asset adds nothing to a consumer's runtime closure. `Microsoft.CodeAnalysis.CSharp`
   is pinned to 4.14.0, older than the compiler of the minimum SDK in `global.json`, and `scripts/test-packed-analyzer`

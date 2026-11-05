@@ -50,7 +50,8 @@
 
   <!--
     ALVO1001 ships inside this package (E6): built before the core, never referenced by it (no runtime reference, no
-    nuspec dependency), and packed at analyzers/dotnet/cs so every consumer's compiler runs it. The inner build's
+    nuspec dependency), and packed at analyzers/dotnet/cs so the compiler of every project referencing this package directly runs it (NuGet
+    does not flow analyzers transitively). The inner build's
     TargetFramework=net10.0 is removed from the call, or it would ask the netstandard2.0 project for a net10.0 path.
   -->
   <ItemGroup>

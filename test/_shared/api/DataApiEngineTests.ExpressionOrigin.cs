@@ -86,9 +86,10 @@ public abstract partial class DataApiEngineTests
     }
 
     /// <summary>
-    /// Two rows that each send one field: the refusal of the stored weight is the caller's only if every row sent the
-    /// weight, so the batch is 500 in either order and writes neither row. A union of the rows' fields, the first row's or
-    /// the last row's would each answer 422 in at least one of the orders (Ruling 44, Task 4 review I1).
+    /// Two rows that each send one field: the refusal of a weight is the caller's only if every row sent the weight, so
+    /// the batch is 500 in either order and writes neither row — even when the weight row comes first and the refused
+    /// value is that row's own sent one, not the stored weight. A union of the rows' fields, the first row's or the last
+    /// row's would each answer 422 in at least one of the orders (Ruling 44, Task 4 review I1).
     /// </summary>
     /// <param name="weightFirst">Whether the row that sends the weight comes first.</param>
     [Theory]
