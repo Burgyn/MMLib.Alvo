@@ -161,7 +161,8 @@
   },
   "function-failed": {
     "causes": [
-      "A host function (`AddCelFunction`) failed while a write was evaluated: it threw, ran past its time budget, or was handed an argument its parameter cannot hold — or Alvo's own evaluation of a hook failed. Nothing was written."
+      "A host function (`AddCelFunction`) failed while a write was evaluated: it threw, ran past its time budget, or was handed an argument its parameter cannot hold — or Alvo's own evaluation of a hook failed. Nothing was written.",
+      "A built-in CEL function refused a value the request did not send: the stored row an update left alone, a default, a literal, `@user`, or anything a delete reads."
     ],
     "fix": "Check the function the detail names and the values the write passes to it; the host's own exception is in its log, never in the response.",
     "violationCodes": [],
@@ -188,7 +189,7 @@
   },
   "expression-failed": {
     "causes": [
-      "A built-in CEL function refused a value the write carries, while a hook's condition or a `mutate` evaluated it: `int('x')`, a `substring` past the end of the text, `timestamp()` of a malformed value.",
+      "A built-in CEL function refused a value the request's body sent, while a hook's condition or a `mutate` evaluated it: `int('x')`, a `substring` past the end of the text, `timestamp()` of a malformed value.",
       "Hook arithmetic failed on the data: an overflow, a division by zero, or an operand that is not a number.",
       "A hook's whole condition evaluated to a present value that is not a Bool."
     ],

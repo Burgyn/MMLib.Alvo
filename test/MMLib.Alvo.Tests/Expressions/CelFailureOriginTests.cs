@@ -124,6 +124,75 @@ public sealed class CelFailureOriginTests
         Should.Throw<CelFunctionException>(() => CelInterpreter.EvaluatePredicate(condition, Flag("yes"), Flag(true), _caller)).OnCallerData.ShouldBeTrue();
     }
 
+    /// <summary>
+    /// Ruling 44: a refusal records which of the written row's fields its refusing subtree reads, so the Data API can
+    /// answer 422 only when the caller sent every one of them.
+    /// </summary>
+    [Fact]
+    public void A_refusal_records_the_fields_its_refusing_subtree_reads()
+    {
+        var condition = TestCelFunctions.Compile("new.qty > 0 || int(new.name) > 1", CelProfile.Condition);
+        var row = new AlvoRecord(new Dictionary<string, object?> { ["qty"] = 0L, ["name"] = "x" });
+
+        Should.Throw<CelFunctionException>(() => CelInterpreter.EvaluatePredicate(condition, row, null, _caller))
+            .ReadFields.ShouldBe(["name"], ignoreOrder: true);
+    }
+
+    /// <summary>A literal a direct-argument check cannot see (<c>int('x')</c> itself is refused at apply).</summary>
+    [Fact]
+    public void A_refusal_of_a_literal_reads_no_field() =>
+        RefusalOf("int(substring('xy', 0, 1)) > 1").ReadFields.ShouldBeEmpty();
+
+    [Fact]
+    public void A_refusal_of_the_caller_s_identity_reads_no_field() =>
+        RefusalOf("int(string(@user.id)) > 1").ReadFields.ShouldBeEmpty();
+
+    [Fact]
+    public void A_whole_condition_with_no_bool_records_what_it_reads()
+    {
+        var condition = Flagged("new.flag");
+
+        Should.Throw<CelFunctionException>(() => CelInterpreter.EvaluatePredicate(condition, Flag("yes"), Flag(true), _caller))
+            .ReadFields.ShouldBe(["flag"]);
+    }
+
+    /// <summary>A refusal nothing judged reads nothing anyone could have sent.</summary>
+    [Fact]
+    public void An_unjudged_refusal_reads_no_field() =>
+        new CelFunctionException("int", "the text is not a whole number such as 42 or -7").ReadFields.ShouldBeEmpty();
+
+    /// <summary>
+    /// A <c>changed</c> that cannot compare refuses the stored row as much as the request (Ruling 26): never the caller's.
+    /// </summary>
+    [Fact]
+    public void A_changed_that_cannot_compare_is_not_the_caller_s()
+    {
+        var condition = TestCelFunctions.Compile("!changed(name)", CelProfile.Condition);
+        var row = new AlvoRecord(new Dictionary<string, object?> { ["name"] = new object() });
+
+        Should.Throw<CelFunctionException>(() => CelInterpreter.EvaluatePredicate(condition, row, row, _caller)).OnCallerData.ShouldBeFalse();
+    }
+
+    /// <summary>A hook writing <c>name</c> says nothing about <c>old.name</c>, the stored row's value (Ruling 26(b)).</summary>
+    [Fact]
+    public void Reading_the_stored_value_of_a_hook_written_field_is_not_reading_the_hook_s_write() =>
+        CelDataOrigin.Reads(
+                TestCelFunctions.Compile("int(old.name) > 1", CelProfile.Condition).Root, new HashSet<string>(StringComparer.Ordinal) { "name" })
+            .ShouldBeFalse();
+
+    /// <summary>A re-attributed refusal keeps the original as its inner exception, so the log carries the real stack (m4).</summary>
+    [Fact]
+    public void A_re_attributed_refusal_keeps_the_original_as_its_inner_exception()
+    {
+        var original = new CelFunctionException("int", "the text is not a whole number such as 42 or -7");
+
+        original.NotTheCallers().InnerException.ShouldBeSameAs(original);
+    }
+
+    private static CelFunctionException RefusalOf(string source) =>
+        Should.Throw<CelFunctionException>(
+            () => CelInterpreter.EvaluatePredicate(TestCelFunctions.Compile(source, CelProfile.Condition), Row("12"), null, _caller));
+
     private static CompiledExpression Flagged(string source) =>
         TestCelFunctions.Compiler().Compile(source, CelProfile.Condition, new MMLib.Alvo.Schema.EntitySchema
         {

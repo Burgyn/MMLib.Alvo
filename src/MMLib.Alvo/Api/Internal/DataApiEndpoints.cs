@@ -143,7 +143,7 @@ internal static class DataApiEndpoints
                         IPolicyEngine policies,
                         IAlvoContextAccessor caller,
                         CancellationToken ct) =>
-                    ProblemResultFactory.GuardAsync(() =>
+                    ProblemResultFactory.GuardAsync(http, () =>
                         BatchAsync(http, entity.Name, kind, options, applied, data, policies, caller, filters, ct)))
                 .Protect(entity, kind, filters, conventions);
     }
@@ -202,6 +202,8 @@ internal static class DataApiEndpoints
         {
             return ProblemResultFactory.Validation(batch.Violations);
         }
+
+        CallerSentFields.RecordCommon(http, batch.Rows.Select(row => row.Keys));
 
         var token = Idempotency(key, http.Request.Method, entity, id: null, precondition: null, BatchDigest(batch));
         var result = await PerformAsync(data, entity, kind, batch, context, token, ct).ConfigureAwait(false);
@@ -296,7 +298,7 @@ internal static class DataApiEndpoints
                     IPolicyEngine policies,
                     IAlvoContextAccessor caller,
                     CancellationToken ct) =>
-                ProblemResultFactory.GuardAsync(async () =>
+                ProblemResultFactory.GuardAsync(http, async () =>
                 {
                     var context = Caller(caller);
                     var (decision, current) = Allowed(
@@ -352,7 +354,7 @@ internal static class DataApiEndpoints
                     IPolicyEngine policies,
                     IAlvoContextAccessor caller,
                     CancellationToken ct) =>
-                ProblemResultFactory.GuardAsync(async () =>
+                ProblemResultFactory.GuardAsync(http, async () =>
                 {
                     var context = Caller(caller);
                     var (decision, current) = Allowed(
@@ -463,7 +465,7 @@ internal static class DataApiEndpoints
                     IAlvoData data,
                     IAlvoContextAccessor caller,
                     CancellationToken ct) =>
-                ProblemResultFactory.GuardAsync(async () =>
+                ProblemResultFactory.GuardAsync(http, async () =>
                 {
                     // The one delegate with no EnsureOperationIsAllowed call, and it takes no IPolicyEngine at
                     // all so the absence is visible in the signature. A guard here would be indistinguishable:
@@ -505,7 +507,7 @@ internal static class DataApiEndpoints
                     IPolicyEngine policies,
                     IAlvoContextAccessor caller,
                     CancellationToken ct) =>
-                ProblemResultFactory.GuardAsync(async () =>
+                ProblemResultFactory.GuardAsync(http, async () =>
                 {
                     var context = Caller(caller);
                     var (decision, current) = Allowed(
@@ -566,7 +568,7 @@ internal static class DataApiEndpoints
                     IPolicyEngine policies,
                     IAlvoContextAccessor caller,
                     CancellationToken ct) =>
-                ProblemResultFactory.GuardAsync(async () =>
+                ProblemResultFactory.GuardAsync(http, async () =>
                 {
                     var context = Caller(caller);
                     var ((creating, decision), current) = applied.Decide(
@@ -620,7 +622,7 @@ internal static class DataApiEndpoints
                     IPolicyEngine policies,
                     IAlvoContextAccessor caller,
                     CancellationToken ct) =>
-                ProblemResultFactory.GuardAsync(async () =>
+                ProblemResultFactory.GuardAsync(http, async () =>
                 {
                     var context = Caller(caller);
                     var (decision, current) = Allowed(
@@ -665,7 +667,7 @@ internal static class DataApiEndpoints
                     IPolicyEngine policies,
                     IAlvoContextAccessor caller,
                     CancellationToken ct) =>
-                ProblemResultFactory.GuardAsync(async () =>
+                ProblemResultFactory.GuardAsync(http, async () =>
                 {
                     var context = Caller(caller);
                     _ = EnsureOperationIsAllowed(
@@ -916,6 +918,8 @@ internal static class DataApiEndpoints
         {
             return (payload, payload.Violations);
         }
+
+        CallerSentFields.Record(http, payload.Values.Keys);
 
         var validated = await RecordValidator.ValidateAsync(
             new RecordValidationRequest(

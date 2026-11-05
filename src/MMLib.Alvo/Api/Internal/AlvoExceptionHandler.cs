@@ -105,7 +105,7 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
 
         if (FunctionFailure(exception) is { } function)
         {
-            await (IsDataApi(httpContext) && CallerDataFailure(exception) is { } refused
+            await (IsDataApi(httpContext) && CallerDataFailure(exception, CallerSentFields.Of(httpContext)) is { } refused
                 ? ProblemResultFactory.ExpressionFailed(ExpressionFailedDetail(refused)).ExecuteAsync(httpContext)
                 : AnswerFunctionFailureAsync(httpContext, function)).ConfigureAwait(false);
             return;
@@ -155,24 +155,38 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
     }
 
     /// <summary>
-    /// The caller's refusal in <paramref name="exception"/>, when every function failure in it (and in what wraps it) is
-    /// the caller's; <see langword="null"/> when there is none, or when any is a host's or a defect (Ruling 28).
+    /// The caller's refusal in <paramref name="exception"/>, when every leaf of it (and of what wraps it) is a refusal of
+    /// values the caller sent in this request; <see langword="null"/> otherwise (Rulings 28 and 44).
     /// </summary>
+    /// <remarks>
+    /// A leaf is the caller's when it is a <see cref="CelFunctionException.OnCallerData"/> refusal whose
+    /// <see cref="CelFunctionException.ReadFields"/> is non-empty and every one of them is in <paramref name="sent"/>: a
+    /// refusal of a literal or of <c>@user</c>, of the stored row an update did not touch, or of a default is not the
+    /// caller's to fix. Any other leaf — a host's failure, a defect, a storage exception beside the refusal, a graph
+    /// deeper than the walk — disqualifies the whole, so the 500 path logs it.
+    /// </remarks>
     /// <param name="exception">The failure the pipeline raised.</param>
+    /// <param name="sent">The fields the request's body carried, or <see langword="null"/> when it carried none (a delete).</param>
     /// <returns>The first refusal, or <see langword="null"/>.</returns>
-    internal static CelFunctionException? CallerDataFailure(Exception exception)
+    internal static CelFunctionException? CallerDataFailure(Exception exception, IReadOnlySet<string>? sent)
     {
-        var failures = FunctionFailures(exception, MaxWrapperDepth).ToList();
-        return failures.Count > 0 && failures.All(failure => failure.OnCallerData) ? failures[0] : null;
+        if (sent is null)
+        {
+            return null;
+        }
+
+        var leaves = Leaves(exception, MaxWrapperDepth).ToList();
+        return leaves.All(leaf => IsSentDataRefusal(leaf, sent)) ? (CelFunctionException)leaves[0] : null;
     }
 
-    private static IEnumerable<CelFunctionException> FunctionFailures(Exception? exception, int depth) => exception switch
-    {
-        null => [],
-        CelFunctionException function => [function],
-        _ when depth <= 0 => [],
-        _ => Children(exception).SelectMany(child => FunctionFailures(child, depth - 1)),
-    };
+    private static bool IsSentDataRefusal(Exception leaf, IReadOnlySet<string> sent) =>
+        leaf is CelFunctionException { OnCallerData: true, ReadFields: { Count: > 0 } read } && read.IsSubsetOf(sent);
+
+    /// <summary>What <paramref name="exception"/> comes down to: a function failure, or anything that wraps nothing more.</summary>
+    private static IEnumerable<Exception> Leaves(Exception exception, int depth) =>
+        exception is CelFunctionException || depth <= 0 || !Children(exception).Any()
+            ? [exception]
+            : Children(exception).SelectMany(child => Leaves(child, depth - 1));
 
     /// <summary>What <paramref name="exception"/> wraps: every member of an aggregate, otherwise its inner exception.</summary>
     /// <param name="exception">The wrapper.</param>

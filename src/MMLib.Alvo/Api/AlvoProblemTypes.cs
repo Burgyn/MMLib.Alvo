@@ -173,8 +173,8 @@ public static class AlvoProblemTypes
     /// <remarks>
     /// Distinct from <see cref="Internal"/> because the failing party is a function, not an Alvo invariant. A built-in
     /// function refusing the caller's data is <see cref="ExpressionFailed"/> instead; a built-in refusing a host
-    /// function's output, the stored row or a value a hook wrote stays here, as does any refusal on a command's or a
-    /// webhook receiver's endpoint. The detail names the function (descriptor-authored) and Alvo's own reason; never the
+    /// function's output, the stored row, a default or a value a hook wrote stays here, as does any refusal on a command's
+    /// or a webhook receiver's endpoint. The detail names the function (descriptor-authored) and Alvo's own reason; never the
     /// host's exception text, which is the log's. Emitted only by <c>AlvoExceptionHandler</c>.
     /// </remarks>
     public const string FunctionFailed = "function-failed";
@@ -202,9 +202,11 @@ public static class AlvoProblemTypes
     /// <summary>A built-in CEL function or hook arithmetic refused the request's own data, so nothing was written (422).</summary>
     /// <remarks>
     /// <c>int('x')</c>, a <c>substring</c> past the end of the text, a <c>timestamp()</c> of a malformed value, an overflow, a
-    /// division by zero, a condition that is no Bool: the caller fixes it by sending other data. The detail names the
-    /// function and Alvo's reason, never the value. Answered on every host, without opting in. A host function's failure
-    /// is <see cref="FunctionFailed"/> (500), because only the host can fix it.
+    /// division by zero, a condition that is no Bool — over the request's own values: the caller fixes it by sending other
+    /// data. Only fields the request's body carried count; a refusal of a value the request did not send (the stored row an
+    /// update left alone, a default, a literal, <c>@user</c>) and any refusal on a delete stay <see cref="FunctionFailed"/>.
+    /// The detail names the function and Alvo's reason, never the value. Answered on every host, without opting in. A host
+    /// function's failure is <see cref="FunctionFailed"/> (500), because only the host can fix it.
     /// </remarks>
     public const string ExpressionFailed = "expression-failed";
 

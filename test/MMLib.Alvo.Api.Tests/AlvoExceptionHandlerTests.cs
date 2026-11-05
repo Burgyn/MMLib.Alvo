@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
 
@@ -215,14 +216,42 @@ public class AlvoExceptionHandlerTests
     {
         var logs = new RecordingLoggerProvider();
         var context = Context(aborted: false, _alvoEndpoint);
-        var refusal = new CelFunctionException("int", "the text is not a whole number such as 42 or -7");
+        CallerSentFields.Record(context, ["quantity_text"]);
 
-        await Handle(logs, context, shape == "bare" ? refusal : new InvalidOperationException("storage", refusal));
+        await Handle(logs, context, shape == "bare" ? _sentRefusal : new InvalidOperationException("storage", _sentRefusal));
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status422UnprocessableEntity);
         (await BodyAsync(context)).ShouldContain("errors/expression-failed");
         logs.Records.ShouldNotContain(LogLevel.Error);
     }
+
+    /// <summary>
+    /// The same refusal on a request whose body did not carry the field it read — or that had no body, a delete — refused
+    /// the stored row or a default, not the caller's data: 500 <c>function-failed</c>, logged (Ruling 44).
+    /// </summary>
+    [Theory]
+    [InlineData("unsent")]
+    [InlineData("no body")]
+    public async Task A_refusal_of_values_the_request_did_not_send_answers_function_failed(string shape)
+    {
+        var logs = new RecordingLoggerProvider();
+        var context = Context(aborted: false, _alvoEndpoint);
+        if (shape == "unsent")
+        {
+            CallerSentFields.Record(context, ["code"]);
+        }
+
+        await Handle(logs, context, _sentRefusal);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status500InternalServerError);
+        (await BodyAsync(context)).ShouldContain("errors/function-failed");
+        logs.Records.ShouldContain(LogLevel.Error);
+    }
+
+    /// <summary>A refusal of the caller's data, judged by its node, that read <c>new.quantity_text</c>.</summary>
+    private static readonly CelFunctionException _sentRefusal =
+        new CelFunctionException("int", "the text is not a whole number such as 42 or -7")
+            .JudgedBy(new CelFieldRef("quantity_text", CelValueType.String, CelRecordState.New));
 
     /// <summary>
     /// The same refusal on a command's endpoint is the handler's own write, not the command caller's data: 500
@@ -233,8 +262,9 @@ public class AlvoExceptionHandlerTests
     {
         var logs = new RecordingLoggerProvider();
         var context = Context(aborted: false, _commandEndpoint);
+        CallerSentFields.Record(context, ["quantity_text"]);
 
-        await Handle(logs, context, new CelFunctionException("int", "the text is not a whole number such as 42 or -7"));
+        await Handle(logs, context, _sentRefusal);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status500InternalServerError);
         (await BodyAsync(context)).ShouldContain("errors/function-failed");
@@ -250,9 +280,9 @@ public class AlvoExceptionHandlerTests
     {
         var logs = new RecordingLoggerProvider();
         var context = Context(aborted: false, _alvoEndpoint);
-        var refusal = new CelFunctionException("int", "the text is not a whole number such as 42 or -7");
+        CallerSentFields.Record(context, ["quantity_text"]);
 
-        await Handle(logs, context, new AggregateException(refusal, new CelFunctionException("rate", isHost: true, new FormatException())));
+        await Handle(logs, context, new AggregateException(_sentRefusal, new CelFunctionException("rate", isHost: true, new FormatException())));
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status500InternalServerError);
         (await BodyAsync(context)).ShouldContain("errors/function-failed");

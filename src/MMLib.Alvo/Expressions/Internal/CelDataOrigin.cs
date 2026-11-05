@@ -27,6 +27,29 @@ internal static class CelDataOrigin
         _ => CelTree.Children(node).Any(child => Reads(child, fields)),
     };
 
+    /// <summary>The fields of the written row (<c>new.</c> or unqualified) <paramref name="node"/>'s subtree reads (Ruling 44).</summary>
+    /// <param name="node">The node that saw a refusal.</param>
+    /// <returns>Their names; empty for a subtree of literals and <c>@user</c>/<c>@tenant</c> references.</returns>
+    internal static IReadOnlySet<string> FieldsRead(CelNode node)
+    {
+        var fields = new HashSet<string>(StringComparer.Ordinal);
+        Collect(node, fields);
+        return fields;
+    }
+
+    private static void Collect(CelNode node, HashSet<string> fields)
+    {
+        if (node is CelFieldRef { State: not CelRecordState.Old } field)
+        {
+            fields.Add(field.FieldName);
+        }
+
+        foreach (var child in CelTree.Children(node))
+        {
+            Collect(child, fields);
+        }
+    }
+
     /// <summary>
     /// Runs <paramref name="evaluate"/>; a refusal of the caller's data whose expression reads a field a hook wrote earlier
     /// in this write is re-attributed as not the caller's. Conservative: the whole expression is judged, not the node.

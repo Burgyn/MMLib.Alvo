@@ -192,13 +192,13 @@ public sealed class ProblemDetailsTests
     public async Task A_malformed_argument_is_rendered_but_a_null_argument_propagates()
     {
         var malformed = await ProblemResultFactory.GuardAsync(
-            () => throw new ArgumentException("the filter is not a filter", "query"));
+            new DefaultHttpContext(), () => throw new ArgumentException("the filter is not a filter", "query"));
 
         (await SlugWrittenByAsync(malformed)).ShouldBe(
             AlvoProblemTypes.MalformedQuery, "the port's malformed-query channel is a 422 the caller can act on");
 
         var propagated = await Should.ThrowAsync<ArgumentNullException>(
-            () => ProblemResultFactory.GuardAsync(() => throw new ArgumentNullException("values")));
+            () => ProblemResultFactory.GuardAsync(new DefaultHttpContext(), () => throw new ArgumentNullException("values")));
 
         propagated.ParamName.ShouldBe(
             "values",
@@ -785,7 +785,7 @@ public sealed class ProblemDetailsTests
 
     /// <summary>The result <c>GuardAsync</c> renders for one of the port's failure families.</summary>
     private static IResult Guarded(Exception failure) =>
-        ProblemResultFactory.GuardAsync(() => throw failure).GetAwaiter().GetResult();
+        ProblemResultFactory.GuardAsync(new DefaultHttpContext(), () => throw failure).GetAwaiter().GetResult();
 
     /// <summary>The slug in the <c>type</c> of the document <paramref name="result"/> writes.</summary>
     private static async Task<string> SlugWrittenByAsync(IResult result)

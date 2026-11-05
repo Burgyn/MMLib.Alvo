@@ -143,7 +143,7 @@ internal static class CelInterpreter
         }
         catch (CelFunctionException failure) when (failure is { OnCallerData: true, Judged: false })
         {
-            throw failure.JudgedBy(CelDataOrigin.IsCallersOwn(expression.Root));
+            throw failure.JudgedBy(expression.Root);
         }
 #pragma warning disable CA1031
         catch (Exception failure) when (failure is not CelFunctionException)
@@ -319,7 +319,7 @@ internal static class CelInterpreter
         }
         catch (CelFunctionException failure) when (failure is { OnCallerData: true, Judged: false })
         {
-            throw failure.JudgedBy(CelDataOrigin.IsCallersOwn(node));
+            throw failure.JudgedBy(node);
         }
     }
 

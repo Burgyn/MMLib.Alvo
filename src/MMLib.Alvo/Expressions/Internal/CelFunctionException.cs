@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Expressions.Internal;
+﻿using System.Collections.Immutable;
+
+namespace MMLib.Alvo.Expressions.Internal;
 
 /// <summary>
 /// A catalogued CEL function failed while an expression was evaluated. Deliberately <b>not</b> collapsed into a value
@@ -6,8 +8,8 @@
 /// reachable, so it fails closed — the interpreter lets it escape and the write rolls back. An in-process <c>IAlvoData</c>
 /// caller receives it as a plain <see cref="Exception"/>; an after-hook condition drops the hook with a Warning. Internal:
 /// only the core throws it and names it — no public signature exposes the type. A Data API caller receives
-/// <c>…/errors/expression-failed</c> (422) when <see cref="OnCallerData"/> holds and <c>…/errors/function-failed</c> (500)
-/// otherwise.
+/// <c>…/errors/expression-failed</c> (422) when <see cref="OnCallerData"/> holds and the request's body carried every field
+/// in <see cref="ReadFields"/> (Ruling 44), and <c>…/errors/function-failed</c> (500) otherwise.
 /// </summary>
 /// <remarks>
 /// <see cref="Exception.Message"/> always reads <c>The CEL function '…' failed…</c>, also for a whole hook condition that
@@ -77,13 +79,14 @@ internal sealed class CelFunctionException : Exception
         Reason = reason;
     }
 
-    private CelFunctionException(CelFunctionException original, bool onCallerData)
-        : base(original.Message, original.InnerException)
+    private CelFunctionException(CelFunctionException original, bool onCallerData, IReadOnlySet<string> readFields)
+        : base(original.Message, original.InnerException ?? original)
     {
         FunctionName = original.FunctionName;
         IsHost = original.IsHost;
         Reason = original.Reason;
         OnCallerData = onCallerData;
+        ReadFields = readFields;
         Judged = true;
     }
 
@@ -103,16 +106,28 @@ internal sealed class CelFunctionException : Exception
     /// </summary>
     public bool OnCallerData { get; }
 
+    /// <summary>
+    /// Gets the fields of the written row (<c>new.</c> or unqualified) the refusing node's subtree reads — empty until a node
+    /// judged the refusal, and for one that reads only literals or <c>@user</c>/<c>@tenant</c>. The Data API answers 422
+    /// only when the caller sent every one of them in this request (Ruling 44): a value read from the stored row or filled
+    /// by a default is not the caller's, although <c>new.</c> reaches it.
+    /// </summary>
+    internal IReadOnlySet<string> ReadFields { get; } = ImmutableHashSet<string>.Empty;
+
     /// <summary>Gets a value indicating whether a node has already decided whose data this is.</summary>
     internal bool Judged { get; }
 
-    /// <summary>The failure as the innermost node that saw it attributes it; an already judged failure is returned as is.</summary>
-    /// <param name="callersOwn">Whether that node's subtree reads only the caller's data.</param>
+    /// <summary>
+    /// The failure as the innermost node that saw it attributes it (Ruling 26), with the fields that node's subtree reads
+    /// (Ruling 44); an already judged failure is returned as is.
+    /// </summary>
+    /// <param name="node">The innermost node that saw the failure.</param>
     /// <returns>The attributed failure.</returns>
-    internal CelFunctionException JudgedBy(bool callersOwn) => Judged || !OnCallerData ? this : new(this, callersOwn);
+    internal CelFunctionException JudgedBy(CelNode node) =>
+        Judged || !OnCallerData ? this : new(this, CelDataOrigin.IsCallersOwn(node), CelDataOrigin.FieldsRead(node));
 
     /// <summary>The failure, attributed as not the caller's (a value a hook wrote).</summary>
     /// <returns>A copy with <see cref="OnCallerData"/> false.</returns>
-    internal CelFunctionException NotTheCallers() => OnCallerData ? new(this, onCallerData: false) : this;
+    internal CelFunctionException NotTheCallers() => OnCallerData ? new(this, onCallerData: false, ReadFields) : this;
 }
 #pragma warning restore RCS1194
