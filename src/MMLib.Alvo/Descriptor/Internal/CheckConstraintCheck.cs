@@ -36,15 +36,19 @@ internal static class CheckConstraintCheck
     /// <param name="schema">The mapped schema, whose entities the expressions are type-checked against.</param>
     /// <param name="compiler">The compiler the driver compiles the constraint with.</param>
     /// <param name="descriptor">The descriptor, whose <c>hidden</c> flags decide which fields a validation may read across.</param>
-    internal static IEnumerable<DescriptorValidationError> Errors(SchemaModel schema, ICelCompiler compiler, AlvoDescriptor descriptor) =>
-        from entity in schema.Entities
-        from field in entity.Fields
-        where field.CheckExpression is not null
-        from error in ErrorsFor(entity, field, compiler, Hidden(descriptor, entity.Name))
-        select error;
+    internal static IEnumerable<DescriptorValidationError> Errors(SchemaModel schema, ICelCompiler compiler, AlvoDescriptor descriptor)
+    {
+        var reads = new ValidationReadSet(schema, descriptor);
+        return
+            from entity in schema.Entities
+            from field in entity.Fields
+            where field.CheckExpression is not null
+            from error in ErrorsFor(entity, field, compiler, reads)
+            select error;
+    }
 
     private static IEnumerable<DescriptorValidationError> ErrorsFor(
-        EntitySchema entity, FieldSchema field, ICelCompiler compiler, IReadOnlySet<string> hidden)
+        EntitySchema entity, FieldSchema field, ICelCompiler compiler, ValidationReadSet reads)
     {
         var result = compiler.Compile(field.CheckExpression!, CelProfile.Rule, entity);
         if (!result.IsSuccess)
@@ -52,59 +56,54 @@ internal static class CheckConstraintCheck
             return result.Errors.Select(error => Refusal(entity, field, $"does not compile: {error.Message}", error.FixSuggestion ?? CompileFix));
         }
 
-        if (HiddenReadRefusal(entity, field, result.Expression!, hidden) is { } refused)
-        {
-            return [refused];
-        }
+        IEnumerable<DescriptorValidationError> hidden = HiddenReadRefusal(entity, field, result.Expression!, reads) is { } refused ? [refused] : [];
+        return hidden.Concat(ShapeErrors(entity, field, result.Expression!));
+    }
 
-        var surface = StoredPredicateSurface.Refusals(result.Expression!, Slot);
+    private static IEnumerable<DescriptorValidationError> ShapeErrors(EntitySchema entity, FieldSchema field, CompiledExpression expression)
+    {
+        var surface = StoredPredicateSurface.Refusals(expression, Slot);
         return surface.Count > 0
             ? surface.Select(error => Refusal(entity, field, $"cannot be a CHECK constraint: {error.Message}", error.FixSuggestion ?? CompileFix))
-            : RenderErrors(entity, field, result.Expression!);
+            : RenderErrors(entity, field, expression);
     }
 
     /// <summary>
-    /// The refusal of a validation that reads another field when it or any field it reads is hidden (HX-11 Ruling 61): the
-    /// 422 or success an update answers would let a caller bisect a hidden stored value — spec H1, which keeps hidden fields
-    /// out of access rules, carried over to validations. A validation over its own value alone discloses nothing the
-    /// caller did not send, so it stays legal on a hidden field.
+    /// The refusal of a validation whose closed read set — derived fields seen through to what they derive from — holds a
+    /// hidden field and anything beyond the validated field itself (HX-11 Ruling 61): the 422 or success a write answers
+    /// would let a caller bisect a hidden stored value — spec H1, which keeps hidden fields out of access rules, carried
+    /// over to validations. Only a stored field validated against its own value alone is exempt, because only then is the
+    /// judged value one the caller sent.
     /// </summary>
     /// <param name="entity">The declaring entity.</param>
     /// <param name="field">The validated field.</param>
     /// <param name="expression">The compiled validation.</param>
-    /// <param name="hidden">Every field of the entity the descriptor flags hidden, statically or per role.</param>
+    /// <param name="reads">The read-set closure over the schema and the descriptor's hidden flags.</param>
     private static DescriptorValidationError? HiddenReadRefusal(
-        EntitySchema entity, FieldSchema field, CompiledExpression expression, IReadOnlySet<string> hidden)
+        EntitySchema entity, FieldSchema field, CompiledExpression expression, ValidationReadSet reads)
     {
-        var others = CelDataOrigin.FieldsRead(expression.Root).Where(read => read != field.Name).Order(StringComparer.Ordinal).ToList();
-        if (others.Count == 0)
+        var own = new ValidationReadSet.Read(entity.Name, field.Name);
+        var closed = reads.Closure(entity, [field.Name, .. CelDataOrigin.FieldsRead(expression.Root)]);
+        var exposed = closed.Where(reads.IsHidden).ToList();
+        if (closed.Count == 1 || exposed.Count == 0)
         {
             return null;
         }
 
-        var exposed = hidden.Contains(field.Name) ? [field.Name, .. others.Where(hidden.Contains)] : others.Where(hidden.Contains).ToList();
-        return exposed.Count == 0
-            ? null
-            : Refusal(
-                entity,
-                field,
-                $"reads {Quoted(others)} across a hidden field ({Quoted(exposed)}): whether a write is refused would disclose a "
-                + "stored value the caller cannot read.",
-                HiddenFix);
+        return Refusal(
+            entity,
+            field,
+            $"reads {Named(entity, closed.Where(read => read != own))} across a hidden field ({Named(entity, exposed)}): whether a "
+            + "write is refused would disclose a stored value the caller cannot read.",
+            HiddenFix);
     }
 
-    private static string Quoted(IEnumerable<string> names) => string.Join(", ", names.Select(name => $"'{name}'"));
+    private static string Named(EntitySchema entity, IEnumerable<ValidationReadSet.Read> reads) =>
+        Quoted(reads
+            .Select(read => string.Equals(read.Entity, entity.Name, StringComparison.Ordinal) ? read.Field : $"{read.Entity}.{read.Field}")
+            .Order(StringComparer.Ordinal));
 
-    /// <summary>The fields of <paramref name="entity"/> carrying any <c>hidden</c> flag: <c>true</c> or an expression.</summary>
-    /// <param name="descriptor">The descriptor.</param>
-    /// <param name="entity">The entity's name.</param>
-    private static HashSet<string> Hidden(AlvoDescriptor descriptor, string entity) =>
-        descriptor.Entities.TryGetValue(entity, out var declared)
-            ? declared.Fields
-                .Where(pair => pair.Value.Hidden is { IsExpression: true } or { Boolean: true })
-                .Select(pair => pair.Key)
-                .ToHashSet(StringComparer.Ordinal)
-            : [];
+    private static string Quoted(IEnumerable<string> names) => string.Join(", ", names.Select(name => $"'{name}'"));
 
     private static IEnumerable<DescriptorValidationError> RenderErrors(EntitySchema entity, FieldSchema field, CompiledExpression expression)
     {

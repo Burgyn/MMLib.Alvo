@@ -56,7 +56,11 @@ public sealed class CheckConstraintCheckTests
     [InlineData("""{"margin": {"type": "integer", "hidden": true}, "discount": {"type": "integer", "validation": "value <= margin"}}""", "discount")]
     [InlineData("""{"price": {"type": "integer"}, "margin": {"type": "integer", "hidden": true, "validation": "value <= price"}}""", "margin")]
     [InlineData("""{"margin": {"type": "integer", "hidden": "!('admin' in @user.roles)"}, "discount": {"type": "integer", "validation": "value <= margin"}}""", "discount")]
-    [InlineData("""{"stock": {"type": "integer", "hidden": true}, "reserved": {"type": "integer", "validation": "value <= stock"}}""", "reserved")]
+    [InlineData("""{"margin": {"type": "integer", "hidden": true}, "discount": {"type": "integer", "validation": "value <= new.margin"}}""", "discount")]
+    [InlineData("""{"margin": {"type": "integer", "hidden": true}, "discount": {"type": "integer", "validation": "!has(margin) || value <= 5"}}""", "discount")]
+    [InlineData("""{"price": {"type": "integer"}, "margin": {"type": "integer", "hidden": true}, "total": {"type": "integer", "computed": "price + margin", "hidden": true, "validation": "value <= 1000"}}""", "total")]
+    [InlineData("""{"price": {"type": "integer"}, "margin": {"type": "integer", "hidden": true}, "total": {"type": "integer", "computed": "price + margin", "validation": "value <= 1000"}}""", "total")]
+    [InlineData("""{"price": {"type": "integer"}, "margin": {"type": "integer", "hidden": true}, "net": {"type": "integer", "computed": "price + margin"}, "discount": {"type": "integer", "validation": "value <= net"}}""", "discount")]
     public void A_validation_reading_across_a_hidden_field_is_refused(string fieldsJson, string validated)
     {
         var error = Validate(fieldsJson).ShouldHaveSingleItem();
@@ -65,7 +69,61 @@ public sealed class CheckConstraintCheckTests
         error.FixSuggestion!.ShouldContain("before-hook");
     }
 
-    /// <summary>A hidden field's validation over its own value only discloses nothing the caller did not send (Ruling 61).</summary>
+    /// <summary>
+    /// A rollup reads its child's field, so a parent validation reaching a hidden field through one — the child's aggregated
+    /// field, or a hidden parent field beside the rollup — is refused like a direct read (Ruling 61).
+    /// </summary>
+    /// <param name="parentFieldsJson">The parent's fields besides its rollup.</param>
+    /// <param name="childFieldJson">The child's aggregated field.</param>
+    /// <param name="rollupJson">The parent's rollup field.</param>
+    [Theory]
+    [InlineData("""{}""", """{"type": "integer", "hidden": true}""",
+        """{"type": "integer", "hidden": true, "rollup": {"from": "lines", "op": "sum", "field": "amount"}, "validation": "value <= 100"}""")]
+    [InlineData("""{"stock": {"type": "integer", "hidden": true}}""", """{"type": "integer"}""",
+        """{"type": "integer", "rollup": {"from": "lines", "op": "sum", "field": "amount"}, "validation": "value <= stock"}""")]
+    public void A_validation_reaching_a_hidden_field_through_a_rollup_is_refused(string parentFieldsJson, string childFieldJson, string rollupJson)
+    {
+        var error = ValidateBins(parentFieldsJson, childFieldJson, rollupJson).ShouldHaveSingleItem();
+        error.Path.ShouldBe("/entities/bins/fields/reserved/validation");
+        error.Message.ShouldContain("hidden");
+    }
+
+    /// <summary>The counterweight: a rollup over a visible child field, validated against itself, is legal.</summary>
+    [Fact]
+    public void A_rollup_over_a_visible_child_field_validated_against_itself_is_valid() =>
+        ValidateBins("""{}""", """{"type": "integer"}""",
+            """{"type": "integer", "rollup": {"from": "lines", "op": "sum", "field": "amount"}, "validation": "value <= 100"}""").ShouldBeEmpty();
+
+    /// <summary>A computed field over visible fields, validated against itself, reads nothing hidden and stays legal.</summary>
+    [Fact]
+    public void A_computed_field_over_visible_fields_validated_against_itself_is_valid() =>
+        Validate("""{"price": {"type": "integer"}, "tax": {"type": "integer"}, "total": {"type": "integer", "computed": "price + tax", "validation": "value <= 1000"}}""")
+            .ShouldBeEmpty();
+
+    /// <summary>The hidden-read refusal is reported beside the validation's other refusals, not instead of them.</summary>
+    [Fact]
+    public void A_hidden_read_is_reported_beside_the_validation_s_other_refusals()
+    {
+        var errors = Validate("""{"secret": {"type": "string", "hidden": true}, "code": {"type": "string", "validation": "value != secret && value != 'a\u0001b'"}}""");
+
+        errors.Count.ShouldBe(2, string.Join(" | ", errors.Select(error => error.Message)));
+        errors.ShouldAllBe(error => error.Path == "/entities/products/fields/code/validation");
+        errors.ShouldContain(error => error.Message.Contains("hidden"));
+        errors.ShouldContain(error => error.Message.Contains("cannot be written into a CHECK constraint"));
+    }
+
+    private static IReadOnlyList<DescriptorValidationError> ValidateBins(string parentFieldsJson, string childFieldJson, string rollupJson)
+    {
+        var parent = parentFieldsJson.Trim()[..^1];
+        var parentFields = parent.Length > 1 ? $"{parent}, \"reserved\": {rollupJson}}}" : $"{{\"reserved\": {rollupJson}}}";
+        const string Rules = """{"list": "true", "get": "true", "create": "true", "update": "true", "delete": "true"}""";
+        var json = "{\"$schema\": \"https://alvo.dev/schema/v1/project.json\", \"apiVersion\": \"alvo.dev/v1\", \"name\": \"checks\", \"entities\": {"
+            + $"\"bins\": {{\"fields\": {parentFields}, \"rules\": {Rules}}}, "
+            + $"\"lines\": {{\"fields\": {{\"bin_id\": {{\"type\": \"ref\", \"entity\": \"bins\", \"required\": true}}, \"amount\": {childFieldJson}}}, \"rules\": {Rules}}}}}}}";
+        return [.. new DescriptorValidator().Validate(json).Errors.Where(error => error.Severity == DescriptorValidationSeverity.Error)];
+    }
+
+    /// <summary>A stored field's validation over its own value only discloses nothing the caller did not send (Ruling 61).</summary>
     [Fact]
     public void A_hidden_field_validated_against_itself_alone_is_valid() =>
         Validate("""{"margin": {"type": "integer", "hidden": "!('admin' in @user.roles)", "validation": "value >= 0"}}""").ShouldBeEmpty();
