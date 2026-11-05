@@ -18,6 +18,8 @@ internal sealed partial class ConditionTranslator
     private const string ClockFix = "use DateTimeOffset.UtcNow, which a condition reads as now(): the instant of the request, or of the event after the commit.";
     private const string NowShapeReason = "DateTimeOffset.UtcNow translates to now() only as an operand: compared, or shifted by a TimeSpan";
     private const string NowShapeFix = "compare against DateTimeOffset.UtcNow itself, such as e.New.DueAt < DateTimeOffset.UtcNow - grace.";
+    private const string SpanConstantFix =
+        "a TimeSpan must be a static readonly TimeSpan field, such as private static readonly TimeSpan Grace = TimeSpan.FromHours(1); — or write the condition as a CEL string with duration('1h').";
     private const string SpanReason = "a TimeSpan finer than a microsecond or longer than ten thousand years has no CEL duration";
     private const string SpanFix = "use a whole number of microseconds within about ten thousand years.";
 
@@ -135,7 +137,9 @@ internal sealed partial class ConditionTranslator
             throw LambdaShape.IsCelNow(clock) ? Refuse(clock, NowShapeReason, NowShapeFix) : Refuse(clock, ClockReason, ClockFix);
         }
 
-        return LambdaValues.TryConstant(node, out var value, out var reason) ? Literal(node, value) : throw Refuse(node, reason, ConstantFix);
+        return LambdaValues.TryConstant(node, out var value, out var reason)
+            ? Literal(node, value)
+            : throw Refuse(node, reason, node.Type == typeof(TimeSpan) ? SpanConstantFix : ConstantFix);
     }
 
     private CelNode Literal(Expression node, object? value) => value switch

@@ -61,12 +61,25 @@ internal static class LambdaShape
     /// <summary>Whether a node reads a clock a condition refuses: no offset, a calendar day, or a host clock CEL does not have.</summary>
     internal static bool IsClock(Expression node) => !IsCelNow(node) && IsAnyClock(node);
 
+    /// <summary>
+    /// Whether a node reads any clock: a calendar <c>Now</c>/<c>UtcNow</c>/<c>Today</c>, a <see cref="TimeProvider"/>, or a
+    /// monotonic tick count (<see cref="System.Diagnostics.Stopwatch.GetTimestamp"/>, <see cref="Environment.TickCount64"/>) —
+    /// named so their refusal carries the clock fix rather than a generic one (Task 4 review m3).
+    /// </summary>
     internal static bool IsAnyClock(Expression node) => node switch
     {
-        MemberExpression { Expression: null, Member: var member } => _clockTypes.Contains(member.DeclaringType!) && _clockMembers.Contains(member.Name),
-        MethodCallExpression { Method: var method } => method.DeclaringType == typeof(TimeProvider) && method.Name is "GetUtcNow" or "GetLocalNow",
+        MemberExpression { Expression: null, Member: var member } => IsClockMember(member),
+        MethodCallExpression { Method: var method } => IsClockMethod(method),
         _ => false,
     };
+
+    private static bool IsClockMember(MemberInfo member) =>
+        (_clockTypes.Contains(member.DeclaringType!) && _clockMembers.Contains(member.Name))
+        || (member.DeclaringType == typeof(Environment) && member.Name is nameof(Environment.TickCount) or nameof(Environment.TickCount64));
+
+    private static bool IsClockMethod(MethodInfo method) =>
+        (method.DeclaringType == typeof(TimeProvider) && method.Name is "GetUtcNow" or "GetLocalNow" or "GetTimestamp")
+        || (method.DeclaringType == typeof(System.Diagnostics.Stopwatch) && method.Name == nameof(System.Diagnostics.Stopwatch.GetTimestamp));
 
     internal static Expression Unwrapped(Expression node)
     {
