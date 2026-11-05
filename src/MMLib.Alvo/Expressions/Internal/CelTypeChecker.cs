@@ -230,6 +230,9 @@ internal static class CelTypeChecker
         private const string TemporalFix =
             "CEL defines timestamp ± duration, duration + timestamp, timestamp - timestamp and duration ± duration.";
 
+        private const string ConstantTemporalFix =
+            "Use constants whose result stays within CEL's range: a timestamp in the years 1 to 9999, a duration within about ten thousand years.";
+
         private const string AccessProjectScopedMessage =
             "'@tenant.id' is not legal in an access level: an access level is project-scoped, not tenant-scoped.";
 
@@ -567,8 +570,46 @@ internal static class CelTypeChecker
                 Errors.Add(new CelCompilationError(TemporalRefusal(binary.Operator, leftType, rightType), TemporalFix, position));
             }
 
-            return (binary, result ?? CelValueType.Null, operandError || profileBad || result is null, position);
+            var bad = operandError || profileBad || result is null;
+            return (binary, result ?? CelValueType.Null, bad || RefusesOutOfRangeConstant(binary, position), position);
         }
+
+        /// <summary>
+        /// Temporal arithmetic over constants alone answers the same on every evaluation, so a result past CEL's range is the
+        /// author's error, refused here (Task 1 review M3) — never a failure on every write, attributed to the caller's data.
+        /// </summary>
+        private bool RefusesOutOfRangeConstant(CelBinary binary, int position)
+        {
+            var reason = ConstantRangeError(binary);
+            if (reason is null)
+            {
+                return false;
+            }
+
+            Errors.Add(new CelCompilationError($"This arithmetic over constants always fails: {reason}.", ConstantTemporalFix, position));
+            return true;
+        }
+
+        private static string? ConstantRangeError(CelBinary binary)
+        {
+            try
+            {
+                _ = ConstantTemporalValue(binary);
+                return null;
+            }
+            catch (CelFunctionException failure)
+            {
+                return failure.Reason;
+            }
+        }
+
+        private static object? ConstantTemporalValue(CelNode node) => node switch
+        {
+            CelLiteral literal => literal.Value,
+            CelBinary binary when CelTemporal.IsTemporal(binary) => CelTemporal.Apply(
+                binary.Operator, ConstantTemporalValue(binary.Left), ConstantTemporalValue(binary.Right), failClosed: true),
+            _ => null,
+        };
 
         private static CelValueType? TemporalResult(CelBinaryOperator op, CelValueType left, CelValueType right) => (op, left, right) switch
         {

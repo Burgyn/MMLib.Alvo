@@ -46,6 +46,18 @@ public sealed class FunctionOfferAgreementTests
     public void No_field_prefills_duration() =>
         Probe.Fields.ShouldAllBe(field => FunctionOffer.FirstArgument(Offered("duration", CelProfile.Mutate), "beforeCreate", field) == null);
 
+    /// <summary>
+    /// The dashboard reads "takes a constant only" off a Duration result; the core agrees that the one built-in yielding a
+    /// Duration is <c>duration</c>, the call the type checker folds from a constant.
+    /// </summary>
+    [Fact]
+    public void The_one_built_in_yielding_a_duration_is_the_constant_only_duration() =>
+        CelFunctionCatalog.BuiltIns.Describe()
+            .Where(function => function.Result == CelValueType.Duration)
+            .Select(function => function.Name)
+            .Distinct()
+            .ShouldBe([CelBuiltInFunctions.DurationName]);
+
     /// <summary>Whenever a mutate row's field prefills a call (Ruling W-D: any overload's first parameter decides), the call compiles.</summary>
     [Theory]
     [MemberData(nameof(PrefilledBuiltIns))]

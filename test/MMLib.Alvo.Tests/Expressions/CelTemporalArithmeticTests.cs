@@ -182,6 +182,67 @@ public sealed class CelTemporalArithmeticTests
         Should.Throw<NotSupportedException>(() =>
             new SqlPredicateRenderer().Render(Compile(source, CelProfile.Rule).Expression!, AlvoContext.Anonymous, new TestFieldSqlRenderer()));
 
+    [Theory]
+    [InlineData(CelBinaryOperator.Add, 1L)]
+    [InlineData(CelBinaryOperator.Subtract, -1L)]
+    public void A_duration_sum_past_the_range_is_a_range_error(CelBinaryOperator op, long sign)
+    {
+        var max = TimeSpan.FromTicks(sign * CelDuration.MaxMagnitude.Ticks);
+        var step = TimeSpan.FromTicks(sign * TimeSpan.TicksPerMicrosecond);
+        var right = op == CelBinaryOperator.Add ? step : -step;
+
+        Should.Throw<CelFunctionException>(() => CelTemporal.Apply(op, max, right, failClosed: true)).Reason.ShouldBe(CelTemporal.DurationRange);
+        Should.Throw<OverflowException>(() => CelTemporal.Apply(op, max, right, failClosed: false));
+        CelTemporal.Apply(op, max, TimeSpan.Zero, failClosed: true).ShouldBe(max);
+    }
+
+    [Fact]
+    public void A_timestamp_before_year_1_is_a_range_error_in_a_condition_and_denies_a_rule()
+    {
+        var row = CelFixtures.Row(
+            ("starts_at", new DateTimeOffset(1, 1, 1, 12, 0, 0, TimeSpan.Zero)),
+            ("ends_at", new DateTimeOffset(1, 1, 2, 0, 0, 0, TimeSpan.Zero)));
+        var condition = Compile("new.starts_at - duration('24h') < new.ends_at", CelProfile.Condition).Expression!;
+        var rule = Compile("starts_at - duration('24h') < ends_at", CelProfile.Rule).Expression!;
+        var fits = Compile("new.starts_at - duration('12h') < new.ends_at", CelProfile.Condition).Expression!;
+
+        var failure = Should.Throw<CelFunctionException>(() => CelInterpreter.EvaluatePredicate(condition, row, null, AlvoContext.Anonymous));
+        failure.Reason.ShouldBe(CelTemporal.TimestampRange);
+        failure.OnCallerData.ShouldBeTrue();
+        CelInterpreter.EvaluatePredicate(rule, row, null, AlvoContext.Anonymous).ShouldBeFalse();
+        CelInterpreter.EvaluatePredicate(fits, row, null, AlvoContext.Anonymous).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_duration_minus_a_timestamp_is_refused_with_the_way_round_to_write_it()
+    {
+        var result = Compile("duration('1h') - starts_at < ends_at", CelProfile.Rule);
+        result.IsSuccess.ShouldBeFalse();
+        result.Errors.ShouldContain(error =>
+            error.Message == "A timestamp cannot be subtracted from a duration; subtract the duration from the timestamp instead.");
+    }
+
+    /// <summary>
+    /// A temporal subtree of constants alone answers the same on every write, so a result past CEL's range is the author's
+    /// error, refused at apply rather than on every write — and never attributed to a caller's data.
+    /// </summary>
+    [Theory]
+    [InlineData("duration('315576000000s') + duration('1us') > duration('0')", CelProfile.Condition, CelTemporal.DurationRange)]
+    [InlineData("duration('-315576000000s') - duration('1us') < duration('0')", CelProfile.Condition, CelTemporal.DurationRange)]
+    [InlineData("new.starts_at + (duration('315576000000s') + duration('1s')) > new.ends_at", CelProfile.Condition, CelTemporal.DurationRange)]
+    [InlineData("starts_at + (duration('315576000000s') + duration('1s'))", CelProfile.Mutate, CelTemporal.DurationRange)]
+    [InlineData("duration('315576000000s') + duration('1s') > duration('0')", CelProfile.Rule, CelTemporal.DurationRange)]
+    public void Constant_temporal_arithmetic_past_the_range_is_refused_at_compile(string source, CelProfile profile, string reason)
+    {
+        var result = Compile(source, profile);
+        result.IsSuccess.ShouldBeFalse();
+        result.Errors.Count(error => error.Message.Contains(reason, StringComparison.Ordinal)).ShouldBe(1);
+    }
+
+    [Fact]
+    public void Constant_temporal_arithmetic_inside_the_range_compiles() =>
+        Compile("new.starts_at + (duration('315576000000s') - duration('1s')) > new.ends_at", CelProfile.Condition).IsSuccess.ShouldBeTrue();
+
     [Fact]
     public void An_empty_operand_makes_the_comparison_false()
     {

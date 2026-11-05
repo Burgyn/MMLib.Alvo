@@ -84,17 +84,63 @@ internal static class CelDuration
     {
         nanoseconds = 0m;
         var number = ReadNumber(body, ref at);
-        reason = number.Length > MaxNumberLength ? Range : Grammar;
-        if (!IsNumber(number)
-            || !TryUnit(body, ref at, out var perUnit)
-            || !decimal.TryParse(Padded(number), NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var amount))
+        reason = Grammar;
+        if (!IsNumber(number) || !TryUnit(body, ref at, out var perUnit))
         {
             return false;
         }
 
+        var significant = Significant(number);
+        reason = LengthRefusal(significant, perUnit);
+        if (reason is not null
+            || !decimal.TryParse(Padded(significant), NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var amount))
+        {
+            reason ??= Grammar;
+            return false;
+        }
+
         nanoseconds = Multiply(amount, perUnit);
-        reason = null;
         return true;
+    }
+
+    /// <summary>
+    /// The number without the zeros that carry no value — leading ones before the point, trailing ones after it — so a
+    /// zero-padded constant is judged by its value, never by its spelling's length.
+    /// </summary>
+    private static string Significant(string number)
+    {
+        var point = number.IndexOf('.', StringComparison.Ordinal);
+        var whole = (point < 0 ? number : number[..point]).TrimStart('0');
+        var fraction = point < 0 ? string.Empty : number[(point + 1)..].TrimEnd('0');
+        return fraction.Length == 0 ? whole : $"{whole}.{fraction}";
+    }
+
+    /// <summary>
+    /// Ruling 52's cap on the significant number. A whole part past it is out of range. A number that only its fraction takes
+    /// past it is out of range when its whole part already is, and otherwise ends below the microsecond — every in-range
+    /// duration that is a whole number of microseconds is spelled in at most 19 significant characters.
+    /// </summary>
+    private static string? LengthRefusal(string significant, decimal perUnit)
+    {
+        var wholeLength = WholeLength(significant);
+        if (wholeLength > MaxNumberLength)
+        {
+            return Range;
+        }
+
+        if (significant.Length <= MaxNumberLength)
+        {
+            return null;
+        }
+
+        var whole = wholeLength == 0 ? 0m : decimal.Parse(significant[..wholeLength], CultureInfo.InvariantCulture);
+        return Multiply(whole, perUnit) > MaxNanoseconds ? Range : Precision;
+    }
+
+    private static int WholeLength(string significant)
+    {
+        var point = significant.IndexOf('.', StringComparison.Ordinal);
+        return point < 0 ? significant.Length : point;
     }
 
     private static string ReadNumber(string body, ref int at)
@@ -109,9 +155,9 @@ internal static class CelDuration
     }
 
     private static bool IsNumber(string number) =>
-        number.Length is > 0 and <= MaxNumberLength && number.Count(character => character == '.') <= 1 && number != ".";
+        number.Length > 0 && number.Count(character => character == '.') <= 1 && number != ".";
 
-    private static string Padded(string number) => number[^1] == '.' ? number + "0" : number[0] == '.' ? "0" + number : number;
+    private static string Padded(string number) => number.Length == 0 ? "0" : number[0] == '.' ? "0" + number : number;
 
     private static bool TryUnit(string body, ref int at, out decimal perUnit)
     {

@@ -19,6 +19,11 @@ public sealed class CelDurationTests
     [InlineData(".5s", 500_000L)]
     [InlineData("1.s", 1_000_000L)]
     [InlineData("315576000000s", 315_576_000_000_000_000L)]
+    [InlineData("87660000h", 315_576_000_000_000_000L)]
+    [InlineData("5259600000m", 315_576_000_000_000_000L)]
+    [InlineData("-87660000h", -315_576_000_000_000_000L)]
+    [InlineData("000000000000000000001s", 1_000_000L)]
+    [InlineData("1.000000000000000000000s", 1_000_000L)]
     public void A_cel_duration_parses_to_its_microseconds(string text, long microseconds)
     {
         CelDuration.TryParse(text, out var value, out var reason).ShouldBeTrue(reason);
@@ -38,6 +43,12 @@ public sealed class CelDurationTests
     [InlineData("315576000001s", "range")]
     [InlineData("-315576000001s", "range")]
     [InlineData("123456789012345678901s", "range")]
+    [InlineData("87660001h", "range")]
+    [InlineData("5259600001m", "range")]
+    [InlineData("1us1ns", "microsecond")]
+    [InlineData("0.0000000000000000001s", "microsecond")]
+    [InlineData("0.000000000000000000000000000000001s", "microsecond")]
+    [InlineData("99999999999999.999999h", "range")]
     public void Anything_else_is_refused_with_its_reason(string text, string reason)
     {
         CelDuration.TryParse(text, out _, out var why).ShouldBeFalse();

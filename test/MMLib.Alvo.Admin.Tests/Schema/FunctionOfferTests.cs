@@ -117,6 +117,21 @@ public class FunctionOfferTests
         FunctionOffer.FirstArgument(now, "beforeCreate", new FieldSchema { Name = "at", Type = FieldType.DateTime }).ShouldBeNull();
     }
 
+    /// <summary>
+    /// A function that yields a Duration takes a text constant only (HX-11 Ruling 7: a duration is built from a constant), so a
+    /// row's String field never prefills it, whatever the function is called — the offer reads that from the catalog.
+    /// </summary>
+    [Theory]
+    [InlineData("duration")]
+    [InlineData("interval")]
+    public void A_function_that_yields_a_duration_takes_no_row_field(string name)
+    {
+        var catalog = new[] { Info(name, CelValueType.Duration, CelFunctionProvenance.BuiltIn, _both, ("text", CelValueType.String)) };
+        var offered = FunctionOffer.For(catalog, CelProfile.Mutate).Single();
+
+        FunctionOffer.FirstArgument(offered, "beforeCreate", new FieldSchema { Name = "code", Type = FieldType.String }).ShouldBeNull();
+    }
+
     [Fact]
     public void An_int_field_fills_a_decimal_parameter() =>
         FunctionOffer.FirstArgument(Offered("tax"), "beforeCreate", new FieldSchema { Name = "qty", Type = FieldType.Integer }).ShouldBe("new.qty");
