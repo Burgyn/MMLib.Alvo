@@ -172,13 +172,14 @@ built-in (below), so `lowerAscii(trim(new.email))` parses and a condition may ca
 
 `Condition` and `Mutate`, interpreter only. Every parameter is non-nullable, so a null argument makes the call
 null; nothing is culture-sensitive; a position or a size counts Unicode code points. Overloads of one name share
-parameter names by position, so the dashboard's insert template is stable. `now` alone is `Mutate`-only. A failure
+parameter names by position, so the dashboard's insert template is stable. `now` alone is `Mutate`-only; `duration` is also legal in `Rule`. A failure
 named here fails the write closed (*Resolution, null and failure* below) with the reason quoted, which never carries a
 value from the row.
 
 | Function | Signature(s) | Semantics |
 |---|---|---|
 | `contains` | `(text: String, search: String) -> Bool` | ordinal, no case folding (`contains(lowerAscii(x), 'b')` for that); an empty `search` is `true` |
+| `duration` | `(text: String) -> Duration` | a length of time as a **constant only** (`duration('90m')`, `duration('1h30m')`, `duration('-1.5h')`), folded into a literal at apply — never computed from a field; Go's `ParseDuration` grammar (units `h m s ms us µs μs ns`, sign, fractions, bare `0`), whole microseconds, within ±315,576,000,000 s; anything else is refused at apply. Also legal in `Rule`. The operands of CEL's `timestamp ± duration`, `timestamp - timestamp` and `duration ± duration` (HX-11) |
 | `endsWith` | `(text: String, suffix: String) -> Bool` | ordinal; an empty suffix is `true` |
 | `int` | `(value: Decimal) -> Int`, `(value: String) -> Int` | a Decimal is cut toward zero (`int(-2.9)` = `-2`); a text must be `[+-]?[0-9]+`, base 10, no spaces (`int(trim(x))`); fails closed outside the 64-bit range ("the value is outside the range of an Int") or on any other text ("the text is not a whole number such as 42 or -7") |
 | `lowerAscii` | `(text: String) -> String` | `A`–`Z` → `a`–`z`, and **nothing else** (`'ÄBC'` → `'Äbc'`) |

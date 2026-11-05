@@ -29,13 +29,13 @@ combinations are refused at apply: a delete has no `new.`, a create no `old.`.
 Text tests (`startsWith`, `endsWith`, `contains`) are case-sensitive: compare `lowerAscii(new.<field>)` to ignore case.
 
 A `mutate` value is a field, a literal, arithmetic (`+ - * /`, unary `-`), `+` joining two strings, or a call to
-one of these built-in functions (all may nest), and nothing more: no `@user` or `@tenant`. A number joins through
+one of these built-ins (all may nest), and nothing more: no `@user` or `@tenant`. A number joins through
 `string()`: `'#' + string(new.quantity)`. Every function takes any value of
 the right type, and a null argument or operand makes the value null. An Int divided by an Int stays an Int, cut
-toward zero; an overflow or a division by zero refuses the write, in a `mutate` and in a `condition` alike.
+toward zero; an overflow or a division by zero refuses the write, in a `mutate` and a `condition` alike.
 
 <!-- gen:mutate-functions -->
-`contains` `endsWith` `int` `lowerAscii` `math.abs` `math.ceil` `math.floor` `math.greatest` `math.least` `math.round` `now` `replace` `size` `startsWith` `string` `substring` `timestamp` `trim` `upperAscii`
+`contains` `duration` `endsWith` `int` `lowerAscii` `math.abs` `math.ceil` `math.floor` `math.greatest` `math.least` `math.round` `now` `replace` `size` `startsWith` `string` `substring` `timestamp` `trim` `upperAscii`
 <!-- /gen:mutate-functions -->
 
 A `substring` past the end fails the write, so to fit a field's `maxLength`, cut:

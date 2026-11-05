@@ -1469,6 +1469,7 @@ namespace MMLib.Alvo.Expressions
         Json = 6,
         StringList = 7,
         Null = 8,
+        Duration = 9,
     }
     public sealed class CompiledExpression : System.IEquatable<MMLib.Alvo.Expressions.CompiledExpression>
     {

@@ -36,10 +36,15 @@ public sealed class FunctionOfferAgreementTests
         var offered = Offered(name, CelProfile.Mutate);
         FunctionOffer.Template(offered, firstArgument: null).Text.ShouldBe(Call(offered, [.. offered.Parameters.Select(p => p.Name)]));
 
-        var source = Call(offered, [.. offered.Parameters.Select(p => Value(p.Type))]);
+        var source = StorableValue(offered, Call(offered, Values(offered)));
 
         new CelCompiler().Compile(source, CelProfile.Mutate, Probe).Errors.ShouldBeEmpty(source);
     }
+
+    /// <summary><c>duration</c> takes a constant only (HX-11 Ruling 7), so no row's field ever prefills it.</summary>
+    [Fact]
+    public void No_field_prefills_duration() =>
+        Probe.Fields.ShouldAllBe(field => FunctionOffer.FirstArgument(Offered("duration", CelProfile.Mutate), "beforeCreate", field) == null);
 
     /// <summary>Whenever a mutate row's field prefills a call (Ruling W-D: any overload's first parameter decides), the call compiles.</summary>
     [Theory]
@@ -70,7 +75,7 @@ public sealed class FunctionOfferAgreementTests
     public void Every_function_a_condition_offers_compiles_in_a_condition(string name)
     {
         var offered = Offered(name, CelProfile.Condition);
-        var call = Call(offered, [.. offered.Parameters.Select(p => Value(p.Type))]);
+        var call = Call(offered, Values(offered));
         var source = $"{call} == {call}";
 
         new CelCompiler().Compile(source, CelProfile.Condition, Probe).Errors.ShouldBeEmpty(source);
@@ -86,6 +91,14 @@ public sealed class FunctionOfferAgreementTests
         FunctionOffer.For(CelFunctionCatalog.BuiltIns.Describe(), profile).Single(f => f.Name == name);
 
     private static string Call(OfferedFunction offered, IEnumerable<string> arguments) => $"{offered.Name}({string.Join(", ", arguments)})";
+
+    /// <summary>A value per parameter: a probe field or a literal, and a duration constant for <c>duration</c>'s text.</summary>
+    private static string[] Values(OfferedFunction offered) =>
+        offered.Name == "duration" ? ["'1h'"] : [.. offered.Parameters.Select(p => Value(p.Type))];
+
+    /// <summary>A duration is no value a field holds; a mutate stores it as the timestamp it shifts.</summary>
+    private static string StorableValue(OfferedFunction offered, string call) =>
+        offered.Name == "duration" ? $"new.moment + {call}" : call;
 
     private static string Value(CelValueType type) => type switch
     {

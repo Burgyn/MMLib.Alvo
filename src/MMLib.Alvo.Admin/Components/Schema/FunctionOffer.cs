@@ -34,6 +34,12 @@ internal sealed record Insertion(string Text, int SelectFrom, int SelectLength);
 /// </summary>
 internal static class FunctionOffer
 {
+    /// <summary>
+    /// <c>duration</c> takes a text constant only (HX-11 Ruling 7), so a row's field is never its argument; the catalog does
+    /// not say which functions take a constant, and this is the one built-in that does.
+    /// </summary>
+    private const string ConstantOnly = "duration";
+
     /// <summary>The functions a profile admits, one per name, in name order (ordinal, as the catalog lists them).</summary>
     /// <param name="functions">Every overload, as <c>cel/functions</c> answers.</param>
     /// <param name="profile">The box's profile: <see cref="CelProfile.Mutate"/> or <see cref="CelProfile.Condition"/>.</param>
@@ -109,7 +115,7 @@ internal static class FunctionOffer
     /// <returns>The argument, or <see langword="null"/>.</returns>
     public static string? FirstArgument(
         OfferedFunction function, string point, FieldSchema? field, IReadOnlyCollection<string>? excludedFromEvents = null) =>
-        field is not null && ConditionTable.HasNew(point)
+        field is not null && function.Name != ConstantOnly && ConditionTable.HasNew(point)
             && (HookBuilder.IsBefore(point) || excludedFromEvents?.Contains(field.Name, StringComparer.Ordinal) is not true)
             && function.FirstParameterTypes.Any(type => Takes(type, CelFieldType.Of(field)))
             ? $"new.{field.Name}"

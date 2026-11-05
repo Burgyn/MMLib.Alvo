@@ -41,4 +41,10 @@ public enum CelValueType
     /// type checker resolves a row field's real <see cref="CelValueType"/>.
     /// </summary>
     Null,
+
+    /// <summary>
+    /// A signed length of time, built only from a constant such as <c>duration('90m')</c>, at microsecond precision,
+    /// within about ten thousand years either way. The difference of two timestamps, and what a timestamp moves by.
+    /// </summary>
+    Duration,
 }

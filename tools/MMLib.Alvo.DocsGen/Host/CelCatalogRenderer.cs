@@ -11,6 +11,7 @@ internal static class CelCatalogRenderer
 
     private static readonly Dictionary<string, string> _profiles = new(StringComparer.Ordinal)
     {
+        ["Rule"] = "a rule, which takes only the `duration('…')` constant",
         ["Condition"] = "a hook `condition`",
         ["Mutate"] = "a before-hook `mutate` value",
     };
@@ -35,7 +36,7 @@ internal static class CelCatalogRenderer
             .Append("A `?` after the return type means the call may yield null even when every argument is present.\n\n")
             .Append("**Profiles** are the descriptor slots a call compiles in: ")
             .Append(string.Join(" and ", _profiles.Select(profile => $"`{profile.Key}` ({profile.Value})")))
-            .Append(". Rules, computed fields and access levels admit no function call.\n\n")
+            .Append(". Computed fields and access levels admit no function call.\n\n")
             .Append("See [CEL in Alvo](").Append(SiteLinks.Page("concepts/cel"))
             .Append(") for the profiles and the language subset, and [Custom CEL functions](").Append(SiteLinks.Page("guides/custom-cel-functions"))
             .Append(") to register your own.\n\n");

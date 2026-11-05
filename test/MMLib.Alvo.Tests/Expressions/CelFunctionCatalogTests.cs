@@ -14,20 +14,20 @@ public sealed class CelFunctionCatalogTests
 
     /// <summary>The one literal pin of the built-in names (preflight R-3): every other name list derives from the catalog.</summary>
     [Fact]
-    public void The_built_ins_are_the_nineteen_names_of_the_design() =>
+    public void The_built_ins_are_the_twenty_names_of_the_design() =>
         CelFunctionCatalog.BuiltIns.Names.ShouldBe(
         [
-            "contains", "endsWith", "int", "lowerAscii", "math.abs", "math.ceil", "math.floor", "math.greatest", "math.least",
+            "contains", "duration", "endsWith", "int", "lowerAscii", "math.abs", "math.ceil", "math.floor", "math.greatest", "math.least",
             "math.round", "now", "replace", "size", "startsWith", "string", "substring", "timestamp", "trim", "upperAscii",
         ]);
 
     /// <summary>
     /// Spec §5's count: ten names with one overload (<c>now</c> among them), seven with two (<c>math.abs</c>,
     /// <c>math.ceil</c>, <c>math.floor</c>, <c>math.greatest</c>, <c>math.least</c>, <c>substring</c>, <c>int</c>),
-    /// <c>math.round</c> with three and <c>string</c> with five: 10 + 14 + 3 + 5.
+    /// <c>math.round</c> with three and <c>string</c> with five: 10 + 14 + 3 + 5; plus HX-11's <c>duration</c>.
     /// </summary>
     [Fact]
-    public void There_are_thirty_two_built_in_overloads() => CelFunctionCatalog.BuiltIns.Functions.Count.ShouldBe(32);
+    public void There_are_thirty_three_built_in_overloads() => CelFunctionCatalog.BuiltIns.Functions.Count.ShouldBe(33);
 
     [Fact]
     public void Only_the_digits_overload_declares_a_constant_check() =>
@@ -42,9 +42,15 @@ public sealed class CelFunctionCatalogTests
                 now => now.Profiles.SetEquals(new[] { CelProfile.Mutate }).ShouldBeTrue());
 
     [Fact]
-    public void Every_built_in_but_now_is_offered_in_condition_and_mutate_only() =>
-        CelFunctionCatalog.BuiltIns.Functions.Where(function => function.Name != CelCall.Now)
+    public void Every_built_in_but_now_and_duration_is_offered_in_condition_and_mutate_only() =>
+        CelFunctionCatalog.BuiltIns.Functions.Where(function => function.Name is not (CelCall.Now or CelBuiltInFunctions.DurationName))
             .ShouldAllBe(function => function.Profiles.SetEquals(new[] { CelProfile.Condition, CelProfile.Mutate }));
+
+    /// <summary>A duration constant folds at type check, so a rule may carry one too (HX-11 Rulings 7, 12).</summary>
+    [Fact]
+    public void Duration_is_offered_in_rule_condition_and_mutate() =>
+        CelFunctionCatalog.BuiltIns.Overloads(CelBuiltInFunctions.DurationName).ShouldHaveSingleItem().Profiles
+            .SetEquals(new[] { CelProfile.Rule, CelProfile.Condition, CelProfile.Mutate }).ShouldBeTrue();
 
     [Fact]
     public void Overloads_of_one_name_share_their_parameter_names_by_position() =>

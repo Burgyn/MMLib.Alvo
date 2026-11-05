@@ -196,7 +196,7 @@ internal sealed class CelCompiler : ICelCompiler
     /// so the refusal stays one line that reads as written, and a source longer than <see cref="EchoLength"/> is cut
     /// there, plus <c>…</c> — never between the halves of a surrogate pair.
     /// </summary>
-    private static string Echo(string source)
+    internal static string Echo(string source)
     {
         var length = source.Length <= EchoLength ? source.Length : EchoLength;
         if (length < source.Length && char.IsHighSurrogate(source[length - 1]))

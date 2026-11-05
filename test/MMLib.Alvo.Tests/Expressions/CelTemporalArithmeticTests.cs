@@ -1,0 +1,139 @@
+﻿using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Schema;
+
+namespace MMLib.Alvo.Tests.Expressions;
+
+/// <summary>CEL's timestamp/duration overloads, typed at compile time and evaluated with CEL's range errors (HX-11 Rulings 7, 9, 10, 12).</summary>
+public sealed class CelTemporalArithmeticTests
+{
+    private static readonly DateTimeOffset _start = new(2026, 11, 9, 10, 0, 0, TimeSpan.Zero);
+
+    private static readonly EntitySchema _bookings = new()
+    {
+        Name = "bookings",
+        Fields =
+        [
+            new FieldSchema { Name = "starts_at", Type = FieldType.DateTime, Nullable = true },
+            new FieldSchema { Name = "ends_at", Type = FieldType.DateTime, Nullable = true },
+            new FieldSchema { Name = "due_on", Type = FieldType.Date, Nullable = true },
+            new FieldSchema { Name = "hours", Type = FieldType.Integer, Nullable = true },
+        ],
+    };
+
+    private static CelCompilationResult Compile(string source, CelProfile profile) =>
+        CelFixtures.Compiler.Compile(source, profile, _bookings);
+
+    [Theory]
+    [InlineData("ends_at - starts_at <= duration('8h')", CelProfile.Rule)]
+    [InlineData("starts_at + duration('1h') < ends_at", CelProfile.Rule)]
+    [InlineData("duration('1h') + starts_at < ends_at", CelProfile.Rule)]
+    [InlineData("ends_at - duration('30m') > starts_at", CelProfile.Rule)]
+    [InlineData("duration('1h') + duration('30m') == duration('90m')", CelProfile.Rule)]
+    [InlineData("new.ends_at - new.starts_at > duration('0')", CelProfile.Condition)]
+    [InlineData("due_on + duration('24h') > starts_at", CelProfile.Rule)]
+    public void Cel_s_overloads_compile_where_temporal_arithmetic_is_admitted(string source, CelProfile profile) =>
+        Compile(source, profile).IsSuccess.ShouldBeTrue();
+
+    [Theory]
+    [InlineData("starts_at + duration('1h')", CelProfile.Mutate, CelValueType.Timestamp)]
+    public void A_mutate_value_may_be_a_shifted_timestamp(string source, CelProfile profile, CelValueType type) =>
+        Compile(source, profile).Expression!.ResultType.ShouldBe(type);
+
+    [Theory]
+    [InlineData("duration('1h') * 2 == duration('2h')", "'*'")]
+    [InlineData("hours + duration('1h') > duration('0')", "number")]
+    [InlineData("starts_at + starts_at > ends_at", "two timestamps")]
+    [InlineData("-duration('1h') < duration('0')", "'-'")]
+    [InlineData("ends_at - starts_at", "boolean")]
+    public void Anything_outside_the_overload_set_is_refused(string source, string reason)
+    {
+        var result = Compile(source, CelProfile.Rule);
+        result.IsSuccess.ShouldBeFalse();
+        string.Join(" ", result.Errors.Select(error => error.Message)).ShouldContain(reason);
+    }
+
+    [Fact]
+    public void A_duration_from_a_field_is_refused_because_duration_takes_a_constant()
+    {
+        var result = CelFixtures.Compiler.Compile("starts_at + duration(string(hours) + 'h') < ends_at", CelProfile.Condition, _bookings);
+        result.Errors.ShouldContain(error => error.Message.Contains("constant", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Numeric_arithmetic_stays_refused_in_a_rule() =>
+        Compile("hours * 2 > 4", CelProfile.Rule).IsSuccess.ShouldBeFalse();
+
+    [Fact]
+    public void A_duration_is_folded_into_a_typed_literal() =>
+        Compile("ends_at - starts_at <= duration('8h')", CelProfile.Rule).Expression!.Root
+            .ShouldBeOfType<CelBinary>().Right.ShouldBe(new CelLiteral(CelValueType.Duration, TimeSpan.FromHours(8)));
+
+    [Fact]
+    public void The_canonical_writer_spells_a_folded_duration_so_it_compiles_back_to_the_same_tree()
+    {
+        var root = Compile("ends_at - starts_at <= duration('8h')", CelProfile.Rule).Expression!.Root;
+        var text = CelText.Write(root);
+        text.ShouldBe("ends_at - starts_at <= duration('28800s')");
+        Compile(text, CelProfile.Rule).Expression!.Root.ShouldBe(root);
+    }
+
+    [Theory]
+    [InlineData("duration('1h')", CelProfile.Computed)]
+    [InlineData("starts_at + duration('1h')", CelProfile.Computed)]
+    [InlineData("duration('1h') == duration('1h')", CelProfile.Access)]
+    public void A_computed_column_and_an_access_level_carry_no_duration(string source, CelProfile profile) =>
+        Compile(source, profile).IsSuccess.ShouldBeFalse();
+
+    [Theory]
+    [InlineData("duration('1d') > duration('0')", "not a duration")]
+    [InlineData("duration('1ns') > duration('0')", "microsecond")]
+    public void A_refused_constant_is_an_apply_time_error_naming_why(string source, string reason) =>
+        string.Join(" ", Compile(source, CelProfile.Rule).Errors.Select(error => error.Message)).ShouldContain(reason);
+
+    [Fact]
+    public void A_duration_result_is_not_a_value_a_mutate_can_store() =>
+        Compile("new.ends_at - new.starts_at", CelProfile.Mutate).IsSuccess.ShouldBeFalse();
+
+    [Theory]
+    [InlineData(9, true)]
+    [InlineData(7, false)]
+    public void The_interpreter_subtracts_two_timestamps_into_a_duration(int hours, bool longerThanEight)
+    {
+        var condition = Compile("new.ends_at - new.starts_at > duration('8h')", CelProfile.Condition).Expression!;
+        var row = CelFixtures.Row(("starts_at", _start), ("ends_at", _start.AddHours(hours)));
+        CelInterpreter.EvaluatePredicate(condition, row, null, AlvoContext.Anonymous).ShouldBe(longerThanEight);
+    }
+
+    [Fact]
+    public void A_date_counts_as_midnight_utc()
+    {
+        var condition = Compile("new.due_on + duration('12h') == new.starts_at", CelProfile.Condition).Expression!;
+        var row = CelFixtures.Row(("due_on", new DateOnly(2026, 11, 9)), ("starts_at", new DateTimeOffset(2026, 11, 9, 12, 0, 0, TimeSpan.Zero)));
+        CelInterpreter.EvaluatePredicate(condition, row, null, AlvoContext.Anonymous).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_timestamp_past_year_9999_is_a_range_error_on_the_fail_closed_path()
+    {
+        var mutate = Compile("starts_at + duration('315576000000s')", CelProfile.Mutate).Expression!;
+        var failure = Should.Throw<CelFunctionException>(() =>
+            CelInterpreter.EvaluateMutation(mutate, CelFixtures.Row(("starts_at", new DateTimeOffset(9000, 1, 1, 0, 0, 0, TimeSpan.Zero))), null, _start));
+        failure.Message.ShouldContain("outside the range of a Timestamp");
+    }
+
+    [Fact]
+    public void A_range_error_in_a_rule_s_in_process_evaluation_is_false_like_an_overflow()
+    {
+        var rule = Compile("starts_at + duration('315576000000s') > ends_at", CelProfile.Rule).Expression!;
+        var row = CelFixtures.Row(("starts_at", new DateTimeOffset(9000, 1, 1, 0, 0, 0, TimeSpan.Zero)), ("ends_at", _start));
+        CelInterpreter.EvaluatePredicate(rule, row, null, AlvoContext.Anonymous).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void An_empty_operand_makes_the_comparison_false()
+    {
+        var rule = Compile("ends_at - starts_at <= duration('8h')", CelProfile.Rule).Expression!;
+        CelInterpreter.EvaluatePredicate(rule, CelFixtures.Row(("ends_at", _start)), null, AlvoContext.Anonymous).ShouldBeFalse();
+    }
+}

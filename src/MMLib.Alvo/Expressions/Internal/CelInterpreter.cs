@@ -398,6 +398,8 @@ internal static class CelInterpreter
     {
         CelBinaryOperator.And or CelBinaryOperator.Or => EvaluateLogical(binary, state),
         CelBinaryOperator.In => EvaluateIn(binary, state),
+        CelBinaryOperator.Add or CelBinaryOperator.Subtract when CelTemporal.IsTemporal(binary) =>
+            CelTemporal.Apply(binary.Operator, Evaluate(binary.Left, state), Evaluate(binary.Right, state), state.FailClosed),
         CelBinaryOperator.Add => EvaluateAdd(Evaluate(binary.Left, state), Evaluate(binary.Right, state), state.FailClosed),
         CelBinaryOperator.Subtract or CelBinaryOperator.Multiply or CelBinaryOperator.Divide =>
             EvaluateArithmetic(binary.Operator, Evaluate(binary.Left, state), Evaluate(binary.Right, state), state.FailClosed),
@@ -613,6 +615,7 @@ internal static class CelInterpreter
         (bool l, bool r) => l == r,
         (Guid l, Guid r) => l == r,
         (DateTimeOffset l, DateTimeOffset r) => l == r,
+        (TimeSpan l, TimeSpan r) => l == r,
         _ => false,
     };
 
@@ -621,6 +624,7 @@ internal static class CelInterpreter
         (decimal l, decimal r) => l.CompareTo(r),
         (string l, string r) => string.CompareOrdinal(l, r),
         (DateTimeOffset l, DateTimeOffset r) => l.CompareTo(r),
+        (TimeSpan l, TimeSpan r) => l.CompareTo(r),
         _ => null,
     };
 
@@ -642,7 +646,7 @@ internal static class CelInterpreter
             || TryNormalizeTimestamp(left, right, out normalizedLeft, out normalizedRight);
     }
 
-    private static bool IsDirectlyComparable(object value) => value is bool or string or Guid or DateTimeOffset;
+    private static bool IsDirectlyComparable(object value) => value is bool or string or Guid or DateTimeOffset or TimeSpan;
 
     private static bool TryNormalizeNumeric(object left, object right, out object normalizedLeft, out object normalizedRight)
     {

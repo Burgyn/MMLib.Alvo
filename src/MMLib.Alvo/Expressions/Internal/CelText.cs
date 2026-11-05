@@ -175,6 +175,7 @@ internal static class CelText
         (CelValueType.Int, long.MinValue) => throw new ArgumentOutOfRangeException(nameof(literal), "long.MinValue has no CEL spelling: its magnitude is not an Int."),
         (CelValueType.Int, long number) => number.ToString(CultureInfo.InvariantCulture),
         (CelValueType.Decimal, decimal number) => DecimalText(number),
+        (CelValueType.Duration, TimeSpan span) => $"{CelBuiltInFunctions.DurationName}({StringLiteral(CelDuration.Text(span))})",
         _ => throw new ArgumentException(
             $"A {literal.Type} literal holding {literal.Value?.GetType().Name ?? "null"} has no CEL spelling here.",
             nameof(literal)),

@@ -17,6 +17,13 @@ internal static partial class CelBuiltInFunctions
     internal static IReadOnlySet<CelProfile> ConditionAndMutate =>
         new HashSet<CelProfile> { CelProfile.Condition, CelProfile.Mutate };
 
+    /// <summary>Gets the profile set of <c>duration</c>, whose call the type checker folds into a constant (HX-11 Ruling 7).</summary>
+    internal static IReadOnlySet<CelProfile> RuleConditionAndMutate =>
+        new HashSet<CelProfile> { CelProfile.Rule, CelProfile.Condition, CelProfile.Mutate };
+
+    /// <summary>The name of CEL's <c>duration(string)</c>, which takes a constant only.</summary>
+    internal const string DurationName = "duration";
+
     /// <summary>
     /// The most characters a <c>replace</c> may grow a text to: the Data API's default request body limit
     /// (<c>AlvoApiOptions.MaxRequestBodyBytes</c>, 1 MiB), the largest value a client could send in one default request.
@@ -50,7 +57,7 @@ internal static partial class CelBuiltInFunctions
             Ceil(CelValueType.Int), Ceil(CelValueType.Decimal), Floor(CelValueType.Int), Floor(CelValueType.Decimal),
             Greatest(CelValueType.Int), Greatest(CelValueType.Decimal), Least(CelValueType.Int), Least(CelValueType.Decimal),
             String(CelValueType.Int), String(CelValueType.Decimal), String(CelValueType.Bool), String(CelValueType.Uuid), String(CelValueType.Timestamp),
-            Int(CelValueType.Decimal), Int(CelValueType.String), Timestamp,
+            Int(CelValueType.Decimal), Int(CelValueType.String), Timestamp, Duration,
         ];
 
     private static CelFunction Replace => InProcess(
@@ -190,6 +197,7 @@ internal static partial class CelBuiltInFunctions
         CelValueType.Bool => typeof(bool),
         CelValueType.Timestamp => typeof(DateTimeOffset),
         CelValueType.Uuid => typeof(Guid),
+        CelValueType.Duration => typeof(TimeSpan),
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, "No CEL function parameter has this type."),
     };
 }

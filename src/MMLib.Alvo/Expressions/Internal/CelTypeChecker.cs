@@ -70,6 +70,12 @@ internal static class CelTypeChecker
 
         /// <summary>A call to a catalogued function; the row is the ceiling, each function's own profiles narrow it.</summary>
         FunctionCall,
+
+        /// <summary><c>duration('…')</c>, folded into a constant at type check (HX-11 Ruling 7).</summary>
+        DurationLiteral,
+
+        /// <summary>CEL's timestamp and duration <c>+</c>/<c>-</c> overloads (HX-11 Ruling 12).</summary>
+        TemporalArithmetic,
     }
 
     /// <summary>
@@ -108,6 +114,13 @@ internal static class CelTypeChecker
         {
             CelProfile.Rule, CelProfile.Computed, CelProfile.Condition, CelProfile.Mutate,
         };
+
+    /// <summary>
+    /// A duration constant and temporal arithmetic's profiles (HX-11 Ruling 12): a rule, a hook condition and a mutate. A
+    /// computed column and an access level carry no duration.
+    /// </summary>
+    private static readonly IReadOnlySet<CelProfile> _ruleConditionAndMutate =
+        new HashSet<CelProfile> { CelProfile.Rule, CelProfile.Condition, CelProfile.Mutate };
 
     private static readonly IReadOnlySet<CelProfile> _computedOnly = new HashSet<CelProfile> { CelProfile.Computed };
 
@@ -178,6 +191,8 @@ internal static class CelTypeChecker
             [CelConstructKind.Changed] = _conditionOnly,
             [CelConstructKind.Call] = _mutateOnly,
             [CelConstructKind.FunctionCall] = _conditionAndMutate,
+            [CelConstructKind.DurationLiteral] = _ruleConditionAndMutate,
+            [CelConstructKind.TemporalArithmetic] = _ruleConditionAndMutate,
         };
 
     /// <summary>
@@ -208,6 +223,12 @@ internal static class CelTypeChecker
 
         private const string AccessNoRowMessage =
             "An access level is a predicate over the caller alone; a field reference has no row to read here.";
+
+        private const string DurationProfileFix =
+            "A computed column and an access level carry no duration; compare durations in a rule, a hook condition or a mutate.";
+
+        private const string TemporalFix =
+            "CEL defines timestamp ± duration, duration + timestamp, timestamp - timestamp and duration ± duration.";
 
         private const string AccessProjectScopedMessage =
             "'@tenant.id' is not legal in an access level: an access level is project-scoped, not tenant-scoped.";
@@ -428,9 +449,19 @@ internal static class CelTypeChecker
                 "Arithmetic negation ('-') is legal only in the Computed, Condition and Mutate profiles.",
                 "Move this calculation into a computed field.",
                 position);
-            var operandBad = RequireNumeric(operandType, operandError, "Unary '-' operand", position);
+            var operandBad = operandType == CelValueType.Duration && !operandError
+                ? RefuseDurationNegation(position)
+                : RequireNumeric(operandType, operandError, "Unary '-' operand", position);
             var resultType = operandError ? CelValueType.Decimal : operandType;
             return (unary, resultType, profileBad || operandBad, position);
+        }
+
+        /// <summary>CEL defines no unary <c>-</c> on a duration (HX-11 Ruling 9); its negative is a constant.</summary>
+        private bool RefuseDurationNegation(int position)
+        {
+            Errors.Add(new CelCompilationError(
+                "'-' is not defined on a duration; write the negative constant, such as duration('-1h').", TemporalFix, position));
+            return true;
         }
 
         private (CelNode, CelValueType, bool, int) CheckBinary(CelBinary binary)
@@ -497,6 +528,11 @@ internal static class CelTypeChecker
                 return CheckConcatenation(binary, leftType, rightType, leftError, rightError, leftPosition, rightPosition);
             }
 
+            if (IsTemporalType(leftType) || IsTemporalType(rightType))
+            {
+                return CheckTemporalArithmetic(binary, leftType, rightType, leftError || rightError, rightPosition);
+            }
+
             var profileBad = CheckConstruct(
                 CelConstructKind.Arithmetic,
                 $"Arithmetic is legal only in the Computed, Condition and Mutate profiles; '{OperatorText(binary.Operator)}' is not allowed here.",
@@ -512,6 +548,52 @@ internal static class CelTypeChecker
             var bad = profileBad || leftBad || rightBad;
             return (binary, resultType, bad || RefusesConstantZeroDivisor(binary, rightPosition), rightPosition);
         }
+
+        /// <summary>
+        /// CEL's timestamp and duration overloads (HX-11 Rulings 9, 12): legal where <see cref="CelConstructKind.TemporalArithmetic"/>
+        /// is, and only in the shapes <see cref="TemporalResult"/> lists; anything else is refused naming its shape.
+        /// </summary>
+        private (CelNode, CelValueType, bool, int) CheckTemporalArithmetic(
+            CelBinary binary, CelValueType leftType, CelValueType rightType, bool operandError, int position)
+        {
+            var profileBad = CheckConstruct(
+                CelConstructKind.TemporalArithmetic,
+                $"Timestamp and duration arithmetic is not legal in the {profile} profile.",
+                "Compare timestamps directly, or move the arithmetic into a rule, a hook condition or a mutate.",
+                position);
+            var result = TemporalResult(binary.Operator, leftType, rightType);
+            if (result is null && !operandError)
+            {
+                Errors.Add(new CelCompilationError(TemporalRefusal(binary.Operator, leftType, rightType), TemporalFix, position));
+            }
+
+            return (binary, result ?? CelValueType.Null, operandError || profileBad || result is null, position);
+        }
+
+        private static CelValueType? TemporalResult(CelBinaryOperator op, CelValueType left, CelValueType right) => (op, left, right) switch
+        {
+            (CelBinaryOperator.Add, CelValueType.Timestamp, CelValueType.Duration) => CelValueType.Timestamp,
+            (CelBinaryOperator.Add, CelValueType.Duration, CelValueType.Timestamp) => CelValueType.Timestamp,
+            (CelBinaryOperator.Subtract, CelValueType.Timestamp, CelValueType.Duration) => CelValueType.Timestamp,
+            (CelBinaryOperator.Subtract, CelValueType.Timestamp, CelValueType.Timestamp) => CelValueType.Duration,
+            (CelBinaryOperator.Add or CelBinaryOperator.Subtract, CelValueType.Duration, CelValueType.Duration) => CelValueType.Duration,
+            _ => null,
+        };
+
+        private static string TemporalRefusal(CelBinaryOperator op, CelValueType left, CelValueType right) => (op, left, right) switch
+        {
+            (CelBinaryOperator.Multiply or CelBinaryOperator.Divide, _, _) =>
+                "'*' and '/' are not defined on a timestamp or a duration.",
+            (_, CelValueType.Timestamp, CelValueType.Timestamp) =>
+                "Two timestamps cannot be added; subtract them to get the duration between them.",
+            _ when IsNumeric(left) || IsNumeric(right) =>
+                "A duration cannot be added to or subtracted from a number; write the number as a duration constant, such as duration('2h').",
+            (CelBinaryOperator.Subtract, CelValueType.Duration, CelValueType.Timestamp) =>
+                "A timestamp cannot be subtracted from a duration; subtract the duration from the timestamp instead.",
+            _ => $"'{OperatorText(op)}' is not defined on {left} and {right}.",
+        };
+
+        private static bool IsTemporalType(CelValueType type) => type is CelValueType.Timestamp or CelValueType.Duration;
 
         /// <summary>
         /// A literal zero divisor in a hook profile can never produce a value — every write it meets with a present
@@ -767,7 +849,16 @@ internal static class CelTypeChecker
                 position);
         }
 
-        private static bool IsSqlOperand(CelNode node) => node is CelLiteral or CelFieldRef or CelContextRef;
+        /// <summary>
+        /// A field, a literal, a context value, <c>now()</c>, or temporal arithmetic over those (HX-11 Ruling 12) — the operands
+        /// the SQL renderer composes a comparison over.
+        /// </summary>
+        private static bool IsSqlOperand(CelNode node) => node switch
+        {
+            CelLiteral or CelFieldRef or CelContextRef or CelCall { Name: CelCall.Now } => true,
+            CelBinary binary => CelTemporal.IsTemporal(binary) && IsSqlOperand(binary.Left) && IsSqlOperand(binary.Right),
+            _ => false,
+        };
 
         private static string DescribeOperand(CelNode node) => node switch
         {
@@ -986,8 +1077,40 @@ internal static class CelTypeChecker
             };
         }
 
-        private (CelNode, CelValueType, bool, int) CheckCall(CelCall call) =>
-            call.Name is CelCall.Now ? CheckLegacyCall(call) : CheckCatalogCall(call);
+        private (CelNode, CelValueType, bool, int) CheckCall(CelCall call) => call.Name switch
+        {
+            CelCall.Now => CheckLegacyCall(call),
+            CelBuiltInFunctions.DurationName => CheckDurationCall(call),
+            _ => CheckCatalogCall(call),
+        };
+
+        /// <summary>
+        /// Folds <c>duration('…')</c> into a <see cref="CelValueType.Duration"/> literal (HX-11 Ruling 7): the argument must be
+        /// one text constant that parses, so a duration is validated at apply and never parsed inside a write.
+        /// </summary>
+        private (CelNode, CelValueType, bool, int) CheckDurationCall(CelCall call)
+        {
+            var position = FindPosition(CelBuiltInFunctions.DurationName);
+            var profileBad = CheckConstruct(
+                CelConstructKind.DurationLiteral, $"duration() is not legal in the {profile} profile.", DurationProfileFix, position);
+            if (call.Arguments is not [CelLiteral { Type: CelValueType.String, Value: string text }])
+            {
+                Errors.Add(new CelCompilationError(
+                    "duration() takes one text constant, such as duration('90m'); a duration is never computed from a field.",
+                    CelDuration.Fix,
+                    position));
+                return (call, CelValueType.Duration, true, position);
+            }
+
+            if (!CelDuration.TryParse(text, out var value, out var reason))
+            {
+                Errors.Add(new CelCompilationError(
+                    $"duration('{CelCompiler.Echo(text)}') is refused: {reason}.", CelDuration.Fix, position));
+                return (call, CelValueType.Duration, true, position);
+            }
+
+            return (new CelLiteral(CelValueType.Duration, value), CelValueType.Duration, profileBad, position);
+        }
 
         /// <summary>
         /// Checks a call to a catalogued function: the profile gate first (as <c>now()</c>'s check does), then every argument,
