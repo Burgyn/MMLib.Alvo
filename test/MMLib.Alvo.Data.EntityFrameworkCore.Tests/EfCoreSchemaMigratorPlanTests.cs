@@ -30,7 +30,8 @@ public class EfCoreSchemaMigratorPlanTests
             () => new ModelBuilder(SqliteConventionSetBuilder.Build()),
             new RelationalConnectionFactory(() => connection),
             new TestSqlDialect(),
-            computed: null);
+            computed: null,
+            checks: null);
     }
 
     private static EntitySchema Vehicles(params FieldSchema[] fields) =>

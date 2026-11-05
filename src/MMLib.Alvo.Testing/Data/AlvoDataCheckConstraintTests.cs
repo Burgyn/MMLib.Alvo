@@ -40,13 +40,16 @@ public abstract class AlvoDataCheckConstraintTests
     /// <summary>Plans and applies a migration through this engine's <see cref="ISchemaMigrator"/>.</summary>
     /// <param name="current">The schema the store currently holds.</param>
     /// <param name="desired">The schema to migrate it to.</param>
-    protected abstract Task ApplyAsync(SchemaModel current, SchemaModel desired);
+    /// <param name="options">The options the plan is applied with — a rollback allows a destructive step.</param>
+    protected abstract Task ApplyAsync(SchemaModel current, SchemaModel desired, MigrationOptions options);
 
     /// <summary>Applies an already planned migration.</summary>
     /// <param name="plan">The plan <see cref="PlanAsync"/> produced.</param>
     protected abstract Task ExecuteAsync(MigrationPlan plan);
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    private Task ApplyAsync(SchemaModel current, SchemaModel desired) => ApplyAsync(current, desired, new MigrationOptions());
 
     /// <summary>The one caller every fact writes as: none of them is about authorization.</summary>
     protected static AlvoContext Caller { get; } = new() { User = UserId.New(), Roles = new HashSet<Role> { Role.Authenticated } };
@@ -116,12 +119,39 @@ public abstract class AlvoDataCheckConstraintTests
             .ShouldBe((SchemaChangeKind.AlterField, "discount", "Drops a field's validation.", false));
     }
 
-    private static SchemaModel WithoutDiscountValidation => new([
+    /// <summary>
+    /// Changing a validation's expression keeps the name, so it plans a drop and then an add of the same constraint — two
+    /// non-destructive steps naming the field — and the engine then holds the new bound.
+    /// </summary>
+    [Fact]
+    public async Task Changing_a_validation_drops_and_re_adds_its_constraint()
+    {
+        await CreateAsync(Schema, Descriptor);
+        var tightened = WithDiscountValidation("discount <= 40");
+
+        var steps = (await PlanAsync(Schema, tightened)).Steps;
+
+        steps.Select(step => (step.Change.Kind, step.Change.Field, step.Change.Detail, step.IsDestructive)).ShouldBe(
+        [
+            (SchemaChangeKind.AlterField, "discount", "Drops a field's validation.", false),
+            (SchemaChangeKind.AlterField, "discount", "Adds the field's validation as a CHECK constraint.", false),
+        ]);
+        await ApplyAsync(Schema, tightened);
+        (await InsertDiscountAsync("discount", "00000000-0000-0000-0000-000000000010", 45)).ShouldNotBeNull("the new bound is the engine's");
+        (await InsertDiscountAsync("discount", "00000000-0000-0000-0000-000000000011", 40)).ShouldBeNull();
+    }
+
+    private static SchemaModel WithoutDiscountValidation => WithDiscountValidation(null);
+
+    private static SchemaModel WithDiscountValidation(string? check) => new([
         Schema.Entities[0] with
         {
-            Fields = [.. Schema.Entities[0].Fields.Select(declared => declared.Name == "discount" ? declared with { CheckExpression = null } : declared)],
+            Fields = [.. Schema.Entities[0].Fields.Select(declared => declared.Name == "discount" ? declared with { CheckExpression = check } : declared)],
         },
     ]);
+
+    private Task<Exception?> InsertDiscountAsync(string column, string id, long value) =>
+        ExecuteOutsideThePortAsync($"INSERT INTO \"products\" (\"id\", \"stock\", \"{column}\") VALUES ('{id}', 1, {value})");
 
     /// <summary>
     /// Renaming a validated field re-creates its constraint under the name the new field gives it (Ruling 19): the engine
@@ -140,7 +170,36 @@ public abstract class AlvoDataCheckConstraintTests
         (await ExecuteOutsideThePortAsync(
             "INSERT INTO \"products\" (\"id\", \"stock\", \"rebate\") VALUES ('00000000-0000-0000-0000-000000000005', 1, 50)"))
             .ShouldBeNull("and a row that keeps it is written under the new column name");
-        (await PlanAsync(Renamed(declared: false), Renamed(declared: false))).Steps.ShouldBeEmpty();
+        (await ExecuteOutsideThePortAsync(
+            "INSERT INTO \"products\" (\"id\", \"stock\", \"rebate\") VALUES ('00000000-0000-0000-0000-000000000006', -1, NULL)"))
+            .ShouldNotBeNull("a rename releases every validation of the entity, so the untouched stock >= 0 must be added back");
+        (await ExecuteOutsideThePortAsync(
+            "INSERT INTO \"products\" (\"id\", \"stock\", \"rebate\") VALUES ('00000000-0000-0000-0000-000000000007', 300, NULL)"))
+            .ShouldNotBeNull("and so must the computed stock_value <= 500");
+        (await PlanAsync(Renamed(declared: false), Renamed(declared: true))).Steps
+            .ShouldBeEmpty("re-applying a descriptor that still says renamedFrom re-creates nothing");
+    }
+
+    /// <summary>
+    /// A rename, its rollback (a destructive drop of the new column and an add of the old one) and the rename again each
+    /// leave the validation enforced under the name the field has at that moment — the old-name and new-name hand-off,
+    /// both ways.
+    /// </summary>
+    [Fact]
+    public async Task Renaming_rolling_back_and_renaming_again_keeps_the_validation_enforced()
+    {
+        await CreateAsync(Schema, Descriptor);
+
+        await ApplyAsync(Schema, Renamed(declared: true));
+        (await InsertDiscountAsync("rebate", "00000000-0000-0000-0000-000000000020", 51)).ShouldNotBeNull("enforced after the rename");
+
+        await ApplyAsync(Renamed(declared: false), Schema, new MigrationOptions { AllowDestructive = true });
+        (await InsertDiscountAsync("discount", "00000000-0000-0000-0000-000000000021", 51)).ShouldNotBeNull("enforced after the rollback");
+        (await InsertDiscountAsync("discount", "00000000-0000-0000-0000-000000000022", 50)).ShouldBeNull();
+
+        await ApplyAsync(Schema, Renamed(declared: true));
+        (await InsertDiscountAsync("rebate", "00000000-0000-0000-0000-000000000023", 51)).ShouldNotBeNull("enforced after renaming again");
+        (await InsertDiscountAsync("rebate", "00000000-0000-0000-0000-000000000024", 50)).ShouldBeNull();
     }
 
     private static SchemaModel Renamed(bool declared) => new([

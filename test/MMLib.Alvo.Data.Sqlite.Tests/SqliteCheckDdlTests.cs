@@ -34,6 +34,10 @@ public sealed class SqliteCheckDdlTests : IDisposable
     public Task Renaming_a_validated_field_recreates_its_constraint_under_the_new_name() =>
         VerifyPlanAsync(Products(validated: true), OnHand());
 
+    [Fact]
+    public Task Renaming_a_validated_entity_recreates_its_constraint_under_the_new_name() =>
+        VerifyPlanAsync(Products(validated: true), StockItems());
+
     public void Dispose()
     {
         _services.Dispose();
@@ -71,6 +75,19 @@ public sealed class SqliteCheckDdlTests : IDisposable
             [
                 new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
                 new FieldSchema { Name = "on_hand", Type = FieldType.Integer, Required = true, RenamedFrom = "stock", CheckExpression = "on_hand >= 0" },
+            ],
+        },
+    ]);
+
+    private static SchemaModel StockItems() => new([
+        new EntitySchema
+        {
+            Name = "stock_items",
+            RenamedFrom = "products",
+            Fields =
+            [
+                new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
+                new FieldSchema { Name = "stock", Type = FieldType.Integer, Required = true, CheckExpression = "stock >= 0" },
             ],
         },
     ]);

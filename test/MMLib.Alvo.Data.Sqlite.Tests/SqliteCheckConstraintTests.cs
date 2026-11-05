@@ -33,14 +33,16 @@ public sealed class SqliteCheckConstraintTests : AlvoDataCheckConstraintTests, I
     protected override Task<MigrationPlan> PlanAsync(SchemaModel current, SchemaModel desired) =>
         Migrator.PlanAsync(current, desired, new MigrationOptions(), TestContext.Current.CancellationToken);
 
-    protected override async Task ApplyAsync(SchemaModel current, SchemaModel desired)
+    protected override async Task ApplyAsync(SchemaModel current, SchemaModel desired, MigrationOptions options)
     {
-        await ExecuteAsync(await PlanAsync(current, desired));
+        (await ApplyAsync(await PlanAsync(current, desired), options)).Applied.ShouldBeTrue();
         _host!.RePrime(desired);
     }
 
-    protected override Task ExecuteAsync(MigrationPlan plan) =>
-        Migrator.ApplyAsync(plan, new MigrationOptions(), TestContext.Current.CancellationToken);
+    protected override Task ExecuteAsync(MigrationPlan plan) => ApplyAsync(plan, new MigrationOptions());
+
+    private Task<MigrationResult> ApplyAsync(MigrationPlan plan, MigrationOptions options) =>
+        Migrator.ApplyAsync(plan, options, TestContext.Current.CancellationToken);
 
     public ValueTask DisposeAsync() => _fixture.DisposeAsync();
 

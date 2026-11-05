@@ -72,11 +72,11 @@ internal static class RenamePrePass
     private static List<FieldSchema> ReleaseChecks(
         EntitySchema currentEntity, string alignedName, List<FieldSchema> alignedFields, List<RenameEntry> releasedChecks)
     {
-        for (var index = 0; index < alignedFields.Count; index++)
+        foreach (var (currentField, alignedField) in currentEntity.Fields.Zip(alignedFields))
         {
-            if (currentEntity.Fields[index].CheckExpression is not null)
+            if (currentField.CheckExpression is not null)
             {
-                releasedChecks.Add(ReleasedCheck(currentEntity, currentEntity.Fields[index], alignedName, alignedFields[index].Name));
+                releasedChecks.Add(ReleasedCheck(currentEntity, currentField, alignedName, alignedField.Name));
             }
         }
 

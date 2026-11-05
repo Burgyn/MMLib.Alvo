@@ -57,7 +57,8 @@ public class DestructiveClassificationParityTests
             () => new ModelBuilder(SqliteConventionSetBuilder.Build()),
             new RelationalConnectionFactory(() => connection),
             new TestSqlDialect(),
-            computed: null);
+            computed: null,
+            checks: null);
     }
 
     private static EntitySchema Widgets(params FieldSchema[] fields) => new() { Name = "widgets", Fields = fields };

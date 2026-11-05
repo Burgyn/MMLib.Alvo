@@ -1,0 +1,25 @@
+﻿ALTER TABLE "products" RENAME TO "stock_items";
+
+;
+CREATE TABLE "ef_temp_stock_items" (
+    "id" TEXT NOT NULL CONSTRAINT "PK_stock_items" PRIMARY KEY,
+    "stock" INTEGER NOT NULL,
+    CONSTRAINT "ck_stock_items_stock_a8b74eeb" CHECK (("stock" IS NULL OR COALESCE("stock" >= 0, 0)))
+);
+
+;
+INSERT INTO "ef_temp_stock_items" ("id", "stock")
+SELECT "id", "stock"
+FROM "stock_items";
+
+;
+PRAGMA foreign_keys = 0;
+
+;
+DROP TABLE "stock_items";
+
+;
+ALTER TABLE "ef_temp_stock_items" RENAME TO "stock_items";
+
+;
+PRAGMA foreign_keys = 1;

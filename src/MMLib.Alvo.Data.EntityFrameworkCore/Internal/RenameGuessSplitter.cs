@@ -44,14 +44,33 @@ internal static class RenameGuessSplitter
             return residual;
         }
 
+        var splits = residual
+            .Where(operation => operation is RenameColumnOperation or RenameTableOperation)
+            .ToDictionary(operation => operation, operation => SplitRenameGuess(operation, alignedCurrent, desired, buildModel, differ).ToList());
+        var splitChecks = splits.Values.SelectMany(operations => operations).Select(CheckKey).OfType<CheckConstraintKey>().ToHashSet();
+
         var normalized = new List<MigrationOperation>(residual.Count + 2);
         foreach (var operation in residual)
         {
-            normalized.AddRange(SplitRenameGuess(operation, alignedCurrent, desired, buildModel, differ));
+            normalized.AddRange(
+                splits.TryGetValue(operation, out var split) ? split
+                : CheckKey(operation) is { } key && splitChecks.Contains(key) ? []
+                : [operation]);
         }
 
         return normalized;
     }
+
+    // A guessed rename's residual already carries the drop and add of the column's CHECK constraint, and the scoped diffs
+    // that replace it carry them again: the split's copies are kept, ordered around the column they constrain.
+    private static CheckConstraintKey? CheckKey(MigrationOperation operation) => operation switch
+    {
+        AddCheckConstraintOperation add => new CheckConstraintKey(true, add.Table, add.Name),
+        DropCheckConstraintOperation drop => new CheckConstraintKey(false, drop.Table, drop.Name),
+        _ => null,
+    };
+
+    private readonly record struct CheckConstraintKey(bool Adds, string Table, string Name);
 
     private static IEnumerable<MigrationOperation> SplitRenameGuess(
         MigrationOperation operation,

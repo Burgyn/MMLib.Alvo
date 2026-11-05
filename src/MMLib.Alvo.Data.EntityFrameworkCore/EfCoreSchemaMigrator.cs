@@ -74,7 +74,7 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
         RelationalConnectionFactory connections,
         IAlvoSqlDialect dialect,
         ComputedColumnSql? computed,
-        CheckConstraintSql? checks = null)
+        CheckConstraintSql? checks)
     {
         ArgumentNullException.ThrowIfNull(differ);
         ArgumentNullException.ThrowIfNull(sqlGenerator);

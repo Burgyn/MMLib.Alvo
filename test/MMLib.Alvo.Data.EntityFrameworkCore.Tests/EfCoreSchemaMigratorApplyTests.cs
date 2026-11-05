@@ -60,7 +60,8 @@ public class EfCoreSchemaMigratorApplyTests : IDisposable
             () => new ModelBuilder(SqliteConventionSetBuilder.Build()),
             connections,
             dialect,
-            computed: null);
+            computed: null,
+            checks: null);
 
     public void Dispose()
     {
