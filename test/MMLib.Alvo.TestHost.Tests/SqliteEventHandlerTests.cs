@@ -10,16 +10,9 @@ public sealed class SqliteEventHandlerTests : EventHandlerFacts, IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
         foreach (var file in _files)
         {
-            try
-            {
-                File.Delete(file);
-            }
-            catch (IOException)
-            {
-            }
+            SqliteTempFile.Delete(file);
         }
 
         GC.SuppressFinalize(this);
@@ -29,7 +22,7 @@ public sealed class SqliteEventHandlerTests : EventHandlerFacts, IDisposable
     {
         var path = Path.Combine(Path.GetTempPath(), $"alvo-handlers-{Guid.NewGuid():N}.db");
         _files.Add(path);
-        var connectionString = $"Data Source={path}";
+        var connectionString = SqliteTempFile.ConnectionStringFor(path);
 
         return Task.FromResult(new HandlerDatabase(alvo => alvo.UseSqlite(connectionString), () => new SqliteConnection(connectionString)));
     }

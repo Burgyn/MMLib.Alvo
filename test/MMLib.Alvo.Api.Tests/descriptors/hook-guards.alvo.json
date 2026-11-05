@@ -1,0 +1,26 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "hook-guards",
+  "description": "One entity guarded by host write hooks the facts register: a status enum, an owner the rules pin to the caller, and a score hidden from writers. Every answer must be the same on every engine.",
+  "auth": { "providers": ["local"], "roles": ["writer", "auditor"] },
+  "access": { "viewer": "'writer' in @user.roles" },
+  "entities": {
+    "orders": {
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 40 },
+        "status": { "type": "enum", "values": ["open", "closed"] },
+        "owner_id": { "type": "uuid" },
+        "score": { "type": "integer", "hidden": "!('auditor' in @user.roles)" },
+        "reference": { "type": "string", "maxLength": 20, "readOnly": true }
+      },
+      "rules": {
+        "list": "'writer' in @user.roles",
+        "get": "'writer' in @user.roles",
+        "create": "'writer' in @user.roles && owner_id == @user.id",
+        "update": "'writer' in @user.roles && owner_id == @user.id",
+        "delete": "'writer' in @user.roles"
+      }
+    }
+  }
+}

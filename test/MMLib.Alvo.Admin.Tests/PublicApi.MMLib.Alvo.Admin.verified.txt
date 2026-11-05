@@ -680,6 +680,8 @@ namespace MMLib.Alvo.Admin.Components.Rules
         [Microsoft.AspNetCore.Components.Parameter]
         public string Entity { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementExtension> Extensions { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         [System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "Operation",
                 "Cel"})]
@@ -808,6 +810,8 @@ namespace MMLib.Alvo.Admin.Components.Schema
         public bool Editable { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string Entity { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementExtension> Extensions { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, string>> Hooks { get; set; }
@@ -860,6 +864,8 @@ namespace MMLib.Alvo.Admin.Components.Schema
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementExtension> Extensions { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, string>> Hooks { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public MMLib.Alvo.Management.ManagementExtensionStats? Stats { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override void OnParametersSet() { }
     }

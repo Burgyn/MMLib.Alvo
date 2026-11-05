@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
+using MMLib.Alvo.Hooks;
 using MMLib.Alvo.Management.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.TestHost.Tests;
@@ -20,6 +21,8 @@ internal sealed class OperationsTestWorld : IDisposable
 {
     internal const string Project = "desk";
     internal const string Handler = "send-confirmation";
+    internal const string Validator = "vat-check";
+    internal const string Guard = "stamp-guard";
 
     private readonly ServiceProvider _provider;
 
@@ -35,6 +38,9 @@ internal sealed class OperationsTestWorld : IDisposable
             alvo.Services.AddSingleton<ISchemaMigrator>(new InMemorySchemaMigrator());
             alvo.Services.AddSingleton<IDeliveryStore>(Store);
             alvo.Entity("tickets", tickets => tickets.OnCreated(Handler, (AlvoCreated<AlvoRecord> _) => Task.CompletedTask));
+            alvo.Entity("tickets", tickets => tickets
+                .Validate(Validator, (ValidateWrite<AlvoRecord> _) => ValueTask.CompletedTask)
+                .BeforeWrite(Guard, (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask));
         });
         _provider = services.BuildServiceProvider();
         _provider.GetRequiredService<AlvoBootState>().Ready(Project, appliedRevision: 1);

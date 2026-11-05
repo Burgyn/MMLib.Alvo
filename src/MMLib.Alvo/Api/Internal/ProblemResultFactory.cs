@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Microsoft.Net.Http.Headers;
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Hooks;
 
 namespace MMLib.Alvo.Api.Internal;
 
@@ -45,6 +46,9 @@ internal static class ProblemResultFactory
 
     /// <summary>The extension member that marks a refusal no retry of the same request can get past.</summary>
     private const string RetryableMember = "retryable";
+
+    /// <summary>The extension member naming the host extension a refusal or failure came from, as an array of one id.</summary>
+    private const string ExtensionsMember = "extensions";
 
     /// <summary>
     /// The 401 for a credential that was presented and cannot be used — unknown, revoked, expired,
@@ -340,6 +344,37 @@ internal static class ProblemResultFactory
             detail,
             new Dictionary<string, object?>(StringComparer.Ordinal) { [RetryableMember] = false });
 
+    /// <summary>A host write hook's refusal: 422, 409 or 403 by its kind, with every violation of that kind and the hook's id.</summary>
+    /// <param name="rejected">The refusal.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult HookRejected(AlvoWriteRejectedException rejected)
+    {
+        ArgumentNullException.ThrowIfNull(rejected);
+        var (status, type) = rejected.Kind switch
+        {
+            AlvoWriteRejectionKind.Forbidden => (StatusCodes.Status403Forbidden, AlvoProblemTypes.Forbidden),
+            AlvoWriteRejectionKind.Conflict => (StatusCodes.Status409Conflict, AlvoProblemTypes.Conflict),
+            _ => (StatusCodes.Status422UnprocessableEntity, AlvoProblemTypes.Validation),
+        };
+
+        return Problem(
+            status,
+            type,
+            string.Join(" ", rejected.Violations.Select(violation => violation.Message).Distinct(StringComparer.Ordinal)),
+            new Dictionary<string, object?>(StringComparer.Ordinal) { ["violations"] = rejected.Violations, [ExtensionsMember] = new[] { rejected.ExtensionId } });
+    }
+
+    /// <summary>The 500 for a host write hook that failed; the write was rolled back.</summary>
+    /// <param name="extension">The hook's id.</param>
+    /// <param name="reason">The fixed reason.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult HookFailed(string extension, string reason) =>
+        Problem(
+            StatusCodes.Status500InternalServerError,
+            AlvoProblemTypes.HookFailed,
+            $"The write hook '{extension}' failed ({reason}), so nothing was written. Its own error is in the server log.",
+            new Dictionary<string, object?>(StringComparer.Ordinal) { [ExtensionsMember] = new[] { extension }, ["reason"] = reason });
+
     /// <summary>
     /// The refusal for a request the web server would not read — rendered at <em>its</em> status, not 500.
     /// </summary>
@@ -509,7 +544,8 @@ internal static class ProblemResultFactory
 
     /// <summary>
     /// The refusal for one of the data port's documented families thrown by a call the caller can fix — authorization,
-    /// not-found, precondition, idempotency, constraint, chain depth — or null for anything else.
+    /// not-found, precondition, idempotency, constraint, chain depth, a host write hook's rejection — or null for anything else.
+    /// A rejection host code constructed itself names no hook, so it is no refusal: it stays a failure (500).
     /// </summary>
     /// <param name="exception">What the port threw.</param>
     internal static IResult? PortRefusalFor(Exception exception) => exception switch
@@ -522,6 +558,7 @@ internal static class ProblemResultFactory
         AlvoIdempotencyConflictException conflict => Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.IdempotencyConflict, conflict.Message),
         AlvoConstraintViolationException constraint => Conflict(constraint),
         AlvoChainDepthExceededException loop => ChainDepthExceeded(loop.Message),
+        AlvoWriteRejectedException { ExtensionId.Length: > 0 } rejected => HookRejected(rejected),
         _ => null,
     };
 

@@ -3,7 +3,10 @@
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Extensions;
+using MMLib.Alvo.Hooks;
 using MMLib.Alvo.Migrations;
+
+using System.Net.Http;
 
 namespace MMLib.Alvo.TestHost.Tests;
 
@@ -53,5 +56,20 @@ public sealed class ExtensionBootRefusalTests
             cancellationToken: Ct));
 
         refusal.Message.ShouldContain("'a-b' and 'a_b'");
+    }
+
+    [Fact]
+    public async Task A_write_hook_injecting_an_http_client_refuses_boot_naming_the_parameter()
+    {
+        var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(() => AlvoTestHost.StartAsync(alvo =>
+        {
+            alvo.FromDescriptor(Path.Combine(AppContext.BaseDirectory, "descriptors", "hook-desk.alvo.json"));
+            alvo.Entity("bookings", b => b.BeforeWrite("network-guard", (BeforeWrite<AlvoRecord> _, HttpClient http) => ValueTask.CompletedTask));
+        }, cancellationToken: TestContext.Current.CancellationToken));
+
+        refusal.Message.ShouldContain("'network-guard'");
+        refusal.Message.ShouldContain("extensions/network-guard/dependencies");
+        refusal.Message.ShouldContain("'http'");
+        refusal.Message.ShouldNotContain("/provider", customMessage: "the real SQLite composition is relational");
     }
 }

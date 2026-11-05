@@ -117,6 +117,24 @@ else
     </div>
 }
 
+@if (Verdict.Extensions.Count > 0)
+{
+    <div class="a-field" data-testid="verdict-extensions">
+        <span class="a-label">Code that also runs on this operation</span>
+        @foreach (var extension in Verdict.Extensions)
+        {
+            <div class="a-row a-row--wrap" data-testid="@($"verdict-extension-{extension.Id}")">
+                <span class="a-badge a-badge--accent">⟨/⟩ from code</span>
+                <span class="a-mono a-name">@extension.Id</span>
+                <span class="a-section__sub" data-testid="verdict-extension-stage">@LifecycleLane.StageLabel(extension)</span>
+            </div>
+        }
+        <span class="a-section__sub">
+            Registered in the host's C#. This screen judges the rules only: a hook may still refuse, or change, a write the rules admit.
+        </span>
+    </div>
+}
+
 @code {
     /// <summary>The verdict the engine returned.</summary>
     [Parameter, EditorRequired]

@@ -49,7 +49,7 @@ internal sealed class ExtensionBinder(
         binding.MarkReported();
     }
 
-    /// <summary>The handlers bound to <paramref name="catalog"/>; the first call per catalog logs each unbound one.</summary>
+    /// <summary>The handlers, commands and write hooks bound to <paramref name="catalog"/>; the first call per catalog logs each unbound one.</summary>
     /// <param name="catalog">The catalog now serving.</param>
     internal ExtensionBindings For(PolicyCatalog catalog)
     {
@@ -78,7 +78,7 @@ internal sealed class ExtensionBinder(
         return _bindings.GetValue(catalog, primed => new(ExtensionBindingCompiler.Compile(registry, primed, compiler, services)));
     }
 
-    /// <summary>One catalog's binding, and whether its unbound handlers were reported.</summary>
+    /// <summary>One catalog's binding, and whether its unbound extensions were reported.</summary>
     private sealed class CatalogBinding(ExtensionBindingResult result)
     {
         private int _reported;

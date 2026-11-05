@@ -63,3 +63,7 @@
 [assembly: InternalsVisibleTo("MMLib.Alvo.Admin")]
 [assembly: InternalsVisibleTo("MMLib.Alvo.Ai.Tests")]
 [assembly: InternalsVisibleTo("MMLib.Alvo.Admin.Tests.EndToEnd")]
+
+// HX-09's write-hook vocabulary: the default runner (NoWriteExtensions), the budget refusal's factory and the reserved
+// rejection table are internal, and their facts live beside the public port they belong to, in Abstractions' own suite.
+[assembly: InternalsVisibleTo("MMLib.Alvo.Abstractions.Tests")]

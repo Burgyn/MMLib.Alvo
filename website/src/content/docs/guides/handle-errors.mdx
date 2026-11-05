@@ -61,13 +61,13 @@ violation's `code` is stable. Take the part after the last `/` and switch on it:
 
 | Slug | Status | What happened | What to do |
 |---|---|---|---|
-| [`validation`](/reference/problem-types/#validation) | 422 | The body breaks the entity's declared fields. | Fix each field a violation points at. |
+| [`validation`](/reference/problem-types/#validation) | 422 | The body breaks the entity's declared fields, or a [write hook](/extending/write-hooks/) found a value invalid. | Fix each field a violation points at. |
 | [`malformed-query`](/reference/problem-types/#malformed-query) | 422 | The query string or query body is malformed. | Fix the parameter the violation names. |
 | [`unauthenticated`](/reference/problem-types/#unauthenticated) | 401 | A key was sent and cannot be used. | Fix the key; retrying will not help. |
-| [`forbidden`](/reference/problem-types/#forbidden) | 403 | A rule or a before-hook refused. | Change the request, or call with a role the rules grant. |
+| [`forbidden`](/reference/problem-types/#forbidden) | 403 | A rule, a before-hook or a [write hook](/extending/write-hooks/) refused. | Change the request, or call with a role the rules grant. |
 | [`out-of-scope`](/reference/problem-types/#out-of-scope) | 403 | The key's scopes do not cover this. | Grant the key the scope. |
 | [`not-found`](/reference/problem-types/#not-found) | 404 | No such row, or your rules hide it. | Check the id and the rules. |
-| [`conflict`](/reference/problem-types/#conflict) | 409 | A `unique` value or a `restrict` reference is in the way. | Send another value, or remove the reference. |
+| [`conflict`](/reference/problem-types/#conflict) | 409 | A `unique` value or a `restrict` reference is in the way, or a [write hook](/extending/write-hooks/) found a conflict. | Send another value, or remove what is in the way. |
 | [`destructive-change`](/reference/problem-types/#destructive-change) | 409 | A Management API apply would discard data. | Resend with `allowDestructive: true`, or keep what the plan drops. |
 | [`idempotency-conflict`](/reference/problem-types/#idempotency-conflict) | 409 | The `Idempotency-Key` was used for a different request. | Send a new key. |
 | [`precondition-failed`](/reference/problem-types/#precondition-failed) | 412 | The row changed since you read it. | Read it again, reapply, resend. |
@@ -75,6 +75,7 @@ violation's `code` is stable. Take the part after the last `/` and switch on it:
 | [`unsupported-media-type`](/reference/problem-types/#unsupported-media-type) | 415 | The body was not declared as JSON. | Send `Content-Type: application/json`. |
 | [`unreadable-request`](/reference/problem-types/#unreadable-request) | 413, 408, 400 | The web server refused the body. | Send a smaller body, in one go. |
 | [`function-failed`](/reference/problem-types/#function-failed) | 500 | A CEL function failed while the write was checked; nothing was written. | Check the input the function reads. |
+| [`hook-failed`](/reference/problem-types/#hook-failed) | 500 | A write hook in the host's code failed; nothing was written. | Nothing in the request is at fault; the host's log has the hook's error. See [Validate and guard writes](/extending/write-hooks/). |
 | [`internal`](/reference/problem-types/#internal) | 500 | Something inside Alvo broke. | Nothing in the request is at fault; the host's log has the details. |
 | [`chain-depth-exceeded`](/reference/problem-types/#chain-depth-exceeded) | 508 | A loop of hooks, handlers or timers went deeper than the chain limit; nothing was written. | Never retry it (`retryable: false`); break the loop. |
 
@@ -165,14 +166,14 @@ requested tenant, or a key with a role the descriptor does not declare. A reques
 
 ## Errors in an embedded host
 
-Three problem types come from Alvo's exception handler rather than from an endpoint: `unreadable-request`, `internal`
-and `function-failed`. The standalone host registers that handler:
+Four problem types come from Alvo's exception handler rather than from an endpoint: `unreadable-request`, `internal`,
+`function-failed` and `hook-failed`. The standalone host registers that handler:
 
 <SourceExcerpt code={alvoHost} from="builder.Services.AddAlvoProblemDetails();" to="builder.Services.AddAlvoProblemDetails();" title="AlvoHost.cs (registration)" />
 
 <SourceExcerpt code={alvoHost} from="app.UseExceptionHandler();" to="app.UseExceptionHandler();" title="AlvoHost.cs (pipeline)" />
 
-An embedded host decides for itself. With both calls, those three failures on Alvo's own routes get the documents
+An embedded host decides for itself. With both calls, those four failures on Alvo's own routes get the documents
 above, and a failure on the host's own routes is left to the host's handlers. Without them, which is the default, Alvo
 writes nothing for them: the exception reaches your own error handling and logging, and your app renders the 500 or 400
 it always would. Every other problem type on this page comes from the endpoints themselves and is the same in both
@@ -186,14 +187,15 @@ how to render them.
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 422 | [`validation`](/reference/problem-types/#validation) | The body names an unknown field, misses a required one or breaks a facet. | Fix each field a violation points at. | every host |
-| 403 | [`forbidden`](/reference/problem-types/#forbidden) | A rule refused, a `reject` fired, or a hook's value broke a facet. | Read the `detail`; change the request or the descriptor. | every host |
+| 422 | [`validation`](/reference/problem-types/#validation) | The body names an unknown field, misses a required one or breaks a facet, or a [write hook](/extending/write-hooks/) found a value invalid. | Fix each field a violation points at. | every host |
+| 403 | [`forbidden`](/reference/problem-types/#forbidden) | A rule refused, a `reject` fired, a hook's value broke a facet, or a [write hook](/extending/write-hooks/) refused. | Read the `detail`; change the request or the descriptor. | every host |
 | 403 | [`out-of-scope`](/reference/problem-types/#out-of-scope) | The key's scopes do not cover the operation. | Grant the key the scope. | every host |
 | 404 | [`not-found`](/reference/problem-types/#not-found) | The row does not exist, or the rules hide it. | Check the id, then the rule with `policy/simulate`. | every host |
 | 415 | [`unsupported-media-type`](/reference/problem-types/#unsupported-media-type) | The body is not declared as JSON. | Send `Content-Type: application/json`. | every host |
 | 401 | [`unauthenticated`](/reference/problem-types/#unauthenticated) | The key cannot be used. | Check the secret and the key's roles. | every host |
 | 413, 408, 400 | [`unreadable-request`](/reference/problem-types/#unreadable-request) | The web server refused the body before Alvo read it. | Send a smaller body, in one go. | standalone; embedded only with `AddAlvoProblemDetails()` |
 | 500 | [`function-failed`](/reference/problem-types/#function-failed) | A CEL function failed during a write. | Check the function's input; the exception is in the host's log. | standalone; embedded only with `AddAlvoProblemDetails()` |
+| 500 | [`hook-failed`](/reference/problem-types/#hook-failed) | A write hook in the host's code failed during a write. | Read the host's log for the hook the `extensions` member names; see [Validate and guard writes](/extending/write-hooks/#time-limits). | standalone; embedded only with `AddAlvoProblemDetails()` |
 | 500 | [`internal`](/reference/problem-types/#internal) | An invariant inside Alvo broke. | Read the host's log. | standalone; embedded only with `AddAlvoProblemDetails()` |
 | 508 | [`chain-depth-exceeded`](/reference/problem-types/#chain-depth-exceeded) | A loop of hooks, handlers or timers went deeper than `Alvo:Extensions:MaxDepth`. | Never retry it (`retryable: false`); break the loop. | every host |
 

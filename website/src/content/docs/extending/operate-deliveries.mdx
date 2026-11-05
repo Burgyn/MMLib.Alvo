@@ -129,8 +129,8 @@ dead** (the dry run's count first); the delivery list by status; and a delivery'
 
 ## Switching code off, and schedules
 
-`PUT …/extensions/{id}/enabled` exists for validate hooks, which arrive with write hooks; for an event handler it
-answers 409 naming the pause route. `POST …/schedules/{id}/run` answers 404 until schedules exist.
+`PUT …/extensions/{id}/enabled` switches a [validate hook](/extending/write-hooks/#validate-before-the-transaction)
+off and on; for an event handler it answers 409 naming the pause route, and for any other code 409 too. `POST …/schedules/{id}/run` answers 404 until schedules exist.
 
 ## Known limits
 

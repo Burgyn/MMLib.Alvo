@@ -6,7 +6,8 @@
       "The body names a field the entity does not declare, writes a read-only field, or points a `ref` at a row that does not exist.",
       "The body is not a JSON object, is not valid JSON, repeats a field, or is larger, deeper or wider than the configured limits.",
       "A batch body has no `rows` array, an empty one, too many rows, or a row without a valid `id`.",
-      "A Management API apply carried a descriptor that does not validate."
+      "A Management API apply carried a descriptor that does not validate.",
+      "A write hook in the host's code refused the write with `Invalid`: the violation's `code` is the hook's own, and the document's `extensions` names the hook."
     ],
     "fix": "Correct each field the violations point at; every violation carries a `pointer` and a `fixSuggestion`.",
     "violationCodes": [
@@ -43,7 +44,8 @@
       "The entity's access rules deny the operation, or the row being written would not satisfy them.",
       "A before-hook's `reject` fired, or a `mutate` produced a value the target field's facets refuse.",
       "A Management API caller does not reach the project access level the route needs.",
-      "In a batch, rows refused by policy or named twice are listed in `violations`, one entry per row."
+      "In a batch, rows refused by policy or named twice are listed in `violations`, one entry per row.",
+      "A write hook in the host's code refused the write with `Forbidden`, or set a field the caller's policy makes `readOnly`; a refusal's `code` is the hook's own, and the document's `extensions` names the hook."
     ],
     "fix": "Change the request so the rules admit it, or call with a role the rules grant. A rule's refusal never says which rule refused; a before-hook's `reject` puts its own message in `detail`, written for the caller.",
     "violationCodes": ["forbidden", "duplicate-row"],
@@ -102,7 +104,8 @@
   "conflict": {
     "causes": [
       "A value another record already holds on a `unique` field.",
-      "A delete that a `ref` declaring `onDelete: \"restrict\"` refuses, because other records still point at the row."
+      "A delete that a `ref` declaring `onDelete: \"restrict\"` refuses, because other records still point at the row.",
+      "A write hook in the host's code refused the write with `Conflict`: the violation's `code` is the hook's own, and the document's `extensions` names the hook."
     ],
     "fix": "Send a value no other record holds, or delete or repoint the records that reference this one, then retry.",
     "violationCodes": ["unique", "referenced"],
@@ -173,5 +176,14 @@
     "violationCodes": [],
     "guides": ["guides/handle-errors", "guides/after-hooks-and-webhooks"],
     "needsProblemDetails": false
+  },
+  "hook-failed": {
+    "causes": [
+      "A write hook the host registered in code failed, so the write was rolled back and nothing was written. The document's `extensions` names the hook and its `reason` says how: `exception` (it threw, or a host function in its `when` did), `timeout`, `budget` (too many calls through the write's transaction), `invalid-set` (it set a field it may not, or a value the field cannot hold), `self-write` (it wrote the row it runs on), `unbound` (it does not fit the current schema) or `row-vanished` (after its writes, the write could no longer read back the row it ran on)."
+    ],
+    "fix": "Nothing in the request is at fault: the hook is the host's code. Its own error is in the host's log under the hook's id, never in the response. A hook that refuses a write on purpose answers `validation`, `conflict` or `forbidden` instead.",
+    "violationCodes": [],
+    "guides": ["extending/write-hooks", "guides/handle-errors"],
+    "needsProblemDetails": true
   }
 }

@@ -1,7 +1,9 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Rules;
@@ -77,6 +79,66 @@ public sealed class WriteUnitTests
         (await Should.ThrowAsync<InvalidOperationException>(() => unit.RunAsync(_ => Task.FromResult(1), Ct))).InnerException.ShouldBeSameAs(original);
         (await Should.ThrowAsync<AlvoUnitInProgressException>(() => unit.CommitAsync())).ShouldBeSameAs(original);
         unit.HasEnded.ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Blame_replaces_a_recorded_cancellation_and_fills_an_empty_failure(bool cancelledFirst)
+    {
+        await using var world = await StartAsync();
+        await using var unit = await OpenAsync(world);
+        var timeout = new HookFailedException("guard", HookFailedException.Timeout);
+
+        if (cancelledFirst)
+        {
+            unit.Poison(new OperationCanceledException());
+        }
+
+        unit.Blame(timeout);
+
+        (await Record.ExceptionAsync(() => unit.CommitAsync())).ShouldBeSameAs(timeout);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Blame_never_replaces_a_timeout_or_another_failure(bool timedOut)
+    {
+        await using var world = await StartAsync();
+        await using var unit = await OpenAsync(world);
+        Exception original = timedOut ? new TimeoutException("deadline") : new AlvoUnitInProgressException("refused");
+
+        unit.Poison(original);
+        unit.Blame(new HookFailedException("guard", HookFailedException.Timeout));
+
+        (await Record.ExceptionAsync(() => unit.CommitAsync())).ShouldBeSameAs(original);
+    }
+
+    [Fact]
+    public async Task Blame_is_ignored_once_the_unit_s_end_is_decided()
+    {
+        await using var world = await StartAsync();
+        await using var unit = await OpenAsync(world);
+        await unit.CommitAsync();
+
+        unit.Blame(new HookFailedException("guard", HookFailedException.Timeout));
+
+        (await Record.ExceptionAsync(() => unit.CommitAsync())).ShouldBeOfType<InvalidOperationException>("the unit's own 'has ended', not the late blame");
+    }
+
+    [Fact]
+    public async Task A_released_unit_keeps_no_more_rejections()
+    {
+        await using var world = await StartAsync();
+        var unit = await OpenAsync(world);
+        var rejection = new HookRejection(DateTimeOffset.UnixEpoch, "guard", "note", "create", "conflict", "late", "t/u");
+        unit.Remember(rejection).ShouldBeTrue();
+
+        await unit.DisposeAsync();
+
+        unit.Remember(rejection with { Code = "later" }).ShouldBeFalse();
+        unit.Rejections.ShouldBe([rejection]);
     }
 
     [Fact]
@@ -324,6 +386,25 @@ public sealed class WriteUnitTests
     }
 
     [Fact]
+    public async Task A_unit_s_rejections_are_recorded_even_when_releasing_it_throws()
+    {
+        var database = $"Data Source=hook-rejections-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        await using var keeper = new SqliteConnection(database);
+        await keeper.OpenAsync(Ct);
+        var log = EfCoreHookRejectionLog.ForTests(() => new SqliteConnection(database), "alvo", NullLogger<EfCoreHookRejectionLog>.Instance);
+        await using var world = await WritePathWorld.StartAsync(
+            WritePathFixture.Descriptor(), WritePathFixture.Schema(), services => services.AddScoped<DisposalProbe>(), rejections: log);
+        var (unit, _, _) = await DisposeFailingUnitAsync(world);
+        unit.Remember(new HookRejection(DateTimeOffset.UnixEpoch, "guard", "note", "create", "conflict", "kept", "t/u")).ShouldBeTrue();
+
+        await Should.ThrowAsync<CleanupFailure>(() => world.Data.ReleasedAndFlushedAsync(unit));
+
+        await using var command = keeper.CreateCommand();
+        command.CommandText = "SELECT code FROM alvo_hook_rejections";
+        (await command.ExecuteScalarAsync(Ct)).ShouldBe("kept");
+    }
+
+    [Fact]
     public async Task A_cleanup_failure_after_a_successful_commit_is_logged_not_thrown()
     {
         var logs = new CapturingLoggerProvider();
@@ -550,7 +631,7 @@ public sealed class WriteUnitTests
         var probe = scope.ServiceProvider.GetRequiredService<DisposalProbe>();
         var unit = new WriteUnit(
             new WriteUnitParts(root, root.Database.GetDbConnection(), transaction, turn, scope),
-            world.Caller, AlvoProvenance.None, TimeSpan.FromHours(1), TimeProvider.System, Ct);
+            world.Caller, AlvoProvenance.None, new AlvoTransactionOptions { Timeout = TimeSpan.FromHours(1) }, owned: false, TimeProvider.System, Ct);
 
         return (unit, turn, probe);
     }

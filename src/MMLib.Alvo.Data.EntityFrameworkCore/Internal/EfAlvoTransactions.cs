@@ -1,12 +1,14 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
-using System.Runtime.ExceptionServices;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using MMLib.Alvo.Events;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
 /// <summary>
-/// <see cref="IAlvoTransactions"/> over the EF data port: open a unit, put it on the flow, run the delegate once, commit —
-/// or roll back and rethrow, as a <see cref="TimeoutException"/> whatever the delegate threw once the deadline passed, and
-/// as the unit's own recorded failure a refusal that only wraps it.
+/// <see cref="IAlvoTransactions"/> over the EF data port: open a unit, run the delegate once on its flow through
+/// <see cref="UnitRun"/>, commit — or roll back and rethrow as the unit recorded it — and record the unit's hook rejections
+/// once it has ended (Ruling 8).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -18,11 +20,18 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// The delegate runs inside <see cref="WriteUnit.EnterFlow"/>, the one way a unit gets onto the flow (Ruling 48): every
 /// call through the unit joins it only from that flow.
 /// </para>
+/// <para>
+/// A unit that suppresses host hooks writes one operations-log row in its own transaction and, once committed, one
+/// <c>ManagementAudit</c> warning — the core's template and event name, which the driver cannot call (Ruling 30).
+/// </para>
 /// </remarks>
 /// <param name="data">The data port the unit's calls run through.</param>
 /// <param name="scopes">Where each unit's DI scope comes from.</param>
-internal sealed class EfAlvoTransactions(EfAlvoData data, IServiceScopeFactory scopes) : IAlvoTransactions
+/// <param name="logger">Where a suppressing unit's audit line goes.</param>
+internal sealed partial class EfAlvoTransactions(EfAlvoData data, IServiceScopeFactory scopes, ILogger<EfAlvoTransactions>? logger = null) : IAlvoTransactions
 {
+    private readonly ILogger _logger = logger ?? NullLogger<EfAlvoTransactions>.Instance;
+
     /// <inheritdoc/>
     public async Task<T> TransactAsync<T>(
         AlvoContext context,
@@ -35,28 +44,41 @@ internal sealed class EfAlvoTransactions(EfAlvoData data, IServiceScopeFactory s
         AlvoFlow.RefuseInsideUnit("IAlvoTransactions.TransactAsync");
         var settings = AlvoTransactionOptions.Validated(options, context);
 
-        await using var unit = await data.OpenUnitAsync(context, settings, scopes, cancellationToken).ConfigureAwait(false);
-        using var flow = unit.EnterFlow();
-        var result = await WorkedAsync(unit, work, context).ConfigureAwait(false);
-        await unit.CommitAsync().ConfigureAwait(false);
-
-        return result;
-    }
-
-    private async Task<T> WorkedAsync<T>(WriteUnit unit, Func<IAlvoTransaction, CancellationToken, Task<T>> work, AlvoContext context)
-    {
+        var unit = await data.OpenUnitAsync(context, settings, scopes, cancellationToken).ConfigureAwait(false);
         try
         {
-            return await work(new EfAlvoTransaction(data, unit, context), unit.Token).ConfigureAwait(false);
+            var (result, audit) = await UnitRun.CommittedAsync(unit, () => AuditedWorkAsync(unit, settings, work, context)).ConfigureAwait(false);
+            Audited(audit);
+
+            return result;
         }
-        catch (Exception failure) when (unit.TimedOut && failure is not TimeoutException)
+        finally
         {
-            throw unit.TimedOutBecause(failure);
-        }
-        catch (Exception failure) when (unit.RecordedFailureBehind(failure) is { } recorded)
-        {
-            ExceptionDispatchInfo.Throw(recorded);
-            throw;
+            await data.ReleasedAndFlushedAsync(unit).ConfigureAwait(false);
         }
     }
+
+    /// <summary>The delegate's run, after the unit's suppression audit row when it suppresses host hooks (Ruling 30).</summary>
+    private async Task<(T Result, DeliveryOperationEntry? Audit)> AuditedWorkAsync<T>(
+        WriteUnit unit, AlvoTransactionOptions settings, Func<IAlvoTransaction, CancellationToken, Task<T>> work, AlvoContext context)
+    {
+        var audit = settings.SuppressHostHooks
+            ? await data.AuditSuppressionAsync(unit, settings.Reason!, unit.Token).ConfigureAwait(false)
+            : null;
+
+        return (await work(new EfAlvoTransaction(data, unit, context), unit.Token).ConfigureAwait(false), audit);
+    }
+
+    private void Audited(DeliveryOperationEntry? entry)
+    {
+        if (entry is not null)
+        {
+            ManagementAudit(_logger, entry.Actor, entry.Operation, entry.Target, entry.Affected ?? 0, entry.Reason ?? string.Empty);
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Management audit: {Actor} made '{Operation}' on '{Target}' ({Affected} changed). Reason: {Reason}")]
+    private static partial void ManagementAudit(ILogger logger, string actor, string operation, string target, int affected, string reason);
 }

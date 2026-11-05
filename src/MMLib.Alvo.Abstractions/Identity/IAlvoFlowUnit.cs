@@ -13,4 +13,11 @@ internal interface IAlvoFlowUnit
     /// <summary>Fails the unit: it will roll back however its delegate ends, and its commit throws <paramref name="failure"/>.</summary>
     /// <param name="failure">The first failure that makes the unit's work untrustworthy.</param>
     void Poison(Exception failure);
+
+    /// <summary>
+    /// Records <paramref name="cause"/> as the unit's failure, replacing a cancellation recorded before it and nothing else:
+    /// a hook's deadline is why its own calls were cancelled (Ruling 11).
+    /// </summary>
+    /// <param name="cause">The failure the unit should end with.</param>
+    void Blame(Exception cause);
 }

@@ -1,6 +1,8 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Events;
+using MMLib.Alvo.Hooks;
 using System.Diagnostics;
 
 namespace MMLib.Alvo.TestHost.Tests;
@@ -13,6 +15,7 @@ public sealed class AlvoHookRecorderTests
 {
     private const string TicketsWebhook = "/entities/tickets/hooks/afterCreate/0";
     private const string HooksSource = "MMLib.Alvo.Hooks";
+    private const string AmbientSource = "MMLib.Alvo.TestHost.Tests.Ambient";
 
     private static string HelpDesk => Path.Combine(AppContext.BaseDirectory, "descriptors", "help-desk.alvo.json");
 
@@ -106,6 +109,48 @@ public sealed class AlvoHookRecorderTests
         StopSucceededRunIn(receiver.Trace);
 
         recorder.AssertRan(TicketsWebhook, times: 1);
+    }
+
+    [Fact]
+    public async Task A_data_call_inside_an_ambient_trace_joins_it_so_the_event_carries_that_trace()
+    {
+        string? traceParent = null;
+        await using var alvo = await AlvoTestHost.StartAsync(
+            builder => builder.FromDescriptor(HelpDesk).Entity("tickets", tickets => tickets
+                .BeforeWrite("in-the-ambient-trace", (BeforeWrite<AlvoRecord> _) => ValueTask.CompletedTask)
+                .OnCreated(
+                    "reads-the-trace",
+                    (AlvoCreated<AlvoRecord> _, AlvoEventContext context) =>
+                    {
+                        traceParent = context.Event.TraceParent;
+                        return Task.CompletedTask;
+                    })),
+            cancellationToken: Ct);
+        using var listener = SampleEverythingFrom(AmbientSource);
+        using var source = new ActivitySource(AmbientSource);
+        using (var request = source.StartActivity("request")!)
+        {
+            await CreateHighPriorityAsync(alvo);
+
+            await alvo.DrainEventsAsync(Ct);
+
+            traceParent.ShouldNotBeNull().ShouldContain(request.TraceId.ToHexString(), Case.Sensitive, "a production write in this trace carries it");
+        }
+
+        alvo.Hooks.AssertRan("reads-the-trace");
+        alvo.Hooks.AssertRan("in-the-ambient-trace");
+    }
+
+    private static ActivityListener SampleEverythingFrom(string name)
+    {
+        var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == name,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+        };
+        ActivitySource.AddActivityListener(listener);
+
+        return listener;
     }
 
     private static void StopSucceededRunIn(ActivityTraceId trace)

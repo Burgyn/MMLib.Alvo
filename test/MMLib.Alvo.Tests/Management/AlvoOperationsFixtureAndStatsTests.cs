@@ -61,7 +61,7 @@ public sealed class AlvoOperationsFixtureAndStatsTests
         var stats = await world.Service.GetExtensionStatsAsync(Project, Ct);
 
         stats.Scope.ShouldBe("this-instance");
-        stats.Items.ShouldHaveSingleItem().Id.ShouldBe(OperationsTestWorld.Handler);
+        stats.Items.Select(item => item.Id).ShouldBe([OperationsTestWorld.Handler, OperationsTestWorld.Validator, OperationsTestWorld.Guard], ignoreOrder: true);
     }
 
     [Fact]

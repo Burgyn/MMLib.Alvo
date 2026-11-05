@@ -2,7 +2,7 @@
 title: Commands and inbound webhooks
 description: Expose a named, access-ruled action over HTTP or in process, make its external call first and its writes in one unit, and receive Standard Webhooks verified and once.
 sidebar:
-  order: 8
+  order: 9
 ---
 
 import { Code } from '@astrojs/starlight/components';
@@ -79,6 +79,8 @@ The handler is **not** in a transaction. Call the payment provider first, then w
 - `ctx.Record` is the row the filter read as the caller; read it rather than reading the row again.
 - Inside `ctx.TransactAsync` use the unit. `IAlvoData` and `ctx.Data` are refused there, as in any
   [unit](/extending/transactions/#not-inside-a-unit). A second `TransactAsync` in one run throws.
+- The unit's writes run their entities' before- and after-write hooks, never validate: make the external check a
+  validate hook would make before `ctx.TransactAsync`, as above. See [Validate and guard writes](/extending/write-hooks/).
 - The completion event `alvo.command.confirm_stay.completed` and the `Idempotency-Key`'s record are written in that unit,
   as its last writes, so they commit with the stay and the payment or not at all.
 - A command that opens no unit gets both after it answers `2xx`, in one transaction of their own. One that answers

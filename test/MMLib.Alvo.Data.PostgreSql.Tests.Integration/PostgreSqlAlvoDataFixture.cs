@@ -81,6 +81,39 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
     }
 
     /// <summary>
+    /// Creates one database, migrates <paramref name="schema"/> into it once, and starts
+    /// <paramref name="replicas"/> hosts over it — each its own container, so each has its own data path, its own
+    /// ensure-once memos and its own connection pool, exactly as separate processes of one deployment would.
+    /// </summary>
+    /// <param name="schema">The schema to migrate and compile the rules against.</param>
+    /// <param name="descriptor">The descriptor whose rules are compiled.</param>
+    /// <param name="replicas">How many hosts share the database.</param>
+    /// <returns>The hosts, and the database's connection string for a fact that has to act on it directly.</returns>
+    public async Task<(IReadOnlyList<PostgreSqlAlvoDataHost> Hosts, string ConnectionString)> StartReplicasAsync(
+        SchemaModel schema, AlvoDescriptor descriptor, int replicas)
+    {
+        ArgumentNullException.ThrowIfNull(schema);
+        Assert.SkipUnless(Available, "Docker is unavailable on this platform, so the PostgreSQL engine cannot be started.");
+
+        var (connectionString, database) = await CreateDatabaseAsync();
+        var hosts = new List<PostgreSqlAlvoDataHost>(replicas);
+        for (var replica = 0; replica < replicas; replica++)
+        {
+            var services = BuildProvider(connectionString, time: null, configure: null);
+            if (replica == 0)
+            {
+                await MigrateAsync(services, schema);
+            }
+
+            var host = new PostgreSqlAlvoDataHost(services, descriptor, NewCapture(database));
+            host.RePrime(schema);
+            hosts.Add(host);
+        }
+
+        return (hosts, connectionString);
+    }
+
+    /// <summary>
     /// Starts recording after the migration, so a fact sees the statements its own act produced rather than the
     /// DDL the fixture ran. The generated database name is the marker, exactly as the SQLite fixture's file
     /// name is.
@@ -127,7 +160,7 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
     /// </summary>
     private async Task<(string ConnectionString, string Database)> CreateDatabaseAsync()
     {
-        var adminConnectionString = _container!.GetConnectionString();
+        var adminConnectionString = PostgresTestContainer.ConnectionStringOf(_container!);
         var name = $"alvo_{Guid.NewGuid():N}";
         await using var admin = new NpgsqlConnection(adminConnectionString);
         await admin.OpenAsync(TestContext.Current.CancellationToken);

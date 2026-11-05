@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Write hooks in three phases** (HX-09, #386). `Entity<T>(…)`/`Entity("name", …)`/`Entities`/`Entity("*", …)` gain
+  `Validate`, `BeforeWrite`, `AfterWrite`, `BeforeDelete` and `AfterDelete` — class (`IValidateWriteHook<T>`, …) or
+  delegate hooks, with a lambda or CEL `when`. Validate runs before a top-level write's transaction (network allowed,
+  5 s, skipped on idempotent replays and inside transaction units; an administrator can switch it off, audited);
+  before/after hooks run inside the write's transaction (250 ms, 50 calls) and may refuse (422/409/403 with pointers —
+  never at a hidden field), `Set` fields (judged again by the rules and the field's facets), write other rows through
+  `write.Transaction` (as the caller, one hop deeper; `AsSystem()` in the caller's tenant only, logged) and publish
+  events that commit with the write. Timeouts, budget overruns, self-writes and hook exceptions fail the write with
+  500 `hook-failed` and a `reason`, even when the hook catches them; a hook taking a network or data-port dependency
+  refuses the start. `SuppressHostHooks` now skips host hooks for a system unit, audited. Rejections are kept in the new
+  framework table `<prefix>_hook_rejections` (the entity name is now reserved). The dashboard's Lifecycle tab draws
+  *Before the transaction* and *In the transaction* lanes with p95 and 24 h rejections; the editors, the policy
+  simulator and the apply preview name the code that also runs. Docs: *Validate and guard writes*.
+  **Breaking for typed .NET clients:** `AlvoExtensionKind` and `AlvoExtensionStage` gained members (append-only).
+  **Behaviour change:** a top-level write on an entity with a host in-transaction hook runs in a transaction unit of
+  its own — a 30 s limit, one DI scope, and an `IAlvoData` call from the hook is refused.
+
 - **Commands, inbound webhooks and HTTP conventions** (HX-08, #385). `MapAlvoCommand`/`MapAlvoCommand<TEntity>` — named
   commands whose caller (as the Data API resolves it), bound row (404 when unreadable) and access rule (CEL over
   `@user`, `@tenant` and the row, or a typed lambda; 403) are judged before the handler, which runs outside any
@@ -57,8 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lock serializes a claim (shared) against a redeliver, replay or pause (exclusive). The list pages at most 200 per
   request (the store, 1 000). Levels are instance-wide: deliveries are not separated per project. Known limit,
   pre-existing: the mutating management routes carry no antiforgery check for a cookie-authenticated caller. Docs:
-  *Operate deliveries*. **Breaking for delivery-store implementers:** `IDeliveryStore` gains nine abstract members and
-  `ClaimAsync` must skip paused subscribers; an attempt's number in the history now counts across redeliveries; the
+  *Operate deliveries*. **Breaking for delivery-store implementers:** `IDeliveryStore` gains nine abstract members, and
+  `SetDisabledAsync`/`DisabledAsync` (HX-09), and `ClaimAsync` must skip paused subscribers; an attempt's number in the history now counts across redeliveries; the
   dispatcher's claimant is unique per claim. **Breaking for SQL dialect implementers:**
   `IAlvoSqlDialect.TransactionLockStatement`'s default throws `NotSupportedException`. Upgrade: the two tables are
   created on start.

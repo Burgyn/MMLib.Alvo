@@ -69,6 +69,9 @@ internal static class AlvoFrameworkTables
     /// <summary>The suffix of the table holding one row per inbound Standard Webhooks id claimed.</summary>
     internal const string InboundWebhooksSuffix = "_inbound_webhooks";
 
+    /// <summary>The suffix of the table holding one row per rejection by a host write hook.</summary>
+    internal const string HookRejectionsSuffix = "_hook_rejections";
+
     /// <summary>The suffix of the table holding administrator accounts.</summary>
     internal const string IdentityUsersSuffix = "_identity_users";
 
@@ -135,6 +138,7 @@ internal static class AlvoFrameworkTables
             schemaPrefix + OperationsLogSuffix,
             schemaPrefix + CommandRequestsSuffix,
             schemaPrefix + InboundWebhooksSuffix,
+            schemaPrefix + HookRejectionsSuffix,
             .. IdentitySuffixes.Select(suffix => schemaPrefix + suffix),
         ];
     }

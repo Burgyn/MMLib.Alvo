@@ -86,9 +86,18 @@ internal static class ProblemComponents
                 Description =
                     "What went wrong, in prose. Built from constants and server-owned values only — it never "
                     + "echoes a caller-supplied field name or value, because a refusal is answered before "
-                    + "authorization on some paths and would otherwise be the cheapest oracle in the API.",
+                    + "authorization on some paths and would otherwise be the cheapest oracle in the API. The one "
+                    + "exception is a host write hook's refusal, whose `detail` is that hook's own message.",
             },
             ["violations"] = Violations(document),
+            ["extensions"] = new OpenApiSchema
+            {
+                Type = JsonSchemaType.Array,
+                Description =
+                    "The host extension that refused or failed, by its id, when one did — such as a write hook's "
+                    + "refusal answered `validation`, `conflict` or `forbidden`. Absent when no extension was involved.",
+                Items = new OpenApiSchema { Type = JsonSchemaType.String },
+            },
             ["retryable"] = new OpenApiSchema
             {
                 Type = JsonSchemaType.Boolean,

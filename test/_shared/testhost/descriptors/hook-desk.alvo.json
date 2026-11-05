@@ -1,0 +1,57 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "hook-desk",
+  "description": "The write-hook facts' desk: bookings with a default status, a score hidden from clerks and a rollup of their lines; audits a validate hook writes outside the write; limits only managers read, so a guard must act as the system to read them.",
+  "tenancy": { "enabled": true },
+  "auth": { "roles": ["clerk", "manager"] },
+  "access": { "admin": "'manager' in @user.roles" },
+  "entities": {
+    "bookings": {
+      "tenancy": "scoped",
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 40 },
+        "status": { "type": "enum", "values": ["open", "closed"], "default": "open" },
+        "score": { "type": "integer", "hidden": "!('manager' in @user.roles)" },
+        "lines_total": { "type": "integer", "rollup": { "from": "booking_lines", "op": "sum", "field": "amount" } }
+      },
+      "rules": {
+        "list": "'clerk' in @user.roles || 'admin' in @user.roles",
+        "get": "'clerk' in @user.roles || 'admin' in @user.roles",
+        "create": "'clerk' in @user.roles || 'admin' in @user.roles",
+        "update": "'clerk' in @user.roles || 'admin' in @user.roles",
+        "delete": "'clerk' in @user.roles || 'admin' in @user.roles"
+      }
+    },
+    "booking_lines": {
+      "tenancy": "scoped",
+      "fields": {
+        "booking_id": { "type": "ref", "entity": "bookings", "required": true, "onDelete": "cascade" },
+        "amount": { "type": "integer", "required": true }
+      },
+      "rules": {
+        "list": "'clerk' in @user.roles || 'admin' in @user.roles",
+        "get": "'clerk' in @user.roles || 'admin' in @user.roles",
+        "create": "'clerk' in @user.roles || 'admin' in @user.roles"
+      }
+    },
+    "audits": {
+      "tenancy": "scoped",
+      "fields": { "note": { "type": "string", "required": true, "maxLength": 80 } },
+      "rules": {
+        "list": "'clerk' in @user.roles || 'admin' in @user.roles",
+        "get": "'clerk' in @user.roles || 'admin' in @user.roles",
+        "create": "'clerk' in @user.roles || 'admin' in @user.roles"
+      }
+    },
+    "limits": {
+      "tenancy": "scoped",
+      "fields": { "max_title": { "type": "integer", "required": true } },
+      "rules": {
+        "list": "'admin' in @user.roles",
+        "get": "'admin' in @user.roles",
+        "create": "'admin' in @user.roles"
+      }
+    }
+  }
+}

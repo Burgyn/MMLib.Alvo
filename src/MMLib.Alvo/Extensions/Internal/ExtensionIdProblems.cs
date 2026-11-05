@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Commands.Internal;
+using MMLib.Alvo.Hooks.Internal;
 
 namespace MMLib.Alvo.Extensions.Internal;
 
@@ -67,6 +68,7 @@ internal static class ExtensionIdProblems
     {
         RetiredExtension => ExtensionBindingCompiler.RetiredKind,
         CommandRegistration => CommandBinding.Kind,
+        WriteHookRegistration hook => WriteHookBinding.KindOf(hook.Stage),
         _ => ExtensionBindingCompiler.HandlerKind,
     };
 

@@ -22,7 +22,9 @@
       "route": null,
       "httpMethod": null,
       "access": null,
-      "paused": false
+      "paused": false,
+      "topLevelOnly": false,
+      "enabled": true
     },
     {
       "id": "ticket-resolved",
@@ -45,7 +47,9 @@
       "route": null,
       "httpMethod": null,
       "access": null,
-      "paused": false
+      "paused": false,
+      "topLevelOnly": false,
+      "enabled": true
     },
     {
       "id": "orders-approved",
@@ -64,7 +68,9 @@
       "route": null,
       "httpMethod": null,
       "access": null,
-      "paused": false
+      "paused": false,
+      "topLevelOnly": false,
+      "enabled": true
     }
   ]
 }

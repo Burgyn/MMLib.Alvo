@@ -76,6 +76,11 @@ internal sealed class RecordShape
         where T : class =>
         (T)RecordMaterializer.Create(this, record ?? AlvoRecord.Empty);
 
+    /// <summary>Materializes <paramref name="record"/>, leaving a property at its default when its field is missing and <paramref name="mayBeAbsent"/> allows it.</summary>
+    internal T Materialize<T>(AlvoRecord record, Func<MappedProperty, bool> mayBeAbsent)
+        where T : class =>
+        (T)RecordMaterializer.Create(this, record, mayBeAbsent);
+
     private static IEnumerable<PropertyInfo> Candidates(Type type) =>
         type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(property => property.GetIndexParameters().Length == 0 && property.GetMethod is { IsPublic: true })

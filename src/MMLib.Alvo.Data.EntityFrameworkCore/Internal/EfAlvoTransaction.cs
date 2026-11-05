@@ -73,7 +73,6 @@ internal sealed class EfAlvoTransaction(EfAlvoData port, WriteUnit unit, AlvoCon
     public IAlvoTransaction AsSystem() =>
         new EfAlvoTransaction(port, unit, AlvoContext.System(context.Tenant) with { Provenance = context.Provenance });
 
-    /// <summary>The same unit as the same caller, one hop deeper — what a write made under another write's stage acts as.</summary>
-    /// <exception cref="AlvoChainDepthExceededException">One hop deeper is past the limit; the unit is poisoned.</exception>
-    internal EfAlvoTransaction Deeper() => new(port, unit, port.Deeper(unit, context));
+    /// <summary>The same unit as the same caller, one hop deeper; the limit is checked by each write and publish (Ruling 9).</summary>
+    internal EfAlvoTransaction Deeper() => new(port, unit, EfAlvoData.OneHopDeeper(context));
 }

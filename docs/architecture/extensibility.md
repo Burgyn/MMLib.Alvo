@@ -89,7 +89,9 @@ generated route a CSRF target and is refused at startup.
      builder it hands out does, one registration per call — `Entity("tickets", t => t.OnUpdated(…))`,
      `Entities(["orders", "invoices"], …)`, `Entity("*", …)`. The precedent is EF Core's `modelBuilder.Entity<T>(…)`.
      The `On{Operation}` verbs (`OnCreated`, `OnUpdated`, `OnDeleted`, `OnSaved`) exist only on that builder and
-     return it, not `IAlvoBuilder`. Every other registration of host code is an `Add{Thing}`: `AddEventHandler` and
+     return it, not `IAlvoBuilder`; so do HX-09's write-hook verbs, named for their phase — `Validate`, `BeforeWrite`,
+     `AfterWrite`, `BeforeDelete`, `AfterDelete` — each as a class form (`Validate<THook>(id, …)`) and a delegate form
+     (`Validate(id, hook, …)`). Every other registration of host code is an `Add{Thing}`: `AddEventHandler` and
      `AddRetiredExtension` from HX-03; `AddSchedule`, `AddFunction`, `AddCommand`, `AddDataMigration`,
      `AddRequiredSecret` as they ship. `MapAlvoCommand` and `MapAlvoWebhookReceiver` are endpoint verbs (`Map*`, the
      ASP.NET Core spelling), on the route builder — rule 10's separation of the DI seam from the endpoint seam.

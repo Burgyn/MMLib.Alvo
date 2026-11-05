@@ -90,4 +90,12 @@ public class PlanStepTests
     [Fact]
     public void A_step_with_no_reason_to_offer_suggests_nothing()
         => PlanStep.SuggestReason(["AddIndex suppliers"]).ShouldBeNull();
+
+    [Theory]
+    [InlineData("AddField technicians.skill_level", "technicians")]
+    [InlineData("CreateEntity suppliers", "suppliers")]
+    [InlineData("DropField customers.notes: Drops the column and all its data.  <- destructive", "customers")]
+    [InlineData("SomethingNew", "")]
+    public void A_step_names_the_entity_it_touches(string line, string entity)
+        => PlanStep.Parse(line).Entity.ShouldBe(entity);
 }

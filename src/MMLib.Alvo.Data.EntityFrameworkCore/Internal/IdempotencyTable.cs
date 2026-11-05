@@ -175,31 +175,31 @@ internal static class IdempotencyTable
     /// <para>
     /// Outside a transaction it commits on its own, which is also what makes a caller's ensure-once memo
     /// honest: a memo set inside a transaction that later rolls back would claim a table exists that was
-    /// rolled back with everything else. Two connections racing the very first create may still collide here
-    /// — a duplicate-relation error on PostgreSQL — which is a storage write failure like any other and is
-    /// retried by the caller, whose next attempt finds the table in place.
+    /// rolled back with everything else.
+    /// </para>
+    /// <para>
+    /// <b>Two connections racing the very first create do collide on PostgreSQL</b> — <c>23505</c> on
+    /// <c>pg_type_typname_nsp_index</c> or <c>42P07</c> — and no retry absorbs it: the data path ensures this table
+    /// before its retry loop (the stage-0 lookup). So the create goes through <see cref="IfNotExistsDdl"/>, which
+    /// takes the rival's committed table as the outcome asked for.
     /// </para>
     /// </remarks>
-    internal static async Task EnsureAsync(DbConnection connection, string tableName, CancellationToken ct)
-    {
-        var command = connection.CreateCommand();
-        await using (command.ConfigureAwait(false))
-        {
-            command.CommandText = Ddl(tableName);
-            await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
-    }
+    internal static Task EnsureAsync(DbConnection connection, string tableName, CancellationToken ct) =>
+        IfNotExistsDdl.CreateTableAsync(connection, tableName, Ddl(tableName), ct);
 
-    /// <summary>Reads the record for one key in one scope, inside the caller's transaction.</summary>
+    /// <summary>Reads the record for one key in one scope, inside the caller's transaction or autocommit.</summary>
     /// <param name="connection">The write transaction's own connection.</param>
-    /// <param name="transaction">The in-flight write transaction, so the read cannot see an uncommitted rival.</param>
+    /// <param name="transaction">
+    /// The in-flight write transaction, so the read cannot see an uncommitted rival; or <see langword="null"/> for the validate
+    /// stage's autocommit pre-lookup, which only decides whether validate runs and never answers as a replay.
+    /// </param>
     /// <param name="tableName">The table name.</param>
     /// <param name="key">The caller's key, bound as a value.</param>
     /// <param name="scope">The key's scope, from <see cref="AlvoIdempotency.IdentityOf"/>.</param>
     /// <param name="ct">A token to cancel the operation.</param>
     internal static async Task<IdempotencyRecord?> FindAsync(
         DbConnection connection,
-        DbTransaction transaction,
+        DbTransaction? transaction,
         string tableName,
         string key,
         string scope,
@@ -216,11 +216,11 @@ internal static class IdempotencyTable
     /// stores something other than a row list reads its own value back verbatim.
     /// </summary>
     /// <remarks>
-    /// <b>The transaction is optional here and required on <see cref="FindAsync"/>, and the difference is the
-    /// caller's.</b> The data path reads inside its own write transaction so the check and the insert are
-    /// atomic; the management path has no transaction to enlist in, because the writer that appends the
-    /// revision owns one and exposes no seam. One statement, two callers, rather than a second copy of the
-    /// SQL that would drift the day a column moved.
+    /// <b>The transaction is optional here, and whether one is passed is the caller's call.</b> The data path
+    /// reads inside its own write transaction so the check and the insert are atomic; the management path
+    /// has no transaction to enlist in, because the writer that appends the revision owns one and exposes no
+    /// seam. One statement, several callers, rather than a second copy of the SQL that would drift the day a
+    /// column moved.
     /// </remarks>
     /// <param name="connection">An open connection.</param>
     /// <param name="transaction">The caller's transaction, or <see langword="null"/> to read outside one.</param>

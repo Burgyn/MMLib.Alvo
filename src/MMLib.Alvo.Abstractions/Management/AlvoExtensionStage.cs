@@ -24,4 +24,8 @@ public enum AlvoExtensionStage
     /// </summary>
     [JsonStringEnumMemberName("preTransaction")]
     PreTransaction = 2,
+
+    /// <summary>Inside the write's own transaction: it can refuse or undo the write, and may not leave the process.</summary>
+    [JsonStringEnumMemberName("inTransaction")]
+    InTransaction = 3,
 }

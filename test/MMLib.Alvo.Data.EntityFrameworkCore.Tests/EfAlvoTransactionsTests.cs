@@ -222,17 +222,25 @@ public sealed class EfAlvoTransactionsTests
     }
 
     [Fact]
-    public async Task A_write_one_hop_deeper_past_the_limit_is_refused_and_a_caught_refusal_still_rolls_back()
+    public async Task A_write_one_hop_deeper_past_the_limit_is_refused_when_it_writes_and_a_caught_refusal_still_rolls_back()
     {
         await using var world = await StartAsync();
         var caller = world.Caller with { Provenance = new AlvoProvenance { Depth = AlvoChainDepthLimit.DefaultMaxDepth } };
+        var readPastTheLimit = false;
+        AlvoChainDepthExceededException? refusedWrite = null;
 
         await Should.ThrowAsync<AlvoChainDepthExceededException>(() => world.Transactions.TransactAsync(caller, async (unit, ct) =>
         {
             await unit.CreateAsync(WritePathFixture.Entity, WritePathFixture.CreatePayload("at the limit"), ct);
-            Should.Throw<AlvoChainDepthExceededException>(() => ((EfAlvoTransaction)unit).Deeper());
+            var deeper = ((EfAlvoTransaction)unit).Deeper();
+            (await deeper.GetAsync(WritePathFixture.Entity, Guid.NewGuid(), ct)).ShouldBeNull("a read is not refused for depth");
+            readPastTheLimit = true;
+            refusedWrite = await Should.ThrowAsync<AlvoChainDepthExceededException>(
+                () => deeper.CreateAsync(WritePathFixture.Entity, WritePathFixture.CreatePayload("too deep"), ct));
         }, cancellationToken: Ct));
 
+        readPastTheLimit.ShouldBeTrue("one hop deeper is refused only when it writes, never when it is made");
+        refusedWrite.ShouldNotBeNull();
         (await NotesAsync(world)).ShouldBe(0L);
     }
 

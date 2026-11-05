@@ -1,0 +1,187 @@
+---
+title: Validate and guard writes
+description: Run your C# in a write in three phases — validate before the transaction, guard and complete inside it — with the caller's rules applied again to everything a hook does.
+sidebar:
+  order: 7
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import hooks from '../../../snippets/extending/write-hooks/OpeningDeskHooks.cs?raw';
+import tests from '../../../snippets/extending/write-hooks/OpeningDeskHooksTests.cs?raw';
+import descriptor from '../../../snippets/extending/write-hooks/opening-desk.alvo.json?raw';
+
+The descriptor's rules and before-hooks decide most writes. When a write needs your C# — a register only a web service
+knows, a check across rows, an audit row with the new id — register a **write hook**. It runs in the same pipeline as
+the descriptor's own hooks, in one of three phases:
+
+| Phase | Runs | May | May not |
+|---|---|---|---|
+| **validate** | before a create, update or replace opens its transaction; only for a write no transaction unit is open around | call another service; refuse; write other rows through `Data`, which commit on their own, outside the write | change the row being written |
+| **before-write** / **before-delete** | inside the write's transaction, after the descriptor's before-hooks | refuse; set fields; write other rows; publish an event | call the network |
+| **after-write** / **after-delete** | inside the transaction, after the row and its rollups exist | refuse — rolling the write back; write other rows; publish | write its own row; call the network |
+
+An [event handler](/extending/event-handlers/) is the fourth place: after the commit, retried, never able to undo the write.
+
+## The booking desk
+
+A booking must fall inside the resource's opening hours, a VAT id must be registered, every booking leaves an audit row,
+and a confirmation is mailed after the commit. Staff may book; only managers read the opening hours.
+
+<Code code={descriptor} lang="json" title="opening-desk.alvo.json" />
+
+<SourceExcerpt code={hooks} from="public static IAlvoBuilder AddOpeningDesk" to="e.Changed(x => x.Status)" title="OpeningDeskHooks.cs" />
+
+`Entity<Booking>` hands every hook your class. `when` is a lambda over `w.New`, `w.Old`, `w.Changed(…)` and `w.Caller`,
+translated to CEL once, when the hook is registered — or a CEL string. `changed(field)` is false on a create, and `old.`
+is absent there, so a condition that must hold for creates tests `new.` — `w.New.VatId != null` above. Each hook's
+condition is judged against the row as the hooks before it left it.
+
+<SourceExcerpt code={hooks} from="public sealed class VatIdIsRegistered" title="The hooks and the handler" />
+
+The guard reads `opening_hours`, which staff may not read, through `write.Transaction.AsSystem()`: the system **in the
+caller's tenant** — never another — with the caller's place in the causation chain. Every such call is logged
+(`ExtensionSystemAccess`, naming the hook and the caller) and counted (`alvo.hook.system_access`).
+
+## What a hook sees
+
+| Context | `Old` | `New` / `Saved` | Also |
+|---|---|---|---|
+| `ValidateWrite<T>` | before the write, read without a lock; null on a create | `New`: the row to store | `Data` (a session as the caller), `Caller`, `Now`, `Operation` |
+| `BeforeWrite<T>` | as above, read under the write's lock | `New`, with earlier hooks' `Set`s | `Transaction`, `Set`, `PublishAsync`, `Caller`, `Now`, `Operation` |
+| `AfterWrite<T>` | as above | `Saved`: id, defaults and rollups | `Transaction`, `PublishAsync`, `Caller`, `Now`, `Operation` |
+| `BeforeDelete<T>` / `AfterDelete<T>` | the row, always | — | `Transaction`, `PublishAsync`, `Caller`, `Now` |
+
+Untyped hooks take the same contexts over `AlvoRecord` — `Entity("bookings", b => b.BeforeWrite<…>(…))`,
+`Entities([...], …)`, and `Entity("*", …)` for every entity (its condition tests only `@user` and `@tenant`). A hook is a
+class (`IBeforeWriteHook<T>` and its siblings) or a delegate whose parameters are the context, a `CancellationToken` or
+services, and which returns `ValueTask`, `Task` or nothing — a delegate returning a value is refused, so give an
+`async` lambda a block body, as `audit-booking` does. A class hook is built for each run from a DI scope that is never
+the HTTP request's: every in-transaction hook of one write shares the write's scope, and a write's validate hooks share
+one of their own — one per row of a batch, which validates row by row.
+
+## Refusing a write
+
+`Invalid(code, message, field)` answers **422** `validation`, `Conflict(…)` **409** `conflict`, `Forbidden(code, message)`
+**403** `forbidden`; when one hook records several kinds, 403 wins over 409 over 422, and the answer lists every
+violation of that kind, with the hook's id in the document's `extensions`. A refusal is always an answer: there is no
+silent skip, so a hook that wants "do nothing" refuses with `Conflict`.
+
+<SourceExcerpt code={tests} from="public async Task A_booking_outside_opening_hours" to="booking_audits" title="OpeningDeskHooksTests.cs" />
+
+`field` becomes the violation's JSON pointer (`/starts_at`) — **except on a field the descriptor hides from some
+callers**, which is never pointed at; do not name it in your message either. In `IAlvoData` the refusal is an
+`AlvoWriteRejectedException`. In a batch it is that row's refusal and the batch writes nothing; over HTTP a refused
+batch answers 403 with one violation per row, whatever the kind. Every refusal is recorded in `alvo_hook_rejections` —
+ids and your code, never the payload or the message. Record a refusal on the context: an `AlvoWriteRejectedException`
+your hook *throws* is a failure like any other exception — 500 `hook-failed`, not a rejection.
+
+## Setting fields
+
+`write.Set("status", "confirmed")`, or `write.Set(x => x.Status, "confirmed")` on a typed hook. The row is then judged
+again by the entity's `create`/`update` rule and its tenant scope — a hook cannot place a row the caller could not. A
+field the caller's policy makes `readOnly` is refused as the data port refuses the caller's own payload: **403**
+`forbidden`. (Over HTTP the caller's own body sending that field is refused earlier, by the payload check, with 422
+`read-only-field`; a hook's `Set` meets the port's 403 on every path.) A field Alvo maintains (`id`, the audit columns,
+`deleted_at`, the version column, `computed`, `rollup`), an undeclared field, or a value its field cannot hold — the
+wrong type, or outside its `maxLength`, enum values, `format`, precision — fails the write with 500 `hook-failed`,
+reason `invalid-set`: that is a bug in the hook, not the caller's fault. A whole number goes into a `decimal` field.
+
+:::caution[What binds a hook]
+`readOnly` binds a hook as it binds the caller, and the rule's `WITH CHECK` is judged again over every row a hook
+produces. A field you only constrain elsewhere — in your own code, or a field nobody marks `readOnly` — is not
+protected from a hook.
+:::
+
+## Writing other rows
+
+`write.Transaction` is the write's own transaction, acting as the caller one hop deeper in the causation chain: what it
+writes commits with the write or not at all, runs the other entity's rules and hooks, and emits its events. Its limits:
+
+- **No self-write.** Writing the row whose hook is running — even from a hook of another row's write, or a sibling row
+  of the same batch — fails the write (`self-write`).
+- **A budget.** 50 calls per run, reads and `PublishAsync` included (`AlvoHookOptions.MaxOperations`); the 51st throws
+  `AlvoBudgetExceededException` — write many rows with one batch call.
+- **Depth.** A hook writing what triggers itself stops at the chain limit (`Alvo:Extensions:MaxDepth`, 8) with
+  **508** `chain-depth-exceeded`.
+- **Cascades run no hooks.** Rows a declared `onDelete: cascade` or `set-null` removes or changes run no host hook —
+  unlike a PostgreSQL row trigger. A hook whose write makes its own row disappear (deleting its parent through a cascade)
+  fails the write (`row-vanished`).
+
+Catching any of these changes nothing: the write is already failed and rolls back. A write a hook makes and does not
+catch — a refusal of another entity's rule, say — fails this write with 500 `hook-failed`, naming your hook.
+
+## Time limits
+
+A before/after hook has **250 ms**, a validate hook **5 s** (`AlvoHookOptions.Timeout`, at most 30 s inside the
+transaction and 60 s for validate). The token a hook receives ends at its limit, and every call through
+`write.Transaction` honours it; a hook that ignores it is failed when it returns (`timeout`). Alvo waits for a hook to
+return — it shares the write's connection — so a hook that ignores its token and never returns holds the write open,
+and on SQLite the database's one writer lock with it, past even the write's 30-second limit. Pass the token on. An
+exception escaping a hook fails the write with 500 `hook-failed`, reason `exception`; its message stays in your log.
+
+A top-level write that an in-transaction hook is registered for — its entity and its operation — runs in a transaction
+unit of its own: the 30-second limit, one DI scope for its hooks, and an `IAlvoData` call from inside it is refused —
+use `write.Transaction`. A write with no such hook is unchanged.
+
+## Validate: before the transaction
+
+Validate runs once per write, before the write's transaction and before an idempotent write's retry loop, so a network
+call never holds a lock. It does **not** run for a delete, for a write inside a
+[transaction unit](/extending/transactions/) — a [command](/extending/commands/) makes its external check before
+`ctx.TransactAsync` — nor for a replayed `Idempotency-Key`. A batch validates every row first; a refused row refuses the
+batch with nothing opened, listing every bad row. What a validate hook saw — its `Old` was read without a lock — may
+change before the write runs: never rest integrity on it; an invariant belongs in a before-write hook. A row a validate
+hook writes through `Data` commits on its own, before the write's transaction exists, and stays even when a later stage
+refuses the write.
+
+A validate hook never sees a payload the caller may not send, and an update of a row the caller cannot reach answers
+404 before any validate hook runs. A replace of a row that does not exist is validated as the create it will be, after
+the create rule admits it; an `If-Match` on it answers 412 before any validate hook, since a version names a row that
+is not there. An `If-Match` that no longer matches a stored row is checked by the write, so the validate hook still runs
+before the answer is 412. `New` differs by operation: on a create it is the stamped row with no id yet; on a replace it
+is the whole row as sent, with the path's id and no audit columns.
+
+An administrator can switch a validate hook off while its service is down:
+`PUT {management}/projects/{project}/extensions/{id}/enabled` with `{"enabled": false, "reason": "…"}` — audited, and
+honoured by the next write on every instance. Other hooks cannot be switched off (409): they guard the data.
+
+## What refuses the start
+
+A before/after/delete hook that takes `HttpClient`, `IHttpClientFactory`, a socket, a `DbConnection` or `DbDataSource`, a
+mail sender, `IAlvoData`, `IAlvoSessions`, `IAlvoTransactions`, `IAlvoEvents`, `IAlvoCommands`, `IAlvoManagement`,
+`IAlvoOperations`, an identity store (`IAlvoUserStore`, `IAlvoUserAdministration`, `IAlvoBootstrapAdmin` included),
+`IAlvoEventPump`, `IAlvoAssistant`, web sockets, `SmtpClient`, `WebClient`/`WebRequest`, or a delivery/outbox store — in
+its constructor or as a delegate parameter — refuses the start, naming the parameter. Validate hooks may take them.
+
+The check sees direct dependencies only: a typed HTTP client that wraps an `HttpClient`, a service resolved later from
+`IServiceProvider`, and whatever a delegate's closure captured are not caught at boot, so keep them out of
+in-transaction hooks yourself.
+
+The start is refused too for an unknown entity, a condition that does not compile or reads `new.` on a delete, a
+timeout or budget out of range, and the in-memory reference provider: write hooks need SQLite or PostgreSQL. A change
+the hooks stop fitting is refused at apply ([the apply guard](/extending/extension-catalog/)); a registration that never
+fit — on a host that boots before its descriptor is applied — fails every write it guards (`unbound`) rather than
+letting it through.
+
+## Maintenance without host hooks
+
+A system job may write with host hooks skipped:
+`TransactAsync(AlvoContext.System(tenant), work, new AlvoTransactionOptions { SuppressHostHooks = true, Reason = "…" })`.
+Any other caller is refused; the descriptor's hooks and events still run; the unit is audited once.
+
+## Testing
+
+<SourceExcerpt code={tests} from="public async Task A_booking_in_opening_hours" to="alvo.Hooks.AssertRan" title="OpeningDeskHooksTests.cs" />
+
+<SourceExcerpt code={tests} from="private static async Task<AlvoTestHost> StartAsync" to="return alvo;" title="OpeningDeskHooksTests.cs (the host)" />
+
+`alvo.Hooks.AssertRan(id, times)` counts write-hook runs made through `alvo.Data` — a rejection counts as a run. The
+host runs on a `FakeTimeProvider` nothing advances, so no hook's 250 ms races a slow test machine. Test a hook through
+`AlvoTestHost` and a real write, as above: Alvo has no public factory for hook contexts, so a hook class is not
+unit-tested by constructing its context.
+
+:::note[Not yet]
+An analyzer that flags network use inside a hook arrives later; until then the start-up check covers direct
+dependencies only.
+:::

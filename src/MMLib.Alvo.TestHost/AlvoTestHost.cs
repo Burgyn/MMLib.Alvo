@@ -15,20 +15,28 @@ namespace MMLib.Alvo.TestHost;
 /// <para>
 /// <b>Nothing above the database is faked.</b> <see cref="Data"/> behaves exactly as the host's own <c>IAlvoData</c>:
 /// a descriptor <c>reject</c> refuses, a <c>mutate</c> applies and a rule hides rows as in production. Write through
-/// <see cref="Data"/> rather than through <see cref="Services"/>: from write hooks on, it is what scopes a write's hooks
-/// to <see cref="Hooks"/>. Unless the builder registers a provider of its own — <c>UsePostgreSql</c>, for parity runs —
+/// <see cref="Data"/> rather than through <see cref="Services"/>: it is what scopes a write's hooks to
+/// <see cref="Hooks"/>. Unless the builder registers a provider of its own — <c>UsePostgreSql</c>, for parity runs —
 /// each host gets a fresh SQLite database in memory, private to it and dropped when the host is disposed.
 /// </para>
 /// <para>
 /// <b>Events wait for the test.</b> The dispatcher runs in the manual dispatch mode, so nothing is delivered until the
 /// test drains. Webhooks go to the handler passed as <c>webhooks</c>; without one, every webhook attempt fails without
-/// touching the network. <see cref="Hooks"/> records which hooks ran inside this host's drains.
+/// touching the network. <see cref="Hooks"/> records which hooks ran inside this host's drains and its <see cref="Data"/> calls.
+/// </para>
+/// <para>
+/// <b>Traces.</b> A <see cref="Data"/> call made inside an ambient W3C activity joins its trace: the call's events carry it as
+/// their <c>traceparent</c>, exactly as in production, and the hooks the call runs are this host's — as are any other runs on
+/// that trace. Without one, the call opens a root activity of its own, so an event written through <see cref="Data"/> carries
+/// that call's trace as its <c>traceparent</c> and <c>correlationid</c> where a production write with no ambient trace carries
+/// none and falls back to the event id.
 /// </para>
 /// </remarks>
 public sealed class AlvoTestHost : IAsyncDisposable
 {
     private const int MaxRounds = 100;
     private const string DrainActivityName = "alvo.test.drain";
+    private const string CallActivityName = "alvo.test.call";
     private const string TestEventType = "test.delivery";
 
     private static readonly ActivitySource _drainSource = new(AlvoHookRecorder.DrainSourceName);
@@ -43,7 +51,7 @@ public sealed class AlvoTestHost : IAsyncDisposable
     {
         _composition = composition;
         _pump = composition.Host.Services.GetRequiredService<IAlvoEventPump>();
-        _data = composition.Host.Services.GetRequiredService<IAlvoData>();
+        _data = new TrackedData(composition.Host.Services.GetRequiredService<IAlvoData>(), JoinOrStartCall);
     }
 
     /// <summary>Gets the data port, behaving exactly as the host's own endpoints and services reach it.</summary>
@@ -70,7 +78,7 @@ public sealed class AlvoTestHost : IAsyncDisposable
         }
     }
 
-    /// <summary>Gets the record of which hooks and subscribers ran in this host's drains.</summary>
+    /// <summary>Gets the record of which hooks and subscribers ran in this host's drains and its <see cref="Data"/> calls.</summary>
     /// <exception cref="ObjectDisposedException">The host was disposed.</exception>
     public AlvoHookRecorder Hooks
     {
@@ -213,7 +221,7 @@ public sealed class AlvoTestHost : IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        using var drain = StartDrain();
+        using var drain = StartRoot(DrainActivityName);
         var progress = new DrainProgress();
         for (var round = 0; round < MaxRounds; round++)
         {
@@ -253,21 +261,36 @@ public sealed class AlvoTestHost : IAsyncDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(fixture);
 
-        using var drain = StartDrain();
+        using var drain = StartRoot(DrainActivityName);
         await _pump.DeliverAsync(fixture, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Opens the drain's root activity on a fresh trace and hands its id to <see cref="Hooks"/>, so the runs inside it —
-    /// and only those — are this host's.
+    /// Scopes one <see cref="Data"/> call to <see cref="Hooks"/>: it joins the caller's ambient W3C trace, which then reaches the
+    /// call's events unchanged, and opens a root of its own only when there is none (Ruling 64).
     /// </summary>
-    private Activity? StartDrain()
+    private Activity? JoinOrStartCall()
+    {
+        if (Activity.Current is { IdFormat: ActivityIdFormat.W3C } ambient)
+        {
+            _hooks.Track(ambient.TraceId);
+
+            return null;
+        }
+
+        return StartRoot(CallActivityName);
+    }
+
+    /// <summary>
+    /// Opens a root activity on a fresh trace — a drain's, or one <see cref="Data"/> call's — and hands its id to
+    /// <see cref="Hooks"/>, so the runs inside it — and only those — are this host's.
+    /// </summary>
+    private Activity? StartRoot(string name)
     {
         var root = new ActivityContext(ActivityTraceId.CreateRandom(), ActivitySpanId.CreateRandom(), ActivityTraceFlags.Recorded);
         _hooks.Track(root.TraceId);
-        var drain = _drainSource.StartActivity(DrainActivityName, ActivityKind.Internal, root);
 
-        return drain;
+        return _drainSource.StartActivity(name, ActivityKind.Internal, root);
     }
 
     /// <summary>

@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Events;
@@ -88,6 +90,8 @@ public static class AlvoEfCoreProvider
             services.GetRequiredService<RelationalConnectionFactory>(),
             services.GetRequiredService<IAlvoSqlDialect>(),
             services.GetRequiredService<IOptions<AlvoOptions>>().Value));
+        builder.Services.TryAddSingleton(CreateHookRejectionLog);
+        builder.Services.TryAddSingleton<IHookRejectionLog>(services => services.GetRequiredService<EfCoreHookRejectionLog>());
         builder.Services.TryAddSingleton(services => new AlvoDataContextFactory(
             services.GetRequiredService<ISchemaRegistry>(),
             options => registration.ConfigureProvider(options, registration.ConnectionString(services))));
@@ -97,7 +101,9 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton(CreateData);
         builder.Services.TryAddSingleton<IAlvoData>(services => services.GetRequiredService<EfAlvoData>());
         builder.Services.TryAddSingleton<IAlvoTransactions>(services => new EfAlvoTransactions(
-            services.GetRequiredService<EfAlvoData>(), services.GetRequiredService<IServiceScopeFactory>()));
+            services.GetRequiredService<EfAlvoData>(),
+            services.GetRequiredService<IServiceScopeFactory>(),
+            services.GetService<ILogger<EfAlvoTransactions>>()));
         builder.Services.TryAddSingleton<IAlvoDataReachability>(CreateReachability);
         builder.Services.TryAddSingleton<IOutboxStore>(CreateOutboxStore);
         builder.Services.TryAddSingleton<IDeliveryStore>(CreateDeliveryStore);
@@ -117,7 +123,10 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<TimeProvider>(),
         services.GetRequiredService<IOptions<AlvoOptions>>().Value,
         services.GetRequiredService<AlvoChainDepthLimit>(),
-        services.GetRequiredService<IRelationalWriteGate>());
+        services.GetRequiredService<IRelationalWriteGate>(),
+        services.GetService<IWriteExtensionRunner>(),
+        services.GetRequiredService<IServiceScopeFactory>(),
+        services.GetService<EfCoreHookRejectionLog>());
 
     /// <summary>Creates the readiness probe every EF-backed driver shares (#133).</summary>
     /// <remarks>
@@ -185,6 +194,11 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<IAlvoSqlDialect>(),
         services.GetRequiredService<IOptions<AlvoOptions>>().Value,
         services.GetRequiredService<TimeProvider>());
+
+    private static EfCoreHookRejectionLog CreateHookRejectionLog(IServiceProvider services) => new(
+        services.GetRequiredService<RelationalConnectionFactory>(),
+        services.GetRequiredService<IOptions<AlvoOptions>>().Value.SchemaPrefix,
+        services.GetService<ILogger<EfCoreHookRejectionLog>>() ?? NullLogger<EfCoreHookRejectionLog>.Instance);
 
     private static RelationalConnectionFactory CreateConnectionFactory(IServiceProvider services, RelationalProviderRegistration registration)
     {

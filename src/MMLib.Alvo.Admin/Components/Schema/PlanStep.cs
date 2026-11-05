@@ -35,6 +35,9 @@ internal sealed record PlanStep(string Verb, string Target, string? Consequence,
 {
     private const string DestructiveMarker = "<- destructive";
 
+    /// <summary>The entity the step touches — its target up to the field — or empty for an unrecognised step.</summary>
+    public string Entity => Target.Split('.', 2)[0];
+
     /// <summary>Reads one line of <c>ManagementPlanSummary.Steps</c>.</summary>
     /// <param name="line">The planner's line, verbatim.</param>
     public static PlanStep Parse(string line)

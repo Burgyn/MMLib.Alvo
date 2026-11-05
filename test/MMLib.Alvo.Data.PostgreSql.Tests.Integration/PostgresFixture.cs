@@ -24,7 +24,7 @@ public sealed class PostgresFixture : IAsyncLifetime
     // Empty when the container was never started — see InitializeAsync. Every test/constructor
     // that consumes this must have already self-skipped via EnsureEngineAvailable() /
     // Assert.SkipUnless(!OperatingSystem.IsWindows()) before relying on it being non-empty.
-    public string ConnectionString => _container is not null ? _container.GetConnectionString() : string.Empty;
+    public string ConnectionString => _container is not null ? PostgresTestContainer.ConnectionStringOf(_container) : string.Empty;
 
     public async ValueTask InitializeAsync()
     {

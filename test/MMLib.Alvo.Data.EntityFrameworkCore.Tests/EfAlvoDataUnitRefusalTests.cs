@@ -111,5 +111,7 @@ public sealed class EfAlvoDataUnitRefusalTests
         internal IReadOnlyList<Exception> Poisoned => _poisoned;
 
         public void Poison(Exception failure) => _poisoned.Add(failure);
+
+        public void Blame(Exception cause) => _poisoned.Add(cause);
     }
 }

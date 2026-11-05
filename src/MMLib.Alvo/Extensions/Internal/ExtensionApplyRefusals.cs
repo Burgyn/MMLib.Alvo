@@ -3,17 +3,19 @@ using MMLib.Alvo.Data.Internal;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Extensions.Internal;
 
 /// <summary>
-/// Turns binding problems into descriptor findings. A refusal names, for a handler the change unbinds, the entity, the
+/// Turns binding problems into descriptor findings; a command's and a write hook's refusals are their own
+/// (<see cref="CommandApplyRefusals"/>, <see cref="WriteHookApplyRefusals"/>). A refusal names, for a handler the change unbinds, the entity, the
 /// field or the <c>events.exclude</c> item the change removed or excluded, or the field whose new type the condition no
 /// longer compiles against, or that its typed record maps and could no longer fill — each existed before the change,
 /// since the handler bound it — and keeps the compiler's own
 /// sentence beside it, so a second cause is not hidden behind the first. A warning is the compiler's sentence alone,
-/// for a handler that bound neither catalog.
+/// for a handler or hook that bound neither catalog.
 /// </summary>
 internal static class ExtensionApplyRefusals
 {
@@ -26,7 +28,9 @@ internal static class ExtensionApplyRefusals
             .GroupBy(problem => problem.Id, StringComparer.Ordinal)
             .SelectMany(refused => CommandOf(registry, refused.Key) is { } command
                 ? CommandApplyRefusals.For(command, refused, current, proposed, compiler)
-                : ForHandler(Registered(registry, refused.Key), refused, current, proposed, compiler))];
+                : WriteHookOf(registry, refused.Key) is { } writeHook
+                    ? WriteHookApplyRefusals.For(writeHook, refused, current, proposed, compiler)
+                    : ForHandler(Registered(registry, refused.Key), refused, current, proposed, compiler))];
 
     internal static IReadOnlyList<DescriptorValidationError> Warnings(IReadOnlyList<ExtensionProblem> problems) =>
         [.. problems.Select(problem => Generic(problem, DescriptorValidationSeverity.Warning))];
@@ -37,6 +41,9 @@ internal static class ExtensionApplyRefusals
 
     private static CommandRegistration? CommandOf(ExtensionRegistry registry, string id) =>
         registry.Commands.FirstOrDefault(candidate => string.Equals(candidate.Id, id, StringComparison.Ordinal));
+
+    private static WriteHookRegistration? WriteHookOf(ExtensionRegistry registry, string id) =>
+        registry.WriteHooks.FirstOrDefault(candidate => string.Equals(candidate.Id, id, StringComparison.Ordinal));
 
     private static HandlerRegistration Registered(ExtensionRegistry registry, string id) =>
         registry.Handlers.First(candidate => string.Equals(candidate.Id, id, StringComparison.Ordinal));

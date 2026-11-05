@@ -197,7 +197,7 @@ internal static class WritePayloadGuard
         return refused is null ? null : $"Field '{refused}' {AlvoManagedColumns.RefusalReason(refused, isUpdate)}.";
     }
 
-    private static string? ReadOnlyRefusal(
+    internal static string? ReadOnlyRefusal(
         IReadOnlyDictionary<string, object?> values, IReadOnlySet<string> readOnlyFields)
     {
         var refused = values.Keys.FirstOrDefault(readOnlyFields.Contains);

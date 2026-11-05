@@ -34,6 +34,12 @@ Two packages are the minimum: `MMLib.Alvo`, the core (schema registry, Data API,
 and one database driver, `MMLib.Alvo.Data.Sqlite` or `MMLib.Alvo.Data.PostgreSql`. The core never references a driver;
 the driver you add is the one you select in code. Every package is listed in the [C# API reference](/reference/csharp/).
 
+:::note[PostgreSQL on a domain-joined machine]
+Npgsql's default `GSS Encryption Mode=Prefer` asks Kerberos for a ticket before every new connection. On a
+domain-joined host whose Kerberos KDC cannot be reached, that wait is about 80 seconds. When your server offers no GSS
+encryption, add `GSS Encryption Mode=Disable` to the connection string.
+:::
+
 Today you either reference the projects in a clone or install from a local package feed you pack yourself;
 `dotnet add package` from NuGet works from v0.1.
 

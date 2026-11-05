@@ -1,0 +1,49 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "opening-desk",
+  "access": { "admin": "'manager' in @user.roles" },
+  "auth": { "roles": ["staff", "manager"] },
+  "entities": {
+    "opening_hours": {
+      "fields": {
+        "resource_id": { "type": "uuid", "required": true },
+        "weekday": { "type": "integer", "required": true },
+        "opens_hour": { "type": "integer", "required": true },
+        "closes_hour": { "type": "integer", "required": true }
+      },
+      "rules": {
+        "list": "'manager' in @user.roles || 'admin' in @user.roles",
+        "get": "'manager' in @user.roles || 'admin' in @user.roles",
+        "create": "'manager' in @user.roles || 'admin' in @user.roles"
+      }
+    },
+    "bookings": {
+      "fields": {
+        "resource_id": { "type": "uuid", "required": true },
+        "guest": { "type": "string", "required": true, "maxLength": 80 },
+        "starts_at": { "type": "datetime", "required": true },
+        "ends_at": { "type": "datetime", "required": true },
+        "vat_id": { "type": "string", "maxLength": 20 },
+        "status": { "type": "enum", "values": ["requested", "confirmed"], "default": "requested" }
+      },
+      "rules": {
+        "list": "'staff' in @user.roles",
+        "get": "'staff' in @user.roles",
+        "create": "'staff' in @user.roles",
+        "update": "'staff' in @user.roles"
+      }
+    },
+    "booking_audits": {
+      "fields": {
+        "booking_id": { "type": "uuid", "required": true },
+        "note": { "type": "string", "required": true, "maxLength": 40 }
+      },
+      "rules": {
+        "list": "'staff' in @user.roles",
+        "get": "'staff' in @user.roles",
+        "create": "'staff' in @user.roles"
+      }
+    }
+  }
+}

@@ -1,5 +1,7 @@
 ﻿using MMLib.Alvo.Events;
 
+using System.Data.Common;
+
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
 /// <summary>
@@ -76,6 +78,18 @@ internal static class DeliveryOperationsTable
 
     internal static IReadOnlyList<string> Statements(string deliveries, string controls, string log) =>
         [SubscriberPageIndexDdl(deliveries), ControlsDdl(controls), LogDdl(log), LogKeyIndexDdl(log)];
+
+    /// <summary>
+    /// Every statement of <see cref="Statements"/>, each through <see cref="IfNotExistsDdl"/> so a replica that loses the
+    /// race to create one of them to another replica takes the rival's object as its own.
+    /// </summary>
+    internal static async Task EnsureAsync(DbConnection connection, string deliveries, string controls, string log, CancellationToken ct)
+    {
+        await IfNotExistsDdl.CreateIndexAsync(connection, SubscriberPageIndexDdl(deliveries), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateTableAsync(connection, controls, ControlsDdl(controls), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateTableAsync(connection, log, LogDdl(log), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateIndexAsync(connection, LogKeyIndexDdl(log), ct).ConfigureAwait(false);
+    }
 
     internal const int MaxPage = 1000;
 
@@ -191,6 +205,55 @@ internal static class DeliveryOperationsTable
 
     internal static string ControlsSql(string controls) =>
         $"SELECT subscriber, paused_at, paused_by, reason FROM {controls} WHERE paused_at IS NOT NULL";
+
+    /// <summary>
+    /// Switches an extension off, recording when and by whom — from on only, so a second switch-off answers no row and its
+    /// caller logs nothing. Leaves a pause as it is, as <see cref="PauseSql"/> leaves a switch-off.
+    /// </summary>
+    internal static string DisableSql(string controls) =>
+        $"""
+        INSERT INTO {controls} (subscriber, disabled_at, disabled_by) VALUES (@subscriber, @at, @actor)
+        ON CONFLICT (subscriber) DO UPDATE SET disabled_at = excluded.disabled_at, disabled_by = excluded.disabled_by
+        WHERE {controls}.disabled_at IS NULL
+        """;
+
+    /// <summary>Switches an extension on again; one that is on answers no row. The row stays, as <see cref="ResumeSql"/> leaves it.</summary>
+    internal static string EnableSql(string controls) =>
+        $"UPDATE {controls} SET disabled_at = NULL, disabled_by = NULL WHERE subscriber = @subscriber AND disabled_at IS NOT NULL";
+
+    /// <summary>The extensions switched off now; unordered — the caller sorts them ordinally, as a collation never would.</summary>
+    internal static string DisabledSql(string controls) =>
+        $"SELECT subscriber FROM {controls} WHERE disabled_at IS NOT NULL";
+
+    /// <summary>Binds one operations-log row to <see cref="InsertLogSql"/>'s parameters.</summary>
+    /// <param name="command">The command.</param>
+    /// <param name="entry">The row.</param>
+    internal static void BindLogEntry(DbCommand command, DeliveryOperationEntry entry)
+    {
+        RelationalSqlBatch.AddParameter(command, "@log_at", StoredInstant.Text(entry.At));
+        RelationalSqlBatch.AddParameter(command, "@log_actor", entry.Actor);
+        RelationalSqlBatch.AddParameter(command, "@log_operation", entry.Operation);
+        RelationalSqlBatch.AddParameter(command, "@log_target", entry.Target);
+        RelationalSqlBatch.AddParameter(command, "@log_reason", Nullable(entry.Reason));
+        RelationalSqlBatch.AddParameter(command, "@log_scope", Nullable(entry.IdempotencyScope));
+        RelationalSqlBatch.AddParameter(command, "@log_key", Nullable(entry.IdempotencyKey));
+        RelationalSqlBatch.AddParameter(command, "@log_fingerprint", Nullable(entry.Fingerprint));
+        BindLogOutcome(command, entry);
+    }
+
+    /// <summary>Binds a log row's id and outcome — <see cref="LogOutcomeSql"/>'s parameters, and the rest of an insert's.</summary>
+    /// <param name="command">The command.</param>
+    /// <param name="entry">The row.</param>
+    internal static void BindLogOutcome(DbCommand command, DeliveryOperationEntry entry)
+    {
+        RelationalSqlBatch.AddParameter(command, "@log_id", entry.Id.ToString());
+        RelationalSqlBatch.AddParameter(command, "@log_affected", (object?)entry.Affected ?? DBNull.Value);
+        RelationalSqlBatch.AddParameter(command, "@log_sample", entry.Sample.Count == 0 ? DBNull.Value : string.Join(',', entry.Sample));
+    }
+
+    /// <summary>A text parameter's value: the text, or <see cref="DBNull"/> for none.</summary>
+    /// <param name="value">The text, if any.</param>
+    internal static object Nullable(string? value) => (object?)value ?? DBNull.Value;
 
     internal static string AllOperationsSql(string log) => $"SELECT {LogColumns} FROM {log} ORDER BY at, id";
 

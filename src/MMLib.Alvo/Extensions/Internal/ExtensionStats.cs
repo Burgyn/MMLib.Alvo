@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Hosting;
 
 using MMLib.Alvo.Events.Internal;
+using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.Management;
 
 using System.Collections.Frozen;
@@ -9,8 +10,8 @@ using System.Diagnostics.Metrics;
 namespace MMLib.Alvo.Extensions.Internal;
 
 /// <summary>
-/// How each extension ran in this process over the last day, read off the delivery duration measurements with a
-/// <see cref="MeterListener"/> and kept in 24 hourly buckets per extension.
+/// How each extension ran in this process over the last day, read off the delivery and write-hook duration measurements
+/// with a <see cref="MeterListener"/> and kept in 24 hourly buckets per extension.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -22,11 +23,12 @@ namespace MMLib.Alvo.Extensions.Internal;
 /// <b>One measurement carries everything:</b> <c>alvo.delivery.duration</c> is recorded once per answered attempt with the
 /// subscriber and the outcome, so a run is a measurement, a failure is an outcome of <c>failed</c> or <c>dead</c>, and the
 /// percentiles come from the same values. A <c>lease-lost</c> attempt counts as a run and not as a failure — a decision:
-/// the handler was not refused, its claim was taken over. Write hooks' rejections join when write hooks exist; a handler
-/// refuses nothing.
+/// the handler was not refused, its claim was taken over. A write hook's runs are <c>alvo.hook.duration</c>, read the same
+/// way: <c>failed</c> is a failure and <c>rejected</c> a rejection (Ruling 28) — a hook that refused a write ran, and was
+/// not at fault; a handler refuses nothing.
 /// </para>
 /// <para>
-/// <b>Bounded memory.</b> Only this host's registered handler ids are tracked — the set is fixed at construction, so a
+/// <b>Bounded memory.</b> Only this host's registered handler and write-hook ids are tracked — the set is fixed at construction, so a
 /// measurement for any other subscriber (another host's, in one process) is ignored and the map never grows; an hour's
 /// latency bins are allocated on its first run. The listener callback runs on any thread: the map is read-only and each
 /// extension's buckets take one short lock.
@@ -55,6 +57,7 @@ internal sealed class ExtensionStats : IHostedService, IDisposable
         _started = time.GetUtcNow();
         _extensions = registry.Handlers
             .Select(handler => handler.Id)
+            .Concat(registry.WriteHooks.Select(hook => hook.Id))
             .Distinct(StringComparer.Ordinal)
             .ToFrozenDictionary(id => id, _ => new Buckets(), StringComparer.Ordinal);
         _listener = new MeterListener { InstrumentPublished = Publish };
@@ -74,11 +77,11 @@ internal sealed class ExtensionStats : IHostedService, IDisposable
 
     public void Dispose() => _listener.Dispose();
 
-    internal void Record(string subscriber, double milliseconds, bool failed)
+    internal void Record(string subscriber, double milliseconds, bool failed, bool rejected = false)
     {
         if (_extensions.TryGetValue(subscriber, out var buckets))
         {
-            buckets.Record(HourOf(_time.GetUtcNow()), milliseconds, failed);
+            buckets.Record(HourOf(_time.GetUtcNow()), milliseconds, failed, rejected);
         }
     }
 
@@ -101,11 +104,17 @@ internal sealed class ExtensionStats : IHostedService, IDisposable
 
     private static void Publish(Instrument instrument, MeterListener listener)
     {
-        if (instrument.Meter.Name == AlvoEventMetrics.MeterName && instrument.Name == AlvoDeliveryMetrics.DurationName)
+        if (IsDeliveryDuration(instrument) || IsHookDuration(instrument))
         {
             listener.EnableMeasurementEvents(instrument);
         }
     }
+
+    private static bool IsDeliveryDuration(Instrument instrument) =>
+        instrument.Meter.Name == AlvoEventMetrics.MeterName && instrument.Name == AlvoDeliveryMetrics.DurationName;
+
+    private static bool IsHookDuration(Instrument instrument) =>
+        instrument.Meter.Name == HookTelemetry.MeterName && instrument.Name == HookTelemetry.DurationName;
 
     private void OnDuration(Instrument instrument, double milliseconds, ReadOnlySpan<KeyValuePair<string, object?>> tags, object? state)
     {
@@ -119,7 +128,11 @@ internal sealed class ExtensionStats : IHostedService, IDisposable
 
         if (subscriber is not null)
         {
-            Record(subscriber, milliseconds, outcome is AlvoDeliveryMetrics.FailedOutcome or AlvoDeliveryMetrics.DeadOutcome);
+            Record(
+                subscriber,
+                milliseconds,
+                failed: outcome is AlvoDeliveryMetrics.FailedOutcome or AlvoDeliveryMetrics.DeadOutcome,
+                rejected: outcome == HookTelemetry.Rejected);
         }
     }
 
@@ -131,15 +144,17 @@ internal sealed class ExtensionStats : IHostedService, IDisposable
         private readonly long[] _hours = Enumerable.Repeat(long.MinValue, Hours).ToArray();
         private readonly long[] _runs = new long[Hours];
         private readonly long[] _failures = new long[Hours];
+        private readonly long[] _rejections = new long[Hours];
         private readonly long[]?[] _bins = new long[]?[Hours];
 
-        internal void Record(long hour, double milliseconds, bool failed)
+        internal void Record(long hour, double milliseconds, bool failed, bool rejected)
         {
             lock (_gate)
             {
                 var slot = Slot(hour);
                 _runs[slot]++;
                 _failures[slot] += failed ? 1 : 0;
+                _rejections[slot] += rejected ? 1 : 0;
                 (_bins[slot] ??= new long[LatencyHistogram.Bins])[LatencyHistogram.Bin(milliseconds)]++;
             }
         }
@@ -149,6 +164,7 @@ internal sealed class ExtensionStats : IHostedService, IDisposable
             var bins = new long[LatencyHistogram.Bins];
             long runs = 0;
             long failures = 0;
+            long rejections = 0;
             lock (_gate)
             {
                 for (var slot = 0; slot < Hours; slot++)
@@ -157,6 +173,7 @@ internal sealed class ExtensionStats : IHostedService, IDisposable
                     {
                         runs += _runs[slot];
                         failures += _failures[slot];
+                        rejections += _rejections[slot];
                         Add(bins, _bins[slot]);
                     }
                 }
@@ -167,6 +184,7 @@ internal sealed class ExtensionStats : IHostedService, IDisposable
                 Id = id,
                 Invocations = runs,
                 Failures = failures,
+                Rejections = rejections,
                 P50 = LatencyHistogram.Percentile(bins, runs, 0.5),
                 P95 = LatencyHistogram.Percentile(bins, runs, 0.95),
             };
@@ -180,6 +198,7 @@ internal sealed class ExtensionStats : IHostedService, IDisposable
                 _hours[slot] = hour;
                 _runs[slot] = 0;
                 _failures[slot] = 0;
+                _rejections[slot] = 0;
                 Array.Clear(_bins[slot] ?? []);
             }
 

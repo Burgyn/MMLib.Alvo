@@ -72,6 +72,9 @@ internal sealed class WritePathWorld : IAsyncDisposable
     /// <summary>The hooks every write of this world runs; patches nothing until a test says so.</summary>
     internal StubBeforeHookRunner Hooks { get; } = new();
 
+    /// <summary>Whether the world's one connection is in autocommit mode — no transaction open on it (sqlite3_get_autocommit).</summary>
+    internal bool InAutocommit => SQLitePCL.raw.sqlite3_get_autocommit(_connection.Handle) != 0;
+
     /// <summary>The engine failures this world injects, and the statements it has seen.</summary>
     internal StatementFailureInterceptor Statements { get; } = new();
 
@@ -89,8 +92,11 @@ internal sealed class WritePathWorld : IAsyncDisposable
     /// <param name="schema">The applied schema the read model and the write path are built from.</param>
     /// <param name="services">Registrations a test adds after <c>AddAlvo</c>, such as a scoped probe.</param>
     /// <param name="time">The port's clock, which a unit's deadline also runs on; the system clock unless set.</param>
+    /// <param name="extensions">The host write hooks the port runs; none unless set.</param>
+    /// <param name="rejections">Where the port records a unit's hook rejections once it ends; nowhere unless set.</param>
     internal static async Task<WritePathWorld> StartAsync(
-        AlvoDescriptor descriptor, SchemaModel schema, Action<IServiceCollection>? services = null, TimeProvider? time = null)
+        AlvoDescriptor descriptor, SchemaModel schema, Action<IServiceCollection>? services = null, TimeProvider? time = null,
+        IWriteExtensionRunner? extensions = null, EfCoreHookRejectionLog? rejections = null)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(schema);
@@ -100,11 +106,12 @@ internal sealed class WritePathWorld : IAsyncDisposable
         var collection = new ServiceCollection().AddAlvo().Services;
         services?.Invoke(collection);
 
-        return await BuildAsync(descriptor, schema, connection, collection.BuildServiceProvider(), time ?? TimeProvider.System);
+        return await BuildAsync(descriptor, schema, connection, collection.BuildServiceProvider(), time ?? TimeProvider.System, (extensions, rejections));
     }
 
     private static async Task<WritePathWorld> BuildAsync(
-        AlvoDescriptor descriptor, SchemaModel schema, SqliteConnection connection, ServiceProvider services, TimeProvider time)
+        AlvoDescriptor descriptor, SchemaModel schema, SqliteConnection connection, ServiceProvider services, TimeProvider time,
+        (IWriteExtensionRunner? Extensions, EfCoreHookRejectionLog? Rejections) hooks)
     {
         var catalog = PolicyCatalog.Build(descriptor, schema, services.GetRequiredService<ICelCompiler>());
         services.GetRequiredService<IPolicyCatalogProvider>().SetCurrent(descriptor.Name, catalog);
@@ -118,12 +125,14 @@ internal sealed class WritePathWorld : IAsyncDisposable
 
         await CreateTablesAsync(contexts);
         world._contexts = contexts;
-        world.Data = Port(services, world, contexts);
+        world.Data = Port(services, world, contexts, hooks);
 
         return world;
     }
 
-    private static EfAlvoData Port(ServiceProvider services, WritePathWorld world, AlvoDataContextFactory contexts) =>
+    private static EfAlvoData Port(
+        ServiceProvider services, WritePathWorld world, AlvoDataContextFactory contexts,
+        (IWriteExtensionRunner? Extensions, EfCoreHookRejectionLog? Rejections) hooks) =>
         new(
             services.GetRequiredService<IPolicyEngine>(),
             services.GetRequiredService<IPredicateEvaluator>(),
@@ -134,7 +143,11 @@ internal sealed class WritePathWorld : IAsyncDisposable
             contexts,
             world._time,
             new AlvoOptions(),
-            AlvoChainDepthLimit.Default);
+            AlvoChainDepthLimit.Default,
+            writeGate: null,
+            extensions: hooks.Extensions,
+            scopes: world.Scopes,
+            rejections: hooks.Rejections);
 
     private static async Task CreateTablesAsync(AlvoDataContextFactory contexts)
     {
@@ -259,6 +272,9 @@ internal sealed class StatementFailureInterceptor : DbCommandInterceptor
 
     /// <summary>Every statement this world has issued, in order.</summary>
     internal IReadOnlyList<string> Seen => _seen;
+
+    /// <summary>Forgets every statement seen so far.</summary>
+    internal void Clear() => _seen.Clear();
 
     public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
         DbCommand command, CommandEventData eventData, InterceptionResult<int> result,
@@ -478,12 +494,14 @@ internal static class WritePathFixture
     /// <param name="get">The <c>get</c> rule.</param>
     /// <param name="list">The <c>list</c> rule.</param>
     /// <param name="delete">The <c>delete</c> rule.</param>
+    /// <param name="readOnlyField">A field the descriptor makes <c>readOnly</c> for every caller, or <see langword="null"/>.</param>
     internal static AlvoDescriptor Descriptor(
         string? create = "true",
         string? update = "true",
         string? get = "true",
         string? list = "true",
-        string? delete = "true") => new()
+        string? delete = "true",
+        string? readOnlyField = null) => new()
         {
             ApiVersion = "alvo.dev/v1",
             Name = "write-path-fixture",
@@ -493,8 +511,8 @@ internal static class WritePathFixture
                 {
                     Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
                     {
-                        ["title"] = new() { Type = DescriptorFieldType.String },
-                        ["owner_id"] = new() { Type = DescriptorFieldType.Uuid },
+                        ["title"] = DescriptorField(DescriptorFieldType.String, readOnlyField == "title"),
+                        ["owner_id"] = DescriptorField(DescriptorFieldType.Uuid, readOnlyField == "owner_id"),
                     },
                     Rules = new AccessRules
                     {
@@ -507,6 +525,9 @@ internal static class WritePathFixture
                 },
             },
         };
+
+    private static FieldDescriptor DescriptorField(DescriptorFieldType type, bool readOnly) =>
+        new() { Type = type, ReadOnly = readOnly ? BoolOrCel.FromBoolean(true) : null };
 
     /// <summary>The caller every write is performed as.</summary>
     internal static AlvoContext Caller() => new()

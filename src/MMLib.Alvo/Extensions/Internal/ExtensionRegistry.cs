@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Commands.Internal;
+using MMLib.Alvo.Hooks.Internal;
 
 namespace MMLib.Alvo.Extensions.Internal;
 
@@ -17,6 +18,7 @@ internal sealed class ExtensionRegistry
         _commands = commands;
         Handlers = [.. _registered.OfType<HandlerRegistration>()];
         Retired = [.. _registered.OfType<RetiredExtension>()];
+        WriteHooks = [.. _registered.OfType<WriteHookRegistration>()];
     }
 
     internal static ExtensionRegistry Empty { get; } = new([]);
@@ -27,9 +29,11 @@ internal sealed class ExtensionRegistry
 
     internal IReadOnlyList<RetiredExtension> Retired { get; }
 
+    internal IReadOnlyList<WriteHookRegistration> WriteHooks { get; }
+
     internal IReadOnlyList<CommandRegistration> Commands => [.. All.OfType<CommandRegistration>()];
 
-    internal bool IsEmpty => Handlers.Count == 0 && Commands.Count == 0;
+    internal bool IsEmpty => Handlers.Count == 0 && Commands.Count == 0 && WriteHooks.Count == 0;
 
     /// <summary>Ends mapping: a command mapped after the first binding throws (Rulings 13, 40).</summary>
     internal void Seal() => _commands?.Seal();

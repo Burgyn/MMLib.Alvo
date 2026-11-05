@@ -138,7 +138,7 @@ internal sealed partial class EfCoreDeliveryStore
             Sample = [.. reset.OrderBy(row => row.EventId, StringComparer.Ordinal).ThenBy(row => row.Id, StringComparer.Ordinal)
                 .Take(filter.Limit).Select(row => Guid.Parse(row.Id, CultureInfo.InvariantCulture))],
         };
-        await ExecuteInAsync(connection, transaction, DeliveryOperationsTable.LogOutcomeSql(_log), command => BindOutcome(command, recorded), ct)
+        await ExecuteInAsync(connection, transaction, DeliveryOperationsTable.LogOutcomeSql(_log), command => DeliveryOperationsTable.BindLogOutcome(command, recorded), ct)
             .ConfigureAwait(false);
 
         return recorded;
@@ -211,6 +211,48 @@ internal sealed partial class EfCoreDeliveryStore
         return [.. controls.OrderBy(control => control.Subscriber, StringComparer.Ordinal)];
     }
 
+    /// <summary>Writes the switch and logs the change in the same transaction when there was one.</summary>
+    /// <remarks>
+    /// No subscriber lock, unlike <see cref="SetPausedAsync"/>: a switch-off gates no claim statement. A write reads the set
+    /// autocommit, so it sees the switch once this transaction commits.
+    /// </remarks>
+    public Task<bool> SetDisabledAsync(string subscriber, bool disabled, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subscriber);
+        EnsureEntry(entry);
+
+        return InTransactionAsync(async (connection, transaction) =>
+        {
+            var sql = disabled ? DeliveryOperationsTable.DisableSql(_controls) : DeliveryOperationsTable.EnableSql(_controls);
+            var changed = await ExecuteInAsync(connection, transaction, sql, command => BindSwitch(command, subscriber, disabled, entry), cancellationToken)
+                .ConfigureAwait(false) == 1;
+            if (changed)
+            {
+                await LogChangeAsync(connection, transaction, entry with { Affected = 1 }, cancellationToken).ConfigureAwait(false);
+            }
+
+            return changed;
+        }, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<string>> DisabledAsync(CancellationToken cancellationToken = default)
+    {
+        var disabled = await ReadAsync(DeliveryOperationsTable.DisabledSql(_controls), _ => { }, reader => reader.GetString(0), cancellationToken)
+            .ConfigureAwait(false);
+
+        return [.. disabled.Order(StringComparer.Ordinal)];
+    }
+
+    private static void BindSwitch(DbCommand command, string subscriber, bool disabled, DeliveryOperationEntry entry)
+    {
+        RelationalSqlBatch.AddParameter(command, "@subscriber", subscriber);
+        if (disabled)
+        {
+            RelationalSqlBatch.AddParameter(command, "@at", StoredInstant.Text(entry.At));
+            RelationalSqlBatch.AddParameter(command, "@actor", entry.Actor);
+        }
+    }
+
     private static void BindControl(DbCommand command, string subscriber, bool paused, DeliveryOperationEntry entry)
     {
         RelationalSqlBatch.AddParameter(command, "@subscriber", subscriber);
@@ -218,7 +260,7 @@ internal sealed partial class EfCoreDeliveryStore
         {
             RelationalSqlBatch.AddParameter(command, "@at", StoredInstant.Text(entry.At));
             RelationalSqlBatch.AddParameter(command, "@actor", entry.Actor);
-            RelationalSqlBatch.AddParameter(command, "@reason", Nullable(entry.Reason));
+            RelationalSqlBatch.AddParameter(command, "@reason", DeliveryOperationsTable.Nullable(entry.Reason));
         }
     }
 
@@ -277,29 +319,7 @@ internal sealed partial class EfCoreDeliveryStore
     };
 
     private Task<int> LogAsync(DbConnection connection, DbTransaction transaction, DeliveryOperationEntry entry, CancellationToken ct) =>
-        ExecuteInAsync(connection, transaction, DeliveryOperationsTable.InsertLogSql(_log), command => BindEntry(command, entry), ct);
-
-    private static void BindEntry(DbCommand command, DeliveryOperationEntry entry)
-    {
-        RelationalSqlBatch.AddParameter(command, "@log_at", StoredInstant.Text(entry.At));
-        RelationalSqlBatch.AddParameter(command, "@log_actor", entry.Actor);
-        RelationalSqlBatch.AddParameter(command, "@log_operation", entry.Operation);
-        RelationalSqlBatch.AddParameter(command, "@log_target", entry.Target);
-        RelationalSqlBatch.AddParameter(command, "@log_reason", Nullable(entry.Reason));
-        RelationalSqlBatch.AddParameter(command, "@log_scope", Nullable(entry.IdempotencyScope));
-        RelationalSqlBatch.AddParameter(command, "@log_key", Nullable(entry.IdempotencyKey));
-        RelationalSqlBatch.AddParameter(command, "@log_fingerprint", Nullable(entry.Fingerprint));
-        BindOutcome(command, entry);
-    }
-
-    private static void BindOutcome(DbCommand command, DeliveryOperationEntry entry)
-    {
-        RelationalSqlBatch.AddParameter(command, "@log_id", entry.Id.ToString());
-        RelationalSqlBatch.AddParameter(command, "@log_affected", (object?)entry.Affected ?? DBNull.Value);
-        RelationalSqlBatch.AddParameter(command, "@log_sample", entry.Sample.Count == 0 ? DBNull.Value : string.Join(',', entry.Sample));
-    }
-
-    private static object Nullable(string? value) => (object?)value ?? DBNull.Value;
+        ExecuteInAsync(connection, transaction, DeliveryOperationsTable.InsertLogSql(_log), command => DeliveryOperationsTable.BindLogEntry(command, entry), ct);
 
     private static void EnsureRows(DeliveryFilter filter)
     {

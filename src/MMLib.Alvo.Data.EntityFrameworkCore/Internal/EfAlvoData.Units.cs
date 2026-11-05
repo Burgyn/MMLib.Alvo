@@ -23,6 +23,7 @@ internal sealed partial class EfAlvoData
     /// <param name="options">The checked options.</param>
     /// <param name="scopes">Where the unit's DI scope comes from.</param>
     /// <param name="cancellationToken">The caller's token, which every call of the unit also honours.</param>
+    /// <param name="owned">Whether the unit is opened for one top-level write a host hook runs on (Ruling 1).</param>
     /// <returns>The open unit; the caller disposes it.</returns>
     /// <exception cref="AlvoChainDepthExceededException">The caller is deeper in one causation chain than the limit allows.</exception>
     /// <remarks>
@@ -38,7 +39,8 @@ internal sealed partial class EfAlvoData
     /// </para>
     /// </remarks>
     internal async Task<WriteUnit> OpenUnitAsync(
-        AlvoContext context, AlvoTransactionOptions options, IServiceScopeFactory scopes, CancellationToken cancellationToken)
+        AlvoContext context, AlvoTransactionOptions options, IServiceScopeFactory scopes, CancellationToken cancellationToken,
+        bool owned = false)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(options);
@@ -50,7 +52,7 @@ internal sealed partial class EfAlvoData
         {
             await root.Database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
             await EnsureOutboxTableAsync(root, cancellationToken).ConfigureAwait(false);
-            return await BegunAsync(root, context, options, scopes, cancellationToken).ConfigureAwait(false);
+            return await BegunAsync(root, context, options, owned, scopes, cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -60,7 +62,7 @@ internal sealed partial class EfAlvoData
     }
 
     private async Task<WriteUnit> BegunAsync(
-        AlvoDataContext root, AlvoContext context, AlvoTransactionOptions options, IServiceScopeFactory scopes,
+        AlvoDataContext root, AlvoContext context, AlvoTransactionOptions options, bool owned, IServiceScopeFactory scopes,
         CancellationToken cancellationToken)
     {
         var turn = await WriteTurnAsync(root, cancellationToken).ConfigureAwait(false);
@@ -69,7 +71,7 @@ internal sealed partial class EfAlvoData
             var transaction = await root.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
             var parts = new WriteUnitParts(root, root.Database.GetDbConnection(), transaction, turn, scopes.CreateAsyncScope());
 
-            return new WriteUnit(parts, context, UnitProvenance(context), options.Timeout, _time, cancellationToken);
+            return new WriteUnit(parts, context, UnitProvenance(context), options, owned, _time, cancellationToken);
         }
         catch
         {
@@ -221,7 +223,7 @@ internal sealed partial class EfAlvoData
             {
                 var decision = BatchDecision(entity, DataOperation.Create, rows.Count, context, idempotency: null);
                 return BatchAsync(
-                    entity, context, idempotency: null,
+                    entity, AlvoWriteOperation.Create, context, idempotency: null,
                     (db, transaction, schema, now) => CreatedRowsAsync(db, transaction, schema, decision, context, rows, now, token),
                     producesRows: true, unit, token);
             },
@@ -238,7 +240,7 @@ internal sealed partial class EfAlvoData
             {
                 var decision = BatchDecision(entity, DataOperation.Update, rows.Count, context, idempotency: null);
                 return BatchAsync(
-                    entity, context, idempotency: null,
+                    entity, AlvoWriteOperation.Update, context, idempotency: null,
                     (db, transaction, schema, now) => UpdatedRowsAsync(db, transaction, schema, decision, context, rows, now, token),
                     producesRows: true, unit, token);
             },
@@ -255,7 +257,7 @@ internal sealed partial class EfAlvoData
             {
                 var decision = BatchDecision(entity, DataOperation.Delete, ids.Count, context, idempotency: null);
                 return BatchAsync(
-                    entity, context, idempotency: null,
+                    entity, AlvoWriteOperation.Delete, context, idempotency: null,
                     (db, transaction, schema, now) => RemovedRowsAsync(db, transaction, schema, decision, context, ids, now, token),
                     producesRows: false, unit, token);
             },
@@ -329,24 +331,81 @@ internal sealed partial class EfAlvoData
     }
 
     /// <summary>
-    /// <paramref name="context"/> one hop deeper in its causation chain — the context of a write made under another write's
-    /// stage (HX-09's hooks) — refused, and the unit failed, past the limit.
+    /// <paramref name="context"/> one hop deeper in its causation chain, unchecked: each write and publish through a unit checks
+    /// the limit inside its own call, where the refusal poisons the unit (Ruling 9).
     /// </summary>
-    /// <exception cref="AlvoChainDepthExceededException">The deeper context is past the limit; the unit is poisoned.</exception>
-    internal AlvoContext Deeper(WriteUnit unit, AlvoContext context)
+    internal static AlvoContext OneHopDeeper(AlvoContext context) =>
+        context with { Provenance = context.Provenance with { Depth = AlvoEventProvenance.Effective(context).Depth + 1 } };
+
+    /// <summary>What a host hook of a write in <paramref name="unit"/> receives as <c>write.Transaction</c>: the unit, as the writer, one hop deeper.</summary>
+    internal IAlvoTransaction HookTransaction(WriteUnit unit, AlvoContext context) => new EfAlvoTransaction(this, unit, OneHopDeeper(context));
+
+    /// <summary>Runs one top-level write in a unit of its own, on the flow, and commits it (Ruling 1).</summary>
+    private async Task<T> OwnUnitAsync<T>(
+        AlvoContext context, Func<WriteUnit?, CancellationToken, Task<T>> write, CancellationToken cancellationToken)
     {
-        var deeper = context with { Provenance = context.Provenance with { Depth = AlvoEventProvenance.Effective(context).Depth + 1 } };
+        var unit = await OpenUnitAsync(context, AlvoTransactionOptions.Validated(null, context), Scopes, cancellationToken, owned: true)
+            .ConfigureAwait(false);
         try
         {
-            _depthLimit.EnsureWithin(deeper);
+            return await UnitRun.CommittedAsync(unit, () => unit.RunAsync(token => write(unit, token), cancellationToken)).ConfigureAwait(false);
         }
-        catch (AlvoChainDepthExceededException refusal)
+        finally
         {
-            unit.Poison(refusal);
-            throw;
+            await ReleasedAndFlushedAsync(unit).ConfigureAwait(false);
         }
+    }
 
-        return deeper;
+    private IServiceScopeFactory Scopes => _scopes ?? throw new InvalidOperationException(
+        "A write a host hook runs on needs the host's IServiceScopeFactory, and this data port was built without one.");
+
+    /// <summary>Releases <paramref name="unit"/> and then records its rejections — even when the release throws (Ruling 8: whatever the outcome).</summary>
+    internal async Task ReleasedAndFlushedAsync(WriteUnit unit)
+    {
+        try
+        {
+            await unit.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            await FlushRejectionsAsync(unit).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Records the rejections a unit remembered, after it released its write turn and left the flow (Ruling 8).</summary>
+    internal Task FlushRejectionsAsync(WriteUnit unit) =>
+        _rejections is null || unit.Rejections.Count == 0 ? Task.CompletedTask : _rejections.FlushAsync(unit.Rejections);
+
+    /// <summary>
+    /// The one audit row of a unit that suppresses host hooks, written in the unit's own transaction — a rolled-back unit
+    /// suppressed nothing durably (Ruling 30).
+    /// </summary>
+    internal async Task<DeliveryOperationEntry> AuditSuppressionAsync(WriteUnit unit, string reason, CancellationToken cancellationToken)
+    {
+        var entry = new DeliveryOperationEntry
+        {
+            Id = Guid.CreateVersion7(),
+            At = _time.GetUtcNow(),
+            Actor = "system",
+            Operation = "suppress-host-hooks",
+            Target = $"unit:{unit.Provenance.CorrelationId}",
+            Reason = reason,
+            Affected = 1,
+        };
+        await unit.RunAsync(
+            token => InUnitAsync(unit, (connection, transaction, ct) => LoggedAsync(connection, transaction, entry, ct), token),
+            cancellationToken).ConfigureAwait(false);
+
+        return entry;
+    }
+
+    private async Task LoggedAsync(DbConnection connection, DbTransaction transaction, DeliveryOperationEntry entry, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = DeliveryOperationsTable.InsertLogSql(_operationsLog);
+        DeliveryOperationsTable.BindLogEntry(command, entry);
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     private Task<bool> PublishedAsync(

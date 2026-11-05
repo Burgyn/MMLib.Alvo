@@ -183,6 +183,18 @@ public static class AlvoProblemTypes
     /// </remarks>
     public const string ChainDepthExceeded = "chain-depth-exceeded";
 
+    /// <summary>A host write hook failed, so nothing was written (500).</summary>
+    /// <remarks>
+    /// The document carries <c>extensions</c> — the hook's id — and a <c>reason</c>: <c>exception</c> (the hook threw, or a
+    /// host function in its condition did), <c>timeout</c>, <c>budget</c> (too many calls through the write's transaction), <c>invalid-set</c>
+    /// (a value its field cannot hold, or a field it may not set), <c>self-write</c> (it wrote the row it runs on),
+    /// <c>unbound</c> (the hook does not fit the current schema) or <c>row-vanished</c> (after its writes, the write could
+    /// no longer read back the row it ran on). Never the hook's own message, which is the log's. Emitted only by
+    /// <c>AlvoExceptionHandler</c>. A host hook's refusal is not this: it is <see cref="Validation"/>,
+    /// <see cref="Conflict"/> or <see cref="Forbidden"/>.
+    /// </remarks>
+    public const string HookFailed = "hook-failed";
+
     /// <summary>
     /// Every slug this catalogue declares. Enumerated rather than discovered by reflection so a fact can
     /// assert the catalogue and the code agree without the assertion being satisfied by its own subject.
@@ -205,6 +217,7 @@ public static class AlvoProblemTypes
         Internal,
         FunctionFailed,
         ChainDepthExceeded,
+        HookFailed,
     ];
 
     /// <summary>The full problem <c>type</c> URI for one slug.</summary>
