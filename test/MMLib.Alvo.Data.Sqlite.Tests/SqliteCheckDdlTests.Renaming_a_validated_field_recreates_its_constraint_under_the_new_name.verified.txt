@@ -1,0 +1,25 @@
+﻿ALTER TABLE "products" RENAME COLUMN "stock" TO "on_hand";
+
+;
+CREATE TABLE "ef_temp_products" (
+    "id" TEXT NOT NULL CONSTRAINT "PK_products" PRIMARY KEY,
+    "on_hand" INTEGER NOT NULL,
+    CONSTRAINT "ck_products_on_hand_cd605ab1" CHECK (("on_hand" IS NULL OR COALESCE("on_hand" >= 0, 0)))
+);
+
+;
+INSERT INTO "ef_temp_products" ("id", "on_hand")
+SELECT "id", "on_hand"
+FROM "products";
+
+;
+PRAGMA foreign_keys = 0;
+
+;
+DROP TABLE "products";
+
+;
+ALTER TABLE "ef_temp_products" RENAME TO "products";
+
+;
+PRAGMA foreign_keys = 1;

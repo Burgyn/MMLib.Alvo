@@ -1,0 +1,6 @@
+﻿CREATE TABLE products (
+    id uuid NOT NULL,
+    stock bigint NOT NULL,
+    CONSTRAINT "PK_products" PRIMARY KEY (id),
+    CONSTRAINT ck_products_stock_7b86837d CHECK (("stock" IS NULL OR COALESCE("stock" >= 0, FALSE)))
+);

@@ -16,12 +16,20 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// aligned model against the desired model produces a residual with <em>no</em> drop+add for the
 /// renamed members, and we prepend our own <see cref="RenameTableOperation"/>/<see
 /// cref="RenameColumnOperation"/> so the SQL is a genuine <c>RENAME</c>.
+/// <para>
+/// <b>An entity a rename touches has its CHECK constraints re-created</b> (HX-11 Ruling 19). A constraint's name is a
+/// function of the entity and field names, and its CEL reads the row's field names, so after a rename the database holds
+/// each validation under its <em>old</em> name — both engines carry the constraint through <c>RENAME</c> — while the
+/// aligned copy could neither name it nor compile it. So every validated field of such an entity is released: the
+/// aligned copy carries no validation for it, a <see cref="DropCheckConstraintOperation"/> removes the old-named
+/// constraint after the renames, and the residual diff adds the desired ones under their new names.
+/// </para>
 /// </remarks>
 internal static class RenamePrePass
 {
     internal readonly record struct RenameEntry(MigrationOperation Operation, SchemaChange Change);
 
-    internal sealed record Result(SchemaModel AlignedCurrent, IReadOnlyList<RenameEntry> Renames);
+    internal sealed record Result(SchemaModel AlignedCurrent, IReadOnlyList<RenameEntry> Renames, IReadOnlyList<RenameEntry> ReleasedChecks);
 
     /// <summary>
     /// Computes the name-aligned "current" schema and the explicit rename operations, from the
@@ -32,28 +40,58 @@ internal static class RenamePrePass
     {
         var alignedEntities = new List<EntitySchema>(current.Entities.Count);
         var renames = new List<RenameEntry>();
+        var releasedChecks = new List<RenameEntry>();
 
         foreach (var currentEntity in current.Entities)
         {
-            alignedEntities.Add(AlignEntity(currentEntity, desired, renames));
+            alignedEntities.Add(AlignEntity(currentEntity, desired, renames, releasedChecks));
         }
 
-        return new Result(new SchemaModel(alignedEntities), renames);
+        return new Result(new SchemaModel(alignedEntities), renames, releasedChecks);
     }
 
-    private static EntitySchema AlignEntity(EntitySchema currentEntity, SchemaModel desired, List<RenameEntry> renames)
+    private static EntitySchema AlignEntity(
+        EntitySchema currentEntity, SchemaModel desired, List<RenameEntry> renames, List<RenameEntry> releasedChecks)
     {
         var desiredEntity = FindDesiredCounterpart(currentEntity, desired);
         var alignedName = ResolveEntityRename(currentEntity, desiredEntity, renames);
         var (alignedFields, fieldRenames) = AlignFields(currentEntity, desiredEntity, alignedName, renames);
+        var renamed = fieldRenames.Count > 0 || !string.Equals(alignedName, currentEntity.Name, StringComparison.Ordinal);
 
         return currentEntity with
         {
             Name = alignedName,
             RenamedFrom = null,
-            Fields = alignedFields,
+            Fields = renamed ? ReleaseChecks(currentEntity, alignedName, alignedFields, releasedChecks) : alignedFields,
             Indexes = AlignIndexes(currentEntity, fieldRenames),
         };
+    }
+
+    // The aligned fields with no validation, each validated one recorded as a drop of the constraint the database holds
+    // under the entity's and field's current names, on the table as it is named after the renames.
+    private static List<FieldSchema> ReleaseChecks(
+        EntitySchema currentEntity, string alignedName, List<FieldSchema> alignedFields, List<RenameEntry> releasedChecks)
+    {
+        for (var index = 0; index < alignedFields.Count; index++)
+        {
+            if (currentEntity.Fields[index].CheckExpression is not null)
+            {
+                releasedChecks.Add(ReleasedCheck(currentEntity, currentEntity.Fields[index], alignedName, alignedFields[index].Name));
+            }
+        }
+
+        return [.. alignedFields.Select(field => field with { CheckExpression = null })];
+    }
+
+    private static RenameEntry ReleasedCheck(EntitySchema currentEntity, FieldSchema currentField, string alignedName, string alignedField)
+    {
+        var drop = new DropCheckConstraintOperation
+        {
+            Table = alignedName,
+            Name = CheckConstraintNames.For(currentEntity.Name, currentField.Name),
+        };
+
+        return new RenameEntry(drop, DestructiveScan.Classify(drop) with { Field = alignedField });
     }
 
     // The desired counterpart is either the entity that explicitly renamed from this one, or

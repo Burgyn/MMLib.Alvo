@@ -1,0 +1,5 @@
+﻿CREATE TABLE "products" (
+    "id" TEXT NOT NULL CONSTRAINT "PK_products" PRIMARY KEY,
+    "stock" INTEGER NOT NULL,
+    CONSTRAINT "ck_products_stock_7b86837d" CHECK (("stock" IS NULL OR COALESCE("stock" >= 0, 0)))
+);

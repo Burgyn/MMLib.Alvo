@@ -21,13 +21,18 @@ internal static class DescriptorModelBuilder
     /// registered no expression services — see <see cref="EnsureComputedIsRenderable"/> for why that is a
     /// refusal here rather than a silently plain column.
     /// </param>
-    public static IModel Build(SchemaModel model, Func<ModelBuilder> newBuilder, ComputedColumnSql? computed = null)
+    /// <param name="checks">
+    /// Renders a field's <c>validation</c> to this driver's CHECK constraint SQL, or <see langword="null"/> when the
+    /// container registered no expression services — see <see cref="EnsureChecksAreRenderable"/>.
+    /// </param>
+    public static IModel Build(
+        SchemaModel model, Func<ModelBuilder> newBuilder, ComputedColumnSql? computed = null, CheckConstraintSql? checks = null)
     {
         var builder = newBuilder();
 
         foreach (var entity in model.Entities)
         {
-            ConfigureEntity(builder, entity, computed);
+            ConfigureEntity(builder, entity, computed, checks);
         }
 
         var knownEntityNames = model.Entities.Select(e => e.Name).ToHashSet(StringComparer.Ordinal);
@@ -39,10 +44,10 @@ internal static class DescriptorModelBuilder
         return builder.FinalizeModel();
     }
 
-    private static void ConfigureEntity(ModelBuilder builder, EntitySchema entity, ComputedColumnSql? computed)
+    private static void ConfigureEntity(ModelBuilder builder, EntitySchema entity, ComputedColumnSql? computed, CheckConstraintSql? checks)
     {
         var entityBuilder = builder.Entity(entity.Name);
-        entityBuilder.ToTable(entity.Name);
+        entityBuilder.ToTable(entity.Name, table => ConfigureChecks(table, entity, checks));
 
         foreach (var field in entity.Fields)
         {
@@ -245,6 +250,36 @@ internal static class DescriptorModelBuilder
                 + "column whose SQL is rendered from CEL — but this container registered no expression "
                 + "services, so there is nothing to render it with. Call AddAlvo() on the same service "
                 + "collection as UseSqlite()/UsePostgreSql().");
+        }
+    }
+
+    /// <summary>
+    /// Declares one CHECK constraint per validated field, named by <see cref="CheckConstraintNames.For"/>, so EF's own
+    /// per-provider generator spells it — inside <c>CREATE TABLE</c>, as PostgreSQL's <c>ADD CONSTRAINT</c>, and inside
+    /// SQLite's table rebuild (HX-11 Rulings 19–21).
+    /// </summary>
+    private static void ConfigureChecks(TableBuilder table, EntitySchema entity, CheckConstraintSql? checks)
+    {
+        foreach (var field in entity.Fields.Where(field => field.CheckExpression is not null))
+        {
+            EnsureChecksAreRenderable(entity, field, checks);
+            table.HasCheckConstraint(CheckConstraintNames.For(entity.Name, field.Name), checks!.For(entity, field));
+        }
+    }
+
+    /// <summary>
+    /// Refuses a validated field when no expression services reached this model builder, naming the registration that
+    /// is missing — <see cref="EnsureComputedIsRenderable"/>'s reason: a validation the store silently drops is a rule
+    /// the descriptor promises and nothing keeps.
+    /// </summary>
+    private static void EnsureChecksAreRenderable(EntitySchema entity, FieldSchema field, CheckConstraintSql? checks)
+    {
+        if (checks is null)
+        {
+            throw new InvalidOperationException(
+                $"Field '{entity.Name}.{field.Name}' declares 'validation', which becomes a CHECK constraint whose SQL is "
+                + "rendered from CEL — but this container registered no expression services, so there is nothing to "
+                + "render it with. Call AddAlvo() on the same service collection as UseSqlite()/UsePostgreSql().");
         }
     }
 

@@ -44,6 +44,7 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
     private readonly RelationalConnectionFactory _connections;
     private readonly IAlvoSqlDialect _dialect;
     private readonly ComputedColumnSql? _computed;
+    private readonly CheckConstraintSql? _checks;
 
     /// <summary>
     /// Initializes a new migrator from a provider's EF Core services and a per-call connection factory.
@@ -61,6 +62,10 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
     /// Renders a <c>computed</c> field's CEL to this driver's SQL, or <see langword="null"/> when the container
     /// registered no expression services — a schema declaring one is then refused by name.
     /// </param>
+    /// <param name="checks">
+    /// Renders a field's <c>validation</c> to this driver's CHECK constraint SQL, or <see langword="null"/> when the
+    /// container registered no expression services — a schema declaring one is then refused by name.
+    /// </param>
     internal EfCoreSchemaMigrator(
         IMigrationsModelDiffer differ,
         IMigrationsSqlGenerator sqlGenerator,
@@ -68,7 +73,8 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
         Func<ModelBuilder> newModelBuilder,
         RelationalConnectionFactory connections,
         IAlvoSqlDialect dialect,
-        ComputedColumnSql? computed)
+        ComputedColumnSql? computed,
+        CheckConstraintSql? checks = null)
     {
         ArgumentNullException.ThrowIfNull(differ);
         ArgumentNullException.ThrowIfNull(sqlGenerator);
@@ -84,6 +90,7 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
         _connections = connections;
         _dialect = dialect;
         _computed = computed;
+        _checks = checks;
     }
 
     /// <inheritdoc/>
@@ -95,7 +102,7 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
 
         var (prePass, desiredModel, residual) = ComputeResidualDiff(current, desired);
         var operations = ForThisEngine(AssembleOperations(prePass, residual));
-        var steps = BuildSemanticSteps(prePass, residual);
+        var steps = BuildSemanticSteps(prePass, desired, residual);
         var sql = GenerateSql(operations, desiredModel);
 
         return Task.FromResult(new MigrationPlan { Steps = steps, Sql = sql });
@@ -121,11 +128,13 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
     }
 
     // Assembles the full, ordered operation list: declared renames first (so later operations see
-    // the new names), then the (normalized) residual diff.
+    // the new names), then the drops of the CHECK constraints a rename released (see RenamePrePass), then the
+    // (normalized) residual diff, which adds them back under their new names.
     private static List<MigrationOperation> AssembleOperations(RenamePrePass.Result prePass, IReadOnlyList<MigrationOperation> residual)
     {
-        var operations = new List<MigrationOperation>(prePass.Renames.Count + residual.Count);
+        var operations = new List<MigrationOperation>(prePass.Renames.Count + prePass.ReleasedChecks.Count + residual.Count);
         operations.AddRange(prePass.Renames.Select(rename => rename.Operation));
+        operations.AddRange(prePass.ReleasedChecks.Select(released => released.Operation));
         operations.AddRange(residual);
         return operations;
     }
@@ -138,21 +147,44 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
 
     // Semantic steps (drive HasDestructiveChanges and the dry-run summary), in the same order as
     // AssembleOperations.
-    private List<MigrationStep> BuildSemanticSteps(RenamePrePass.Result prePass, IReadOnlyList<MigrationOperation> residual)
+    private List<MigrationStep> BuildSemanticSteps(
+        RenamePrePass.Result prePass, SchemaModel desired, IReadOnlyList<MigrationOperation> residual)
     {
-        var steps = new List<MigrationStep>(prePass.Renames.Count + residual.Count);
+        var steps = new List<MigrationStep>(prePass.Renames.Count + prePass.ReleasedChecks.Count + residual.Count);
         steps.AddRange(prePass.Renames.Select(rename => ToStep(rename.Change)));
-        steps.AddRange(residual.Select(operation => ToStep(DestructiveScan.Classify(operation), CostNote(operation))));
+        steps.AddRange(prePass.ReleasedChecks.Select(released => ToStep(released.Change, CostNote(released.Operation))));
+        steps.AddRange(residual.Select(operation =>
+            ToStep(WithValidatedField(DestructiveScan.Classify(operation), operation, prePass.AlignedCurrent, desired), CostNote(operation))));
         return steps;
     }
 
+    // A CHECK constraint's step names the field whose validation it is: recomputed from the constraint's name over the
+    // schema that holds it — the desired one for an added constraint, the (aligned) current one for a dropped one —
+    // because a constraint name is never parsed (HX-11 Ruling 19).
+    private static SchemaChange WithValidatedField(
+        SchemaChange change, MigrationOperation operation, SchemaModel current, SchemaModel desired) =>
+        operation switch
+        {
+            AddCheckConstraintOperation add => change with { Field = ValidatedField(desired, add.Table, add.Name) },
+            DropCheckConstraintOperation drop => change with { Field = ValidatedField(current, drop.Table, drop.Name) },
+            _ => change,
+        };
+
+    private static string? ValidatedField(SchemaModel schema, string table, string constraintName) =>
+        schema.Entities.FirstOrDefault(entity => string.Equals(entity.Name, table, StringComparison.Ordinal)) is { } entity
+            ? CheckConstraintNames.Owner(schema, entity, constraintName)?.Field.Name
+            : null;
+
     // What a non-destructive step costs when that is worth saying before it runs: on an engine that rebuilds the table
-    // to add a generated column, the step copies every row under a write lock — a pause on a large table, not data
-    // loss, so it is a note on the step and never the destructive flag.
+    // to add a generated column or to add or drop a CHECK constraint, the step copies every row under a write lock — a
+    // pause on a large table, not data loss, so it is a note on the step and never the destructive flag.
     private string? CostNote(MigrationOperation operation) =>
-        _dialect.GeneratedColumnAddRequiresTableRebuild && GeneratedColumnAdds.IsGeneratedAdd(operation)
+        _dialect.GeneratedColumnAddRequiresTableRebuild && RebuildsTheTable(operation)
             ? GeneratedColumnAdds.RebuildNote
             : null;
+
+    private static bool RebuildsTheTable(MigrationOperation operation) =>
+        GeneratedColumnAdds.IsGeneratedAdd(operation) || operation is AddCheckConstraintOperation or DropCheckConstraintOperation;
 
     // Generates the executable SQL from the WHOLE operation list in ONE call: only then does EF
     // resolve interdependent operations correctly (e.g. a SQLite table rebuild triggered by a drop
@@ -231,7 +263,8 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
     {
         // DescriptorModelBuilder.Build returns a FinalizeModel()'d model; GetRelationalModel()
         // additionally requires the runtime initializer to have run (Task 0 report, gotcha #1).
-        var model = DescriptorModelBuilder.Build(schema, _newModelBuilder, _computed);
+        CheckConstraintNames.EnsureDistinct(schema);
+        var model = DescriptorModelBuilder.Build(schema, _newModelBuilder, _computed, _checks);
         var initialized = _modelRuntimeInitializer.Initialize(model, designTime: true);
         EnsureEveryGeneratedColumnIsExpressible(initialized);
 

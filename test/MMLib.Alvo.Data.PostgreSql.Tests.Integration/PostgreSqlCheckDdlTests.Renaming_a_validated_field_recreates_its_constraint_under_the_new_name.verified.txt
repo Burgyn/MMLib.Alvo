@@ -1,0 +1,7 @@
+﻿ALTER TABLE products RENAME COLUMN stock TO on_hand;
+
+;
+ALTER TABLE products DROP CONSTRAINT ck_products_stock_7b86837d;
+
+;
+ALTER TABLE products ADD CONSTRAINT ck_products_on_hand_cd605ab1 CHECK (("on_hand" IS NULL OR COALESCE("on_hand" >= 0, FALSE)));
