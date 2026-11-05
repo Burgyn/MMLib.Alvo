@@ -57,6 +57,47 @@ public class AlvoExtensionOptionsTests
         exposed.GetRequiredService<IOptions<AlvoExtensionOptions>>().Value.ExposeTypeNames.ShouldBeTrue();
     }
 
+    [Fact]
+    public void The_cel_function_budget_defaults_to_the_in_transaction_hook_timeout()
+    {
+        using var services = Container(new());
+
+        services.GetRequiredService<IOptions<AlvoExtensionOptions>>().Value.CelFunctionBudget.ShouldBe(TimeSpan.FromMilliseconds(250));
+    }
+
+    [Fact]
+    public void The_cel_function_budget_is_bound_from_its_section()
+    {
+        using var services = Container(new() { ["Alvo:Extensions:CelFunctionBudget"] = "00:00:00.040" });
+
+        services.GetRequiredService<IOptions<AlvoExtensionOptions>>().Value.CelFunctionBudget.ShouldBe(TimeSpan.FromMilliseconds(40));
+    }
+
+    [Theory]
+    [InlineData("00:00:00")]
+    [InlineData("-00:00:01")]
+    [InlineData("00:00:30.001")]
+    [InlineData("01:00:00")]
+    public void A_cel_function_budget_outside_its_bounds_refuses_the_start_naming_the_key(string configured)
+    {
+        using var services = Container(new() { ["Alvo:Extensions:CelFunctionBudget"] = configured });
+
+        var refused = Should.Throw<OptionsValidationException>(
+            () => services.GetRequiredService<IOptions<AlvoExtensionOptions>>().Value);
+
+        refused.Message.ShouldContain("Alvo:Extensions:CelFunctionBudget");
+        refused.Message.ShouldContain("Alvo__Extensions__CelFunctionBudget");
+        refused.Message.ShouldContain("30 s");
+    }
+
+    [Fact]
+    public void A_budget_of_exactly_thirty_seconds_is_accepted()
+    {
+        using var services = Container(new() { ["Alvo:Extensions:CelFunctionBudget"] = "00:00:30" });
+
+        services.GetRequiredService<IOptions<AlvoExtensionOptions>>().Value.CelFunctionBudget.ShouldBe(TimeSpan.FromSeconds(30));
+    }
+
     private static ServiceProvider Container(Dictionary<string, string?> settings) => new ServiceCollection()
         .AddSingleton<IConfiguration>(new ConfigurationBuilder().AddInMemoryCollection(settings).Build())
         .AddAlvoExtensions()

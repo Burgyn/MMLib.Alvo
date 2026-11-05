@@ -12,6 +12,8 @@ internal static class ExpressionsSetup
     /// <returns><paramref name="services"/>, for chaining.</returns>
     internal static IServiceCollection AddAlvoExpressions(this IServiceCollection services)
     {
+        services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<CelFunctionBudgetPolicy>();
         services.TryAddSingleton(provider => CelFunctionCatalog.BuiltIns.With(
             provider.GetServices<CelFunctionRegistration>().Select(registration => registration.Function)));
         services.TryAddSingleton<ICelCompiler>(provider => new CelCompiler(provider.GetRequiredService<CelFunctionCatalog>()));

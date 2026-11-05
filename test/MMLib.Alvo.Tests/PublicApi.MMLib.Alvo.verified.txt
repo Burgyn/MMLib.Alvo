@@ -426,6 +426,7 @@ namespace MMLib.Alvo.Extensions
     {
         public const string SectionName = "Alvo:Extensions";
         public AlvoExtensionOptions() { }
+        public System.TimeSpan CelFunctionBudget { get; set; }
         public bool ExposeTypeNames { get; set; }
         public int MaxDepth { get; set; }
     }

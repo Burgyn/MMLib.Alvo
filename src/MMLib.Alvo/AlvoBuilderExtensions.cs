@@ -43,22 +43,29 @@ public static class AlvoBuilderExtensions
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Up to four parameters of <see cref="string"/>, <see cref="long"/>, <see cref="int"/>, <see cref="decimal"/>,
-    /// <see cref="bool"/>, <see cref="DateTimeOffset"/> or <see cref="Guid"/> (or a nullable one), and a result of the
-    /// same set. A null argument for a non-nullable parameter makes the call null without invoking the function; a
-    /// present argument that does not fit its parameter (a value past <see cref="int"/>'s range for an <see cref="int"/>)
-    /// fails the call without invoking it, exactly as a throw does — it never reads as null.
+    /// Up to four parameters (plus an optional trailing <see cref="CancellationToken"/>) of <see cref="string"/>,
+    /// <see cref="long"/>, <see cref="int"/>, <see cref="decimal"/>, <see cref="bool"/>, <see cref="DateTimeOffset"/> or
+    /// <see cref="Guid"/> (or a nullable one), and a result of the same set. A null argument for a non-nullable
+    /// parameter makes the call null without invoking the function; a present argument that does not fit its parameter
+    /// (a value past <see cref="int"/>'s range for an <see cref="int"/>) fails the call without invoking it, exactly as a
+    /// throw does — it never reads as null.
     /// Everything is checked here, at the call, so a mistake fails startup rather than an apply.
     /// </para>
     /// <para>
     /// <b>The function is host code inside the write's transaction.</b> It must be synchronous, fast, thread-safe and
-    /// free of side effects; it runs once per evaluation with no timeout. It captures what it closes over for the host's
-    /// lifetime (no DI scope).
+    /// free of side effects. Every call in one evaluation — a hook's condition, its <c>mutate</c> values — shares a time
+    /// budget, <c>Alvo:Extensions:CelFunctionBudget</c> (250 ms by default). Give the function a trailing
+    /// <see cref="CancellationToken"/> parameter — <c>(string vin, CancellationToken ct) =&gt; …</c>; it is not a CEL
+    /// argument — and it receives a token cancelled when the budget is spent. A function that returns after the budget,
+    /// with a token or without one, fails the write as a function failure, so a catch around the token buys nothing. The
+    /// <c>ALVO1001</c> analyzer reports the network, a database connection, a file or a data port used inside it. It
+    /// captures what it closes over for the host's lifetime (no DI scope).
     /// </para>
     /// <para>
     /// <b>If it throws (or an argument does not fit), the evaluation fails closed</b>, and what that looks like depends
     /// on the caller: a Data API write is rolled back and answers HTTP 500 <c>…/errors/function-failed</c> naming the
-    /// function; an in-process <c>IAlvoData</c> caller (a host endpoint, the dashboard) receives an exception and nothing
+    /// function (a built-in function that refuses the caller's data answers 422 <c>…/errors/expression-failed</c>
+    /// instead); an in-process <c>IAlvoData</c> caller (a host endpoint, the dashboard) receives an exception and nothing
     /// is written (the dashboard shows its generic fault); in an after-hook condition the after-hook is dropped and a
     /// Warning is logged. So <b>throw</b> on a present input the function cannot answer for: a <see langword="null"/>
     /// return makes the call <see langword="null"/>, a condition over <see langword="null"/> does not fire, and a
