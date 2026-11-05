@@ -104,20 +104,18 @@ internal static class DeliveryTable
     internal static string OutboxUnfannedIndexDdl(string outbox) =>
         $"CREATE INDEX IF NOT EXISTS ix_{outbox}_unfanned ON {outbox} (partition_key, id) WHERE dispatched_at IS NULL";
 
-    internal static IReadOnlyList<string> Statements(string table, string attempts, string outbox) =>
-        [Ddl(table), ClaimIndexDdl(table), LaneIndexDdl(table), OpenLaneIndexDdl(table), AttemptsDdl(attempts), OutboxUnfannedIndexDdl(outbox)];
-
+    /// <summary>
+    /// The deliveries table, its attempts table and their indexes, each through <see cref="IfNotExistsDdl"/> so a replica that loses the
+    /// race to create one of them to another replica takes the rival's object as its own.
+    /// </summary>
     internal static async Task EnsureAsync(DbConnection connection, string table, string attempts, string outbox, CancellationToken ct)
     {
-        foreach (var statement in Statements(table, attempts, outbox))
-        {
-            var command = connection.CreateCommand();
-            await using (command.ConfigureAwait(false))
-            {
-                command.CommandText = statement;
-                await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
-        }
+        await IfNotExistsDdl.CreateTableAsync(connection, table, Ddl(table), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateIndexAsync(connection, ClaimIndexDdl(table), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateIndexAsync(connection, LaneIndexDdl(table), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateIndexAsync(connection, OpenLaneIndexDdl(table), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateTableAsync(connection, attempts, AttemptsDdl(attempts), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateIndexAsync(connection, OutboxUnfannedIndexDdl(outbox), ct).ConfigureAwait(false);
     }
 
     internal static string FanOutSql(string table, int rows) =>

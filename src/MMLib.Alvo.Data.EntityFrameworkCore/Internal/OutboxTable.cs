@@ -125,21 +125,13 @@ internal static class OutboxTable
     /// </para>
     /// <para>
     /// Two connections racing the very first create may still collide here — a duplicate-relation error on
-    /// PostgreSQL, because <c>CREATE TABLE IF NOT EXISTS</c> is not atomic there. On the apply path
-    /// <see cref="SystemSchemaInitializer"/> already absorbs that by probing whether the table exists
-    /// afterwards; on the write path it is a storage write failure like any other, retried by the caller,
-    /// whose next attempt finds the table in place.
+    /// PostgreSQL, because <c>CREATE TABLE IF NOT EXISTS</c> is not atomic there. <see cref="IfNotExistsDdl"/>
+    /// absorbs that on every path by probing whether the table exists afterwards, the way
+    /// <see cref="SystemSchemaInitializer"/> always has on the apply path.
     /// </para>
     /// </remarks>
-    internal static async Task EnsureAsync(DbConnection connection, string tableName, CancellationToken ct)
-    {
-        var command = connection.CreateCommand();
-        await using (command.ConfigureAwait(false))
-        {
-            command.CommandText = Ddl(tableName);
-            await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
-    }
+    internal static Task EnsureAsync(DbConnection connection, string tableName, CancellationToken ct) =>
+        IfNotExistsDdl.CreateTableAsync(connection, tableName, Ddl(tableName), ct);
 
     /// <summary>
     /// Appends <paramref name="event"/> to the outbox <b>on the caller's own transaction</b>, so the event and

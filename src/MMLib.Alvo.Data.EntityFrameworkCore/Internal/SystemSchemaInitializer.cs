@@ -149,111 +149,21 @@ internal sealed partial class SystemSchemaInitializer
     }
 
     /// <summary>
-    /// Runs one <c>CREATE TABLE IF NOT EXISTS</c>, treating "another connection created it a moment ago" as
-    /// the success <c>IF NOT EXISTS</c> was asked for.
+    /// Runs one <c>CREATE TABLE IF NOT EXISTS</c>, treating "another connection created it a moment ago" as the success
+    /// <c>IF NOT EXISTS</c> was asked for — see <see cref="IfNotExistsDdl"/>, which holds the measured reason and is
+    /// shared with every store that ensures its own table on the data path.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b><c>CREATE TABLE IF NOT EXISTS</c> is not concurrency-safe on PostgreSQL, and this was measured, not
-    /// assumed.</b> PostgreSQL's own documentation says so: the existence check and the catalog insert are not
-    /// atomic, so two sessions creating one table at the same instant leave the loser with
-    /// <c>23505 duplicate key value violates unique constraint "pg_type_typname_nsp_index"</c> rather than a
-    /// quiet no-op. Three replicas cold-starting against one empty database do exactly that, and before this
-    /// they failed their <em>first</em> database call — stage 1 — never reaching the applied-snapshot race the
-    /// boot's own convergence handles.
-    /// </para>
-    /// <para>
-    /// The recovery reads the outcome instead of the error: no <c>SQLSTATE</c> and no
-    /// <c>SqliteErrorCode</c> is inspected, because a driver that decoded engine error numbers here would need
-    /// a new branch for every engine Alvo adds. If the table is there afterwards, the intent was met by
-    /// whoever created it; if it is not, the failure was something else and is rethrown unchanged. That is the
-    /// same "re-read rather than classify" discipline <see cref="VersionRowWriter"/> uses to tell a lost race
-    /// from a genuine write failure.
-    /// </para>
-    /// <para>
-    /// The DDL runs outside any transaction, so a failed statement leaves the connection usable and the
-    /// existence probe below can run on it directly.
-    /// </para>
-    /// </remarks>
     /// <param name="tableName">The table the DDL creates.</param>
     /// <param name="ddl">The <c>CREATE TABLE IF NOT EXISTS</c> statement.</param>
     /// <param name="ct">A token to cancel the operation.</param>
-    private async Task CreateIfMissingAsync(string tableName, string ddl, CancellationToken ct)
-    {
-        try
-        {
-            await ExecuteAsync(ddl, ct).ConfigureAwait(false);
-        }
-        catch (DbException)
-        {
-            if (!await ExistsAsync(tableName, ct).ConfigureAwait(false))
-            {
-                throw;
-            }
-        }
-    }
+    private Task CreateIfMissingAsync(string tableName, string ddl, CancellationToken ct) =>
+        IfNotExistsDdl.CreateTableAsync(_connection, tableName, ddl, ct);
 
-    /// <summary>
-    /// Runs one <c>CREATE INDEX IF NOT EXISTS</c> and, when it fails, runs it once more: the index-shaped twin of
-    /// <see cref="CreateIfMissingAsync"/>.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>Not the table probe.</b> An index is built on a table that is already there, so asking whether the table
-    /// exists answers yes for every failure — a lock or statement timeout on a large outbox, a full disk, a missing
-    /// column — and the boot would go on without the index, silently turning a seek into a scan of a key's whole
-    /// history.
-    /// </para>
-    /// <para>
-    /// <b>The second run is the existence check</b>, in the same "read the outcome, not the error" discipline: after a
-    /// lost race the concurrent creator's index is committed, so <c>IF NOT EXISTS</c> skips it and the run succeeds;
-    /// any other failure fails again, and the <em>first</em> error is rethrown. It needs no catalog query, which is
-    /// what keeps it free of a per-engine branch (<c>sqlite_master</c> on one engine, <c>pg_indexes</c> on the other).
-    /// </para>
-    /// </remarks>
+    /// <summary>The index-shaped twin of <see cref="CreateIfMissingAsync"/>: <see cref="IfNotExistsDdl.CreateIndexAsync"/>.</summary>
     /// <param name="ddl">The <c>CREATE INDEX IF NOT EXISTS</c> statement.</param>
     /// <param name="ct">A token to cancel the operation.</param>
-    private async Task CreateIndexIfMissingAsync(string ddl, CancellationToken ct)
-    {
-        try
-        {
-            await ExecuteAsync(ddl, ct).ConfigureAwait(false);
-        }
-        catch (DbException)
-        {
-            if (!await SucceedsAsync(ddl, ct).ConfigureAwait(false))
-            {
-                throw;
-            }
-        }
-    }
-
-    /// <summary>Whether <paramref name="sql"/> runs without a database error.</summary>
-    /// <param name="sql">The statement to run.</param>
-    /// <param name="ct">A token to cancel the operation.</param>
-    private async Task<bool> SucceedsAsync(string sql, CancellationToken ct)
-    {
-        try
-        {
-            await ExecuteAsync(sql, ct).ConfigureAwait(false);
-            return true;
-        }
-        catch (DbException)
-        {
-            return false;
-        }
-    }
-
-    /// <summary>Whether <paramref name="tableName"/> can be selected from, i.e. whether it exists.</summary>
-    /// <remarks>
-    /// A zero-row select rather than a catalog query: SQLite has <c>sqlite_master</c>, PostgreSQL has
-    /// <c>information_schema</c>, and asking the table itself is the one question every engine answers the
-    /// same way. Nothing is returned, so the shape of the table does not matter either.
-    /// </remarks>
-    /// <param name="tableName">The table to look for.</param>
-    /// <param name="ct">A token to cancel the operation.</param>
-    private Task<bool> ExistsAsync(string tableName, CancellationToken ct) =>
-        SucceedsAsync($"SELECT 1 FROM {tableName} WHERE 1 = 0", ct);
+    private Task CreateIndexIfMissingAsync(string ddl, CancellationToken ct) =>
+        IfNotExistsDdl.CreateIndexAsync(_connection, ddl, ct);
 
     private string DescriptorVersionsDdl =>
         $"""
@@ -269,16 +179,6 @@ internal sealed partial class SystemSchemaInitializer
             PRIMARY KEY (project, revision)
         )
         """;
-
-    private async Task ExecuteAsync(string sql, CancellationToken ct)
-    {
-        var command = _connection.CreateCommand();
-        await using (command.ConfigureAwait(false))
-        {
-            command.CommandText = sql;
-            await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
-    }
 
     /// <remarks>
     /// <c>\A…\z</c> rather than <c>^…$</c>: in .NET <c>$</c> also matches immediately before a trailing
