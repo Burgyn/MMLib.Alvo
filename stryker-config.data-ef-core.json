@@ -17,7 +17,9 @@
       "Internal/ConstraintViolationTranslator.cs",
       "Internal/WholeRowGuard.cs",
       "EfCoreOutboxStore.cs",
-      "Internal/OutboxTable.cs"
+      "Internal/OutboxTable.cs",
+      "Internal/EfAlvoData.Hooks.cs",
+      "Internal/UnitRun.cs"
     ],
     "thresholds": {
       "high": 90,
