@@ -198,6 +198,13 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
     private static NotSupportedException Unsupported(CelNode node) =>
         new($"'{node.GetType().Name}' cannot be rendered to SQL by this entry point.");
 
+    /// <summary>
+    /// A duration has no SQL operand form yet (HX-11 Ruling 11 renders it as integer microseconds): bound as a
+    /// <see cref="TimeSpan"/>, SQLite would compare its text, so <c>duration('24h') &lt; duration('23h')</c> would hold.
+    /// </summary>
+    private static NotSupportedException UnsupportedDuration() =>
+        new("A duration cannot be rendered to SQL by this entry point.");
+
     private readonly record struct PredicateFragment(string Sql, bool IsTwoValued);
 
     /// <summary>
@@ -392,6 +399,11 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
 
     private static string RenderLiteralOperand(CelLiteral literal, IFieldSqlRenderer fields, ParameterBag bag)
     {
+        if (literal.Type == CelValueType.Duration)
+        {
+            throw UnsupportedDuration();
+        }
+
         if (literal.Type == CelValueType.Bool)
         {
             return literal.Value is true ? fields.TrueLiteral : fields.FalseLiteral;

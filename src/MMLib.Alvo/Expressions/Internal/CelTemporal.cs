@@ -34,8 +34,10 @@ internal static class CelTemporal
         && (TypeOf(binary.Left) is not null || TypeOf(binary.Right) is not null);
 
     /// <summary>
-    /// Applies a temporal <c>+</c> or <c>-</c>. A null operand answers <see langword="null"/>; a result outside CEL's range
-    /// fails closed on the hook path and answers <see langword="null"/> elsewhere, like numeric overflow (Ruling 10).
+    /// Applies a temporal <c>+</c> or <c>-</c>. A null operand answers <see langword="null"/>. A result outside CEL's range
+    /// fails closed on the hook path as the caller's data (Ruling 10); elsewhere — a rule's in-process evaluation — it
+    /// throws an <see cref="OverflowException"/>, which the interpreter's entry point turns into a false verdict for the
+    /// <b>whole</b> predicate (Ruling 57), so no <c>!</c> above it can read the error as a grant.
     /// </summary>
     /// <param name="op">The operator.</param>
     /// <param name="left">The left value.</param>
@@ -43,6 +45,7 @@ internal static class CelTemporal
     /// <param name="failClosed">Whether this is the fail-closed hook path.</param>
     /// <returns>A <see cref="DateTimeOffset"/>, a <see cref="TimeSpan"/>, or <see langword="null"/>.</returns>
     /// <exception cref="CelFunctionException"><paramref name="failClosed"/> is set and the result is out of range.</exception>
+    /// <exception cref="OverflowException"><paramref name="failClosed"/> is not set and the result is out of range.</exception>
     internal static object? Apply(CelBinaryOperator op, object? left, object? right, bool failClosed)
     {
         if (left is null || right is null)
@@ -51,7 +54,12 @@ internal static class CelTemporal
         }
 
         var (value, reason) = Compute(op, left, right);
-        return value ?? (failClosed ? throw new CelFunctionException(Name(op), reason!) : null);
+        if (value is not null)
+        {
+            return value;
+        }
+
+        return failClosed ? throw new CelFunctionException(Name(op), reason!) : RuleFailure(op, reason!);
     }
 
     /// <summary>The instant a timestamp-typed value denotes; a duration is never one.</summary>
@@ -59,6 +67,13 @@ internal static class CelTemporal
     /// <returns>The instant, or <see langword="null"/>.</returns>
     internal static DateTimeOffset? Instant(object value) =>
         value is not TimeSpan && CelInterpreter.TryToDateTimeOffset(value, out var instant) ? instant : null;
+
+    /// <summary>
+    /// Off the hook path, a range error denies the whole verdict (Ruling 57) and any other operand the overloads do not
+    /// cover answers <see langword="null"/>, as an uncomparable value does there.
+    /// </summary>
+    private static object? RuleFailure(CelBinaryOperator op, string reason) =>
+        reason is TimestampRange or DurationRange ? throw new OverflowException($"'{Name(op)}': {reason}.") : null;
 
     private static CelValueType? ResultOf(CelBinary binary) => (TypeOf(binary.Left), TypeOf(binary.Right)) switch
     {
@@ -70,7 +85,7 @@ internal static class CelTemporal
     private static (object? Value, string? Reason) Compute(CelBinaryOperator op, object left, object right) => (left, right) switch
     {
         (TimeSpan l, TimeSpan r) => Duration(op == CelBinaryOperator.Add ? l.Ticks + (decimal)r.Ticks : l.Ticks - (decimal)r.Ticks),
-        (TimeSpan d, _) when Instant(right) is { } t => Shift(t, d.Ticks),
+        (TimeSpan d, _) when op == CelBinaryOperator.Add && Instant(right) is { } t => Shift(t, d.Ticks),
         (_, TimeSpan d) when Instant(left) is { } t => Shift(t, op == CelBinaryOperator.Add ? d.Ticks : -(decimal)d.Ticks),
         _ when Instant(left) is { } a && Instant(right) is { } b => Duration(a.UtcTicks - (decimal)b.UtcTicks),
         _ => (null, NotTemporal),

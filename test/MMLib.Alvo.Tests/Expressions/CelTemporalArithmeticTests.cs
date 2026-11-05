@@ -1,6 +1,7 @@
 ﻿using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Schema;
+using MMLib.Alvo.Testing;
 
 namespace MMLib.Alvo.Tests.Expressions;
 
@@ -129,6 +130,57 @@ public sealed class CelTemporalArithmeticTests
         var row = CelFixtures.Row(("starts_at", new DateTimeOffset(9000, 1, 1, 0, 0, 0, TimeSpan.Zero)), ("ends_at", _start));
         CelInterpreter.EvaluatePredicate(rule, row, null, AlvoContext.Anonymous).ShouldBeFalse();
     }
+
+    /// <summary>
+    /// Ruling 57: a range error decides a rule's whole verdict as false, so <c>!</c> cannot turn it into a grant. The
+    /// operands are values a caller may write (year 9999), not unreachable ones.
+    /// </summary>
+    [Theory]
+    [InlineData("!(starts_at + duration('24h') > ends_at)")]
+    [InlineData("!(starts_at + duration('24h') == ends_at)")]
+    [InlineData("!(starts_at + duration('24h') != ends_at)")]
+    [InlineData("starts_at + duration('24h') != ends_at")]
+    [InlineData("ends_at < starts_at + duration('24h') || !(starts_at + duration('24h') > ends_at)")]
+    public void A_range_error_denies_the_whole_rule_even_under_negation(string source)
+    {
+        var rule = Compile(source, CelProfile.Rule).Expression!;
+        var row = CelFixtures.Row(
+            ("starts_at", new DateTimeOffset(9999, 12, 31, 12, 0, 0, TimeSpan.Zero)),
+            ("ends_at", new DateTimeOffset(9999, 12, 31, 13, 0, 0, TimeSpan.Zero)));
+        CelInterpreter.EvaluatePredicate(rule, row, null, AlvoContext.Anonymous).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_range_error_in_a_condition_still_fails_closed_as_the_caller_s()
+    {
+        var condition = Compile("!(new.starts_at + duration('24h') > new.ends_at)", CelProfile.Condition).Expression!;
+        var row = CelFixtures.Row(
+            ("starts_at", new DateTimeOffset(9999, 12, 31, 12, 0, 0, TimeSpan.Zero)),
+            ("ends_at", new DateTimeOffset(9999, 12, 31, 13, 0, 0, TimeSpan.Zero)));
+        var failure = Should.Throw<CelFunctionException>(() => CelInterpreter.EvaluatePredicate(condition, row, null, AlvoContext.Anonymous));
+        failure.Reason.ShouldBe(CelTemporal.TimestampRange);
+        failure.OnCallerData.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_duration_minus_a_timestamp_is_no_overload_the_interpreter_computes()
+    {
+        Should.Throw<CelFunctionException>(() => CelTemporal.Apply(CelBinaryOperator.Subtract, TimeSpan.FromHours(1), _start, failClosed: true))
+            .Reason.ShouldNotBe(CelTemporal.TimestampRange);
+        CelTemporal.Apply(CelBinaryOperator.Subtract, TimeSpan.FromHours(1), _start, failClosed: false).ShouldBeNull();
+        CelTemporal.Apply(CelBinaryOperator.Add, TimeSpan.FromHours(1), _start, failClosed: false).ShouldBe(_start.AddHours(1));
+    }
+
+    /// <summary>
+    /// Until temporal comparisons render as integer microseconds, a duration never reaches SQL as a bound
+    /// <see cref="TimeSpan"/>: SQLite would compare its text form, so <c>duration('24h') &lt; duration('23h')</c> would hold.
+    /// </summary>
+    [Theory]
+    [InlineData("duration('24h') < duration('23h')")]
+    [InlineData("duration('24h') == duration('24h')")]
+    public void A_duration_literal_refuses_to_render_rather_than_bind_a_time_span(string source) =>
+        Should.Throw<NotSupportedException>(() =>
+            new SqlPredicateRenderer().Render(Compile(source, CelProfile.Rule).Expression!, AlvoContext.Anonymous, new TestFieldSqlRenderer()));
 
     [Fact]
     public void An_empty_operand_makes_the_comparison_false()
