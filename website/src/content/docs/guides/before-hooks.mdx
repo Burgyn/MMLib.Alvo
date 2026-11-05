@@ -144,8 +144,8 @@ hook received it. The facet check runs once, on the final row, and names the hoo
 **Failing closed.** A function that cannot answer refuses the write and rolls it back: `int(new.code)` over a text
 that is not a whole number, a `substring` past the end, a division by zero. When the refused value is one the request's
 body sent, the answer is 422 [`expression-failed`](/reference/problem-types/#expression-failed) — the caller can send
-another; when it is not — a field an update left alone, a default, a value an earlier hook wrote, a custom function's
-result, `old.` — it is 500 `function-failed`. A call over constants that always fails, such as
+another; when it is not — a field an update left alone, a default, a field an earlier hook writes (whether or not its
+condition held this time), a custom function's result, `old.` — it is 500 `function-failed`. A call over constants that always fails, such as
 `timestamp('yesterday')`, is refused when the descriptor is applied instead.
 
 :::caution[Not in this build]
