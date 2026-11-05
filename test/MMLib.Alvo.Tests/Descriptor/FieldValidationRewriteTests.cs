@@ -26,6 +26,18 @@ public sealed class FieldValidationRewriteTests
             .Message.ShouldSatisfyAllConditions(m => m.ShouldContain("'value'"), m => m.ShouldContain("'limit'"));
 
     [Fact]
+    public void A_conditional_is_refused_with_its_alternative_and_no_parameter_name() =>
+        Should.Throw<InvalidDataException>(() => FieldValidation.Canonical("products", "stock", "value > 0 ? true : false", _fields))
+            .Message.ShouldSatisfyAllConditions(
+                m => m.ShouldContain("'?:'"), m => m.ShouldContain("'&&' and '||'"), m => m.ShouldNotContain("(Parameter"));
+
+    [Fact]
+    public void A_field_whose_name_cel_cannot_spell_is_refused_with_no_parameter_name() =>
+        Should.Throw<InvalidDataException>(() => FieldValidation.Canonical("products", "true", "value >= 0", ["true"]))
+            .Message.ShouldSatisfyAllConditions(
+                m => m.ShouldContain("has no canonical CEL text: 'true' is not a CEL field name"), m => m.ShouldNotContain("(Parameter"));
+
+    [Fact]
     public void The_field_named_value_may_validate_itself_by_name() =>
         FieldValidation.Canonical("readings", "value", "value > 0", ["value", "limit"]).ShouldBe("value > 0");
 }

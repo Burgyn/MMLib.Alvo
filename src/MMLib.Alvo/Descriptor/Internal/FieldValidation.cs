@@ -89,14 +89,20 @@ internal static class FieldValidation
         }
         catch (ArgumentException unspellable)
         {
-            return (null, ($"Field '{entity}.{field}' declares a 'validation' that has no canonical CEL text: {unspellable.Message}", SyntaxFix));
+            return (null, ($"Field '{entity}.{field}' declares a 'validation' that has no canonical CEL text: {WithoutParameter(unspellable)}", SyntaxFix));
         }
     }
+
+    private static string WithoutParameter(ArgumentException failure) =>
+        failure.ParamName is { } name
+            ? failure.Message.Replace($" (Parameter '{name}')", string.Empty, StringComparison.Ordinal)
+            : failure.Message;
 
     /// <summary>Rewrites the row's spellings to its field names and folds duration constants; refuses what one row cannot answer.</summary>
     private sealed class Rewriter(string entity, string field, IReadOnlyCollection<string> fieldNames)
     {
         private const string Value = "value";
+        private const string ConditionalFix = "Write it with '&&' and '||', e.g. \"!has(starts_at) || value > starts_at\".";
 
         public CelNode Visit(CelNode node) => node switch
         {
@@ -106,8 +112,9 @@ internal static class FieldValidation
             CelCall call => (CelNode?)FoldedDuration(call) ?? call with { Arguments = [.. call.Arguments.Select(Visit)] },
             CelUnary unary => unary with { Operand = Visit(unary.Operand) },
             CelBinary binary => binary with { Left = Visit(binary.Left), Right = Visit(binary.Right) },
-            CelConditional conditional => new CelConditional(
-                Visit(conditional.Condition), Visit(conditional.WhenTrue), Visit(conditional.WhenFalse)),
+            CelConditional => throw new RefusedException(
+                $"Field '{entity}.{field}' declares a validation that uses the conditional '?:', which a validation cannot hold.",
+                ConditionalFix),
             _ => node,
         };
 

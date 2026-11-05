@@ -21,7 +21,10 @@ namespace MMLib.Alvo.Data.PostgreSql.Tests.Integration;
 /// </remarks>
 public sealed class PostgreSqlCheckLiteralPropertyTests(PostgresFixture fixture) : IClassFixture<PostgresFixture>, IAsyncLifetime
 {
-    /// <summary>The property's pinned seed (Ruling 50), so its accepted/declined floors hold run to run.</summary>
+    /// <summary>
+    /// The seed of the property's first draw (Ruling 50); CsCheck draws the rest at random, so the accepted/declined floors
+    /// are statistical, set far below their expected counts, and a failure prints the seed that replays it.
+    /// </summary>
     private const string Seed = "0N0XIzNsQ0O2";
 
     private static readonly EntitySchema _notes = new()

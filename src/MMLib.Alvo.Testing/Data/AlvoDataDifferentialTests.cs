@@ -34,7 +34,10 @@ public abstract partial class AlvoDataDifferentialTests
     /// <summary>The parameter prefix the <c>USING</c> predicate is rendered with, matching the data path's own.</summary>
     private const string UsingPrefix = "alvo_u";
 
-    /// <summary>The agreement property's pinned seed (Ruling 50), so its admitted/refused floors hold run to run.</summary>
+    /// <summary>
+    /// The seed of the agreement property's first draw (Ruling 50); CsCheck draws the rest at random, so the admitted/refused
+    /// floors are statistical, set far below their expected counts, and a failure prints the seed that replays it.
+    /// </summary>
     private const string TemporalSeed = "0N0XIzNsQ0O2";
 
     /// <summary>Creates a probe over a freshly created table shaped like <paramref name="entity"/>.</summary>

@@ -5,7 +5,9 @@ namespace MMLib.Alvo.Tests.Data;
 /// <summary>
 /// The shape of <see cref="LiteralText.Hostile"/>, pinned: the CHECK literal properties sample it unfiltered, so a
 /// generator that drifted toward the empty string, or stopped drawing the characters SQL gives meaning to, would leave
-/// them green and vacuous (HX-11 Task 5 review m1).
+/// them green and vacuous (HX-11 Task 5 review m1). Every draw comes from one generator stream started at
+/// <see cref="Seed"/>, so the sample — and every share below — is the same on every run; CsCheck's <c>seed:</c> would
+/// pin only the first iteration (Task 6 review m1).
 /// </summary>
 public sealed class LiteralTextHostileTests
 {
@@ -70,8 +72,8 @@ public sealed class LiteralTextHostileTests
 
     private static string[] Draw()
     {
-        var texts = new List<string>(Draws);
-        LiteralText.Hostile().Sample(texts.Add, iter: Draws, threads: 1, seed: Seed);
-        return [.. texts];
+        var stream = PCG.Parse(Seed);
+        var hostile = LiteralText.Hostile();
+        return [.. Enumerable.Range(0, Draws).Select(_ => hostile.Generate(stream, null, out Size _))];
     }
 }

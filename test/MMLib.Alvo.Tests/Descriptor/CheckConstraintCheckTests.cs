@@ -36,10 +36,15 @@ public sealed class CheckConstraintCheckTests
     public void A_negative_bound_and_a_validation_on_a_computed_field_are_valid(string expression) =>
         Validate($$$"""{"qty": {"type": "integer"}, "stock": {"type": "integer", "computed": "qty + qty", "validation": "{{{expression}}}"}}""").ShouldBeEmpty();
 
-    [Fact]
-    public void A_text_constant_a_sql_literal_cannot_carry_is_refused_at_apply() =>
-        Validate("""{"stock": {"type": "string", "validation": "value != 'a\u0001b'"}}""").ShouldHaveSingleItem()
-            .Path.ShouldBe("/entities/products/fields/stock/validation");
+    [Theory]
+    [InlineData("a\\u0001b")]
+    [InlineData("a\\u2028b")]
+    public void A_text_constant_a_sql_literal_cannot_carry_is_refused_at_apply(string text)
+    {
+        var error = Validate($$$"""{"stock": {"type": "string", "validation": "value != '{{{text}}}'"}}""").ShouldHaveSingleItem();
+        error.Path.ShouldBe("/entities/products/fields/stock/validation");
+        error.Message.ShouldContain("cannot be written into a CHECK constraint");
+    }
 
     [Fact]
     public void A_validation_on_a_dynamic_entity_is_refused_naming_41()
