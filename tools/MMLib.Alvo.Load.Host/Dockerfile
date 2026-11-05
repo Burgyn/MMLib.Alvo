@@ -6,7 +6,8 @@
 # is copied in, restore and publish name it, and the entrypoint runs it. No OCI labels and no examples: this image is
 # never pushed, and compose mounts the field-service descriptor. The build context is the repository root, as there;
 # Dockerfile.dockerignore beside this file admits tools/MMLib.Alvo.Load.Host, which the root .dockerignore excludes.
-# tools/Directory.Build.props stays out: it only sets IsPackable=false, and publish never packs.
+# tools/Directory.Build.props stays out: it only sets IsPackable=false, and publish never packs. LoadHostImageParityTests
+# (ring0) holds this file and Dockerfile.dockerignore to exactly these differences.
 
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
 WORKDIR /source

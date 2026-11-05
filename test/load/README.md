@@ -132,8 +132,9 @@ criterion into a number).
 
 What an in-transaction write hook costs, measured so Q5's 250 ms default can be judged against a number rather than a
 guess. The standalone image registers no hook — hooks are C# registered at composition, not descriptor content — so
-`tools/MMLib.Alvo.Load.Host` is a second image: `AlvoHost`'s own composition plus three hooks on `work_orders`, each
-gated by a `when` on the work order's reference prefix so one host serves every shape. `scripts/test-load` builds it
+`tools/MMLib.Alvo.Load.Host` is a second image: `AlvoHost`'s own composition plus three measured hooks on `work_orders`,
+each gated by a `when` on the work order's reference prefix so one host serves every shape, and a fourth that is never
+measured — `calibration-probe`, which refuses `WO-89…` with 409 (see validity below). `scripts/test-load` builds it
 (`alvo-load:hooks`, from HEAD only) and removes it afterwards; it is never published.
 
 The arm swaps the alvo container for the hooks image in place, exactly as the A/B arms swap, so the hook shapes measure
@@ -148,15 +149,21 @@ difference from its neighbour:
 | `hook_read` | hooks | `WO-82…` | `hook_read − hook_noop` = one read through `write.Transaction` (`calibration-read` loads the work order's customer) |
 | `hook_after` | hooks | `WO-83…` | `hook_after − hook_unit` = an after-write invocation (`calibration-after`, no work) |
 
-**Calibration tier only** — it runs there by default, or when `--scenarios` names a hook shape; never in the gate (a
-gate ceiling must be measured on the gate tier, and Q5 asks for a calibrated default, not a regression gate), and never
-beside `--baseline-ref`. A hook shape is published against `create` from the same run, so a `--scenarios` with hook
+**Calibration tier only** — it runs there by default, or when `--scenarios` names a hook shape; never judged in the
+gate (a gate ceiling must be measured on the gate tier, Q5 asks for a calibrated default, not a regression gate, and the
+verdict reads only the head arm), and never beside `--baseline-ref`. Names are trimmed, and a hook shape that is not one
+of the four is refused before any image is built (k6 would silently skip it). A hook shape is published against `create` from the same run, so a `--scenarios` with hook
 shapes but no `create` is refused before any image is built. An unfiltered `scenarios.js` run leaves the hook shapes
 out: against the standalone image they would measure `create` four more times under other names.
 
-Validity is the head arm's: a failed request or a dropped iteration voids the arm. `calibration-read` throws when it
-finds no customer, so a clean arm is also the proof that the read hook ran and read something. The arm prints a table
-— min, med, p95, p99, max per shape, and each min over `create`'s — which is **copied by hand** into
+Validity is the head arm's — a failed request or a dropped iteration voids the arm — plus one more: every requested
+shape must have produced samples. A missing customer also voids it (the `ref` refuses the write, or `calibration-read`
+throws). **A clean arm does not prove the hooks ran**: an image serving the standalone composition, or a `when` that
+never matches, would measure a hook-free write just as cleanly. What proves it is the probe: before k6 starts, the
+script posts one `WO-89000001` work order and refuses the arm unless `calibration-probe` answers 409 — the same `when`
+gating as the measured hooks, so a hooks image that is not running them fails loudly instead of publishing a false hook
+cost. The arm prints a table — min, med, p95, p99, max per shape, and each min over `create`'s — and tees it into
+`artifacts/load/hooks.md`, which CI appends to `calibration.md` and uploads; it is **copied by hand** from there into
 `docs/performance.md`, never edited.
 
 **The Q5 decision rule** (HX-10 plan, Ruling 20): keep the 250 ms in-transaction default (hooks and host functions
@@ -208,7 +215,7 @@ the generator is off-box.
 | `seed.sql` | the bulk seed, parameterised by `:rows` |
 | `baselines/gate.json` | ratio ceilings and A/B factors — the reviewable artifact |
 | `docker-compose.load.yml` | the field-service stack with a pre-built image, so the A/B can swap arms |
-| `../../tools/MMLib.Alvo.Load.Host` | the hooks arm's host: the standalone composition plus three calibration hooks |
+| `../../tools/MMLib.Alvo.Load.Host` | the hooks arm's host: the standalone composition plus three calibration hooks and the probe |
 | `../../scripts/test-load` | the driver: image, stack, seed, cursor walk, k6, verdict |
 | `../../scripts/assert-load-baseline` | the verdict — the one authority on pass/fail |
 | `../../scripts/test-assert-load-baseline` | the guard's own suite |

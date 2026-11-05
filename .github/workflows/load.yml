@@ -26,6 +26,9 @@ on:
       - 'test/load/**'
       - 'scripts/test-load'
       - 'scripts/assert-load-baseline'
+      # The hooks arm's image is built only by the calibration tier, so a PR is where a broken
+      # Dockerfile or composition here can still be seen before a release tag turns it red.
+      - 'tools/MMLib.Alvo.Load.Host/**'
       - 'docker-compose.field-service.yml'
       - 'Directory.Packages.props'
       - '.github/workflows/load.yml'
@@ -181,6 +184,11 @@ jobs:
                 + " | \(.value["p(95)"] | .*100|round/100) | \(.value["p(99)"] | .*100|round/100)"
                 + " | \(.value.max | .*100|round/100) |"
             ' artifacts/load/head-1.json
+            # The hooks arm's table (HX-10), teed by scripts/test-load beside the summaries.
+            if [ -f artifacts/load/hooks.md ]; then
+              printf '\n#### The hooks arm\n'
+              cat artifacts/load/hooks.md
+            fi
           } > artifacts/load/calibration.md
           cat artifacts/load/calibration.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -192,6 +200,7 @@ jobs:
           path: |
             artifacts/load/*.json
             artifacts/load/calibration.md
+            artifacts/load/hooks.md
           if-no-files-found: ignore
 
   notify:
@@ -234,6 +243,9 @@ jobs:
             *before* k6 starts (see "the seed is not visible through the API");
           - k6 could not sustain the offered rate, which \`scripts/assert-load-baseline\` treats
             as a void run rather than a slow one;
+          - the hooks arm was void: its probe (\`WO-89000001\`) was not refused with 409, so the
+            hooks image did not run its gated calibration hooks; or it failed requests, dropped
+            iterations, or a requested hook shape produced no samples;
           - the job hit \`timeout-minutes\` and produced no artifact at all.
 
           Reproduce it locally with the same script CI runs:

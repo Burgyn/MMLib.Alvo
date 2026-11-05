@@ -108,6 +108,9 @@ ABSOLUTE_SCENARIOS=read_by_id,list_indexed,create,openapi
 GATE_SCENARIOS=read_by_id,list_indexed,create,openapi,count_exact,page_shallow,page_deep,sort_nullable,row_policy,select_projection
 CALIBRATION_SCENARIOS="$GATE_SCENARIOS,unindexed_filter"
 
+# Blanks are stripped first: `--scenarios "create, hook_noop"` would otherwise keep ` hook_noop` out of the hooks arm's
+# `^hook_` match, and scenarios.js — which trims — would run it against the standalone image under a hook's name.
+SCENARIOS_OVERRIDE="$(tr -d '[:space:]' <<<"$SCENARIOS_OVERRIDE")"
 if [ -n "$SCENARIOS_OVERRIDE" ]; then
     HEAD_SCENARIOS="$SCENARIOS_OVERRIDE"
 elif [ "$TIER" = calibration ]; then
@@ -118,7 +121,8 @@ fi
 
 # The hook shapes run against the hooks image (tools/MMLib.Alvo.Load.Host), never the standalone one: they mean "what an
 # in-transaction hook costs" only beside `create`, measured on the same dataset minutes earlier (HX-10, Q5). They run in
-# the calibration tier, or when --scenarios names them; never in the gate (a gate ceiling must be measured on the gate tier).
+# the calibration tier, or when --scenarios names them; never judged by the gate (a gate ceiling must be measured on the
+# gate tier, and the verdict reads only head-1.json), and never beside --baseline-ref.
 HOOKS_RUN=""
 if [ -n "$SCENARIOS_OVERRIDE" ]; then
     HOOKS_RUN="$(tr ',' '\n' <<<"$SCENARIOS_OVERRIDE" | grep '^hook_' | paste -sd, - || true)"
@@ -136,6 +140,12 @@ fi
 if [ -n "$HOOKS_RUN" ]; then
     grep -qx create <<<"${HEAD_SCENARIOS//,/$'\n'}" \
         || die "the hook shapes are published against \`create\`: add it to --scenarios"
+    # A misspelt shape (`hook_reed`) passes `^hook_`, and k6 silently skips a name it does not know — the arm would then
+    # publish a table without the shape that was asked for.
+    for shape in ${HOOKS_RUN//,/ }; do
+        grep -qx "$shape" <<<"${HOOK_SCENARIOS//,/$'\n'}" \
+            || die "unknown hook shape '$shape' (expected one of $HOOK_SCENARIOS)"
+    done
 fi
 
 for tool in docker curl jq openssl; do
@@ -208,7 +218,7 @@ build_image() {
     docker build --quiet -f "$dockerfile" -t "$tag" "$context" >/dev/null
 }
 
-# The hooks arm's image: the standalone composition plus three calibration hooks. Its Dockerfile is not in
+# The hooks arm's image: the standalone composition plus three calibration hooks and the probe. Its Dockerfile is not in
 # src/MMLib.Alvo.Host, so build_image's context-relative lookup does not apply; it is built from HEAD only, because the
 # hooks arm never runs beside --baseline-ref.
 build_hooks_image() {
@@ -406,7 +416,8 @@ run_k6() {
         "$K6_IMAGE" run --quiet /scripts/scenarios.js
 }
 
-rm -f "$OUT_DIR"/*.json 2>/dev/null || true
+# hooks.md too: load.yml appends it to calibration.md whenever it exists, so a stale one would publish a previous run's table.
+rm -f "$OUT_DIR"/*.json "$OUT_DIR/hooks.md" 2>/dev/null || true
 build_image "$IMAGE_HEAD" "$ROOT"
 if [ -n "$HOOKS_RUN" ]; then
     build_hooks_image
@@ -449,13 +460,37 @@ else
     done
 fi
 
-# Validity first, exactly as the guard enforces it for the head arm: a dropped iteration or a failed request voids the
-# arm, and a void arm publishes garbage. `calibration-read` throws when it finds no customer, so a failed request here is
-# also the proof that the read hook ran.
+# Validity first, as the guard enforces it for the head arm: a dropped iteration or a failed request voids the arm, and a
+# void arm publishes garbage. Beyond the guard, every shape the arm was asked for must have produced samples — k6 skips
+# a scenario it does not run, and a table missing a shape is not the table that was asked for. A missing customer also
+# voids the arm (the `ref` refuses it, or `calibration-read` throws); a clean arm proves nothing about the hooks firing —
+# assert_hooks_fire does.
 assert_valid_summary() {
-    local file="$1"
+    local file="$1" shape
     jq -e '(.http_req_failed.rate // 0) == 0 and (.dropped_iterations.count // 0) == 0' "$file" >/dev/null \
         || die "$(basename "$file") is void: failed requests or dropped iterations — publish nothing from it"
+    for shape in ${HOOKS_RUN//,/ }; do
+        jq -e --arg s "$shape" '.scenarios[$s].min != null' "$file" >/dev/null \
+            || die "$(basename "$file") is void: \`$shape\` produced no samples — publish nothing from it"
+    done
+}
+
+# THE HOOKS TRIPWIRE, the hooks arm's `row_policy`: a clean arm cannot tell an image that runs the gated hooks from one
+# that silently serves the standalone composition or whose `when` never matches — and that arm would publish a hook-free
+# write as a hook's cost (HX-10, Ruling 20's p99 rule). So, before k6, one `WO-89…` work order is posted: the hooks
+# image's `calibration-probe` refuses exactly that prefix with 409, through the same `when` gating as the measured
+# hooks. Any other answer refuses the arm. The probe writes nothing, and reset_created_rows covers WO-8… anyway.
+assert_hooks_fire() {
+    local body status
+    body=$(jq -cn --arg tenant "$ALVO_FS_TENANT_NORTH" '{
+        tenant_id: $tenant, reference: "WO-89000001", title: "Hooks probe", status: "scheduled", priority: 3,
+        access_code: "AC-LOAD", customer_id: "22222222-0001-4000-8000-000000000001",
+        region_id: "11111111-0000-4000-8000-000000000001" }')
+    status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "X-Alvo-Api-Key: $KEY_DISPATCHER" \
+        -H 'Content-Type: application/json' --data "$body" "$BASE_URL/api/work_orders")
+    [ "$status" = "409" ] \
+        || die "the hooks probe (WO-89000001) answered $status, not calibration-probe's 409: the hooks image is not running its gated calibration hooks, so the hooks arm would measure nothing"
+    say "hooks probe refused with 409: the gated calibration hooks are live"
 }
 
 hook_table() {
@@ -472,12 +507,15 @@ hook_table() {
 if [ -n "$HOOKS_RUN" ]; then
     use_image "$IMAGE_HOOKS"
     reset_created_rows
+    assert_hooks_fire
     run_k6 hooks-1.json "$HOOKS_RUN" "$CURSOR"
     use_image "$IMAGE_HEAD"
     assert_valid_summary "$OUT_DIR/hooks-1.json"
     [ -f "$OUT_DIR/head-1.json" ] && jq -e '.scenarios.create' "$OUT_DIR/head-1.json" >/dev/null \
         || die "the hook shapes are published against \`create\`: run it in the same invocation"
-    hook_table "$OUT_DIR/head-1.json" "$OUT_DIR/hooks-1.json"
+    # Teed into the artifacts as well as stdout: CI appends hooks.md to calibration.md and uploads it, so the table is
+    # copied from the published artifact rather than scraped out of a step log.
+    hook_table "$OUT_DIR/head-1.json" "$OUT_DIR/hooks-1.json" | tee "$OUT_DIR/hooks.md"
 fi
 
 # The calibration tier REPORTS; only the gate tier judges. The ceilings in the baseline file were

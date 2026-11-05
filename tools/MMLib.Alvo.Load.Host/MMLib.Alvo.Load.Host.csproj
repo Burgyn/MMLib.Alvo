@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <!--
-    The load harness's second arm (HX-10, Q5): the standalone host's own composition plus three calibration hooks on
+    The load harness's second arm (HX-10, Q5): the standalone host's own composition plus three calibration hooks (and a probe) on
     work_orders, so scripts/test-load can measure what an in-transaction hook costs against the image that has none.
     A tool, run and never referenced (tools/Directory.Build.props: IsPackable=false), like MMLib.Alvo.DocsGen.
   -->
