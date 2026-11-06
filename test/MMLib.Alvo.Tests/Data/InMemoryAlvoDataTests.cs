@@ -293,6 +293,29 @@ public class InMemoryAlvoDataTests
         (await data.QueryAsync(new AlvoQuery { Entity = "items" }, Caller(), ct)).Items.ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task A_read_carries_every_virtual_field_as_null_unless_a_projection_leaves_it_out()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var fields = new Dictionary<string, FieldDescriptor>(StringField(), StringComparer.Ordinal)
+        {
+            ["display"] = new() { Type = DescField.String, Virtual = true },
+        };
+        var data = CreateStore("items", fields);
+
+        var created = await data.CreateAsync("items", new Dictionary<string, object?> { ["title"] = "x" }, Caller(), cancellationToken: ct);
+        var listed = (await data.QueryAsync(new AlvoQuery { Entity = "items" }, Caller(), ct)).Items.ShouldHaveSingleItem();
+        var projected = (await data.QueryAsync(new AlvoQuery { Entity = "items", Select = ["title"] }, Caller(), ct)).Items.ShouldHaveSingleItem();
+
+        foreach (var record in new[] { created, listed })
+        {
+            record.Values.ShouldContainKey("display");
+            record["display"].ShouldBeNull();
+        }
+
+        projected.Values.ShouldNotContainKey("display");
+    }
+
     private static Dictionary<string, FieldDescriptor> StringField() => new(StringComparer.Ordinal)
     {
         ["title"] = new() { Type = DescField.String },

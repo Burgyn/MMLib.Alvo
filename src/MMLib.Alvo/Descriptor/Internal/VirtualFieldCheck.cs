@@ -19,7 +19,7 @@
 /// </remarks>
 internal static class VirtualFieldCheck
 {
-    private const string NoColumn = "a virtual field has no column, so nothing stores, constrains, indexes or references it.";
+    internal const string NoColumn = "a virtual field has no column, so nothing stores, constrains, indexes or references it.";
 
     private static readonly (string Key, Func<FieldDescriptor, bool> Declares)[] _storageKeys =
     [

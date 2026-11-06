@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Internal;
@@ -312,8 +313,8 @@ internal static class BeforeHookCompiler
     }
 
     /// <summary>
-    /// The field a mutation writes: it has to exist on the entity, and it must not be one the framework
-    /// manages — see the type's own remarks for why the managed set is a tenancy guard and not a formality.
+    /// The field a mutation writes: it has to exist on the entity, it must not be virtual (no column holds it), and it must
+    /// not be one the framework manages — see the type's own remarks for why the managed set is a tenancy guard and not a formality.
     /// </summary>
     private static FieldSchema? Target(string field, string path, BeforeHookScope scope)
     {
@@ -329,9 +330,17 @@ internal static class BeforeHookCompiler
         {
             scope.Errors.Add(UnknownField(field, path, scope));
         }
+        else if (declared.IsVirtual)
+        {
+            scope.Errors.Add(Error(path, VirtualTarget(scope.Schema.Name, field), $"Remove '{field}' from the mutate, or compute the value in the enricher."));
+            return null;
+        }
 
         return declared;
     }
+
+    private static string VirtualTarget(string entity, string field) =>
+        $"Field '{entity}.{field}' is virtual: {VirtualFieldCheck.NoColumn}";
 
     private static string ManagedColumn(string field) =>
         $"'{field}' is a column the framework manages, so a hook may not patch it. The write's own verdict — "

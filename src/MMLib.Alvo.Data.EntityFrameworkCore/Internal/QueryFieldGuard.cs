@@ -33,7 +33,7 @@ internal static class QueryFieldGuard
     /// </summary>
     private const string UnavailableQueryFieldMessage = AlvoAuthorizationException.QueryFieldUnavailable;
 
-    private const string UndeclaredPayloadFieldMessage = "The payload names a field that is not writable on this entity.";
+    private const string UndeclaredPayloadFieldMessage = VirtualFieldWrites.UndeclaredPayloadField;
 
     /// <summary>
     /// Refuses a filter or sort key the caller cannot read — one the entity does not declare, or one the

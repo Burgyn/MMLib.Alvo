@@ -122,7 +122,7 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         return Task.FromResult(new AlvoPage
         {
-            Items = [.. page.Select(row => Mask(row, decision.HiddenFields, unselectedForThisQuery))],
+            Items = [.. page.Select(row => Mask(query.Entity, row, decision.HiddenFields, unselectedForThisQuery))],
             NextCursor = nextCursor,
 
             // Counted over the ordered, policy-filtered set — before paging, which is the whole distinction
@@ -147,7 +147,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         }
 
         var row = FindVisible(entity, id, decision, context);
-        AlvoRecord? result = row is null ? null : Mask(row, decision.HiddenFields, FrozenSet<string>.Empty);
+        AlvoRecord? result = row is null ? null : Mask(entity, row, decision.HiddenFields, FrozenSet<string>.Empty);
         return Task.FromResult(result);
     }
 
@@ -171,7 +171,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         }
 
         var schema = EnsureFieldsDeclared(entity, values);
-        EnsureNoManagedColumnWrite(values, schema, isUpdate: false);
+        EnsureNoManagedColumnWrite(values, schema, isUpdate: false, decision.HiddenFields);
         EnsureNoReadOnlyWrite(values, decision.ReadOnlyFields);
 
         var stamped = AlvoAuditStamp.Applied(schema, WholeRowValues(schema, values), context, _time, isUpdate: false);
@@ -244,7 +244,7 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         var stored = RowsForLocked(entity).Find(row => IsRow(row, RecordedRow(record)));
         return stored is not null && IsVisible(stored, read, context)
-            ? Mask(stored, read.HiddenFields, FrozenSet<string>.Empty)
+            ? Mask(entity, stored, read.HiddenFields, FrozenSet<string>.Empty)
             : IdOnly(RecordedRow(record));
     }
 
@@ -303,7 +303,7 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         return [.. written.Select(row => read.IsDenied || !IsVisible(row, read, context)
             ? IdOnly(RowIdOf(row))
-            : Mask(row, read.HiddenFields, FrozenSet<string>.Empty))];
+            : Mask(entity, row, read.HiddenFields, FrozenSet<string>.Empty))];
     }
 
     private void RecordIdempotencyLocked(AlvoIdempotency? idempotency, AlvoContext context, Guid rowId) =>
@@ -371,7 +371,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         }
 
         var schema = EnsureFieldsDeclared(entity, values);
-        EnsureNoManagedColumnWrite(values, schema, isUpdate: true);
+        EnsureNoManagedColumnWrite(values, schema, isUpdate: true, decision.HiddenFields);
         EnsureNoReadOnlyWrite(values, decision.ReadOnlyFields);
         AlvoPrecondition.EnsureSupported(precondition, schema);
         var stamped = AlvoAuditStamp.Applied(schema, values, context, _time, isUpdate: true);
@@ -420,7 +420,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         var update = Allowed(entity, DataOperation.Update, context);
 
         var schema = EnsureFieldsDeclared(entity, values);
-        EnsureNoManagedColumnWrite(values, schema, isUpdate: true);
+        EnsureNoManagedColumnWrite(values, schema, isUpdate: true, create.HiddenFields.Union(update.HiddenFields).ToHashSet(StringComparer.Ordinal));
         EnsureNoReadOnlyWrite(values, create.ReadOnlyFields);
         EnsureNoReadOnlyWrite(values, update.ReadOnlyFields);
         EnsureWholeRow(WholeRowValues(schema, values), schema);
@@ -986,9 +986,9 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// different sets or word one refusal two ways.
     /// </remarks>
     private static void EnsureNoManagedColumnWrite(
-        IReadOnlyDictionary<string, object?> values, EntitySchema entity, bool isUpdate)
+        IReadOnlyDictionary<string, object?> values, EntitySchema entity, bool isUpdate, IReadOnlySet<string> hidden)
     {
-        if ((ManagedColumnRefusal(values, entity, isUpdate) ?? VirtualRefusal(values, entity)) is { } reason)
+        if ((ManagedColumnRefusal(values, entity, isUpdate) ?? VirtualFieldWrites.Refusal(values, entity, hidden)) is { } reason)
         {
             throw new AlvoAuthorizationException(reason);
         }
@@ -1024,12 +1024,6 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// check: an inconsistency between the catalog and this store's schema must not be the one path on
     /// which an unvalidated payload reaches the rows.
     /// </remarks>
-    /// <summary>A payload naming a <c>virtual</c> field, which no column holds — word for word the relational driver's refusal.</summary>
-    private static string? VirtualRefusal(IReadOnlyDictionary<string, object?> values, EntitySchema entity) =>
-        entity.Fields.Where(field => field.IsVirtual).FirstOrDefault(field => values.ContainsKey(field.Name)) is { } field
-            ? $"Field '{field.Name}' is virtual and cannot be written: an enricher fills it when the record is read. Remove it from the payload."
-            : null;
-
     private EntitySchema EnsureFieldsDeclared(string entity, IReadOnlyDictionary<string, object?> values)
     {
         var (schema, refusal) = DeclaredFieldsRefusal(entity, values);
@@ -1062,7 +1056,7 @@ public sealed class InMemoryAlvoData : IAlvoData
             : (null, UndeclaredPayloadFieldMessage);
     }
 
-    private const string UndeclaredPayloadFieldMessage = "The payload names a field that is not writable on this entity.";
+    private const string UndeclaredPayloadFieldMessage = VirtualFieldWrites.UndeclaredPayloadField;
 
     private static AlvoRecord Merge(AlvoRecord stored, IReadOnlyDictionary<string, object?> values)
     {
@@ -1089,17 +1083,22 @@ public sealed class InMemoryAlvoData : IAlvoData
         entity is null ? FrozenSet<string>.Empty : AlvoQuery.UnselectedFields(query, entity);
 
     /// <summary>
-    /// Drops every key neither the policy's field mask nor the caller's projection admits.
+    /// Drops every key neither the policy's field mask nor the caller's projection admits, and adds every virtual field
+    /// both admit as <see langword="null"/> — the relational driver's stable key set; this reference runs no enricher.
     /// </summary>
     /// <remarks>
     /// <b>The early return must consider both sets.</b> It used to test the mask alone, which was correct
     /// while the mask was the only thing that removed a key — and would have made a projection a silent
     /// no-op on every entity that declares no <c>hidden</c> rule, which is most of them.
     /// </remarks>
-    private static AlvoRecord Mask(
-        AlvoRecord record, IReadOnlySet<string> hiddenFields, IReadOnlySet<string> unselectedFields)
+    private AlvoRecord Mask(
+        string entity, AlvoRecord record, IReadOnlySet<string> hiddenFields, IReadOnlySet<string> unselectedFields)
     {
-        if (hiddenFields.Count == 0 && unselectedFields.Count == 0)
+        var virtuals = FindEntity(entity)?.Fields
+            .Where(field => field.IsVirtual && !hiddenFields.Contains(field.Name) && !unselectedFields.Contains(field.Name))
+            .Select(field => field.Name)
+            .ToList() ?? [];
+        if (hiddenFields.Count == 0 && unselectedFields.Count == 0 && virtuals.Count == 0)
         {
             return record;
         }
@@ -1107,6 +1106,11 @@ public sealed class InMemoryAlvoData : IAlvoData
         var visible = record.Values
             .Where(pair => !hiddenFields.Contains(pair.Key) && !unselectedFields.Contains(pair.Key))
             .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        foreach (var name in virtuals)
+        {
+            visible.TryAdd(name, null);
+        }
+
         return new AlvoRecord(visible);
     }
 
@@ -1600,7 +1604,7 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         return undeclared
             ?? ManagedColumnRefusal(values, schema!, isUpdate)
-            ?? VirtualRefusal(values, schema!)
+            ?? VirtualFieldWrites.Refusal(values, schema, decision.HiddenFields)
             ?? ReadOnlyRefusal(values, decision.ReadOnlyFields);
     }
 
@@ -1668,25 +1672,26 @@ public sealed class InMemoryAlvoData : IAlvoData
         var stored = RowsForLocked(entity);
         var rows = read.IsDenied
             ? [.. record.RowIds.Select(IdOnly)]
-            : RecordedRows(stored, record, read, context);
+            : RecordedRows(entity, stored, record, read, context);
 
         return AlvoBatchResult.Wrote(rows, record.RowIds.Count);
     }
 
     /// <inheritdoc cref="ReplayedBatch"/>
+    /// <param name="entity">The entity replayed.</param>
     /// <param name="stored">Every row of the entity.</param>
     /// <param name="record">The record this replay matched.</param>
     /// <param name="read">The <c>get</c> decision resolved for the replaying caller.</param>
     /// <param name="context">The replaying caller.</param>
     private List<AlvoRecord> RecordedRows(
-        List<AlvoRecord> stored, IdempotencyRecord record, PolicyDecision read, AlvoContext context)
+        string entity, List<AlvoRecord> stored, IdempotencyRecord record, PolicyDecision read, AlvoContext context)
     {
         var rows = new List<AlvoRecord>(record.RowIds.Count);
         foreach (var id in record.RowIds)
         {
             var row = stored.Find(candidate => IsRow(candidate, id));
             rows.Add(row is not null && IsVisible(row, read, context)
-                ? Mask(row, read.HiddenFields, FrozenSet<string>.Empty)
+                ? Mask(entity, row, read.HiddenFields, FrozenSet<string>.Empty)
                 : IdOnly(id));
         }
 

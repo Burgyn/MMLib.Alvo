@@ -72,6 +72,21 @@ public abstract partial class DataApiEngineTests
         (await refused.ReadTextAsync()).ShouldContain("This field is virtual: the host fills it when a record is read, so a write cannot set it.");
     }
 
+    [Fact]
+    public async Task A_write_naming_a_virtual_field_the_policy_hides_is_422_unknown_field_on_every_engine()
+    {
+        await using var world = await StartReadsAsync();
+        var body = NoteBody("x");
+        body["internal_code"] = "forged";
+
+        using var refused = await world.SendAsync(HttpMethod.Post, "/api/notes", _noteClerk, body: body);
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await refused.ReadTextAsync());
+        var violation = (await refused.ReadViolationsAsync()).ShouldHaveSingleItem();
+        (violation.Code, violation.Pointer).ShouldBe(("unknown-field", "/internal_code"));
+        (await refused.ReadTextAsync()).ShouldNotContain("virtual");
+    }
+
     [Theory]
     [MemberData(nameof(VirtualQueries))]
     public async Task A_virtual_field_in_filter_order_or_select_is_422_on_every_engine(string query, string parameter)
@@ -102,13 +117,21 @@ public abstract partial class DataApiEngineTests
     {
         await using var world = await StartReadsAsync();
 
-        var schemas = (await world.OpenApiDocumentAsync())["components"]!["schemas"]!.AsObject();
+        var document = await world.OpenApiDocumentAsync();
+        var schemas = document["components"]!["schemas"]!.AsObject();
 
         schemas["notes"]!["properties"]!["display"]!["readOnly"]!.GetValue<bool>().ShouldBeTrue();
         foreach (var request in new[] { "notesCreate", "notesPatch", "notesReplace" })
         {
             schemas[request]!["properties"]!.AsObject().ContainsKey("display").ShouldBeFalse(request);
         }
+
+        schemas["notesQuery"]!["properties"]!.AsObject().ContainsKey("display").ShouldBeFalse("a virtual field is never a query member");
+        schemas["notesQuery"]!["properties"]!.AsObject().ContainsKey("title").ShouldBeTrue();
+        var listed = document["paths"]!["/api/notes"]!["get"]!["parameters"]!.AsArray()
+            .Select(parameter => parameter?["name"]?.GetValue<string>()).ToList();
+        listed.ShouldNotContain("display", "a virtual field is never a filter parameter");
+        listed.ShouldContain("title");
     }
 
     private static JsonObject NoteBody(string title) => new()

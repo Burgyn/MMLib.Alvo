@@ -283,8 +283,30 @@ public abstract class ReadExtensionFacts
         var batch = await alvo.Data.CreateManyAsync(Notes, [forged], clerk, cancellationToken: Ct);
 
         batch.Refusals.ShouldHaveSingleItem().Message.ShouldContain("'display' is virtual");
+        var patched = await alvo.Data.UpdateManyAsync(Notes, [new AlvoRowPatch(id, new Dictionary<string, object?> { ["display"] = "x" })], clerk, cancellationToken: Ct);
+        patched.Refusals.ShouldHaveSingleItem().Message.ShouldContain("'display' is virtual");
         var stored = (await alvo.Data.QueryAsync(new AlvoQuery { Entity = Notes }, AlvoContext.System(clerk.Tenant), Ct)).Items.ShouldHaveSingleItem();
         stored["title"].ShouldBe("a");
+    }
+
+    [Fact]
+    public async Task A_write_naming_a_virtual_field_the_policy_hides_reads_as_an_undeclared_field()
+    {
+        await using var alvo = await StartAsync(await DatabaseAsync(), _ => { });
+        var clerk = Clerk();
+        var id = await CreateAsync(alvo, clerk, "a", "north");
+        var forged = NoteValues(clerk, "forged", "south");
+        forged["internal_code"] = "x";
+
+        var created = await Should.ThrowAsync<AlvoAuthorizationException>(alvo.Data.CreateAsync(Notes, forged, clerk, cancellationToken: Ct));
+        var updated = await Should.ThrowAsync<AlvoAuthorizationException>(
+            alvo.Data.UpdateAsync(Notes, id, new Dictionary<string, object?> { ["internal_code"] = "x" }, clerk, cancellationToken: Ct));
+        var batch = await alvo.Data.CreateManyAsync(Notes, [forged], clerk, cancellationToken: Ct);
+
+        foreach (var message in new[] { created.Message, updated.Message, batch.Refusals.ShouldHaveSingleItem().Message })
+        {
+            message.ShouldBe("The payload names a field that is not writable on this entity.");
+        }
     }
 
     [Fact]

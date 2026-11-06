@@ -78,6 +78,23 @@ public sealed class VirtualFieldCheckTests
             "Field 'notes.display' is virtual and 'notes' declares 'storage: dynamic' — dynamic entities hold no virtual field until #41.");
     }
 
+    [Theory]
+    [InlineData("beforeCreate")]
+    [InlineData("beforeUpdate")]
+    public void A_mutate_targeting_a_virtual_field_is_refused_at_apply(string hook)
+    {
+        var json = Notes(Virtual).Replace(
+            "\"rules\": {\"list\"",
+            $"\"hooks\": {{\"{hook}\": [{{\"action\": {{\"mutate\": {{\"display\": \"'x'\"}}}}}}]}}, \"rules\": {{\"list\"",
+            StringComparison.Ordinal);
+
+        var error = VirtualErrors(json).ShouldHaveSingleItem();
+
+        error.Path.ShouldBe($"/entities/notes/hooks/{hook}/0/action/mutate/display");
+        error.Message.ShouldBe($"Field 'notes.display' is virtual: {NoColumnTail}");
+        error.FixSuggestion.ShouldBe("Remove 'display' from the mutate, or compute the value in the enricher.");
+    }
+
     [Fact]
     public void A_plain_virtual_string_field_is_accepted_and_maps_IsVirtual()
     {
