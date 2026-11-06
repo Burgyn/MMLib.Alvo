@@ -90,7 +90,8 @@ expression over `new`, the row as it will be stored.
 
 </Steps>
 
-`now()` is the instant the write is stamped with, the same one its audit columns get. The slug is stamped once, when
+`now()` is the instant of the request: every `now()` one request evaluates returns the same value. The audit columns
+are read when the row is written, so `closed_at` can differ from `updated_at` by microseconds. The slug is stamped once, when
 the ticket is created, so it stays stable when the title changes later; a value that must always follow other fields
 of the row belongs in a [computed field](/guides/computed-and-rollups/) instead.
 
@@ -132,7 +133,8 @@ write a literal.
 **Built-in functions.** Both a condition and a `mutate` value may call the built-ins, nested as deep as you need:
 text (`trim`, `lowerAscii`, `upperAscii`, `replace`, `substring`, `size`, `startsWith`, `endsWith`, `contains`),
 numbers (`math.round`, `math.floor`, `math.ceil`, `math.abs`, `math.least`, `math.greatest`, `int`), and conversions
-(`string`, `timestamp`). `now()` works in a `mutate` value only. Every signature is in the
+(`string`, `timestamp`). `now()` works in a condition and a `mutate` value, and `duration('…')` with CEL's timestamp
+arithmetic in both (`now() + duration('48h')`). Every signature is in the
 [CEL function catalog](/reference/cel-functions/), and an embedded host can add its own with
 [Custom CEL functions](/guides/custom-cel-functions/). Text tests compare characters exactly: compare
 `lowerAscii(new.title)` to ignore case.

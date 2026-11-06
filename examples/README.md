@@ -68,10 +68,11 @@ and the descriptor validator read:
 
 | Feature | What you would silently get | Tracked in |
 |---|---|---|
-| `field.rollup.where` | the aggregate is maintained over **every** child instead of the declared subset — a stored number that looks like data. `rollup` itself works; only the filter does not | filtered-rollup issue |
-| `field.validation` | the expression is never evaluated, so a value it forbids is accepted — the field is not constrained at all | #22 (before-hooks) |
 | `field.default`, `$cel` half only | a CEL default needs the caller's context at insert time, which is the `computed` machinery — the value would be dropped and the field left null. **The literal half is honoured (#113):** it becomes a column `DEFAULT` and is filled into every whole-row write | #113 |
 | `entity.softDelete` | DELETE removes the row and reads do not exclude it — irrecoverable loss where the contract promises recovery | soft-delete issue |
+
+`field.validation` and `field.rollup.where` left this table in HX-11: a validation is a database `CHECK`
+constraint, and a rollup's filter is kept in the child's write and recomputed by the apply.
 
 Hooks used to be refused **per hook point** (`beforeCreate`, `afterUpdate`, …), so #22 could lift them one at a
 time; all six now run, so the table holds no hook entry. What a hook may still not do is refused per *action*: the

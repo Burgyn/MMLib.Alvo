@@ -212,8 +212,8 @@ without one is refused.
 <dt id="profile-rule">Rule profile</dt>
 <dd>
 
-The CEL profile of rules and of `hidden` and `readOnly` flags: a boolean over the current row, `@user` and `@tenant`,
-with no arithmetic. [CEL in Alvo](/concepts/cel/#the-five-profiles)
+The CEL profile of rules and of `hidden` and `readOnly` flags: a boolean over the current row, `@user`, `@tenant` and
+`now()`, with no arithmetic but timestamp and duration arithmetic. [CEL in Alvo](/concepts/cel/#the-five-profiles)
 
 </dd>
 

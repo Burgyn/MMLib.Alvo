@@ -86,8 +86,9 @@ The responses below were captured from a real host when the site was built, so y
 
 - **The user** is the id the caller's key acts as. For an anonymous caller it is `null`: there is no identity to
   record.
-- **The instant** is the write's own, in UTC: the same one `now()` returns in a [before-hook](/guides/before-hooks/)
-  and the same one the write's event carries.
+- **The instant** is the write's own, in UTC, read when the row is written: the same one the write's event carries.
+  It is not `now()`, which is the request's instant in a [before-hook](/guides/before-hooks/); the two can differ by
+  microseconds.
 - **They are ordinary fields to read.** Filter and sort by them like any other field
   ([Read data](/guides/read-data/)), and use `created_by` in a rule: `created_by == @user.id` is the
   ownership pattern in [Access rules](/guides/access-rules/#2-let-callers-reach-only-their-own-rows).

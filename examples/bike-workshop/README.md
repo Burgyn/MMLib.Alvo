@@ -88,10 +88,12 @@ such a function beside the built-ins, with a **this host** badge.
 Each of these is declared in the schema and **refused at apply** by this build (see
 [`../README.md`](../README.md#declared-in-the-schema-refused-at-apply)), so it is not here:
 
-- `field.validation` — the before-hook `reject` on `order_lines` stands in for `quantity > 0`.
 - a `$cel` `default` — the `mutate` hook stamps `completed_at` instead of a `now()` default.
-- `rollup.where` — so there is no "open orders" count on a bike, only a count of all of them.
 - `entity.softDelete` — deletion is guarded by a before-hook instead.
+
+Two keys this list used to hold are honoured since HX-11 and simply not used here: a field's `validation` — the
+before-hook `reject` on `order_lines` still stands in for `quantity > 0` — and a rollup's `where`, so there is still no
+"open orders" count on a bike, only a count of all of them.
 - the `function` action type (an after-hook that runs a script — not the CEL functions above), the `http.call` and
   `entity.update` actions, JSONata payloads, `email.data`, `bodyFile`.
 

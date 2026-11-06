@@ -61,7 +61,7 @@ violation's `code` is stable. Take the part after the last `/` and switch on it:
 
 | Slug | Status | What happened | What to do |
 |---|---|---|---|
-| [`validation`](/reference/problem-types/#validation) | 422 | The body breaks the entity's declared fields, or a [write hook](/extending/write-hooks/) found a value invalid. | Fix each field a violation points at. |
+| [`validation`](/reference/problem-types/#validation) | 422 | The body breaks the entity's declared fields or a field's [`validation`](/extending/integrity/) (code `check`), or a [write hook](/extending/write-hooks/) found a value invalid. | Fix each field a violation points at. |
 | [`malformed-query`](/reference/problem-types/#malformed-query) | 422 | The query string or query body is malformed. | Fix the parameter the violation names. |
 | [`unauthenticated`](/reference/problem-types/#unauthenticated) | 401 | A key was sent and cannot be used. | Fix the key; retrying will not help. |
 | [`forbidden`](/reference/problem-types/#forbidden) | 403 | A rule, a before-hook or a [write hook](/extending/write-hooks/) refused. | Change the request, or call with a role the rules grant. |

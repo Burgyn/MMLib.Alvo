@@ -24,8 +24,9 @@ What you can use today:
 - The embedded mode: the same engine inside your ASP.NET Core app, extended with your own C# functions and endpoints.
 - A generated REST API per descriptor, with its own OpenAPI document, filtering, sorting, keyset paging, batches,
   optimistic concurrency and idempotent writes.
-- Access rules, before-hooks, after-hooks that send e-mail and deliver webhooks, computed fields, rollups, audit
-  columns, indexes and multi-tenancy.
+- Access rules, before-hooks, after-hooks that send e-mail and deliver webhooks, computed fields, rollups (filtered
+  too), field validations the database enforces, `now()` and durations in rules and hooks, audit columns, indexes and
+  multi-tenancy.
 - The Management API, with dry runs, revisions and rollback, and the admin dashboard with its schema assistant.
 
 ## Honoured, warned, refused
@@ -41,8 +42,8 @@ with it without saying so.
   `entity.storage: dynamic`, `entity.realtime`, and the parts of `templates` and `webhooks` that only automation would
   use. Webhook deliveries from after-hooks are made, but not signed yet.
 - **Refused at apply**: the descriptor is rejected with a reason and a fix, because accepting it would silently give
-  you something other than what it says. Examples: a field's `validation` expression, a `$cel` default, `softDelete`,
-  a rollup's `where` filter, JSONata transformations and the `function`, `http.call` and `entity.update` hook actions.
+  you something other than what it says. Examples: a `$cel` default, `softDelete`, JSONata transformations and the
+  `function`, `http.call` and `entity.update` hook actions.
 
 **Dynamic entities**, record types your end users define at runtime in one shared store, are **planned** for a later
 phase: [Dynamic entities (planned)](/concepts/dynamic-entities/).

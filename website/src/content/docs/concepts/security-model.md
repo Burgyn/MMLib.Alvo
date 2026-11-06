@@ -48,6 +48,11 @@ Where the guarantees stop:
     allowed to read.
 
   Do not make a guessable value, such as an e-mail address, `unique` if its existence is confidential.
+- **A validation on a rollup parent answers for a parent the caller may not read.** A field's
+  [`validation`](/extending/integrity/) is a `CHECK` the database enforces on every row, so `reserved <= stock` refuses
+  a child write with a `422` even when the caller's rule hides the product: the caller learns that the product is at
+  capacity. That one bit is the oversell protection itself, and whether a caller may read a row is decided per request,
+  so it cannot be refused when the descriptor is applied.
 - **The schema's shape is public.** Which entities exist and their non-hidden fields are published by the routes and
   the OpenAPI document. Data and the names of hidden fields are not.
 
@@ -181,6 +186,12 @@ reason a client could parse would hand back what the prose is written to withhol
 - **A `hidden` field's name** is indistinguishable from a field that does not exist on the read surface and in the
   published document. A caller who may write can still tell the two apart, because a write to a hidden field is
   accepted and a write to an undeclared one is refused; what it learns is a name, never a value.
+- **A validation or a rollup filter cannot be made to reveal a hidden value.** Whether a write is refused would tell a
+  caller something about every field the validation reads, so a `validation` that reads another field is refused at
+  apply when it, or any field it reads — directly or through a computed or rollup field — is `hidden`, statically or for
+  some roles. A rollup's `where` may not read a hidden child field, since a filtered count would reveal it. A broken
+  validation on a hidden field answers `422` with an empty pointer, never the field's name. A computed or rollup field
+  over a hidden field, read with no validation, is not covered yet: keep such a field hidden too.
 - **A unique value** on a tenant-scoped entity is unique within its tenant, so a conflict never tells one tenant what
   another holds; it can still tell a caller about rows of its own tenant a rule hides from it. On an entity that is
   not tenant-scoped it is unique instance-wide. Both are among the conflicts above.

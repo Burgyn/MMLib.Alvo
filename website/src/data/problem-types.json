@@ -4,19 +4,20 @@
       "A field the entity declares `required` is missing or null.",
       "A value breaks a declared facet: `maxLength`, `enum`, `format`, `precision` or `scale`.",
       "The body names a field the entity does not declare, writes a read-only field, or points a `ref` at a row that does not exist.",
+      "A row the write would leave breaks a field's `validation`, the `CHECK` constraint the database enforces: code `check`, pointing at the field, or at `\"\"` for a hidden one.",
       "The body is not a JSON object, is not valid JSON, repeats a field, or is larger, deeper or wider than the configured limits.",
       "A batch body has no `rows` array, an empty one, too many rows, or a row without a valid `id`.",
-      "A Management API apply carried a descriptor that does not validate.",
+      "A Management API apply carried a descriptor that does not validate — including a new `validation` that existing rows break, with their count.",
       "A write hook in the host's code refused the write with `Invalid`: the violation's `code` is the hook's own, and the document's `extensions` names the hook."
     ],
     "fix": "Correct each field the violations point at; every violation carries a `pointer` and a `fixSuggestion`.",
     "violationCodes": [
       "required", "max-length", "enum-value", "format", "format-not-evaluated", "precision", "scale",
-      "unknown-field", "invalid-value", "read-only-field", "read-only-required-field", "unresolved-reference",
+      "unknown-field", "invalid-value", "check", "read-only-field", "read-only-required-field", "unresolved-reference",
       "not-an-object", "malformed-json", "duplicate-field", "body-too-large", "body-too-deep", "body-too-many-fields",
       "not-a-batch", "empty-batch", "batch-too-many-rows", "invalid-row-id", "descriptor"
     ],
-    "guides": ["guides/write-data", "guides/entities-and-fields", "guides/handle-errors"],
+    "guides": ["guides/write-data", "guides/entities-and-fields", "guides/handle-errors", "extending/integrity"],
     "needsProblemDetails": false
   },
   "malformed-query": {
@@ -105,9 +106,10 @@
     "causes": [
       "A value another record already holds on a `unique` field.",
       "A delete that a `ref` declaring `onDelete: \"restrict\"` refuses, because other records still point at the row.",
-      "A write hook in the host's code refused the write with `Conflict`: the violation's `code` is the hook's own, and the document's `extensions` names the hook."
+      "A write hook in the host's code refused the write with `Conflict`: the violation's `code` is the hook's own, and the document's `extensions` names the hook.",
+      "On PostgreSQL, a Management API apply waited longer than its 5 s lock timeout for a table other transactions are using, and changed nothing; the response carries `Retry-After: 5`."
     ],
-    "fix": "Send a value no other record holds, or delete or repoint the records that reference this one, then retry.",
+    "fix": "Send a value no other record holds, or delete or repoint the records that reference this one, then retry; retry an apply that timed out on a lock unchanged, after `Retry-After`.",
     "violationCodes": ["unique", "referenced"],
     "guides": ["guides/write-data", "guides/entities-and-fields", "guides/indexes"],
     "needsProblemDetails": false
