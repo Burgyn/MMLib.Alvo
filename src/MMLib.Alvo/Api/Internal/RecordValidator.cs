@@ -447,6 +447,10 @@ internal static class RecordValidator
     /// version of the oracle above, and one that reports a refusal about a second entity the caller did not
     /// ask about.
     /// </para>
+    /// <para>
+    /// <b>Under the rules alone, never a host narrowing</b>, so the 422 agrees with the port, which checks a reference
+    /// under the rules too: a narrowing is a view, not an authorization boundary.
+    /// </para>
     /// </remarks>
     private static async Task<bool> IsResolvableAsync(
         FieldSchema field, RecordValidationRequest request, CancellationToken cancellationToken)
@@ -458,6 +462,7 @@ internal static class RecordValidator
 
         try
         {
+            using var rulesOnly = AlvoFlow.EnterRulesOnlyRead();
             var row = await request.Data
                 .GetAsync(field.Reference!.TargetEntity, id, request.Context, cancellationToken)
                 .ConfigureAwait(false);

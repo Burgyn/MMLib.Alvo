@@ -54,6 +54,12 @@ internal sealed class ReadStatementComposer
         /// <summary>The caller's filter, or <see langword="null"/> for none.</summary>
         internal AlvoFilter? Filter { get; init; }
 
+        /// <summary>
+        /// A host narrowing, ANDed as its own term after the tenant scope — never merged into <see cref="Filter"/>, whose
+        /// limits and field guard are the caller's. Shared by a page, its count and its cursor's anchor read.
+        /// </summary>
+        internal ReadNarrowing? Narrowing { get; init; }
+
         /// <summary>A single row's id, for a get/pre-image read.</summary>
         internal Guid? RowId { get; init; }
 
@@ -209,6 +215,7 @@ internal sealed class ReadStatementComposer
 
         AddPredicate(terms, parameters, decision.Using, context, PolicyParameterPrefix.Using);
         AddPredicate(terms, parameters, decision.TenantScope, context, PolicyParameterPrefix.TenantScope);
+        AddNarrowing(terms, parameters, entity, options.Narrowing);
         AddRowId(terms, parameters, entity, options.RowId);
         AddFilter(terms, parameters, entity, options.Filter);
         AddAnchor(terms, parameters, entity, options.Anchor);
@@ -353,6 +360,50 @@ internal sealed class ReadStatementComposer
         var rendered = FilterSqlRenderer.Render(filter, entity, _fields, PolicyParameterPrefix.Filter);
         terms.Add(rendered.Sql);
         Collect(parameters, rendered.Parameters);
+    }
+
+    /// <summary>
+    /// The host narrowing's term. Whatever the renderer refuses in it — a field the entity does not declare, a malformed
+    /// tree, a value its field cannot hold — is the extension's defect, answered as its failure (500 <c>hook-failed</c>)
+    /// rather than as the caller's 422 or 403.
+    /// </summary>
+    private void AddNarrowing(
+        List<string> terms, Dictionary<string, BoundValue> parameters, EntitySchema entity, ReadNarrowing? narrowing)
+    {
+        if (narrowing is null)
+        {
+            return;
+        }
+
+        var rendered = RenderedNarrowing(narrowing, entity);
+        terms.Add(rendered.Sql);
+        Collect(parameters, rendered.Parameters);
+    }
+
+    private RenderedSql RenderedNarrowing(ReadNarrowing narrowing, EntitySchema entity)
+    {
+        try
+        {
+            var rendered = FilterSqlRenderer.Render(narrowing.Filter, entity, _fields, PolicyParameterPrefix.Narrowing);
+            EnsureHoldable(rendered, entity);
+            return rendered;
+        }
+        catch (Exception refused) when (refused is ArgumentException or AlvoAuthorizationException)
+        {
+            var failure = HookFailedException.OfRead(narrowing.ExtensionIds, HookFailedException.InvalidFilter);
+            AlvoFlow.Unit?.Blame(failure);
+            throw failure;
+        }
+    }
+
+    /// <summary>Converts every value the narrowing compares with a column as the column will, so a mismatch fails here.</summary>
+    private static void EnsureHoldable(RenderedSql rendered, EntitySchema entity)
+    {
+        foreach (var bound in rendered.Parameters.Values.Where(bound => bound.Origin == BoundValueOrigin.ColumnComparison))
+        {
+            var field = QueryFieldGuard.DeclaredField(entity, bound.Column!);
+            ColumnValue.For(FieldClrTypeMap.Optional(field), field.Name, bound.Value);
+        }
     }
 
     private void AddAnchor(
