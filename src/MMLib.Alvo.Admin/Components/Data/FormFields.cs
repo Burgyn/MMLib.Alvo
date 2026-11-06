@@ -19,12 +19,12 @@ namespace MMLib.Alvo.Admin.Components.Data;
 /// </remarks>
 internal static class FormFields
 {
-    /// <summary>Whether the engine derives the field's value, from its own row or from related ones.</summary>
+    /// <summary>Whether the engine or the framework derives the field's value — from its own row, related ones, or a sequence.</summary>
     public static bool Derived(FieldSchema field)
     {
         ArgumentNullException.ThrowIfNull(field);
 
-        return field.ComputedExpression is not null || field.Rollup is not null;
+        return field.IsMaintained();
     }
 
     /// <summary>Whether the form shows the field read-only rather than as a control.</summary>

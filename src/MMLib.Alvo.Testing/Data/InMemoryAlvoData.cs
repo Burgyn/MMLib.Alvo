@@ -646,7 +646,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     {
         var managed = AlvoManagedColumns.For(schema);
         return schema.Fields.Where(field =>
-            !managed.Contains(field.Name) && field.ComputedExpression is null && field.Rollup is null);
+            !managed.Contains(field.Name) && !field.IsMaintained());
     }
 
     /// <summary>Places a created row in the caller's own tenant, on an entity that is scoped at all.</summary>

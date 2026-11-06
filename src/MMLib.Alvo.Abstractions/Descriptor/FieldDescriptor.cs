@@ -82,6 +82,12 @@ public sealed record FieldDescriptor
     /// <summary>Value aggregated over related records; the framework maintains it and the field is read-only.</summary>
     public Rollup? Rollup { get; init; }
 
+    /// <summary>
+    /// A number the framework assigns on create — gapless and never reused, counted per tenant, and optionally per
+    /// another field's value and per UTC calendar period; the field is read-only.
+    /// </summary>
+    public FieldSequence? Sequence { get; init; }
+
     /// <summary>Extension keys (<c>x-*</c>) preserved verbatim through apply and export.</summary>
     [JsonExtensionData]
     public IDictionary<string, JsonElement>? Extensions { get; set; }
@@ -104,4 +110,23 @@ public sealed record Rollup
 
     /// <summary>Optional CEL filter on the child records.</summary>
     public string? Where { get; init; }
+}
+
+/// <summary>A sequence: the framework-assigned, gapless number of a field (schema <c>field.sequence</c>).</summary>
+public sealed record FieldSequence
+{
+    /// <summary>A required field of the same entity whose value starts its own count.</summary>
+    public string? Per { get; init; }
+
+    /// <summary>The UTC calendar period after which the count restarts; <see langword="null"/> never restarts.</summary>
+    public SequencePeriod? Period { get; init; }
+
+    /// <summary>The first number of every count; <see langword="null"/> means <c>1</c>.</summary>
+    public long? Start { get; init; }
+
+    /// <summary>
+    /// For a <see cref="FieldType.String"/> field, the text stored — exactly one <c>{n}</c> or <c>{n:width}</c>, plus
+    /// any of <c>{yyyy}</c>, <c>{yy}</c>, <c>{MM}</c>, <c>{dd}</c> read from the create's UTC date.
+    /// </summary>
+    public string? Format { get; init; }
 }

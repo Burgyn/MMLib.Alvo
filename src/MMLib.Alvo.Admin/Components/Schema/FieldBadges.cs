@@ -162,7 +162,7 @@ internal static class FieldBadges
         }
     }
 
-    /// <summary>What Alvo maintains for it: a computed value, a rollup, an index.</summary>
+    /// <summary>What Alvo maintains for it: a computed value, a rollup, a sequence, an index.</summary>
     private static IEnumerable<string> Maintenance(FieldSchema field)
     {
         if (field.ComputedExpression is { Length: > 0 })
@@ -173,6 +173,11 @@ internal static class FieldBadges
         if (field.Rollup is not null)
         {
             yield return "rollup";
+        }
+
+        if (field.Sequence is not null)
+        {
+            yield return "sequence";
         }
 
         if (field.Indexed)

@@ -37,6 +37,7 @@ internal static class DescriptorToSchemaMapper
         var formats = DeclaredFormats(d);
         EnsureNoWildcardSubscription(d);
         EnsureNoValidationOnADynamicEntity(d);
+        EnsureNoSequenceOnADynamicEntity(d);
 
         // Built once, from the WHOLE descriptor: resolving a rollup's foreign key needs the CHILD entity's
         // fields, which the per-entity pass below cannot see. See RollupResolver's own remarks for why the
@@ -111,6 +112,26 @@ internal static class DescriptorToSchemaMapper
         if (declared.Entity is not null)
         {
             throw new InvalidDataException(FieldValidation.DynamicMessage(declared.Entity, declared.Field));
+        }
+    }
+
+    /// <summary>
+    /// Refuses, at apply, a <c>sequence</c> on a <c>storage: dynamic</c> entity — before the physical filter drops the
+    /// entity and the declaration with it; the validator reports the same refusal at its pointer.
+    /// </summary>
+    /// <param name="d">The parsed descriptor.</param>
+    /// <exception cref="InvalidDataException">A dynamic entity's field declares a sequence.</exception>
+    private static void EnsureNoSequenceOnADynamicEntity(AlvoDescriptor d)
+    {
+        var declared = d.Entities
+            .Where(entity => !IsPhysical(entity.Value))
+            .SelectMany(entity => entity.Value.Fields
+                .Where(field => field.Value.Sequence is not null)
+                .Select(field => (Entity: entity.Key, Field: field.Key)))
+            .FirstOrDefault();
+        if (declared.Entity is not null)
+        {
+            throw new InvalidDataException(SequenceFieldCheck.DynamicMessage(declared.Entity, declared.Field));
         }
     }
 
@@ -446,12 +467,23 @@ internal static class DescriptorToSchemaMapper
                 ? FieldValidation.Canonical(entity, name, validation, [.. declaring.Fields.Keys])
                 : null,
             Rollup = rollups.Resolve(entity, declaring, name, f),
+            Sequence = MapSequence(f.Sequence),
 
             // The literal as declared. See FieldSchema.Default for why it is not converted here, and
             // FieldDefault for what is refused before it gets this far.
             Default = FieldDefault.Resolve(entity, name, f),
         };
     }
+
+    private static SequenceSchema? MapSequence(FieldSequence? sequence) => sequence is null
+        ? null
+        : new SequenceSchema
+        {
+            Per = sequence.Per,
+            Period = MapPeriod(sequence.Period),
+            Start = sequence.Start ?? 1,
+            Format = sequence.Format,
+        };
 
     /// <summary>
     /// Refuses, at apply, every feature <see cref="UnhonouredFeatures"/> records as declared by the frozen
@@ -534,6 +566,14 @@ internal static class DescriptorToSchemaMapper
         FieldType.Enum => SchemaFieldType.Enum,
         FieldType.Ref => SchemaFieldType.Ref,
         _ => throw new InvalidDataException($"Unknown field type '{t}'."),
+    };
+
+    private static SequenceResetPeriod? MapPeriod(SequencePeriod? period) => period switch
+    {
+        SequencePeriod.Year => SequenceResetPeriod.Year,
+        SequencePeriod.Month => SequenceResetPeriod.Month,
+        SequencePeriod.Day => SequenceResetPeriod.Day,
+        _ => null,
     };
 
     private static OnDelete MapOnDelete(OnDeleteAction? od) => od switch

@@ -4,6 +4,8 @@
   "events-exclude-typo.json": { "pointer": "#/entities/notes/events/exclud" },
   "format-without-pattern.json": { "pointer": "#/formats/slug", "messageContains": "pattern" },
   "reserved-users-entity.json": { "pointer": "#/entities/users" },
+  "sequence-two-numbers.json": { "pointer": "#/entities/orders/fields/code/sequence/format", "messageContains": "pattern" },
+  "sequence-unknown-period.json": { "pointer": "#/entities/orders/fields/number/sequence/period" },
   "typo-property.json": { "pointer": "#/entities/widgets/fields/name/requird" },
   "wrong-api-version.json": { "pointer": "#/apiVersion", "messageContains": "alvo.dev/v1" }
 }

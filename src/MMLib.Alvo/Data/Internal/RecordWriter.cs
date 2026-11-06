@@ -66,10 +66,10 @@ internal static class RecordWriter
         return isCreate ? WithTenant(values, shape, nameof(record)) : values;
     }
 
-    /// <summary>The fields of <paramref name="entity"/> the store maintains itself: <c>computed</c> and <c>rollup</c>.</summary>
+    /// <summary>The fields of <paramref name="entity"/> the store maintains itself: <c>computed</c>, <c>rollup</c> and <c>sequence</c>.</summary>
     internal static IReadOnlySet<string> Maintained(EntitySchema? entity) => entity is null
         ? new HashSet<string>(StringComparer.Ordinal)
-        : entity.Fields.Where(field => field.ComputedExpression is not null || field.Rollup is not null)
+        : entity.Fields.Where(field => field.IsMaintained())
             .Select(field => field.Name)
             .ToHashSet(StringComparer.Ordinal);
 

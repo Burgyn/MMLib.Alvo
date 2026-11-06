@@ -41,6 +41,10 @@ public class FormFieldsTests
             .ShouldBe(["external_ref", "labour_total", "lines_count"]);
 
     [Fact]
+    public void A_sequence_field_is_derived()
+        => FormFields.Derived(new FieldSchema { Name = "number", Type = FieldType.Integer, Sequence = new SequenceSchema() }).ShouldBeTrue();
+
+    [Fact]
     public void Everything_else_is_a_control_and_the_managed_columns_are_neither()
         => FormFields.Editable(Orders(), _locks).Select(field => field.Name)
             .ShouldBe(["order_number", "cost_price", "discount", "internal_notes"]);

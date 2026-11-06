@@ -861,10 +861,19 @@ namespace MMLib.Alvo.Descriptor
         public bool? Required { get; init; }
         public MMLib.Alvo.Descriptor.Rollup? Rollup { get; init; }
         public int? Scale { get; init; }
+        public MMLib.Alvo.Descriptor.FieldSequence? Sequence { get; init; }
         public required MMLib.Alvo.Descriptor.FieldType Type { get; init; }
         public bool? Unique { get; init; }
         public string? Validation { get; init; }
         public System.Collections.Generic.IReadOnlyList<string>? Values { get; init; }
+    }
+    public sealed class FieldSequence : System.IEquatable<MMLib.Alvo.Descriptor.FieldSequence>
+    {
+        public FieldSequence() { }
+        public string? Format { get; init; }
+        public string? Per { get; init; }
+        public MMLib.Alvo.Descriptor.SequencePeriod? Period { get; init; }
+        public long? Start { get; init; }
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.FieldType>))]
     public enum FieldType
@@ -997,6 +1006,16 @@ namespace MMLib.Alvo.Descriptor
         Min = 3,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("max")]
         Max = 4,
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.SequencePeriod>))]
+    public enum SequencePeriod
+    {
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("year")]
+        Year = 0,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("month")]
+        Month = 1,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("day")]
+        Day = 2,
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.StorageMode>))]
     public enum StorageMode
@@ -2168,6 +2187,7 @@ namespace MMLib.Alvo.Schema
         public bool Required { get; init; }
         public MMLib.Alvo.Schema.RollupSchema? Rollup { get; init; }
         public int? Scale { get; init; }
+        public MMLib.Alvo.Schema.SequenceSchema? Sequence { get; init; }
         public required MMLib.Alvo.Schema.FieldType Type { get; init; }
         public bool Unique { get; init; }
     }
@@ -2232,6 +2252,20 @@ namespace MMLib.Alvo.Schema
     {
         public SchemaModel(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.EntitySchema> Entities) { }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.EntitySchema> Entities { get; init; }
+    }
+    public enum SequenceResetPeriod
+    {
+        Year = 0,
+        Month = 1,
+        Day = 2,
+    }
+    public sealed class SequenceSchema : System.IEquatable<MMLib.Alvo.Schema.SequenceSchema>
+    {
+        public SequenceSchema() { }
+        public string? Format { get; init; }
+        public string? Per { get; init; }
+        public MMLib.Alvo.Schema.SequenceResetPeriod? Period { get; init; }
+        public long Start { get; init; }
     }
     public enum TenancyMode
     {

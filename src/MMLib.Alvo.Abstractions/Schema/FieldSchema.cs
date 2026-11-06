@@ -152,6 +152,17 @@ public sealed record FieldSchema
     public RollupSchema? Rollup { get; init; }
 
     /// <summary>
+    /// Gets the gapless number the framework assigns this field on create, or <see langword="null"/> when the field
+    /// is not a sequence.
+    /// </summary>
+    /// <remarks>
+    /// A field carrying one is maintained by the framework like a computed or rollup field: no write may set it, and a
+    /// create that omits it is not missing it. The number is allocated inside the create's own transaction, so a
+    /// rolled-back create returns its number and the count never has a gap.
+    /// </remarks>
+    public SequenceSchema? Sequence { get; init; }
+
+    /// <summary>
     /// Gets the value a create takes when it omits this field, or <see langword="null"/> when the field has
     /// no default.
     /// </summary>
