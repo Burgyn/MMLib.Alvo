@@ -246,18 +246,27 @@ public abstract partial class AutomationFacts
     protected abstract Task<AutomationDatabase> DatabaseAsync();
 
     private protected async Task<AlvoTestHost> StartAsync(
-        HttpMessageHandler? webhooks = null, AutomationDatabase? database = null, string? descriptor = null, AutomationLogCapture? logs = null)
+        HttpMessageHandler? webhooks = null,
+        AutomationDatabase? database = null,
+        string? descriptor = null,
+        AutomationLogCapture? logs = null,
+        bool failAfterCommit = false)
     {
         var used = database ?? await DatabaseAsync();
         var path = descriptor is null ? DescriptorPath() : await WriteDescriptorAsync(descriptor);
 
         return await AlvoTestHost.StartAsync(
-            alvo => Configure(alvo, used, path, logs), Time, webhooks ?? new ScriptedReceiver(), Ct);
+            alvo => Configure(alvo, used, path, logs, failAfterCommit), Time, webhooks ?? new ScriptedReceiver(), Ct);
     }
 
-    private void Configure(IAlvoBuilder alvo, AutomationDatabase database, string path, AutomationLogCapture? logs)
+    private void Configure(IAlvoBuilder alvo, AutomationDatabase database, string path, AutomationLogCapture? logs, bool failAfterCommit)
     {
         database.Use(alvo);
+        if (failAfterCommit)
+        {
+            FailFirstCommit(alvo.Services);
+        }
+
         alvo.FromDescriptor(path);
         alvo.AddFunction<IssueInvoice>("issue-invoice");
         alvo.Services
@@ -269,6 +278,19 @@ public abstract partial class AutomationFacts
             alvo.Services.AddSingleton<ILoggerProvider>(logs);
         }
     }
+
+    /// <summary>Wraps the provider's unit in <see cref="FailingAfterCommit"/>, for the one fact about a lost answer.</summary>
+    private static void FailFirstCommit(IServiceCollection services)
+    {
+        var registered = services.Last(service => service.ServiceType == typeof(IAlvoTransactions));
+        services.Remove(registered);
+        services.AddSingleton<IAlvoTransactions>(provider => new FailingAfterCommit(Resolve(registered, provider)));
+    }
+
+    private static IAlvoTransactions Resolve(ServiceDescriptor registered, IServiceProvider provider) =>
+        (IAlvoTransactions)(registered.ImplementationInstance
+            ?? registered.ImplementationFactory?.Invoke(provider)
+            ?? ActivatorUtilities.CreateInstance(provider, registered.ImplementationType!));
 
     protected static string DescriptorPath() => Path.Combine(AppContext.BaseDirectory, "descriptors", $"{OrderDesk}.alvo.json");
 

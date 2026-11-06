@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Automation and `entity.update`** (HX-15): the `automation` block runs — an `entity.<entity>.<created|updated|deleted>`
+  or a five-field UTC cron trigger (once per tenant on a tenanted project, with an `IAlvoTenantCatalog`), a condition, and
+  `webhook`, `email`, `function` and `entity.update` actions, each its own retried delivery. `entity.update` writes its
+  target exactly once per event through the command ledger, in the event's tenant: a record of another tenant is dead
+  `record-not-found`. It runs as the system and **bypasses the target's rules** — and it may read the triggering row's
+  `hidden` fields; a rule that re-triggers itself stops at the chain-depth limit.
 - **Timers** (HX-13): `IAlvoScheduler.ScheduleAsync(key, at, …)` — and the typed `ScheduleAsync<TMessage>` over an
   `[AlvoEvent]` class — arms a keyed timer that fires its custom event exactly once at its latest time; the same key
   moves it, `CancelAsync` deletes it. Inside a unit it joins the unit's transaction, so a rollback leaves no timer. Its
