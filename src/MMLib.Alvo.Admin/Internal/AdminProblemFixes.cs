@@ -45,7 +45,7 @@ internal static class AdminProblemFixes
             => "The descriptor breaks a rule every Alvo descriptor must follow. The message above says where in it.",
         ManagementEscalationException
             => "This change touches the access block, which re-qualifies the whole apply to admin. Your management level is lower.",
-        _ when AdminProblem.IsLockTimeout(exception)
+        AlvoApplyLockTimeoutException
             => "Another transaction held a table this apply needed. Nothing changed — wait a few seconds and apply again.",
         _ => null,
     };
@@ -53,7 +53,7 @@ internal static class AdminProblemFixes
     private static string? Rollback(Exception exception) => exception switch
     {
         DescriptorConcurrencyException => "Somebody applied a revision while this screen was open. Reload and try again.",
-        _ when AdminProblem.IsLockTimeout(exception)
+        AlvoApplyLockTimeoutException
             => "Another transaction held a table this restore needed. Nothing changed — wait a few seconds and restore again.",
         _ => null,
     };

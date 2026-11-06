@@ -3,8 +3,9 @@
 namespace MMLib.Alvo.Admin.Tests;
 
 /// <summary>
-/// The Abstractions grant D45 gives the dashboard is used for the trace seam and nothing else: it never builds an allow
-/// decision or a compiled expression of its own.
+/// The Abstractions grant D45 gives the dashboard is used for the trace seam and, since HX-11 Ruling 78, to name
+/// <c>AlvoApplyLockTimeoutException</c> as a retryable refusal — and nothing else: it never builds an allow decision or a
+/// compiled expression of its own.
 /// </summary>
 public sealed class InternalGrantArchitectureTests
 {

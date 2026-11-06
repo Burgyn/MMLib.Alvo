@@ -56,7 +56,9 @@
 // Internal rather than public for this file's own AlvoFrameworkTables reason: publishing is one word away, and
 // un-publishing is a breaking change. Opt-in, so a third-party IAlvoAssistant consumer never meets a case it
 // cannot name. The Ai grant has a second use (D52): ManagementApplyResult.Warnings, the validator's warnings on a dry
-// run, which the assistant reads and the wire does not carry. These grants reach every other internal here too — PolicyDecision's constructor and Allow, and
+// run, which the assistant reads and the wire does not carry. The Admin grant has a second use (HX-11 Ruling 78):
+// AlvoApplyLockTimeoutException, which the dashboard calls IAlvoManagement in-process and so receives as itself — it
+// answers it as a retryable refusal. These grants reach every other internal here too — PolicyDecision's constructor and Allow, and
 // CompiledExpression's constructor among them — so an architecture fact in each granted product assembly's suite
 // holds that it references none of them. The same forgeability caveat applies: an unsigned grant is a name match.
 [assembly: InternalsVisibleTo("MMLib.Alvo.Ai")]

@@ -88,8 +88,8 @@ public class AdminProblemTests
 
     /// <summary>
     /// An apply that gave up waiting for a busy table changed nothing and is worth retrying (HX-11 Ruling 20): a refusal
-    /// with a retry fix, never a fault. The exception is internal to Abstractions, so it is made the way the dashboard
-    /// recognises it — by its full name — and a rename of the type fails here.
+    /// with a retry fix, never a fault. The dashboard names the type through the D45 grant; this suite holds no grant (one
+    /// would move Abstractions' public-API baseline for a test), so it builds the exception by its name.
     /// </summary>
     [Fact]
     public void A_lock_timeout_is_a_refusal_that_says_to_retry()
