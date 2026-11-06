@@ -15,7 +15,8 @@
       "tenancy": "scoped",
       "fields": {
         "starts_at": { "type": "datetime" },
-        "note": { "type": "text" }
+        "note": { "type": "text" },
+        "seats": { "type": "integer" }
       },
       "rules": {
         "list": "true",

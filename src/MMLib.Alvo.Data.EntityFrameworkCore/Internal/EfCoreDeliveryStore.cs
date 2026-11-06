@@ -8,7 +8,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// <summary>
 /// The relational <see cref="IDeliveryStore"/>: one connection per call, one statement — or a write-first transaction: the
 /// claim's one <c>UPDATE … RETURNING</c> (<see cref="RelationalSqlBatch.ReadWrittenRowsAsync"/>), or, to answer for an
-/// attempt, the fenced update then the attempt row — over <see cref="DeliveryTable"/>'s SQL.
+/// attempt, the slot release, the fenced update then the attempt row — over <see cref="DeliveryTable"/>'s SQL.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -53,6 +53,9 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
     private readonly string _outbox;
     private readonly string _controls;
     private readonly string _log;
+    private readonly string _steps;
+    private readonly string _slots;
+    private int _singleClaims;
 
     internal EfCoreDeliveryStore(RelationalConnectionFactory connections, IAlvoSqlDialect dialect, AlvoOptions options, TimeProvider time)
     {
@@ -69,6 +72,8 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
         _outbox = OutboxTable.NameFor(options.SchemaPrefix);
         _controls = DeliveryOperationsTable.ControlsNameFor(options.SchemaPrefix);
         _log = DeliveryOperationsTable.LogNameFor(options.SchemaPrefix);
+        _steps = StepTable.NameFor(options.SchemaPrefix);
+        _slots = ConcurrencySlotTable.NameFor(options.SchemaPrefix);
     }
 
     public async Task EnsureAsync(CancellationToken cancellationToken = default)
@@ -80,8 +85,9 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
             using (await _connections.WriteGate.EnterAsync(cancellationToken).ConfigureAwait(false))
             {
                 await OutboxTable.EnsureAsync(connection, _outbox, cancellationToken).ConfigureAwait(false);
-                await DeliveryTable.EnsureAsync(connection, _table, _attempts, _outbox, cancellationToken).ConfigureAwait(false);
+                await DeliveryTable.EnsureAsync(connection, _table, _attempts, _outbox, _steps, cancellationToken).ConfigureAwait(false);
                 await DeliveryOperationsTable.EnsureAsync(connection, _table, _controls, _log, cancellationToken).ConfigureAwait(false);
+                await ConcurrencySlotTable.EnsureAsync(connection, _slots, cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -89,16 +95,55 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
     public Task<int> FanOutAsync(IReadOnlyList<DeliveryRequest> requests, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(requests);
+        EnsureKeyParts(requests);
+        if (requests.Count == 0)
+        {
+            return Task.FromResult(0);
+        }
 
-        return requests.Count == 0
-            ? Task.FromResult(0)
-            : ExecuteAsync(DeliveryTable.FanOutSql(_table, requests.Count), command => BindRequests(command, requests), cancellationToken);
+        var lanes = DebouncedLanes(requests);
+
+        return lanes.Count == 0
+            ? ExecuteAsync(DeliveryTable.FanOutSql(_table, requests.Count), command => BindRequests(command, requests), cancellationToken)
+            : InTransactionAsync((connection, transaction) => FanOutDebouncedAsync(connection, transaction, requests, lanes, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>
+    /// The debounced fan-out: each debounced lane's lock taken exclusively, in ascending key order, then the insert, then one
+    /// supersede per lane — so a concurrent fan-out of the same lane waits, and each sees the other's row.
+    /// </summary>
+    private async Task<int> FanOutDebouncedAsync(
+        DbConnection connection, DbTransaction transaction, IReadOnlyList<DeliveryRequest> requests, List<DeliveryRequest> lanes, CancellationToken ct)
+    {
+        await LockAsync(connection, transaction, lanes.Select(lane => DeliveryTable.DebounceLockKey(_table, lane.Subscriber, lane.TenantId, lane.PartitionKey)), exclusive: true, ct)
+            .ConfigureAwait(false);
+        var inserted = await ExecuteInAsync(connection, transaction, DeliveryTable.FanOutSql(_table, requests.Count), command => BindRequests(command, requests), ct)
+            .ConfigureAwait(false);
+        foreach (var lane in lanes)
+        {
+            await ExecuteInAsync(connection, transaction, DeliveryTable.SupersedeSql(_table, _attempts), command => BindLane(command, lane), ct).ConfigureAwait(false);
+        }
+
+        return inserted;
+    }
+
+    private static List<DeliveryRequest> DebouncedLanes(IReadOnlyList<DeliveryRequest> requests) =>
+        [.. (from request in requests where request.Debounce is not null && request.DeadReason is null select request)
+            .DistinctBy(request => (request.Subscriber, request.TenantId, request.PartitionKey))];
+
+    private void BindLane(DbCommand command, DeliveryRequest lane)
+    {
+        RelationalSqlBatch.AddParameter(command, "@now", Now);
+        RelationalSqlBatch.AddParameter(command, "@subscriber", lane.Subscriber);
+        RelationalSqlBatch.AddParameter(command, "@partition_key", lane.PartitionKey);
+        RelationalSqlBatch.AddParameter(command, "@tenant_id", (object?)lane.TenantId ?? DBNull.Value);
     }
 
     public async Task<IReadOnlyList<ClaimedDelivery>> ClaimAsync(DeliveryClaim claim, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(claim);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(claim.BatchSize);
+        EnsureLimits(claim);
         if (claim.Ordered.Count + claim.Unordered.Count == 0)
         {
             return [];
@@ -173,13 +218,7 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
                 await using (transaction.ConfigureAwait(false))
                 {
                     await LockSubscribersAsync(connection, transaction, [.. claim.Ordered, .. claim.Unordered], exclusive: false, ct).ConfigureAwait(false);
-                    var claimed = await RelationalSqlBatch.ReadRowsAsync(
-                        connection,
-                        transaction,
-                        DeliveryTable.ClaimSql(_table, _outbox, _controls, claim.Ordered.Count, claim.Unordered.Count),
-                        command => BindClaim(command, claim),
-                        ReadClaimed,
-                        ct).ConfigureAwait(false);
+                    var claimed = await ClaimInTransactionAsync(connection, transaction, claim, ct).ConfigureAwait(false);
                     await transaction.CommitAsync(ct).ConfigureAwait(false);
 
                     return claimed;
@@ -193,10 +232,14 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
     /// answers, or nothing on an engine with one writer — so the transaction's next statement starts after any conflicting
     /// claim or reset of those subscribers committed.
     /// </summary>
-    private async Task LockSubscribersAsync(
-        DbConnection connection, DbTransaction transaction, IEnumerable<string> subscribers, bool exclusive, CancellationToken ct)
+    private Task LockSubscribersAsync(
+        DbConnection connection, DbTransaction transaction, IEnumerable<string> subscribers, bool exclusive, CancellationToken ct) =>
+        LockAsync(connection, transaction, subscribers.Distinct(StringComparer.Ordinal).Select(subscriber => DeliveryOperationsTable.SubscriberLockKey(_table, subscriber)), exclusive, ct);
+
+    /// <summary>Takes transaction locks on <paramref name="lockKeys"/>, distinct and ascending, or nothing on an engine with one writer.</summary>
+    private async Task LockAsync(DbConnection connection, DbTransaction transaction, IEnumerable<long> lockKeys, bool exclusive, CancellationToken ct)
     {
-        var keys = subscribers.Distinct(StringComparer.Ordinal).Select(subscriber => DeliveryOperationsTable.SubscriberLockKey(_table, subscriber)).Distinct().Order().ToList();
+        var keys = lockKeys.Distinct().Order().ToList();
         if (keys.Count == 0 || _dialect.TransactionLockStatement([.. keys.Select((_, index) => $"@lock{index}")], exclusive) is not { } sql)
         {
             return;
@@ -211,7 +254,60 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
         }, ct).ConfigureAwait(false);
     }
 
-    private void BindClaim(DbCommand command, DeliveryClaim claim)
+    /// <summary>
+    /// The capped subscribers' claim first, slot by slot, with a reserved share of the batch — the whole batch when no
+    /// uncapped subscriber is named, else its larger half — then, in the same transaction, the uncapped subscribers' batch
+    /// claim with the room the capped claim left. A claim naming no uncapped subscriber skips the batch statement.
+    /// </summary>
+    /// <remarks>
+    /// Capped first, so an uncapped backlog that fills the batch cannot starve a capped handler, and an uncapped handler
+    /// keeps at least the smaller half; and so the claim's transaction locks every slot before any delivery row. A batch of
+    /// one has no halves: such claims alternate which half goes first, so each kind gets a claim within two rounds. An
+    /// uncapped-first claim of one that wins a row runs no capped half, and one that wins none holds no row lock, so the
+    /// lock order still holds.
+    /// </remarks>
+    private async Task<List<ClaimedDelivery>> ClaimInTransactionAsync(DbConnection connection, DbTransaction transaction, DeliveryClaim claim, CancellationToken ct)
+    {
+        var caps = Caps(claim);
+        var (ordered, unordered) = Uncapped(claim, caps);
+        var uncappedFirst = UncappedFirst(claim, caps.Count, ordered.Count + unordered.Count);
+        var claimed = uncappedFirst ? await ClaimUncappedAsync(connection, transaction, claim, ordered, unordered, claim.BatchSize, ct).ConfigureAwait(false) : [];
+        if (caps.Count > 0 && claimed.Count < claim.BatchSize)
+        {
+            var room = uncappedFirst ? claim.BatchSize - claimed.Count : CappedRoom(claim.BatchSize, ordered.Count + unordered.Count);
+            claimed.AddRange(await ClaimCappedAsync(connection, transaction, claim, caps, room, ct).ConfigureAwait(false));
+        }
+
+        if (!uncappedFirst && claimed.Count < claim.BatchSize)
+        {
+            claimed.AddRange(await ClaimUncappedAsync(connection, transaction, claim, ordered, unordered, claim.BatchSize - claimed.Count, ct).ConfigureAwait(false));
+        }
+
+        return claimed;
+    }
+
+    /// <summary>
+    /// Whether this claim runs its uncapped half first: only when a batch of one cannot hold both shares and both kinds are
+    /// named, and then on every other such claim of this store, so neither half starves the other.
+    /// </summary>
+    private bool UncappedFirst(DeliveryClaim claim, int capped, int uncapped) =>
+        claim.BatchSize < 2 && capped > 0 && uncapped > 0 && Interlocked.Increment(ref _singleClaims) % 2 == 0;
+
+    private async Task<List<ClaimedDelivery>> ClaimUncappedAsync(
+        DbConnection connection, DbTransaction transaction, DeliveryClaim claim, List<string> ordered, List<string> unordered, int batch, CancellationToken ct) =>
+        ordered.Count + unordered.Count == 0
+            ? []
+            : await RelationalSqlBatch.ReadRowsAsync(
+                connection,
+                transaction,
+                DeliveryTable.ClaimSql(_table, _outbox, _controls, ordered.Count, unordered.Count),
+                command => BindClaim(command, claim with { BatchSize = batch }, [.. ordered, .. unordered]),
+                ReadClaimed,
+                ct).ConfigureAwait(false);
+
+    private static int CappedRoom(int batch, int uncapped) => uncapped == 0 ? batch : batch - (batch / 2);
+
+    private void BindClaim(DbCommand command, DeliveryClaim claim, IReadOnlyList<string> subscribers)
     {
         var now = _time.GetUtcNow();
         RelationalSqlBatch.AddParameter(command, "@now", StoredInstant.Text(now));
@@ -220,10 +316,9 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
         RelationalSqlBatch.AddParameter(command, "@batch", claim.BatchSize);
         RelationalSqlBatch.AddParameter(command, "@outbox_max_attempts", claim.OutboxMaxAttempts);
         RelationalSqlBatch.AddParameter(command, "@outbox_stale_before", StoredInstant.Text(now - claim.OutboxClaimLease));
-        var index = 0;
-        foreach (var subscriber in claim.Ordered.Concat(claim.Unordered))
+        for (var index = 0; index < subscribers.Count; index++)
         {
-            RelationalSqlBatch.AddParameter(command, $"@s{index++}", subscriber);
+            RelationalSqlBatch.AddParameter(command, $"@s{index}", subscribers[index]);
         }
     }
 
@@ -262,24 +357,25 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
 
     private void BindRequests(DbCommand command, IReadOnlyList<DeliveryRequest> requests)
     {
-        RelationalSqlBatch.AddParameter(command, "@now", Now);
+        var now = _time.GetUtcNow();
         for (var row = 0; row < requests.Count; row++)
         {
-            BindRequest(command, row, requests[row]);
+            BindRequest(command, row, requests[row], now);
         }
     }
 
-    private void BindRequest(DbCommand command, int row, DeliveryRequest request)
+    private static void BindRequest(DbCommand command, int row, DeliveryRequest request, DateTimeOffset now)
     {
         var dead = request.DeadReason is not null;
-        RelationalSqlBatch.AddParameter(command, $"@id{row}", AlvoEventId.Create(_time.GetUtcNow()).ToString());
+        RelationalSqlBatch.AddParameter(command, $"@id{row}", AlvoEventId.Create(now).ToString());
         RelationalSqlBatch.AddParameter(command, $"@event_id{row}", request.EventId.ToString());
         RelationalSqlBatch.AddParameter(command, $"@subscriber{row}", request.Subscriber);
         RelationalSqlBatch.AddParameter(command, $"@partition_key{row}", request.PartitionKey);
         RelationalSqlBatch.AddParameter(command, $"@tenant_id{row}", (object?)request.TenantId ?? DBNull.Value);
         RelationalSqlBatch.AddParameter(command, $"@kind{row}", request.Kind);
+        RelationalSqlBatch.AddParameter(command, $"@not_before{row}", StoredInstant.Text(now + (dead ? TimeSpan.Zero : request.Debounce ?? TimeSpan.Zero)));
         RelationalSqlBatch.AddParameter(command, $"@status{row}", dead ? DeliveryTable.Dead : DeliveryTable.Pending);
-        RelationalSqlBatch.AddParameter(command, $"@completed_at{row}", dead ? Now : DBNull.Value as object);
+        RelationalSqlBatch.AddParameter(command, $"@completed_at{row}", dead ? StoredInstant.Text(now) : DBNull.Value as object);
         RelationalSqlBatch.AddParameter(command, $"@last_error_type{row}", (object?)request.DeadReason ?? DBNull.Value);
     }
 
@@ -311,13 +407,14 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
         var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
         await using (transaction.ConfigureAwait(false))
         {
+            await ExecuteInAsync(connection, transaction, ConcurrencySlotTable.ReleaseSql(_slots, _table), command => BindFence(command, attempt), ct).ConfigureAwait(false);
             var held = await FencedUpdateAsync(connection, transaction, sql, bind, attempt, ct).ConfigureAwait(false) == 1;
             if (held)
             {
                 await InsertAttemptAsync(connection, transaction, attempt, outcome, errorType, ct).ConfigureAwait(false);
             }
 
-            await transaction.CommitAsync(ct).ConfigureAwait(false);
+            await (held ? transaction.CommitAsync(ct) : transaction.RollbackAsync(ct)).ConfigureAwait(false);
 
             return held;
         }
@@ -367,7 +464,19 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
     /// One transaction behind the database's write gate. <paramref name="work"/> opens it with a write, never a read
     /// (the port's remarks): SQLite then holds the write lock from the first statement instead of upgrading a read lock.
     /// </summary>
-    private async Task<T> InTransactionAsync<T>(Func<DbConnection, DbTransaction, Task<T>> work, CancellationToken ct)
+    private Task<T> InTransactionAsync<T>(Func<DbConnection, DbTransaction, Task<T>> work, CancellationToken ct) =>
+        InTransactionWhenAsync(work, _ => true, ct);
+
+    /// <summary>
+    /// <see cref="InTransactionAsync{T}"/> that commits only when <paramref name="work"/> answers <see langword="true"/>, and
+    /// otherwise rolls back what it wrote — for a write that must stand only if a later statement of the same transaction
+    /// matched.
+    /// </summary>
+    private Task<bool> InTransactionIfAsync(Func<DbConnection, DbTransaction, Task<bool>> work, CancellationToken ct) =>
+        InTransactionWhenAsync(work, changed => changed, ct);
+
+    /// <summary>One write-gated transaction that commits when <paramref name="commit"/> holds for the result, and otherwise rolls back.</summary>
+    private async Task<T> InTransactionWhenAsync<T>(Func<DbConnection, DbTransaction, Task<T>> work, Func<T, bool> commit, CancellationToken ct)
     {
         var connection = _connections.Create();
         await using (connection.ConfigureAwait(false))
@@ -379,7 +488,7 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
                 await using (transaction.ConfigureAwait(false))
                 {
                     var result = await work(connection, transaction).ConfigureAwait(false);
-                    await transaction.CommitAsync(ct).ConfigureAwait(false);
+                    await (commit(result) ? transaction.CommitAsync(ct) : transaction.RollbackAsync(ct)).ConfigureAwait(false);
 
                     return result;
                 }

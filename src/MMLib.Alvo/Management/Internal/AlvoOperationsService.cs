@@ -57,8 +57,9 @@ internal sealed partial class AlvoOperationsService(
     {
         var row = await FoundAsync(delivery, ct).ConfigureAwait(false);
         var attempts = await Store.AttemptsAsync(delivery, ct).ConfigureAwait(false);
+        var steps = await Store.StepsAsync(row.EventId, row.Subscriber, ct).ConfigureAwait(false);
 
-        return DeliveryViews.Of(row) with { History = [.. attempts.Select(DeliveryViews.Of)] };
+        return DeliveryViews.Of(row) with { History = [.. attempts.Select(DeliveryViews.Of)], Steps = [.. steps.Select(DeliveryViews.Of)] };
     }
 
     private async Task<StoredDelivery> FoundAsync(Guid delivery, CancellationToken ct) =>

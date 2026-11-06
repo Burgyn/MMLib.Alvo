@@ -37,6 +37,7 @@ internal static class AlvoHookTelemetry
     internal const string Succeeded = "succeeded";
     internal const string Failed = "failed";
     internal const string LeaseLost = "lease-lost";
+    internal const string Skipped = "skipped";
 
     private static readonly ActivitySource _source = new(SourceName);
 

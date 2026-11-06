@@ -12,9 +12,9 @@ An entity's `hooks` hold lists under `beforeCreate`, `beforeUpdate` and `beforeD
 - `{"mutate": {"<field>": …}}` sets fields before the write: each value is a JSON literal or `{"$cel": "…"}`.
 
 A before-hook runs inside the write's transaction, with no network: it can refuse or change this row
-only. A hook without a `condition` runs on every write, never on a schedule: a timed job is a `timers` entry or
-host code (`AddSchedule`, `IAlvoScheduler`). No hook skips a `stateMachine` (both: traits-and-tenancy skill).
-The descriptor's `automation` does not run in this build.
+only. A hook without a `condition` runs on every write, never on a schedule. Timed jobs are host code
+(`AddSchedule`, `IAlvoScheduler`) or a `timers` entry; steps that must not repeat are `IAlvoSteps`. No hook
+skips a `stateMachine`. The descriptor's `automation` does not run in this build.
 
 The shape: `schema/project.schema.json#/$defs/beforeHookList`.
 

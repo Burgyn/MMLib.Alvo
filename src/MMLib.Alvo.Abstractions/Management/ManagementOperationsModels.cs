@@ -18,7 +18,10 @@ public sealed record ManagementDelivery
     /// <summary>Gets the event's tenant, or <see langword="null"/>.</summary>
     public string? TenantId { get; init; }
 
-    /// <summary>Gets where it is: <c>pending</c>, <c>running</c>, <c>succeeded</c>, <c>retrying</c>, <c>dead</c> or <c>cancelled</c>.</summary>
+    /// <summary>
+    /// Gets where it is: <c>pending</c>, <c>running</c>, <c>succeeded</c>, <c>retrying</c>, <c>dead</c>, <c>cancelled</c> or
+    /// <c>superseded</c> — ended unrun by a newer debounced delivery of its lane, and never replayed.
+    /// </summary>
     public required string Status { get; init; }
 
     /// <summary>Gets how many times it was attempted since it was last put back to pending.</summary>
@@ -35,6 +38,12 @@ public sealed record ManagementDelivery
 
     /// <summary>Gets its attempts, oldest first; filled only when one delivery is read.</summary>
     public IReadOnlyList<ManagementDeliveryAttempt> History { get; init; } = [];
+
+    /// <summary>
+    /// Gets the steps its handler completed, in the order they completed — names and times only, never a step's result;
+    /// filled only when one delivery is read.
+    /// </summary>
+    public IReadOnlyList<ManagementDeliveryStep> Steps { get; init; } = [];
 }
 
 /// <summary>One attempt of a delivery.</summary>
@@ -49,7 +58,7 @@ public sealed record ManagementDeliveryAttempt
     /// <summary>Gets how long it ran.</summary>
     public required TimeSpan Duration { get; init; }
 
-    /// <summary>Gets how it ended: <c>succeeded</c>, <c>failed</c> or <c>dead</c>.</summary>
+    /// <summary>Gets how it ended: <c>succeeded</c>, <c>failed</c>, <c>dead</c> or <c>skipped</c> — the handler went to sleep.</summary>
     public required string Outcome { get; init; }
 
     /// <summary>Gets the type name or fixed reason it failed with, or <see langword="null"/>.</summary>
@@ -165,4 +174,14 @@ public sealed record ManagementExtensionStat
 
     /// <summary>Gets the 95th-percentile run time, within about a fifth, or <see langword="null"/> before any run.</summary>
     public TimeSpan? P95 { get; init; }
+}
+
+/// <summary>One completed step of a delivery, as an operator reads it: its name and when it completed — never its result.</summary>
+public sealed record ManagementDeliveryStep
+{
+    /// <summary>Gets the step's name.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>Gets when the step's work finished.</summary>
+    public required DateTimeOffset CompletedAt { get; init; }
 }

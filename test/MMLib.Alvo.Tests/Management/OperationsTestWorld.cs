@@ -63,7 +63,8 @@ internal sealed class OperationsTestWorld : IDisposable
     internal static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>Fans one event of <paramref name="key"/> out to <paramref name="subscriber"/>, dead when a reason is given, and returns the delivery.</summary>
-    internal async Task<StoredDelivery> DeliveryAsync(string key, string? deadReason = null, string subscriber = Handler, bool keepEnvelope = true)
+    internal async Task<StoredDelivery> DeliveryAsync(
+        string key, string? deadReason = null, string subscriber = Handler, bool keepEnvelope = true, TimeSpan? debounce = null)
     {
         var @event = Event(key);
         if (keepEnvelope)
@@ -71,7 +72,7 @@ internal sealed class OperationsTestWorld : IDisposable
             Store.Publish(@event);
         }
 
-        await Store.FanOutAsync([new DeliveryRequest { EventId = @event.Id, Subscriber = subscriber, PartitionKey = key, Kind = "handler", DeadReason = deadReason }], Ct);
+        await Store.FanOutAsync([new DeliveryRequest { EventId = @event.Id, Subscriber = subscriber, PartitionKey = key, Kind = "handler", DeadReason = deadReason, Debounce = debounce }], Ct);
 
         return (await Store.ListAsync(new DeliveryFilter { Limit = 1 }, Ct))[0];
     }

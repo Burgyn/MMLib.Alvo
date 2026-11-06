@@ -1,6 +1,8 @@
 ﻿using MMLib.Alvo.Events;
 using MMLib.Alvo.Management;
 
+using System.Text.Json;
+
 namespace MMLib.Alvo.Tests.Management;
 
 /// <summary>The operations port's reads: a page and one delivery.</summary>
@@ -69,6 +71,40 @@ public sealed class AlvoOperationsServiceTests
         read.History.ShouldHaveSingleItem().Outcome.ShouldBe("succeeded");
         read.History[0].Duration.ShouldBe(TimeSpan.FromMilliseconds(12));
     }
+
+    [Fact]
+    public async Task A_delivery_read_lists_its_steps_by_name_and_time_but_never_their_results()
+    {
+        using var world = new OperationsTestWorld();
+        var delivery = await world.DeliveryAsync("tickets:a");
+        var completedAt = world.Clock.GetUtcNow();
+        await world.Store.RecordStepAsync(Step(delivery, "charge", "\"card-4242\"", completedAt), Ct);
+        await world.Store.RecordStepAsync(Step(delivery, "email", "null", completedAt.AddSeconds(1)), Ct);
+
+        var read = await world.Service.GetDeliveryAsync(Project, delivery.Id, Ct);
+
+        read.Steps.ShouldBe([
+            new ManagementDeliveryStep { Name = "charge", CompletedAt = completedAt },
+            new ManagementDeliveryStep { Name = "email", CompletedAt = completedAt.AddSeconds(1) }]);
+        var json = JsonSerializer.Serialize(read, JsonSerializerOptions.Web);
+        json.ShouldNotContain("card-4242");
+        JsonDocument.Parse(json).RootElement.GetProperty("steps")[0].EnumerateObject().Select(property => property.Name).ShouldBe(["name", "completedAt"]);
+    }
+
+    [Fact]
+    public async Task A_delivery_page_reads_no_steps()
+    {
+        using var world = new OperationsTestWorld();
+        var delivery = await world.DeliveryAsync("tickets:a");
+        await world.Store.RecordStepAsync(Step(delivery, "charge", "1", world.Clock.GetUtcNow()), Ct);
+
+        var page = await world.Service.ListDeliveriesAsync(Project, new ManagementDeliveryQuery(), Ct);
+
+        page.Items.ShouldHaveSingleItem().Steps.ShouldBeEmpty();
+    }
+
+    private static DeliveryStep Step(StoredDelivery delivery, string name, string result, DateTimeOffset completedAt) =>
+        new() { EventId = delivery.EventId, Subscriber = delivery.Subscriber, Name = name, Result = result, CompletedAt = completedAt };
 
     [Fact]
     public async Task An_unknown_delivery_is_not_found()

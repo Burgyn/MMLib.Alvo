@@ -55,6 +55,7 @@ internal static class AlvoDeliveryMetrics
         DeliveryRunOutcome.Succeeded => "succeeded",
         DeliveryRunOutcome.Dead => DeadOutcome,
         DeliveryRunOutcome.LeaseLost => "lease-lost",
+        DeliveryRunOutcome.Slept => "skipped",
         _ => FailedOutcome,
     };
 }

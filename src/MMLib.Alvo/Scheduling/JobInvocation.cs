@@ -22,8 +22,8 @@ internal static class JobInvocation
     {
         var job = services.GetRequiredService<TJob>();
         var payload = (AlvoRecord)message;
-        var run = AlvoJobContext.Create(
-            context.Subscriber, ScheduledFor(payload), TenantOf(context.Event), context.Data, context.Attempt, Revision(payload));
+        var run = AlvoJobContext.ForRun(
+            context.Subscriber, ScheduledFor(payload), TenantOf(context.Event), context.Data, context.Attempt, Revision(payload), context.Steps);
         await RunAsync(job, run, ct).ConfigureAwait(false);
     }
 

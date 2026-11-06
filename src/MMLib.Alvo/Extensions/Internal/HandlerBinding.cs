@@ -37,6 +37,7 @@ internal sealed class HandlerBinding(HandlerRegistration handler, ICelCompiler c
         CheckShape();
         ResolveServices(services);
         CheckTimeout();
+        CheckDebounce();
         CheckChoices();
         CheckSource();
 
@@ -96,6 +97,16 @@ internal sealed class HandlerBinding(HandlerRegistration handler, ICelCompiler c
         {
             Add("timeout", $"A timeout of {timeout} is longer than one attempt may hold its delivery.",
                 "Set Timeout to at most 1 hour; split longer work into steps the handler records and resumes.");
+        }
+    }
+
+    private void CheckDebounce()
+    {
+        if (handler.Settings.Debounce is { } debounce
+            && (debounce < AlvoHandlerOptions.MinDebounce || debounce > AlvoHandlerOptions.MaxDebounce))
+        {
+            Add("debounce", $"A debounce of {debounce} is outside what a burst of events may be gathered for.",
+                "Set Debounce between 1 second and 1 day, or leave it unset.");
         }
     }
 

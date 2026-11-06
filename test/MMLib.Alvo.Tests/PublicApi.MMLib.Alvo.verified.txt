@@ -276,6 +276,7 @@ namespace MMLib.Alvo.Events
         public MMLib.Alvo.Data.IAlvoSession Data { get; }
         public MMLib.Alvo.Events.AlvoEvent Event { get; }
         public System.Guid EventId { get; }
+        public MMLib.Alvo.Events.IAlvoSteps Steps { get; }
         public string Subscriber { get; }
         public static MMLib.Alvo.Events.AlvoEventContext Create(MMLib.Alvo.Events.AlvoEvent @event, MMLib.Alvo.Data.IAlvoSession data, string subscriber, int attempt = 1) { }
     }
@@ -328,9 +329,22 @@ namespace MMLib.Alvo.Events
         System.Threading.Tasks.Task DeliverAsync(MMLib.Alvo.Management.DeliveryFixture fixture, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Events.AlvoDrainResult> DrainAsync(System.Threading.CancellationToken cancellationToken = default);
     }
+    public interface IAlvoSteps
+    {
+        System.Threading.Tasks.Task RunAsync(string name, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task> work, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<T> RunAsync<T>(string name, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<T>> work, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task SleepUntilAsync(string name, System.DateTimeOffset at, System.Threading.CancellationToken cancellationToken = default);
+    }
 }
 namespace MMLib.Alvo.Extensions
 {
+    public sealed class AlvoConcurrency
+    {
+        public string Key { get; }
+        public int Limit { get; }
+        public override string ToString() { }
+        public static MMLib.Alvo.Extensions.AlvoConcurrency PerKey(string key, int limit) { }
+    }
     public sealed class AlvoDeliveryOptions
     {
         public const string SectionName = "Alvo:Deliveries";
@@ -449,6 +463,8 @@ namespace MMLib.Alvo.Extensions
     public sealed class AlvoHandlerOptions
     {
         public AlvoHandlerOptions() { }
+        public MMLib.Alvo.Extensions.AlvoConcurrency? Concurrency { get; set; }
+        public System.TimeSpan? Debounce { get; set; }
         public string? Description { get; set; }
         public int Order { get; set; }
         public MMLib.Alvo.Extensions.AlvoOrdering Ordering { get; set; }
@@ -732,6 +748,7 @@ namespace MMLib.Alvo.Scheduling
         public string Id { get; }
         public int? Revision { get; }
         public System.DateTimeOffset ScheduledFor { get; }
+        public MMLib.Alvo.Events.IAlvoSteps Steps { get; }
         public MMLib.Alvo.TenantId? Tenant { get; }
         public static MMLib.Alvo.Scheduling.AlvoJobContext Create(string id, System.DateTimeOffset scheduledFor, MMLib.Alvo.TenantId? tenant, MMLib.Alvo.Data.IAlvoSession data, int attempt = 1, int? revision = default) { }
     }

@@ -13,6 +13,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     private static readonly string[] _unfinished = ["pending", "running", "retrying"];
     private static readonly string[] _blocking = ["pending", "running", "retrying", "dead"];
     private static readonly string[] _finished = ["succeeded", "dead", "cancelled"];
+    private static readonly string[] _live = ["pending", "retrying", "running", "succeeded"];
 
     private readonly Lock _gate = new();
     private readonly List<Row> _rows = [];
@@ -23,6 +24,8 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     private readonly List<DeliveryOperationEntry> _operations = [];
     private readonly Dictionary<string, SubscriberControl> _paused = new(StringComparer.Ordinal);
     private readonly HashSet<string> _disabled = new(StringComparer.Ordinal);
+    private readonly List<DeliveryStep> _steps = [];
+    private readonly List<(string Key, Guid Delivery, DateTimeOffset LeaseUntil)> _slots = [];
 
     internal int FanOutFailures { get; set; }
 
@@ -33,6 +36,8 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     internal ConcurrentQueue<AlvoProvenance?> AnswerFlows { get; } = new();
 
     /// <summary>Every claim made, in order.</summary>
+    private int _singleClaims;
+
     internal ConcurrentQueue<DeliveryClaim> Claims { get; } = new();
 
     internal IReadOnlyList<Row> Rows
@@ -118,8 +123,30 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
                 .Where(request => !_rows.Exists(row => row.EventId == request.EventId && row.Subscriber == request.Subscriber))
                 .ToList();
             _rows.AddRange(fresh.Select(NewRow));
+            foreach (var lane in requests.Where(request => request.Debounce is not null && request.DeadReason is null))
+            {
+                Supersede(lane);
+            }
 
             return Task.FromResult(fresh.Count);
+        }
+    }
+
+    private void Supersede(DeliveryRequest lane)
+    {
+        var rows = _rows.Where(row => row.Subscriber == lane.Subscriber && row.PartitionKey == lane.PartitionKey && (row.TenantId ?? string.Empty) == (lane.TenantId ?? string.Empty)).ToList();
+        if (rows.Where(row => _live.Contains(row.Status)).Select(row => row.EventId.ToString()).Max(StringComparer.Ordinal) is not { } newest)
+        {
+            return;
+        }
+
+        foreach (var row in rows.Where(row => row.Status is "pending" or "retrying"
+            && !_attempts.Exists(attempt => attempt.Delivery == row.Id)
+            && string.CompareOrdinal(row.EventId.ToString(), newest) < 0))
+        {
+            row.Status = "superseded";
+            row.CompletedAt = time.GetUtcNow();
+            row.LeaseUntil = null;
         }
     }
 
@@ -131,14 +158,52 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         lock (_gate)
         {
             var now = time.GetUtcNow();
-            var heads = _rows.Where(row => Claimable(row, claim, now))
+            var claimable = _rows.Where(row => Claimable(row, claim, now))
                 .OrderBy(row => row.EventId.ToString(), StringComparer.Ordinal)
                 .ThenBy(row => row.Subscriber, StringComparer.Ordinal)
-                .Take(claim.BatchSize)
                 .ToList();
+            var uncappedFirst = UncappedFirst(claim);
+            var early = uncappedFirst ? claimable.Where(row => !Capped(claim, row.Subscriber)).Take(claim.BatchSize).ToList() : [];
+            var capped = claimable.Where(row => Capped(claim, row.Subscriber) && TookSlot(row, claim, now))
+                .Take(uncappedFirst ? claim.BatchSize - early.Count : CappedRoom(claim)).ToList();
+            var uncapped = uncappedFirst ? early : claimable.Where(row => !Capped(claim, row.Subscriber)).Take(claim.BatchSize - capped.Count).ToList();
 
-            return Task.FromResult<IReadOnlyList<ClaimedDelivery>>([.. heads.Select(row => Claim(row, claim, now))]);
+            return Task.FromResult<IReadOnlyList<ClaimedDelivery>>([.. capped.Concat(uncapped).Select(row => Claim(row, claim, now))]);
         }
+    }
+
+    private bool UncappedFirst(DeliveryClaim claim) =>
+        claim.BatchSize < 2
+        && claim.Ordered.Concat(claim.Unordered).Any(subscriber => Capped(claim, subscriber))
+        && !claim.Ordered.Concat(claim.Unordered).All(subscriber => Capped(claim, subscriber))
+        && ++_singleClaims % 2 == 0;
+
+    private static bool Capped(DeliveryClaim claim, string subscriber) => claim.Limits.Any(limit => limit.Subscriber == subscriber);
+
+    /// <summary>The capped share of the batch: all of it when every named subscriber is capped, else its larger half.</summary>
+    private static int CappedRoom(DeliveryClaim claim) =>
+        claim.Ordered.Concat(claim.Unordered).All(subscriber => Capped(claim, subscriber)) ? claim.BatchSize : claim.BatchSize - (claim.BatchSize / 2);
+
+    /// <summary>
+    /// Whether <paramref name="row"/> may run under its subscriber's cap, taking a place when it does; evaluated lazily, so
+    /// only rows the batch still has room for take one.
+    /// </summary>
+    private bool TookSlot(Row row, DeliveryClaim claim, DateTimeOffset now)
+    {
+        if (claim.Limits.FirstOrDefault(limit => limit.Subscriber == row.Subscriber) is not { } limit)
+        {
+            return true;
+        }
+
+        var key = $"{row.Subscriber}\u001f{limit.Key}\u001f{row.TenantId}\u001f{(limit.Key == "record" ? row.PartitionKey : string.Empty)}";
+        _slots.RemoveAll(slot => slot.Key == key && slot.LeaseUntil < now);
+        if (_slots.Count(slot => slot.Key == key) >= limit.Limit)
+        {
+            return false;
+        }
+
+        _slots.Add((key, row.Id, now + claim.Lease));
+        return true;
     }
 
     public Task<bool> CompleteAsync(DeliveryAttempt attempt, CancellationToken cancellationToken = default) =>
@@ -344,6 +409,41 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         }
     }
 
+    public Task<IReadOnlyList<DeliveryStep>> StepsAsync(Guid eventId, string subscriber, CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<DeliveryStep>>([.. _steps.Where(step => step.EventId == eventId && step.Subscriber == subscriber)]);
+        }
+    }
+
+    public Task<DeliveryStep> RecordStepAsync(DeliveryStep completed, CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            if (_steps.Find(step => step.EventId == completed.EventId && step.Subscriber == completed.Subscriber && step.Name == completed.Name) is { } stored)
+            {
+                return Task.FromResult(stored);
+            }
+
+            _steps.Add(completed);
+
+            return Task.FromResult(completed);
+        }
+    }
+
+    public Task<bool> SleepAsync(DeliveryAttempt attempt, DateTimeOffset wakeAt, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Answer(attempt, row => Sleep(row, wakeAt), "skipped", errorType: null));
+
+    private static void Sleep(Row row, DateTimeOffset wakeAt)
+    {
+        row.Status = "pending";
+        row.NotBefore = wakeAt;
+        row.Attempts--;
+        row.ClaimedBy = null;
+        row.LastErrorType = null;
+    }
+
     /// <summary>Refuses a log row whose idempotency key comes without its scope, as the EF store does, before anything changes.</summary>
     private static void EnsureEntry(DeliveryOperationEntry entry)
     {
@@ -370,6 +470,11 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
 
     private void Reset(Row row)
     {
+        if (row.Status == "succeeded")
+        {
+            _steps.RemoveAll(step => step.EventId == row.EventId && step.Subscriber == row.Subscriber);
+        }
+
         row.Status = "pending";
         row.Attempts = 0;
         row.NotBefore = time.GetUtcNow();
@@ -428,7 +533,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         Kind = request.Kind,
         Status = request.DeadReason is null ? "pending" : "dead",
         LastErrorType = request.DeadReason,
-        NotBefore = time.GetUtcNow(),
+        NotBefore = time.GetUtcNow() + (request.DeadReason is null ? request.Debounce ?? TimeSpan.Zero : TimeSpan.Zero),
         CompletedAt = request.DeadReason is null ? null : time.GetUtcNow(),
     };
 
@@ -489,6 +594,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
                 return false;
             }
 
+            _slots.RemoveAll(slot => slot.Delivery == row.Id);
             change(row);
             row.LeaseUntil = null;
             _attempts.Add((row.Id, row.Attempts, outcome));

@@ -1,12 +1,15 @@
 ﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Events;
+using MMLib.Alvo.Events.Internal;
 
 namespace MMLib.Alvo.Scheduling;
 
 /// <summary>One run of a scheduled job: which occurrence, in which tenant, which attempt, and the data session to work through.</summary>
 public sealed class AlvoJobContext
 {
-    private AlvoJobContext(string id, DateTimeOffset scheduledFor, TenantId? tenant, IAlvoSession data, int attempt, int? revision)
+    private AlvoJobContext(string id, DateTimeOffset scheduledFor, TenantId? tenant, IAlvoSession data, int attempt, int? revision, IAlvoSteps steps)
     {
+        Steps = steps;
         Id = id;
         ScheduledFor = scheduledFor;
         Tenant = tenant;
@@ -33,6 +36,12 @@ public sealed class AlvoJobContext
     /// <summary>Gets the schema revision a data migration started at; <see langword="null"/> for a schedule.</summary>
     public int? Revision { get; }
 
+    /// <summary>
+    /// Gets the run's steps: work split into named steps, each run until it completes once, so a retry resumes after the last
+    /// completed step. A context from <see cref="Create"/> runs every step's work every time and never sleeps.
+    /// </summary>
+    public IAlvoSteps Steps { get; }
+
     /// <summary>Creates a context, so a job can be run directly in a test.</summary>
     /// <param name="id">The job's id.</param>
     /// <param name="scheduledFor">The occurrence the run is for.</param>
@@ -48,6 +57,11 @@ public sealed class AlvoJobContext
         ArgumentNullException.ThrowIfNull(data);
         ArgumentOutOfRangeException.ThrowIfLessThan(attempt, 1);
 
-        return new(id, scheduledFor, tenant, data, attempt, revision);
+        return new(id, scheduledFor, tenant, data, attempt, revision, PassThroughSteps.Instance);
     }
+
+    /// <summary>The context of one delivered run, carrying its delivery's steps.</summary>
+    internal static AlvoJobContext ForRun(
+        string id, DateTimeOffset scheduledFor, TenantId? tenant, IAlvoSession data, int attempt, int? revision, IAlvoSteps steps) =>
+        new(id, scheduledFor, tenant, data, attempt, revision, steps);
 }

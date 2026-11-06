@@ -192,6 +192,20 @@ public sealed class AlvoOperationsWritesTests
     }
 
     [Fact]
+    public async Task Redelivering_a_superseded_delivery_is_refused_naming_the_newer_one()
+    {
+        using var world = new OperationsTestWorld();
+        await world.DeliveryAsync("tickets:a", debounce: TimeSpan.FromMinutes(5));
+        world.Clock.Advance(TimeSpan.FromSeconds(1));
+        await world.DeliveryAsync("tickets:a", debounce: TimeSpan.FromMinutes(5));
+        var superseded = (await world.Store.ListAsync(new DeliveryFilter { Status = "superseded", Limit = 10 }, Ct)).ShouldHaveSingleItem();
+
+        (await Should.ThrowAsync<ManagementConflictException>(() => world.Service.RedeliverAsync(Project, superseded.Id, reason: null, Ct)))
+            .Message.ShouldContain("newer debounced delivery");
+        world.Store.Operations.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Redelivering_while_the_record_runs_another_delivery_is_refused()
     {
         using var world = new OperationsTestWorld();

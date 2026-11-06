@@ -33,6 +33,14 @@ public sealed record DeliveryRequest
     /// deep, a handler not bound — or <see langword="null"/> for a delivery to run.
     /// </summary>
     public string? DeadReason { get; init; }
+
+    /// <summary>
+    /// Gets how long a delivery to run waits before it is due, or <see langword="null"/> to be due at once. A debounced
+    /// delivery also supersedes, in the same fan-out, every delivery of its lane — the same subscriber, partition key and
+    /// tenant — with an older event that is still waiting and never started: each ends <c>superseded</c>, so only the
+    /// newest runs. A running, sleeping or retried delivery is never superseded.
+    /// </summary>
+    public TimeSpan? Debounce { get; init; }
 }
 
 /// <summary>What one claim asks for: whose deliveries, how many, and for how long.</summary>
@@ -72,6 +80,13 @@ public sealed record DeliveryClaim
     /// dispatched or its claim goes stale.
     /// </summary>
     public required TimeSpan OutboxClaimLease { get; init; }
+
+    /// <summary>
+    /// Gets the caps on how many deliveries of a subscriber the claim names may run at once per key; a subscriber with none
+    /// is capped only by <see cref="BatchSize"/>. A capped delivery is claimed only together with a free place under its
+    /// key's cap, held until its attempt is answered or its lease expires, so the cap holds across claimants and replicas.
+    /// </summary>
+    public IReadOnlyCollection<DeliveryLimit> Limits { get; init; } = [];
 }
 
 /// <summary>One claimed delivery, with the envelope it is for.</summary>
@@ -160,6 +175,12 @@ public sealed record DeliveryFailure
 /// current one.
 /// </para>
 /// <para>
+/// <b>Caps.</b> A subscriber a claim names in <see cref="DeliveryClaim.Limits"/> has at most its limit of deliveries running
+/// per key — per tenant, or per partition key of a tenant — whoever claimed them: a capped delivery is claimed only together
+/// with a free place under its key's cap. <see cref="CompleteAsync"/>, <see cref="FailAsync"/> and <see cref="SleepAsync"/>
+/// give the place back in their transaction, and only when their fence held; a place whose delivery's lease expired is free.
+/// </para>
+/// <para>
 /// <b>The operator's members</b> read deliveries, put finished ones back to pending, pause a subscriber and record each of
 /// those changes in the operations log in the same transaction as the change; a member that changes nothing records nothing.
 /// They are abstract: a default that did nothing would report success and leave a dead delivery's lane blocked.
@@ -172,7 +193,11 @@ public interface IDeliveryStore
     /// <returns>A task that completes when the storage exists.</returns>
     Task EnsureAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Records one delivery per request; a request whose (event, subscriber) pair already exists is skipped.</summary>
+    /// <summary>
+    /// Records one delivery per request; a request whose (event, subscriber) pair already exists is skipped. A request with a
+    /// <see cref="DeliveryRequest.Debounce"/> is due that long after now and supersedes its lane's older waiting deliveries,
+    /// in the same transaction.
+    /// </summary>
     /// <param name="requests">The deliveries one event fans out to, all recorded together or not at all.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>How many rows were new.</returns>
@@ -343,4 +368,30 @@ public interface IDeliveryStore
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The row, or <see langword="null"/>.</returns>
     Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default);
+
+    /// <summary>The completed steps of one subscriber's delivery of one event, in the order they completed.</summary>
+    /// <param name="eventId">The event the delivery is for.</param>
+    /// <param name="subscriber">The registration whose steps are read.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The steps; none when no step of that delivery completed.</returns>
+    Task<IReadOnlyList<DeliveryStep>> StepsAsync(Guid eventId, string subscriber, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records a completed step unless one of the same event, subscriber and name is already recorded — the first writer
+    /// wins — and returns the step as stored.
+    /// </summary>
+    /// <param name="completed">The step its work just completed.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The stored step: <paramref name="completed"/>, or the one recorded before it.</returns>
+    Task<DeliveryStep> RecordStepAsync(DeliveryStep completed, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Puts the attempt's delivery back to pending, due at <paramref name="wakeAt"/>, without spending the attempt, and
+    /// records the attempt as <c>skipped</c> — if the claimant still holds the delivery.
+    /// </summary>
+    /// <param name="attempt">The attempt that asked to sleep.</param>
+    /// <param name="wakeAt">When the delivery is due again.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>Whether the claim still held; <see langword="false"/> changed nothing.</returns>
+    Task<bool> SleepAsync(DeliveryAttempt attempt, DateTimeOffset wakeAt, CancellationToken cancellationToken = default);
 }

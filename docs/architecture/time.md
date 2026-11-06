@@ -223,3 +223,5 @@ its own.
 Enum wire values: `AlvoExtensionKind.Schedule = 9` (`schedule`), `AlvoExtensionKind.DataMigration = 10`
 (`dataMigration`), `AlvoExtensionStage.Scheduled = 5` (`scheduled`) — the plan's 7/8/4 were taken by HX-16's
 `Narrowing = 7` and `Read = 4`, and `Enricher = 8` is reserved.
+
+A step's sleep is not a timer: it is the delivery's own `not_before` — see [`steps.md`](steps.md).
