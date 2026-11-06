@@ -396,6 +396,7 @@ namespace MMLib.Alvo.Data
         Referenced = 1,
         Check = 2,
         Exclusion = 3,
+        Transition = 4,
     }
     public sealed class AlvoConstraintViolationException : System.Exception
     {

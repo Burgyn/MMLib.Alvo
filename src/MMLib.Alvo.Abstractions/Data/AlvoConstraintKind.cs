@@ -34,4 +34,10 @@ public enum AlvoConstraintKind
     /// range. The refusal names the range's start field when the caller may know it, and never the other record or a value.
     /// </summary>
     Exclusion,
+
+    /// <summary>
+    /// A write would move a record's state field along no transition its state machine declares, or one whose condition
+    /// refuses this record; fixed by sending a state a declared transition reaches.
+    /// </summary>
+    Transition,
 }

@@ -569,17 +569,26 @@ internal static class ProblemResultFactory
     /// <param name="exception">The port's refusal.</param>
     private static IReadOnlyList<AlvoViolation> CheckViolations(AlvoConstraintViolationException exception) =>
         exception.Fields.Count > 0
-            ? [.. exception.Fields.Select(CheckViolation)]
-            : [new AlvoViolation(string.Empty, CodeFor(exception.Kind), CheckDocumentMessage, FixFor(exception.Kind))];
+            ? [.. exception.Fields.Select(field => CheckViolation(field, exception))]
+            : [new AlvoViolation(string.Empty, CodeFor(exception.Kind), DocumentMessageFor(exception), FixFor(exception.Kind))];
+
+    private static string DocumentMessageFor(AlvoConstraintViolationException exception) =>
+        exception.Kind == AlvoConstraintKind.Transition ? exception.Message : CheckDocumentMessage;
 
     private const string CheckFieldMessage = "This value breaks the validation the descriptor declares for this field.";
 
     private const string CheckDocumentMessage = "This write would leave a record breaking a validation the descriptor declares.";
 
-    /// <summary>The entry for one field whose validation refused the value sent for it.</summary>
+    private const string TransitionFix =
+        "Send a state a declared transition reaches from the current one — the entity's stateMachine lists them — or leave the field unchanged.";
+
+    /// <summary>The entry for one field whose validation, or whose state machine, refused the value sent for it.</summary>
     /// <param name="field">The field name, from the entity's schema.</param>
-    private static AlvoViolation CheckViolation(string field) =>
-        new("/" + field, "check", CheckFieldMessage, "Send a value the field's validation accepts.");
+    /// <param name="exception">The port's refusal, of kind <see cref="AlvoConstraintKind.Check"/> or <see cref="AlvoConstraintKind.Transition"/>.</param>
+    private static AlvoViolation CheckViolation(string field, AlvoConstraintViolationException exception) =>
+        exception.Kind == AlvoConstraintKind.Transition
+            ? new("/" + field, CodeFor(exception.Kind), exception.Message, TransitionFix)
+            : new("/" + field, CodeFor(exception.Kind), CheckFieldMessage, "Send a value the field's validation accepts.");
 
     /// <summary>The stable code for a refusal that names no field.</summary>
     /// <param name="kind">Which constraint refused the request.</param>
@@ -588,6 +597,7 @@ internal static class ProblemResultFactory
         AlvoConstraintKind.Referenced => "referenced",
         AlvoConstraintKind.Check => "check",
         AlvoConstraintKind.Exclusion => "exclusion",
+        AlvoConstraintKind.Transition => "transition",
         _ => "unique",
     };
 
@@ -598,6 +608,7 @@ internal static class ProblemResultFactory
         AlvoConstraintKind.Referenced => "Delete the records that reference this one, or point them at something else, then retry.",
         AlvoConstraintKind.Check => "Change the values this write sends so every record it touches keeps its validations.",
         AlvoConstraintKind.Exclusion => ExclusionFix,
+        AlvoConstraintKind.Transition => TransitionFix,
         _ => "Send a value no other record holds on the field declared unique.",
     };
 
@@ -635,7 +646,7 @@ internal static class ProblemResultFactory
         AlvoRecordNotFoundException => NotFound(),
         AlvoPreconditionFailedException precondition => Problem(StatusCodes.Status412PreconditionFailed, AlvoProblemTypes.PreconditionFailed, precondition.Message),
         AlvoIdempotencyConflictException conflict => Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.IdempotencyConflict, conflict.Message),
-        AlvoConstraintViolationException { Kind: AlvoConstraintKind.Check } check => Problem(
+        AlvoConstraintViolationException { Kind: AlvoConstraintKind.Check or AlvoConstraintKind.Transition } check => Problem(
             StatusCodes.Status422UnprocessableEntity, AlvoProblemTypes.Validation, CheckViolations(check)),
         AlvoConstraintViolationException constraint => Conflict(constraint),
         AlvoChainDepthExceededException loop => ChainDepthExceeded(loop.Message),

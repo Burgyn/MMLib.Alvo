@@ -114,6 +114,12 @@ public sealed record PolicyDecision
     /// </summary>
     internal IReadOnlySet<string> Unnameable { get; init; } = _empty;
 
+    /// <summary>
+    /// The compiled <c>stateMachine</c> and <c>timers</c> of the entity this decision was resolved for, from the same catalog
+    /// revision as its predicates; <see langword="null"/> on a denial.
+    /// </summary>
+    internal IDecidedLifecycle? Lifecycle { get; init; }
+
     /// <summary>Creates a denial — the only publicly constructible <see cref="PolicyDecision"/>, and the safe default.</summary>
     /// <param name="reason">Why the operation is denied; surfaced to callers building a structured error.</param>
     public static PolicyDecision Deny(string reason)

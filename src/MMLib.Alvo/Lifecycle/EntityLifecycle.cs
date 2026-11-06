@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Rules;
 
 namespace MMLib.Alvo.Lifecycle;
 
@@ -8,7 +9,7 @@ namespace MMLib.Alvo.Lifecycle;
 /// </summary>
 /// <param name="StateMachine">The compiled state machine, or <see langword="null"/> when the entity declares none.</param>
 /// <param name="Timers">The compiled timers, in declaration order.</param>
-internal sealed record EntityLifecycle(CompiledStateMachine? StateMachine, IReadOnlyList<CompiledTimer> Timers)
+internal sealed record EntityLifecycle(CompiledStateMachine? StateMachine, IReadOnlyList<CompiledTimer> Timers) : IDecidedLifecycle
 {
     /// <summary>The one instance every entity declaring neither member shares.</summary>
     internal static EntityLifecycle None { get; } = new(null, []);
