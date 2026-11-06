@@ -77,6 +77,10 @@ public sealed class AlvoConstraintViolationException : Exception
     /// <summary>The wording of a refused state move, naming neither the stored state nor the one sent.</summary>
     private const string TransitionMessage = "This write would move a record to a state its state machine does not allow from its current one.";
 
+    /// <summary>The fix a refused state move carries, single row or batch row alike.</summary>
+    internal const string TransitionFix =
+        "Send a state a declared transition reaches from the current one — the entity's stateMachine lists them — or leave the field unchanged.";
+
     /// <summary>The wording of a restrict refusal, naming neither the referencing entity nor how many rows.</summary>
     private const string ReferencedMessage =
         "Other records still reference this record, so it cannot be removed. Delete those records, or point "

@@ -107,6 +107,29 @@ public sealed class LifecycleCompilerTests
         error.Message.ShouldContain("caller");
     }
 
+    [Theory]
+    [InlineData(""" "stateMachine": {"field": "status", "transitions": {"confirm": {"from": ["draft"], "to": "confirmed", "when": "room_id.capacity > 0"}}} """, "/stateMachine/transitions/confirm/when")]
+    [InlineData(""" "stateMachine": {"field": "status", "transitions": {"confirm": {"from": ["draft"], "to": "confirmed", "when": "booking_items.exists(i, i.booking_id == id)"}}} """, "/stateMachine/transitions/confirm/when")]
+    [InlineData(""" "timers": {"reminder": {"at": "room_id.opens_at"}} """, "/timers/reminder/at")]
+    [InlineData(""" "timers": {"reminder": {"at": "starts_at", "when": "room_id.capacity > 0"}} """, "/timers/reminder/when")]
+    public void A_relation_read_in_a_transition_or_a_timer_is_refused(string member, string path)
+    {
+        var errors = Errors(", " + member);
+        errors.ShouldNotBeEmpty();
+        errors.ShouldAllBe(error => error.Path == Pointer + path);
+    }
+
+    [Theory]
+    [InlineData("""{"at": "starts_at", "when": "last_item_at < starts_at"}""", "/when")]
+    [InlineData("""{"at": "last_item_at + duration('24h')"}""", "/at")]
+    public void A_timer_expression_reading_a_rollup_is_refused(string timer, string member)
+    {
+        var error = Errors(Timers($$""" "reminder": {{timer}} """)).ShouldHaveSingleItem();
+        error.Path.ShouldBe(Pointer + "/timers/reminder" + member);
+        error.Message.ShouldContain("'last_item_at'");
+        error.Message.ShouldContain("rollup");
+    }
+
     [Fact]
     public void A_compiled_at_evaluates_to_its_instant_or_to_none()
     {
@@ -148,7 +171,10 @@ public sealed class LifecycleCompilerTests
     private static AlvoDescriptor Descriptor(string[] members) => AlvoDescriptor.Parse(
         """{"apiVersion": "alvo.dev/v1", "name": "lifecycles", "auth": {"roles": ["manager"]}, "entities": {"bookings": {"fields": {"""
         + """ "status": {"type": "enum", "values": ["draft", "confirmed", "cancelled"], "default": "draft"},"""
-        + """ "starts_at": {"type": "datetime"}, "note": {"type": "string"}, "site_id": {"type": "uuid"}}"""
+        + """ "starts_at": {"type": "datetime"}, "note": {"type": "string"}, "site_id": {"type": "uuid"},"""
+        + """ "room_id": {"type": "ref", "entity": "rooms"}, "last_item_at": {"type": "datetime", "rollup": {"from": "booking_items", "op": "max", "field": "added_at"}}}"""
         + string.Concat(members)
-        + """, "rules": {"list": "true", "get": "true", "create": "true", "update": "true", "delete": "true"}}}}""");
+        + """, "rules": {"list": "true", "get": "true", "create": "true", "update": "true", "delete": "true"}},"""
+        + """ "rooms": {"fields": {"capacity": {"type": "integer"}, "opens_at": {"type": "datetime"}}, "rules": {"list": "true"}},"""
+        + """ "booking_items": {"fields": {"booking_id": {"type": "ref", "entity": "bookings"}, "added_at": {"type": "datetime"}}, "rules": {"list": "true"}}}}""");
 }

@@ -163,6 +163,100 @@ public abstract class StateMachineFacts
         (await StatusAsync(alvo, id)).ShouldBe("draft");
     }
 
+    [Fact]
+    public async Task A_create_storing_a_state_other_than_initial_is_refused_and_writes_nothing()
+    {
+        EnsureEngineAvailable();
+        var database = await DatabaseAsync();
+        await using var alvo = await StartAsync(database);
+
+        var refused = await Should.ThrowAsync<AlvoConstraintViolationException>(() =>
+            alvo.Data.CreateAsync(Bookings, Booking(_now.AddHours(48), "confirmed"), Caller("staff"), cancellationToken: Ct));
+
+        (refused.Kind, refused.Fields.ShouldHaveSingleItem()).ShouldBe((AlvoConstraintKind.Transition, "status"));
+        (await alvo.Data.QueryAsync(new AlvoQuery { Entity = Bookings }, Caller("staff"), Ct)).Items.ShouldBeEmpty();
+        (await WriteHookRows.CountAsync(database.Connect, "alvo_outbox", "event_type = 'entity.bookings.created'")).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_batch_create_row_not_storing_initial_is_refused_by_its_index()
+    {
+        EnsureEngineAvailable();
+        await using var alvo = await StartAsync(await DatabaseAsync());
+
+        var result = await alvo.Data.CreateManyAsync(
+            Bookings, [Booking(_now.AddHours(48)), Booking(_now.AddHours(48), "confirmed")], Caller("staff"), cancellationToken: Ct);
+
+        var refusal = result.Refusals.ShouldHaveSingleItem();
+        (refusal.Index, refusal.Code, result.Affected).ShouldBe((1, "transition", 0));
+        (await alvo.Data.QueryAsync(new AlvoQuery { Entity = Bookings }, Caller("staff"), Ct)).Items.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_replace_moving_the_state_undeclared_is_refused()
+    {
+        EnsureEngineAvailable();
+        await using var alvo = await StartAsync(await DatabaseAsync());
+        var id = await DraftAsync(alvo);
+
+        var refused = await Should.ThrowAsync<AlvoConstraintViolationException>(() =>
+            alvo.Data.ReplaceAsync(Bookings, id, Whole("done"), Caller("staff"), cancellationToken: Ct));
+
+        refused.Kind.ShouldBe(AlvoConstraintKind.Transition);
+        (await StatusAsync(alvo, id)).ShouldBe("draft");
+    }
+
+    [Fact]
+    public async Task A_replace_that_creates_a_row_not_storing_initial_is_refused()
+    {
+        EnsureEngineAvailable();
+        await using var alvo = await StartAsync(await DatabaseAsync());
+        var id = Guid.NewGuid();
+
+        var refused = await Should.ThrowAsync<AlvoConstraintViolationException>(() =>
+            alvo.Data.ReplaceAsync(Bookings, id, Whole("confirmed"), Caller("staff"), cancellationToken: Ct));
+
+        refused.Kind.ShouldBe(AlvoConstraintKind.Transition);
+        (await alvo.Data.GetAsync(Bookings, id, Caller("staff"), Ct)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task A_batch_row_whose_host_patch_fails_the_when_is_refused_by_its_index()
+    {
+        EnsureEngineAvailable();
+        await using var alvo = await StartAsync(await DatabaseAsync(), alvo => alvo.Entity(Bookings, b => b.BeforeWrite("backdate", (BeforeWrite<AlvoRecord> write) =>
+        {
+            if (write.Operation == AlvoWriteOperation.Update)
+            {
+                write.Set("starts_at", _now.AddHours(-1));
+            }
+
+            return ValueTask.CompletedTask;
+        })));
+        var id = await DraftAsync(alvo);
+
+        var result = await alvo.Data.UpdateManyAsync(Bookings, [new AlvoRowPatch(id, Status("confirmed"))], Caller("staff"), cancellationToken: Ct);
+
+        var refusal = result.Refusals.ShouldHaveSingleItem();
+        (refusal.Index, refusal.Code, result.Affected).ShouldBe((0, "transition", 0));
+        (await StatusAsync(alvo, id)).ShouldBe("draft");
+    }
+
+    [Fact]
+    public async Task A_batch_row_needing_a_role_the_caller_lacks_is_forbidden_by_its_index()
+    {
+        EnsureEngineAvailable();
+        await using var alvo = await StartAsync(await DatabaseAsync());
+        var id = await DraftAsync(alvo);
+        await MoveAsync(alvo, id, "confirmed");
+
+        var result = await alvo.Data.UpdateManyAsync(Bookings, [new AlvoRowPatch(id, Status("done"))], Caller("staff"), cancellationToken: Ct);
+
+        var refusal = result.Refusals.ShouldHaveSingleItem();
+        (refusal.Index, refusal.Code).ShouldBe((0, "forbidden"));
+        (await StatusAsync(alvo, id)).ShouldBe("confirmed");
+    }
+
     protected abstract Task<LifecycleDatabase> DatabaseAsync();
 
     /// <summary>Skips the fact where the deriving engine cannot run; every fact calls it first, before any assertion can catch the skip.</summary>
@@ -192,11 +286,27 @@ public abstract class StateMachineFacts
 
     private AlvoContext Caller(string role) => AlvoTestHost.Caller(role) with { Tenant = Tenant };
 
-    private Dictionary<string, object?> Booking(DateTimeOffset startsAt) => new()
+    private Dictionary<string, object?> Booking(DateTimeOffset startsAt, string? status = null)
     {
-        ["starts_at"] = startsAt,
+        var booking = new Dictionary<string, object?>
+        {
+            ["starts_at"] = startsAt,
+            ["note"] = "booked",
+            ["tenant_id"] = Tenant.Value,
+        };
+        if (status is not null)
+        {
+            booking["status"] = status;
+        }
+
+        return booking;
+    }
+
+    private static Dictionary<string, object?> Whole(string status) => new()
+    {
+        ["starts_at"] = _now.AddHours(48),
         ["note"] = "booked",
-        ["tenant_id"] = Tenant.Value,
+        ["status"] = status,
     };
 
     private static Dictionary<string, object?> Status(string status) => new() { ["status"] = status };

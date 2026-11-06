@@ -3398,8 +3398,9 @@ internal sealed partial class EfAlvoData : IAlvoData
         new(index, ForbiddenCode, AlvoAuthorizationException.RowUnavailable, "Check the row id, or drop it from the batch.");
 
     /// <summary>
-    /// The one code this driver emits. Every refusal it can decide is a policy refusal — a shape refusal is
-    /// the request layer's, and it never reaches here.
+    /// The code of a policy refusal, the one most refusals this driver decides carry; a shape refusal is the request layer's
+    /// and never reaches here. The others are a lookup check's <c>check</c>, a state machine's <c>transition</c> and a
+    /// repeated row's <c>duplicate-row</c>.
     /// </summary>
     private const string ForbiddenCode = "forbidden";
 

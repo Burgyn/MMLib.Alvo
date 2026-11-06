@@ -41,4 +41,29 @@ public sealed class TransitionViolationAnswerTests
         (unnamed["violations"]![0]!["pointer"]!.GetValue<string>(), unnamed["violations"]![0]!["code"]!.GetValue<string>(), unnamed["violations"]![0]!["message"]!.GetValue<string>())
             .ShouldBe((string.Empty, "transition", TransitionMessage));
     }
+
+    [Fact]
+    public async Task A_batch_refused_only_by_transitions_is_422_validation_like_a_single_write()
+    {
+        var (status, document) = await ProblemWriting.WrittenAsync(ProblemResultFactory.RowsRefused(
+            [BatchViolations.FromPort(new AlvoRowRefusal(1, "transition", TransitionMessage, TransitionFix))]));
+
+        status.ShouldBe(422);
+        document["type"]!.GetValue<string>().ShouldEndWith(AlvoProblemTypes.Validation);
+        var violation = document["violations"]!.AsArray().ShouldHaveSingleItem()!;
+        (violation["pointer"]!.GetValue<string>(), violation["code"]!.GetValue<string>()).ShouldBe(("/rows/1", "transition"));
+    }
+
+    [Fact]
+    public async Task A_batch_with_any_policy_refusal_stays_403()
+    {
+        var (status, document) = await ProblemWriting.WrittenAsync(ProblemResultFactory.RowsRefused(
+        [
+            BatchViolations.FromPort(new AlvoRowRefusal(0, "transition", TransitionMessage, TransitionFix)),
+            BatchViolations.FromPort(new AlvoRowRefusal(1, "forbidden", "Refused.", null)),
+        ]));
+
+        status.ShouldBe(403);
+        document["type"]!.GetValue<string>().ShouldEndWith(AlvoProblemTypes.Forbidden);
+    }
 }

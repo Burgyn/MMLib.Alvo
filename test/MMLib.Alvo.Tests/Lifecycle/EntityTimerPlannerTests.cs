@@ -98,7 +98,7 @@ public sealed class EntityTimerPlannerTests
     }
 
     [Fact]
-    public void A_writer_past_the_depth_limit_arms_nothing()
+    public void A_writer_past_the_depth_limit_refuses_the_write()
     {
         var deep = AlvoContext.System(_tenant) with { Provenance = new AlvoProvenance { Depth = AlvoChainDepthLimit.DefaultMaxDepth + 1 } };
 

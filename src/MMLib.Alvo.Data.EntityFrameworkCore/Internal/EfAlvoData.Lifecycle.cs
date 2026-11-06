@@ -13,10 +13,6 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// </summary>
 internal sealed partial class EfAlvoData
 {
-    /// <summary>The fix a batch row refused by its entity's state machine carries; the Data API's single-row answer says the same.</summary>
-    private const string TransitionFix =
-        "Send a state a declared transition reaches from the current one — the entity's stateMachine lists them — or leave the field unchanged.";
-
     /// <summary>
     /// The entity's compiled <c>stateMachine</c> and <c>timers</c>, through an internal port no host can replace — the machine
     /// cannot be switched off by a registration.
@@ -31,7 +27,7 @@ internal sealed partial class EfAlvoData
     /// came from.
     /// </summary>
     /// <remarks>
-    /// <b>Twice per write, and the second run is not redundant.</b> Stage 3 runs before any host hook, so a host never sees a move
+    /// <b>Twice per write, and the second run is not redundant.</b> Stage 3 runs before any host before-write hook, so such a hook never sees a move
     /// the machine refuses. A host's before-write may not set the state field (<c>invalid-set</c>), but it may set a field a
     /// transition's <c>when</c> reads; stage 5 therefore judges the move again over what will actually be stored, as
     /// <see cref="EnsureWriteAllowedAsync"/> judges the rules again.
@@ -92,5 +88,5 @@ internal sealed partial class EfAlvoData
 
     /// <summary>A batch row whose state move its entity's machine refuses.</summary>
     private static AlvoRowRefusal Transitioned(int index, AlvoConstraintViolationException refused) =>
-        new(index, "transition", refused.Message, TransitionFix);
+        new(index, "transition", refused.Message, AlvoConstraintViolationException.TransitionFix);
 }

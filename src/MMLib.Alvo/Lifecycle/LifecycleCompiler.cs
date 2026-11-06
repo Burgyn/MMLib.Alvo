@@ -15,7 +15,8 @@ namespace MMLib.Alvo.Lifecycle;
 /// <remarks>
 /// <b>A timer reads its row and nothing else.</b> It is re-judged at every write by whichever caller made it, so an
 /// <c>old.</c>/<c>new.</c>/<c>changed()</c> read would arm it from one write's comparison, and an <c>@user</c>/<c>@tenant</c>
-/// read from one caller's identity — neither is a property of the record. The shape checks are
+/// read from one caller's identity — neither is a property of the record. A rollup field is refused too: its recompute writes
+/// the row without a write of the record, so nothing would re-plan the timer. The shape checks are
 /// <see cref="StateMachineCheck"/>'s and <see cref="EntityTimerCheck"/>'s.
 /// </remarks>
 internal static class LifecycleCompiler
@@ -117,7 +118,7 @@ internal static class LifecycleCompiler
             return null;
         }
 
-        var refusal = ForeignRead(compiled.Root);
+        var refusal = ForeignRead(compiled.Root) ?? RollupRead(compiled.Root, scope.Schema);
         if (refusal is not null)
         {
             scope.Errors.Add(Error(path, refusal, "Read the record's fields by their bare names, e.g. starts_at, and nothing about the caller."));
@@ -132,6 +133,16 @@ internal static class LifecycleCompiler
             : CelImageReads.ReadsContext(root)
                 ? "A timer reads the record's own fields only, never the caller or the tenant ('@user', '@tenant'): it is re-judged at every write of the record, by whichever caller makes it."
                 : null;
+
+    private static string? RollupRead(CelNode root, EntitySchema schema)
+    {
+        var read = CelDataOrigin.FieldsRead(root);
+        var rollup = schema.Fields.FirstOrDefault(field => field.Rollup is not null && read.Contains(field.Name));
+
+        return rollup is null
+            ? null
+            : $"A timer cannot read the rollup field '{rollup.Name}': a rollup is recomputed when its children change, without a write of this record, so the timer would keep its old due.";
+    }
 
     private static CompiledExpression? Accepted(CelCompilationResult result, string path, LifecycleScope scope)
     {
