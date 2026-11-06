@@ -39,6 +39,10 @@ namespace MMLib.Alvo.Testing.Data;
 /// keeps the key-set contract all the same: every virtual field a caller may read is present as <see langword="null"/>,
 /// and a write naming a virtual field is refused as the relational driver refuses it.
 /// </para>
+/// <para>
+/// <b>It enforces no <c>stateMachine</c> and arms no <c>timers</c></b>, for the hooks' reason: both run in the write's
+/// pipeline, and a test of a transition's 422/403 or of a timer firing uses <c>MMLib.Alvo.TestHost</c>.
+/// </para>
 /// </remarks>
 public sealed class InMemoryAlvoData : IAlvoData
 {

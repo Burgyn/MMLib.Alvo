@@ -149,6 +149,8 @@ public class ChangeTrackerReachTests
     /// (<c>EfCoreDeliveryStore.Operations.cs</c>) builds no command of its own and goes through the main file's;
     /// <c>EfCoreTimerStore</c> reads and writes only the timer, schedule and data-migration tables and appends to the
     /// outbox, binding every value, and never an entity table — its schedule half builds no command of its own;
+    /// <c>TimerWrites</c> is the timer table's upsert and cancel that store shares with a data write arming its entity's
+    /// declarative timers, binding every value, and never touches an entity table;
     /// <c>RelationalReachability</c> executes one <c>const</c> of its own (<c>SELECT 1</c>) that names no
     /// table, carries no <c>WHERE</c> and binds no parameter, so there is nothing in it a caller could
     /// influence and nothing for a policy predicate to be missing from; and
@@ -214,6 +216,7 @@ public class ChangeTrackerReachTests
     [InlineData("EfCoreDeliveryStore.cs")]
     [InlineData("TimerTable.cs")]
     [InlineData("EfCoreTimerStore.cs")]
+    [InlineData("TimerWrites.cs")]
     public void The_outbox_claim_is_raw_sql_and_never_linq_over_the_context(string file)
     {
         var source = ReadSource(file);
@@ -268,6 +271,7 @@ public class ChangeTrackerReachTests
         "SequenceNumbers.cs",
         "SqliteCaseSensitiveLike.cs",
         "SystemSchemaInitializer.cs",
+        "TimerWrites.cs",
         "VersionRowWriter.cs",
     ];
 

@@ -8,6 +8,8 @@
   "reserved-users-entity.json": { "pointer": "#/entities/users" },
   "sequence-two-numbers.json": { "pointer": "#/entities/orders/fields/code/sequence/format", "messageContains": "pattern" },
   "sequence-unknown-period.json": { "pointer": "#/entities/orders/fields/number/sequence/period" },
+  "state-machine-no-transitions.json": { "pointer": "#/entities/bookings/stateMachine/transitions", "messageContains": "minProperties" },
+  "timer-without-at.json": { "pointer": "#/entities/bookings/timers/reminder", "messageContains": "at" },
   "typo-property.json": { "pointer": "#/entities/widgets/fields/name/requird" },
   "wrong-api-version.json": { "pointer": "#/apiVersion", "messageContains": "alvo.dev/v1" }
 }

@@ -56,8 +56,9 @@ payload, and the calling flow's **provenance** — correlation, causation and de
 past the chain-depth limit). The same key again is a move — one row, a new generation. `CancelAsync` deletes the row.
 
 **Inside a unit.** Called while `TransactAsync` (or a write hook's transaction) is open on the flow, the upsert and the
-cancel write through the unit's own transaction: a rollback leaves no timer. This is the path HX-18's declarative timers
-take.
+cancel write through the unit's own transaction: a rollback leaves no timer. HX-18's declarative timers take the same
+table, SQL and transaction, but are written by the driver at the emit site rather than through this call — see
+*Declarative timers* below.
 
 **Claim.** `TimerPump` claims due rows with a one-minute lease, by the outbox's EvalPlanQual-safe shape:
 
@@ -85,6 +86,19 @@ claimed, so a re-arm made meanwhile survives.
 
 **Exactly-once fire, at-least-once handlers.** The timer fires one event; its handlers then run as deliveries, which
 are at least once.
+
+## Declarative timers (HX-18)
+
+An entity's descriptor `timers` are armed, moved and cancelled by the data path itself, in the write's own transaction,
+and fired by this same pump — `docs/architecture/state-machines-and-timers.md` has the arming rule and its decisions.
+Two things matter here:
+
+- **Keys starting `alvo:` are the framework's.** A declarative timer's key is `alvo:<entity>:<timer>:<id>`;
+  `IAlvoScheduler.ScheduleAsync` and `CancelAsync` refuse any key with that prefix, so host code cannot move or cancel one.
+  `ITimerStore` is public and does **not** refuse it: a host writing the store directly can still touch an `alvo:` row,
+  and is on its own when it does.
+- **Written at the emit site.** The driver upserts or cancels the row through `TimerWrites` — the SQL `EfCoreTimerStore`
+  uses — on the write's own connection and transaction, beside the outbox append, not through `ScheduleAsync`.
 
 ## Schedules
 

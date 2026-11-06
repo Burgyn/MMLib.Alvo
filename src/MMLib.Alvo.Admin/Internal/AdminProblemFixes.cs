@@ -102,6 +102,8 @@ internal static class AdminProblemFixes
             => $"Point {(violation.Fields.Count > 0 ? violation.Fields[0] : "the reference")} at a record that satisfies this check, or change the values the check compares. The check is declared in the entity's checks.",
         AlvoConstraintViolationException { Kind: AlvoConstraintKind.Check, Fields.Count: > 0 } violation
             => $"The value for {string.Join(", ", violation.Fields)} breaks the validation the descriptor declares for it. The field's validation is on the entity's Fields tab.",
+        AlvoConstraintViolationException { Kind: AlvoConstraintKind.Transition } violation
+            => $"The entity's state machine does not allow this move of {(violation.Fields.Count > 0 ? violation.Fields[0] : "its state")} from the stored state, or a transition's condition is false for this record. The transitions are on the entity's States tab.",
         AlvoConstraintViolationException { Kind: AlvoConstraintKind.Exclusion }
             => "Choose a range that does not overlap one another record already holds, then retry. The exclusion is on the entity's Indexes tab.",
         AlvoConstraintViolationException { Kind: AlvoConstraintKind.Check }

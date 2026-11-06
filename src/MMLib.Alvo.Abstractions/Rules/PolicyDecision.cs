@@ -115,6 +115,12 @@ public sealed record PolicyDecision
     internal IReadOnlySet<string> Unnameable { get; init; } = _empty;
 
     /// <summary>
+    /// The compiled <c>stateMachine</c> and <c>timers</c> of the entity this decision was resolved for, from the same catalog
+    /// revision as its predicates; <see langword="null"/> on a denial.
+    /// </summary>
+    internal IDecidedLifecycle? Lifecycle { get; init; }
+
+    /// <summary>
     /// Gets the entity's lookup checks, each bound to the caller's <c>list</c> decision on the entity it reads, in
     /// declaration order; set on a <c>create</c> or <c>update</c> allow only, and empty otherwise. A data port runs them
     /// after <see cref="WithCheck"/>, and one that cannot run a relation refuses the decision rather than skip them.

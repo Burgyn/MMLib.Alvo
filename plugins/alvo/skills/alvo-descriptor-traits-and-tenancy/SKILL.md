@@ -1,6 +1,6 @@
 ---
 name: alvo-descriptor-traits-and-tenancy
-description: Use when an Alvo descriptor change touches audit, softDelete, tenancy, storage or realtime on an entity, or project tenancy — the columns each trait adds and what this build honours.
+description: Use when an Alvo descriptor change touches audit, softDelete, tenancy, storage, realtime, stateMachine or timers on an entity, or project tenancy — what each adds and does here.
 ---
 
 # Entity traits and tenancy in an Alvo descriptor
@@ -34,6 +34,20 @@ shared reference data every tenant sees.
 - `"storage": "dynamic"` is not honoured by this build: the apply warns and drops the entity, which gets no table
   and no Data API route. `realtime` is not honoured either, and not even warned, since its default is `true`: nothing
   is published. Propose neither; see `alvo-descriptor-capabilities-and-limits`.
+
+## State machine and timers
+
+`stateMachine` names one stored `enum` field and its named `transitions`, each `{from, to, roles?, when?}`. `from`
+lists the states it leaves (`["*"]` alone means any); `initial`, if set, is what every create stores and must equal the
+field's `default`. An update that changes the field must take a transition, else 422 code `transition`; a transition
+whose `roles` the caller lacks is 403. `when` is CEL over `old`/`new`, and one that fails refuses. The system caller
+holds `admin`, so a job needs a transition listing it. A host before-write hook may not set the field.
+
+`timers` maps a name to `{at, when?, event?}`: `at` is a CEL timestamp over the row's own fields
+(`now() + duration('24h')`), `when` a condition. A create arms it, an update moves it only when its due changes, an
+inactive `when` or a delete cancels it, all in the write's transaction. It fires `event` (default `<entity>.<timer>`)
+with `entity`, `id`, `timer`, `at`: a timer's event is handled in code by a host handler, never by descriptor
+automation. Existing rows are not back-filled. Neither member is allowed on `storage: "dynamic"`.
 
 <!-- example: audit-rental-fleet -->
 **Record who created and last changed each rental bike.**

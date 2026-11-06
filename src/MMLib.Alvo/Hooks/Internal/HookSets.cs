@@ -13,6 +13,9 @@ internal static class HookSets
     /// <summary>The problem of a <c>Set</c> of a field its entity does not declare — or of any <c>Set</c> on an entity with no schema.</summary>
     internal const string Undeclared = "undeclared";
 
+    /// <summary>The problem of a <c>Set</c> of the field an entity's <c>stateMachine</c> guards, which only a declared transition moves.</summary>
+    internal const string StateMachineField = "a state-machine field, which moves only through a declared transition";
+
     /// <summary>
     /// <paramref name="sets"/> with every lossless widening applied (Ruling 47): an integral CLR value is already a <c>long</c>
     /// (<c>RecordWriter.Field</c>), a <c>float</c> becomes a <c>double</c>, and a whole number into a <c>decimal</c> field

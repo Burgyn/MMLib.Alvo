@@ -3,6 +3,7 @@ using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Internal;
+using MMLib.Alvo.Lifecycle;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Rules.Internal;
@@ -116,6 +117,7 @@ internal static class PolicyCatalogBuilder
         {
             Relations = RelationGraph.Targets(operations[DataOperation.List].Using?.Root),
             Checks = CompileChecks(descriptor, build, checkConsumers),
+            Lifecycle = LifecycleCompiler.Compile(descriptor, new LifecycleScope(build.Schema, build.Compiler, build.Roles, build.Path, build.Errors)),
         };
     }
 

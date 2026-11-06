@@ -1,0 +1,114 @@
+﻿@*
+    The entity's state machine and timers, drawn from the working copy as every Schema tab is, and read only: they are
+    edited in the descriptor. The picture is server-rendered SVG in the system map's idiom (tokens only); the rows below it
+    say every transition in words, for a screen reader and for a phone, where the picture scrolls.
+*@
+@if (Model?.StateMachine is null && Model?.Timers is not { Count: > 0 })
+{
+    <div data-testid="states-empty">
+        <EmptyState Title="No state machine or timers"
+                    Body="This entity declares no state machine or timers — add stateMachine to its descriptor." />
+    </div>
+}
+else
+{
+    @if (Model?.StateMachine is { } machine && _graph is { } graph)
+    {
+        <div data-testid="states-machine">
+            <SectionHead Title="@($"State machine on {machine.Field}")">
+                <Subtitle>
+                    An update that changes @machine.Field must take one of these transitions, checked in the write before any host
+                    before-write hook: an undeclared move is refused with 422, a caller holding none of a transition's roles with 403.
+                    @(machine.Initial is null ? "A create may store any state." : $"Every create stores {machine.Initial}.")
+                </Subtitle>
+            </SectionHead>
+            <div class="a-map">
+                <svg class="a-map__svg" viewBox="@ViewBox(graph)" width="@N(graph.Width + 2 * Margin)" height="@N(graph.Height + 2 * Margin)"
+                     role="img" aria-label="@($"State machine of {Entity}")">
+                    <defs>
+                        <marker id="@ArrowId" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                            <path class="a-map__dot" d="M 0 0 L 10 5 L 0 10 z" />
+                        </marker>
+                    </defs>
+                    @foreach (var group in graph.Edges.GroupBy(edge => edge.Transition))
+                    {
+                        <g data-testid="@($"sm-transition-{group.Key}")">
+                            @foreach (var edge in group)
+                            {
+                                <path class="@(edge.Gated ? "a-map__wire a-map__wire--hook" : "a-map__wire")" d="@EdgePath(graph, edge)" marker-end="@($"url(#{ArrowId})")">
+                                    <title>@EdgeWords(edge)</title>
+                                </path>
+                            }
+                            @TransitionLabel(LabelAt(graph, group.First()), group.Key, Gate(machine.Transitions[group.Key]))
+                        </g>
+                    }
+                    @foreach (var node in graph.Nodes)
+                    {
+                        <g data-testid="@($"sm-state-{node.State}")">
+                            <rect class="a-map__plate" x="@N(node.X)" y="@N(node.Y)" width="@N(StateGraphLayout.NodeWidth)"
+                                  height="@N(StateGraphLayout.NodeHeight)" rx="@(node.Any ? "18" : "8")" />
+                            <text class="a-map__name" x="@N(node.X + StateGraphLayout.NodeWidth / 2)" y="@N(node.Y + 22)" text-anchor="middle">@(node.Any ? "any state" : node.State)</text>
+                            @if (node.Initial)
+                            {
+                                <g><text class="a-map__meta" x="@N(node.X + StateGraphLayout.NodeWidth / 2)" y="@N(node.Y - 4)" text-anchor="middle">initial</text></g>
+                            }
+                        </g>
+                    }
+                </svg>
+            </div>
+            @foreach (var transition in machine.Transitions)
+            {
+                <ListRow class="a-listrow--roomy a-listrow--stacked" data-testid="@($"sm-row-{transition.Key}")">
+                    <div class="a-row">
+                        <span class="a-mono a-name">@transition.Key</span>
+                        <span class="a-mono">@string.Join(", ", transition.Value.From) → @transition.Value.To</span>
+                    </div>
+                    @if (transition.Value.Roles is { Count: > 0 } roles)
+                    {
+                        <code class="a-mono">roles @string.Join(", ", roles)</code>
+                    }
+                    @if (transition.Value.When is { } when)
+                    {
+                        <code class="a-mono">when @when</code>
+                    }
+                </ListRow>
+            }
+        </div>
+    }
+
+    @if (Model?.Timers is { Count: > 0 } timers)
+    {
+        <div data-testid="states-timers">
+            <SectionHead Title="Timers">
+                <Subtitle>
+                    Each record carries its own timer, armed, moved and cancelled in the write that changes when it is due, and fired
+                    once as an event the host handles in code.
+                </Subtitle>
+            </SectionHead>
+            @foreach (var timer in timers)
+            {
+                <ListRow class="a-listrow--roomy a-listrow--stacked" data-testid="@($"sm-timer-{timer.Key}")">
+                    <div class="a-row">
+                        <span class="a-mono a-name">@timer.Key</span>
+                        <span class="a-badge">@EventOf(timer.Key, timer.Value)</span>
+                    </div>
+                    <code class="a-mono">at @timer.Value.At</code>
+                    @if (timer.Value.When is { } when)
+                    {
+                        <code class="a-mono">when @when</code>
+                    }
+                </ListRow>
+            }
+        </div>
+    }
+}
+
+@code {
+    private static RenderFragment TransitionLabel((double X, double Y) at, string name, string? gate) => @<g>
+        <text class="a-map__label" x="@N(at.X)" y="@N(at.Y)" text-anchor="middle">@name</text>
+        @if (gate is not null)
+        {
+            <g><text class="a-map__label" x="@N(at.X)" y="@N(at.Y + 11)" text-anchor="middle">@gate</text></g>
+        }
+    </g>;
+}

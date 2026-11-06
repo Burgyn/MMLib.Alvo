@@ -210,7 +210,7 @@ internal static class DataApiEndpoints
 
         return result.Succeeded
             ? Rows(Echoed(result, caller, entity, filters))
-            : ProblemResultFactory.RowsForbidden([.. result.Refusals.Select(BatchViolations.FromPort)]);
+            : ProblemResultFactory.RowsRefused([.. result.Refusals.Select(BatchViolations.FromPort)]);
     }
 
     /// <summary>The port call this batch verb makes.</summary>
