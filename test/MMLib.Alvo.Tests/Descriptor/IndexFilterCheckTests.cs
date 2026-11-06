@@ -20,16 +20,14 @@ public sealed class IndexFilterCheckTests
     }
 
     /// <summary>
-    /// A timestamp constant is the one temporal operand a stored predicate keeps: <c>timestamp('…')</c> over a text constant
-    /// folds at compile time, as <c>duration('…')</c> does, so the predicate reads the row and one fixed instant.
+    /// Review R4: a timestamp constant is not a stored predicate's operand in HX-12 — <c>timestamp('…')</c> stays an
+    /// in-process function a Rule cannot call, so a <c>where</c> comparing with one is refused when the descriptor is saved.
     /// </summary>
-    [Fact]
-    public void A_where_comparing_a_datetime_with_a_timestamp_constant_has_no_findings() =>
-        Errors("joined_at > timestamp('2026-01-01T00:00:00Z')").ShouldBeEmpty();
-
-    [Fact]
-    public void A_where_converting_a_field_to_a_timestamp_is_refused() =>
-        Errors("joined_at > timestamp(email)").ShouldHaveSingleItem().Path.ShouldBe(Pointer);
+    [Theory]
+    [InlineData("joined_at > timestamp('2026-01-01T00:00:00Z')")]
+    [InlineData("joined_at > timestamp(email)")]
+    public void A_where_calling_timestamp_is_refused(string where) =>
+        Errors(where).ShouldHaveSingleItem().Path.ShouldBe(Pointer);
 
     [Theory]
     [InlineData("joined_at > now()", "now()")]

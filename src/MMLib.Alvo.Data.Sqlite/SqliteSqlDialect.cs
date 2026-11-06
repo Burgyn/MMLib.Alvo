@@ -176,6 +176,7 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     ExclusionConstraintSql? IAlvoSqlDialect.ExclusionConstraint(ExclusionConstraintDefinition definition)
     {
         ArgumentNullException.ThrowIfNull(definition);
+        EnsureRaisableName(definition.Name);
         return new(
             Create: [SupportingIndex(definition), Trigger(definition, "_i", "INSERT"), Trigger(definition, "_u", "UPDATE")],
             Drop:
@@ -185,6 +186,18 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
                 $"DROP INDEX IF EXISTS {RenderColumn(IndexNames.ExclusionSupport(definition))}",
             ],
             SurvivesTableRebuild: false);
+    }
+
+    /// <summary>
+    /// Holds the name to the computed shape (lower-case letters, digits, <c>_</c>) before it is spliced into the trigger's
+    /// <c>RAISE</c> text — the decoder reads it back by the same alphabet, and no quote can reach the literal.
+    /// </summary>
+    private static void EnsureRaisableName(string name)
+    {
+        if (string.IsNullOrEmpty(name) || !name.All(character => char.IsAsciiLetterLower(character) || char.IsAsciiDigit(character) || character == '_'))
+        {
+            throw new ArgumentException("An exclusion's name is lower-case letters, digits and '_' only.", nameof(name));
+        }
     }
 
     private string SupportingIndex(ExclusionConstraintDefinition definition) =>

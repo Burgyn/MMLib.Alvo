@@ -20,11 +20,10 @@ public abstract class AlvoDataPartialIndexTests
     private const string Members = "members";
     private const string People = "people";
     private const string ActiveWhere = "active";
-    private const string LateJoinerWhere = "joined_at > timestamp('2026-01-01T00:00:00Z')";
+    private const string TimestampConstantWhere = "joined_at > timestamp('2026-01-01T00:00:00Z')";
 
     private static readonly AlvoContext _acme = InTenant(TenantId.New());
     private static readonly AlvoContext _globex = InTenant(TenantId.New());
-    private static readonly DateTimeOffset _in2025 = new(2025, 6, 1, 0, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset _in2026 = new(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
 
     /// <summary>Stands up an engine over <paramref name="schema"/>, its policy primed from <paramref name="descriptor"/>.</summary>
@@ -52,6 +51,10 @@ public abstract class AlvoDataPartialIndexTests
     /// same predicate is one it keeps.
     /// </summary>
     protected abstract bool RefusesANonImmutablePredicate { get; }
+
+    /// <summary>The names of every ordinary index the engine's catalog holds on <paramref name="table"/>.</summary>
+    /// <param name="table">The table whose indexes are listed.</param>
+    protected abstract Task<IReadOnlyList<string>> IndexNamesAsync(string table);
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -96,20 +99,37 @@ public abstract class AlvoDataPartialIndexTests
     }
 
     /// <summary>
-    /// Review focus 3: a <c>where</c> comparing a <c>datetime</c> with a timestamp constant applies on both engines — on
-    /// PostgreSQL the constant is an immutable literal, not a cast through a stable function — and it holds.
+    /// Review focus 3, narrowed by review R4: a <c>where</c> added by a later apply to a table that already holds rows applies
+    /// on both engines and holds — a predicate over the row alone, which PostgreSQL accepts as <c>IMMUTABLE</c>.
     /// </summary>
     [Fact]
-    public async Task A_where_comparing_a_datetime_with_a_timestamp_literal_applies()
+    public async Task A_where_added_to_an_existing_table_applies_and_holds()
     {
         var data = await CreateAsync(Schema(Members, where: null), Descriptor(Members));
-        await ApplyAsync(Schema(Members, where: null), Schema(Members, LateJoinerWhere), Descriptor(Members));
+        await CreateMemberAsync(data, _acme, "bo@example.com", active: false);
+        await CreateMemberAsync(data, _acme, "bo@example.com", active: true);
 
-        await CreateMemberAsync(data, _acme, "bo@example.com", active: true, joinedAt: _in2025);
-        await CreateMemberAsync(data, _acme, "bo@example.com", active: true, joinedAt: _in2025);
-        await CreateMemberAsync(data, _acme, "bo@example.com", active: true, joinedAt: _in2026);
+        await ApplyAsync(Schema(Members, where: null), Schema(Members, ActiveWhere), Descriptor(Members));
+
+        await CreateMemberAsync(data, _acme, "bo@example.com", active: false);
         (await Should.ThrowAsync<AlvoConstraintViolationException>(
-            () => CreateMemberAsync(data, _acme, "bo@example.com", active: true, joinedAt: _in2026))).Kind.ShouldBe(AlvoConstraintKind.Unique);
+            () => CreateMemberAsync(data, _acme, "bo@example.com", active: true))).Kind.ShouldBe(AlvoConstraintKind.Unique);
+    }
+
+    /// <summary>
+    /// Review R4's regression: <c>timestamp('…')</c> is not a constant a stored predicate may hold in HX-12, so a <c>where</c>
+    /// comparing with one is refused at its pointer on every engine and nothing is applied.
+    /// </summary>
+    [Fact]
+    public async Task A_where_comparing_with_a_timestamp_constant_is_refused_at_its_pointer()
+    {
+        await CreateAsync(Schema(Members, where: null), Descriptor(Members));
+
+        var refusal = await Should.ThrowAsync<DescriptorValidationException>(
+            () => ApplyAsync(Schema(Members, where: null), Schema(Members, TimestampConstantWhere), Descriptor(Members)));
+
+        refusal.Result.Errors.ShouldAllBe(error => error.Path == "/entities/members/indexes/0/where");
+        (await IndexNamesAsync(Members)).ShouldNotContain(name => name.StartsWith("ix_", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -119,7 +139,7 @@ public abstract class AlvoDataPartialIndexTests
     [Fact]
     public async Task An_engine_refusal_of_a_where_is_refused_at_its_pointer()
     {
-        const string Mutable = "joined_at + duration('1h') > timestamp('2026-01-01T00:00:00Z')";
+        const string Mutable = "joined_at + duration('1h') > joined_at";
         await CreateAsync(Schema(Members, where: null), Descriptor(Members));
 
         var apply = () => ApplyAsync(Schema(Members, where: null), Schema(Members, Mutable), Descriptor(Members));
@@ -150,6 +170,8 @@ public abstract class AlvoDataPartialIndexTests
         await ApplyAsync(Schema(Members, ActiveWhere), renamed, Descriptor(Members, activeField: "enabled"));
 
         NameIn(sql, "DROP INDEX").ShouldNotBe(NameIn(sql, "CREATE UNIQUE INDEX"));
+        (await IndexNamesAsync(Members)).Where(name => name.StartsWith("ix_", StringComparison.Ordinal))
+            .ShouldBe([NameIn(sql, "CREATE UNIQUE INDEX")]);
         await CreateMemberAsync(data, _acme, "cy@example.com", active: true, activeField: "enabled");
         (await Should.ThrowAsync<AlvoConstraintViolationException>(
             () => CreateMemberAsync(data, _acme, "cy@example.com", active: true, activeField: "enabled"))).Kind.ShouldBe(AlvoConstraintKind.Unique);

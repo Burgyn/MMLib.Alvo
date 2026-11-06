@@ -3,6 +3,7 @@ using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Data;
+using MMLib.Alvo.Tests.Data;
 using Xunit;
 
 namespace MMLib.Alvo.Data.PostgreSql.Tests.Integration;
@@ -36,6 +37,9 @@ public sealed class PostgreSqlPartialIndexTests : AlvoDataPartialIndexTests, IAs
         (await Migrator.ApplyAsync(plan, new MigrationOptions(), ct)).Applied.ShouldBeTrue();
         _host!.RePrime(desired, descriptor);
     }
+
+    protected override Task<IReadOnlyList<string>> IndexNamesAsync(string table) =>
+        CatalogQuery.NamesAsync(_host!.Services, "SELECT indexname FROM pg_indexes WHERE tablename = @table", table);
 
     public ValueTask DisposeAsync() => _fixture.DisposeAsync();
 

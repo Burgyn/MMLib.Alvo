@@ -532,11 +532,13 @@ namespace MMLib.Alvo.Testing.Data
         protected abstract bool RefusesANonImmutablePredicate { get; }
         public System.Threading.Tasks.Task A_partial_unique_index_allows_duplicates_outside_its_where() { }
         public System.Threading.Tasks.Task A_partial_unique_index_is_per_tenant() { }
-        public System.Threading.Tasks.Task A_where_comparing_a_datetime_with_a_timestamp_literal_applies() { }
+        public System.Threading.Tasks.Task A_where_added_to_an_existing_table_applies_and_holds() { }
+        public System.Threading.Tasks.Task A_where_comparing_with_a_timestamp_constant_is_refused_at_its_pointer() { }
         public System.Threading.Tasks.Task An_engine_refusal_of_a_where_is_refused_at_its_pointer() { }
         protected abstract System.Threading.Tasks.Task ApplyAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
         public System.Threading.Tasks.Task Changing_a_where_recreates_the_index() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
+        protected abstract System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> IndexNamesAsync(string table);
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationPlan> PlanAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired);
         public System.Threading.Tasks.Task Renaming_a_field_a_where_reads_recreates_the_index_under_its_new_name() { }
         public System.Threading.Tasks.Task Renaming_an_entity_with_a_partial_unique_index_keeps_it_enforced() { }

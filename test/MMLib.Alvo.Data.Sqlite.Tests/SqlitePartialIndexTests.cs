@@ -32,6 +32,9 @@ public sealed class SqlitePartialIndexTests : AlvoDataPartialIndexTests, IAsyncD
         _host!.RePrime(desired, descriptor);
     }
 
+    protected override Task<IReadOnlyList<string>> IndexNamesAsync(string table) =>
+        CatalogQuery.NamesAsync(_host!.Services, "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = @table", table);
+
     public ValueTask DisposeAsync() => _fixture.DisposeAsync();
 
     private ISchemaMigrator Migrator => _host!.Services.GetRequiredService<ISchemaMigrator>();

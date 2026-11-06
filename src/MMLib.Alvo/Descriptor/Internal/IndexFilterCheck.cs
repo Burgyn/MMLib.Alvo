@@ -12,8 +12,8 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b><see cref="RollupFilterCheck"/>'s three steps, with the entity as the row</b> — bare field names or <c>new.</c>, no
-/// <c>value</c>. An index predicate is stored and judged on every write with no caller and no instant, as a
+/// <b><see cref="RollupFilterCheck"/>'s three steps, with the entity as the row</b> — bare field names only (a <c>new.</c>
+/// prefix is the Rule profile's compile error), no <c>value</c>, and no <c>timestamp('…')</c> constant (review R4). An index predicate is stored and judged on every write with no caller and no instant, as a
 /// <c>CHECK</c> is; PostgreSQL further demands an <c>IMMUTABLE</c> predicate, and a duration over a field renders through
 /// its epoch extraction, which is not — so temporal arithmetic is refused here for both engines alike.
 /// </para>

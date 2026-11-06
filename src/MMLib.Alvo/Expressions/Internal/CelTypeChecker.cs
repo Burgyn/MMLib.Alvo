@@ -1189,40 +1189,8 @@ internal static class CelTypeChecker
         {
             CelCall.Now => CheckLegacyCall(call),
             CelBuiltInFunctions.DurationName => CheckDurationCall(call),
-            CelBuiltInFunctions.TimestampName when profile == CelProfile.Rule => CheckRuleTimestampCall(call),
             _ => CheckCatalogCall(call),
         };
-
-        /// <summary>
-        /// Folds <c>timestamp('…')</c> in a Rule into a <see cref="CelValueType.Timestamp"/> literal, as
-        /// <see cref="CheckDurationCall"/> folds a duration: a Rule is translated to SQL — and a stored predicate written into
-        /// DDL — where no in-process function runs, so the instant must be one text constant that parses at apply.
-        /// </summary>
-        private (CelNode, CelValueType, bool, int) CheckRuleTimestampCall(CelCall call)
-        {
-            var position = FindPosition(CelBuiltInFunctions.TimestampName);
-            if (call.Arguments is not [CelLiteral { Type: CelValueType.String, Value: string text }])
-            {
-                Errors.Add(new CelCompilationError(
-                    "timestamp() in a rule takes one text constant, such as timestamp('2026-01-01T00:00:00Z'); a rule never converts a field.",
-                    "Compare the timestamp field itself, or write the instant as a constant.",
-                    position));
-                return (call, CelValueType.Timestamp, true, position);
-            }
-
-            try
-            {
-                return (new CelLiteral(CelValueType.Timestamp, CelBuiltInFunctions.TimestampOf(text)), CelValueType.Timestamp, false, position);
-            }
-            catch (CelFunctionException failure)
-            {
-                Errors.Add(new CelCompilationError(
-                    $"timestamp('{CelCompiler.Echo(text)}') is refused: {failure.Reason}.",
-                    "Write an RFC 3339 instant such as '2026-01-01T00:00:00Z'.",
-                    position));
-                return (call, CelValueType.Timestamp, true, position);
-            }
-        }
 
         /// <summary>
         /// Folds <c>duration('…')</c> into a <see cref="CelValueType.Duration"/> literal (HX-11 Ruling 7): the argument must be

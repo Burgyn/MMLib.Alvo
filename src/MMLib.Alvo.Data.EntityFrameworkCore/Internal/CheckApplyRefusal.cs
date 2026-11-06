@@ -44,9 +44,9 @@ internal static class CheckApplyRefusal
             return null;
         }
 
-        if (dialect.IsIndexPredicateRefusal(provider))
+        if (dialect.IsIndexPredicateRefusal(provider) && CreatedPartialIndex(desired, sql ?? []) is { } created)
         {
-            return PredicateRefused(desired, sql ?? []);
+            return PredicateRefused(created.Entity, created.Index);
         }
 
         return dialect.IsLockTimeout(provider)
@@ -57,18 +57,21 @@ internal static class CheckApplyRefusal
     }
 
     // The engine does not name the index whose predicate it refused, so the pointer is the first partial index the plan
-    // creates — in a plan that creates several, the one the engine reached first — and the document's root when none is found.
-    private static DescriptorValidationException PredicateRefused(SchemaModel desired, IReadOnlyList<string> sql)
-    {
-        var created = desired.Entities
-            .SelectMany(entity => entity.Indexes.Where(index => index.Where is not null).Select(index => (Entity: entity, Index: index)))
-            .FirstOrDefault(pair => sql.Any(statement => Creates(statement, IndexNames.Partial(pair.Entity, pair.Index))));
-        return new(new DescriptorValidationResult([new(
-            created.Entity is null ? "/" : IndexFilterSql.Pointer(created.Entity, created.Index),
+    // creates — in a plan that creates several, the one the engine reached first. A plan that creates none raised the same
+    // code over something else (a generation expression), which stays the provider's failure (review M1).
+    private static (EntitySchema Entity, IndexSchema Index)? CreatedPartialIndex(SchemaModel desired, IReadOnlyList<string> sql) =>
+        desired.Entities
+            .SelectMany(entity => entity.Indexes
+                .Where(index => index.Where is not null && index.Exclude is null)
+                .Select(index => ((EntitySchema Entity, IndexSchema Index)?)(entity, index)))
+            .FirstOrDefault(pair => sql.Any(statement => Creates(statement, IndexNames.Partial(pair!.Value.Entity, pair.Value.Index))));
+
+    private static DescriptorValidationException PredicateRefused(EntitySchema entity, IndexSchema index) =>
+        new(new DescriptorValidationResult([new(
+            IndexFilterSql.Pointer(entity, index),
             "The database refused this index's 'where' as a partial index predicate. Nothing was applied.",
             "Compare this entity's fields with constants directly — no duration arithmetic — then apply again.",
             DescriptorValidationSeverity.Error)]));
-    }
 
     private static bool Creates(string statement, string name) =>
         statement.Contains("CREATE", StringComparison.OrdinalIgnoreCase)

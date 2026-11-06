@@ -17,14 +17,8 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// <para>
 /// <b>Nothing outside the row reaches the writer.</b> <see cref="StoredPredicateSurface"/> refuses the caller, the tenant, a
 /// role test and <c>now()</c> before the walk, and the walk runs with no caller at all, so a context read that slipped past
-/// would throw rather than resolve. A <c>uuid</c> constant is refused too: no CEL literal of one reaches a Rule, and refusing
-/// keeps DDL from gaining a format by accident.
-/// </para>
-/// <para>
-/// <b>A <c>timestamp</c> constant</b> — a Rule's folded <c>timestamp('…')</c> — is written as the text a stored instant is:
-/// UTC, <c>yyyy-MM-dd HH:mm:ss.FFFFFFF+00:00</c>, the form SQLite's provider stores and compares a <c>datetime</c> in, and a
-/// literal PostgreSQL resolves to a <c>timestamptz</c> constant when the statement is parsed — so a partial index's
-/// predicate stays <c>IMMUTABLE</c> (HX-12 D11). It goes through the dialect's own text-literal writer like any text.
+/// would throw rather than resolve. A <c>uuid</c> or <c>timestamp</c> constant is refused too: no CEL literal of either reaches
+/// a Rule today, and refusing keeps DDL from gaining a format by accident.
 /// </para>
 /// </remarks>
 internal sealed partial class SqlPredicateRenderer
@@ -80,14 +74,10 @@ internal sealed partial class SqlPredicateRenderer
             long number => Integer(number, fields),
             decimal number => number.ToString(CultureInfo.InvariantCulture),
             string text => fields.RenderStringLiteral(text) ?? throw DeclinedText(fields),
-            DateTimeOffset instant => fields.RenderStringLiteral(StoredText(instant)) ?? throw DeclinedText(fields),
             _ => throw new NotSupportedException(
                 $"A {(value is null ? "null" : value.GetType().Name)} constant has no inline form in a constraint; "
-                + "only numbers, booleans, text, timestamps and durations are written into one."),
+                + "only numbers, booleans, text and durations are written into one."),
         };
-
-        private static string StoredText(DateTimeOffset instant) =>
-            instant.ToUniversalTime().ToString("yyyy'-'MM'-'dd HH':'mm':'ss.FFFFFFFzzz", CultureInfo.InvariantCulture);
 
         public string Integer(long value, IFieldSqlRenderer fields) => value.ToString(CultureInfo.InvariantCulture);
 
