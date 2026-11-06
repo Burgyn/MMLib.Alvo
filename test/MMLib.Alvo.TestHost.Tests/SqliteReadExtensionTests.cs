@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace MMLib.Alvo.TestHost.Tests;
 
@@ -23,6 +24,18 @@ public sealed class SqliteReadExtensionTests : ReadExtensionFacts, IDisposable
         _files.Add(path);
         var connectionString = SqliteTempFile.ConnectionStringFor(path);
 
-        return Task.FromResult(new ReadsDatabase(alvo => alvo.UseSqlite(connectionString), Path.GetFileName(path)));
+        return Task.FromResult(new ReadsDatabase(
+            alvo => alvo.UseSqlite(connectionString), Path.GetFileName(path), table => ColumnsAsync(connectionString, table)));
+    }
+
+    private static async Task<IReadOnlyList<string>> ColumnsAsync(string connectionString, string table)
+    {
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync(Ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name FROM pragma_table_info($table)";
+        command.Parameters.AddWithValue("$table", table);
+
+        return await NamesAsync(command);
     }
 }

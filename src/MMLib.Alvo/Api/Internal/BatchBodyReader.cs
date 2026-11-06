@@ -192,7 +192,10 @@ internal static class BatchBodyReader
                 RefusedFields(payload.Violations),
                 formats,
                 data,
-                context),
+                context)
+            {
+                HiddenFields = decision.HiddenFields,
+            },
             cancellationToken).ConfigureAwait(false);
 
         var refusals = payload.Violations.Concat(validated).ToList();

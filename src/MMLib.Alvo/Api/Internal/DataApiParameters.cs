@@ -49,7 +49,7 @@ internal static class DataApiParameters
         [
             .. Shared(Names(kind, entity), document),
             .. kind == DataApiEndpointKind.List
-                ? entity.Fields.Where(field => !hidden.Contains(field.Name)).Select(Filter)
+                ? entity.Fields.Where(field => !field.IsVirtual && !hidden.Contains(field.Name)).Select(Filter)
                 : [],
         ];
     }
@@ -488,7 +488,7 @@ internal static class DataApiParameters
             properties[name] = repeatable ? Repeatable(schema) : schema;
         }
 
-        foreach (var field in entity.Fields.Where(field => !hidden.Contains(field.Name)))
+        foreach (var field in entity.Fields.Where(field => !field.IsVirtual && !hidden.Contains(field.Name)))
         {
             properties[field.Name] = Repeatable(TextSchema);
         }

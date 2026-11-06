@@ -71,6 +71,12 @@ internal static class SortParser
             return false;
         }
 
+        if (declared.IsVirtual)
+        {
+            violation = QueryViolations.VirtualField(ReservedQueryKeys.Order, declared.Name);
+            return false;
+        }
+
         if (keys.Any(key => string.Equals(key.Field, declared.Name, StringComparison.Ordinal)))
         {
             violation = QueryViolations.RepeatedSortKey();

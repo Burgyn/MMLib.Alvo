@@ -114,4 +114,23 @@ public class QueryFieldGuardTests
     }
 
     private static HashSet<string> Hidden(params string[] fields) => fields.ToHashSet(StringComparer.Ordinal);
+    /// <summary>A virtual field has no column, so a filter, sort or select naming it reads as undeclared — the same refusal.</summary>
+    /// <param name="channel">Which statement part names the field; the guard answers all three identically.</param>
+    [Theory]
+    [InlineData("filter")]
+    [InlineData("sort")]
+    [InlineData("select")]
+    public void A_virtual_field_in_a_filter_sort_or_select_reads_as_undeclared(string channel)
+    {
+        var entity = _entity with
+        {
+            Fields = [.. _entity.Fields, new FieldSchema { Name = "display", Type = FieldType.String, Nullable = true, IsVirtual = true }],
+        };
+
+        var refused = Should.Throw<AlvoAuthorizationException>(() => QueryFieldGuard.EnsureAvailable(["display"], entity, Hidden()), channel);
+
+        refused.Message.ShouldBe(AlvoAuthorizationException.QueryFieldUnavailable);
+        Should.Throw<AlvoAuthorizationException>(() => QueryFieldGuard.DeclaredField(entity, "display")).Message
+            .ShouldBe(AlvoAuthorizationException.QueryFieldUnavailable);
+    }
 }

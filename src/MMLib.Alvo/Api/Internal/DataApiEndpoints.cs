@@ -930,7 +930,10 @@ internal static class DataApiEndpoints
                 RefusedFields(payload.Violations),
                 entity.Formats,
                 data,
-                context),
+                context)
+            {
+                HiddenFields = HiddenByEither(decision, alsoFrozenBy),
+            },
             ct).ConfigureAwait(false);
 
         return (payload, [.. payload.Violations, .. validated]);
@@ -1392,6 +1395,11 @@ internal static class DataApiEndpoints
                 .Union(second.ReadOnlyFields, StringComparer.Ordinal)
                 .ToFrozenSet(StringComparer.Ordinal)
             : decision.ReadOnlyFields;
+
+    private static IReadOnlySet<string> HiddenByEither(PolicyDecision decision, PolicyDecision? also) =>
+        also is { } second && second.HiddenFields.Count > 0
+            ? decision.HiddenFields.Union(second.HiddenFields, StringComparer.Ordinal).ToFrozenSet(StringComparer.Ordinal)
+            : decision.HiddenFields;
 
     /// <summary>
     /// The row a write answers with, as this caller's <b>key</b> may see it: whole when its scopes include a
