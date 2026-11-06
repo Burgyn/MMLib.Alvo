@@ -11,4 +11,7 @@ internal enum FieldKind
 
     /// <summary>The database computes it from this row's own fields (<c>computed</c>).</summary>
     Computed,
+
+    /// <summary>The framework numbers it on create, gapless and never reused (<c>sequence</c>).</summary>
+    Sequence,
 }

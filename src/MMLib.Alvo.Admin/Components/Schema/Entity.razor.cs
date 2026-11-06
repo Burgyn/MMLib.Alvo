@@ -467,7 +467,7 @@ public partial class Entity
     /// </remarks>
     private void AddIndex(IndexSchema index)
     {
-        Copy.AddIndex(EntityName, index.Fields, index.Unique);
+        Copy.AddIndex(EntityName, index.Fields, index.Unique, index.Where, index.Exclude);
         ReadWorking();
         Snackbar.Confirm(StagedWords.Added("Index", $"on {string.Join(", ", index.Fields)}"));
     }
