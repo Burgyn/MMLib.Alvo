@@ -20,8 +20,8 @@ namespace MMLib.Alvo.Admin.Components.Data;
 internal static class FormFields
 {
     /// <summary>
-    /// Whether the field's value is not the caller's to write: the engine or the framework derives it — from its own row,
-    /// from related ones, or as a sequence number — or the host fills a virtual one when the record is read.
+    /// Whether the field's value is not the caller's to write: the engine derives it from its own row or from related
+    /// ones, the framework assigns a sequence number, or the host fills a virtual one when the record is read.
     /// </summary>
     public static bool Derived(FieldSchema field)
     {
