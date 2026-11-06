@@ -2,6 +2,7 @@
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Schema;
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
@@ -120,10 +121,15 @@ internal sealed class RollupRecompute(
     IAlvoSqlDialect dialect, IFieldSqlRenderer fields, ICelCompiler compiler, IPredicateRenderer predicates)
 {
     /// <summary>
-    /// Each rendered filter, keyed by child and source: a schema revision is immutable, and the same pair renders the same
-    /// SQL under every revision, so the cache never needs invalidating.
+    /// Each rendered filter, keyed by the child's schema <b>instance</b> and the filter's source (HX-11 Ruling 70).
     /// </summary>
-    private readonly ConcurrentDictionary<(string Child, string Where), string> _filters = new();
+    /// <remarks>
+    /// Never by the child's name: the SQL depends on the child's field types — SQLite repairs a <c>decimal</c> comparison with
+    /// <c>CAST(… AS REAL)</c> and an <c>integer</c> one not at all — so a revision that changes a filtered field's type must
+    /// render afresh, or the old text compares a TEXT-stored decimal to a number and admits every child. A schema revision is
+    /// immutable, so one instance always renders the same SQL; the weak table lets a retired revision be collected.
+    /// </remarks>
+    private readonly ConditionalWeakTable<EntitySchema, ConcurrentDictionary<string, string>> _filters = new();
 
     /// <summary>
     /// Recomputes every rollup the images of one child row can have changed.
@@ -451,7 +457,7 @@ internal sealed class RollupRecompute(
     /// <param name="rollup">The rollup whose filter is rendered.</param>
     internal string? Filter(EntitySchema child, RollupSchema rollup) =>
         rollup.Where is { } where
-            ? _filters.GetOrAdd((child.Name, where), _ => Render(child, where))
+            ? _filters.GetValue(child, static _ => new(StringComparer.Ordinal)).GetOrAdd(where, source => Render(child, source))
             : null;
 
     private string Render(EntitySchema child, string where)
