@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Timers** (HX-13): `IAlvoScheduler.ScheduleAsync(key, at, …)` — and the typed `ScheduleAsync<TMessage>` over an
   `[AlvoEvent]` class — arms a keyed timer that fires its custom event exactly once at its latest time; the same key
   moves it, `CancelAsync` deletes it. Inside a unit it joins the unit's transaction, so a rollback leaves no timer. Its
-  event carries the arming flow's correlation, causation and depth, so a self-re-arming timer stops at the chain-depth
-  limit. Docs: *Time: timers and schedules*.
+  event carries the arming flow's correlation, causation and depth, so a self-re-arming timer climbs two levels per
+  cycle and stops at the chain-depth limit (about four fires at the default 8). Docs: *Time: timers and schedules*.
 - **Schedules** (HX-13): `AddSchedule<TJob>(id, cron, timeZone)` runs an `IAlvoScheduledJob` per five-field cron
   occurrence in an IANA zone (Cronos's DST rules), one run across replicas, a missed occurrence once, and once per tenant
   with `AlvoScheduleScope.EachTenant` and an `IAlvoTenantCatalog`. Each run is a `schedule` delivery — retries,

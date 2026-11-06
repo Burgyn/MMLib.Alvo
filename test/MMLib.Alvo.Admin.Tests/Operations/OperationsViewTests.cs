@@ -109,6 +109,15 @@ public sealed class OperationsViewTests
     }
 
     [Fact]
+    public void A_zone_this_host_does_not_know_reads_in_utc_rather_than_breaking_the_page()
+    {
+        var now = new DateTimeOffset(2026, 11, 6, 22, 0, 0, TimeSpan.Zero);
+        var schedule = Schedule() with { TimeZone = "Mars/Olympus", NextRunAt = now.AddHours(3) };
+
+        OperationsView.NextRun(schedule, now).ShouldBe("in 3 h (01:00 UTC — Mars/Olympus is unknown here)");
+    }
+
+    [Fact]
     public void A_migration_row_reads_its_revision_and_never_offers_run_now()
     {
         var migration = new ManagementExtension

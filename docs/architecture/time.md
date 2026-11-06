@@ -100,8 +100,9 @@ it. **Rows are never pruned by absence.** A row is deleted only for an id the ho
 - two processes registering the same schedule id with a different cron or time zone overwrite each other at start —
   keep schedule definitions identical across hosts.
 
-The sync runs in the pump's first round, not at boot (a deviation from Decision 8's "once at host start"): a boot that
-is not yet `Ready` has no catalog to sync from, so the first round after it does.
+The sync runs when the pump starts if the boot is `Ready` and a catalog is primed; otherwise — a boot not yet ready,
+or a start-time sync that failed (logged) — the first pump round does it. Running it in a round at all is the
+deviation from Decision 8's "once at host start": a boot that is not ready has no catalog to sync from.
 
 **Claim and advance.** `SchedulePump` claims due rows (`next_run_at <= now`, lease free, id among the bound ones) with a
 one-minute lease and its own `leased_by`, by the same both-halves shape. `AdvanceScheduleAsync` then, in one
@@ -126,7 +127,7 @@ tenant and answers the first tenant's delivery (Decision 12).
 ## Data migrations
 
 `SchedulePump` polls the applied revision; the first revision a round reads at or after a migration's `afterRevision`
-is the one it starts at (Decision 16 — "a revision number reached", not "a revision with this shape": a rollback that
+is the one it starts at (plan Decision 16 — "a revision number reached", not "a revision with this shape": a rollback that
 lands before the start makes it start over the older shape). Its start row is inserted (`alvo_data_migrations`,
 insert-if-absent) and `alvo.migration.<id>` appended in one transaction. A rollback below the revision neither undoes
 nor re-runs it; a later re-apply finds the row and does nothing (acceptance (7)).
@@ -137,7 +138,7 @@ the apply still holds — one run per tenant `IAlvoTenantCatalog` lists, each as
 reads another tenant's rows. A tenant created after the migration started never gets it. A scoped schema with **zero
 tenants** marks the migration started with no runs and logs `MigrationStartedWithNoTenants` at Information.
 
-**Failures (Decision 17).** Each migration's start fails on its own: a throwing tenant list or a rejected append is
+**Failures (plan Decision 17).** Each migration's start fails on its own: a throwing tenant list or a rejected append is
 logged with the migration's id, nothing is marked, and that migration alone is retried after 1 min, doubling to 15 min;
 the others go on. Without a catalog the boot refuses — the process does not start — but only for migrations **not yet
 started** (read from the store beside the orphaned-work check), so a finished migration's registration never refuses a
@@ -162,14 +163,17 @@ caller-controlled, and a host cannot publish or schedule `alvo.schedule.*`. The 
 | schedule occurrence | `System(tenant)`, subject `schedules/<id>` | new | 0 |
 | migration run | `System(tenant)`, subject `migrations/<id>` | new | 0 |
 
-A timer that re-arms itself from its own handler climbs one per hop and is stopped by fan-out at the depth limit — a
-dead `chain-depth-exceeded` delivery, as HX-03 stops event loops (Decision 13).
+A timer that re-arms itself from its own handler climbs **two per cycle** — the handler runs one deeper than the event
+it handles, and the fire adds one more — so at the default limit of 8 it fires about four times before fan-out stops
+it with a dead `chain-depth-exceeded` delivery, as HX-03 stops event loops (Decision 13).
 
 ## The round
 
-`IAlvoEventPump.DrainAsync` — and each background tick — runs, in order: **timers → schedules (and migrations) →
-outbox → deliveries**. A timer that falls due fires, fans out and runs in the same drain; `AlvoTestHost` with a
-`FakeTimeProvider` therefore needs only `Advance` + `DrainEventsAsync`.
+`IAlvoEventPump.DrainAsync` — the manual round — runs, in order: **timers → schedules (and migration starts) → outbox
+→ deliveries**. A timer that falls due fires, fans out and runs in the same drain; `AlvoTestHost` with a
+`FakeTimeProvider` therefore needs only `Advance` + `DrainEventsAsync`. In background mode there is no such order:
+`TimerPump`, `SchedulePump`, the outbox dispatcher and the delivery dispatcher are independent loops, each polling on
+its own.
 
 ## Settled decisions and their cost
 
@@ -189,11 +193,11 @@ outbox → deliveries**. A timer that falls due fires, fans out and runs in the 
 9. **Cronos `CronFormat.Standard`, IANA zones, checked at boot.** Cost: no sub-minute schedules (use a timer).
 10. **Migration: one run per tenant** (deviation), decided by the start revision's own schema. Cost: no cross-tenant
     view; tenants created later never get it; up to one poll interval between an apply and the start.
-16. **A migration starts at the first applied revision a round reads at or after `afterRevision`.** Cost: a migration
-    that needs a shape must check for it itself.
-17. **Migration starts fail independently and back off** (1 min doubling to 15 min); zero tenants mark it started; the
-    boot refusal covers only migrations not yet started. Cost: a tenant list that is down delays a migration by up to
-    15 min after it recovers.
+    - *Plan Decision 16:* a migration starts at the first applied revision a round reads at or after `afterRevision`.
+      Cost: a migration that needs a shape must check for it itself.
+    - *Plan Decision 17:* migration starts fail independently and back off (1 min doubling to 15 min); zero tenants
+      mark it started; the boot refusal covers only migrations not yet started. Cost: a tenant list that is down
+      delays a migration by up to 15 min after it recovers.
 11. **Dashboard data rides appended init members** (`ManagementExtension.Cron…LastOutcome`, `AfterRevision`,
     `ManagementExtensionCatalog.Timers`). Cost: the catalog read does two more store reads.
 12. **Run now on `EachTenant`** answers the first tenant's delivery. Cost: the answer names one of n runs.
