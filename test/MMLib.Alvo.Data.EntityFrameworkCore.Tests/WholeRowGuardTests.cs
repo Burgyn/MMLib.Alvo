@@ -66,6 +66,25 @@ public class WholeRowGuardTests
     public void A_field_the_store_accepts_null_for_may_be_left_out()
         => WholeRowGuard.EnsureWholeRow(Payload(), Ledger(required: false, nullable: true));
 
+    /// <summary>
+    /// A sequence number is the framework's: a replace may omit it on either branch, and one that updates keeps it
+    /// rather than clearing it.
+    /// </summary>
+    [Fact]
+    public void A_replace_need_not_resend_a_sequence_number()
+    {
+        var ledger = Ledger(required: false, nullable: true) with
+        {
+            Fields = [.. Ledger(required: false, nullable: true).Fields, Numbered()],
+        };
+
+        WholeRowGuard.EnsureWholeRow(Payload(), ledger);
+        WholeRowGuard.WholeRow(Payload(), ledger, SnapshotFixture.UpdateDecision(null)).ShouldNotContainKey("number");
+    }
+
+    private static FieldSchema Numbered() =>
+        new() { Name = "number", Type = FieldType.Integer, Required = true, Sequence = new SequenceSchema() };
+
     private static Dictionary<string, object?> Payload() =>
         new(StringComparer.Ordinal) { ["title"] = "Q3 close" };
 

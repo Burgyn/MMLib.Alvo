@@ -1,5 +1,6 @@
 ﻿using Microsoft.Data.Sqlite;
 using MMLib.Alvo.Data.EntityFrameworkCore;
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Schema;
 using System.Data.Common;
 
@@ -146,6 +147,14 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     /// part of this type's own surface.
     /// </remarks>
     string? IAlvoSqlDialect.TransactionLockStatement(IReadOnlyList<string> keyParameterMarkers, bool exclusive) => null;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <c>INSERT … ON CONFLICT DO UPDATE … RETURNING</c> (SQLite 3.35+): the write gate and <c>BEGIN IMMEDIATE</c> admit one
+    /// writer at a time, so the counter row is the transaction's until it commits or rolls back. Implemented explicitly:
+    /// the create path's question, not part of this type's own surface.
+    /// </remarks>
+    string? IAlvoSqlDialect.SequenceAllocationStatement(string table) => SequenceTable.Upsert(table);
 
     /// <summary><c>SQLITE_CONSTRAINT_UNIQUE</c> (2067): a <c>UNIQUE</c> index refused the row.</summary>
     private const int ConstraintUnique = 2067;

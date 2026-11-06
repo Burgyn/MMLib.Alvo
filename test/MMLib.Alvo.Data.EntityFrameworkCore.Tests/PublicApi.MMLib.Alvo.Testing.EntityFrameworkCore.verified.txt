@@ -68,6 +68,7 @@ namespace MMLib.Alvo.Testing.Data
         public void A_row_window_clause_names_the_row_count_marker_and_carries_no_separator_of_its_own() { }
         public void A_row_window_clause_with_an_offset_names_both_markers_and_carries_no_separator_of_its_own() { }
         public void A_row_window_clause_with_an_offset_renders_exactly_one_offset_keyword() { }
+        public void A_sequence_allocation_statement_is_declined_or_binds_every_key_once() { }
         [Xunit.InlineData(new object[] {
                 MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation.Delete})]
         [Xunit.InlineData(new object[] {

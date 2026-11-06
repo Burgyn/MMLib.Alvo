@@ -235,7 +235,8 @@ public static class AlvoEfCoreProvider
             CheckConstraints(services, registration),
             registration.Fields,
             RollupFilters(services, registration),
-            services.GetService<ILogger<EfCoreSchemaMigrator>>());
+            services.GetService<ILogger<EfCoreSchemaMigrator>>(),
+            () => services.GetRequiredService<IOptions<AlvoOptions>>().Value.SchemaPrefix);
     }
 
     /// <summary>

@@ -468,6 +468,26 @@ public abstract class AlvoSqlDialectContractTests
     }
 
     /// <summary>
+    /// A sequence allocation is declined, or is one statement that binds each of its six markers exactly once — the
+    /// allocator binds every one of them, and a marker the statement repeated or dropped would bind a key twice or never.
+    /// </summary>
+    [Fact]
+    public void A_sequence_allocation_statement_is_declined_or_binds_every_key_once()
+    {
+        var statement = CreateDialect().SequenceAllocationStatement("alvo_sequences");
+        if (statement is null)
+        {
+            return;
+        }
+
+        statement.ShouldContain("alvo_sequences");
+        foreach (var marker in new[] { "@entity", "@field", "@tenant", "@scope", "@period", "@start" })
+        {
+            Regex.Count(statement, Regex.Escape(marker) + @"\b").ShouldBe(1, marker);
+        }
+    }
+
+    /// <summary>
     /// Each of the three arguments is required, and a missing one is refused rather than interpolated as an
     /// empty string — which would produce <c>"" GENERATED ALWAYS AS () STORED</c>, DDL that fails at migration
     /// time with a syntax error naming nothing the author wrote.

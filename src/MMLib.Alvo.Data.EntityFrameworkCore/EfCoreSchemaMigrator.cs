@@ -53,6 +53,7 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     private readonly IFieldSqlRenderer? _fields;
     private readonly Func<EntitySchema, RollupSchema, string?> _rollupFilter;
     private readonly ILogger _logger;
+    private readonly Func<string> _schemaPrefix;
     private readonly ConditionalWeakTable<MigrationPlan, SchemaModel> _plannedAgainst = [];
 
     /// <summary>
@@ -88,6 +89,11 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     /// Where a violation count the database could not run is recorded for the operator, the caller seeing only the
     /// refusal; <see langword="null"/> discards it.
     /// </param>
+    /// <param name="schemaPrefix">
+    /// Reads the configured schema prefix, naming the sequence counter table a declared rename rewrites; <see langword="null"/>
+    /// takes <see cref="AlvoOptions"/>' default. Read when a plan is built, never here: the container validates the options
+    /// by resolving this migrator, so reading them while it is constructed would re-enter that resolution.
+    /// </param>
     internal EfCoreSchemaMigrator(
         IMigrationsModelDiffer differ,
         IMigrationsSqlGenerator sqlGenerator,
@@ -99,7 +105,8 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         CheckConstraintSql? checks,
         IFieldSqlRenderer? fields = null,
         Func<EntitySchema, RollupSchema, string?>? rollupFilter = null,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        Func<string>? schemaPrefix = null)
     {
         ArgumentNullException.ThrowIfNull(differ);
         ArgumentNullException.ThrowIfNull(sqlGenerator);
@@ -119,7 +126,10 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         _fields = fields;
         _rollupFilter = rollupFilter ?? NoFilterRenderer;
         _logger = logger ?? NullLogger.Instance;
+        _schemaPrefix = schemaPrefix ?? DefaultSchemaPrefix;
     }
+
+    private static string DefaultSchemaPrefix() => new AlvoOptions().SchemaPrefix;
 
     /// <inheritdoc/>
     /// <remarks>
@@ -140,11 +150,13 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         ArgumentNullException.ThrowIfNull(current);
         ArgumentNullException.ThrowIfNull(desired);
         ct.ThrowIfCancellationRequested();
+        SequencePlan.EnsureAllocatable(desired, _dialect);
 
         var (prePass, desiredModel, residual) = ComputeResidualDiff(current, desired);
         if (counted)
         {
             await RefuseRowsThatBreakNewChecksAsync(current, desired, prePass, residual, ct).ConfigureAwait(false);
+            await RefuseSequenceRenameCollisionsAsync(desired, prePass, ct).ConfigureAwait(false);
         }
 
         var operations = ForThisEngine(AssembleOperations(prePass, residual));
@@ -152,7 +164,9 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         var locks = BackfillLocks(current, backfill);
         var steps = BuildSemanticSteps(prePass, desired, residual);
         steps.AddRange(backfill.Select(statement => BackfillStep(statement, locks)));
-        var sql = GenerateSql(operations, desiredModel, locks, backfill);
+        var renames = SequencePlan.RenameStatements(
+            prePass.Renames.Select(rename => rename.Operation), desired, SequenceTable.NameFor(_schemaPrefix()));
+        var sql = GenerateSql(operations, desiredModel, locks, [.. renames, .. backfill.Select(statement => statement.Sql)]);
 
         var plan = new MigrationPlan { Steps = steps, Sql = sql };
         _plannedAgainst.AddOrUpdate(plan, desired);
@@ -214,6 +228,57 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         {
             ViolationCountFailed(_logger, target.Entity.Name, target.Field.Name, failure);
             return Uncountable(target);
+        }
+    }
+
+    /// <summary>
+    /// Refuses a declared rename onto a name that still holds an earlier sequence's counter rows (they are never deleted),
+    /// before the apply's key rewrite would hit the counter table's primary key mid-transaction.
+    /// </summary>
+    private async Task RefuseSequenceRenameCollisionsAsync(SchemaModel desired, RenamePrePass.Result prePass, CancellationToken ct)
+    {
+        var collisions = SequencePlan.Collisions(
+            prePass.Renames.Select(rename => rename.Operation), desired, SequenceTable.NameFor(_schemaPrefix()));
+        if (collisions.Count == 0)
+        {
+            return;
+        }
+
+        var connection = _connections.Create();
+        await using (connection.ConfigureAwait(false))
+        {
+            await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
+            var errors = new List<DescriptorValidationError>();
+            foreach (var collision in collisions)
+            {
+                if (await CountersUnderAsync(connection, collision.CountSql, ct).ConfigureAwait(false) > 0)
+                {
+                    errors.Add(collision.Error);
+                }
+            }
+
+            if (errors.Count > 0)
+            {
+                throw new DescriptorValidationException(new DescriptorValidationResult(errors));
+            }
+        }
+    }
+
+    /// <summary>The counter rows a collision probe finds; none when no create has made the counter table yet.</summary>
+    private static async Task<long> CountersUnderAsync(DbConnection connection, string countSql, CancellationToken ct)
+    {
+        var command = connection.CreateCommand();
+        await using (command.ConfigureAwait(false))
+        {
+            command.CommandText = countSql;
+            try
+            {
+                return Convert.ToInt64(await command.ExecuteScalarAsync(ct).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+            }
+            catch (DbException)
+            {
+                return 0;
+            }
         }
     }
 
@@ -317,9 +382,9 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     // and writes the columns the DDL has just made (Ruling 32).
     private IReadOnlyList<string> GenerateSql(
         List<MigrationOperation> operations, IModel desiredModel, SortedDictionary<string, string> locks,
-        IReadOnlyList<RollupBackfill.Statement> backfill)
+        IReadOnlyList<string> afterDdl)
     {
-        if (operations.Count == 0 && backfill.Count == 0)
+        if (operations.Count == 0 && afterDdl.Count == 0)
         {
             return [];
         }
@@ -327,7 +392,7 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         var ddl = operations.Count == 0
             ? []
             : _sqlGenerator.Generate(operations, desiredModel).Select(command => command.CommandText);
-        return [.. LockTimeout, .. locks.Values, .. ddl, .. backfill.Select(statement => statement.Sql)];
+        return [.. LockTimeout, .. locks.Values, .. ddl, .. afterDdl];
     }
 
     /// <summary>

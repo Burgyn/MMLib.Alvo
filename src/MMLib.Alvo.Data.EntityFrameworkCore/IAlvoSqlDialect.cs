@@ -387,6 +387,31 @@ public interface IAlvoSqlDialect
             $"{GetType().Name} does not say how it serializes a claim and an operator's reset; a driver must implement {nameof(TransactionLockStatement)}.");
 
     /// <summary>
+    /// The statement that allocates the next number of one sequence count on the framework's counter table, or
+    /// <see langword="null"/> when this engine cannot keep a gapless counter — in which case an apply declaring
+    /// <c>sequence</c> is refused, naming the field.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Return grammar.</b> One statement answering one row of one 64-bit integer column: the allocated number. It
+    /// binds each of <c>@entity</c>, <c>@field</c>, <c>@tenant</c>, <c>@scope</c>, <c>@period</c> (text) and <c>@start</c>
+    /// (a 64-bit integer) exactly once. A count that has no row yet answers <c>@start</c>; one that has answers its last
+    /// value plus one.
+    /// </para>
+    /// <para>
+    /// <b>It runs inside the create's own transaction and must lock the counter row until that transaction ends</b>, so a
+    /// concurrent allocator of the same count waits, and a rollback returns the number — the count never has a gap. An
+    /// engine sequence object (<c>CREATE SEQUENCE</c>) is the wrong answer: it never rolls back.
+    /// </para>
+    /// <para>
+    /// A default interface member answering <see langword="null"/>, like <see cref="GeneratedColumnDefinition"/>: the
+    /// statement is not ANSI, so there is no majority spelling to inherit.
+    /// </para>
+    /// </remarks>
+    /// <param name="table">The counter table's name, already prefixed.</param>
+    string? SequenceAllocationStatement(string table) => null;
+
+    /// <summary>
     /// Decides whether <paramref name="failure"/> is this engine refusing a write on a constraint a
     /// <em>caller</em> can do something about — a <c>unique</c> collision or a <c>restrict</c>-ed reference —
     /// and recovers whatever it names, or answers <see langword="null"/> when it is anything else.

@@ -257,6 +257,7 @@ public class ChangeTrackerReachTests
         "RelationalSqlBatch.cs",
         "RollupRecompute.cs",
         "SecretsTable.cs",
+        "SequenceNumbers.cs",
         "SqliteCaseSensitiveLike.cs",
         "SystemSchemaInitializer.cs",
         "VersionRowWriter.cs",

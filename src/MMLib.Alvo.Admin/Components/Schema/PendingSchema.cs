@@ -175,6 +175,7 @@ internal static class PendingSchema
             Format = String(field.Value, "format"),
             ComputedExpression = String(field.Value, "computed"),
             Rollup = Rollup(field.Value),
+            Sequence = Sequence(field.Value),
             Indexed = Flag(field.Value, "index"),
             Nullable = NullableOf(field.Value),
             Default = Literal(field.Value),
@@ -213,6 +214,18 @@ internal static class PendingSchema
                 Op = Enum.TryParse<RollupOperation>(String(rollup, "op"), ignoreCase: true, out var op) ? op : RollupOperation.Count,
                 Field = String(rollup, "field"),
                 Via = String(rollup, "via") ?? string.Empty,
+            }
+            : null;
+
+    private static SequenceSchema? Sequence(JsonElement field)
+        => field.TryGetProperty("sequence", out var sequence) && sequence.ValueKind == JsonValueKind.Object
+            ? new SequenceSchema
+            {
+                Per = String(sequence, "per"),
+                Period = Enum.TryParse<SequenceResetPeriod>(String(sequence, "period"), ignoreCase: true, out var period)
+                    && Enum.IsDefined(period) ? period : null,
+                Start = sequence.TryGetProperty("start", out var start) && start.TryGetInt64(out var first) ? first : 1,
+                Format = String(sequence, "format"),
             }
             : null;
 
