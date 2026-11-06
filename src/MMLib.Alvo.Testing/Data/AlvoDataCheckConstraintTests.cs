@@ -19,7 +19,7 @@ namespace MMLib.Alvo.Testing.Data;
 /// apply over rows that break a validation — counted before the apply where the table and every column it reads already
 /// exist, and otherwise refused by the engine and translated at the same pointer (HX-11 Ruling 22).
 /// </remarks>
-public abstract class AlvoDataCheckConstraintTests
+public abstract partial class AlvoDataCheckConstraintTests
 {
     /// <summary>
     /// Stands up an engine over the products entity of <see cref="Descriptor"/> — the seam

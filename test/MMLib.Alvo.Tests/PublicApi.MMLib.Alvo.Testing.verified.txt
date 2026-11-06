@@ -202,6 +202,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_hidden_field_s_refusal_names_nothing() { }
         public System.Threading.Tasks.Task A_negative_bound_holds_and_reads_back_exactly() { }
         public System.Threading.Tasks.Task A_rollup_pushing_a_parent_past_its_validation_is_refused_at_the_child_field() { }
+        public System.Threading.Tasks.Task A_text_literal_applied_through_the_migrator_never_escapes_its_check() { }
         public System.Threading.Tasks.Task A_validation_on_a_computed_field_holds_in_the_engine() { }
         public System.Threading.Tasks.Task A_validation_on_a_field_added_in_the_same_apply_is_guarded_by_the_ddl_alone() { }
         public System.Threading.Tasks.Task A_validation_reading_a_sibling_renamed_in_the_same_apply_is_refused_at_its_pointer_and_never_500() { }

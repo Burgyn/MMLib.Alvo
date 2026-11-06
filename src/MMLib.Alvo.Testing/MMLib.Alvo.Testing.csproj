@@ -52,6 +52,15 @@
     contract instead, exactly like IPredicateRenderer is for SQL.
   -->
 
+  <!--
+    The hostile-literal generator the renderer-level CHECK properties draw from, shared so the apply-path property
+    (AlvoDataCheckConstraintTests.Literals) draws from the same one (HX-11 Ruling 51). Internal, and this library grants
+    no InternalsVisibleTo, so the test projects that link it too never see two copies.
+  -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../../test/_shared/literals/LiteralText.cs" Link="_shared/LiteralText.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="xunit.v3.extensibility.core" />
     <PackageReference Include="Shouldly" />
