@@ -198,7 +198,9 @@ code to every Viewer and to the assistant's model; a delegate is never named. HX
 It is threaded through two existing answers. The capability report's `honoured` gains `extensions.<kind>` after the five
 blocks, per request and only for kinds registered (the static list the skill region and the prototype hold stays the
 blocks). `ManagementPolicyVerdict.Extensions` (init, default `[]`) lists the entity's own and every-entity extensions
-whose `operations` contain the simulated operation; rendering it is HX-09's.
+whose `operations` contain the simulated operation; rendering it is HX-09's. `ManagementPolicyVerdict.Relations`
+(init, default `[]`, HX-19) lists each relation the decision's bound `USING`, `WITH CHECK` and lookup checks read
+directly, with the related `list` decision's sources or a structural denial (`docs/architecture/relation-rules.md`).
 
 **The apply guard.** `ExtensionApplyGuard` keeps an apply from unbinding a handler. It is **change-based**: a change is
 refused only when a handler that binds the current catalog (`IPolicyCatalogProvider.Current`) would not bind the

@@ -1790,7 +1790,7 @@ later ruling amends an earlier one, both are kept and the earlier says so. Docs:
 
 Decisions taken while planning (1–15, verbatim from `docs/superpowers/plans/2026-11-06-hx-19-relation-rules.md`
 *Decisions*), the reading of acceptance (2) they fix (16), and the rulings of the plan and task reviews and the
-deviations taken while building (17–36), so a later reader can tell a decision from an oversight. Where a ruling and
+deviations taken while building (17–37), so a later reader can tell a decision from an oversight. Where a ruling and
 the scope above, §5 row `19` or §6.1 disagree, the ruling is what shipped. Each decision reads: the decision, then the
 cost if it is wrong.
 
@@ -1865,6 +1865,10 @@ cost if it is wrong.
     (`AlvoConstraintViolationException.DescriptorMessage`), never as a field validation.
 36. **Not asserted over HTTP:** a probe refusal (403) whose ref the caller can resolve — the HTTP facts meet reference
     resolution's 422 `unresolved-reference` first; the port suites cover the probe on both engines.
+37. **Follow-up, not covered:** an update through a hidden lookup (`Unnameable` on the update decision) is proven on
+    create only; the fixture's `gift_lines` declares no `update` rule. `ManagementRelationVerdict.Allowed` reports a
+    structural denial only (a role condition stays in `Using`), and the verdict lists the relations a decision reads
+    directly, not those nested in a related `list` rule.
 
 ---
 

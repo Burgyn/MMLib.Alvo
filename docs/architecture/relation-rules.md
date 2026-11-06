@@ -11,7 +11,8 @@ re-checked on update only when its key changed) and SQL `CHECK` (`UNKNOWN` passe
 
 ## The term and its SQL
 
-- **Forward:** `<ref>.<field>` — `customer_id.owner_id == @user.id`. The related row is the one the ref names.
+- **Forward:** `<ref>.<field>` — `customer_id.owner_id == @user.id`. The related row is the one the ref names; a
+  null ref names none, so the term is false for that row.
 - **Reverse:** `<child>.exists(x, p)` — `project_members.exists(m, m.user_id == @user.id)`. The related rows are
   the children that reference this row; `<child>_via_<field>` names the ref when the child references this
   entity more than once (the rollup `via` resolution, reused).
@@ -121,8 +122,10 @@ with a check's lookup itself (not a ref, an unreadable target) at `/entities/<e>
 
 - **`ManagementPolicyVerdict.Relations`** lists each relation the bound `USING`, `WITH CHECK` and lookup checks read
   through, once each and in that order, as a `ManagementRelationVerdict`: `Via` is the ref for a forward relation and
-  `<child>.<ref>` for a reverse one, `Allowed` is false when the related `list` decision is a denial (the relation then
-  matches nothing), and `Using`/`TenantScope` are the related decision's CEL sources for the simulated caller. It reads
+  `<child>.<ref>` for a reverse one, `Allowed` is false when the related `list` decision is a structural denial — no `list`
+  rule, no identity or tenant, too deep — and the relation then matches nothing; a role condition stays in `Using`,
+  rendered per caller, and is not folded here. Only the relations a decision reads directly are listed: one nested in
+  a related `list` rule shows as part of that rule's `Using`, and `Using`/`TenantScope` are the related decision's CEL sources for the simulated caller. It reads
   the decision the engine already bound, so it cannot disagree with what a query renders.
 - **The dashboard** shows them under *Reads through* in the policy verdict. The rules editor lists, under each box, the
   relation terms apply would compile on this entity (`RelationHints`, internal): `<ref>.<field>` per ref to a declared

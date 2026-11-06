@@ -197,8 +197,9 @@ public sealed record ManagementPolicyVerdict(
 /// </param>
 /// <param name="Entity">The related entity whose rows are read.</param>
 /// <param name="Allowed">
-/// Whether this caller may list the related entity at all. When <see langword="false"/> the relation matches no row,
-/// whatever its condition says.
+/// Whether the related <c>list</c> decision is not denied outright. <see langword="false"/> — no <c>list</c> rule, no
+/// identity or tenant the related entity needs, or too deep — means the relation matches no row, whatever its condition
+/// says. A role condition is not folded here: it stays in <paramref name="Using"/> and is decided per caller.
 /// </param>
 /// <param name="Using">The related entity's <c>list</c> rule, as CEL source, when one applies.</param>
 /// <param name="TenantScope">The related entity's tenant-scope predicate, as CEL source, when it is tenant-scoped.</param>

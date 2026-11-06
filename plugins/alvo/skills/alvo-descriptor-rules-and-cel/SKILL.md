@@ -33,8 +33,8 @@ each in its own skill.
 
 Also allowed: `order_id.assigned_user_id == @user.id` and `service_orders.exists(o, o.assigned_user_id == @user.id)`.
 A rule may follow a ref (`customer_id.city == 'Brno'`) or reach the rows that reference this one
-(`service_orders.exists(o, o.status == 'ready')`); the related entity's own list rule always applies, never under `!`,
-one hop. An entity's `checks`, e.g. `{"lookup": "part_id", "expr": "!part_id.discontinued && quantity <= part_id.stock_quantity", "message": "…"}`,
+(`service_orders.exists(o, o.status == 'ready')`); the related entity's own list rule always applies, only under `&&`/`||`
+(never `!`), one hop; a null ref matches nothing. An entity's `checks`, e.g. `{"lookup": "part_id", "expr": "!part_id.discontinued && quantity <= part_id.stock_quantity", "message": "…"}`,
 refuse a write whose looked-up row fails `expr` with 422 and that message; a check reads no `@user` or `@tenant`.
 
 A rule calls no function — not `trim`, not a host function: a rule filters in SQL. Two forms are not calls: `now()`,

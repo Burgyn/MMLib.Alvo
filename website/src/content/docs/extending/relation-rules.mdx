@@ -37,7 +37,8 @@ EXISTS (SELECT 1 FROM "projects" AS _alvo_r1
 ```
 
 A comparison may hold one relation and a value or the caller: `customer_id.owner_id == @user.id`,
-`customer_id.credit_limit >= amount`. Values are bound as parameters, as everywhere else in a rule.
+`customer_id.credit_limit >= amount`. Values are bound as parameters, as everywhere else in a rule. A row whose ref
+is null matches no term — the `EXISTS` finds no row — so `customer_id.active == true` is false for it.
 
 ## Reach the records that point here
 
@@ -70,8 +71,9 @@ sees neither:
   a view, not a boundary: writes are not narrowed, and a relation reads the related rows the *rules* admit. If a
   narrowing hides rows for a security reason, put that condition into the related entity's `list` rule.
 
-The [dashboard's policy simulator](/guides/admin-dashboard/) lists, under *Reads through*, every relation a decision reads and the related
-`list` rule it was bound to for the simulated caller, or that the caller may list none of those rows.
+The [dashboard's policy simulator](/guides/admin-dashboard/) lists, under *Reads through*, every relation a decision reads directly and the
+related `list` rule it was bound to for the simulated caller, or that it is denied outright (no `list` rule, no
+identity or tenant, too deep). A role condition in the related rule is shown, not evaluated.
 
 ## What a relation cannot do
 
@@ -80,8 +82,8 @@ Each limit is refused at apply, at the rule's own pointer, with a fix:
 - **One hop per term.** `customer_id.region_id.name` is not a term. Deeper reach composes through the related entity's
   own `list` rule, which the relation carries; a chain of such rules deeper than three is refused — *"… reads
   relations 4 levels deep; at most 3 are allowed."*
-- **Never under `!`.** A rule may only narrow as related rows become invisible, so `!customer_id.active` or
-  `!(project_id.archived == false)` is refused — *"A relation is negated here."* — while `customer_id.active == false`
+- **Only directly under `&&` and `||`.** A rule may only narrow as related rows become invisible, so a relation under
+  `!` or any other parent, a ternary included — `!customer_id.active`, `!(project_id.archived == false)` — is refused — *"A relation is negated here."* — while `customer_id.active == false`
   and `!=` inside a term are fine. To say *no blocking row exists*, count the rows with a [rollup](/guides/computed-and-rollups/) and compare
   the count.
 - **No cycles among `list` rules.** If `projects`' list rule reads `tasks` and `tasks`' reads `projects`, no caller's
