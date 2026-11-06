@@ -86,6 +86,36 @@ public sealed class ScheduleRegistrationTests
         (registration.Settings.Ordering, registration.Settings.RunAs).ShouldBe((AlvoOrdering.None, AlvoRunAs.System));
     }
 
+    [Fact]
+    public void The_catalog_lists_a_migration_with_its_revision()
+    {
+        var registry = Registry(alvo => alvo.AddDataMigration<BackfillNotes>("backfill-notes", afterRevision: 2));
+
+        var catalog = new ExtensionCatalog(registry, Options.Create(new AlvoExtensionOptions()));
+        var migration = catalog.Items.ShouldHaveSingleItem();
+
+        (migration.Kind, migration.Stage, migration.Event).ShouldBe((AlvoExtensionKind.DataMigration, AlvoExtensionStage.Scheduled, "alvo.migration.backfill_notes"));
+        (migration.AfterRevision, migration.Cron, migration.Timeout, migration.RunAs).ShouldBe(((int?)2, (string?)null, TimeSpan.FromMinutes(15), "system"));
+        ExtensionCatalog.WireName(AlvoExtensionKind.DataMigration).ShouldBe("dataMigration");
+        ((int)AlvoExtensionKind.DataMigration).ShouldBe(10, "7 and 8 are the read extensions', 9 the schedule's");
+    }
+
+    [Fact]
+    public void A_migration_fans_out_as_a_migration_delivery_with_no_ordering()
+    {
+        var registration = Registry(alvo => alvo.AddDataMigration<BackfillNotes>("backfill-notes", afterRevision: 1)).Handlers.ShouldHaveSingleItem();
+
+        registration.Job.ShouldNotBeNull().DeliveryKind.ShouldBe("migration");
+        registration.Job.AfterRevision.ShouldBe(1);
+        (registration.Settings.Ordering, registration.Settings.RunAs).ShouldBe((AlvoOrdering.None, AlvoRunAs.System));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void A_migration_waits_for_revision_one_or_later(int afterRevision) =>
+        Should.Throw<ArgumentOutOfRangeException>(() => Registry(alvo => alvo.AddDataMigration<BackfillNotes>("backfill-notes", afterRevision)));
+
     private static void EnsureRegistrable(Action<IAlvoBuilder> configure)
     {
         var services = new ServiceCollection();
@@ -95,6 +125,11 @@ public sealed class ScheduleRegistrationTests
     }
 
     private sealed class NightlyRoll : IAlvoScheduledJob
+    {
+        public Task RunAsync(AlvoJobContext context, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class BackfillNotes : IAlvoDataMigration
     {
         public Task RunAsync(AlvoJobContext context, CancellationToken cancellationToken) => Task.CompletedTask;
     }

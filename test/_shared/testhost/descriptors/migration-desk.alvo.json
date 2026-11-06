@@ -1,0 +1,24 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "migration-desk",
+  "description": "The data-migration facts' desk: one shared entity, so revision 1 has no tenant; a later revision adds a field or a scoped entity.",
+  "tenancy": { "enabled": true },
+  "auth": { "roles": ["ops", "watch"] },
+  "access": {
+    "developer": "'ops' in @user.roles",
+    "viewer": "'watch' in @user.roles"
+  },
+  "entities": {
+    "desks": {
+      "tenancy": "global",
+      "fields": {
+        "label": { "type": "text" }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true"
+      }
+    }
+  }
+}

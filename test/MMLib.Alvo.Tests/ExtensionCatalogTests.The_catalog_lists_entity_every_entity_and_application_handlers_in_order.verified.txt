@@ -29,7 +29,8 @@
       "timeZone": null,
       "nextRunAt": null,
       "lastRunAt": null,
-      "lastOutcome": null
+      "lastOutcome": null,
+      "afterRevision": null
     },
     {
       "id": "ticket-resolved",
@@ -59,7 +60,8 @@
       "timeZone": null,
       "nextRunAt": null,
       "lastRunAt": null,
-      "lastOutcome": null
+      "lastOutcome": null,
+      "afterRevision": null
     },
     {
       "id": "orders-approved",
@@ -85,7 +87,8 @@
       "timeZone": null,
       "nextRunAt": null,
       "lastRunAt": null,
-      "lastOutcome": null
+      "lastOutcome": null,
+      "afterRevision": null
     }
   ],
   "timers": null

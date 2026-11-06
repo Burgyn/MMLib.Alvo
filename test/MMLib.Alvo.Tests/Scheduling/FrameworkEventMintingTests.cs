@@ -18,12 +18,13 @@ namespace MMLib.Alvo.Tests.Scheduling;
 public sealed class FrameworkEventMintingTests
 {
     private const string ScheduleRun = "alvo.schedule.nightly_roll";
+    private const string MigrationRun = "alvo.migration.backfill_notes";
     private static readonly DateTimeOffset _now = new(2026, 11, 6, 9, 0, 0, TimeSpan.Zero);
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>
-    /// A command's completion and a schedule's run are the runtime's callers; the timer-store contract suite is the one other,
+    /// A command's completion and a schedule's or data migration's run are the runtime's callers; the timer-store contract suite is the one other,
     /// building the envelopes a provider under test is handed — through the grant the Testing package holds, not a host's.
     /// </summary>
     [Fact]
@@ -43,6 +44,8 @@ public sealed class FrameworkEventMintingTests
 
         await Should.ThrowAsync<ArgumentException>(() => events.PublishAsync(ScheduleRun, "schedules/nightly-roll", null, AlvoContext.System(null), Ct));
         await Should.ThrowAsync<ArgumentException>(() => scheduler.ScheduleAsync("nightly", _now, ScheduleRun, null, cancellationToken: Ct));
+        await Should.ThrowAsync<ArgumentException>(() => events.PublishAsync(MigrationRun, "migrations/backfill-notes", null, AlvoContext.System(null), Ct));
+        await Should.ThrowAsync<ArgumentException>(() => scheduler.ScheduleAsync("backfill", _now, MigrationRun, null, cancellationToken: Ct));
 
         await outbox.DidNotReceiveWithAnyArgs().AppendAsync(default(AlvoCustomEvent)!, Ct);
         await timers.DidNotReceiveWithAnyArgs().UpsertAsync(default!, Ct);

@@ -112,4 +112,7 @@ public sealed record ManagementExtension
     /// <c>dead</c>; null for any other kind, or before its first run.
     /// </summary>
     public string? LastOutcome { get; init; }
+
+    /// <summary>Gets the descriptor revision a data migration waits for before it runs; null for any other kind.</summary>
+    public int? AfterRevision { get; init; }
 }

@@ -1,12 +1,17 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 
 using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Rules;
+using MMLib.Alvo.Schema;
+
+using Kinds = MMLib.Alvo.Events.Internal.DeliveryKind;
 
 namespace MMLib.Alvo.Scheduling;
 
 /// <summary>
 /// The boot's checks of every schedule, all reported at once: a cron Cronos cannot read or that never fires, a zone this
-/// machine does not know, and a per-tenant schedule in a host with no <see cref="IAlvoTenantCatalog"/> to list the tenants.
+/// machine does not know, and a per-tenant schedule in a host with no <see cref="IAlvoTenantCatalog"/> to list the tenants — and,
+/// against the catalog the boot primes, a data migration on a scoped schema with no tenant list.
 /// </summary>
 internal static class ScheduleChecks
 {
@@ -14,6 +19,23 @@ internal static class ScheduleChecks
 
     internal static IEnumerable<ExtensionProblem> Check(ExtensionRegistry registry, IServiceProviderIsService services, DateTimeOffset now) =>
         registry.Handlers.Where(handler => handler.Job is { IsSchedule: true }).SelectMany(handler => Problems(handler, handler.Job!, services, now));
+
+    /// <summary>
+    /// The boot's own check of every data migration against the schema it primes: a scoped schema needs a tenant list. Not part
+    /// of the per-catalog binding, so an apply that first scopes the schema is not refused — its migration waits at run time.
+    /// </summary>
+    internal static IEnumerable<ExtensionProblem> CheckBoot(ExtensionRegistry registry, PolicyCatalog catalog, IServiceProviderIsService services) =>
+        IsScoped(catalog.Schema) && !services.IsService(typeof(IAlvoTenantCatalog))
+            ? registry.Handlers.Where(handler => handler.Job is { IsMigration: true }).Select(handler => new ExtensionProblem(
+                handler.Id,
+                Kinds.Migration,
+                $"extensions/{handler.Id}/tenants",
+                $"'{handler.Id}' runs once per tenant on this scoped schema, and this host registers no IAlvoTenantCatalog to list them.",
+                "Register an IAlvoTenantCatalog in DI."))
+            : [];
+
+    /// <summary>Whether <paramref name="schema"/> has an entity whose rows belong to a tenant.</summary>
+    internal static bool IsScoped(SchemaModel schema) => schema.Entities.Any(entity => entity.Tenancy == TenancyMode.Scoped);
 
     private static IEnumerable<ExtensionProblem> Problems(HandlerRegistration handler, JobSpec job, IServiceProviderIsService services, DateTimeOffset now)
     {

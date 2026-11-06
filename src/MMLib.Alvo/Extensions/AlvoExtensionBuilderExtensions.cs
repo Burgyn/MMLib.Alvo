@@ -188,6 +188,32 @@ public static class AlvoExtensionBuilderExtensions
     }
 
     /// <summary>
+    /// Runs a <typeparamref name="TMigration"/>, built per run, once: when the applied descriptor first reaches
+    /// <paramref name="afterRevision"/> or later — once per tenant the <see cref="IAlvoTenantCatalog"/> lists when the schema has
+    /// a scoped entity — as a delivery that is retried and recorded. Neither a restart, a rollback nor a re-apply runs it again.
+    /// </summary>
+    /// <typeparam name="TMigration">The migration class.</typeparam>
+    /// <param name="builder">The Alvo builder.</param>
+    /// <param name="id">A stable id: whether it has run is found by it after a restart.</param>
+    /// <param name="afterRevision">The applied descriptor revision it waits for; at least 1.</param>
+    /// <returns><paramref name="builder"/>, for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="afterRevision"/> is below 1.</exception>
+    public static IAlvoBuilder AddDataMigration<TMigration>(this IAlvoBuilder builder, string id, int afterRevision)
+        where TMigration : class, IAlvoDataMigration
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentOutOfRangeException.ThrowIfLessThan(afterRevision, 1);
+        var options = new AlvoScheduleOptions();
+        builder.Services.TryAddTransient<TMigration>();
+        ExtensionRegistrations.AddHandler(
+            builder.Services, id, new NamedEvent(ScheduleEvents.MigrationTypeFor(id)), when: null, handler => JobSettings(handler, options),
+            HandlerInvoker.ForJob<TMigration>(), typed: null, new JobSpec(DeliveryKind.Migration, null, null, AlvoScheduleScope.Global, afterRevision));
+
+        return builder;
+    }
+
+    /// <summary>
     /// Declares an id this host no longer registers, and what happens at start-up to the work it left behind; without it
     /// a host whose store holds such work refuses to start.
     /// </summary>
