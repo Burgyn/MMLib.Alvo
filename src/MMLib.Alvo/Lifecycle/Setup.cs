@@ -12,6 +12,7 @@ internal static class LifecycleSetup
     internal static IServiceCollection AddAlvoLifecycle(this IServiceCollection services)
     {
         services.TryAddSingleton<IEntityLifecycle, EntityLifecycleService>();
+        services.TryAddSingleton<TransitionSimulator>();
         return services;
     }
 }

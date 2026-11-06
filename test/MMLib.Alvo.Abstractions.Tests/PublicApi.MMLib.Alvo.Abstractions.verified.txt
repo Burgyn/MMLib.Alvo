@@ -1909,6 +1909,7 @@ namespace MMLib.Alvo.Management
         public System.Collections.Generic.IReadOnlyList<string> ReadOnlyFields { get; init; }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRelationVerdict> Relations { get; init; }
         public string? TenantScope { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementTransitionVerdict> Transitions { get; init; }
         public string? Using { get; init; }
         public string? WithCheck { get; init; }
     }
@@ -2020,6 +2021,16 @@ namespace MMLib.Alvo.Management
         public ManagementTimerCounts() { }
         public required int Due { get; init; }
         public required int Pending { get; init; }
+    }
+    public sealed class ManagementTransitionVerdict : System.IEquatable<MMLib.Alvo.Management.ManagementTransitionVerdict>
+    {
+        public ManagementTransitionVerdict() { }
+        public bool? Allowed { get; init; }
+        public required System.Collections.Generic.IReadOnlyList<string> From { get; init; }
+        public required string Name { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> Roles { get; init; }
+        public required string To { get; init; }
+        public string? When { get; init; }
     }
     public sealed class ManagementWarnedBlock : System.IEquatable<MMLib.Alvo.Management.ManagementWarnedBlock>
     {
