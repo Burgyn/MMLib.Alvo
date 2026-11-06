@@ -88,6 +88,36 @@ public sealed class CheckConstraintCheckTests
         error.Message.ShouldContain("hidden");
     }
 
+    /// <summary>
+    /// A rollup's <c>where</c> reads the child too, so a parent validation whose rollup filters on a hidden child field is a
+    /// hidden read — for a <c>count</c> as much as a <c>sum</c>: which rows are counted would disclose the hidden value (Ruling 61).
+    /// </summary>
+    /// <param name="op">The rollup's operation.</param>
+    [Theory]
+    [InlineData("count")]
+    [InlineData("sum")]
+    public void A_validation_reaching_a_hidden_child_field_through_a_rollup_filter_is_refused(string op)
+    {
+        var field = op == "count" ? string.Empty : ", \"field\": \"amount\"";
+        var error = ValidateBins(
+            """{}""",
+            """{"type": "integer"}""",
+            $$"""{"type": "integer", "rollup": {"from": "lines", "op": "{{op}}"{{field}}, "where": "flag == 'on'"}, "validation": "value <= 100"}""",
+            childExtraJson: """, "flag": {"type": "string", "hidden": true}""").ShouldHaveSingleItem();
+
+        error.Path.ShouldBe("/entities/bins/fields/reserved/validation");
+        error.Message.ShouldContain("'lines.flag'");
+    }
+
+    /// <summary>The counterweight: a filter over a visible child field adds a visible read, and the validation stays legal.</summary>
+    [Fact]
+    public void A_validation_through_a_rollup_filtering_on_a_visible_child_field_is_valid() =>
+        ValidateBins(
+            """{}""",
+            """{"type": "integer"}""",
+            """{"type": "integer", "rollup": {"from": "lines", "op": "sum", "field": "amount", "where": "flag == 'on'"}, "validation": "value <= 100"}""",
+            childExtraJson: """, "flag": {"type": "string"}""").ShouldBeEmpty();
+
     /// <summary>The counterweight: a rollup over a visible child field, validated against itself, is legal.</summary>
     [Fact]
     public void A_rollup_over_a_visible_child_field_validated_against_itself_is_valid() =>
@@ -112,14 +142,15 @@ public sealed class CheckConstraintCheckTests
         errors.ShouldContain(error => error.Message.Contains("cannot be written into a CHECK constraint"));
     }
 
-    private static IReadOnlyList<DescriptorValidationError> ValidateBins(string parentFieldsJson, string childFieldJson, string rollupJson)
+    private static IReadOnlyList<DescriptorValidationError> ValidateBins(
+        string parentFieldsJson, string childFieldJson, string rollupJson, string childExtraJson = "")
     {
         var parent = parentFieldsJson.Trim()[..^1];
         var parentFields = parent.Length > 1 ? $"{parent}, \"reserved\": {rollupJson}}}" : $"{{\"reserved\": {rollupJson}}}";
         const string Rules = """{"list": "true", "get": "true", "create": "true", "update": "true", "delete": "true"}""";
         var json = "{\"$schema\": \"https://alvo.dev/schema/v1/project.json\", \"apiVersion\": \"alvo.dev/v1\", \"name\": \"checks\", \"entities\": {"
             + $"\"bins\": {{\"fields\": {parentFields}, \"rules\": {Rules}}}, "
-            + $"\"lines\": {{\"fields\": {{\"bin_id\": {{\"type\": \"ref\", \"entity\": \"bins\", \"required\": true}}, \"amount\": {childFieldJson}}}, \"rules\": {Rules}}}}}}}";
+            + $"\"lines\": {{\"fields\": {{\"bin_id\": {{\"type\": \"ref\", \"entity\": \"bins\", \"required\": true}}, \"amount\": {childFieldJson}{childExtraJson}}}, \"rules\": {Rules}}}}}}}";
         return [.. new DescriptorValidator().Validate(json).Errors.Where(error => error.Severity == DescriptorValidationSeverity.Error)];
     }
 

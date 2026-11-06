@@ -102,33 +102,6 @@ internal static class UnhonouredFeatures
     ];
 
     /// <summary>
-    /// A <c>rollup</c>'s optional <c>where</c> filter: the one part of the frozen rollup shape #21 does not
-    /// honour.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>An <see cref="UnhonouredSlot"/> rather than a table entry, for the reason that shape exists.</b> The
-    /// two-pass tie does not apply: the raw-JSON validator pass would have to walk into the <c>rollup</c> object
-    /// it does not parse to find the key, while the typed pass already holds the parsed declaration and the
-    /// field it belongs to. So the detection lives in <c>RollupResolver</c> and only the wording lives here.
-    /// </para>
-    /// <para>
-    /// Refused rather than ignored because ignoring it is the silent case: the aggregate is still maintained,
-    /// still transactionally consistent, and computed over <em>every</em> child record rather than the declared
-    /// subset. The parent's column then holds a number that is larger than the author asked for, by an amount
-    /// only the data knows — indistinguishable from a bug in whatever reads it.
-    /// </para>
-    /// </remarks>
-    internal static UnhonouredSlot RollupWhere { get; } = new(
-        "rollup.where",
-        "A rollup's 'where' filter is not evaluated yet: the aggregate is still maintained, but it aggregates "
-        + "every record of the child entity instead of the subset this filter declares — a stored number that "
-        + "is silently wrong rather than absent.",
-        "Remove 'where' and aggregate every child record, or move the distinction into the model: a separate "
-        + "child entity, or a second rollup once filtered rollups land. A partial implementation is "
-        + "deliberately not offered — an aggregate over the wrong row set costs more than this refusal.");
-
-    /// <summary>
     /// A wildcard subscription — <c>entity.orders.*</c> — in either slot the frozen schema types as
     /// <c>$defs/eventPattern</c>.
     /// </summary>
@@ -248,7 +221,7 @@ internal static class UnhonouredFeatures
     /// </para>
     /// <para>
     /// <b>The <see cref="UnhonouredSlot"/> half is discovered by reflection, and that is the whole point of
-    /// the shape.</b> An enumeration that named <c>RollupWhere</c>, <c>RawJsonata</c> and the rest by hand
+    /// the shape.</b> An enumeration that named <c>RawJsonata</c> and the rest by hand
     /// would be precisely the hand-copied list this file's own opening remark exists to forbid — and it would
     /// fail in the worse direction: a new slot omitted from it does not break a build, it silently narrows
     /// the assertion above back toward what deviation 76 complained about. Reflection over this type's own

@@ -95,6 +95,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         IPredicateRenderer predicates,
         IFieldSqlRenderer fields,
         IAlvoSqlDialect dialect,
+        ICelCompiler compiler,
         AlvoDataContextFactory contexts,
         TimeProvider time,
         AlvoOptions options,
@@ -119,7 +120,8 @@ internal sealed partial class EfAlvoData : IAlvoData
         _hooks = hooks;
         _statements = new ReadStatementComposer(predicates, fields, dialect);
         _dialect = dialect;
-        _rollups = new RollupRecompute(dialect, fields);
+        ArgumentNullException.ThrowIfNull(compiler);
+        _rollups = new RollupRecompute(dialect, fields, compiler, predicates);
         _contexts = contexts;
         _time = time;
         _idempotencyTable = IdempotencyTable.NameFor(options.SchemaPrefix);

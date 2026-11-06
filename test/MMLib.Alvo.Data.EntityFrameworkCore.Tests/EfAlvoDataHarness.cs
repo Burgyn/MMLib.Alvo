@@ -101,6 +101,7 @@ internal sealed class EfAlvoDataHarness : IDisposable
         _services.GetRequiredService<IPredicateRenderer>(),
         new TestFieldSqlRenderer(),
         new TestSqlDialect(),
+        _services.GetRequiredService<ICelCompiler>(),
         new AlvoDataContextFactory(new FixedSchemaRegistry(applied), ConfigureProvider),
         TimeProvider.System,
         new AlvoOptions(),

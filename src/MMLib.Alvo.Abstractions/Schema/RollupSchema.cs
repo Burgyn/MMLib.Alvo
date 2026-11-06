@@ -15,10 +15,9 @@
 /// stored number aggregated over the wrong set of rows.
 /// </para>
 /// <para>
-/// It carries no <c>where</c>. The frozen schema declares one and this build refuses it
-/// (<c>UnhonouredFeatures</c>): a filter that is declared and then ignored aggregates <em>every</em> child
-/// instead of the declared subset, which is the same silent-wrong-value outcome the whole feature was refused
-/// for before #21.
+/// <b><see cref="Where"/> is carried as the author wrote it</b>, a CEL predicate over the child's own fields, and
+/// every driver that maintains the rollup must honour it: a filter that is declared and then ignored aggregates
+/// <em>every</em> child instead of the declared subset — a stored number that looks like data and is not.
 /// </para>
 /// </remarks>
 public sealed record RollupSchema
@@ -40,6 +39,12 @@ public sealed record RollupSchema
     /// below this type. See the type's own remarks for why it is required here and optional in the descriptor.
     /// </summary>
     public required string Via { get; init; }
+
+    /// <summary>
+    /// Gets a CEL predicate over the child's own fields; only the children it admits are aggregated.
+    /// <see langword="null"/> aggregates every child.
+    /// </summary>
+    public string? Where { get; init; }
 }
 
 /// <summary>The aggregate operation of a <see cref="RollupSchema"/> — the five the frozen schema allows.</summary>

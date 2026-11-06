@@ -55,7 +55,6 @@ internal sealed class RollupResolver(AlvoDescriptor descriptor)
 
         var child = ChildEntity(parent, fieldName, rollup);
         EnsureChildIsPhysical(parent, fieldName, rollup, child);
-        EnsureNoFilter(parent, fieldName, rollup);
         EnsureTenancyDoesNotCross(parent, declaring, fieldName, rollup, child);
         EnsureAggregatedFieldIsResolvable(parent, fieldName, rollup, child);
 
@@ -65,6 +64,7 @@ internal sealed class RollupResolver(AlvoDescriptor descriptor)
             Op = MapOperation(rollup.Op),
             Field = rollup.Op == RollupOp.Count ? null : rollup.Field,
             Via = ResolveVia(parent, fieldName, rollup, child),
+            Where = rollup.Where,
         };
     }
 
@@ -90,27 +90,6 @@ internal sealed class RollupResolver(AlvoDescriptor descriptor)
                 + "for arithmetic over this row, or 'rollup' for an aggregate over related records — and to "
                 + "combine them, put the rollup on its own field and reference it from a second, computed "
                 + "one, which is what the schema's own 'gross_total = net_total + vat_total' example does.");
-        }
-    }
-
-    /// <summary>
-    /// A <c>rollup.where</c> is refused rather than ignored, because ignoring it aggregates <b>every</b> child
-    /// record instead of the declared subset — a stored number that looks like data and is not, which is the
-    /// same failure mode the whole feature was refused for.
-    /// </summary>
-    /// <remarks>
-    /// Refused here rather than tabulated in <see cref="UnhonouredFeatures"/> for the reason
-    /// <see cref="UnhonouredSlot"/> exists: the raw-JSON validator pass cannot ask "is this a rollup whose
-    /// filter I would drop" without walking the rollup object it does not parse, while this pass already holds
-    /// the parsed declaration and its exact location. The <em>wording</em> still lives in one place.
-    /// </remarks>
-    private static void EnsureNoFilter(string parent, string fieldName, Rollup rollup)
-    {
-        if (rollup.Where is not null)
-        {
-            throw new InvalidDataException(
-                $"Field '{parent}.{fieldName}' declares a 'rollup.where' filter. {UnhonouredFeatures.RollupWhere.Consequence} "
-                + UnhonouredFeatures.RollupWhere.Fix);
         }
     }
 

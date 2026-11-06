@@ -165,18 +165,15 @@ public class RollupLadderTests
     }
 
     /// <summary>
-    /// A <c>where</c> is refused rather than ignored: an ignored filter still maintains the aggregate, over
-    /// every child record instead of the declared subset, so the parent holds a number that is wrong by an
-    /// amount only the data knows.
+    /// A <c>where</c> is carried into the applied schema as written, for the driver to honour (HX-11 Ruling 31) — never
+    /// dropped, which would maintain the aggregate over every child record instead of the declared subset.
     /// </summary>
     [Fact]
-    public void A_rollup_where_filter_is_refused_rather_than_ignored()
+    public void A_rollup_where_filter_is_carried_into_the_applied_schema()
     {
-        var refused = Should.Throw<InvalidDataException>(() => Map(Invoicing(
-            netTotal: Rolled(Sum("invoice_items", "line_total", where: "status == 'open'")))));
+        var model = Map(Invoicing(netTotal: Rolled(Sum("invoice_items", "line_total", where: "status == 'open'"))));
 
-        refused.Message.ShouldContain("aggregates every record");
-        refused.Message.ShouldContain("'where'");
+        Rollup(model, "invoices", "net_total").Where.ShouldBe("status == 'open'");
     }
 
     /// <summary>

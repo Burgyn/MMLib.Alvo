@@ -2226,6 +2226,7 @@ namespace MMLib.Alvo.Schema
         public required string From { get; init; }
         public required MMLib.Alvo.Schema.RollupOperation Op { get; init; }
         public required string Via { get; init; }
+        public string? Where { get; init; }
     }
     public sealed class SchemaModel : System.IEquatable<MMLib.Alvo.Schema.SchemaModel>
     {

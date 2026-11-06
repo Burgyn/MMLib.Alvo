@@ -119,6 +119,7 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<IPredicateRenderer>(),
         services.GetRequiredService<IFieldSqlRenderer>(),
         services.GetRequiredService<IAlvoSqlDialect>(),
+        services.GetRequiredService<ICelCompiler>(),
         services.GetRequiredService<AlvoDataContextFactory>(),
         services.GetRequiredService<TimeProvider>(),
         services.GetRequiredService<IOptions<AlvoOptions>>().Value,

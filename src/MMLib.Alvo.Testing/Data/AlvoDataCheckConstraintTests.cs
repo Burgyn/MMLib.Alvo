@@ -395,6 +395,22 @@ public abstract class AlvoDataCheckConstraintTests
     }
 
     /// <summary>
+    /// The counterweight: a child the rollup's filter does not admit never moves the parent, so it cannot push the parent
+    /// past its validation — the recompute that carries the CHECK carries the filter too (Ruling 31).
+    /// </summary>
+    [Fact]
+    public async Task A_child_the_rollup_filter_excludes_never_pushes_the_parent_past_its_validation()
+    {
+        var data = await CreateAsync(ReservedSchema, ReservedDescriptor);
+        var product = (Guid)(await data.CreateAsync("products", Row(1), Caller, cancellationToken: Ct))["id"]!;
+        await data.CreateAsync("reservations", Reservation(product, 1), Caller, cancellationToken: Ct);
+
+        await data.CreateAsync("reservations", Reservation(product, 5, "released"), Caller, cancellationToken: Ct);
+
+        (await data.QueryAsync(new AlvoQuery { Entity = "reservations" }, Caller, Ct)).Items.Count.ShouldBe(2);
+    }
+
+    /// <summary>
     /// Adding a validation to a table whose rows break it is refused when it is planned, at the validation, with the
     /// number of breaking rows (acceptance 2) — and nothing is applied.
     /// </summary>
@@ -608,12 +624,12 @@ public abstract class AlvoDataCheckConstraintTests
         },
     };
 
-    private static Dictionary<string, object?> Reservation(Guid product, long quantity) =>
-        new(StringComparer.Ordinal) { ["product_id"] = product, ["quantity"] = quantity };
+    private static Dictionary<string, object?> Reservation(Guid product, long quantity, string status = "held") =>
+        new(StringComparer.Ordinal) { ["product_id"] = product, ["quantity"] = quantity, ["status"] = status };
 
     /// <summary>
-    /// <see cref="Descriptor"/> plus reservations, whose quantities products.reserved sums under the validation
-    /// "value &lt;= stock".
+    /// <see cref="Descriptor"/> plus reservations, whose held quantities products.reserved sums (where "status == 'held'")
+    /// under the validation "value &lt;= stock".
     /// </summary>
     private static AlvoDescriptor ReservedDescriptor => Descriptor with
     {
@@ -626,7 +642,7 @@ public abstract class AlvoDataCheckConstraintTests
                     ["reserved"] = new()
                     {
                         Type = DescField.Integer,
-                        Rollup = new Rollup { From = "reservations", Op = RollupOp.Sum, Field = "quantity" },
+                        Rollup = new Rollup { From = "reservations", Op = RollupOp.Sum, Field = "quantity", Where = "status == 'held'" },
                         Validation = "value <= stock",
                     },
                 },
@@ -638,6 +654,7 @@ public abstract class AlvoDataCheckConstraintTests
                 {
                     ["product_id"] = new() { Type = DescField.Ref, Entity = "products", Required = true },
                     ["quantity"] = new() { Type = DescField.Integer, Required = true },
+                    ["status"] = new() { Type = DescField.Enum, Values = ["held", "released"], Required = true },
                 },
                 Rules = new AccessRules { List = "true", Get = "true", Create = "true", Update = "true", Delete = "true" },
             },
@@ -654,7 +671,10 @@ public abstract class AlvoDataCheckConstraintTests
                 new FieldSchema
                 {
                     Name = "reserved", Type = SchemaField.Integer, Nullable = true, CheckExpression = "reserved <= stock",
-                    Rollup = new RollupSchema { From = "reservations", Op = RollupOperation.Sum, Field = "quantity", Via = "product_id" },
+                    Rollup = new RollupSchema
+                    {
+                        From = "reservations", Op = RollupOperation.Sum, Field = "quantity", Via = "product_id", Where = "status == 'held'",
+                    },
                 },
             ],
         },
@@ -671,6 +691,7 @@ public abstract class AlvoDataCheckConstraintTests
                     Reference = new RefSchema("products", MMLib.Alvo.Schema.OnDelete.Cascade),
                 },
                 new FieldSchema { Name = "quantity", Type = SchemaField.Integer, Required = true },
+                new FieldSchema { Name = "status", Type = SchemaField.Enum, EnumValues = ["held", "released"], Required = true },
             ],
         },
     ]);

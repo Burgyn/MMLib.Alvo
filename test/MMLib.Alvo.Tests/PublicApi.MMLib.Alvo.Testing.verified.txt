@@ -194,6 +194,7 @@ namespace MMLib.Alvo.Testing.Data
         protected static MMLib.Alvo.Descriptor.AlvoDescriptor Descriptor { get; }
         protected static MMLib.Alvo.Schema.SchemaModel Schema { get; }
         public System.Threading.Tasks.Task A_before_hook_value_that_breaks_a_validation_is_refused_at_the_field() { }
+        public System.Threading.Tasks.Task A_child_the_rollup_filter_excludes_never_pushes_the_parent_past_its_validation() { }
         public System.Threading.Tasks.Task A_count_the_database_cannot_run_is_refused_at_the_validation_and_applies_nothing() { }
         public System.Threading.Tasks.Task A_duration_validation_holds_in_the_engine() { }
         public System.Threading.Tasks.Task A_field_hidden_from_other_roles_is_never_named_even_to_a_caller_who_reads_it() { }
@@ -285,9 +286,12 @@ namespace MMLib.Alvo.Testing.Data
     public abstract class AlvoDataComputedRollupTests
     {
         protected AlvoDataComputedRollupTests() { }
+        public System.Threading.Tasks.Task A_child_moving_across_the_filter_moves_the_aggregate_both_ways() { }
         public System.Threading.Tasks.Task A_child_write_in_one_tenant_never_moves_another_tenants_rollup() { }
         public System.Threading.Tasks.Task A_computed_field_can_be_added_to_an_entity_that_already_holds_a_row() { }
         public System.Threading.Tasks.Task A_computed_field_is_the_expression_over_the_row_the_write_stored() { }
+        public System.Threading.Tasks.Task A_filter_whose_constant_holds_braces_aggregates_exactly_the_matching_children() { }
+        public System.Threading.Tasks.Task A_filtered_rollup_counts_only_the_children_its_filter_admits() { }
         public System.Threading.Tasks.Task A_new_computed_field_can_be_added_to_a_parent_that_already_holds_rows() { }
         public System.Threading.Tasks.Task A_payload_naming_a_computed_field_is_refused_rather_than_ignored() { }
         public System.Threading.Tasks.Task A_rollup_over_no_children_is_the_operations_own_empty_answer() { }
