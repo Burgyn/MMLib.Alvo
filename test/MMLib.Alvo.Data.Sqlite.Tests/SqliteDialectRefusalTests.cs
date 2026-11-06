@@ -66,6 +66,35 @@ public class SqliteDialectRefusalTests
     }
 
     /// <summary>
+    /// An abort raised by one of an exclusion's own triggers decodes as <see cref="AlvoConstraintKind.Exclusion"/>, carrying the
+    /// name after the framework's tag (HX-12 D2).
+    /// </summary>
+    [Fact]
+    public void A_trigger_abort_tagged_as_an_exclusion_decodes_its_name()
+    {
+        var refused = RefusedWrite(
+            "CREATE TABLE b (x INTEGER); CREATE TRIGGER t AFTER INSERT ON b BEGIN SELECT RAISE(ABORT, 'alvo_exclusion:xc_b_0123abcd'); END;",
+            "SELECT 1;",
+            "INSERT INTO b VALUES (1);");
+
+        var decoded = _dialect.DecodeConstraintViolation(refused).ShouldNotBeNull(refused.Message);
+
+        (decoded.Kind, decoded.ConstraintName).ShouldBe((AlvoConstraintKind.Exclusion, "xc_b_0123abcd"));
+    }
+
+    /// <summary>Any other trigger's abort is not a constraint a caller can act on, so it is not decoded.</summary>
+    [Fact]
+    public void An_untagged_trigger_abort_is_not_a_constraint_violation()
+    {
+        var refused = RefusedWrite(
+            "CREATE TABLE b (x INTEGER); CREATE TRIGGER t AFTER INSERT ON b BEGIN SELECT RAISE(ABORT, 'nope'); END;",
+            "SELECT 1;",
+            "INSERT INTO b VALUES (1);");
+
+        _dialect.DecodeConstraintViolation(refused).ShouldBeNull(refused.Message);
+    }
+
+    /// <summary>
     /// A unique violation names the columns the index covers, with the table qualifier stripped: the shared
     /// path already knows which entity it is writing and resolves the names against it.
     /// </summary>

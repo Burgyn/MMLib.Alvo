@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`sequence` on a field** (HX-12): a gapless number per tenant, optionally per another field's value and per UTC
   year/month/day, stored as an integer or formatted text (`SO-{yyyy}-{n:4}`); the T-SQL double and any dialect without
   `SequenceAllocationStatement` refuse it at apply.
+- **`indexes[].where` and `indexes[].exclude`** (HX-12): `indexes[].where` (partial indexes; a partial `unique` allows
+  duplicates outside it) and `indexes[].exclude` (no overlapping `[from, to)` ranges among rows with equal `fields`; 409
+  `exclusion` at the range's pointer; PostgreSQL installs or requires `btree_gist`); `AlvoConstraintKind.Exclusion`.
+  Adding an exclusion over overlapping rows is refused at apply — and in a dry run — with their count; a dialect that
+  cannot enforce one refuses `exclude` at apply. A `where` cannot compare with a `timestamp('…')` constant yet.
 - **Integrity in the descriptor** (HX-11). A field's `validation` is now enforced as a database `CHECK` constraint on
   SQLite and PostgreSQL, for every write — Alvo's, a hook's, and one that bypasses Alvo. A write that breaks one answers
   422 `validation` with violation code `check` and a pointer at the field (at the child field the caller sent when a
