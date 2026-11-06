@@ -1197,6 +1197,13 @@ namespace MMLib.Alvo.Events
         public string? Subscriber { get; init; }
         public System.Guid? ToEventId { get; init; }
     }
+    public sealed class DeliveryLimit : System.IEquatable<MMLib.Alvo.Events.DeliveryLimit>
+    {
+        public DeliveryLimit() { }
+        public required string Key { get; init; }
+        public required int Limit { get; init; }
+        public required string Subscriber { get; init; }
+    }
     public sealed class DeliveryOperationEntry : System.IEquatable<MMLib.Alvo.Events.DeliveryOperationEntry>
     {
         public DeliveryOperationEntry() { }
@@ -1230,6 +1237,15 @@ namespace MMLib.Alvo.Events
         public required int Count { get; init; }
         public required System.Collections.Generic.IReadOnlyList<System.Guid> Sample { get; init; }
     }
+    public sealed class DeliveryStep : System.IEquatable<MMLib.Alvo.Events.DeliveryStep>
+    {
+        public DeliveryStep() { }
+        public required System.DateTimeOffset CompletedAt { get; init; }
+        public required System.Guid EventId { get; init; }
+        public required string Name { get; init; }
+        public required string Result { get; init; }
+        public required string Subscriber { get; init; }
+    }
     public interface IAlvoEvents
     {
         System.Threading.Tasks.Task PublishAsync(string type, string subject, System.Collections.Generic.IReadOnlyDictionary<string, object?>? data, MMLib.Alvo.AlvoContext context, System.Threading.CancellationToken cancellationToken = default);
@@ -1250,11 +1266,14 @@ namespace MMLib.Alvo.Events
         System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliveryOperationEntry?> FindOperationAsync(string scope, string key, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.StoredDelivery>> ListAsync(MMLib.Alvo.Events.DeliveryFilter filter, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> PendingSubscribersAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliveryStep> RecordStepAsync(MMLib.Alvo.Events.DeliveryStep completed, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> RedeliverAsync(System.Guid id, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliveryOperationEntry?> ReplayAsync(MMLib.Alvo.Events.DeliveryFilter filter, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliverySelection> SelectAsync(MMLib.Alvo.Events.DeliveryFilter filter, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> SetDisabledAsync(string subscriber, bool disabled, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> SetPausedAsync(string subscriber, bool paused, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<bool> SleepAsync(MMLib.Alvo.Events.DeliveryAttempt attempt, System.DateTimeOffset wakeAt, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.DeliveryStep>> StepsAsync(System.Guid eventId, string subscriber, System.Threading.CancellationToken cancellationToken = default);
     }
     public interface IEmailSender
     {

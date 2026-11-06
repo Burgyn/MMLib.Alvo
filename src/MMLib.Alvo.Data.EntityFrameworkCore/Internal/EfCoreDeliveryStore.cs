@@ -53,6 +53,7 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
     private readonly string _outbox;
     private readonly string _controls;
     private readonly string _log;
+    private readonly string _steps;
 
     internal EfCoreDeliveryStore(RelationalConnectionFactory connections, IAlvoSqlDialect dialect, AlvoOptions options, TimeProvider time)
     {
@@ -69,6 +70,7 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
         _outbox = OutboxTable.NameFor(options.SchemaPrefix);
         _controls = DeliveryOperationsTable.ControlsNameFor(options.SchemaPrefix);
         _log = DeliveryOperationsTable.LogNameFor(options.SchemaPrefix);
+        _steps = StepTable.NameFor(options.SchemaPrefix);
     }
 
     public async Task EnsureAsync(CancellationToken cancellationToken = default)
@@ -80,7 +82,7 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
             using (await _connections.WriteGate.EnterAsync(cancellationToken).ConfigureAwait(false))
             {
                 await OutboxTable.EnsureAsync(connection, _outbox, cancellationToken).ConfigureAwait(false);
-                await DeliveryTable.EnsureAsync(connection, _table, _attempts, _outbox, cancellationToken).ConfigureAwait(false);
+                await DeliveryTable.EnsureAsync(connection, _table, _attempts, _outbox, _steps, cancellationToken).ConfigureAwait(false);
                 await DeliveryOperationsTable.EnsureAsync(connection, _table, _controls, _log, cancellationToken).ConfigureAwait(false);
             }
         }

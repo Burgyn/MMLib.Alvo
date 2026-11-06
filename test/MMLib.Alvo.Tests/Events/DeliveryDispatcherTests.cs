@@ -875,6 +875,15 @@ public sealed class DeliveryDispatcherTests : IDisposable
 
         public Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default) =>
             inner.FindOperationAsync(scope, key, cancellationToken);
+
+        public Task<IReadOnlyList<DeliveryStep>> StepsAsync(Guid eventId, string subscriber, CancellationToken cancellationToken = default) =>
+            inner.StepsAsync(eventId, subscriber, cancellationToken);
+
+        public Task<DeliveryStep> RecordStepAsync(DeliveryStep completed, CancellationToken cancellationToken = default) =>
+            inner.RecordStepAsync(completed, cancellationToken);
+
+        public Task<bool> SleepAsync(DeliveryAttempt attempt, DateTimeOffset wakeAt, CancellationToken cancellationToken = default) =>
+            inner.SleepAsync(attempt, wakeAt, cancellationToken);
     }
 
     /// <summary>The in-memory store whose first claims fail the way a database under a deadlock or a restart refuses one.</summary>
@@ -940,5 +949,14 @@ public sealed class DeliveryDispatcherTests : IDisposable
 
         public Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default) =>
             inner.FindOperationAsync(scope, key, cancellationToken);
+
+        public Task<IReadOnlyList<DeliveryStep>> StepsAsync(Guid eventId, string subscriber, CancellationToken cancellationToken = default) =>
+            inner.StepsAsync(eventId, subscriber, cancellationToken);
+
+        public Task<DeliveryStep> RecordStepAsync(DeliveryStep completed, CancellationToken cancellationToken = default) =>
+            inner.RecordStepAsync(completed, cancellationToken);
+
+        public Task<bool> SleepAsync(DeliveryAttempt attempt, DateTimeOffset wakeAt, CancellationToken cancellationToken = default) =>
+            inner.SleepAsync(attempt, wakeAt, cancellationToken);
     }
 }

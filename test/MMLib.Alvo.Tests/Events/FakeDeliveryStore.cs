@@ -23,6 +23,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     private readonly List<DeliveryOperationEntry> _operations = [];
     private readonly Dictionary<string, SubscriberControl> _paused = new(StringComparer.Ordinal);
     private readonly HashSet<string> _disabled = new(StringComparer.Ordinal);
+    private readonly List<DeliveryStep> _steps = [];
 
     internal int FanOutFailures { get; set; }
 
@@ -343,6 +344,32 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
             return Task.FromResult<IReadOnlyList<string>>([.. _disabled.Order(StringComparer.Ordinal)]);
         }
     }
+
+    public Task<IReadOnlyList<DeliveryStep>> StepsAsync(Guid eventId, string subscriber, CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<DeliveryStep>>([.. _steps.Where(step => step.EventId == eventId && step.Subscriber == subscriber)]);
+        }
+    }
+
+    public Task<DeliveryStep> RecordStepAsync(DeliveryStep completed, CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            if (_steps.Find(step => step.EventId == completed.EventId && step.Subscriber == completed.Subscriber && step.Name == completed.Name) is { } stored)
+            {
+                return Task.FromResult(stored);
+            }
+
+            _steps.Add(completed);
+
+            return Task.FromResult(completed);
+        }
+    }
+
+    public Task<bool> SleepAsync(DeliveryAttempt attempt, DateTimeOffset wakeAt, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Task 3");
 
     /// <summary>Refuses a log row whose idempotency key comes without its scope, as the EF store does, before anything changes.</summary>
     private static void EnsureEntry(DeliveryOperationEntry entry)

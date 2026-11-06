@@ -741,6 +741,7 @@ namespace MMLib.Alvo.Testing.Events
         public System.Threading.Tasks.Task A_paused_extension_is_not_listed_as_switched_off() { }
         public System.Threading.Tasks.Task A_paused_subscriber_is_listed_with_who_when_and_why() { }
         public System.Threading.Tasks.Task A_paused_subscriber_is_not_claimed_and_its_lane_drains_in_order_after_resume() { }
+        public System.Threading.Tasks.Task A_recorded_step_is_read_back_with_its_result() { }
         public System.Threading.Tasks.Task A_redeliver_whose_log_row_is_refused_changes_nothing() { }
         public System.Threading.Tasks.Task A_redeliver_writes_one_log_row() { }
         public System.Threading.Tasks.Task A_redelivered_delivery_runs_again_with_a_fresh_budget_and_keeps_its_history() { }
@@ -755,6 +756,7 @@ namespace MMLib.Alvo.Testing.Events
         public System.Threading.Tasks.Task A_running_delivery_whose_lease_expired_is_claimed_again() { }
         public System.Threading.Tasks.Task A_second_fan_out_does_not_revive_a_dead_delivery() { }
         public System.Threading.Tasks.Task A_second_fan_out_of_one_event_records_nothing() { }
+        public System.Threading.Tasks.Task A_second_record_of_one_step_keeps_the_first_result() { }
         public System.Threading.Tasks.Task A_selection_asking_for_no_rows_is_refused() { }
         public System.Threading.Tasks.Task A_selection_counts_exactly_samples_in_event_order_and_changes_nothing() { }
         public System.Threading.Tasks.Task An_attempt_is_answered_for_once_and_only_by_its_claimant() { }
@@ -773,6 +775,8 @@ namespace MMLib.Alvo.Testing.Events
         public System.Threading.Tasks.Task Redelivering_an_unfinished_delivery_changes_nothing_and_logs_nothing() { }
         public System.Threading.Tasks.Task Redelivering_while_its_record_runs_another_delivery_changes_nothing() { }
         public System.Threading.Tasks.Task Retiring_ends_a_subscriber_s_unfinished_work() { }
+        public System.Threading.Tasks.Task Steps_are_kept_per_subscriber_of_one_event() { }
+        public System.Threading.Tasks.Task Steps_of_another_event_are_not_read() { }
         public System.Threading.Tasks.Task Storage_brought_up_again_holds_no_work_and_retiring_over_it_ends_nothing() { }
         public System.Threading.Tasks.Task Switching_an_extension_off_lists_it_and_logs_the_change_once() { }
         public System.Threading.Tasks.Task Switching_an_extension_on_again_removes_it_and_leaves_its_pause_alone() { }

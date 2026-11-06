@@ -343,4 +343,30 @@ public interface IDeliveryStore
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The row, or <see langword="null"/>.</returns>
     Task<DeliveryOperationEntry?> FindOperationAsync(string scope, string key, CancellationToken cancellationToken = default);
+
+    /// <summary>The completed steps of one subscriber's delivery of one event, in the order they completed.</summary>
+    /// <param name="eventId">The event the delivery is for.</param>
+    /// <param name="subscriber">The registration whose steps are read.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The steps; none when no step of that delivery completed.</returns>
+    Task<IReadOnlyList<DeliveryStep>> StepsAsync(Guid eventId, string subscriber, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records a completed step unless one of the same event, subscriber and name is already recorded — the first writer
+    /// wins — and returns the step as stored.
+    /// </summary>
+    /// <param name="completed">The step its work just completed.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The stored step: <paramref name="completed"/>, or the one recorded before it.</returns>
+    Task<DeliveryStep> RecordStepAsync(DeliveryStep completed, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Puts the attempt's delivery back to pending, due at <paramref name="wakeAt"/>, without spending the attempt, and
+    /// records the attempt as <c>skipped</c> — if the claimant still holds the delivery.
+    /// </summary>
+    /// <param name="attempt">The attempt that asked to sleep.</param>
+    /// <param name="wakeAt">When the delivery is due again.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>Whether the claim still held; <see langword="false"/> changed nothing.</returns>
+    Task<bool> SleepAsync(DeliveryAttempt attempt, DateTimeOffset wakeAt, CancellationToken cancellationToken = default);
 }
