@@ -33,6 +33,7 @@ internal sealed class SqlCapture : IObserver<DiagnosticListener>, IDisposable
     private const string CommandExecutingEventName = "Microsoft.EntityFrameworkCore.Database.Command.CommandExecuting";
 
     private readonly List<string> _statements = [];
+    private readonly List<bool> _transacted = [];
     private readonly List<IDisposable> _subscriptions = [];
     private readonly Lock _gate = new();
     private readonly string _marker;
@@ -61,6 +62,21 @@ internal sealed class SqlCapture : IObserver<DiagnosticListener>, IDisposable
         }
     }
 
+    /// <summary>
+    /// Every statement with whether it ran inside a transaction — EF hands the command the context's current transaction,
+    /// so a statement outside one carries none.
+    /// </summary>
+    internal IReadOnlyList<(string Statement, bool InTransaction)> Commands
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _statements.Zip(_transacted)];
+            }
+        }
+    }
+
     internal string LastStatement
     {
         get
@@ -77,6 +93,7 @@ internal sealed class SqlCapture : IObserver<DiagnosticListener>, IDisposable
         lock (_gate)
         {
             _statements.Clear();
+            _transacted.Clear();
         }
     }
 
@@ -144,6 +161,7 @@ internal sealed class SqlCapture : IObserver<DiagnosticListener>, IDisposable
         lock (_gate)
         {
             _statements.Add(command.Command.CommandText.Trim());
+            _transacted.Add(command.Command.Transaction is not null);
         }
     }
 

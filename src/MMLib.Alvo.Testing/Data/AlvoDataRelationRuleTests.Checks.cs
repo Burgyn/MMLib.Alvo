@@ -63,6 +63,42 @@ public abstract partial class AlvoDataRelationRuleTests
         refusal.Message.ShouldBe(RelationWorld.Unavailable);
     }
 
+    /// <summary>
+    /// A same-tenant product that satisfies the condition, but that the products list rule hides from this caller, fails the
+    /// check: the probe reads through the related list rule, not only its tenant scope. A buyer, whom the rule admits, passes.
+    /// </summary>
+    [Fact]
+    public async Task A_lookup_check_over_a_same_tenant_row_the_related_list_rule_hides_refuses()
+    {
+        var (data, world) = await RelationWorldAsync();
+        var restricted = await world.SeedProductAsync(world.Tenant1, active: true, stock: 5, restricted: true);
+
+        var refusal = await Should.ThrowAsync<AlvoConstraintViolationException>(() =>
+            data.CreateAsync(RelationWorld.OrderLines, world.Line(restricted, 1), world.A, cancellationToken: Ct));
+        var line = await data.CreateAsync(RelationWorld.OrderLines, world.Line(restricted, 1), world.Buyer, cancellationToken: Ct);
+
+        refusal.Message.ShouldBe(RelationWorld.Unavailable);
+        line["product_id"].ShouldBe(restricted);
+    }
+
+    /// <summary>
+    /// A keyed create replayed after its product was deactivated answers the recorded row: the replay writes nothing, so the
+    /// lookup check — like a foreign key — is not re-run over a related row that changed since.
+    /// </summary>
+    [Fact]
+    public async Task A_keyed_create_replayed_after_its_product_changed_answers_the_recorded_row()
+    {
+        var (data, world) = await RelationWorldAsync();
+        var product = await world.SeedProductAsync(world.Tenant1, active: true, stock: 5);
+        var key = new AlvoIdempotency($"line-{Guid.NewGuid():N}", "fingerprint");
+        var first = await data.CreateAsync(RelationWorld.OrderLines, world.Line(product, 1), world.A, key, Ct);
+        await world.UpdateAsSeederAsync(RelationWorld.Products, product, world.Tenant1, "active", false);
+
+        var replayed = await data.CreateAsync(RelationWorld.OrderLines, world.Line(product, 1), world.A, key, Ct);
+
+        replayed["id"].ShouldBe(first["id"]);
+    }
+
     /// <summary>A product deactivated after the line was written does not block an edit to a field the check never reads.</summary>
     [Fact]
     public async Task An_update_that_changes_no_field_a_check_reads_skips_it()

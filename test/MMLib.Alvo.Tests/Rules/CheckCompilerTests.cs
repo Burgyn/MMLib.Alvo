@@ -134,6 +134,14 @@ public sealed class CheckCompilerTests
     }
 
     [Fact]
+    public void An_outer_field_read_only_under_has_is_in_the_reads_set()
+    {
+        var check = CompiledCheck("has(memo) && product_id.active");
+
+        check.Reads.Order(StringComparer.Ordinal).ShouldBe(["memo", "product_id"]);
+    }
+
+    [Fact]
     public void A_check_whose_target_list_is_three_deep_is_refused_at_its_own_path()
     {
         var json = Project(
@@ -181,6 +189,7 @@ public sealed class CheckCompilerTests
     {
         var json = JsonNode.Parse(Shop("product_id", "product_id.active"))!.AsObject();
         json["entities"]!["order_lines"]!["rules"]!["update"] = "true";
+        json["entities"]!["products"]!["rules"]!["list"] = "owner_id == @user.id";
         var descriptor = AlvoDescriptor.Parse(json.ToJsonString());
         var provider = new PolicyCatalogProvider();
         provider.SetCurrent("checks", PolicyCatalog.Build(descriptor, DescriptorToSchemaMapper.Map(descriptor), CelFixtures.Compiler));
@@ -189,9 +198,15 @@ public sealed class CheckCompilerTests
         foreach (var operation in new[] { DataOperation.Create, DataOperation.Update })
         {
             var check = engine.Resolve("order_lines", operation, CelFixtures.Alice).Checks.ShouldHaveSingleItem();
-            check.Relation.Scope.ShouldNotBeNull().Denied.ShouldBeFalse();
+            var scope = check.Relation.Scope.ShouldNotBeNull();
+            scope.Denied.ShouldBeFalse();
+            scope.Using.ShouldNotBeNull().Source.ShouldBe("owner_id == @user.id", "the check reads through the products list rule");
             check.Message.ShouldBe(Available);
         }
+
+        var anonymous = new AlvoContext { User = default, Roles = new HashSet<Role> { Role.Anon } };
+        engine.Resolve("order_lines", DataOperation.Create, anonymous).Checks.ShouldHaveSingleItem()
+            .Relation.Scope.ShouldNotBeNull().Denied.ShouldBeTrue("a caller the products list rule cannot decide lists no product");
 
         engine.Resolve("order_lines", DataOperation.List, CelFixtures.Alice).Checks.ShouldBeEmpty();
         engine.Resolve("order_lines", DataOperation.Delete, CelFixtures.Alice).Checks.ShouldBeEmpty();
@@ -227,7 +242,7 @@ public sealed class CheckCompilerTests
         var suppliers = Entity([Field("active", "boolean")], ("list", "true"));
         var lines = Entity(
             [Ref("product_id", "products"), Ref("backup_id", "products"), Ref("supplier_id", "suppliers"), Ref("buyer_id", "users"),
-             Field("quantity", "integer"), Field("note", "string")],
+             Field("quantity", "integer"), Field("note", "string"), Field("memo", "string")],
             ("list", "true"), ("create", "true"));
         var notes = Entity([Ref("line_id", "order_lines"), Field("text", "string")], ("list", "true"));
         return Project(

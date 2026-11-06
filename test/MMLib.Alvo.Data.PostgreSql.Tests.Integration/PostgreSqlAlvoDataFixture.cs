@@ -246,6 +246,9 @@ public sealed class PostgreSqlAlvoDataHost
     /// <summary>Gets every statement EF has executed against this database since the last <see cref="ClearStatements"/>.</summary>
     internal IReadOnlyList<string> Statements => _capture.Statements;
 
+    /// <summary>Gets every statement since the last <see cref="ClearStatements"/>, with whether it ran inside a transaction.</summary>
+    internal IReadOnlyList<(string Statement, bool InTransaction)> Commands => _capture.Commands;
+
     /// <summary>Forgets every recorded statement, so a fact asserts on the ones its own act produced.</summary>
     internal void ClearStatements() => _capture.Clear();
 

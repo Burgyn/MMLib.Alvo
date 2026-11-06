@@ -69,6 +69,7 @@ public abstract partial class DataApiEngineTests
             ["tenant_id"] = _relationsTenant,
         });
         product.StatusCode.ShouldBe(HttpStatusCode.Created, await product.ReadTextAsync());
+        var events = await world.CountRowsAsync("alvo_outbox");
 
         using var line = await world.SendAsync(HttpMethod.Post, "/api/order_lines", _relationsAlice, body: new JsonObject
         {
@@ -86,6 +87,8 @@ public abstract partial class DataApiEngineTests
         violation["message"]!.GetValue<string>().ShouldBe("This product is not available in that quantity.");
         violation["fixSuggestion"]!.GetValue<string>().ShouldBe(
             "Point 'product_id' at a record that satisfies this check, or change the values the check compares.");
+        (await world.CountRowsAsync("order_lines")).ShouldBe(0);
+        (await world.CountRowsAsync("alvo_outbox")).ShouldBe(events, "a refused write emits no event");
     }
 
     private static async Task<Guid> CreateRelatedOrderAsync(AlvoApiWorld world, TestApiKey owner)

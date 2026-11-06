@@ -665,7 +665,6 @@ internal sealed partial class EfAlvoData : IAlvoData
         await EnsureOutboxTableAsync(db, cancellationToken);
 
         await using var transaction = await BeginAsync(db, FlowUnit, cancellationToken);
-        await EnsureRelationsHoldAsync(db, schema, decision, candidate, context, cancellationToken);
         var records = new IdempotencyScope(
             db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
 
@@ -707,12 +706,18 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// a <c>reject</c> refuse a retry of a create the caller has already been told succeeded. A hook belongs on
     /// the branch that writes a row, which is this one.
     /// </para>
+    /// <para>
+    /// <b>The deferred relation verdict and the lookup checks are judged here too, for the same reason:</b> a replay
+    /// writes nothing, so re-running a check over a related row that changed since would refuse a retry of a create that
+    /// already succeeded — and a related row changed later is, by design, not re-validated.
+    /// </para>
     /// </remarks>
     private async Task<AlvoRecord> RecordedCreateAsync(
         AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision,
         AlvoContext context, Dictionary<string, object> candidate, IdempotencyScope records, DateTimeOffset now,
         CancellationToken cancellationToken)
     {
+        await EnsureRelationsHoldAsync(db, schema, decision, candidate, context, cancellationToken);
         candidate = await RunBeforeCreateAsync(db, schema, decision, context, candidate, now, cancellationToken);
         candidate = await HostBeforeCreateAsync(db, schema, decision, context, candidate, AlvoWriteOperation.Create, now, cancellationToken);
         var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);

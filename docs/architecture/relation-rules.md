@@ -74,7 +74,9 @@ the tree and lets the interpreter judge the rest.
 
 ## Apply-time refusals
 
-All at the rule's or check's own pointer (`/entities/<e>/rules/<op>`, `/entities/<e>/checks/<i>/expr`).
+At the rule's or check's own pointer: `/entities/<e>/rules/<op>` and `/entities/<e>/checks/<i>/expr`; a problem
+with a check's lookup itself (not a ref, an unreadable target) at `/entities/<e>/checks/<i>/lookup`, and a check on a
+`storage: dynamic` entity at `/entities/<e>/checks/<i>`.
 
 - **Cycles.** A cycle among `list` rules — a self-loop included — has no caller whose rows can be decided, and is
   refused once, at its first entity. Other operations and checks only *consume* `list` rules, so a `get` reading
@@ -108,6 +110,12 @@ All at the rule's or check's own pointer (`/entities/<e>/rules/<op>`, `/entities
   added, so a host tells a lookup check from a column `CHECK` by its fields and message only.
 - **TOCTOU.** The probe takes no `FOR KEY SHARE`, so a concurrent change to the looked-up row after the probe is
   not seen, and a row changed later is not re-validated — as with an unlocked foreign-key read.
+- **A keyed create's replay** answers the recorded row without re-running its checks: the replay writes nothing,
+  and a related row changed since is, by the line above, not re-validated. The deferred verdict runs on the branch
+  that inserts only.
+- **A hidden related field answers one bit per request.** A check may read a related field the caller cannot read
+  (`quantity * product_id.cost <= 1000`), and its 422 then tells the caller whether that value passes. A rule over a
+  related field has the same property. The check's author chose the condition and owns what it discloses.
 
 ## Not done
 

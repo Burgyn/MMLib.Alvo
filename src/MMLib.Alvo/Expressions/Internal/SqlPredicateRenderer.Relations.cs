@@ -112,12 +112,10 @@ internal sealed partial class SqlPredicateRenderer
             : RenderBoolField(RenderOuterField(outer, scope), scope.Fields);
 
     /// <summary>
-    /// <c>has()</c> over the outer row. A post-image's presence is known before the statement exists, so it renders as a
-    /// constant predicate rather than a null parameter an engine could not type.
-    /// </summary>
-    /// <summary>
-    /// <c>has(outer)</c>: a column test in a read, a constant in a probe — present when the post-image holds a value, and a
-    /// JSON <c>null</c> counts as absent, as it does everywhere else an image value is read.
+    /// <c>has(outer)</c>: a column test in a read, a constant in a probe. A post-image's presence is known before the
+    /// statement exists, so it renders as a constant predicate rather than a null parameter an engine could not type —
+    /// present when the post-image holds a value, and a JSON <c>null</c> counts as absent, as it does everywhere else an
+    /// image value is read.
     /// </summary>
     private static PredicateFragment RenderOuterHas(CelOuterHas has, RenderScope scope) =>
         OuterRow(scope, has.Field) is RowSource.Image image

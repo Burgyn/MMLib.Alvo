@@ -24,6 +24,32 @@ public abstract class RelationEngineFacts
     /// <summary>Boots a host over <paramref name="schema"/> and <paramref name="descriptor"/> and answers its services.</summary>
     protected abstract Task<IServiceProvider> StartAsync(SchemaModel schema, AlvoDescriptor descriptor);
 
+    /// <summary>Every statement the last started host ran, with whether it ran inside a transaction.</summary>
+    protected abstract IReadOnlyList<(string Statement, bool InTransaction)> Commands { get; }
+
+    /// <summary>
+    /// A create's relation probe is a read; judged before the write's transaction opened, it would read outside it — on
+    /// SQLite outside the writer's turn, on PostgreSQL outside the savepoint — and widen the window between the probe and
+    /// the commit. Every probe of a plain, a keyed and a unit create runs with a transaction.
+    /// </summary>
+    [Fact]
+    public async Task A_create_s_relation_probe_runs_inside_the_write_s_transaction()
+    {
+        var services = await ServicesAsync(UnitsJson);
+        var data = services.GetRequiredService<IAlvoData>();
+        var customer = (await data.CreateAsync("customers", Row(("owner_id", _alice.User.Value)), _alice, cancellationToken: Ct))["id"];
+
+        await data.CreateAsync("orders", Row(("customer_id", customer)), _alice, cancellationToken: Ct);
+        await data.CreateAsync(
+            "orders", Row(("customer_id", customer)), _alice, new AlvoIdempotency($"order-{Guid.NewGuid():N}", "fingerprint"), Ct);
+        await services.GetRequiredService<IAlvoTransactions>().TransactAsync(
+            _alice, (unit, ct) => unit.CreateAsync("orders", Row(("customer_id", customer)), ct), cancellationToken: Ct);
+
+        var probes = Commands.Where(command => command.Statement.Contains("CASE WHEN EXISTS", StringComparison.Ordinal)).ToList();
+        probes.Count.ShouldBe(3, "one probe per create");
+        probes.ShouldAllBe(probe => probe.InTransaction);
+    }
+
     [Fact]
     public async Task A_create_inside_a_unit_probes_its_relation_over_the_unit_s_own_rows()
     {

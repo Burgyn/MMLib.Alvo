@@ -564,7 +564,9 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_failing_lookup_check_refuses_with_its_message_and_the_lookup_pointer() { }
         public System.Threading.Tasks.Task A_global_row_is_visible_through_the_caller_s_tenant_children_only() { }
         public System.Threading.Tasks.Task A_hidden_lookup_field_is_not_named_by_the_refusal() { }
+        public System.Threading.Tasks.Task A_keyed_create_replayed_after_its_product_changed_answers_the_recorded_row() { }
         public System.Threading.Tasks.Task A_lookup_check_over_a_row_the_caller_cannot_list_refuses() { }
+        public System.Threading.Tasks.Task A_lookup_check_over_a_same_tenant_row_the_related_list_rule_hides_refuses() { }
         public System.Threading.Tasks.Task A_null_lookup_skips_its_check() { }
         public System.Threading.Tasks.Task A_null_reference_never_satisfies_a_forward_relation() { }
         public System.Threading.Tasks.Task A_passing_lookup_check_lets_the_write_through() { }

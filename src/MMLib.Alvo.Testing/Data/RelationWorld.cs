@@ -11,13 +11,13 @@ namespace MMLib.Alvo.Testing.Data;
 /// and created through an owned one; <c>quotes</c> created under the customer's credit limit and start; <c>projects</c>
 /// listed by membership; <c>regions</c> (global) listed through a managed <c>site</c>; <c>employees</c> read through
 /// their manager's region; <c>order_lines</c> and <c>gift_lines</c> (whose lookup is hidden) checked against an active,
-/// stocked <c>products</c> row. Every create rule also admits the built-in <c>admin</c> role, which seeds rows in their own tenant.
+/// stocked <c>products</c> row, which only a <c>buyer</c> lists when it is <c>restricted</c>. Every create rule also admits the built-in <c>admin</c> role, which seeds rows in their own tenant.
 /// </summary>
 /// <param name="data">The port the world is seeded through.</param>
 internal sealed class RelationWorld(IAlvoData data)
 {
-    internal Task<Guid> SeedProductAsync(TenantId tenant, bool active, int stock) =>
-        SeedAsync(Products, tenant, ("active", active), ("stock", stock));
+    internal Task<Guid> SeedProductAsync(TenantId tenant, bool active, int stock, bool restricted = false) =>
+        SeedAsync(Products, tenant, ("active", active), ("stock", stock), ("restricted", restricted));
 
     internal Dictionary<string, object?> Line(Guid? product, int quantity, string note = "line") =>
         Row(("product_id", product), ("quantity", quantity), ("note", note), ("tenant_id", Tenant1.Value));
@@ -61,8 +61,12 @@ internal sealed class RelationWorld(IAlvoData data)
     /// <summary>Another caller in <see cref="Tenant1"/>.</summary>
     internal AlvoContext B => _b ??= Caller(Guid.NewGuid(), Tenant1);
 
+    /// <summary>A caller in <see cref="Tenant1"/> holding <c>buyer</c>, the role that lists a restricted product.</summary>
+    internal AlvoContext Buyer => _buyer ??= Caller(Guid.NewGuid(), Tenant1, RoleCatalog.Create(["buyer"]).Get("buyer"));
+
     private AlvoContext? _a;
     private AlvoContext? _b;
+    private AlvoContext? _buyer;
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -134,7 +138,7 @@ internal sealed class RelationWorld(IAlvoData data)
         Scoped(Boards, Text("name")),
         Scoped(Pins, Ref("board_id", Boards), Text("color"), Uuid("owner_id")),
         Scoped(Stickers, Ref("pin_id", Pins)),
-        Scoped(Products, Bool("active"), Int("stock")),
+        Scoped(Products, Bool("active"), Int("stock"), Bool("restricted")),
         Scoped(OrderLines, Ref("product_id", Products), Int("quantity"), Text("note")),
         Scoped(GiftLines, Ref("product_id", Products), Int("quantity")),
     ]);
@@ -143,7 +147,7 @@ internal sealed class RelationWorld(IAlvoData data)
         {
           "apiVersion": "alvo.dev/v1", "name": "relation-rules",
           "tenancy": { "enabled": true },
-          "auth": { "roles": ["manager"] },
+          "auth": { "roles": ["manager", "buyer"] },
           "entities": {
             "customers": { "tenancy": "scoped",
               "fields": { "owner_id": { "type": "uuid" }, "active": { "type": "boolean" }, "region": { "type": "string" },
@@ -193,8 +197,8 @@ internal sealed class RelationWorld(IAlvoData data)
               "fields": { "pin_id": { "type": "ref", "entity": "pins" } },
               "rules": { "list": "true", "create": "pin_id.color == 'red'" } },
             "products": { "tenancy": "scoped",
-              "fields": { "active": { "type": "boolean" }, "stock": { "type": "integer" } },
-              "rules": { "list": "'authenticated' in @user.roles", "get": "'authenticated' in @user.roles",
+              "fields": { "active": { "type": "boolean" }, "stock": { "type": "integer" }, "restricted": { "type": "boolean" } },
+              "rules": { "list": "restricted == false || 'buyer' in @user.roles", "get": "restricted == false || 'buyer' in @user.roles",
                          "create": "{{Seeding}}", "update": "{{Seeding}}" } },
             "order_lines": { "tenancy": "scoped",
               "fields": { "product_id": { "type": "ref", "entity": "products" }, "quantity": { "type": "integer" },
