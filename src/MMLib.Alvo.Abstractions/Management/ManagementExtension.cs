@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Management;
+﻿using System.Text.Json;
+
+namespace MMLib.Alvo.Management;
 
 /// <summary>
 /// One piece of host code registered with this instance, as metadata: what it is, what it binds to and when it runs.
@@ -125,4 +127,9 @@ public sealed record ManagementExtension
     /// a handler with no cap, or any other kind.
     /// </summary>
     public string? Concurrency { get; init; }
+
+    /// <summary>
+    /// Gets a function's input as a JSON Schema document, as its input type exports it; null for any other kind.
+    /// </summary>
+    public JsonElement? InputSchema { get; init; }
 }

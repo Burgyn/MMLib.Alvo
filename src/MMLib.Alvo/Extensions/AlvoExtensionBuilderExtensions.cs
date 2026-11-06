@@ -8,6 +8,8 @@ using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Functions;
+using MMLib.Alvo.Functions.Internal;
 using MMLib.Alvo.Scheduling;
 using System.Linq.Expressions;
 
@@ -214,6 +216,41 @@ public static class AlvoExtensionBuilderExtensions
     }
 
     /// <summary>
+    /// Registers a host function: <typeparamref name="TFunction"/>, built per run, called by a descriptor's <c>function</c>
+    /// action named <paramref name="name"/> after the triggering write commits, as a delivery that is retried and recorded. The
+    /// action's <c>input</c> is checked against the input type's JSON Schema when the descriptor is applied.
+    /// </summary>
+    /// <typeparam name="TFunction">A concrete class implementing <c>IAlvoFunction&lt;TInput&gt;</c> exactly once.</typeparam>
+    /// <param name="builder">The Alvo builder.</param>
+    /// <param name="name">
+    /// The name a <c>function</c> action calls it by, and its id: a lower-case letter, then up to 62 lower-case letters, digits,
+    /// hyphens and underscores — <c>issue-invoice</c>.
+    /// </param>
+    /// <returns><paramref name="builder"/>, for chaining.</returns>
+    /// <exception cref="ArgumentException">
+    /// <typeparamref name="TFunction"/> is no function, or <paramref name="name"/> is outside the name grammar.
+    /// </exception>
+    public static IAlvoBuilder AddFunction<TFunction>(this IAlvoBuilder builder, string name)
+        where TFunction : class
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(name);
+        if (!ExtensionIds.IsFunctionName(name))
+        {
+            throw new ArgumentException(
+                $"'{name}' is not a function name: use a lower-case letter, then up to 62 lower-case letters, digits, hyphens and underscores — 'issue-invoice'.",
+                nameof(name));
+        }
+
+        var input = FunctionInputOf<TFunction>();
+        var schema = FunctionInputSchema.For(input);
+        builder.Services.AddKeyedTransient<TFunction>(name);
+        ExtensionRegistrations.Add(builder.Services, sequence => new FunctionRegistration(name, sequence, typeof(TFunction), input, schema));
+
+        return builder;
+    }
+
+    /// <summary>
     /// Declares an id this host no longer registers, and what happens at start-up to the work it left behind; without it
     /// a host whose store holds such work refuses to start.
     /// </summary>
@@ -283,6 +320,28 @@ public static class AlvoExtensionBuilderExtensions
         ExtensionRegistrations.Add(builder.Services, sequence => new CommandRegistration(name, sequence, access, null, null, typeof(TCommand), input));
 
         return builder;
+    }
+
+    private static Type FunctionInputOf<TFunction>()
+        where TFunction : class
+    {
+        var function = typeof(TFunction);
+        if (function.IsAbstract)
+        {
+            throw new ArgumentException(
+                $"{function.Name} is abstract, so it cannot be created to run: register a concrete class that implements IAlvoFunction<TInput>.",
+                nameof(TFunction));
+        }
+
+        var implemented = function.GetInterfaces()
+            .Where(candidate => candidate.IsGenericType && candidate.GetGenericTypeDefinition() == typeof(IAlvoFunction<>))
+            .ToList();
+
+        return implemented is [var only]
+            ? only.GetGenericArguments()[0]
+            : throw new ArgumentException(
+                $"{function.Name} must implement IAlvoFunction<TInput> exactly once to be a function; it implements it {implemented.Count} times.",
+                nameof(TFunction));
     }
 
     private static Type InputOf<TCommand>()
