@@ -65,6 +65,22 @@ public abstract partial class TimerStoreContractTests
         (await world.OutboxTypesAsync()).ShouldHaveSingleItem();
     }
 
+    /// <summary>A re-arm while a claim is in flight drops that claim's lease: the timer is claimable at its new time at once.</summary>
+    [Fact]
+    public async Task A_timer_re_armed_during_a_claim_is_claimable_at_once_under_its_new_generation()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        await world.Store.UpsertAsync(Timer("t-1", world.Now), Ct);
+        var stale = (await world.Store.ClaimTimersAsync(10, _lease, Ct)).ShouldHaveSingleItem();
+
+        var generation = await world.Store.UpsertAsync(Timer("t-1", world.Now), Ct);
+
+        var fresh = (await world.Store.ClaimTimersAsync(10, _lease, Ct)).ShouldHaveSingleItem();
+        fresh.Generation.ShouldBe(generation);
+        fresh.Generation.ShouldNotBe(stale.Generation);
+    }
+
     /// <summary>A cancel while a claim is in flight leaves its fire nothing to delete and nothing to append.</summary>
     [Fact]
     public async Task A_cancel_during_a_claim_leaves_the_fire_nothing_to_append()

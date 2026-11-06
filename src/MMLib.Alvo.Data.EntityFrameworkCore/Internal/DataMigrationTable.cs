@@ -28,5 +28,5 @@ internal static class DataMigrationTable
 
     /// <summary>Reads every started migration's id, in ordinal order.</summary>
     /// <param name="table">The validated table name.</param>
-    internal static string StartedSql(string table) => $"SELECT id FROM {table} ORDER BY id";
+    internal static string StartedSql(string table) => $"SELECT id FROM {table}";
 }

@@ -92,7 +92,7 @@ public abstract partial class TimerStoreContractTests
         (await world.Store.SchedulesAsync(Ct)).ShouldHaveSingleItem().LastRunAt.ShouldBe(claimed.ScheduledFor);
     }
 
-    /// <summary>A re-sync with the same cron keeps the stored next run; a changed cron moves it.</summary>
+    /// <summary>A re-sync with the same cron keeps the stored next run; a changed cron, or a changed time zone, moves it.</summary>
     [Fact]
     public async Task Syncing_a_changed_cron_moves_the_next_run_and_an_unchanged_one_keeps_it()
     {
@@ -109,6 +109,31 @@ public abstract partial class TimerStoreContractTests
         var stored = (await world.Store.SchedulesAsync(Ct)).ShouldHaveSingleItem();
         stored.NextRunAt.ShouldBe(t3);
         stored.Cron.ShouldBe(ThreeAm);
+
+        var t4 = world.Now.AddHours(4);
+        await world.Store.SyncSchedulesAsync([Schedule(Nightly, t4) with { Cron = ThreeAm, TimeZone = "Europe/Bratislava" }], Ct);
+        (await world.Store.SchedulesAsync(Ct)).ShouldHaveSingleItem().NextRunAt.ShouldBe(t4);
+    }
+
+    /// <summary>
+    /// An occurrence leased across a sync that moved the schedule cannot be advanced: the stale claimant appends nothing and
+    /// leaves the sync's next run in place.
+    /// </summary>
+    [Fact]
+    public async Task An_advance_after_a_sync_moved_the_occurrence_changes_nothing()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        await world.Store.SyncSchedulesAsync([Schedule(Nightly, world.Now)], Ct);
+        var claimed = (await world.Store.ClaimSchedulesAsync("worker-1", _lease, Ct)).ShouldHaveSingleItem();
+
+        await world.Store.SyncSchedulesAsync([Schedule(Nightly, world.Now.AddHours(1)) with { Cron = ThreeAm }], Ct);
+
+        (await world.Store.AdvanceScheduleAsync(Advance("worker-1", claimed, world.Now.AddDays(1)), Ct)).ShouldBeFalse();
+        (await world.OutboxTypesAsync()).ShouldBeEmpty();
+        var stored = (await world.Store.SchedulesAsync(Ct)).ShouldHaveSingleItem();
+        stored.NextRunAt.ShouldBe(world.Now.AddHours(1));
+        stored.LastRunAt.ShouldBeNull();
     }
 
     /// <summary>A sync deletes every stored schedule it does not list; an empty sync empties the store.</summary>

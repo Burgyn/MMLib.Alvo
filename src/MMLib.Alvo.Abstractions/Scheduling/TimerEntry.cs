@@ -38,6 +38,10 @@ public sealed class TimerEntry
     public string MessageType { get; }
 
     /// <summary>Gets the message, as <see cref="AlvoEventJson"/> writes it; opaque to the store.</summary>
+    /// <remarks>
+    /// It is the arming caller's whole envelope, but only its data is meant to be read back: the fired event is rebuilt
+    /// around it, so the stored actor, claims, id and time mean nothing and are not to be shown as if they did.
+    /// </remarks>
     public string Payload { get; }
 
     /// <summary>Gets the provenance the fired event resumes from; opaque to the store.</summary>

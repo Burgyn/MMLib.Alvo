@@ -28,20 +28,20 @@ internal sealed class TimerStoreWorld : ITimerStoreWorld
     private readonly FakeTimeProvider _clock = new(_start);
     private readonly string _outbox = OutboxTable.NameFor(SchemaPrefix);
 
-    private TimerStoreWorld(Func<DbConnection> connect)
+    private TimerStoreWorld(Func<DbConnection> connect, IRelationalWriteGate? writeGate)
     {
         _connect = connect;
         Store = new EfCoreTimerStore(
-            new RelationalConnectionFactory(connect), new AlvoOptions { SchemaPrefix = SchemaPrefix }, _clock, NoData);
+            new RelationalConnectionFactory(connect, writeGate), new AlvoOptions { SchemaPrefix = SchemaPrefix }, _clock, NoData);
     }
 
     public ITimerStore Store { get; }
 
     public DateTimeOffset Now => _clock.GetUtcNow();
 
-    internal static async Task<TimerStoreWorld> StartAsync(Func<DbConnection> connect)
+    internal static async Task<TimerStoreWorld> StartAsync(Func<DbConnection> connect, IRelationalWriteGate? writeGate = null)
     {
-        var world = new TimerStoreWorld(connect);
+        var world = new TimerStoreWorld(connect, writeGate);
         await world.Store.EnsureAsync(Ct);
 
         return world;

@@ -18,7 +18,7 @@ internal sealed partial class EfCoreTimerStore
         return WriteAsync(
             async (connection, transaction, ct) =>
             {
-                foreach (var schedule in schedules)
+                foreach (var schedule in schedules.OrderBy(schedule => schedule.Id, StringComparer.Ordinal))
                 {
                     await ExecuteAsync(connection, transaction, ScheduleTable.SyncSql(_schedules), command => BindSchedule(command, schedule), ct)
                         .ConfigureAwait(false);

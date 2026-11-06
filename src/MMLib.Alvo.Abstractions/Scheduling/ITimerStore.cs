@@ -59,6 +59,11 @@ public interface ITimerStore
     /// Fires one claimed timer: deletes it only at <paramref name="generation"/> and appends <paramref name="customEvent"/> in the
     /// same transaction.
     /// </summary>
+    /// <remarks>
+    /// The event, its provenance included, is the caller's: Alvo's timer pump rebuilds it from
+    /// <see cref="ClaimedTimer.Provenance"/> and <see cref="ClaimedTimer.Payload"/>. The member grants no more than
+    /// <see cref="IOutboxStore.AppendAsync"/> already does — a custom event appended as given.
+    /// </remarks>
     /// <param name="scope">The claimed timer's scope.</param>
     /// <param name="key">The claimed timer's key.</param>
     /// <param name="generation">The generation the claim read.</param>

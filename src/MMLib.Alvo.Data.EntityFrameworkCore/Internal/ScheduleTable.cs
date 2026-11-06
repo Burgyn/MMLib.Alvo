@@ -76,5 +76,5 @@ internal static class ScheduleTable
     /// <summary>Reads every schedule, by id.</summary>
     /// <param name="table">The validated table name.</param>
     internal static string AllSql(string table) =>
-        $"SELECT id, cron, time_zone, next_run_at, last_run_at FROM {table} ORDER BY id";
+        $"SELECT id, cron, time_zone, next_run_at, last_run_at FROM {table}";
 }

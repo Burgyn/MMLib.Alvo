@@ -11,7 +11,7 @@ public sealed class SqliteTimerStoreTests : TimerStoreContractTests, IDisposable
     private readonly string _databasePath =
         Path.Combine(Path.GetTempPath(), $"alvo-timer-store-tests-{Guid.NewGuid():N}.db");
 
-    protected override async Task<ITimerStoreWorld> WorldAsync() => await TimerStoreWorld.StartAsync(Connect);
+    protected override async Task<ITimerStoreWorld> WorldAsync() => await TimerStoreWorld.StartAsync(Connect, SqliteWriteGates.For(ConnectionString));
 
     public void Dispose()
     {
@@ -26,5 +26,7 @@ public sealed class SqliteTimerStoreTests : TimerStoreContractTests, IDisposable
         GC.SuppressFinalize(this);
     }
 
-    private SqliteConnection Connect() => new($"Data Source={_databasePath};Pooling=False");
+    private string ConnectionString => $"Data Source={_databasePath};Pooling=False";
+
+    private SqliteConnection Connect() => new(ConnectionString);
 }
