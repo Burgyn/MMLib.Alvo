@@ -229,7 +229,7 @@ internal sealed class DeliveryRunner(
         {
             return invocation.IsCompleted
                 ? Ended(invocation)
-                : await TimedOutAsync(invocation, cancel, delivery, stopping).ConfigureAwait(false);
+                : await TimedOutAsync(invocation, cancel, delivery, handler.Registration.Job is not null, stopping).ConfigureAwait(false);
         }
         catch (Exception failure) when (!stopping.IsCancellationRequested)
         {
@@ -249,7 +249,7 @@ internal sealed class DeliveryRunner(
 
     /// <summary>Cancels a handler past its timeout, gives it <see cref="SettleGrace"/> to stop, and abandons it if it does not.</summary>
     private async Task<AttemptVerdict> TimedOutAsync(
-        Task invocation, CancellationTokenSource cancel, ClaimedDelivery delivery, CancellationToken stopping)
+        Task invocation, CancellationTokenSource cancel, ClaimedDelivery delivery, bool job, CancellationToken stopping)
     {
         await cancel.CancelAsync().ConfigureAwait(false);
         await SettleAsync(invocation, stopping).ConfigureAwait(false);
@@ -258,7 +258,7 @@ internal sealed class DeliveryRunner(
             return Settled(invocation);
         }
 
-        Abandon(invocation, delivery);
+        Abandon(invocation, delivery, job);
         return AttemptVerdict.Retry(DeliveryErrors.Timeout);
     }
 
@@ -286,10 +286,10 @@ internal sealed class DeliveryRunner(
     /// Counts an abandoned handler — and tracks it while it runs, so its handler stands down at the cap — and observes its
     /// later failure and logs its type, never its message, since nothing records it.
     /// </summary>
-    private void Abandon(Task invocation, ClaimedDelivery delivery)
+    private void Abandon(Task invocation, ClaimedDelivery delivery, bool job)
     {
         AlvoDeliveryMetrics.AbandonedRecorded(delivery.Subscriber);
-        abandoned.Track(delivery.Subscriber, invocation);
+        abandoned.Track(delivery.Subscriber, invocation, job);
         _ = invocation.ContinueWith(
             ended => DeliveryLog.AbandonedHandlerFailed(
                 logger, delivery.Id, delivery.Subscriber, delivery.Attempts, TypeOf(ended.Exception!.InnerException ?? ended.Exception)),

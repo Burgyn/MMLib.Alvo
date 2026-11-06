@@ -76,6 +76,8 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// <summary>The idempotency table's ensure outside any write, once per process — see <see cref="EnsureIdempotencyTableOutsideAsync"/>.</summary>
     private readonly OnceDdl _idempotencyDdl;
     private readonly string _outboxTable;
+    private readonly string _sequenceTable;
+    private readonly SequenceNumbers _sequences;
     private readonly string _commandTable;
 
     /// <summary>The causation-chain limit every write face enforces before it reads or writes a row.</summary>
@@ -134,6 +136,8 @@ internal sealed partial class EfAlvoData : IAlvoData
         _idempotencyTable = IdempotencyTable.NameFor(options.SchemaPrefix);
         _idempotencyDdl = new OnceDdl(EnsureIdempotencyTableOnOwnContextAsync);
         _outboxTable = OutboxTable.NameFor(options.SchemaPrefix);
+        _sequenceTable = SequenceTable.NameFor(options.SchemaPrefix);
+        _sequences = new SequenceNumbers(dialect, _sequenceTable);
         _commandTable = CommandLedgerTable.NameFor(options.SchemaPrefix);
         _operationsLog = DeliveryOperationsTable.LogNameFor(options.SchemaPrefix);
         _depthLimit = depthLimit;
@@ -371,7 +375,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         await EnsureRelationsHoldAsync(db, schema, decision, candidate, context, cancellationToken);
         candidate = await RunBeforeCreateAsync(db, schema, decision, context, candidate, now, cancellationToken);
         candidate = await HostBeforeCreateAsync(db, schema, decision, context, candidate, AlvoWriteOperation.Create, now, cancellationToken);
-        var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
+        var stored = await InsertAsync(db, schema, decision, context, candidate, now, cancellationToken);
         await RecomputeRollupsAsync(db, schema, [stored!], decision.Unnameable, cancellationToken);
         stored = await AfterSavedAsync(db, schema, decision, context, AlvoWriteOperation.Create, preImage: null, stored, now, cancellationToken);
         await EmitAsync(
@@ -720,7 +724,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         await EnsureRelationsHoldAsync(db, schema, decision, candidate, context, cancellationToken);
         candidate = await RunBeforeCreateAsync(db, schema, decision, context, candidate, now, cancellationToken);
         candidate = await HostBeforeCreateAsync(db, schema, decision, context, candidate, AlvoWriteOperation.Create, now, cancellationToken);
-        var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
+        var stored = await InsertAsync(db, schema, decision, context, candidate, now, cancellationToken);
         await RecomputeRollupsAsync(db, schema, [stored!], decision.Unnameable, cancellationToken);
         stored = await AfterSavedAsync(db, schema, decision, context, AlvoWriteOperation.Create, preImage: null, stored, now, cancellationToken);
         await EmitAsync(
@@ -1083,9 +1087,11 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// </remarks>
     private async Task<Dictionary<string, object>> InsertAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
-        Dictionary<string, object> candidate, CancellationToken cancellationToken, bool callerKeyed = false)
+        Dictionary<string, object> candidate, DateTimeOffset now, CancellationToken cancellationToken, bool callerKeyed = false)
     {
+        await _sequences.AssignAsync(db, schema, candidate, now, cancellationToken);
         db.Rows(schema.Name).Add(candidate);
+        await ExclusionLocks.TakeAsync(db, _dialect, schema, [Lookup(candidate)], cancellationToken);
         await ConstraintViolationTranslator.TranslatedAsync(
             () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema,
             callerKeyed, db.AppliedSchema, decision.Unnameable);
@@ -1119,16 +1125,19 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// <param name="decision">The verdict the policy engine returned for this caller.</param>
     /// <param name="context">The caller performing the batch.</param>
     /// <param name="candidates">The rows the judging pass approved.</param>
+    /// <param name="now">The batch's stamp, which names each sequence number's period.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     private async Task<List<Dictionary<string, object>>> InsertManyAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
-        List<Dictionary<string, object>> candidates, CancellationToken cancellationToken)
+        List<Dictionary<string, object>> candidates, DateTimeOffset now, CancellationToken cancellationToken)
     {
+        await _sequences.AssignAsync(db, schema, [.. candidates], now, cancellationToken);
         foreach (var candidate in candidates)
         {
             db.Rows(schema.Name).Add(candidate);
         }
 
+        await ExclusionLocks.TakeAsync(db, _dialect, schema, [.. candidates.Select(Lookup)], cancellationToken);
         await ConstraintViolationTranslator.TranslatedAsync(
             () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema,
             callerKeyed: false, db.AppliedSchema, decision.Unnameable);
@@ -1779,7 +1788,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             await EnsureWriteAllowedAsync(db, schema, decision, Unmasked(candidate), previous: null, context, cancellationToken);
         }
 
-        var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken, callerKeyed: true);
+        var stored = await InsertAsync(db, schema, decision, context, candidate, now, cancellationToken, callerKeyed: true);
         await RecomputeRollupsAsync(db, schema, [stored!], decision.Unnameable, cancellationToken);
         stored = await AfterSavedAsync(db, schema, decision, context, AlvoWriteOperation.Replace, preImage: null, stored, now, cancellationToken);
         await EmitAsync(
@@ -2226,7 +2235,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         vetted = await HostBeforeUpdateAsync(schema, decision, context, operation, preImage, vetted, now, cancellationToken);
         await EnsureWriteAllowedAsync(db, schema, decision, Merge(preImage, vetted), preImage, context, cancellationToken);
 
-        if (await AffectedAsync(db, schema, decision, context, id, vetted, cancellationToken) == 0)
+        if (await AffectedAsync(db, schema, decision, context, preImage, vetted, cancellationToken) == 0)
         {
             throw new AlvoRecordNotFoundException();
         }
@@ -2296,16 +2305,29 @@ internal sealed partial class EfAlvoData : IAlvoData
     private static object? StoredVersion(EntitySchema schema, Dictionary<string, object> preImage) =>
         AlvoManagedColumns.VersionColumn(schema) is { } column ? preImage.GetValueOrDefault(column) : null;
 
-    private Task<int> AffectedAsync(
+    /// <summary>
+    /// The update itself, after the exclusion locks its merged post-image needs (HX-12 D3) — an update never saves through
+    /// the change tracker, so this is where the row an exclusion will judge is last in hand before the write.
+    /// </summary>
+    private async Task<int> AffectedAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
-        Guid id, IReadOnlyDictionary<string, object?> values, CancellationToken cancellationToken)
-        => ConstraintViolationTranslator.TranslatedAsync(
+        AlvoRecord preImage, IReadOnlyDictionary<string, object?> values, CancellationToken cancellationToken)
+    {
+        var postImage = Merge(preImage, values).Values;
+        await ExclusionLocks.TakeAsync(db, _dialect, schema, [LookupOf(postImage)], cancellationToken);
+        var id = (Guid)preImage.Values[AlvoDataContext.IdColumn]!;
+        return await ConstraintViolationTranslator.TranslatedAsync(
             () => RowOf(PolicyRoot(db, schema, decision, context), id)
                 .ExecuteUpdateAsync(UpdateSetterFactory.For(schema, values), cancellationToken),
             _dialect,
             db.Rows(schema.Name).EntityType,
             schema,
             callerKeyed: false, db.AppliedSchema, decision.Unnameable);
+    }
+
+    private static Func<string, object?> Lookup(Dictionary<string, object> row) => column => row.GetValueOrDefault(column);
+
+    private static Func<string, object?> LookupOf(IReadOnlyDictionary<string, object?> row) => column => row.GetValueOrDefault(column);
 
     /// <summary>
     /// The queryable a write is composed over: a <c>FromSql</c> root whose <c>WHERE</c> already carries the
@@ -2562,7 +2584,8 @@ internal sealed partial class EfAlvoData : IAlvoData
             cancellationToken);
 
     /// <summary>
-    /// Ensures the outbox table exists, once per process and <b>before</b> the write transaction begins.
+    /// Ensures the outbox table — and the sequence counter table a create allocates from — exists, once per process and
+    /// <b>before</b> the write transaction begins.
     /// </summary>
     /// <remarks>
     /// The same arrangement — and the same reasoning — as <see cref="EnsureIdempotencyTableAsync"/>: nothing
@@ -2582,6 +2605,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         var connection = db.Database.GetDbConnection();
         await RelationalSqlBatch.OpenAsync(connection, cancellationToken);
         await OutboxTable.EnsureAsync(connection, _outboxTable, cancellationToken);
+        await SequenceTable.EnsureAsync(connection, _sequenceTable, cancellationToken);
         _outboxTableEnsured = true;
     }
 
@@ -2950,7 +2974,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             return BatchOutcome.Refused(refusals);
         }
 
-        var stored = await InsertManyAsync(db, schema, decision, context, judged, cancellationToken);
+        var stored = await InsertManyAsync(db, schema, decision, context, judged, now, cancellationToken);
 
         await RecomputeRollupsAsync(db, schema, stored!, decision.Unnameable, cancellationToken);
         using var held = HeldWhileHooksRun(schema, AlvoWriteOperation.Create, stored.Select(RowIdOf));
@@ -3184,9 +3208,11 @@ internal sealed partial class EfAlvoData : IAlvoData
         DateTimeOffset now, CancellationToken cancellationToken)
     {
         var written = new List<(int Index, Guid Id, AlvoRecord PreImage, Dictionary<string, object> PostImage)>(judged.Count);
+        await ExclusionLocks.TakeAsync(
+            db, _dialect, schema, [.. judged.Select(row => Merge(row.PreImage, row.Values).Values).Select(LookupOf)], cancellationToken);
         foreach (var (index, id, preImage, values) in judged)
         {
-            if (await AffectedAsync(db, schema, decision, context, id, values, cancellationToken) == 0)
+            if (await AffectedAsync(db, schema, decision, context, preImage, values, cancellationToken) == 0)
             {
                 throw new AlvoRecordNotFoundException();
             }

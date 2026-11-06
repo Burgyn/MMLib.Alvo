@@ -67,12 +67,12 @@ internal static class RecordWriter
     }
 
     /// <summary>
-    /// The fields of <paramref name="entity"/> a write never sends: <c>computed</c> and <c>rollup</c>, which the store
-    /// maintains itself, and <c>virtual</c>, which no column holds.
+    /// The fields of <paramref name="entity"/> a write never sends: <c>computed</c>, <c>rollup</c> and <c>sequence</c>,
+    /// which the store maintains itself, and <c>virtual</c>, which no column holds.
     /// </summary>
     internal static IReadOnlySet<string> Maintained(EntitySchema? entity) => entity is null
         ? new HashSet<string>(StringComparer.Ordinal)
-        : entity.Fields.Where(field => field.ComputedExpression is not null || field.Rollup is not null || field.IsVirtual)
+        : entity.Fields.Where(field => field.IsMaintained() || field.IsVirtual)
             .Select(field => field.Name)
             .ToHashSet(StringComparer.Ordinal);
 

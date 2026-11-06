@@ -1,0 +1,5 @@
+﻿-- create
+ALTER TABLE "bookings" ADD CONSTRAINT "xc_bookings_6423bd5f" EXCLUDE USING gist ("tenant_id" WITH =, "room" WITH =, tstzrange("starts_at", "ends_at", '[)') WITH &&) WHERE (COALESCE("status" <> E'cancelled', FALSE))
+-- drop
+ALTER TABLE "bookings" DROP CONSTRAINT IF EXISTS "xc_bookings_6423bd5f"
+-- survives a table rebuild: True

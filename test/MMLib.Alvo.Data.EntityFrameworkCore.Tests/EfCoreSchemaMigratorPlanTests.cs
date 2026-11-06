@@ -39,6 +39,61 @@ public class EfCoreSchemaMigratorPlanTests
 
     private static FieldSchema Id() => new() { Name = "id", Type = FieldType.Uuid, Required = true };
 
+    /// <summary>
+    /// A dialect that answers no allocation statement — <see cref="TestSqlDialect"/> inherits the declining default — cannot
+    /// keep a gapless counter, so a plan declaring a sequence is refused at the sequence, before anything is applied.
+    /// </summary>
+    [Fact]
+    public async Task A_declining_engine_refuses_the_apply_at_the_sequence()
+    {
+        var desired = new SchemaModel([
+            new EntitySchema
+            {
+                Name = "orders",
+                Fields = [Id(), new FieldSchema { Name = "number", Type = FieldType.Integer, Required = true, Sequence = new SequenceSchema() }],
+            },
+        ]);
+
+        var refused = await Should.ThrowAsync<MMLib.Alvo.Descriptor.DescriptorValidationException>(
+            () => NewSqliteMigrator().PlanAsync(new SchemaModel([]), desired, Options, TestContext.Current.CancellationToken));
+
+        var error = refused.Result.Errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe("/entities/orders/fields/number/sequence");
+        error.Message.ShouldBe("This database engine cannot enforce 'sequence'. Nothing was applied.");
+        error.FixSuggestion.ShouldBe("Remove 'sequence', or run Alvo on SQLite or PostgreSQL.");
+    }
+
+    /// <summary>
+    /// A dialect that declines an exclusion — <see cref="TestSqlDialect"/> inherits the declining default, as the T-SQL double
+    /// does on purpose — cannot enforce one, so a plan declaring one is refused at its <c>exclude</c>, before anything is applied.
+    /// </summary>
+    [Fact]
+    public async Task A_declining_engine_refuses_an_exclusion_at_its_pointer()
+    {
+        var desired = new SchemaModel([
+            new EntitySchema
+            {
+                Name = "bookings",
+                Fields =
+                [
+                    Id(),
+                    new FieldSchema { Name = "room", Type = FieldType.String, Required = true },
+                    new FieldSchema { Name = "starts_at", Type = FieldType.DateTime, Required = true },
+                    new FieldSchema { Name = "ends_at", Type = FieldType.DateTime, Required = true },
+                ],
+                Indexes = [new IndexSchema(["room"], Unique: false), new IndexSchema(["room"], Unique: false) { Exclude = new ExclusionSchema("starts_at", "ends_at") }],
+            },
+        ]);
+
+        var refused = await Should.ThrowAsync<MMLib.Alvo.Descriptor.DescriptorValidationException>(
+            () => NewSqliteMigrator().PlanAsync(new SchemaModel([]), desired, Options, TestContext.Current.CancellationToken));
+
+        var error = refused.Result.Errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe("/entities/bookings/indexes/1/exclude");
+        error.Message.ShouldBe("This database engine cannot enforce 'exclude'. Nothing was applied.");
+        error.FixSuggestion.ShouldBe("Remove 'exclude', or run Alvo on SQLite or PostgreSQL.");
+    }
+
     [Fact]
     public async Task Create_from_empty_produces_a_create_entity_step_with_sql()
     {

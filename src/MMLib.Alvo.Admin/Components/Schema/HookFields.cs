@@ -44,7 +44,7 @@ internal static class HookFields
         var managed = AlvoManagedColumns.For(schema);
         return [.. schema.Fields
             .DistinctBy(field => field.Name, StringComparer.Ordinal)
-            .Where(field => !managed.Contains(field.Name) && field.ComputedExpression is null && field.Rollup is null)
+            .Where(field => !managed.Contains(field.Name) && !field.IsMaintained())
             .Select(field => field.Name)];
     }
 }

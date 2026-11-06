@@ -49,6 +49,52 @@ public class SqliteDialectRefusalTests
     }
 
     /// <summary>
+    /// SQLite's refusal of a partial index predicate calling a function non-deterministically is recognised as one, so the
+    /// apply answers it at the index's <c>where</c> (HX-12); an unrelated failure under the same generic code is not.
+    /// </summary>
+    [Fact]
+    public void A_non_deterministic_index_predicate_is_an_index_predicate_refusal()
+    {
+        var refused = RefusedWrite(
+            "CREATE TABLE members (joined_at TEXT);",
+            "INSERT INTO members VALUES ('2026-01-01');",
+            "CREATE INDEX ix ON members (joined_at) WHERE unixepoch('now') > 5;");
+        var unrelated = RefusedWrite("CREATE TABLE a (x INTEGER);", "INSERT INTO a VALUES (1);", "SELECT * FROM missing;");
+
+        ((IAlvoSqlDialect)_dialect).IsIndexPredicateRefusal(refused).ShouldBeTrue(refused.Message);
+        ((IAlvoSqlDialect)_dialect).IsIndexPredicateRefusal(unrelated).ShouldBeFalse(unrelated.Message);
+    }
+
+    /// <summary>
+    /// An abort raised by one of an exclusion's own triggers decodes as <see cref="AlvoConstraintKind.Exclusion"/>, carrying the
+    /// name after the framework's tag (HX-12 D2).
+    /// </summary>
+    [Fact]
+    public void A_trigger_abort_tagged_as_an_exclusion_decodes_its_name()
+    {
+        var refused = RefusedWrite(
+            "CREATE TABLE b (x INTEGER); CREATE TRIGGER t AFTER INSERT ON b BEGIN SELECT RAISE(ABORT, 'alvo_exclusion:xc_b_0123abcd'); END;",
+            "SELECT 1;",
+            "INSERT INTO b VALUES (1);");
+
+        var decoded = _dialect.DecodeConstraintViolation(refused).ShouldNotBeNull(refused.Message);
+
+        (decoded.Kind, decoded.ConstraintName).ShouldBe((AlvoConstraintKind.Exclusion, "xc_b_0123abcd"));
+    }
+
+    /// <summary>Any other trigger's abort is not a constraint a caller can act on, so it is not decoded.</summary>
+    [Fact]
+    public void An_untagged_trigger_abort_is_not_a_constraint_violation()
+    {
+        var refused = RefusedWrite(
+            "CREATE TABLE b (x INTEGER); CREATE TRIGGER t AFTER INSERT ON b BEGIN SELECT RAISE(ABORT, 'nope'); END;",
+            "SELECT 1;",
+            "INSERT INTO b VALUES (1);");
+
+        _dialect.DecodeConstraintViolation(refused).ShouldBeNull(refused.Message);
+    }
+
+    /// <summary>
     /// A unique violation names the columns the index covers, with the table qualifier stripped: the shared
     /// path already knows which entity it is writing and resolves the names against it.
     /// </summary>

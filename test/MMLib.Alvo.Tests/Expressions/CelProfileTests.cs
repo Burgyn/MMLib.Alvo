@@ -32,6 +32,22 @@ public class CelProfileTests
         CelFixtures.CompileComputed("total + total").ResultType.ShouldBe(CelValueType.Decimal);
     }
 
+    /// <summary>
+    /// Review R4 of HX-12: <c>timestamp('…')</c> stays an in-process function a rule cannot call — no timestamp literal reaches
+    /// a rule's bound parameters, a validation or an index predicate — while a write-time condition still converts with it.
+    /// </summary>
+    [Theory]
+    [InlineData("due_on != timestamp('2026-01-01T00:00:00Z')")]
+    [InlineData("due_on == timestamp('2026-01-01T00:00:00Z')")]
+    [InlineData("!(due_on == timestamp('2026-01-01T00:00:00Z'))")]
+    [InlineData("created_at < timestamp('2026-01-01T00:00:00-05:00')")]
+    public void A_timestamp_constant_is_refused_in_a_rule(string source)
+    {
+        CelFixtures.Compiler.Compile(source, CelProfile.Rule, CelFixtures.Orders).IsSuccess.ShouldBeFalse();
+
+        CelFixtures.CompileCondition(source).ResultType.ShouldBe(CelValueType.Bool);
+    }
+
     [Fact]
     public void Context_references_are_unavailable_in_computed()
     {

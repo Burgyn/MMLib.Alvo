@@ -12,6 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Rules over relations** (HX-19): a rule may follow a ref (`customer_id.owner_id == @user.id`) or reach the rows that reference this one (`project_members.exists(m, m.user_id == @user.id)`, `<child>_via_<field>` when ambiguous). Each term is one correlated `EXISTS` in the query that ANDs in the related entity's own `list` rule and tenant scope, so it never matches a row the caller could not list (a host narrowing is not part of it); a write judges it in SQL inside its transaction. Apply refuses a cycle among `list` rules, a chain deeper than 3, a relation under `!`, and a relation outside `rules`/`checks`. Not supported by `InMemoryAlvoData`. Docs: *Rules over relations*.
 - **Dashboard: relations** (HX-19): the policy simulator lists, under *Reads through*, each relation a decision reads and the related `list` rule it was bound to for the caller (`ManagementPolicyVerdict.Relations`); the rules editor offers the relation terms of the entity under each rule; a lookup-check refusal is shown with its own message, not as a field validation.
 - **Lookup checks** (HX-19): `entities.<e>.checks: [{ lookup, expr, message }]` follows a ref field to the row it names and refuses a create, or an update that changes a field the check reads, when that row is not one the caller may list or fails `expr` — 422 `validation`, violation code `check`, the check's own `message` and a pointer at the lookup field (none when the field is hidden). A null lookup skips the check; a check reads no `@user`/`@tenant`, and apply refuses one that does or reads no `<lookup>.<field>`.
+- **`sequence` on a field** (HX-12): a gapless number per tenant, optionally per another field's value and per UTC
+  year/month/day, stored as an integer or formatted text (`SO-{yyyy}-{n:4}`); the T-SQL double and any dialect without
+  `SequenceAllocationStatement` refuse it at apply.
+- **`indexes[].where` and `indexes[].exclude`** (HX-12): `indexes[].where` (partial indexes; a partial `unique` allows
+  duplicates outside it) and `indexes[].exclude` (no overlapping `[from, to)` ranges among rows with equal `fields`; 409
+  `exclusion` at the range's pointer; PostgreSQL installs or requires `btree_gist`); `AlvoConstraintKind.Exclusion`.
+  Adding an exclusion over overlapping rows is refused at apply — and in a dry run — with their count; a dialect that
+  cannot enforce one refuses `exclude` at apply. A `where` cannot compare with a `timestamp('…')` constant yet.
+- **Dashboard and docs for HX-12's integrity keywords.** The field editor offers *Sequence* beside rollup and computed
+  (a `per` picker over required fields a caller writes, a period, a start, and a format checked as it is typed with a
+  preview of the first number); the Indexes tab's add form gains *Only where* (checked live against the host) and
+  *Exclude overlaps* (start and end pickers over required date and datetime fields; it hides *Unique*), and each row
+  badges its `where` and its range. The *Integrity in the descriptor* page gains sections on `sequence`, partial unique
+  indexes and `exclude`, with an executed snippet; the indexes and field-types descriptor skills teach both keywords.
 - **Virtual fields and record enrichers** (HX-16): a field declared `"virtual": true` has no column, is read-only and refused in writes, expressions and filter/sort/select (422 on the Data API); an embedded host's `Enrich(…)` fills it — or hides a field — on every read and write echo, after the caller's rules and masks. The applied schema a version row stores now records which fields are virtual; a binary older than this release reading a newer row ignores that and would plan a column for each virtual field, so do not roll a deployment back across it.
 - **Query narrowing** (HX-16): an embedded host can AND a filter into every non-system read of an entity — list, get and count — with `Entity(…).Narrow(…)`; it never widens what the rules allow and never applies to writes.
 - **Integrity in the descriptor** (HX-11). A field's `validation` is now enforced as a database `CHECK` constraint on
@@ -548,6 +562,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The OpenAPI document marks every framework-maintained field read-only** (HX-12): a `computed`, `rollup` or `sequence`
+  field is `readOnly` in the response schema and absent from the create and patch schemas (and from their `required`).
+  Every write to one was already refused with 403; a generated client no longer offers it.
 - **HX-11 appends enum members** — `AlvoConstraintKind.Check` and `CelValueType.Duration`: an exhaustive `switch` over
   either gains a case. `IFieldSqlRenderer.RenderEpochMicroseconds` is a new default interface member; a third-party
   dialect inherits `null`, and duration arithmetic over a field is then refused on it, naming the renderer.

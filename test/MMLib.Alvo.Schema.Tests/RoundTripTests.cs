@@ -1,4 +1,5 @@
 ﻿using CsCheck;
+using MMLib.Alvo.Descriptor;
 using System.Text;
 using System.Text.Json;
 
@@ -48,6 +49,105 @@ public class RoundTripTests
 
             string mutated = Encoding.UTF8.GetString(stream.ToArray());
             return SchemaValidator.Failures(schema, mutated).Count > 0;
+        });
+    }
+
+    [Fact]
+    public void A_generated_sequence_validates_and_survives_parse_and_serialize()
+    {
+        var schema = SchemaValidator.Load();
+
+        GeneratedSequenceDescriptor().Sample(descriptor =>
+        {
+            SchemaValidator.Failures(schema, descriptor).ShouldBeEmpty(descriptor);
+            var parsed = AlvoDescriptor.Parse(descriptor);
+            parsed.Entities["orders"].Fields["number"].Sequence.ShouldNotBeNull(descriptor);
+            parsed.Entities["orders"].Fields["number"].Extensions.ShouldBeNull(descriptor);
+            Canonicalizer.Canonicalize(AlvoDescriptor.Serialize(AlvoDescriptor.Parse(descriptor)))
+                .ShouldBe(Canonicalizer.Canonicalize(descriptor), descriptor);
+        });
+    }
+
+    private static Gen<string> GeneratedSequenceDescriptor() =>
+        Gen.Select(
+            Gen.Bool,
+            Gen.OneOfConst<string?>(null, "branch"),
+            Gen.OneOfConst<string?>(null, "year", "month", "day"),
+            Gen.OneOfConst<long?>(null, 0, 1, 1000, 999_999),
+            Gen.OneOfConst("{n}", "SO-{yyyy}-{n:4}", "{yy}{MM}{dd}/{n:18}", "INV {n:1}"),
+            SequenceDescriptor);
+
+    private static string SequenceDescriptor(bool asText, string? per, string? period, long? start, string format)
+    {
+        var sequence = new Dictionary<string, object?>
+        {
+            ["per"] = per,
+            ["period"] = period,
+            ["start"] = start,
+            ["format"] = asText ? format : null,
+        }.Where(member => member.Value is not null).ToDictionary(member => member.Key, member => member.Value);
+        var fields = new Dictionary<string, object>
+        {
+            ["branch"] = new { type = "string", required = true },
+            ["number"] = new { type = asText ? "string" : "integer", sequence },
+        };
+
+        return JsonSerializer.Serialize(new
+        {
+            apiVersion = "alvo.dev/v1",
+            name = "sequences",
+            entities = new { orders = new { fields } },
+        });
+    }
+
+    [Fact]
+    public void A_generated_index_validates_and_survives_parse_and_serialize()
+    {
+        var schema = SchemaValidator.Load();
+
+        GeneratedIndexDescriptor().Sample(descriptor =>
+        {
+            SchemaValidator.Failures(schema, descriptor).ShouldBeEmpty(descriptor);
+            var index = AlvoDescriptor.Parse(descriptor).Entities["bookings"].Indexes.ShouldNotBeNull(descriptor).ShouldHaveSingleItem();
+            index.Fields.ShouldNotBeEmpty(descriptor);
+            (index.Exclude is null).ShouldBe(!descriptor.Contains("\"exclude\"", StringComparison.Ordinal), descriptor);
+            Canonicalizer.Canonicalize(AlvoDescriptor.Serialize(AlvoDescriptor.Parse(descriptor)))
+                .ShouldBe(Canonicalizer.Canonicalize(descriptor), descriptor);
+        });
+    }
+
+    private static readonly string[] _indexedFields = ["room"];
+
+    private static Gen<string> GeneratedIndexDescriptor() =>
+        Gen.Select(
+            Gen.OneOfConst<bool?>(null, false, true),
+            Gen.OneOfConst<string?>(null, "active", "status != 'cancelled'", "room == 'a' && active"),
+            Gen.Bool,
+            IndexDescriptor);
+
+    private static string IndexDescriptor(bool? unique, string? where, bool excluding)
+    {
+        var index = new Dictionary<string, object?>
+        {
+            ["fields"] = _indexedFields,
+            ["unique"] = unique,
+            ["where"] = where,
+            ["exclude"] = excluding ? new { from = "starts_at", to = "ends_at" } : null,
+        }.Where(member => member.Value is not null).ToDictionary(member => member.Key, member => member.Value);
+        var fields = new Dictionary<string, object>
+        {
+            ["room"] = new { type = "string", required = true },
+            ["active"] = new { type = "boolean", required = true },
+            ["status"] = new { type = "string" },
+            ["starts_at"] = new { type = "datetime", required = true },
+            ["ends_at"] = new { type = "datetime", required = true },
+        };
+
+        return JsonSerializer.Serialize(new
+        {
+            apiVersion = "alvo.dev/v1",
+            name = "indexes",
+            entities = new { bookings = new { fields, indexes = new[] { index } } },
         });
     }
 

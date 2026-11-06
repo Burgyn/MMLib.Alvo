@@ -132,7 +132,8 @@ internal static class RecordValidator
 
     /// <summary>
     /// Whether the framework, not the caller, is the source of this field's value — a <c>computed</c>
-    /// expression (a stored generated column) or a <c>rollup</c> the write path maintains.
+    /// expression (a stored generated column), a <c>rollup</c> the write path maintains, or a <c>sequence</c>
+    /// number the create allocates.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -160,7 +161,7 @@ internal static class RecordValidator
     /// </para>
     /// <param name="field">The declared field.</param>
     private static bool IsFilledInByTheStore(FieldSchema field) =>
-        field.ComputedExpression is not null || field.Rollup is not null || field.Default is not null;
+        field.IsMaintained() || field.Default is not null;
 
     /// <summary>
     /// Whether the missing required value is one this caller could not have supplied — a create of a

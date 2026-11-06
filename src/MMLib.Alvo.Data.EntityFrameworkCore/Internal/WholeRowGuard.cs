@@ -190,6 +190,6 @@ internal static class WholeRowGuard
     {
         var managed = AlvoManagedColumns.For(schema);
         return schema.Fields.Where(field =>
-            !managed.Contains(field.Name) && field.ComputedExpression is null && field.Rollup is null && !field.IsVirtual);
+            !managed.Contains(field.Name) && !field.IsMaintained() && !field.IsVirtual);
     }
 }

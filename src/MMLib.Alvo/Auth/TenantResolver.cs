@@ -7,7 +7,7 @@ namespace MMLib.Alvo.Auth;
 /// A requested tenant is only ever honoured as a <em>confirmation</em> of the key's own tenant —
 /// it can never grant a tenant the key itself was not issued for. A key with no tenant of its own
 /// is not cross-tenant capable: a request naming any tenant is refused, exactly as if the key had
-/// no tenant at all (that capability is a deliberate, audited grant, deferred to #42). A key with
+/// no tenant at all (that capability is a deliberate, audited grant, deferred to #376). A key with
 /// no tenant and no request resolves to <see langword="null"/> with a successful result — that
 /// denial belongs to the policy engine, which is the one that knows whether the target entity is
 /// tenant-scoped.

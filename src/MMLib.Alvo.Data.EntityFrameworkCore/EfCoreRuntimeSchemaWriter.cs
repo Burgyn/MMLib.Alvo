@@ -118,7 +118,7 @@ internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposa
         catch (DbException failure)
         {
             await _rows.ThrowIfConcurrencyConflictAsync(transaction, project, expectedRevision, ct).ConfigureAwait(false);
-            if (CheckApplyRefusal.Translate(failure, _dialect, candidate.Schema) is { } refused)
+            if (CheckApplyRefusal.Translate(failure, _dialect, candidate.Schema, plan.Sql) is { } refused)
             {
                 throw Located(refused, atTheVersionRow);
             }

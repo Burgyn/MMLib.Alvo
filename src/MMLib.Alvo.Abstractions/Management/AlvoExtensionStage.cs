@@ -32,4 +32,8 @@ public enum AlvoExtensionStage
     /// <summary>Inside a read, as its SQL is composed or its rows are returned: it shapes what the read answers and never writes.</summary>
     [JsonStringEnumMemberName("read")]
     Read = 4,
+
+    /// <summary>On time rather than on a write: its runs are framework events Alvo appends to the outbox, delivered after they commit.</summary>
+    [JsonStringEnumMemberName("scheduled")]
+    Scheduled = 5,
 }

@@ -198,9 +198,14 @@ public sealed class AlvoDataHost
     /// <summary>Re-primes the policy catalog (and therefore the applied schema) from <paramref name="schema"/>.</summary>
     /// <remarks>Synchronous, because compiling and publishing a catalog is: nothing here awaits.</remarks>
     /// <param name="schema">The schema the rules are re-compiled against and that the read model is rebuilt from.</param>
-    public void RePrime(SchemaModel schema)
+    public void RePrime(SchemaModel schema) => RePrime(schema, _descriptor);
+
+    /// <summary>Re-primes the policy catalog from <paramref name="schema"/> and a descriptor an apply changed.</summary>
+    /// <param name="schema">The schema the rules are re-compiled against and that the read model is rebuilt from.</param>
+    /// <param name="descriptor">The descriptor <paramref name="schema"/> maps from — a rename changes its entity names.</param>
+    public void RePrime(SchemaModel schema, AlvoDescriptor descriptor)
     {
-        var catalog = PolicyCatalog.Build(_descriptor, schema, _services.GetRequiredService<ICelCompiler>());
-        _services.GetRequiredService<IPolicyCatalogProvider>().SetCurrent(_descriptor.Name, catalog);
+        var catalog = PolicyCatalog.Build(descriptor, schema, _services.GetRequiredService<ICelCompiler>());
+        _services.GetRequiredService<IPolicyCatalogProvider>().SetCurrent(descriptor.Name, catalog);
     }
 }

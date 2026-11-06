@@ -64,6 +64,30 @@ public sealed record EntityIndex
 
     /// <summary>Whether the index enforces uniqueness across the covered fields.</summary>
     public bool? Unique { get; init; }
+
+    /// <summary>
+    /// A CEL predicate over the entity's own fields: only the rows it accepts are indexed — a partial index. With
+    /// <see cref="Unique"/>, duplicates outside it are allowed.
+    /// </summary>
+    public string? Where { get; init; }
+
+    /// <summary>
+    /// Makes this an exclusion: no two rows with equal <see cref="Fields"/> may hold overlapping <c>[from, to)</c> ranges.
+    /// </summary>
+    public IndexExclusion? Exclude { get; init; }
+}
+
+/// <summary>
+/// The half-open <c>[from, to)</c> range of an exclusion (schema <c>entity.indexes[].exclude</c>): two required
+/// <c>date</c> or <c>datetime</c> fields of one type. An empty range overlaps nothing.
+/// </summary>
+public sealed record IndexExclusion
+{
+    /// <summary>The field where the range starts (inclusive).</summary>
+    public required string From { get; init; }
+
+    /// <summary>The field where the range ends (exclusive).</summary>
+    public required string To { get; init; }
 }
 
 /// <summary>

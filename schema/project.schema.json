@@ -624,6 +624,31 @@
                 "type": "boolean",
                 "default": false,
                 "description": "Whether the index enforces uniqueness across the covered fields."
+              },
+              "where": {
+                "$ref": "#/$defs/cel",
+                "description": "Index only the rows this CEL predicate over the entity's own fields accepts — a partial index. With unique, duplicates outside it are allowed."
+              },
+              "exclude": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "from",
+                  "to"
+                ],
+                "description": "No two rows with equal `fields` may hold overlapping [from, to) ranges (an empty range overlaps nothing). A write that would is refused 409. PostgreSQL needs the btree_gist extension.",
+                "properties": {
+                  "from": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]{0,62}$",
+                    "description": "A required date or datetime field: where the range starts (inclusive)."
+                  },
+                  "to": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]{0,62}$",
+                    "description": "A required field of the same type: where the range ends (exclusive)."
+                  }
+                }
               }
             }
           }
@@ -802,6 +827,37 @@
               }
             }
           ]
+        },
+        "sequence": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "A number the framework assigns on create: gapless and never reused, counted per tenant, and optionally per another field's value (`per`) and per calendar period (`period`, in UTC). type=integer stores the number; type=string requires `format`. The field becomes read-only.",
+          "properties": {
+            "per": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]{0,62}$",
+              "description": "A required field of this entity whose value starts its own count."
+            },
+            "period": {
+              "enum": [
+                "year",
+                "month",
+                "day"
+              ],
+              "description": "Restart the count each UTC calendar period."
+            },
+            "start": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 1,
+              "description": "The first number of every count."
+            },
+            "format": {
+              "type": "string",
+              "pattern": "^[^{}]*(\\{(yyyy|yy|MM|dd)\\}[^{}]*)*\\{n(:([1-9]|1[0-8]))?\\}[^{}]*(\\{(yyyy|yy|MM|dd)\\}[^{}]*)*$",
+              "description": "type=string only: the text stored, e.g. \"SO-{yyyy}-{n:4}\" → SO-2026-0042. Exactly one {n} or {n:width}; {yyyy} {yy} {MM} {dd} read the create's UTC date."
+            }
+          }
         }
       },
       "patternProperties": {

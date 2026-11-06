@@ -468,6 +468,50 @@ public abstract class AlvoSqlDialectContractTests
     }
 
     /// <summary>
+    /// A sequence allocation is declined, or is one statement that binds each of its six markers exactly once — the
+    /// allocator binds every one of them, and a marker the statement repeated or dropped would bind a key twice or never.
+    /// </summary>
+    [Fact]
+    public void A_sequence_allocation_statement_is_declined_or_binds_every_key_once()
+    {
+        var statement = CreateDialect().SequenceAllocationStatement("alvo_sequences");
+        if (statement is null)
+        {
+            return;
+        }
+
+        statement.ShouldContain("alvo_sequences");
+        foreach (var marker in new[] { "@entity", "@field", "@tenant", "@scope", "@period", "@start" })
+        {
+            Regex.Count(statement, Regex.Escape(marker) + @"\b").ShouldBe(1, marker);
+        }
+    }
+
+    /// <summary>
+    /// An exclusion is declined, or answered with statements that create and drop it: every create names the table, the
+    /// filter is carried verbatim — it is already SQL the constraint renderer wrote — and the drops undo what the creates made.
+    /// </summary>
+    [Fact]
+    public void An_exclusion_is_declined_or_answered_with_create_and_drop()
+    {
+        var definition = new ExclusionConstraintDefinition(
+            "bookings", "xc_bookings_0a1b2c3d", ["tenant_id", "room"], "starts_at", "ends_at", MMLib.Alvo.Schema.FieldType.DateTime, "\"status\" <> 'cancelled'");
+
+        var sql = CreateDialect().ExclusionConstraint(definition);
+        if (sql is null)
+        {
+            return;
+        }
+
+        sql.Create.ShouldNotBeEmpty();
+        sql.Drop.ShouldNotBeEmpty();
+        sql.Create.ShouldAllBe(statement => statement.Contains("bookings", StringComparison.Ordinal));
+        string.Join("\n", sql.Create).ShouldContain(definition.Filter!);
+        sql.Drop.ShouldAllBe(statement => statement.Contains("IF EXISTS", StringComparison.OrdinalIgnoreCase));
+        string.Join("\n", sql.Drop).ShouldContain(definition.Name);
+    }
+
+    /// <summary>
     /// Each of the three arguments is required, and a missing one is refused rather than interpolated as an
     /// empty string — which would produce <c>"" GENERATED ALWAYS AS () STORED</c>, DDL that fails at migration
     /// time with a syntax error naming nothing the author wrote.

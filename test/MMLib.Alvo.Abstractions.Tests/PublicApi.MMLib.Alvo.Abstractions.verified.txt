@@ -395,6 +395,7 @@ namespace MMLib.Alvo.Data
         Unique = 0,
         Referenced = 1,
         Check = 2,
+        Exclusion = 3,
     }
     public sealed class AlvoConstraintViolationException : System.Exception
     {
@@ -830,8 +831,10 @@ namespace MMLib.Alvo.Descriptor
     public sealed class EntityIndex : System.IEquatable<MMLib.Alvo.Descriptor.EntityIndex>
     {
         public EntityIndex() { }
+        public MMLib.Alvo.Descriptor.IndexExclusion? Exclude { get; init; }
         public required System.Collections.Generic.IReadOnlyList<string> Fields { get; init; }
         public bool? Unique { get; init; }
+        public string? Where { get; init; }
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.EntityTenancy>))]
     public enum EntityTenancy
@@ -869,11 +872,20 @@ namespace MMLib.Alvo.Descriptor
         public bool? Required { get; init; }
         public MMLib.Alvo.Descriptor.Rollup? Rollup { get; init; }
         public int? Scale { get; init; }
+        public MMLib.Alvo.Descriptor.FieldSequence? Sequence { get; init; }
         public required MMLib.Alvo.Descriptor.FieldType Type { get; init; }
         public bool? Unique { get; init; }
         public string? Validation { get; init; }
         public System.Collections.Generic.IReadOnlyList<string>? Values { get; init; }
         public bool? Virtual { get; init; }
+    }
+    public sealed class FieldSequence : System.IEquatable<MMLib.Alvo.Descriptor.FieldSequence>
+    {
+        public FieldSequence() { }
+        public string? Format { get; init; }
+        public string? Per { get; init; }
+        public MMLib.Alvo.Descriptor.SequencePeriod? Period { get; init; }
+        public long? Start { get; init; }
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.FieldType>))]
     public enum FieldType
@@ -961,6 +973,12 @@ namespace MMLib.Alvo.Descriptor
     {
         MMLib.Alvo.Descriptor.DescriptorValidationResult Validate(string descriptorJson);
     }
+    public sealed class IndexExclusion : System.IEquatable<MMLib.Alvo.Descriptor.IndexExclusion>
+    {
+        public IndexExclusion() { }
+        public required string From { get; init; }
+        public required string To { get; init; }
+    }
     public sealed class MessageTemplate : System.IEquatable<MMLib.Alvo.Descriptor.MessageTemplate>
     {
         public MessageTemplate() { }
@@ -1006,6 +1024,16 @@ namespace MMLib.Alvo.Descriptor
         Min = 3,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("max")]
         Max = 4,
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.SequencePeriod>))]
+    public enum SequencePeriod
+    {
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("year")]
+        Year = 0,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("month")]
+        Month = 1,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("day")]
+        Day = 2,
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.StorageMode>))]
     public enum StorageMode
@@ -1561,6 +1589,8 @@ namespace MMLib.Alvo.Management
         Narrowing = 7,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("enricher")]
         Enricher = 8,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("schedule")]
+        Schedule = 9,
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Management.AlvoExtensionStage>))]
     public enum AlvoExtensionStage
@@ -1575,6 +1605,8 @@ namespace MMLib.Alvo.Management
         InTransaction = 3,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("read")]
         Read = 4,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("scheduled")]
+        Scheduled = 5,
     }
     public sealed class DeliveryFixture : System.IEquatable<MMLib.Alvo.Management.DeliveryFixture>
     {
@@ -1751,6 +1783,7 @@ namespace MMLib.Alvo.Management
     {
         public ManagementExtension() { }
         public string? Access { get; init; }
+        public string? Cron { get; init; }
         public string? Description { get; init; }
         public bool Enabled { get; init; }
         public System.Collections.Generic.IReadOnlyList<string> Entities { get; init; }
@@ -1758,6 +1791,9 @@ namespace MMLib.Alvo.Management
         public string? HttpMethod { get; init; }
         public required string Id { get; init; }
         public required MMLib.Alvo.Management.AlvoExtensionKind Kind { get; init; }
+        public string? LastOutcome { get; init; }
+        public System.DateTimeOffset? LastRunAt { get; init; }
+        public System.DateTimeOffset? NextRunAt { get; init; }
         public System.Collections.Generic.IReadOnlyList<string> Operations { get; init; }
         public int Order { get; init; }
         public string? Ordering { get; init; }
@@ -1765,6 +1801,7 @@ namespace MMLib.Alvo.Management
         public string? Route { get; init; }
         public string? RunAs { get; init; }
         public required MMLib.Alvo.Management.AlvoExtensionStage Stage { get; init; }
+        public string? TimeZone { get; init; }
         public System.TimeSpan? Timeout { get; init; }
         public bool TopLevelOnly { get; init; }
         public string? TypeName { get; init; }
@@ -1774,6 +1811,7 @@ namespace MMLib.Alvo.Management
     {
         public ManagementExtensionCatalog() { }
         public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementExtension> Items { get; init; }
+        public MMLib.Alvo.Management.ManagementTimerCounts? Timers { get; init; }
     }
     public sealed class ManagementExtensionNotFoundException : System.Exception
     {
@@ -1946,6 +1984,12 @@ namespace MMLib.Alvo.Management
         public ManagementSimulationException() { }
         public ManagementSimulationException(string message) { }
         public ManagementSimulationException(string message, System.Exception innerException) { }
+    }
+    public sealed class ManagementTimerCounts : System.IEquatable<MMLib.Alvo.Management.ManagementTimerCounts>
+    {
+        public ManagementTimerCounts() { }
+        public required int Due { get; init; }
+        public required int Pending { get; init; }
     }
     public sealed class ManagementWarnedBlock : System.IEquatable<MMLib.Alvo.Management.ManagementWarnedBlock>
     {
@@ -2155,13 +2199,17 @@ namespace MMLib.Alvo.Scheduling
         System.Threading.Tasks.Task<bool> CancelAsync(string key, MMLib.Alvo.TenantId? tenant = default, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task ScheduleAsync(string key, System.DateTimeOffset at, string eventType, System.Collections.Generic.IReadOnlyDictionary<string, object?>? data, MMLib.Alvo.TenantId? tenant = default, System.Threading.CancellationToken cancellationToken = default);
     }
+    public interface IAlvoTenantCatalog
+    {
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.TenantId>> ListTenantsAsync(System.Threading.CancellationToken cancellationToken = default);
+    }
     public interface ITimerStore
     {
         System.Threading.Tasks.Task<bool> AdvanceScheduleAsync(MMLib.Alvo.Scheduling.ScheduleAdvance advance, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task AppendRunAsync(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.AlvoFrameworkEnvelope> events, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> CancelAsync(string scope, string key, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> CancelAsync(string scope, string key, System.Guid generation, System.Threading.CancellationToken cancellationToken = default);
-        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.ClaimedSchedule>> ClaimSchedulesAsync(string claimant, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.ClaimedSchedule>> ClaimSchedulesAsync(string claimant, System.Collections.Generic.IReadOnlyList<string> ids, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.ClaimedTimer>> ClaimTimersAsync(int batchSize, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Scheduling.TimerCounts> CountTimersAsync(System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task EnsureAsync(System.Threading.CancellationToken cancellationToken = default);
@@ -2169,7 +2217,7 @@ namespace MMLib.Alvo.Scheduling
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.StoredSchedule>> SchedulesAsync(System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> StartMigrationAsync(string id, int revision, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.AlvoFrameworkEnvelope> events, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> StartedMigrationsAsync(System.Threading.CancellationToken cancellationToken = default);
-        System.Threading.Tasks.Task SyncSchedulesAsync(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.ScheduleDefinition> schedules, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task SyncSchedulesAsync(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.ScheduleDefinition> schedules, System.Collections.Generic.IReadOnlyList<string> retired, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Guid> UpsertAsync(MMLib.Alvo.Scheduling.TimerEntry timer, System.Threading.CancellationToken cancellationToken = default);
     }
     public sealed class ScheduleAdvance : System.IEquatable<MMLib.Alvo.Scheduling.ScheduleAdvance>
@@ -2255,6 +2303,12 @@ namespace MMLib.Alvo.Schema
         Physical = 0,
         Dynamic = 1,
     }
+    public sealed class ExclusionSchema : System.IEquatable<MMLib.Alvo.Schema.ExclusionSchema>
+    {
+        public ExclusionSchema(string From, string To) { }
+        public string From { get; init; }
+        public string To { get; init; }
+    }
     public static class FieldClrType
     {
         public static System.Type Of(MMLib.Alvo.Schema.FieldSchema field) { }
@@ -2281,6 +2335,7 @@ namespace MMLib.Alvo.Schema
         public bool Required { get; init; }
         public MMLib.Alvo.Schema.RollupSchema? Rollup { get; init; }
         public int? Scale { get; init; }
+        public MMLib.Alvo.Schema.SequenceSchema? Sequence { get; init; }
         public required MMLib.Alvo.Schema.FieldType Type { get; init; }
         public bool Unique { get; init; }
     }
@@ -2309,8 +2364,10 @@ namespace MMLib.Alvo.Schema
     public sealed class IndexSchema : System.IEquatable<MMLib.Alvo.Schema.IndexSchema>
     {
         public IndexSchema(System.Collections.Generic.IReadOnlyList<string> Fields, bool Unique) { }
+        public MMLib.Alvo.Schema.ExclusionSchema? Exclude { get; init; }
         public System.Collections.Generic.IReadOnlyList<string> Fields { get; init; }
         public bool Unique { get; init; }
+        public string? Where { get; init; }
     }
     public enum OnDelete
     {
@@ -2345,6 +2402,20 @@ namespace MMLib.Alvo.Schema
     {
         public SchemaModel(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.EntitySchema> Entities) { }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.EntitySchema> Entities { get; init; }
+    }
+    public enum SequenceResetPeriod
+    {
+        Year = 0,
+        Month = 1,
+        Day = 2,
+    }
+    public sealed class SequenceSchema : System.IEquatable<MMLib.Alvo.Schema.SequenceSchema>
+    {
+        public SequenceSchema() { }
+        public string? Format { get; init; }
+        public string? Per { get; init; }
+        public MMLib.Alvo.Schema.SequenceResetPeriod? Period { get; init; }
+        public long Start { get; init; }
     }
     public enum TenancyMode
     {

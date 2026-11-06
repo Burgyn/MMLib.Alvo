@@ -1,0 +1,21 @@
+﻿-- create
+CREATE INDEX IF NOT EXISTS "ix_bookings_a41ba36d" ON "bookings" ("tenant_id", "room", "starts_at")
+;
+CREATE TRIGGER IF NOT EXISTS "xc_bookings_6423bd5f_i" AFTER INSERT ON "bookings"
+BEGIN
+    SELECT RAISE(ABORT, 'alvo_exclusion:xc_bookings_6423bd5f')
+    WHERE EXISTS (SELECT 1 FROM (SELECT * FROM "bookings" WHERE COALESCE("status" <> 'cancelled', 0)) AS "n" JOIN (SELECT * FROM "bookings" WHERE COALESCE("status" <> 'cancelled', 0)) AS "o" ON "o"."tenant_id" = "n"."tenant_id" AND "o"."room" = "n"."room" AND "o"."id" <> "n"."id" AND (CAST(round(unixepoch("o"."starts_at", 'subsec') * 1000) AS INTEGER) * 1000) < (CAST(round(unixepoch("o"."ends_at", 'subsec') * 1000) AS INTEGER) * 1000) AND (CAST(round(unixepoch("n"."starts_at", 'subsec') * 1000) AS INTEGER) * 1000) < (CAST(round(unixepoch("n"."ends_at", 'subsec') * 1000) AS INTEGER) * 1000) AND (CAST(round(unixepoch("o"."starts_at", 'subsec') * 1000) AS INTEGER) * 1000) < (CAST(round(unixepoch("n"."ends_at", 'subsec') * 1000) AS INTEGER) * 1000) AND (CAST(round(unixepoch("n"."starts_at", 'subsec') * 1000) AS INTEGER) * 1000) < (CAST(round(unixepoch("o"."ends_at", 'subsec') * 1000) AS INTEGER) * 1000) WHERE "n"."id" = NEW."id");
+END
+;
+CREATE TRIGGER IF NOT EXISTS "xc_bookings_6423bd5f_u" AFTER UPDATE ON "bookings"
+BEGIN
+    SELECT RAISE(ABORT, 'alvo_exclusion:xc_bookings_6423bd5f')
+    WHERE EXISTS (SELECT 1 FROM (SELECT * FROM "bookings" WHERE COALESCE("status" <> 'cancelled', 0)) AS "n" JOIN (SELECT * FROM "bookings" WHERE COALESCE("status" <> 'cancelled', 0)) AS "o" ON "o"."tenant_id" = "n"."tenant_id" AND "o"."room" = "n"."room" AND "o"."id" <> "n"."id" AND (CAST(round(unixepoch("o"."starts_at", 'subsec') * 1000) AS INTEGER) * 1000) < (CAST(round(unixepoch("o"."ends_at", 'subsec') * 1000) AS INTEGER) * 1000) AND (CAST(round(unixepoch("n"."starts_at", 'subsec') * 1000) AS INTEGER) * 1000) < (CAST(round(unixepoch("n"."ends_at", 'subsec') * 1000) AS INTEGER) * 1000) AND (CAST(round(unixepoch("o"."starts_at", 'subsec') * 1000) AS INTEGER) * 1000) < (CAST(round(unixepoch("n"."ends_at", 'subsec') * 1000) AS INTEGER) * 1000) AND (CAST(round(unixepoch("n"."starts_at", 'subsec') * 1000) AS INTEGER) * 1000) < (CAST(round(unixepoch("o"."ends_at", 'subsec') * 1000) AS INTEGER) * 1000) WHERE "n"."id" = NEW."id");
+END
+-- drop
+DROP TRIGGER IF EXISTS "xc_bookings_6423bd5f_i"
+;
+DROP TRIGGER IF EXISTS "xc_bookings_6423bd5f_u"
+;
+DROP INDEX IF EXISTS "ix_bookings_a41ba36d"
+-- survives a table rebuild: False

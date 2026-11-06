@@ -22,6 +22,7 @@ public sealed class VirtualFieldCheckTests
     [InlineData("validation", "\"validation\": \"size(value) > 1\"")]
     [InlineData("renamedFrom", "\"renamedFrom\": \"label\"")]
     [InlineData("entity", "\"type\": \"ref\", \"entity\": \"comments\"")]
+    [InlineData("sequence", "\"type\": \"integer\", \"sequence\": {}")]
     public void A_virtual_field_combined_with_a_storage_key_is_refused_at_its_virtual_pointer(string key, string json)
     {
         var display = json.Contains("\"type\"", StringComparison.Ordinal)
@@ -42,6 +43,16 @@ public sealed class VirtualFieldCheckTests
 
         error.Path.ShouldBe("/entities/notes/indexes/0/fields");
         error.Message.ShouldBe($"Field 'notes.display' is virtual: {NoColumnTail}");
+    }
+
+    [Theory]
+    [InlineData("from", "{\"from\": \"display\", \"to\": \"title\"}")]
+    [InlineData("to", "{\"from\": \"title\", \"to\": \"display\"}")]
+    public void A_virtual_field_as_an_exclusion_s_range_end_is_refused_at_that_end(string end, string exclude)
+    {
+        var error = VirtualErrors(Notes(Virtual, indexes: $"[{{\"fields\": [\"title\"], \"exclude\": {exclude}}}]")).ShouldHaveSingleItem();
+
+        error.Path.ShouldBe($"/entities/notes/indexes/0/exclude/{end}");
     }
 
     [Fact]

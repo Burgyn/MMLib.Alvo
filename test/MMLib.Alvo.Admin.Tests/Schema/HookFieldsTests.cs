@@ -37,6 +37,12 @@ public class HookFieldsTests
     public void A_computed_or_rollup_field_is_not_writable()
         => HookFields.Writable(Working, "orders").ShouldBe(["status", "price", "quantity"]);
 
+    [Fact]
+    public void A_sequence_field_is_not_writable()
+        => HookFields.Writable(
+                """{"entities":{"orders":{"fields":{"number":{"type":"integer","sequence":{}},"price":{"type":"decimal"}}}}}""", "orders")
+            .ShouldBe(["price"]);
+
     [Theory]
     [InlineData("missing")]
     [InlineData("")]

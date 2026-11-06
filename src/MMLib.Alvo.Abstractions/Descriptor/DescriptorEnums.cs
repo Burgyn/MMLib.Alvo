@@ -127,6 +127,23 @@ public enum RollupOp
     Max,
 }
 
+/// <summary>The UTC calendar period after which a sequence restarts its count (schema <c>field.sequence.period</c>).</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<SequencePeriod>))]
+public enum SequencePeriod
+{
+    /// <summary>Restart every UTC calendar year (<c>year</c>).</summary>
+    [JsonStringEnumMemberName("year")]
+    Year,
+
+    /// <summary>Restart every UTC calendar month (<c>month</c>).</summary>
+    [JsonStringEnumMemberName("month")]
+    Month,
+
+    /// <summary>Restart every UTC calendar day (<c>day</c>).</summary>
+    [JsonStringEnumMemberName("day")]
+    Day,
+}
+
 /// <summary>An enabled authentication identity provider (schema <c>auth.providers</c>).</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<AuthProvider>))]
 public enum AuthProvider
