@@ -101,13 +101,13 @@ public sealed class ReadExtensionRegistrationTests
     }
 
     [Fact]
-    public void A_class_narrowing_is_built_from_the_read_s_services_and_disposed_after_the_call()
+    public async Task A_class_narrowing_is_built_from_the_read_s_services_and_disposed_after_the_call()
     {
         var narrowing = Registry(alvo => alvo.Entity("tickets", t => t.Narrow<DisposableNarrowing>("disposable"))).ReadExtensions.ShouldHaveSingleItem();
         using var services = new ServiceCollection().BuildServiceProvider();
         var before = DisposableNarrowing.Disposed;
 
-        var filter = narrowing.Invoker.Narrow!(services, new QueryNarrowing(AlvoContext.Anonymous, "tickets", MMLib.Alvo.Rules.DataOperation.List));
+        var filter = await narrowing.Invoker.Narrow!(services, new QueryNarrowing(AlvoContext.Anonymous, "tickets", MMLib.Alvo.Rules.DataOperation.List));
 
         filter.ShouldBe(new AlvoComparison("title", AlvoFilterOperator.Eq, "tickets"));
         DisposableNarrowing.Disposed.ShouldBe(before + 1);

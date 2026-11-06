@@ -123,7 +123,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         _policy = policy;
         _evaluator = evaluator;
         _hooks = hooks;
-        _statements = new ReadStatementComposer(predicates, fields, dialect);
+        _statements = new ReadStatementComposer(predicates, fields, dialect, reads is null ? null : reads.Refused);
         _dialect = dialect;
         _rollups = new RollupRecompute(dialect, fields, compiler, predicates);
         _contexts = contexts;
@@ -204,7 +204,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         var entity = Entity(db, query.Entity);
         QueryFieldGuard.EnsureAvailable(QueryFields(query), entity, decision.HiddenFields);
 
-        var narrowing = NarrowingOf(query.Entity, DataOperation.List, context);
+        var narrowing = await NarrowingOfAsync(query.Entity, DataOperation.List, context, cancellationToken);
         var anchor = await AnchorAsync(db, entity, decision, context, query, narrowing, cancellationToken);
         var options = ReadOptions(query, anchor, entity) with { Narrowing = narrowing };
         var total = await TotalCountAsync(db, entity, decision, context, query, options, cancellationToken);
@@ -312,7 +312,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         string entity, Guid id, AlvoContext context, WriteUnit? unit, CancellationToken cancellationToken)
     {
         var decision = Resolve(entity, DataOperation.Get, context);
-        var narrowing = NarrowingOf(entity, DataOperation.Get, context);
+        var narrowing = await NarrowingOfAsync(entity, DataOperation.Get, context, cancellationToken);
 
         using var db = ContextFor(unit);
         await using var joined = await ReadScopeAsync(db, unit, cancellationToken);
@@ -837,7 +837,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             return IdOnly(rowId);
         }
 
-        var narrowing = NarrowingOf(schema.Name, DataOperation.Get, context);
+        var narrowing = await NarrowingOfAsync(schema.Name, DataOperation.Get, context, cancellationToken);
         var row = await SingleAsync(db, schema, read, context, rowId, lockFor: null, cancellationToken, narrowing: narrowing);
         if (row is null)
         {
@@ -876,7 +876,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             return readable;
         }
 
-        var narrowing = NarrowingOf(schema.Name, DataOperation.Get, context);
+        var narrowing = await NarrowingOfAsync(schema.Name, DataOperation.Get, context, cancellationToken);
         await using var enrichment = rowIds.Count == 0 ? null : EnrichmentOf(schema.Name, operation, context);
         var shaper = new RowShaper(schema, read.HiddenFields, FrozenSet<string>.Empty, enrichment);
         foreach (var chunk in rowIds.Chunk(AlvoFilter.MaxInCandidates))

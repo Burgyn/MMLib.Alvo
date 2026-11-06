@@ -77,6 +77,9 @@ internal sealed class ReadsWorld : IAsyncDisposable
     internal IReadExtensionRunner RunnerOver(IServiceScopeFactory scopes) =>
         ActivatorUtilities.CreateInstance<ReadExtensionRunner>(_provider, scopes);
 
+    /// <summary>This world's own scope factory, counting the scopes a runner opens through it.</summary>
+    internal PassThroughScopes CountingScopes() => new(_provider.GetRequiredService<IServiceScopeFactory>());
+
     internal static ReadsWorld Start(Action<IAlvoBuilder> configure, PolicyCatalog? catalog = null, Action<IServiceCollection>? services = null)
     {
         var logs = new CapturingLogger();
@@ -99,4 +102,16 @@ internal sealed class ReadsWorld : IAsyncDisposable
     }
 
     public ValueTask DisposeAsync() => _provider.DisposeAsync();
+}
+
+/// <summary>A real scope factory that counts the scopes opened through it.</summary>
+internal sealed class PassThroughScopes(IServiceScopeFactory inner) : IServiceScopeFactory
+{
+    internal int Created { get; private set; }
+
+    public IServiceScope CreateScope()
+    {
+        Created++;
+        return inner.CreateScope();
+    }
 }

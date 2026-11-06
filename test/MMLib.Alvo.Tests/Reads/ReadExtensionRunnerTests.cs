@@ -8,11 +8,6 @@ using MMLib.Alvo.Tests.Data;
 
 namespace MMLib.Alvo.Tests.Reads;
 
-public sealed class CountingNarrowing : IQueryNarrowing
-{
-    public AlvoFilter? Narrow(QueryNarrowing query) => new AlvoComparison("region", AlvoFilterOperator.Eq, query.Operation.ToString());
-}
-
 /// <summary>
 /// The read runner, the fail-closed core of the narrowing: what it ANDs, whom it skips, and how every defect of host code
 /// fails the read with the extension's id and never its text.
@@ -30,7 +25,7 @@ public sealed class ReadExtensionRunnerTests
             .Entity("tickets", t => t.Narrow("elsewhere", (QueryNarrowing _) => _titled))
             .Entity("notes", n => n.Narrow("second", (QueryNarrowing _) => _titled)));
 
-        var narrowing = world.Runner.Narrowing("notes", DataOperation.List, ReadsWorld.Caller).ShouldNotBeNull();
+        var narrowing = (await world.Runner.NarrowingAsync("notes", DataOperation.List, ReadsWorld.Caller, Ct)).ShouldNotBeNull();
 
         narrowing.Filter.ShouldBeOfType<AlvoAnd>().Filters.ShouldBe([_north, _titled]);
         narrowing.ExtensionIds.ShouldBe(["first", "second"]);
@@ -42,7 +37,7 @@ public sealed class ReadExtensionRunnerTests
         QueryNarrowing? seen = null;
         await using var world = ReadsWorld.Start(alvo => alvo.Entity("notes", n => n.Narrow("only", (QueryNarrowing query) => { seen = query; return _north; })));
 
-        world.Runner.Narrowing("notes", DataOperation.Get, ReadsWorld.Caller).ShouldNotBeNull().Filter.ShouldBe(_north);
+        (await world.Runner.NarrowingAsync("notes", DataOperation.Get, ReadsWorld.Caller, Ct)).ShouldNotBeNull().Filter.ShouldBe(_north);
 
         (seen!.Entity, seen.Operation, seen.Caller).ShouldBe(("notes", DataOperation.Get, ReadsWorld.Caller));
     }
@@ -53,7 +48,7 @@ public sealed class ReadExtensionRunnerTests
         var asked = 0;
         await using var world = ReadsWorld.Start(alvo => alvo.Entity("notes", n => n.Narrow("counted", (QueryNarrowing _) => { asked++; return _north; })));
 
-        world.Runner.Narrowing("notes", DataOperation.List, AlvoContext.System(ReadsWorld.Caller.Tenant)).ShouldBeNull();
+        (await world.Runner.NarrowingAsync("notes", DataOperation.List, AlvoContext.System(ReadsWorld.Caller.Tenant), Ct)).ShouldBeNull();
         asked.ShouldBe(0);
     }
 
@@ -62,7 +57,7 @@ public sealed class ReadExtensionRunnerTests
     {
         await using var world = ReadsWorld.Start(alvo => alvo.Entity("notes", n => n.Narrow("notes-only", (QueryNarrowing _) => _north)));
 
-        world.Runner.Narrowing("tickets", DataOperation.List, ReadsWorld.Caller).ShouldBeNull();
+        (await world.Runner.NarrowingAsync("tickets", DataOperation.List, ReadsWorld.Caller, Ct)).ShouldBeNull();
     }
 
     [Fact]
@@ -72,7 +67,7 @@ public sealed class ReadExtensionRunnerTests
             .Narrow("nothing", (QueryNarrowing _) => null)
             .Narrow("something", (QueryNarrowing _) => _north)));
 
-        var narrowing = world.Runner.Narrowing("notes", DataOperation.List, ReadsWorld.Caller).ShouldNotBeNull();
+        var narrowing = (await world.Runner.NarrowingAsync("notes", DataOperation.List, ReadsWorld.Caller, Ct)).ShouldNotBeNull();
 
         narrowing.Filter.ShouldBe(_north);
         narrowing.ExtensionIds.ShouldBe(["nothing", "something"]);
@@ -83,7 +78,7 @@ public sealed class ReadExtensionRunnerTests
     {
         await using var world = ReadsWorld.Start(alvo => alvo.Entity("notes", n => n.Narrow("nothing", (QueryNarrowing _) => null)));
 
-        world.Runner.Narrowing("notes", DataOperation.List, ReadsWorld.Caller).ShouldBeNull();
+        (await world.Runner.NarrowingAsync("notes", DataOperation.List, ReadsWorld.Caller, Ct)).ShouldBeNull();
     }
 
     [Fact]
@@ -92,7 +87,7 @@ public sealed class ReadExtensionRunnerTests
         await using var world = ReadsWorld.Start(alvo => alvo.Entity("notes", n => n.Narrow(
             "broken", (QueryNarrowing _) => throw new InvalidOperationException("secret host detail"))));
 
-        var failure = Failure(world);
+        var failure = (await FailureAsync(world));
 
         (failure.Extension, failure.Reason, failure.Stage).ShouldBe(("broken", HookFailedException.Exception, HookFailureStage.Read));
         failure.Message.ShouldBe("The read extension 'broken' failed (exception), so the read answered nothing.");
@@ -105,7 +100,7 @@ public sealed class ReadExtensionRunnerTests
     {
         await using var world = ReadsWorld.Start(alvo => alvo.Entity<ReadNote>(n => n.Narrow("hashed", _ => note => note.Title.GetHashCode() == 3)));
 
-        Failure(world).Reason.ShouldBe(HookFailedException.Translation);
+        (await FailureAsync(world)).Reason.ShouldBe(HookFailedException.Translation);
     }
 
     [Fact]
@@ -114,9 +109,9 @@ public sealed class ReadExtensionRunnerTests
         var region = "north";
         await using var world = ReadsWorld.Start(alvo => alvo.Entity<ReadNote>(n => n.Narrow("by-region", _ => note => note.Region == region)));
 
-        world.Runner.Narrowing("notes", DataOperation.List, ReadsWorld.Caller)!.Filter.ShouldBe(_north);
+        (await world.Runner.NarrowingAsync("notes", DataOperation.List, ReadsWorld.Caller, Ct))!.Filter.ShouldBe(_north);
         region = "south";
-        world.Runner.Narrowing("notes", DataOperation.List, ReadsWorld.Caller)!.Filter.ShouldBe(new AlvoComparison("region", AlvoFilterOperator.Eq, "south"));
+        (await world.Runner.NarrowingAsync("notes", DataOperation.List, ReadsWorld.Caller, Ct))!.Filter.ShouldBe(new AlvoComparison("region", AlvoFilterOperator.Eq, "south"));
     }
 
     [Fact]
@@ -125,7 +120,7 @@ public sealed class ReadExtensionRunnerTests
         await using var world = ReadsWorld.Start(alvo => alvo.Entity("notes", n => n.Narrow(
             "typo", (QueryNarrowing _) => new AlvoComparison("regoin", AlvoFilterOperator.Eq, "north"))));
 
-        Failure(world).Reason.ShouldBe(HookFailedException.InvalidFilter);
+        (await FailureAsync(world)).Reason.ShouldBe(HookFailedException.InvalidFilter);
     }
 
     [Fact]
@@ -134,7 +129,7 @@ public sealed class ReadExtensionRunnerTests
         await using var world = ReadsWorld.Start(alvo => alvo.Entity("notes", n => n.Narrow(
             "by-display", (QueryNarrowing _) => new AlvoComparison("display", AlvoFilterOperator.Eq, "x"))));
 
-        Failure(world).Reason.ShouldBe(HookFailedException.InvalidFilter);
+        (await FailureAsync(world)).Reason.ShouldBe(HookFailedException.InvalidFilter);
     }
 
     [Fact]
@@ -143,7 +138,7 @@ public sealed class ReadExtensionRunnerTests
         var id = new AlvoComparison("id", AlvoFilterOperator.Eq, Guid.Empty);
         await using var world = ReadsWorld.Start(alvo => alvo.Entity("notes", n => n.Narrow("by-id", (QueryNarrowing _) => id)));
 
-        world.Runner.Narrowing("notes", DataOperation.Get, ReadsWorld.Caller)!.Filter.ShouldBe(id);
+        (await world.Runner.NarrowingAsync("notes", DataOperation.Get, ReadsWorld.Caller, Ct))!.Filter.ShouldBe(id);
     }
 
     [Fact]
@@ -157,7 +152,7 @@ public sealed class ReadExtensionRunnerTests
 
         await using var world = ReadsWorld.Start(alvo => alvo.Entity("notes", n => n.Narrow("deep", (QueryNarrowing _) => deep)));
 
-        Failure(world).Reason.ShouldBe(HookFailedException.InvalidFilter);
+        (await FailureAsync(world)).Reason.ShouldBe(HookFailedException.InvalidFilter);
     }
 
     [Fact]
@@ -168,7 +163,7 @@ public sealed class ReadExtensionRunnerTests
             """);
         await using var world = ReadsWorld.Start(alvo => alvo.Entity("notes", n => n.Narrow("orphan", (QueryNarrowing _) => _north)), withoutNotes);
 
-        Failure(world).Reason.ShouldBe(HookFailedException.Unbound);
+        (await FailureAsync(world)).Reason.ShouldBe(HookFailedException.Unbound);
     }
 
     [Fact]
@@ -178,10 +173,10 @@ public sealed class ReadExtensionRunnerTests
 
         using (AlvoFlow.EnterRulesOnlyRead())
         {
-            world.Runner.Narrowing("notes", DataOperation.Get, ReadsWorld.Caller).ShouldBeNull();
+            (await world.Runner.NarrowingAsync("notes", DataOperation.Get, ReadsWorld.Caller, Ct)).ShouldBeNull();
         }
 
-        world.Runner.Narrowing("notes", DataOperation.Get, ReadsWorld.Caller).ShouldNotBeNull("the scope ends with its disposal");
+        (await world.Runner.NarrowingAsync("notes", DataOperation.Get, ReadsWorld.Caller, Ct)).ShouldNotBeNull("the scope ends with its disposal");
     }
 
     [Fact]
@@ -190,18 +185,9 @@ public sealed class ReadExtensionRunnerTests
         var scopes = new CountingScopeFactory();
         await using var world = ReadsWorld.Start(alvo => alvo.Entity("notes", n => n.Narrow("north", (QueryNarrowing _) => _north)));
 
-        world.RunnerOver(scopes).Narrowing("notes", DataOperation.List, ReadsWorld.Caller).ShouldNotBeNull();
+        (await world.RunnerOver(scopes).NarrowingAsync("notes", DataOperation.List, ReadsWorld.Caller, Ct)).ShouldNotBeNull();
 
         scopes.Created.ShouldBe(0);
-    }
-
-    [Fact]
-    public async Task A_class_narrowing_is_built_in_one_scope_per_read()
-    {
-        await using var world = ReadsWorld.Start(alvo => alvo.Entity("notes", n => n.Narrow<CountingNarrowing>("by-class")));
-
-        world.Runner.Narrowing("notes", DataOperation.Get, ReadsWorld.Caller)!.Filter
-            .ShouldBe(new AlvoComparison("region", AlvoFilterOperator.Eq, "Get"));
     }
 
     [Fact]
@@ -210,8 +196,8 @@ public sealed class ReadExtensionRunnerTests
         var salary = new AlvoComparison("salary", AlvoFilterOperator.Lt, 1000L);
         await using var world = ReadsWorld.Start(alvo => alvo.Entity("notes", n => n.Narrow("by-salary", (QueryNarrowing _) => salary)));
 
-        world.Runner.Narrowing("notes", DataOperation.List, ReadsWorld.Caller).ShouldNotBeNull().Filter.ShouldBe(salary);
-        world.Runner.Narrowing("notes", DataOperation.Get, ReadsWorld.Caller);
+        (await world.Runner.NarrowingAsync("notes", DataOperation.List, ReadsWorld.Caller, Ct)).ShouldNotBeNull().Filter.ShouldBe(salary);
+        _ = await world.Runner.NarrowingAsync("notes", DataOperation.Get, ReadsWorld.Caller, Ct);
 
         world.Logs.Warnings.ShouldHaveSingleItem().ShouldContain("by-salary");
         world.Logs.Warnings[0].ShouldContain("salary");
@@ -226,13 +212,84 @@ public sealed class ReadExtensionRunnerTests
 
         using (AlvoFlow.EnterUnit(unit, AlvoProvenance.None))
         {
-            var failure = Failure(world);
+            var failure = (await FailureAsync(world));
             unit.Blamed.ShouldHaveSingleItem().ShouldBeSameAs(failure);
         }
     }
 
-    private static HookFailedException Failure(ReadsWorld world) =>
-        Should.Throw<HookFailedException>(() => world.Runner.Narrowing("notes", DataOperation.List, ReadsWorld.Caller));
+    [Fact]
+    public async Task A_class_narrowing_is_built_in_one_scope_per_read_and_the_scope_is_disposed()
+    {
+        await using var world = ReadsWorld.Start(
+            alvo => alvo.Entity("notes", n => n.Narrow<AsyncServiceNarrowing>("async-service")),
+            services: services => services.AddScoped<AsyncOnlyService>());
+        var scopes = world.CountingScopes();
+
+        var narrowing = await world.RunnerOver(scopes).NarrowingAsync("notes", DataOperation.Get, ReadsWorld.Caller, Ct);
+
+        narrowing.ShouldNotBeNull().Filter.ShouldBe(_north);
+        scopes.Created.ShouldBe(1);
+        AsyncServiceNarrowing.LastService.ShouldNotBeNull().Disposed.ShouldBeTrue(
+            "a scoped service that is only IAsyncDisposable is disposed with the read's scope, never refused by a synchronous Dispose");
+    }
+
+    [Fact]
+    public async Task A_class_narrowing_that_is_only_async_disposable_is_disposed_after_the_call()
+    {
+        await using var world = ReadsWorld.Start(alvo => alvo.Entity("notes", n => n.Narrow<AsyncDisposableNarrowing>("async-disposable")));
+        var before = AsyncDisposableNarrowing.Disposed;
+
+        (await world.Runner.NarrowingAsync("notes", DataOperation.List, ReadsWorld.Caller, Ct)).ShouldNotBeNull();
+
+        AsyncDisposableNarrowing.Disposed.ShouldBe(before + 1);
+    }
+
+    [Fact]
+    public async Task A_scope_whose_disposal_throws_fails_the_read_with_the_class_ids_and_blames_the_unit()
+    {
+        await using var world = ReadsWorld.Start(
+            alvo => alvo.Entity("notes", n => n
+                .Narrow("by-delegate", (QueryNarrowing _) => _north)
+                .Narrow<ThrowingDisposalNarrowing>("by-class")),
+            services: services => services.AddScoped<ThrowingDisposalService>());
+        var unit = new FakeFlowUnit();
+
+        using (AlvoFlow.EnterUnit(unit, AlvoProvenance.None))
+        {
+            var failure = await FailureAsync(world);
+
+            (failure.Reason, failure.Extensions.Single()).ShouldBe((HookFailedException.Exception, "by-class"));
+            unit.Blamed.ShouldHaveSingleItem().ShouldBeSameAs(failure);
+        }
+
+        world.Logs.Entries.ShouldContain(entry => entry.Level == LogLevel.Error && entry.Message.Contains("by-class", StringComparison.Ordinal));
+        world.Logs.Entries.ShouldAllBe(entry => !entry.Message.Contains("disposal secret", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_failure_the_driver_finds_is_logged_once_with_the_ids_and_blames_the_unit()
+    {
+        await using var world = ReadsWorld.Start(alvo => alvo.Entity("notes", n => n.Narrow("typed-wrong", (QueryNarrowing _) => _north)));
+        var unit = new FakeFlowUnit();
+
+        HookFailedException failure;
+        using (AlvoFlow.EnterUnit(unit, AlvoProvenance.None))
+        {
+            failure = world.Runner.Refused(["typed-wrong", "other"], HookFailedException.InvalidFilter, new ArgumentException("secret value 2020"));
+        }
+
+        (failure.Stage, failure.Reason).ShouldBe((HookFailureStage.Read, HookFailedException.InvalidFilter));
+        failure.Extensions.ShouldBe(["typed-wrong", "other"]);
+        unit.Blamed.ShouldHaveSingleItem().ShouldBeSameAs(failure);
+        var error = world.Logs.Entries.Where(entry => entry.Level == LogLevel.Error).ShouldHaveSingleItem();
+        error.Message.ShouldContain("typed-wrong");
+        error.Message.ShouldNotContain("secret value 2020");
+    }
+
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    private static Task<HookFailedException> FailureAsync(ReadsWorld world) =>
+        Should.ThrowAsync<HookFailedException>(() => world.Runner.NarrowingAsync("notes", DataOperation.List, ReadsWorld.Caller, Ct).AsTask());
 
     private sealed class CountingScopeFactory : IServiceScopeFactory
     {
@@ -243,5 +300,54 @@ public sealed class ReadExtensionRunnerTests
             Created++;
             throw new InvalidOperationException("a delegate narrowing takes no service");
         }
+    }
+}
+
+public sealed class AsyncOnlyService : IAsyncDisposable
+{
+    internal bool Disposed { get; private set; }
+
+    public ValueTask DisposeAsync()
+    {
+        Disposed = true;
+        return ValueTask.CompletedTask;
+    }
+}
+
+public sealed class AsyncServiceNarrowing(AsyncOnlyService service) : IQueryNarrowing
+{
+    internal static AsyncOnlyService? LastService { get; private set; }
+
+    public AlvoFilter? Narrow(QueryNarrowing query)
+    {
+        LastService = service;
+        return new AlvoComparison("region", AlvoFilterOperator.Eq, "north");
+    }
+}
+
+public sealed class AsyncDisposableNarrowing : IQueryNarrowing, IAsyncDisposable
+{
+    internal static int Disposed { get; private set; }
+
+    public AlvoFilter? Narrow(QueryNarrowing query) => new AlvoComparison("region", AlvoFilterOperator.Eq, "north");
+
+    public ValueTask DisposeAsync()
+    {
+        Disposed++;
+        return ValueTask.CompletedTask;
+    }
+}
+
+public sealed class ThrowingDisposalService : IAsyncDisposable
+{
+    public ValueTask DisposeAsync() => throw new InvalidOperationException("disposal secret");
+}
+
+public sealed class ThrowingDisposalNarrowing(ThrowingDisposalService service) : IQueryNarrowing
+{
+    public AlvoFilter? Narrow(QueryNarrowing query)
+    {
+        _ = service;
+        return null;
     }
 }

@@ -24,7 +24,8 @@ internal sealed class ReadExtensionRunner(
 {
     private readonly ConcurrentDictionary<(string Extension, string Field), bool> _warned = new();
 
-    public ReadNarrowing? Narrowing(string entity, DataOperation operation, AlvoContext context)
+    public async ValueTask<ReadNarrowing?> NarrowingAsync(
+        string entity, DataOperation operation, AlvoContext context, CancellationToken cancellationToken)
     {
         var registered = Narrowings(entity);
         if (registered.Count == 0 || context.ActorKind == AlvoActorKind.System || AlvoFlow.IsRulesOnlyRead)
@@ -32,15 +33,37 @@ internal sealed class ReadExtensionRunner(
             return null;
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         var query = new QueryNarrowing(context, entity, operation);
-        var scope = registered.Any(read => read.Invoker.IsClass) ? scopes.CreateScope() : null;
+        if (!registered.Any(read => read.Invoker.IsClass))
+        {
+            return Combined(registered, await NarrowedAsync(registered, entity, EmptyServices.Instance, query).ConfigureAwait(false));
+        }
+
+        var scope = scopes.CreateAsyncScope();
         try
         {
-            return Combined(registered, Narrowed(registered, entity, scope?.ServiceProvider ?? EmptyServices.Instance, query));
+            return Combined(registered, await NarrowedAsync(registered, entity, scope.ServiceProvider, query).ConfigureAwait(false));
         }
         finally
         {
-            scope?.Dispose();
+            await DisposeAsync(scope, registered).ConfigureAwait(false);
+        }
+    }
+
+    public HookFailedException Refused(IReadOnlyList<string> extensions, string reason, Exception cause) =>
+        Failed(extensions, reason, cause);
+
+    /// <summary>A scope whose disposal throws is the class narrowings' failure, logged and blamed like any other.</summary>
+    private async ValueTask DisposeAsync(AsyncServiceScope scope, List<ReadExtensionRegistration> registered)
+    {
+        try
+        {
+            await scope.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception cause) when (cause is not OperationCanceledException)
+        {
+            throw Failed([.. registered.Where(read => read.Invoker.IsClass).Select(read => read.Id)], HookFailedException.Exception, cause);
         }
     }
 
@@ -78,11 +101,20 @@ internal sealed class ReadExtensionRunner(
             ? null
             : new ReadNarrowing(terms.Count == 1 ? terms[0] : new AlvoAnd(terms), [.. registered.Select(read => read.Id)]);
 
-    private List<AlvoFilter> Narrowed(
+    private async Task<List<AlvoFilter>> NarrowedAsync(
         List<ReadExtensionRegistration> registered, string entity, IServiceProvider services, QueryNarrowing query)
     {
         var (schema, policy, bindings) = Bound(entity);
-        return [.. registered.Select(narrowing => Narrowed(narrowing, bindings, schema, policy, services, query)).OfType<AlvoFilter>()];
+        var terms = new List<AlvoFilter>(registered.Count);
+        foreach (var narrowing in registered)
+        {
+            if (await NarrowedAsync(narrowing, bindings, schema, policy, services, query).ConfigureAwait(false) is { } term)
+            {
+                terms.Add(term);
+            }
+        }
+
+        return terms;
     }
 
     private (EntitySchema? Schema, EntityPolicy? Policy, ExtensionBindings Bindings) Bound(string entity)
@@ -96,7 +128,7 @@ internal sealed class ReadExtensionRunner(
         return (schema, catalog.TryGetEntity(entity, out var policy) ? policy : null, binder.For(catalog));
     }
 
-    private AlvoFilter? Narrowed(
+    private async Task<AlvoFilter?> NarrowedAsync(
         ReadExtensionRegistration narrowing, ExtensionBindings bindings, EntitySchema? schema, EntityPolicy? policy,
         IServiceProvider services, QueryNarrowing query)
     {
@@ -105,15 +137,15 @@ internal sealed class ReadExtensionRunner(
             throw Failed(narrowing.Id, HookFailedException.Unbound, cause: null);
         }
 
-        var filter = Invoked(narrowing, services, query);
+        var filter = await InvokedAsync(narrowing, services, query).ConfigureAwait(false);
         return filter is null ? null : Checked(narrowing.Id, filter, schema, policy);
     }
 
-    private AlvoFilter? Invoked(ReadExtensionRegistration narrowing, IServiceProvider services, QueryNarrowing query)
+    private async Task<AlvoFilter?> InvokedAsync(ReadExtensionRegistration narrowing, IServiceProvider services, QueryNarrowing query)
     {
         try
         {
-            return narrowing.Invoker.Narrow!(services, query);
+            return await narrowing.Invoker.Narrow!(services, query).ConfigureAwait(false);
         }
         catch (Exception cause) when (cause is not OperationCanceledException)
         {
@@ -158,5 +190,8 @@ internal sealed class ReadExtensionRunner(
         }
     }
 
-    private HookFailedException Failed(string id, string reason, Exception? cause) => ReadFailures.Failed(logger, id, reason, cause);
+    private HookFailedException Failed(string id, string reason, Exception? cause) => Failed([id], reason, cause);
+
+    private HookFailedException Failed(IReadOnlyList<string> ids, string reason, Exception? cause) =>
+        ReadFailures.Failed(logger, ids, reason, cause);
 }

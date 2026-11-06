@@ -40,7 +40,7 @@ public abstract class ReadExtensionFacts
 
     protected static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    public static TheoryData<string> WideningAttempts => ["everyone", "the-other-owner", "or-true"];
+    public static TheoryData<string> WideningAttempts => ["everyone", "the-other-owner", "the-other-tenant", "or-true"];
 
     [Fact]
     public async Task A_narrowing_is_anded_into_the_list_get_and_count_statements_and_changes_the_count()
@@ -68,9 +68,11 @@ public abstract class ReadExtensionFacts
     {
         var database = await DatabaseAsync();
         var other = Clerk();
-        await using var alvo = await StartAsync(database, alvo => alvo.Entity(Notes, n => n.Narrow(attempt, (QueryNarrowing _) => Widening(attempt, other))));
+        var stranger = AlvoTestHost.Caller("clerk") with { Tenant = new TenantId(Guid.NewGuid()) };
+        await using var alvo = await StartAsync(database, alvo => alvo.Entity(Notes, n => n.Narrow(attempt, (QueryNarrowing _) => Widening(attempt, other, stranger))));
         var clerk = Clerk();
         await CreateAsync(alvo, other, "theirs", "north");
+        await CreateAsync(alvo, stranger, "foreign", "north");
         using var capture = new SqlCapture(database.Marker);
 
         var page = await alvo.Data.QueryAsync(new AlvoQuery { Entity = Notes, IncludeTotalCount = true }, clerk, Ct);
@@ -161,6 +163,37 @@ public abstract class ReadExtensionFacts
 
         updated.Values.Keys.ShouldBe([AlvoManagedColumns.Id], "a narrowed-out echo answers the id alone, as a get-excluded one does");
         (await alvo.Data.QueryAsync(new AlvoQuery { Entity = Notes }, AlvoContext.System(owner.Tenant), Ct)).Items.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_batch_echo_answers_a_narrowed_out_row_by_its_id_alone()
+    {
+        await using var alvo = await StartAsync(await DatabaseAsync(), alvo => alvo.Entity(Notes, n => n.Narrow(
+            "north-only", (QueryNarrowing _) => new AlvoComparison("region", AlvoFilterOperator.Eq, "north"))));
+        var clerk = Clerk();
+
+        var batch = await alvo.Data.CreateManyAsync(Notes, [NoteValues(clerk, "a", "north"), NoteValues(clerk, "b", "south")], clerk, cancellationToken: Ct);
+
+        batch.Rows[0]["title"].ShouldBe("a");
+        batch.Rows[1].Values.Keys.ShouldBe([AlvoManagedColumns.Id], "the batch echo is read back under the narrowing");
+    }
+
+    [Fact]
+    public async Task An_idempotent_replay_is_read_back_under_the_narrowing()
+    {
+        var region = new RegionSwitch("north");
+        await using var alvo = await StartAsync(await DatabaseAsync(), alvo => alvo.Entity(Notes, n => n.Narrow(
+            "switched", (QueryNarrowing _) => new AlvoComparison("region", AlvoFilterOperator.Eq, region.Value))));
+        var clerk = Clerk();
+        var key = new AlvoIdempotency("note-1", "fingerprint-1");
+
+        var first = await alvo.Data.CreateAsync(Notes, NoteValues(clerk, "a", "north"), clerk, key, Ct);
+        region.Value = "south";
+        var replayed = await alvo.Data.CreateAsync(Notes, NoteValues(clerk, "a", "north"), clerk, key, Ct);
+
+        first["title"].ShouldBe("a");
+        replayed[AlvoManagedColumns.Id].ShouldBe(first[AlvoManagedColumns.Id]);
+        replayed.Values.Keys.ShouldBe([AlvoManagedColumns.Id], "a replay's echo is read back under the narrowing of the replay");
     }
 
     [Fact]
@@ -528,8 +561,9 @@ public abstract class ReadExtensionFacts
     private static void NowhereOnly(IAlvoBuilder alvo) => alvo.Entity(Notes, n => n.Narrow(
         "nowhere", (QueryNarrowing _) => new AlvoComparison("region", AlvoFilterOperator.Eq, "nowhere")));
 
-    private static AlvoFilter Widening(string attempt, AlvoContext other) => attempt switch
+    private static AlvoFilter Widening(string attempt, AlvoContext other, AlvoContext stranger) => attempt switch
     {
+        "the-other-tenant" => new AlvoComparison(AlvoManagedColumns.TenantId, AlvoFilterOperator.Eq, stranger.Tenant!.Value.Value),
         "everyone" => new AlvoComparison("id", AlvoFilterOperator.Neq, Guid.Empty),
         "the-other-owner" => new AlvoComparison("owner_id", AlvoFilterOperator.Eq, other.User.Value),
         _ => new AlvoOr([new AlvoComparison("region", AlvoFilterOperator.Eq, "x"), new AlvoNot(new AlvoComparison("region", AlvoFilterOperator.Eq, "x"))]),

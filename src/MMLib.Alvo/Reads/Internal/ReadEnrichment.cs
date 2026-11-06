@@ -54,6 +54,19 @@ internal sealed class ReadEnrichment : IReadEnrichment
 
     public async ValueTask DisposeAsync()
     {
+        try
+        {
+            await DisposeClassesAsync().ConfigureAwait(false);
+        }
+        catch (Exception cause) when (cause is not OperationCanceledException)
+        {
+            throw ReadFailures.Failed(_logger, [.. _enrichers.Where(read => read.Invoker.IsClass).Select(read => read.Id)], HookFailedException.Exception, cause);
+        }
+    }
+
+    /// <summary>Every instance Alvo built, then the read's scope: a disposal that throws is the class enrichers' failure, as a narrowing's is.</summary>
+    private async ValueTask DisposeClassesAsync()
+    {
         foreach (var owned in _calls.Select(call => call?.Owned).OfType<object>())
         {
             await DisposeOwnedAsync(owned).ConfigureAwait(false);

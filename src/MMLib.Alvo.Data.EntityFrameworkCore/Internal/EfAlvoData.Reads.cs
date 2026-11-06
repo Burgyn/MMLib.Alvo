@@ -11,8 +11,9 @@ internal sealed partial class EfAlvoData
     /// replay's — or <see langword="null"/>. Never asked for a write's target rows, its pre-image or an unmasked read: writes
     /// are not narrowed.
     /// </summary>
-    private ReadNarrowing? NarrowingOf(string entity, DataOperation operation, AlvoContext context) =>
-        _reads?.Narrowing(entity, operation, context);
+    private ValueTask<ReadNarrowing?> NarrowingOfAsync(
+        string entity, DataOperation operation, AlvoContext context, CancellationToken cancellationToken) =>
+        _reads?.NarrowingAsync(entity, operation, context, cancellationToken) ?? ValueTask.FromResult<ReadNarrowing?>(null);
 
     /// <summary>
     /// The enrichment of a caller-facing read — a page, a get, a write's echo or a replay's — or <see langword="null"/> when

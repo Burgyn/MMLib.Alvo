@@ -443,6 +443,28 @@ public class ReadStatementComposerTests
     }
 
     [Fact]
+    public void A_refused_narrowing_is_handed_to_the_core_to_log_and_its_answer_is_thrown()
+    {
+        using var services = Services();
+        (IReadOnlyList<string> Ids, string Reason, Exception Cause)? handed = null;
+        var answer = HookFailedException.OfRead(["bad"], HookFailedException.InvalidFilter);
+        var composer = new ReadStatementComposer(
+            services.GetRequiredService<IPredicateRenderer>(), new TestFieldSqlRenderer(), new TestSqlDialect(),
+            (ids, reason, cause) => { handed = (ids, reason, cause); return answer; });
+        var decision = SnapshotFixture.Decision(services, SnapshotFixture.VehicleWith(list: "owner_id == @user.id"), DataOperation.List);
+        var options = new ReadStatementComposer.ReadStatementOptions
+        {
+            Narrowing = new ReadNarrowing(new AlvoComparison("mileage", AlvoFilterOperator.Eq, "many"), ["bad"]),
+        };
+
+        Should.Throw<HookFailedException>(() => composer.ComposeCount(AlvoDataFixtures.Vehicle, decision, AlvoDataFixtures.Caller, options))
+            .ShouldBeSameAs(answer);
+        handed!.Value.Ids.ShouldBe(["bad"]);
+        handed.Value.Reason.ShouldBe(HookFailedException.InvalidFilter);
+        handed.Value.Cause.ShouldBeOfType<ArgumentException>();
+    }
+
+    [Fact]
     public void A_malformed_narrowing_is_the_extension_s_failure()
         => Should.Throw<HookFailedException>(() => Compose(new ReadStatementComposer.ReadStatementOptions
         {

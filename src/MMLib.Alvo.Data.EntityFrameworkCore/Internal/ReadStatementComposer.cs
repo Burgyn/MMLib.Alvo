@@ -37,8 +37,19 @@ internal sealed class ReadStatementComposer
     private readonly IPredicateRenderer _predicates;
     private readonly IFieldSqlRenderer _fields;
     private readonly IAlvoSqlDialect _dialect;
+    private readonly Func<IReadOnlyList<string>, string, Exception, HookFailedException> _narrowingRefused;
 
-    internal ReadStatementComposer(IPredicateRenderer predicates, IFieldSqlRenderer fields, IAlvoSqlDialect dialect)
+    /// <summary>Creates the composer over one engine's renderers.</summary>
+    /// <param name="predicates">The policy predicate renderer.</param>
+    /// <param name="fields">The driver's field/expression renderer.</param>
+    /// <param name="dialect">The engine's SQL dialect.</param>
+    /// <param name="narrowingRefused">
+    /// Turns a narrowing the renderer refuses into the extension's failure — the core's runner logs and blames it there, as it
+    /// does every failure it finds itself; without one, the failure is only blamed on the open unit.
+    /// </param>
+    internal ReadStatementComposer(
+        IPredicateRenderer predicates, IFieldSqlRenderer fields, IAlvoSqlDialect dialect,
+        Func<IReadOnlyList<string>, string, Exception, HookFailedException>? narrowingRefused = null)
     {
         ArgumentNullException.ThrowIfNull(predicates);
         ArgumentNullException.ThrowIfNull(fields);
@@ -46,6 +57,7 @@ internal sealed class ReadStatementComposer
         _predicates = predicates;
         _fields = fields;
         _dialect = dialect;
+        _narrowingRefused = narrowingRefused ?? UnloggedRefusal;
     }
 
     /// <summary>What one operation adds to the policy-filtered read.</summary>
@@ -390,10 +402,15 @@ internal sealed class ReadStatementComposer
         }
         catch (Exception refused) when (refused is ArgumentException or AlvoAuthorizationException)
         {
-            var failure = HookFailedException.OfRead(narrowing.ExtensionIds, HookFailedException.InvalidFilter);
-            AlvoFlow.Unit?.Blame(failure);
-            throw failure;
+            throw _narrowingRefused(narrowing.ExtensionIds, HookFailedException.InvalidFilter, refused);
         }
+    }
+
+    private static HookFailedException UnloggedRefusal(IReadOnlyList<string> extensions, string reason, Exception cause)
+    {
+        var failure = HookFailedException.OfRead(extensions, reason);
+        AlvoFlow.Unit?.Blame(failure);
+        return failure;
     }
 
     /// <summary>Converts every value the narrowing compares with a column as the column will, so a mismatch fails here.</summary>

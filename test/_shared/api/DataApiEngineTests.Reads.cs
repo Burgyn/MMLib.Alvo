@@ -197,7 +197,29 @@ public abstract partial class DataApiEngineTests
         return (await created.ReadJsonObjectAsync())["id"]!.GetValue<Guid>();
     }
 
+    [Fact]
+    public async Task A_failed_narrowing_answers_500_hook_failed_on_a_list_and_a_get()
+    {
+        await using var world = await StartNarrowedAsync((QueryNarrowing _) => throw new InvalidOperationException("host secret"));
+
+        using var list = await world.SendAsync(HttpMethod.Get, "/api/notes", _auditor);
+        using var get = await world.SendAsync(HttpMethod.Get, $"/api/notes/{Guid.NewGuid()}", _auditor);
+
+        foreach (var answer in new[] { list, get })
+        {
+            answer.StatusCode.ShouldBe(HttpStatusCode.InternalServerError, await answer.ReadTextAsync());
+            (await answer.ReadProblemTypeAsync()).ShouldBe("hook-failed");
+            var body = await answer.ReadJsonObjectAsync();
+            body["extensions"]!.AsArray().Select(node => node!.GetValue<string>()).ShouldBe(["north-only"]);
+            body["reason"]!.GetValue<string>().ShouldBe("exception");
+            (await answer.ReadTextAsync()).ShouldNotContain("host secret");
+        }
+    }
+
     private Task<AlvoApiWorld> StartReadsAsync(Action<AlvoEntityBuilder>? extensions = null) =>
+        StartNarrowedAsync((QueryNarrowing _) => new AlvoComparison("region", AlvoFilterOperator.Eq, "north"), extensions);
+
+    private Task<AlvoApiWorld> StartNarrowedAsync(Func<QueryNarrowing, AlvoFilter?> narrow, Action<AlvoEntityBuilder>? extensions = null) =>
         AlvoApiWorld.FromDescriptorAsync(
             "reads-desk.alvo.json",
             [_auditor, _noteClerk],
@@ -206,7 +228,7 @@ public abstract partial class DataApiEngineTests
                 MapAlvoProblemDetails: true,
                 ConfigureAlvo: alvo => alvo.Entity("notes", n =>
                 {
-                    n.Narrow("north-only", (QueryNarrowing _) => new AlvoComparison("region", AlvoFilterOperator.Eq, "north"));
+                    n.Narrow("north-only", narrow);
                     extensions?.Invoke(n);
                 })),
             Engine);

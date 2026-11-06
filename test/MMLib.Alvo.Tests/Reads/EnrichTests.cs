@@ -23,6 +23,11 @@ public sealed class SalariedNote
     public string? Display { get; init; }
 }
 
+public sealed class ThrowingDisposalEnricher(ThrowingDisposalService service) : IRecordEnricher<AlvoRecord>
+{
+    public void Enrich(Enrich<AlvoRecord> row) => _ = service;
+}
+
 public sealed class TitleEnricher : IRecordEnricher<AlvoRecord>
 {
     internal static int Built { get; set; }
@@ -260,6 +265,30 @@ public sealed class EnrichTests
         }
 
         TitleEnricher.Built.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_scope_whose_disposal_throws_fails_the_read_with_the_class_ids_and_blames_the_unit()
+    {
+        await using var world = ReadsWorld.Start(
+            alvo => alvo.Entity("notes", n => n
+                .Enrich("by-delegate", (Enrich<AlvoRecord> _) => { })
+                .Enrich<ThrowingDisposalEnricher>("by-class")),
+            services: services => services.AddScoped<ThrowingDisposalService>());
+        var unit = new FakeFlowUnit();
+
+        using (AlvoFlow.EnterUnit(unit, AlvoProvenance.None))
+        {
+            var enrichment = world.Runner.BeginEnrichment("notes", DataOperation.List, ReadsWorld.Caller).ShouldNotBeNull();
+            enrichment.Enrich(Row());
+
+            var failure = await Should.ThrowAsync<HookFailedException>(async () => await enrichment.DisposeAsync());
+
+            (failure.Reason, failure.Extensions.Single()).ShouldBe((HookFailedException.Exception, "by-class"));
+            unit.Blamed.ShouldHaveSingleItem().ShouldBeSameAs(failure);
+        }
+
+        world.Logs.Entries.ShouldAllBe(entry => !entry.Message.Contains("disposal secret", StringComparison.Ordinal));
     }
 
     private static async Task<HookFailedException> FailureAsync(ReadsWorld world)
