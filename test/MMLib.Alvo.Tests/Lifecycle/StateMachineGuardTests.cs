@@ -108,6 +108,14 @@ public sealed class StateMachineGuardTests
     public void A_delete_is_no_transition() =>
         Should.NotThrow(() => StateMachineGuard.Ensure(Machine(), DataOperation.Delete, Row("done"), Row("done"), _member));
 
+    [Fact]
+    public void A_state_that_is_not_a_string_is_refused_rather_than_read_as_no_state()
+    {
+        var row = new AlvoRecord(new Dictionary<string, object?> { ["status"] = 1L });
+
+        Should.Throw<InvalidOperationException>(() => StateMachineGuard.Ensure(Machine(), DataOperation.Update, row, row, AlvoContext.System(null)));
+    }
+
     private static void Update(
         CompiledStateMachine machine, string? from, string? to, AlvoContext caller, DateTimeOffset? startsAt = null, string note = "x")
     {

@@ -23,6 +23,8 @@ public sealed class StateMachineCheckTests
     [Theory]
     [InlineData("note", "is not an enum")]
     [InlineData("rating", "is computed")]
+    [InlineData("shadow", "is virtual")]
+    [InlineData("wild", "'*' among its values")]
     [InlineData("missing", "does not declare")]
     public void A_state_machine_over_a_field_that_is_not_a_stored_enum_is_refused(string field, string reason)
     {
@@ -113,7 +115,9 @@ public sealed class StateMachineCheckTests
     private static IReadOnlyList<DescriptorValidationError> Validate(string members, string storage = "physical") =>
         [.. new DescriptorValidator().Validate(Json(members, storage, string.Empty)).Errors.Where(error => error.Severity == DescriptorValidationSeverity.Error)];
 
-    private const string Computed = """, "rating": {"type": "enum", "values": ["draft", "confirmed", "cancelled"], "computed": "status"}""";
+    private const string Computed = """, "rating": {"type": "enum", "values": ["draft", "confirmed", "cancelled"], "computed": "status"},"""
+        + """ "shadow": {"type": "enum", "values": ["draft", "confirmed", "cancelled"], "virtual": true},"""
+        + """ "wild": {"type": "enum", "values": ["*", "draft"]}""";
 
     private static string Json(string members, string storage, string computed)
     {

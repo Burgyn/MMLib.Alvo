@@ -63,6 +63,15 @@ internal static class StateMachineCheck
         return findings.OfType<DescriptorValidationError>();
     }
 
+    /// <summary>The state field's literal <c>default</c> — the state a create that sends none stores — or <see langword="null"/>.</summary>
+    /// <param name="entity">The entity.</param>
+    /// <param name="field">The state field.</param>
+    internal static string? DefaultStateOf(EntityDescriptor entity, string field) =>
+        entity.Fields.TryGetValue(field, out var declared)
+        && declared.Default?.Literal is { ValueKind: System.Text.Json.JsonValueKind.String } literal
+            ? literal.GetString()
+            : null;
+
     private static DescriptorValidationError? FieldError(Declared declared)
     {
         var name = declared.Machine.Field;
@@ -74,6 +83,11 @@ internal static class StateMachineCheck
         if (field.Type != DescFieldType.Enum || field.Values is null)
         {
             return declared.FieldAt("is not an enum.");
+        }
+
+        if (field.Values.Contains(AnyState, StringComparer.Ordinal))
+        {
+            return declared.FieldAt($"has '{AnyState}' among its values, which a transition's 'from' reads as any state.");
         }
 
         return MaintainedError(declared, field) ?? HiddenError(declared, field);
@@ -156,8 +170,7 @@ internal static class StateMachineCheck
     {
         internal IReadOnlyList<string> Values => Entity.Fields[Machine.Field].Values!;
 
-        internal string? DefaultState =>
-            Entity.Fields[Machine.Field].Default?.Literal is { ValueKind: System.Text.Json.JsonValueKind.String } literal ? literal.GetString() : null;
+        internal string? DefaultState => DefaultStateOf(Entity, Machine.Field);
 
         internal DescriptorValidationError FieldAt(string reason) =>
             At("/field", $"guards '{Machine.Field}', which {reason}", $"Name a stored enum field of '{Name}' that every reader may see.");

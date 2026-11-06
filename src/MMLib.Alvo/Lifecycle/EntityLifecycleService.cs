@@ -51,6 +51,7 @@ internal sealed class EntityLifecycleService(CelFunctionBudgetPolicy budget, Alv
             throw new InvalidOperationException("A denied decision reached the lifecycle; the write path must refuse it first.");
         }
 
-        return decision.Lifecycle as EntityLifecycle ?? EntityLifecycle.None;
+        return decision.Lifecycle as EntityLifecycle
+            ?? throw new InvalidOperationException("An allowed decision reached the lifecycle without the compiled lifecycle the policy engine resolves with it; the machine cannot be judged, so the write is refused.");
     }
 }

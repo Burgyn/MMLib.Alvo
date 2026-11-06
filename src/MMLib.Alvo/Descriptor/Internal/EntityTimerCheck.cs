@@ -59,6 +59,16 @@ internal static class EntityTimerCheck
                 DescriptorValidationSeverity.Error);
     }
 
+    private static string ExampleEvent(string entity, string timer)
+    {
+        var name = timer.Replace('-', '_');
+        var own = $"{entity.Replace('-', '_')}.{name}";
+
+        return AlvoEventName.IsWellFormed(own) && !AlvoEventName.IsReservedNamespace(own.Split(AlvoEventName.Separator)[0])
+            ? own
+            : $"<your_namespace>.{name}";
+    }
+
     private static DescriptorValidationError? EventError(string entity, string timer, EntityTimer declared)
     {
         var type = EventOf(entity, timer, declared);
@@ -70,8 +80,8 @@ internal static class EntityTimerCheck
             declared.Event is null ? $"/entities/{entity}/timers/{timer}" : $"/entities/{entity}/timers/{timer}/event",
             $"Timer '{timer}' of '{entity}' fires '{type}', {reason}.",
             declared.Event is null
-                ? $"Declare 'event' with a name of your own, e.g. 'bookings.{timer.Replace('-', '_')}'."
-                : $"Name an event of your own, e.g. 'bookings.{timer.Replace('-', '_')}'.",
+                ? $"Declare 'event' with a name of your own, e.g. '{ExampleEvent(entity, timer)}'."
+                : $"Name an event of your own, e.g. '{ExampleEvent(entity, timer)}'.",
             DescriptorValidationSeverity.Error);
     }
 }

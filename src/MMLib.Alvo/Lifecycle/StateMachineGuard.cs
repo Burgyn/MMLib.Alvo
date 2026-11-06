@@ -33,7 +33,7 @@ internal static class StateMachineGuard
         var to = StateOf(candidate, machine.Field);
         if (operation == DataOperation.Create)
         {
-            EnsureInitial(machine, candidate.TryGetValue(machine.Field, out var sent) ? sent as string : machine.Default);
+            EnsureInitial(machine, candidate.TryGetValue(machine.Field, out _) ? to : machine.Default);
             return;
         }
 
@@ -60,7 +60,13 @@ internal static class StateMachineGuard
         }
     }
 
-    private static string? StateOf(AlvoRecord row, string field) => row.TryGetValue(field, out var value) ? value as string : null;
+    private static string? StateOf(AlvoRecord row, string field) => row.TryGetValue(field, out var value) ? value switch
+    {
+        null => null,
+        string state => state,
+        _ => throw new InvalidOperationException($"The state field '{field}' holds a {value.GetType().Name}, not an enum value; the move cannot be judged, so the write is refused."),
+    }
+        : null;
 
     private static List<CompiledTransition> Declared(CompiledStateMachine machine, string? from, string? to) =>
         [.. machine.Transitions.Where(transition => string.Equals(transition.To, to, StringComparison.Ordinal) && Leaves(transition, from))];

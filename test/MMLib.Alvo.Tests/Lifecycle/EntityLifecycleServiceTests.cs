@@ -49,6 +49,11 @@ public sealed class EntityLifecycleServiceTests
     }
 
     [Fact]
+    public void An_allowed_decision_carrying_no_compiled_lifecycle_is_refused_not_skipped() =>
+        Should.Throw<InvalidOperationException>(() => _service.EnsureTransition(
+            PolicyDecision.Allow(null, null, null, new HashSet<string>(), new HashSet<string>()), DataOperation.Update, Row("done"), Row("draft"), _caller));
+
+    [Fact]
     public void A_denied_decision_never_reaches_the_guard() =>
         Should.Throw<InvalidOperationException>(() => _service.EnsureTransition(
             PolicyDecision.Deny("no"), DataOperation.Update, Row("done"), Row("draft"), _caller));

@@ -44,15 +44,9 @@ internal static class LifecycleCompiler
         return new CompiledStateMachine(
             machine.Field,
             machine.Initial,
-            DefaultOf(descriptor, machine.Field),
+            StateMachineCheck.DefaultStateOf(descriptor, machine.Field),
             [.. machine.Transitions.Select(transition => CompileTransition(transition.Key, transition.Value, $"{path}/{transition.Key}", scope))]);
     }
-
-    private static string? DefaultOf(EntityDescriptor descriptor, string field) =>
-        descriptor.Fields.TryGetValue(field, out var declared)
-        && declared.Default?.Literal is { ValueKind: System.Text.Json.JsonValueKind.String } literal
-            ? literal.GetString()
-            : null;
 
     private static CompiledTransition CompileTransition(string name, StateTransition transition, string path, LifecycleScope scope) => new(
         name,

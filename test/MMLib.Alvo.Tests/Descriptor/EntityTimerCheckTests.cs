@@ -27,7 +27,13 @@ public sealed class EntityTimerCheckTests
         error.Message.ShouldContain("'entity.x'");
         error.Message.ShouldContain("reserved");
         error.FixSuggestion.ShouldNotBeNull().ShouldContain("Declare 'event'");
+        error.FixSuggestion.ShouldContain("'<your_namespace>.x'");
     }
+
+    [Fact]
+    public void The_fix_for_a_refused_event_suggests_the_entity_s_own_namespace() =>
+        Check("visits", "reminder", """{"at": "starts_at", "event": "alvo.reminder"}""").ShouldHaveSingleItem()
+            .FixSuggestion.ShouldNotBeNull().ShouldContain("'visits.reminder'");
 
     [Fact]
     public void An_event_in_the_alvo_namespace_is_refused()
