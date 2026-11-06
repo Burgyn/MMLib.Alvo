@@ -105,6 +105,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         TimeProvider time,
         AlvoOptions options,
         AlvoChainDepthLimit depthLimit,
+        IEntityLifecycle lifecycle,
         IRelationalWriteGate? writeGate = null,
         IWriteExtensionRunner? extensions = null,
         IServiceScopeFactory? scopes = null,
@@ -122,6 +123,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         ArgumentNullException.ThrowIfNull(time);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(depthLimit);
+        ArgumentNullException.ThrowIfNull(lifecycle);
         _policy = policy;
         _evaluator = evaluator;
         _hooks = hooks;
@@ -138,6 +140,8 @@ internal sealed partial class EfAlvoData : IAlvoData
         _commandTable = CommandLedgerTable.NameFor(options.SchemaPrefix);
         _operationsLog = DeliveryOperationsTable.LogNameFor(options.SchemaPrefix);
         _depthLimit = depthLimit;
+        _lifecycle = lifecycle;
+        _timerTable = TimerTable.NameFor(options.SchemaPrefix);
         _writeGate = writeGate ?? NoRelationalWriteGate.Instance;
         _extensions = extensions ?? NoWriteExtensions.Instance;
         _scopes = scopes;
@@ -421,15 +425,15 @@ internal sealed partial class EfAlvoData : IAlvoData
         Dictionary<string, object> candidate, DateTimeOffset now)
     {
         var patch = Hooks.Run(schema.Name, DataOperation.Create, Unmasked(candidate), previous: null, context, ExpressionInstant(now));
-        if (patch.Count == 0)
+        var declared = patch.Count == 0 ? candidate : Patched(db.Rows(schema.Name).EntityType, candidate, patch);
+        if (patch.Count > 0)
         {
-            return candidate;
+            EnsureWriteAllowed(decision, Unmasked(declared), previous: null, context);
         }
 
-        var patched = Patched(db.Rows(schema.Name).EntityType, candidate, patch);
-        EnsureWriteAllowed(decision, Unmasked(patched), previous: null, context);
+        EnsureTransition(decision, DataOperation.Create, Unmasked(declared), previous: null, context);
 
-        return patched;
+        return declared;
     }
 
     /// <summary>
@@ -2119,9 +2123,10 @@ internal sealed partial class EfAlvoData : IAlvoData
         AlvoPrecondition.EnsureMatches(precondition, StoredVersion(schema, stored));
 
         var preImage = Unmasked(stored);
-        var vetted = RunBeforeUpdate(schema, context, preImage, values, now);
+        var vetted = RunBeforeUpdate(schema, decision, context, preImage, values, now);
         vetted = await HostBeforeUpdateAsync(schema, decision, context, operation, preImage, vetted, now, cancellationToken);
         EnsureWriteAllowed(decision, Merge(preImage, vetted), preImage, context);
+        EnsureTransition(decision, DataOperation.Update, Merge(preImage, vetted), preImage, context);
 
         if (await AffectedAsync(db, schema, decision, context, preImage, vetted, cancellationToken) == 0)
         {
@@ -2149,23 +2154,15 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// a real <c>SET column = NULL</c>, which is what an author asking for null on an update means.
     /// </remarks>
     private IReadOnlyDictionary<string, object?> RunBeforeUpdate(
-        EntitySchema schema, AlvoContext context, AlvoRecord preImage,
+        EntitySchema schema, PolicyDecision decision, AlvoContext context, AlvoRecord preImage,
         IReadOnlyDictionary<string, object?> values, DateTimeOffset now)
     {
         var patch = Hooks.Run(
             schema.Name, DataOperation.Update, Merge(preImage, values), preImage, context, ExpressionInstant(now));
-        if (patch.Count == 0)
-        {
-            return values;
-        }
+        var declared = patch.Count == 0 ? values : Overlaid(values, patch);
+        EnsureTransition(decision, DataOperation.Update, Merge(preImage, declared), preImage, context);
 
-        var patched = new Dictionary<string, object?>(values, StringComparer.Ordinal);
-        foreach (var (field, value) in patch)
-        {
-            patched[field] = value;
-        }
-
-        return patched;
+        return declared;
     }
 
     /// <summary>
@@ -2963,16 +2960,15 @@ internal sealed partial class EfAlvoData : IAlvoData
             return (null, Forbidden(index, refusedByHook.Message));
         }
 
-        if (patch.Count == 0)
+        var declared = patch.Count == 0 ? candidate : Patched(db.Rows(schema.Name).EntityType, candidate, patch);
+        if (patch.Count > 0 && WriteRefusal(decision, Unmasked(declared), previous: null, context) is { } refused)
         {
-            return (candidate, null);
+            return (null, Forbidden(index, refused));
         }
 
-        var patched = Patched(db.Rows(schema.Name).EntityType, candidate, patch);
-
-        return WriteRefusal(decision, Unmasked(patched), previous: null, context) is { } refused
-            ? (null, Forbidden(index, refused))
-            : (patched, null);
+        return TransitionRefusal(decision, DataOperation.Create, Unmasked(declared), previous: null, context, index) is { } moved
+            ? (null, moved)
+            : (declared, null);
     }
 
     /// <summary>A batch update: every row's locked pre-image judged, then every approved row written.</summary>
@@ -3044,11 +3040,16 @@ internal sealed partial class EfAlvoData : IAlvoData
             try
             {
                 vetted = RunBeforeUpdate(
-                    schema, context, preImage, Stamped(schema, patch.Values, context, now, isUpdate: true), now);
+                    schema, decision, context, preImage, Stamped(schema, patch.Values, context, now, isUpdate: true), now);
             }
             catch (AlvoAuthorizationException refusedByHook)
             {
                 refusals.Add(Forbidden(index, refusedByHook.Message));
+                continue;
+            }
+            catch (AlvoConstraintViolationException refused) when (refused.Kind == AlvoConstraintKind.Transition)
+            {
+                refusals.Add(Transitioned(index, refused));
                 continue;
             }
 
@@ -3064,6 +3065,12 @@ internal sealed partial class EfAlvoData : IAlvoData
             if (WriteRefusal(decision, Merge(preImage, vetted), preImage, context) is { } rejected)
             {
                 refusals.Add(Forbidden(index, rejected));
+                continue;
+            }
+
+            if (TransitionRefusal(decision, DataOperation.Update, Merge(preImage, vetted), preImage, context, index) is { } moved)
+            {
+                refusals.Add(moved);
                 continue;
             }
 

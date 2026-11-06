@@ -74,6 +74,7 @@ internal sealed partial class EfAlvoData
         EnsureHookMayWrite(patch, decision);
         var patched = Patched(db.Rows(schema.Name).EntityType, candidate, patch);
         EnsureWriteAllowed(decision, Unmasked(patched), previous: null, context);
+        EnsureTransition(decision, DataOperation.Create, Unmasked(patched), previous: null, context);
 
         return patched;
     }
@@ -111,7 +112,9 @@ internal sealed partial class EfAlvoData
 
         var patched = Patched(db.Rows(schema.Name).EntityType, candidate, patch);
 
-        return WriteRefusal(decision, Unmasked(patched), previous: null, context) is { } refusal ? (null, Forbidden(index, refusal)) : (patched, null);
+        return WriteRefusal(decision, Unmasked(patched), previous: null, context) is { } refusal ? (null, Forbidden(index, refusal))
+            : TransitionRefusal(decision, DataOperation.Create, Unmasked(patched), previous: null, context, index) is { } moved ? (null, moved)
+            : (patched, null);
     }
 
     /// <summary>
