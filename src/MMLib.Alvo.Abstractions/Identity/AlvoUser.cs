@@ -51,7 +51,7 @@ public sealed record AlvoUser
     /// <para>
     /// <b>One tenant, not a set, and that is a deliberate narrowing.</b> Acting in more than one
     /// tenant is a cross-tenant capability, which <c>TenantResolver</c>'s own remarks call
-    /// <i>"a deliberate, audited grant"</i> and defer to #42. Until that exists, a set here would
+    /// <i>"a deliberate, audited grant"</i> and defer to #376. Until that exists, a set here would
     /// be a capability nothing in the framework can audit — so an operator holds at most one, and
     /// the resolver honours a requested tenant only as a <em>confirmation</em> of this value,
     /// never as a choice between values.

@@ -118,7 +118,8 @@ internal static class ManagementSetup
             provider.GetRequiredService<Migrations.RuntimeSchemaService>,
             provider.GetService<Events.IDeliveryStore>(),
             provider.GetService<Commands.Internal.CommandSimulator>(),
-            provider.GetService<TimeProvider>()));
+            provider.GetService<TimeProvider>(),
+            provider.GetService<Scheduling.ITimerStore>()));
 
     /// <summary>
     /// Registers <see cref="AlvoManagementOptions"/>, bound from its configuration section and validated at

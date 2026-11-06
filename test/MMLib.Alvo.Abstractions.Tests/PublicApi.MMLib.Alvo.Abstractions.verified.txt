@@ -1553,6 +1553,8 @@ namespace MMLib.Alvo.Management
         Narrowing = 7,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("enricher")]
         Enricher = 8,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("schedule")]
+        Schedule = 9,
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Management.AlvoExtensionStage>))]
     public enum AlvoExtensionStage
@@ -1567,6 +1569,8 @@ namespace MMLib.Alvo.Management
         InTransaction = 3,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("read")]
         Read = 4,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("scheduled")]
+        Scheduled = 5,
     }
     public sealed class DeliveryFixture : System.IEquatable<MMLib.Alvo.Management.DeliveryFixture>
     {
@@ -1743,6 +1747,7 @@ namespace MMLib.Alvo.Management
     {
         public ManagementExtension() { }
         public string? Access { get; init; }
+        public string? Cron { get; init; }
         public string? Description { get; init; }
         public bool Enabled { get; init; }
         public System.Collections.Generic.IReadOnlyList<string> Entities { get; init; }
@@ -1750,6 +1755,9 @@ namespace MMLib.Alvo.Management
         public string? HttpMethod { get; init; }
         public required string Id { get; init; }
         public required MMLib.Alvo.Management.AlvoExtensionKind Kind { get; init; }
+        public string? LastOutcome { get; init; }
+        public System.DateTimeOffset? LastRunAt { get; init; }
+        public System.DateTimeOffset? NextRunAt { get; init; }
         public System.Collections.Generic.IReadOnlyList<string> Operations { get; init; }
         public int Order { get; init; }
         public string? Ordering { get; init; }
@@ -1757,6 +1765,7 @@ namespace MMLib.Alvo.Management
         public string? Route { get; init; }
         public string? RunAs { get; init; }
         public required MMLib.Alvo.Management.AlvoExtensionStage Stage { get; init; }
+        public string? TimeZone { get; init; }
         public System.TimeSpan? Timeout { get; init; }
         public bool TopLevelOnly { get; init; }
         public string? TypeName { get; init; }
@@ -1766,6 +1775,7 @@ namespace MMLib.Alvo.Management
     {
         public ManagementExtensionCatalog() { }
         public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementExtension> Items { get; init; }
+        public MMLib.Alvo.Management.ManagementTimerCounts? Timers { get; init; }
     }
     public sealed class ManagementExtensionNotFoundException : System.Exception
     {
@@ -1928,6 +1938,12 @@ namespace MMLib.Alvo.Management
         public ManagementSimulationException() { }
         public ManagementSimulationException(string message) { }
         public ManagementSimulationException(string message, System.Exception innerException) { }
+    }
+    public sealed class ManagementTimerCounts : System.IEquatable<MMLib.Alvo.Management.ManagementTimerCounts>
+    {
+        public ManagementTimerCounts() { }
+        public required int Due { get; init; }
+        public required int Pending { get; init; }
     }
     public sealed class ManagementWarnedBlock : System.IEquatable<MMLib.Alvo.Management.ManagementWarnedBlock>
     {
@@ -2137,13 +2153,17 @@ namespace MMLib.Alvo.Scheduling
         System.Threading.Tasks.Task<bool> CancelAsync(string key, MMLib.Alvo.TenantId? tenant = default, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task ScheduleAsync(string key, System.DateTimeOffset at, string eventType, System.Collections.Generic.IReadOnlyDictionary<string, object?>? data, MMLib.Alvo.TenantId? tenant = default, System.Threading.CancellationToken cancellationToken = default);
     }
+    public interface IAlvoTenantCatalog
+    {
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.TenantId>> ListTenantsAsync(System.Threading.CancellationToken cancellationToken = default);
+    }
     public interface ITimerStore
     {
         System.Threading.Tasks.Task<bool> AdvanceScheduleAsync(MMLib.Alvo.Scheduling.ScheduleAdvance advance, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task AppendRunAsync(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.AlvoFrameworkEnvelope> events, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> CancelAsync(string scope, string key, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> CancelAsync(string scope, string key, System.Guid generation, System.Threading.CancellationToken cancellationToken = default);
-        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.ClaimedSchedule>> ClaimSchedulesAsync(string claimant, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.ClaimedSchedule>> ClaimSchedulesAsync(string claimant, System.Collections.Generic.IReadOnlyList<string> ids, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.ClaimedTimer>> ClaimTimersAsync(int batchSize, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Scheduling.TimerCounts> CountTimersAsync(System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task EnsureAsync(System.Threading.CancellationToken cancellationToken = default);
@@ -2151,7 +2171,7 @@ namespace MMLib.Alvo.Scheduling
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.StoredSchedule>> SchedulesAsync(System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> StartMigrationAsync(string id, int revision, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.AlvoFrameworkEnvelope> events, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> StartedMigrationsAsync(System.Threading.CancellationToken cancellationToken = default);
-        System.Threading.Tasks.Task SyncSchedulesAsync(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.ScheduleDefinition> schedules, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task SyncSchedulesAsync(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.ScheduleDefinition> schedules, System.Collections.Generic.IReadOnlyList<string> retired, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Guid> UpsertAsync(MMLib.Alvo.Scheduling.TimerEntry timer, System.Threading.CancellationToken cancellationToken = default);
     }
     public sealed class ScheduleAdvance : System.IEquatable<MMLib.Alvo.Scheduling.ScheduleAdvance>

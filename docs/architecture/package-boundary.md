@@ -220,6 +220,12 @@ calling `MapAlvo()`, which is a hosting decision in the one project that is `IsP
     **UI** is a hosting decision, so Scalar sits in `MMLib.Alvo.Host` instead.
   - `Corvus.Json.SourceGenerator` (build-time only, `PrivateAssets=all`) and its
     `Corvus.Json.ExtendedTypes` runtime support.
+  - `Cronos` (MIT, no dependencies of its own), for `AddSchedule`'s cron. A
+    five-field cron evaluated in an IANA zone across daylight-saving changes is
+    the part of a scheduler that is easy to get subtly wrong; Cronos documents
+    its DST behaviour (a time in the spring-forward gap runs at the end of the
+    gap, a fixed time in the fall-back overlap runs once), and the core's tests
+    pin it. A hand-written parser would own that behaviour instead.
 
   The cost, stated: an embedded consumer of the core is an ASP.NET consumer
   whether or not it maps the Data API. That is the price of principle 8, and it is

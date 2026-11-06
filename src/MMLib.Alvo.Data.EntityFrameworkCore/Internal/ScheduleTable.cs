@@ -46,24 +46,26 @@ internal static class ScheduleTable
          WHERE {table}.cron <> excluded.cron OR {table}.time_zone <> excluded.time_zone
         """;
 
-    /// <summary>Deletes every schedule not among the <paramref name="kept"/> bound ids — every schedule when none is kept.</summary>
+    /// <summary>Deletes the <paramref name="retired"/> declared-retired ids, bound as <c>@retired0</c>, <c>@retired1</c>, ….</summary>
     /// <param name="table">The validated table name.</param>
-    /// <param name="kept">How many ids are bound, as <c>@id0</c>, <c>@id1</c>, ….</param>
-    internal static string PruneSql(string table, int kept) =>
-        kept == 0
-            ? $"DELETE FROM {table}"
-            : $"DELETE FROM {table} WHERE id NOT IN ({string.Join(", ", Enumerable.Range(0, kept).Select(index => $"@id{index}"))})";
+    /// <param name="retired">How many ids are bound; at least one.</param>
+    internal static string RetireSql(string table, int retired) =>
+        $"DELETE FROM {table} WHERE id IN ({Placeholders("@retired", retired)})";
 
-    /// <summary>Leases every claimable occurrence for <c>@claimant</c> and returns it.</summary>
+    /// <summary>Leases every claimable occurrence among the <paramref name="ids"/> bound ids (<c>@id0</c>, …) for <c>@claimant</c>.</summary>
     /// <param name="table">The validated table name.</param>
+    /// <param name="ids">How many ids are bound; at least one.</param>
     /// <remarks>The outer <c>WHERE</c> repeats <see cref="Claimable"/>: see <see cref="TimerTable.ClaimSql"/>.</remarks>
-    internal static string ClaimSql(string table) =>
+    internal static string ClaimSql(string table, int ids) =>
         $"""
         UPDATE {table} SET lease_until = @lease_until, leased_by = @claimant
          WHERE {Claimable}
-           AND id IN (SELECT id FROM {table} WHERE {Claimable} ORDER BY next_run_at, id)
+           AND id IN (SELECT id FROM {table} WHERE {Claimable} AND id IN ({Placeholders("@id", ids)}) ORDER BY next_run_at, id)
         RETURNING id, next_run_at
         """;
+
+    private static string Placeholders(string prefix, int count) =>
+        string.Join(", ", Enumerable.Range(0, count).Select(index => $"{prefix}{index}"));
 
     /// <summary>Moves one leased occurrence to the next run and records it as the last, releasing the lease.</summary>
     /// <param name="table">The validated table name.</param>
