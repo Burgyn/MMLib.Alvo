@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   422 `validation` with violation code `check` and a pointer at the field (at the child field the caller sent when a
   rollup recompute breaks a parent's validation; `""` for a hidden field). Adding one over rows that break it is refused
   at apply — and in a dry run — with their count, at the validation's pointer. A validation reads its own row only: no
-  caller, `now()`, function or numeric arithmetic, and no hidden field beside its own. It is not in the OpenAPI document.
+  caller, `now()`, function or numeric arithmetic, and no hidden field besides its own. It is not in the OpenAPI document.
   Docs: *Integrity in the descriptor*.
 - **`rollup.where`** (HX-11): a rollup aggregates only the children a CEL condition over the child admits, kept
   consistent in the child write's transaction and recomputed by an apply that adds or changes it.

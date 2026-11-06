@@ -1060,7 +1060,7 @@ values sent — the `validation` slug's fix, so it takes that slug (HX-11 Ruling
 written entity's validated field; for a parent's validation broken through a rollup recompute, at the child field the
 caller sent (`/quantity` when an order line pushes `products.reserved` past `stock`), never at the parent's (Ruling
 25); and at `""` for a `count` rollup, a delete, a name the schema cannot place, or a field the descriptor flags
-`hidden` for anyone. The message is fixed — "This value breaks the validation the descriptor declares for this field."
+`hidden` — statically or for some roles. The message is fixed — "This value breaks the validation the descriptor declares for this field."
 — and never echoes a value or the expression. A value a hook wrote is still 422 (Ruling 26). `validation` is not published in the OpenAPI document (Ruling 36):
 a CEL predicate has no faithful JSON Schema form, so a client learns of it from the 422. Design: `data-path.md`,
 *`validation` is the engine's `CHECK`*.
@@ -1383,12 +1383,12 @@ consequence and the fix named in the error:
 
 | Refusal | Why ignoring it is silent wrongness |
 |---|---|
-| `field.computed` | the expression is never evaluated, so the column stays null |
-| `field.rollup` | nothing maintains the aggregate, so it reads as permanently null while looking like data |
+| ~~`field.computed`~~ | **lifted (#21)**: a computed field is a stored generated column (`data-path.md`) |
+| ~~`field.rollup`~~ | **lifted (#21)**: a rollup is maintained in the child's write transaction (`data-path.md`) |
 | ~~`field.validation`~~ | **lifted in HX-11**: enforced as a database `CHECK` constraint (`data-path.md`, *`validation` is the engine's `CHECK`*); `rollup.where`, never listed here but refused by its own slot, was lifted with it |
 | `field.default` as `{"$cel": …}` (**#113**) | a CEL default is evaluated against the caller's context at insert time, which is the `computed` machinery rather than a column default — so the value would be dropped and the field left null. **A literal default is honoured**: it is emitted as a column `DEFAULT` and filled into any write that composes a whole row |
 | `entity.softDelete` | a delete would remove the row outright and reads would not exclude it — irrecoverable data loss where the schema promises recoverability |
-| the three `before*` `entity.hooks.*` points, refused **one per point** (**#114**) | a `before*` hook may reject or mutate in the write transaction, so a write the author believes is vetted is neither |
+| ~~the three `before*` `entity.hooks.*` points~~, once refused **one per point** (**#114**) | **lifted**: before-hooks run in the write transaction, rejecting or mutating the row (see the paragraph below for the history) |
 | a raw **JSONata** expression in any `$defs/jsonata` action slot (**#149**) | the action still runs, with Alvo's canonical envelope instead of the declared transform — a delivery that succeeded carrying data the author did not declare |
 | a template's **`bodyFile`**, per referencing after-hook | nothing reads a path inside a descriptor bundle, so the mail would go out with an empty body rather than fail |
 | an **`entity.update`** / **`function`** / **`http.call`** action on an after-hook | each loses something different, so each names its own consequence |

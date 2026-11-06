@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Time.Testing;
 
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Events;
 using MMLib.Alvo.Hooks;
 
 namespace MMLib.Alvo.TestHost.Tests;
@@ -19,6 +20,9 @@ public abstract class NowInstantFacts
 
     /// <summary>How far each host hook moves the clock: well inside a before-write hook's 250 ms budget.</summary>
     private static readonly TimeSpan _hookTick = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>How long after the commit the handler is delivered: well inside the notes' one-hour list window.</summary>
+    private static readonly TimeSpan _deliveryLag = TimeSpan.FromMinutes(10);
 
     protected static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -99,6 +103,34 @@ public abstract class NowInstantFacts
         }, cancellationToken: Ct);
 
         Instant(after2, "updated_at").ShouldBeGreaterThan(Instant(after1, "updated_at"), "a version (ETag) strictly increases per row (review I5, Ruling 2)");
+    }
+
+    /// <summary>
+    /// An event handler's body is new work, so it runs on a fresh instant, never the event's time (HX-11 Ruling 58): the
+    /// note its body writes is stamped by the descriptor before-hook's <c>mutate: now()</c> at the clock the delivery ran at.
+    /// </summary>
+    [Fact]
+    public async Task A_handler_s_body_writes_at_the_delivery_s_instant_not_the_event_s_time()
+    {
+        var clock = new FakeTimeProvider(_t);
+        await using var alvo = await StartAsync(clock, alvo => alvo.Entity(Notes, notes => notes.OnCreated(
+            "relay",
+            async (AlvoCreated<AlvoRecord> created, AlvoEventContext context, CancellationToken ct) =>
+            {
+                if ((string?)created.New["body"] == "trigger")
+                {
+                    await context.Data.CreateAsync(Notes, Body("relayed"), ct);
+                }
+            })));
+        var clerk = AlvoTestHost.Caller("clerk");
+        await alvo.Data.CreateAsync(Notes, Body("trigger"), clerk, cancellationToken: Ct);
+
+        clock.Advance(_deliveryLag);
+        await alvo.DrainEventsAsync(Ct);
+
+        var relayed = (await alvo.Data.QueryAsync(new AlvoQuery { Entity = Notes }, clerk, Ct)).Items
+            .Single(note => (string?)note["body"] == "relayed");
+        Instant(relayed, "stamped_at").ShouldBe(_t + _deliveryLag, "the handler's write bound its own instant when it ran, not the event's time");
     }
 
     /// <summary>

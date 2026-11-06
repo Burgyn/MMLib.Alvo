@@ -29,7 +29,7 @@ built-in auth entity (a `ref` may still point at it):
 
 A field's `validation` is a CEL condition over its own row that the database enforces as a `CHECK` constraint:
 `value` is the field, other fields by name (`"validation": "value <= stock"`). An empty field passes its own
-validation — use `required` for presence. It reads no caller, no `now()`, no function, and no hidden field beside
+validation — use `required` for presence. It reads no caller, no `now()`, no function, and no hidden field besides
 its own; adding one is refused at apply if existing rows break it, with their count.
 Types and facets are in `alvo-descriptor-field-types-and-formats`; `computed` and `rollup` have their own skill.
 

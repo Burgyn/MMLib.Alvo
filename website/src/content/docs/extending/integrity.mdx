@@ -75,7 +75,7 @@ The pointer names the field to fix, never the value or the expression:
   breaks the end's validation.
 - **A validation broken through a rollup** points at the child field the caller sent, here the reservation's
   `/quantity`; the parent's `reserved` is never named. For a `count` rollup, or a delete, the pointer is `""`.
-- **A hidden field is never named.** A field the descriptor marks `hidden`, for anyone, gets the pointer `""`.
+- **A hidden field is never named.** A field the descriptor marks `hidden` — statically or for some roles — gets the pointer `""`.
 
 A value a hook wrote is refused the same way: the database cannot tell whose value it was.
 
@@ -124,8 +124,8 @@ A rollup's `where` is a CEL condition over the **child's** fields; only the chil
 - **Recomputed on apply.** An apply that adds a rollup to a table holding rows, or changes one's `from`, `op`, `field`,
   `via` or `where`, recomputes it for every parent before it commits; on PostgreSQL, writes to the child wait for the
   apply. Roll every replica after such a change: a process still holding the old definition — another replica until it
-  restarts or applies, or a child write that began just before the apply — recomputes with it, and the parent's value
-  stays stale until its next child write.
+  restarts or applies, or a child write that began around the apply — just before it, or between its commit and this
+  process picking up the new schema — recomputes with it, and the parent's value stays stale until its next child write.
 - **No caller and no clock.** A filter reads no `@user`, `@tenant`, role test, `now()` or function: the stored number
   would go stale with no write to move it. It may not read a hidden child field either — a filtered count would reveal
   it.
