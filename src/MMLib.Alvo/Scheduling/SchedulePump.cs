@@ -29,7 +29,7 @@ namespace MMLib.Alvo.Scheduling;
 /// </para>
 /// <para>
 /// <b>Each round then starts the data migrations whose revision has been reached</b> (<see cref="DataMigrationStarter"/>); a
-/// failed start is logged and tried again on the next round.
+/// failed start is logged and waits its own backoff, without holding the others back.
 /// </para>
 /// <para>
 /// <b>A process claims only the schedules it binds</b>, so an orphaned row runs nowhere and a replica that does not register a
@@ -168,30 +168,30 @@ internal sealed class SchedulePump(
 
         return new AlvoDrainResult
         {
-            Claimed = outcomes.Count(outcome => outcome is true) + Math.Max(started, 0),
-            Failed = outcomes.Count(outcome => outcome is null) + (started < 0 ? 1 : 0),
+            Claimed = outcomes.Count(outcome => outcome is true) + started.Started,
+            Failed = outcomes.Count(outcome => outcome is null) + started.Failed,
             Subscribers = [],
         };
     }
 
-    /// <summary>Starts the due data migrations of every project this process serves.</summary>
-    /// <returns>How many started, or -1 when a start failed and was logged.</returns>
-    private async Task<int> StartMigrationsAsync(ITimerStore schedules, ExtensionBindings bindings, CancellationToken ct)
+    /// <summary>Starts the due data migrations of every project this process serves; a failed read is logged, not thrown.</summary>
+    private async Task<MigrationRound> StartMigrationsAsync(ITimerStore schedules, ExtensionBindings bindings, CancellationToken ct)
     {
+        var round = MigrationRound.None;
         try
         {
-            var started = 0;
             foreach (var project in boot.Projects.Where(entry => entry.Value is AlvoBootPhase.Ready).Select(entry => entry.Key))
             {
-                started += await migrations.StartDueAsync(schedules, bindings, project, ct).ConfigureAwait(false);
+                var started = await migrations.StartDueAsync(schedules, bindings, project, ct).ConfigureAwait(false);
+                round = new(round.Started + started.Started, round.Failed + started.Failed);
             }
 
-            return started;
+            return round;
         }
         catch (Exception failure) when (!ct.IsCancellationRequested)
         {
-            SchedulePumpLog.MigrationStartFailed(logger, TypeOf(failure));
-            return -1;
+            SchedulePumpLog.MigrationRoundFailed(logger, TypeOf(failure));
+            return round with { Failed = round.Failed + 1 };
         }
     }
 

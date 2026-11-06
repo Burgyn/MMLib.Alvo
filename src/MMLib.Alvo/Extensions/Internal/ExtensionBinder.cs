@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging;
 
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
-using MMLib.Alvo.Scheduling;
 
 using System.Runtime.CompilerServices;
 
@@ -46,10 +45,9 @@ internal sealed class ExtensionBinder(
     internal void EnsureBindable(PolicyCatalog catalog)
     {
         var binding = Binding(catalog);
-        List<ExtensionProblem> problems = [.. binding.Result.Problems, .. ScheduleChecks.CheckBoot(registry, catalog, services)];
-        if (problems.Count > 0)
+        if (binding.Result.Problems.Count > 0)
         {
-            throw ExtensionRefusal.Of(problems);
+            throw ExtensionRefusal.Of(binding.Result.Problems);
         }
 
         binding.MarkReported();

@@ -7,6 +7,7 @@ using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Migrations.Internal;
 using MMLib.Alvo.Rules.Internal;
+using MMLib.Alvo.Scheduling;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Migrations;
 using MMLib.Alvo.Tests.Events;
@@ -266,10 +267,11 @@ internal sealed class BootServiceWorld : IDisposable
             State,
             new OptionsWrapper<AlvoSchemaOptions>(Options),
             ExtensionState(),
+            MigrationCheck(),
             _loggers.CreateLogger<AlvoBootService>());
 
     /// <summary>
-    /// The same eleven ports <see cref="Build"/> passes, positionally — for the facts that null one of them.
+    /// The same twelve ports <see cref="Build"/> passes, positionally — for the facts that null one of them.
     /// </summary>
     internal object?[] Ports() =>
     [
@@ -283,6 +285,7 @@ internal sealed class BootServiceWorld : IDisposable
         State,
         new OptionsWrapper<AlvoSchemaOptions>(Options),
         ExtensionState(),
+        MigrationCheck(),
         _loggers.CreateLogger<AlvoBootService>(),
     ];
 
@@ -291,6 +294,9 @@ internal sealed class BootServiceWorld : IDisposable
 
     private ExtensionStateGuard ExtensionState() =>
         new(Registrations, Deliveries, _loggers.CreateLogger<ExtensionStateGuard>());
+
+    private DataMigrationBootCheck MigrationCheck() =>
+        new(Registrations, Tests.Extensions.HandlerCatalog.EveryService(), store: null);
 
     private DescriptorBootPlan Plan() =>
         new(Source, new DescriptorValidator(), new CelCompiler(), _loggers.CreateLogger<DescriptorBootPlan>(), Extensions);
