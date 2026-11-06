@@ -89,4 +89,4 @@ stops it but leaves a database it did not create.
 
 - `InMemoryAlvoData` in `MMLib.Alvo.Testing` is the double the provider contract suites run against; it enforces rules
   but runs no hooks. To test your backend's behaviour, use `AlvoTestHost`.
-- Timers in C# arrive later; they join the test host — and `Hooks.AssertRan` — when they ship.
+- Timers and schedules are in the test host: pass a `FakeTimeProvider`, advance it and drain — [Time: timers and schedules](/extending/time/#testing-with-a-fake-clock).

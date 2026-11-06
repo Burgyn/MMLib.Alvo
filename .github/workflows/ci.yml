@@ -19,7 +19,11 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     # 30, not 20: HX-03's delivery chaos criteria (SQLite + PostgreSQL) added ~6 min to ring2.
-    timeout-minutes: 30
+    # Windows gets 45: its ring2 is bound by SQLite's per-write cost there (#410) and swings ~35 % between runners.
+    # On 2026-11-06 PR #454's Windows leg took 25 of its 30 minutes; the next run (PR #457) spent 16 instead of 12
+    # minutes on the unit tier — in suites that PR did not touch (Host, Data.Sqlite) as much as in the one it did —
+    # and was cancelled at 30 mid-way through Data.Sqlite.Tests.Integration with nothing failed. Linux takes ~20.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 30 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -316,7 +320,12 @@ jobs:
     name: Admin dashboard scenarios
     # Pinned: ubuntu-latest moved to 26.04, where Playwright ships no Chromium ("does not support chromium on ubuntu26.04-x64"). Unpin once it does.
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # Two budgets, not one. The browser's system packages come from the runner's apt mirror, and on a
+    # bad day azure.archive.ubuntu.com serves them at ~30 kB/s: three runs on 2026-11-06 spent 8-11
+    # minutes fetching ~20 MB of fonts, which left a 13-minute suite under 10 of a shared 20 and got
+    # it cancelled with no test output. The install now has its own ceiling, and the suite keeps a
+    # step-level one — that step timeout, not the job's, is the guard against a scenario that hangs.
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -328,8 +337,13 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Build and install the browser
+        timeout-minutes: 15
+        run: bash scripts/test-admin-e2e --install-only
+
       - name: Scenarios
-        run: bash scripts/test-admin-e2e
+        timeout-minutes: 22
+        run: bash scripts/test-admin-e2e --skip-install
 
       - name: Upload the failure trace
         if: failure()

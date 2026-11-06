@@ -59,4 +59,11 @@ public enum AlvoExtensionKind
     /// <summary>A schedule: host C# run on a cron, once per occurrence across every replica, as a delivery.</summary>
     [JsonStringEnumMemberName("schedule")]
     Schedule = 9,
+
+    /// <summary>
+    /// A data migration: host C# run once, when the applied descriptor first reaches the revision it waits for — once per
+    /// tenant on a scoped schema — as a delivery.
+    /// </summary>
+    [JsonStringEnumMemberName("dataMigration")]
+    DataMigration = 10,
 }

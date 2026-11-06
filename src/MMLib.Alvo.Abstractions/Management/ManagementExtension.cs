@@ -116,4 +116,7 @@ public sealed record ManagementExtension
     /// tenant's run; the delivery list, filtered by the schedule's id, shows every tenant's.
     /// </remarks>
     public string? LastOutcome { get; init; }
+
+    /// <summary>Gets the descriptor revision a data migration waits for before it runs; null for any other kind.</summary>
+    public int? AfterRevision { get; init; }
 }

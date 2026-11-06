@@ -11,6 +11,8 @@ namespace MMLib.Alvo.Scheduling;
 internal sealed record JobSpec(string DeliveryKind, string? Cron, string? TimeZone, AlvoScheduleScope Scope, int? AfterRevision)
 {
     internal bool IsSchedule => DeliveryKind == Kinds.Schedule;
+
+    internal bool IsMigration => DeliveryKind == Kinds.Migration;
 }
 
 /// <summary>The framework event types a job is subscribed to: <c>alvo.schedule.&lt;id&gt;</c> and <c>alvo.migration.&lt;id&gt;</c>, <c>-</c> read as <c>_</c>.</summary>

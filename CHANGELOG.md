@@ -12,6 +12,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Rules over relations** (HX-19): a rule may follow a ref (`customer_id.owner_id == @user.id`) or reach the rows that reference this one (`project_members.exists(m, m.user_id == @user.id)`, `<child>_via_<field>` when ambiguous). Each term is one correlated `EXISTS` in the query that ANDs in the related entity's own `list` rule and tenant scope, so it never matches a row the caller could not list (a host narrowing is not part of it); a write judges it in SQL inside its transaction. Apply refuses a cycle among `list` rules, a chain deeper than 3, a relation under `!`, and a relation outside `rules`/`checks`. Not supported by `InMemoryAlvoData`. Docs: *Rules over relations*.
 - **Dashboard: relations** (HX-19): the policy simulator lists, under *Reads through*, each relation a decision reads and the related `list` rule it was bound to for the caller (`ManagementPolicyVerdict.Relations`); the rules editor offers the relation terms of the entity under each rule; a lookup-check refusal is shown with its own message, not as a field validation.
 - **Lookup checks** (HX-19): `entities.<e>.checks: [{ lookup, expr, message }]` follows a ref field to the row it names and refuses a create, or an update that changes a field the check reads, when that row is not one the caller may list or fails `expr` — 422 `validation`, violation code `check`, the check's own `message` and a pointer at the lookup field (none when the field is hidden). A null lookup skips the check; a check reads no `@user`/`@tenant`, and apply refuses one that does or reads no `<lookup>.<field>`.
+- **Timers** (HX-13): `IAlvoScheduler.ScheduleAsync(key, at, …)` — and the typed `ScheduleAsync<TMessage>` over an
+  `[AlvoEvent]` class — arms a keyed timer that fires its custom event exactly once at its latest time; the same key
+  moves it, `CancelAsync` deletes it. Inside a unit it joins the unit's transaction, so a rollback leaves no timer. Its
+  event carries the arming flow's correlation, causation and depth, so a self-re-arming timer climbs two levels per
+  cycle and stops at the chain-depth limit (about four fires at the default 8). Docs: *Time: timers and schedules*.
+- **Schedules** (HX-13): `AddSchedule<TJob>(id, cron, timeZone)` runs an `IAlvoScheduledJob` per five-field cron
+  occurrence in an IANA zone (Cronos's DST rules), one run across replicas, a missed occurrence once, and once per tenant
+  with `AlvoScheduleScope.EachTenant` and an `IAlvoTenantCatalog`. Each run is a `schedule` delivery — retries,
+  history, dead letter. **Run now**: `POST …/schedules/{id}/run` (developer) and `IAlvoOperations.RunScheduleAsync`.
+  A schedule removed from code leaves an inert row until its id is declared with `AddRetiredExtension`.
+- **Data migrations** (HX-13): `AddDataMigration<T>(id, afterRevision)` runs an `IAlvoDataMigration` once, as a
+  `migration` delivery, after the descriptor reaches the revision — once per tenant on a tenant-scoped schema — and
+  never again after a rollback and re-apply.
+- **`Alvo:Deliveries:MaxJobConcurrency`** (HX-13, default 2): scheduled jobs and migrations run from a pool of their
+  own, with a 15-minute default timeout, so a long job never takes an event handler's slot.
+- **Dashboard: *Schedules* and *Timers* on Operations** (HX-13): each schedule and data migration with its cron and
+  zone (or revision), next run in its zone, last run and outcome, and *Run now*; a tile with the pending and due timer
+  counts. The extension catalog carries them (`ManagementExtension.Cron`, `TimeZone`, `NextRunAt`, `LastRunAt`,
+  `LastOutcome`, `AfterRevision`; `ManagementExtensionCatalog.Timers`).
+- **New core dependency: `Cronos`** 0.13.0 (MIT, no dependencies) — cron parsing and time-zone occurrences.
 - **`sequence` on a field** (HX-12): a gapless number per tenant, optionally per another field's value and per UTC
   year/month/day, stored as an integer or formatted text (`SO-{yyyy}-{n:4}`); the T-SQL double and any dialect without
   `SequenceAllocationStatement` refuse it at apply.
@@ -302,6 +322,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the docs site's tutorial and the source of the README's "See it" section.
 
 ### Changed (breaking)
+
+- **`ITimerStore` is a new provider obligation** (HX-13): a data provider that implements `IOutboxStore` implements
+  `ITimerStore` over the same database, so a timer fire or a schedule advance and its outbox append commit together;
+  `TimerStoreContractTests` (`MMLib.Alvo.Testing`) is the suite it must pass. Its schedule and migration writes take an
+  `AlvoFrameworkEnvelope`, which only the framework can mint.
+- **`AlvoExtensionKind` gains `Schedule` (9) and `DataMigration` (10), `AlvoExtensionStage` gains `Scheduled` (5)**
+  (HX-13): an exhaustive `switch` over them gains cases.
 
 - **Breaking for clients that branch on 500:** a built-in CEL function's refusal of the caller's data answered 500
   `function-failed`; it answers 422 `expression-failed`, and is no longer logged at Error. Host functions keep 500.

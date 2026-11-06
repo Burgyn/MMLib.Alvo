@@ -12,9 +12,16 @@ internal sealed class OperationsGateway(IAlvoOperations operations, ManagementGa
 {
     private const int PageSize = 50;
 
-    /// <summary>The host's event handlers, the catalog read again each time so a pause made elsewhere shows; a refusal is thrown.</summary>
-    public async Task<IReadOnlyList<ManagementExtension>> HandlersAsync(CancellationToken ct) =>
-        [.. (await management.ExtensionsAgainAsync(ct).ConfigureAwait(false)).Where(extension => extension.Kind == AlvoExtensionKind.EventHandler)];
+    /// <summary>
+    /// The host's event handlers, schedules and data migrations, and its timer counts — the catalog read again each time so a
+    /// pause made elsewhere shows; a refusal is thrown.
+    /// </summary>
+    public async Task<OperationsCatalog> CatalogAsync(CancellationToken ct) =>
+        OperationsCatalog.Of(await management.ExtensionsAgainAsync(ct).ConfigureAwait(false));
+
+    /// <summary>Runs a schedule now, outside its cron; its next occurrence stays where it was.</summary>
+    public Task<ManagementDelivery> RunScheduleAsync(string schedule, CancellationToken ct) =>
+        management.ForProjectAsync(project => operations.RunScheduleAsync(project, schedule, ct), ct);
 
     /// <summary>This instance's per-handler numbers over the last 24 hours.</summary>
     public Task<ManagementExtensionStats> StatsAsync(CancellationToken ct) =>
@@ -54,4 +61,20 @@ internal sealed class OperationsGateway(IAlvoOperations operations, ManagementGa
 
         return handler;
     }
+}
+
+/// <summary>The part of the extension catalog the Operations page draws.</summary>
+/// <param name="Handlers">The host's event handlers.</param>
+/// <param name="Jobs">Its schedules and data migrations.</param>
+/// <param name="Timers">How many timers it holds, or <see langword="null"/> when its data provider keeps none.</param>
+internal sealed record OperationsCatalog(
+    IReadOnlyList<ManagementExtension> Handlers,
+    IReadOnlyList<ManagementExtension> Jobs,
+    ManagementTimerCounts? Timers)
+{
+    /// <summary>Splits a catalog into the handlers and the jobs, every other kind left out.</summary>
+    public static OperationsCatalog Of(ManagementExtensionCatalog catalog) => new(
+        [.. catalog.Items.Where(extension => extension.Kind == AlvoExtensionKind.EventHandler)],
+        [.. catalog.Items.Where(extension => extension.Kind is AlvoExtensionKind.Schedule or AlvoExtensionKind.DataMigration)],
+        catalog.Timers);
 }

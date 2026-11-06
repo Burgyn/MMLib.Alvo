@@ -131,9 +131,9 @@ Documented on *Analyzer rules* under *What it cannot see* (Rulings 25, 32, 39):
 The boot refusal covers a hook's constructor and delegate parameters; the time budget covers a CEL function whatever it
 does, except one that never returns.
 
-**Owed: `IAlvoScheduler` on the await allow-list (HX-13).** §4.4.5 allows scheduling a timer inside the write's
-transaction. When HX-13 adds `IAlvoScheduler`, its methods must join the allowed awaits in `AlvoSymbols` (beside
-`IAlvoSession` and `MMLib.Alvo.Hooks`), or every scheduler call in a hook becomes a false positive that breaks a
+**Done in HX-13: `IAlvoScheduler` on the await allow-list.** §4.4.5 allows scheduling a timer inside the write's
+transaction, so `AlvoSymbols` allows awaiting `IAlvoScheduler`'s methods and the typed `AlvoSchedulerExtensions`
+(beside `IAlvoSession` and `MMLib.Alvo.Hooks`); a scheduler call in a hook is not a false positive that breaks a
 `TreatWarningsAsErrors` build (Ruling 39).
 
 ## Adding a rule

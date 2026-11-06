@@ -6,9 +6,10 @@ using System.Globalization;
 namespace MMLib.Alvo.Scheduling;
 
 /// <summary>
-/// Mints the framework events of one schedule occurrence: one per tenant the <see cref="IAlvoTenantCatalog"/> lists for an
-/// <see cref="AlvoScheduleScope.EachTenant"/> schedule, else one with no tenant — each as the system in its tenant, under a
-/// correlation of its own at depth 0, whatever flow asked for it.
+/// Mints the framework events of one schedule occurrence or data migration start: one per tenant the
+/// <see cref="IAlvoTenantCatalog"/> lists for an <see cref="AlvoScheduleScope.EachTenant"/> schedule or a migration on a scoped
+/// schema, else one with no tenant — each as the system in its tenant, under a correlation of its own at depth 0, whatever flow
+/// asked for it.
 /// </summary>
 /// <param name="tenants">The host's tenant list, or <see langword="null"/> when it registers none; the boot refuses a per-tenant schedule without one.</param>
 /// <param name="time">The clock each event is stamped with.</param>
@@ -16,6 +17,10 @@ internal sealed class ScheduleRuns(IAlvoTenantCatalog? tenants, TimeProvider tim
 {
     internal const string ScheduleKey = "schedule";
     internal const string ManualKey = "manual";
+    internal const string MigrationKey = "migration";
+
+    /// <summary>Gets whether the host registers a tenant list, which a per-tenant run needs.</summary>
+    internal bool HasTenantCatalog => tenants is not null;
 
     /// <summary>The events of <paramref name="job"/>'s run for <paramref name="scheduledFor"/>, in the order the tenants are listed.</summary>
     /// <param name="job">A registered schedule.</param>
@@ -33,13 +38,32 @@ internal sealed class ScheduleRuns(IAlvoTenantCatalog? tenants, TimeProvider tim
         return [.. scopes.Select(tenant => Mint(type, $"schedules/{job.Id}", payload, tenant, now))];
     }
 
-    private async Task<IReadOnlyList<TenantId?>> ScopesAsync(JobSpec job, CancellationToken ct)
+    /// <summary>The events that start data migration <paramref name="job"/> at <paramref name="revision"/>, one per tenant when <paramref name="perTenant"/>.</summary>
+    /// <param name="job">A registered data migration.</param>
+    /// <param name="revision">The applied revision it starts at.</param>
+    /// <param name="perTenant">Whether the schema has a scoped entity, so each tenant gets a run of its own.</param>
+    /// <param name="ct">A token to cancel the tenant listing.</param>
+    internal async Task<IReadOnlyList<AlvoFrameworkEnvelope>> MigrationEventsAsync(
+        HandlerRegistration job, int revision, bool perTenant, CancellationToken ct)
     {
-        if (job.Scope is not AlvoScheduleScope.EachTenant)
+        var type = ((NamedEvent)job.Source).Type;
+        var now = time.GetUtcNow();
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
-            return [null];
-        }
+            [MigrationKey] = job.Id,
+            [JobInvocation.RevisionKey] = revision,
+            [JobInvocation.ScheduledForKey] = now.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
+        };
+        IReadOnlyList<TenantId?> scopes = perTenant ? await TenantsAsync(ct).ConfigureAwait(false) : [null];
 
+        return [.. scopes.Select(tenant => Mint(type, $"migrations/{job.Id}", payload, tenant, now))];
+    }
+
+    private async Task<IReadOnlyList<TenantId?>> ScopesAsync(JobSpec job, CancellationToken ct) =>
+        job.Scope is AlvoScheduleScope.EachTenant ? await TenantsAsync(ct).ConfigureAwait(false) : [null];
+
+    private async Task<IReadOnlyList<TenantId?>> TenantsAsync(CancellationToken ct)
+    {
         var listed = await (tenants ?? throw NoTenantCatalog()).ListTenantsAsync(ct).ConfigureAwait(false);
         return [.. listed.Distinct().Select(tenant => (TenantId?)tenant)];
     }
@@ -70,5 +94,6 @@ internal sealed class ScheduleRuns(IAlvoTenantCatalog? tenants, TimeProvider tim
     }
 
     private static InvalidOperationException NoTenantCatalog() => new(
-        "A per-tenant schedule ran in a host that registers no IAlvoTenantCatalog. Register one, or use AlvoScheduleScope.Global.");
+        "A per-tenant schedule or data migration ran in a host that registers no IAlvoTenantCatalog. Register one, or use "
+        + "AlvoScheduleScope.Global.");
 }

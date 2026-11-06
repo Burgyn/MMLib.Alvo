@@ -32,11 +32,21 @@ internal static class SchedulingSetup
             provider.GetRequiredService<ILogger<TimerPump>>()));
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, TimerPump>(provider => provider.GetRequiredService<TimerPump>()));
         services.TryAddSingleton(provider => new ScheduleRuns(provider.GetService<IAlvoTenantCatalog>(), provider.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton(provider => new DataMigrationBootCheck(
+            provider.GetRequiredService<ExtensionRegistry>(),
+            provider.GetRequiredService<IServiceProviderIsService>(),
+            provider.GetService<ITimerStore>()));
+        services.TryAddSingleton(provider => new DataMigrationStarter(
+            provider.GetRequiredService<ScheduleRuns>(),
+            provider.GetService<IAppliedSchemaStore>(),
+            provider.GetRequiredService<TimeProvider>(),
+            provider.GetRequiredService<ILogger<DataMigrationStarter>>()));
         services.TryAddSingleton(provider => new SchedulePump(
             provider.GetService<ITimerStore>(),
             provider.GetRequiredService<ExtensionBinder>(),
             provider.GetRequiredService<ExtensionRegistry>(),
             provider.GetRequiredService<ScheduleRuns>(),
+            provider.GetRequiredService<DataMigrationStarter>(),
             provider.GetRequiredService<AlvoBootState>(),
             provider.GetRequiredService<IPolicyCatalogProvider>(),
             provider.GetRequiredService<IOptions<AlvoEventOptions>>(),
