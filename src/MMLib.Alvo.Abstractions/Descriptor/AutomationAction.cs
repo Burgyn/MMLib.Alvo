@@ -40,11 +40,14 @@ public sealed record EmailAction : AutomationAction
 /// <summary>Invokes a custom function (<c>type: function</c>).</summary>
 public sealed record FunctionAction : AutomationAction
 {
-    /// <summary>Name of the function declared under <c>functions</c>.</summary>
+    /// <summary>Name of the function the host registers.</summary>
     public required string Name { get; init; }
 
-    /// <summary>Optional JSONata transformation producing the function input.</summary>
-    public string? Input { get; init; }
+    /// <summary>
+    /// Optional function input: an object of literal values and tagged CEL expressions, or a JSONata
+    /// transformation.
+    /// </summary>
+    public FunctionInput? Input { get; init; }
 }
 
 /// <summary>Creates or updates a record on an entity (<c>type: entity.update</c>).</summary>

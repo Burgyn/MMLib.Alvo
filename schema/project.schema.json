@@ -1206,10 +1206,21 @@
             },
             "name": {
               "$ref": "#/$defs/identifier",
-              "description": "The name of a function declared in the top-level `functions` block."
+              "description": "The name of a function the host registers (AddFunction)."
             },
             "input": {
-              "$ref": "#/$defs/jsonata"
+              "description": "The function's input: an object of input property -> literal value or tagged {\"$cel\": \"...\"} expression (checked at apply against the function's input schema), or a JSONata transformation.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/jsonata"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/$defs/valueOrExpr"
+                  }
+                }
+              ]
             }
           }
         },

@@ -908,7 +908,7 @@ namespace MMLib.Alvo.Descriptor
     public sealed class FunctionAction : MMLib.Alvo.Descriptor.AutomationAction, System.IEquatable<MMLib.Alvo.Descriptor.FunctionAction>
     {
         public FunctionAction() { }
-        public string? Input { get; init; }
+        public MMLib.Alvo.Descriptor.FunctionInput? Input { get; init; }
         public required string Name { get; init; }
     }
     public sealed class FunctionDescriptor : System.IEquatable<MMLib.Alvo.Descriptor.FunctionDescriptor>
@@ -931,6 +931,13 @@ namespace MMLib.Alvo.Descriptor
         public FunctionHttpTrigger() { }
         public MMLib.Alvo.Descriptor.HttpVerb? Method { get; init; }
         public required string Route { get; init; }
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(MMLib.Alvo.Descriptor.FunctionInputConverter?))]
+    public sealed class FunctionInput : System.IEquatable<MMLib.Alvo.Descriptor.FunctionInput>
+    {
+        public FunctionInput() { }
+        public System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.ValueOrExpr?>? Fields { get; init; }
+        public string? Transform { get; init; }
     }
     public sealed class FunctionTrigger : System.IEquatable<MMLib.Alvo.Descriptor.FunctionTrigger>
     {
