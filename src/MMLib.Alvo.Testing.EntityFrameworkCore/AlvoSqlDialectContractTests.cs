@@ -483,7 +483,7 @@ public abstract class AlvoSqlDialectContractTests
         statement.ShouldContain("alvo_sequences");
         foreach (var marker in new[] { "@entity", "@field", "@tenant", "@scope", "@period", "@start" })
         {
-            Regex.Matches(statement, Regex.Escape(marker) + @"\b").Count.ShouldBe(1, marker);
+            Regex.Count(statement, Regex.Escape(marker) + @"\b").ShouldBe(1, marker);
         }
     }
 
