@@ -12,7 +12,9 @@
         "title": { "type": "string", "required": true, "maxLength": 80 },
         "owner_id": { "type": "uuid", "required": true },
         "region": { "type": "string", "maxLength": 20 },
-        "salary": { "type": "integer", "hidden": "!('auditor' in @user.roles)" }
+        "salary": { "type": "integer", "hidden": "!('auditor' in @user.roles)" },
+        "display": { "type": "string", "virtual": true },
+        "internal_code": { "type": "string", "virtual": true, "hidden": "!('auditor' in @user.roles)" }
       },
       "rules": {
         "list": "owner_id == @user.id || 'auditor' in @user.roles || 'admin' in @user.roles",

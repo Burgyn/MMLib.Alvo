@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counts. The extension catalog carries them (`ManagementExtension.Cron`, `TimeZone`, `NextRunAt`, `LastRunAt`,
   `LastOutcome`, `AfterRevision`; `ManagementExtensionCatalog.Timers`).
 - **New core dependency: `Cronos`** 0.13.0 (MIT, no dependencies) — cron parsing and time-zone occurrences.
+- **Virtual fields and record enrichers** (HX-16): a field declared `"virtual": true` has no column, is read-only and refused in writes, expressions and filter/sort/select (422 on the Data API); an embedded host's `Enrich(…)` fills it — or hides a field — on every read and write echo, after the caller's rules and masks. The applied schema a version row stores now records which fields are virtual; a binary older than this release reading a newer row ignores that and would plan a column for each virtual field, so do not roll a deployment back across it.
 - **Query narrowing** (HX-16): an embedded host can AND a filter into every non-system read of an entity — list, get and count — with `Entity(…).Narrow(…)`; it never widens what the rules allow and never applies to writes.
 - **Integrity in the descriptor** (HX-11). A field's `validation` is now enforced as a database `CHECK` constraint on
   SQLite and PostgreSQL, for every write — Alvo's, a hook's, and one that bypasses Alvo. A write that breaks one answers

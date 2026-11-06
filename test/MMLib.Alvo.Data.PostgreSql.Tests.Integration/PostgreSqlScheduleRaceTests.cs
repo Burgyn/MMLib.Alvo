@@ -49,6 +49,7 @@ public sealed class PostgreSqlScheduleRaceTests(PostgresFixture postgres) : ICla
     [Fact]
     public async Task Three_dispatchers_fire_one_cron_occurrence_exactly_once()
     {
+        Assert.SkipUnless(!OperatingSystem.IsWindows(), "PostgreSQL Testcontainers requires a Linux Docker daemon; unavailable on Windows-container runners.");
         var connectionString = await DatabaseAsync();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 11, 6, 1, 0, 0, TimeSpan.Zero));
         var runs = new ConcurrentQueue<DateTimeOffset>();

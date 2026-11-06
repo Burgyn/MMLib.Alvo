@@ -21,6 +21,7 @@ public sealed class HookSetsTests
             new FieldSchema { Name = "deleted_at", Type = FieldType.DateTime, Nullable = true },
             new FieldSchema { Name = "created_by", Type = FieldType.Uuid, Nullable = true },
             new FieldSchema { Name = "updated_at", Type = FieldType.DateTime, Nullable = true },
+            new FieldSchema { Name = "display", Type = FieldType.String, Nullable = true, IsVirtual = true },
         ],
         Audit = true,
         SoftDelete = true,
@@ -39,6 +40,10 @@ public sealed class HookSetsTests
     [InlineData("title", "far too long a title", "max-length")]
     public void A_set_it_may_not_write_names_its_field_and_problem(string field, object? value, string problem) =>
         HookSets.FirstProblem(new Dictionary<string, object?> { [field] = value }, _entity).ShouldBe((field, problem));
+
+    [Fact]
+    public void A_hook_s_set_of_a_virtual_field_is_maintained() =>
+        HookSets.FirstProblem(new Dictionary<string, object?> { ["display"] = "x" }, _entity).ShouldBe(("display", "maintained"));
 
     [Fact]
     public void A_whole_number_into_a_decimal_field_and_a_declared_value_are_accepted_and_widened()

@@ -49,6 +49,13 @@ public enum AlvoExtensionKind
     [JsonStringEnumMemberName("narrowing")]
     Narrowing = 7,
 
+    /// <summary>
+    /// A record enricher: host C# run on every row a read or a write's echo returns, after the caller's rules and masks; it
+    /// can only hide a field or fill a field the descriptor declares virtual.
+    /// </summary>
+    [JsonStringEnumMemberName("enricher")]
+    Enricher = 8,
+
     /// <summary>A schedule: host C# run on a cron, once per occurrence across every replica, as a delivery.</summary>
     [JsonStringEnumMemberName("schedule")]
     Schedule = 9,

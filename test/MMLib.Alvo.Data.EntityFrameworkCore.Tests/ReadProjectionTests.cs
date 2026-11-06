@@ -153,4 +153,17 @@ public class ReadProjectionTests
     private static HashSet<string> Hidden(params string[] fields) => fields.ToHashSet(StringComparer.Ordinal);
 
     private static HashSet<string> Unselected(params string[] fields) => fields.ToHashSet(StringComparer.Ordinal);
+    /// <summary>A virtual field has no column, so no read selects it — not even as a typed <c>NULL</c>, which would need a store type.</summary>
+    [Fact]
+    public void A_virtual_field_is_never_projected()
+    {
+        var declared = _entity with
+        {
+            Fields = [.. _entity.Fields, new FieldSchema { Name = "display", Type = FieldType.String, Nullable = true, IsVirtual = true }],
+        };
+        var rows = ReadModelFixture.Rows(declared);
+
+        ReadProjection.Compose(declared, Hidden(), Unselected(), _dialect, rows).ShouldBe(Compose(Hidden()));
+        ReadProjection.Compose(declared, Hidden("display"), Unselected("display"), _dialect, rows).ShouldBe(Compose(Hidden()));
+    }
 }

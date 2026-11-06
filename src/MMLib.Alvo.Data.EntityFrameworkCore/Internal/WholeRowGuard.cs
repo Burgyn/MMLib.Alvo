@@ -179,7 +179,7 @@ internal static class WholeRowGuard
             && !decision.HiddenFields.Contains(field.Name));
 
     /// <summary>
-    /// The fields a row's own shape is made of: declared, not framework-managed, not engine-computed.
+    /// The fields a row's own shape is made of: declared, not framework-managed, not engine-computed, not virtual.
     /// </summary>
     /// <remarks>
     /// Deliberately blind to the caller's masks. Whether a row can be <em>stored</em> without a field is a
@@ -190,6 +190,6 @@ internal static class WholeRowGuard
     {
         var managed = AlvoManagedColumns.For(schema);
         return schema.Fields.Where(field =>
-            !managed.Contains(field.Name) && field.ComputedExpression is null && field.Rollup is null);
+            !managed.Contains(field.Name) && field.ComputedExpression is null && field.Rollup is null && !field.IsVirtual);
     }
 }

@@ -81,6 +81,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_timer_scheduled_in_a_rolled_back_unit_leaves_no_row()
     {
+        EnsureEngineAvailable();
         await using var alvo = await StartAsync();
         var staff = Staff(Tenant);
         var armed = false;
@@ -99,6 +100,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_timer_scheduled_in_a_committed_unit_takes_the_units_tenant()
     {
+        EnsureEngineAvailable();
         await using var alvo = await StartAsync();
         var staff = Staff(Tenant);
 
@@ -121,6 +123,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_fake_clock_and_a_drain_deliver_a_24_hour_reminder()
     {
+        EnsureEngineAvailable();
         var log = new ReminderLog();
         await using var alvo = await StartAsync(log);
         await Scheduler(alvo).ScheduleAsync("remind-b1", _now.AddHours(24), Reminder, Data("b1"), Tenant, Ct);
@@ -143,6 +146,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_timer_scheduled_in_a_handler_fires_with_the_handlers_correlation_causation_and_depth()
     {
+        EnsureEngineAvailable();
         var log = new ReminderLog();
         await using var alvo = await StartAsync(log, TimerMode.ArmOnCreate);
         await alvo.Data.CreateAsync("bookings", Booking("b1"), Staff(Tenant), cancellationToken: Ct);
@@ -158,6 +162,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_rescheduled_reminder_fires_once_at_its_new_time_even_when_it_races_a_claim()
     {
+        EnsureEngineAvailable();
         var log = new ReminderLog();
         await using var alvo = await StartAsync(log);
         await Scheduler(alvo).ScheduleAsync("remind-b1", _now, Reminder, Data("b1"), Tenant, Ct);
@@ -177,6 +182,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_reminder_cancelled_while_claimed_never_fires()
     {
+        EnsureEngineAvailable();
         var log = new ReminderLog();
         await using var alvo = await StartAsync(log);
         await Scheduler(alvo).ScheduleAsync("remind-b1", _now, Reminder, Data("b1"), Tenant, Ct);
@@ -193,6 +199,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_timer_survives_a_restart_of_the_host()
     {
+        EnsureEngineAvailable();
         var log = new ReminderLog();
         var database = await DatabaseAsync();
         await using (var first = await StartAsync(new ReminderLog(), database: database))
@@ -210,6 +217,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_typed_reminder_round_trips_a_guid_and_a_timestamp()
     {
+        EnsureEngineAvailable();
         var log = new ReminderLog();
         await using var alvo = await StartAsync(log);
         var sent = new BookingReminderDue(Guid.NewGuid(), new DateTimeOffset(2026, 11, 7, 10, 30, 0, TimeSpan.Zero));
@@ -228,6 +236,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_self_re_arming_timer_stops_at_the_depth_limit()
     {
+        EnsureEngineAvailable();
         var log = new ReminderLog();
         var database = await DatabaseAsync();
         await using var alvo = await StartAsync(log, TimerMode.ReArm, database);
@@ -247,6 +256,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_timer_due_in_the_past_fires_on_the_next_drain()
     {
+        EnsureEngineAvailable();
         var log = new ReminderLog();
         await using var alvo = await StartAsync(log);
         var anHourAgoInBratislava = _now.AddHours(-1).ToOffset(TimeSpan.FromHours(2));
@@ -278,6 +288,11 @@ public abstract partial class TimeFacts
     }
 
     protected abstract Task<TimeDatabase> DatabaseAsync();
+
+    /// <summary>Skips the fact where the deriving engine cannot run; every fact calls it first, before any assertion can catch the skip.</summary>
+    protected virtual void EnsureEngineAvailable()
+    {
+    }
 
     private async Task<AlvoTestHost> StartAsync(
         ReminderLog? log = null, TimerMode mode = TimerMode.Record, TimeDatabase? database = null, TimerLogCapture? logs = null)

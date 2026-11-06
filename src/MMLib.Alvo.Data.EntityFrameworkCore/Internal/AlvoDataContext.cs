@@ -133,7 +133,7 @@ internal sealed class AlvoDataContext : DbContext
         var builder = modelBuilder.SharedTypeEntity<Dictionary<string, object>>(entity.Name);
         builder.ToTable(entity.Name);
 
-        foreach (var field in entity.Fields)
+        foreach (var field in entity.Fields.Where(field => !field.IsVirtual))
         {
             ConfigureField(builder, field);
         }
