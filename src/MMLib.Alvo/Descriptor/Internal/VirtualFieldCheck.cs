@@ -7,7 +7,7 @@
 /// <remarks>
 /// <para>
 /// <b>The order is the order a reader fixes them in.</b> The field's own keys first (<c>computed</c>, <c>rollup</c>,
-/// <c>default</c>, <c>required</c>, <c>nullable: false</c>, <c>unique</c>, <c>index</c>, <c>validation</c>, <c>renamedFrom</c>, then a
+/// <c>sequence</c>, <c>default</c>, <c>required</c>, <c>nullable: false</c>, <c>unique</c>, <c>index</c>, <c>validation</c>, <c>renamedFrom</c>, then a
 /// <c>ref</c> type reported as its <c>entity</c> key), then a node elsewhere naming it (an index, another entity's
 /// rollup, the entity's event exclusions), then the dynamic-entity form. Only the first applies, because each is the
 /// same defect — the field cannot be both virtual and stored — and one fix answers all of them.

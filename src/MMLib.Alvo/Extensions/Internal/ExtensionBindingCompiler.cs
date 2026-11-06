@@ -5,6 +5,7 @@ using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.Reads.Internal;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Scheduling;
 
 namespace MMLib.Alvo.Extensions.Internal;
 
@@ -19,9 +20,12 @@ internal static class ExtensionBindingCompiler
     internal const string HandlerKind = "eventHandler";
     internal const string RetiredKind = "retired";
 
+    /// <summary>The kind a handler registration's problems are reported under: a job's delivery kind, else an event handler.</summary>
+    internal static string KindOf(HandlerRegistration handler) => handler.Job?.DeliveryKind ?? HandlerKind;
+
     /// <summary>The catalog-free pass: problems no descriptor can cure, and the ties among the handlers that pass it.</summary>
     internal static ExtensionRegistrationResult Check(
-        ExtensionRegistry registry, ICelCompiler compiler, IServiceProviderIsService services)
+        ExtensionRegistry registry, ICelCompiler compiler, IServiceProviderIsService services, DateTimeOffset? now = null)
     {
         var problems = new List<ExtensionProblem>(ExtensionIdProblems.Of(registry));
         problems.AddRange(registry.Handlers.SelectMany(handler => new HandlerBinding(handler, compiler).CheckRegistration(services).Problems));
@@ -31,6 +35,7 @@ internal static class ExtensionBindingCompiler
         var relationalHooks = WriteHookBinding.Relational(services);
         problems.AddRange(registry.WriteHooks.SelectMany(hook => new WriteHookBinding(hook, compiler).CheckRegistration(services, relationalHooks).Problems));
         problems.AddRange(registry.ReadExtensions.SelectMany(read => new ReadExtensionBinding(read).CheckRegistration(services, relationalHooks).Problems));
+        problems.AddRange(ScheduleChecks.Check(registry, services, now ?? DateTimeOffset.UtcNow));
         var refused = Refused(problems);
 
         return new(problems, [.. Ties(registry.Handlers.Where(handler => !refused.Contains(handler.Id))), .. HookTies(registry.WriteHooks.Where(hook => !refused.Contains(hook.Id)))]);
@@ -38,13 +43,14 @@ internal static class ExtensionBindingCompiler
 
     /// <summary>Both passes against <paramref name="catalog"/>: what binds, what is left unbound, and why.</summary>
     internal static ExtensionBindingResult Compile(
-        ExtensionRegistry registry, PolicyCatalog catalog, ICelCompiler compiler, IServiceProviderIsService services)
+        ExtensionRegistry registry, PolicyCatalog catalog, ICelCompiler compiler, IServiceProviderIsService services, DateTimeOffset? now = null)
     {
         var problems = new List<ExtensionProblem>(ExtensionIdProblems.Of(registry));
         var bound = BindHandlers(registry, catalog, compiler, services, problems);
         var commands = BindCommands(registry, catalog, compiler, services, problems);
         var hooks = BindWriteHooks(registry, catalog, compiler, services, problems);
         var reads = BindReads(registry, catalog, services, problems);
+        problems.AddRange(ScheduleChecks.Check(registry, services, now ?? DateTimeOffset.UtcNow));
         var refused = Refused(problems);
         List<BoundHandler> binds = [.. bound.Where(handler => !refused.Contains(handler.Id))];
         List<BoundWriteHook> boundHooks = [.. hooks.Where(hook => !refused.Contains(hook.Id))];

@@ -23,7 +23,7 @@ public static class AlvoAdminClaims
     /// <summary>The operator's tenant, as the canonical <c>Guid</c> string, when they hold one.</summary>
     /// <remarks>
     /// An operator holds one tenant, not a set (§2.7) — cross-tenant capability is a deliberate,
-    /// audited grant deferred to #42, so a second value of this claim is a bug rather than a
+    /// audited grant deferred to #376, so a second value of this claim is a bug rather than a
     /// broader operator.
     /// </remarks>
     public const string Tenant = "alvo:tenant";

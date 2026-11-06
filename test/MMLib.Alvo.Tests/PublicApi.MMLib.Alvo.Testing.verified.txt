@@ -639,13 +639,17 @@ namespace MMLib.Alvo.Testing.Data
         protected AlvoDataSequenceTests() { }
         protected abstract MMLib.Alvo.Data.IAlvoTransactions Transactions { get; }
         public System.Threading.Tasks.Task A_batch_create_numbers_its_rows_in_order() { }
+        public System.Threading.Tasks.Task A_create_refused_inside_a_unit_that_carries_on_consumes_no_number() { }
         public System.Threading.Tasks.Task A_create_rolled_back_with_its_unit_consumes_no_number() { }
         public System.Threading.Tasks.Task A_hundred_concurrent_creates_number_one_to_a_hundred_without_gap_or_duplicate() { }
+        public System.Threading.Tasks.Task A_rename_onto_a_name_an_earlier_sequence_counted_under_is_refused() { }
         public System.Threading.Tasks.Task A_replace_that_creates_assigns_a_number_and_one_that_updates_keeps_it() { }
         public System.Threading.Tasks.Task A_rolled_back_create_consumes_no_number() { }
         protected abstract System.Threading.Tasks.Task ApplyAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
+        public System.Threading.Tasks.Task Concurrent_batches_over_the_same_counts_in_opposite_orders_both_succeed() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.TimeProvider time);
         public System.Threading.Tasks.Task Each_tenant_per_value_and_period_counts_from_start() { }
+        protected virtual void EnsureAHundredWritersFitTheBusyTimeout() { }
         public System.Threading.Tasks.Task Renaming_a_sequenced_entity_and_field_keeps_counting() { }
     }
     public abstract class AlvoDataSqlSnapshotTests
@@ -1068,6 +1072,7 @@ namespace MMLib.Alvo.Testing.Scheduling
         public System.Threading.Tasks.Task A_cancel_at_a_stale_generation_leaves_a_timer_re_armed_since_the_claim() { }
         public System.Threading.Tasks.Task A_cancel_during_a_claim_leaves_the_fire_nothing_to_append() { }
         public System.Threading.Tasks.Task A_cancel_of_an_unknown_key_answers_false() { }
+        public System.Threading.Tasks.Task A_claim_takes_only_the_ids_it_names() { }
         public System.Threading.Tasks.Task A_claim_takes_the_earliest_due_first_and_at_most_the_batch() { }
         public System.Threading.Tasks.Task A_due_timer_is_claimed_once_and_fired_once() { }
         public System.Threading.Tasks.Task A_fire_removes_the_timer_and_appends_its_event_in_one_commit() { }
@@ -1088,7 +1093,7 @@ namespace MMLib.Alvo.Testing.Scheduling
         protected virtual void EnsureEngineAvailable() { }
         public System.Threading.Tasks.Task Racing_claimants_advance_one_occurrence_once() { }
         public System.Threading.Tasks.Task Syncing_a_changed_cron_moves_the_next_run_and_an_unchanged_one_keeps_it() { }
-        public System.Threading.Tasks.Task Syncing_drops_schedules_no_longer_registered() { }
+        public System.Threading.Tasks.Task Syncing_deletes_a_retired_schedule_and_never_an_unlisted_one() { }
         public System.Threading.Tasks.Task The_same_key_in_two_scopes_is_two_timers() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Scheduling.ITimerStoreWorld> WorldAsync();
     }

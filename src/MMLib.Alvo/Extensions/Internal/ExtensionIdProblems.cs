@@ -71,6 +71,7 @@ internal static class ExtensionIdProblems
         CommandRegistration => CommandBinding.Kind,
         WriteHookRegistration hook => WriteHookBinding.KindOf(hook.Stage),
         ReadExtensionRegistration read => ReadExtensionBinding.KindOf(read.Kind),
+        HandlerRegistration handler => ExtensionBindingCompiler.KindOf(handler),
         _ => ExtensionBindingCompiler.HandlerKind,
     };
 

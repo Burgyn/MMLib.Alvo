@@ -9,6 +9,8 @@ namespace MMLib.Alvo.Testing.Data;
 /// </summary>
 /// <remarks>
 /// Called with the store's lock held and only on the path that then stores the row, so a refused create takes no number.
+/// The period is the row's own <c>created_at</c> stamp when it has one — the instant the relational drivers key it on —
+/// so a period boundary never falls between the two.
 /// </remarks>
 internal sealed class InMemorySequences
 {
@@ -17,8 +19,8 @@ internal sealed class InMemorySequences
     /// <summary><paramref name="row"/> with every sequenced field of <paramref name="schema"/> assigned its next number.</summary>
     /// <param name="schema">The entity being created.</param>
     /// <param name="row">The row about to be stored.</param>
-    /// <param name="instant">The create's stamp.</param>
-    internal AlvoRecord Numbered(EntitySchema schema, AlvoRecord row, DateTimeOffset instant)
+    /// <param name="now">The clock's reading, for a row that carries no <c>created_at</c> stamp of its own.</param>
+    internal AlvoRecord Numbered(EntitySchema schema, AlvoRecord row, DateTimeOffset now)
     {
         var sequenced = schema.Fields.Where(field => field.Sequence is not null).ToList();
         if (sequenced.Count == 0)
@@ -27,6 +29,7 @@ internal sealed class InMemorySequences
         }
 
         var values = new Dictionary<string, object?>(row.Values, StringComparer.Ordinal);
+        var instant = values.TryGetValue(AlvoManagedColumns.CreatedAt, out var created) && created is DateTimeOffset stamped ? stamped : now;
         foreach (var field in sequenced)
         {
             var number = Next(schema, field, values, instant);

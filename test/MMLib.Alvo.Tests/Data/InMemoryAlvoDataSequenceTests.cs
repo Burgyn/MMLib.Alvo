@@ -37,6 +37,36 @@ public sealed class InMemoryAlvoDataSequenceTests
         batch.Rows.Select(row => row["number"]).ShouldBe([10L, 11L]);
     }
 
+    /// <summary>
+    /// The period is the row's own <c>created_at</c> instant, as on the relational drivers — never a second clock read that
+    /// a period boundary could fall between.
+    /// </summary>
+    [Fact]
+    public async Task The_period_is_the_rows_created_at_instant()
+    {
+        var newYear = new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        for (var readsBefore = 1; readsBefore <= 20; readsBefore++)
+        {
+            var data = Store(new TickingClock(newYear - TimeSpan.FromSeconds(readsBefore), TimeSpan.FromSeconds(1)), audited: true);
+
+            var row = await data.CreateAsync("orders", Row("north"), _caller, cancellationToken: TestContext.Current.CancellationToken);
+
+            row["code"].ShouldBe($"SO-{((DateTimeOffset)row["created_at"]!).Year}-0001", $"{readsBefore} clock reads before the new year");
+        }
+    }
+
+    private sealed class TickingClock(DateTimeOffset start, TimeSpan step) : TimeProvider
+    {
+        private DateTimeOffset _next = start;
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            var now = _next;
+            _next += step;
+            return now;
+        }
+    }
+
     private static async Task<(long Number, string Code)> CreatedAsync(InMemoryAlvoData data, string branch)
     {
         var row = await data.CreateAsync("orders", Row(branch), _caller, cancellationToken: TestContext.Current.CancellationToken);
@@ -45,12 +75,13 @@ public sealed class InMemoryAlvoDataSequenceTests
 
     private static Dictionary<string, object?> Row(string branch) => new(StringComparer.Ordinal) { ["branch"] = branch };
 
-    private static InMemoryAlvoData Store(TimeProvider clock)
+    private static InMemoryAlvoData Store(TimeProvider clock, bool audited = false)
     {
-        var catalog = PolicyCatalog.Build(Descriptor, Schema, MMLib.Alvo.Tests.Expressions.CelFixtures.Compiler);
+        var catalog = PolicyCatalog.Build(Descriptor, audited ? new SchemaModel([Schema.Entities[0] with { Audit = true }]) : Schema, MMLib.Alvo.Tests.Expressions.CelFixtures.Compiler);
         var provider = new PolicyCatalogProvider();
         provider.SetCurrent(Descriptor.Name, catalog);
-        return new InMemoryAlvoData(new PolicyEngine(provider), new PredicateEvaluator(), Schema, clock);
+        var schema = audited ? new SchemaModel([Schema.Entities[0] with { Audit = true }]) : Schema;
+        return new InMemoryAlvoData(new PolicyEngine(provider), new PredicateEvaluator(), schema, clock);
     }
 
     private static SchemaModel Schema => new([

@@ -20,6 +20,7 @@ public abstract class AlvoDataSequenceTests
 
     private static readonly DateTimeOffset _lastSecondOf2026 = new(2026, 12, 31, 23, 59, 59, TimeSpan.Zero);
     private static readonly DateTimeOffset _firstSecondOf2027 = new(2027, 1, 1, 0, 0, 0, TimeSpan.Zero);
+    private static readonly string[][] _oppositeOrders = [["north", "south"], ["south", "north"]];
     private static readonly AlvoContext _acme = InTenant(TenantId.New());
     private static readonly AlvoContext _globex = InTenant(TenantId.New());
 
@@ -43,12 +44,23 @@ public abstract class AlvoDataSequenceTests
     /// <param name="descriptor">The descriptor <paramref name="desired"/> maps from.</param>
     protected abstract Task ApplyAsync(SchemaModel current, SchemaModel desired, AlvoDescriptor descriptor);
 
+    /// <summary>
+    /// Skips the hundred-writer fact where this engine's write line cannot drain a hundred writers within its busy
+    /// timeout — SQLite's single writer on a Windows runner (#410). Empty by default: an engine whose writers run
+    /// concurrently always holds it.
+    /// </summary>
+    protected virtual void EnsureAHundredWritersFitTheBusyTimeout()
+    {
+    }
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>Acceptance (1): a hundred concurrent creates are numbered one to a hundred, without a gap or a duplicate.</summary>
     [Fact]
     public async Task A_hundred_concurrent_creates_number_one_to_a_hundred_without_gap_or_duplicate()
     {
+        EnsureAHundredWritersFitTheBusyTimeout();
+
         var data = await CreateAsync(Schema, Descriptor, _clock);
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -95,6 +107,27 @@ public abstract class AlvoDataSequenceTests
         (await NumberOfAsync(data, _acme, "north")).ShouldBe(2);
     }
 
+    /// <summary>
+    /// A create the engine refuses inside a unit that carries on returns its number with its savepoint — on SQLite too,
+    /// where a failed statement does not abort the transaction — so the unit's next create takes the same number.
+    /// </summary>
+    [Fact]
+    public async Task A_create_refused_inside_a_unit_that_carries_on_consumes_no_number()
+    {
+        var data = await CreateAsync(Schema, Descriptor, _clock);
+        (await NumberOfAsync(data, _acme, "north")).ShouldBe(1);
+
+        var kept = await Transactions.TransactAsync(_acme, async (unit, ct) =>
+        {
+            await Should.ThrowAsync<AlvoConstraintViolationException>(
+                () => unit.CreateAsync(Orders, Order(_acme, "north", qty: 0), ct));
+            return (await unit.CreateAsync(Orders, Order(_acme, "north"), ct))["number"];
+        }, cancellationToken: Ct);
+
+        kept.ShouldBe(2L);
+        (await NumberOfAsync(data, _acme, "north")).ShouldBe(3);
+    }
+
     /// <summary>Review focus 5: each tenant, <c>per</c> value and period counts from its start, and none restarts.</summary>
     [Fact]
     public async Task Each_tenant_per_value_and_period_counts_from_start()
@@ -122,6 +155,37 @@ public abstract class AlvoDataSequenceTests
             Orders, [Order(_acme, "north", qty: 1), Order(_acme, "north", qty: 2), Order(_acme, "north", qty: 3)], _acme, cancellationToken: Ct);
 
         batch.Rows.Select(row => (row["qty"], row["number"])).ShouldBe([(1L, 2L), (2L, 3L), (3L, 4L)]);
+    }
+
+    /// <summary>
+    /// Two batches over the same counts in opposite orders, released together round after round, both succeed: the counter
+    /// rows are taken in one canonical order, so neither waits on the other in a cycle.
+    /// </summary>
+    [Fact]
+    public async Task Concurrent_batches_over_the_same_counts_in_opposite_orders_both_succeed()
+    {
+        const int Rounds = 10;
+        var data = await CreateAsync(Schema, Descriptor, _clock);
+
+        for (var round = 0; round < Rounds; round++)
+        {
+            var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var batches = _oppositeOrders.Select(async branches =>
+            {
+                await start.Task;
+                return await data.CreateManyAsync(
+                    Orders, [.. branches.Select(branch => Order(_acme, branch))], _acme, cancellationToken: Ct);
+            }).ToList();
+            start.SetResult();
+            (await Task.WhenAll(batches)).ShouldAllBe(batch => batch.Rows.Count == 2);
+        }
+
+        var rows = await data.QueryAsync(new AlvoQuery { Entity = Orders, Limit = 100 }, _acme, Ct);
+        foreach (var branch in _oppositeOrders[0])
+        {
+            rows.Items.Where(row => (string)row["branch"]! == branch).Select(row => (long)row["number"]!).Order()
+                .ShouldBe(Enumerable.Range(1, 2 * Rounds).Select(number => (long)number), branch);
+        }
     }
 
     /// <summary>A replace that creates its row takes the next number; one that replaces a stored row keeps its number.</summary>
@@ -154,6 +218,46 @@ public abstract class AlvoDataSequenceTests
         var row = await data.CreateAsync(SalesOrders, Order(_acme, "north"), _acme, cancellationToken: Ct);
         (row["seq"], row["code"]).ShouldBe((3L, "SO-2026-0003"));
     }
+
+    /// <summary>
+    /// Counter rows are never deleted, so a rename onto a name an earlier sequence counted under is refused by name when it
+    /// is planned — rewriting the renamed count onto those rows would merge two counts, and hit the counter table's key.
+    /// </summary>
+    [Fact]
+    public async Task A_rename_onto_a_name_an_earlier_sequence_counted_under_is_refused()
+    {
+        var data = await CreateAsync(WithLegacy(Schema, "legacy", renamedFrom: null, sequenced: true), Descriptor, _clock);
+        (await NumberOfAsync(data, _acme, "north")).ShouldBe(1);
+        var retired = WithLegacy(Schema, "old_legacy", renamedFrom: "legacy", sequenced: false);
+        await ApplyAsync(WithLegacy(Schema, "legacy", renamedFrom: null, sequenced: true), retired, Descriptor);
+
+        var onto = WithLegacy(new SchemaModel([Entity(Orders, renamedFrom: null, numberField: "legacy", numberRenamedFrom: "number")]),
+            "old_legacy", renamedFrom: null, sequenced: false);
+        var refused = await Should.ThrowAsync<DescriptorValidationException>(
+            () => ApplyAsync(WithLegacy(Schema, "old_legacy", renamedFrom: null, sequenced: false), onto, DescriptorFor(Orders, "legacy")));
+
+        var error = refused.Result.Errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe("/entities/orders/fields/legacy/renamedFrom");
+        error.Message.ShouldStartWith("'orders.legacy' still holds the sequence counts of an earlier declaration of that name");
+    }
+
+    private static SchemaModel WithLegacy(SchemaModel schema, string name, string? renamedFrom, bool sequenced) => new([
+        schema.Entities[0] with
+        {
+            Fields =
+            [
+                .. schema.Entities[0].Fields,
+                new FieldSchema
+                {
+                    Name = name,
+                    RenamedFrom = renamedFrom,
+                    Type = SchemaField.Integer,
+                    Nullable = true,
+                    Sequence = sequenced ? new SequenceSchema { Per = "branch" } : null,
+                },
+            ],
+        },
+    ]);
 
     private static async Task<(long Number, string Code)> CreatedAsync(IAlvoData data, AlvoContext caller, string branch)
     {

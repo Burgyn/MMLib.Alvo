@@ -1,5 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 
+using MMLib.Alvo.Scheduling;
+
 namespace MMLib.Alvo.Extensions.Internal;
 
 /// <summary>Adds registrations to the container, numbering them in call order.</summary>
@@ -12,7 +14,8 @@ internal static class ExtensionRegistrations
         string? when,
         Action<AlvoHandlerOptions>? configure,
         HandlerInvoker invoker,
-        TypedHandler? typed = null)
+        TypedHandler? typed = null,
+        JobSpec? job = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         if (when is not null)
@@ -22,7 +25,7 @@ internal static class ExtensionRegistrations
 
         var options = new AlvoHandlerOptions();
         configure?.Invoke(options);
-        Add(services, sequence => new HandlerRegistration(id, sequence, source, when, HandlerSettings.From(options), invoker, typed));
+        Add(services, sequence => new HandlerRegistration(id, sequence, source, when, HandlerSettings.From(options), invoker, typed, job));
     }
 
     internal static void Add(IServiceCollection services, Func<int, ExtensionRegistration> create)

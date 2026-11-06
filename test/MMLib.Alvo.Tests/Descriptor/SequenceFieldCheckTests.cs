@@ -54,9 +54,10 @@ public sealed class SequenceFieldCheckTests
     [InlineData(", \"computed\": \"qty + 1\"", "computed")]
     [InlineData(""", "rollup": {"from": "orders", "op": "count", "via": "number"}""", "rollup")]
     [InlineData(""", "maxLength": 20""", "maxLength")]
+    [InlineData(", \"format\": \"email\"", "format")]
     public void A_sequence_with_a_default_computed_rollup_or_maxLength_is_refused(string extra, string keyword)
     {
-        var type = keyword == "maxLength" ? "string" : "integer";
+        var type = keyword is "maxLength" or "format" ? "string" : "integer";
         var sequence = type == "string" ? """{"format": "{n}"}""" : "{}";
 
         var error = Check(Number(type, sequence, extra)).ShouldHaveSingleItem();
@@ -73,6 +74,31 @@ public sealed class SequenceFieldCheckTests
         var error = Check(Number("integer", $$"""{"per": "{{per}}"}""")).ShouldHaveSingleItem();
         error.Path.ShouldBe(Pointer + "/per");
         error.Message.ShouldBe($"Field 'orders.number' counts its 'sequence' per '{per}', which {reason}.");
+    }
+
+    [Theory]
+    [InlineData("{\"type\": \"string\", \"required\": true, \"computed\": \"branch\"}")]
+    [InlineData("{\"type\": \"integer\", \"required\": true, \"rollup\": {\"from\": \"lines\", \"op\": \"count\", \"via\": \"order_id\"}}")]
+    [InlineData("{\"type\": \"integer\", \"required\": true, \"sequence\": {}}")]
+    public void A_per_naming_a_field_the_framework_maintains_is_refused(string kind)
+    {
+        var fields = "{" + Branch + ", \"number\": {\"type\": \"integer\", \"sequence\": {\"per\": \"kind\"}}, \"kind\": " + kind + "}";
+
+        var error = Check(fields).ShouldHaveSingleItem();
+        error.Path.ShouldBe(Pointer + "/per");
+        error.Message.ShouldBe(
+            "Field 'orders.number' counts its 'sequence' per 'kind', which is maintained by the framework and has no value when the number is allocated.");
+    }
+
+    [Fact]
+    public void A_per_naming_a_virtual_field_is_refused()
+    {
+        var fields = "{" + Branch + ", \"number\": {\"type\": \"integer\", \"sequence\": {\"per\": \"kind\"}}, \"kind\": {\"type\": \"string\", \"virtual\": true}}";
+
+        var error = Check(fields).ShouldHaveSingleItem();
+        error.Path.ShouldBe(Pointer + "/per");
+        error.Message.ShouldBe(
+            "Field 'orders.number' counts its 'sequence' per 'kind', which is virtual and has no value when the number is allocated.");
     }
 
     [Theory]

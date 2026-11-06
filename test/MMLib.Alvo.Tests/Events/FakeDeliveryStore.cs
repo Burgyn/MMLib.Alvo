@@ -32,6 +32,9 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     /// <summary>The ambient <see cref="AlvoFlow"/> at each answer for an attempt — what a write the store made there would carry.</summary>
     internal ConcurrentQueue<AlvoProvenance?> AnswerFlows { get; } = new();
 
+    /// <summary>Every claim made, in order.</summary>
+    internal ConcurrentQueue<DeliveryClaim> Claims { get; } = new();
+
     internal IReadOnlyList<Row> Rows
     {
         get
@@ -123,6 +126,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     public Task<IReadOnlyList<ClaimedDelivery>> ClaimAsync(DeliveryClaim claim, CancellationToken cancellationToken = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(claim.BatchSize);
+        Claims.Enqueue(claim);
 
         lock (_gate)
         {

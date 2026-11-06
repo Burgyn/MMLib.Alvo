@@ -24,7 +24,12 @@
       "access": null,
       "paused": false,
       "topLevelOnly": false,
-      "enabled": true
+      "enabled": true,
+      "cron": null,
+      "timeZone": null,
+      "nextRunAt": null,
+      "lastRunAt": null,
+      "lastOutcome": null
     },
     {
       "id": "ticket-resolved",
@@ -49,7 +54,12 @@
       "access": null,
       "paused": false,
       "topLevelOnly": false,
-      "enabled": true
+      "enabled": true,
+      "cron": null,
+      "timeZone": null,
+      "nextRunAt": null,
+      "lastRunAt": null,
+      "lastOutcome": null
     },
     {
       "id": "orders-approved",
@@ -70,7 +80,13 @@
       "access": null,
       "paused": false,
       "topLevelOnly": false,
-      "enabled": true
+      "enabled": true,
+      "cron": null,
+      "timeZone": null,
+      "nextRunAt": null,
+      "lastRunAt": null,
+      "lastOutcome": null
     }
-  ]
+  ],
+  "timers": null
 }

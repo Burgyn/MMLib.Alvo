@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 
@@ -30,6 +31,18 @@ internal static class SchedulingSetup
             provider.GetRequiredService<TimeProvider>(),
             provider.GetRequiredService<ILogger<TimerPump>>()));
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, TimerPump>(provider => provider.GetRequiredService<TimerPump>()));
+        services.TryAddSingleton(provider => new ScheduleRuns(provider.GetService<IAlvoTenantCatalog>(), provider.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton(provider => new SchedulePump(
+            provider.GetService<ITimerStore>(),
+            provider.GetRequiredService<ExtensionBinder>(),
+            provider.GetRequiredService<ExtensionRegistry>(),
+            provider.GetRequiredService<ScheduleRuns>(),
+            provider.GetRequiredService<AlvoBootState>(),
+            provider.GetRequiredService<IPolicyCatalogProvider>(),
+            provider.GetRequiredService<IOptions<AlvoEventOptions>>(),
+            provider.GetRequiredService<TimeProvider>(),
+            provider.GetRequiredService<ILogger<SchedulePump>>()));
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, SchedulePump>(provider => provider.GetRequiredService<SchedulePump>()));
 
         return services;
     }

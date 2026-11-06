@@ -36,6 +36,11 @@ public sealed class SequenceFormatTests
     public void A_scope_key_is_the_value_in_invariant_text(object value, string expected) =>
         SequenceFormat.KeyText(value).ShouldBe(expected);
 
+    /// <summary>A missing <c>per</c> value keys the empty count; the insert's own <c>NOT NULL</c> then refuses the row.</summary>
+    [Fact]
+    public void A_null_scope_key_is_empty_rather_than_a_crash() =>
+        SequenceFormat.KeyText(null).ShouldBe(string.Empty);
+
     [Fact]
     public void A_date_and_a_uuid_scope_key_are_their_canonical_text()
     {
