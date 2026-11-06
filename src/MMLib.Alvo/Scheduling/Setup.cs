@@ -40,6 +40,7 @@ internal static class SchedulingSetup
         services.TryAddSingleton(provider => new SchedulePump(
             provider.GetService<ITimerStore>(),
             provider.GetRequiredService<ExtensionBinder>(),
+            provider.GetRequiredService<ExtensionRegistry>(),
             provider.GetRequiredService<ScheduleRuns>(),
             provider.GetRequiredService<DataMigrationStarter>(),
             provider.GetRequiredService<AlvoBootState>(),

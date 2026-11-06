@@ -24,13 +24,13 @@ public abstract partial class TimerStoreContractTests
     {
         EnsureEngineAvailable();
         await using var world = await WorldAsync();
-        await world.Store.SyncSchedulesAsync([Schedule(Nightly, world.Now)], Ct);
+        await world.Store.SyncSchedulesAsync([Schedule(Nightly, world.Now)], [], Ct);
         using var start = new Barrier(3);
 
         var outcomes = await Task.WhenAll(Enumerable.Range(0, 3).Select(index => Task.Run(async () =>
         {
             start.SignalAndWait(Ct);
-            var claimed = await world.Store.ClaimSchedulesAsync($"worker-{index}", _lease, Ct);
+            var claimed = await world.Store.ClaimSchedulesAsync($"worker-{index}", [Nightly], _lease, Ct);
             return claimed.Count == 1 && await world.Store.AdvanceScheduleAsync(Advance($"worker-{index}", claimed[0], world.Now.AddDays(1)), Ct);
         }, Ct)));
 
@@ -45,11 +45,11 @@ public abstract partial class TimerStoreContractTests
     {
         EnsureEngineAvailable();
         await using var world = await WorldAsync();
-        await world.Store.SyncSchedulesAsync([Schedule(Nightly, world.Now)], Ct);
-        var first = (await world.Store.ClaimSchedulesAsync("worker-1", _lease, Ct)).ShouldHaveSingleItem();
+        await world.Store.SyncSchedulesAsync([Schedule(Nightly, world.Now)], [], Ct);
+        var first = (await world.Store.ClaimSchedulesAsync("worker-1", [Nightly], _lease, Ct)).ShouldHaveSingleItem();
 
         world.Advance(_lease);
-        var second = (await world.Store.ClaimSchedulesAsync("worker-2", _lease, Ct)).ShouldHaveSingleItem();
+        var second = (await world.Store.ClaimSchedulesAsync("worker-2", [Nightly], _lease, Ct)).ShouldHaveSingleItem();
 
         (await world.Store.AdvanceScheduleAsync(Advance("worker-1", first, world.Now.AddDays(1)), Ct)).ShouldBeFalse();
         (await world.Store.AdvanceScheduleAsync(Advance("worker-2", second, world.Now.AddDays(1)), Ct)).ShouldBeTrue();
@@ -62,8 +62,8 @@ public abstract partial class TimerStoreContractTests
     {
         EnsureEngineAvailable();
         await using var world = await WorldAsync();
-        await world.Store.SyncSchedulesAsync([Schedule(Nightly, world.Now)], Ct);
-        var claimed = (await world.Store.ClaimSchedulesAsync("worker-1", _lease, Ct)).ShouldHaveSingleItem();
+        await world.Store.SyncSchedulesAsync([Schedule(Nightly, world.Now)], [], Ct);
+        var claimed = (await world.Store.ClaimSchedulesAsync("worker-1", [Nightly], _lease, Ct)).ShouldHaveSingleItem();
         await world.BreakOutboxAsync();
 
         await Should.ThrowAsync<Exception>(() => world.Store.AdvanceScheduleAsync(Advance("worker-1", claimed, world.Now.AddDays(1)), Ct));
@@ -79,8 +79,8 @@ public abstract partial class TimerStoreContractTests
     {
         EnsureEngineAvailable();
         await using var world = await WorldAsync();
-        await world.Store.SyncSchedulesAsync([Schedule(Nightly, world.Now)], Ct);
-        var claimed = (await world.Store.ClaimSchedulesAsync("worker-1", _lease, Ct)).ShouldHaveSingleItem();
+        await world.Store.SyncSchedulesAsync([Schedule(Nightly, world.Now)], [], Ct);
+        var claimed = (await world.Store.ClaimSchedulesAsync("worker-1", [Nightly], _lease, Ct)).ShouldHaveSingleItem();
         var advance = Advance("worker-1", claimed, world.Now.AddDays(1)) with
         {
             Events = [.. Enumerable.Range(0, 3).Select(_ => Framework(NightlyEvent, new TenantId(Guid.NewGuid())))],
@@ -99,19 +99,19 @@ public abstract partial class TimerStoreContractTests
         EnsureEngineAvailable();
         await using var world = await WorldAsync();
         var t1 = world.Now.AddHours(1);
-        await world.Store.SyncSchedulesAsync([Schedule(Nightly, t1)], Ct);
+        await world.Store.SyncSchedulesAsync([Schedule(Nightly, t1)], [], Ct);
 
-        await world.Store.SyncSchedulesAsync([Schedule(Nightly, world.Now.AddHours(2))], Ct);
+        await world.Store.SyncSchedulesAsync([Schedule(Nightly, world.Now.AddHours(2))], [], Ct);
         (await world.Store.SchedulesAsync(Ct)).ShouldHaveSingleItem().NextRunAt.ShouldBe(t1);
 
         var t3 = world.Now.AddHours(3);
-        await world.Store.SyncSchedulesAsync([Schedule(Nightly, t3) with { Cron = ThreeAm }], Ct);
+        await world.Store.SyncSchedulesAsync([Schedule(Nightly, t3) with { Cron = ThreeAm }], [], Ct);
         var stored = (await world.Store.SchedulesAsync(Ct)).ShouldHaveSingleItem();
         stored.NextRunAt.ShouldBe(t3);
         stored.Cron.ShouldBe(ThreeAm);
 
         var t4 = world.Now.AddHours(4);
-        await world.Store.SyncSchedulesAsync([Schedule(Nightly, t4) with { Cron = ThreeAm, TimeZone = "Europe/Bratislava" }], Ct);
+        await world.Store.SyncSchedulesAsync([Schedule(Nightly, t4) with { Cron = ThreeAm, TimeZone = "Europe/Bratislava" }], [], Ct);
         (await world.Store.SchedulesAsync(Ct)).ShouldHaveSingleItem().NextRunAt.ShouldBe(t4);
     }
 
@@ -124,10 +124,10 @@ public abstract partial class TimerStoreContractTests
     {
         EnsureEngineAvailable();
         await using var world = await WorldAsync();
-        await world.Store.SyncSchedulesAsync([Schedule(Nightly, world.Now)], Ct);
-        var claimed = (await world.Store.ClaimSchedulesAsync("worker-1", _lease, Ct)).ShouldHaveSingleItem();
+        await world.Store.SyncSchedulesAsync([Schedule(Nightly, world.Now)], [], Ct);
+        var claimed = (await world.Store.ClaimSchedulesAsync("worker-1", [Nightly], _lease, Ct)).ShouldHaveSingleItem();
 
-        await world.Store.SyncSchedulesAsync([Schedule(Nightly, world.Now.AddHours(1)) with { Cron = ThreeAm }], Ct);
+        await world.Store.SyncSchedulesAsync([Schedule(Nightly, world.Now.AddHours(1)) with { Cron = ThreeAm }], [], Ct);
 
         (await world.Store.AdvanceScheduleAsync(Advance("worker-1", claimed, world.Now.AddDays(1)), Ct)).ShouldBeFalse();
         (await world.OutboxTypesAsync()).ShouldBeEmpty();
@@ -136,19 +136,35 @@ public abstract partial class TimerStoreContractTests
         stored.LastRunAt.ShouldBeNull();
     }
 
-    /// <summary>A sync deletes every stored schedule it does not list; an empty sync empties the store.</summary>
+    /// <summary>
+    /// A sync never deletes a schedule because it does not list it — another process sharing the database registers it — and
+    /// deletes only the ids it declares retired.
+    /// </summary>
     [Fact]
-    public async Task Syncing_drops_schedules_no_longer_registered()
+    public async Task Syncing_deletes_a_retired_schedule_and_never_an_unlisted_one()
     {
         EnsureEngineAvailable();
         await using var world = await WorldAsync();
-        await world.Store.SyncSchedulesAsync([Schedule("a", world.Now), Schedule("b", world.Now)], Ct);
+        await world.Store.SyncSchedulesAsync([Schedule("a", world.Now), Schedule("b", world.Now)], [], Ct);
 
-        await world.Store.SyncSchedulesAsync([Schedule("a", world.Now)], Ct);
+        await world.Store.SyncSchedulesAsync([], [], Ct);
+        (await world.Store.SchedulesAsync(Ct)).Select(schedule => schedule.Id).ShouldBe(["a", "b"]);
+
+        await world.Store.SyncSchedulesAsync([Schedule("a", world.Now)], ["b", "never-stored"], Ct);
         (await world.Store.SchedulesAsync(Ct)).Select(schedule => schedule.Id).ShouldBe(["a"]);
+    }
 
-        await world.Store.SyncSchedulesAsync([], Ct);
-        (await world.Store.SchedulesAsync(Ct)).ShouldBeEmpty();
+    /// <summary>A claim takes only the due schedules whose ids it names; an empty list claims nothing.</summary>
+    [Fact]
+    public async Task A_claim_takes_only_the_ids_it_names()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        await world.Store.SyncSchedulesAsync([Schedule("a", world.Now), Schedule("b", world.Now)], [], Ct);
+
+        (await world.Store.ClaimSchedulesAsync("web", [], _lease, Ct)).ShouldBeEmpty();
+        (await world.Store.ClaimSchedulesAsync("worker", ["b", "unknown"], _lease, Ct)).ShouldHaveSingleItem().Id.ShouldBe("b");
+        (await world.Store.ClaimSchedulesAsync("other", ["a", "b"], _lease, Ct)).ShouldHaveSingleItem().Id.ShouldBe("a");
     }
 
     /// <summary>An occurrence still in the future is not claimed.</summary>
@@ -157,11 +173,11 @@ public abstract partial class TimerStoreContractTests
     {
         EnsureEngineAvailable();
         await using var world = await WorldAsync();
-        await world.Store.SyncSchedulesAsync([Schedule(Nightly, world.Now.AddMinutes(1))], Ct);
+        await world.Store.SyncSchedulesAsync([Schedule(Nightly, world.Now.AddMinutes(1))], [], Ct);
 
-        (await world.Store.ClaimSchedulesAsync("worker-1", _lease, Ct)).ShouldBeEmpty();
+        (await world.Store.ClaimSchedulesAsync("worker-1", [Nightly], _lease, Ct)).ShouldBeEmpty();
         world.Advance(TimeSpan.FromMinutes(1));
-        (await world.Store.ClaimSchedulesAsync("worker-1", _lease, Ct)).ShouldHaveSingleItem().Id.ShouldBe(Nightly);
+        (await world.Store.ClaimSchedulesAsync("worker-1", [Nightly], _lease, Ct)).ShouldHaveSingleItem().Id.ShouldBe(Nightly);
     }
 
     /// <summary>A run now appends its events and leaves the schedule's next and last run where they were.</summary>
@@ -171,7 +187,7 @@ public abstract partial class TimerStoreContractTests
         EnsureEngineAvailable();
         await using var world = await WorldAsync();
         var next = world.Now.AddHours(5);
-        await world.Store.SyncSchedulesAsync([Schedule(Nightly, next)], Ct);
+        await world.Store.SyncSchedulesAsync([Schedule(Nightly, next)], [], Ct);
 
         await world.Store.AppendRunAsync([Framework(NightlyEvent), Framework(NightlyEvent)], Ct);
 

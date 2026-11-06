@@ -281,6 +281,7 @@ public sealed partial class OutboxDispatcherTests
     private static SchedulePump NoSchedules() => new(
         store: null,
         new ExtensionBinder(ExtensionRegistry.Empty, CelFixtures.Compiler, HandlerCatalog.EveryService(), NullLogger<ExtensionBinder>.Instance),
+        ExtensionRegistry.Empty,
         new ScheduleRuns(tenants: null, TimeProvider.System),
         new DataMigrationStarter(
             new ScheduleRuns(tenants: null, TimeProvider.System), applied: null, new PolicyCatalogProvider(), NullLogger<DataMigrationStarter>.Instance),

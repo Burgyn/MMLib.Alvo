@@ -17,9 +17,11 @@ namespace MMLib.Alvo.Scheduling;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The registered schedules are synced once, when the host starts</b> (<see cref="StartAsync"/>) — a new id gets its first
-/// occurrence, a changed cron or zone moves its next run, an id no longer registered is removed. A boot that had no primed
-/// catalog at start leaves the sync to the first round that has one.
+/// <b>The schedules this process registers are synced once, when the host starts</b> (<see cref="StartAsync"/>) — a new id
+/// gets its first occurrence, a changed cron or zone moves its next run, and an id declared with <c>AddRetiredExtension</c> is
+/// removed. A schedule this process does not register is neither removed nor claimed: processes sharing one database — a web
+/// host and a worker — register different schedules. A boot that had no primed catalog at start leaves the sync to the first
+/// round that has one; a process with nothing to sync writes nothing.
 /// </para>
 /// <para>
 /// <b>A missed occurrence runs once.</b> An occurrence that fell due while nothing ran is claimed once and the schedule resumes
@@ -30,12 +32,14 @@ namespace MMLib.Alvo.Scheduling;
 /// failed start is logged and tried again on the next round.
 /// </para>
 /// <para>
-/// <b>A claimed id this process no longer binds is left to its lease</b>, for a replica that still registers it. A run whose
+/// <b>A process claims only the schedules it binds</b>, so an orphaned row runs nowhere and a replica that does not register a
+/// schedule never holds its lease. A run whose
 /// events cannot be minted — the tenant list failed — or whose advance the store failed is logged and returns with its lease.
 /// </para>
 /// </remarks>
 /// <param name="store">The timer store, or <see langword="null"/> when no provider registered one.</param>
 /// <param name="binder">Binds the registered schedules to the current catalog.</param>
+/// <param name="registry">The registrations, read for the ids this process declares retired.</param>
 /// <param name="runs">Mints the framework events of one occurrence.</param>
 /// <param name="migrations">Starts the data migrations whose revision has been reached.</param>
 /// <param name="boot">The readiness signal the loop and the sync wait on.</param>
@@ -46,6 +50,7 @@ namespace MMLib.Alvo.Scheduling;
 internal sealed class SchedulePump(
     ITimerStore? store,
     ExtensionBinder binder,
+    ExtensionRegistry registry,
     ScheduleRuns runs,
     DataMigrationStarter migrations,
     AlvoBootState boot,
@@ -152,7 +157,7 @@ internal sealed class SchedulePump(
         }
 
         var bindings = binder.For(catalog);
-        var claimed = await schedules.ClaimSchedulesAsync(_claimant, Lease, ct).ConfigureAwait(false);
+        var claimed = await schedules.ClaimSchedulesAsync(_claimant, ScheduleIds(bindings), Lease, ct).ConfigureAwait(false);
         var outcomes = new List<bool?>(claimed.Count);
         foreach (var due in claimed)
         {
@@ -244,10 +249,19 @@ internal sealed class SchedulePump(
 
     private async Task SyncAsync(ITimerStore schedules, PolicyCatalog catalog, CancellationToken ct)
     {
-        await schedules.EnsureAsync(ct).ConfigureAwait(false);
-        await schedules.SyncSchedulesAsync(Definitions(binder.For(catalog)), ct).ConfigureAwait(false);
+        var definitions = Definitions(binder.For(catalog));
+        List<string> retired = [.. registry.Retired.Select(retirement => retirement.Id)];
+        if (definitions.Count > 0 || retired.Count > 0)
+        {
+            await schedules.EnsureAsync(ct).ConfigureAwait(false);
+            await schedules.SyncSchedulesAsync(definitions, retired, ct).ConfigureAwait(false);
+        }
+
         Volatile.Write(ref _synced, 1);
     }
+
+    private static List<string> ScheduleIds(ExtensionBindings bindings) =>
+        [.. bindings.Handlers.Where(handler => handler.Registration.Job is { IsSchedule: true }).Select(handler => handler.Id)];
 
     private List<ScheduleDefinition> Definitions(ExtensionBindings bindings)
     {

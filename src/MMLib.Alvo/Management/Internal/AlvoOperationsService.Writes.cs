@@ -87,6 +87,9 @@ internal sealed partial class AlvoOperationsService
                 + $"pause it instead: PUT {{m}}/projects/{project}/subscribers/{found.Id}/paused with {{\"paused\": true}}.",
             AlvoExtensionKind.Command =>
                 $"'{found.Id}' is a command, and {only}: a command is changed in the host's code and redeployed.",
+            AlvoExtensionKind.Schedule =>
+                $"'{found.Id}' is a schedule, and {only}: a schedule is changed or retired in the host's code and redeployed; to "
+                + $"run it outside its cron, POST {{m}}/projects/{project}/schedules/{found.Id}/run.",
             _ =>
                 $"'{found.Id}' is a {ExtensionCatalog.WireName(found.Kind)} extension, and {only}: a hook inside the write's transaction "
                 + "guards the data's integrity, so it is changed in the host's code and redeployed.",

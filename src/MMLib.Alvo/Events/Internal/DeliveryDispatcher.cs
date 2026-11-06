@@ -117,14 +117,17 @@ internal sealed class DeliveryDispatcher(
         return round.Result(claimedInRound);
     }
 
-    /// <summary>One manual iteration's claims: the handler pool's free slots, then the job pool's, within what the round has left.</summary>
+    /// <summary>
+    /// One manual iteration's claims: the job pool's free slots first, then the handler pool's, within what the round has left —
+    /// jobs first, so a round whose handlers alone would fill its batch size still runs the jobs due.
+    /// </summary>
     private async Task<IReadOnlyList<PoolClaim>> ClaimBothPoolsAsync(ExtensionBindings bindings, int left, CancellationToken ct)
     {
-        var handlers = await ClaimAsync(Pool(bindings, jobs: false), Math.Min(deliveries.Value.MaxConcurrency, left), ct).ConfigureAwait(false);
-        var jobs = await ClaimAsync(
-            Pool(bindings, jobs: true), Math.Min(deliveries.Value.MaxJobConcurrency, left - handlers.Deliveries.Count), ct).ConfigureAwait(false);
+        var jobs = await ClaimAsync(Pool(bindings, jobs: true), Math.Min(deliveries.Value.MaxJobConcurrency, left), ct).ConfigureAwait(false);
+        var handlers = await ClaimAsync(
+            Pool(bindings, jobs: false), Math.Min(deliveries.Value.MaxConcurrency, left - jobs.Deliveries.Count), ct).ConfigureAwait(false);
 
-        return [handlers, jobs];
+        return [jobs, handlers];
     }
 
     /// <summary>
@@ -272,7 +275,7 @@ internal sealed class DeliveryDispatcher(
     /// </summary>
     private async Task<PoolClaim> ClaimAsync(List<BoundHandler> pool, int batchSize, CancellationToken ct)
     {
-        var claimable = pool.Where(handler => !abandoned.StoodDown(handler.Id)).ToList();
+        var claimable = pool.Where(handler => !abandoned.StoodDown(handler.Id, handler.Registration.Job is not null)).ToList();
         var claimant = $"{_claimant}:{Guid.NewGuid():N}";
 
         return batchSize <= 0 || claimable.Count == 0

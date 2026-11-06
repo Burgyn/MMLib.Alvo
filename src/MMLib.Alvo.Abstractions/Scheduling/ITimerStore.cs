@@ -94,21 +94,31 @@ public interface ITimerStore
     Task<TimerCounts> CountTimersAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Makes the stored schedules exactly <paramref name="schedules"/>: inserts a new one, moves the next run of one whose
-    /// cron or time zone changed, keeps the next run of an unchanged one, and deletes every stored id not listed — an empty
-    /// list empties the store.
+    /// Stores the schedules one process registers, and removes the ids it declares retired, in one transaction: inserts a new
+    /// schedule, moves the next run of one whose cron or time zone changed, and keeps the next run of an unchanged one.
     /// </summary>
-    /// <param name="schedules">Every schedule this deployment registers.</param>
+    /// <remarks>
+    /// <b>A stored schedule is never removed because a process does not list it.</b> Processes sharing one database register
+    /// different schedules — a web host and a worker — so absence says nothing; only an id declared retired is deleted.
+    /// </remarks>
+    /// <param name="schedules">The schedules this process registers.</param>
+    /// <param name="retired">The ids this process declares retired; their stored schedules are deleted.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>A task that completes when the schedules are synchronized.</returns>
-    Task SyncSchedulesAsync(IReadOnlyList<ScheduleDefinition> schedules, CancellationToken cancellationToken = default);
+    Task SyncSchedulesAsync(
+        IReadOnlyList<ScheduleDefinition> schedules, IReadOnlyList<string> retired, CancellationToken cancellationToken = default);
 
-    /// <summary>Leases every due schedule that no unexpired lease holds, for <paramref name="claimant"/>.</summary>
+    /// <summary>
+    /// Leases, for <paramref name="claimant"/>, every due schedule among <paramref name="ids"/> that no unexpired lease holds — a
+    /// process claims only what it registers, so another process's schedule, or an orphaned row, is never run by it.
+    /// </summary>
     /// <param name="claimant">Who claims; unique to this claim, and the fence its advance must name.</param>
+    /// <param name="ids">The schedule ids the claimant registers; an empty list claims nothing.</param>
     /// <param name="lease">How long the claim holds before another claimant may take an occurrence back.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The claimed occurrences.</returns>
-    Task<IReadOnlyList<ClaimedSchedule>> ClaimSchedulesAsync(string claimant, TimeSpan lease, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ClaimedSchedule>> ClaimSchedulesAsync(
+        string claimant, IReadOnlyList<string> ids, TimeSpan lease, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Runs one claimed occurrence: moves the schedule to its next run, records the occurrence as its last run and appends
