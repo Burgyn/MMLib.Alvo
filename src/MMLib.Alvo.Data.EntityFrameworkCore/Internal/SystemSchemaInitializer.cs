@@ -64,6 +64,8 @@ internal sealed partial class SystemSchemaInitializer
         _inboundWebhooksTableName = InboundWebhookTable.NameFor(schemaPrefix);
         _hookRejectionsTableName = HookRejectionTable.NameFor(schemaPrefix);
         _timersTableName = TimerTable.NameFor(schemaPrefix);
+        _schedulesTableName = ScheduleTable.NameFor(schemaPrefix);
+        _dataMigrationsTableName = DataMigrationTable.NameFor(schemaPrefix);
     }
 
     private readonly string _idempotencyTableName;
@@ -77,6 +79,8 @@ internal sealed partial class SystemSchemaInitializer
     private readonly string _inboundWebhooksTableName;
     private readonly string _hookRejectionsTableName;
     private readonly string _timersTableName;
+    private readonly string _schedulesTableName;
+    private readonly string _dataMigrationsTableName;
 
     /// <summary>Gets the fully-prefixed descriptor-versions table name, e.g. <c>alvo_descriptor_versions</c>.</summary>
     public string TableName { get; }
@@ -150,6 +154,8 @@ internal sealed partial class SystemSchemaInitializer
         await CreateIndexIfMissingAsync(HookRejectionTable.IndexDdl(_hookRejectionsTableName), ct).ConfigureAwait(false);
         await CreateIfMissingAsync(_timersTableName, TimerTable.Ddl(_timersTableName), ct).ConfigureAwait(false);
         await CreateIndexIfMissingAsync(TimerTable.DueIndexDdl(_timersTableName), ct).ConfigureAwait(false);
+        await CreateIfMissingAsync(_schedulesTableName, ScheduleTable.Ddl(_schedulesTableName), ct).ConfigureAwait(false);
+        await CreateIfMissingAsync(_dataMigrationsTableName, DataMigrationTable.Ddl(_dataMigrationsTableName), ct).ConfigureAwait(false);
     }
 
     /// <summary>

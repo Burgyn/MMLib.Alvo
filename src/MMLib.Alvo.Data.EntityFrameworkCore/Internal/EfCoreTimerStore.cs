@@ -20,6 +20,8 @@ internal sealed partial class EfCoreTimerStore : ITimerStore
     private readonly TimeProvider _time;
     private readonly Func<EfAlvoData> _data;
     private readonly string _timers;
+    private readonly string _schedules;
+    private readonly string _migrations;
     private readonly string _outbox;
 
     internal EfCoreTimerStore(RelationalConnectionFactory connections, AlvoOptions options, TimeProvider time, Func<EfAlvoData> data)
@@ -33,6 +35,8 @@ internal sealed partial class EfCoreTimerStore : ITimerStore
         _time = time;
         _data = data;
         _timers = TimerTable.NameFor(options.SchemaPrefix);
+        _schedules = ScheduleTable.NameFor(options.SchemaPrefix);
+        _migrations = DataMigrationTable.NameFor(options.SchemaPrefix);
         _outbox = OutboxTable.NameFor(options.SchemaPrefix);
     }
 
@@ -44,11 +48,18 @@ internal sealed partial class EfCoreTimerStore : ITimerStore
             await RelationalSqlBatch.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
             using (await _connections.WriteGate.EnterAsync(cancellationToken).ConfigureAwait(false))
             {
-                await OutboxTable.EnsureAsync(connection, _outbox, cancellationToken).ConfigureAwait(false);
-                await IfNotExistsDdl.CreateTableAsync(connection, _timers, TimerTable.Ddl(_timers), cancellationToken).ConfigureAwait(false);
-                await IfNotExistsDdl.CreateIndexAsync(connection, TimerTable.DueIndexDdl(_timers), cancellationToken).ConfigureAwait(false);
+                await EnsureTablesAsync(connection, cancellationToken).ConfigureAwait(false);
             }
         }
+    }
+
+    private async Task EnsureTablesAsync(DbConnection connection, CancellationToken ct)
+    {
+        await OutboxTable.EnsureAsync(connection, _outbox, ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateTableAsync(connection, _timers, TimerTable.Ddl(_timers), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateIndexAsync(connection, TimerTable.DueIndexDdl(_timers), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateTableAsync(connection, _schedules, ScheduleTable.Ddl(_schedules), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateTableAsync(connection, _migrations, DataMigrationTable.Ddl(_migrations), ct).ConfigureAwait(false);
     }
 
     public Task<Guid> UpsertAsync(TimerEntry timer, CancellationToken cancellationToken = default)
