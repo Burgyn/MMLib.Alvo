@@ -14,6 +14,7 @@ using MMLib.Alvo.Rules;
 using MMLib.Alvo.Scheduling;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Secrets;
+using MMLib.Alvo.Secrets.Internal;
 using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
@@ -333,14 +334,23 @@ internal sealed partial class AlvoManagementService(
     {
         var options = OptionsFor(request);
         var schema = runtime();
-        var preview = await schema.PreviewAsync(
-            project, request.DescriptorJson, request.ExpectedRevision, options, ct).ConfigureAwait(false);
+        var preview = await WithSecretWarningsAsync(
+            await schema.PreviewAsync(project, request.DescriptorJson, request.ExpectedRevision, options, ct).ConfigureAwait(false),
+            request.DescriptorJson,
+            ct).ConfigureAwait(false);
         Guard(project, preview);
 
         return request.DryRun
             ? new ManagementApplyResult(Applied: false, preview.CurrentRevision, Summary(preview.Plan)) { Warnings = preview.Warnings }
             : await AppendAsync(schema, project, request, options, preview, ct).ConfigureAwait(false);
     }
+
+    /// <summary>The preview, with a warning per secret reference the store does not hold — names only, never a value.</summary>
+    private async Task<DescriptorApplyPreview> WithSecretWarningsAsync(DescriptorApplyPreview preview, string descriptorJson, CancellationToken ct) =>
+        preview with
+        {
+            Warnings = [.. preview.Warnings, .. await SecretReferenceCheck.MissingAsync(AlvoDescriptor.Parse(descriptorJson), secrets, ct).ConfigureAwait(false)],
+        };
 
     /// <summary>What makes two applies of this project the same request.</summary>
     /// <param name="project">The project being changed.</param>

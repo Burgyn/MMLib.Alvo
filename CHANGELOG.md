@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`AddRequiredSecret(name)`** (HX-15): a host declares a secret it cannot run without; the start is refused while the
+  secret store holds no non-empty value under that name (a dashboard-first host whose store is writable stands down
+  instead, so Settings → Secrets stays reachable). A store that fails refuses the start naming its exception type. An
+  apply warns, by name, about a `secretRef` the store does not hold yet. No secret value reaches a log, a refusal or a
+  warning.
 - **Automation and `entity.update`** (HX-15): the `automation` block runs — an `entity.<entity>.<created|updated|deleted>`
   or a five-field UTC cron trigger (once per tenant on a tenanted project, with an `IAlvoTenantCatalog`), a condition, and
   `webhook`, `email`, `function` and `entity.update` actions, each its own retried delivery. `entity.update` writes its
@@ -341,6 +346,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **A `secretRef` or `headersSecretRef` outside the secret-name grammar is refused at apply** (HX-15): the schema now
+  carries the name `pattern`, and the refusal names the slot without repeating its value, which may be the secret
+  itself pasted in the wrong place.
 - **Every descriptor action is its own delivery** (HX-15): an after-hook's `webhook`/`email` (and every automation
   action) is fanned out as a delivery of kind `action` (`function` for a function), retried on `AlvoRetryPolicy.Default`,
   dead-lettered and visible on Operations like a handler; the outbox only fans out, so a failing action no longer

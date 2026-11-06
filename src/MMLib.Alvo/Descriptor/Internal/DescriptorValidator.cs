@@ -8,6 +8,7 @@ using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
+using MMLib.Alvo.Secrets.Internal;
 using System.Text.Json;
 
 namespace MMLib.Alvo.Descriptor.Internal;
@@ -157,6 +158,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         var errors = new List<DescriptorValidationError>(schemaErrors);
         errors.AddRange(SemanticErrors(root));
         errors.AddRange(WildcardSubscriptionErrors(root));
+        errors.AddRange(SecretGrammarErrors(descriptorJson, errors));
         var judged = schemaErrors.Count == 0 && RuleErrors(descriptorJson, errors);
 
         return (new DescriptorValidationResult(errors), judged);
@@ -375,6 +377,27 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     private static DescriptorValidationError Malformed(JsonException ex) =>
         new("/", $"Descriptor is not valid JSON: {ex.Message}", "Fix the JSON syntax.", DescriptorValidationSeverity.Error);
 
+    /// <summary>
+    /// The secret references outside the name grammar, each at its own pointer and none echoing its value — the schema's
+    /// <c>pattern</c> already refuses them, but under an action's <c>oneOf</c> only as "matched no action", which names neither
+    /// the slot nor the fix. A pointer the schema pass already reported is not reported twice.
+    /// </summary>
+    private static IEnumerable<DescriptorValidationError> SecretGrammarErrors(string descriptorJson, List<DescriptorValidationError> reported)
+    {
+        AlvoDescriptor descriptor;
+        try
+        {
+            descriptor = AlvoDescriptor.Parse(descriptorJson);
+        }
+        catch (Exception unreadable) when (unreadable is JsonException or InvalidOperationException)
+        {
+            return [];
+        }
+
+        var seen = reported.Select(error => error.Path.TrimStart('#')).ToHashSet(StringComparer.Ordinal);
+        return [.. SecretReferenceCheck.Grammar(descriptor).Where(error => !seen.Contains(error.Path))];
+    }
+
     private static List<DescriptorValidationError> SchemaErrors(JsonElement root)
     {
         var instance = new GeneratedProjectDescriptor(root);
@@ -393,6 +416,11 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     private static DescriptorValidationError ToError(ValidationResult result)
     {
         var instancePath = PointerOrRoot(result.Location?.DocumentLocation.ToString());
+        if (SecretReferenceCheck.IsReferenceSlot(instancePath))
+        {
+            return SecretReferenceCheck.Refusal(instancePath);
+        }
+
         var schemaPath = PointerOrRoot(result.Location?.SchemaLocation.ToString());
         var message = result.Message;
         var effectiveMessage = string.IsNullOrWhiteSpace(message)

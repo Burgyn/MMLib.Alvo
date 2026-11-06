@@ -876,6 +876,7 @@ namespace Microsoft.Extensions.DependencyInjection
             where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<TMessage> { }
         public static MMLib.Alvo.IAlvoBuilder AddFunction<TFunction>(this MMLib.Alvo.IAlvoBuilder builder, string name)
             where TFunction :  class { }
+        public static MMLib.Alvo.IAlvoBuilder AddRequiredSecret(this MMLib.Alvo.IAlvoBuilder builder, string name) { }
         public static MMLib.Alvo.IAlvoBuilder AddRetiredExtension(this MMLib.Alvo.IAlvoBuilder builder, string id, MMLib.Alvo.Extensions.AlvoRetirement retirement) { }
         public static MMLib.Alvo.IAlvoBuilder AddSchedule<TJob>(this MMLib.Alvo.IAlvoBuilder builder, string id, string cron, string timeZone = "UTC", System.Action<MMLib.Alvo.Scheduling.AlvoScheduleOptions>? configure = null)
             where TJob :  class, MMLib.Alvo.Scheduling.IAlvoScheduledJob { }

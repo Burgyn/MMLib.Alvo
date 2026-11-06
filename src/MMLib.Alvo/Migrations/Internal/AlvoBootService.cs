@@ -7,6 +7,7 @@ using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Scheduling;
 using MMLib.Alvo.Schema;
+using MMLib.Alvo.Secrets.Internal;
 using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
 
@@ -77,6 +78,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     private readonly IOptions<AlvoSchemaOptions> _options;
     private readonly ExtensionStateGuard _extensionState;
     private readonly DataMigrationBootCheck _migrationCheck;
+    private readonly RequiredSecretsCheck? _requiredSecrets;
     private readonly ILogger<AlvoBootService> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="AlvoBootService"/> class.</summary>
@@ -95,6 +97,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// <param name="extensionState">Retires and refuses the durable work of ids this host no longer registers.</param>
     /// <param name="migrationCheck">Refuses a data migration not yet started on a scoped schema without a tenant list.</param>
     /// <param name="logger">Records what the boot decided, so a restart's no-op is visible.</param>
+    /// <param name="requiredSecrets">Refuses a start that lacks a secret the host declared with <c>AddRequiredSecret</c>.</param>
     public AlvoBootService(
         DescriptorBootPlan bootPlan,
         ISchemaMigrator migrator,
@@ -107,7 +110,8 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         IOptions<AlvoSchemaOptions> options,
         ExtensionStateGuard extensionState,
         DataMigrationBootCheck migrationCheck,
-        ILogger<AlvoBootService> logger)
+        ILogger<AlvoBootService> logger,
+        RequiredSecretsCheck? requiredSecrets = null)
     {
         ArgumentNullException.ThrowIfNull(bootPlan);
         ArgumentNullException.ThrowIfNull(migrator);
@@ -134,6 +138,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         _extensionState = extensionState;
         _migrationCheck = migrationCheck;
         _logger = logger;
+        _requiredSecrets = requiredSecrets;
     }
 
     /// <summary>Runs the whole boot, before the server binds.</summary>
@@ -244,6 +249,11 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         // Stage 1, unconditionally and in this order: the applied-snapshot read is what brings the `alvo.*`
         // system schema up, and the history read below needs those tables to exist.
         _ = await ReadAppliedSchemaAsync(project, ct).ConfigureAwait(false);
+
+        if (!await RequiredSecretsHeldAsync(project, ct).ConfigureAwait(false))
+        {
+            return;
+        }
 
         var stored = await _history.GetCurrentAsync(project, ct).ConfigureAwait(false);
         if (stored is null)
@@ -796,6 +806,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     {
         try
         {
+            await RefuseMissingSecretsAsync(ct).ConfigureAwait(false);
             await _extensionState.RefuseOrphansAsync(ct).ConfigureAwait(false);
             if (catalog is not null)
             {
@@ -807,6 +818,35 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         {
             _state.Failed(project, refusal.Message);
             BootRefused(_logger, refusal.Message);
+
+            throw;
+        }
+    }
+
+    private Task RefuseMissingSecretsAsync(CancellationToken ct) =>
+        _requiredSecrets?.RefuseAsync(ct) ?? Task.CompletedTask;
+
+    /// <summary>
+    /// The dashboard-first half of the required-secret check: a missing secret the operator can add in this process — the store
+    /// is writable — stands the boot down (Failed, readiness 503, nothing primed) instead of exiting, so Settings → Secrets stays
+    /// reachable; one the store cannot take refuses the start as on the code-first path.
+    /// </summary>
+    /// <returns>Whether every required secret is held; when not, the boot has stood down.</returns>
+    private async Task<bool> RequiredSecretsHeldAsync(string project, CancellationToken ct)
+    {
+        try
+        {
+            await RefuseMissingSecretsAsync(ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (AlvoStartupRefusedException refusal)
+        {
+            _state.Failed(project, refusal.Message);
+            BootRefused(_logger, refusal.Message);
+            if (_requiredSecrets is { CanBeFixedInProcess: true })
+            {
+                return false;
+            }
 
             throw;
         }

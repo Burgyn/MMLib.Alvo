@@ -11,6 +11,8 @@ using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Functions;
 using MMLib.Alvo.Functions.Internal;
 using MMLib.Alvo.Scheduling;
+using MMLib.Alvo.Secrets;
+using MMLib.Alvo.Secrets.Internal;
 using System.Linq.Expressions;
 
 namespace Microsoft.Extensions.DependencyInjection;
@@ -246,6 +248,23 @@ public static class AlvoExtensionBuilderExtensions
         var schema = FunctionInputSchema.For(input);
         builder.Services.AddKeyedTransient<TFunction>(name);
         ExtensionRegistrations.Add(builder.Services, sequence => new FunctionRegistration(name, sequence, typeof(TFunction), input, schema));
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Declares a secret this host cannot run without: the start is refused while the secret store does not hold a non-empty
+    /// value under <paramref name="name"/>. Only the name is ever logged or reported — never the value.
+    /// </summary>
+    /// <param name="builder">The Alvo builder.</param>
+    /// <param name="name">The secret's name in the store: lower case, starting with a letter, at most 64 letters, digits, dots, dashes and underscores.</param>
+    /// <returns><paramref name="builder"/>, for chaining.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is not a secret name.</exception>
+    public static IAlvoBuilder AddRequiredSecret(this IAlvoBuilder builder, string name)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(name);
+        builder.Services.AddSingleton(new RequiredSecret(SecretName.Parse(name)));
 
         return builder;
     }
