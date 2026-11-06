@@ -296,16 +296,15 @@ internal sealed partial class FieldFacets
             ? string.Create(CultureInfo.InvariantCulture, $"{what} is at most {CelMaxLength} characters — the schema's limit for CEL.")
             : null;
 
-    /// <summary>Sets the key in place, or removes it when there is no value; answers no refusal, so it chains.</summary>
-    private static string? SetOrRemove(JsonObject owner, string key, string? value)
+    /// <summary>Sets the key in place, or removes it when there is no value.</summary>
+    private static void SetOrRemove(JsonObject owner, string key, string? value)
     {
         if (value is { Length: > 0 })
         {
             owner[key] = value;
-            return null;
+            return;
         }
 
         owner.Remove(key);
-        return null;
     }
 }

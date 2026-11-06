@@ -249,10 +249,15 @@
                     <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" Lines="1" id="rollup-where"
                                   data-testid="rollup-where" Class="a-mono" spellcheck="false"
                                   Placeholder="e.g. status == 'held' — leave empty to aggregate every child"
-                                  aria-describedby="@_check.DescribedBy(WhereBox)"
+                                  aria-describedby="@DescribedBy(WhereBox)"
                                   Value="_facets.RollupWhere" ValueChanged="TypeWhere" />
                     @Findings(WhereBox)
                 </ChildContent>
+                <Hint>
+                    CEL over the child's own fields, not this row's — only the children it admits are aggregated. No
+                    caller and no now(): the stored number would go stale with no write to move it.
+                    @ChordHint.Of("saves")
+                </Hint>
             </Field>
         }
 
@@ -262,7 +267,7 @@
                 <ChildContent>
                     <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" Lines="2" id="new-field-computed"
                                   Class="a-mono" spellcheck="false" Placeholder="e.g. unit_price * amount"
-                                  aria-describedby="@ComputedDescribedBy"
+                                  aria-describedby="@DescribedBy(ComputedBox)"
                                   Value="_facets.Computed" ValueChanged="TypeComputed" />
                     @Findings(ComputedBox)
                 </ChildContent>
@@ -280,10 +285,15 @@
                 <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" Lines="1" id="field-validation"
                               data-testid="field-validation" Class="a-mono" spellcheck="false"
                               Placeholder="e.g. value >= 0 — the database refuses any row that breaks it"
-                              aria-describedby="@_check.DescribedBy(ValidationBox)"
+                              aria-describedby="@DescribedBy(ValidationBox)"
                               Value="_facets.Validation" ValueChanged="TypeValidation" />
                 @Findings(ValidationBox)
             </ChildContent>
+            <Hint>
+                CEL over this row: value is this field, other fields by name. The database enforces it as a CHECK, so it
+                reads no caller (@@user), no now(), and no hidden field. An empty field passes — use Required for presence.
+                @ChordHint.Of("saves")
+            </Hint>
         </Field>
 
         @if (_facets.DrawsDefault)

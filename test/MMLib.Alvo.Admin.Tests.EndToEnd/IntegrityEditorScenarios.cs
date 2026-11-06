@@ -25,7 +25,7 @@ public sealed class IntegrityEditorValidationScenarios(BikeWorkshopWorld world) 
         await box.FillAsync("value >= 0 && @user.id == @user.id");
         var finding = session.Page.GetByTestId("check-field-validation").First;
         await finding.WaitForAsync(new() { Timeout = 5_000 });
-        (await finding.InnerTextAsync()).ShouldContain("@user.id");
+        (await finding.InnerTextAsync()).ShouldContain("cannot be a CHECK constraint");
         await box.FillAsync("value >= 0");
         await finding.WaitForAsync(new() { State = WaitForSelectorState.Detached, Timeout = 5_000 });
 
@@ -70,7 +70,7 @@ public sealed class IntegrityEditorWhereScenarios(BikeWorkshopWorld world) : ICl
         await box.FillAsync("missing == 'x'");
         var finding = session.Page.GetByTestId("check-rollup-where").First;
         await finding.WaitForAsync(new() { Timeout = 5_000 });
-        (await finding.InnerTextAsync()).ShouldContain("missing");
+        (await finding.InnerTextAsync()).ShouldContain("'missing' is not a field of entity 'order_lines'");
         await box.FillAsync("quantity > 1");
         await finding.WaitForAsync(new() { State = WaitForSelectorState.Detached, Timeout = 5_000 });
 

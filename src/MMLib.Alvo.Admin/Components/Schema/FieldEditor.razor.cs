@@ -146,9 +146,9 @@ public partial class FieldEditor
         GC.SuppressFinalize(this);
     }
 
-    /// <summary>The expression box is described by its hint, and by the sentence under it while it has one.</summary>
-    private string ComputedDescribedBy
-        => _check.DescribedBy(ComputedBox) is { } check ? $"{ComputedBox}-hint {check}" : $"{ComputedBox}-hint";
+    /// <summary>An expression box is described by its hint, and by the sentence under it while it has one.</summary>
+    private string DescribedBy(string box)
+        => _check.DescribedBy(box) is { } check ? $"{box}-hint {check}" : $"{box}-hint";
 
     private void TypeComputed(string? text)
     {
@@ -308,7 +308,7 @@ public partial class FieldEditor
     /// </remarks>
     private string Fingerprint()
         => string.Join('|', _facets.Name, _facets.Build(Editing, EditingJson, Siblings, out _)?.ToJsonString()
-            ?? string.Join('|', "unbuilt", _facets.Kind, _facets.Type, _facets.Values, _facets.Computed), _excludedFromEvents);
+            ?? _facets.Unbuilt, _excludedFromEvents);
 
     /// <summary>Switches the kind; a computed column keeps a type it can be, and decimal otherwise.</summary>
     private void ChooseKind(FieldKind kind)

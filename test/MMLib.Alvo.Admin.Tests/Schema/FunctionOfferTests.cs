@@ -145,6 +145,19 @@ public class FunctionOfferTests
             .ShouldBe(new Insertion("duration('1h')", 10, 2));
     }
 
+    /// <summary>
+    /// The text constant is written only where the one parameter is a String: a host function that yields a Duration
+    /// from an Int would be offered <c>hours('1h')</c>, a type error, so it gets its parameter name like any other.
+    /// </summary>
+    [Fact]
+    public void A_duration_from_a_number_inserts_its_parameter_name_not_a_text_constant()
+    {
+        var catalog = new[] { Info("hours", CelValueType.Duration, CelFunctionProvenance.Host, _both, ("count", CelValueType.Int)) };
+
+        FunctionOffer.Template(FunctionOffer.For(catalog, CelProfile.Mutate).Single(), firstArgument: null)
+            .ShouldBe(new Insertion("hours(count)", 6, 5));
+    }
+
     [Fact]
     public void An_int_field_fills_a_decimal_parameter() =>
         FunctionOffer.FirstArgument(Offered("tax"), "beforeCreate", new FieldSchema { Name = "qty", Type = FieldType.Integer }).ShouldBe("new.qty");

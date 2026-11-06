@@ -32,6 +32,21 @@ public class FieldFacetsTests
         facets.Build(editing: "stock", editingJson: null, siblings: [], out _)!["validation"]!.GetValue<string>().ShouldBe("value >= 0");
     }
 
+    [Theory]
+    [InlineData("validation")]
+    [InlineData("where")]
+    [InlineData("computed")]
+    public void An_unnamed_form_still_tells_a_typed_expression_apart(string box)
+    {
+        var form = new FieldFacets();
+        Refusal(form);
+        var opened = form.Unbuilt;
+
+        Type(form, box, "x > 1");
+
+        form.Unbuilt.ShouldNotBe(opened);
+    }
+
     [Fact]
     public void A_rollup_filter_round_trips_and_an_empty_box_removes_it()
     {
@@ -229,5 +244,21 @@ public class FieldFacetsTests
     {
         editor.Build(null, null, siblings ?? [], out var refusal).ShouldBeNull();
         return refusal.ShouldNotBeNull();
+    }
+
+    private static void Type(FieldFacets form, string box, string text)
+    {
+        switch (box)
+        {
+            case "validation":
+                form.Validation = text;
+                break;
+            case "where":
+                form.RollupWhere = text;
+                break;
+            default:
+                form.Computed = text;
+                break;
+        }
     }
 }

@@ -69,9 +69,9 @@ public sealed class StagedFieldRefusalScenarios(AdminWorld world) : IClassFixtur
     /// </summary>
     /// <remarks>
     /// <b>This is what pins <c>FieldBadges.Refused</c>'s detection to the core's</b>: the Admin cannot call
-    /// <c>ValueOrExpr.IsTaggedExpression</c> or <c>RollupResolver</c>, which are internal to the core, so it restates
-    /// them — and this asks the build itself, through Preview's dry run of the same staged field, whether each form is
-    /// refused. A core that starts accepting a form the row still badges, or refusing one it does not, fails here.
+    /// <c>ValueOrExpr.IsTaggedExpression</c>, which is internal to the core, so it restates it (since HX-11 that is the
+    /// only restatement: <c>rollup.where</c> left the carried slots) — and this asks the build itself, through Preview's
+    /// dry run of the same staged field, whether each form is refused. A core that starts accepting a form the row still badges, or refusing one it does not, fails here.
     /// </remarks>
     /// <param name="declaration">The staged field's declaration.</param>
     /// <param name="slot">The slot the row badges, or empty when the build accepts it.</param>

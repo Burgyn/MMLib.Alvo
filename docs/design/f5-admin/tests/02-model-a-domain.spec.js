@@ -132,6 +132,13 @@ test.describe('model a domain', () => {
     await page.fill('[data-rollup-where]', '');
     expect((await working(page)).entities.customers.fields.invoice_count.rollup).toEqual({ from: 'invoices', op: 'count' });
 
+    // So is `field.validation`, on every kind: typed, it lands on the field; emptied, it leaves it.
+    await expect(page.locator('[data-refused="field.validation"]')).toHaveCount(0);
+    await page.fill('[data-validation]', 'value >= 0');
+    expect((await working(page)).entities.customers.fields.invoice_count.validation).toBe('value >= 0');
+    await page.fill('[data-validation]', '');
+    expect((await working(page)).entities.customers.fields.invoice_count).not.toHaveProperty('validation');
+
     await go(page, '#/schema/preview');
     await page.fill('#apply-reason', 'Count each customer\'s invoices');
     await page.click('[data-act="apply"]');

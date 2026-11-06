@@ -278,9 +278,23 @@ internal sealed partial class FieldFacets
         return WriteTypeFacets(facets);
     }
 
+    /// <summary>
+    /// The choices made so far, for a form that cannot <see cref="Build"/> yet: every box an operator can type into
+    /// before naming the field, so text typed there makes the form dirty.
+    /// </summary>
+    public string Unbuilt => string.Join('|', "unbuilt", Kind, Type, Values, Computed, Validation, RollupWhere);
+
     /// <summary>Writes the typed validation in place, or removes it when the box is empty.</summary>
     private string? WriteValidation(JsonObject facets)
-        => RefuseCelLength(Validation.Trim(), "A validation") ?? SetOrRemove(facets, "validation", Validation.Trim());
+    {
+        if (RefuseCelLength(Validation.Trim(), "A validation") is { } refusal)
+        {
+            return refusal;
+        }
+
+        SetOrRemove(facets, "validation", Validation.Trim());
+        return null;
+    }
 
     /// <summary>Why the typed name cannot be used, or nothing.</summary>
     /// <remarks>
