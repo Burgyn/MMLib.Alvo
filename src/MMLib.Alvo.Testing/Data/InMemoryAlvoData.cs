@@ -34,6 +34,11 @@ namespace MMLib.Alvo.Testing.Data;
 /// <c>MMLib.Alvo.TestHost</c>, which runs the production pipeline over a real SQLite database. A second, in-memory hook
 /// pipeline would be a second security core to keep identical to the first.
 /// </para>
+/// <para>
+/// <b>It runs no read extension either</b> — no host narrowing, no enricher — for the same reason, as it runs no unit. It
+/// keeps the key-set contract all the same: every virtual field a caller may read is present as <see langword="null"/>,
+/// and a write naming a virtual field is refused as the relational driver refuses it.
+/// </para>
 /// </remarks>
 public sealed class InMemoryAlvoData : IAlvoData
 {

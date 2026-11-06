@@ -245,10 +245,11 @@ namespace MMLib.Alvo.Data;
 /// </para>
 /// <para>
 /// <b>The returned key set and CLR types are part of the contract, not an implementation detail.</b>
-/// A returned <see cref="AlvoRecord"/> carries every non-hidden field the schema declares for that
-/// entity, including framework-managed columns (<c>id</c>, and — on a tenant-scoped entity —
-/// <c>tenant_id</c>); masking removes only descriptor-declared <c>hidden</c> fields, never a
-/// framework column.
+/// A returned <see cref="AlvoRecord"/> carries every non-hidden stored field the schema declares for that entity,
+/// including framework-managed columns (<c>id</c>, and — on a tenant-scoped entity — <c>tenant_id</c>), plus every
+/// non-hidden <see cref="Schema.FieldSchema.IsVirtual"/> field, <see langword="null"/> unless the host's enricher filled it.
+/// Two things remove a field: masking, which removes descriptor-declared <c>hidden</c> fields, and a host enricher's
+/// <c>Hide</c>; neither ever removes a framework column.
 /// <b><see cref="AlvoQuery.Select"/> is the one other thing that narrows this key set, and it never
 /// narrows it below two groups.</b> A projected read returns the fields the projection named, plus
 /// every column <see cref="Schema.AlvoManagedColumns.For(Schema.EntitySchema)"/> reports for the
@@ -256,7 +257,8 @@ namespace MMLib.Alvo.Data;
 /// <see cref="AlvoQuery.Sort"/>, because no implementation can order by a column it did not read. Both
 /// exemptions are contract, not courtesy: a caller reading "the fields I selected" and receiving
 /// those plus a sort key has not been surprised, and one that received *fewer* would have lost its
-/// paging. Masking remains the only thing that removes a field the caller did ask for.
+/// paging. Masking and an enricher's <c>Hide</c> remain the only things that remove a field the caller did ask for. A
+/// virtual field is never selectable, so a projected read carries none.
 /// Field values use the same CLR types <see cref="AlvoRecord"/>'s own remarks
 /// describe the interpreter reading (<see cref="Guid"/> for a <c>uuid</c> field, never a
 /// <see cref="string"/> or a byte array; <see cref="DateTimeOffset"/> for a timestamp; <c>decimal</c>

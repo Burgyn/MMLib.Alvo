@@ -26,8 +26,9 @@ public sealed class ReadsNote
 }
 
 /// <summary>
-/// Query narrowing on a real engine: ANDed into the SQL of list, get and count for every caller but the system, inside a
-/// unit too, never widening what the rules allow, never narrowing a write — and failing closed.
+/// Read extensions on a real engine. Query narrowing: ANDed into the SQL of list, get and count for every caller but the
+/// system, inside a unit too, never widening what the rules allow, never narrowing a write — and failing closed. Record
+/// enrichment: every returned row and write echo, after the mask, for every caller — never the stored row or an event.
 /// </summary>
 public abstract class ReadExtensionFacts
 {
@@ -310,6 +311,170 @@ public abstract class ReadExtensionFacts
     }
 
     [Fact]
+    public async Task A_hidden_field_is_absent_from_get_query_and_the_write_echo()
+    {
+        var database = await DatabaseAsync();
+        await using var alvo = await StartAsync(database, alvo => alvo.Entity(Notes, n => n.Enrich("no-region",
+            (Enrich<AlvoRecord> row) => row.Hide("region"))));
+        var clerk = Clerk();
+
+        var echo = await alvo.Data.CreateAsync(Notes, NoteValues(clerk, "a", "north"), clerk, cancellationToken: Ct);
+        var updated = await alvo.Data.UpdateAsync(Notes, (Guid)echo["id"]!, new Dictionary<string, object?> { ["title"] = "b" }, clerk, cancellationToken: Ct);
+        var got = await alvo.Data.GetAsync(Notes, (Guid)echo["id"]!, clerk, Ct);
+        var listed = (await alvo.Data.QueryAsync(new AlvoQuery { Entity = Notes }, clerk, Ct)).Items.ShouldHaveSingleItem();
+
+        foreach (var record in new[] { echo, updated, got!, listed })
+        {
+            record.Values.ContainsKey("region").ShouldBeFalse();
+            record["title"].ShouldNotBeNull();
+        }
+    }
+
+    [Fact]
+    public async Task An_enricher_fills_a_virtual_field_on_reads_and_echoes()
+    {
+        await using var alvo = await StartAsync(await DatabaseAsync(), Labelled);
+        var clerk = Clerk();
+
+        var echo = await alvo.Data.CreateAsync(Notes, NoteValues(clerk, "a", "north"), clerk, cancellationToken: Ct);
+        var id = (Guid)echo["id"]!;
+        var updated = await alvo.Data.UpdateAsync(Notes, id, new Dictionary<string, object?> { ["title"] = "b" }, clerk, cancellationToken: Ct);
+        var replaced = await alvo.Data.ReplaceAsync(Notes, id, Without(NoteValues(clerk, "c", "south"), "tenant_id"), clerk, cancellationToken: Ct);
+        var got = (await alvo.Data.GetAsync(Notes, id, clerk, Ct)).ShouldNotBeNull();
+        var listed = (await alvo.Data.QueryAsync(new AlvoQuery { Entity = Notes }, clerk, Ct)).Items.ShouldHaveSingleItem();
+
+        echo["display"].ShouldBe("a (north)");
+        updated["display"].ShouldBe("b (north)");
+        replaced.Row["display"].ShouldBe("c (south)");
+        got["display"].ShouldBe("c (south)");
+        listed["display"].ShouldBe("c (south)");
+    }
+
+    [Fact]
+    public async Task An_enricher_cannot_bring_back_a_field_the_policy_hides()
+    {
+        await using var alvo = await StartAsync(await DatabaseAsync(), alvo => alvo.Entity(Notes, n => n.Enrich(
+            "coded", (Enrich<AlvoRecord> row) => row.SetVirtual("internal_code", "x"))));
+        var clerk = Clerk();
+        var auditor = AlvoTestHost.Caller("auditor") with { Tenant = clerk.Tenant };
+        var id = await CreateAsync(alvo, clerk, "a", "north");
+
+        (await alvo.Data.GetAsync(Notes, id, clerk, Ct)).ShouldNotBeNull().Values.ShouldNotContainKey("internal_code");
+        (await alvo.Data.GetAsync(Notes, id, auditor, Ct)).ShouldNotBeNull()["internal_code"].ShouldBe("x");
+    }
+
+    [Fact]
+    public async Task A_system_read_is_enriched_too()
+    {
+        await using var alvo = await StartAsync(await DatabaseAsync(), Labelled);
+        var clerk = Clerk();
+        var id = await CreateAsync(alvo, clerk, "a", "north");
+
+        (await alvo.Data.GetAsync(Notes, id, AlvoContext.System(clerk.Tenant), Ct)).ShouldNotBeNull()["display"].ShouldBe("a (north)");
+    }
+
+    [Fact]
+    public async Task An_idempotent_replay_is_enriched()
+    {
+        await using var alvo = await StartAsync(await DatabaseAsync(), Labelled);
+        var clerk = Clerk();
+        var key = new AlvoIdempotency("note-1", "fingerprint-1");
+
+        var first = await alvo.Data.CreateAsync(Notes, NoteValues(clerk, "a", "north"), clerk, key, Ct);
+        var replay = await alvo.Data.CreateAsync(Notes, NoteValues(clerk, "a", "north"), clerk, key, Ct);
+
+        replay["id"].ShouldBe(first["id"]);
+        (first["display"], replay["display"]).ShouldBe(("a (north)", "a (north)"));
+    }
+
+    [Fact]
+    public async Task An_idempotent_batch_replay_is_enriched_with_the_create_operation()
+    {
+        var seen = new ConcurrentQueue<DataOperation>();
+        await using var alvo = await StartAsync(await DatabaseAsync(), alvo => alvo.Entity(Notes, n => n.Enrich(
+            "operations", (Enrich<AlvoRecord> row) => seen.Enqueue(row.Operation))));
+        var clerk = Clerk();
+        var key = new AlvoIdempotency("batch-1", "fingerprint-1");
+
+        await alvo.Data.CreateManyAsync(Notes, [NoteValues(clerk, "a", "north")], clerk, key, Ct);
+        await alvo.Data.CreateManyAsync(Notes, [NoteValues(clerk, "a", "north")], clerk, key, Ct);
+
+        seen.ShouldBe([DataOperation.Create, DataOperation.Create]);
+    }
+
+    [Fact]
+    public async Task A_projected_read_is_enriched_without_bringing_back_unselected_fields()
+    {
+        await using var alvo = await StartAsync(await DatabaseAsync(), alvo => alvo.Entity(Notes, n => n.Enrich(
+            "reshaping", (Enrich<AlvoRecord> row) =>
+            {
+                row.Hide("region");
+                row.SetVirtual("display", "x");
+            })));
+        var clerk = Clerk();
+        await CreateAsync(alvo, clerk, "a", "north");
+
+        var projected = (await alvo.Data.QueryAsync(new AlvoQuery { Entity = Notes, Select = ["title"] }, clerk, Ct)).Items.ShouldHaveSingleItem();
+
+        projected["title"].ShouldBe("a");
+        projected.Values.ShouldNotContainKey("region");
+        projected.Values.ShouldNotContainKey("display");
+        projected.Values.ShouldNotContainKey("owner_id");
+    }
+
+    [Fact]
+    public async Task A_batch_echo_is_enriched_row_by_row()
+    {
+        await using var alvo = await StartAsync(await DatabaseAsync(), Labelled);
+        var clerk = Clerk();
+
+        var batch = await alvo.Data.CreateManyAsync(
+            Notes, [NoteValues(clerk, "a", "north"), NoteValues(clerk, "b", "south"), NoteValues(clerk, "c", "east")], clerk, cancellationToken: Ct);
+
+        batch.Rows.Select(row => row["display"]).ShouldBe(["a (north)", "b (south)", "c (east)"]);
+    }
+
+    [Fact]
+    public async Task A_throwing_enricher_fails_the_read_with_its_id()
+    {
+        await using var alvo = await StartAsync(await DatabaseAsync(), alvo => alvo.Entity(Notes, n => n.Enrich(
+            "boom", (Enrich<AlvoRecord> row) =>
+            {
+                if (row.Operation == DataOperation.Get)
+                {
+                    throw new InvalidOperationException("host bug");
+                }
+            })));
+        var clerk = Clerk();
+        var id = await CreateAsync(alvo, clerk, "a", "north");
+
+        var failure = await Should.ThrowAsync<InvalidOperationException>(() => alvo.Data.GetAsync(Notes, id, clerk, Ct));
+
+        failure.Message.ShouldBe("The read extension 'boom' failed (exception), so the read answered nothing.");
+    }
+
+    [Fact]
+    public async Task The_stored_row_and_the_event_image_are_never_enriched()
+    {
+        var database = await DatabaseAsync();
+        var events = new ConcurrentQueue<AlvoEvent>();
+        await using var alvo = await StartAsync(database, alvo =>
+        {
+            Labelled(alvo);
+            alvo.Entity(Notes, n => n.OnCreated("seen", (AlvoCreated<AlvoRecord> _, AlvoEventContext context) => events.Enqueue(context.Event)));
+        });
+        var clerk = Clerk();
+        var columns = await database.Columns(Notes);
+
+        var echo = await alvo.Data.CreateAsync(Notes, NoteValues(clerk, "a", "north"), clerk, cancellationToken: Ct);
+        await alvo.DrainEventsAsync(Ct);
+
+        echo["display"].ShouldBe("a (north)");
+        events.ShouldHaveSingleItem().Data.Record!.Values.ShouldNotContainKey("display");
+        (await database.Columns(Notes)).ShouldBe(columns);
+    }
+
+    [Fact]
     public async Task A_replace_never_demands_a_virtual_field()
     {
         await using var alvo = await StartAsync(await DatabaseAsync(), _ => { });
@@ -356,6 +521,9 @@ public abstract class ReadExtensionFacts
             "reads-desk", new MMLib.Alvo.Management.ManagementApplyRequest(descriptorJson, current.Revision, allowDestructive), Ct))
             .Applied.ShouldBeTrue();
     }
+
+    private static void Labelled(IAlvoBuilder alvo) => alvo.Entity(Notes, n => n.Enrich(
+        "labelled", (Enrich<AlvoRecord> row) => row.SetVirtual("display", $"{row.Row["title"]} ({row.Row["region"]})")));
 
     private static void NowhereOnly(IAlvoBuilder alvo) => alvo.Entity(Notes, n => n.Narrow(
         "nowhere", (QueryNarrowing _) => new AlvoComparison("region", AlvoFilterOperator.Eq, "nowhere")));

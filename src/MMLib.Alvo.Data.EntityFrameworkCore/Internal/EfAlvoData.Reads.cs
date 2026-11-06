@@ -15,22 +15,51 @@ internal sealed partial class EfAlvoData
         _reads?.Narrowing(entity, operation, context);
 
     /// <summary>
-    /// A materialized row as the caller receives it: masked, unselected fields absent, and every virtual field it may carry
-    /// present — <see langword="null"/> until an enricher fills it, so the key set of a read is stable.
+    /// The enrichment of a caller-facing read — a page, a get, a write's echo or a replay's — or <see langword="null"/> when
+    /// no enricher binds the entity. A write's echo is enriched with the write's own operation; its target rows, pre-images
+    /// and event images never are.
     /// </summary>
-    /// <param name="row">The row as the statement returned it.</param>
-    /// <param name="schema">The entity the row belongs to, or <see langword="null"/> when the applied schema does not declare it.</param>
+    private IReadEnrichment? EnrichmentOf(string entity, DataOperation operation, AlvoContext context) =>
+        _reads?.BeginEnrichment(entity, operation, context);
+
+    /// <summary>
+    /// One read's rows as the caller receives them: masked, unselected fields absent, every virtual field the row may carry
+    /// present — <see langword="null"/> until an enricher fills it, so the key set of a read is stable — and then passed
+    /// through the read's enrichment, if any.
+    /// </summary>
+    /// <param name="schema">The entity the rows belong to, or <see langword="null"/> when the applied schema does not declare it.</param>
     /// <param name="hidden">The fields the caller's policy hides.</param>
     /// <param name="unselected">The fields the caller's projection left out.</param>
-    private static AlvoRecord Shaped(
-        Dictionary<string, object> row, EntitySchema? schema, IReadOnlySet<string> hidden, IReadOnlySet<string> unselected)
+    /// <param name="enrichment">The read's enrichment, or <see langword="null"/>.</param>
+    private sealed class RowShaper(
+        EntitySchema? schema, IReadOnlySet<string> hidden, IReadOnlySet<string> unselected, IReadEnrichment? enrichment)
     {
-        var record = RecordMaterializer.ToRecord(row, hidden, unselected);
-        var missing = schema?.Fields
+        private readonly string[] _virtuals = schema?.Fields
             .Where(field => field.IsVirtual && !hidden.Contains(field.Name) && !unselected.Contains(field.Name))
-            .Where(field => !record.Values.ContainsKey(field.Name))
-            .ToList() ?? [];
+            .Select(field => field.Name)
+            .ToArray() ?? [];
 
-        return missing.Aggregate(record, (shaped, field) => shaped.With(field.Name, null));
+        internal AlvoRecord Shaped(Dictionary<string, object> row)
+        {
+            var record = WithVirtuals(RecordMaterializer.ToRecord(row, hidden, unselected));
+
+            return enrichment is null ? record : enrichment.Enrich(record);
+        }
+
+        private AlvoRecord WithVirtuals(AlvoRecord record)
+        {
+            if (_virtuals.All(record.Values.ContainsKey))
+            {
+                return record;
+            }
+
+            var values = new Dictionary<string, object?>(record.Values, StringComparer.Ordinal);
+            foreach (var name in _virtuals)
+            {
+                values.TryAdd(name, null);
+            }
+
+            return new AlvoRecord(values);
+        }
     }
 }
