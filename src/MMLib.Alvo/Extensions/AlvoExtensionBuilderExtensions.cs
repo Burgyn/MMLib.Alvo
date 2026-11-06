@@ -5,8 +5,10 @@ using MMLib.Alvo.Commands.Internal;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Data.Internal;
 using MMLib.Alvo.Events;
+using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Scheduling;
 using System.Linq.Expressions;
 
 namespace Microsoft.Extensions.DependencyInjection;
@@ -156,6 +158,36 @@ public static class AlvoExtensionBuilderExtensions
     }
 
     /// <summary>
+    /// Runs a <typeparamref name="TJob"/>, built per run, on <paramref name="cron"/> in <paramref name="timeZone"/>: one run
+    /// per occurrence across every replica — once per tenant with <see cref="AlvoScheduleScope.EachTenant"/> — as a delivery
+    /// that is retried, recorded and runnable on demand. An occurrence missed while no replica ran runs once, not once per miss.
+    /// </summary>
+    /// <typeparam name="TJob">The job class.</typeparam>
+    /// <param name="builder">The Alvo builder.</param>
+    /// <param name="id">A stable id: its next run and its deliveries are found by it after a restart.</param>
+    /// <param name="cron">Five fields — minute, hour, day of month, month, day of week — such as <c>0 2 * * *</c>; checked when the host starts.</param>
+    /// <param name="timeZone">The IANA zone the cron is read in; default <c>UTC</c>. Daylight-saving changes follow the zone.</param>
+    /// <param name="configure">Optional schedule options.</param>
+    /// <returns><paramref name="builder"/>, for chaining.</returns>
+    public static IAlvoBuilder AddSchedule<TJob>(
+        this IAlvoBuilder builder, string id, string cron, string timeZone = "UTC", Action<AlvoScheduleOptions>? configure = null)
+        where TJob : class, IAlvoScheduledJob
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(cron);
+        ArgumentException.ThrowIfNullOrWhiteSpace(timeZone);
+        var options = new AlvoScheduleOptions();
+        configure?.Invoke(options);
+        builder.Services.TryAddTransient<TJob>();
+        ExtensionRegistrations.AddHandler(
+            builder.Services, id, new NamedEvent(ScheduleEvents.TypeFor(id)), when: null, handler => JobSettings(handler, options),
+            HandlerInvoker.ForJob<TJob>(), typed: null, new JobSpec(DeliveryKind.Schedule, cron, timeZone, options.Scope, AfterRevision: null));
+
+        return builder;
+    }
+
+    /// <summary>
     /// Declares an id this host no longer registers, and what happens at start-up to the work it left behind; without it
     /// a host whose store holds such work refuses to start.
     /// </summary>
@@ -205,6 +237,15 @@ public static class AlvoExtensionBuilderExtensions
     public static IAlvoBuilder AddCommand<TCommand>(this IAlvoBuilder builder, string name, Expression<Func<AlvoConditionCaller, bool>> access)
         where TCommand : class =>
         Commanded<TCommand>(builder, name, CommandAccess.Typed(access, name));
+
+    private static void JobSettings(AlvoHandlerOptions handler, AlvoScheduleOptions options)
+    {
+        handler.Timeout = options.Timeout;
+        handler.Retry = options.Retry;
+        handler.Description = options.Description;
+        handler.RunAs = AlvoRunAs.System;
+        handler.Ordering = AlvoOrdering.None;
+    }
 
     private static IAlvoBuilder Commanded<TCommand>(IAlvoBuilder builder, string name, CommandAccess access)
         where TCommand : class

@@ -2,6 +2,7 @@
 
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
+using MMLib.Alvo.Scheduling;
 
 using System.Reflection;
 
@@ -69,6 +70,19 @@ internal sealed class HandlerInvoker
         }
 
         return new(typeof(TMessage), typeof(THandler).FullName, InvokeClassAsync<THandler, TMessage>, isService => ClassUnresolvable(typeof(THandler), isService));
+    }
+
+    /// <summary>A scheduled job or a data migration, built per run from the delivery's scope; its message is the run's payload.</summary>
+    internal static HandlerInvoker ForJob<TJob>()
+        where TJob : class
+    {
+        if (typeof(TJob).IsAbstract)
+        {
+            throw new ArgumentException(
+                $"{Display(typeof(TJob))} is abstract, so Alvo cannot build it for a run; register a concrete job class.", nameof(TJob));
+        }
+
+        return new(typeof(AlvoRecord), typeof(TJob).FullName, JobInvocation.InvokeAsync<TJob>, isService => ClassUnresolvable(typeof(TJob), isService));
     }
 
     private static void EnsureReturnsTask(Delegate handler)

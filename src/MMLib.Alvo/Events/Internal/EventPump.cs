@@ -10,9 +10,10 @@ namespace MMLib.Alvo.Events.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A round is the timer pump's tick (fire the timers now due, appending their events), then the outbox dispatcher's (claim,
-/// fan out, run the declarative actions), then the delivery dispatcher's (claim the lane heads now due, run them) — so a
-/// timer that falls due fires and is delivered in one round. The public port and its result do not change; the steps'
+/// A round is the timer pump's tick (fire the timers now due, appending their events), then the schedule pump's (advance the
+/// occurrences now due, appending their runs), then the outbox dispatcher's (claim, fan out, run the declarative actions), then
+/// the delivery dispatcher's (claim the lane heads now due, run them) — so a timer or an occurrence that falls due fires and
+/// is delivered in one round. The public port and its result do not change; the steps'
 /// results are summed.
 /// </para>
 /// <para>
@@ -24,10 +25,11 @@ namespace MMLib.Alvo.Events.Internal;
 /// </para>
 /// </remarks>
 /// <param name="timers">The timer pump, whose manual round fires the timers now due.</param>
+/// <param name="schedules">The schedule pump, whose manual round runs the occurrences now due.</param>
 /// <param name="outbox">The outbox dispatcher, whose manual round checks the mode and the boot before it claims.</param>
 /// <param name="deliveries">The delivery dispatcher, whose manual round runs the handler deliveries now due.</param>
 /// <param name="lifetime">The host's lifetime, whose stopping token ends a round the way it ends the loop's.</param>
-internal sealed class EventPump(TimerPump timers, OutboxDispatcher outbox, DeliveryDispatcher deliveries, IHostApplicationLifetime lifetime)
+internal sealed class EventPump(TimerPump timers, SchedulePump schedules, OutboxDispatcher outbox, DeliveryDispatcher deliveries, IHostApplicationLifetime lifetime)
     : IAlvoEventPump, IDisposable
 {
     private readonly SemaphoreSlim _rounds = new(1, 1);
@@ -49,6 +51,7 @@ internal sealed class EventPump(TimerPump timers, OutboxDispatcher outbox, Deliv
     public Task<AlvoDrainResult> DrainAsync(CancellationToken cancellationToken = default) =>
         InRoundAsync(async round => Sum(
             await timers.ManualRoundAsync(round).ConfigureAwait(false),
+            await schedules.ManualRoundAsync(round).ConfigureAwait(false),
             await outbox.ManualRoundAsync(round).ConfigureAwait(false),
             await deliveries.ManualRoundAsync(round).ConfigureAwait(false)), cancellationToken);
 

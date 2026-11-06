@@ -13,4 +13,10 @@ public sealed class AlvoDeliveryOptions
     /// handlers keep running.
     /// </remarks>
     public int MaxConcurrency { get; set; } = 16;
+
+    /// <summary>
+    /// Gets or sets how many scheduled-job and data-migration runs this process runs at once, beside
+    /// <see cref="MaxConcurrency"/> handler deliveries, so a long job never takes a handler's slot; default 2, from 1 to 256.
+    /// </summary>
+    public int MaxJobConcurrency { get; set; } = 2;
 }

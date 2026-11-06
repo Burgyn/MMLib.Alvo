@@ -55,4 +55,8 @@ public enum AlvoExtensionKind
     /// </summary>
     [JsonStringEnumMemberName("enricher")]
     Enricher = 8,
+
+    /// <summary>A schedule: host C# run on a cron, once per occurrence across every replica, as a delivery.</summary>
+    [JsonStringEnumMemberName("schedule")]
+    Schedule = 9,
 }
