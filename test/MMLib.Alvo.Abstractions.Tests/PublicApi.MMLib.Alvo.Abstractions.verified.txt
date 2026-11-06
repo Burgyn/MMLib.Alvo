@@ -1839,6 +1839,7 @@ namespace MMLib.Alvo.Management
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementExtension> Extensions { get; init; }
         public System.Collections.Generic.IReadOnlyList<string> HiddenFields { get; init; }
         public System.Collections.Generic.IReadOnlyList<string> ReadOnlyFields { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRelationVerdict> Relations { get; init; }
         public string? TenantScope { get; init; }
         public string? Using { get; init; }
         public string? WithCheck { get; init; }
@@ -1864,6 +1865,15 @@ namespace MMLib.Alvo.Management
         public string Consequence { get; init; }
         public string Fix { get; init; }
         public string Slot { get; init; }
+    }
+    public sealed class ManagementRelationVerdict : System.IEquatable<MMLib.Alvo.Management.ManagementRelationVerdict>
+    {
+        public ManagementRelationVerdict(string Via, string Entity, bool Allowed, string? Using, string? TenantScope) { }
+        public bool Allowed { get; init; }
+        public string Entity { get; init; }
+        public string? TenantScope { get; init; }
+        public string? Using { get; init; }
+        public string Via { get; init; }
     }
     public sealed class ManagementReplayPlan : System.IEquatable<MMLib.Alvo.Management.ManagementReplayPlan>
     {

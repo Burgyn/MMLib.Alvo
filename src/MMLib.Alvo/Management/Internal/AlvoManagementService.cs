@@ -7,6 +7,7 @@ using MMLib.Alvo.Commands.Internal;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
@@ -941,7 +942,44 @@ internal sealed partial class AlvoManagementService(
         decision.WithCheck?.Source,
         decision.TenantScope?.Source,
         [.. decision.HiddenFields.Order(StringComparer.Ordinal)],
-        [.. decision.ReadOnlyFields.Order(StringComparer.Ordinal)]);
+        [.. decision.ReadOnlyFields.Order(StringComparer.Ordinal)])
+    {
+        Relations = RelationVerdicts(decision),
+    };
+
+    /// <summary>
+    /// Every relation the decision's bound predicates and lookup checks read through, once each, in the order they are
+    /// read: <c>USING</c>, then <c>WITH CHECK</c>, then the checks.
+    /// </summary>
+    /// <param name="decision">What the engine resolved, its relations already bound for the simulated caller.</param>
+    private static IReadOnlyList<ManagementRelationVerdict> RelationVerdicts(PolicyDecision decision)
+    {
+        CelNode?[] roots = [decision.Using?.Root, decision.WithCheck?.Root, .. decision.Checks.Select(check => check.Relation)];
+        var relations = new List<CelRelation>();
+        foreach (var root in roots.OfType<CelNode>())
+        {
+            CelRewriter.Any(root, node =>
+            {
+                if (node is CelRelation relation)
+                {
+                    relations.Add(relation);
+                }
+
+                return false;
+            });
+        }
+
+        return [.. relations.Select(RelationVerdict).Distinct()];
+    }
+
+    /// <summary>One bound relation, named the way its author reached it.</summary>
+    /// <param name="relation">The relation, bound by the engine; an unbound one reads as denied, which is how it renders.</param>
+    private static ManagementRelationVerdict RelationVerdict(CelRelation relation) => new(
+        relation.Kind == CelRelationKind.Forward ? relation.Via : $"{relation.Related.Name}.{relation.RelatedKey}",
+        relation.Related.Name,
+        relation.Scope is { Denied: false },
+        relation.Scope?.Using?.Source,
+        relation.Scope?.TenantScope?.Source);
 
     /// <summary>One stored revision's provenance, without the descriptor body a list has no use for.</summary>
     /// <param name="version">The stored revision.</param>

@@ -181,7 +181,28 @@ public sealed record ManagementPolicyVerdict(
     /// and those added for in-process invocation only. Empty in a host that registers none.
     /// </summary>
     public IReadOnlyList<ManagementCommandVerdict> Commands { get; init; } = [];
+
+    /// <summary>
+    /// Gets each relation the resolved predicates and lookup checks read through, and what the related entity's own
+    /// <c>list</c> rule answers for this caller — the scope ANDed inside the relation's correlated read. Empty when no
+    /// rule or check of this operation reads a related row.
+    /// </summary>
+    public IReadOnlyList<ManagementRelationVerdict> Relations { get; init; } = [];
 }
+
+/// <summary>One relation a decision reads through, and the related entity's <c>list</c> decision it was bound to.</summary>
+/// <param name="Via">
+/// The relation as the descriptor reaches it: the reference field for a forward relation (<c>customer_id</c>), or
+/// <c>&lt;child&gt;.&lt;reference&gt;</c> for the child rows that reference this one (<c>project_members.project_id</c>).
+/// </param>
+/// <param name="Entity">The related entity whose rows are read.</param>
+/// <param name="Allowed">
+/// Whether this caller may list the related entity at all. When <see langword="false"/> the relation matches no row,
+/// whatever its condition says.
+/// </param>
+/// <param name="Using">The related entity's <c>list</c> rule, as CEL source, when one applies.</param>
+/// <param name="TenantScope">The related entity's tenant-scope predicate, as CEL source, when it is tenant-scoped.</param>
+public sealed record ManagementRelationVerdict(string Via, string Entity, bool Allowed, string? Using, string? TenantScope);
 
 /// <summary>One expression to check, in the descriptor it will live in.</summary>
 /// <param name="DescriptorJson">
