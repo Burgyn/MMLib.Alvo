@@ -126,6 +126,16 @@ public class FieldFacetsSequenceTests
     }
 
     [Fact]
+    public void A_declared_field_level_format_is_removed_and_said()
+    {
+        const string declared = """{"type":"string","format":"email","sequence":{"format":"{n}"}}""";
+        var editor = FieldFacets.Prefill("number", declared);
+
+        editor.Build("number", declared, [], out _)!.ToJsonString().ShouldBe("""{"type":"string","sequence":{"format":"{n}"}}""");
+        editor.Notes().ShouldContain(note => note.Facet == "format" && note.Fate == FacetFate.Removed);
+    }
+
+    [Fact]
     public void Switching_a_sequence_back_to_supplied_drops_it_and_says_so()
     {
         const string declared = """{"type":"integer","sequence":{"start":5}}""";
@@ -148,6 +158,7 @@ public class FieldFacetsSequenceTests
             new("total", """{"type":"integer","required":true,"computed":"1 + 1"}"""),
             new("other_number", """{"type":"integer","required":true,"sequence":{}}"""),
             new("number", """{"type":"integer","required":true}"""),
+            new("shown_label", """{"type":"string","required":true,"virtual":true}"""),
         ];
 
         FieldFacets.SequencePerOffered(fields, "number").ShouldBe(["room", "status"]);

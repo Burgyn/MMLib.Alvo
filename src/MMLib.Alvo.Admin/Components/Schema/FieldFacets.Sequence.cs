@@ -60,7 +60,7 @@ internal sealed partial class FieldFacets
 
     private string DeclaredPer => Text((_declared["sequence"] as JsonObject)?["per"]);
 
-    /// <summary>The fields a sequence of <paramref name="self"/> may count per: required, countable, and written by callers.</summary>
+    /// <summary>The fields a sequence of <paramref name="self"/> may count per: required, countable, stored, and written by callers.</summary>
     /// <param name="fields">The entity's fields as the working copy carries them.</param>
     /// <param name="self">The sequence's own field, which is never offered.</param>
     public static IReadOnlyList<string> SequencePerOffered(IReadOnlyList<KeyValuePair<string, string>> fields, string? self)
@@ -84,7 +84,7 @@ internal sealed partial class FieldFacets
     private static bool Countable(JsonObject field)
         => Flag(field["required"])
             && Enum.TryParse<FieldType>(Text(field["type"]), ignoreCase: true, out var type) && _countable.Contains(type)
-            && !_maintainedFacets.Any(field.ContainsKey);
+            && !_maintainedFacets.Any(field.ContainsKey) && !Flag(field["virtual"]);
 
     /// <summary>Reads a declared <c>sequence</c> into the boxes.</summary>
     private void ReadSequence(JsonObject sequence)
@@ -111,6 +111,7 @@ internal sealed partial class FieldFacets
         facets["type"] = Word(Type);
         ClearFacetsOfOtherTypes(facets);
         facets.Remove("maxLength");
+        facets.Remove("format");
         WriteSequenceObject(SequenceObject(facets));
         Toggle(facets, "index", Indexed);
         return WriteDefault(facets);

@@ -1765,8 +1765,21 @@ executed snippet, `data-path.md`, this section). The security-core review (`alvo
   nothing; installable → `CREATE EXTENSION IF NOT EXISTS btree_gist` right after the lock-timeout statement; otherwise
   the apply is refused with the fix, on the counted and uncounted paths alike. The engine supplies the wording, so the
   shared migrator never names a PostgreSQL extension.
-- `per` may not name a maintained field (computed, rollup or sequence) — slice A review I1: such a target holds no
-  value yet when the number is allocated, so every create would fail while the in-memory store counted silently.
+- `per` may not name a maintained field (computed, rollup or sequence) or a virtual one (HX-16) — slice A review I1:
+  such a target holds no stored value when the number is allocated, so every create would fail while the in-memory
+  store counted silently. Every call site that excludes a maintained field asks `IsMaintained() || IsVirtual`, and
+  `VirtualFieldCheck` refuses `sequence` on a virtual field.
+- A field-level `format` (`email`, a declared format) beside `sequence` is refused at apply (slice A fix1): the
+  framework writes the text, which a caller-facing format cannot describe; the sequence's own `format` is the stored
+  text. The dashboard's editor drops a declared field-level `format` when a field becomes a sequence, and says so.
+- A declared entity or field rename onto a name that still holds an earlier sequence's counter rows is refused at apply,
+  before the key rewrite (`SequencePlan.Collisions`, slice A fix1): counter rows are never deleted (D7), so the rewrite
+  would otherwise hit the counter table's primary key mid-transaction, or merge two counts.
+- R7: the 100-writer SQLite fact of AC (1) is skipped on Windows runners (precedent #410: about 1.3 s per write there;
+  the world already uses the shipped gate). — Cost: AC (1) has no Windows coverage until #410.
+- An exclusion whose equality `fields` include a `boolean` needs PostgreSQL 15 or later: `btree_gist` gained its
+  `bool` operator class in 15 (slice B review M3). It is verified on 16 only; the validator does not read the server
+  version (follow-up: btree_gist type support by server version).
 - A batch create locks its counters in canonical key order, so two batches cannot deadlock on each other's counters.
 - The T-SQL double declines `exclude` (D16) and answers `MERGE … WITH (HOLDLOCK) … OUTPUT` for a sequence (D5).
 - SQLite's in-apply overlap check is a no-op `UPDATE … SET id = id` over the overlapping rows, which fires the new

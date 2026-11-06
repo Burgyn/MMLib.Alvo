@@ -72,12 +72,15 @@ internal sealed partial class FieldFacets
         }
     }
 
-    /// <summary>A declared <c>maxLength</c> beside a sequence, which <see cref="WriteSequence"/> drops: the apply refuses the pair.</summary>
+    /// <summary>A declared <c>maxLength</c> or field-level <c>format</c> beside a sequence, which <see cref="WriteSequence"/> drops: the apply refuses each beside one.</summary>
     private IEnumerable<FacetNote> DroppedFromSequence()
-        => Kind == FieldKind.Sequence && _declared["maxLength"] is { } declared
-            ? [new("maxLength", declared.ToJsonString(), FacetFate.Removed,
-                "the framework writes a sequence's text, and the apply refuses a max length beside it — removed.")]
+        => Kind == FieldKind.Sequence
+            ? _droppedBesideSequence.Where(facet => _declared[facet] is not null).Select(facet => new FacetNote(
+                facet, _declared[facet]!.ToJsonString(), FacetFate.Removed,
+                $"the framework writes a sequence's text, and the apply refuses a {facet} beside it — removed."))
             : [];
+
+    private static readonly string[] _droppedBesideSequence = ["maxLength", "format"];
 
     private static string Quoted(string text) => JsonValue.Create(text).ToJsonString();
 }

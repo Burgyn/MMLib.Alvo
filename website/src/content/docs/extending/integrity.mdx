@@ -192,17 +192,19 @@ numbered per room and per year:
   exactly one `{n}` — or `{n:3}` to pad it to three digits, up to 18 — and any of `{yyyy}`, `{yy}`, `{MM}` and `{dd}`,
   read from the create's own instant in UTC.
 - **What counts separately.** Every tenant counts on its own. `per` names a required field a caller writes — a string,
-  integer, enum, ref, uuid, date or boolean, never another sequence, computed or rollup field — and each of its values
+  integer, enum, ref, uuid, date or boolean, never another sequence, computed, rollup or virtual field — and each of its values
   counts on its own. `period` (`year`, `month` or `day`) starts a new count each UTC period. `start` is the first
   number of every count, 1 by default.
 - **Gapless and never reused.** The number is taken in the create's own transaction, just before the row is
   inserted, so a create that fails or is rolled back gives its number back, and no two creates ever get the same one.
   Concurrent creates into one count wait for each other until the first commits. A number is never handed out
   twice: removing the sequence and adding it again resumes the count, and renaming the entity or the field keeps it.
+  A rename onto a name whose earlier sequence left counts behind is refused at apply, so two counts never merge.
 - **Alvo writes it.** A create or update that sends the field is refused `403`, as for a computed field. A
   before-hook does not see the number yet; `per` is read after the before-hooks ran, and changing it later does not
   renumber a record.
-- **Where it is refused.** With `default`, `computed`, `rollup` or `maxLength`; on a dynamic entity
+- **Where it is refused.** With `default`, `computed`, `rollup`, `maxLength`, `virtual`, or a field-level `format`
+  such as `email` (the sequence's own `format` is the text it stores); on a dynamic entity
   ([#41](https://github.com/Burgyn/MMLib.Alvo/issues/41)); and by an engine that cannot take the number in the write's
   transaction — SQLite and PostgreSQL both can.
 
