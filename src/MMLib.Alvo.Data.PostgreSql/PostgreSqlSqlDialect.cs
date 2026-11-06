@@ -81,14 +81,19 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
     private const string BtreeGistProbe = """
         SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'btree_gist'),
                EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'btree_gist'),
-               has_database_privilege(current_database(), 'CREATE')
+               COALESCE((has_database_privilege(current_database(), 'CREATE')
+                         AND has_schema_privilege(current_schema(), 'CREATE')
+                         AND current_setting('server_version_num')::int >= 130000)
+                        OR (SELECT rolsuper FROM pg_roles WHERE rolname = current_user), FALSE)
         """;
 
     /// <inheritdoc/>
     /// <remarks>
     /// <c>btree_gist</c> (HX-12 D12): a scalar <c>WITH =</c> in a GiST index needs it. Installed → nothing; available and this
-    /// role may create in the database → the plan's first statement installs it (contrib, trusted since PostgreSQL 13);
-    /// otherwise the apply is refused, naming what the database owner runs.
+    /// role may install it → the plan's first statement installs it; otherwise the apply is refused, naming what the database
+    /// owner runs. A role may install it as a superuser, or with <c>CREATE</c> on the database <em>and</em> on the schema the
+    /// extension lands in (the first on the search path; since PostgreSQL 15 nobody's by default) on a server that trusts it
+    /// (PostgreSQL 13 and later) — review M2.
     /// </remarks>
     async ValueTask<ExclusionPrerequisite> IAlvoSqlDialect.ExclusionPrerequisiteAsync(DbConnection connection, CancellationToken ct)
     {

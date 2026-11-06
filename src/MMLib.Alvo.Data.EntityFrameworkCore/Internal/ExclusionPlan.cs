@@ -86,9 +86,10 @@ internal static class ExclusionPlan
         var had = Declare(prePass.AlignedCurrent, dialect, filters);
         var wants = Declare(desired, dialect, filters);
         var released = prePass.ReleasedExclusions.Select(pair => Resolve(pair.Entity, pair.Index, dialect, filters)).OfType<Declared>().ToList();
-        var dropped = had.Values.Where(declared => !wants.ContainsKey(declared.Definition.Name) && HasTable(desired, declared.Definition.Table)).ToList();
-        var added = wants.Values.Where(declared => !had.ContainsKey(declared.Definition.Name)).ToList();
-        var replayed = wants.Values.Where(declared => had.ContainsKey(declared.Definition.Name)
+        var kept = had.Keys.Where(name => wants.TryGetValue(name, out var wanted) && SameEnforcement(had[name], wanted)).ToHashSet(StringComparer.Ordinal);
+        var dropped = had.Values.Where(declared => !kept.Contains(declared.Definition.Name) && HasTable(desired, declared.Definition.Table)).ToList();
+        var added = wants.Values.Where(declared => !kept.Contains(declared.Definition.Name)).ToList();
+        var replayed = wants.Values.Where(declared => kept.Contains(declared.Definition.Name)
             && !declared.Sql.SurvivesTableRebuild && touched.Contains(declared.Definition.Table));
 
         return new Result(
@@ -139,6 +140,12 @@ internal static class ExclusionPlan
         var id = AlvoSqlIdentifier.Quote(AlvoDataContext.IdColumn);
         return $"UPDATE {table} SET {id} = {id} WHERE {id} IN (SELECT \"n\".{id} FROM {ExclusionOverlapSql.Pairs(definition, epoch, newRowId: null)})";
     }
+
+    // The name hashes the declaration, not the range's type nor the rendered filter, so one name can stand for a changed
+    // enforcement — a date range become datetime — which must be replaced, not kept over the column it can no longer read (M4).
+    private static bool SameEnforcement(Declared had, Declared wanted) =>
+        had.Definition.RangeType == wanted.Definition.RangeType
+        && string.Equals(had.Definition.Filter, wanted.Definition.Filter, StringComparison.Ordinal);
 
     private static bool HasTable(SchemaModel schema, string table) =>
         schema.Entities.Any(entity => string.Equals(entity.Name, table, StringComparison.Ordinal));

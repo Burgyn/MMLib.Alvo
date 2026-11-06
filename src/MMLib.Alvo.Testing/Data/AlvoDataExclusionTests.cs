@@ -25,6 +25,7 @@ public abstract partial class AlvoDataExclusionTests
     private const string EndsAt = "ends_at";
     private const string NotCancelled = "status != 'cancelled'";
     private const string ExcludePointer = "/entities/bookings/indexes/0/exclude";
+    private const string NotByPhone = "!(channel == 'phone')";
 
     private static readonly AlvoContext _acme = InTenant(TenantId.New());
     private static readonly AlvoContext _globex = InTenant(TenantId.New());
@@ -46,6 +47,10 @@ public abstract partial class AlvoDataExclusionTests
     /// <summary>Executes <paramref name="sql"/> on a connection of its own and returns the engine's failure, or <see langword="null"/>.</summary>
     /// <param name="sql">The statement. Identifiers are double-quoted, which both engines accept.</param>
     protected abstract Task<Exception?> ExecuteOutOfBandAsync(string sql);
+
+    /// <summary>The names of the exclusions the engine's catalog holds on <paramref name="table"/>, one per exclusion.</summary>
+    /// <param name="table">The table whose exclusions are listed.</param>
+    protected abstract Task<IReadOnlyList<string>> ExclusionNamesAsync(string table);
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -132,6 +137,54 @@ public abstract partial class AlvoDataExclusionTests
         (await InsertOutOfBandAsync(Hours(10, 12))).ShouldBeNull();
     }
 
+    /// <summary>
+    /// One apply that adds a field and an exclusion whose <c>where</c> reads it applies (review I1): the plan cannot count
+    /// over a column that does not exist yet, so it leaves the check to the apply rather than refusing as uncountable.
+    /// </summary>
+    [Fact]
+    public async Task An_exclusion_whose_where_reads_a_field_the_same_apply_adds_applies()
+    {
+        var data = await CreateAsync(Schema(exclude: false), Descriptor());
+        await BookAsync(data, _acme, "r1", Hours(9, 10));
+        await BookAsync(data, _acme, "r1", Hours(10, 11));
+
+        await ApplyAsync(Schema(exclude: false), Schema(where: NotByPhone, channel: true));
+
+        (await InsertOutOfBandAsync(Hours(9, 11))).ShouldNotBeNull().Message.ShouldContain("xc_bookings_");
+    }
+
+    /// <summary>The same one-shot apply over rows that overlap is refused by the apply itself, at the <c>exclude</c>.</summary>
+    [Fact]
+    public async Task An_exclusion_whose_where_reads_a_field_the_same_apply_adds_is_refused_over_overlapping_rows()
+    {
+        var data = await CreateAsync(Schema(exclude: false), Descriptor());
+        await BookAsync(data, _acme, "r1", Hours(9, 11));
+        await BookAsync(data, _acme, "r1", Hours(10, 12));
+        var plan = await PlanAsync(Schema(exclude: false), Schema(where: NotByPhone, channel: true));
+
+        var refusal = await Should.ThrowAsync<DescriptorValidationException>(() => Migrator.ApplyAsync(plan, new MigrationOptions(), Ct));
+
+        var error = refusal.Result.Errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe(ExcludePointer);
+        error.Message.ShouldBe("Rows of 'bookings' overlap, so this exclusion cannot be added. Nothing was applied.");
+    }
+
+    /// <summary>
+    /// A range changed between <c>date</c> and <c>datetime</c> keeps its name but not its enforcement, so the plan replaces
+    /// the exclusion rather than leaving the old one over the column whose type changes (review M4).
+    /// </summary>
+    [Fact]
+    public async Task Changing_a_range_s_type_replaces_the_exclusion()
+    {
+        await CreateAsync(Schema(), Descriptor());
+
+        var plan = await PlanAsync(Schema(), Schema(rangeType: SchemaField.Date));
+
+        var dropped = NamesIn(plan.Sql.Where(IsDrop));
+        dropped.ShouldHaveSingleItem();
+        NamesIn(plan.Sql.Where(IsCreate)).ShouldBe(dropped);
+    }
+
     /// <summary>Renaming a range field re-creates the exclusion under its new name, and it holds.</summary>
     [Fact]
     public async Task Renaming_a_range_field_keeps_the_exclusion_enforced()
@@ -143,6 +196,7 @@ public abstract partial class AlvoDataExclusionTests
 
         (await InsertOutOfBandAsync(Hours(9, 11), start: "begins_at")).ShouldBeNull();
         (await InsertOutOfBandAsync(Hours(10, 12), start: "begins_at")).ShouldNotBeNull().Message.ShouldContain("xc_bookings_");
+        await ShouldHoldOnlyAsync(Bookings, NamesIn((await PlanAsync(new SchemaModel([]), renamed)).Sql.Where(IsCreate)));
     }
 
     /// <summary>Renaming the entity re-creates the exclusion under the name the new entity gives it, and it holds.</summary>
@@ -155,7 +209,11 @@ public abstract partial class AlvoDataExclusionTests
 
         (await InsertOutOfBandAsync(Hours(9, 11), table: Venues)).ShouldBeNull();
         (await InsertOutOfBandAsync(Hours(10, 12), table: Venues)).ShouldNotBeNull().Message.ShouldContain("xc_venues_");
+        (await ExclusionNamesAsync(Venues)).ShouldHaveSingleItem().ShouldStartWith("xc_venues_");
     }
+
+    private async Task ShouldHoldOnlyAsync(string table, IReadOnlyList<string> expected) =>
+        (await ExclusionNamesAsync(table)).ShouldBe(expected, ignoreOrder: true);
 
     /// <summary>
     /// Every equality type the validator admits is one the engine can compare in an exclusion — on PostgreSQL, a type
@@ -229,7 +287,7 @@ public abstract partial class AlvoDataExclusionTests
 
     private static SchemaModel Schema(
         string name = Bookings, bool exclude = true, string? where = null, string start = StartsAt, string? startRenamedFrom = null,
-        string? renamedFrom = null, string? statusCheck = null) =>
+        string? renamedFrom = null, string? statusCheck = null, bool channel = false, SchemaField rangeType = SchemaField.DateTime) =>
         new([new EntitySchema
         {
             Name = name,
@@ -239,10 +297,11 @@ public abstract partial class AlvoDataExclusionTests
             [
                 new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true },
                 new FieldSchema { Name = "room", Type = SchemaField.String, Required = true },
-                new FieldSchema { Name = start, RenamedFrom = startRenamedFrom, Type = SchemaField.DateTime, Required = true },
-                new FieldSchema { Name = EndsAt, Type = SchemaField.DateTime, Required = true, CheckExpression = $"{EndsAt} >= {start}" },
+                new FieldSchema { Name = start, RenamedFrom = startRenamedFrom, Type = rangeType, Required = true },
+                new FieldSchema { Name = EndsAt, Type = rangeType, Required = true, CheckExpression = $"{EndsAt} >= {start}" },
                 new FieldSchema { Name = "status", Type = SchemaField.String, Required = true, CheckExpression = statusCheck },
                 new FieldSchema { Name = "tenant_id", Type = SchemaField.Uuid, Required = true, Indexed = true },
+                .. channel ? [new FieldSchema { Name = "channel", Type = SchemaField.String, Nullable = true }] : Array.Empty<FieldSchema>(),
             ],
             Indexes = exclude ? [new IndexSchema(["room"], Unique: false) { Exclude = new ExclusionSchema(start, EndsAt), Where = where }] : [],
         }]);

@@ -405,14 +405,18 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Adding_an_exclusion_over_overlapping_rows_is_refused_with_their_count() { }
         public System.Threading.Tasks.Task An_empty_range_overlaps_nothing_on_either_engine() { }
         public System.Threading.Tasks.Task An_exclusion_survives_a_later_apply_that_rebuilds_its_table() { }
+        public System.Threading.Tasks.Task An_exclusion_whose_where_reads_a_field_the_same_apply_adds_applies() { }
+        public System.Threading.Tasks.Task An_exclusion_whose_where_reads_a_field_the_same_apply_adds_is_refused_over_overlapping_rows() { }
         public System.Threading.Tasks.Task An_inverted_range_is_refused_at_its_end_field() { }
         public System.Threading.Tasks.Task Applying_an_uncounted_plan_over_overlapping_rows_is_refused_at_the_exclude_pointer() { }
         public System.Threading.Tasks.Task Back_to_back_bookings_do_not_overlap() { }
+        public System.Threading.Tasks.Task Changing_a_range_s_type_replaces_the_exclusion() { }
         public System.Threading.Tasks.Task Changing_an_exclusion_s_where_replaces_it() { }
         public System.Threading.Tasks.Task Concurrent_overlapping_bookings_admit_one_and_refuse_the_rest_with_the_exclusion_kind() { }
         public System.Threading.Tasks.Task Concurrent_patches_moving_two_bookings_onto_one_slot_admit_one() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
         public System.Threading.Tasks.Task Every_admitted_equality_type_can_be_excluded_over() { }
+        protected abstract System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> ExclusionNamesAsync(string table);
         protected abstract System.Threading.Tasks.Task<System.Exception?> ExecuteOutOfBandAsync(string sql);
         public System.Threading.Tasks.Task Other_rooms_and_other_tenants_do_not_collide() { }
         protected abstract void RePrime(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);

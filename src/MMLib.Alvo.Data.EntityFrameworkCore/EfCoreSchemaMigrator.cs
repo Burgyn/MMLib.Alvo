@@ -261,7 +261,7 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
             await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
             if (counted)
             {
-                await RefuseOverlappingRowsAsync(connection, ExclusionOverlapScan.Countable(current, prePass, added), ct).ConfigureAwait(false);
+                await RefuseOverlappingRowsAsync(connection, ExclusionOverlapScan.Countable(current, prePass, added, _filters), ct).ConfigureAwait(false);
             }
 
             var prerequisite = await _dialect.ExclusionPrerequisiteAsync(connection, ct).ConfigureAwait(false);
