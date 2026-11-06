@@ -413,6 +413,12 @@ internal static class QueryStringParser
                 return false;
             }
 
+            if (declared.IsVirtual)
+            {
+                Add(QueryViolations.VirtualField(ReservedQueryKeys.Select, declared.Name));
+                return false;
+            }
+
             return TryClaimKey(key ?? declared.Name, declared.Name, projected);
         }
 

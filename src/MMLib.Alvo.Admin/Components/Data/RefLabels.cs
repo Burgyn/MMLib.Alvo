@@ -24,7 +24,8 @@ namespace MMLib.Alvo.Admin.Components.Data;
 /// <para>
 /// §4.6 as first written was only step 3, and it named bikes by their brand and customers by their first
 /// name alone: a label that is true of many rows is not a label. A field hidden from every caller is never
-/// a candidate; one masked by CEL is, because it comes back for some callers.
+/// a candidate; one masked by CEL is, because it comes back for some callers. A virtual field never is: the label's
+/// query selects its fields, and a select naming a virtual field is refused.
 /// </para>
 /// <para>
 /// <b>One query per reference column per page, never one per cell.</b> The distinct ids on the page
@@ -90,7 +91,7 @@ internal static class RefLabels
     /// <summary>The label of <paramref name="entity"/>'s rows, when it has one.</summary>
     public static RowLabel? For(EntitySchema entity, FieldMasks masks)
     {
-        var strings = GridColumns.Readable(entity, masks).Where(field => field.Type == FieldType.String).ToList();
+        var strings = GridColumns.Readable(entity, masks).Where(field => field.Type == FieldType.String && !field.IsVirtual).ToList();
         var byName = strings.ToDictionary(field => field.Name, StringComparer.Ordinal);
 
         var named = NameLike.FirstOrDefault(byName.ContainsKey)

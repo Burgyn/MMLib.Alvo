@@ -363,6 +363,17 @@ internal static class PayloadViolations
         + "be stored — which is why this is refused rather than ignored.");
 
     /// <summary>
+    /// The refusal for a write naming a <c>virtual</c> field: no column holds it, and its value exists only in a
+    /// read's answer, so no value a caller sends could be stored.
+    /// </summary>
+    /// <param name="field">The declared virtual field.</param>
+    internal static AlvoViolation Virtual(FieldSchema field) => new(
+        PointerTo(field.Name),
+        "virtual",
+        "This field is virtual: the host fills it when a record is read, so a write cannot set it.",
+        "Remove it from the request.");
+
+    /// <summary>
     /// The refusal for a <b>create</b> whose caller cannot satisfy it: the entity declares the field
     /// required, and this caller's own <c>readOnly</c> mask froze it.
     /// </summary>

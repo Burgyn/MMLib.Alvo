@@ -57,7 +57,8 @@ internal static class ReadProjection
         QueryFieldGuard.EnsureMaskable(hiddenFields, rows);
 
         return string.Join(
-            ", ", entity.Fields.Select(field => Project(field, hiddenFields, unselectedFields, dialect, rows)));
+            ", ",
+            entity.Fields.Where(field => !field.IsVirtual).Select(field => Project(field, hiddenFields, unselectedFields, dialect, rows)));
     }
 
     /// <summary>Renders one field: the column, or a typed <c>NULL</c> aliased to the column's name.</summary>

@@ -163,6 +163,12 @@ public class RefLabelsTests
             .Searchable.ShouldBe(["first_name", "last_name"]);
 
     [Fact]
+    public void A_virtual_name_like_field_is_never_the_label()
+        => RefLabels.For(
+                Entity(Strings("display_name") with { IsVirtual = true }, Strings("brand", required: true)), FieldMasks.None)!
+            .Fields.ShouldBe(["brand"], "its query would select it, and the Data API refuses a virtual field in a select");
+
+    [Fact]
     public void A_managed_column_is_never_the_label()
         => RefLabels.For(Entity(Strings("created_by"), Strings("brand")) with { Audit = true }, FieldMasks.None)!
             .Fields.ShouldBe(["brand"]);
