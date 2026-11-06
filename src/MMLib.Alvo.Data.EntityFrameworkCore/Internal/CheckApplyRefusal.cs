@@ -32,7 +32,8 @@ internal static class CheckApplyRefusal
     /// <param name="failure">What the apply threw.</param>
     /// <param name="dialect">The driver's dialect, which decodes the engine's failure.</param>
     /// <param name="desired">The schema the apply was bringing the database to.</param>
-    internal static Exception? Translate(Exception failure, IAlvoSqlDialect dialect, SchemaModel desired)
+    /// <param name="sql">The plan's statements, which name the partial indexes the apply creates.</param>
+    internal static Exception? Translate(Exception failure, IAlvoSqlDialect dialect, SchemaModel desired, IReadOnlyList<string>? sql = null)
     {
         ArgumentNullException.ThrowIfNull(failure);
         ArgumentNullException.ThrowIfNull(dialect);
@@ -43,12 +44,59 @@ internal static class CheckApplyRefusal
             return null;
         }
 
-        return dialect.IsLockTimeout(provider)
-            ? new AlvoApplyLockTimeoutException(provider)
-            : dialect.DecodeConstraintViolation(provider) is { Kind: AlvoConstraintKind.Check } violation
-                ? Refused(desired, violation.ConstraintName)
-                : null;
+        if (dialect.IsIndexPredicateRefusal(provider) && CreatedPartialIndex(desired, sql ?? []) is { } created)
+        {
+            return PredicateRefused(created.Entity, created.Index);
+        }
+
+        if (dialect.IsLockTimeout(provider))
+        {
+            return new AlvoApplyLockTimeoutException(provider);
+        }
+
+        return dialect.DecodeConstraintViolation(provider) switch
+        {
+            { Kind: AlvoConstraintKind.Check } violation => Refused(desired, violation.ConstraintName),
+            { Kind: AlvoConstraintKind.Exclusion } violation => OverlapRefused(desired, violation.ConstraintName),
+            _ => null,
+        };
     }
+
+    // An exclusion the apply adds over rows that overlap — written after the plan's count, or on a plan that did not count —
+    // is refused at the declaration the engine's name recomputes to over the schema being applied (HX-12).
+    private static DescriptorValidationException OverlapRefused(SchemaModel desired, string? name)
+    {
+        var owner = ExclusionPlan.Exclusions(desired)
+            .FirstOrDefault(pair => name is not null && string.Equals(IndexNames.Exclusion(pair.Entity, pair.Index), name, StringComparison.Ordinal));
+        return new(new DescriptorValidationResult([owner.Entity is null
+            ? new DescriptorValidationError(
+                "/",
+                "Rows overlap a range an exclusion this apply needs to hold forbids. Nothing was applied.",
+                "Correct or remove the overlapping rows first — or narrow the exclusion with 'where' — then apply again.",
+                DescriptorValidationSeverity.Error)
+            : ExclusionOverlapScan.Overlapping(owner.Entity, owner.Index)]));
+    }
+
+    // The engine does not name the index whose predicate it refused, so the pointer is the first partial index the plan
+    // creates — in a plan that creates several, the one the engine reached first. A plan that creates none raised the same
+    // code over something else (a generation expression), which stays the provider's failure (review M1).
+    private static (EntitySchema Entity, IndexSchema Index)? CreatedPartialIndex(SchemaModel desired, IReadOnlyList<string> sql) =>
+        desired.Entities
+            .SelectMany(entity => entity.Indexes
+                .Where(index => index.Where is not null && index.Exclude is null)
+                .Select(index => ((EntitySchema Entity, IndexSchema Index)?)(entity, index)))
+            .FirstOrDefault(pair => sql.Any(statement => Creates(statement, IndexNames.Partial(pair!.Value.Entity, pair.Value.Index))));
+
+    private static DescriptorValidationException PredicateRefused(EntitySchema entity, IndexSchema index) =>
+        new(new DescriptorValidationResult([new(
+            IndexFilterSql.Pointer(entity, index),
+            "The database refused this index's 'where' as a partial index predicate. Nothing was applied.",
+            "Compare this entity's fields with constants directly — no duration arithmetic — then apply again.",
+            DescriptorValidationSeverity.Error)]));
+
+    private static bool Creates(string statement, string name) =>
+        statement.Contains("CREATE", StringComparison.OrdinalIgnoreCase)
+        && statement.Contains(name, StringComparison.Ordinal);
 
     private static DescriptorValidationException Refused(SchemaModel desired, string? name) =>
         name is not null && CheckConstraintNames.Owner(desired, name) is { } owner

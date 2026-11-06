@@ -1053,6 +1053,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     {
         await _sequences.AssignAsync(db, schema, candidate, now, cancellationToken);
         db.Rows(schema.Name).Add(candidate);
+        await ExclusionLocks.TakeAsync(db, _dialect, schema, [Lookup(candidate)], cancellationToken);
         await ConstraintViolationTranslator.TranslatedAsync(
             () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema,
             callerKeyed, db.AppliedSchema, decision.Unnameable);
@@ -1098,6 +1099,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             db.Rows(schema.Name).Add(candidate);
         }
 
+        await ExclusionLocks.TakeAsync(db, _dialect, schema, [.. candidates.Select(Lookup)], cancellationToken);
         await ConstraintViolationTranslator.TranslatedAsync(
             () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema,
             callerKeyed: false, db.AppliedSchema, decision.Unnameable);
@@ -2121,7 +2123,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         vetted = await HostBeforeUpdateAsync(schema, decision, context, operation, preImage, vetted, now, cancellationToken);
         EnsureWriteAllowed(decision, Merge(preImage, vetted), preImage, context);
 
-        if (await AffectedAsync(db, schema, decision, context, id, vetted, cancellationToken) == 0)
+        if (await AffectedAsync(db, schema, decision, context, preImage, vetted, cancellationToken) == 0)
         {
             throw new AlvoRecordNotFoundException();
         }
@@ -2191,16 +2193,29 @@ internal sealed partial class EfAlvoData : IAlvoData
     private static object? StoredVersion(EntitySchema schema, Dictionary<string, object> preImage) =>
         AlvoManagedColumns.VersionColumn(schema) is { } column ? preImage.GetValueOrDefault(column) : null;
 
-    private Task<int> AffectedAsync(
+    /// <summary>
+    /// The update itself, after the exclusion locks its merged post-image needs (HX-12 D3) — an update never saves through
+    /// the change tracker, so this is where the row an exclusion will judge is last in hand before the write.
+    /// </summary>
+    private async Task<int> AffectedAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
-        Guid id, IReadOnlyDictionary<string, object?> values, CancellationToken cancellationToken)
-        => ConstraintViolationTranslator.TranslatedAsync(
+        AlvoRecord preImage, IReadOnlyDictionary<string, object?> values, CancellationToken cancellationToken)
+    {
+        var postImage = Merge(preImage, values).Values;
+        await ExclusionLocks.TakeAsync(db, _dialect, schema, [LookupOf(postImage)], cancellationToken);
+        var id = (Guid)preImage.Values[AlvoDataContext.IdColumn]!;
+        return await ConstraintViolationTranslator.TranslatedAsync(
             () => RowOf(PolicyRoot(db, schema, decision, context), id)
                 .ExecuteUpdateAsync(UpdateSetterFactory.For(schema, values), cancellationToken),
             _dialect,
             db.Rows(schema.Name).EntityType,
             schema,
             callerKeyed: false, db.AppliedSchema, decision.Unnameable);
+    }
+
+    private static Func<string, object?> Lookup(Dictionary<string, object> row) => column => row.GetValueOrDefault(column);
+
+    private static Func<string, object?> LookupOf(IReadOnlyDictionary<string, object?> row) => column => row.GetValueOrDefault(column);
 
     /// <summary>
     /// The queryable a write is composed over: a <c>FromSql</c> root whose <c>WHERE</c> already carries the
@@ -3079,9 +3094,11 @@ internal sealed partial class EfAlvoData : IAlvoData
         DateTimeOffset now, CancellationToken cancellationToken)
     {
         var written = new List<(int Index, Guid Id, AlvoRecord PreImage, Dictionary<string, object> PostImage)>(judged.Count);
+        await ExclusionLocks.TakeAsync(
+            db, _dialect, schema, [.. judged.Select(row => Merge(row.PreImage, row.Values).Values).Select(LookupOf)], cancellationToken);
         foreach (var (index, id, preImage, values) in judged)
         {
-            if (await AffectedAsync(db, schema, decision, context, id, values, cancellationToken) == 0)
+            if (await AffectedAsync(db, schema, decision, context, preImage, values, cancellationToken) == 0)
             {
                 throw new AlvoRecordNotFoundException();
             }

@@ -54,6 +54,7 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     private readonly Func<EntitySchema, RollupSchema, string?> _rollupFilter;
     private readonly ILogger _logger;
     private readonly Func<string> _schemaPrefix;
+    private readonly IndexFilterSql? _filters;
     private readonly ConditionalWeakTable<MigrationPlan, SchemaModel> _plannedAgainst = [];
 
     /// <summary>
@@ -94,6 +95,10 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     /// takes <see cref="AlvoOptions"/>' default. Read when a plan is built, never here: the container validates the options
     /// by resolving this migrator, so reading them while it is constructed would re-enter that resolution.
     /// </param>
+    /// <param name="filters">
+    /// Renders an index's <c>where</c> to this driver's partial-index predicate, or <see langword="null"/> when the container
+    /// registered no expression services — a schema declaring one is then refused by name.
+    /// </param>
     internal EfCoreSchemaMigrator(
         IMigrationsModelDiffer differ,
         IMigrationsSqlGenerator sqlGenerator,
@@ -106,7 +111,8 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         IFieldSqlRenderer? fields = null,
         Func<EntitySchema, RollupSchema, string?>? rollupFilter = null,
         ILogger? logger = null,
-        Func<string>? schemaPrefix = null)
+        Func<string>? schemaPrefix = null,
+        IndexFilterSql? filters = null)
     {
         ArgumentNullException.ThrowIfNull(differ);
         ArgumentNullException.ThrowIfNull(sqlGenerator);
@@ -127,6 +133,7 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         _rollupFilter = rollupFilter ?? NoFilterRenderer;
         _logger = logger ?? NullLogger.Instance;
         _schemaPrefix = schemaPrefix ?? DefaultSchemaPrefix;
+        _filters = filters;
     }
 
     private static string DefaultSchemaPrefix() => new AlvoOptions().SchemaPrefix;
@@ -151,6 +158,7 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         ArgumentNullException.ThrowIfNull(desired);
         ct.ThrowIfCancellationRequested();
         SequencePlan.EnsureAllocatable(desired, _dialect);
+        ExclusionPlan.EnsureEnforceable(desired, _dialect, _filters);
 
         var (prePass, desiredModel, residual) = ComputeResidualDiff(current, desired);
         if (counted)
@@ -160,13 +168,18 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         }
 
         var operations = ForThisEngine(AssembleOperations(prePass, residual));
+        var exclusions = ExclusionPlan.Plan(prePass, desired, _dialect, _filters, TouchedTables(operations), Epoch);
+        var prerequisite = await PrepareExclusionsAsync(current, prePass, exclusions.Added, counted, ct).ConfigureAwait(false);
         var backfill = Backfill(prePass.AlignedCurrent, desired);
         var locks = BackfillLocks(current, backfill);
         var steps = BuildSemanticSteps(prePass, desired, residual);
+        steps.AddRange(exclusions.Changes.Select(change => ToStep(change)));
         steps.AddRange(backfill.Select(statement => BackfillStep(statement, locks)));
         var renames = SequencePlan.RenameStatements(
             prePass.Renames.Select(rename => rename.Operation), desired, SequenceTable.NameFor(_schemaPrefix()));
-        var sql = GenerateSql(operations, desiredModel, locks, [.. renames, .. backfill.Select(statement => statement.Sql)]);
+        var sql = GenerateSql(
+            operations, desiredModel, [.. prerequisite, .. locks.Values, .. exclusions.Before],
+            [.. exclusions.After, .. renames, .. backfill.Select(statement => statement.Sql)]);
 
         var plan = new MigrationPlan { Steps = steps, Sql = sql };
         _plannedAgainst.AddOrUpdate(plan, desired);
@@ -230,6 +243,68 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
             return Uncountable(target);
         }
     }
+
+    /// <summary>
+    /// The plan's exclusion prerequisite statement, after refusing a counted plan that adds an exclusion over rows that
+    /// already overlap (HX-12) and a database that cannot hold one; empty when the plan adds none.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> PrepareExclusionsAsync(
+        SchemaModel current, RenamePrePass.Result prePass, IReadOnlyList<ExclusionPlan.Declared> added, bool counted, CancellationToken ct)
+    {
+        if (added.Count == 0)
+        {
+            return [];
+        }
+
+        var connection = _connections.Create();
+        await using (connection.ConfigureAwait(false))
+        {
+            await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
+            if (counted)
+            {
+                await RefuseOverlappingRowsAsync(connection, ExclusionOverlapScan.Countable(current, prePass, added, _filters), ct).ConfigureAwait(false);
+            }
+
+            var prerequisite = await _dialect.ExclusionPrerequisiteAsync(connection, ct).ConfigureAwait(false);
+            return prerequisite.Refused
+                ? throw Refusal(added[0].Pointer, prerequisite.RefusalMessage!, prerequisite.RefusalFix ?? string.Empty)
+                : prerequisite.Statement is { } statement ? [statement] : [];
+        }
+    }
+
+    private async Task RefuseOverlappingRowsAsync(DbConnection connection, IReadOnlyList<ExclusionPlan.Declared> countable, CancellationToken ct)
+    {
+        var errors = new List<DescriptorValidationError>();
+        foreach (var declared in countable)
+        {
+            if (await OverlappingRowsAsync(connection, declared, ct).ConfigureAwait(false) is { } error)
+            {
+                errors.Add(error);
+            }
+        }
+
+        if (errors.Count > 0)
+        {
+            throw new DescriptorValidationException(new DescriptorValidationResult(errors));
+        }
+    }
+
+    private async Task<DescriptorValidationError?> OverlappingRowsAsync(DbConnection connection, ExclusionPlan.Declared declared, CancellationToken ct)
+    {
+        try
+        {
+            var pairs = await ExclusionOverlapScan.CountAsync(connection, declared.Definition, Epoch, ct).ConfigureAwait(false);
+            return pairs > 0 ? ExclusionOverlapScan.Overlapping(declared, pairs) : null;
+        }
+        catch (DbException failure)
+        {
+            OverlapCountFailed(_logger, declared.Entity.Name, failure);
+            return ExclusionOverlapScan.Uncountable(declared);
+        }
+    }
+
+    private static DescriptorValidationException Refusal(string pointer, string message, string fix) =>
+        new(new DescriptorValidationResult([new DescriptorValidationError(pointer, message, fix, DescriptorValidationSeverity.Error)]));
 
     /// <summary>
     /// Refuses a declared rename onto a name that still holds an earlier sequence's counter rows (they are never deleted),
@@ -313,12 +388,14 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         return (prePass, desiredModel, residual);
     }
 
-    // Assembles the full, ordered operation list: declared renames first (so later operations see
-    // the new names), then the drops of the CHECK constraints a rename released (see RenamePrePass), then the
+    // Assembles the full, ordered operation list: the drops of the partial indexes a rename released (by their old names,
+    // which no rename changes), then declared renames (so later operations see the new names), then the drops of the CHECK constraints a rename released (see RenamePrePass), then the
     // (normalized) residual diff, which adds them back under their new names.
     private static List<MigrationOperation> AssembleOperations(RenamePrePass.Result prePass, IReadOnlyList<MigrationOperation> residual)
     {
-        var operations = new List<MigrationOperation>(prePass.Renames.Count + prePass.ReleasedChecks.Count + residual.Count);
+        var operations = new List<MigrationOperation>(
+            prePass.ReleasedIndexes.Count + prePass.Renames.Count + prePass.ReleasedChecks.Count + residual.Count);
+        operations.AddRange(prePass.ReleasedIndexes.Select(released => released.Operation));
         operations.AddRange(prePass.Renames.Select(rename => rename.Operation));
         operations.AddRange(prePass.ReleasedChecks.Select(released => released.Operation));
         operations.AddRange(residual);
@@ -336,7 +413,9 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     private List<MigrationStep> BuildSemanticSteps(
         RenamePrePass.Result prePass, SchemaModel desired, IReadOnlyList<MigrationOperation> residual)
     {
-        var steps = new List<MigrationStep>(prePass.Renames.Count + prePass.ReleasedChecks.Count + residual.Count);
+        var steps = new List<MigrationStep>(
+            prePass.ReleasedIndexes.Count + prePass.Renames.Count + prePass.ReleasedChecks.Count + residual.Count);
+        steps.AddRange(prePass.ReleasedIndexes.Select(released => ToStep(released.Change)));
         steps.AddRange(prePass.Renames.Select(rename => ToStep(rename.Change)));
         steps.AddRange(prePass.ReleasedChecks.Select(released => ToStep(released.Change, CostNote(released.Operation))));
         steps.AddRange(residual.Select(operation =>
@@ -379,12 +458,13 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     // The dialect's lock-timeout statement leads, so it is the first statement of the apply's transaction on either executor
     // and a dry run shows it (HX-11 Ruling 20). The backfill's child locks come next, before the DDL — so the apply takes
     // each child before its parent, a writer's own order (Ruling 74) — and the rollup backfill follows EF's DDL, so it reads
-    // and writes the columns the DDL has just made (Ruling 32).
+    // and writes the columns the DDL has just made (Ruling 32). An exclusion's prerequisite (PostgreSQL's btree_gist) leads
+    // the locks; its drops precede the DDL — and so the renames — and its creates follow it, so an EF table rebuild never
+    // runs after a trigger it would take with the old table (HX-12).
     private IReadOnlyList<string> GenerateSql(
-        List<MigrationOperation> operations, IModel desiredModel, SortedDictionary<string, string> locks,
-        IReadOnlyList<string> afterDdl)
+        List<MigrationOperation> operations, IModel desiredModel, IReadOnlyList<string> beforeDdl, IReadOnlyList<string> afterDdl)
     {
-        if (operations.Count == 0 && afterDdl.Count == 0)
+        if (operations.Count == 0 && beforeDdl.Count == 0 && afterDdl.Count == 0)
         {
             return [];
         }
@@ -392,8 +472,25 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         var ddl = operations.Count == 0
             ? []
             : _sqlGenerator.Generate(operations, desiredModel).Select(command => command.CommandText);
-        return [.. LockTimeout, .. locks.Values, .. ddl, .. afterDdl];
+        return [.. LockTimeout, .. beforeDdl, .. ddl, .. afterDdl];
     }
+
+    /// <summary>Every table an operation of the plan names — the set an engine that rebuilds tables may rebuild.</summary>
+    private static HashSet<string> TouchedTables(IEnumerable<MigrationOperation> operations) =>
+    [
+        .. operations.SelectMany(operation => operation switch
+        {
+            RenameTableOperation rename => [rename.Name, rename.NewName ?? rename.Name],
+            TableOperation table => [table.Name],
+            ITableMigrationOperation table => [table.Table],
+            _ => Array.Empty<string>(),
+        }),
+    ];
+
+    private string Epoch(string column) =>
+        _fields?.RenderEpochMicroseconds(column) ?? throw new InvalidOperationException(
+            "This plan checks a datetime exclusion over the rows a table already holds, which needs the driver's field "
+            + "renderer — and this migrator was built without one. Register the driver through its UseSqlite/UsePostgreSql entry point.");
 
     /// <summary>
     /// The rollup recomputes this plan needs (HX-11 Ruling 32), over the current schema as the declared renames leave it —
@@ -517,7 +614,7 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
                 await ExecuteFramedAsync(connection, plan, ct).ConfigureAwait(false);
             }
         }
-        catch (Exception failure) when (CheckApplyRefusal.Translate(failure, _dialect, PlannedAgainst(plan)) is { } refused)
+        catch (Exception failure) when (CheckApplyRefusal.Translate(failure, _dialect, PlannedAgainst(plan), plan.Sql) is { } refused)
         {
             throw refused;
         }
@@ -562,7 +659,7 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         // DescriptorModelBuilder.Build returns a FinalizeModel()'d model; GetRelationalModel()
         // additionally requires the runtime initializer to have run (Task 0 report, gotcha #1).
         CheckConstraintNames.EnsureDistinct(schema);
-        var model = DescriptorModelBuilder.Build(schema, _newModelBuilder, _computed, _checks);
+        var model = DescriptorModelBuilder.Build(schema, _newModelBuilder, _computed, _checks, _filters);
         var initialized = _modelRuntimeInitializer.Initialize(model, designTime: true);
         EnsureEveryGeneratedColumnIsExpressible(initialized);
 
@@ -630,4 +727,9 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         Level = LogLevel.Warning,
         Message = "Could not count the rows of '{Entity}' that break the validation of '{Field}'; the plan was refused at that validation.")]
     private static partial void ViolationCountFailed(ILogger logger, string entity, string field, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Could not count the overlapping rows of '{Entity}' an exclusion forbids; the plan was refused at that exclusion.")]
+    private static partial void OverlapCountFailed(ILogger logger, string entity, Exception exception);
 }

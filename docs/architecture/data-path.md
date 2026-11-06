@@ -1188,6 +1188,96 @@ apply.
 `InMemoryAlvoData` does not enforce `CHECK`, like `computed`; the facts live in the real-engine suites
 (`AlvoDataCheckConstraintTests`, inherited per engine).
 
+## Sequences are a counter row in the create's transaction (HX-12)
+
+A field's `sequence` (HX-12, spec 2026-10-14 §7; the decisions are the spec's *HX-12 settled details*) is a number the
+port assigns on create: gapless, never reused, counted per tenant and optionally per another field's value and per UTC
+period. The plan is `docs/superpowers/plans/2026-11-06-hx-12-integrity-sequence-exclusion.md`.
+
+**One framework table, one row per count.** `<prefix>_sequences` (`AlvoFrameworkTables.SequencesSuffix`) holds
+`entity, field, tenant_key, scope_key, period_key, last_value`, keyed on the first five. `tenant_key` is the tenant id
+(`""` on a global entity), `scope_key` the `per` value in invariant text (`""` without `per`), `period_key` the
+`yyyy` / `yyyy-MM` / `yyyy-MM-dd` of the write's UTC stamp (`""` without `period`).
+
+**One statement, in the create's own transaction** (D6, D15). `SequenceNumbers` runs the dialect's
+`SequenceAllocationStatement(table)` — `INSERT … ON CONFLICT DO UPDATE SET last_value = last_value + 1 RETURNING
+last_value` on SQLite and PostgreSQL — after the before-hooks and immediately before the row's `INSERT`. A new
+partition's first number needs the insert half; two statements (insert, then update) would race on one key. The upsert
+takes the counter row's lock, which is held until the create commits, so:
+
+- **Gapless by construction.** A rollback — a refused insert, a failed after-step, a host unit that throws — rolls the
+  counter back with the row. Nothing hands a number out before the commit that keeps it.
+- **Concurrent creates into one count serialize on that row** and nowhere else. On PostgreSQL the second upsert waits
+  on the first's row lock; on SQLite every writer already holds the database's write lock (`BEGIN IMMEDIATE`). A batch
+  create locks its counters in canonical key order, so two batches cannot deadlock on each other's counters.
+- **Not `CREATE SEQUENCE`.** A database sequence is gap-prone by design: `nextval` is never rolled back, which is the
+  property an invoice number must not have. It also cannot restart per `per` value or per period without one sequence
+  per partition.
+
+The number is formatted in-process (`SequenceFormat`: `{n}`, `{n:W}`, `{yyyy}`, `{yy}`, `{MM}`, `{dd}`) from the same
+UTC stamp the period key is read from. Before-hooks see no number; `per` is read from the post-hook row; changing `per`
+later does not renumber (D6).
+
+**Counter rows are never deleted** (D7). Removing a sequence and adding it back resumes the count; a declared entity or
+field rename rewrites the rows' keys in the apply transaction, so a rename keeps counting instead of re-issuing numbers.
+The cost is orphan rows of a few bytes.
+
+**The dialect decides whether it can** (D5). `SequenceAllocationStatement` is a public default interface member that
+answers `null`; a dialect that answers `null` makes the apply refuse `sequence` at its pointer. The T-SQL double answers
+`MERGE … WITH (HOLDLOCK) … OUTPUT`, the shape Azure SQL (#92) would need. `InMemoryAlvoData` assigns numbers too, so a
+host's unit test reads them (D14). A sent or patched sequence number is refused `403 forbidden` by `WritePayloadGuard`,
+as a computed or rollup value is (ruling R3).
+
+## Exclusions: gist on PostgreSQL, triggers on SQLite (HX-12)
+
+An index's `exclude: {from, to}` says no two rows with equal `fields` hold overlapping half-open `[from, to)` ranges
+(D1). `tenant_id` is prepended to the equality columns on a scoped entity, as `UniqueColumns` does for `unique`. The
+DDL is the dialect's `ExclusionConstraint(ExclusionConstraintDefinition)` — a public default interface member that
+answers `null`, so a dialect that cannot enforce one makes the apply refuse the keyword (the T-SQL double declines it,
+D16).
+
+- **PostgreSQL** answers one table constraint: `EXCLUDE USING gist (<eq> WITH =, …, tstzrange|daterange(from, to, '[)')
+  WITH &&) WHERE (<where>)`. An empty range overlaps nothing, as the half-open contract says. The equality columns are
+  scalars in a GiST index, so it needs `btree_gist`. A violation is SQLSTATE `23P01`, decoded as
+  `AlvoConstraintKind.Exclusion`.
+- **SQLite** has no exclusion constraint, so it answers two `AFTER INSERT` / `AFTER UPDATE` triggers over one overlap
+  join that `RAISE(ABORT, 'alvo_exclusion:<name>')` (D2), plus an ordinary index the trigger seeks through. The engine
+  runs them on every write path; under `BEGIN IMMEDIATE` the trigger sees every committed row, so the check is race-free.
+  The abort arrives as `SQLITE_CONSTRAINT_TRIGGER` (1811) and is decoded by its tag; a `RESTRICT` foreign-key failure
+  reports 1811 too, and without the tag falls back to the message-only path. `datetime` bounds compare in HX-11's epoch
+  domain, rounded to the millisecond, so two bounds differing below 1 ms can overlap on one engine and not the other.
+
+**Names are hashed** (D10): `xc_` + entity cut to 46 + `_` + 8 hex of SHA-256 of the definition, the triggers `<name>_i`
+and `<name>_u`. A changed definition is a new name, so the plan is a set difference: drop the old, create the new.
+
+**A rebuild replays the triggers.** A SQLite table rebuild (a new validation on another field, a type change) drops the
+triggers with the old table. `ExclusionConstraintSql.SurvivesTableRebuild` is `false` there, every create is
+`IF NOT EXISTS`, and `ExclusionPlan` replays the non-surviving enforcement on every table an EF operation touched
+(`AlvoDataExclusionTests.An_exclusion_survives_a_later_apply_that_rebuilds_its_table`). A renamed entity's exclusions
+are dropped by their old definition before the rename and created under their new names after it.
+
+**The pre-apply scan** counts overlapping pairs (`ExclusionOverlapScan`, the HX-11 pre-apply scan's twin) for an added
+exclusion over an existing table and refuses at `/entities/<e>/indexes/<i>/exclude`: `<n> pair(s) of '<e>' rows
+overlap, so this exclusion cannot be added. Nothing was applied.` Inside the apply transaction SQLite re-checks with a
+no-op `UPDATE … SET id = id` over the overlapping rows, which fires the new trigger; PostgreSQL's `ADD CONSTRAINT` checks
+the rows itself. Either failure is translated back to that pointer.
+
+**The prerequisite.** Before an apply that adds an exclusion on PostgreSQL, the dialect probes `pg_extension`,
+`pg_available_extensions` and `has_database_privilege(…, 'CREATE')` (D12): installed → nothing; installable → the plan's
+first statement is `CREATE EXTENSION IF NOT EXISTS btree_gist` (trusted since PostgreSQL 13); otherwise the apply is
+refused at the exclusion's pointer with the fix to ask the database owner. Which scalar types `btree_gist` supports
+depends on the server version (`bool` from 15); that is verified on 16 only.
+
+**Writers queue, they do not deadlock** (D3). On PostgreSQL a write to an entity with an exclusion first takes
+transaction-scoped advisory locks, one per exclusion, keyed on SHA-256 of the name, the tenant and the equality values,
+in sorted order — so concurrent inserters of one resource wait for each other instead of meeting `40P01` between
+exclusion waiters. No test fails without them yet; they are defensive.
+
+**A refused write is a 409.** `ConstraintViolationTranslator` resolves the constraint name over the written entity
+and names `exclude.from` (filtered by `Unnameable`); the API answers `conflict` with the violation code `exclusion` at
+`/<from>`. An inverted range (`to < from`) never reaches PostgreSQL's `22000`: the mapper ANDs `value >= <from>` into
+the `to` field's `CHECK` (D4), so it is a 422 `check` at `/<to>` on both engines. Soft-deleted rows still count (D13).
+
 ## `softDelete` is refused, not silently ignored
 
 The frozen descriptor schema states the guarantee in full: *"Framework-managed soft delete: a managed

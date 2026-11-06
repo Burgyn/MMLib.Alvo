@@ -1,6 +1,7 @@
 ﻿using Microsoft.Data.Sqlite;
 using MMLib.Alvo.Data.EntityFrameworkCore;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Schema;
 using System.Data.Common;
 
@@ -156,6 +157,62 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     /// </remarks>
     string? IAlvoSqlDialect.SequenceAllocationStatement(string table) => SequenceTable.Upsert(table);
 
+    private static readonly IFieldSqlRenderer _fields = new SqliteFieldSqlRenderer();
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <b>Two <c>AFTER</c> triggers over one overlap join</b> (HX-12 D2): SQLite has no exclusion constraint, so the engine
+    /// runs the check on every write path — the data API, a batch, an out-of-band statement — and aborts with
+    /// <c>alvo_exclusion:&lt;name&gt;</c>. Under <c>BEGIN IMMEDIATE</c> a writer sees every committed row, so the check is
+    /// race-free. An ordinary index over the equality columns and the range start lets the trigger seek its candidates.
+    /// </para>
+    /// <para>
+    /// <b>A table rebuild drops all three</b> with the old table, so <see cref="ExclusionConstraintSql.SurvivesTableRebuild"/>
+    /// is <see langword="false"/> and every create is <c>IF NOT EXISTS</c>, to be replayed after one. Datetime bounds are
+    /// compared through the driver's epoch rendering, millisecond-rounded (D1).
+    /// </para>
+    /// </remarks>
+    ExclusionConstraintSql? IAlvoSqlDialect.ExclusionConstraint(ExclusionConstraintDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        EnsureRaisableName(definition.Name);
+        return new(
+            Create: [SupportingIndex(definition), Trigger(definition, "_i", "INSERT"), Trigger(definition, "_u", "UPDATE")],
+            Drop:
+            [
+                $"DROP TRIGGER IF EXISTS {RenderColumn(definition.Name + "_i")}",
+                $"DROP TRIGGER IF EXISTS {RenderColumn(definition.Name + "_u")}",
+                $"DROP INDEX IF EXISTS {RenderColumn(IndexNames.ExclusionSupport(definition))}",
+            ],
+            SurvivesTableRebuild: false);
+    }
+
+    /// <summary>
+    /// Holds the name to the computed shape (lower-case letters, digits, <c>_</c>) before it is spliced into the trigger's
+    /// <c>RAISE</c> text — the decoder reads it back by the same alphabet, and no quote can reach the literal.
+    /// </summary>
+    private static void EnsureRaisableName(string name)
+    {
+        if (string.IsNullOrEmpty(name) || !name.All(character => char.IsAsciiLetterLower(character) || char.IsAsciiDigit(character) || character == '_'))
+        {
+            throw new ArgumentException("An exclusion's name is lower-case letters, digits and '_' only.", nameof(name));
+        }
+    }
+
+    private string SupportingIndex(ExclusionConstraintDefinition definition) =>
+        $"CREATE INDEX IF NOT EXISTS {RenderColumn(IndexNames.ExclusionSupport(definition))} ON {RenderColumn(definition.Table)} "
+        + $"({string.Join(", ", definition.EqualityColumns.Append(definition.StartColumn).Select(RenderColumn))})";
+
+    private string Trigger(ExclusionConstraintDefinition definition, string suffix, string verb) =>
+        $"""
+        CREATE TRIGGER IF NOT EXISTS {RenderColumn(definition.Name + suffix)} AFTER {verb} ON {RenderColumn(definition.Table)}
+        BEGIN
+            SELECT RAISE(ABORT, '{ExclusionOverlapSql.RaisePrefix}{definition.Name}')
+            WHERE EXISTS (SELECT 1 FROM {ExclusionOverlapSql.Pairs(definition, column => _fields.RenderEpochMicroseconds(column)!, "NEW.\"id\"")});
+        END
+        """;
+
     /// <summary><c>SQLITE_CONSTRAINT_UNIQUE</c> (2067): a <c>UNIQUE</c> index refused the row.</summary>
     private const int ConstraintUnique = 2067;
 
@@ -167,6 +224,12 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
 
     /// <summary><c>SQLITE_CONSTRAINT_CHECK</c> (275): a <c>CHECK</c> constraint — a field's validation — refused the row.</summary>
     private const int ConstraintCheck = 275;
+
+    /// <summary>
+    /// <c>SQLITE_CONSTRAINT_TRIGGER</c> (1811): a trigger's <c>RAISE(ABORT, …)</c> refused the row — an exclusion's, or the
+    /// engine's own <c>RESTRICT</c> action, which reports a foreign-key failure under this code.
+    /// </summary>
+    private const int ConstraintTrigger = 1811;
 
     /// <summary>SQLite's own prefix on the one message that names columns.</summary>
     private const string UniqueFailurePrefix = "UNIQUE constraint failed: ";
@@ -220,12 +283,48 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
             },
             ConstraintForeignKey => new SqlConstraintViolation { Kind = AlvoConstraintKind.Referenced },
             ConstraintCheck => CheckViolation(sqlite.Message),
+            ConstraintTrigger => ExclusionViolation(sqlite.Message) ?? WithoutAnExtendedCode(sqlite),
             _ => WithoutAnExtendedCode(sqlite),
         };
     }
 
     /// <summary>SQLITE_CONSTRAINT (19): some constraint refused the statement, without saying which.</summary>
     private const int Constraint = 19;
+
+    /// <summary>SQLITE_ERROR (1): the generic code SQLite raises a refused index expression or predicate under.</summary>
+    private const int GenericError = 1;
+
+    /// <summary>SQLite's own text for a function an index may not call, such as <c>non-deterministic use of date() in an index</c>.</summary>
+    private const string NonDeterministicUsePrefix = "non-deterministic use of";
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// SQLite reports it under its generic code, so the narrowing is the code and then SQLite's own unlocalized text — the
+    /// message names the function, never a value.
+    /// </remarks>
+    bool IAlvoSqlDialect.IsIndexPredicateRefusal(DbException failure) =>
+        failure is SqliteException { SqliteErrorCode: GenericError } sqlite
+        && sqlite.Message.Contains(NonDeterministicUsePrefix, StringComparison.Ordinal)
+        && sqlite.Message.Contains("in an index", StringComparison.Ordinal);
+
+    /// <summary>
+    /// The exclusion an abort raised by one of its own triggers names (HX-12 D2), or <see langword="null"/> for any other
+    /// trigger's abort — the tag is the framework's own constant, followed by a name the framework computed, never a value.
+    /// </summary>
+    /// <param name="message">The exception's message.</param>
+    private static SqlConstraintViolation? ExclusionViolation(string message)
+    {
+        var start = message.IndexOf(ExclusionOverlapSql.RaisePrefix, StringComparison.Ordinal);
+        if (start < 0)
+        {
+            return null;
+        }
+
+        var name = new string([.. message[(start + ExclusionOverlapSql.RaisePrefix.Length)..].TakeWhile(IsNameCharacter)]);
+        return new SqlConstraintViolation { Kind = AlvoConstraintKind.Exclusion, ConstraintName = name.Length == 0 ? null : name };
+    }
+
+    private static bool IsNameCharacter(char character) => char.IsAsciiLetterOrDigit(character) || character == '_';
 
     /// <summary>SQLite's own prefix on a foreign-key failure, which names nothing else at all.</summary>
     private const string ForeignKeyFailurePrefix = "FOREIGN KEY constraint failed";
@@ -266,6 +365,11 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
         if (sqlite.Message.Contains(CheckFailurePrefix, StringComparison.Ordinal))
         {
             return CheckViolation(sqlite.Message);
+        }
+
+        if (ExclusionViolation(sqlite.Message) is { } exclusion)
+        {
+            return exclusion;
         }
 
         return sqlite.Message.Contains(UniqueFailurePrefix, StringComparison.Ordinal)

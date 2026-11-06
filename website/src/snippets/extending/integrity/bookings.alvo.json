@@ -1,0 +1,32 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "bookings",
+  "description": "Meeting rooms and their bookings: numbered per room and year, and never double-booked unless cancelled.",
+  "auth": { "roles": ["clerk"] },
+  "access": { "admin": "'clerk' in @user.roles" },
+  "tenancy": { "enabled": true },
+  "entities": {
+    "rooms": {
+      "fields": {
+        "name": { "type": "string", "maxLength": 60, "required": true }
+      },
+      "rules": { "list": "true", "get": "true", "create": "true", "update": "true", "delete": "true" }
+    },
+    "bookings": {
+      "fields": {
+        "room": { "type": "ref", "entity": "rooms", "required": true },
+        "number": { "type": "string", "sequence": { "per": "room", "period": "year", "format": "B-{yyyy}-{n:3}" } },
+        "starts_at": { "type": "datetime", "required": true },
+        "ends_at": { "type": "datetime", "required": true },
+        "status": { "type": "enum", "values": ["confirmed", "cancelled"], "required": true },
+        "external_ref": { "type": "string", "maxLength": 40 }
+      },
+      "indexes": [
+        { "fields": ["room"], "exclude": { "from": "starts_at", "to": "ends_at" }, "where": "status != 'cancelled'" },
+        { "fields": ["room", "external_ref"], "unique": true, "where": "status != 'cancelled'" }
+      ],
+      "rules": { "list": "true", "get": "true", "create": "true", "update": "true", "delete": "true" }
+    }
+  }
+}

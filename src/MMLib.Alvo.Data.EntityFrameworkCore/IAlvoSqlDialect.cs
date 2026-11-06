@@ -412,6 +412,35 @@ public interface IAlvoSqlDialect
     string? SequenceAllocationStatement(string table) => null;
 
     /// <summary>
+    /// How this engine enforces an exclusion — no two rows with equal equality columns holding overlapping
+    /// <c>[start, end)</c> ranges — or <see langword="null"/> when it cannot, in which case an apply declaring
+    /// <c>exclude</c> is refused, naming the keyword.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Half-open, and an empty range overlaps nothing.</b> A row whose start is not before its end takes part in no
+    /// overlap, on every engine — PostgreSQL's <c>'[)'</c> range semantics, which an engine without range types reproduces.
+    /// </para>
+    /// <para>
+    /// <b><see cref="ExclusionConstraintDefinition.Filter"/> is inline-literal SQL over unqualified columns</b>, written by the
+    /// constraint renderer from a compiled predicate — never caller text. A dialect places it where its own grammar scopes
+    /// it to the table's rows.
+    /// </para>
+    /// <para>
+    /// <b>Replayable.</b> When <see cref="ExclusionConstraintSql.SurvivesTableRebuild"/> is <see langword="false"/>, the
+    /// migrator replays <see cref="ExclusionConstraintSql.Create"/> after every rebuild of the table, so its statements must
+    /// be idempotent.
+    /// </para>
+    /// <para>
+    /// A default interface member answering <see langword="null"/>, like <see cref="SequenceAllocationStatement"/>: there is
+    /// no ANSI exclusion constraint to inherit.
+    /// </para>
+    /// </remarks>
+    /// <param name="definition">The exclusion, resolved to its table's columns.</param>
+    /// <returns>The create and drop statements, or <see langword="null"/>.</returns>
+    ExclusionConstraintSql? ExclusionConstraint(ExclusionConstraintDefinition definition) => null;
+
+    /// <summary>
     /// Decides whether <paramref name="failure"/> is this engine refusing a write on a constraint a
     /// <em>caller</em> can do something about — a <c>unique</c> collision or a <c>restrict</c>-ed reference —
     /// and recovers whatever it names, or answers <see langword="null"/> when it is anything else.
@@ -489,6 +518,26 @@ public interface IAlvoSqlDialect
     /// </summary>
     /// <param name="failure">The provider's own exception, unwrapped.</param>
     internal bool IsLockTimeout(DbException failure) => false;
+
+    /// <summary>
+    /// Whether <paramref name="failure"/> is this engine refusing a partial index's predicate — PostgreSQL's <c>42P17</c> over
+    /// a function that is not <c>IMMUTABLE</c>, SQLite's non-deterministic use of a function in an index — so the apply
+    /// answers it at the index's <c>where</c> rather than as a 500 (HX-12). <see langword="false"/> by default.
+    /// </summary>
+    /// <remarks>Internal, for <see cref="IsLockTimeout"/>'s reason: the published dialect port does not grow.</remarks>
+    /// <param name="failure">The provider's own exception, unwrapped.</param>
+    internal bool IsIndexPredicateRefusal(DbException failure) => false;
+
+    /// <summary>
+    /// What this engine needs before an apply can add an exclusion — nothing, a statement the apply runs first, or a refusal
+    /// because the database lacks something the connection's role may not install (HX-12 D12). Asked once per plan that
+    /// adds one; <see cref="ExclusionPrerequisite.Ready"/> by default.
+    /// </summary>
+    /// <remarks>Internal, for <see cref="IsLockTimeout"/>'s reason: the published dialect port does not grow.</remarks>
+    /// <param name="connection">An open connection to the database being planned against.</param>
+    /// <param name="ct">A token to cancel the probe.</param>
+    internal ValueTask<ExclusionPrerequisite> ExclusionPrerequisiteAsync(DbConnection connection, CancellationToken ct) =>
+        ValueTask.FromResult(ExclusionPrerequisite.Ready);
 
     /// <summary>
     /// The statement an apply runs before it recomputes rollups over <paramref name="child"/>, holding off every write to the

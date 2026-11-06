@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Admin.Components.DesignSystem;
 using MMLib.Alvo.Admin.Internal;
@@ -253,11 +254,30 @@ public partial class FieldEditor
     /// <summary>The child fields the chosen op can aggregate, by name.</summary>
     private IReadOnlyList<string> AggregatableNames => [.. _facets.Aggregatable.Select(child => child.Name)];
 
+    /// <summary>The type chips the chosen kind offers.</summary>
+    private IReadOnlyList<FieldType> TypesOffered => _facets.Kind switch
+    {
+        FieldKind.Computed => _facets.ComputedTypesOffered,
+        FieldKind.Sequence => FieldFacets.SequenceTypes,
+        _ => _types,
+    };
+
+    /// <summary>Whether the format box says what is wrong with it: only once something is typed, never on an empty new box.</summary>
+    private bool FormatProblemShown => _facets.SequenceFormat.Length > 0 && _facets.SequenceFormatProblem is not null;
+
+    /// <summary>The clock the next-number preview reads its date tokens from: the host's, else the system's.</summary>
+    private TimeProvider Clock => Services.GetService<TimeProvider>() ?? TimeProvider.System;
+
+    /// <summary>The services the preview's clock is looked up in, since a host need not register one.</summary>
+    [Inject]
+    private IServiceProvider Services { get; set; } = default!;
+
     /// <summary>What a kind is called on its chip.</summary>
     private static string KindWord(FieldKind kind) => kind switch
     {
         FieldKind.Rollup => "rollup",
         FieldKind.Computed => "computed",
+        FieldKind.Sequence => "sequence",
         _ => "written by callers",
     };
 
@@ -266,6 +286,7 @@ public partial class FieldEditor
     {
         FieldKind.Rollup => "Maintained by Alvo: aggregated from the rows of an entity that points here, in the same transaction as the write to them. Callers never write it.",
         FieldKind.Computed => "Maintained by the database: a stored generated column computed from this row's own fields. Callers never write it.",
+        FieldKind.Sequence => "Numbered by Alvo on create, in the create's own transaction: gapless, never reused, counted per tenant. Callers never write it.",
         _ => "A caller writes it, within the type and constraints below.",
     };
 
@@ -292,6 +313,7 @@ public partial class FieldEditor
         }
 
         _facets.Sources = Sources ?? [];
+        _facets.PerOffered = Copy is { } copy ? FieldFacets.SequencePerOffered(copy.FieldsOf(Entity), Editing) : [];
         if (_opened.Length == 0 || prefilledNow)
         {
             _opened = Fingerprint();
@@ -318,6 +340,11 @@ public partial class FieldEditor
         if (kind == FieldKind.Computed && !_facets.ComputedTypesOffered.Contains(_facets.Type))
         {
             _facets.Type = FieldType.Decimal;
+        }
+
+        if (kind == FieldKind.Sequence && !FieldFacets.SequenceTypes.Contains(_facets.Type))
+        {
+            _facets.Type = FieldType.Integer;
         }
 
         _refusal.Clear();
@@ -352,7 +379,7 @@ public partial class FieldEditor
     private bool NumbersRead()
     {
         _numbers.ClearAll();
-        if (_facets.Kind != FieldKind.Rollup)
+        if (_facets.Kind is not (FieldKind.Rollup or FieldKind.Sequence))
         {
             _numbers.RefuseAll(ShownNumbers()
                 .Where(box => box.Read.Problem is not null)
@@ -414,7 +441,7 @@ public partial class FieldEditor
         {
             if (await StageAsync(keepOpen: true))
             {
-                _facets = new FieldFacets { Type = _facets.Type, Kind = _facets.Kind, Sources = _facets.Sources };
+                _facets = new FieldFacets { Type = _facets.Type, Kind = _facets.Kind, Sources = _facets.Sources, PerOffered = _facets.PerOffered };
                 _excludedFromEvents = false;
                 CheckEveryBox();
                 ForgetNumbers();
