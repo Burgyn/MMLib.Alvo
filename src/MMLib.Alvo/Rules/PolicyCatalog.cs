@@ -367,7 +367,14 @@ internal readonly record struct RequiredContext(bool TenantId, bool UserId)
     /// <see cref="AlvoContext.Anonymous"/>) — never a real caller who happens to own the all-zero
     /// rows.
     /// </summary>
-    private static bool HasNoIdentity(AlvoContext context) => context.User.Value == Guid.Empty;
+    private static bool HasNoIdentity(AlvoContext context) => !HasIdentity(context);
+
+    /// <summary>
+    /// Whether <paramref name="context"/> carries an identity: any user id but the reserved all-zero one. The one test
+    /// the required-context gate and the relation binder's cache key share, so the two cannot drift apart.
+    /// </summary>
+    /// <param name="context">The caller.</param>
+    internal static bool HasIdentity(AlvoContext context) => context.User.Value != Guid.Empty;
 }
 
 /// <summary>
