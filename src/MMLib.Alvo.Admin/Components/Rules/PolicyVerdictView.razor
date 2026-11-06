@@ -66,6 +66,40 @@ else
     </div>
 }
 
+@if (Verdict.Relations.Count > 0)
+{
+    <div class="a-field" data-testid="verdict-relations">
+        <span class="a-label">Reads through — a related row's own list rule</span>
+        @foreach (var relation in Verdict.Relations)
+        {
+            <div class="a-field" data-testid="@($"verdict-relation-{relation.Via}")">
+                <div class="a-row a-row--wrap">
+                    <span class="a-mono a-name">Reads through @relation.Via → @relation.Entity</span>
+                </div>
+                @if (!relation.Allowed)
+                {
+                    <span class="a-badge a-badge--warn" data-testid="verdict-relation-denied">denied for this caller — never matches</span>
+                }
+                else
+                {
+                    @if (relation.Using is { Length: > 0 } related)
+                    {
+                        <pre class="a-code"><code>@related</code></pre>
+                    }
+                    @if (relation.TenantScope is { Length: > 0 } relatedTenant)
+                    {
+                        <pre class="a-code"><code>@relatedTenant</code></pre>
+                    }
+                }
+            </div>
+        }
+        <span class="a-section__sub">
+            A relation matches only a related row this caller could list: the related entity's list rule and tenant scope
+            are ANDed inside it. A host narrowing is not — it is a view, not a boundary.
+        </span>
+    </div>
+}
+
 @if (Verdict.HiddenFields.Count > 0)
 {
     <div class="a-field">

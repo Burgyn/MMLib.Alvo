@@ -225,8 +225,8 @@ internal sealed class ReadStatementComposer
         var terms = new List<string>();
         var parameters = new Dictionary<string, BoundValue>(StringComparer.Ordinal);
 
-        AddPredicate(terms, parameters, decision.Using, context, PolicyParameterPrefix.Using);
-        AddPredicate(terms, parameters, decision.TenantScope, context, PolicyParameterPrefix.TenantScope);
+        AddPredicate(terms, parameters, entity, decision.Using, context, PolicyParameterPrefix.Using);
+        AddPredicate(terms, parameters, entity, decision.TenantScope, context, PolicyParameterPrefix.TenantScope);
         AddNarrowing(terms, parameters, entity, options.Narrowing);
         AddRowId(terms, parameters, entity, options.RowId);
         AddFilter(terms, parameters, entity, options.Filter);
@@ -320,7 +320,7 @@ internal sealed class ReadStatementComposer
     /// reason.
     /// </summary>
     private void AddPredicate(
-        List<string> terms, Dictionary<string, BoundValue> parameters,
+        List<string> terms, Dictionary<string, BoundValue> parameters, EntitySchema entity,
         CompiledExpression? expression, AlvoContext context, string prefix)
     {
         if (expression is null)
@@ -329,10 +329,23 @@ internal sealed class ReadStatementComposer
             return;
         }
 
-        var predicate = _predicates.Render(expression, context, _fields, prefix);
+        var predicate = Rendered(entity, expression, context, prefix);
         terms.Add(predicate.Sql);
         Collect(parameters, PolicyValues(predicate.Parameters));
     }
+
+    /// <summary>
+    /// A predicate holding a relation renders through the internal relation member, each relation a correlated
+    /// <c>EXISTS</c> over an unlocked table that reads the outer row qualified by its table name — only the outer
+    /// <c>FROM</c> keeps the lock form. Every other predicate keeps the public member, so a host's own renderer still
+    /// serves every rule that reads no relation.
+    /// </summary>
+    private SqlPredicate Rendered(EntitySchema entity, CompiledExpression expression, AlvoContext context, string prefix) =>
+        CelRewriter.HasRelation(expression.Root)
+            ? _predicates.Render(expression, context, _fields, prefix, new RelationSql(UnlockedTable, new RowSource.Columns(UnlockedTable(entity))))
+            : _predicates.Render(expression, context, _fields, prefix);
+
+    private string UnlockedTable(EntitySchema entity) => _dialect.RenderTable(entity, lockedPreImageFor: null);
 
     /// <summary>
     /// A rendered <c>SqlPredicate</c>'s bag records names and values only — it carries no field — so its values

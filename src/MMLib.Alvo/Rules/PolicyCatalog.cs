@@ -180,6 +180,12 @@ internal sealed record EntityPolicy(
     /// record's fields, it leaves the record's equality untouched too.
     /// </remarks>
     internal IReadOnlySet<string> FlaggedHidden => _flaggedByHidden.GetValue(Hidden, static hidden => Flagged(hidden));
+
+    /// <summary>The entities this entity's <c>list</c> rule reads through relation terms, each once.</summary>
+    internal IReadOnlyList<string> Relations { get; init; } = [];
+
+    /// <summary>The entity's compiled lookup checks, in declaration order, each still unbound.</summary>
+    internal IReadOnlyList<DescriptorCheck> Checks { get; init; } = [];
 }
 
 /// <summary>
@@ -319,7 +325,11 @@ internal sealed record CompiledAction(
 internal sealed record OperationPolicy(
     CompiledExpression? Using,
     CompiledExpression? WithCheck,
-    RequiredContext Required);
+    RequiredContext Required)
+{
+    /// <summary>Whether <see cref="Using"/> or <see cref="WithCheck"/> reads a related entity, so each needs binding per caller.</summary>
+    internal bool HasRelations { get; init; }
+}
 
 /// <summary>
 /// The caller/tenant context values one compiled expression — or a set of them — actually reads,
@@ -344,7 +354,7 @@ internal readonly record struct RequiredContext(bool TenantId, bool UserId)
 
     /// <summary>Whether this expression reads <c>@tenant.id</c> and <paramref name="context"/> carries no tenant.</summary>
     /// <param name="context">The caller resolving against the expression.</param>
-    public bool TenantIdMissingFrom(AlvoContext context) => TenantId && context.Tenant is null;
+    public bool TenantIdMissingFrom(AlvoContext context) => TenantId && !HasTenant(context);
 
     /// <summary>Whether this expression reads <c>@user.id</c> and <paramref name="context"/> carries no identity.</summary>
     /// <param name="context">The caller resolving against the expression.</param>
@@ -360,7 +370,21 @@ internal readonly record struct RequiredContext(bool TenantId, bool UserId)
     /// <see cref="AlvoContext.Anonymous"/>) — never a real caller who happens to own the all-zero
     /// rows.
     /// </summary>
-    private static bool HasNoIdentity(AlvoContext context) => context.User.Value == Guid.Empty;
+    private static bool HasNoIdentity(AlvoContext context) => !HasIdentity(context);
+
+    /// <summary>
+    /// Whether <paramref name="context"/> carries an identity: any user id but the reserved all-zero one. The one test
+    /// the required-context gate and the relation binder's cache key share, so the two cannot drift apart.
+    /// </summary>
+    /// <param name="context">The caller.</param>
+    internal static bool HasIdentity(AlvoContext context) => context.User.Value != Guid.Empty;
+
+    /// <summary>
+    /// Whether <paramref name="context"/> carries a tenant. The one test the tenant guard, the required-context gate and
+    /// the relation binder's cache key share.
+    /// </summary>
+    /// <param name="context">The caller.</param>
+    internal static bool HasTenant(AlvoContext context) => context.Tenant is not null;
 }
 
 /// <summary>

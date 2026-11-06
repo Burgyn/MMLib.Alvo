@@ -33,7 +33,7 @@ internal sealed partial class SqlPredicateRenderer
 
         try
         {
-            var rendered = RenderPredicate(expression.Root, expression.Entity, context: null, fields, InlineLiterals.Instance);
+            var rendered = RenderPredicate(expression.Root, RenderScope.Top(expression.Entity, context: null, fields, InlineLiterals.Instance));
             return rendered.IsTwoValued ? rendered.Sql : fields.RenderTwoValued(rendered.Sql);
         }
         catch (CelFunctionException failure) when (IsTemporalRangeError(failure))

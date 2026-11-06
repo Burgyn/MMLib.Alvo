@@ -1,0 +1,47 @@
+﻿{
+  Column: {
+    Sql: EXISTS (SELECT 1 FROM "customers" AS _alvo_r1 WHERE (_alvo_r1."id" = "orders"."customer_id") AND (COALESCE(EPOCH_US(_alvo_r1."since") <= (EPOCH_US("orders"."placed_at") - @alvo_u0), FALSE)) AND (COALESCE(_alvo_r1."owner_id" = @alvo_u1, FALSE)) AND (COALESCE(_alvo_r1."tenant_id" = @alvo_u2, FALSE))),
+    Parameters: [
+      {
+        Key: alvo_u0,
+        Type: Int64,
+        Value: 86400000000
+      },
+      {
+        Key: alvo_u1,
+        Type: Guid,
+        Value: {alice-user-id}
+      },
+      {
+        Key: alvo_u2,
+        Type: Guid,
+        Value: {acme-tenant-id}
+      }
+    ]
+  },
+  Image: {
+    Sql: EXISTS (SELECT 1 FROM "customers" AS _alvo_r1 WHERE (_alvo_r1."id" = @alvo_q0) AND (COALESCE(_alvo_r1."since" <= @alvo_q1, FALSE)) AND (COALESCE(_alvo_r1."owner_id" = @alvo_q2, FALSE)) AND (COALESCE(_alvo_r1."tenant_id" = @alvo_q3, FALSE))),
+    Parameters: [
+      {
+        Key: alvo_q0,
+        Type: Guid,
+        Value: Guid_1
+      },
+      {
+        Key: alvo_q1,
+        Type: DateTimeOffset,
+        Value: DateTimeOffset_1
+      },
+      {
+        Key: alvo_q2,
+        Type: Guid,
+        Value: {alice-user-id}
+      },
+      {
+        Key: alvo_q3,
+        Type: Guid,
+        Value: {acme-tenant-id}
+      }
+    ]
+  }
+}

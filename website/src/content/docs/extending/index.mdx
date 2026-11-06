@@ -29,6 +29,8 @@ Start with [Where logic goes](/extending/where-logic-goes/): the first question 
   one in every returned row, after the rules.
 - [Integrity in the descriptor](/extending/integrity/) — a field's `validation` as a `CHECK` the database enforces, a
   rollup that counts some children, and time with `now()` and durations.
+- [Rules over relations](/extending/relation-rules/) — a rule that follows a ref or reaches the records that point
+  here, always through the related entity's own list rule; lookup checks against a related row.
 - [Analyzer rules](/extending/analyzer-rules/) — `ALVO1001`, shipped inside `MMLib.Alvo`: what it reports in hooks and
   CEL functions that run inside the write's transaction, and what it cannot see.
 - [Transactions in your own code](/extending/transactions/) — several writes, batches and events as one unit, with savepoints and a time limit.

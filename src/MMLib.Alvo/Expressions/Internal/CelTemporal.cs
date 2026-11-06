@@ -21,6 +21,7 @@ internal static class CelTemporal
     {
         CelLiteral { Type: CelValueType.Duration or CelValueType.Timestamp } literal => literal.Type,
         CelFieldRef { Type: CelValueType.Timestamp } => CelValueType.Timestamp,
+        CelOuterFieldRef { Type: CelValueType.Timestamp } => CelValueType.Timestamp,
         CelCall { ResultType: CelValueType.Timestamp } => CelValueType.Timestamp,
         CelBinary binary when IsTemporal(binary) => ResultOf(binary),
         _ => null,

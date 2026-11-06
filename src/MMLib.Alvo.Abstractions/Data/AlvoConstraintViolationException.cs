@@ -126,8 +126,30 @@ public sealed class AlvoConstraintViolationException : Exception
         Fields = [];
     }
 
+    /// <summary>Initializes a new instance of the <see cref="AlvoConstraintViolationException"/> class for a failed lookup check.</summary>
+    /// <remarks>
+    /// The message is the descriptor author's, which is server-owned text rather than anything the caller sent, so it is
+    /// carried to the caller as written; <see cref="Kind"/> is <see cref="AlvoConstraintKind.Check"/>.
+    /// </remarks>
+    /// <param name="fields">The lookup field, or empty when the descriptor hides it from callers.</param>
+    /// <param name="message">The check's own message.</param>
+    internal AlvoConstraintViolationException(IReadOnlyList<string> fields, string message)
+        : base(message)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        Kind = AlvoConstraintKind.Check;
+        Fields = [.. fields];
+        DescriptorMessage = message;
+    }
+
     /// <summary>Which constraint the request collided with.</summary>
     public AlvoConstraintKind Kind { get; }
+
+    /// <summary>
+    /// The descriptor author's message when a lookup check refused the write; <see langword="null"/> for every refusal the
+    /// engine itself raised, whose text is fixed.
+    /// </summary>
+    internal string? DescriptorMessage { get; }
 
     /// <summary>
     /// The entity's own field names the conflict concerns — one for an ordinary <c>unique</c> field, several

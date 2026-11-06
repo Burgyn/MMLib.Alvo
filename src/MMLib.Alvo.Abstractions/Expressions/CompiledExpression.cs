@@ -11,7 +11,7 @@ namespace MMLib.Alvo.Expressions;
 /// <remarks>
 /// <para>
 /// A <see cref="CompiledExpression"/> is only ever produced by a successful
-/// <see cref="ICelCompiler.Compile"/>, so a renderer may assume it is type-checked and
+/// <see cref="ICelCompiler.Compile(string, CelProfile, EntitySchema)"/>, so a renderer may assume it is type-checked and
 /// in-profile — it never needs to re-validate the tree it renders. The constructor is
 /// <see langword="internal"/> (the core is granted access via <c>InternalsVisibleTo</c>), which
 /// prevents a provider or host from <em>accidentally</em> assembling one from a raw, unchecked parser

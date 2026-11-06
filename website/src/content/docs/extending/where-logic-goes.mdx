@@ -11,6 +11,7 @@ until it ships, use the row above it or an after-hook `webhook`.
 | Situation | Where | Why | Today |
 |---|---|---|---|
 | A condition or a calculation over one row; access; whether a field is visible | descriptor: `rules`, before-hook, `computed` | Compiled to SQL, shown by the policy simulator, written by an agent on its own. | available |
+| Who may see a row depends on a related row; a write must agree with a related row | descriptor: a relation rule (`customer_id.owner_id == @user.id`, `members.exists(…)`); a lookup check (`checks`) | One correlated `EXISTS` in the query, through the related entity's own list rule; a check refuses with your message. | available — [Rules over relations](/extending/relation-rules/) |
 | CEL lacks a function (VAT, working hours) | `AddCelFunction` | A pure calculation: synchronous, in the transaction, no network. | available |
 | Integrity across rows: stock, capacity, numbering, overlaps | descriptor: `CHECK`, `sequence`, `exclude` | The database enforces it atomically on every engine; code would be slower and race. | planned |
 | Validation needs an external service (VIES, fraud, billing) | `IValidateWriteHook` | Before the transaction, with network and a timeout. Not atomic, so nothing integrity depends on. | available — [Validate and guard writes](/extending/write-hooks/) |

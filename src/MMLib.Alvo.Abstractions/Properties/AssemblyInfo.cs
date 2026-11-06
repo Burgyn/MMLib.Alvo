@@ -58,7 +58,8 @@
 // cannot name. The Ai grant has a second use (D52): ManagementApplyResult.Warnings, the validator's warnings on a dry
 // run, which the assistant reads and the wire does not carry. The Admin grant has a second use (HX-11 Ruling 78):
 // AlvoApplyLockTimeoutException, which the dashboard calls IAlvoManagement in-process and so receives as itself — it
-// answers it as a retryable refusal. These grants reach every other internal here too — PolicyDecision's constructor and Allow, and
+// answers it as a retryable refusal; and a third (HX-19): AlvoConstraintViolationException.DescriptorMessage, so a
+// lookup check's refusal is worded as one rather than as a field's validation. These grants reach every other internal here too — PolicyDecision's constructor and Allow, and
 // CompiledExpression's constructor among them — so an architecture fact in each granted product assembly's suite
 // holds that it references none of them. The same forgeability caveat applies: an unsigned grant is a name match.
 [assembly: InternalsVisibleTo("MMLib.Alvo.Ai")]

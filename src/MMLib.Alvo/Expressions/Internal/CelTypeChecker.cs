@@ -10,7 +10,7 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// <see cref="CelProfile"/> does not allow — all in one pass, collecting every independent error
 /// instead of stopping at the first.
 /// </summary>
-internal static class CelTypeChecker
+internal static partial class CelTypeChecker
 {
     /// <summary>Checks a parsed tree against an entity's schema and a profile, knowing only the built-in functions.</summary>
     /// <param name="root">The parsed, untyped tree.</param>
@@ -37,9 +37,21 @@ internal static class CelTypeChecker
     /// every error found.
     /// </returns>
     public static (CelNode Root, CelValueType ResultType, int Position, IReadOnlyList<CelCompilationError> Errors) Check(
-        CelNode root, string source, EntitySchema entity, CelProfile profile, CelFunctionCatalog catalog)
+        CelNode root, string source, EntitySchema entity, CelProfile profile, CelFunctionCatalog catalog) =>
+        Check(root, source, entity, profile, catalog, relations: null);
+
+    /// <summary>Checks a parsed tree that may hold relation syntax, resolving it through <paramref name="relations"/>.</summary>
+    /// <param name="root">The parsed, untyped tree.</param>
+    /// <param name="source">The original CEL source, used only to locate positions.</param>
+    /// <param name="entity">The entity to resolve row fields against.</param>
+    /// <param name="profile">Which constructs are legal.</param>
+    /// <param name="catalog">The functions a call may bind.</param>
+    /// <param name="relations">The relations a path or an <c>exists</c> may follow; <see langword="null"/> for none.</param>
+    /// <returns>The rewritten tree, its result type, the result-type anchor position and every error.</returns>
+    public static (CelNode Root, CelValueType ResultType, int Position, IReadOnlyList<CelCompilationError> Errors) Check(
+        CelNode root, string source, EntitySchema entity, CelProfile profile, CelFunctionCatalog catalog, CelRelationCatalog? relations)
     {
-        var visitor = new Visitor(source, entity, profile, catalog);
+        var visitor = new Visitor(source, entity, profile, catalog, relations);
         var (node, type, _, position) = visitor.CheckNode(root);
         return (node, type, position, visitor.Errors);
     }
@@ -70,6 +82,9 @@ internal static class CelTypeChecker
 
         /// <summary>A call to a catalogued function; the row is the ceiling, each function's own profiles narrow it.</summary>
         FunctionCall,
+
+        /// <summary>A forward path or a reverse <c>exists</c>: legal in a rule only, and only with a relation catalog.</summary>
+        Relation,
 
         /// <summary><c>duration('…')</c>, folded into a constant at type check (HX-11 Ruling 7).</summary>
         DurationLiteral,
@@ -121,6 +136,8 @@ internal static class CelTypeChecker
     /// </summary>
     private static readonly IReadOnlySet<CelProfile> _ruleConditionAndMutate =
         new HashSet<CelProfile> { CelProfile.Rule, CelProfile.Condition, CelProfile.Mutate };
+
+    private static readonly IReadOnlySet<CelProfile> _ruleOnly = new HashSet<CelProfile> { CelProfile.Rule };
 
     private static readonly IReadOnlySet<CelProfile> _computedOnly = new HashSet<CelProfile> { CelProfile.Computed };
 
@@ -191,6 +208,7 @@ internal static class CelTypeChecker
             [CelConstructKind.FunctionCall] = _conditionAndMutate,
             [CelConstructKind.DurationLiteral] = _ruleConditionAndMutate,
             [CelConstructKind.TemporalArithmetic] = _ruleConditionAndMutate,
+            [CelConstructKind.Relation] = _ruleOnly,
         };
 
     /// <summary>
@@ -205,7 +223,14 @@ internal static class CelTypeChecker
     private static bool IsAllowed(CelProfile profile, CelConstructKind kind) =>
         _allowedProfiles.TryGetValue(kind, out var profiles) && profiles.Contains(profile);
 
-    private sealed class Visitor(string source, EntitySchema entity, CelProfile profile, CelFunctionCatalog catalog)
+    private sealed partial class Visitor(
+        string source,
+        EntitySchema entity,
+        CelProfile profile,
+        CelFunctionCatalog catalog,
+        CelRelationCatalog? relations = null,
+        Visitor.RelationFrame? frame = null,
+        List<CelCompilationError>? errors = null)
     {
         /// <summary>The fix of every "always fails with these constant arguments" refusal (spec §8).</summary>
         private const string ConstantFixSuggestion = "Correct the constant, or pass a field instead of a literal.";
@@ -257,11 +282,15 @@ internal static class CelTypeChecker
         /// </summary>
         private ImmutableHashSet<string> _knownPresent = ImmutableHashSet.Create<string>(StringComparer.Ordinal);
 
-        public List<CelCompilationError> Errors { get; } = [];
+        public List<CelCompilationError> Errors { get; } = errors ?? [];
 
         public (CelNode Node, CelValueType Type, bool HasError, int Position) CheckNode(CelNode node) => node switch
         {
             CelLiteral literal => CheckLiteral(literal),
+            CelFieldRef fieldRef when frame is not null => CheckOuterFieldRef(fieldRef),
+            CelHas has when frame is not null => CheckOuterHas(has),
+            CelPath path => CheckPath(path),
+            CelExistsMacro macro => CheckExists(macro),
             CelFieldRef fieldRef => CheckFieldRef(fieldRef),
             CelContextRef contextRef => CheckContextRef(contextRef),
             CelUnary unary => CheckUnary(unary),
@@ -963,7 +992,7 @@ internal static class CelTypeChecker
         /// </summary>
         private static bool IsSqlOperand(CelNode node) => node switch
         {
-            CelLiteral or CelFieldRef or CelContextRef or CelCall { Name: CelCall.Now } => true,
+            CelLiteral or CelFieldRef or CelContextRef or CelCall { Name: CelCall.Now } or CelHop or CelOuterFieldRef => true,
             CelBinary binary => CelTemporal.IsTemporal(binary) && IsSqlOperand(binary.Left) && IsSqlOperand(binary.Right),
             _ => false,
         };
@@ -973,6 +1002,7 @@ internal static class CelTypeChecker
             CelBinary { Operator: CelBinaryOperator.And or CelBinaryOperator.Or } => "a logical expression ('&&'/'||')",
             CelUnary { Operator: CelUnaryOperator.Not } => "a negation ('!')",
             CelHas => "has(...)",
+            CelRelation => "a relation term",
             CelConditional => "a ternary",
             _ when IsArithmetic(node) => "arithmetic",
             _ => "another comparison",
@@ -1018,12 +1048,11 @@ internal static class CelTypeChecker
 
         private IReadOnlyList<string>? EnumValuesOf(CelNode node)
         {
-            if (node is not CelFieldRef fieldRef)
+            var field = node switch
             {
-                return null;
-            }
-
-            var field = ResolveField(fieldRef.FieldName);
+                CelFieldRef fieldRef => ResolveField(fieldRef.FieldName),
+                _ => RelatedFieldOf(node),
+            };
             return field is { Type: FieldType.Enum } ? field.EnumValues : null;
         }
 

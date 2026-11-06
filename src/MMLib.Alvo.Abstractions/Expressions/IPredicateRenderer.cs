@@ -73,4 +73,35 @@ public interface IPredicateRenderer
     /// <exception cref="NotSupportedException">The expression reads the caller, the tenant or the clock, or holds a constant this engine cannot write inline.</exception>
     internal string RenderConstraint(CompiledExpression expression, IFieldSqlRenderer fields) =>
         throw new NotSupportedException($"{GetType().Name} does not render constraints.");
+
+    /// <summary>
+    /// Renders a Rule expression whose relations are bound for this caller: each one becomes a correlated <c>EXISTS</c>
+    /// over <paramref name="relations"/>' unlocked table, with the related <c>list</c> rule and tenant scope ANDed inside.
+    /// </summary>
+    /// <remarks>Internal, like <see cref="RenderConstraint"/>: a third-party renderer inherits this refusal.</remarks>
+    /// <param name="expression">A compiled Rule expression whose relations <c>IPolicyEngine.Resolve</c> bound.</param>
+    /// <param name="context">The caller.</param>
+    /// <param name="fields">The engine's field rendering.</param>
+    /// <param name="parameterPrefix">The prefix every parameter of this render, nested scopes included, carries.</param>
+    /// <param name="relations">The driver's table source and the outer row a relation correlates with.</param>
+    /// <returns>A two-valued SQL predicate.</returns>
+    /// <exception cref="NotSupportedException">This renderer renders no relation.</exception>
+    internal SqlPredicate Render(
+        CompiledExpression expression, AlvoContext context, IFieldSqlRenderer fields, string parameterPrefix,
+        RelationSql relations) =>
+        throw new NotSupportedException($"{GetType().Name} does not render relation rules.");
+
+    /// <summary>One bound relation term, alone: the <c>EXISTS</c> a write probe selects over a post-image.</summary>
+    /// <param name="relation">A relation bound for this caller.</param>
+    /// <param name="outer">The entity whose row the relation correlates with.</param>
+    /// <param name="context">The caller.</param>
+    /// <param name="fields">The engine's field rendering.</param>
+    /// <param name="parameterPrefix">The prefix every parameter of this render carries.</param>
+    /// <param name="relations">The driver's table source and the outer row, usually <see cref="RowSource.Image"/>.</param>
+    /// <returns>A two-valued SQL predicate.</returns>
+    /// <exception cref="NotSupportedException">This renderer renders no relation.</exception>
+    internal SqlPredicate RenderRelation(
+        CelRelation relation, Schema.EntitySchema outer, AlvoContext context, IFieldSqlRenderer fields, string parameterPrefix,
+        RelationSql relations) =>
+        throw new NotSupportedException($"{GetType().Name} does not render relation rules.");
 }

@@ -98,6 +98,8 @@ internal static class AdminProblemFixes
     {
         AlvoConstraintViolationException { Kind: AlvoConstraintKind.Unique } violation
             => $"Another record already has this value for {string.Join(", ", violation.Fields)}. The field is declared unique on the entity's Fields tab.",
+        AlvoConstraintViolationException { Kind: AlvoConstraintKind.Check, DescriptorMessage: not null } violation
+            => $"Point {(violation.Fields.Count > 0 ? violation.Fields[0] : "the reference")} at a record that satisfies this check, or change the values the check compares. The check is declared in the entity's checks.",
         AlvoConstraintViolationException { Kind: AlvoConstraintKind.Check, Fields.Count: > 0 } violation
             => $"The value for {string.Join(", ", violation.Fields)} breaks the validation the descriptor declares for it. The field's validation is on the entity's Fields tab.",
         AlvoConstraintViolationException { Kind: AlvoConstraintKind.Exclusion }
