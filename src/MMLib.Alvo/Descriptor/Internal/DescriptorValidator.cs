@@ -249,23 +249,26 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         errors.AddRange(VirtualFieldCheck.Errors(descriptor));
         errors.AddRange(CheckConstraintCheck.Errors(schema, _compiler, descriptor));
         errors.AddRange(RollupFilterCheck.Errors(schema, _compiler, descriptor));
-        errors.AddRange(OwnerWarnings(descriptor, schema, errors));
+        errors.AddRange(RuleWarnings(descriptor, schema, errors));
 
         return errors;
     }
 
     /// <summary>
-    /// The owner-comparison warnings (D51), less any at a pointer that already carries an error: a condition the
-    /// phase check refuses compiles, and a warning beside its error would be noise (T16 review L1).
+    /// The owner-comparison warnings (D51) and the missing-list-rule relation warnings, less any at a pointer that
+    /// already carries an error: a condition the phase check refuses compiles, and a warning beside its error would be
+    /// noise (T16 review L1).
     /// </summary>
-    private IEnumerable<DescriptorValidationError> OwnerWarnings(
+    private IEnumerable<DescriptorValidationError> RuleWarnings(
         AlvoDescriptor descriptor, SchemaModel schema, List<DescriptorValidationError> errors)
     {
         var refused = errors
             .Where(error => error.Severity == DescriptorValidationSeverity.Error)
             .Select(error => error.Path)
             .ToHashSet(StringComparer.Ordinal);
-        return OwnerComparisonCheck.Warnings(descriptor, schema, _compiler).Where(warning => !refused.Contains(warning.Path));
+        return OwnerComparisonCheck.Warnings(descriptor, schema, _compiler)
+            .Concat(RelationWarnings.Warnings(descriptor, schema, _compiler))
+            .Where(warning => !refused.Contains(warning.Path));
     }
 
     private const string UnreadableOverflow = "A value in the descriptor is outside what Alvo can hold";

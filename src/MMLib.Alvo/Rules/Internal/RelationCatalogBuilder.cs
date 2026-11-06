@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Expressions;
+﻿using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Rules.Internal;
@@ -10,6 +11,18 @@ namespace MMLib.Alvo.Rules.Internal;
 /// </summary>
 internal static class RelationCatalogBuilder
 {
+    /// <summary>
+    /// The catalog an apply compiles rules with: the schema's entities are readable, except the built-in
+    /// <c>users</c>; a <c>storage: dynamic</c> entity never reaches the schema and is refused as such (#41).
+    /// </summary>
+    /// <param name="descriptor">The descriptor being applied, for the entities the schema leaves out.</param>
+    /// <param name="schema">The applied schema.</param>
+    internal static CelRelationCatalog From(AlvoDescriptor descriptor, SchemaModel schema) => From(
+        [.. schema.Entities.Where(entity => entity.Name != RelationRefusals.UsersEntity)],
+        descriptor.Entities
+            .Where(entity => !DescriptorToSchemaMapper.IsPhysical(entity.Value))
+            .ToDictionary(entity => entity.Key, _ => RelationRefusals.Dynamic, StringComparer.Ordinal));
+
     /// <summary>The catalog over <paramref name="readable"/>; every other entity is refused with its reason.</summary>
     /// <param name="readable">The declared, physical entities a relation may read.</param>
     /// <param name="unreadable">Each declared entity a rule may not read, and why (<see cref="RelationRefusals.Dynamic"/>).</param>

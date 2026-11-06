@@ -37,13 +37,16 @@ internal static class PolicyCatalogBuilder
         var references = new ProjectReferences(
             descriptor.Templates ?? _emptyTemplates,
             descriptor.Webhooks?.Endpoints ?? _emptyEndpoints);
+        var relations = RelationCatalogBuilder.From(descriptor, schema);
 
         foreach (var entitySchema in schema.Entities)
         {
             var entityDescriptor = descriptor.Entities.GetValueOrDefault(entitySchema.Name);
-            var build = new EntityBuild(entitySchema, compiler, roles, references, errorList);
+            var build = new EntityBuild(entitySchema, compiler, roles, references, errorList, relations);
             entities[entitySchema.Name] = BuildEntity(entityDescriptor, build);
         }
+
+        RelationGraph.Check(ListReads(entities), Consumers(entities), errorList);
 
         var managementAccess = AccessCatalogBuilder.Build(descriptor.Access, compiler, roles, errorList);
 
@@ -68,12 +71,14 @@ internal static class PolicyCatalogBuilder
     /// <param name="Roles">The project's declared roles, for validating role literals.</param>
     /// <param name="References">The project-level blocks an after-hook action may name.</param>
     /// <param name="Errors">The shared accumulator every problem is appended to.</param>
+    /// <param name="Relations">The relations a rule of this entity may follow.</param>
     private sealed record EntityBuild(
         EntitySchema Schema,
         ICelCompiler Compiler,
         RoleCatalog Roles,
         ProjectReferences References,
-        List<DescriptorValidationError> Errors)
+        List<DescriptorValidationError> Errors,
+        CelRelationCatalog Relations)
     {
         public string Name => Schema.Name;
 
@@ -105,8 +110,29 @@ internal static class PolicyCatalogBuilder
         var afterHooks = CompileAfterHooks(descriptor, build);
         var beforeHooks = CompileBeforeHooks(descriptor, EntityPolicy.Flagged(hidden), build);
         return new EntityPolicy(
-            build.Schema.Tenancy, tenantScope, operations, hidden, readOnly, afterHooks, beforeHooks);
+            build.Schema.Tenancy, tenantScope, operations, hidden, readOnly, afterHooks, beforeHooks)
+        {
+            Relations = RelationGraph.Targets(operations[DataOperation.List].Using?.Root),
+        };
     }
+
+    /// <summary>Each entity, and the entities its <c>list</c> rule reads: the edges the cycle and depth walk follows.</summary>
+    private static Dictionary<string, IReadOnlyList<string>> ListReads(Dictionary<string, EntityPolicy> entities) =>
+        entities.ToDictionary(entity => entity.Key, entity => entity.Value.Relations, StringComparer.Ordinal);
+
+    /// <summary>Every rule of an operation other than <c>list</c> that reads a relation, with what it reads.</summary>
+    private static List<RelationConsumer> Consumers(Dictionary<string, EntityPolicy> entities) =>
+    [
+        .. from entity in entities
+           from operation in entity.Value.Operations
+           where operation.Key != DataOperation.List && operation.Value.HasRelations
+           let targets = RelationGraph.Targets(operation.Value.Using?.Root).Union(RelationGraph.Targets(operation.Value.WithCheck?.Root))
+           select new RelationConsumer(
+               entity.Key,
+               $"rules.{operation.Key.ToWireName()}",
+               $"/entities/{entity.Key}/rules/{operation.Key.ToWireName()}",
+               [.. targets]),
+    ];
 
     /// <summary>
     /// Compiles the entity's <c>before*</c> hooks in this same pass, against this same schema, appending to
@@ -166,7 +192,13 @@ internal static class PolicyCatalogBuilder
     /// </summary>
     private static OperationPolicy Operation(
         CompiledExpression? @using, CompiledExpression? withCheck, CompiledExpression? tenantScope) =>
-        new(@using, withCheck, ContextRead(@using, withCheck, tenantScope));
+        new(@using, withCheck, ContextRead(@using, withCheck, tenantScope))
+        {
+            HasRelations = ReadsRelation(@using) || ReadsRelation(withCheck),
+        };
+
+    private static bool ReadsRelation(CompiledExpression? expression) =>
+        expression is not null && CelRewriter.HasRelation(expression.Root);
 
     /// <summary>
     /// The one place a compiled expression's context reads are measured, for both channels the
@@ -192,7 +224,9 @@ internal static class PolicyCatalogBuilder
     internal static bool ReferencesContextValue(CelNode node, CelContextValue value) => node switch
     {
         CelContextRef contextRef => contextRef.Value == value,
-        CelLiteral or CelFieldRef or CelHas or CelChanged => false,
+        CelLiteral or CelFieldRef or CelHas or CelChanged or CelOuterFieldRef or CelHop => false,
+        CelRelation relation => ReferencesContextValue(relation.Body, value),
+        CelOuterHas outerHas => ReferencesContextValue(outerHas.Field, value),
         CelUnary unary => ReferencesContextValue(unary.Operand, value),
         CelBinary binary => ReferencesContextValue(binary.Left, value) || ReferencesContextValue(binary.Right, value),
         CelConditional conditional =>
@@ -205,7 +239,9 @@ internal static class PolicyCatalogBuilder
     };
 
     private static CompiledExpression? CompileOperationRule(DataOperation operation, string? source, EntityBuild build) =>
-        source is null ? null : CompileRuleExpression(source, $"{build.Path}/rules/{operation.ToWireName()}", build);
+        source is null
+            ? null
+            : CompileRuleExpression(source, $"{build.Path}/rules/{operation.ToWireName()}", build, build.Relations);
 
     /// <summary>
     /// Synthesizes the tenant scope for a tenant-scoped entity by compiling
@@ -224,9 +260,12 @@ internal static class PolicyCatalogBuilder
     /// problem are reported on <paramref name="path"/> and both yield <see langword="null"/>, so a
     /// rejected expression never reaches a rule slot or a field mask.
     /// </summary>
-    private static CompiledExpression? CompileRuleExpression(string source, string path, EntityBuild build)
+    private static CompiledExpression? CompileRuleExpression(
+        string source, string path, EntityBuild build, CelRelationCatalog? relations = null)
     {
-        var result = build.Compiler.Compile(source, CelProfile.Rule, build.Schema);
+        var result = relations is null
+            ? build.Compiler.Compile(source, CelProfile.Rule, build.Schema)
+            : build.Compiler.Compile(source, CelProfile.Rule, build.Schema, relations);
         if (!result.IsSuccess)
         {
             build.Errors.AddRange(result.Errors.Select(error => Error(path, error)));

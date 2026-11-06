@@ -180,6 +180,9 @@ internal sealed record EntityPolicy(
     /// record's fields, it leaves the record's equality untouched too.
     /// </remarks>
     internal IReadOnlySet<string> FlaggedHidden => _flaggedByHidden.GetValue(Hidden, static hidden => Flagged(hidden));
+
+    /// <summary>The entities this entity's <c>list</c> rule reads through relation terms, each once.</summary>
+    internal IReadOnlyList<string> Relations { get; init; } = [];
 }
 
 /// <summary>
@@ -319,7 +322,11 @@ internal sealed record CompiledAction(
 internal sealed record OperationPolicy(
     CompiledExpression? Using,
     CompiledExpression? WithCheck,
-    RequiredContext Required);
+    RequiredContext Required)
+{
+    /// <summary>Whether <see cref="Using"/> or <see cref="WithCheck"/> reads a related entity, so each needs binding per caller.</summary>
+    internal bool HasRelations { get; init; }
+}
 
 /// <summary>
 /// The caller/tenant context values one compiled expression — or a set of them — actually reads,
