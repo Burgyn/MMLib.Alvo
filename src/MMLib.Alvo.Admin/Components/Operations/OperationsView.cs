@@ -53,6 +53,46 @@ internal static class OperationsView
     /// <summary>Whether a delivery is finished, and so may be run again.</summary>
     public static bool CanRedeliver(ManagementDelivery delivery) => delivery.Status is "dead" or "succeeded" or "cancelled";
 
+    /// <summary>When a job runs: a schedule's cron and zone, or the revision a data migration waits for.</summary>
+    public static string When(ManagementExtension job) => job.Kind == AlvoExtensionKind.DataMigration
+        ? string.Create(CultureInfo.InvariantCulture, $"after revision {job.AfterRevision}")
+        : $"{job.Cron}{Separator}{job.TimeZone}";
+
+    /// <summary>
+    /// When a schedule next runs, relative to <paramref name="now"/> and as the wall-clock time in its own zone, such as
+    /// <c>in 3 h (02:00 Europe/Bratislava)</c>; a dash for a migration or a schedule whose first start has not recorded it.
+    /// </summary>
+    public static string NextRun(ManagementExtension job, DateTimeOffset now) => job is { NextRunAt: { } next, TimeZone: { } zone }
+        ? $"{Until(next - now)} ({Local(next, zone)} {zone})"
+        : "—";
+
+    /// <summary>How long ago a schedule's last occurrence ran, or <c>never</c>.</summary>
+    public static string LastRun(ManagementExtension job, DateTimeOffset now) =>
+        job.LastRunAt is { } last ? $"{Span(now - last)} ago" : "never";
+
+    /// <summary>Whether a job can be run now: a schedule can, a data migration runs once per revision and never on demand.</summary>
+    public static bool CanRunNow(ManagementExtension job) => job.Kind == AlvoExtensionKind.Schedule;
+
+    /// <summary>The timer tile's line: how many are armed and how many are due.</summary>
+    public static string TimersLine(ManagementTimerCounts? timers) => timers is { } counts
+        ? string.Create(CultureInfo.InvariantCulture, $"{counts.Pending} pending{Separator}{counts.Due} due")
+        : "this host keeps no timers";
+
+    private static string Until(TimeSpan left) => left <= TimeSpan.Zero ? "due now" : $"in {Span(left)}";
+
+    private static string Span(TimeSpan span) => span switch
+    {
+        { TotalMinutes: < 1 } => "under a minute",
+        { TotalHours: < 1 } => Whole(span.TotalMinutes, "min"),
+        { TotalDays: < 2 } => Whole(span.TotalHours, "h"),
+        _ => Whole(span.TotalDays, "d"),
+    };
+
+    private static string Whole(double amount, string unit) => string.Create(CultureInfo.InvariantCulture, $"{Math.Round(amount):0} {unit}");
+
+    private static string Local(DateTimeOffset instant, string zone) =>
+        TimeZoneInfo.ConvertTime(instant, TimeZoneInfo.FindSystemTimeZoneById(zone)).ToString("HH:mm", CultureInfo.InvariantCulture);
+
     private static IEnumerable<string> AttemptParts(ManagementDeliveryAttempt attempt)
     {
         yield return string.Create(CultureInfo.InvariantCulture, $"#{attempt.Attempt}");

@@ -79,6 +79,67 @@ public sealed class OperationsViewTests
         JsonSerializer.Deserialize<DeliveryFixture>(json, JsonSerializerOptions.Web)!.Subscriber.ShouldBe("send-confirmation");
     }
 
+    [Fact]
+    public void A_schedule_row_reads_next_run_in_its_zone_and_last_outcome()
+    {
+        var now = new DateTimeOffset(2026, 11, 6, 22, 0, 0, TimeSpan.Zero);
+        var schedule = Schedule() with
+        {
+            NextRunAt = new DateTimeOffset(2026, 11, 7, 1, 0, 0, TimeSpan.Zero),
+            LastRunAt = new DateTimeOffset(2026, 11, 6, 1, 0, 0, TimeSpan.Zero),
+            LastOutcome = "dead",
+        };
+
+        OperationsView.When(schedule).ShouldBe("0 2 * * * · Europe/Bratislava");
+        OperationsView.NextRun(schedule, now).ShouldBe("in 3 h (02:00 Europe/Bratislava)");
+        OperationsView.LastRun(schedule, now).ShouldBe("21 h ago");
+        OperationsView.BadgeClass(schedule.LastOutcome!).ShouldBe("a-badge a-badge--danger");
+        OperationsView.CanRunNow(schedule).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_schedule_that_never_ran_says_so_and_a_due_one_says_due()
+    {
+        var now = new DateTimeOffset(2026, 11, 6, 22, 0, 0, TimeSpan.Zero);
+        var schedule = Schedule() with { NextRunAt = now.AddMinutes(-1) };
+
+        OperationsView.NextRun(schedule, now).ShouldBe("due now (22:59 Europe/Bratislava)");
+        OperationsView.LastRun(schedule, now).ShouldBe("never");
+        OperationsView.NextRun(Schedule(), now).ShouldBe("—");
+    }
+
+    [Fact]
+    public void A_migration_row_reads_its_revision_and_never_offers_run_now()
+    {
+        var migration = new ManagementExtension
+        {
+            Id = "backfill-codes",
+            Kind = AlvoExtensionKind.DataMigration,
+            Stage = AlvoExtensionStage.Scheduled,
+            AfterRevision = 3,
+        };
+
+        OperationsView.When(migration).ShouldBe("after revision 3");
+        OperationsView.NextRun(migration, DateTimeOffset.UnixEpoch).ShouldBe("—");
+        OperationsView.CanRunNow(migration).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void The_timer_tile_counts_pending_and_due_or_says_the_host_keeps_none()
+    {
+        OperationsView.TimersLine(new ManagementTimerCounts { Pending = 4, Due = 1 }).ShouldBe("4 pending · 1 due");
+        OperationsView.TimersLine(null).ShouldBe("this host keeps no timers");
+    }
+
+    private static ManagementExtension Schedule() => new()
+    {
+        Id = "nightly-roll",
+        Kind = AlvoExtensionKind.Schedule,
+        Stage = AlvoExtensionStage.Scheduled,
+        Cron = "0 2 * * *",
+        TimeZone = "Europe/Bratislava",
+    };
+
     private static ManagementDelivery Delivery(string status) => new()
     {
         Id = Guid.Empty,

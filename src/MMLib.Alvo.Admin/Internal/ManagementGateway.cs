@@ -157,14 +157,13 @@ internal sealed class ManagementGateway(
     /// answer refills the cache, so the other screens' extension badges agree with it.
     /// </remarks>
     /// <param name="ct">Cancels the read.</param>
-    /// <returns>The catalog's extensions, as this read found them.</returns>
-    internal async Task<IReadOnlyList<ManagementExtension>> ExtensionsAgainAsync(CancellationToken ct)
+    /// <returns>The catalog, its timer counts included, as this read found it.</returns>
+    internal async Task<ManagementExtensionCatalog> ExtensionsAgainAsync(CancellationToken ct)
     {
         _extensions.Value = null;
         var project = await ProjectAsync(ct).ConfigureAwait(false);
-        var answer = await CachedAsync(_extensions, () => management.GetExtensionsAsync(project, ct), ct).ConfigureAwait(false);
 
-        return answer.Items;
+        return await CachedAsync(_extensions, () => management.GetExtensionsAsync(project, ct), ct).ConfigureAwait(false);
     }
 
     /// <summary>Runs one call of another management port for this dashboard's project, with the operator published.</summary>
