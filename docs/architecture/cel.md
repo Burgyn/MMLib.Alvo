@@ -36,6 +36,13 @@ proposes it** — see *`Mutate`, the fourth profile* below for where the two dif
 | `changed(field)` | ✗ | ✗ | ✓ | ✗ | ✗ |
 | Legacy call (`now()`) | ✓ | ✗ | ✓ | ✓ | ✗ |
 | Catalogued function call (built-ins and host functions; each function's own profiles narrow this ceiling) | ✗ | ✗ | ✓ | ✓ | ✗ |
+| Relation term (`<ref>.<field>`, `<child>.exists(x, …)` — *Relation rules*) | ✓ | ✗ | ✗ | ✗ | ✗ |
+
+**The relation row is gated twice.** Besides this table, the parser builds relation syntax only when
+a compile is given a relation catalog, and only the rule and lookup-check compiles in
+`PolicyCatalogBuilder` pass one. Every other slot — `hidden`/`readOnly` (also the `Rule` profile),
+`validation`, `rollup.where`, hook conditions — parses `a.b` exactly as before and keeps its "no
+nested field access" refusal. The mechanism is `docs/architecture/relation-rules.md`.
 
 **Note the row that split.** `@user` and `@tenant` were one row (`@user`/`@tenant` context ref)
 because no profile had ever wanted one without the other. `Access` does, so the row is two rows and

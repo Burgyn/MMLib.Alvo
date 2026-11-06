@@ -100,7 +100,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         using var instant = AlvoFlow.EnsureInstant(_time);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var decision = _policy.Resolve(query.Entity, DataOperation.List, context);
+        var decision = Resolve(query.Entity, DataOperation.List, context);
         if (decision.IsDenied)
         {
             throw Denied(decision);
@@ -146,7 +146,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         using var instant = AlvoFlow.EnsureInstant(_time);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var decision = _policy.Resolve(entity, DataOperation.Get, context);
+        var decision = Resolve(entity, DataOperation.Get, context);
         if (decision.IsDenied)
         {
             throw Denied(decision);
@@ -170,7 +170,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         AlvoChainDepthLimit.Default.EnsureWithin(context);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var decision = _policy.Resolve(entity, DataOperation.Create, context);
+        var decision = Resolve(entity, DataOperation.Create, context);
         if (decision.IsDenied)
         {
             throw Denied(decision);
@@ -243,7 +243,7 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         EnsureSameRequest(record, token);
 
-        var read = _policy.Resolve(entity, DataOperation.Get, context);
+        var read = Resolve(entity, DataOperation.Get, context);
         if (read.IsDenied)
         {
             return IdOnly(RecordedRow(record));
@@ -306,7 +306,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// <param name="context">The caller who wrote them.</param>
     private List<AlvoRecord> Echoed(string entity, List<AlvoRecord> written, AlvoContext context)
     {
-        var read = _policy.Resolve(entity, DataOperation.Get, context);
+        var read = Resolve(entity, DataOperation.Get, context);
 
         return [.. written.Select(row => read.IsDenied || !IsVisible(row, read, context)
             ? IdOnly(RowIdOf(row))
@@ -371,7 +371,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         AlvoChainDepthLimit.Default.EnsureWithin(context);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var decision = _policy.Resolve(entity, DataOperation.Update, context);
+        var decision = Resolve(entity, DataOperation.Update, context);
         if (decision.IsDenied)
         {
             throw Denied(decision);
@@ -676,7 +676,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// <param name="context">The caller.</param>
     private PolicyDecision Allowed(string entity, DataOperation operation, AlvoContext context)
     {
-        var decision = _policy.Resolve(entity, operation, context);
+        var decision = Resolve(entity, operation, context);
         return decision.IsDenied ? throw Denied(decision) : decision;
     }
 
@@ -692,7 +692,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         AlvoChainDepthLimit.Default.EnsureWithin(context);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var decision = _policy.Resolve(entity, DataOperation.Delete, context);
+        var decision = Resolve(entity, DataOperation.Delete, context);
         if (decision.IsDenied)
         {
             throw Denied(decision);
@@ -1243,6 +1243,34 @@ public sealed class InMemoryAlvoData : IAlvoData
     private static string Cursor(AlvoRecord row) => row["id"]?.ToString() ?? string.Empty;
 
     /// <summary>
+    /// The engine's decision, refused when it reads a related entity: this double evaluates rules in memory over its own
+    /// rows, and judging a relation that way would be a post-filter, not the correlated <c>EXISTS</c> the relational
+    /// driver runs — so it throws rather than evaluate or ignore one.
+    /// </summary>
+    /// <remarks>
+    /// A <c>create</c> or <c>update</c> echoes the written row under the caller's <c>get</c> decision, so that decision is
+    /// judged here too, before anything is written: a refusal raised at the echo would leave a row behind a call that threw.
+    /// </remarks>
+    private PolicyDecision Resolve(string entity, DataOperation operation, AlvoContext context)
+    {
+        if (operation is DataOperation.Create or DataOperation.Update)
+        {
+            Refused(_policy.Resolve(entity, DataOperation.Get, context));
+        }
+
+        return Refused(_policy.Resolve(entity, operation, context));
+    }
+
+    private static PolicyDecision Refused(PolicyDecision decision) =>
+        ReadsRelation(decision.Using) || ReadsRelation(decision.WithCheck) || decision.Checks.Count > 0
+            ? throw new NotSupportedException(
+                "Relation rules and lookup checks need a relational driver; InMemoryAlvoData is the policy-contract double.")
+            : decision;
+
+    private static bool ReadsRelation(CompiledExpression? expression) =>
+        expression is not null && CelRewriter.HasRelation(expression.Root);
+
+    /// <summary>
     /// <see cref="PolicyDecision.DenyReason"/> is already designed, at the policy layer, never to
     /// name the entity or echo caller-supplied text (see <c>PolicyEngine</c>'s own docs) — the
     /// tenant guard's reason deliberately names "tenant" specifically, a conscious, narrow oracle an
@@ -1365,7 +1393,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         EnsureBatchIsNotEmpty(rowCount);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var decision = _policy.Resolve(entity, operation, context);
+        var decision = Resolve(entity, operation, context);
 
         return decision.IsDenied ? throw Denied(decision) : decision;
     }
@@ -1679,7 +1707,7 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         EnsureSameRequest(record, token);
 
-        var read = _policy.Resolve(entity, DataOperation.Get, context);
+        var read = Resolve(entity, DataOperation.Get, context);
         var stored = RowsForLocked(entity);
         var rows = read.IsDenied
             ? [.. record.RowIds.Select(IdOnly)]

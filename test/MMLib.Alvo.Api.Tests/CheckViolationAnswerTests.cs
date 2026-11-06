@@ -46,4 +46,26 @@ public sealed class CheckViolationAnswerTests
             "Change the values this write sends so every record it touches keeps its validations."));
         named["detail"]!.GetValue<string>().ShouldBe("This value breaks the validation the descriptor declares for this field.");
     }
+
+    [Fact]
+    public async Task A_descriptor_check_refusal_carries_the_author_s_message_and_never_the_fixed_text()
+    {
+        const string Author = "This product is not available in that quantity.";
+        var (status, named) = await ProblemWriting.WrittenAsync(ProblemResultFactory.PortRefusalFor(
+            new AlvoConstraintViolationException(["product_id"], Author)).ShouldNotBeNull());
+        var (_, hidden) = await ProblemWriting.WrittenAsync(ProblemResultFactory.PortRefusalFor(
+            new AlvoConstraintViolationException([], Author)).ShouldNotBeNull());
+
+        status.ShouldBe(422);
+        named["type"]!.GetValue<string>().ShouldEndWith(AlvoProblemTypes.Validation);
+        var violation = named["violations"]!.AsArray().ShouldHaveSingleItem()!;
+        (violation["pointer"]!.GetValue<string>(), violation["code"]!.GetValue<string>(), violation["message"]!.GetValue<string>())
+            .ShouldBe(("/product_id", "check", Author));
+        violation["fixSuggestion"]!.GetValue<string>().ShouldBe(
+            "Point 'product_id' at a record that satisfies this check, or change the values the check compares.");
+        var unnamed = hidden["violations"]!.AsArray().ShouldHaveSingleItem()!;
+        (unnamed["pointer"]!.GetValue<string>(), unnamed["message"]!.GetValue<string>()).ShouldBe(("", Author));
+        unnamed["fixSuggestion"]!.GetValue<string>().ShouldNotContain("product_id");
+        named.ToJsonString().ShouldNotContain("breaks the validation");
+    }
 }

@@ -334,8 +334,16 @@ internal static class CelInterpreter
         CelConditional conditional => EvaluateConditional(conditional, state),
         CelChanged changed => EvaluateChanged(changed, state),
         CelCall call => EvaluateCall(call, state),
+        CelRelation or CelOuterFieldRef or CelOuterHas or CelHop or CelPath or CelExistsMacro => throw RelationNotInterpretable(),
         _ => null,
     };
+
+    /// <summary>
+    /// A relation term reads another table, which only the database driver can do. It throws rather than falling to
+    /// <c>_ =&gt; null</c>: a <see langword="null"/> under <c>!</c> reads as true, so a missing arm would fail open.
+    /// </summary>
+    private static NotSupportedException RelationNotInterpretable() =>
+        new("A relation term is evaluated by the database driver; this evaluator cannot read related rows.");
 
     /// <summary>
     /// Evaluates a catalogued call through the overload the type checker bound, or <c>now()</c>, the one call left with

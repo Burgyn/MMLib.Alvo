@@ -1345,7 +1345,7 @@ Roslyn dependency is needed.
 | `IRecordEnricher<T>`, `Enrich<T>`, `IQueryNarrowing<T>`, `QueryNarrowing`; `FieldSchema.IsVirtual` | core; Abstractions / Schema | 16 | **Amended (HX-16):** also the untyped `IQueryNarrowing` (`AlvoFilter?`, *HX-16 settled details* (10)); `AlvoEntityBuilder<T>.Narrow<TNarrowing>(string)`, `.Narrow(string, Func<QueryNarrowing, Expression<Func<T,bool>>?>)`, `.Enrich<TEnricher>(string)`, `.Enrich(string, Action<Enrich<T>>)` and `AlvoEntityBuilder.Narrow<TNarrowing>(string)`, `.Narrow(string, Func<QueryNarrowing, AlvoFilter?>)`, `.Enrich<TEnricher>(string)`, `.Enrich(string, Action<Enrich<AlvoRecord>>)` (core / `MMLib.Alvo.Extensions`); `AlvoExtensionKind.Narrowing = 7`, `.Enricher = 8`, `AlvoExtensionStage.Read = 4` (appended, *HX-04 settled details* (17)); `FieldDescriptor.Virtual` (`bool?`, init — the descriptor model). Everything else — `IReadExtensionRunner`, `IReadEnrichment`, `ReadNarrowing`, `VirtualFieldWrites` — is internal. |
 | (generator output only) | Analyzers in the `MMLib.Alvo` nupkg | 17 | |
 | schema-model members for `stateMachine`, `timers` | Abstractions / Schema | 18 | |
-| schema-model members for relation rules and `checks` | Abstractions / Schema | 19 | |
+| schema-model members for relation rules and `checks` | Abstractions / Schema | 19 | **Amended (HX-19):** `EntityCheck`, `EntityDescriptor.Checks`, `ManagementPolicyVerdict.Relations`, `ManagementRelationVerdict`; no `Abstractions/Schema` member (*HX-19 settled details* (14), (34)) |
 
 No `CelProfile` member and no CEL AST node is added (X7).
 
@@ -1984,6 +1984,90 @@ executed snippet, `data-path.md`, this section). The security-core review (`alvo
   pointer.
 - **Why last:** the largest change to the predicate compiler and the riskiest security-core PR; lands on a
   stable catalog, simulator and read pipeline.
+
+#### HX-19 settled details
+
+Decisions taken while planning (1–15, verbatim from `docs/superpowers/plans/2026-11-06-hx-19-relation-rules.md`
+*Decisions*), the reading of acceptance (2) they fix (16), and the rulings of the plan and task reviews and the
+deviations taken while building (17–37), so a later reader can tell a decision from an oversight. Where a ruling and
+the scope above, §5 row `19` or §6.1 disagree, the ruling is what shipped. Each decision reads: the decision, then the
+cost if it is wrong.
+
+1. **Syntax.** Forward is `<ref>.<field>`. Reverse is CEL's `<child>.exists(x, p)`, with `<child>_via_<field>` when the child references this entity more than once (rollup `via` resolution, PocketBase spelling). — Renaming syntax later is a breaking descriptor change.
+2. **One hop per term.** Deeper reach composes through the related entity's own `list` rule, which is ANDed in. A chain deeper than 3 is refused at apply. — A 4-deep chain needs a stored field or a rollup.
+3. **A relation term is refused under `!` in rules,** so a rule only narrows as related rows vanish. `!=` inside a term is fine. — "No blocking row" needs a rollup count.
+4. **`EXISTS` carries the related `list` USING plus its tenant scope.** A denied related `list` is a constant `FALSE`. **Host narrowings are not ANDed in**: a narrowing is a view, writes are not narrowed (§4.12, HX-16 D3), and AC (2)'s "cannot list" means *by rules*. — A host using a narrowing as security sees relations match rows it hides; the fix is to put that condition into the rule.
+5. **Relations are legal only in `rules.*` and `checks[].expr`.** Hook conditions, `validation`, `rollup.where`, `hidden`/`readOnly`, command access and `computed` keep today's refusal unchanged, because the parser builds relation nodes only on request. — None; widening a slot later is additive.
+6. **Internal nodes.** A tree holding `CelRelation` is refused by the public `IPredicateRenderer.Render`, the interpreter and `InMemoryAlvoData`, each with `NotSupportedException`. §5's "no CEL AST node is added" holds for the public API. — A third-party renderer or the in-memory double cannot run relation rules.
+7. **Binding happens in `PolicyEngine.Resolve`, over one catalog snapshot read once per call,** cached per (catalog, entity, operation, slot, depth, has-identity, has-tenant). Has-identity is `RequiredContext.HasIdentity` (the all-zero `UserId` is anonymous), shared with the required-context gate. Those are the only inputs a related decision's allow or deny depends on; role literals render later, per caller. — A wrong key binds a wrong scope; `PolicyEngineRelationTests` pins all four bit combinations, the anonymous-after-authenticated case and the depth key.
+8. **`WITH CHECK` relation terms are probed in SQL inside the write's transaction,** with the outer values bound from the post-image. The rest stays interpreted. — One round trip per relation term per written row.
+9. **A cycle means a cycle among `list` rules, self-loops included.** Other operations and checks only consume `list`, but their chains count: a non-`list` rule or a check whose target's `list` depth plus 1 exceeds 3 is refused. A relation to an entity with no `list` rule draws an apply warning from its own validator pass. — Hierarchies cannot write a self-relation in `list`; they use `get`/`update` or a stored field.
+10. **Targets are declared physical entities only.** `users` and `storage: dynamic` (#41) are refused. Tenancy may cross: nothing is materialised, so each caller's own related scope applies, unlike rollups. — A global outer row is visible to a tenant through that tenant's related rows only.
+11. **A check is forward over `lookup` only, and its whole `expr` is the `EXISTS` body,** so negation inside is allowed and fails closed when the row is invisible. A check refuses `@user`/`@tenant` and allows `now()`. A null lookup skips the check (SQL `CHECK`). — A check cannot read a child or the caller.
+12. **Checks run after `WITH CHECK`,** so authorization comes first and a forbidden caller learns nothing. They run on create and batch create, and on update or replace only when a field the check reads changed (`RI_FKey_check_upd`). The first failing check in declaration order refuses. **The probe takes no lock** (no `FOR KEY SHARE`): a concurrent transaction may change the looked-up row between the probe and the commit, the TOCTOU a PostgreSQL RLS sub-select also has; the architecture doc says so. — A related row changed later or concurrently is not re-validated, as with an unlocked foreign-key read, and an agent fixes one check per round trip.
+13. **The refusal is `AlvoConstraintViolationException(Check, [lookup])` plus an internal `DescriptorMessage`.** The author's text is server-owned, not caller-supplied. No `AlvoConstraintKind` value is added, because HX-12 appends in parallel. — A host can tell a lookup check from a column `CHECK` only by `Fields` and `Message`.
+14. **Public additions are `EntityCheck` and `EntityDescriptor.Checks`, not "schema-model members" as §5 row 19 says.** Rules and checks live in the descriptor model, not `EntitySchema`. `ManagementPolicyVerdict.Relations` is added so the simulator can name bound scopes. — Two public types more than §5.
+15. **The interpreter's `_ => null` default stays, and `CelRelation`/`CelOuterFieldRef` get explicit throwing arms.** A `null` under `!` reads as true, so a missing arm would fail open. — None.
+16. **Acceptance (2), read by Decision 4:** "a related row the caller cannot list" means *by the related entity's
+    rules* — its `list` rule and tenant scope, both ANDed inside the `EXISTS` (a denied `list` is constant `FALSE`). A
+    host narrowing (HX-16) is **not** part of the `EXISTS`: a narrowing is a view, not a boundary. *Rules over
+    relations* says so.
+17. **Plan review: the cache key's identity bit is `RequiredContext.HasIdentity`** (the all-zero user id is anonymous),
+    so an anonymous caller is never served a scope bound for an authenticated one; pinned by
+    `PolicyEngineRelationTests`.
+18. **`CelNode` gains two `internal virtual` members, `ChildNodes` and `RebuildChildren`,** so the Abstractions-side
+    `CelRewriter` descends into a core node (`CelCall`) it cannot name; a node that declares no children makes the walk
+    throw rather than read it as a leaf. The public surface is unchanged.
+19. **The catalog's refusal delegate returns a `CelCompilationError`** (message and fix), and the texts the brief left
+    open were worded in `RelationRefusals`: an `exists` over a non-child, a second relation inside an `exists` body, a
+    bare `exists` variable, and `ref.exists(…)`.
+20. **The reverse walk reads the applied schema** (`FieldSchema.Reference`); only `RollupResolver`'s alternatives text
+    is shared, and a parity fact holds the `_via_` spellings equal to `RollupResolver.ReferencesTo`. A `_via_` spelling
+    that collides with an entity name is ambiguous, whatever the enumeration order.
+21. **`'<e>.<path>'` in the depth text is `'<entity>.rules.<op>'`** (or `checks.<i>`); every `list` entity is checked
+    after its walk, so a too-deep chain is refused at every rule that starts it; entities on a cycle draw no depth error.
+22. **The lifter refuses a relation under any node other than `&&`/`||`** with the negation text — a ternary can
+    invert one as surely as `!`.
+23. **`IPredicateRenderer`'s internal relation member takes the outer `EntitySchema`,** and the read composer uses it
+    only when a tree holds a relation, so a host-registered third-party renderer keeps working for every other rule.
+24. **In a probe, a null or unconvertible outer value renders its comparison `FALSE`,** and a null outer key the whole
+    relation `FALSE` without reading a table; `has(outer)` is a constant decided by the post-image, a JSON `null` being
+    absent; an outer timestamp is a constant instant on the temporal path.
+25. **The probe runs through EF's `SqlQueryRaw<int>`** on the write's context, so it joins that context's transaction.
+26. **Task 4–6 review I1: a create's relation verdict and its lookup checks are deferred until `BeginAsync`** (on a
+    plain, a keyed and a unit create), so the probe runs inside the write's transaction as Decision 8 says. The
+    validate-hook stage may still answer early. Pinned by statement: `RelationEngineFacts` records that every probe ran
+    with a transaction (Task 7–8 review I1).
+27. **Task 4–6 review I2: aliases are `_alvo_rN`,** which no entity name can spell, so an entity called `alvo_r1`
+    cannot capture its own qualifier (red first on both engines).
+28. **`CelRelationCatalog.LiftsForwardPaths`** (internal, default true): a check's compile sets it false, so its whole
+    `expr` stays one relation body (Decision 11).
+29. **A check's lookup problems are refused at `/entities/<e>/checks/<i>/lookup`** — not a reference, an unreadable
+    target — and a check on a `storage: dynamic` entity at `/entities/<e>/checks/<i>`; `expr` problems stay at
+    `/checks/<i>/expr`.
+30. **`AlvoConstraintViolationException` does not implement `IRowRefusal`.** A batch builds its row refusal directly
+    (`index`, `check`, the message, no fix), so a hook's own unique or FK violation is never mistaken for a row
+    refusal.
+31. **Task 7–8 review I2: the port suite's `products` list rule is role-gated** (`restricted == false || 'buyer' in
+    @user.roles`), so a same-tenant product the caller cannot list fails the check — the related `USING`, not only the
+    tenant scope, is proven inside a check's probe; `CheckCompilerTests` asserts the bound check scope's `USING`.
+32. **Task 7–8 review m2: a keyed create's replay does not re-run lookup checks.** The deferred verdict runs on the
+    branch that inserts; a retry after the product changed answers the recorded row (Decision 12).
+33. **A check reading a hidden related field answers one bit per request,** as a rule over one does; the author owns
+    it, and `docs/architecture/relation-rules.md` says so.
+34. **`ManagementPolicyVerdict.Relations` names each relation once,** from the bound `USING`, `WITH CHECK` and checks in
+    that order: `Via` is the ref (forward) or `<child>.<ref>` (reverse), `Allowed = !Scope.Denied`, with the related
+    `USING` and tenant-scope sources. The dashboard shows them under *Reads through*, and the rules editor lists the
+    relation terms apply would compile under each box (`RelationHints`, internal), in `_via_` form only for an
+    ambiguous child.
+35. **The dashboard names a lookup-check refusal as one,** through the existing Admin grant to Abstractions' internals
+    (`AlvoConstraintViolationException.DescriptorMessage`), never as a field validation.
+36. **Not asserted over HTTP:** a probe refusal (403) whose ref the caller can resolve — the HTTP facts meet reference
+    resolution's 422 `unresolved-reference` first; the port suites cover the probe on both engines.
+37. **Follow-up, not covered:** an update through a hidden lookup (`Unnameable` on the update decision) is proven on
+    create only; the fixture's `gift_lines` declares no `update` rule. `ManagementRelationVerdict.Allowed` reports a
+    structural denial only (a role condition stays in `Using`), and the verdict lists the relations a decision reads
+    directly, not those nested in a related `list` rule.
 
 ---
 

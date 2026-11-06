@@ -114,6 +114,13 @@ public sealed record PolicyDecision
     /// </summary>
     internal IReadOnlySet<string> Unnameable { get; init; } = _empty;
 
+    /// <summary>
+    /// Gets the entity's lookup checks, each bound to the caller's <c>list</c> decision on the entity it reads, in
+    /// declaration order; set on a <c>create</c> or <c>update</c> allow only, and empty otherwise. A data port runs them
+    /// after <see cref="WithCheck"/>, and one that cannot run a relation refuses the decision rather than skip them.
+    /// </summary>
+    internal IReadOnlyList<DescriptorCheck> Checks { get; init; } = [];
+
     /// <summary>Creates a denial — the only publicly constructible <see cref="PolicyDecision"/>, and the safe default.</summary>
     /// <param name="reason">Why the operation is denied; surfaced to callers building a structured error.</param>
     public static PolicyDecision Deny(string reason)

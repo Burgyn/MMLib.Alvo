@@ -55,6 +55,8 @@ internal sealed partial class EfAlvoData : IAlvoData
     private readonly IBeforeHookRunner _hooks;
     private readonly ReadStatementComposer _statements;
 
+    private readonly RelationProbe _probe;
+
     /// <summary>
     /// The driver's SQL seam, kept whole rather than only handed to the composer: it also owns the
     /// engine-specific decoding of a constraint violation — see
@@ -126,6 +128,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         _evaluator = evaluator;
         _hooks = hooks;
         _statements = new ReadStatementComposer(predicates, fields, dialect, reads is null ? null : reads.Refused);
+        _probe = new RelationProbe(predicates, fields, dialect);
         _dialect = dialect;
         _rollups = new RollupRecompute(dialect, fields, compiler, predicates);
         _contexts = contexts;
@@ -365,11 +368,12 @@ internal sealed partial class EfAlvoData : IAlvoData
     {
         using var db = ContextFor(unit);
         var now = WriteInstantNow();
-        var (schema, candidate) = AuthorizedCandidate(db, entity, values, decision, context, now);
+        var (schema, candidate) = await AuthorizedCandidateAsync(db, entity, values, decision, context, now, cancellationToken, deferRelations: true);
         await EnsureOutboxTableAsync(db, cancellationToken);
 
         await using var transaction = await BeginAsync(db, unit, cancellationToken);
-        candidate = RunBeforeCreate(db, schema, decision, context, candidate, now);
+        await EnsureRelationsHoldAsync(db, schema, decision, candidate, context, cancellationToken);
+        candidate = await RunBeforeCreateAsync(db, schema, decision, context, candidate, now, cancellationToken);
         candidate = await HostBeforeCreateAsync(db, schema, decision, context, candidate, AlvoWriteOperation.Create, now, cancellationToken);
         var stored = await InsertAsync(db, schema, decision, context, candidate, now, cancellationToken);
         await RecomputeRollupsAsync(db, schema, [stored!], decision.Unnameable, cancellationToken);
@@ -390,7 +394,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// <remarks>
     /// <para>
     /// <b>Called from inside the transaction at every create site, and never where the candidate is built.</b>
-    /// <see cref="AuthorizedCandidate"/> runs before <c>BeginTransactionAsync</c> — a hook placed there would
+    /// <see cref="AuthorizedCandidateAsync"/> runs before <c>BeginTransactionAsync</c> — a hook placed there would
     /// have nothing to roll back, so a <c>reject</c> would refuse a write whose row was already committed on
     /// the next site to open a transaction, and a budget the hook overran would be spent outside the scope
     /// that could undo it. Inside the transaction, a refusal is a rolled-back write with no row and no outbox
@@ -401,7 +405,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// <see cref="WritePayloadGuard"/> judges <em>a caller's</em> keys — framework-managed columns, fields a
     /// policy froze as <c>readOnly</c> — and a hook is not the caller: re-running it would refuse a hook
     /// legitimately setting a field callers may not write, which is one of the two things a before-hook exists
-    /// for. <see cref="EnsureWriteAllowed"/> judges something else entirely: the <em>row</em> the write will
+    /// for. <see cref="EnsureWriteAllowedAsync"/> judges something else entirely: the <em>row</em> the write will
     /// store, against <c>WITH CHECK</c> and the tenant scope. A patch reaching storage unjudged would be a
     /// caller-reachable authorization bypass — a hook writing <c>owner_id</c> from a field the caller controls
     /// would place a row the <c>create</c> rule refuses — so the post-image verdict runs again over exactly
@@ -416,9 +420,9 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// non-nullable value type cannot hold — the key is left out instead, which is
     /// <see cref="WritePropertyBag"/>'s own rule for an insert.
     /// </returns>
-    private Dictionary<string, object> RunBeforeCreate(
+    private async Task<Dictionary<string, object>> RunBeforeCreateAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
-        Dictionary<string, object> candidate, DateTimeOffset now)
+        Dictionary<string, object> candidate, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var patch = Hooks.Run(schema.Name, DataOperation.Create, Unmasked(candidate), previous: null, context, ExpressionInstant(now));
         if (patch.Count == 0)
@@ -427,7 +431,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         }
 
         var patched = Patched(db.Rows(schema.Name).EntityType, candidate, patch);
-        EnsureWriteAllowed(decision, Unmasked(patched), previous: null, context);
+        await EnsureWriteAllowedAsync(db, schema, decision, Unmasked(patched), previous: null, context, cancellationToken).ConfigureAwait(false);
 
         return patched;
     }
@@ -468,13 +472,21 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// not write and already checked against <c>WITH CHECK</c> and the tenant scope.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Built per attempt rather than once, so a retried attempt re-stamps its audit instant and mints a fresh
     /// row id: the previous attempt's id was rolled back, and reusing a candidate a change tracker has already
     /// seen is how a retry turns into a second insert of the same object.
+    /// </para>
+    /// <para>
+    /// <b>A <c>WITH CHECK</c> that reads a relation, or a lookup check, is judged inside the write's transaction, not here,</b> when the
+    /// caller is about to open one (<paramref name="deferRelations"/>): its probe is a read, and before
+    /// <c>BeginAsync</c> it would run outside a unit's transaction on the unit's own connection, and see no row the unit
+    /// wrote. The write judges it with <see cref="EnsureRelationsHoldAsync"/> once the transaction is open.
+    /// </para>
     /// </remarks>
-    private (EntitySchema Schema, Dictionary<string, object> Candidate) AuthorizedCandidate(
+    private async Task<(EntitySchema Schema, Dictionary<string, object> Candidate)> AuthorizedCandidateAsync(
         AlvoDataContext db, string entity, IReadOnlyDictionary<string, object?> values, PolicyDecision decision,
-        AlvoContext context, DateTimeOffset now)
+        AlvoContext context, DateTimeOffset now, CancellationToken cancellationToken, bool deferRelations = false)
     {
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: false);
@@ -482,10 +494,30 @@ internal sealed partial class EfAlvoData : IAlvoData
         var candidate = Candidate(
             db.Rows(entity).EntityType,
             Stamped(schema, WholeRowValues(schema, values), context, now, isUpdate: false));
-        EnsureWriteAllowed(decision, Unmasked(candidate), previous: null, context);
+        if (!(deferRelations && ProbesRelations(decision)))
+        {
+            await EnsureWriteAllowedAsync(db, schema, decision, Unmasked(candidate), previous: null, context, cancellationToken).ConfigureAwait(false);
+        }
 
         return (schema, candidate);
     }
+
+    /// <summary>
+    /// The verdict <see cref="AuthorizedCandidateAsync"/> deferred: a <c>WITH CHECK</c> that reads a relation, and the lookup
+    /// checks, judged by their probes inside the transaction that is now open. A write that probes nothing was judged already.
+    /// </summary>
+    private async Task EnsureRelationsHoldAsync(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, Dictionary<string, object> candidate,
+        AlvoContext context, CancellationToken cancellationToken)
+    {
+        if (ProbesRelations(decision))
+        {
+            await EnsureWriteAllowedAsync(db, schema, decision, Unmasked(candidate), previous: null, context, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static bool ProbesRelations(PolicyDecision decision) =>
+        decision.Checks.Count > 0 || (decision.WithCheck is { } check && CelRewriter.HasRelation(check.Root));
 
     /// <summary>
     /// One create carrying an idempotency token, retried while storage refuses the write because a rival
@@ -632,7 +664,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     {
         using var db = ContextFor(FlowUnit);
         var now = WriteInstantNow();
-        var (schema, candidate) = AuthorizedCandidate(db, entity, values, decision, context, now);
+        var (schema, candidate) = await AuthorizedCandidateAsync(db, entity, values, decision, context, now, cancellationToken, deferRelations: true);
         await EnsureIdempotencyTableAsync(db, cancellationToken);
         await EnsureOutboxTableAsync(db, cancellationToken);
 
@@ -678,13 +710,19 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// a <c>reject</c> refuse a retry of a create the caller has already been told succeeded. A hook belongs on
     /// the branch that writes a row, which is this one.
     /// </para>
+    /// <para>
+    /// <b>The deferred relation verdict and the lookup checks are judged here too, for the same reason:</b> a replay
+    /// writes nothing, so re-running a check over a related row that changed since would refuse a retry of a create that
+    /// already succeeded — and a related row changed later is, by design, not re-validated.
+    /// </para>
     /// </remarks>
     private async Task<AlvoRecord> RecordedCreateAsync(
         AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision,
         AlvoContext context, Dictionary<string, object> candidate, IdempotencyScope records, DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        candidate = RunBeforeCreate(db, schema, decision, context, candidate, now);
+        await EnsureRelationsHoldAsync(db, schema, decision, candidate, context, cancellationToken);
+        candidate = await RunBeforeCreateAsync(db, schema, decision, context, candidate, now, cancellationToken);
         candidate = await HostBeforeCreateAsync(db, schema, decision, context, candidate, AlvoWriteOperation.Create, now, cancellationToken);
         var stored = await InsertAsync(db, schema, decision, context, candidate, now, cancellationToken);
         await RecomputeRollupsAsync(db, schema, [stored!], decision.Unnameable, cancellationToken);
@@ -1137,34 +1175,108 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// tenant scope here, and not only on the read side, is what stops a caller placing or moving a row
     /// into another tenant.
     /// </summary>
-    private void EnsureWriteAllowed(
-        PolicyDecision decision, AlvoRecord postImage, AlvoRecord? previous, AlvoContext context)
+    private async Task EnsureWriteAllowedAsync(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoRecord postImage, AlvoRecord? previous,
+        AlvoContext context, CancellationToken cancellationToken)
     {
-        if (WriteRefusal(decision, postImage, previous, context) is { } reason)
+        if (await WriteRefusalAsync(db, schema, decision, postImage, previous, context, cancellationToken).ConfigureAwait(false) is { } reason)
         {
             throw new AlvoAuthorizationException(reason);
         }
+
+        if (await FailingCheckAsync(db, schema, decision, postImage, previous, context, cancellationToken).ConfigureAwait(false) is { } check)
+        {
+            throw new AlvoConstraintViolationException(
+                decision.Unnameable.Contains(check.Lookup) ? [] : [check.Lookup], check.Message);
+        }
     }
+
+    /// <summary>
+    /// The first of the decision's lookup checks, in declaration order, that refuses this row, or <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Run after <c>WITH CHECK</c>, by both its callers</b>, so a caller the rules refuse learns nothing from a check.
+    /// Each one is a probe: one correlated <c>EXISTS</c> over the looked-up row, with the related <c>list</c> rule and
+    /// tenant scope inside, its outer values bound from the post-image. A row the caller cannot list fails the check.
+    /// </para>
+    /// <para>
+    /// A null lookup skips its check, as SQL's <c>CHECK</c> passes an unknown, and an update runs a check only when a field
+    /// it reads changed, as a foreign key is re-checked only when its key did. The probe takes no lock, so a concurrent
+    /// change to the looked-up row after it is not seen.
+    /// </para>
+    /// </remarks>
+    private async Task<DescriptorCheck?> FailingCheckAsync(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoRecord postImage, AlvoRecord? previous,
+        AlvoContext context, CancellationToken cancellationToken)
+    {
+        foreach (var check in decision.Checks.Where(check => Applies(check, postImage, previous)))
+        {
+            if (!await _probe.HoldsAsync(db, check.Relation, schema, context, postImage, cancellationToken).ConfigureAwait(false))
+            {
+                return check;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool Applies(DescriptorCheck check, AlvoRecord postImage, AlvoRecord? previous) =>
+        postImage.Values.GetValueOrDefault(check.Lookup) is not null
+        && (previous is null || check.Reads.Any(field =>
+            !Equals(postImage.Values.GetValueOrDefault(field), previous.Values.GetValueOrDefault(field))));
+
+    /// <summary>
+    /// One batch row's refusal, or <see langword="null"/> when it may be written: the rules first, as
+    /// <see cref="EnsureWriteAllowedAsync"/> judges a single row, then the lookup checks, each reported with its own message.
+    /// </summary>
+    private async Task<AlvoRowRefusal?> RowRefusalAsync(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoRecord postImage, AlvoRecord? previous,
+        AlvoContext context, int index, CancellationToken cancellationToken)
+    {
+        if (await WriteRefusalAsync(db, schema, decision, postImage, previous, context, cancellationToken).ConfigureAwait(false) is { } reason)
+        {
+            return Forbidden(index, reason);
+        }
+
+        return await FailingCheckAsync(db, schema, decision, postImage, previous, context, cancellationToken).ConfigureAwait(false) is { } check
+            ? new AlvoRowRefusal(index, CheckCode, check.Message, null)
+            : null;
+    }
+
+    private const string CheckCode = "check";
 
     /// <summary>
     /// Why this row may not be written, or <see langword="null"/> when it may.
     /// </summary>
     /// <remarks>
-    /// <b>The one evaluation of this rule, and <see cref="EnsureWriteAllowed"/> is a caller of it.</b> A batch
+    /// <b>The one evaluation of this rule, and <see cref="EnsureWriteAllowedAsync"/> is a caller of it.</b> A batch
     /// has to report every bad row rather than the first, so it needs this verdict without a throw. A second,
     /// collecting variant beside the throwing one would be two expressions of one authorization rule — which
     /// is how the two come to differ, and this rule is the <c>WITH CHECK</c> predicate. So the collecting form
     /// is the implementation, and throwing is the single-row caller's choice.
+    /// <para>
+    /// A <c>WITH CHECK</c> that reads a relation has each relation term judged by an in-transaction probe over the
+    /// post-image first (<see cref="RelationProbe"/>), and the interpreter judges the rest; a rule that reads none takes
+    /// no probe and no allocation. The tenant scope never holds a relation.
+    /// </para>
     /// </remarks>
+    /// <param name="db">The write's context, whose transaction a relation probe joins.</param>
+    /// <param name="schema">The entity being written.</param>
     /// <param name="decision">The verdict the policy engine returned for this caller.</param>
     /// <param name="postImage">The complete row as it would be stored.</param>
     /// <param name="previous">The stored row an update replaces, or <see langword="null"/> for a create.</param>
     /// <param name="context">The caller performing the write.</param>
-    private string? WriteRefusal(
-        PolicyDecision decision, AlvoRecord postImage, AlvoRecord? previous, AlvoContext context)
+    /// <param name="cancellationToken">The caller's token.</param>
+    private async Task<string?> WriteRefusalAsync(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoRecord postImage, AlvoRecord? previous,
+        AlvoContext context, CancellationToken cancellationToken)
     {
-        var passesCheck = decision.WithCheck is null
-            || _evaluator.Evaluate(decision.WithCheck, postImage, previous, context);
+        var withCheck = decision.WithCheck is { } check && CelRewriter.HasRelation(check.Root)
+            ? await _probe.ResolvedAsync(db, check, schema, context, postImage, cancellationToken).ConfigureAwait(false)
+            : decision.WithCheck;
+        var passesCheck = withCheck is null
+            || _evaluator.Evaluate(withCheck, postImage, previous, context);
         var passesTenantScope = decision.TenantScope is null
             || _evaluator.Evaluate(decision.TenantScope, postImage, previous, context);
 
@@ -1370,7 +1482,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// </summary>
     /// <remarks>
     /// Stamped <em>after</em> <see cref="WritePayloadGuard.EnsureWritable"/> and <em>before</em>
-    /// <see cref="EnsureWriteAllowed"/>, which is the only order that is both safe and useful: the guard
+    /// <see cref="EnsureWriteAllowedAsync"/>, which is the only order that is both safe and useful: the guard
     /// must judge the caller's own keys, and the check predicate must see the values that will be stored —
     /// so a create rule reading <c>created_by == @user.id</c> is satisfied by the stamp rather than by
     /// something the caller claimed.
@@ -1668,12 +1780,12 @@ internal sealed partial class EfAlvoData : IAlvoData
         AlvoPrecondition.EnsureMatches(precondition, storedVersion: null);
 
         var candidate = ReplaceCandidate(db, schema, decision, context, id, values, now);
-        EnsureWriteAllowed(decision, Unmasked(candidate), previous: null, context);
-        candidate = RunBeforeCreate(db, schema, decision, context, candidate, now);
+        await EnsureWriteAllowedAsync(db, schema, decision, Unmasked(candidate), previous: null, context, cancellationToken);
+        candidate = await RunBeforeCreateAsync(db, schema, decision, context, candidate, now, cancellationToken);
         candidate = await HostBeforeCreateAsync(db, schema, decision, context, candidate, AlvoWriteOperation.Replace, now, cancellationToken);
         if (KeptAtTheNamedRow(candidate, id))
         {
-            EnsureWriteAllowed(decision, Unmasked(candidate), previous: null, context);
+            await EnsureWriteAllowedAsync(db, schema, decision, Unmasked(candidate), previous: null, context, cancellationToken);
         }
 
         var stored = await InsertAsync(db, schema, decision, context, candidate, now, cancellationToken, callerKeyed: true);
@@ -1700,7 +1812,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// </para>
     /// <para>
     /// <b>It reports the change because restoring the key <em>after</em> the check would be an authorization
-    /// gap.</b> <see cref="RunBeforeCreate"/> judges the candidate the hook produced; if this then moves the
+    /// gap.</b> <see cref="RunBeforeCreateAsync"/> judges the candidate the hook produced; if this then moves the
     /// row back, the row inserted is not the row judged, and a <c>WITH CHECK</c> predicate reading <c>id</c>
     /// — or any field the hook changed alongside it — was evaluated against a candidate that never reached
     /// the store. So the caller re-runs the check, and only when the key actually moved.
@@ -1722,7 +1834,7 @@ internal sealed partial class EfAlvoData : IAlvoData
 
     /// <summary>The candidate a create-or-replace inserts: the caller's payload under the caller's own id.</summary>
     /// <remarks>
-    /// <b>Deliberately not <see cref="AuthorizedCandidate"/>.</b> That helper passes one <c>isUpdate</c> to
+    /// <b>Deliberately not <see cref="AuthorizedCandidateAsync"/>.</b> That helper passes one <c>isUpdate</c> to
     /// both the payload guard and the audit stamp, and this route needs the two to disagree: the guard is
     /// told <see langword="true"/>, because <c>tenant_id</c> must be refused on both branches or its refusal
     /// reports whether the row exists; the stamp is told <see langword="false"/>, because this row really is
@@ -2104,7 +2216,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// both row images exist.</b> A hook's <c>old.</c> references and its <c>changed(...)</c> calls need the
     /// in-transaction, row-locked pre-image — a pre-image read before the transaction, or on another
     /// connection, would let the row advance between what the hook judged and what the write stored. Running
-    /// before <see cref="EnsureWriteAllowed"/> is likewise deliberate: the verdict then judges the patched
+    /// before <see cref="EnsureWriteAllowedAsync"/> is likewise deliberate: the verdict then judges the patched
     /// post-image, which is what will actually be written.
     /// </para>
     /// </remarks>
@@ -2121,7 +2233,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         var preImage = Unmasked(stored);
         var vetted = RunBeforeUpdate(schema, context, preImage, values, now);
         vetted = await HostBeforeUpdateAsync(schema, decision, context, operation, preImage, vetted, now, cancellationToken);
-        EnsureWriteAllowed(decision, Merge(preImage, vetted), preImage, context);
+        await EnsureWriteAllowedAsync(db, schema, decision, Merge(preImage, vetted), preImage, context, cancellationToken);
 
         if (await AffectedAsync(db, schema, decision, context, preImage, vetted, cancellationToken) == 0)
         {
@@ -2143,7 +2255,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// </summary>
     /// <remarks>
     /// The hooks judge the <b>complete</b> post-image and not the caller's partial payload, for the reason
-    /// <see cref="EnsureWriteAllowed"/> does: a field the caller did not mention has to read as its stored
+    /// <see cref="EnsureWriteAllowedAsync"/> does: a field the caller did not mention has to read as its stored
     /// value, or a condition over one unrelated field would see a null. A patched <see langword="null"/>
     /// survives into the setters here — unlike on the insert path — because <c>ExecuteUpdate</c> writes it as
     /// a real <c>SET column = NULL</c>, which is what an author asking for null on an update means.
@@ -2544,7 +2656,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         using var instant = AlvoFlow.EnsureInstant(_time);
         var decision = BatchDecision(entity, DataOperation.Create, rows.Count, context, idempotency);
         var refused = await ValidateRowsAsync(
-            entity, AlvoWriteOperation.Create, rows.Count, CreateRowValidation(rows, decision, context), context, idempotency, cancellationToken);
+            entity, AlvoWriteOperation.Create, rows.Count, CreateRowValidation(rows, decision, context, cancellationToken), context, idempotency, cancellationToken);
         if (refused.Count > 0)
         {
             return AlvoBatchResult.Refused(BatchWrite.InRequestOrder([.. refused]));
@@ -2804,7 +2916,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// </para>
     /// <para>
     /// <b>The hooks run in the judging pass, and the judged candidate is what lands.</b>
-    /// <see cref="RunBeforeCreate"/>'s own remark names the bypass this closes: a hook writing a field from
+    /// <see cref="RunBeforeCreateAsync"/>'s own remark names the bypass this closes: a hook writing a field from
     /// something the caller controls could place a row the create rule refuses, which is why the post-hook
     /// re-verdict exists. Running the hooks in a later write pass would put a seam exactly there — the row
     /// stored would be one no verdict had seen.
@@ -2832,15 +2944,15 @@ internal sealed partial class EfAlvoData : IAlvoData
         var refusals = new List<AlvoRowRefusal>();
         for (var index = 0; index < rows.Count; index++)
         {
-            var (candidate, refusal) = JudgedCandidate(db, schema, decision, context, rows[index], now, index);
+            var (candidate, refusal) = await JudgedCandidateAsync(db, schema, decision, context, rows[index], now, index, cancellationToken);
             if (refusal is not null)
             {
                 refusals.Add(refusal);
                 continue;
             }
 
-            var (hooked, refusedAfterHook) = RunBeforeCreateOrRefuse(
-                db, schema, decision, context, candidate!, now, index);
+            var (hooked, refusedAfterHook) = await RunBeforeCreateOrRefuseAsync(
+                db, schema, decision, context, candidate!, now, index, cancellationToken);
             if (refusedAfterHook is not null)
             {
                 refusals.Add(refusedAfterHook);
@@ -2893,8 +3005,8 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// verdict over the candidate — collected rather than thrown.
     /// </summary>
     /// <remarks>
-    /// The same two checks <see cref="AuthorizedCandidate"/> performs for a single row, in the same order,
-    /// reading the same <see cref="WritePayloadGuard.PayloadRefusal"/> and <see cref="WriteRefusal"/> that it
+    /// The same two checks <see cref="AuthorizedCandidateAsync"/> performs for a single row, in the same order,
+    /// reading the same <see cref="WritePayloadGuard.PayloadRefusal"/> and <see cref="WriteRefusalAsync"/> that it
     /// now throws on. One evaluation of the rule, two callers.
     /// </remarks>
     /// <param name="db">The store this attempt runs against.</param>
@@ -2904,9 +3016,10 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// <param name="values">The caller's payload for this row.</param>
     /// <param name="now">The instant the whole batch is stamped with.</param>
     /// <param name="index">The row's position in the list the caller supplied.</param>
-    private (Dictionary<string, object>? Candidate, AlvoRowRefusal? Refusal) JudgedCandidate(
+    /// <param name="cancellationToken">The caller's token.</param>
+    private async Task<(Dictionary<string, object>? Candidate, AlvoRowRefusal? Refusal)> JudgedCandidateAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
-        IReadOnlyDictionary<string, object?> values, DateTimeOffset now, int index)
+        IReadOnlyDictionary<string, object?> values, DateTimeOffset now, int index, CancellationToken cancellationToken)
     {
         if (WritePayloadGuard.PayloadRefusal(values, schema, decision, isUpdate: false) is { } unwritable)
         {
@@ -2917,25 +3030,25 @@ internal sealed partial class EfAlvoData : IAlvoData
             db.Rows(schema.Name).EntityType,
             Stamped(schema, WholeRowValues(schema, values), context, now, isUpdate: false));
 
-        return WriteRefusal(decision, Unmasked(candidate), previous: null, context) is { } rejected
-            ? (null, Forbidden(index, rejected))
+        return await RowRefusalAsync(db, schema, decision, Unmasked(candidate), previous: null, context, index, cancellationToken).ConfigureAwait(false) is { } rejected
+            ? (null, rejected)
             : (candidate, null);
     }
 
     /// <summary>
-    /// <see cref="RunBeforeCreate"/> for one row of a batch: the hooks, then the re-verdict over what they
+    /// <see cref="RunBeforeCreateAsync"/> for one row of a batch: the hooks, then the re-verdict over what they
     /// produced — collected rather than thrown.
     /// </summary>
     /// <remarks>
     /// <para>
     /// <b>The re-verdict is the point, and it is why this call lives in the judging pass rather than beside
-    /// the insert.</b> <see cref="RunBeforeCreate"/>'s own remark names the bypass: a hook writing a field
+    /// the insert.</b> <see cref="RunBeforeCreateAsync"/>'s own remark names the bypass: a hook writing a field
     /// from something the caller controls could place a row the create rule refuses, so the post-hook check
     /// is what keeps a <c>mutate</c> from being an authorization hole. Running the hooks in a later write
     /// pass would put a seam exactly there — the row stored would be one no verdict had seen.
     /// </para>
     /// <para>
-    /// <b>Called from the batch body rather than from <see cref="JudgedCandidate"/></b>, because
+    /// <b>Called from the batch body rather than from <see cref="JudgedCandidateAsync"/></b>, because
     /// <c>BeforeHookTransactionArchitectureTests</c> proves a hook runs inside the transaction it guards by
     /// reading the enclosing member — and only the batch body demonstrably holds one. A pipeline call in a
     /// helper the scan cannot place is a call whose placement nothing checks, which is the situation that
@@ -2949,9 +3062,10 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// <param name="candidate">The row as the judging pass approved it, before any hook.</param>
     /// <param name="now">The instant the whole batch is stamped with.</param>
     /// <param name="index">The row's position in the list the caller supplied.</param>
-    private (Dictionary<string, object>? Candidate, AlvoRowRefusal? Refusal) RunBeforeCreateOrRefuse(
+    /// <param name="cancellationToken">The caller's token.</param>
+    private async Task<(Dictionary<string, object>? Candidate, AlvoRowRefusal? Refusal)> RunBeforeCreateOrRefuseAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
-        Dictionary<string, object> candidate, DateTimeOffset now, int index)
+        Dictionary<string, object> candidate, DateTimeOffset now, int index, CancellationToken cancellationToken)
     {
         IReadOnlyDictionary<string, object?> patch;
         try
@@ -2970,8 +3084,8 @@ internal sealed partial class EfAlvoData : IAlvoData
 
         var patched = Patched(db.Rows(schema.Name).EntityType, candidate, patch);
 
-        return WriteRefusal(decision, Unmasked(patched), previous: null, context) is { } refused
-            ? (null, Forbidden(index, refused))
+        return await RowRefusalAsync(db, schema, decision, Unmasked(patched), previous: null, context, index, cancellationToken).ConfigureAwait(false) is { } refused
+            ? (null, refused)
             : (patched, null);
     }
 
@@ -3061,9 +3175,9 @@ internal sealed partial class EfAlvoData : IAlvoData
 
             vetted = hostVetted!;
 
-            if (WriteRefusal(decision, Merge(preImage, vetted), preImage, context) is { } rejected)
+            if (await RowRefusalAsync(db, schema, decision, Merge(preImage, vetted), preImage, context, index, cancellationToken) is { } rejected)
             {
-                refusals.Add(Forbidden(index, rejected));
+                refusals.Add(rejected);
                 continue;
             }
 

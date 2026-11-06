@@ -45,6 +45,12 @@ public sealed record EntityDescriptor
     /// <summary>Explicit composite/extra indexes beyond the automatic ones.</summary>
     public IReadOnlyList<EntityIndex>? Indexes { get; init; }
 
+    /// <summary>
+    /// Write-time lookup checks: each follows a ref field to the row it names and refuses the write when its condition
+    /// is false for that row.
+    /// </summary>
+    public IReadOnlyList<EntityCheck>? Checks { get; init; }
+
     /// <summary>Extension keys (<c>x-*</c>) preserved verbatim through apply and export.</summary>
     [JsonExtensionData]
     public IDictionary<string, JsonElement>? Extensions { get; set; }
@@ -82,6 +88,22 @@ public sealed record IndexExclusion
 
     /// <summary>The field where the range ends (exclusive).</summary>
     public required string To { get; init; }
+}
+
+/// <summary>
+/// A write-time lookup check (schema <c>entity.checks[]</c>): the row <see cref="Lookup"/> points at must satisfy
+/// <see cref="Expr"/>, or the write is refused with <see cref="Message"/>.
+/// </summary>
+public sealed record EntityCheck
+{
+    /// <summary>A ref field of the entity; the check reads the row it points at, and a null value skips the check.</summary>
+    public required string Lookup { get; init; }
+
+    /// <summary>CEL over this row's fields and <c>&lt;lookup&gt;.&lt;field&gt;</c>; <see langword="true"/> lets the write through.</summary>
+    public required string Expr { get; init; }
+
+    /// <summary>The text the caller is shown when the check fails.</summary>
+    public required string Message { get; init; }
 }
 
 /// <summary>What an entity's events carry (schema <c>entity.events</c>).</summary>

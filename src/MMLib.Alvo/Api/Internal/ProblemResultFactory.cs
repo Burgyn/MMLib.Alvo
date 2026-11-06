@@ -568,9 +568,27 @@ internal static class ProblemResultFactory
     /// </remarks>
     /// <param name="exception">The port's refusal.</param>
     private static IReadOnlyList<AlvoViolation> CheckViolations(AlvoConstraintViolationException exception) =>
-        exception.Fields.Count > 0
-            ? [.. exception.Fields.Select(CheckViolation)]
-            : [new AlvoViolation(string.Empty, CodeFor(exception.Kind), CheckDocumentMessage, FixFor(exception.Kind))];
+        exception.DescriptorMessage is { } message
+            ? [LookupCheckViolation(exception.Fields, message)]
+            : exception.Fields.Count > 0
+                ? [.. exception.Fields.Select(CheckViolation)]
+                : [new AlvoViolation(string.Empty, CodeFor(exception.Kind), CheckDocumentMessage, FixFor(exception.Kind))];
+
+    /// <summary>
+    /// A failed lookup check: one entry at the lookup field, or at the whole document when the descriptor hides it, carrying
+    /// the check's own message. That text is the descriptor author's, server-owned like the fixed texts above, and never
+    /// holds a value: the caller learns which check refused, not what the looked-up row holds.
+    /// </summary>
+    /// <param name="fields">The lookup field, or none.</param>
+    /// <param name="message">The check's message.</param>
+    private static AlvoViolation LookupCheckViolation(IReadOnlyList<string> fields, string message) => new(
+        fields.Count > 0 ? "/" + fields[0] : string.Empty,
+        "check",
+        message,
+        LookupCheckFix(fields));
+
+    private static string LookupCheckFix(IReadOnlyList<string> fields) =>
+        $"Point '{(fields.Count > 0 ? fields[0] : "the reference")}' at a record that satisfies this check, or change the values the check compares.";
 
     private const string CheckFieldMessage = "This value breaks the validation the descriptor declares for this field.";
 

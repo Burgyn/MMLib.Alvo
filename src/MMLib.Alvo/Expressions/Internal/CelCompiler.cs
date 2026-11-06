@@ -59,12 +59,23 @@ internal sealed class CelCompiler : ICelCompiler
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(entity);
 
-        return Compile(source, profile, entity, detectQuoted: true);
+        return Compile(source, profile, entity, detectQuoted: true, relations: null);
     }
 
-    private CelCompilationResult Compile(string source, CelProfile profile, EntitySchema entity, bool detectQuoted)
+    /// <inheritdoc/>
+    CelCompilationResult ICelCompiler.Compile(string source, CelProfile profile, EntitySchema entity, CelRelationCatalog relations)
     {
-        var parsed = TryParse(source, out var syntaxError);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(entity);
+        ArgumentNullException.ThrowIfNull(relations);
+
+        return Compile(source, profile, entity, detectQuoted: true, relations);
+    }
+
+    private CelCompilationResult Compile(
+        string source, CelProfile profile, EntitySchema entity, bool detectQuoted, CelRelationCatalog? relations)
+    {
+        var parsed = TryParse(source, relations is not null, out var syntaxError);
         if (parsed is null)
         {
             return CelCompilationResult.Failure(syntaxError!);
@@ -76,15 +87,15 @@ internal sealed class CelCompiler : ICelCompiler
             return CelCompilationResult.Failure(depthError);
         }
 
-        return CheckAndAssemble(new Authored(source, profile, entity, parsed, detectQuoted));
+        return CheckAndAssemble(new Authored(source, profile, entity, parsed, detectQuoted, relations));
     }
 
-    private CelNode? TryParse(string source, out CelCompilationError? syntaxError)
+    private CelNode? TryParse(string source, bool allowRelations, out CelCompilationError? syntaxError)
     {
         try
         {
             syntaxError = null;
-            return CelParser.Parse(source, _catalog);
+            return CelParser.Parse(source, _catalog, allowRelations);
         }
         catch (CelSyntaxException ex)
         {
@@ -95,9 +106,10 @@ internal sealed class CelCompiler : ICelCompiler
 
     private CelCompilationResult CheckAndAssemble(Authored authored)
     {
-        var (root, resultType, position, errors) =
-            CelTypeChecker.Check(authored.Parsed, authored.Source, authored.Entity, authored.Profile, _catalog);
+        var (checkedRoot, resultType, position, errors) = CelTypeChecker.Check(
+            authored.Parsed, authored.Source, authored.Entity, authored.Profile, _catalog, authored.Relations);
         var allErrors = AppendResultTypeError(errors, authored, resultType, position);
+        var root = Lift(checkedRoot, authored, allErrors);
 
         if (allErrors.Count > 0)
         {
@@ -107,6 +119,14 @@ internal sealed class CelCompiler : ICelCompiler
         return CelCompilationResult.Success(
             new CompiledExpression(root, authored.Profile, resultType, authored.Source, authored.Entity));
     }
+
+    /// <summary>
+    /// Lifts every forward path of a relation-catalog compile into its own relation term, once the tree checked clean;
+    /// a compile with no catalog holds no path, so it is returned untouched, and a lookup check's catalog asks for its
+    /// paths unlifted, for the check compiler to wrap whole.
+    /// </summary>
+    private static CelNode Lift(CelNode root, Authored authored, List<CelCompilationError> errors) =>
+        authored.Relations is not { LiftsForwardPaths: true } || errors.Count > 0 ? root : RelationLifter.Lift(root, errors);
 
     private List<CelCompilationError> AppendResultTypeError(
         IReadOnlyList<CelCompilationError> errors, Authored authored, CelValueType resultType, int position)
@@ -185,7 +205,7 @@ internal sealed class CelCompiler : ICelCompiler
     private string? QuotedPredicate(Authored authored) =>
         authored.DetectQuoted
         && authored.Parsed is CelLiteral { Type: CelValueType.String, Value: string content }
-        && Compile(content, authored.Profile, authored.Entity, detectQuoted: false).IsSuccess
+        && Compile(content, authored.Profile, authored.Entity, detectQuoted: false, authored.Relations).IsSuccess
             ? content
             : null;
 
@@ -298,5 +318,6 @@ internal sealed class CelCompiler : ICelCompiler
     }
 
     /// <summary>What was authored, and how: the one argument the result-type check needs.</summary>
-    private readonly record struct Authored(string Source, CelProfile Profile, EntitySchema Entity, CelNode Parsed, bool DetectQuoted);
+    private readonly record struct Authored(
+        string Source, CelProfile Profile, EntitySchema Entity, CelNode Parsed, bool DetectQuoted, CelRelationCatalog? Relations);
 }

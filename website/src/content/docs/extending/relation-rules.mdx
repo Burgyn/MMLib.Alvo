@@ -1,0 +1,148 @@
+---
+title: Rules over relations
+description: A rule that reads a related row — follow a ref, or reach the records that point here — always through the related entity's own list rule; and lookup checks that refuse a write whose related row fails a condition.
+sidebar:
+  order: 8
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import descriptor from '../../../snippets/extending/relation-rules/projects.alvo.json?raw';
+import tests from '../../../snippets/extending/relation-rules/RelationRulesTests.cs?raw';
+
+Who may see a row often depends on another row: a project is visible to its members, a task to whoever can see its
+project, an order line may only name a product that is in stock. A rule can say that directly — it may read a related
+row — and an entity can refuse a write whose related row fails a condition with a **lookup check**. Both compile to SQL
+inside the query, never to a filter after it.
+
+The example holds projects seen by their members, tasks seen through their project, and order lines checked against
+their product:
+
+<Code code={descriptor} lang="json" title="projects.alvo.json" />
+
+## Follow a reference
+
+A `ref` field leads to the row it names: `<ref>.<field>` reads a field of that row. A task is visible while its project
+is not archived:
+
+<SourceExcerpt code={descriptor} from="project_id.archived == false" to="project_id.archived == false" lang="json" title="projects.alvo.json" />
+
+Each term becomes one correlated `EXISTS` in the statement's `WHERE`:
+
+```sql
+EXISTS (SELECT 1 FROM "projects" AS _alvo_r1
+        WHERE _alvo_r1."id" = "tasks"."project_id"
+          AND (_alvo_r1."archived" = FALSE)
+          AND (<the projects list rule>))
+```
+
+A comparison may hold one relation and a value or the caller: `customer_id.owner_id == @user.id`,
+`customer_id.credit_limit >= amount`. Values are bound as parameters, as everywhere else in a rule. A row whose ref
+is null matches no term — the `EXISTS` finds no row — so `customer_id.active == true` is false for it.
+
+## Reach the records that point here
+
+The rows that reference this one are reached with CEL's standard `exists` macro, named by the child entity. A project
+is visible to its members:
+
+<SourceExcerpt code={descriptor} from="project_members.exists" to="m.user_id == @user.id)" lang="json" title="projects.alvo.json" />
+
+When the child references this entity through more than one field, name the field: `<child>_via_<field>`, for example
+`transfers_via_to_order.exists(t, t.status == 'open')`. The bare child name is then ambiguous, and the apply refuses it
+with the spellings it accepts.
+
+:::caution
+A reverse relation in a `create` rule can never hold: the new row has no children yet, so the `EXISTS` finds none.
+:::
+
+## The related rule always applies
+
+A relation never matches a row the caller could not list. The related entity's own `list` rule, and its tenant scope,
+are ANDed inside the `EXISTS` — PostgreSQL row-level security's behaviour for a policy whose `USING` holds a
+sub-select. So a task's rule above admits a caller only through a project that caller is a member of, and a stranger
+sees neither:
+
+<SourceExcerpt code={tests} from="public async Task The_snippet_admits_a_member" to="seen through its project" title="RelationRulesTests.cs" />
+
+- **A related entity with no `list` rule** is listed by nobody, so a relation to it never matches; the apply warns.
+- **Each caller's own scope applies.** A rule on a global entity may read a tenant-scoped child; each tenant then sees
+  the row only through its own children.
+- **Host narrowings are not part of the `EXISTS`.** A read narrowing registered in C# is
+  a view, not a boundary: writes are not narrowed, and a relation reads the related rows the *rules* admit. If a
+  narrowing hides rows for a security reason, put that condition into the related entity's `list` rule.
+
+The [dashboard's policy simulator](/guides/admin-dashboard/) lists, under *Reads through*, every relation a decision reads directly and the
+related `list` rule it was bound to for the simulated caller, or that it is denied outright (no `list` rule, no
+identity or tenant, too deep). A role condition in the related rule is shown, not evaluated.
+
+## What a relation cannot do
+
+Each limit is refused at apply, at the rule's own pointer, with a fix:
+
+- **One hop per term.** `customer_id.region_id.name` is not a term. Deeper reach composes through the related entity's
+  own `list` rule, which the relation carries; a chain of such rules deeper than three is refused — *"… reads
+  relations 4 levels deep; at most 3 are allowed."*
+- **Only directly under `&&` and `||`.** A rule may only narrow as related rows become invisible, so a relation under
+  `!` or any other parent, a ternary included — `!customer_id.active`, `!(project_id.archived == false)` — is refused — *"A relation is negated here."* — while `customer_id.active == false`
+  and `!=` inside a term are fine. To say *no blocking row exists*, count the rows with a [rollup](/guides/computed-and-rollups/) and compare
+  the count.
+- **No cycles among `list` rules.** If `projects`' list rule reads `tasks` and `tasks`' reads `projects`, no caller's
+  rows can be decided — *"Rule cycle: the list rules of 'projects' → 'tasks' → 'projects' read each other …"*. A
+  `list` rule reading its own entity is a cycle too; a `get` or `update` rule may read it.
+- **Declared tables only.** A ref to the built-in `users` entity, or to a `storage: dynamic` entity, cannot be
+  followed; compare the ref itself (`owner_id == @user.id`).
+- **Rules and checks only.** Hook conditions, a field's `validation`, a rollup's `where`, `hidden`/`readOnly`, command
+  access and `computed` keep refusing a relation.
+
+## Lookup checks
+
+A lookup check refuses a write whose related row fails a condition. It names the ref it follows, the condition over
+that row (and this row's own fields), and the sentence the caller sees:
+
+<SourceExcerpt code={descriptor} from="checks" to="This product is not available" lang="json" title="projects.alvo.json" />
+
+- **The whole `expr` is one `EXISTS` over the looked-up row**, so it holds only when that row exists, the caller may
+  list it, and the condition is true for it. A negation inside a check is allowed, and a row the caller cannot list
+  fails the check.
+- **It reads no caller.** `@user` and `@tenant` belong in rules; `now()` is allowed. A check must read its lookup, and
+  only its lookup.
+- **A null lookup skips the check,** as SQL's `CHECK` passes an unknown; use `required` for presence.
+- **When it runs.** After the rules, so a caller the rules refuse learns nothing from a check. On every create, and on
+  an update only when a field the check reads changed — a product deactivated later does not block an edit to a line's
+  note, as a foreign key is re-checked only when its key changes. The first failing check, in declaration order,
+  refuses.
+
+A failing check is a 422 with the author's message and a pointer at the lookup:
+
+<SourceExcerpt code={tests} from="public async Task The_snippet_s_check" to="refusal.Message.ShouldBe" title="RelationRulesTests.cs" />
+
+In `IAlvoData` the refusal is an `AlvoConstraintViolationException` with `Kind` `Check`, `Fields` the lookup, and the
+check's message. Over HTTP it is [`validation`](/reference/problem-types/#validation) (the document trimmed to what you
+act on):
+
+```json
+{
+  "type": "https://alvo.dev/errors/validation",
+  "status": 422,
+  "violations": [
+    {
+      "pointer": "/product_id",
+      "code": "check",
+      "message": "This product is not available in that quantity.",
+      "fixSuggestion": "Point 'product_id' at a record that satisfies this check, or change the values the check compares."
+    }
+  ]
+}
+```
+
+When the lookup field is `hidden`, the pointer is `""` and the fix says *the reference*. A batch reports the failing
+row at its index. A check that reads a related field the caller cannot read answers, per request, whether that value
+passes — the author chooses the condition and owns what it discloses.
+
+## Cost
+
+- **One `EXISTS` per relation term** in a read. Index the reverse `ref` (`"index": true` on `project_members.project_id`
+  above): every `exists` correlates on it.
+- **One probe per relation term per written row.** A write judges its rule's relations, and its checks, with one
+  `SELECT CASE WHEN EXISTS (…)` each, inside the write's transaction. The probe takes no lock: a related row changed by
+  a concurrent transaction after the probe is not seen, as with an unlocked foreign-key read.

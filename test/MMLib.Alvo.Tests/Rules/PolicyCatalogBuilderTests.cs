@@ -1,10 +1,13 @@
 ﻿using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Tests.Expressions;
+
+using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Tests.Rules;
 
@@ -410,6 +413,87 @@ public class PolicyCatalogBuilderTests
 
         catalog.ShouldNotBeNull();
         errors.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_rule_relation_marks_its_operation_and_its_required_context_reads_the_body()
+    {
+        var descriptor = AlvoDescriptor.Parse(RelationDescriptors.Project(
+            ("projects", RelationDescriptors.Entity(
+                [RelationDescriptors.Field("note", "string")], ("list", "project_members.exists(m, m.user_id == @user.id)"))),
+            ("project_members", RelationDescriptors.Entity(
+                [RelationDescriptors.Ref("project_id", "projects"), RelationDescriptors.Field("user_id", "uuid")], ("list", "true")))));
+
+        PolicyCatalog.TryBuild(descriptor, DescriptorToSchemaMapper.Map(descriptor), CelFixtures.Compiler, out var catalog, out var errors)
+            .ShouldBeTrue(string.Join(" | ", errors.Select(error => error.Message)));
+
+        catalog!.TryGetEntity("projects", out var projects).ShouldBeTrue();
+        projects.Operations[DataOperation.List].HasRelations.ShouldBeTrue();
+        projects.Operations[DataOperation.List].Required.UserId.ShouldBeTrue();
+        projects.Operations[DataOperation.Get].HasRelations.ShouldBeFalse();
+        projects.Relations.ShouldBe(["project_members"]);
+    }
+
+    [Theory]
+    [InlineData("hook", "/entities/tasks/hooks/beforeUpdate/0/condition")]
+    [InlineData("validation", "/entities/tasks/fields/title/validation")]
+    [InlineData("rollup", "/entities/projects/fields/open_count")]
+    [InlineData("hidden", "/entities/tasks/fields/title/hidden")]
+    public void A_hook_condition_validation_rollup_where_and_hidden_flag_refuse_a_relation(string slot, string path)
+    {
+        var result = new DescriptorValidator().Validate(SlotDescriptor(slot));
+
+        result.Errors.ShouldContain(
+            error => error.Path.StartsWith(path, StringComparison.Ordinal)
+                && error.Message.EndsWith("Alvo has no nested field access; use a single field name.", StringComparison.Ordinal),
+            string.Join(" | ", result.Errors.Select(error => $"{error.Path}: {error.Message}")));
+    }
+
+    [Fact]
+    public void A_relation_into_a_dynamic_entity_names_41()
+    {
+        var json = RelationDescriptors.Project(
+            ("notes", new JsonObject { ["storage"] = "dynamic", ["fields"] = new JsonObject { ["text"] = new JsonObject { ["type"] = "string" } } }),
+            ("orders", RelationDescriptors.Entity([RelationDescriptors.Ref("note_id", "notes")], ("list", "note_id.text == 'x'"))));
+
+        var result = new DescriptorValidator().Validate(json);
+
+        result.Errors.ShouldContain(
+            error => error.Path == "/entities/orders/rules/list" && error.Message == "'notes' is dynamic (#41), so a rule cannot read its rows.",
+            string.Join(" | ", result.Errors.Select(error => $"{error.Path}: {error.Message}")));
+    }
+
+    private static string SlotDescriptor(string slot)
+    {
+        const string relation = "project_id.owner_id == @user.id";
+        var title = new JsonObject { ["type"] = "string" };
+        var tasks = RelationDescriptors.Entity(
+            [RelationDescriptors.Ref("project_id", "projects"), ("title", title)], ("list", "true"), ("update", "true"));
+        var projects = RelationDescriptors.Entity([RelationDescriptors.Field("owner_id", "uuid")], ("list", "true"));
+        switch (slot)
+        {
+            case "hook":
+                tasks["hooks"] = new JsonObject
+                {
+                    ["beforeUpdate"] = new JsonArray(new JsonObject { ["condition"] = relation, ["action"] = new JsonObject { ["reject"] = "No." } }),
+                };
+                break;
+            case "validation":
+                title["validation"] = "project_id.owner_id == new.title";
+                break;
+            case "hidden":
+                title["hidden"] = relation;
+                break;
+            default:
+                projects["fields"]!["open_count"] = new JsonObject
+                {
+                    ["type"] = "integer",
+                    ["rollup"] = new JsonObject { ["from"] = "tasks", ["op"] = "count", ["where"] = "project_id.owner_id == owner_id" },
+                };
+                break;
+        }
+
+        return RelationDescriptors.Project(("projects", projects), ("tasks", tasks));
     }
 
     private static Dictionary<string, FieldDescriptor> Flagged(string field, string flag) =>

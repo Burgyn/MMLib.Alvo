@@ -1,0 +1,57 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "relations-sim",
+  "auth": { "roles": ["clerk", "auditor"] },
+  "access": { "admin": "'auditor' in @user.roles" },
+  "entities": {
+    "customers": {
+      "fields": {
+        "owner_id": { "type": "uuid", "required": true },
+        "active": { "type": "boolean" }
+      },
+      "rules": {
+        "list": "owner_id == @user.id",
+        "get": "owner_id == @user.id"
+      }
+    },
+    "regions": {
+      "fields": {
+        "code": { "type": "string", "maxLength": 8 }
+      },
+      "rules": {
+        "get": "'clerk' in @user.roles"
+      }
+    },
+    "orders": {
+      "fields": {
+        "customer_id": { "type": "ref", "entity": "customers" },
+        "region_id": { "type": "ref", "entity": "regions" }
+      },
+      "rules": {
+        "list": "customer_id.active == true && region_id.code == 'eu'",
+        "create": "'clerk' in @user.roles"
+      },
+      "checks": [
+        { "lookup": "customer_id", "expr": "customer_id.active", "message": "The customer is not active." }
+      ]
+    },
+    "projects": {
+      "fields": {
+        "title": { "type": "string", "maxLength": 80 }
+      },
+      "rules": {
+        "list": "project_members.exists(m, m.user_id == @user.id)"
+      }
+    },
+    "project_members": {
+      "fields": {
+        "project_id": { "type": "ref", "entity": "projects" },
+        "user_id": { "type": "uuid", "required": true }
+      },
+      "rules": {
+        "list": "user_id == @user.id"
+      }
+    }
+  }
+}
