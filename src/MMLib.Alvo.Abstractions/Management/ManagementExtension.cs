@@ -119,4 +119,10 @@ public sealed record ManagementExtension
 
     /// <summary>Gets the descriptor revision a data migration waits for before it runs; null for any other kind.</summary>
     public int? AfterRevision { get; init; }
+
+    /// <summary>
+    /// Gets an event handler's cap on its running deliveries, as key and limit — <c>tenant:2</c>, <c>record:1</c>; null for
+    /// a handler with no cap, or any other kind.
+    /// </summary>
+    public string? Concurrency { get; init; }
 }

@@ -64,8 +64,18 @@ internal sealed record HandlerSettings(
     TimeSpan Timeout,
     AlvoRunAs RunAs,
     AlvoOrdering Ordering,
-    AlvoRetryPolicy Retry)
+    AlvoRetryPolicy Retry,
+    TimeSpan? Debounce = null,
+    AlvoConcurrency? Concurrency = null)
 {
     internal static HandlerSettings From(AlvoHandlerOptions options) => new(
-        options.Description, options.Order, options.OrderStated, options.Timeout, options.RunAs, options.Ordering, options.Retry);
+        options.Description,
+        options.Order,
+        options.OrderStated,
+        options.Timeout,
+        options.RunAs,
+        options.Ordering,
+        options.Retry,
+        options.Debounce,
+        options.Concurrency);
 }

@@ -20,6 +20,7 @@ internal static class HandlerDescription
         Ordering = Ordering(handler.Settings.Ordering),
         Description = handler.Settings.Description,
         TypeName = exposeTypeNames ? handler.Invoker.TypeName : null,
+        Concurrency = handler.Settings.Concurrency?.ToString(),
     };
 
     private static string[] Operations(HandlerVerb verb) => verb switch

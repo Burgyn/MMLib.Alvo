@@ -22,7 +22,8 @@ public sealed record StoredDelivery
     public required string Kind { get; init; }
 
     /// <summary>
-    /// Gets where it is: <c>pending</c>, <c>running</c>, <c>succeeded</c>, <c>retrying</c>, <c>dead</c> or <c>cancelled</c>.
+    /// Gets where it is: <c>pending</c>, <c>running</c>, <c>succeeded</c>, <c>retrying</c>, <c>dead</c>, <c>cancelled</c> or
+    /// <c>superseded</c> — ended unrun by a newer debounced delivery of its lane, and never redelivered or replayed.
     /// </summary>
     public required string Status { get; init; }
 
@@ -32,7 +33,7 @@ public sealed record StoredDelivery
     /// <summary>Gets the earliest instant it may be claimed.</summary>
     public required DateTimeOffset NotBefore { get; init; }
 
-    /// <summary>Gets when it ended — succeeded, dead or cancelled — or <see langword="null"/> while it has not.</summary>
+    /// <summary>Gets when it ended — succeeded, dead, cancelled or superseded — or <see langword="null"/> while it has not.</summary>
     public DateTimeOffset? CompletedAt { get; init; }
 
     /// <summary>Gets the type name or fixed reason of its last failure — never an exception message.</summary>

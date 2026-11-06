@@ -9,11 +9,11 @@ internal static class DeliveryQueries
 {
     internal const int MaxPage = 200;
 
-    internal static FrozenSet<string> Statuses { get; } = new[] { "pending", "running", "succeeded", "retrying", "dead", "cancelled" }.ToFrozenSet(StringComparer.Ordinal);
+    internal static FrozenSet<string> Statuses { get; } = new[] { "pending", "running", "succeeded", "retrying", "dead", "cancelled", "superseded" }.ToFrozenSet(StringComparer.Ordinal);
 
     internal static FrozenSet<string> Finished { get; } = new[] { "succeeded", "dead", "cancelled" }.ToFrozenSet(StringComparer.Ordinal);
 
-    private static readonly string[] _statusOrder = ["pending", "running", "succeeded", "retrying", "dead", "cancelled"];
+    private static readonly string[] _statusOrder = ["pending", "running", "succeeded", "retrying", "dead", "cancelled", "superseded"];
 
     internal static DeliveryFilter Filter(ManagementDeliveryQuery query)
     {

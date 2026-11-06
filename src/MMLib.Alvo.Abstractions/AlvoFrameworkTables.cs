@@ -105,6 +105,12 @@ internal static class AlvoFrameworkTables
     /// <summary>The suffix of the table holding one row per started data migration.</summary>
     internal const string DataMigrationsSuffix = "_data_migrations";
 
+    /// <summary>The suffix of the table holding one row per completed step of a delivery.</summary>
+    internal const string StepsSuffix = "_steps";
+
+    /// <summary>The suffix of the table holding one row per concurrency slot of a limited subscriber's key.</summary>
+    internal const string ConcurrencySlotsSuffix = "_concurrency_slots";
+
     /// <summary>
     /// Every table <c>MMLib.Alvo.Identity</c> owns, reserved here whether or not that package is
     /// installed.
@@ -155,6 +161,8 @@ internal static class AlvoFrameworkTables
             schemaPrefix + TimersSuffix,
             schemaPrefix + SchedulesSuffix,
             schemaPrefix + DataMigrationsSuffix,
+            schemaPrefix + StepsSuffix,
+            schemaPrefix + ConcurrencySlotsSuffix,
             .. IdentitySuffixes.Select(suffix => schemaPrefix + suffix),
         ];
     }

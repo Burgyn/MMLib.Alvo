@@ -1210,6 +1210,7 @@ namespace MMLib.Alvo.Events
         public required int BatchSize { get; init; }
         public required string Claimant { get; init; }
         public required System.TimeSpan Lease { get; init; }
+        public System.Collections.Generic.IReadOnlyCollection<MMLib.Alvo.Events.DeliveryLimit> Limits { get; init; }
         public required System.Collections.Generic.IReadOnlyCollection<string> Ordered { get; init; }
         public required System.TimeSpan OutboxClaimLease { get; init; }
         public required int OutboxMaxAttempts { get; init; }
@@ -1234,6 +1235,13 @@ namespace MMLib.Alvo.Events
         public string? Subscriber { get; init; }
         public System.Guid? ToEventId { get; init; }
     }
+    public sealed class DeliveryLimit : System.IEquatable<MMLib.Alvo.Events.DeliveryLimit>
+    {
+        public DeliveryLimit() { }
+        public required string Key { get; init; }
+        public required int Limit { get; init; }
+        public required string Subscriber { get; init; }
+    }
     public sealed class DeliveryOperationEntry : System.IEquatable<MMLib.Alvo.Events.DeliveryOperationEntry>
     {
         public DeliveryOperationEntry() { }
@@ -1254,6 +1262,7 @@ namespace MMLib.Alvo.Events
         public const string UnboundReason = "unbound";
         public DeliveryRequest() { }
         public string? DeadReason { get; init; }
+        public System.TimeSpan? Debounce { get; init; }
         public required System.Guid EventId { get; init; }
         public required string Kind { get; init; }
         public required string PartitionKey { get; init; }
@@ -1266,6 +1275,15 @@ namespace MMLib.Alvo.Events
         public int Busy { get; init; }
         public required int Count { get; init; }
         public required System.Collections.Generic.IReadOnlyList<System.Guid> Sample { get; init; }
+    }
+    public sealed class DeliveryStep : System.IEquatable<MMLib.Alvo.Events.DeliveryStep>
+    {
+        public DeliveryStep() { }
+        public required System.DateTimeOffset CompletedAt { get; init; }
+        public required System.Guid EventId { get; init; }
+        public required string Name { get; init; }
+        public required string Result { get; init; }
+        public required string Subscriber { get; init; }
     }
     public interface IAlvoEvents
     {
@@ -1287,11 +1305,14 @@ namespace MMLib.Alvo.Events
         System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliveryOperationEntry?> FindOperationAsync(string scope, string key, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.StoredDelivery>> ListAsync(MMLib.Alvo.Events.DeliveryFilter filter, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> PendingSubscribersAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliveryStep> RecordStepAsync(MMLib.Alvo.Events.DeliveryStep completed, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> RedeliverAsync(System.Guid id, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliveryOperationEntry?> ReplayAsync(MMLib.Alvo.Events.DeliveryFilter filter, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliverySelection> SelectAsync(MMLib.Alvo.Events.DeliveryFilter filter, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> SetDisabledAsync(string subscriber, bool disabled, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> SetPausedAsync(string subscriber, bool paused, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<bool> SleepAsync(MMLib.Alvo.Events.DeliveryAttempt attempt, System.DateTimeOffset wakeAt, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.DeliveryStep>> StepsAsync(System.Guid eventId, string subscriber, System.Threading.CancellationToken cancellationToken = default);
     }
     public interface IEmailSender
     {
@@ -1719,6 +1740,7 @@ namespace MMLib.Alvo.Management
         public required System.DateTimeOffset NotBefore { get; init; }
         public required string PartitionKey { get; init; }
         public required string Status { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementDeliveryStep> Steps { get; init; }
         public required string Subscriber { get; init; }
         public string? TenantId { get; init; }
     }
@@ -1755,6 +1777,12 @@ namespace MMLib.Alvo.Management
         public string? Subscriber { get; init; }
         public System.DateTimeOffset? To { get; init; }
     }
+    public sealed class ManagementDeliveryStep : System.IEquatable<MMLib.Alvo.Management.ManagementDeliveryStep>
+    {
+        public ManagementDeliveryStep() { }
+        public required System.DateTimeOffset CompletedAt { get; init; }
+        public required string Name { get; init; }
+    }
     public sealed class ManagementDescriptor : System.IEquatable<MMLib.Alvo.Management.ManagementDescriptor>
     {
         public ManagementDescriptor(string Project, int Revision, string DescriptorJson) { }
@@ -1786,6 +1814,7 @@ namespace MMLib.Alvo.Management
         public ManagementExtension() { }
         public string? Access { get; init; }
         public int? AfterRevision { get; init; }
+        public string? Concurrency { get; init; }
         public string? Cron { get; init; }
         public string? Description { get; init; }
         public bool Enabled { get; init; }

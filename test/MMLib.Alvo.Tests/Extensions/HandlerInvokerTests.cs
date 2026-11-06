@@ -188,7 +188,8 @@ public sealed class HandlerInvokerTests
         },
         "on-created",
         attempt: 1,
-        Substitute.For<IAlvoSession>());
+        Substitute.For<IAlvoSession>(),
+        MMLib.Alvo.Events.Internal.PassThroughSteps.Instance);
 
     private static IServiceProviderIsService IsService()
     {

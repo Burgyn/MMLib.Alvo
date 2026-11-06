@@ -851,24 +851,36 @@ namespace MMLib.Alvo.Testing.Events
     {
         protected DeliveryStoreContractTests() { }
         public System.Threading.Tasks.Task A_cancelled_delivery_does_not_block_its_lane() { }
+        public System.Threading.Tasks.Task A_capped_subscriber_is_claimed_beside_an_uncapped_backlog_that_fills_the_batch() { }
         public System.Threading.Tasks.Task A_claim_for_no_deliveries_is_refused() { }
         public System.Threading.Tasks.Task A_claim_returns_lane_heads_in_event_order_up_to_its_batch() { }
+        public System.Threading.Tasks.Task A_claim_takes_capped_and_uncapped_subscribers_together() { }
+        public System.Threading.Tasks.Task A_claim_takes_no_more_deliveries_of_one_tenant_than_its_limit() { }
         public System.Threading.Tasks.Task A_claim_takes_only_the_subscribers_it_names() { }
+        public System.Threading.Tasks.Task A_completed_delivery_frees_its_slot_for_the_next_claim() { }
         public System.Threading.Tasks.Task A_completed_delivery_is_never_claimed_again() { }
         public System.Threading.Tasks.Task A_dead_delivery_blocks_its_own_lane_and_no_other() { }
         public System.Threading.Tasks.Task A_dead_request_is_recorded_dead() { }
         public System.Threading.Tasks.Task A_dead_unbound_delivery_does_not_block_its_lane() { }
+        public System.Threading.Tasks.Task A_debounced_fan_out_is_due_after_its_debounce() { }
+        public System.Threading.Tasks.Task A_debounced_fan_out_never_supersedes_a_running_delivery() { }
+        public System.Threading.Tasks.Task A_debounced_fan_out_never_supersedes_a_sleeping_delivery() { }
+        public System.Threading.Tasks.Task A_debounced_fan_out_supersedes_only_its_own_tenants_lane() { }
+        public System.Threading.Tasks.Task A_debounced_fan_out_supersedes_the_lanes_waiting_delivery() { }
         public System.Threading.Tasks.Task A_delivery_cancelled_while_it_runs_is_not_revived_by_its_late_answer() { }
         public System.Threading.Tasks.Task A_delivery_dead_lettered_while_it_runs_is_not_revived_by_its_late_answer() { }
         public System.Threading.Tasks.Task A_delivery_is_dead_once_its_last_attempt_fails() { }
         public System.Threading.Tasks.Task A_delivery_is_found_with_its_envelope_and_its_attempts_in_order() { }
         public System.Threading.Tasks.Task A_delivery_whose_outbox_entry_is_gone_is_claimed_without_a_payload() { }
         public System.Threading.Tasks.Task A_failed_delivery_waits_for_its_retry_before_it_is_claimed_again() { }
+        public System.Threading.Tasks.Task A_failed_or_sleeping_delivery_frees_its_slot() { }
         public System.Threading.Tasks.Task A_failure_without_a_retry_is_dead_at_once() { }
         public System.Threading.Tasks.Task A_fan_out_records_one_delivery_per_subscriber_and_a_claim_takes_them_with_their_envelope() { }
         public System.Threading.Tasks.Task A_lane_is_claimed_one_event_at_a_time_in_event_order() { }
         public System.Threading.Tasks.Task A_lane_is_one_subscriber_s_and_blocks_no_other_subscriber_of_the_record() { }
         public System.Threading.Tasks.Task A_late_answer_from_before_a_redeliver_changes_nothing() { }
+        public System.Threading.Tasks.Task A_late_fan_out_of_an_older_event_is_superseded_at_once() { }
+        public System.Threading.Tasks.Task A_late_finisher_releases_no_slot_it_no_longer_holds() { }
         public System.Threading.Tasks.Task A_late_finisher_whose_lease_was_reclaimed_changes_nothing() { }
         public System.Threading.Tasks.Task A_page_above_the_store_s_ceiling_is_refused() { }
         public System.Threading.Tasks.Task A_page_asking_for_no_rows_is_refused() { }
@@ -878,11 +890,16 @@ namespace MMLib.Alvo.Testing.Events
         public System.Threading.Tasks.Task A_paused_extension_is_not_listed_as_switched_off() { }
         public System.Threading.Tasks.Task A_paused_subscriber_is_listed_with_who_when_and_why() { }
         public System.Threading.Tasks.Task A_paused_subscriber_is_not_claimed_and_its_lane_drains_in_order_after_resume() { }
+        public System.Threading.Tasks.Task A_recorded_step_is_read_back_with_its_result() { }
+        public System.Threading.Tasks.Task A_redeliver_clears_the_steps_of_a_succeeded_delivery_and_keeps_those_of_a_dead_one() { }
         public System.Threading.Tasks.Task A_redeliver_whose_log_row_is_refused_changes_nothing() { }
         public System.Threading.Tasks.Task A_redeliver_writes_one_log_row() { }
         public System.Threading.Tasks.Task A_redelivered_delivery_runs_again_with_a_fresh_budget_and_keeps_its_history() { }
+        public System.Threading.Tasks.Task A_refused_redeliver_keeps_the_steps() { }
+        public System.Threading.Tasks.Task A_replay_clears_the_steps_of_the_succeeded_deliveries_it_resets() { }
         public System.Threading.Tasks.Task A_replay_naming_no_subscriber_resets_every_subscriber_s_replayable_deliveries() { }
         public System.Threading.Tasks.Task A_replay_never_resets_a_loop_break_nor_a_delivery_whose_record_is_running() { }
+        public System.Threading.Tasks.Task A_replay_resets_a_busy_lanes_succeeded_delivery_only_once_the_lane_is_free_and_then_without_its_steps() { }
         public System.Threading.Tasks.Task A_replay_resets_only_the_named_subscriber_s_finished_deliveries() { }
         public System.Threading.Tasks.Task A_replay_that_selects_nothing_still_records_its_row() { }
         public System.Threading.Tasks.Task A_replay_under_a_spent_key_changes_nothing() { }
@@ -890,10 +907,18 @@ namespace MMLib.Alvo.Testing.Events
         public System.Threading.Tasks.Task A_replayable_selection_leaves_out_loop_breaks_and_counts_running_records() { }
         public System.Threading.Tasks.Task A_request_repeated_within_one_fan_out_is_recorded_once() { }
         public System.Threading.Tasks.Task A_running_delivery_whose_lease_expired_is_claimed_again() { }
+        public System.Threading.Tasks.Task A_saturated_key_does_not_starve_another_keys_deliveries() { }
         public System.Threading.Tasks.Task A_second_fan_out_does_not_revive_a_dead_delivery() { }
         public System.Threading.Tasks.Task A_second_fan_out_of_one_event_records_nothing() { }
+        public System.Threading.Tasks.Task A_second_record_of_one_step_keeps_the_first_result() { }
         public System.Threading.Tasks.Task A_selection_asking_for_no_rows_is_refused() { }
         public System.Threading.Tasks.Task A_selection_counts_exactly_samples_in_event_order_and_changes_nothing() { }
+        public System.Threading.Tasks.Task A_sleep_by_a_claimant_that_lost_its_lease_changes_nothing() { }
+        public System.Threading.Tasks.Task A_sleep_returns_the_delivery_due_at_its_wake_time_without_spending_an_attempt() { }
+        public System.Threading.Tasks.Task A_sleeping_delivery_reads_as_pending_at_its_wake_time() { }
+        public System.Threading.Tasks.Task A_sleeping_ordered_delivery_holds_its_lane() { }
+        public System.Threading.Tasks.Task A_slot_whose_lease_expired_is_taken_again() { }
+        public System.Threading.Tasks.Task A_superseded_delivery_holds_no_lane_and_is_not_replayable() { }
         public System.Threading.Tasks.Task An_attempt_is_answered_for_once_and_only_by_its_claimant() { }
         public System.Threading.Tasks.Task An_earlier_event_at_the_ceiling_under_a_stale_claim_holds_no_lane_back() { }
         public System.Threading.Tasks.Task An_earlier_event_on_its_last_attempt_under_a_live_claim_holds_the_lane() { }
@@ -904,15 +929,19 @@ namespace MMLib.Alvo.Testing.Events
         public System.Threading.Tasks.Task An_unknown_delivery_is_not_found_and_has_no_attempts() { }
         public System.Threading.Tasks.Task An_unordered_subscriber_does_not_wait_for_an_earlier_unfanned_event() { }
         public System.Threading.Tasks.Task An_unordered_subscriber_is_not_blocked_by_a_dead_earlier_delivery() { }
+        public System.Threading.Tasks.Task At_a_batch_of_one_capped_and_uncapped_backlogs_each_get_a_claim_within_two_rounds() { }
         protected virtual void EnsureEngineAvailable() { }
         public System.Threading.Tasks.Task Pausing_twice_changes_nothing_the_second_time() { }
         public System.Threading.Tasks.Task Redelivering_a_dead_delivery_makes_it_the_head_of_its_lane_again() { }
         public System.Threading.Tasks.Task Redelivering_an_unfinished_delivery_changes_nothing_and_logs_nothing() { }
         public System.Threading.Tasks.Task Redelivering_while_its_record_runs_another_delivery_changes_nothing() { }
         public System.Threading.Tasks.Task Retiring_ends_a_subscriber_s_unfinished_work() { }
+        public System.Threading.Tasks.Task Steps_are_kept_per_subscriber_of_one_event() { }
+        public System.Threading.Tasks.Task Steps_of_another_event_are_not_read() { }
         public System.Threading.Tasks.Task Storage_brought_up_again_holds_no_work_and_retiring_over_it_ends_nothing() { }
         public System.Threading.Tasks.Task Switching_an_extension_off_lists_it_and_logs_the_change_once() { }
         public System.Threading.Tasks.Task Switching_an_extension_on_again_removes_it_and_leaves_its_pause_alone() { }
+        public System.Threading.Tasks.Task The_record_key_limits_each_record_of_each_tenant_on_its_own() { }
         public System.Threading.Tasks.Task Two_claimants_claiming_at_once_take_disjoint_deliveries() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Events.IDeliveryStoreWorld> WorldAsync();
     }
@@ -939,6 +968,11 @@ namespace MMLib.Alvo.Testing.Events
         System.Threading.Tasks.Task<System.Guid> AppendUnfannedEventAsync(string partitionKey, int attempts = 0, bool claimed = false);
         System.Threading.Tasks.Task MarkDispatchedAsync(System.Guid eventId);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.DeliveryOperationEntry>> OperationsAsync();
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Key",
+                "Slot",
+                "DeliveryId"})]
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<System.ValueTuple<string, int, System.Guid?>>> ReadSlotsAsync();
     }
     public interface IOutboxStoreWorld : System.IAsyncDisposable
     {

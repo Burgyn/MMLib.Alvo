@@ -158,7 +158,22 @@ internal static class DeliveryOperationsTable
     /// with no locked subscriber is refused rather than rendered unnarrowed.
     /// </remarks>
     internal static string ReplaySql(string table, DeliveryFilter filter, int lockedSubscribers = 0) =>
-        $"UPDATE {table} SET {Reset} WHERE {Conditions(filter with { Replayable = true }, keyset: false)}{LockedSubscribers(filter, lockedSubscribers)} AND NOT {LaneRunning(table)} RETURNING id, event_id";
+        $"UPDATE {table} SET {Reset} WHERE {ReplayedSql(table, filter, lockedSubscribers)} RETURNING id, event_id";
+
+    /// <summary>The predicate <see cref="ReplaySql"/> resets by, which a replay's step clearing selects by too.</summary>
+    internal static string ReplayedSql(string table, DeliveryFilter filter, int lockedSubscribers = 0) =>
+        $"{Conditions(filter with { Replayable = true }, keyset: false)}{LockedSubscribers(filter, lockedSubscribers)} AND NOT {LaneRunning(table)}";
+
+    /// <summary>
+    /// What a replay clears the steps of: <see cref="ReplayedSql"/>'s filter and locked subscribers <b>without</b> its lane
+    /// term. Under the subscribers' exclusive locks a succeeded delivery is stable — only a redeliver or a replay moves it,
+    /// and both take that lock — but its lane's running delivery may answer between the clearing and the reset, two
+    /// statements apart on PostgreSQL; with the lane term the reset could then catch a row whose steps were kept. Without
+    /// it the clearing selects a superset the reset cannot escape; a succeeded delivery left un-reset by a busy lane loses
+    /// steps no run reads again before its next reset.
+    /// </summary>
+    internal static string ClearedOnReplaySql(DeliveryFilter filter, int lockedSubscribers = 0) =>
+        $"{Conditions(filter with { Replayable = true }, keyset: false)}{LockedSubscribers(filter, lockedSubscribers)}";
 
     /// <summary>The subscribers with a replayable delivery <paramref name="filter"/> selects — the locks a replay naming none takes.</summary>
     internal static string ReplaySubscribersSql(string table, DeliveryFilter filter) =>

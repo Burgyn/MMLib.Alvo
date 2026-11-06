@@ -22,6 +22,7 @@ internal enum DeliveryRunOutcome
     Dead,
     LeaseLost,
     Shutdown,
+    Slept,
 }
 
 /// <summary>
@@ -163,7 +164,7 @@ internal sealed class DeliveryRunner(
     private async Task RunUnderTimeoutAsync(AlvoEvent @event, ClaimedDelivery delivery, BoundHandler handler, CancellationToken cancellationToken)
     {
         using var cancel = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var invocation = Task.Run(() => RunHandlerAsync(@event, delivery, handler, cancel.Token), CancellationToken.None);
+        var invocation = Task.Run(() => RunHandlerAsync(@event, delivery, handler, PassThroughSteps.Instance, cancel.Token), CancellationToken.None);
         try
         {
             await invocation.WaitAsync(handler.Settings.Timeout, time, cancellationToken).ConfigureAwait(false);
@@ -201,7 +202,10 @@ internal sealed class DeliveryRunner(
         AlvoDeliveryMetrics.Lagged(delivery.Subscriber, time.GetUtcNow() - @event.Time);
         try
         {
-            return await InvokeAsync(@event, delivery, handler, stopping).ConfigureAwait(false);
+            var steps = new DeliverySteps(store, delivery.EventId, delivery.Subscriber, time);
+            var verdict = await InvokeAsync(@event, delivery, handler, steps, stopping).ConfigureAwait(false);
+
+            return steps.SleepRequested is { } wakeAt ? AttemptVerdict.Sleep(wakeAt) : verdict;
         }
         catch (Exception) when (stopping.IsCancellationRequested)
         {
@@ -213,13 +217,15 @@ internal sealed class DeliveryRunner(
     {
         DeliveryRunOutcome.Succeeded => AlvoHookTelemetry.Succeeded,
         DeliveryRunOutcome.LeaseLost => AlvoHookTelemetry.LeaseLost,
+        DeliveryRunOutcome.Slept => AlvoHookTelemetry.Skipped,
         _ => AlvoHookTelemetry.Failed,
     };
 
-    private async Task<AttemptVerdict> InvokeAsync(AlvoEvent @event, ClaimedDelivery delivery, BoundHandler handler, CancellationToken stopping)
+    private async Task<AttemptVerdict> InvokeAsync(
+        AlvoEvent @event, ClaimedDelivery delivery, BoundHandler handler, IAlvoSteps steps, CancellationToken stopping)
     {
         using var cancel = CancellationTokenSource.CreateLinkedTokenSource(stopping);
-        var invocation = Task.Run(() => RunHandlerAsync(@event, delivery, handler, cancel.Token), CancellationToken.None);
+        var invocation = Task.Run(() => RunHandlerAsync(@event, delivery, handler, steps, cancel.Token), CancellationToken.None);
         try
         {
             await invocation.WaitAsync(handler.Settings.Timeout, time, stopping).ConfigureAwait(false);
@@ -335,12 +341,13 @@ internal sealed class DeliveryRunner(
         (@event.TenantId is null || EventActor.TenantOf(@event) is not null)
         && (runAs is not AlvoRunAs.EventActor || @event.AuthId is null || UserId.TryParse(@event.AuthId, CultureInfo.InvariantCulture, out _));
 
-    private async Task RunHandlerAsync(AlvoEvent @event, ClaimedDelivery delivery, BoundHandler handler, CancellationToken ct)
+    private async Task RunHandlerAsync(AlvoEvent @event, ClaimedDelivery delivery, BoundHandler handler, IAlvoSteps steps, CancellationToken ct)
     {
         var scope = scopes.CreateAsyncScope();
         await using (scope.ConfigureAwait(false))
         {
-            var context = new AlvoEventContext(@event, delivery.Subscriber, delivery.Attempts, sessions.For(CallerFor(@event, handler.Settings.RunAs)));
+            var caller = sessions.For(CallerFor(@event, handler.Settings.RunAs));
+            var context = new AlvoEventContext(@event, delivery.Subscriber, delivery.Attempts, caller, steps);
             var message = HandlerMessage.For(@event, handler.Registration);
             await handler.Registration.Invoker.InvokeAsync(scope.ServiceProvider, message, context, ct).ConfigureAwait(false);
         }
@@ -375,6 +382,13 @@ internal sealed class DeliveryRunner(
 
     private async Task<DeliveryRunOutcome> AnswerAsync(DeliveryAttempt attempt, AlvoRetryPolicy policy, AttemptVerdict verdict, AnswerWindow window)
     {
+        if (verdict.WakeAt is { } wakeAt)
+        {
+            return await AnsweredAsync(() => store.SleepAsync(attempt, wakeAt, CancellationToken.None), attempt, window).ConfigureAwait(false)
+                ? DeliveryRunOutcome.Slept
+                : LeaseLost(attempt);
+        }
+
         if (verdict.Succeeded)
         {
             return await AnsweredAsync(() => store.CompleteAsync(attempt, CancellationToken.None), attempt, window).ConfigureAwait(false)
@@ -473,11 +487,13 @@ internal sealed class DeliveryRunner(
             Narrowed ? this : this with { AnswerBy = AnswerBy < now + grace ? AnswerBy : now + grace, Narrowed = true };
     }
 
-    internal readonly record struct AttemptVerdict(string? ErrorType, bool Retryable)
+    internal readonly record struct AttemptVerdict(string? ErrorType, bool Retryable, DateTimeOffset? WakeAt = null)
     {
         internal static AttemptVerdict Success => new(null, false);
 
-        internal bool Succeeded => ErrorType is null;
+        internal bool Succeeded => ErrorType is null && WakeAt is null;
+
+        internal static AttemptVerdict Sleep(DateTimeOffset wakeAt) => new(null, false, wakeAt);
 
         internal static AttemptVerdict Retry(string errorType) => new(errorType, true);
 

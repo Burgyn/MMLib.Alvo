@@ -73,6 +73,25 @@ public sealed class SystemSchemaInitializerTests : IDisposable
         objects.ShouldContain("ix_alvo_hook_rejections_extension_at");
     }
 
+    /// <summary>
+    /// The boot creates every bookkeeping table and the indexes on them before any replica introspects the schema. A
+    /// table a store created later, beside a replica still in its boot, raced that replica's introspection: the engine's
+    /// table read missed it and its index read did not, and the introspection failed.
+    /// </summary>
+    [Fact]
+    public async Task The_boot_creates_every_bookkeeping_table_so_no_store_creates_one_beside_a_booting_replica()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        await new SystemSchemaInitializer(_keepAlive, "alvo").EnsureAsync(ct);
+
+        var objects = await SchemaObjectsAsync(ct);
+        var bookkeeping = AlvoFrameworkTables.NamesFor("alvo")
+            .Where(name => !AlvoFrameworkTables.IdentitySuffixes.Any(suffix => name == "alvo" + suffix));
+        bookkeeping.Except(objects, StringComparer.Ordinal).ShouldBeEmpty("the boot creates every bookkeeping table");
+        objects.ShouldContain("ix_alvo_concurrency_slots_delivery");
+    }
+
     public void Dispose()
     {
         _keepAlive.Dispose();
