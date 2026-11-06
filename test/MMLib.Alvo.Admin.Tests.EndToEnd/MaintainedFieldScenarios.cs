@@ -5,7 +5,8 @@ using MMLib.Alvo.Data;
 namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>
-/// A rollup is authored from the field editor, and the apply accepts what it composes (docs/todo-admin.md §7).
+/// A rollup is authored from the field editor — its <c>where</c> a live box since HX-11 — and the apply accepts what it
+/// composes (docs/todo-admin.md §7).
 /// </summary>
 /// <remarks>
 /// <c>customers ← work_orders.customer_id</c> is the field-service pair both sides of which are scoped; the plan
@@ -28,7 +29,7 @@ public sealed class MaintainedFieldScenarios(AdminWorld world) : IClassFixture<A
 
         (await sheet.GetByTestId("rollup-type").InnerTextAsync()).ShouldContain("integer");
         (await sheet.GetByRole(AriaRole.Checkbox, new() { Name = "required", Exact = true }).CountAsync()).ShouldBe(0);
-        await sheet.GetByTestId("rollup-where-refused").WaitForAsync();
+        await sheet.GetByTestId("rollup-where").WaitForAsync();
         await session.Page.GetByTestId("field-save").ClickAsync();
 
         var row = session.Page.GetByTestId("field-row-open_orders");

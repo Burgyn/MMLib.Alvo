@@ -25,6 +25,46 @@ public class FieldFacetsTests
         => Refusal(new FieldFacets { Name = name }).ShouldContain(DescriptorNames.Member);
 
     [Fact]
+    public void A_validation_round_trips_through_the_form()
+    {
+        var facets = FieldFacets.Prefill("stock", """{"type": "integer", "validation": "value >= 0"}""");
+        facets.Validation.ShouldBe("value >= 0");
+        facets.Build(editing: "stock", editingJson: null, siblings: [], out _)!["validation"]!.GetValue<string>().ShouldBe("value >= 0");
+    }
+
+    [Fact]
+    public void A_rollup_filter_round_trips_and_an_empty_box_removes_it()
+    {
+        var facets = FieldFacets.Prefill("held", """{"type": "integer", "rollup": {"from": "reservations", "op": "count", "where": "status == 'held'"}}""");
+        facets.Sources = [new("reservations", ["product_id"], [], null)];
+        facets.RollupWhere.ShouldBe("status == 'held'");
+        facets.Build("held", null, [], out _)!["rollup"]!["where"]!.GetValue<string>().ShouldBe("status == 'held'");
+        facets.RollupWhere = "";
+        facets.Build("held", null, [], out _)!["rollup"]!.AsObject().ContainsKey("where").ShouldBeFalse();
+    }
+
+    /// <summary>Ruling 47: a validation is offered for every kind, a maintained value included, and an empty box removes it.</summary>
+    [Theory]
+    [InlineData("""{"type":"integer","validation":"value >= 0"}""")]
+    [InlineData("""{"type":"integer","computed":"1 + 1","validation":"value >= 0"}""")]
+    public void A_validation_is_written_for_every_kind_and_an_empty_box_removes_it(string declared)
+    {
+        var facets = FieldFacets.Prefill("n", declared);
+        facets.Build("n", declared, [], out _)!["validation"]!.GetValue<string>().ShouldBe("value >= 0");
+
+        facets.Validation = "  ";
+        facets.Build("n", declared, [], out _)!.ContainsKey("validation").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_declared_validation_is_drawn_so_it_is_no_note()
+        => FieldFacets.Prefill("n", """{"type":"integer","validation":"value >= 0"}""").Notes().ShouldNotContain(note => note.Facet == "validation");
+
+    [Fact]
+    public void A_validation_longer_than_the_schema_takes_is_refused()
+        => Refusal(new FieldFacets { Name = "n", Validation = new string('x', 2001) }).ShouldContain("2000");
+
+    [Fact]
     public void A_name_another_field_already_has_is_refused()
         => Refusal(new FieldFacets { Name = "status" }, siblings: ["status"])
             .ShouldBe("This entity already declares a field called status.");

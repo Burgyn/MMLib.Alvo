@@ -56,15 +56,57 @@ internal static class ExpressionSlots
     /// <returns>The clone's text and the expression's JSON Pointer, or <see langword="null"/> when there is no such entity.</returns>
     public static (string Json, string Path)? ForComputed(
         string workingJson, string entity, string? editing, string field, JsonObject facets, string source)
+        => ForField(workingJson, entity, editing, field, facets, source, "computed");
+
+    /// <summary>Places the field the form would declare, with the typed <c>validation</c>, on a clone of the working copy.</summary>
+    /// <remarks><see cref="ForComputed"/>'s writer and rules, for the field's <c>CHECK</c> (HX-11).</remarks>
+    /// <param name="workingJson">The working copy's text; not modified.</param>
+    /// <param name="entity">The entity the field is on.</param>
+    /// <param name="editing">The name of the field being edited, or <see langword="null"/> for a new one.</param>
+    /// <param name="field">The field's name.</param>
+    /// <param name="facets">The facets the form built; not modified.</param>
+    /// <param name="source">The CEL as it stands in the validation box.</param>
+    /// <returns>The clone's text and the validation's JSON Pointer, or <see langword="null"/> when there is no such entity.</returns>
+    public static (string Json, string Path)? ForValidation(
+        string workingJson, string entity, string? editing, string field, JsonObject facets, string source)
+        => ForField(workingJson, entity, editing, field, facets, source, "validation");
+
+    /// <summary>Places the rollup the form would declare, with the typed <c>where</c>, on a clone of the working copy.</summary>
+    /// <remarks><see cref="ForComputed"/>'s writer and rules, for the rollup's filter (HX-11).</remarks>
+    /// <param name="workingJson">The working copy's text; not modified.</param>
+    /// <param name="entity">The entity the rollup is on.</param>
+    /// <param name="editing">The name of the field being edited, or <see langword="null"/> for a new one.</param>
+    /// <param name="field">The field's name.</param>
+    /// <param name="facets">The facets the form built, a <c>rollup</c> among them; not modified.</param>
+    /// <param name="source">The CEL as it stands in the filter box.</param>
+    /// <returns>
+    /// The clone's text and the filter's JSON Pointer, or <see langword="null"/> when there is no such entity or the
+    /// field is no rollup.
+    /// </returns>
+    public static (string Json, string Path)? ForRollupWhere(
+        string workingJson, string entity, string? editing, string field, JsonObject facets, string source)
+        => facets?["rollup"] is JsonObject
+            ? ForField(workingJson, entity, editing, field, facets, source, "rollup", "where")
+            : null;
+
+    /// <summary>Writes <paramref name="source"/> at <paramref name="slot"/> inside a copy of the facets, and saves the field on a scratch copy.</summary>
+    private static (string Json, string Path)? ForField(
+        string workingJson, string entity, string? editing, string field, JsonObject facets, string source, params string[] slot)
     {
         if (Scratch(workingJson, entity) is not { } scratch || facets.DeepClone() is not JsonObject declared)
         {
             return null;
         }
 
-        declared["computed"] = source;
+        var owner = declared;
+        foreach (var segment in slot[..^1])
+        {
+            owner = (JsonObject)owner[segment]!;
+        }
+
+        owner[slot[^1]] = source;
         scratch.SaveField(entity, editing, field, declared);
-        return (scratch.Json, Pointer("entities", entity, "fields", field, "computed"));
+        return (scratch.Json, Pointer([.. new[] { "entities", entity, "fields", field }, .. slot]));
     }
 
     /// <summary>Places a whole hook — the one the editor would write, with the typed text already in its slot — on a clone.</summary>

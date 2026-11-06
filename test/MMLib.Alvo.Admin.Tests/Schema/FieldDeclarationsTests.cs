@@ -51,9 +51,9 @@ public class FieldDeclarationsTests
     [Fact]
     public void A_staged_field_carrying_a_refused_facet_names_the_refusal()
         => FieldDeclarations.From(
-                """{"entities":{"orders":{"fields":{"code":{"type":"string","validation":"size(this) > 1"}}}}}""",
-                Applied, "orders", [new("field.validation", "c", "f")])
-            .RefusedOf("code").ShouldHaveSingleItem().Slot.ShouldBe("field.validation");
+                """{"entities":{"orders":{"fields":{"code":{"type":"string","default":{"$cel":"@user.id"}}}}}}""",
+                Applied, "orders", [new("field.default", "c", "f")])
+            .RefusedOf("code").ShouldHaveSingleItem().Slot.ShouldBe("field.default");
 
     [Fact]
     public void Nothing_is_read_when_no_screen_cascaded_the_declarations()

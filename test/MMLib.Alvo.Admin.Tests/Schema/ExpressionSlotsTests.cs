@@ -192,6 +192,32 @@ public class ExpressionSlotsTests
     }
 
     [Fact]
+    public void A_validation_lands_in_the_field_with_the_typed_source()
+    {
+        var facets = new JsonObject { ["type"] = "decimal", ["validation"] = "stale" };
+        var (json, path) = ExpressionSlots.ForValidation(WithComputed, "orders", "price", "price", facets, "value >= 0")!.Value;
+
+        path.ShouldBe("/entities/orders/fields/price/validation");
+        JsonNode.Parse(json)!["entities"]!["orders"]!["fields"]!["price"]!["validation"]!.GetValue<string>().ShouldBe("value >= 0");
+        facets["validation"]!.GetValue<string>().ShouldBe("stale", "the form's facets are not modified");
+    }
+
+    [Fact]
+    public void A_rollup_filter_lands_in_the_rollup_with_the_typed_source()
+    {
+        var facets = new JsonObject { ["type"] = "integer", ["rollup"] = new JsonObject { ["from"] = "lines", ["op"] = "count" } };
+        var (json, path) = ExpressionSlots.ForRollupWhere(WithComputed, "orders", null, "line_count", facets, "quantity > 1")!.Value;
+
+        path.ShouldBe("/entities/orders/fields/line_count/rollup/where");
+        JsonNode.Parse(json)!["entities"]!["orders"]!["fields"]!["line_count"]!["rollup"]!["where"]!.GetValue<string>().ShouldBe("quantity > 1");
+        facets["rollup"]!.AsObject().ContainsKey("where").ShouldBeFalse("the form's facets are not modified");
+    }
+
+    [Fact]
+    public void A_field_that_is_no_rollup_has_no_filter_to_check()
+        => ExpressionSlots.ForRollupWhere(WithComputed, "orders", null, "n", new JsonObject { ["type"] = "integer" }, "x > 1").ShouldBeNull();
+
+    [Fact]
     public void A_computed_field_on_an_unknown_entity_has_nothing_to_check()
         => ExpressionSlots.ForComputed(WithHooks, "missing", null, "f", new JsonObject(), "x").ShouldBeNull();
 

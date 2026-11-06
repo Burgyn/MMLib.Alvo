@@ -50,16 +50,16 @@ public sealed class RefusalPlacementScenarios(AdminWorld world) : IClassFixture<
     }
 
     /// <summary>
-    /// The field editor's refused-facets fold lists the rollup filter beside <c>field.*</c>, and once the rollup
-    /// section is open the filter's refusal is said at the filter and only there.
+    /// Since HX-11 the rollup filter and the validation are live boxes, so the refused-facets fold names neither — it
+    /// keeps only what the build still refuses (a <c>$cel</c> default) — and the rollup section draws the filter's box.
     /// </summary>
     /// <remarks>
-    /// Counted rather than waited on: the fold is shut by default, and what is asserted is that the refusal is in it,
-    /// not that it is open. The sheet is found as the dialog it is (<see cref="AdminSession.Dialog"/>). Choosing a
-    /// kind stages nothing, so this class stays read-only.
+    /// Counted rather than waited on: the fold is shut by default, and what is asserted is what it lists, not that it is
+    /// open. The sheet is found as the dialog it is (<see cref="AdminSession.Dialog"/>). Choosing a kind stages nothing,
+    /// so this class stays read-only.
     /// </remarks>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task The_field_editor_says_the_rollup_filter_is_refused_once()
+    public async Task The_field_editor_draws_the_rollup_filter_and_the_validation_as_boxes_not_refusals()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema/customers");
@@ -67,11 +67,13 @@ public sealed class RefusalPlacementScenarios(AdminWorld world) : IClassFixture<
         await session.Page.GetByTestId("add-field").ClickAsync();
         var sheet = session.Dialog("field-sheet");
         await sheet.GetByTestId("refused-facets").WaitForAsync(new() { State = Microsoft.Playwright.WaitForSelectorState.Attached });
-        (await sheet.GetByTestId("refused-rollup.where").CountAsync()).ShouldBe(1);
+        (await sheet.GetByTestId("refused-field.default").CountAsync()).ShouldBe(1);
+        (await sheet.GetByTestId("refused-rollup.where").CountAsync()).ShouldBe(0);
+        (await sheet.GetByTestId("refused-field.validation").CountAsync()).ShouldBe(0);
+        await sheet.GetByTestId("field-validation").WaitForAsync();
 
         await sheet.GetByRole(Microsoft.Playwright.AriaRole.Radio, new() { Name = "rollup", Exact = true }).ClickAsync();
-        await sheet.GetByTestId("rollup-where-refused").WaitForAsync();
-        (await sheet.GetByTestId("refused-rollup.where").CountAsync()).ShouldBe(0, "said beside the filter, not again in the fold");
+        await sheet.GetByTestId("rollup-where").WaitForAsync();
 
         session.AssertConsoleClean();
     }

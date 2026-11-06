@@ -73,6 +73,12 @@ internal sealed partial class FieldFacets
     /// <summary>The default as typed, or empty for none.</summary>
     public string Default { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The field's <c>validation</c> as typed — CEL the database enforces as a <c>CHECK</c> on every row — or empty for
+    /// none. Offered for every kind, a maintained value included (HX-11 Ruling 47).
+    /// </summary>
+    public string Validation { get; set; } = string.Empty;
+
     /// <summary>Whether the type may be declared unique.</summary>
     public bool TakesUnique => Type is FieldType.String or FieldType.Integer or FieldType.Uuid
         or FieldType.Date or FieldType.DateTime;
@@ -160,6 +166,7 @@ internal sealed partial class FieldFacets
             Target = Text(facets["entity"]),
             Default = LiteralText(facets["default"]),
             Values = facets["values"] is JsonArray values ? string.Join(", ", values.Select(Text)) : string.Empty,
+            Validation = Text(facets["validation"]),
             _declared = facets,
             _declaredType = type,
         };
@@ -241,7 +248,7 @@ internal sealed partial class FieldFacets
             FieldKind.Rollup => WriteRollup(facets),
             FieldKind.Computed => WriteComputed(facets),
             _ => WriteSupplied(facets),
-        } ?? RefuseWhatTheApplyRefuses(facets);
+        } ?? WriteValidation(facets) ?? RefuseWhatTheApplyRefuses(facets);
         return refusal is null ? facets : null;
     }
 
@@ -270,6 +277,10 @@ internal sealed partial class FieldFacets
         ClearFacetsOfOtherTypes(facets);
         return WriteTypeFacets(facets);
     }
+
+    /// <summary>Writes the typed validation in place, or removes it when the box is empty.</summary>
+    private string? WriteValidation(JsonObject facets)
+        => RefuseCelLength(Validation.Trim(), "A validation") ?? SetOrRemove(facets, "validation", Validation.Trim());
 
     /// <summary>Why the typed name cannot be used, or nothing.</summary>
     /// <remarks>
@@ -480,7 +491,7 @@ internal sealed partial class FieldFacets
 
     /// <summary>What the apply would still refuse about the built declaration, checked on the result itself.</summary>
     private string? RefuseWhatTheApplyRefuses(JsonObject facets)
-        => RefuseAKeptDefault(facets) ?? RefuseRequiredBesideReadOnly(facets) ?? RefuseAKeptFilter(facets);
+        => RefuseAKeptDefault(facets) ?? RefuseRequiredBesideReadOnly(facets);
 
     /// <summary>A kept default the apply refuses: <c>$cel</c> (<c>UnhonouredFeatures.cs:63</c>) or beside a maintained value (<c>FieldDefault.cs:88</c>).</summary>
     private string? RefuseAKeptDefault(JsonObject facets)

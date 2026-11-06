@@ -45,8 +45,8 @@ internal sealed partial class FieldFacets
     /// <summary>The child's ref it follows, when it has more than one here.</summary>
     public string RollupVia { get; set; } = string.Empty;
 
-    /// <summary>Whether a declared <c>rollup.where</c> — refused at apply — is dropped on save.</summary>
-    public bool RemoveRollupFilter { get; set; }
+    /// <summary>The rollup's <c>where</c> as typed — CEL over the child's own fields — or empty to aggregate every child.</summary>
+    public string RollupWhere { get; set; } = string.Empty;
 
     /// <summary>A computed field's CEL.</summary>
     public string Computed { get; set; } = string.Empty;
@@ -109,9 +109,6 @@ internal sealed partial class FieldFacets
             ? [.. ComputedTypes, _declaredType]
             : ComputedTypes;
 
-    /// <summary>Whether the declaration carries a <c>rollup.where</c>.</summary>
-    public bool DeclaresRollupFilter => DeclaredRollup?["where"] is not null;
-
     private JsonObject? DeclaredRollup => _declared["rollup"] as JsonObject;
 
     /// <summary>Whether the field was declared a rollup and still is one.</summary>
@@ -145,6 +142,7 @@ internal sealed partial class FieldFacets
             RollupOp = Text(rollup["op"]) is { Length: > 0 } op ? op : "count";
             RollupField = Text(rollup["field"]);
             RollupVia = Text(rollup["via"]);
+            RollupWhere = Text(rollup["where"]);
         }
         else if (facets["computed"] is JsonValue)
         {
@@ -161,6 +159,11 @@ internal sealed partial class FieldFacets
         if (RefuseRollup() is { } refusal)
         {
             return refusal;
+        }
+
+        if (RefuseCelLength(RollupWhere.Trim(), "A rollup filter") is { } tooLong)
+        {
+            return tooLong;
         }
 
         WriteRollupType(facets);
@@ -251,11 +254,7 @@ internal sealed partial class FieldFacets
         rollup["op"] = RollupOp;
         SetOrRemove(rollup, "field", RollupOp == "count" ? null : RollupField);
         SetOrRemove(rollup, "via", source.Via.Contains(RollupVia, StringComparer.Ordinal) ? RollupVia : null);
-
-        if (RemoveRollupFilter)
-        {
-            rollup.Remove("where");
-        }
+        SetOrRemove(rollup, "where", RollupWhere.Trim());
     }
 
     /// <summary>Writes a computed column: the expression and a chosen type.</summary>
@@ -281,10 +280,9 @@ internal sealed partial class FieldFacets
             return "A computed field needs its expression — CEL over this row's own fields, such as unit_price * amount.";
         }
 
-        if (expression.Length > CelMaxLength)
+        if (RefuseCelLength(expression, "A computed expression") is { } tooLong)
         {
-            return string.Create(
-                CultureInfo.InvariantCulture, $"A computed expression is at most {CelMaxLength} characters — the schema's limit for CEL.");
+            return tooLong;
         }
 
         return ComputedTypesOffered.Contains(Type)
@@ -292,20 +290,22 @@ internal sealed partial class FieldFacets
             : $"A computed value is stored as a generated column, offered here as {string.Join(", ", ComputedTypes.Select(Word))}.";
     }
 
-    /// <summary>A kept <c>rollup.where</c> is refused at apply (<c>RollupResolver.cs:107</c>).</summary>
-    private string? RefuseAKeptFilter(JsonObject facets)
-        => Kind == FieldKind.Rollup && facets["rollup"]?["where"] is not null
-            ? "Its rollup declares a 'where' filter, which this build refuses at apply (rollup.where). Tick \"Remove the declared filter\" to save the field."
+    /// <summary>The schema's limit for any CEL string, said of the box that broke it.</summary>
+    private static string? RefuseCelLength(string expression, string what)
+        => expression.Length > CelMaxLength
+            ? string.Create(CultureInfo.InvariantCulture, $"{what} is at most {CelMaxLength} characters — the schema's limit for CEL.")
             : null;
 
-    private static void SetOrRemove(JsonObject owner, string key, string? value)
+    /// <summary>Sets the key in place, or removes it when there is no value; answers no refusal, so it chains.</summary>
+    private static string? SetOrRemove(JsonObject owner, string key, string? value)
     {
         if (value is { Length: > 0 })
         {
             owner[key] = value;
-            return;
+            return null;
         }
 
         owner.Remove(key);
+        return null;
     }
 }
