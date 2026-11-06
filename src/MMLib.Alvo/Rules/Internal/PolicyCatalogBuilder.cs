@@ -242,7 +242,7 @@ internal static class PolicyCatalogBuilder
     /// matches, so a rule written to admit admins admits nobody — or, negated, everybody.
     /// </summary>
     /// <remarks>
-    /// Deliberately a post-compile walk here rather than a check inside <see cref="ICelCompiler.Compile"/>:
+    /// Deliberately a post-compile walk here rather than a check inside <see cref="ICelCompiler.Compile(string, CelProfile, EntitySchema)"/>:
     /// the compiler judges one expression against one entity schema and has no role catalog. Declared
     /// roles are a project-level concern (the descriptor's <c>auth.roles</c> plus the built-ins), and the
     /// compiler is reachable from callers holding no descriptor at all.

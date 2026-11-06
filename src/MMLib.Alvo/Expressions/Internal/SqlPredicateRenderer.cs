@@ -67,6 +67,7 @@ internal sealed partial class SqlPredicateRenderer : IPredicateRenderer
         ArgumentNullException.ThrowIfNull(fields);
         RequirePredicateProfile(expression);
         RequireIdentifierPrefix(parameterPrefix);
+        RefuseRelations(expression);
 
         var bag = new ParameterBag(parameterPrefix);
         try
@@ -78,6 +79,19 @@ internal sealed partial class SqlPredicateRenderer : IPredicateRenderer
         catch (CelFunctionException failure) when (IsTemporalRangeError(failure))
         {
             return DeniedWhole(fields);
+        }
+    }
+
+    /// <summary>
+    /// Refuses a relation-bearing tree at the public entry point: a relation renders only through the driver's internal
+    /// member, with its related scope bound for one caller, never through a seam a third party may drive unbound.
+    /// </summary>
+    private static void RefuseRelations(CompiledExpression expression)
+    {
+        if (CelRewriter.HasRelation(expression.Root))
+        {
+            throw new NotSupportedException(
+                $"'{expression.Source}' reads a related entity; only the database driver renders a relation rule.");
         }
     }
 

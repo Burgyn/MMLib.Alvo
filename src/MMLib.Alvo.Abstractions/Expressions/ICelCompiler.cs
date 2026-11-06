@@ -20,4 +20,15 @@ public interface ICelCompiler
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="source"/> or <paramref name="entity"/> is <see langword="null"/>.</exception>
     CelCompilationResult Compile(string source, CelProfile profile, EntitySchema entity);
+
+    /// <summary>
+    /// Compiles a rule or lookup-check source that may read related rows through <paramref name="relations"/>. A
+    /// compiler that does not implement it ignores the catalog, so relation syntax stays refused: it fails closed.
+    /// </summary>
+    /// <param name="source">The CEL expression source.</param>
+    /// <param name="profile">Which slot of the descriptor <paramref name="source"/> was authored for.</param>
+    /// <param name="entity">The entity <paramref name="source"/> is checked against.</param>
+    /// <param name="relations">The relations the source may follow.</param>
+    internal CelCompilationResult Compile(string source, CelProfile profile, EntitySchema entity, CelRelationCatalog relations) =>
+        Compile(source, profile, entity);
 }

@@ -12,7 +12,18 @@
 /// <b>not</b> a <c>CompiledExpression</c> and must never be rendered to SQL; only a tree that has
 /// been through the checker (and, from there, the renderer) is safe to render.
 /// </remarks>
-public abstract record CelNode;
+public abstract record CelNode
+{
+    /// <summary>
+    /// The children of a node kind this assembly cannot name — the core's function call — for the internal relation
+    /// rewrite; every kind declared here is walked by name, so it answers empty.
+    /// </summary>
+    internal virtual IReadOnlyList<CelNode> ChildNodes => [];
+
+    /// <summary>This node rebuilt over its <see cref="ChildNodes"/>, each passed through <paramref name="rewrite"/>.</summary>
+    /// <param name="rewrite">The rewrite applied to each child.</param>
+    internal virtual CelNode RebuildChildren(Func<CelNode, CelNode> rewrite) => this;
+}
 
 /// <summary>A constant value. Valid in every profile.</summary>
 /// <param name="Type">The literal's runtime type.</param>

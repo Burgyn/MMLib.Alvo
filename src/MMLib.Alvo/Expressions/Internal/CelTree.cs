@@ -12,7 +12,7 @@ internal static class CelTree
     /// A node's direct children. Every known leaf kind is named explicitly, never matched by a
     /// wildcard, so a genuinely unrecognized node fails loudly instead of reporting an empty subtree;
     /// this can only be reached by a defect (a new <see cref="CelNode"/> case added without a case
-    /// here), never by any source string a caller passes to <see cref="ICelCompiler.Compile"/>.
+    /// here), never by any source string a caller passes to <see cref="ICelCompiler.Compile(string, CelProfile, Schema.EntitySchema)"/>.
     /// </summary>
     /// <param name="node">The node whose children to enumerate.</param>
     /// <exception cref="InvalidOperationException"><paramref name="node"/> is not a known node kind.</exception>
@@ -27,6 +27,12 @@ internal static class CelTree
         CelConditional conditional => [conditional.Condition, conditional.WhenTrue, conditional.WhenFalse],
         CelHas has => [has.Field],
         CelCall call => call.Arguments,
+        CelPath => [],
+        CelExistsMacro macro => [macro.Body],
+        CelHop hop => [hop.Field],
+        CelRelation relation => [relation.Body],
+        CelOuterFieldRef => [],
+        CelOuterHas outerHas => [outerHas.Field],
         _ => throw new InvalidOperationException(
             $"'{node.GetType().Name}' is not a known CEL node kind; its subtree cannot be walked."),
     };
@@ -85,4 +91,11 @@ internal sealed record CelCall(string Name, IReadOnlyList<CelNode> Arguments) : 
     /// keeps the interpreter and <c>BeforeHookRunner</c> free of any catalog or container dependency.
     /// </summary>
     public CelFunction? Function { get; init; }
+
+    /// <inheritdoc/>
+    internal override IReadOnlyList<CelNode> ChildNodes => Arguments;
+
+    /// <inheritdoc/>
+    internal override CelNode RebuildChildren(Func<CelNode, CelNode> rewrite) =>
+        this with { Arguments = [.. Arguments.Select(rewrite)] };
 }

@@ -264,7 +264,7 @@ internal sealed class RollupResolver(AlvoDescriptor descriptor)
             .Select(candidate => candidate.Key)];
 
     /// <summary>The references an author could have meant, for a refusal that is actionable rather than correct.</summary>
-    private static string Alternatives(string child, string parent, IReadOnlyList<string> candidates) =>
+    internal static string Alternatives(string child, string parent, IReadOnlyList<string> candidates) =>
         candidates.Count == 0
             ? $"'{child}' declares no reference to '{parent}' at all."
             : $"References from '{child}' to '{parent}': "
