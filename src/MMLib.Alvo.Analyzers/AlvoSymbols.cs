@@ -32,6 +32,8 @@ internal sealed class AlvoSymbols
     private readonly INamedTypeSymbol? _entityBuilder;
     private readonly INamedTypeSymbol? _typedEntityBuilder;
     private readonly INamedTypeSymbol? _session;
+    private readonly INamedTypeSymbol? _scheduler;
+    private readonly INamedTypeSymbol? _schedulerExtensions;
 
     private AlvoSymbols(Compilation compilation, ImmutableDictionary<INamedTypeSymbol, string> hooks)
     {
@@ -40,6 +42,8 @@ internal sealed class AlvoSymbols
         _entityBuilder = compilation.GetTypeByMetadataName("MMLib.Alvo.Extensions.AlvoEntityBuilder");
         _typedEntityBuilder = compilation.GetTypeByMetadataName("MMLib.Alvo.Extensions.AlvoEntityBuilder`1");
         _session = compilation.GetTypeByMetadataName("MMLib.Alvo.Data.IAlvoSession");
+        _scheduler = compilation.GetTypeByMetadataName("MMLib.Alvo.Scheduling.IAlvoScheduler");
+        _schedulerExtensions = compilation.GetTypeByMetadataName("MMLib.Alvo.Scheduling.AlvoSchedulerExtensions");
     }
 
     /// <summary>The symbols of <paramref name="compilation"/>, or <see langword="null"/> when it does not reference Alvo.</summary>
@@ -93,12 +97,22 @@ internal sealed class AlvoSymbols
         return null;
     }
 
-    /// <summary>Whether awaiting a call to <paramref name="method"/> is the write's own transaction, or the hook's own code.</summary>
+    /// <summary>Whether awaiting a call to <paramref name="method"/> is the write's own transaction, the scheduler (which joins it), or the hook's own code.</summary>
     internal bool IsTransactionCall(IMethodSymbol method, AnalysisScope scope) =>
         scope.IsOwnCode(method)
         || IsSession(method.ContainingType)
         || (method.IsExtensionMethod && method.Parameters.Length > 0 && IsSession(method.Parameters[0].Type))
-        || method.ContainingType?.ContainingNamespace?.ToDisplayString() == "MMLib.Alvo.Hooks";
+        || method.ContainingType?.ContainingNamespace?.ToDisplayString() == "MMLib.Alvo.Hooks"
+        || IsScheduler(method);
+
+    private bool IsScheduler(IMethodSymbol method) =>
+        (_schedulerExtensions is not null && Same(method.ContainingType?.OriginalDefinition, _schedulerExtensions))
+        || (_scheduler is not null && method.ContainingType is { } type
+            && (Same(type.OriginalDefinition, _scheduler) || ImplementsSchedulerMember(type, method)));
+
+    private bool ImplementsSchedulerMember(INamedTypeSymbol type, IMethodSymbol method) =>
+        type.AllInterfaces.Any(contract => Same(contract, _scheduler))
+        && _scheduler!.GetMembers().Any(member => Same(type.FindImplementationForInterfaceMember(member), method.OriginalDefinition));
 
     private bool IsSession(ITypeSymbol? type) =>
         _session is not null && type is not null

@@ -10,6 +10,9 @@ internal interface IAlvoFlowUnit
     /// <summary>Gets a value indicating whether the <c>TransactAsync</c> that opened the unit has not returned yet.</summary>
     bool IsOpen { get; }
 
+    /// <summary>Gets the caller who opened the unit, whose tenant a timer armed inside it belongs to.</summary>
+    AlvoContext Caller { get; }
+
     /// <summary>Fails the unit: it will roll back however its delegate ends, and its commit throws <paramref name="failure"/>.</summary>
     /// <param name="failure">The first failure that makes the unit's work untrustworthy.</param>
     void Poison(Exception failure);

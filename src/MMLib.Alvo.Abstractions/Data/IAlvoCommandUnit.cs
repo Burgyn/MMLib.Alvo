@@ -10,7 +10,7 @@ namespace MMLib.Alvo.Data;
 internal interface IAlvoCommandUnit
 {
     /// <summary>Appends a framework event to the outbox in the unit's transaction.</summary>
-    Task PublishFrameworkAsync(AlvoEvent @event, CancellationToken cancellationToken);
+    Task PublishFrameworkAsync(AlvoFrameworkEnvelope @event, CancellationToken cancellationToken);
 
     /// <summary>
     /// Marks <paramref name="key"/> committed in the unit's transaction, only while the run holds its claim

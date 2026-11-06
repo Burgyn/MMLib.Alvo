@@ -89,6 +89,8 @@ public sealed class WriteGateUnitRefusalTests
 
         public bool IsOpen => true;
 
+        public AlvoContext Caller { get; } = AlvoContext.System(null);
+
         internal IReadOnlyList<Exception> Poisoned => _poisoned;
 
         public void Poison(Exception failure) => _poisoned.Add(failure);

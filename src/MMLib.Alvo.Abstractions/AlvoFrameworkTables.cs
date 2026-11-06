@@ -96,6 +96,15 @@ internal static class AlvoFrameworkTables
     /// <summary>The suffix of the table holding per-role claims.</summary>
     internal const string IdentityRoleClaimsSuffix = "_identity_role_claims";
 
+    /// <summary>The suffix of the table holding one row per armed timer.</summary>
+    internal const string TimersSuffix = "_timers";
+
+    /// <summary>The suffix of the table holding one row per registered cron schedule.</summary>
+    internal const string SchedulesSuffix = "_schedules";
+
+    /// <summary>The suffix of the table holding one row per started data migration.</summary>
+    internal const string DataMigrationsSuffix = "_data_migrations";
+
     /// <summary>
     /// Every table <c>MMLib.Alvo.Identity</c> owns, reserved here whether or not that package is
     /// installed.
@@ -143,6 +152,9 @@ internal static class AlvoFrameworkTables
             schemaPrefix + InboundWebhooksSuffix,
             schemaPrefix + HookRejectionsSuffix,
             schemaPrefix + SequencesSuffix,
+            schemaPrefix + TimersSuffix,
+            schemaPrefix + SchedulesSuffix,
+            schemaPrefix + DataMigrationsSuffix,
             .. IdentitySuffixes.Select(suffix => schemaPrefix + suffix),
         ];
     }

@@ -63,7 +63,7 @@ internal sealed class EfCoreCommandLedger : ICommandLedger
 
     /// <inheritdoc/>
     public Task CompleteAsync(
-        AlvoEvent completion, CommandKey? key, CommandAnswer? answer, DateTimeOffset now, CancellationToken cancellationToken)
+        AlvoFrameworkEnvelope completion, CommandKey? key, CommandAnswer? answer, DateTimeOffset now, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(completion);
         if (key is not null)
@@ -74,7 +74,7 @@ internal sealed class EfCoreCommandLedger : ICommandLedger
         return InTransactionAsync(
             async (connection, transaction, ct) =>
             {
-                await OutboxTable.InsertAsync(connection, transaction, _outbox, completion, ct).ConfigureAwait(false);
+                await OutboxTable.InsertAsync(connection, transaction, _outbox, completion.Envelope, ct).ConfigureAwait(false);
                 await CommittedAsync(connection, transaction, key, answer, now, ct).ConfigureAwait(false);
                 return true;
             },
