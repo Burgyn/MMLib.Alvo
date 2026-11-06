@@ -17,7 +17,12 @@ internal sealed class RowShaping(EntitySchema schema, AlvoRecord row, Func<Forma
 {
     private readonly Dictionary<string, object?> _values = new(row.Values, StringComparer.Ordinal);
 
+    private readonly IReadOnlySet<string> _framework = AlvoManagedColumns.For(schema);
+
     internal string Entity => schema.Name;
+
+    /// <summary>Gets the reason of the first move refused on this row — kept even when host code caught the refusal, so it still fails the read.</summary>
+    internal string? Refusal { get; private set; }
 
     /// <summary>The row so far as <typeparamref name="T"/>; a mapped property whose field the row lacks reads its default.</summary>
     internal T As<T>()
@@ -30,9 +35,9 @@ internal sealed class RowShaping(EntitySchema schema, AlvoRecord row, Func<Forma
     /// <exception cref="ReadShapingRefusal"><paramref name="field"/> is a framework column.</exception>
     internal void Hide(string field)
     {
-        if (AlvoManagedColumns.For(schema).Contains(field))
+        if (_framework.Contains(field))
         {
-            throw new ReadShapingRefusal(HookFailedException.InvalidHide);
+            throw Refused(HookFailedException.InvalidHide);
         }
 
         _values.Remove(field);
@@ -46,13 +51,19 @@ internal sealed class RowShaping(EntitySchema schema, AlvoRecord row, Func<Forma
         var (fits, held) = declared is { IsVirtual: true } ? Converted(declared, value) : (false, null);
         if (!fits)
         {
-            throw new ReadShapingRefusal(HookFailedException.InvalidSet);
+            throw Refused(HookFailedException.InvalidSet);
         }
 
         if (_values.ContainsKey(field))
         {
             _values[field] = held;
         }
+    }
+
+    private ReadShapingRefusal Refused(string reason)
+    {
+        Refusal ??= reason;
+        return new ReadShapingRefusal(reason);
     }
 
     internal AlvoRecord ToRecord() => new(new Dictionary<string, object?>(_values, StringComparer.Ordinal));

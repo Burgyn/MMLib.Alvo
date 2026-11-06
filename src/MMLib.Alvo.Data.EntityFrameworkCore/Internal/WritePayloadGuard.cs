@@ -49,11 +49,16 @@ internal static class WritePayloadGuard
     /// <param name="entity">The entity being written, or <see langword="null"/> when the applied schema does not declare it.</param>
     /// <param name="decision">The verdict <see cref="IPolicyEngine"/> returned for this caller.</param>
     /// <param name="isUpdate">Whether this is an update rather than a create.</param>
+    /// <param name="hidden">
+    /// The fields the caller may not know of, when it is wider than <paramref name="decision"/>'s — a replace judges a
+    /// virtual field against both of its branches at once.
+    /// </param>
     /// <exception cref="AlvoAuthorizationException">A key is undeclared, framework-managed or read-only.</exception>
     internal static void EnsureWritable(
-        IReadOnlyDictionary<string, object?> values, EntitySchema? entity, PolicyDecision decision, bool isUpdate)
+        IReadOnlyDictionary<string, object?> values, EntitySchema? entity, PolicyDecision decision, bool isUpdate,
+        IReadOnlySet<string>? hidden = null)
     {
-        if (PayloadRefusal(values, entity, decision, isUpdate) is { } reason)
+        if (PayloadRefusal(values, entity, decision, isUpdate, hidden) is { } reason)
         {
             throw new AlvoAuthorizationException(reason);
         }
@@ -80,8 +85,10 @@ internal static class WritePayloadGuard
     /// <param name="entity">The entity being written, or <see langword="null"/> when the applied schema does not declare it.</param>
     /// <param name="decision">The verdict <see cref="IPolicyEngine"/> returned for this caller.</param>
     /// <param name="isUpdate">Whether this is an update rather than a create.</param>
+    /// <param name="hidden">The fields the caller may not know of; <paramref name="decision"/>'s own when <see langword="null"/>.</param>
     internal static string? PayloadRefusal(
-        IReadOnlyDictionary<string, object?> values, EntitySchema? entity, PolicyDecision decision, bool isUpdate)
+        IReadOnlyDictionary<string, object?> values, EntitySchema? entity, PolicyDecision decision, bool isUpdate,
+        IReadOnlySet<string>? hidden = null)
     {
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(decision);
@@ -98,7 +105,7 @@ internal static class WritePayloadGuard
         return ManagedColumnRefusal(values, entity, isUpdate)
             ?? ComputedRefusal(values, entity)
             ?? RollupRefusal(values, entity)
-            ?? VirtualFieldWrites.Refusal(values, entity, decision.HiddenFields)
+            ?? VirtualFieldWrites.Refusal(values, entity, hidden ?? decision.HiddenFields)
             ?? ReadOnlyRefusal(values, decision.ReadOnlyFields);
     }
 

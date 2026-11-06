@@ -11,7 +11,7 @@ internal static class AlvoFrameworkEvent
 {
     private const string PartitionMarker = "framework.event";
 
-    /// <summary>Builds a framework event stamped with <paramref name="context"/>'s identity and effective provenance.</summary>
+    /// <summary>Builds a framework event, wrapped so only a port that takes framework events can append it, stamped with <paramref name="context"/>'s identity and effective provenance.</summary>
     /// <param name="type">The event type, in the <c>alvo.</c> namespace.</param>
     /// <param name="subject">What it is about.</param>
     /// <param name="data">The flat payload.</param>
@@ -20,7 +20,7 @@ internal static class AlvoFrameworkEvent
     /// <exception cref="ArgumentException">
     /// <paramref name="type"/> is not a well-formed <c>alvo.</c> name, or the payload cannot be written.
     /// </exception>
-    internal static AlvoEvent Create(
+    internal static AlvoFrameworkEnvelope Create(
         string type, string subject, IReadOnlyDictionary<string, object?> data, AlvoContext context, DateTimeOffset now)
     {
         EnsureFramework(type);
@@ -32,7 +32,7 @@ internal static class AlvoFrameworkEvent
         var id = AlvoEventId.Create(now);
         var stamp = AlvoEnvelopeStamp.Of(context, id, context.Tenant);
 
-        return stamp.Onto(new AlvoEvent
+        return new AlvoFrameworkEnvelope(stamp.Onto(new AlvoEvent
         {
             Id = id,
             Source = AlvoEvent.DefaultSource,
@@ -43,7 +43,7 @@ internal static class AlvoFrameworkEvent
             AuthType = stamp.AuthType,
             CorrelationId = stamp.CorrelationId,
             Data = new AlvoEventData { Record = new AlvoRecord(data) },
-        });
+        }));
     }
 
     private static void EnsureFramework(string type)

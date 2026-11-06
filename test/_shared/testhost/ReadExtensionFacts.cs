@@ -436,6 +436,46 @@ public abstract class ReadExtensionFacts
     }
 
     [Fact]
+    public async Task Every_echo_is_enriched_with_its_write_s_operation()
+    {
+        var seen = new ConcurrentQueue<DataOperation>();
+        await using var alvo = await StartAsync(await DatabaseAsync(), alvo => alvo.Entity(Notes, n => n.Enrich(
+            "operations", (Enrich<AlvoRecord> row) => seen.Enqueue(row.Operation))));
+        var clerk = Clerk();
+        var whole = Without(NoteValues(clerk, "whole", "north"), "tenant_id");
+        var key = new AlvoIdempotency("update-1", "fingerprint-1");
+
+        var id = (Guid)(await alvo.Data.CreateAsync(Notes, NoteValues(clerk, "a", "north"), clerk, cancellationToken: Ct))["id"]!;
+        await alvo.Data.UpdateAsync(Notes, id, new Dictionary<string, object?> { ["title"] = "b" }, clerk, idempotency: key, cancellationToken: Ct);
+        await alvo.Data.UpdateAsync(Notes, id, new Dictionary<string, object?> { ["title"] = "b" }, clerk, idempotency: key, cancellationToken: Ct);
+        await alvo.Data.ReplaceAsync(Notes, id, whole, clerk, cancellationToken: Ct);
+        await alvo.Data.ReplaceAsync(Notes, Guid.NewGuid(), whole, clerk, cancellationToken: Ct);
+        await alvo.Data.UpdateManyAsync(Notes, [new AlvoRowPatch(id, new Dictionary<string, object?> { ["title"] = "c" })], clerk, cancellationToken: Ct);
+
+        seen.ShouldBe([DataOperation.Create, DataOperation.Update, DataOperation.Update, DataOperation.Update, DataOperation.Update, DataOperation.Update]);
+    }
+
+    [Fact]
+    public async Task A_write_whose_echo_enrichment_fails_is_rolled_back()
+    {
+        await using var alvo = await StartAsync(await DatabaseAsync(), alvo => alvo.Entity(Notes, n => n.Enrich(
+            "echo-breaker", (Enrich<AlvoRecord> row) =>
+            {
+                if (row.Operation == DataOperation.Create)
+                {
+                    throw new InvalidOperationException("host bug");
+                }
+            })));
+        var clerk = Clerk();
+
+        var failure = await Should.ThrowAsync<InvalidOperationException>(() => alvo.Data.CreateAsync(Notes, NoteValues(clerk, "a", "north"), clerk, cancellationToken: Ct));
+
+        failure.Message.ShouldBe("The read extension 'echo-breaker' failed (exception), so the read answered nothing.");
+        (await alvo.Data.QueryAsync(new AlvoQuery { Entity = Notes }, AlvoContext.System(clerk.Tenant), Ct)).Items.ShouldBeEmpty(
+            "the echo is read inside the write's transaction, so its failure rolls the write back");
+    }
+
+    [Fact]
     public async Task A_projected_read_is_enriched_without_bringing_back_unselected_fields()
     {
         await using var alvo = await StartAsync(await DatabaseAsync(), alvo => alvo.Entity(Notes, n => n.Enrich(

@@ -6,6 +6,8 @@ using MMLib.Alvo.Data;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 
+using System.Runtime.ExceptionServices;
+
 namespace MMLib.Alvo.Reads.Internal;
 
 /// <summary>
@@ -52,29 +54,51 @@ internal sealed class ReadEnrichment : IReadEnrichment
         return shaping.ToRecord();
     }
 
+    /// <summary>
+    /// Disposes every instance Alvo built and then the read's scope — each attempted even when an earlier one throws, so a
+    /// failing disposal never leaks the scope. A failure is the class enrichers' failure, as a narrowing's is.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
-        try
+        var owned = await DisposeOwnedAsync().ConfigureAwait(false);
+        var scope = await DisposeScopeAsync().ConfigureAwait(false);
+        switch (owned ?? scope)
         {
-            await DisposeClassesAsync().ConfigureAwait(false);
-        }
-        catch (Exception cause) when (cause is not OperationCanceledException)
-        {
-            throw ReadFailures.Failed(_logger, [.. _enrichers.Where(read => read.Invoker.IsClass).Select(read => read.Id)], HookFailedException.Exception, cause);
+            case null:
+                return;
+            case OperationCanceledException cancelled:
+                ExceptionDispatchInfo.Throw(cancelled);
+                return;
+            case { } cause:
+                throw ReadFailures.Failed(_logger, [.. _enrichers.Where(read => read.Invoker.IsClass).Select(read => read.Id)], HookFailedException.Exception, cause);
         }
     }
 
-    /// <summary>Every instance Alvo built, then the read's scope: a disposal that throws is the class enrichers' failure, as a narrowing's is.</summary>
-    private async ValueTask DisposeClassesAsync()
+    private async ValueTask<Exception?> DisposeOwnedAsync()
     {
+        Exception? first = null;
         foreach (var owned in _calls.Select(call => call?.Owned).OfType<object>())
         {
-            await DisposeOwnedAsync(owned).ConfigureAwait(false);
+            var failure = await GuardedAsync(() => DisposeOneAsync(owned)).ConfigureAwait(false);
+            first ??= failure;
         }
 
-        if (_scope is { } scope)
+        return first;
+    }
+
+    private async ValueTask<Exception?> DisposeScopeAsync() =>
+        _scope is { } scope ? await GuardedAsync(scope.DisposeAsync).ConfigureAwait(false) : null;
+
+    private static async ValueTask<Exception?> GuardedAsync(Func<ValueTask> dispose)
+    {
+        try
         {
-            await scope.DisposeAsync().ConfigureAwait(false);
+            await dispose().ConfigureAwait(false);
+            return null;
+        }
+        catch (Exception cause)
+        {
+            return cause;
         }
     }
 
@@ -89,6 +113,10 @@ internal sealed class ReadEnrichment : IReadEnrichment
         {
             var call = _calls[index] ??= enricher.Invoker.Enricher!(Services);
             call.Call(shaping, _caller, _operation);
+            if (shaping.Refusal is { } swallowed)
+            {
+                throw new ReadShapingRefusal(swallowed);
+            }
         }
         catch (ReadShapingRefusal refusal)
         {
@@ -100,7 +128,7 @@ internal sealed class ReadEnrichment : IReadEnrichment
         }
     }
 
-    private static async ValueTask DisposeOwnedAsync(object owned)
+    private static async ValueTask DisposeOneAsync(object owned)
     {
         if (owned is IAsyncDisposable asynchronous)
         {

@@ -1786,8 +1786,9 @@ internal sealed partial class EfAlvoData : IAlvoData
         AlvoPrecondition? precondition)
     {
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
-        WritePayloadGuard.EnsureWritable(values, schema, branches.Create, isUpdate: true);
-        WritePayloadGuard.EnsureWritable(values, schema, branches.Update, isUpdate: true);
+        var hidden = branches.Create.HiddenFields.Union(branches.Update.HiddenFields).ToHashSet(StringComparer.Ordinal);
+        WritePayloadGuard.EnsureWritable(values, schema, branches.Create, isUpdate: true, hidden);
+        WritePayloadGuard.EnsureWritable(values, schema, branches.Update, isUpdate: true, hidden);
         /* Asked about the row that will be stored, not the one that arrived: a field the caller omitted and
            the descriptor gives a default is supplied by the time anything writes it. Asking about the raw
            payload instead would refuse a create the defaults make valid; exempting defaulted fields inside

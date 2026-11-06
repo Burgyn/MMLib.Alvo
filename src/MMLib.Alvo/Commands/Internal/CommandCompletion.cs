@@ -10,7 +10,7 @@ namespace MMLib.Alvo.Commands.Internal;
 internal sealed class CommandCompletion(TimeProvider time)
 {
     /// <summary>The completion event of <paramref name="invocation"/>, minted now as its caller.</summary>
-    internal AlvoEvent EventOf(CommandInvocation invocation) => AlvoFrameworkEvent.Create(
+    internal AlvoFrameworkEnvelope EventOf(CommandInvocation invocation) => AlvoFrameworkEvent.Create(
         invocation.Command.EventType, invocation.Command.Subject(invocation.RowId), Payload(invocation), invocation.Caller, time.GetUtcNow());
 
     /// <summary>Writes the completion and the key's commit mark into <paramref name="unit"/>, as its last calls.</summary>

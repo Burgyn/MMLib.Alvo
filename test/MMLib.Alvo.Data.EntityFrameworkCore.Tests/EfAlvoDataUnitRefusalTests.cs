@@ -108,6 +108,8 @@ public sealed class EfAlvoDataUnitRefusalTests
 
         public bool IsOpen { get; set; } = true;
 
+        public AlvoContext Caller { get; } = AlvoContext.System(null);
+
         internal IReadOnlyList<Exception> Poisoned => _poisoned;
 
         public void Poison(Exception failure) => _poisoned.Add(failure);
