@@ -22,6 +22,7 @@ using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Migrations.Internal;
 using MMLib.Alvo.Reads.Internal;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Scheduling;
 using MMLib.Alvo.Secrets;
 using MMLib.Alvo.Secrets.Internal;
 
@@ -83,6 +84,7 @@ public static class AlvoServiceCollectionExtensions
         services.AddAlvoCommands();
         services.AddAlvoInboundWebhooks();
         services.AddAlvoEvents();
+        services.AddAlvoScheduling();
         services.AddAlvoApi();
 
         configure?.Invoke(builder);

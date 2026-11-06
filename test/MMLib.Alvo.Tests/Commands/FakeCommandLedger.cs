@@ -56,10 +56,10 @@ internal sealed class FakeCommandLedger : ICommandLedger
         return Task.CompletedTask;
     }
 
-    public Task CompleteAsync(AlvoEvent completion, CommandKey? key, CommandAnswer? answer, DateTimeOffset now, CancellationToken cancellationToken)
+    public Task CompleteAsync(AlvoFrameworkEnvelope completion, CommandKey? key, CommandAnswer? answer, DateTimeOffset now, CancellationToken cancellationToken)
     {
         Calls.Add("complete");
-        Completions.Add(completion);
+        Completions.Add(completion.Envelope);
         if (key is not null)
         {
             _rows[(key.Scope, key.Key)] = (key.Fingerprint, true, answer);
@@ -83,9 +83,9 @@ internal sealed class FakeCommandUnit(FakeCommandLedger ledger, AlvoContext cont
 
     public AlvoContext Context => context;
 
-    public Task PublishFrameworkAsync(AlvoEvent @event, CancellationToken cancellationToken)
+    public Task PublishFrameworkAsync(AlvoFrameworkEnvelope @event, CancellationToken cancellationToken)
     {
-        Published.Add(@event);
+        Published.Add(@event.Envelope);
         return Task.CompletedTask;
     }
 

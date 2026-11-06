@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Hosting;
 
 using MMLib.Alvo.Management;
+using MMLib.Alvo.Scheduling;
 
 namespace MMLib.Alvo.Events.Internal;
 
@@ -9,9 +10,10 @@ namespace MMLib.Alvo.Events.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A round is the outbox dispatcher's tick (claim, fan out, run the declarative actions) followed by the delivery
-/// dispatcher's (claim the lane heads now due, run them); HX-13 adds the timer and schedule steps. The public port and its
-/// result do not change; the steps' results are summed.
+/// A round is the timer pump's tick (fire the timers now due, appending their events), then the outbox dispatcher's (claim,
+/// fan out, run the declarative actions), then the delivery dispatcher's (claim the lane heads now due, run them) — so a
+/// timer that falls due fires and is delivered in one round. The public port and its result do not change; the steps'
+/// results are summed.
 /// </para>
 /// <para>
 /// The gate serialises rounds. A round called from inside a round — a subscriber that drains — is <b>refused</b> rather than
@@ -21,10 +23,11 @@ namespace MMLib.Alvo.Events.Internal;
 /// has ended, and a drain from there is refused although it would not wait: a false refusal, never a hang.
 /// </para>
 /// </remarks>
+/// <param name="timers">The timer pump, whose manual round fires the timers now due.</param>
 /// <param name="outbox">The outbox dispatcher, whose manual round checks the mode and the boot before it claims.</param>
 /// <param name="deliveries">The delivery dispatcher, whose manual round runs the handler deliveries now due.</param>
 /// <param name="lifetime">The host's lifetime, whose stopping token ends a round the way it ends the loop's.</param>
-internal sealed class EventPump(OutboxDispatcher outbox, DeliveryDispatcher deliveries, IHostApplicationLifetime lifetime)
+internal sealed class EventPump(TimerPump timers, OutboxDispatcher outbox, DeliveryDispatcher deliveries, IHostApplicationLifetime lifetime)
     : IAlvoEventPump, IDisposable
 {
     private readonly SemaphoreSlim _rounds = new(1, 1);
@@ -45,6 +48,7 @@ internal sealed class EventPump(OutboxDispatcher outbox, DeliveryDispatcher deli
     /// </remarks>
     public Task<AlvoDrainResult> DrainAsync(CancellationToken cancellationToken = default) =>
         InRoundAsync(async round => Sum(
+            await timers.ManualRoundAsync(round).ConfigureAwait(false),
             await outbox.ManualRoundAsync(round).ConfigureAwait(false),
             await deliveries.ManualRoundAsync(round).ConfigureAwait(false)), cancellationToken);
 
@@ -91,11 +95,11 @@ internal sealed class EventPump(OutboxDispatcher outbox, DeliveryDispatcher deli
         }
     }
 
-    private static AlvoDrainResult Sum(AlvoDrainResult first, AlvoDrainResult second) => new()
+    private static AlvoDrainResult Sum(params AlvoDrainResult[] steps) => new()
     {
-        Claimed = first.Claimed + second.Claimed,
-        Failed = first.Failed + second.Failed,
-        Subscribers = [.. first.Subscribers.Concat(second.Subscribers).Distinct(StringComparer.Ordinal)],
+        Claimed = steps.Sum(step => step.Claimed),
+        Failed = steps.Sum(step => step.Failed),
+        Subscribers = [.. steps.SelectMany(step => step.Subscribers).Distinct(StringComparer.Ordinal)],
     };
 
     private static InvalidOperationException ReEntered() => new(

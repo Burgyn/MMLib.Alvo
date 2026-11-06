@@ -1138,6 +1138,10 @@ namespace MMLib.Alvo.Events
         public static string CorrelationIdOf(System.Guid eventId) { }
         public static MMLib.Alvo.AlvoProvenance Effective(MMLib.Alvo.AlvoContext context) { }
     }
+    public sealed class AlvoFrameworkEnvelope
+    {
+        public MMLib.Alvo.Events.AlvoEvent Envelope { get; }
+    }
     public sealed class AlvoMailMessage : System.IEquatable<MMLib.Alvo.Events.AlvoMailMessage>
     {
         public AlvoMailMessage(string To, string Subject, string Body) { }
@@ -2104,6 +2108,89 @@ namespace MMLib.Alvo.Rules
         public MMLib.Alvo.Data.AlvoRecord? Saved { get; init; }
         public System.IServiceProvider? Services { get; init; }
         public MMLib.Alvo.Data.IAlvoTransaction? Transaction { get; init; }
+    }
+}
+namespace MMLib.Alvo.Scheduling
+{
+    public sealed class ClaimedSchedule : System.IEquatable<MMLib.Alvo.Scheduling.ClaimedSchedule>
+    {
+        public ClaimedSchedule() { }
+        public required string Id { get; init; }
+        public required System.DateTimeOffset ScheduledFor { get; init; }
+    }
+    public sealed class ClaimedTimer : System.IEquatable<MMLib.Alvo.Scheduling.ClaimedTimer>
+    {
+        public ClaimedTimer() { }
+        public required System.DateTimeOffset DueAt { get; init; }
+        public required System.Guid Generation { get; init; }
+        public required string Key { get; init; }
+        public required string MessageType { get; init; }
+        public required string Payload { get; init; }
+        public required string Provenance { get; init; }
+        public required string Scope { get; init; }
+    }
+    public interface IAlvoScheduler
+    {
+        System.Threading.Tasks.Task<bool> CancelAsync(string key, MMLib.Alvo.TenantId? tenant = default, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task ScheduleAsync(string key, System.DateTimeOffset at, string eventType, System.Collections.Generic.IReadOnlyDictionary<string, object?>? data, MMLib.Alvo.TenantId? tenant = default, System.Threading.CancellationToken cancellationToken = default);
+    }
+    public interface ITimerStore
+    {
+        System.Threading.Tasks.Task<bool> AdvanceScheduleAsync(MMLib.Alvo.Scheduling.ScheduleAdvance advance, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task AppendRunAsync(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.AlvoFrameworkEnvelope> events, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<bool> CancelAsync(string scope, string key, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<bool> CancelAsync(string scope, string key, System.Guid generation, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.ClaimedSchedule>> ClaimSchedulesAsync(string claimant, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.ClaimedTimer>> ClaimTimersAsync(int batchSize, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Scheduling.TimerCounts> CountTimersAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task EnsureAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<bool> FireAsync(string scope, string key, System.Guid generation, MMLib.Alvo.Events.AlvoCustomEvent customEvent, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.StoredSchedule>> SchedulesAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<bool> StartMigrationAsync(string id, int revision, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.AlvoFrameworkEnvelope> events, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> StartedMigrationsAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task SyncSchedulesAsync(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.ScheduleDefinition> schedules, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Guid> UpsertAsync(MMLib.Alvo.Scheduling.TimerEntry timer, System.Threading.CancellationToken cancellationToken = default);
+    }
+    public sealed class ScheduleAdvance : System.IEquatable<MMLib.Alvo.Scheduling.ScheduleAdvance>
+    {
+        public ScheduleAdvance() { }
+        public required string Claimant { get; init; }
+        public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.AlvoFrameworkEnvelope> Events { get; init; }
+        public required string Id { get; init; }
+        public required System.DateTimeOffset NextRunAt { get; init; }
+        public required System.DateTimeOffset ScheduledFor { get; init; }
+    }
+    public sealed class ScheduleDefinition : System.IEquatable<MMLib.Alvo.Scheduling.ScheduleDefinition>
+    {
+        public ScheduleDefinition() { }
+        public required string Cron { get; init; }
+        public required string Id { get; init; }
+        public required System.DateTimeOffset NextRunAt { get; init; }
+        public required string TimeZone { get; init; }
+    }
+    public sealed class StoredSchedule : System.IEquatable<MMLib.Alvo.Scheduling.StoredSchedule>
+    {
+        public StoredSchedule() { }
+        public required string Cron { get; init; }
+        public required string Id { get; init; }
+        public System.DateTimeOffset? LastRunAt { get; init; }
+        public required System.DateTimeOffset NextRunAt { get; init; }
+        public required string TimeZone { get; init; }
+    }
+    public sealed class TimerCounts : System.IEquatable<MMLib.Alvo.Scheduling.TimerCounts>
+    {
+        public TimerCounts() { }
+        public required int Due { get; init; }
+        public required int Pending { get; init; }
+    }
+    public sealed class TimerEntry
+    {
+        public System.DateTimeOffset DueAt { get; }
+        public string Key { get; }
+        public string MessageType { get; }
+        public string Payload { get; }
+        public string Provenance { get; }
+        public string Scope { get; }
     }
 }
 namespace MMLib.Alvo.Schema

@@ -31,6 +31,7 @@
     <PackageReference Include="Testcontainers.PostgreSql" />
     <PackageReference Include="Verify.XunitV3" />
     <PackageReference Include="CsCheck" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
   </ItemGroup>
 
   <!-- Only the path-derivation module initializer from test/_shared — this project opts out of
@@ -60,6 +61,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/AlvoDataBeforeHookWorld.cs" Link="_shared/AlvoDataBeforeHookWorld.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/OutboxStoreWorld.cs" Link="_shared/OutboxStoreWorld.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/DeliveryStoreWorld.cs" Link="_shared/DeliveryStoreWorld.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/TimerStoreWorld.cs" Link="_shared/TimerStoreWorld.cs" />
   </ItemGroup>
 
   <!-- The world the two event acceptance criteria run over, shared with MMLib.Alvo.Data.Sqlite.Tests — see the
