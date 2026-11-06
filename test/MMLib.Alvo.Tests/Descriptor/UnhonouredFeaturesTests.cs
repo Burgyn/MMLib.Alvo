@@ -43,7 +43,7 @@ namespace MMLib.Alvo.Tests.Descriptor;
 public class UnhonouredFeaturesTests
 {
     /// <summary>The action types the frozen <c>$defs/action</c> declares and this build never runs.</summary>
-    private static readonly string[] _unrunnableActionTypes = ["function", "http.call", "entity.update"];
+    private static readonly string[] _unrunnableActionTypes = ["http.call"];
 
     [Fact]
     public Task Both_unhonoured_tables_are_pinned()

@@ -47,6 +47,7 @@ namespace MMLib.Alvo.Descriptor.Internal;
 internal sealed class DescriptorValidator : IDescriptorValidator
 {
     private readonly ICelCompiler _compiler;
+    private readonly DescriptorHost _host;
     private readonly IReadOnlySet<string> _frameworkTableNames;
 
     /// <summary>
@@ -84,9 +85,24 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     /// <param name="compiler">The CEL compiler every rule and field flag is compiled through.</param>
     /// <param name="options">Supplies the validated <see cref="AlvoOptions.SchemaPrefix"/> the framework tables are named from.</param>
     public DescriptorValidator(ICelCompiler compiler, IOptions<AlvoOptions> options)
+        : this(compiler, options, DescriptorHost.Empty)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DescriptorValidator"/> class whose <c>function</c> and
+    /// <c>entity.update</c> actions compile against <paramref name="host"/> — the instance the container builds.
+    /// </summary>
+    /// <param name="compiler">The CEL compiler every rule and field flag is compiled through.</param>
+    /// <param name="options">Supplies the validated <see cref="AlvoOptions.SchemaPrefix"/>.</param>
+    /// <param name="host">The functions and services the host registers.</param>
+    internal DescriptorValidator(ICelCompiler compiler, IOptions<AlvoOptions> options, DescriptorHost host)
     {
         ArgumentNullException.ThrowIfNull(compiler);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(host);
+
+        _host = host;
 
         _compiler = compiler;
         _frameworkTableNames =
@@ -245,7 +261,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
 
     private List<DescriptorValidationError> CompiledErrors(AlvoDescriptor descriptor, SchemaModel schema)
     {
-        var errors = PolicyCatalog.TryBuild(descriptor, schema, _compiler, out _, out var ruleErrors)
+        var errors = PolicyCatalog.TryBuild(descriptor, schema, _compiler, _host, out _, out var ruleErrors)
             ? []
             : ruleErrors.ToList();
         errors.AddRange(ComputedFieldCheck.Errors(schema, _compiler));

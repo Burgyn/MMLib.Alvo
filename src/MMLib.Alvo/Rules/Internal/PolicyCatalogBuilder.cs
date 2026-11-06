@@ -21,6 +21,7 @@ internal static class PolicyCatalogBuilder
     /// <param name="descriptor">The project descriptor whose <c>rules</c>/<c>hidden</c>/<c>readOnly</c> are compiled.</param>
     /// <param name="schema">The schema <paramref name="descriptor"/> maps to; the authoritative set of entities to compile.</param>
     /// <param name="compiler">The CEL compiler every rule and field flag is compiled through.</param>
+    /// <param name="host">The functions and services the host registers, which the actions compile against.</param>
     /// <param name="catalog">The built catalog, when every rule compiled; otherwise <see langword="null"/>.</param>
     /// <param name="errors">Every compilation problem found; empty on success.</param>
     /// <returns><see langword="true"/> when every rule, tenant scope, and field flag compiled.</returns>
@@ -28,15 +29,17 @@ internal static class PolicyCatalogBuilder
         AlvoDescriptor descriptor,
         SchemaModel schema,
         ICelCompiler compiler,
+        DescriptorHost host,
         out PolicyCatalog? catalog,
         out IReadOnlyList<DescriptorValidationError> errors)
     {
-        var errorList = new List<DescriptorValidationError>();
+        var errorList = new List<DescriptorValidationError>(AmbiguousFunctions(descriptor, host));
         var roles = RoleCatalog.FromDescriptor(descriptor);
         var entities = new Dictionary<string, EntityPolicy>(StringComparer.Ordinal);
         var references = new ProjectReferences(
             descriptor.Templates ?? _emptyTemplates,
-            descriptor.Webhooks?.Endpoints ?? _emptyEndpoints);
+            descriptor.Webhooks?.Endpoints ?? _emptyEndpoints,
+            new ActionHost(host, descriptor, schema));
 
         foreach (var entitySchema in schema.Entities)
         {
@@ -87,9 +90,25 @@ internal static class PolicyCatalogBuilder
     /// </summary>
     /// <param name="Templates">The descriptor's <c>templates</c>, or empty when it declares none.</param>
     /// <param name="Endpoints">The descriptor's <c>webhooks.endpoints</c>, or empty when it declares none.</param>
+    /// <param name="Host">What a <c>function</c> or <c>entity.update</c> action resolves against.</param>
     private sealed record ProjectReferences(
         IReadOnlyDictionary<string, MessageTemplate> Templates,
-        IReadOnlyDictionary<string, WebhookEndpoint> Endpoints);
+        IReadOnlyDictionary<string, WebhookEndpoint> Endpoints,
+        ActionHost Host);
+
+    /// <summary>
+    /// A name both registered as a host function and declared under <c>functions</c>: a <c>function</c> action naming it
+    /// could mean either, so it is refused once per name, at the <c>functions</c> entry.
+    /// </summary>
+    private static IEnumerable<DescriptorValidationError> AmbiguousFunctions(AlvoDescriptor descriptor, DescriptorHost host) =>
+        (descriptor.Functions?.Keys ?? [])
+            .Where(host.Functions.ContainsKey)
+            .Order(StringComparer.Ordinal)
+            .Select(name => new DescriptorValidationError(
+                $"/functions/{name}",
+                $"'{name}' is both a host function and a 'functions' entry, so a 'function' action naming it would be ambiguous.",
+                "Rename the 'functions' entry, or remove it.",
+                DescriptorValidationSeverity.Error));
 
     private static readonly Dictionary<string, MessageTemplate> _emptyTemplates = new(StringComparer.Ordinal);
 
@@ -134,7 +153,10 @@ internal static class PolicyCatalogBuilder
                 build.References.Templates,
                 build.References.Endpoints,
                 build.Path,
-                build.Errors));
+                build.Errors)
+            {
+                Host = build.References.Host,
+            });
 
     /// <summary>
     /// Compiles the five nullable rule strings into the per-operation <c>USING</c>/<c>WITH CHECK</c>
@@ -338,7 +360,7 @@ internal static class PolicyCatalogBuilder
     /// </para>
     /// <para>
     /// <see cref="RowKeyField"/> stays, because this method is reachable without either of those passes:
-    /// <see cref="PolicyCatalog.TryBuild"/> takes a <see cref="SchemaModel"/> a host may have assembled itself,
+    /// <see cref="PolicyCatalog.TryBuild(AlvoDescriptor, SchemaModel, ICelCompiler, out PolicyCatalog?, out IReadOnlyList{DescriptorValidationError})"/> takes a <see cref="SchemaModel"/> a host may have assembled itself,
     /// which is the same reason <c>EfAlvoData.EnsureNotSoftDeleted</c> exists. It keeps the one refusal whose
     /// consequence is not a wrong column but a row that cannot materialise at all.
     /// </para>

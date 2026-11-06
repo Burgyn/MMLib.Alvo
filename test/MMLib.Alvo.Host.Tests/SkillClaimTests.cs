@@ -51,9 +51,7 @@ public sealed class SkillClaimTests
     /// </summary>
     private static readonly (string Type, string Hook)[] _refusedActions =
     [
-        ("function", """{"action": {"type": "function", "name": "invoice"}}"""),
         ("http.call", """{"action": {"type": "http.call", "url": "https://erp.example.com/rentals"}}"""),
-        ("entity.update", """{"action": {"type": "entity.update", "entity": "customers", "payload": {"notes": "x"}}}"""),
     ];
 
     public static TheoryData<int> Probes() => [.. Enumerable.Range(0, _probes.Length)];

@@ -56,6 +56,7 @@ public sealed class RuntimeSchemaService
     private readonly ICelCompiler _compiler;
     private readonly IPolicyCatalogProvider _policyCatalogProvider;
     private readonly ExtensionApplyGuard? _extensions;
+    private readonly DescriptorHost _host;
 
     /// <summary>Initializes a new instance of the <see cref="RuntimeSchemaService"/> class.</summary>
     /// <param name="validator">Validates untrusted descriptor JSON before it is parsed.</param>
@@ -87,11 +88,12 @@ public sealed class RuntimeSchemaService
     /// Refuses a descriptor that would unbind a handler bound to the current catalog, and hands back the catalog it
     /// checked; <see langword="null"/> for a service a host builds itself, which then carries no guard.
     /// </param>
+    /// <param name="host">The functions and services the host registers, which a descriptor's actions compile against; <see langword="null"/> for none.</param>
     internal RuntimeSchemaService(
         IDescriptorValidator validator, ISchemaMigrator migrator,
         IDescriptorVersionStore store, IRuntimeSchemaWriter writer,
         ICelCompiler compiler, IPolicyCatalogProvider policyCatalogProvider,
-        ExtensionApplyGuard? extensions)
+        ExtensionApplyGuard? extensions, DescriptorHost? host = null)
     {
         ArgumentNullException.ThrowIfNull(validator);
         ArgumentNullException.ThrowIfNull(migrator);
@@ -106,6 +108,7 @@ public sealed class RuntimeSchemaService
         _compiler = compiler;
         _policyCatalogProvider = policyCatalogProvider;
         _extensions = extensions;
+        _host = host ?? DescriptorHost.Empty;
     }
 
     /// <summary>Validates, plans, guards, and atomically applies + versions a runtime descriptor change.</summary>
@@ -161,11 +164,11 @@ public sealed class RuntimeSchemaService
 
         if (IsUnchangedReapply(plan, current, descriptor))
         {
-            _policyCatalogProvider.SetCurrent(project, checkedCatalog ?? PolicyCatalog.Build(descriptor, desired, _compiler));
+            _policyCatalogProvider.SetCurrent(project, checkedCatalog ?? PolicyCatalog.Build(descriptor, desired, _compiler, _host));
             return current!;
         }
 
-        var catalog = checkedCatalog ?? PolicyCatalog.Build(descriptor, desired, _compiler);
+        var catalog = checkedCatalog ?? PolicyCatalog.Build(descriptor, desired, _compiler, _host);
         var candidate = new DescriptorVersion(desired, descriptorJson, 0, DateTimeOffset.UtcNow, options.Author, options.Reason);
         var applied = await _writer.ApplyAndAppendAsync(project, plan, candidate, expectedRevision, options, ct).ConfigureAwait(false);
         _policyCatalogProvider.SetCurrent(project, catalog);
@@ -296,7 +299,7 @@ public sealed class RuntimeSchemaService
         var plan = await _migrator.PlanAsync(currentVersion.Schema, target.Schema, options, ct).ConfigureAwait(false);
         Guard(project, plan, options);
 
-        var catalog = checkedCatalog ?? PolicyCatalog.Build(AlvoDescriptor.Parse(target.DescriptorJson), restored, _compiler);
+        var catalog = checkedCatalog ?? PolicyCatalog.Build(AlvoDescriptor.Parse(target.DescriptorJson), restored, _compiler, _host);
         var candidate = new DescriptorVersion(
             restored, target.DescriptorJson, 0, DateTimeOffset.UtcNow,
             options.Author, options.Reason ?? $"Rollback to revision {targetRevision}", RolledBackFrom: targetRevision);

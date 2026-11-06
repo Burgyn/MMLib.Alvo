@@ -80,19 +80,9 @@ export const CAPABILITIES = {
       "fix": "Move the body inline into the template's 'body' — it takes the same '{{...}}' placeholders — or stop referencing this template from an after-hook until bundle files are read."
     },
     {
-      "slot": "function",
-      "consequence": "The 'function' action is declared in the schema but not implemented in this build, so this hook invokes nothing — no function declared under 'functions' runs, on this hook or on any trigger or schedule it declares elsewhere.",
-      "fix": "Use a 'webhook' or 'email' action, which this build does run. Custom functions are an F4 concern and the schema freezes their shape ahead of the implementation."
-    },
-    {
       "slot": "http.call",
       "consequence": "The 'http.call' action is declared in the schema but not implemented in this build, so this hook makes no request: the URL is never called, and 'headersSecretRef' is never read, so a receiver you believe is being notified is not.",
       "fix": "Declare the target under 'webhooks.endpoints' and use a 'webhook' action instead — that is the managed path, and it is the one this build delivers on."
-    },
-    {
-      "slot": "entity.update",
-      "consequence": "The 'entity.update' action is declared in the schema but not implemented in this build, so this hook writes nothing — no record is written or patched on the target entity, and no event is emitted for the write that did not happen.",
-      "fix": "Perform the follow-up write through the Data API for now. 'entity.update' lands with automation, where the causation chain it creates can be bounded."
     }
   ],
   "routes": [

@@ -22,6 +22,7 @@ using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Migrations.Internal;
 using MMLib.Alvo.Reads.Internal;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Scheduling;
 using MMLib.Alvo.Secrets;
 using MMLib.Alvo.Secrets.Internal;
@@ -69,7 +70,10 @@ public static class AlvoServiceCollectionExtensions
         AddSecrets(services);
         AddAi(services);
 
-        services.TryAddSingleton<IDescriptorValidator, MMLib.Alvo.Descriptor.Internal.DescriptorValidator>();
+        services.TryAddSingleton<IDescriptorValidator>(provider => new MMLib.Alvo.Descriptor.Internal.DescriptorValidator(
+            provider.GetRequiredService<ICelCompiler>(),
+            provider.GetRequiredService<IOptions<AlvoOptions>>(),
+            provider.GetRequiredService<DescriptorHost>()));
         AddBootPlan(services);
         services.TryAddSingleton<SchemaMigrationRunner>();
         AddRuntimeSchemaService(services);
@@ -112,7 +116,8 @@ public static class AlvoServiceCollectionExtensions
             provider.GetRequiredService<IDescriptorValidator>(),
             provider.GetRequiredService<ICelCompiler>(),
             provider.GetRequiredService<ILogger<DescriptorBootPlan>>(),
-            provider.GetRequiredService<ExtensionBinder>()));
+            provider.GetRequiredService<ExtensionBinder>(),
+            provider.GetRequiredService<DescriptorHost>()));
 
     /// <summary>Registers the runtime apply path, guarded for the host's extensions.</summary>
     /// <remarks>
@@ -129,7 +134,8 @@ public static class AlvoServiceCollectionExtensions
             provider.GetRequiredService<IRuntimeSchemaWriter>(),
             provider.GetRequiredService<ICelCompiler>(),
             provider.GetRequiredService<IPolicyCatalogProvider>(),
-            provider.GetRequiredService<ExtensionApplyGuard>()));
+            provider.GetRequiredService<ExtensionApplyGuard>(),
+            provider.GetRequiredService<DescriptorHost>()));
 
     /// <summary>
     /// Registers the boot: the state a readiness probe reads, the hosted lifecycle service that fills it in

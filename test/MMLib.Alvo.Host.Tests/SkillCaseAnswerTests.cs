@@ -43,13 +43,13 @@ public sealed class SkillCaseAnswerTests
     }
 
     [Fact]
-    public async Task The_function_cases_wrong_answer_is_refused_as_unhonoured()
+    public async Task The_function_cases_wrong_answer_is_refused_as_an_unregistered_function()
     {
         var attempt = await AttemptAsync(SkillCaseAnswers.FunctionHook);
 
         attempt.Valid.ShouldBeFalse();
         attempt.Refusals.ShouldContain(
-            refusal => refusal.Contains(UnhonouredFeatures.UnhonouredAction("function").Consequence, StringComparison.Ordinal),
+            refusal => refusal.Contains("'invoice' is not a function this host registers.", StringComparison.Ordinal),
             string.Join(" | ", attempt.Refusals));
     }
 
