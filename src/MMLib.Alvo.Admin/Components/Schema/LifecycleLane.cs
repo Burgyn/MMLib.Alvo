@@ -62,9 +62,19 @@ internal static class LifecycleLane
     public static bool IsWriteHook(ManagementExtension extension) => extension.Kind is AlvoExtensionKind.Validate or AlvoExtensionKind.BeforeWrite
         or AlvoExtensionKind.AfterWrite or AlvoExtensionKind.BeforeDelete or AlvoExtensionKind.AfterDelete;
 
-    /// <summary>When, in a write, <paramref name="extension"/> runs, in two words.</summary>
+    /// <summary>The narrowings and enrichers the Reads lane draws for <paramref name="entity"/>.</summary>
+    public static IReadOnlyList<ManagementExtension> Reads(string entity, IReadOnlyList<ManagementExtension> extensions) =>
+        [.. Binding(entity, extensions).Where(extension => extension.Stage == AlvoExtensionStage.Read)];
+
+    /// <summary>Whether the Reads lane is drawn: only in a host that registers a read extension (Ruling 29's rule).</summary>
+    public static bool HasReads(IReadOnlyList<ManagementExtension> extensions) =>
+        extensions.Any(extension => extension.Stage == AlvoExtensionStage.Read);
+
+    /// <summary>When, in a write or a read, <paramref name="extension"/> runs, in two words.</summary>
     public static string StageLabel(ManagementExtension extension) => extension.Kind switch
     {
+        AlvoExtensionKind.Narrowing => "narrows reads",
+        AlvoExtensionKind.Enricher => "shapes reads",
         AlvoExtensionKind.Validate => "validate",
         AlvoExtensionKind.BeforeWrite => "before write",
         AlvoExtensionKind.AfterWrite => "after write",

@@ -25,6 +25,8 @@ Start with [Where logic goes](/extending/where-logic-goes/): the first question 
 - [Operate deliveries](/extending/operate-deliveries/) — history, pause, redeliver, replay and fixtures for your handlers.
 - [Validate and guard writes](/extending/write-hooks/) — C# in a write: validate before its transaction, guard and
   complete inside it, with the caller's rules applied to everything a hook does.
+- [Shape what reads return](/extending/reads/) — narrow which rows a caller reads, and hide a field or fill a virtual
+  one in every returned row, after the rules.
 - [Integrity in the descriptor](/extending/integrity/) — a field's `validation` as a `CHECK` the database enforces, a
   rollup that counts some children, and time with `now()` and durations.
 - [Rules over relations](/extending/relation-rules/) — a rule that follows a ref or reaches the records that point
