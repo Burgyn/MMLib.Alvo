@@ -67,7 +67,7 @@ public class RollupLockStatementTests
         => Statement(new UnlockableSqlDialect()).ShouldBeNull();
 
     private static string? Statement(IAlvoSqlDialect dialect) =>
-        new RollupRecompute(dialect, new TestFieldSqlRenderer()).LockStatement(Parent);
+        RollupRecomputes.For(dialect, new TestFieldSqlRenderer()).LockStatement(Parent);
 
     private static EntitySchema Parent => new()
     {

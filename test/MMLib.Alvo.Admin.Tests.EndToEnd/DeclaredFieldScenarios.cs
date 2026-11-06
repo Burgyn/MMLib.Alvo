@@ -43,42 +43,44 @@ public sealed class DeclaredFieldScenarios(AdminWorld world) : IClassFixture<Adm
 /// A staged field carrying a facet the build refuses says so on its Fields row, before it is opened (#269).
 /// </summary>
 /// <remarks>
-/// The field arrives through Import, which stages without applying: the field editor offers no <c>validation</c> box,
-/// because the build refuses it. Its own world, because the import replaces the operator's working copy.
+/// The field arrives through Import, which stages without applying: the field editor offers no box for a <c>$cel</c>
+/// default, because the build refuses it. Its own world, because the import replaces the operator's working copy.
 /// </remarks>
 /// <param name="world">The running host and browser.</param>
 public sealed class StagedFieldRefusalScenarios(AdminWorld world) : IClassFixture<AdminWorld>
 {
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task A_staged_field_with_validation_is_badged_refused_on_its_row()
+    public async Task A_staged_field_with_an_expression_default_is_badged_refused_on_its_row()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        await StageAsync(session, WithValidatedField());
+        await StageAsync(session, WithExpressionDefault());
 
         await session.GoAsync("/schema/regions");
-        await session.Page.GetByTestId("field-refused-slug-field.validation").WaitForAsync();
+        await session.Page.GetByTestId("field-refused-slug-field.default").WaitForAsync();
         (await session.Page.GetByTestId("field-row-name").InnerTextAsync()).ShouldNotContain("refused");
 
         session.AssertConsoleClean();
     }
 
     /// <summary>
-    /// The row's badge agrees with the build, form by form: the three forms the badge detects are the ones the real
-    /// host's dry run refuses, and the honoured neighbour of each is accepted and not badged.
+    /// The row's badge agrees with the build, form by form: the form the badge detects is one the real host's dry run
+    /// refuses, and each honoured form — a literal default, and since HX-11 a validation and a rollup filter — is
+    /// accepted and not badged.
     /// </summary>
     /// <remarks>
     /// <b>This is what pins <c>FieldBadges.Refused</c>'s detection to the core's</b>: the Admin cannot call
-    /// <c>ValueOrExpr.IsTaggedExpression</c> or <c>RollupResolver</c>, which are internal to the core, so it restates
-    /// them — and this asks the build itself, through Preview's dry run of the same staged field, whether each form is
-    /// refused. A core that starts accepting a form the row still badges, or refusing one it does not, fails here.
+    /// <c>ValueOrExpr.IsTaggedExpression</c>, which is internal to the core, so it restates it (since HX-11 that is the
+    /// only restatement: <c>rollup.where</c> left the carried slots) — and this asks the build itself, through Preview's
+    /// dry run of the same staged field, whether each form is refused. A core that starts accepting a form the row still
+    /// badges, or refusing one it does not, fails here.
     /// </remarks>
     /// <param name="declaration">The staged field's declaration.</param>
     /// <param name="slot">The slot the row badges, or empty when the build accepts it.</param>
     [Theory(Timeout = AdminWorld.ScenarioTimeout)]
-    [InlineData("""{"type":"string","validation":"size(this) > 2"}""", "field.validation")]
+    [InlineData("""{"type":"integer","validation":"value >= 0"}""", "")]
     [InlineData("""{"type":"string","default":{"$cel":"'x'"}}""", "field.default")]
     [InlineData("""{"type":"string","default":"x"}""", "")]
-    [InlineData("""{"type":"integer","rollup":{"from":"work_orders","op":"count","where":"priority > 1"}}""", "rollup.where")]
+    [InlineData("""{"type":"integer","rollup":{"from":"work_orders","op":"count","where":"priority > 1"}}""", "")]
     [InlineData("""{"type":"integer","rollup":{"from":"work_orders","op":"count"}}""", "")]
     public async Task The_row_badges_exactly_what_the_build_refuses(string declaration, string slot)
     {
@@ -126,9 +128,9 @@ public sealed class StagedFieldRefusalScenarios(AdminWorld world) : IClassFixtur
         await arrived;
     }
 
-    /// <summary>field-service with one more field on <c>regions</c>, which declares a <c>validation</c>.</summary>
-    private static string WithValidatedField()
-        => With("regions", "slug", new JsonObject { ["type"] = "string", ["validation"] = "size(this) > 2" });
+    /// <summary>field-service with one more field on <c>regions</c>, which declares a <c>$cel</c> default.</summary>
+    private static string WithExpressionDefault()
+        => With("regions", "slug", new JsonObject { ["type"] = "string", ["default"] = new JsonObject { ["$cel"] = "'x'" } });
 
     /// <summary>field-service with one more field on one entity.</summary>
     private static string With(string entity, string field, JsonObject declaration)

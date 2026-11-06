@@ -103,21 +103,19 @@ public class DescriptorToSchemaMapperTests
 
     /// <summary>
     /// The showcase's own <c>companies.open_deals</c> rollup filters the child records
-    /// (<c>stage in ['lead', 'offer']</c>), and this build does not evaluate that filter — so the whole
-    /// declaration is refused rather than silently counting <em>every</em> deal.
+    /// (<c>stage in ['lead', 'offer']</c>), and the mapper carries that filter into the applied schema rather than
+    /// dropping it — a count of open deals must never silently become a count of all deals (HX-11 Ruling 31).
     /// </summary>
     /// <remarks>
-    /// Asserted against the real showcase rather than a synthetic descriptor, because the value of this refusal
-    /// is precisely that a plausible, schema-valid, hand-authored rollup hits it: a count of open deals that
-    /// silently became a count of all deals is the failure mode the refusal exists for.
+    /// Whether the filter itself is one the recompute can carry is the validator's question (<c>RollupFilterCheck</c>),
+    /// not the mapper's.
     /// </remarks>
     [Fact]
-    public void Complex_crm_rollup_with_a_where_filter_is_refused()
+    public void Complex_crm_rollup_with_a_where_filter_carries_it()
     {
-        var ex = Should.Throw<InvalidDataException>(() => MapInline(ComplexCrmWithout("default")));
+        var model = MapInline(ComplexCrmWithout("default"));
 
-        ex.Message.ShouldContain("open_deals");
-        ex.Message.ShouldContain("aggregates every record");
+        FieldOf(model, "companies", "open_deals").Rollup!.Where.ShouldBe("stage in ['lead', 'offer']");
     }
 
     private static FieldSchema FieldOf(SchemaModel model, string entity, string field) =>

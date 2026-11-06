@@ -1,6 +1,8 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Schema;
+using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
@@ -66,6 +68,17 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// <see cref="EnsureTenancyDoesNotCross"/> for a schema that did not come through the mapper.
 /// </para>
 /// <para>
+/// <b>Why a <c>rollup.where</c> is ANDed into the subquery, unqualified and escaped</b> (HX-11 Ruling 31). The filter is
+/// the author's Rule-profile predicate over the child, rendered by <see cref="IPredicateRenderer.RenderConstraint"/> with its
+/// constants inline — the validator already refused a caller, a tenant, a role test or <c>now()</c> in it, so it reads the
+/// child row alone. Its columns are left unqualified on purpose: the compiler guarantees each one exists on the child, and
+/// the innermost scope binds first, so none can resolve to the parent's — the hazard <see cref="ChildTenantPredicate"/>
+/// qualifies against arises only for a column the child may lack. And because <c>ExecuteSqlRawAsync</c> formats the
+/// statement with its arguments, the rendered text goes through <see cref="RawSqlFormat.Escape"/>: a constant holding
+/// <c>{0}</c> is then matched literally instead of becoming the parent id. Recomputing from scratch is what makes a child
+/// that moves across the filter move the aggregate both ways.
+/// </para>
+/// <para>
 /// <b>What this does not claim.</b> Four gaps, all decisions rather than oversights, and all named here
 /// because each of them is a number that stays stale while looking like data:
 /// </para>
@@ -102,8 +115,22 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// </remarks>
 /// <param name="dialect">This driver's statement seam: the table source, the delimiters and the row lock.</param>
 /// <param name="fields">This driver's expression seam, for the aggregated column and its value repair.</param>
-internal sealed class RollupRecompute(IAlvoSqlDialect dialect, IFieldSqlRenderer fields)
+/// <param name="compiler">The compiler a rollup's <c>where</c> is compiled with, against the child.</param>
+/// <param name="predicates">The renderer that writes a compiled filter as SQL with its constants inline.</param>
+internal sealed class RollupRecompute(
+    IAlvoSqlDialect dialect, IFieldSqlRenderer fields, ICelCompiler compiler, IPredicateRenderer predicates)
 {
+    /// <summary>
+    /// Each rendered filter, keyed by the child's schema <b>instance</b> and the filter's source (HX-11 Ruling 70).
+    /// </summary>
+    /// <remarks>
+    /// Never by the child's name: the SQL depends on the child's field types — SQLite repairs a <c>decimal</c> comparison with
+    /// <c>CAST(… AS REAL)</c> and an <c>integer</c> one not at all — so a revision that changes a filtered field's type must
+    /// render afresh, or the old text compares a TEXT-stored decimal to a number and admits every child. A schema revision is
+    /// immutable, so one instance always renders the same SQL; the weak table lets a retired revision be collected.
+    /// </remarks>
+    private readonly ConditionalWeakTable<EntitySchema, ConcurrentDictionary<string, string>> _filters = new();
+
     /// <summary>
     /// Recomputes every rollup the images of one child row can have changed.
     /// </summary>
@@ -191,9 +218,13 @@ internal sealed class RollupRecompute(IAlvoSqlDialect dialect, IFieldSqlRenderer
     /// refused <em>again</em> here is that the alternative is silent: with only one side scoped, an
     /// unqualified <c>tenant_id</c> in the child aggregate would bind to the parent's column in the enclosing
     /// statement and the subquery would quietly aggregate <b>every</b> tenant's children, or the parent's
-    /// <c>UPDATE</c> would carry no tenant predicate at all and write another tenant's row.
+    /// <c>UPDATE</c> would carry no tenant predicate at all and write another tenant's row. The apply's
+    /// <see cref="RollupBackfill"/> calls it too, for the same reason and against the same schema.
     /// </remarks>
-    private static void EnsureTenancyDoesNotCross(EntitySchema parent, EntitySchema child)
+    /// <param name="parent">The entity declaring the rollup.</param>
+    /// <param name="child">The aggregated entity.</param>
+    /// <exception cref="InvalidOperationException">Exactly one of the two is tenant-scoped.</exception>
+    internal static void EnsureTenancyDoesNotCross(EntitySchema parent, EntitySchema child)
     {
         if ((parent.Tenancy == TenancyMode.Scoped) == (child.Tenancy == TenancyMode.Scoped))
         {
@@ -411,10 +442,37 @@ internal sealed class RollupRecompute(IAlvoSqlDialect dialect, IFieldSqlRenderer
     {
         var rollup = field.Rollup!;
         var fk = dialect.RenderColumn(rollup.Via);
-        var aggregate = Aggregate(child, rollup);
+        var aggregate = Aggregate(child, rollup, fields);
+        var filter = Filter(child, rollup) is { } where ? $" AND ({RawSqlFormat.Escape(where)})" : string.Empty;
 
         return $"{dialect.RenderColumn(field.Name)} = (SELECT {aggregate} FROM {Table(child)} "
-            + $"WHERE {fk} = {{0}}{ChildTenantPredicate(child)})";
+            + $"WHERE {fk} = {{0}}{ChildTenantPredicate(child)}{filter})";
+    }
+
+    /// <summary>
+    /// The rollup's <c>where</c> as SQL over the child row, unescaped, or <see langword="null"/> when it declares none.
+    /// </summary>
+    /// <remarks>
+    /// A filter that does not compile is an invariant violation, not a caller error: <c>RollupFilterCheck</c> refuses it when
+    /// the descriptor is saved, so only a schema that did not come through the validator reaches the throw — and dropping
+    /// the filter instead would aggregate every child, the silent wrong number the filter exists to prevent.
+    /// </remarks>
+    /// <param name="child">The child entity being aggregated.</param>
+    /// <param name="rollup">The rollup whose filter is rendered.</param>
+    internal string? Filter(EntitySchema child, RollupSchema rollup) =>
+        rollup.Where is { } where
+            ? _filters.GetValue(child, static _ => new(StringComparer.Ordinal)).GetOrAdd(where, source => Render(child, source))
+            : null;
+
+    private string Render(EntitySchema child, string where)
+    {
+        var compiled = compiler.Compile(where, CelProfile.Rule, child);
+        return compiled.IsSuccess
+            ? predicates.RenderConstraint(compiled.Expression!, fields)
+            : throw new InvalidOperationException(
+                $"A rollup over '{child.Name}' declares the filter '{where}', which does not compile against it: "
+                + $"{string.Join(" ", compiled.Errors.Select(error => error.Message))} The descriptor validator refuses this "
+                + "filter when the descriptor is saved, and this schema did not come through it.");
     }
 
     /// <summary>
@@ -450,10 +508,17 @@ internal sealed class RollupRecompute(IAlvoSqlDialect dialect, IFieldSqlRenderer
     /// <c>count</c> aggregates <em>rows</em>, so it takes no column and needs no repair — and it is
     /// <c>COUNT(*)</c> rather than <c>COUNT(&lt;fk&gt;)</c> so a nullable column can never make it undercount.
     /// The other four aggregate a value, and the repair is what stops <c>MIN</c>/<c>MAX</c> comparing a SQLite
-    /// <c>decimal</c> as text.
+    /// <c>decimal</c> as text. Static and <see langword="internal"/> so the apply-time backfill aggregates by this one rule.
     /// </remarks>
-    private string Aggregate(EntitySchema child, RollupSchema rollup)
+    /// <param name="child">The child entity being aggregated.</param>
+    /// <param name="rollup">The rollup whose aggregate is rendered.</param>
+    /// <param name="fields">The driver's field renderer, for the column and its value repair.</param>
+    internal static string Aggregate(EntitySchema child, RollupSchema rollup, IFieldSqlRenderer fields)
     {
+        ArgumentNullException.ThrowIfNull(child);
+        ArgumentNullException.ThrowIfNull(rollup);
+        ArgumentNullException.ThrowIfNull(fields);
+
         if (rollup.Op == RollupOperation.Count)
         {
             return "COUNT(*)";

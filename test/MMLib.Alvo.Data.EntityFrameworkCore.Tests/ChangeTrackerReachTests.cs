@@ -130,6 +130,9 @@ public class ChangeTrackerReachTests
     /// <c>MigrationFramingScope</c> runs the dialect's constant integrity query (<c>PRAGMA foreign_key_check</c>) inside
     /// a migration's transaction, binding and composing nothing;
     /// <c>SqliteCaseSensitiveLike</c> runs one connection pragma and can carry no row predicate at all;
+    /// <c>CheckViolationScan</c> counts, at plan time, the rows a constraint about to be added would refuse — a read whose
+    /// predicate is the constraint's own SQL, compiled from the descriptor with inline literals, over a delimited table
+    /// name, so it carries no caller input and answers only a number;
     /// <c>RollupRecompute</c> writes the parent's own aggregate columns from a subquery over the child table
     /// and narrows by the row id it read off the child row this caller was already authorised to write, so it
     /// composes no caller-influenced predicate and every identifier in it comes from the dialect;
@@ -227,6 +230,7 @@ public class ChangeTrackerReachTests
     /// <summary>The files permitted to compose SQL text or construct a <c>DbCommand</c> inside a data package.</summary>
     private static readonly string[] _sqlComposingFiles =
     [
+        "CheckViolationScan.cs",
         "CommandLedgerTable.cs",
         "DeliveryTable.cs",
         "EfAlvoData.cs",

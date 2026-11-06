@@ -80,4 +80,12 @@ public sealed class TestFieldSqlRenderer : IFieldSqlRenderer
         ArgumentNullException.ThrowIfNull(right);
         return $"({left} || {right})";
     }
+
+    /// <inheritdoc/>
+    /// <remarks>A neutral <c>EPOCH_US(x)</c>, so a golden reads the shape and the in-process evaluator can recognise it.</remarks>
+    string? IFieldSqlRenderer.RenderEpochMicroseconds(string timestampSql)
+    {
+        ArgumentNullException.ThrowIfNull(timestampSql);
+        return $"EPOCH_US({timestampSql})";
+    }
 }

@@ -48,5 +48,16 @@ public sealed class SqliteAlvoDataComputedRollupTests : AlvoDataComputedRollupTe
         return result;
     }
 
+    /// <inheritdoc/>
+    protected override Task<MigrationPlan> PlanAsync(SchemaModel current, SchemaModel desired) =>
+        _host!.Services.GetRequiredService<ISchemaMigrator>()
+            .PlanAsync(current, desired, new MigrationOptions(), TestContext.Current.CancellationToken);
+
+    /// <inheritdoc/>
+    protected override string DistinctOperator => "IS NOT";
+
+    /// <inheritdoc/>
+    protected override string? BackfillLock => null;
+
     public ValueTask DisposeAsync() => _fixture.DisposeAsync();
 }

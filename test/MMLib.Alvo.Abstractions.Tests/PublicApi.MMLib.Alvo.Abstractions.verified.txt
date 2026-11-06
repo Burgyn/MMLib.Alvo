@@ -394,6 +394,7 @@ namespace MMLib.Alvo.Data
     {
         Unique = 0,
         Referenced = 1,
+        Check = 2,
     }
     public sealed class AlvoConstraintViolationException : System.Exception
     {
@@ -1469,6 +1470,7 @@ namespace MMLib.Alvo.Expressions
         Json = 6,
         StringList = 7,
         Null = 8,
+        Duration = 9,
     }
     public sealed class CompiledExpression : System.IEquatable<MMLib.Alvo.Expressions.CompiledExpression>
     {
@@ -1493,6 +1495,7 @@ namespace MMLib.Alvo.Expressions
                 "Left",
                 "Right"})]
         System.ValueTuple<string, string> RenderComparableOperands(string left, string right, MMLib.Alvo.Expressions.CelValueType type);
+        string? RenderEpochMicroseconds(string timestampSql);
         string RenderField(MMLib.Alvo.Schema.EntitySchema entity, string fieldName);
         string RenderParameter(string parameterName);
         string RenderStringConcatenation(string left, string right);
@@ -2148,6 +2151,7 @@ namespace MMLib.Alvo.Schema
     public sealed class FieldSchema : System.IEquatable<MMLib.Alvo.Schema.FieldSchema>
     {
         public FieldSchema() { }
+        public string? CheckExpression { get; init; }
         public string? ComputedExpression { get; init; }
         public System.Text.Json.JsonElement? Default { get; init; }
         public string? Description { get; init; }
@@ -2222,6 +2226,7 @@ namespace MMLib.Alvo.Schema
         public required string From { get; init; }
         public required MMLib.Alvo.Schema.RollupOperation Op { get; init; }
         public required string Via { get; init; }
+        public string? Where { get; init; }
     }
     public sealed class SchemaModel : System.IEquatable<MMLib.Alvo.Schema.SchemaModel>
     {

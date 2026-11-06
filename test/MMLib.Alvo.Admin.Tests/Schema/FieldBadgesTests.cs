@@ -72,38 +72,42 @@ public class FieldBadgesTests
             .ShouldBe(["required", "hidden (conditional)", "readOnly", "max 12"]);
 
     /// <summary>
-    /// A staged field carrying a facet the build refuses says so on its row, not only in the editor (#269): the three
-    /// field slots, each detected in the form the apply refuses.
+    /// A staged field carrying a facet the build refuses says so on its row, not only in the editor (#269): a
+    /// <c>$cel</c> default, the one field slot left, detected in the form the apply refuses.
     /// </summary>
-    [Theory]
-    [InlineData("""{"type":"text","validation":"size(this) > 2"}""", "field.validation")]
-    [InlineData("""{"type":"text","default":{"$cel":"@user.id"}}""", "field.default")]
-    [InlineData("""{"type":"integer","rollup":{"from":"lines","op":"count","where":"x > 1"}}""", "rollup.where")]
-    public void A_refused_facet_is_found_on_the_row(string declaration, string slot)
-        => FieldBadges.Refused(Declared(declaration), _published).ShouldHaveSingleItem().Slot.ShouldBe(slot);
+    [Fact]
+    public void A_refused_facet_is_found_on_the_row()
+        => FieldBadges.Refused(Declared("""{"type":"text","default":{"$cel":"@user.id"}}"""), _published)
+            .ShouldHaveSingleItem().Slot.ShouldBe("field.default");
 
-    /// <summary>The form the build honours is not a refusal: a literal default, a rollup with no filter.</summary>
+    /// <summary>
+    /// The form the build honours is not a refusal: a literal default, and — since HX-11 — a validation and a rollup
+    /// filter, even should a build still publish their old slots.
+    /// </summary>
     [Theory]
     [InlineData("""{"type":"text","default":"x"}""")]
     [InlineData("""{"type":"integer","rollup":{"from":"lines","op":"count"}}""")]
-    [InlineData("""{"type":"text","validation":null}""")]
+    [InlineData("""{"type":"text","validation":"size(this) > 2"}""")]
+    [InlineData("""{"type":"integer","rollup":{"from":"lines","op":"count","where":"x > 1"}}""")]
     public void An_honoured_form_is_not_refused(string declaration)
-        => FieldBadges.Refused(Declared(declaration), _published).ShouldBeEmpty();
+        => FieldBadges.Refused(Declared(declaration), [.. _published, new("field.validation", "c", "f"), new("rollup.where", "c", "f")])
+            .ShouldBeEmpty();
 
-    /// <summary>
-    /// The build is the authority, slot by slot: with every other slot still published, the one it stopped publishing is
-    /// not badged — while the field's other refused facet still is.
-    /// </summary>
+    /// <summary>The build is the authority: a slot it stopped publishing is not badged, though the field carries it.</summary>
     [Fact]
     public void A_slot_the_build_does_not_publish_is_not_badged()
     {
-        var declared = Declared("""{"type":"text","validation":"size(this) > 2","default":{"$cel":"@user.id"}}""");
-        var withoutValidation = _published.Where(refusal => refusal.Slot != "field.validation").ToArray();
+        var declared = Declared("""{"type":"text","default":{"$cel":"@user.id"}}""");
 
-        FieldBadges.Refused(declared, _published).Select(refusal => refusal.Slot)
-            .ShouldBe(["field.validation", "field.default"]);
-        FieldBadges.Refused(declared, withoutValidation).ShouldHaveSingleItem().Slot.ShouldBe("field.default");
+        FieldBadges.Refused(declared, _published).ShouldHaveSingleItem().Slot.ShouldBe("field.default");
+        FieldBadges.Refused(declared, [.. _published.Where(refusal => refusal.Slot != "field.default")]).ShouldBeEmpty();
     }
+
+    /// <summary>A validation is a constraint the database enforces, so it is badged beside the other constraints.</summary>
+    [Fact]
+    public void A_validation_is_badged_as_a_constraint()
+        => FieldBadges.Of(new FieldSchema { Name = "stock", Type = FieldType.Integer, Required = true, CheckExpression = "value >= 0" })
+            .ShouldBe(["required", "validation"]);
 
     /// <summary>A published slot that belongs to another screen is not a Fields-row refusal, whatever it is called.</summary>
     [Fact]
@@ -116,8 +120,7 @@ public class FieldBadgesTests
 
     private static readonly ManagementRefusedFeature[] _published =
     [
-        new("field.validation", "c", "f"), new("field.default", "c", "f"), new("rollup.where", "c", "f"),
-        new("entity.softDelete", "c", "f"),
+        new("field.default", "c", "f"), new("entity.softDelete", "c", "f"),
     ];
 
     private static FieldSchema Text { get; } = new() { Name = "notes", Type = FieldType.Text, Nullable = true };

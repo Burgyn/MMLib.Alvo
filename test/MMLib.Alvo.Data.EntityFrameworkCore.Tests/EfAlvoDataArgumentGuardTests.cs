@@ -28,6 +28,7 @@ public class EfAlvoDataArgumentGuardTests : IDisposable
     [InlineData("predicates")]
     [InlineData("fields")]
     [InlineData("dialect")]
+    [InlineData("compiler")]
     [InlineData("contexts")]
     [InlineData("time")]
     [InlineData("options")]
@@ -89,6 +90,7 @@ public class EfAlvoDataArgumentGuardTests : IDisposable
         Unless<IPredicateRenderer>(nulled, "predicates"),
         nulled == "fields" ? null! : new TestFieldSqlRenderer(),
         nulled == "dialect" ? null! : new TestSqlDialect(),
+        Unless<ICelCompiler>(nulled, "compiler"),
         nulled == "contexts" ? null! : Contexts(),
         nulled == "time" ? null! : TimeProvider.System,
         nulled == "options" ? null! : new AlvoOptions(),

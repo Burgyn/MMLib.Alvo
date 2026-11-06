@@ -57,9 +57,9 @@ internal static class FieldBadges
     /// </para>
     /// <para>
     /// <b>The build decides which slots exist</b> (<see cref="RefusalPlaces"/>, <see cref="RefusalScreen.FieldsList"/>);
-    /// this only says how each is seen in a declaration, in the form <c>UnhonouredFeatures</c> refuses it: any
-    /// <c>validation</c>, a <c>$cel</c> default (<c>ValueOrExpr.IsTaggedExpression</c>), a <c>rollup.where</c>
-    /// (<c>RollupResolver.EnsureNoFilter</c>). A slot the build stops publishing stops being badged.
+    /// this only says how each is seen in a declaration, in the form <c>UnhonouredFeatures</c> refuses it: a <c>$cel</c>
+    /// default (<c>ValueOrExpr.IsTaggedExpression</c>). A slot the build stops publishing stops being badged — as
+    /// <c>field.validation</c> and <c>rollup.where</c> did when HX-11 honoured them.
     /// </para>
     /// </remarks>
     public static IReadOnlyList<ManagementRefusedFeature> Refused(
@@ -74,23 +74,15 @@ internal static class FieldBadges
     public static string RefusedWord(string slot) => slot switch
     {
         "field.default" => "$cel default — refused at apply",
-        "rollup.where" => "rollup where — refused at apply",
         _ => $"{slot.Replace("field.", string.Empty, StringComparison.Ordinal)} — refused at apply",
     };
 
     /// <summary>How each field slot is seen in a declaration.</summary>
     private static readonly Dictionary<string, Func<JsonElement, bool>> _carries = new(StringComparer.Ordinal)
     {
-        ["field.validation"] = field => Present(field, "validation"),
         ["field.default"] = field => field.TryGetProperty("default", out var value) && value.ValueKind == JsonValueKind.Object
             && value.TryGetProperty("$cel", out var cel) && cel.ValueKind == JsonValueKind.String,
-        ["rollup.where"] = field => field.TryGetProperty("rollup", out var rollup) && rollup.ValueKind == JsonValueKind.Object
-            && Present(rollup, "where"),
     };
-
-    /// <summary>Whether the key is there with a value; <c>null</c> is the absence the mapper reads it as.</summary>
-    private static bool Present(JsonElement owner, string key)
-        => owner.TryGetProperty(key, out var value) && value.ValueKind != JsonValueKind.Null;
 
     /// <summary><c>hidden</c>, then <c>readOnly</c>: <c>true</c> for every caller, a CEL string for some.</summary>
     private static IEnumerable<string> Policy(JsonElement? declared)
@@ -104,7 +96,7 @@ internal static class FieldBadges
         }
     }
 
-    /// <summary>What a caller may send: required, an explicit nullability, the default, unique, the format.</summary>
+    /// <summary>What a caller may send: required, an explicit nullability, the default, unique, a validation, the format.</summary>
     private static IEnumerable<string> Constraints(FieldSchema field)
     {
         if (field.Required)
@@ -131,6 +123,11 @@ internal static class FieldBadges
         if (field.Unique)
         {
             yield return "unique";
+        }
+
+        if (field.CheckExpression is { Length: > 0 })
+        {
+            yield return "validation";
         }
 
         if (field.Format is { Length: > 0 } format)

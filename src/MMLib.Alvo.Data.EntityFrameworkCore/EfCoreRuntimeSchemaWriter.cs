@@ -39,6 +39,7 @@ internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposa
     private readonly RelationalConnectionFactory _connections;
     private readonly VersionRowWriter _rows;
     private readonly MigrationBatchFraming _framing;
+    private readonly IAlvoSqlDialect _dialect;
 
     public EfCoreRuntimeSchemaWriter(RelationalConnectionFactory connections, AlvoOptions options, IAlvoSqlDialect dialect)
     {
@@ -48,6 +49,7 @@ internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposa
         _connections = connections;
         _rows = new VersionRowWriter(connections, options);
         _framing = dialect.MigrationFraming;
+        _dialect = dialect;
     }
 
     /// <inheritdoc/>
@@ -92,6 +94,7 @@ internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposa
         DbConnection connection, DbTransaction transaction, string project, MigrationPlan plan,
         DescriptorVersion candidate, int expectedRevision, CancellationToken ct)
     {
+        await RelationalSqlBatch.ExecuteAsync(connection, LockTimeout, transaction, ct).ConfigureAwait(false);
         var current = await _rows.ReadCurrentRevisionAsync(connection, transaction, project, ct).ConfigureAwait(false);
         if (current != expectedRevision)
         {
@@ -100,22 +103,45 @@ internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposa
         }
 
         var appended = candidate with { Revision = expectedRevision + 1 };
+        var atTheVersionRow = true;
         try
         {
             // Version-row insert first (the optimistic-lock gate), then the plan's DDL, then commit —
             // all in this one transaction, so a loser rolls back before touching the schema and a DDL
             // failure rolls the version row back too. See the type remarks for why order matters.
             await _rows.InsertAsync(connection, transaction, project, appended, ct).ConfigureAwait(false);
+            atTheVersionRow = false;
             await RelationalSqlBatch.ExecuteAsync(connection, plan.Sql, transaction, ct).ConfigureAwait(false);
             await MigrationFramingScope.VerifyAsync(connection, transaction, _framing, plan, ct).ConfigureAwait(false);
             await transaction.CommitAsync(ct).ConfigureAwait(false);
         }
-        catch (DbException)
+        catch (DbException failure)
         {
             await _rows.ThrowIfConcurrencyConflictAsync(transaction, project, expectedRevision, ct).ConfigureAwait(false);
+            if (CheckApplyRefusal.Translate(failure, _dialect, candidate.Schema) is { } refused)
+            {
+                throw Located(refused, atTheVersionRow);
+            }
+
             throw;
         }
 
         return appended;
     }
+
+    /// <summary>
+    /// Marks a lock timeout raised by the version-row insert as such: that insert waits only on another writer's
+    /// uncommitted row for the same revision, so the boot reads it as a lost race (HX-11 Ruling 81).
+    /// </summary>
+    private static Exception Located(Exception refused, bool atTheVersionRow) =>
+        atTheVersionRow && refused is AlvoApplyLockTimeoutException { InnerException: { } engine }
+            ? new AlvoApplyLockTimeoutException(engine) { AtTheVersionRow = true }
+            : refused;
+
+    /// <summary>
+    /// The dialect's lock-timeout bound, run before anything else in the transaction — the revision read and the version
+    /// row included — so no statement of the apply waits on a lock unbounded (HX-11 Ruling 20).
+    /// </summary>
+    private IReadOnlyList<string> LockTimeout =>
+        _dialect.ApplyLockTimeoutStatement is { } statement ? [statement] : [];
 }

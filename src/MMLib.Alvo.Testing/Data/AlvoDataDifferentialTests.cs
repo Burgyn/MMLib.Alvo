@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Data;
+﻿using CsCheck;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Schema;
 using Shouldly;
@@ -28,10 +29,16 @@ namespace MMLib.Alvo.Testing.Data;
 /// it needs one database rather than one per case.
 /// </para>
 /// </remarks>
-public abstract class AlvoDataDifferentialTests
+public abstract partial class AlvoDataDifferentialTests
 {
     /// <summary>The parameter prefix the <c>USING</c> predicate is rendered with, matching the data path's own.</summary>
     private const string UsingPrefix = "alvo_u";
+
+    /// <summary>
+    /// The seed of the agreement property's first draw (Ruling 50); CsCheck draws the rest at random, so the admitted/refused
+    /// floors are statistical, set far below their expected counts, and a failure prints the seed that replays it.
+    /// </summary>
+    private const string TemporalSeed = "0N0XIzNsQ0O2";
 
     /// <summary>Creates a probe over a freshly created table shaped like <paramref name="entity"/>.</summary>
     /// <param name="entity">The entity to create a table for.</param>
@@ -107,15 +114,49 @@ public abstract class AlvoDataDifferentialTests
             + "really evaluating the rendered predicate.");
     }
 
-    private async Task<Verdicts> VerdictsAsync(IDifferentialProbe probe, DifferentialRuleCase testCase)
+    /// <summary>
+    /// HX-11 acceptance (6): duration arithmetic and now() agree between this engine's SQL and the interpreter for any
+    /// instants — offsets other than UTC included — at the millisecond alignment SQLite's date functions keep.
+    /// </summary>
+    [Fact]
+    public async Task Durations_and_now_agree_between_this_engine_and_the_interpreter_for_any_instants()
     {
-        var context = DifferentialRuleCases.ContextFor(testCase.ContextName);
-        var compiled = Compile(testCase.Rule);
-        var predicate = Renderer.Render(compiled, context, Fields, UsingPrefix);
+        await using var probe = await CreateProbeAsync(DifferentialEntity);
+        var admitted = 0;
+        var refused = 0;
+        await TemporalCase.Any.SampleAsync(async testCase =>
+        {
+            var verdicts = await TemporalVerdictsAsync(probe, testCase);
+            admitted += verdicts.ViaEngine ? 1 : 0;
+            refused += verdicts.ViaEngine ? 0 : 1;
+            verdicts.ViaEngine.ShouldBe(verdicts.InMemory, $"{testCase} rendered {verdicts.Predicate.Sql}");
+        }, iter: 300, threads: 1, seed: TemporalSeed);
+        admitted.ShouldBeGreaterThanOrEqualTo(100, "the space must reach admitted rows");
+        refused.ShouldBeGreaterThanOrEqualTo(100, "and refused ones, or agreement is vacuous");
+    }
 
-        var inMemory = Evaluator.Evaluate(compiled, testCase.Row, previous: null, context);
-        var viaEngine = await probe.MatchesAsync(testCase.Row, predicate);
+    private Task<Verdicts> VerdictsAsync(IDifferentialProbe probe, DifferentialRuleCase testCase) =>
+        VerdictsAtAsync(probe, testCase.Rule, testCase.Row, DifferentialRuleCases.ContextFor(testCase.ContextName), DifferentialRuleCases.Now);
 
+    private Task<Verdicts> TemporalVerdictsAsync(IDifferentialProbe probe, TemporalCase testCase) =>
+        VerdictsAtAsync(probe, testCase.Rule, testCase.Row, DifferentialRuleCases.Alice, testCase.Now);
+
+    /// <summary>
+    /// Both verdicts at one bound instant: the render reads it into the <c>USING</c> parameters and the in-memory
+    /// evaluation reads it directly, exactly as one request's entry point binds it for both (HX-11 Ruling 1).
+    /// </summary>
+    private async Task<Verdicts> VerdictsAtAsync(IDifferentialProbe probe, string rule, AlvoRecord row, AlvoContext context, DateTimeOffset now)
+    {
+        var compiled = Compile(rule);
+        SqlPredicate predicate;
+        bool inMemory;
+        using (AlvoFlow.EnterInstant(now))
+        {
+            predicate = Renderer.Render(compiled, context, Fields, UsingPrefix);
+            inMemory = Evaluator.Evaluate(compiled, row, previous: null, context);
+        }
+
+        var viaEngine = await probe.MatchesAsync(row, predicate);
         return new Verdicts(inMemory, viaEngine, predicate);
     }
 
@@ -135,7 +176,7 @@ public abstract class AlvoDataDifferentialTests
             ", ", verdicts.Predicate.Parameters.Select(pair => $"{pair.Key}={pair.Value ?? "null"}"));
         var fields = string.Join(", ", testCase.Row.Values.Select(pair => $"{pair.Key}={pair.Value ?? "null"}"));
         return $"""
-            Rule '{testCase.Rule}' disagreed for caller '{testCase.ContextName}'.
+            Rule '{testCase.Rule}'{NameSuffix(testCase)} disagreed for caller '{testCase.ContextName}'.
               Rendered SQL: {verdicts.Predicate.Sql}
               Parameters: {parameters}
               Row: {fields}
@@ -143,6 +184,9 @@ public abstract class AlvoDataDifferentialTests
               Engine verdict: {verdicts.ViaEngine}
             """;
     }
+
+    private static string NameSuffix(DifferentialRuleCase testCase) =>
+        DifferentialRuleCases.NameOf(testCase) is { } name ? $" ({name})" : string.Empty;
 
     private sealed record Verdicts(bool InMemory, bool ViaEngine, SqlPredicate Predicate);
 }

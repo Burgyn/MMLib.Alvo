@@ -1,0 +1,78 @@
+﻿using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Schema;
+using System.Data.Common;
+
+namespace MMLib.Alvo.Data.EntityFrameworkCore;
+
+/// <summary>
+/// What an apply the database refused answers, the same from both executors — the migrator's apply and the runtime writer
+/// the Management API, the dashboard, rollback, restore and the boot apply through (HX-11 Rulings 20, 22).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Two refusals, everything else untouched.</b> A lock the apply gave up waiting for is a retryable
+/// <see cref="AlvoApplyLockTimeoutException"/>; a <c>CHECK</c> the engine refused is a <see cref="DescriptorValidationException"/>
+/// at the validation's pointer. Any other failure answers <see langword="null"/>, so the caller's <c>when</c> filter lets
+/// it propagate with the provider's own stack.
+/// </para>
+/// <para>
+/// <b>The pointer comes from the desired schema, never from the plan's steps.</b> The constraint the engine names may be
+/// one the plan adds, one a rename re-creates, or one that existed before the plan and is broken by something it does —
+/// a rollup backfill has no step of its own — so it is found by recomputing names over the schema being applied
+/// (<see cref="CheckConstraintNames.Owner(SchemaModel, string)"/>), and the message says "could not be added or kept". A name no validated field
+/// recomputes to still refuses, at the document's root: the engine refused the apply, and nothing was applied.
+/// </para>
+/// </remarks>
+internal static class CheckApplyRefusal
+{
+    private const string Fix = "Correct those rows first — or relax the expression — then apply again.";
+
+    /// <summary>The refusal <paramref name="failure"/> stands for, or <see langword="null"/> when it is neither.</summary>
+    /// <param name="failure">What the apply threw.</param>
+    /// <param name="dialect">The driver's dialect, which decodes the engine's failure.</param>
+    /// <param name="desired">The schema the apply was bringing the database to.</param>
+    internal static Exception? Translate(Exception failure, IAlvoSqlDialect dialect, SchemaModel desired)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+        ArgumentNullException.ThrowIfNull(dialect);
+        ArgumentNullException.ThrowIfNull(desired);
+
+        if (Provider(failure) is not { } provider)
+        {
+            return null;
+        }
+
+        return dialect.IsLockTimeout(provider)
+            ? new AlvoApplyLockTimeoutException(provider)
+            : dialect.DecodeConstraintViolation(provider) is { Kind: AlvoConstraintKind.Check } violation
+                ? Refused(desired, violation.ConstraintName)
+                : null;
+    }
+
+    private static DescriptorValidationException Refused(SchemaModel desired, string? name) =>
+        name is not null && CheckConstraintNames.Owner(desired, name) is { } owner
+            ? new(new DescriptorValidationResult([new(
+                $"/entities/{owner.Entity.Name}/fields/{owner.Field.Name}/validation",
+                $"Rows of '{owner.Entity.Name}' break this validation, so the CHECK constraint could not be added or kept. Nothing was applied.",
+                Fix,
+                DescriptorValidationSeverity.Error)]))
+            : new(new DescriptorValidationResult([new(
+                "/",
+                "A row breaks a validation this apply needs to hold. Nothing was applied.",
+                Fix,
+                DescriptorValidationSeverity.Error)]));
+
+    private static DbException? Provider(Exception failure)
+    {
+        for (var current = failure; current is not null; current = current.InnerException)
+        {
+            if (current is DbException provider)
+            {
+                return provider;
+            }
+        }
+
+        return null;
+    }
+}

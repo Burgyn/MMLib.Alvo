@@ -131,9 +131,9 @@
     </div>
     <div class="a-refused__reason"><span>⌀</span><span>Soft delete is not supported yet: a delete would remove the row outright and reads would not exclude it, which is irrecoverable data loss where the schema promises recoverability.</span></div>
     <div class="a-refused" style="margin-top:var(--space-4)">
-      <label class="a-field"><span class="a-label">validation</span><input class="a-input" value="value.matches('^[A-Z]{2}')"></label>
+      <label class="a-field"><span class="a-label">default</span><input class="a-input" value='{"$cel": "@user.id"}'></label>
     </div>
-    <div class="a-refused__reason"><span>⌀</span><span>Field 'validation' is not evaluated yet, so a value the expression forbids is accepted — the field is not constrained at all.</span></div>
+    <div class="a-refused__reason"><span>⌀</span><span>A CEL default is not evaluated yet: it needs the caller's context at insert time, so the value would be dropped and the field left null.</span></div>
   </div>
 </div>
 

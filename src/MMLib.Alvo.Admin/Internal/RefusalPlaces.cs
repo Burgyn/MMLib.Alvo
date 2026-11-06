@@ -45,16 +45,15 @@ internal enum RefusalScreen
 /// honest instead is that a slot it does not place is <see cref="Unplaced"/>, which Overview shows and an end-to-end
 /// fact (<c>RefusalPlacementScenarios</c>) asserts is empty against the real host, so a new core slot is loud rather
 /// than silently dropped. The slots are the ones <c>UnhonouredFeatures.EveryRefusal</c> publishes
-/// (src/MMLib.Alvo/Descriptor/Internal/UnhonouredFeatures.cs).
+/// (src/MMLib.Alvo/Descriptor/Internal/UnhonouredFeatures.cs); <c>field.validation</c> and <c>rollup.where</c> left
+/// it when HX-11 made both live editor boxes.
 /// </para>
 /// </remarks>
 internal static class RefusalPlaces
 {
     private static readonly Dictionary<string, RefusalScreen[]> _owners = new(StringComparer.Ordinal)
     {
-        ["field.validation"] = [RefusalScreen.FieldEditor, RefusalScreen.FieldsList],
         ["field.default"] = [RefusalScreen.FieldEditor, RefusalScreen.FieldsList],
-        ["rollup.where"] = [RefusalScreen.FieldEditor, RefusalScreen.FieldsList],
         ["entity.softDelete"] = [RefusalScreen.EntityHeader],
         ["function"] = [RefusalScreen.OnWrite],
         ["http.call"] = [RefusalScreen.OnWrite],

@@ -16,7 +16,10 @@ Put a derived value on the lowest rung that expresses it:
 ## Rollups
 
 `{"from": "<child>", "op": "…", "field": "<child field>"}`: `from` is an entity with a `ref` to this one, `field` is
-needed by every `op` but `count`, and `via` names the child's `ref` when it has several. A `where` is refused.
+needed by every `op` but `count`, and `via` names the child's `ref` when it has several. `where` filters the
+children with a CEL condition over the child's own fields — `"where": "status == 'held'"` — kept consistent in the
+same transaction; it reads no caller or `now()` (the number would go stale with no write to move it), no function,
+no hidden child field.
 
 <!-- gen:rollup-ops -->
 `sum` `count` `avg` `min` `max`
@@ -35,11 +38,10 @@ names the refusal the framework gives, so you can explain it.
   two numbers"*), and a computed field has no `string()` to convert with.
 - **Null rule**: every joined operand must be **never null** — a `required` field, a constant, or a field read
   inside the branch its own `has()` guards: `(has(middle_name) ? middle_name : '') + last_name`, or with the
-  separator only when present, `first_name + (has(middle_name) ? ' ' + middle_name : '') + ' ' + last_name` and
-  `has(middle_name) ? first_name + ' ' + middle_name : first_name`. An optional field joined directly is refused
+  separator only when present, `first_name + (has(middle_name) ? ' ' + middle_name : '') + ' ' + last_name`. An
+  optional field joined directly is refused
   (*"'+' would join 'street', which may be null…"*, fix: *"Make 'street' required, or write the fallback explicitly:
-  (has(street) ? street : '')"*). Reason: CEL's `+` has no null overload, and SQL's `||` makes the whole value NULL
-  when any part is.
+  (has(street) ? street : '')"*). Reason: SQL's `||` makes the whole value NULL when any part is.
 - **Only a bare `has(f)` is a guard**: `has(f) ? … : …` guards `f` in its first branch, `!has(f) ? … : …` in its
   second, and nothing else guards anything — `has(street) && has(city) ? street + ' ' + city : ''` is refused by
   the null rule (a combined guard is not supported yet). Nest one ternary per optional part:
@@ -51,20 +53,18 @@ names the refusal the framework gives, so you can explain it.
   join: a `string` part counts its `maxLength`, an `enum` part its longest value, a text constant its length, a
   ternary its longer branch (`first_name` 60 + `' '` 1 + `last_name` 60 = 121; *"which can be up to 121 characters
   long"*). A `text` part, or a `string` part without `maxLength`, has no bound, so the join cannot declare
-  `maxLength` at all (*"which declares no maxLength"*) — omit it. Omitting `maxLength` is always fine.
+  `maxLength` at all (*"which declares no maxLength"*) — omit it.
 - **Never boolean**: a computed value is never a `boolean` (*"A computed-field expression must evaluate to a
   non-boolean scalar"*). A comparison or `has(f)` is only ever a ternary's condition, never the value. A flag such as
-  `is_vip` is a plain `boolean` field kept by before-hooks, as `alvo-descriptor-hooks` shows: the hook's `condition` does the
-  comparison and its `mutate` writes the literal `true`, and an opposite hook writes `false` — a `mutate` value
-  cannot compare.
+  `is_vip` is a plain `boolean` field kept by before-hooks (`alvo-descriptor-hooks`): a `condition` compares, its
+  `mutate` writes `true`, and an opposite hook writes `false`.
 - **Ternary** `c ? a : b` whose condition compares two fields of the row or is `has(field)` / `!has(field)`; both
   branches have the same type.
 - **Constants**: a **text** constant may appear in a join or a ternary branch. A **numeric** constant
   (`unit_price * 1.2`) is refused (*"a constant other than a text constant joined into the value cannot be carried
   into it"*) — hold a rate in a field of its own that a before-hook maintains. An expression that reads **no field**
   (`'always the same'`) is refused (*"which reads no field of its row"*) — that is a `default`, not computed. A text
-  constant cannot hold a line break (the Unicode line and paragraph separators U+2028 and U+2029 included), a tab or
-  another control character.
+  constant cannot hold a line break (U+2028 and U+2029 included), a tab or another control character.
 - **Not another computed field**: a computed field reads stored fields only (a rollup is stored); reading another
   computed field is refused (*"itself a computed field"*) with that field's expression as the fix, and a computed
   field never reads itself.

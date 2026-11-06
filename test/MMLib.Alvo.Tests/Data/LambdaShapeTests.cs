@@ -140,8 +140,30 @@ public sealed class LambdaShapeTests
     public void A_clock_is_found_anywhere_in_a_value()
     {
         Expression<Func<DateTimeOffset>> later = () => DateTimeOffset.UtcNow.AddDays(1);
+        Expression<Func<DateTime>> local = () => DateTime.UtcNow.AddDays(1);
 
-        LambdaShape.FindClock(later.Body).ShouldNotBeNull();
+        LambdaShape.FindAnyClock(later.Body).ShouldNotBeNull();
+        LambdaShape.FindAnyClock(local.Body).ShouldNotBeNull();
+        LambdaShape.FindClock(local.Body).ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// <see cref="DateTimeOffset.UtcNow"/> and <see cref="DateTimeOffset.Now"/> are the one instant a condition reads as
+    /// <c>now()</c>; every other clock is one it refuses (HX-11 Ruling 34).
+    /// </summary>
+    [Fact]
+    public void Only_the_offset_instants_are_cel_now()
+    {
+        Expression<Func<DateTimeOffset>> utc = () => DateTimeOffset.UtcNow;
+        Expression<Func<DateTimeOffset>> local = () => DateTimeOffset.Now;
+        Expression<Func<DateTime>> offsetless = () => DateTime.UtcNow;
+
+        LambdaShape.IsCelNow(utc.Body).ShouldBeTrue();
+        LambdaShape.IsCelNow(local.Body).ShouldBeTrue();
+        LambdaShape.IsClock(utc.Body).ShouldBeFalse();
+        LambdaShape.FindClock(utc.Body).ShouldBeNull();
+        LambdaShape.IsCelNow(offsetless.Body).ShouldBeFalse();
+        LambdaShape.IsClock(offsetless.Body).ShouldBeTrue();
     }
 
     [Fact]

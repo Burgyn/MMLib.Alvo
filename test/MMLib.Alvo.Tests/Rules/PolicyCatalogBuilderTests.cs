@@ -212,6 +212,23 @@ public class PolicyCatalogBuilderTests
         policy.Hidden["owner_id"].AlwaysOn.ShouldBeTrue();
     }
 
+    [Fact]
+    public void A_policy_copied_with_other_hidden_flags_names_those_flags_and_not_the_original_s()
+    {
+        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+        {
+            ["owner_id"] = new() { Type = MMLib.Alvo.Descriptor.FieldType.Uuid, Hidden = BoolOrCel.FromBoolean(true) },
+        };
+        var catalog = PolicyCatalog.Build(Descriptor("orders", Entity(fields: fields)), Schema(), CelFixtures.Compiler);
+        catalog.TryGetEntity("orders", out var policy).ShouldBeTrue();
+        policy.FlaggedHidden.ShouldBe(["owner_id"]);
+
+        var copy = policy with { Hidden = new Dictionary<string, FieldMask>(StringComparer.Ordinal) { ["secret"] = FieldMask.Always } };
+
+        copy.FlaggedHidden.ShouldBe(["secret"], ignoreOrder: true, customMessage: "the set is Unnameable — a stale copy would let a refusal name a hidden field");
+        policy.FlaggedHidden.ShouldBe(["owner_id"]);
+    }
+
     /// <summary>
     /// A typo'd role literal is a silent authorization change — <c>'amdin' in @user.roles</c> compiles,
     /// type-checks, and then simply never matches, so a rule an author wrote to admit admins admits

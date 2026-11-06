@@ -52,6 +52,7 @@ internal sealed class ManagementCallerFilter(
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(next);
+        using var instant = RequestInstant.Enter(context.HttpContext);
 
         var options = authOptions.Value;
         var request = context.HttpContext.Request;

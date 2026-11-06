@@ -77,19 +77,16 @@ public class FieldFacetsMaintainedTests
         editor.Build("bikes_count", declared, [], out _)!.ToJsonString().ShouldBe(declared);
     }
 
+    /// <summary>HX-11: a declared filter is honoured, so an unchanged edit writes it back as declared.</summary>
     [Fact]
-    public void A_declared_filter_is_refused_until_it_is_removed()
+    public void A_declared_filter_is_kept_as_declared()
     {
-        const string declared = """{"type":"integer","rollup":{"from":"orders","op":"count","where":"priority > 1"}}""";
+        const string declared = """{"type":"integer","rollup":{"from":"orders","op":"count","where":"priority == 1"}}""";
         var editor = FieldFacets.Prefill("urgent", declared);
         editor.Sources = [_orders];
 
-        editor.DeclaresRollupFilter.ShouldBeTrue();
-        editor.Build("urgent", declared, [], out var refusal).ShouldBeNull();
-        refusal.ShouldNotBeNull().ShouldContain("rollup.where");
-
-        editor.RemoveRollupFilter = true;
-        editor.Build("urgent", declared, [], out _)!["rollup"]!.AsObject().ContainsKey("where").ShouldBeFalse();
+        editor.Build("urgent", declared, [], out var refusal)!.ToJsonString().ShouldBe(declared);
+        refusal.ShouldBeNull();
     }
 
     [Fact]

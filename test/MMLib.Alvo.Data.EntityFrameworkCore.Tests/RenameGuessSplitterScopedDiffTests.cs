@@ -88,6 +88,72 @@ public class RenameGuessSplitterScopedDiffTests
     }
 
     /// <summary>
+    /// A guessed column rename of a validated field whose validation also changed: the residual's own drop and add of the
+    /// constraint are superseded by the scoped diffs' copies, so exactly one of each runs — the add carrying the
+    /// <em>desired</em> expression, after the column it constrains — while a sibling's drop and add survive untouched.
+    /// </summary>
+    [Fact]
+    public void A_guessed_rename_of_a_validated_field_drops_and_adds_its_constraint_once()
+    {
+        var sibling = (Drop: DropCheck("products", "ck_products_stock"), Add: AddCheck("products", "ck_products_stock", "stock >= 1"));
+        IReadOnlyList<MigrationOperation> residual =
+        [
+            new RenameColumnOperation { Table = "products", Name = "rebate", NewName = "discount" },
+            DropCheck("products", RebateCheck),
+            AddCheck("products", DiscountCheck, "residual"),
+            sibling.Drop,
+            sibling.Add,
+        ];
+        var differ = new ScriptedDiffer(
+            [DropCheck("products", RebateCheck), new DropColumnOperation { Table = "products", Name = "rebate" }],
+            [new AddColumnOperation { Table = "products", Name = "discount", ClrType = typeof(long), IsNullable = true }, AddCheck("products", DiscountCheck, "desired")]);
+
+        var normalized = RenameGuessSplitter.Normalize(residual, Current, Desired, Record([]), differ).ToList();
+
+        normalized.OfType<DropCheckConstraintOperation>().Count(drop => drop.Name == RebateCheck).ShouldBe(1);
+        var added = normalized.OfType<AddCheckConstraintOperation>().Where(add => add.Name == DiscountCheck).ShouldHaveSingleItem();
+        added.Sql.ShouldBe("desired");
+        normalized.IndexOf(added).ShouldBeGreaterThan(normalized.IndexOf(normalized.OfType<AddColumnOperation>().Single()));
+        normalized.ShouldContain(sibling.Drop);
+        normalized.ShouldContain(sibling.Add);
+    }
+
+    /// <summary>
+    /// A guessed <em>table</em> rename of a validated entity is a DropTable and a CreateTable whose constraints are declared
+    /// inline, so the residual's own drop and add of them are dropped: kept, the add would run twice and the drop would
+    /// name a table the split removed. A check on another table survives.
+    /// </summary>
+    [Fact]
+    public void A_guessed_table_rename_of_a_validated_entity_adds_its_constraints_only_inline()
+    {
+        var unrelated = AddCheck("invoices", "ck_invoices_total", "total >= 0");
+        IReadOnlyList<MigrationOperation> residual =
+        [
+            TableRename(),
+            DropCheck("orders", "ck_orders_total"),
+            AddCheck("ledgers", "ck_ledgers_total", "total >= 0"),
+            unrelated,
+        ];
+        var created = new CreateTableOperation { Name = "ledgers" };
+        created.CheckConstraints.Add(AddCheck("ledgers", "ck_ledgers_total", "total >= 0"));
+        var differ = new ScriptedDiffer([new DropTableOperation { Name = "orders" }], [created]);
+
+        var normalized = RenameGuessSplitter.Normalize(residual, Current, Desired, Record([]), differ);
+
+        normalized.ShouldBe([normalized[0], created, unrelated]);
+        normalized[0].ShouldBeOfType<DropTableOperation>();
+    }
+
+    private const string RebateCheck = "ck_products_rebate_1";
+
+    private const string DiscountCheck = "ck_products_discount_2";
+
+    private static DropCheckConstraintOperation DropCheck(string table, string name) => new() { Table = table, Name = name };
+
+    private static AddCheckConstraintOperation AddCheck(string table, string name, string sql) =>
+        new() { Table = table, Name = name, Sql = sql };
+
+    /// <summary>
     /// The four schemas the splitter builds a model from, in order: the current schema, the current schema
     /// without the dropped member, the desired schema without the added member, and the desired schema.
     /// </summary>
@@ -166,6 +232,16 @@ public class RenameGuessSplitterScopedDiffTests
         options.UseSqlite("Data Source=:memory:");
         using var context = new AlvoDataContext(options.Options, Current, Guid.NewGuid());
         return context.Model;
+    }
+
+    /// <summary>Answers each scoped diff with the next scripted operation list, in the order the splitter asks.</summary>
+    private sealed class ScriptedDiffer(params IReadOnlyList<MigrationOperation>[] answers) : IMigrationsModelDiffer
+    {
+        private int _next;
+
+        public IReadOnlyList<MigrationOperation> GetDifferences(IRelationalModel? source, IRelationalModel? target) => answers[_next++];
+
+        public bool HasDifferences(IRelationalModel? source, IRelationalModel? target) => true;
     }
 
     /// <summary>

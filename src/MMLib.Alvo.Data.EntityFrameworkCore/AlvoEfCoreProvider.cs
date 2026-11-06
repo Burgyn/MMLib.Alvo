@@ -119,6 +119,7 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<IPredicateRenderer>(),
         services.GetRequiredService<IFieldSqlRenderer>(),
         services.GetRequiredService<IAlvoSqlDialect>(),
+        services.GetRequiredService<ICelCompiler>(),
         services.GetRequiredService<AlvoDataContextFactory>(),
         services.GetRequiredService<TimeProvider>(),
         services.GetRequiredService<IOptions<AlvoOptions>>().Value,
@@ -221,8 +222,22 @@ public static class AlvoEfCoreProvider
             registration.CreateModelBuilder,
             connections,
             registration.Dialect,
-            ComputedColumns(services, registration));
+            ComputedColumns(services, registration),
+            CheckConstraints(services, registration),
+            registration.Fields,
+            RollupFilters(services, registration),
+            services.GetService<ILogger<EfCoreSchemaMigrator>>());
     }
+
+    /// <summary>
+    /// How the apply's rollup backfill renders a <c>rollup.where</c> — the write path's own <see cref="RollupRecompute"/> —
+    /// or <see langword="null"/> when this container has no expression services, <see cref="ComputedColumns"/>' reasoning.
+    /// </summary>
+    private static Func<EntitySchema, RollupSchema, string?>? RollupFilters(
+        IServiceProvider services, RelationalProviderRegistration registration) =>
+        services.GetService<ICelCompiler>() is { } compiler && services.GetService<IPredicateRenderer>() is { } renderer
+            ? new RollupRecompute(registration.Dialect, registration.Fields, compiler, renderer).Filter
+            : null;
 
     /// <summary>
     /// The CEL-to-generated-column renderer, or <see langword="null"/> when this container has no expression
@@ -241,6 +256,16 @@ public static class AlvoEfCoreProvider
     private static ComputedColumnSql? ComputedColumns(IServiceProvider services, RelationalProviderRegistration registration) =>
         services.GetService<ICelCompiler>() is { } compiler && services.GetService<IPredicateRenderer>() is { } renderer
             ? new ComputedColumnSql(compiler, renderer, registration.Fields)
+            : null;
+
+    /// <summary>
+    /// The CEL-to-CHECK-constraint renderer, or <see langword="null"/> when this container has no expression services —
+    /// <see cref="ComputedColumns"/>' reasoning, so a container without <c>AddAlvo()</c> still migrates every schema that
+    /// declares no <c>validation</c>.
+    /// </summary>
+    private static CheckConstraintSql? CheckConstraints(IServiceProvider services, RelationalProviderRegistration registration) =>
+        services.GetService<ICelCompiler>() is { } compiler && services.GetService<IPredicateRenderer>() is { } renderer
+            ? new CheckConstraintSql(compiler, renderer, registration.Fields)
             : null;
 
     private static EfCoreSchemaIntrospector CreateIntrospector(IServiceProvider services, RelationalProviderRegistration registration)

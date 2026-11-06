@@ -173,7 +173,7 @@ public sealed class CelBuiltInFunctionTests
     [Fact]
     public void Every_built_in_body_returns_exactly_its_declared_clr_type()
     {
-        // Int is a position inside the String sample, so substring's body answers rather than fails closed; the two
+        // Int is a position inside the String sample, so substring's body answers rather than fails closed; the three
         // conversions that read their text get a text they accept, for the same reason.
         var samples = new Dictionary<CelValueType, object>
         {
@@ -184,7 +184,7 @@ public sealed class CelBuiltInFunctionTests
             [CelValueType.Uuid] = Guid.Empty,
             [CelValueType.Timestamp] = DateTimeOffset.UnixEpoch,
         };
-        var texts = new Dictionary<string, object> { ["int"] = "-7", ["timestamp"] = "2026-10-05T12:00:00Z" };
+        var texts = new Dictionary<string, object> { ["int"] = "-7", ["timestamp"] = "2026-10-05T12:00:00Z", ["duration"] = "90m" };
 
         foreach (var function in CelBuiltInFunctions.All.Where(f => !f.IsLegacy))
         {

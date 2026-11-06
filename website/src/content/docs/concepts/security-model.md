@@ -48,6 +48,21 @@ Where the guarantees stop:
     allowed to read.
 
   Do not make a guessable value, such as an e-mail address, `unique` if its existence is confidential.
+- **A validation on a rollup parent answers for a parent the caller may not read.** A field's
+  [`validation`](/extending/integrity/) is a `CHECK` the database enforces on every row, so `reserved <= stock` refuses
+  a child write with a `422` even when the caller's rule hides the product. That answer is the oversell protection
+  itself, and whether a caller may read a row is decided per request, so it cannot be refused when the descriptor is
+  applied. It is more than "the product is at capacity": a caller who may create and delete order lines can try
+  quantities and recover the product's remaining headroom, `stock − reserved`, exactly, because each refusal changes
+  nothing. No rule can close this today, because a rule reads only the written row, `@user` and `@tenant`; if that
+  headroom is confidential, keep such a validation off a parent the child's writers cannot read.
+- **Long reads can hold off a schema change on PostgreSQL.** An apply that adds a `CHECK` or changes a table needs an
+  exclusive lock, and it waits at most five seconds for it. A caller who can keep a read running longer than that on
+  the table makes every apply answer `409` (retry) and a starting host in `Apply` mode refuse to start, for as long as
+  such reads continue. Bound slow Data API reads (indexes, timeouts at your proxy) on tables you change often.
+- **The dry run counts violating rows with a full scan.** Before a validation is added, the apply — and every preview
+  of it — counts the rows that break it with a `COUNT(*)` that has no timeout. On a large table each preview is a full
+  scan. It needs Developer access to the Management API.
 - **The schema's shape is public.** Which entities exist and their non-hidden fields are published by the routes and
   the OpenAPI document. Data and the names of hidden fields are not.
 
@@ -181,6 +196,12 @@ reason a client could parse would hand back what the prose is written to withhol
 - **A `hidden` field's name** is indistinguishable from a field that does not exist on the read surface and in the
   published document. A caller who may write can still tell the two apart, because a write to a hidden field is
   accepted and a write to an undeclared one is refused; what it learns is a name, never a value.
+- **A validation or a rollup filter cannot be made to reveal a hidden value.** Whether a write is refused would tell a
+  caller something about every field the validation reads, so a `validation` that reads another field is refused at
+  apply when it, or any field it reads — directly or through a computed or rollup field — is `hidden`, statically or for
+  some roles. A rollup's `where` may not read a hidden child field, since a filtered count would reveal it. A broken
+  validation on a hidden field answers `422` with an empty pointer, never the field's name. A computed or rollup field
+  over a hidden field, read with no validation, is not covered yet: keep such a field hidden too.
 - **A unique value** on a tenant-scoped entity is unique within its tenant, so a conflict never tells one tenant what
   another holds; it can still tell a caller about rows of its own tenant a rule hides from it. On an entity that is
   not tenant-scoped it is unique instance-wide. Both are among the conflicts above.

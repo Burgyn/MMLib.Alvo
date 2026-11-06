@@ -94,7 +94,6 @@ public class ManagementCapabilitiesTests
         var slots = CapabilityReport.Project().Refused.Select(feature => feature.Slot).ToList();
 
         slots.ShouldContain("field.default");
-        slots.ShouldContain("field.validation");
         slots.ShouldContain("entity.softDelete");
     }
 

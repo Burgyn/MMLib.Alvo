@@ -91,6 +91,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(context);
+        using var instant = AlvoFlow.EnsureInstant(_time);
         cancellationToken.ThrowIfCancellationRequested();
 
         var decision = _policy.Resolve(query.Entity, DataOperation.List, context);
@@ -136,6 +137,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(context);
+        using var instant = AlvoFlow.EnsureInstant(_time);
         cancellationToken.ThrowIfCancellationRequested();
 
         var decision = _policy.Resolve(entity, DataOperation.Get, context);
@@ -157,6 +159,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
+        using var instant = AlvoFlow.EnsureInstant(_time);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
         AlvoChainDepthLimit.Default.EnsureWithin(context);
         cancellationToken.ThrowIfCancellationRequested();
@@ -356,6 +359,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
+        using var instant = AlvoFlow.EnsureInstant(_time);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
         AlvoChainDepthLimit.Default.EnsureWithin(context);
         cancellationToken.ThrowIfCancellationRequested();
@@ -407,6 +411,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
+        using var instant = AlvoFlow.EnsureInstant(_time);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
         AlvoChainDepthLimit.Default.EnsureWithin(context);
         cancellationToken.ThrowIfCancellationRequested();
@@ -674,6 +679,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(context);
+        using var instant = AlvoFlow.EnsureInstant(_time);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
         AlvoChainDepthLimit.Default.EnsureWithin(context);
         cancellationToken.ThrowIfCancellationRequested();
@@ -1235,6 +1241,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(rows);
+        using var instant = AlvoFlow.EnsureInstant(_time);
         var decision = BatchDecision(entity, DataOperation.Create, rows.Count, context, idempotency, cancellationToken);
 
         lock (_gate)
@@ -1260,6 +1267,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(rows);
+        using var instant = AlvoFlow.EnsureInstant(_time);
         var decision = BatchDecision(entity, DataOperation.Update, rows.Count, context, idempotency, cancellationToken);
 
         lock (_gate)
@@ -1290,6 +1298,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(ids);
+        using var instant = AlvoFlow.EnsureInstant(_time);
         var decision = BatchDecision(entity, DataOperation.Delete, ids.Count, context, idempotency, cancellationToken);
         EnsureNotSoftDeleted(entity);
 

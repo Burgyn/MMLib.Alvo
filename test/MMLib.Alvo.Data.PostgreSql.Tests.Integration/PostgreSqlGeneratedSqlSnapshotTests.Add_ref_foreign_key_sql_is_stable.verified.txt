@@ -1,4 +1,6 @@
-﻿ALTER TABLE vehicles ADD owner_id uuid NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000';
+﻿SET LOCAL lock_timeout = '5s'
+;
+ALTER TABLE vehicles ADD owner_id uuid NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000';
 
 ;
 CREATE INDEX "IX_vehicles_owner_id" ON vehicles (owner_id);

@@ -33,7 +33,7 @@ These are refused at apply, each with its reason in the capability report (`fiel
 literal is honoured):
 
 <!-- gen:refused -->
-`field.validation` `field.default` `entity.softDelete` `rollup.where` `trigger.event` `JSONata` `email.data` `bodyFile` `function` `http.call` `entity.update`
+`field.default` `entity.softDelete` `trigger.event` `JSONata` `email.data` `bodyFile` `function` `http.call` `entity.update`
 <!-- /gen:refused -->
 
 The after-hook action types in this list are refused as actions, not as blocks. The skills of each area say what to use instead.

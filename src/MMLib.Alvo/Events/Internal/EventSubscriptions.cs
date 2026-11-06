@@ -132,6 +132,7 @@ internal static class EventSubscriptions
 
         try
         {
+            using var instant = AlvoFlow.EnterInstant(@event.Time);
             return EnvelopeReading.Holds(hook.Condition, @event.Data, evaluator, caller.Context);
         }
         catch (CelFunctionException failure)

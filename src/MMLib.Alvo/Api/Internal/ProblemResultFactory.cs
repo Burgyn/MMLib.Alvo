@@ -293,6 +293,15 @@ internal static class ProblemResultFactory
         StatusCodes.Status409Conflict, AlvoProblemTypes.Conflict, detail);
 
     /// <summary>
+    /// The 409 for an apply that gave up waiting for a table lock and changed nothing, with the <c>Retry-After</c> the
+    /// apply's own bound suggests (HX-11 Ruling 20) — a retryable refusal, never the 500 of a broken invariant.
+    /// </summary>
+    internal static IResult ManagementApplyLockTimeout() => new AdvertisingResult(
+        Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.Conflict, Migrations.AlvoApplyLockTimeoutException.Refusal),
+        HeaderNames.RetryAfter,
+        Migrations.AlvoApplyLockTimeoutException.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    /// <summary>
     /// The 404 for a row that does not exist <em>or</em> that the caller's policy excludes — one
     /// wording and one type, because <c>IAlvoData</c>'s contract makes the two indistinguishable and the
     /// HTTP layer must not undo that.
@@ -519,16 +528,48 @@ internal static class ProblemResultFactory
         "This field is declared unique and another record already holds the value sent for it.",
         "Send a value no other record holds, or change the record that holds it.");
 
+    /// <summary>
+    /// A broken validation (HX-11 Ruling 24): 422 <c>validation</c>, code <c>check</c>, one entry per field the port
+    /// named, or one entry pointed at the whole document when it named none.
+    /// </summary>
+    /// <remarks>
+    /// <b>The text is fixed, and that is the security property.</b> Neither the value, the expression nor the
+    /// constraint's name reaches the caller: the field comes from the port, which resolved it from the schema and left out
+    /// every field the descriptor hides, and the words are constants — so the refusal says which field to fix and never
+    /// why, nor what is stored.
+    /// </remarks>
+    /// <param name="exception">The port's refusal.</param>
+    private static IReadOnlyList<AlvoViolation> CheckViolations(AlvoConstraintViolationException exception) =>
+        exception.Fields.Count > 0
+            ? [.. exception.Fields.Select(CheckViolation)]
+            : [new AlvoViolation(string.Empty, CodeFor(exception.Kind), CheckDocumentMessage, FixFor(exception.Kind))];
+
+    private const string CheckFieldMessage = "This value breaks the validation the descriptor declares for this field.";
+
+    private const string CheckDocumentMessage = "This write would leave a record breaking a validation the descriptor declares.";
+
+    /// <summary>The entry for one field whose validation refused the value sent for it.</summary>
+    /// <param name="field">The field name, from the entity's schema.</param>
+    private static AlvoViolation CheckViolation(string field) =>
+        new("/" + field, "check", CheckFieldMessage, "Send a value the field's validation accepts.");
+
     /// <summary>The stable code for a refusal that names no field.</summary>
     /// <param name="kind">Which constraint refused the request.</param>
-    private static string CodeFor(AlvoConstraintKind kind) =>
-        kind == AlvoConstraintKind.Referenced ? "referenced" : "unique";
+    private static string CodeFor(AlvoConstraintKind kind) => kind switch
+    {
+        AlvoConstraintKind.Referenced => "referenced",
+        AlvoConstraintKind.Check => "check",
+        _ => "unique",
+    };
 
     /// <summary>The fix for a refusal that names no field.</summary>
     /// <param name="kind">Which constraint refused the request.</param>
-    private static string FixFor(AlvoConstraintKind kind) => kind == AlvoConstraintKind.Referenced
-        ? "Delete the records that reference this one, or point them at something else, then retry."
-        : "Send a value no other record holds on the field declared unique.";
+    private static string FixFor(AlvoConstraintKind kind) => kind switch
+    {
+        AlvoConstraintKind.Referenced => "Delete the records that reference this one, or point them at something else, then retry.",
+        AlvoConstraintKind.Check => "Change the values this write sends so every record it touches keeps its validations.",
+        _ => "Send a value no other record holds on the field declared unique.",
+    };
 
     /// <summary>
     /// Runs <paramref name="operation"/> and maps every refusal <c>IAlvoData</c> is allowed to raise
@@ -564,6 +605,8 @@ internal static class ProblemResultFactory
         AlvoRecordNotFoundException => NotFound(),
         AlvoPreconditionFailedException precondition => Problem(StatusCodes.Status412PreconditionFailed, AlvoProblemTypes.PreconditionFailed, precondition.Message),
         AlvoIdempotencyConflictException conflict => Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.IdempotencyConflict, conflict.Message),
+        AlvoConstraintViolationException { Kind: AlvoConstraintKind.Check } check => Problem(
+            StatusCodes.Status422UnprocessableEntity, AlvoProblemTypes.Validation, CheckViolations(check)),
         AlvoConstraintViolationException constraint => Conflict(constraint),
         AlvoChainDepthExceededException loop => ChainDepthExceeded(loop.Message),
         AlvoWriteRejectedException { ExtensionId.Length: > 0 } rejected => HookRejected(rejected),

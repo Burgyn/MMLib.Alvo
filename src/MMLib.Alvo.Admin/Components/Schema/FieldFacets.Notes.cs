@@ -12,7 +12,7 @@ internal sealed partial class FieldFacets
     private static readonly HashSet<string> _drawn = new(StringComparer.Ordinal)
     {
         "type", "required", "unique", "index", "maxLength", "precision", "scale", "values", "entity", "default",
-        "rollup", "computed",
+        "rollup", "computed", "validation",
     };
 
     /// <summary>How a note's value is written: as it was declared, not escaped for HTML.</summary>

@@ -59,4 +59,12 @@ public sealed class PostgreSqlFieldSqlRenderer : IFieldSqlRenderer
             ? "E" + literal
             : null;
     }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <c>EXTRACT(EPOCH …)</c> answers an exact <c>numeric</c> on PostgreSQL 14+, so the result is exact to the microsecond; a
+    /// <c>date</c> reads as its nominal midnight, independent of the session <c>TimeZone</c> (HX-11 Ruling 11).
+    /// </remarks>
+    string? IFieldSqlRenderer.RenderEpochMicroseconds(string timestampSql) =>
+        $"CAST(EXTRACT(EPOCH FROM {timestampSql}) * 1000000 AS bigint)";
 }

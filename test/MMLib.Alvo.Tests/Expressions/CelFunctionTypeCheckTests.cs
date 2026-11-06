@@ -153,8 +153,9 @@ public sealed class CelFunctionTypeCheckTests
         Compile("name(name) == name", CelProfile.Condition, title).IsSuccess.ShouldBeTrue();
     }
 
-    [Fact]
-    public void The_legacy_calls_keep_their_mutate_only_refusal_text() =>
-        Compile("now() == now()", CelProfile.Condition).Errors[0].Message
-            .ShouldBe("'now(...)' is legal only in the Mutate profile (a before-hook mutate value).");
+    [Theory]
+    [InlineData(CelProfile.Computed, "'now()' is not legal in the Computed profile. A computed column is maintained by the database and has no instant to read.")]
+    [InlineData(CelProfile.Access, "'now()' is not legal in the Access profile. An access level is a predicate over the caller alone, judged with no row and no instant.")]
+    public void The_legacy_call_s_refusal_names_why_its_own_profile_has_no_instant(CelProfile profile, string message) =>
+        Compile("now()", profile).Errors[0].Message.ShouldBe(message);
 }

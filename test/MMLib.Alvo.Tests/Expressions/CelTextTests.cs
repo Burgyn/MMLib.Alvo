@@ -96,8 +96,24 @@ public sealed class CelTextTests
         CelText.Write(new CelLiteral(CelValueType.Decimal, 10m)).ShouldBe("10.0");
 
     [Fact]
-    public void The_smallest_long_has_no_spelling() =>
-        Should.Throw<ArgumentOutOfRangeException>(() => CelText.Write(new CelLiteral(CelValueType.Int, long.MinValue)));
+    public void The_smallest_long_is_spelled_as_the_one_literal_the_parser_reads_back() =>
+        CelParser.Parse(CelText.Write(new CelLiteral(CelValueType.Int, long.MinValue))).ShouldBe(new CelLiteral(CelValueType.Int, long.MinValue));
+
+    [Fact]
+    public void The_smallest_long_reads_back_under_a_negation()
+    {
+        var negated = new CelUnary(CelUnaryOperator.Negate, new CelLiteral(CelValueType.Int, long.MinValue));
+        CelText.Write(negated).ShouldBe("--9223372036854775808");
+        CelParser.Parse(CelText.Write(negated)).ShouldBe(negated);
+    }
+
+    [Fact]
+    public void The_smallest_long_reads_back_on_the_right_of_a_minus()
+    {
+        var difference = new CelBinary(CelBinaryOperator.Subtract, CelParser.Parse("x"), new CelLiteral(CelValueType.Int, long.MinValue));
+        CelText.Write(difference).ShouldBe("x - -9223372036854775808");
+        CelParser.Parse(CelText.Write(difference)).ShouldBe(difference);
+    }
 
     [Fact]
     public void A_literal_the_lexer_has_no_spelling_for_is_refused() =>

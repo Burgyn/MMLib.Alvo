@@ -55,6 +55,7 @@ public class AccessProfileTests
     [InlineData("'sales' in @user.roles || 'manager' in @user.roles")]
     [InlineData("true == true")]
     [InlineData("true != false")]
+    [InlineData("-1 == -1")]
     public void The_profile_admits_the_constructs_a_level_is_written_from(string source)
     {
         var result = Compile(source, _project);
@@ -151,7 +152,18 @@ public class AccessProfileTests
     public void Arithmetic_does_not_compile()
     {
         Compile("1 + 1 == 2", _project).IsSuccess.ShouldBeFalse();
-        Compile("-1 == -1", _project).IsSuccess.ShouldBeFalse();
+        Compile("-(1 + 1) == 2", _project).IsSuccess.ShouldBeFalse();
+    }
+
+    /// <summary>A negated number constant is one constant in every profile, not arithmetic (HX-11 Ruling 16).</summary>
+    [Fact]
+    public void A_negative_constant_is_a_constant_here_too()
+    {
+        var result = Compile("-1 == -1", _project);
+
+        result.IsSuccess.ShouldBeTrue(Report(result));
+        result.Expression.ShouldNotBeNull().Root.ShouldBe(
+            new CelBinary(CelBinaryOperator.Equal, new CelLiteral(CelValueType.Int, -1L), new CelLiteral(CelValueType.Int, -1L)));
     }
 
     [Fact]

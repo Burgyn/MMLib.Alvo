@@ -168,7 +168,7 @@ public class DestructiveScanTests
     public void An_unmodelled_operation_is_attributed_to_its_table_property()
     {
         var change = DestructiveScan.Classify(
-            new DropCheckConstraintOperation { Table = Table, Name = "ck_orders_total" });
+            new DeleteDataOperation { Table = Table });
 
         change.Kind.ShouldBe(SchemaChangeKind.AlterField);
         change.Entity.ShouldBe(Table);
@@ -177,8 +177,8 @@ public class DestructiveScanTests
     /// <summary>The operation type is what an unmodelled change has instead of a description.</summary>
     [Fact]
     public void An_unmodelled_operation_reports_its_operation_type()
-        => DestructiveScan.Classify(new DropCheckConstraintOperation { Table = Table, Name = "ck" })
-            .Detail.ShouldBe(nameof(DropCheckConstraintOperation));
+        => DestructiveScan.Classify(new DeleteDataOperation { Table = Table })
+            .Detail.ShouldBe(nameof(DeleteDataOperation));
 
     /// <summary>
     /// An operation with no table at all is still classified rather than refused: <see cref="SchemaChange.Entity"/>

@@ -190,13 +190,15 @@ add (`created_at`, `tenant_id` and the rest) may not be declared on an entity th
 **Renames.** Renaming a field or an entity without losing its data takes `renamedFrom`; see
 [Apply and evolve your descriptor](/guides/apply-and-evolve/#5-rename-without-losing-data).
 
+**A rule the database enforces.** A field's `validation` is a CEL condition over its row — `"validation": "value >= 0"`,
+or `"value <= stock"` — that the database enforces as a `CHECK` constraint; a write that breaks it is a 422 pointing at
+the field. See [Integrity in the descriptor](/extending/integrity/).
+
 :::caution[Not in this build]
-Three keys the schema declares are refused when the descriptor is applied
+Two keys the schema declares are refused when the descriptor is applied
 ([Capabilities in this build](/reference/capabilities/#refused-at-apply)):
 
 - an entity's `softDelete`: a delete would remove the row outright. Remove the key.
-- a field's `validation`: the expression is not evaluated. Use a facet (`maxLength`, `precision` and `scale`, enum
-  `values`, a `format`) or a [before-hook](/guides/before-hooks/).
 - a `default` written as `{"$cel": "…"}`: only a literal default is honoured. Send the value on create instead.
 :::
 

@@ -9,7 +9,7 @@ three files this script writes are the only source, and `--check` fails when the
 
 Sources, and nothing else:
 
-  src/MMLib.Alvo/Descriptor/Internal/UnhonouredFeatures.cs     -> capabilities.refused (11 slots)
+  src/MMLib.Alvo/Descriptor/Internal/UnhonouredFeatures.cs     -> capabilities.refused (9 slots)
   src/MMLib.Alvo/Descriptor/Internal/UnhonouredSubsystems.cs   -> capabilities.warned   (5 blocks, 3 slots)
   src/MMLib.Alvo/Management/Internal/CapabilityReport.cs       -> capabilities.honoured
   src/MMLib.Alvo/Management/Internal/ManagementEndpoints.cs    -> the management route table

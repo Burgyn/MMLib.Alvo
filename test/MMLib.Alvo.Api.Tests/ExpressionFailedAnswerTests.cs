@@ -3,7 +3,6 @@ using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
-using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Api.Tests;
 
@@ -21,7 +20,7 @@ public sealed class ExpressionFailedAnswerTests
     [Fact]
     public async Task A_built_in_refusal_is_a_422_naming_the_function_and_its_reason()
     {
-        var (status, document) = await WrittenAsync(ProblemResultFactory.RefusalFor(_intOfText, _sent).ShouldNotBeNull());
+        var (status, document) = await ProblemWriting.WrittenAsync(ProblemResultFactory.RefusalFor(_intOfText, _sent).ShouldNotBeNull());
 
         status.ShouldBe(StatusCodes.Status422UnprocessableEntity);
         document["type"]!.GetValue<string>().ShouldBe("https://alvo.dev/errors/expression-failed");
@@ -32,7 +31,7 @@ public sealed class ExpressionFailedAnswerTests
 
     [Fact]
     public async Task A_wrapped_refusal_is_found_through_its_wrapper() =>
-        (await WrittenAsync(ProblemResultFactory.RefusalFor(new AggregateException(new InvalidOperationException("w", _intOfText)), _sent).ShouldNotBeNull()))
+        (await ProblemWriting.WrittenAsync(ProblemResultFactory.RefusalFor(new AggregateException(new InvalidOperationException("w", _intOfText)), _sent).ShouldNotBeNull()))
             .Status.ShouldBe(StatusCodes.Status422UnprocessableEntity);
 
     [Fact]
@@ -54,7 +53,7 @@ public sealed class ExpressionFailedAnswerTests
     {
         var failure = new CelFunctionException(CelInterpreter.WholeCondition, CelInterpreter.WholeConditionReason).JudgedBy(New("code"));
 
-        (await WrittenAsync(ProblemResultFactory.RefusalFor(failure, _sent).ShouldNotBeNull())).Document["detail"]!.GetValue<string>().ShouldBe(
+        (await ProblemWriting.WrittenAsync(ProblemResultFactory.RefusalFor(failure, _sent).ShouldNotBeNull())).Document["detail"]!.GetValue<string>().ShouldBe(
             "The hook's condition evaluated to a present value that is not a Bool, so nothing was written. Correct the values it reads.");
     }
 
@@ -97,7 +96,4 @@ public sealed class ExpressionFailedAnswerTests
     private static CelFunctionException IntOfText() => new("int", "the text is not a whole number such as 42 or -7");
 
     private static CelFieldRef New(string field) => new(field, CelValueType.String, CelRecordState.New);
-
-    private static Task<(int Status, JsonObject Document)> WrittenAsync(IResult result) =>
-        ProblemDetailsTests.DocumentWrittenByAsync(result);
 }

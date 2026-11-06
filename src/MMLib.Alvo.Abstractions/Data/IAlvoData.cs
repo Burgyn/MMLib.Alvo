@@ -107,7 +107,9 @@ namespace MMLib.Alvo.Data;
 ///     refuses. The payload is well-formed and every facet an implementation can check itself has already
 ///     passed, so this is neither the malformed-query channel nor a policy refusal; what is wrong is the
 ///     request's relationship to rows the caller may not even be able to see. Render 409, naming the fields
-///     the exception carries — see its own remarks for what may and may not appear there.
+///     the exception carries — see its own remarks for what may and may not appear there. The one kind rendered
+///     otherwise is <see cref="AlvoConstraintKind.Check"/>, a row breaking a field's <c>validation</c>: its fix is a
+///     different value in this request, so it is 422 <c>validation</c>, pointed at the field it names.
 ///     <para>
 ///     <b>An implementation must not let the provider's exception escape as this family's neighbour below.</b>
 ///     Rendered as a 500 it tells the caller nothing they can act on, invites a retry that cannot succeed, and

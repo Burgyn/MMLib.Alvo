@@ -247,15 +247,36 @@ public class SqliteDialectRefusalTests
     }
 
     /// <summary>
-    /// A constraint failure of a kind the decode does not claim — <c>CHECK</c>, <c>NOT NULL</c> — answers
-    /// nothing rather than being reported as a unique violation against no columns.
+    /// A constraint failure of a kind the decode does not claim — <c>NOT NULL</c> — answers nothing rather than
+    /// being reported as a unique violation against no columns.
     /// </summary>
-    /// <param name="message">A constraint message that is neither unique nor foreign key.</param>
+    /// <param name="message">A constraint message that is neither unique, foreign key nor check.</param>
     [Theory]
-    [InlineData("CHECK constraint failed: vehicle")]
     [InlineData("NOT NULL constraint failed: vehicle.plate")]
     public void A_constraint_failure_of_another_kind_answers_nothing(string message)
         => _dialect.DecodeConstraintViolation(new SqliteException(message, Constraint)).ShouldBeNull();
+
+    /// <summary>
+    /// A field's validation is a CHECK the decode claims (HX-11), by its extended code and by the bare code's message
+    /// alike, carrying the constraint's name — the one handle the shared path recomputes against.
+    /// </summary>
+    /// <param name="code">The code the exception carries: <c>SQLITE_CONSTRAINT_CHECK</c> or the bare <c>SQLITE_CONSTRAINT</c>.</param>
+    /// <param name="message">SQLite's message, as <c>Microsoft.Data.Sqlite</c> wraps it or bare.</param>
+    [Theory]
+    [InlineData(275, "SQLite Error 19: 'CHECK constraint failed: ck_products_stock_7b86837d'.")]
+    [InlineData(19, "CHECK constraint failed: ck_products_stock_7b86837d")]
+    public void A_check_failure_decodes_with_its_constraint_name(int code, string message)
+    {
+        var decoded = _dialect.DecodeConstraintViolation(new SqliteException(message, code, code)).ShouldNotBeNull();
+
+        (decoded.Kind, decoded.ConstraintName).ShouldBe((AlvoConstraintKind.Check, "ck_products_stock_7b86837d"));
+    }
+
+    /// <summary>A CHECK message that names nothing still decodes as a CHECK, with no name to place it by.</summary>
+    [Fact]
+    public void A_check_failure_naming_nothing_decodes_without_a_name() =>
+        _dialect.DecodeConstraintViolation(new SqliteException("CHECK constraint failed: ", 275, 275)).ShouldNotBeNull()
+            .ConstraintName.ShouldBeNull();
 
     /// <summary>And a code that is not a constraint at all is not read for columns.</summary>
     [Fact]

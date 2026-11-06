@@ -45,6 +45,7 @@ internal sealed class CommandEndpointFilter(
     private async ValueTask<object?> InvokeAsync(
         CommandRegistration command, CommandInputs inputs, EndpointFilterInvocationContext invocation, EndpointFilterDelegate next)
     {
+        using var instant = RequestInstant.Enter(invocation.HttpContext);
         var admission = await gate.AdmitAsync(
             invocation.HttpContext, command.Entity ?? CallerGate.AnyEntity, DataOperation.Update, alsoRead: command.Entity is not null).ConfigureAwait(false);
         if (admission.Refusal is { } refused)

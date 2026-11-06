@@ -89,6 +89,9 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
     /// <summary>SQLSTATE 23503 — <c>foreign_key_violation</c>, what <c>ON DELETE RESTRICT</c> raises.</summary>
     private const string ForeignKeyViolation = "23503";
 
+    /// <summary>SQLSTATE 23514 — <c>check_violation</c>, what a field's validation raises.</summary>
+    private const string CheckViolation = "23514";
+
     /// <inheritdoc/>
     /// <remarks>
     /// <para>
@@ -126,8 +129,41 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
                 ConstraintName = NullIfEmpty(postgres.ConstraintName),
             },
             ForeignKeyViolation => new SqlConstraintViolation { Kind = AlvoConstraintKind.Referenced },
+            CheckViolation => new SqlConstraintViolation
+            {
+                Kind = AlvoConstraintKind.Check,
+                ConstraintName = NullIfEmpty(postgres.ConstraintName),
+            },
             _ => null,
         };
+    }
+
+    /// <summary>SQLSTATE 55P03 — <c>lock_not_available</c>, what a statement raises when <c>lock_timeout</c> runs out.</summary>
+    private const string LockNotAvailable = "55P03";
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <c>SET LOCAL</c>, so the bound ends with the apply's transaction and never leaks onto a pooled connection. Five
+    /// seconds is long enough for an ordinary request transaction ahead of the apply to finish and short enough that the
+    /// readers queued behind the apply's lock request stall at most that long (HX-11 Ruling 20).
+    /// </remarks>
+    string? IAlvoSqlDialect.ApplyLockTimeoutStatement => "SET LOCAL lock_timeout = '5s'";
+
+    /// <inheritdoc/>
+    /// <remarks>Decided from the SQLSTATE alone, like <see cref="DecodeConstraintViolation"/>.</remarks>
+    bool IAlvoSqlDialect.IsLockTimeout(DbException failure) => failure is PostgresException { SqlState: LockNotAvailable };
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <c>SHARE</c> admits readers and the apply's own statements, and conflicts with the <c>ROW EXCLUSIVE</c> every insert,
+    /// update and delete takes — so a child write queues behind the apply and commits after it, recomputing under the new
+    /// definition (HX-11 Ruling 32). Held until the apply commits, and bounded by its <c>lock_timeout</c> like every other
+    /// lock the apply waits for.
+    /// </remarks>
+    string? IAlvoSqlDialect.BackfillLockStatement(EntitySchema child)
+    {
+        ArgumentNullException.ThrowIfNull(child);
+        return $"LOCK TABLE {RenderTable(child, lockedPreImageFor: null)} IN SHARE MODE";
     }
 
     /// <summary>

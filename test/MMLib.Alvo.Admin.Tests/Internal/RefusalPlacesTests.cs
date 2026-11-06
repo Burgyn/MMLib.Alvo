@@ -10,15 +10,11 @@ namespace MMLib.Alvo.Admin.Tests.Internal;
 /// </summary>
 public class RefusalPlacesTests
 {
-    /// <summary>The slots <c>UnhonouredFeatures.EveryRefusal</c> publishes at a1f1a57.</summary>
+    /// <summary>The slots <c>UnhonouredFeatures.EveryRefusal</c> publishes since HX-11 honoured <c>field.validation</c> and <c>rollup.where</c>.</summary>
     /// <remarks>The screen is passed by name: <see cref="RefusalScreen"/> is internal, and a public test method cannot take it.</remarks>
     [Theory]
-    [InlineData("field.validation", nameof(RefusalScreen.FieldEditor))]
     [InlineData("field.default", nameof(RefusalScreen.FieldEditor))]
-    [InlineData("rollup.where", nameof(RefusalScreen.FieldEditor))]
-    [InlineData("field.validation", nameof(RefusalScreen.FieldsList))]
     [InlineData("field.default", nameof(RefusalScreen.FieldsList))]
-    [InlineData("rollup.where", nameof(RefusalScreen.FieldsList))]
     [InlineData("entity.softDelete", nameof(RefusalScreen.EntityHeader))]
     [InlineData("function", nameof(RefusalScreen.OnWrite))]
     [InlineData("http.call", nameof(RefusalScreen.OnWrite))]

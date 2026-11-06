@@ -146,11 +146,12 @@ and [CEL in Alvo](/concepts/cel/)).
 A computed field that joins text must be a `string` or `text` field. A `maxLength` on it must hold the longest
 possible result; omitting `maxLength` is always accepted.
 
-:::caution[Not in this build]
-A rollup's `where`, which would aggregate only some child rows, is refused at apply, because the aggregate would
-silently include every row ([Capabilities in this build](/reference/capabilities/#refused-at-apply)).
-Aggregate every child row, or move the distinction into the model, for example a separate child entity.
-:::
+**Aggregate only some children with `where`**, a CEL condition over the child's own fields:
+`"where": "status == 'held'"`. A child that enters or leaves the filter recomputes its parent in the same
+transaction, and an apply that adds or changes a rollup recomputes it for every parent. A filter reads no caller, no
+`now()`, no function and no hidden child field, and there is no list literal: write `stage == 'lead' || stage ==
+'offer'`, not `stage in [...]`. [Integrity in the descriptor](/extending/integrity/#a-rollup-that-counts-some-children)
+has the example.
 
 ## What can go wrong
 

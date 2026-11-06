@@ -11,10 +11,17 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// Destructive = data can be lost by applying it: dropping a table or column, or an
 /// <see cref="AlterColumnOperation"/> that <em>narrows</em> the column (nullable → not-null, a
 /// smaller length/precision/scale, or a changed type). Widening alters, adds, creates, and index
-/// changes are non-destructive.
+/// changes are non-destructive. So is a CHECK constraint, added or dropped: a row that breaks a new one makes the
+/// apply fail and change nothing, and no row is ever removed to make one hold.
 /// </remarks>
 internal static class DestructiveScan
 {
+    /// <summary>What a plan says about a step that adds a field's validation (HX-11).</summary>
+    internal const string AddsValidation = "Adds the field's validation as a CHECK constraint.";
+
+    /// <summary>What a plan says about a step that drops one.</summary>
+    internal const string DropsValidation = "Drops a field's validation.";
+
     /// <summary>Maps a single EF migration operation to its Alvo <see cref="SchemaChange"/>.</summary>
     public static SchemaChange Classify(MigrationOperation operation) => operation switch
     {
@@ -27,6 +34,8 @@ internal static class DestructiveScan
         DropPrimaryKeyOperation op => TableConstraintChange(op.Table, "Drop primary key."),
         AddUniqueConstraintOperation op => TableConstraintChange(op.Table, "Add unique constraint."),
         DropUniqueConstraintOperation op => TableConstraintChange(op.Table, "Drop unique constraint."),
+        AddCheckConstraintOperation op => TableConstraintChange(op.Table, AddsValidation),
+        DropCheckConstraintOperation op => TableConstraintChange(op.Table, DropsValidation),
         _ => new SchemaChange
         {
             Kind = SchemaChangeKind.AlterField,

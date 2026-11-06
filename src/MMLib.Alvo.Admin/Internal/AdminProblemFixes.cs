@@ -45,12 +45,16 @@ internal static class AdminProblemFixes
             => "The descriptor breaks a rule every Alvo descriptor must follow. The message above says where in it.",
         ManagementEscalationException
             => "This change touches the access block, which re-qualifies the whole apply to admin. Your management level is lower.",
+        AlvoApplyLockTimeoutException
+            => "Another transaction held a table this apply needed. Nothing changed — wait a few seconds and apply again.",
         _ => null,
     };
 
     private static string? Rollback(Exception exception) => exception switch
     {
         DescriptorConcurrencyException => "Somebody applied a revision while this screen was open. Reload and try again.",
+        AlvoApplyLockTimeoutException
+            => "Another transaction held a table this restore needed. Nothing changed — wait a few seconds and restore again.",
         _ => null,
     };
 
@@ -94,6 +98,10 @@ internal static class AdminProblemFixes
     {
         AlvoConstraintViolationException { Kind: AlvoConstraintKind.Unique } violation
             => $"Another record already has this value for {string.Join(", ", violation.Fields)}. The field is declared unique on the entity's Fields tab.",
+        AlvoConstraintViolationException { Kind: AlvoConstraintKind.Check, Fields.Count: > 0 } violation
+            => $"The value for {string.Join(", ", violation.Fields)} breaks the validation the descriptor declares for it. The field's validation is on the entity's Fields tab.",
+        AlvoConstraintViolationException { Kind: AlvoConstraintKind.Check }
+            => "A value breaks a validation the descriptor declares. Each field's validation is on the entity's Fields tab.",
         AlvoConstraintViolationException violation
             => $"The value does not satisfy {violation.Kind} on {string.Join(", ", violation.Fields)}.",
         AlvoAuthorizationException

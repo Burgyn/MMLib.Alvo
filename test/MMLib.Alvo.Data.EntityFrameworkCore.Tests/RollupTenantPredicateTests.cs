@@ -55,7 +55,7 @@ public class RollupTenantPredicateTests
     private static string Setter(EntitySchema child) =>
         Recompute().Setter(child, new FieldSchema { Name = "net_total", Type = FieldType.Decimal, Rollup = Sum });
 
-    private static RollupRecompute Recompute() => new(new TestSqlDialect(), new TestFieldSqlRenderer());
+    private static RollupRecompute Recompute() => RollupRecomputes.For(new TestSqlDialect(), new TestFieldSqlRenderer());
 
     private static RollupSchema Sum =>
         new() { From = "invoice_items", Via = "invoice", Op = RollupOperation.Sum, Field = "line_total" };

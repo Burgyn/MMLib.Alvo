@@ -21,8 +21,7 @@ public sealed class SqliteAlvoDataAuditTests : IAsyncDisposable
     [Fact]
     public async Task A_create_stamps_all_four_audit_columns_from_the_injected_clock()
     {
-        var clock = new SteppingTimeProvider(Created, Updated);
-        var host = await StartAsync(clock);
+        var host = await StartAsync(new SettableTimeProvider(Created));
         var caller = Caller;
 
         var created = await host.Data.CreateAsync("invoices", Payload("first"), caller, cancellationToken: Cancellation);
@@ -36,9 +35,10 @@ public sealed class SqliteAlvoDataAuditTests : IAsyncDisposable
     [Fact]
     public async Task An_update_advances_only_the_updated_columns()
     {
-        var clock = new SteppingTimeProvider(Created, Updated);
+        var clock = new SettableTimeProvider(Created);
         var host = await StartAsync(clock);
         var created = await host.Data.CreateAsync("invoices", Payload("first"), Caller, cancellationToken: Cancellation);
+        clock.Now = Updated;
 
         var updated = await host.Data.UpdateAsync(
             "invoices", (Guid)created["id"]!, Payload("second"), Caller, cancellationToken: Cancellation);
@@ -54,10 +54,12 @@ public sealed class SqliteAlvoDataAuditTests : IAsyncDisposable
     [Fact]
     public async Task A_batch_update_advances_only_the_updated_columns()
     {
-        var host = await StartAsync(new SteppingTimeProvider(Created, Updated));
+        var clock = new SettableTimeProvider(Created);
+        var host = await StartAsync(clock);
         var creator = Caller;
         var updater = Caller;
         var created = await host.Data.CreateAsync("invoices", Payload("first"), creator, cancellationToken: Cancellation);
+        clock.Now = Updated;
 
         var batch = await host.Data.UpdateManyAsync(
             "invoices", [new AlvoRowPatch((Guid)created["id"]!, Payload("second"))], updater,
@@ -74,7 +76,7 @@ public sealed class SqliteAlvoDataAuditTests : IAsyncDisposable
     [Fact]
     public async Task A_batch_create_stamps_all_four_audit_columns_from_the_injected_clock()
     {
-        var host = await StartAsync(new SteppingTimeProvider(Created, Updated));
+        var host = await StartAsync(new SettableTimeProvider(Created));
         var caller = Caller;
 
         var batch = await host.Data.CreateManyAsync(
@@ -98,7 +100,7 @@ public sealed class SqliteAlvoDataAuditTests : IAsyncDisposable
     [Fact]
     public async Task A_caller_with_no_identity_leaves_the_actor_columns_null()
     {
-        var host = await StartAsync(new SteppingTimeProvider(Created, Updated));
+        var host = await StartAsync(new SettableTimeProvider(Created));
 
         var created = await host.Data.CreateAsync("invoices", Payload("anon"), AlvoContext.Anonymous, cancellationToken: Cancellation);
 
@@ -160,14 +162,14 @@ public sealed class SqliteAlvoDataAuditTests : IAsyncDisposable
     public ValueTask DisposeAsync() => _fixture.DisposeAsync();
 
     /// <summary>
-    /// A clock that answers each configured instant once and then repeats the last, so a create and the
-    /// update that follows it are distinguishable without the test having to advance anything between them.
+    /// A clock that answers <see cref="Now"/> however often it is read: a data-port call reads it for the flow's
+    /// instant as well as for each write's stamp (HX-11 Rulings 1, 2), so the facts set it between calls rather than
+    /// count reads.
     /// </summary>
-    private sealed class SteppingTimeProvider(params DateTimeOffset[] instants) : TimeProvider
+    private sealed class SettableTimeProvider(DateTimeOffset now) : TimeProvider
     {
-        private int _reads;
+        public DateTimeOffset Now { get; set; } = now;
 
-        public override DateTimeOffset GetUtcNow() =>
-            instants[Math.Min(_reads++, instants.Length - 1)];
+        public override DateTimeOffset GetUtcNow() => Now;
     }
 }

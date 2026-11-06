@@ -105,9 +105,12 @@ refused, and a record holding one fails to read into the class.
 - **Enum fields compare with `==` and `!=` only**, against a member of their own enum or another field of that enum. An
   enum field converted to a number, an ordering on it, and a comparison cast to `object` are refused; an enum
   *constant* cast to a number is that number.
-- **No clock yet.** `DateTimeOffset.UtcNow`, `DateTime.Now`, `TimeProvider.GetUtcNow()` and the like are refused: a
-  condition is judged after the commit and has no clock until `now()` arrives. Compare against a field the write
-  stored, or check the time in the handler.
+- **`DateTimeOffset.UtcNow` is `now()`.** `DateTimeOffset.UtcNow` and `DateTimeOffset.Now` translate to `now()`, a
+  `static readonly TimeSpan` field to a `duration`, and `+`/`-` over them to CEL's operators:
+  `e.New.DueAt < DateTimeOffset.UtcNow - Grace`. In a handler's `when` that is the **event's** time, not the time
+  the handler runs; in a write hook's `when`, the request's instant. A `static readonly DateTimeOffset` is a constant,
+  read once at registration, so it never moves. `DateTime.Now`, `DateTime.Today`, `TimeProvider.GetUtcNow()` and the
+  like stay refused, with `DateTimeOffset.UtcNow` as the fix.
 - **No exact literal, no translation.** A `double`, `float`, `char`, `DateOnly` or `DateTime` constant, `long.MinValue`,
   a user-defined conversion operator and a `?:` are refused; use a `decimal` (`99.5m`) or a `DateTimeOffset`.
 

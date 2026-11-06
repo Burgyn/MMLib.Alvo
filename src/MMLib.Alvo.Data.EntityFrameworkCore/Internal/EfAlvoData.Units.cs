@@ -337,6 +337,13 @@ internal sealed partial class EfAlvoData
     internal static AlvoContext OneHopDeeper(AlvoContext context) =>
         context with { Provenance = context.Provenance with { Depth = AlvoEventProvenance.Effective(context).Depth + 1 } };
 
+    /// <summary>
+    /// Binds this store's clock as the flow's instant unless one is bound (HX-11 Ruling 1): <c>TransactAsync</c>'s entry, so
+    /// every write of a unit reads one <c>now()</c>.
+    /// </summary>
+    /// <returns>A scope that unbinds it, or a no-op when an instant was already bound.</returns>
+    internal IDisposable EnsureInstant() => AlvoFlow.EnsureInstant(_time);
+
     /// <summary>What a host hook of a write in <paramref name="unit"/> receives as <c>write.Transaction</c>: the unit, as the writer, one hop deeper.</summary>
     internal IAlvoTransaction HookTransaction(WriteUnit unit, AlvoContext context) => new EfAlvoTransaction(this, unit, OneHopDeeper(context));
 

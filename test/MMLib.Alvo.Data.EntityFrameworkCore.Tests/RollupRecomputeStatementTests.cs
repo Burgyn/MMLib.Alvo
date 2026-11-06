@@ -209,7 +209,7 @@ public class RollupRecomputeStatementTests
     {
         await using var db = new AlvoDataContext(Options(recorder), schema, Guid.NewGuid());
 
-        await new RollupRecompute(new TestSqlDialect(), new TestFieldSqlRenderer())
+        await RollupRecomputes.For(new TestSqlDialect(), new TestFieldSqlRenderer())
             .ForChildWriteAsync(db, child, Images(tenants), TestContext.Current.CancellationToken);
     }
 

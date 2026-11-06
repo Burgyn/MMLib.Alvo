@@ -99,6 +99,27 @@ public abstract class AlvoDataComputedRollupTests
     /// <param name="desired">The schema to migrate it to.</param>
     protected abstract Task<MigrationResult> MigrateAsync(SchemaModel current, SchemaModel desired);
 
+    /// <summary>
+    /// Plans the change from <paramref name="current"/> to <paramref name="desired"/> against the store the most recent
+    /// <see cref="CreateAsync"/> stood up, without applying it.
+    /// </summary>
+    /// <param name="current">The schema the store currently holds.</param>
+    /// <param name="desired">The schema to migrate it to.</param>
+    protected abstract Task<MigrationPlan> PlanAsync(SchemaModel current, SchemaModel desired);
+
+    /// <summary>The engine's NULL-safe "differs" operator: <c>IS DISTINCT FROM</c> on PostgreSQL, <c>IS NOT</c> on SQLite.</summary>
+    protected abstract string DistinctOperator { get; }
+
+    /// <summary>
+    /// The statement this engine's apply holds the child <c>reservations</c> with before it recomputes a rollup over it —
+    /// <c>LOCK TABLE … IN SHARE MODE</c> on PostgreSQL — or <see langword="null"/> for an engine on which no child write can
+    /// interleave with an apply (SQLite).
+    /// </summary>
+    protected abstract string? BackfillLock { get; }
+
+    private async Task ApplyAsync(SchemaModel current, SchemaModel desired) =>
+        (await MigrateAsync(current, desired)).Applied.ShouldBeTrue();
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>
@@ -514,6 +535,163 @@ public abstract class AlvoDataComputedRollupTests
         stored[ItemCount].ShouldBe(2L, "a count over another tenant's rows is a disclosure of how many they hold");
     }
 
+    /// <summary>
+    /// A <c>rollup.where</c> narrows the aggregate to the children its filter admits (HX-11 Ruling 31): a released
+    /// reservation is not held stock.
+    /// </summary>
+    [Fact]
+    public async Task A_filtered_rollup_counts_only_the_children_its_filter_admits()
+    {
+        var data = await CreateAsync(FilteredSchema, FilteredDescriptor);
+        var product = await CreateProductAsync(data);
+        await CreateReservationAsync(data, product, 2m, "held");
+        await CreateReservationAsync(data, product, 5m, "released");
+
+        (await ReadAsync(data, product))[HeldTotal].ShouldBe(2m);
+    }
+
+    /// <summary>
+    /// A child whose filtered field changes — its foreign key untouched — leaves and re-enters the aggregate: the recompute
+    /// reruns the filter rather than adjusting by the row's own delta (Ruling 33).
+    /// </summary>
+    [Fact]
+    public async Task A_child_moving_across_the_filter_moves_the_aggregate_both_ways()
+    {
+        var data = await CreateAsync(FilteredSchema, FilteredDescriptor);
+        var product = await CreateProductAsync(data);
+        var reservation = await CreateReservationAsync(data, product, 2m, "held");
+
+        await UpdateStatusAsync(data, reservation, "released");
+        (await ReadAsync(data, product))[HeldTotal].ShouldBeNull("SUM over no admitted child is the operation's empty answer");
+        await UpdateStatusAsync(data, reservation, "held");
+        (await ReadAsync(data, product))[HeldTotal].ShouldBe(2m);
+    }
+
+    /// <summary>
+    /// A filter constant holding <c>{0}</c> is matched literally, not formatted with the statement's parent id: the filter
+    /// text is escaped for EF's raw-SQL formatting (Ruling 31).
+    /// </summary>
+    [Fact]
+    public async Task A_filter_whose_constant_holds_braces_aggregates_exactly_the_matching_children()
+    {
+        var data = await CreateAsync(BracedSchema, BracedDescriptor);
+        var product = await CreateProductAsync(data);
+        await CreateReservationAsync(data, product, 2m, "held", label: "{0}");
+        await CreateReservationAsync(data, product, 3m, "held", label: "x");
+
+        (await ReadAsync(data, product))[HeldTotal].ShouldBe(2m);
+    }
+
+    /// <summary>
+    /// The adversarial pair over a <em>filtered</em> rollup (HX-11 Task 10 review m3): the filter is ANDed after the tenant
+    /// predicate, so an <c>||</c> inside it can only widen which of the tenant's own children count — never reach Globex's
+    /// child that names Acme's product and matches the filter.
+    /// </summary>
+    [Fact]
+    public async Task A_filter_with_an_or_never_aggregates_another_tenants_children()
+    {
+        var data = await CreateAsync(ScopedFilteredSchema(EitherStatus), ScopedFilteredDescriptor(EitherStatus));
+        var product = await CreateProductAsync(data, Acme);
+        await CreateReservationAsync(data, product, 10m, "held", Acme);
+        await CreateReservationAsync(data, product, 5m, "released", Globex);
+
+        await CreateReservationAsync(data, product, 2m, "released", Acme);
+
+        (await ReadAsync(data, product, Acme))[HeldTotal].ShouldBe(12m, "Acme's own two children, and nothing of Globex's");
+    }
+
+    /// <summary>
+    /// An apply that changes a rollup's filter recomputes every parent in that apply (Ruling 32): the stored aggregate never
+    /// waits for a child write to catch up with the new definition.
+    /// </summary>
+    [Fact]
+    public async Task Changing_a_filter_on_an_apply_recomputes_every_parent_at_once()
+    {
+        var data = await CreateAsync(FilteredSchema, FilteredDescriptor);
+        var product = await CreateProductAsync(data);
+        await CreateReservationAsync(data, product, 2m, "held");
+        await CreateReservationAsync(data, product, 5m, "released");
+
+        await ApplyAsync(FilteredSchema, ReleasedFilterSchema);
+
+        (await ReadAsync(data, product))["held_total"].ShouldBe(5m, "the backfill ran in the apply, before any child write");
+    }
+
+    /// <summary>
+    /// A rollup added to a parent that already holds rows is filled by the apply, rather than reading empty until a child
+    /// write (Ruling 32 — the old staleness this fixes).
+    /// </summary>
+    [Fact]
+    public async Task A_rollup_added_to_a_populated_parent_is_filled_by_the_apply()
+    {
+        var data = await CreateAsync(WithoutRollupSchema, FilteredDescriptor);
+        var product = await CreateProductAsync(data);
+        await CreateReservationAsync(data, product, 2m, "held");
+
+        await ApplyAsync(WithoutRollupSchema, FilteredSchema);
+
+        (await ReadAsync(data, product))["held_total"].ShouldBe(2m);
+    }
+
+    /// <summary>
+    /// The backfill writes only the parents whose aggregate differs, by the engine's NULL-safe comparison — an unchanged
+    /// parent costs neither a row version nor a row lock (Ruling 32).
+    /// </summary>
+    [Fact]
+    public async Task A_backfill_rewrites_only_the_parents_whose_aggregate_changes()
+    {
+        await CreateAsync(FilteredSchema, FilteredDescriptor);
+
+        var plan = await PlanAsync(FilteredSchema, ReleasedFilterSchema);
+
+        plan.Sql[^1].ShouldContain(DistinctOperator, Case.Sensitive, "an unchanged parent is not rewritten (no WAL, no row lock)");
+    }
+
+    /// <summary>
+    /// Where the backfill's child lock sits (Ruling 74): right after the lock timeout and <em>before</em> EF's DDL, so the
+    /// apply takes the child before the parent — a writer's own order, child row first, parent row lock second — and never
+    /// waits for the child while holding the parent's DDL lock. The step names what it costs on an engine that locks; on
+    /// one that does not, there is neither a lock nor a note.
+    /// </summary>
+    [Fact]
+    public async Task A_backfill_holds_the_child_before_the_parent_s_ddl_and_says_so()
+    {
+        await CreateAsync(WithoutRollupSchema, FilteredDescriptor);
+
+        var plan = await PlanAsync(WithoutRollupSchema, FilteredSchema);
+
+        var step = plan.Steps.Single(candidate => candidate.Change.Detail == "Recomputes the rollup for every record.");
+        plan.Sql[^1].ShouldStartWith("UPDATE", Case.Insensitive, "the recompute follows the DDL that adds its column");
+        if (BackfillLock is null)
+        {
+            plan.Sql.ShouldNotContain(statement => statement.Contains("LOCK TABLE", StringComparison.OrdinalIgnoreCase));
+            step.Reason.ShouldBeNull();
+            return;
+        }
+
+        plan.Sql.ToList().IndexOf(BackfillLock).ShouldBe(1, "right after the lock timeout, before the parent's ALTER TABLE");
+        plan.Sql.Count(statement => statement.Contains("LOCK TABLE", StringComparison.OrdinalIgnoreCase)).ShouldBe(1);
+        step.Reason.ShouldBe("Locks writes to 'reservations' and every changed parent row until the apply commits.");
+    }
+
+    /// <summary>
+    /// The backfill's tenant predicate, pinned (Ruling 32): Globex's released child names Acme's product, and the apply that
+    /// switches the filter to <c>released</c> recomputes Acme's row from Acme's own children alone.
+    /// </summary>
+    [Fact]
+    public async Task A_backfill_never_aggregates_another_tenants_children()
+    {
+        var data = await CreateAsync(ScopedFilteredSchema("status == 'held'"), ScopedFilteredDescriptor("status == 'held'"));
+        var product = await CreateProductAsync(data, Acme);
+        await CreateReservationAsync(data, product, 10m, "held", Acme);
+        await CreateReservationAsync(data, product, 2m, "released", Acme);
+        await CreateReservationAsync(data, product, 5m, "released", Globex);
+
+        await ApplyAsync(ScopedFilteredSchema("status == 'held'"), ScopedFilteredSchema("status == 'released'"));
+
+        (await ReadAsync(data, product, Acme))[HeldTotal].ShouldBe(2m, "Acme's own released child, and nothing of Globex's");
+    }
+
     private const string Invoices = "invoices";
 
     private const string Items = "invoice_items";
@@ -856,4 +1034,160 @@ public abstract class AlvoDataComputedRollupTests
     /// </summary>
     private static FieldSchema TenantColumn =>
         new() { Name = "tenant_id", Type = SchemaField.Uuid, Required = true, Indexed = true };
+
+    private const string Products = "products";
+    private const string Reservations = "reservations";
+    private const string HeldTotal = "held_total";
+
+    private static async Task<Guid> CreateProductAsync(IAlvoData data, AlvoContext? caller = null)
+    {
+        var payload = caller?.Tenant is null ? new Dictionary<string, object?>(StringComparer.Ordinal) : Owned(caller);
+        payload["name"] = "widget";
+        return (Guid)(await data.CreateAsync(Products, payload, caller ?? Caller, cancellationToken: Ct))["id"]!;
+    }
+
+    private static Task<Guid> CreateReservationAsync(
+        IAlvoData data, Guid product, decimal quantity, string status, string? label = null) =>
+        CreateReservationAsync(data, product, quantity, status, Caller, label);
+
+    private static async Task<Guid> CreateReservationAsync(
+        IAlvoData data, Guid product, decimal quantity, string status, AlvoContext caller, string? label = null)
+    {
+        var payload = caller.Tenant is null ? new Dictionary<string, object?>(StringComparer.Ordinal) : Owned(caller);
+        payload["product_id"] = product;
+        payload["quantity"] = quantity;
+        payload["status"] = status;
+        payload["label"] = label;
+        return (Guid)(await data.CreateAsync(Reservations, payload, caller, cancellationToken: Ct))["id"]!;
+    }
+
+    private static Task<AlvoRecord> UpdateStatusAsync(IAlvoData data, Guid reservation, string status) =>
+        data.UpdateAsync(
+            Reservations, reservation, new Dictionary<string, object?>(StringComparer.Ordinal) { ["status"] = status }, Caller, cancellationToken: Ct);
+
+    private static async Task<AlvoRecord> ReadAsync(IAlvoData data, Guid product, AlvoContext? caller = null) =>
+        (await data.GetAsync(Products, product, caller ?? Caller, Ct))!;
+
+    /// <summary>A filter admitting both statuses through an <c>||</c>.</summary>
+    private const string EitherStatus = "status == 'held' || status == 'released'";
+
+    /// <summary><see cref="FilteredSchema"/> with the filter switched to released reservations.</summary>
+    private static SchemaModel ReleasedFilterSchema => FilteredSchemaFor("status == 'released'");
+
+    /// <summary><see cref="FilteredSchema"/> before <c>held_total</c> was declared.</summary>
+    private static SchemaModel WithoutRollupSchema
+    {
+        get
+        {
+            var filtered = FilteredSchema;
+            var products = filtered.Entities[0];
+            return new([products with { Fields = [.. products.Fields.Where(declared => declared.Name != HeldTotal)] }, filtered.Entities[1]]);
+        }
+    }
+
+    /// <summary>The filtered pair with both entities tenant-scoped, as the adversarial facts need.</summary>
+    private static AlvoDescriptor ScopedFilteredDescriptor(string where)
+    {
+        var filtered = FilteredDescriptorFor(where);
+        return filtered with
+        {
+            Tenancy = new Tenancy { Enabled = true },
+            Entities = filtered.Entities.ToDictionary(
+                pair => pair.Key, pair => pair.Value with { Tenancy = EntityTenancy.Scoped }, StringComparer.Ordinal),
+        };
+    }
+
+    /// <summary>The schema <see cref="ScopedFilteredDescriptor"/> maps to, with the managed <c>tenant_id</c> on both.</summary>
+    private static SchemaModel ScopedFilteredSchema(string where) => new([
+        .. FilteredSchemaFor(where).Entities.Select(entity => entity with
+        {
+            Tenancy = TenancyMode.Scoped,
+            Fields = [.. entity.Fields, TenantColumn],
+        }),
+    ]);
+
+    /// <summary><c>products.held_total</c>: the <c>sum</c> of held reservations' <c>quantity</c>.</summary>
+    private static AlvoDescriptor FilteredDescriptor => FilteredDescriptorFor("status == 'held'");
+
+    /// <summary>The schema <see cref="FilteredDescriptor"/> maps to.</summary>
+    private static SchemaModel FilteredSchema => FilteredSchemaFor("status == 'held'");
+
+    /// <summary>The same rollup filtered on a text constant holding EF's own placeholder spelling.</summary>
+    private static AlvoDescriptor BracedDescriptor => FilteredDescriptorFor("label == '{0}'");
+
+    /// <summary>The schema <see cref="BracedDescriptor"/> maps to.</summary>
+    private static SchemaModel BracedSchema => FilteredSchemaFor("label == '{0}'");
+
+    private static AlvoDescriptor FilteredDescriptorFor(string where) => new()
+    {
+        ApiVersion = "alvo.dev/v1",
+        Name = "filtered-rollup-suite",
+        Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
+        {
+            [Products] = new()
+            {
+                Tenancy = EntityTenancy.Global,
+                Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+                {
+                    ["name"] = new() { Type = DescField.String },
+                    [HeldTotal] = new()
+                    {
+                        Type = DescField.Decimal,
+                        Precision = 18,
+                        Scale = 2,
+                        Rollup = new() { From = Reservations, Op = RollupOp.Sum, Field = "quantity", Where = where },
+                    },
+                },
+                Rules = AllowAll,
+            },
+            [Reservations] = new()
+            {
+                Tenancy = EntityTenancy.Global,
+                Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+                {
+                    ["product_id"] = new() { Type = DescField.Ref, Entity = Products, Required = true },
+                    ["quantity"] = new() { Type = DescField.Decimal, Precision = 18, Scale = 2, Required = true },
+                    ["status"] = new() { Type = DescField.Enum, Values = ["held", "released"], Required = true },
+                    ["label"] = new() { Type = DescField.String },
+                },
+                Rules = AllowAll,
+            },
+        },
+    };
+
+    private static SchemaModel FilteredSchemaFor(string where) => new([
+        new EntitySchema
+        {
+            Name = Products,
+            Tenancy = TenancyMode.Global,
+            Fields =
+            [
+                new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true },
+                new FieldSchema { Name = "name", Type = SchemaField.String, Nullable = true },
+                Money(HeldTotal) with
+                {
+                    Rollup = new RollupSchema { From = Reservations, Op = RollupOperation.Sum, Field = "quantity", Via = "product_id", Where = where },
+                },
+            ],
+        },
+        new EntitySchema
+        {
+            Name = Reservations,
+            Tenancy = TenancyMode.Global,
+            Fields =
+            [
+                new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true },
+                new FieldSchema
+                {
+                    Name = "product_id",
+                    Type = SchemaField.Ref,
+                    Required = true,
+                    Reference = new RefSchema(Products, MMLib.Alvo.Schema.OnDelete.Cascade),
+                },
+                Money("quantity") with { Required = true, Nullable = false },
+                new FieldSchema { Name = "status", Type = SchemaField.Enum, EnumValues = ["held", "released"], Required = true },
+                new FieldSchema { Name = "label", Type = SchemaField.String, Nullable = true },
+            ],
+        },
+    ]);
 }

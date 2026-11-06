@@ -44,14 +44,47 @@ internal static class RenameGuessSplitter
             return residual;
         }
 
+        var splits = residual
+            .Where(operation => operation is RenameColumnOperation or RenameTableOperation)
+            .ToDictionary(operation => operation, operation => SplitRenameGuess(operation, alignedCurrent, desired, buildModel, differ).ToList());
+        var superseded = SupersededChecks(splits.Values.SelectMany(operations => operations), splits.Keys);
+
         var normalized = new List<MigrationOperation>(residual.Count + 2);
         foreach (var operation in residual)
         {
-            normalized.AddRange(SplitRenameGuess(operation, alignedCurrent, desired, buildModel, differ));
+            normalized.AddRange(
+                splits.TryGetValue(operation, out var split) ? split
+                : superseded(operation) ? []
+                : [operation]);
         }
 
         return normalized;
     }
+
+    // The residual's CHECK operations the split already carries: one the scoped diffs re-emitted under the same key, or any
+    // on a table a guessed table rename splits — its DropTable takes the old constraints with it and its CreateTable
+    // declares the new ones inline, so a residual ADD CONSTRAINT would add one twice and a residual DROP would name a
+    // table that no longer exists.
+    private static Func<MigrationOperation, bool> SupersededChecks(
+        IEnumerable<MigrationOperation> splitOperations, IEnumerable<MigrationOperation> guesses)
+    {
+        var keys = splitOperations.Select(CheckKey).OfType<CheckConstraintKey>().ToHashSet();
+        var tables = guesses.OfType<RenameTableOperation>().SelectMany(rename => new[] { rename.Name, rename.NewName! })
+            .ToHashSet(StringComparer.Ordinal);
+
+        return operation => CheckKey(operation) is { } key && (keys.Contains(key) || tables.Contains(key.Table));
+    }
+
+    // A guessed rename's residual already carries the drop and add of the column's CHECK constraint, and the scoped diffs
+    // that replace it carry them again: the split's copies are kept, ordered around the column they constrain.
+    private static CheckConstraintKey? CheckKey(MigrationOperation operation) => operation switch
+    {
+        AddCheckConstraintOperation add => new CheckConstraintKey(true, add.Table, add.Name),
+        DropCheckConstraintOperation drop => new CheckConstraintKey(false, drop.Table, drop.Name),
+        _ => null,
+    };
+
+    private readonly record struct CheckConstraintKey(bool Adds, string Table, string Name);
 
     private static IEnumerable<MigrationOperation> SplitRenameGuess(
         MigrationOperation operation,

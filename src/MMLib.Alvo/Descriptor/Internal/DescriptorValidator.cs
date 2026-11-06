@@ -246,6 +246,8 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             ? []
             : ruleErrors.ToList();
         errors.AddRange(ComputedFieldCheck.Errors(schema, _compiler));
+        errors.AddRange(CheckConstraintCheck.Errors(schema, _compiler, descriptor));
+        errors.AddRange(RollupFilterCheck.Errors(schema, _compiler, descriptor));
         errors.AddRange(OwnerWarnings(descriptor, schema, errors));
 
         return errors;
@@ -554,6 +556,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             yield return error;
         }
 
+        var fieldNames = fields.EnumerateObject().Select(field => field.Name).ToList();
         foreach (var field in fields.EnumerateObject())
         {
             foreach (var error in FieldSemanticErrors(
@@ -561,8 +564,42 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             {
                 yield return error;
             }
+
+            if (ValidationRefusal(entity, field, fieldNames) is { } refused)
+            {
+                yield return refused;
+            }
         }
     }
+
+    /// <summary>
+    /// The refusal of a field's <c>validation</c> that never reaches the compiled pass: one on a <c>storage: dynamic</c>
+    /// entity (HX-11 Ruling 30), or one the mapper cannot rewrite — a syntax error, <c>old.</c>, <c>changed()</c>, an
+    /// ambiguous <c>value</c> (Rulings 13, 14).
+    /// </summary>
+    /// <remarks>
+    /// Reported here because the mapper refuses the same declaration with an exception, which <c>TryReadModel</c> takes
+    /// as already reported — so this pass is the one that gives it a pointer and a fix.
+    /// </remarks>
+    /// <param name="entity">The declaring entity.</param>
+    /// <param name="field">The field.</param>
+    /// <param name="fieldNames">Every field the entity declares.</param>
+    private static DescriptorValidationError? ValidationRefusal(JsonProperty entity, JsonProperty field, List<string> fieldNames)
+    {
+        if (!field.Value.TryGetProperty("validation", out var validation) || validation.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        return IsDynamic(entity.Value)
+            ? FieldValidation.DynamicRefusal(entity.Name, field.Name)
+            : FieldValidation.Refusal(entity.Name, field.Name, validation.GetString()!, fieldNames);
+    }
+
+    private static bool IsDynamic(JsonElement entity) =>
+        entity.TryGetProperty("storage", out var storage)
+        && storage.ValueKind == JsonValueKind.String
+        && storage.ValueEquals("dynamic");
 
     private static IEnumerable<DescriptorValidationError> EventExclusionErrors(
         JsonProperty entity, JsonElement fields, IReadOnlySet<string> managed)

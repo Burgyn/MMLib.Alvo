@@ -47,5 +47,16 @@ public sealed class PostgreSqlAlvoDataComputedRollupTests : AlvoDataComputedRoll
         return result;
     }
 
+    /// <inheritdoc/>
+    protected override Task<MigrationPlan> PlanAsync(SchemaModel current, SchemaModel desired) =>
+        _host!.Services.GetRequiredService<ISchemaMigrator>()
+            .PlanAsync(current, desired, new MigrationOptions(), TestContext.Current.CancellationToken);
+
+    /// <inheritdoc/>
+    protected override string DistinctOperator => "IS DISTINCT FROM";
+
+    /// <inheritdoc/>
+    protected override string? BackfillLock => "LOCK TABLE \"reservations\" IN SHARE MODE";
+
     public ValueTask DisposeAsync() => _fixture.DisposeAsync();
 }

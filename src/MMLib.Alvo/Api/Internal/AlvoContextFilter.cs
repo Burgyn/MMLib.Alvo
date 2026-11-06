@@ -90,6 +90,7 @@ internal sealed class AlvoContextFilter : IEndpointFilter
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(next);
+        using var instant = RequestInstant.Enter(context.HttpContext);
 
         var options = _authOptions.Value;
         var request = context.HttpContext.Request;

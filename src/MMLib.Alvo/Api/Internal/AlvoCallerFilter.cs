@@ -17,6 +17,7 @@ internal sealed class AlvoCallerFilter(CallerGate gate, IAlvoContextAccessor acc
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(next);
+        using var instant = RequestInstant.Enter(context.HttpContext);
 
         var admission = await gate.AdmitAsync(context.HttpContext, scopeEntity: null, DataOperation.Get).ConfigureAwait(false);
         if (admission.Refusal is { } refused)

@@ -117,6 +117,47 @@ public class FunctionOfferTests
         FunctionOffer.FirstArgument(now, "beforeCreate", new FieldSchema { Name = "at", Type = FieldType.DateTime }).ShouldBeNull();
     }
 
+    /// <summary>
+    /// A function that yields a Duration takes a text constant only (HX-11 Ruling 7: a duration is built from a constant), so a
+    /// row's String field never prefills it, whatever the function is called — the offer reads that from the catalog.
+    /// </summary>
+    [Theory]
+    [InlineData("duration")]
+    [InlineData("interval")]
+    public void A_function_that_yields_a_duration_takes_no_row_field(string name)
+    {
+        var catalog = new[] { Info(name, CelValueType.Duration, CelFunctionProvenance.BuiltIn, _both, ("text", CelValueType.String)) };
+        var offered = FunctionOffer.For(catalog, CelProfile.Mutate).Single();
+
+        FunctionOffer.FirstArgument(offered, "beforeCreate", new FieldSchema { Name = "code", Type = FieldType.String }).ShouldBeNull();
+    }
+
+    /// <summary>
+    /// A constant-only function inserts a constant it compiles with, its inside selected to retype — a bare
+    /// <c>duration(text)</c> named a field <c>text</c> the check then refused (HX-11 Task 1 note).
+    /// </summary>
+    [Fact]
+    public void A_function_that_yields_a_duration_inserts_a_constant_with_its_inside_selected()
+    {
+        var catalog = new[] { Info("duration", CelValueType.Duration, CelFunctionProvenance.BuiltIn, _both, ("text", CelValueType.String)) };
+
+        FunctionOffer.Template(FunctionOffer.For(catalog, CelProfile.Mutate).Single(), firstArgument: null)
+            .ShouldBe(new Insertion("duration('1h')", 10, 2));
+    }
+
+    /// <summary>
+    /// The text constant is written only where the one parameter is a String: a host function that yields a Duration
+    /// from an Int would be offered <c>hours('1h')</c>, a type error, so it gets its parameter name like any other.
+    /// </summary>
+    [Fact]
+    public void A_duration_from_a_number_inserts_its_parameter_name_not_a_text_constant()
+    {
+        var catalog = new[] { Info("hours", CelValueType.Duration, CelFunctionProvenance.Host, _both, ("count", CelValueType.Int)) };
+
+        FunctionOffer.Template(FunctionOffer.For(catalog, CelProfile.Mutate).Single(), firstArgument: null)
+            .ShouldBe(new Insertion("hours(count)", 6, 5));
+    }
+
     [Fact]
     public void An_int_field_fills_a_decimal_parameter() =>
         FunctionOffer.FirstArgument(Offered("tax"), "beforeCreate", new FieldSchema { Name = "qty", Type = FieldType.Integer }).ShouldBe("new.qty");

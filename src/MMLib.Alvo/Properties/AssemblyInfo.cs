@@ -47,3 +47,9 @@
 // The analyzer's parity fact reads the boot ban's own list (HookDependencies), so ALVO1001's reach list is held a
 // superset of what the core refuses at start, rather than a copy that drifts from it.
 [assembly: InternalsVisibleTo("MMLib.Alvo.Analyzers.Tests")]
+
+// The assistant eval's reject_negative_price grader (HX-11), for three internals: DescriptorToSchemaMapper, CelCompiler
+// and CelInterpreter. A field's validation is graded by what the core makes of it — the canonical CHECK expression,
+// evaluated against a negative price and a zero one — never by its spelling, which has as many right forms as CEL
+// has ways to say "not negative". The eval is a measurement project in no ring, never packed or shipped.
+[assembly: InternalsVisibleTo("MMLib.Alvo.Ai.Eval")]

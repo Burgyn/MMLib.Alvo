@@ -140,6 +140,7 @@ internal sealed class WritePathWorld : IAsyncDisposable
             services.GetRequiredService<IPredicateRenderer>(),
             new TestFieldSqlRenderer(),
             new SqliteTestDialect(),
+            services.GetRequiredService<ICelCompiler>(),
             contexts,
             world._time,
             new AlvoOptions(),

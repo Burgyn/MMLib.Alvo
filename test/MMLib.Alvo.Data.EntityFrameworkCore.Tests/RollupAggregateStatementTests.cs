@@ -88,7 +88,7 @@ public class RollupAggregateStatementTests
     private static RollupOperation Unmapped => (RollupOperation)99;
 
     private static string Setter(RollupSchema rollup) =>
-        new RollupRecompute(new TestSqlDialect(), new TestFieldSqlRenderer())
+        RollupRecomputes.For(new TestSqlDialect(), new TestFieldSqlRenderer())
             .Setter(Child, new FieldSchema { Name = "net_total", Type = FieldType.Decimal, Rollup = rollup });
 
     private static RollupSchema Sum(string field) => Aggregate(RollupOperation.Sum, field);

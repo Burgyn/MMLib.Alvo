@@ -999,7 +999,7 @@ so every host answers it on the generated routes, opt-in or not.
 | 409 | `destructive-change` | **Management API only** — the apply's plan would discard data and the caller did not allow that |
 | 412 | `precondition-failed` | a precondition this API cannot evaluate, or a version that does not match |
 | 415 | `unsupported-media-type` | the request body was not declared as JSON, so nothing read it — the fix is a header, not the body |
-| 422 | `validation` | schema-derived validation refused the body |
+| 422 | `validation` | schema-derived validation refused the body — or a field's `validation`, the `CHECK` constraint the database enforces, refused the row the write would leave (violation code `check`, HX-11) |
 | 422 | `malformed-query` | the query string or the query body is malformed — the shape is wrong, nothing is hidden |
 | 422 | `expression-failed` | a built-in CEL function or hook arithmetic refused the request's data (`int('x')`, `substring` past the end, overflow, division by zero, a condition that is no Bool) — nothing was written; the detail names the function and Alvo's reason, never the value; answered on every host on the generated routes (`GuardAsync`), not opt-in, and never on a command or webhook receiver (500 there, Ruling 27); a refusal of a host function's output, of `old.` or of a hook-written value stays 500 (Ruling 26); only a field the request's body carried counts — a refusal of the stored row an update left alone, of a default, of a literal or of `@user`, and any refusal on a DELETE, is 500 (HX-10 Ruling 44) |
 | 428 | `precondition-required` | **Management API only** — the write requires `If-Match` and carried none |
@@ -1050,6 +1050,20 @@ now `409 conflict`:
 |---|---|---|
 | Supplied a value another record holds on a `unique` field | `409 conflict` | one per field, pointer `/<field>`, code `unique` |
 | Deleted a record a `ref` with `onDelete: restrict` still points at | `409 conflict` | one, pointer `""`, code `referenced` |
+| Left a row breaking a field's `validation` — a `CHECK` constraint (HX-11) | `422 validation` | one, pointer `/<field>` or `""`, code `check` |
+
+**A broken `CHECK` is a 422, not a 409, beside the `unique` it otherwise resembles.** Both are refusals only the engine
+can make, and both arrive through the same decoder and translator. The fix differs: a `unique` collision is the
+request colliding with *another* record, repaired by a different value or by removing what stands in the way; a
+broken validation is the row itself being invalid under a rule the descriptor declares, repaired by changing the
+values sent — the `validation` slug's fix, so it takes that slug (HX-11 Ruling 24). The violation points at the
+written entity's validated field; for a parent's validation broken through a rollup recompute, at the child field the
+caller sent (`/quantity` when an order line pushes `products.reserved` past `stock`), never at the parent's (Ruling
+25); and at `""` for a `count` rollup, a delete, a name the schema cannot place, or a field the descriptor flags
+`hidden` — statically or for some roles. The message is fixed — "This value breaks the validation the descriptor declares for this field."
+— and never echoes a value or the expression. A value a hook wrote is still 422 (Ruling 26). `validation` is not published in the OpenAPI document (Ruling 36):
+a CEL predicate has no faithful JSON Schema form, so a client learns of it from the 422. Design: `data-path.md`,
+*`validation` is the engine's `CHECK`*.
 
 **Three costs the misclassification had, each a separate defect.** An agent could not repair the request —
 no pointer, no field, no fix suggestion, in a framework whose principle 4 is structured errors *with* one. A
@@ -1369,12 +1383,12 @@ consequence and the fix named in the error:
 
 | Refusal | Why ignoring it is silent wrongness |
 |---|---|
-| `field.computed` | the expression is never evaluated, so the column stays null |
-| `field.rollup` | nothing maintains the aggregate, so it reads as permanently null while looking like data |
-| `field.validation` | the expression is not evaluated, so a value it forbids is accepted — the field is not constrained at all |
+| ~~`field.computed`~~ | **lifted (#21)**: a computed field is a stored generated column (`data-path.md`) |
+| ~~`field.rollup`~~ | **lifted (#21)**: a rollup is maintained in the child's write transaction (`data-path.md`) |
+| ~~`field.validation`~~ | **lifted in HX-11**: enforced as a database `CHECK` constraint (`data-path.md`, *`validation` is the engine's `CHECK`*); `rollup.where`, never listed here but refused by its own slot, was lifted with it |
 | `field.default` as `{"$cel": …}` (**#113**) | a CEL default is evaluated against the caller's context at insert time, which is the `computed` machinery rather than a column default — so the value would be dropped and the field left null. **A literal default is honoured**: it is emitted as a column `DEFAULT` and filled into any write that composes a whole row |
 | `entity.softDelete` | a delete would remove the row outright and reads would not exclude it — irrecoverable data loss where the schema promises recoverability |
-| the three `before*` `entity.hooks.*` points, refused **one per point** (**#114**) | a `before*` hook may reject or mutate in the write transaction, so a write the author believes is vetted is neither |
+| ~~the three `before*` `entity.hooks.*` points~~, once refused **one per point** (**#114**) | **lifted**: before-hooks run in the write transaction, rejecting or mutating the row (see the paragraph below for the history) |
 | a raw **JSONata** expression in any `$defs/jsonata` action slot (**#149**) | the action still runs, with Alvo's canonical envelope instead of the declared transform — a delivery that succeeded carrying data the author did not declare |
 | a template's **`bodyFile`**, per referencing after-hook | nothing reads a path inside a descriptor bundle, so the mail would go out with an empty body rather than fail |
 | an **`entity.update`** / **`function`** / **`http.call`** action on an after-hook | each loses something different, so each names its own consequence |

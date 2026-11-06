@@ -4,21 +4,23 @@ Applying this descriptor **fails**, on purpose. It exists to exercise the *shape
 `schema/project.schema.json` declares — including the ones this build does not yet honour — so the schema
 corpus has one fixture that covers the whole surface.
 
-Today it declares three such features, each refused at apply by
-`DescriptorToSchemaMapper`/`DescriptorValidator` with the consequence and the fix named:
+Today two things in it are refused at apply by `DescriptorToSchemaMapper`/`DescriptorValidator`, each with the
+consequence and the fix named:
 
 | Feature | Where | Why it is refused |
 |---|---|---|
-| `rollup.where` | `companies.open_deals` | the *filter* is not evaluated, so the aggregate is maintained over **every** child instead of the declared subset — a stored number that looks like data. `rollup` itself is honoured now (#21); only its `where` is not |
 | `default` (`$cel` half only) | `companies.owner_id`, `deals.owner_id` | a CEL default is evaluated against the caller's context at insert time, which is the `computed` machinery rather than a column default — so the value would be dropped and the field left null. **The literal half is honoured now (#113)**, and `deals.stage`'s `"lead"` therefore applies |
-| `hooks/before*` | `contacts.beforeCreate`, `deals.beforeUpdate` | the hooks never run, so a write the author believes is vetted or patched is neither. The three `after*` points **are** honoured now, and this example declares none of them |
+| a list literal in `rollup.where` | `companies.open_deals` | `rollup.where` itself is honoured since HX-11, but its filter here, `stage in ['lead', 'offer']`, uses a CEL list literal, which this build's CEL does not have — so the filter does not compile. The working form is `stage == 'lead' \|\| stage == 'offer'`; the file keeps the list form because it is CEL's own idiom, and a general list-literal `in` is a follow-up |
+
+**Before-hooks left that list** when they started running in the write transaction: `contacts.beforeCreate` and
+`deals.beforeUpdate` apply as declared.
 
 **`computed`, `rollup` and a literal `default` are no longer on that list** — #21 honours the first two and
 #113's literal half honours the third.
 `invoice_items.line_total` is a stored generated column the database maintains and refuses every write to,
 `invoices.net_total` is a rollup Alvo recomputes inside the child write's own transaction, and
-`invoices.gross_total` is a computed column *over* that rollup. What is left of the pair is
-`companies.open_deals`' `where`, above.
+`invoices.gross_total` is a computed column *over* that rollup. `companies.open_deals`' `where` is honoured as a
+feature too; only its list literal stands in the way, above.
 
 ## It also declares five blocks that are *warned about*, not refused
 
@@ -116,5 +118,5 @@ would fire on every descriptor ever applied. `docs/architecture/data-api.md` rec
 
 Delete it as soon as applying `crm.alvo.json` succeeds. That is not a suggestion a reader has to remember:
 `DescriptorToSchemaMapperTests.Every_example_marked_not_runnable_really_is_refused` asserts every marked
-example *is* refused, so the day the last of the three features lands, that fact fails until this file is
+example *is* refused, so the day the last of those refusals lifts, that fact fails until this file is
 removed. The marker cannot outlive its reason.

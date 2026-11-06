@@ -128,7 +128,10 @@ internal sealed class PolicyEngine : IPolicyEngine
             operationPolicy.WithCheck,
             policy.TenantScope,
             ResolveFieldMask(policy.Hidden, context),
-            ResolveFieldMask(policy.ReadOnly, context));
+            ResolveFieldMask(policy.ReadOnly, context)) with
+        {
+            Unnameable = policy.FlaggedHidden,
+        };
 
     private static bool IsUnconfigured(DataOperation operation, OperationPolicy policy) => operation switch
     {

@@ -30,6 +30,8 @@ public static class DifferentialRuleCases
 {
     private static readonly RoleCatalog _roleCatalog = RoleCatalog.Create(["editor"]);
 
+    private static readonly Dictionary<DifferentialRuleCase, string> _names = new(ReferenceEqualityComparer.Instance);
+
     private static readonly TenantId _acmeTenant = TenantId.New();
 
     private static readonly TenantId _otherTenant = TenantId.New();
@@ -111,6 +113,12 @@ public static class DifferentialRuleCases
     public static AlvoContext TenantlessAlice => _tenantlessAlice;
 
     /// <summary>
+    /// The instant every <c>now()</c> in the matrix reads, 2026-11-09T10:00:00Z: a replay binds it around both the render
+    /// and the in-memory evaluation, as an entry point binds one per request (HX-11 Ruling 1).
+    /// </summary>
+    public static DateTimeOffset Now { get; } = new(2026, 11, 9, 10, 0, 0, TimeSpan.Zero);
+
+    /// <summary>
     /// Resolves a caller by the name a <see cref="DifferentialRuleCase.ContextName"/> carries —
     /// <c>Alice</c>, <c>Bob</c>, <c>Editor</c>, <c>Admin</c>, <c>AcmeUser</c>, <c>OtherTenantUser</c>,
     /// or <c>TenantlessAlice</c>.
@@ -141,8 +149,40 @@ public static class DifferentialRuleCases
     /// </remarks>
     public static IReadOnlyList<DifferentialRuleCase> All { get; } = BuildCases();
 
+    /// <summary>The name a temporal row carries in a divergence report, or <see langword="null"/> for an unnamed one.</summary>
+    /// <param name="testCase">A case of <see cref="All"/>.</param>
+    internal static string? NameOf(DifferentialRuleCase testCase) => _names.GetValueOrDefault(testCase);
+
     private static AlvoRecord Row(params (string Field, object? Value)[] fields) =>
         new(fields.ToDictionary(pair => pair.Field, pair => pair.Value));
+
+    private static DifferentialRuleCase Named(string name, string rule, AlvoRecord row)
+    {
+        var testCase = new DifferentialRuleCase(rule, row, nameof(Alice));
+        _names.Add(testCase, name);
+        return testCase;
+    }
+
+    /// <summary>
+    /// Durations and <c>now()</c> (HX-11), each named: windows on both sides of their boundary, an exact <c>==</c>, instants
+    /// written at an offset other than UTC, a <c>date</c> shifted by a duration and one against a folded instant — the
+    /// shape a sargable leaf would get wrong — and a <see langword="null"/> operand. All millisecond-aligned (Ruling 11).
+    /// </summary>
+    private static IEnumerable<DifferentialRuleCase> TemporalCases()
+    {
+        var now = Now;
+        yield return Named("duration-window-in", "approved_at - created_at <= duration('8h')", Row(("created_at", now.AddHours(-10)), ("approved_at", now.AddHours(-3))));
+        yield return Named("duration-window-out", "approved_at - created_at <= duration('8h')", Row(("created_at", now.AddHours(-10)), ("approved_at", now)));
+        yield return Named("duration-equal", "approved_at - created_at == duration('90m')", Row(("created_at", now.AddHours(-2)), ("approved_at", now.AddMinutes(-30))));
+        yield return Named("duration-literals", "duration('24h') < duration('23h')", Row());
+        yield return Named("now-window-in", "created_at > now() - duration('24h')", Row(("created_at", now.AddHours(-1))));
+        yield return Named("now-window-out", "created_at > now() - duration('24h')", Row(("created_at", now.AddHours(-25))));
+        yield return Named("offset-plus-two-in", "created_at > now() - duration('1h')", Row(("created_at", new DateTimeOffset(2026, 11, 9, 11, 30, 0, TimeSpan.FromHours(2)))));
+        yield return Named("offset-minus-five-thirty-out", "created_at > now() - duration('1h')", Row(("created_at", new DateTimeOffset(2026, 11, 9, 3, 0, 0, new TimeSpan(-5, -30, 0)))));
+        yield return Named("date-plus-duration", "due_on + duration('36h') <= created_at", Row(("due_on", new DateOnly(2026, 11, 8)), ("created_at", now.AddHours(2))));
+        yield return Named("date-window", "due_on > now() - duration('24h')", Row(("due_on", new DateOnly(2026, 11, 8))));
+        yield return Named("null-operand", "approved_at - created_at <= duration('8h')", Row(("created_at", now.AddHours(-10)), ("approved_at", null)));
+    }
 
     private static IReadOnlyList<DifferentialRuleCase> BuildCases()
     {
@@ -194,6 +234,7 @@ public static class DifferentialRuleCases
                 "(owner_id == @user.id || status == 'approved') && !has(owner_id)",
                 Row(("owner_id", aliceId), ("status", "draft")),
                 nameof(Alice)),
+            .. TemporalCases(),
         ];
     }
 }

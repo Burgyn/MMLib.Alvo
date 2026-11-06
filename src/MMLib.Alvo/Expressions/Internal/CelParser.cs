@@ -264,10 +264,29 @@ internal static class CelParser
 
             if (Match(CelTokenKind.Minus))
             {
-                return new CelUnary(CelUnaryOperator.Negate, ParseNestedUnary());
+                return IsSmallestLongMagnitude(Current)
+                    ? ParseSmallestLong()
+                    : new CelUnary(CelUnaryOperator.Negate, ParseNestedUnary());
             }
 
             return ParsePrimary();
+        }
+
+        /// <summary>
+        /// Whether the token is <c>9223372036854775808</c> — the one magnitude a negative <c>int</c> literal has and a
+        /// positive one does not (HX-11 Ruling 16). Read as an unsigned number so a spelling with leading zeros is the same
+        /// literal.
+        /// </summary>
+        private static bool IsSmallestLongMagnitude(CelToken token) =>
+            token.Kind == CelTokenKind.IntLiteral
+            && ulong.TryParse(token.Text, NumberStyles.None, CultureInfo.InvariantCulture, out var magnitude)
+            && magnitude == (ulong)long.MaxValue + 1;
+
+        /// <summary><c>-9223372036854775808</c> as one literal, <see cref="long.MinValue"/>: its magnitude alone is out of range.</summary>
+        private CelLiteral ParseSmallestLong()
+        {
+            Expect(CelTokenKind.IntLiteral);
+            return new CelLiteral(CelValueType.Int, long.MinValue);
         }
 
         private CelNode ParseNestedUnary()

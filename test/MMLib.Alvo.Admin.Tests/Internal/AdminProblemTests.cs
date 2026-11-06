@@ -86,6 +86,26 @@ public class AdminProblemTests
             "Somebody applied a revision while this screen was open. Reload and try again.");
     }
 
+    /// <summary>
+    /// An apply that gave up waiting for a busy table changed nothing and is worth retrying (HX-11 Ruling 20): a refusal
+    /// with a retry fix, never a fault. The dashboard names the type through the D45 grant; this suite holds no grant (one
+    /// would move Abstractions' public-API baseline for a test), so it builds the exception by its name.
+    /// </summary>
+    [Fact]
+    public void A_lock_timeout_is_a_refusal_that_says_to_retry()
+    {
+        var timedOut = (Exception)Activator.CreateInstance(
+            typeof(ManagementRequestException).Assembly.GetType("MMLib.Alvo.Migrations.AlvoApplyLockTimeoutException", throwOnError: true)!)!;
+
+        var applied = AdminProblem.From(timedOut, ProblemSite.SchemaApply)!;
+        applied.IsFault.ShouldBeFalse();
+        applied.Title.ShouldBe("A table was busy, so nothing was applied");
+        applied.Detail.ShouldBe(timedOut.Message);
+        applied.Fix.ShouldBe("Another transaction held a table this apply needed. Nothing changed — wait a few seconds and apply again.");
+        AdminProblem.From(timedOut, ProblemSite.Rollback)!.Fix.ShouldBe(
+            "Another transaction held a table this restore needed. Nothing changed — wait a few seconds and restore again.");
+    }
+
     [Fact]
     public void A_scoped_read_without_a_tenant_is_told_about_the_tenant_rather_than_the_rules()
     {
@@ -106,6 +126,15 @@ public class AdminProblemTests
         problem.Title.ShouldBe("A constraint refused the value");
         problem.Fix.ShouldBe(
             "Another record already has this value for email. The field is declared unique on the entity's Fields tab.");
+    }
+
+    [Fact]
+    public void A_broken_validation_names_the_field_or_nothing()
+    {
+        AdminProblem.From(new AlvoConstraintViolationException(AlvoConstraintKind.Check, ["stock"]), ProblemSite.RecordWrite)!.Fix.ShouldBe(
+            "The value for stock breaks the validation the descriptor declares for it. The field's validation is on the entity's Fields tab.");
+        AdminProblem.From(new AlvoConstraintViolationException(AlvoConstraintKind.Check, []), ProblemSite.RecordWrite)!.Fix.ShouldBe(
+            "A value breaks a validation the descriptor declares. Each field's validation is on the entity's Fields tab.");
     }
 
     [Fact]

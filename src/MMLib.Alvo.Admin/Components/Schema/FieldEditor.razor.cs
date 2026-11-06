@@ -14,10 +14,16 @@ public partial class FieldEditor
 {
     private const string ComputedBox = "new-field-computed";
 
-    private const int NoteValueLimit = 40;
+    /// <summary>The field's <c>validation</c> box, offered for every kind (HX-11 Ruling 47).</summary>
+    private const string ValidationBox = "field-validation";
 
-    /// <summary>The build's slot for a rollup's refused <c>where</c> filter (<c>UnhonouredFeatures.RollupWhere</c>).</summary>
-    private const string RollupWhereSlot = "rollup.where";
+    /// <summary>A rollup's <c>where</c> box.</summary>
+    private const string WhereBox = "rollup-where";
+
+    /// <summary>Every expression box, each checked against the slot its key names.</summary>
+    private static readonly string[] _boxes = [ComputedBox, ValidationBox, WhereBox];
+
+    private const int NoteValueLimit = 40;
 
     private static readonly FieldType[] _types = Enum.GetValues<FieldType>();
     private static readonly string[] _flags = [string.Empty, "false", "true"];
@@ -114,18 +120,8 @@ public partial class FieldEditor
         internal bool ExcludedFromEvents { get; init; }
     }
 
-    /// <summary>
-    /// The refusals that belong to a field — its facets and its rollup — by <see cref="RefusalPlaces"/>, less the one
-    /// already drawn at its control.
-    /// </summary>
-    /// <remarks>
-    /// <b>Drawn once.</b> While the rollup section is open, <c>rollup.where</c> is said beside the filter it refuses
-    /// (<c>rollup-where-refused</c>) — spec §3.8 puts a field's refusal at its control — so the fold leaves it out
-    /// rather than repeat the same sentence in one dialog. For any other kind the fold is the only place it is said.
-    /// </remarks>
-    private IReadOnlyList<ManagementRefusedFeature> FieldRefusals =>
-        [.. RefusalPlaces.On(RefusalScreen.FieldEditor, Refused)
-            .Where(refusal => !(_facets.Kind == FieldKind.Rollup && refusal.Slot == RollupWhereSlot))];
+    /// <summary>The refusals that belong to a field — its facets and its rollup — by <see cref="RefusalPlaces"/>.</summary>
+    private IReadOnlyList<ManagementRefusedFeature> FieldRefusals => RefusalPlaces.On(RefusalScreen.FieldEditor, Refused);
 
     /// <summary>
     /// The working copy a typed expression is checked against, on a clone — cascaded by the entity screen only, so its
@@ -150,39 +146,59 @@ public partial class FieldEditor
         GC.SuppressFinalize(this);
     }
 
-    /// <summary>The expression box is described by its hint, and by the sentence under it while it has one.</summary>
-    private string ComputedDescribedBy
-        => _check.DescribedBy(ComputedBox) is { } check ? $"{ComputedBox}-hint {check}" : $"{ComputedBox}-hint";
+    /// <summary>An expression box is described by its hint, and by the sentence under it while it has one.</summary>
+    private string DescribedBy(string box)
+        => _check.DescribedBy(box) is { } check ? $"{box}-hint {check}" : $"{box}-hint";
 
     private void TypeComputed(string? text)
     {
         _facets.Computed = text ?? string.Empty;
-        _ = CheckComputedAsync();
+        _ = CheckAsync(ComputedBox);
     }
 
-    /// <summary>The name is the slot's address, so a name typed after the expression asks again.</summary>
+    private void TypeValidation(string? text)
+    {
+        _facets.Validation = text ?? string.Empty;
+        _ = CheckAsync(ValidationBox);
+    }
+
+    private void TypeWhere(string? text)
+    {
+        _facets.RollupWhere = text ?? string.Empty;
+        _ = CheckAsync(WhereBox);
+    }
+
+    /// <summary>The name is the slot's address, so a name typed after an expression asks again.</summary>
     private void TypeName(string? name)
     {
         _facets.Name = name ?? string.Empty;
-        _ = CheckComputedAsync();
+        CheckEveryBox();
     }
 
     private void ChooseType(FieldType type)
     {
         _facets.Type = type;
-        _ = CheckComputedAsync();
+        CheckEveryBox();
+    }
+
+    /// <summary>Asks again for every box: the name, type and kind are part of each one's candidate.</summary>
+    private void CheckEveryBox()
+    {
+        foreach (var box in _boxes)
+        {
+            _ = CheckAsync(box);
+        }
     }
 
     /// <summary>
-    /// Runs the check to its end and observes its fault: it is fire-and-forget, so an unobserved exception would
+    /// Runs one box's check to its end and observes its fault: it is fire-and-forget, so an unobserved exception would
     /// otherwise vanish, and a helper that fails must never be the reason the form misbehaves.
     /// </summary>
-    private async Task CheckComputedAsync()
+    private async Task CheckAsync(string box)
     {
         try
         {
-            var text = _facets.Kind == FieldKind.Computed ? _facets.Computed : string.Empty;
-            await _check.SubmitAsync(ComputedBox, text, AskAsync);
+            await _check.SubmitAsync(box, Source(box), (source, ct) => AskAsync(box, source, ct));
         }
         catch (Exception ex)
         {
@@ -190,31 +206,46 @@ public partial class FieldEditor
         }
     }
 
+    /// <summary>What a box holds, or nothing while the kind does not draw it — which clears what it said.</summary>
+    private string Source(string box) => box switch
+    {
+        ComputedBox => _facets.Kind == FieldKind.Computed ? _facets.Computed : string.Empty,
+        WhereBox => _facets.Kind == FieldKind.Rollup ? _facets.RollupWhere : string.Empty,
+        _ => _facets.Validation,
+    };
+
     /// <summary>Fixed text and the exception only: the entity name is the caller's string and is never logged raw.</summary>
-    [LoggerMessage(EventId = 21, Level = LogLevel.Warning, Message = "The expression check on the new computed field failed")]
+    [LoggerMessage(EventId = 21, Level = LogLevel.Warning, Message = "The expression check on a field's expression box failed")]
     private static partial void CheckFailed(ILogger logger, Exception exception);
 
     /// <summary>
-    /// The field exactly as <see cref="FieldFacets.Build"/> would stage it, with the typed expression, or nothing while
-    /// the form cannot build one yet.
+    /// The field exactly as <see cref="FieldFacets.Build"/> would stage it, with the typed expression in the box's slot,
+    /// or nothing while the form cannot build one yet.
     /// </summary>
-    private Task<ManagementExpressionVerdict?> AskAsync(string source, CancellationToken ct)
-        => !_lifetime.Ended && Copy is { } copy && Candidate(copy, source) is { } slot
+    private Task<ManagementExpressionVerdict?> AskAsync(string box, string source, CancellationToken ct)
+        => !_lifetime.Ended && Copy is { } copy && Candidate(copy, box, source) is { } slot
             ? Gateway.CheckExpressionAsync(slot.Json, slot.Path, source, ct)
             : Task.FromResult<ManagementExpressionVerdict?>(null);
 
-    private (string Json, string Path)? Candidate(WorkingCopy copy, string source)
-        => _facets.Build(Editing, EditingJson, Siblings, out _) is { } facets
-            ? ExpressionSlots.ForComputed(copy.Json, Entity, Editing, _facets.Name, facets, source)
-            : null;
+    private (string Json, string Path)? Candidate(WorkingCopy copy, string box, string source)
+    {
+        if (_facets.Build(Editing, EditingJson, Siblings, out _) is not { } facets)
+        {
+            return null;
+        }
+
+        return box switch
+        {
+            ComputedBox => ExpressionSlots.ForComputed(copy.Json, Entity, Editing, _facets.Name, facets, source),
+            WhereBox => ExpressionSlots.ForRollupWhere(copy.Json, Entity, Editing, _facets.Name, facets, source),
+            _ => ExpressionSlots.ForValidation(copy.Json, Entity, Editing, _facets.Name, facets, source),
+        };
+    }
 
     private bool IsEditing => Editing is { Length: > 0 };
 
     /// <summary>Whether the form differs from how it opened, which is what Escape must not throw away.</summary>
     private bool Dirty => Fingerprint() != _opened;
-
-    /// <summary>The build's refusal of a rollup filter, shown where the filter would be.</summary>
-    private ManagementRefusedFeature? WhereRefusal => Refused.FirstOrDefault(refusal => refusal.Slot == RollupWhereSlot);
 
     /// <summary>The sources a rollup may be chosen from: the ones the apply accepts.</summary>
     private IReadOnlyList<string> RollupFroms => [.. _facets.Sources.Where(source => source.Refusal is null).Select(source => source.Entity)];
@@ -277,13 +308,13 @@ public partial class FieldEditor
     /// </remarks>
     private string Fingerprint()
         => string.Join('|', _facets.Name, _facets.Build(Editing, EditingJson, Siblings, out _)?.ToJsonString()
-            ?? string.Join('|', "unbuilt", _facets.Kind, _facets.Type, _facets.Values, _facets.Computed), _excludedFromEvents);
+            ?? _facets.Unbuilt, _excludedFromEvents);
 
     /// <summary>Switches the kind; a computed column keeps a type it can be, and decimal otherwise.</summary>
     private void ChooseKind(FieldKind kind)
     {
         _facets.Kind = kind;
-        _ = CheckComputedAsync();
+        CheckEveryBox();
         if (kind == FieldKind.Computed && !_facets.ComputedTypesOffered.Contains(_facets.Type))
         {
             _facets.Type = FieldType.Decimal;
@@ -385,7 +416,7 @@ public partial class FieldEditor
             {
                 _facets = new FieldFacets { Type = _facets.Type, Kind = _facets.Kind, Sources = _facets.Sources };
                 _excludedFromEvents = false;
-                _ = CheckComputedAsync();
+                CheckEveryBox();
                 ForgetNumbers();
                 _opened = Fingerprint();
                 if (_nameField is not null)

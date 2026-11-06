@@ -244,15 +244,22 @@
                 }
             }
 
-            @* `where` is in the frozen schema and refused by this build, so it gets the build's sentence and no box. *@
-            <Refusal data-testid="rollup-where-refused">
-                <code class="a-mono">where</code> — @(WhereRefusal is { } where ? $"{where.Consequence} {where.Fix}" : "a filter on the child rows is not offered here.")
-            </Refusal>
-            @if (_facets.DeclaresRollupFilter)
-            {
-                <MudCheckBox T="bool" Value="_facets.RemoveRollupFilter" ValueChanged="on => _facets.RemoveRollupFilter = on"
-                             Label="Remove the declared filter" data-testid="rollup-remove-where" />
-            }
+            <Field Label="Only children where" For="rollup-where">
+                <ChildContent>
+                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" Lines="1" id="rollup-where"
+                                  data-testid="rollup-where" Class="a-mono" spellcheck="false"
+                                  Placeholder="e.g. status == 'held' — leave empty to aggregate every child"
+                                  aria-describedby="@DescribedBy(WhereBox)"
+                                  Value="_facets.RollupWhere" ValueChanged="TypeWhere" />
+                    @Findings(WhereBox)
+                </ChildContent>
+                <Hint>
+                    CEL over the child's own fields, not this row's — only the children it admits are aggregated. No
+                    caller and no now(): the stored number would go stale with no write to move it. No hidden child
+                    field: a filtered count would reveal it.
+                    @ChordHint.Of("saves")
+                </Hint>
+            </Field>
         }
 
         @if (_facets.Kind == FieldKind.Computed)
@@ -261,19 +268,9 @@
                 <ChildContent>
                     <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" Lines="2" id="new-field-computed"
                                   Class="a-mono" spellcheck="false" Placeholder="e.g. unit_price * amount"
-                                  aria-describedby="@ComputedDescribedBy"
+                                  aria-describedby="@DescribedBy(ComputedBox)"
                                   Value="_facets.Computed" ValueChanged="TypeComputed" />
-                    @foreach (var (finding, index) in _check.Findings(ComputedBox).Select((finding, index) => (finding, index)))
-                    {
-                        <p class="@ExpressionCheck.ProblemClass(finding)" id="@(index == 0 ? $"{ComputedBox}-check" : $"{ComputedBox}-check-{index}")" role="status"
-                           data-testid="@($"check-{ComputedBox}")" data-severity="@finding.Severity">
-                            @finding.Message
-                            @if (finding.FixSuggestion is { } fix)
-                            {
-                                <span class="a-field__fix">@fix</span>
-                            }
-                        </p>
-                    }
+                    @Findings(ComputedBox)
                 </ChildContent>
                 <Hint>
                     CEL over this row's own fields — and its rollups. No constants: the column is DDL, which carries no
@@ -282,6 +279,23 @@
                 </Hint>
             </Field>
         }
+
+        @* Every kind, a maintained value included (HX-11 Ruling 47): the database judges the stored value, whoever wrote it. *@
+        <Field Label="Validation" For="field-validation">
+            <ChildContent>
+                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" Lines="1" id="field-validation"
+                              data-testid="field-validation" Class="a-mono" spellcheck="false"
+                              Placeholder="e.g. value >= 0 — the database refuses any row that breaks it"
+                              aria-describedby="@DescribedBy(ValidationBox)"
+                              Value="_facets.Validation" ValueChanged="TypeValidation" />
+                @Findings(ValidationBox)
+            </ChildContent>
+            <Hint>
+                CEL over this row: value is this field, other fields by name. The database enforces it as a CHECK, so it
+                reads no caller (@@user), no now(), and no hidden field besides its own. An empty field passes — use Required for presence.
+                @ChordHint.Of("saves")
+            </Hint>
+        </Field>
 
         @if (_facets.DrawsDefault)
         {
@@ -335,13 +349,13 @@
         }
 
     @* The facets the frozen schema declares and this build refuses. Without this the editor's
-       silence about `default` and `validation` is indistinguishable from an oversight — the
+       silence about a `$cel` default is indistinguishable from an oversight — the
        question every reader of this panel asks is "where is the default value", and the answer
        exists, in the framework's own words. Served verbatim (§2.3): a second wording of a refusal
        is a third spelling of one truth. *@
     @*
-        Collapsed and last: the answer is there for the operator who asks where the default or the
-        validation box went, and out of the way of the one adding a field — open, it took more than
+        Collapsed and last: the answer is there for the operator who asks where an expression default
+        went, and out of the way of the one adding a field — open, it took more than
         half of the dialog.
     *@
     @if (FieldRefusals.Count > 0)
@@ -370,3 +384,20 @@
 
     </ChildContent>
 </AlvoEditor>
+
+@code {
+    /// <summary>What apply would say about the expression in a box, under it, as its sentences — HooksTab's own loop.</summary>
+    private RenderFragment Findings(string box) => @<text>
+        @foreach (var (finding, index) in _check.Findings(box).Select((finding, index) => (finding, index)))
+        {
+            <p class="@ExpressionCheck.ProblemClass(finding)" id="@(index == 0 ? $"{box}-check" : $"{box}-check-{index}")" role="status"
+               data-testid="@($"check-{box}")" data-severity="@finding.Severity">
+                @finding.Message
+                @if (finding.FixSuggestion is { } fix)
+                {
+                    <span class="a-field__fix">@fix</span>
+                }
+            </p>
+        }
+    </text>;
+}

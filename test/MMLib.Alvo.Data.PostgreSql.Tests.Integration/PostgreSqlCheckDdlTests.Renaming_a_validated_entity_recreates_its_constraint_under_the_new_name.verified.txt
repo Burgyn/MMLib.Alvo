@@ -1,0 +1,9 @@
+﻿SET LOCAL lock_timeout = '5s'
+;
+ALTER TABLE products RENAME TO stock_items;
+
+;
+ALTER TABLE stock_items DROP CONSTRAINT ck_products_stock_7b86837d;
+
+;
+ALTER TABLE stock_items ADD CONSTRAINT ck_stock_items_stock_a8b74eeb CHECK (("stock" IS NULL OR COALESCE("stock" >= 0, FALSE)));

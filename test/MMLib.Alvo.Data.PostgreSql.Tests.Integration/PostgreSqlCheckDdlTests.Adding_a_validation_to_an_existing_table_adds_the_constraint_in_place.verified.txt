@@ -1,0 +1,3 @@
+﻿SET LOCAL lock_timeout = '5s'
+;
+ALTER TABLE products ADD CONSTRAINT ck_products_stock_7b86837d CHECK (("stock" IS NULL OR COALESCE("stock" >= 0, FALSE)));

@@ -3,10 +3,15 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
 using System.Data.Common;
+using System.Runtime.CompilerServices;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
@@ -35,7 +40,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// locking (PR-B), not by this type.
 /// </para>
 /// </remarks>
-public sealed class EfCoreSchemaMigrator : ISchemaMigrator
+public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSchemaPlanner
 {
     private readonly IMigrationsModelDiffer _differ;
     private readonly IMigrationsSqlGenerator _sqlGenerator;
@@ -44,6 +49,11 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
     private readonly RelationalConnectionFactory _connections;
     private readonly IAlvoSqlDialect _dialect;
     private readonly ComputedColumnSql? _computed;
+    private readonly CheckConstraintSql? _checks;
+    private readonly IFieldSqlRenderer? _fields;
+    private readonly Func<EntitySchema, RollupSchema, string?> _rollupFilter;
+    private readonly ILogger _logger;
+    private readonly ConditionalWeakTable<MigrationPlan, SchemaModel> _plannedAgainst = [];
 
     /// <summary>
     /// Initializes a new migrator from a provider's EF Core services and a per-call connection factory.
@@ -61,6 +71,23 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
     /// Renders a <c>computed</c> field's CEL to this driver's SQL, or <see langword="null"/> when the container
     /// registered no expression services — a schema declaring one is then refused by name.
     /// </param>
+    /// <param name="checks">
+    /// Renders a field's <c>validation</c> to this driver's CHECK constraint SQL, or <see langword="null"/> when the
+    /// container registered no expression services — a schema declaring one is then refused by name.
+    /// </param>
+    /// <param name="fields">
+    /// This driver's field renderer, with which an apply recomputes the rollups it adds or changes
+    /// (<see cref="RollupBackfill"/>), or <see langword="null"/> for a container wired without one — a plan that needs a
+    /// backfill is then refused by name rather than leaving the parents stale.
+    /// </param>
+    /// <param name="rollupFilter">
+    /// Renders a rollup's <c>where</c> over its child — the write path's own rendering — or <see langword="null"/> when the
+    /// container registered no expression services, and a filtered rollup's backfill is refused by name.
+    /// </param>
+    /// <param name="logger">
+    /// Where a violation count the database could not run is recorded for the operator, the caller seeing only the
+    /// refusal; <see langword="null"/> discards it.
+    /// </param>
     internal EfCoreSchemaMigrator(
         IMigrationsModelDiffer differ,
         IMigrationsSqlGenerator sqlGenerator,
@@ -68,7 +95,11 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
         Func<ModelBuilder> newModelBuilder,
         RelationalConnectionFactory connections,
         IAlvoSqlDialect dialect,
-        ComputedColumnSql? computed)
+        ComputedColumnSql? computed,
+        CheckConstraintSql? checks,
+        IFieldSqlRenderer? fields = null,
+        Func<EntitySchema, RollupSchema, string?>? rollupFilter = null,
+        ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(differ);
         ArgumentNullException.ThrowIfNull(sqlGenerator);
@@ -84,22 +115,119 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
         _connections = connections;
         _dialect = dialect;
         _computed = computed;
+        _checks = checks;
+        _fields = fields;
+        _rollupFilter = rollupFilter ?? NoFilterRenderer;
+        _logger = logger ?? NullLogger.Instance;
     }
 
     /// <inheritdoc/>
-    public Task<MigrationPlan> PlanAsync(SchemaModel current, SchemaModel desired, MigrationOptions options, CancellationToken ct = default)
+    /// <remarks>
+    /// <b>Planning reads the database when the plan adds a validation to a table that already holds rows</b>: each such
+    /// constraint is counted against the table (<see cref="CheckViolationScan"/>), and a positive count refuses the plan at
+    /// the validation's pointer, so a dry run reports it before anything is applied (HX-11 Rulings 22, 49).
+    /// </remarks>
+    public Task<MigrationPlan> PlanAsync(SchemaModel current, SchemaModel desired, MigrationOptions options, CancellationToken ct = default) =>
+        PlanAsync(current, desired, counted: true, ct);
+
+    /// <inheritdoc/>
+    Task<MigrationPlan> IUncountedSchemaPlanner.PlanWithoutCountingAsync(
+        SchemaModel current, SchemaModel desired, MigrationOptions options, CancellationToken ct) =>
+        PlanAsync(current, desired, counted: false, ct);
+
+    private async Task<MigrationPlan> PlanAsync(SchemaModel current, SchemaModel desired, bool counted, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(current);
         ArgumentNullException.ThrowIfNull(desired);
         ct.ThrowIfCancellationRequested();
 
         var (prePass, desiredModel, residual) = ComputeResidualDiff(current, desired);
-        var operations = ForThisEngine(AssembleOperations(prePass, residual));
-        var steps = BuildSemanticSteps(prePass, residual);
-        var sql = GenerateSql(operations, desiredModel);
+        if (counted)
+        {
+            await RefuseRowsThatBreakNewChecksAsync(current, desired, prePass, residual, ct).ConfigureAwait(false);
+        }
 
-        return Task.FromResult(new MigrationPlan { Steps = steps, Sql = sql });
+        var operations = ForThisEngine(AssembleOperations(prePass, residual));
+        var backfill = Backfill(prePass.AlignedCurrent, desired);
+        var locks = BackfillLocks(current, backfill);
+        var steps = BuildSemanticSteps(prePass, desired, residual);
+        steps.AddRange(backfill.Select(statement => BackfillStep(statement, locks)));
+        var sql = GenerateSql(operations, desiredModel, locks, backfill);
+
+        var plan = new MigrationPlan { Steps = steps, Sql = sql };
+        _plannedAgainst.AddOrUpdate(plan, desired);
+        return plan;
     }
+
+    private async Task RefuseRowsThatBreakNewChecksAsync(
+        SchemaModel current, SchemaModel desired, RenamePrePass.Result prePass, IReadOnlyList<MigrationOperation> residual,
+        CancellationToken ct)
+    {
+        var targets = _checks is null
+            ? []
+            : CheckViolationScan.Targets(current, desired, [.. prePass.Renames.Select(rename => rename.Operation)], residual, _checks);
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        var connection = _connections.Create();
+        await using (connection.ConfigureAwait(false))
+        {
+            await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
+            var errors = await BreakingRowsAsync(connection, targets, ct).ConfigureAwait(false);
+            if (errors.Count > 0)
+            {
+                throw new DescriptorValidationException(new DescriptorValidationResult(errors));
+            }
+        }
+    }
+
+    private async Task<List<DescriptorValidationError>> BreakingRowsAsync(
+        DbConnection connection, IReadOnlyList<CheckViolationScan.Target> targets, CancellationToken ct)
+    {
+        var errors = new List<DescriptorValidationError>();
+        foreach (var target in targets)
+        {
+            if (await BreakingRowsAsync(connection, target, ct).ConfigureAwait(false) is { } error)
+            {
+                errors.Add(error);
+            }
+        }
+
+        return errors;
+    }
+
+    // A count the database cannot run (a drifted table missing a column `current` still names) refuses at the validation
+    // it was counting for, rather than escaping as a provider exception: fail-closed, and a 422 a dry run can show (Ruling 67).
+    // The provider's exception never reaches the caller, so it is logged for the operator, who may need it to tell a
+    // drifted table from a transient fault (Task 10 review m4).
+    private async Task<DescriptorValidationError?> BreakingRowsAsync(
+        DbConnection connection, CheckViolationScan.Target target, CancellationToken ct)
+    {
+        try
+        {
+            var count = await CheckViolationScan.CountAsync(connection, target.Add.Table, target.Add.Sql, ct).ConfigureAwait(false);
+            return count > 0 ? BreakingRows(target, count) : null;
+        }
+        catch (DbException failure)
+        {
+            ViolationCountFailed(_logger, target.Entity.Name, target.Field.Name, failure);
+            return Uncountable(target);
+        }
+    }
+
+    private static DescriptorValidationError Uncountable(CheckViolationScan.Target target) => new(
+        $"/entities/{target.Entity.Name}/fields/{target.Field.Name}/validation",
+        $"Could not count the rows of '{target.Entity.Name}' that break this validation, so the CHECK constraint cannot be added. Nothing was applied.",
+        "Check that the database still matches the applied schema — a column this validation reads may be missing — then apply again.",
+        DescriptorValidationSeverity.Error);
+
+    private static DescriptorValidationError BreakingRows(CheckViolationScan.Target target, long count) => new(
+        $"/entities/{target.Entity.Name}/fields/{target.Field.Name}/validation",
+        $"{count} row(s) of '{target.Entity.Name}' break this validation, so the CHECK constraint cannot be added. Nothing was applied.",
+        "Correct those rows first — or relax the expression — then apply again.",
+        DescriptorValidationSeverity.Error);
 
     // Pre-applies the descriptor's DECLARED renames to the current schema so the differ sees the
     // renamed members already aligned by name (no drop+add), diffs the aligned pair, then
@@ -121,11 +249,13 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
     }
 
     // Assembles the full, ordered operation list: declared renames first (so later operations see
-    // the new names), then the (normalized) residual diff.
+    // the new names), then the drops of the CHECK constraints a rename released (see RenamePrePass), then the
+    // (normalized) residual diff, which adds them back under their new names.
     private static List<MigrationOperation> AssembleOperations(RenamePrePass.Result prePass, IReadOnlyList<MigrationOperation> residual)
     {
-        var operations = new List<MigrationOperation>(prePass.Renames.Count + residual.Count);
+        var operations = new List<MigrationOperation>(prePass.Renames.Count + prePass.ReleasedChecks.Count + residual.Count);
         operations.AddRange(prePass.Renames.Select(rename => rename.Operation));
+        operations.AddRange(prePass.ReleasedChecks.Select(released => released.Operation));
         operations.AddRange(residual);
         return operations;
     }
@@ -138,32 +268,145 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
 
     // Semantic steps (drive HasDestructiveChanges and the dry-run summary), in the same order as
     // AssembleOperations.
-    private List<MigrationStep> BuildSemanticSteps(RenamePrePass.Result prePass, IReadOnlyList<MigrationOperation> residual)
+    private List<MigrationStep> BuildSemanticSteps(
+        RenamePrePass.Result prePass, SchemaModel desired, IReadOnlyList<MigrationOperation> residual)
     {
-        var steps = new List<MigrationStep>(prePass.Renames.Count + residual.Count);
+        var steps = new List<MigrationStep>(prePass.Renames.Count + prePass.ReleasedChecks.Count + residual.Count);
         steps.AddRange(prePass.Renames.Select(rename => ToStep(rename.Change)));
-        steps.AddRange(residual.Select(operation => ToStep(DestructiveScan.Classify(operation), CostNote(operation))));
+        steps.AddRange(prePass.ReleasedChecks.Select(released => ToStep(released.Change, CostNote(released.Operation))));
+        steps.AddRange(residual.Select(operation =>
+            ToStep(WithValidatedField(DestructiveScan.Classify(operation), operation, prePass.AlignedCurrent, desired), CostNote(operation))));
         return steps;
     }
 
+    // A CHECK constraint's step names the field whose validation it is: recomputed from the constraint's name over the
+    // schema that holds it — the desired one for an added constraint, the (aligned) current one for a dropped one —
+    // because a constraint name is never parsed (HX-11 Ruling 19).
+    private static SchemaChange WithValidatedField(
+        SchemaChange change, MigrationOperation operation, SchemaModel current, SchemaModel desired) =>
+        operation switch
+        {
+            AddCheckConstraintOperation add => change with { Field = ValidatedField(desired, add.Table, add.Name) },
+            DropCheckConstraintOperation drop => change with { Field = ValidatedField(current, drop.Table, drop.Name) },
+            _ => change,
+        };
+
+    private static string? ValidatedField(SchemaModel schema, string table, string constraintName) =>
+        schema.Entities.FirstOrDefault(entity => string.Equals(entity.Name, table, StringComparison.Ordinal)) is { } entity
+            ? CheckConstraintNames.Owner(schema, entity, constraintName)?.Field.Name
+            : null;
+
     // What a non-destructive step costs when that is worth saying before it runs: on an engine that rebuilds the table
-    // to add a generated column, the step copies every row under a write lock — a pause on a large table, not data
-    // loss, so it is a note on the step and never the destructive flag.
+    // to add a generated column or to add or drop a CHECK constraint, the step copies every row under a write lock — a
+    // pause on a large table, not data loss, so it is a note on the step and never the destructive flag.
     private string? CostNote(MigrationOperation operation) =>
-        _dialect.GeneratedColumnAddRequiresTableRebuild && GeneratedColumnAdds.IsGeneratedAdd(operation)
+        _dialect.GeneratedColumnAddRequiresTableRebuild && RebuildsTheTable(operation)
             ? GeneratedColumnAdds.RebuildNote
             : null;
+
+    private static bool RebuildsTheTable(MigrationOperation operation) =>
+        GeneratedColumnAdds.IsGeneratedAdd(operation) || operation is AddCheckConstraintOperation or DropCheckConstraintOperation;
 
     // Generates the executable SQL from the WHOLE operation list in ONE call: only then does EF
     // resolve interdependent operations correctly (e.g. a SQLite table rebuild triggered by a drop
     // excludes a not-yet-added column from its INSERT ... SELECT). Generating per operation would
     // emit SQL referencing columns that do not exist at that point.
-    private IReadOnlyList<string> GenerateSql(List<MigrationOperation> operations, IModel desiredModel) =>
-        operations.Count == 0
+    // The dialect's lock-timeout statement leads, so it is the first statement of the apply's transaction on either executor
+    // and a dry run shows it (HX-11 Ruling 20). The backfill's child locks come next, before the DDL — so the apply takes
+    // each child before its parent, a writer's own order (Ruling 74) — and the rollup backfill follows EF's DDL, so it reads
+    // and writes the columns the DDL has just made (Ruling 32).
+    private IReadOnlyList<string> GenerateSql(
+        List<MigrationOperation> operations, IModel desiredModel, SortedDictionary<string, string> locks,
+        IReadOnlyList<RollupBackfill.Statement> backfill)
+    {
+        if (operations.Count == 0 && backfill.Count == 0)
+        {
+            return [];
+        }
+
+        var ddl = operations.Count == 0
             ? []
-            : [.. _sqlGenerator.Generate(operations, desiredModel).Select(command => command.CommandText)];
+            : _sqlGenerator.Generate(operations, desiredModel).Select(command => command.CommandText);
+        return [.. LockTimeout, .. locks.Values, .. ddl, .. backfill.Select(statement => statement.Sql)];
+    }
+
+    /// <summary>
+    /// The rollup recomputes this plan needs (HX-11 Ruling 32), over the current schema as the declared renames leave it —
+    /// so a renamed parent or field is compared under its new name.
+    /// </summary>
+    private IReadOnlyList<RollupBackfill.Statement> Backfill(SchemaModel alignedCurrent, SchemaModel desired)
+    {
+        if (RollupBackfill.Targets(alignedCurrent, desired).Count == 0)
+        {
+            return [];
+        }
+
+        var fields = _fields ?? throw new InvalidOperationException(
+            "This plan adds or changes a rollup on a table that already holds rows, which the apply recomputes — and this "
+            + "migrator was built without the driver's field renderer to write that recompute with. Register the driver "
+            + "through its UseSqlite/UsePostgreSql entry point, which supplies it.");
+        return RollupBackfill.Statements(alignedCurrent, desired, _dialect, fields, _rollupFilter);
+    }
+
+    /// <summary>
+    /// The child lock of every distinct child the backfill reads that already exists in <paramref name="current"/>, keyed by
+    /// name in ordinal order (Ruling 74): one fixed order across applies, and none for a child the plan creates — it has
+    /// no table before the DDL, and no writer to hold off. An engine whose dialect answers no lock contributes nothing.
+    /// </summary>
+    private SortedDictionary<string, string> BackfillLocks(SchemaModel current, IReadOnlyList<RollupBackfill.Statement> backfill)
+    {
+        var locks = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var child in backfill.Select(statement => statement.Child))
+        {
+            if (!locks.ContainsKey(child.Name)
+                && current.Entities.Any(entity => string.Equals(entity.Name, child.Name, StringComparison.Ordinal))
+                && _dialect.BackfillLockStatement(child) is { } statement)
+            {
+                locks.Add(child.Name, statement);
+            }
+        }
+
+        return locks;
+    }
+
+    private static MigrationStep BackfillStep(RollupBackfill.Statement statement, SortedDictionary<string, string> locks) => ToStep(
+        new SchemaChange
+        {
+            Kind = SchemaChangeKind.AlterField,
+            Entity = statement.Entity,
+            Field = statement.Field,
+            Detail = "Recomputes the rollup for every record.",
+        },
+        locks.ContainsKey(statement.Child.Name)
+            ? $"Locks writes to '{statement.Child.Name}' and every changed parent row until the apply commits."
+            : null);
+
+    private static string? NoFilterRenderer(EntitySchema child, RollupSchema rollup) =>
+        rollup.Where is null
+            ? null
+            : throw new InvalidOperationException(
+                $"A rollup over '{child.Name}' declares a 'where' filter, which the apply's recompute renders with the "
+                + "expression services — and this container registered none. Call AddAlvo() on the host's builder.");
+
+    private IEnumerable<string> LockTimeout =>
+        _dialect.ApplyLockTimeoutStatement is { } statement ? [statement] : [];
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <b>A <c>CHECK</c> the engine refuses during the apply</b> — rows written after the plan's count, or a recomputed
+    /// rollup breaking a parent's validation — is a <see cref="DescriptorValidationException"/> at the owning validation's
+    /// pointer, and nothing is applied (HX-11 Ruling 22).
+    /// </para>
+    /// <para>
+    /// <b>A lock timeout escapes as an internal exception, deliberately.</b> On an engine whose dialect bounds the apply's
+    /// lock wait (PostgreSQL, five seconds), giving up raises <c>AlvoApplyLockTimeoutException</c>, an internal type: the
+    /// family's own surfaces answer it — the Management API with a <c>409</c> and <c>Retry-After</c>, the boot with a
+    /// refused start — and an embedded host calling this member directly receives it as an exception it cannot catch by
+    /// name. Nothing was applied; the same plan may be retried. Publishing the type would make one apply's retry signal a
+    /// contract no host has asked for (HX-11 Ruling 20, Task 9 review m3).
+    /// </para>
+    /// </remarks>
     public async Task<MigrationResult> ApplyAsync(MigrationPlan plan, MigrationOptions options, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -187,14 +430,36 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
         // concurrent ApplyAsync calls never race on a shared connection. The open->begin->execute
         // -each->commit sequence lives in the shared RelationalSqlBatch, which both this migrator
         // and the atomic runtime writer reuse (an uncommitted transaction rolls back on disposal).
-        var connection = _connections.Create();
-        await using (connection.ConfigureAwait(false))
-        {
-            await ExecuteFramedAsync(connection, plan, ct).ConfigureAwait(false);
-        }
-
+        await ExecuteTranslatedAsync(plan, ct).ConfigureAwait(false);
         return new MigrationResult(true, plan, false);
     }
+
+    /// <summary>
+    /// Runs the plan on its own connection, answering a refusal the engine raised the way the runtime writer does
+    /// (<see cref="CheckApplyRefusal"/>), with the pointer resolved from the schema the plan was made for.
+    /// </summary>
+    /// <remarks>
+    /// A plan this migrator did not make — or a copy of one — carries no schema, so a refused validation is then reported
+    /// at the document's root rather than guessed at.
+    /// </remarks>
+    private async Task ExecuteTranslatedAsync(MigrationPlan plan, CancellationToken ct)
+    {
+        try
+        {
+            var connection = _connections.Create();
+            await using (connection.ConfigureAwait(false))
+            {
+                await ExecuteFramedAsync(connection, plan, ct).ConfigureAwait(false);
+            }
+        }
+        catch (Exception failure) when (CheckApplyRefusal.Translate(failure, _dialect, PlannedAgainst(plan)) is { } refused)
+        {
+            throw refused;
+        }
+    }
+
+    private SchemaModel PlannedAgainst(MigrationPlan plan) =>
+        _plannedAgainst.TryGetValue(plan, out var desired) ? desired : new SchemaModel([]);
 
     /// <summary>
     /// Runs the plan's SQL in one transaction, framed by the statements this engine only honours
@@ -231,7 +496,8 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
     {
         // DescriptorModelBuilder.Build returns a FinalizeModel()'d model; GetRelationalModel()
         // additionally requires the runtime initializer to have run (Task 0 report, gotcha #1).
-        var model = DescriptorModelBuilder.Build(schema, _newModelBuilder, _computed);
+        CheckConstraintNames.EnsureDistinct(schema);
+        var model = DescriptorModelBuilder.Build(schema, _newModelBuilder, _computed, _checks);
         var initialized = _modelRuntimeInitializer.Initialize(model, designTime: true);
         EnsureEveryGeneratedColumnIsExpressible(initialized);
 
@@ -294,4 +560,9 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
                 + "columns.");
         }
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Could not count the rows of '{Entity}' that break the validation of '{Field}'; the plan was refused at that validation.")]
+    private static partial void ViolationCountFailed(ILogger logger, string entity, string field, Exception exception);
 }

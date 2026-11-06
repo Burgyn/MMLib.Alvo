@@ -199,11 +199,13 @@ Each rule's slot is in the reference: [`list`](/reference/descriptor/entities-ru
 [`delete`](/reference/descriptor/entities-rules/#entities.rules.delete). A rule compares with `==`, `!=`,
 `<`, `<=`, `>`, `>=`, tests roles with `in`, tests presence with `has(field)`, and combines with `&&`, `||` and `!`.
 `<`, `<=`, `>`, `>=` take numbers and dates, not text; compare with `null` through `has(field)`, not `== null`. A rule
-has no arithmetic, no `old.` or `new.` and no `changed()`: those belong to [before-hooks](/guides/before-hooks/). The same expression language decides per caller whether a field is
+has no arithmetic beyond a time window (`created_at > now() - duration('24h')`, where `now()` is the request's
+instant), no `old.` or `new.` and no `changed()`: those belong to [before-hooks](/guides/before-hooks/). The same expression language decides per caller whether a field is
 `hidden` or `readOnly`; see [Entities and fields](/guides/entities-and-fields/#3-decide-per-caller-readonly-and-hidden).
 
 :::caution[Not in this build]
-A rule admits no function call, not even a built-in one such as `trim`: a rule is a SQL filter, and functions are not
+A rule admits no function call, not even a built-in one such as `trim` (`now()` and a `duration('…')` constant are
+not calls): a rule is a SQL filter, and functions are not
 translated to SQL yet (the profiles are in the [CEL function catalog](/reference/cel-functions/)). To
 filter by a normalised value, store it with a before-hook `mutate` and compare that field. A rule also cannot read
 any attribute of the caller beyond `@user.id`, `@user.roles` and `@tenant.id`.

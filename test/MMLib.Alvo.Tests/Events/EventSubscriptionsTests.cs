@@ -209,6 +209,30 @@ public sealed class EventSubscriptionsTests : IDisposable
     }
 
     /// <summary>
+    /// After the commit, an after-hook condition's <c>now()</c> is the event's time, never the dispatch's (HX-11 Ruling 1):
+    /// the outbox may deliver it long after the write.
+    /// </summary>
+    /// <param name="secondsLater">How long after the event's time the row says it happened.</param>
+    /// <param name="selected">Whether the hook fires.</param>
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, false)]
+    public void An_after_hook_condition_s_now_is_the_event_s_time(int secondsLater, bool selected)
+    {
+        Matching(CatalogConditionedOnNow, HappenedAt(_eventTime.AddSeconds(secondsLater))).Count.ShouldBe(selected ? 1 : 0);
+        AlvoFlow.Instant.ShouldBeNull();
+    }
+
+    [Fact]
+    public void The_event_s_time_overrides_the_instant_the_dispatch_flow_carries()
+    {
+        using var dispatch = AlvoFlow.EnterInstant(_eventTime.AddHours(1));
+
+        Matching(CatalogConditionedOnNow, HappenedAt(_eventTime)).ShouldHaveSingleItem();
+        AlvoFlow.Instant.ShouldBe(_eventTime.AddHours(1));
+    }
+
+    /// <summary>
     /// A registered host function in an after-hook condition runs for real: the hook is selected when the function
     /// answers true on the record, and not when it answers false.
     /// </summary>
@@ -493,6 +517,8 @@ public sealed class EventSubscriptionsTests : IDisposable
 
     private readonly CapturingLogger _logger = new();
 
+    private static readonly DateTimeOffset _eventTime = new(2026, 8, 3, 10, 0, 0, TimeSpan.Zero);
+
     private const string Actor = "019000aa-0000-7000-8000-00000000a001";
     private const string Bystander = "019000aa-0000-7000-8000-00000000b002";
 
@@ -528,6 +554,11 @@ public sealed class EventSubscriptionsTests : IDisposable
     private static PolicyCatalog CatalogConditionedOnAnotherTenant => Catalog(new EntityHooks
     {
         AfterUpdate = [Hook("new.tenant_id != @tenant.id")],
+    });
+
+    private static PolicyCatalog CatalogConditionedOnNow => Catalog(new EntityHooks
+    {
+        AfterCreate = [Hook("now() == new.happened_at")],
     });
 
     private static PolicyCatalog CatalogConditionedOnAdmins => Catalog(new EntityHooks
@@ -585,6 +616,7 @@ public sealed class EventSubscriptionsTests : IDisposable
             new FieldSchema { Name = "zero", Type = FieldType.Integer, Nullable = true },
             new FieldSchema { Name = "salary", Type = FieldType.Integer, Nullable = true },
             new FieldSchema { Name = "tenant_id", Type = FieldType.Uuid, Nullable = true },
+            new FieldSchema { Name = "happened_at", Type = FieldType.DateTime, Nullable = true },
         ],
     };
 
@@ -596,6 +628,9 @@ public sealed class EventSubscriptionsTests : IDisposable
         record: Record(("owner_id", Guid.Parse(owner))),
         oldRecord: Record(("owner_id", Guid.Parse(owner))),
         authId: actedBy);
+
+    private static AlvoEvent HappenedAt(DateTimeOffset happenedAt) =>
+        Event("entity.deals.created", record: Record(("happened_at", happenedAt)));
 
     private static AlvoEvent Updated(string stage, string was) => Event(
         "entity.deals.updated",
@@ -622,7 +657,7 @@ public sealed class EventSubscriptionsTests : IDisposable
             Id = Guid.Parse("019000aa-0000-7000-8000-0000000000d1"),
             Source = AlvoEvent.DefaultSource,
             Type = type,
-            Time = new DateTimeOffset(2026, 8, 3, 10, 0, 0, TimeSpan.Zero),
+            Time = _eventTime,
             Subject = "deals/019000aa-0000-7000-8000-0000000000ff",
             PartitionKey = "deals:019000aa-0000-7000-8000-0000000000ff",
             AuthType = AlvoEventAuthType.ApiKey,

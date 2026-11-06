@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
@@ -508,19 +509,61 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// survives a killed process, so an OOM-kill mid-migration wedges every later boot until someone deletes the
     /// row by hand. The revision check has nothing to leak.
     /// </para>
+    /// <para>
+    /// <b>One more bounded wait, inside each attempt.</b> A loser whose version-row insert times out behind a winner
+    /// still applying waits that winner out in <see cref="OutwaitASlowWinnerAsync"/> — at most a fixed number of lock
+    /// timeouts — and then meets its commit here as the ordinary optimistic-lock loss (HX-11 Ruling 81).
+    /// </para>
     /// </remarks>
     private async Task<BootOutcome> ConvergeOnWhatTheDatabaseSaysAsync(BootPlan boot, CancellationToken ct)
     {
         try
         {
-            return await DecideAndCarryOutAsync(boot, ct).ConfigureAwait(false);
+            return await OutwaitASlowWinnerAsync(boot, ct).ConfigureAwait(false);
         }
         catch (Exception lostRace) when (IsAnotherWriterGettingThereFirst(lostRace))
         {
             var conflict = lostRace.GetType().Name;
             AnotherReplicaWonTheRace(_logger, boot.Descriptor.Name, conflict);
 
-            return await DecideAndCarryOutAsync(boot, ct).ConfigureAwait(false);
+            return await OutwaitASlowWinnerAsync(boot, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Decides and carries out, re-deciding while the version-row insert times out behind another writer's uncommitted
+    /// revision — a winner whose apply outlasts the lock timeout (HX-11 Ruling 81).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A lost race, not a stuck table.</b> The insert waits only on another writer's row for the same revision, so
+    /// its timeout says a winner is still applying. Refusing the start would crash-loop every losing replica until the
+    /// winner commits; re-deciding meets the committed revision instead — as a
+    /// <see cref="DescriptorConcurrencyException"/>, which <see cref="ConvergeOnWhatTheDatabaseSaysAsync"/> answers.
+    /// </para>
+    /// <para>
+    /// <b>Bounded.</b> Each attempt waits out the lock timeout itself, so <see cref="SlowWinnerAttempts"/> attempts
+    /// wait at most that many timeouts; a winner still holding the row after them is refused like any other lock
+    /// timeout. A timeout in the plan's DDL is never retried here: <see cref="ApplyAsync"/> refuses it at once.
+    /// </para>
+    /// </remarks>
+    private async Task<BootOutcome> OutwaitASlowWinnerAsync(BootPlan boot, CancellationToken ct)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await DecideAndCarryOutAsync(boot, ct).ConfigureAwait(false);
+            }
+            catch (AlvoApplyLockTimeoutException timedOut) when (timedOut.AtTheVersionRow)
+            {
+                if (attempt == SlowWinnerAttempts)
+                {
+                    throw RefusedForTheLock(boot.Descriptor.Name, timedOut);
+                }
+
+                AnotherReplicaIsStillApplying(_logger, boot.Descriptor.Name, attempt);
+            }
         }
     }
 
@@ -607,11 +650,34 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         BootPlan boot, AppliedSchema? applied, CancellationToken ct)
     {
         var current = applied?.Schema ?? await _introspector.IntrospectAsync(ct).ConfigureAwait(false);
-        var plan = await _migrator.PlanAsync(current, boot.Desired, MigrationOptions, ct).ConfigureAwait(false);
+        var plan = await PlanUncountedAsync(current, boot.Desired, ct).ConfigureAwait(false);
         var outOfOrder = await AmIAnOlderPodAsync(boot, plan, ct).ConfigureAwait(false);
+        var decision = SchemaStartupPolicy.Decide(applied, plan, _options.Value, outOfOrder);
 
-        return SchemaStartupPolicy.Decide(applied, plan, _options.Value, outOfOrder);
+        return decision.Outcome is SchemaStartupOutcome.Apply or SchemaStartupOutcome.Initialize
+            ? decision with { Plan = await PlanCountedAsync(current, boot.Desired, ct).ConfigureAwait(false) }
+            : decision;
     }
+
+    /// <summary>
+    /// The plan a boot that initializes or applies carries out: refused first when a validation it adds reads a rollup it
+    /// changes (HX-11 Ruling 73), then planned with the pre-apply violation count (Ruling 66).
+    /// </summary>
+    private Task<MigrationPlan> PlanCountedAsync(SchemaModel current, SchemaModel desired, CancellationToken ct)
+    {
+        RollupValidationOrderCheck.ThrowIfAny(current, desired);
+        return _migrator.PlanAsync(current, desired, MigrationOptions, ct);
+    }
+
+    /// <summary>
+    /// The plan stage 2 judges, without the pre-apply violation scan: a boot that will not act — <c>Skip</c>, an older pod
+    /// standing down (#145), a refusal — must not be failed by a count over rows it never touches. Only a decision to
+    /// initialize or apply plans again with the count (HX-11 Ruling 66).
+    /// </summary>
+    private Task<MigrationPlan> PlanUncountedAsync(SchemaModel current, SchemaModel desired, CancellationToken ct) =>
+        _migrator is IUncountedSchemaPlanner uncounted
+            ? uncounted.PlanWithoutCountingAsync(current, desired, MigrationOptions, ct)
+            : _migrator.PlanAsync(current, desired, MigrationOptions, ct);
 
     /// <summary>
     /// Whether this process is holding a descriptor the database has already moved on from — the ordering the
@@ -818,11 +884,33 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
 
         var candidate = new DescriptorVersion(
             boot.Desired, boot.DescriptorJson, Revision: 0, DateTimeOffset.UtcNow);
-        var written = await _writer
-            .ApplyAndAppendAsync(project, decision.Plan, candidate, applied?.Revision ?? 0, MigrationOptions, ct)
-            .ConfigureAwait(false);
+        try
+        {
+            var written = await _writer
+                .ApplyAndAppendAsync(project, decision.Plan, candidate, applied?.Revision ?? 0, MigrationOptions, ct)
+                .ConfigureAwait(false);
 
-        return Prime(boot, written.Revision);
+            return Prime(boot, written.Revision);
+        }
+        catch (AlvoApplyLockTimeoutException timedOut) when (!timedOut.AtTheVersionRow)
+        {
+            throw RefusedForTheLock(project, timedOut);
+        }
+    }
+
+    /// <summary>
+    /// A boot whose apply gave up waiting for a table lock is a refused start naming that reason, never an unexplained
+    /// crash (HX-11 Ruling 20): nothing was applied, and a restart once the holding transactions finish succeeds.
+    /// </summary>
+    /// <remarks>Recorded first, because <see cref="StartingAsync"/> rethrows an <see cref="AlvoStartupRefusedException"/> untouched.</remarks>
+    private AlvoStartupRefusedException RefusedForTheLock(string project, AlvoApplyLockTimeoutException timedOut)
+    {
+        var refusal = new AlvoStartupRefusedException(
+            $"Project '{project}': {timedOut.Message}",
+            "Restart once the transactions holding the project's tables have finished; nothing was applied.");
+        _state.Failed(project, refusal.Message);
+        BootRefused(_logger, refusal.Message);
+        return refusal;
     }
 
     /// <summary>The last guard before the DDL runs: a plan that discards data needs an explicit allowance.</summary>
@@ -849,6 +937,13 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// </summary>
     private MigrationOptions MigrationOptions =>
         new() { AllowDestructive = _options.Value.AllowDestructive };
+
+    /// <summary>
+    /// How many times a boot decides again while another replica's apply holds the version row — each attempt waits out
+    /// one lock timeout. The single converge re-decide may run the loop once more, so the hard ceiling is twice this
+    /// many timeouts (HX-11 Ruling 81).
+    /// </summary>
+    private const int SlowWinnerAttempts = 6;
 
     /// <summary>
     /// The refusal used when the policy refused without saying why — unreachable through
@@ -987,4 +1082,14 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         Message = "Alvo lost the schema race for project {Project} to another replica and is re-reading what "
             + "it applied. Conflict: {Conflict}")]
     private static partial void AnotherReplicaWonTheRace(ILogger logger, string project, string conflict);
+
+    /// <summary>A version-row insert timed out behind another replica's uncommitted revision; the boot decides again.</summary>
+    /// <param name="logger">The logger the boot writes through.</param>
+    /// <param name="project">The project whose schema was being brought up.</param>
+    /// <param name="attempt">The attempt that timed out.</param>
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Alvo waited out its lock timeout on project {Project}'s version row, which another replica is still "
+            + "applying (attempt {Attempt}); deciding again.")]
+    private static partial void AnotherReplicaIsStillApplying(ILogger logger, string project, int attempt);
 }

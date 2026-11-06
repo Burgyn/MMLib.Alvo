@@ -332,6 +332,18 @@ malformed — it is a well-formed request colliding with data already stored, wh
 
 `precondition-required` is distinct from `precondition-failed` for the reason the section above gives.
 
+**An apply that cannot get a table lock answers the existing `conflict`, not a new slug (HX-11 Ruling 20).** On
+PostgreSQL every apply transaction starts with `SET LOCAL lock_timeout = '5s'`; one that gives up waiting
+(`55P03`) changed nothing and answers **409 `conflict`** with `Retry-After: 5` and the detail "The apply waited longer
+than its lock timeout for a table other transactions are using, and changed nothing. Retry it." — on `PUT descriptor`
+and `POST rollback` (`ManagementEndpoints`, `ProblemResultFactory.ManagementApplyLockTimeout`). The fix is the same
+request, later, which `Retry-After` says; no slug in the catalogue keys on "retry unchanged", and `conflict` already
+means "colliding with what other transactions hold". The exception behind it, `AlvoApplyLockTimeoutException`, is
+internal: an embedded caller of `IAlvoManagement` receives it as an exception it cannot catch by type, which the
+interface's own docs state; the dashboard matches it through the D45 grant. Two concurrent applies change answer with
+it: the loser, blocked more than 5 s on the winner's uncommitted version row, now gets this 409 where it got 412, and a
+retry then yields the 412. Design: `data-path.md`, *`validation` is the engine's `CHECK`*.
+
 ## `Idempotency-Key`: safety versus attribution
 
 Honoured on both write routes (`PUT descriptor`, `POST rollback`), on the Data API's header spelling and

@@ -17,6 +17,12 @@ public class TSqlSqlDialectContractTests : AlvoSqlDialectContractTests
     protected override IAlvoSqlDialect CreateDialect() => new TSqlSqlDialect();
 
     protected override IFieldSqlRenderer CreateFieldRenderer() => new TSqlFieldSqlRenderer();
+
+    /// <summary>The T-SQL double's epoch (HX-11 Ruling 11): whole microseconds since the Unix epoch, as a <c>bigint</c>.</summary>
+    [Fact]
+    public void The_epoch_is_microseconds_since_1970_as_datediff_big() =>
+        CreateFieldRenderer().RenderEpochMicroseconds("[created_at]")
+            .ShouldBe("DATEDIFF_BIG(microsecond, '1970-01-01T00:00:00', [created_at])");
 }
 
 /// <summary>

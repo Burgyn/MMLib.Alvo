@@ -161,7 +161,7 @@ or a 403 whose `violations` name each row a rule refused. A `409 conflict` names
 | 409 | A `unique` or `restrict` conflict (`conflict`), or a reused `Idempotency-Key` (`idempotency-conflict`). |
 | 412 | A precondition that does not hold or cannot be evaluated. |
 | 415 | A body not declared as JSON. |
-| 422 | A malformed body (`validation`) or query (`malformed-query`), or a built-in CEL function in a hook that refused a value the body sent (`expression-failed`). |
+| 422 | A malformed body (`validation`) or query (`malformed-query`), a row breaking a field's `validation` (`validation`, code `check`), or a built-in CEL function in a hook that refused a value the body sent (`expression-failed`). |
 | 413, 408, 400 | The web server refused the request before Alvo read it (`unreadable-request`). |
 | 500 | `internal` or `function-failed`. |
 | 508 | A loop of hooks, handlers or timers went deeper than the chain limit (`chain-depth-exceeded`); never retry it (`"retryable": false`). |

@@ -13,7 +13,7 @@ internal sealed partial class FilterTranslator
 
     private object? Value(Expression value, Type? enumType)
     {
-        if (LambdaShape.FindClock(value) is { } clock)
+        if (LambdaShape.FindAnyClock(value) is { } clock)
         {
             throw Refuse(clock, "a query has no clock", NoClockFix);
         }

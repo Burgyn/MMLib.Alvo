@@ -23,15 +23,18 @@ refused with *"Remove the outer quotes"*.
 What a rule may contain:
 
 <!-- gen:cel-rule -->
-- allowed: `'admin' in @user.roles` `user_id == @user.id` `active == true` `has(phone)` `hourly_rate > 40.0`
-- refused: `hourly_rate * 2.0` `changed(active)` `old.active == true` `now()` `'user_id == @user.id'` `'true'`
+- allowed: `'admin' in @user.roles` `user_id == @user.id` `active == true` `has(phone)` `hourly_rate > 40.0` `created_at > now() - duration('24h')`
+- refused: `hourly_rate * 2.0` `changed(active)` `old.active == true` `trim(full_name) == 'x'` `'user_id == @user.id'` `'true'`
 <!-- /gen:cel-rule -->
 
-A rule compares and combines with `&&`, `||` and `!`. It has no arithmetic, no `old.`/`new.` and no `changed()`: those
-belong to hooks and computed fields, each in its own skill.
+A rule compares and combines with `&&`, `||` and `!`. It has no numeric arithmetic (timestamp ± duration is the
+exception: `now() - duration('24h')`), no `old.`/`new.` and no `changed()`: those belong to hooks and computed fields,
+each in its own skill.
 
-No function call works in a rule in this build — not `trim`, not a host function: a rule filters in SQL. To filter by a
-normalised value, write it into a field with a before-hook `mutate` and compare that field.
+A rule calls no function — not `trim`, not a host function: a rule filters in SQL. Two forms are not calls: `now()`,
+the instant of the request, and `duration('…')`, a constant such as `duration('90m')` (units `h m s ms us ns`).
+`created_at > now() - duration('24h')` admits the last day's rows. To filter by a normalised value, write it into a
+field with a before-hook `mutate` and compare that field.
 
 Keep the grants an operation already has unless the request removes them: add a clause with `||` rather than
 replacing the rule. Before a `replace` of a rule, `test` its current value.

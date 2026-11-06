@@ -794,7 +794,8 @@ function fieldEditor(e, name) {
               <div class="p-hstack">${SCHEMA_FACETS.rollupOps.map((op) => `<button class="a-preset${f.rollup.op === op ? ' a-preset--on' : ''}" type="button" data-act="rollupop" data-field="${esc(f.name)}" data-value="${esc(op)}">${esc(op)}</button>`).join('')}</div>
               <span class="a-label__hint">${f.rollup.op === 'count' ? 'Counts the child records. The only operation that needs no field.' : `Over <code class="a-mono">${esc(f.rollup.field ?? '—')}</code> on <code class="a-mono">${esc(f.rollup.from)}</code>. Every operation but <code class="a-mono">count</code> requires one.`}</span></div>
              <div class="a-readout"><span class="a-readout__tag">descriptor</span><span>${esc(f.rollup.op)}(${esc(f.rollup.from)}${f.rollup.field ? '.' + f.rollup.field : ''})</span></div>
-             ${refusedControl('rollup.where', 'Only count some child records', "status != 'cancelled'")}`}
+             <div class="a-field"><span class="a-label">Only count some child records<span class="a-label__hint">A predicate over the child's own fields. Leave it empty to aggregate every child record.</span></span>
+              <input class="a-input" style="font-family:var(--font-mono)" value="${esc(f.rollup.where ?? '')}" placeholder="status != 'cancelled'" data-act="rollupwhere" data-field="${esc(f.name)}" data-rollup-where></div>`}
         <button class="a-btn a-btn--sm a-btn--ghost" data-act="underive" data-field="${esc(f.name)}">Make it an ordinary field</button>
       </div>`
       : `<div class="a-panel" style="padding:var(--space-4);display:flex;flex-direction:column;gap:var(--space-4)">
@@ -808,11 +809,13 @@ function fieldEditor(e, name) {
       <span class="p-muted"><code class="a-mono">hidden</code> restricts reading, <code class="a-mono">readOnly</code> restricts writing. A hidden field is still writable — and a <em>required</em> hidden one is the single case where a hidden field's name is published, in the write schemas only.</span>
     </div>`}
 
+    <div class="a-field"><span class="a-label">Validation<span class="a-label__hint">A predicate over this row, enforced by the database as a <code class="a-mono">CHECK</code> on every write — for every kind of field, a derived one included.</span></span>
+      <input class="a-input" style="font-family:var(--font-mono)" value="${esc(f.validation ?? '')}" placeholder="value >= 0" data-act="setfacet" data-field="${esc(f.name)}" data-key="validation" data-validation></div>
+
     <details class="a-disclose">
-      <summary>Two constraints this build refuses</summary>
+      <summary>One constraint this build refuses</summary>
       <div class="a-disclose__body" style="display:flex;flex-direction:column;gap:var(--space-4)">
         ${refusedControl('field.default', 'Value when none is given', 'scheduled')}
-        ${refusedControl('field.validation', 'Custom validation rule', 'value.matches(…)')}
         <span class="p-muted">Refused at apply rather than ignored, so a descriptor declaring one is rejected instead of quietly storing the wrong value. The control is here, and inert, so you can see the decision was made rather than forgotten.</span>
       </div>
     </details>
@@ -4051,6 +4054,15 @@ document.addEventListener('input', (ev) => {
     if (f?.type === 'integer') v = v === '' ? '' : Number(v);
     if (f?.type === 'decimal') v = v === '' ? '' : Number(v);
     state.form.values = { ...state.form.values, [d.field]: v };
+    return;
+  }
+  if (act === 'rollupwhere') {
+    const e = entityView(state.entity);
+    const f = editingField(e);
+    const next = { ...f.rollup, where: el.value };
+    if (el.value === '') delete next.where;
+    patchField(e.name, d.field, { rollup: next });
+    softRender();
     return;
   }
   if (act === 'setfacet') {

@@ -72,6 +72,20 @@ internal sealed class BootServiceWorld : IDisposable
         }
         """;
 
+    /// <summary>
+    /// <see cref="City"/> with a validation on <c>city</c> — the descriptor whose new CHECK the database's rows break when
+    /// <see cref="RowsBreakNewValidations"/> is set.
+    /// </summary>
+    internal const string ValidatedCity = """
+        {
+          "apiVersion": "alvo.dev/v1",
+          "name": "depots",
+          "entities": {
+            "depots": { "fields": { "city": { "type": "string", "validation": "value != ''" } } }
+          }
+        }
+        """;
+
     /// <summary>A descriptor this build refuses: <c>entities</c> is required and is not there.</summary>
     internal const string Unservable = """
         { "apiVersion": "alvo.dev/v1", "name": "depots" }
@@ -145,6 +159,23 @@ internal sealed class BootServiceWorld : IDisposable
 
     /// <summary>How many optimistic-lock losses the writer reports before the append is allowed to land.</summary>
     internal int ConflictsBeforeTheWriteLands { get; set; }
+
+    /// <summary>
+    /// Whether the database holds rows that break any validation a plan adds: the migrator's counted plan then refuses,
+    /// as the EF migrator's pre-apply scan does, while its uncounted plan answers as usual.
+    /// </summary>
+    internal bool RowsBreakNewValidations { get; set; }
+
+    /// <summary>What the writer throws instead of applying, when a fact asked it to.</summary>
+    internal Exception? WriteFailure { get; set; }
+
+    /// <summary>How many attempts throw <see cref="WriteFailure"/> before the append is allowed to land — every one by default.</summary>
+    internal int WriteFailuresBeforeTheWriteLands { get; set; } = int.MaxValue;
+
+    /// <summary>How many times the boot reached the writer.</summary>
+    internal int WriteAttempts => _writer?.Attempts ?? 0;
+
+    private ConflictingRuntimeSchemaWriter? _writer;
 
     /// <summary>The configured startup mode, project and destructive allowance.</summary>
     internal AlvoSchemaOptions Options { get; } = new();
@@ -226,7 +257,7 @@ internal sealed class BootServiceWorld : IDisposable
     internal AlvoBootService Build() =>
         new(
             Plan(),
-            new InMemorySchemaMigrator(),
+            Migrator(),
             Writer(),
             new StubSchemaIntrospector(this),
             _store,
@@ -243,7 +274,7 @@ internal sealed class BootServiceWorld : IDisposable
     internal object?[] Ports() =>
     [
         Plan(),
-        new InMemorySchemaMigrator(),
+        Migrator(),
         Writer(),
         new StubSchemaIntrospector(this),
         _store,
@@ -255,6 +286,9 @@ internal sealed class BootServiceWorld : IDisposable
         _loggers.CreateLogger<AlvoBootService>(),
     ];
 
+    private ISchemaMigrator Migrator() =>
+        RowsBreakNewValidations ? new ViolationCountingMigrator(new InMemorySchemaMigrator()) : new InMemorySchemaMigrator();
+
     private ExtensionStateGuard ExtensionState() =>
         new(Registrations, Deliveries, _loggers.CreateLogger<ExtensionStateGuard>());
 
@@ -262,8 +296,8 @@ internal sealed class BootServiceWorld : IDisposable
         new(Source, new DescriptorValidator(), new CelCompiler(), _loggers.CreateLogger<DescriptorBootPlan>(), Extensions);
 
     private ConflictingRuntimeSchemaWriter Writer() =>
-        new ConflictingRuntimeSchemaWriter(
-            new InMemoryRuntimeSchemaWriter(_appends), ConflictsBeforeTheWriteLands);
+        _writer = new ConflictingRuntimeSchemaWriter(
+            new InMemoryRuntimeSchemaWriter(_appends), ConflictsBeforeTheWriteLands, WriteFailure, WriteFailuresBeforeTheWriteLands);
 
     /// <summary>Runs the boot the way a host does, and hands back what it threw, if anything.</summary>
     internal async Task<Exception?> BootAsync()
@@ -365,15 +399,57 @@ internal sealed class BootServiceWorld : IDisposable
     }
 
     /// <summary>
+    /// A migrator over a database whose rows break every validation a plan adds: its counted plan refuses at the
+    /// validation, as the EF migrator's scan does, and its uncounted plan (the boot's seam) answers as usual.
+    /// </summary>
+    private sealed class ViolationCountingMigrator(ISchemaMigrator inner) : ISchemaMigrator, IUncountedSchemaPlanner
+    {
+        public Task<MigrationPlan> PlanAsync(SchemaModel current, SchemaModel desired, MigrationOptions options, CancellationToken ct = default) =>
+            AddsAValidation(current, desired)
+                ? Task.FromException<MigrationPlan>(new DescriptorValidationException(new DescriptorValidationResult([new(
+                    "/entities/depots/fields/city/validation",
+                    "1 row(s) of 'depots' break this validation, so the CHECK constraint cannot be added. Nothing was applied.",
+                    null,
+                    DescriptorValidationSeverity.Error)])))
+                : PlanWithoutCountingAsync(current, desired, options, ct);
+
+        public async Task<MigrationPlan> PlanWithoutCountingAsync(
+            SchemaModel current, SchemaModel desired, MigrationOptions options, CancellationToken ct)
+        {
+            var plan = await inner.PlanAsync(current, desired, options, ct);
+            return Validated(desired).ToHashSet().SetEquals(Validated(current))
+                ? plan
+                : plan with { Steps = [.. plan.Steps, ValidationStep] };
+        }
+
+        private static MigrationStep ValidationStep { get; } = new(
+            new SchemaChange { Kind = SchemaChangeKind.AlterField, Entity = "depots", Field = "city" }, false, null);
+
+        public Task<MigrationResult> ApplyAsync(MigrationPlan plan, MigrationOptions options, CancellationToken ct = default) =>
+            inner.ApplyAsync(plan, options, ct);
+
+        private static bool AddsAValidation(SchemaModel current, SchemaModel desired) =>
+            Validated(desired).Except(Validated(current)).Any();
+
+        private static IEnumerable<(string Entity, string Field)> Validated(SchemaModel schema) =>
+            schema.Entities.SelectMany(entity => entity.Fields.Where(declared => declared.CheckExpression is not null)
+                .Select(declared => (entity.Name, declared.Name)));
+    }
+
+    /// <summary>
     /// The writer, reporting the optimistic-lock loss a replica that got there second sees — the first
     /// <paramref name="conflicts"/> attempts only.
     /// </summary>
     /// <param name="inner">The writer the surviving attempt delegates to.</param>
     /// <param name="conflicts">How many attempts lose the race before one is allowed to win.</param>
-    private sealed class ConflictingRuntimeSchemaWriter(IRuntimeSchemaWriter inner, int conflicts)
+    /// <param name="failure">What the first <paramref name="failures"/> attempts throw instead, or <see langword="null"/>.</param>
+    /// <param name="failures">How many attempts throw <paramref name="failure"/>.</param>
+    private sealed class ConflictingRuntimeSchemaWriter(IRuntimeSchemaWriter inner, int conflicts, Exception? failure, int failures)
         : IRuntimeSchemaWriter
     {
         private int _attempts;
+
+        internal int Attempts => _attempts;
 
         public Task<DescriptorVersion> ApplyAndAppendAsync(
             string project,
@@ -384,6 +460,10 @@ internal sealed class BootServiceWorld : IDisposable
             CancellationToken ct = default)
         {
             _attempts++;
+            if (failure is not null && _attempts <= failures)
+            {
+                return Task.FromException<DescriptorVersion>(failure);
+            }
 
             return _attempts <= conflicts
                 ? Task.FromException<DescriptorVersion>(new DescriptorConcurrencyException(project, expectedRevision, expectedRevision + 1))

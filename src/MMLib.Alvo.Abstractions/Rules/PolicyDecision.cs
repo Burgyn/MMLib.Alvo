@@ -107,6 +107,13 @@ public sealed record PolicyDecision
     /// <summary>Gets why the operation was denied; <see langword="null"/> when <see cref="IsDenied"/> is <see langword="false"/>.</summary>
     public string? DenyReason { get; }
 
+    /// <summary>
+    /// Gets every field the descriptor carries any <c>hidden</c> flag for, independent of what this caller's mask
+    /// resolves to — the fields a refusal must never name, because a name published for the callers who may read it is
+    /// published to those who may not. Empty for any denied decision. Ordinal.
+    /// </summary>
+    internal IReadOnlySet<string> Unnameable { get; init; } = _empty;
+
     /// <summary>Creates a denial — the only publicly constructible <see cref="PolicyDecision"/>, and the safe default.</summary>
     /// <param name="reason">Why the operation is denied; surfaced to callers building a structured error.</param>
     public static PolicyDecision Deny(string reason)

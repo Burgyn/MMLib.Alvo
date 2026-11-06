@@ -2,8 +2,10 @@
 
 /// <summary>
 /// Thrown when a well-formed, authorized request collides with <em>stored state</em> the database itself
-/// guards: a value another record already holds on a <c>unique</c> field, or a delete a
-/// <c>onDelete: "restrict"</c> reference refuses.
+/// guards: a value another record already holds on a <c>unique</c> field, a delete a
+/// <c>onDelete: "restrict"</c> reference refuses, or a row that breaks a field's <c>validation</c> — the CHECK
+/// constraint the engine holds for it (<see cref="AlvoConstraintKind.Check"/>, answered as invalid input rather than
+/// a conflict, because the fix is a different value in this request, not a change to stored state).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -65,6 +67,10 @@ public sealed class AlvoConstraintViolationException : Exception
         "Another record already holds a value this request supplies on a field declared unique. Send a value "
         + "that is not already taken, or change the record that holds it.";
 
+    /// <summary>The wording of a broken validation, naming neither the value, the field, nor the expression.</summary>
+    private const string CheckMessage =
+        "A value this request supplies breaks a validation the descriptor declares. Send values every validation accepts.";
+
     /// <summary>The wording of a restrict refusal, naming neither the referencing entity nor how many rows.</summary>
     private const string ReferencedMessage =
         "Other records still reference this record, so it cannot be removed. Delete those records, or point "
@@ -122,11 +128,16 @@ public sealed class AlvoConstraintViolationException : Exception
 
     /// <summary>
     /// The entity's own field names the conflict concerns — one for an ordinary <c>unique</c> field, several
-    /// for a composite unique index, and none when the engine reports no columns (SQLite says only
-    /// <c>FOREIGN KEY constraint failed</c>) or when the kind is <see cref="AlvoConstraintKind.Referenced"/>.
+    /// for a composite unique index, the validated field for a <see cref="AlvoConstraintKind.Check"/> the caller may
+    /// know of, and none when the engine reports no columns (SQLite says only <c>FOREIGN KEY constraint failed</c>), when
+    /// the kind is <see cref="AlvoConstraintKind.Referenced"/>, or when the validated field is one the descriptor hides.
     /// </summary>
     public IReadOnlyList<string> Fields { get; }
 
-    private static string MessageFor(AlvoConstraintKind kind) =>
-        kind == AlvoConstraintKind.Referenced ? ReferencedMessage : UniqueMessage;
+    private static string MessageFor(AlvoConstraintKind kind) => kind switch
+    {
+        AlvoConstraintKind.Referenced => ReferencedMessage,
+        AlvoConstraintKind.Check => CheckMessage,
+        _ => UniqueMessage,
+    };
 }

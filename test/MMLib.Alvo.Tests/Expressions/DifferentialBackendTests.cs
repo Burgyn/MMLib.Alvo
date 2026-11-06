@@ -173,6 +173,7 @@ public class DifferentialBackendTests
 
     private static void AssertAgreement(CompiledExpression compiled, string rule, AlvoContext context, string contextName, AlvoRecord row)
     {
+        using var instant = AlvoFlow.EnterInstant(DifferentialRuleCases.Now);
         var inMemory = CelInterpreter.EvaluatePredicate(compiled, row, previous: null, context);
         // Prefix is incidental here — the differential test is about backend agreement, not the
         // default parameter name — and "p" is what SqlVerdict's hand-rolled parameter-name parser

@@ -42,18 +42,22 @@ from the table compiles nowhere, not everywhere.
 | `in` (role membership) | ✓ | ✗ | ✓ | ✗ | ✓ |
 | `has(field)` | ✓ | ✓ | ✓ | ✗ | ✗ |
 | Arithmetic (`+`, `-`, `*`, `/`, unary `-`) | ✗ | ✓ | ✓ | ✓ | ✗ |
+| Timestamp and duration arithmetic (`created_at > now() - duration('24h')`) | ✓ | ✗ | ✓ | ✓ | ✗ |
 | Joining two strings with `+` | ✗ | ✓ | ✗ | ✓ | ✗ |
 | Conditional (`a ? b : c`) | ✗ | ✓ | ✗ | ✗ | ✗ |
 | `changed(field)` | ✗ | ✗ | ✓ | ✗ | ✗ |
-| `now()` | ✗ | ✗ | ✗ | ✓ | ✗ |
+| `now()` | ✓ | ✗ | ✓ | ✓ | ✗ |
 | A [catalogued function](/reference/cel-functions/), built in or registered by the host | ✗ | ✗ | ✓ | ✓ | ✗ |
 
 Each function narrows that last row further with its own list of profiles. Where each profile applies, and what it must
 produce:
 
 - **Rule**: an entity's `rules` and a field's `hidden` and `readOnly` flags. A boolean over the current row, `@user` and
-  `@tenant`. It is a filter, not a calculation, so there is no arithmetic, and there is no row "before" an
-  authorization check, so no `old.` or `new.`.
+  `@tenant`. It is a filter, not a calculation, so there is no arithmetic but time windows
+  (`created_at > now() - duration('24h')`), and there is no row "before" an authorization check, so no `old.` or
+  `new.`. A field's `validation` and a rollup's `where` are rules too, narrower still: they are stored and judged by
+  the database on every write, so they read the row alone — no caller, no `now()`
+  ([Integrity in the descriptor](/extending/integrity/)).
 - **Computed**: a `computed` field. A value (a number, text, an instant or an id, never a bare boolean) the database
   computes from the same row, with no caller: no `@user`, no `@tenant`. The only profile with the conditional, which is
   how a computed field picks between two values.
@@ -134,7 +138,8 @@ with the reason for each is in
 
 - the `@user` and `@tenant` context, written with `@`;
 - `changed(field)`, and the `old.` and `new.` prefixes for the row before and after a write;
-- `now()`, a call rather than a variable. It returns the instant the write is stamped with, not a fresh clock read.
+- `now()`, a call rather than a variable. It returns the request's instant — one value for the whole request — not a
+  fresh clock read; a condition judged after the commit reads the event's time.
 
 **Narrowings**, constructs CEL has that Alvo refuses:
 
@@ -143,6 +148,7 @@ with the reason for each is in
 - comparing with a `null` literal is refused in favour of `has()`;
 - `<`, `<=`, `>` and `>=` on text only in a computed field, where the database compares by its own collation;
 - no `%`; numbers are plain decimal digits, with no hexadecimal, exponent or unsigned suffix;
+- `duration('…')` takes a constant only, and a duration is a whole number of microseconds (CEL: nanoseconds);
 - string escapes are limited to `\n`, `\t`, `\r`, `\\`, `\'` and `\"`.
 
 **Function calls**: catalogued functions are called globally, `trim(new.title)` rather than `new.title.trim()`; a

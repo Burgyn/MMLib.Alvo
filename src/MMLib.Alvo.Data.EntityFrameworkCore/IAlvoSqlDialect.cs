@@ -439,4 +439,72 @@ public interface IAlvoSqlDialect
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="failure"/> is <see langword="null"/>.</exception>
     SqlConstraintViolation? DecodeConstraintViolation(DbException failure);
+
+    /// <summary>
+    /// The statement that bounds how long an apply waits for a table lock, run first in every apply transaction — or
+    /// <see langword="null"/> for an engine with no lock queue to bound (HX-11 Ruling 20).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why it exists.</b> Adding a <c>CHECK</c> constraint in place takes the strongest table lock, and on an engine
+    /// whose lock requests queue, an apply waiting behind a long reader also stalls every reader that arrives after it.
+    /// Bounding the wait turns that into a retryable refusal (<see cref="IsLockTimeout"/>) instead of a stalled table.
+    /// SQLite has one writer and no queue, so it answers <see langword="null"/>.
+    /// </para>
+    /// <para>
+    /// <b>Internal</b>, reachable by the in-family drivers through <c>InternalsVisibleTo</c>, so the published dialect
+    /// port does not grow: a third-party driver keeps the unbounded wait until the member is earned publicly.
+    /// </para>
+    /// </remarks>
+    internal string? ApplyLockTimeoutStatement => null;
+
+    /// <summary>
+    /// Whether <paramref name="failure"/> is this engine giving up on a lock after <see cref="ApplyLockTimeoutStatement"/>'s
+    /// bound — <see langword="false"/> for an engine that sets none.
+    /// </summary>
+    /// <param name="failure">The provider's own exception, unwrapped.</param>
+    internal bool IsLockTimeout(DbException failure) => false;
+
+    /// <summary>
+    /// The statement an apply runs before it recomputes rollups over <paramref name="child"/>, holding off every write to the
+    /// child until the apply commits — or <see langword="null"/> for an engine on which no child write can interleave with
+    /// the apply (HX-11 Ruling 32).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why it exists.</b> The backfill's <c>UPDATE parent … = (SELECT … FROM child …)</c> reads the child from the
+    /// statement's snapshot, and on an engine that re-checks only the outer <c>WHERE</c> once a parent row lock is granted, a
+    /// child row committed in between is missing from the value written — the window <c>RollupRecompute</c>'s remarks
+    /// measured. A lock that lets readers through but queues writers closes it: a child write waits for the apply, so the
+    /// backfill misses no committed child. That queued write still recomputes with the definition its process captured
+    /// before the apply, until that process re-primes — the accepted stale window of HX-11 Ruling 72, healed by the parent's
+    /// next child write. SQLite needs none, because an apply holds the database's single write lock for its whole
+    /// transaction.
+    /// </para>
+    /// <para>
+    /// <b>Taken before the DDL</b>, right after <see cref="ApplyLockTimeoutStatement"/>, for every pre-existing child in
+    /// ordinal name order (HX-11 Ruling 74): a writer writes the child row first and locks the parent row second, so an
+    /// apply that took the parent first (its <c>ALTER TABLE</c>, or an earlier backfill's row locks) and then waited for a
+    /// child would deadlock against it. <b>The residual:</b> a parent delete that cascades to its children runs parent then
+    /// child, and can still deadlock against the apply in any position of this lock. That is rarer, and the engine's
+    /// deadlock detector resolves it by failing one side — an unmapped <c>40P01</c> today (a follow-up).
+    /// </para>
+    /// <para>
+    /// <b>Internal</b>, for <see cref="ApplyLockTimeoutStatement"/>'s reason: the published dialect port does not grow.
+    /// </para>
+    /// </remarks>
+    /// <param name="child">The entity a rollup aggregates.</param>
+    internal string? BackfillLockStatement(EntitySchema child) => null;
+
+    /// <summary>
+    /// The engine's NULL-safe "differs" between two SQL expressions — true when exactly one is <c>NULL</c> or both are
+    /// non-<c>NULL</c> and unequal — with which the rollup backfill writes only the parents whose aggregate changes.
+    /// </summary>
+    /// <remarks>
+    /// The SQL-standard <c>IS DISTINCT FROM</c> by default; an engine with its own spelling (SQLite's <c>IS NOT</c>)
+    /// overrides it. Internal, like <see cref="BackfillLockStatement"/>.
+    /// </remarks>
+    /// <param name="left">The left expression, already rendered.</param>
+    /// <param name="right">The right expression, already rendered.</param>
+    internal string RenderDistinct(string left, string right) => $"{left} IS DISTINCT FROM {right}";
 }

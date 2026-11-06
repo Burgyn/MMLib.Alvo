@@ -65,4 +65,18 @@ public sealed class SqliteFieldSqlRenderer : IFieldSqlRenderer
     /// </remarks>
     string? IFieldSqlRenderer.RenderStringLiteral(string value) =>
         AlvoSqlStringLiteral.TryQuote(value, out var literal) ? literal : null;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <c>unixepoch(x, 'subsec')</c> (SQLite 3.42+) reads the stored text, any offset included, as fractional epoch seconds;
+    /// SQLite's date functions keep milliseconds, so the result is whole microseconds rounded to the millisecond (HX-11
+    /// Ruling 11). A <c>date</c> column's <c>YYYY-MM-DD</c> text reads as midnight UTC.
+    /// <para>
+    /// <b>Rounded in milliseconds, then scaled as an integer</b> (review I1). Epoch milliseconds stay below 2⁵³ across years
+    /// 1–9999, so the double rounds to the exact millisecond everywhere; epoch <em>micro</em>seconds pass 2⁵³ outside
+    /// roughly 1685–2255, and rounding there landed a few microseconds off (<c>9999-12-31 23:59:59.999</c> read …999008).
+    /// </para>
+    /// </remarks>
+    string? IFieldSqlRenderer.RenderEpochMicroseconds(string timestampSql) =>
+        $"(CAST(round(unixepoch({timestampSql}, 'subsec') * 1000) AS INTEGER) * 1000)";
 }

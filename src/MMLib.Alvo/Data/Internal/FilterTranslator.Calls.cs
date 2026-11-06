@@ -31,7 +31,7 @@ internal sealed partial class FilterTranslator
 
         if (!LambdaShape.IsContains(call, out var source, out var value))
         {
-            throw Refuse(call, LambdaShape.IsClock(call) ? "a query has no clock" : $"method '{call.Method.Name}' has no filter equivalent");
+            throw Refuse(call, LambdaShape.IsAnyClock(call) ? "a query has no clock" : $"method '{call.Method.Name}' has no filter equivalent");
         }
 
         return !LambdaShape.Touches(source, _row) && value.Type != typeof(object)
@@ -87,7 +87,7 @@ internal sealed partial class FilterTranslator
 
     private List<object?> Candidates(MethodCallExpression call, Expression source, Type? enumType)
     {
-        if (LambdaShape.FindClock(source) is { } clock)
+        if (LambdaShape.FindAnyClock(source) is { } clock)
         {
             throw Refuse(clock, "a query has no clock", NoClockFix);
         }

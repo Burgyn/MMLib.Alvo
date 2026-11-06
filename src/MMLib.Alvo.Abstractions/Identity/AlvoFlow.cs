@@ -14,6 +14,12 @@
 /// (<c>WriteUnit.EnterFlow</c>, which <c>TransactAsync</c> enters), and every data-port entry calls <see cref="RefuseInsideUnit"/>.
 /// </para>
 /// <para>
+/// HX-11 adds the flow's <b>instant</b>, the one every <c>now()</c> reads (Ruling 1): bound by Alvo's HTTP caller filters
+/// for a request, otherwise by each data-port entry and <c>TransactAsync</c> when none is bound (<see cref="EnsureInstant"/>),
+/// and overridden with an event's time around a post-commit condition (<see cref="EnterInstant"/>). Audit and version
+/// stamps never read it: each write reads the clock (Ruling 2), so a version never repeats.
+/// </para>
+/// <para>
 /// <b>The limit, stated:</b> it follows the execution context. Work a host hands to its own queue or background loop,
 /// or runs with flow suppressed, leaves its reach.
 /// </para>
@@ -22,6 +28,7 @@ internal static class AlvoFlow
 {
     private static readonly AsyncLocal<AlvoProvenance?> _provenance = new();
     private static readonly AsyncLocal<IAlvoFlowUnit?> _unit = new();
+    private static readonly AsyncLocal<DateTimeOffset?> _instant = new();
 
     /// <summary>The ambient provenance, or <see langword="null"/> outside any framework flow.</summary>
     internal static AlvoProvenance? Provenance => _provenance.Value;
@@ -33,13 +40,35 @@ internal static class AlvoFlow
     /// </remarks>
     internal static IAlvoFlowUnit? Unit => _unit.Value is { IsOpen: true } open ? open : null;
 
+    /// <summary>The instant every <c>now()</c> on this flow reads, in UTC and whole microseconds, or <see langword="null"/> when none is bound.</summary>
+    internal static DateTimeOffset? Instant => _instant.Value;
+
+    /// <summary>Binds <paramref name="instant"/>, truncated to the microsecond, until the returned scope is disposed.</summary>
+    /// <param name="instant">The instant <c>now()</c> reads — a request's start, or an event's time.</param>
+    /// <returns>A scope whose disposal restores whatever was ambient before.</returns>
+    internal static IDisposable EnterInstant(DateTimeOffset instant)
+    {
+        var restore = Captured();
+        _instant.Value = Microsecond(instant.ToUniversalTime());
+        return restore;
+    }
+
+    /// <summary>Binds <paramref name="time"/>'s current instant when none is bound; otherwise keeps the bound one.</summary>
+    /// <param name="time">The clock read once, only when nothing is bound.</param>
+    /// <returns>A scope whose disposal restores whatever was ambient before; a no-op when an instant was already bound.</returns>
+    internal static IDisposable EnsureInstant(TimeProvider time)
+    {
+        ArgumentNullException.ThrowIfNull(time);
+        return _instant.Value is null ? EnterInstant(time.GetUtcNow()) : KeptInstant.Instance;
+    }
+
     /// <summary>Makes <paramref name="provenance"/> ambient until the returned scope is disposed; the open unit, if any, stays.</summary>
     /// <param name="provenance">The provenance of the flow being entered.</param>
     /// <returns>A scope whose disposal restores whatever was ambient before.</returns>
     internal static IDisposable Enter(AlvoProvenance provenance)
     {
         ArgumentNullException.ThrowIfNull(provenance);
-        var restore = new Restore(_provenance.Value, _unit.Value);
+        var restore = Captured();
         _provenance.Value = provenance;
 
         return restore;
@@ -53,7 +82,7 @@ internal static class AlvoFlow
     {
         ArgumentNullException.ThrowIfNull(unit);
         ArgumentNullException.ThrowIfNull(provenance);
-        var restore = new Restore(_provenance.Value, _unit.Value);
+        var restore = Captured();
         _provenance.Value = provenance;
         _unit.Value = unit;
 
@@ -85,7 +114,21 @@ internal static class AlvoFlow
         "idempotency");
 #pragma warning restore CA2208
 
-    private sealed class Restore(AlvoProvenance? provenance, IAlvoFlowUnit? unit) : IDisposable
+    private static Restore Captured() => new(_provenance.Value, _unit.Value, _instant.Value);
+
+    private static DateTimeOffset Microsecond(DateTimeOffset instant) =>
+        instant.AddTicks(-(instant.Ticks % TimeSpan.TicksPerMicrosecond));
+
+    private sealed class KeptInstant : IDisposable
+    {
+        internal static KeptInstant Instance { get; } = new();
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class Restore(AlvoProvenance? provenance, IAlvoFlowUnit? unit, DateTimeOffset? instant) : IDisposable
     {
         private bool _disposed;
 
@@ -99,6 +142,7 @@ internal static class AlvoFlow
             _disposed = true;
             _provenance.Value = provenance;
             _unit.Value = unit;
+            _instant.Value = instant;
         }
     }
 }

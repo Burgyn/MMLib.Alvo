@@ -84,6 +84,7 @@ public sealed class CelFunctionRegistrationTests
     [InlineData("string")]
     [InlineData("timestamp")]
     [InlineData("now")]
+    [InlineData("duration")]
     public void A_built_in_name_is_refused_as_a_built_in(string name) =>
         Should.Throw<ArgumentException>(() => Alvo().AddCelFunction(name, (string s) => s)).Message
             .ShouldStartWith($"'{name}' cannot name a host function: it is a built-in function.");
@@ -91,7 +92,6 @@ public sealed class CelFunctionRegistrationTests
     [Theory]
     [InlineData("uint")]
     [InlineData("matches")]
-    [InlineData("duration")]
     public void A_standard_name_not_yet_built_is_refused_as_cel_syntax(string name) =>
         Should.Throw<ArgumentException>(() => Alvo().AddCelFunction(name, (string s) => s)).Message
             .ShouldStartWith($"'{name}' cannot name a host function: it is a standard CEL type or function name");

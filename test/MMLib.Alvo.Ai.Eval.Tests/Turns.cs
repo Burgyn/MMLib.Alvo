@@ -7,6 +7,7 @@ internal static class Turns
 {
     internal const string Original = """
         {
+          "apiVersion": "alvo.dev/v1",
           "name": "bike-workshop",
           "entities": {
             "customers": { "fields": {

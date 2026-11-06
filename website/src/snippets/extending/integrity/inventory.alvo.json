@@ -1,0 +1,32 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "inventory",
+  "description": "A product's stock and its held reservations, kept honest by validations the database enforces and a filtered rollup.",
+  "auth": { "roles": ["clerk"] },
+  "access": { "admin": "'clerk' in @user.roles" },
+  "entities": {
+    "products": {
+      "fields": {
+        "name": { "type": "string", "maxLength": 80, "required": true },
+        "stock": { "type": "integer", "required": true, "validation": "value >= 0" },
+        "reserved": {
+          "type": "integer",
+          "rollup": { "from": "reservations", "op": "sum", "field": "quantity", "where": "status == 'held'" },
+          "validation": "value <= stock"
+        },
+        "sale_starts_at": { "type": "datetime" },
+        "sale_ends_at": { "type": "datetime", "validation": "!has(sale_starts_at) || value - sale_starts_at <= duration('720h')" }
+      },
+      "rules": { "list": "true", "get": "true", "create": "true", "update": "true", "delete": "true" }
+    },
+    "reservations": {
+      "fields": {
+        "product_id": { "type": "ref", "entity": "products", "required": true },
+        "quantity": { "type": "integer", "required": true, "validation": "value > 0" },
+        "status": { "type": "enum", "values": ["held", "released"], "required": true }
+      },
+      "rules": { "list": "true", "get": "true", "create": "true", "update": "true", "delete": "true" }
+    }
+  }
+}

@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Expressions.Internal;
 
-/// <summary>CEL's standard conversions <c>string</c>, <c>int</c> and <c>timestamp</c>, with one text form per type (spec §5.3).</summary>
+/// <summary>CEL's standard conversions <c>string</c>, <c>int</c>, <c>timestamp</c> and <c>duration</c>, with one text form per type (spec §5.3).</summary>
 internal static partial class CelBuiltInFunctions
 {
     private const string TimestampFailure = "the text is not an RFC 3339 timestamp such as 2026-10-05T12:00:00Z";
@@ -25,6 +25,15 @@ internal static partial class CelBuiltInFunctions
         "timestamp", CelValueType.Timestamp,
         "The text read as an RFC 3339 instant, such as 2026-10-05T12:00:00Z or 2026-10-05T14:00:00+02:00; anything else fails the write.",
         arguments => TimestampOf((string)arguments[0]!), Parameter("text", CelValueType.String));
+
+    private static CelFunction Duration => new(
+        DurationName, [Parameter("text", CelValueType.String)], CelValueType.Duration, ResultNullable: false,
+        "A length of time written as a constant, such as duration('90m') or duration('1h30m'): units h, m, s, ms, us and ns, "
+        + "an optional sign and fractions; whole microseconds, within about ten thousand years.",
+        IsHost: false, RuleConditionAndMutate, Body: arguments => DurationOf((string)arguments[0]!));
+
+    private static TimeSpan DurationOf(string text) =>
+        CelDuration.TryParse(text, out var value, out var reason) ? value : throw new CelFunctionException(DurationName, reason!);
 
     /// <summary><c>string</c>: the one text form per type spec §5.3 pins, culture-free.</summary>
     /// <param name="value">An Int (<see cref="long"/>), Decimal, Bool, Uuid or Timestamp.</param>

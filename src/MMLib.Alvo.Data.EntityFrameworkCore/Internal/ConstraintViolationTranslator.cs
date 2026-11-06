@@ -49,14 +49,21 @@ internal static class ConstraintViolationTranslator
     /// expires and a collision on it is an ordinary conflict the caller can fix by choosing another id.
     /// Every other write mints its own key, passes <see langword="false"/>, and keeps the old answer.
     /// </param>
+    /// <param name="applied">The applied schema, whose validated fields a CHECK constraint's name is recomputed from.</param>
+    /// <param name="unnameable">The fields the descriptor hides, which a CHECK refusal never names (the write's decision).</param>
+    /// <param name="bodySent">
+    /// Whether the request carried values a refusal may point at. A delete sends none, so a parent's validation its rollup
+    /// recompute breaks names no child field: there is no value of the caller's to change.
+    /// </param>
     internal static async Task<T> TranslatedAsync<T>(
-        Func<Task<T>> write, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema, bool callerKeyed)
+        Func<Task<T>> write, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema, bool callerKeyed,
+        SchemaModel applied, IReadOnlySet<string> unnameable, bool bodySent = true)
     {
         try
         {
             return await write();
         }
-        catch (Exception failure) when (Translate(failure, dialect, rows, schema, callerKeyed) is { } violation)
+        catch (Exception failure) when (Translate(failure, dialect, new Written(rows, schema, callerKeyed, applied, unnameable, bodySent)) is { } violation)
         {
             throw violation;
         }
@@ -64,17 +71,29 @@ internal static class ConstraintViolationTranslator
 
     /// <inheritdoc cref="TranslatedAsync{T}"/>
     internal static async Task TranslatedAsync(
-        Func<Task> write, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema, bool callerKeyed)
+        Func<Task> write, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema, bool callerKeyed,
+        SchemaModel applied, IReadOnlySet<string> unnameable, bool bodySent = true)
     {
         try
         {
             await write();
         }
-        catch (Exception failure) when (Translate(failure, dialect, rows, schema, callerKeyed) is { } violation)
+        catch (Exception failure) when (Translate(failure, dialect, new Written(rows, schema, callerKeyed, applied, unnameable, bodySent)) is { } violation)
         {
             throw violation;
         }
     }
+
+    /// <summary>What a translation knows about the write it guards.</summary>
+    /// <param name="Rows">The entity type being written.</param>
+    /// <param name="Schema">The entity as the applied schema declares it.</param>
+    /// <param name="CallerKeyed">Whether the caller chose this row's key.</param>
+    /// <param name="Applied">The applied schema.</param>
+    /// <param name="Unnameable">The fields a refusal never names.</param>
+    /// <param name="BodySent">Whether the request carried values a refusal may point at.</param>
+    private sealed record Written(
+        IEntityType Rows, EntitySchema Schema, bool CallerKeyed, SchemaModel Applied, IReadOnlySet<string> Unnameable,
+        bool BodySent);
 
     /// <summary>
     /// The translated exception, or <see langword="null"/> when <paramref name="failure"/> is not a
@@ -85,8 +104,7 @@ internal static class ConstraintViolationTranslator
     /// translate is never caught at all: the stack trace a host logs is then the provider's own, unwound from
     /// where it was raised, rather than one rethrown from here.
     /// </remarks>
-    private static AlvoConstraintViolationException? Translate(
-        Exception failure, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema, bool callerKeyed)
+    private static AlvoConstraintViolationException? Translate(Exception failure, IAlvoSqlDialect dialect, Written written)
     {
         if (ProviderException(failure) is not { } provider)
         {
@@ -105,7 +123,12 @@ internal static class ConstraintViolationTranslator
             return new AlvoConstraintViolationException(AlvoConstraintKind.Referenced, [], failure);
         }
 
-        var fields = CallerFields(violation, rows, schema, callerKeyed);
+        if (violation.Kind == AlvoConstraintKind.Check)
+        {
+            return new AlvoConstraintViolationException(AlvoConstraintKind.Check, CheckFields(violation, written), failure);
+        }
+
+        var fields = CallerFields(violation, written.Rows, written.Schema, written.CallerKeyed);
         return fields.Count == 0
             ? null
             : new AlvoConstraintViolationException(AlvoConstraintKind.Unique, fields, failure);
@@ -159,6 +182,51 @@ internal static class ConstraintViolationTranslator
         var managed = AlvoManagedColumns.For(schema);
         return [.. columns.Where(column => !managed.Contains(column) || IsTheCallersOwnKey(column, callerKeyed))];
     }
+
+    /// <summary>
+    /// The field a CHECK refusal points at: the written entity's own validated field, or — when a rollup recompute broke a
+    /// parent's validation — the child field it aggregates; nothing for a name this schema cannot place, a <c>count</c>
+    /// rollup, a write that sent no body (a delete), or a field the descriptor hides (HX-11 Rulings 24, 25).
+    /// </summary>
+    /// <remarks>
+    /// <b>Always a refusal, even naming nothing.</b> Unlike a unique collision confined to managed columns, a broken CHECK is
+    /// never a broken invariant of the framework's: it is the descriptor's integrity holding, so it is the caller's 422 and
+    /// never a 500 — whatever the engine reported and whether or not it can be placed.
+    /// </remarks>
+    /// <param name="violation">What the dialect decoded.</param>
+    /// <param name="written">The write the violation interrupted.</param>
+    private static IReadOnlyList<string> CheckFields(SqlConstraintViolation violation, Written written)
+    {
+        if (violation.ConstraintName is not { } name
+            || CheckConstraintNames.Owner(written.Applied, written.Schema, name) is not { } owner)
+        {
+            return [];
+        }
+
+        var field = IsTheWrittenEntitysOwnField(owner, written.Schema)
+            ? owner.Field.Name
+            : written.BodySent ? RolledUpChildField(owner.Field, written.Schema) : null;
+        return field is null || written.Unnameable.Contains(field) ? [] : [field];
+    }
+
+    /// <summary>
+    /// Whether the broken validation is the written entity's own field rather than a parent's rollup — and a rollup over
+    /// its own entity is a parent's field too, so its refusal points at the child field, never at the rollup (Ruling 25).
+    /// </summary>
+    /// <param name="owner">The entity and field whose validation broke.</param>
+    /// <param name="written">The entity the write touched.</param>
+    private static bool IsTheWrittenEntitysOwnField((EntitySchema Entity, FieldSchema Field) owner, EntitySchema written) =>
+        string.Equals(owner.Entity.Name, written.Name, StringComparison.Ordinal)
+        && !string.Equals(owner.Field.Rollup?.From, written.Name, StringComparison.Ordinal);
+
+    /// <summary>The child field a parent's rollup aggregates from <paramref name="written"/>, or none for a <c>count</c>.</summary>
+    /// <param name="parentField">The parent's validated field.</param>
+    /// <param name="written">The child entity the write touched.</param>
+    private static string? RolledUpChildField(FieldSchema parentField, EntitySchema written) =>
+        parentField.Rollup is { Op: not RollupOperation.Count, Field: { } child } rollup
+        && string.Equals(rollup.From, written.Name, StringComparison.Ordinal)
+            ? child
+            : null;
 
     /// <summary>Whether <paramref name="column"/> is the row key on a write whose key the caller chose.</summary>
     /// <remarks>

@@ -125,9 +125,19 @@ test.describe('model a domain', () => {
       rollup: { from: 'invoices', op: 'count' },
     });
 
-    // `rollup.where` is refused, and the control says so in the framework's own words.
-    await expect(page.locator('[data-refused="rollup.where"] input')).toBeDisabled();
-    await expect(page.locator('[data-refused="rollup.where"]')).toContainText('a stored number that is silently wrong rather than absent');
+    // `rollup.where` is live since HX-11: typed, it lands in the rollup; emptied, it leaves it.
+    await expect(page.locator('[data-refused="rollup.where"]')).toHaveCount(0);
+    await page.fill('[data-rollup-where]', "status != 'void'");
+    expect((await working(page)).entities.customers.fields.invoice_count.rollup).toEqual({ from: 'invoices', op: 'count', where: "status != 'void'" });
+    await page.fill('[data-rollup-where]', '');
+    expect((await working(page)).entities.customers.fields.invoice_count.rollup).toEqual({ from: 'invoices', op: 'count' });
+
+    // So is `field.validation`, on every kind: typed, it lands on the field; emptied, it leaves it.
+    await expect(page.locator('[data-refused="field.validation"]')).toHaveCount(0);
+    await page.fill('[data-validation]', 'value >= 0');
+    expect((await working(page)).entities.customers.fields.invoice_count.validation).toBe('value >= 0');
+    await page.fill('[data-validation]', '');
+    expect((await working(page)).entities.customers.fields.invoice_count).not.toHaveProperty('validation');
 
     await go(page, '#/schema/preview');
     await page.fill('#apply-reason', 'Count each customer\'s invoices');

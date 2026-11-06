@@ -14,13 +14,18 @@ namespace MMLib.Alvo.Admin.Components.Schema;
 /// The first parameter's type in each overload that has one, distinct, in overload order — what decides whether a row's
 /// field can be the first argument (Ruling W-D), since the template's overload is only one of them.
 /// </param>
+/// <param name="TakesConstantOnly">
+/// Whether its argument must be a constant: a function that yields a Duration does, because a duration is built from a
+/// constant only (HX-11 Ruling 7) — read off the catalog's result type, not a name.
+/// </param>
 internal sealed record OfferedFunction(
     string Name,
     IReadOnlyList<string> Signatures,
     string Summary,
     bool IsHost,
     IReadOnlyList<CelFunctionParameter> Parameters,
-    IReadOnlyList<CelValueType> FirstParameterTypes);
+    IReadOnlyList<CelValueType> FirstParameterTypes,
+    bool TakesConstantOnly);
 
 /// <summary>A text to write and the range in it to select next.</summary>
 /// <param name="Text">The text.</param>
@@ -68,6 +73,11 @@ internal static class FunctionOffer
     public static Insertion Template(OfferedFunction function, string? firstArgument)
     {
         Debug.Assert(firstArgument is null || function.Parameters.Count > 0, "A parameterless function never takes a first argument.");
+        if (function.TakesConstantOnly && firstArgument is null && function.Parameters is [{ Type: CelValueType.String }])
+        {
+            return ConstantTemplate(function);
+        }
+
         var arguments = function.Parameters
             .Select((parameter, index) => index == 0 && firstArgument is not null ? firstArgument : parameter.Name)
             .ToList();
@@ -85,7 +95,7 @@ internal static class FunctionOffer
     /// <summary>
     /// <c>new.{field}</c> when a mutate row's field can be the function's first argument: the point has a <c>new.</c>
     /// image that carries the field — after the commit, not one the entity leaves out of its event images — and some
-    /// overload's first parameter takes the field's CEL type (an Int also fills a Decimal, C1 F7).
+    /// overload's first parameter takes the field's CEL type (an Int also fills a Decimal, C1 F7) — unless the function takes a constant only.
     /// </summary>
     /// <remarks>
     /// Any overload decides, not only the one the template spells (Ruling W-D, a deviation from spec §9.2): the template
@@ -109,7 +119,7 @@ internal static class FunctionOffer
     /// <returns>The argument, or <see langword="null"/>.</returns>
     public static string? FirstArgument(
         OfferedFunction function, string point, FieldSchema? field, IReadOnlyCollection<string>? excludedFromEvents = null) =>
-        field is not null && ConditionTable.HasNew(point)
+        field is not null && !function.TakesConstantOnly && ConditionTable.HasNew(point)
             && (HookBuilder.IsBefore(point) || excludedFromEvents?.Contains(field.Name, StringComparer.Ordinal) is not true)
             && function.FirstParameterTypes.Any(type => Takes(type, CelFieldType.Of(field)))
             ? $"new.{field.Name}"
@@ -129,6 +139,18 @@ internal static class FunctionOffer
         return new Insertion(written, from + template.SelectFrom, template.SelectLength);
     }
 
+    /// <summary>
+    /// <c>duration('1h')</c>, with <c>1h</c> selected: a constant-only function's placeholder must itself be a constant, or
+    /// the inserted call names a field (<c>text</c>) the check refuses before the operator has typed anything. Written only
+    /// for one String parameter: a Duration built from a number takes its parameter name, as any call does.
+    /// </summary>
+    private static Insertion ConstantTemplate(OfferedFunction function)
+    {
+        const string Example = "1h";
+        var text = $"{function.Name}('{Example}')";
+        return new Insertion(text, function.Name.Length + 2, Example.Length);
+    }
+
     private static OfferedFunction Offer(IGrouping<string, CelFunctionInfo> overloads)
     {
         var first = overloads.First();
@@ -139,7 +161,8 @@ internal static class FunctionOffer
             first.Summary,
             first.Provenance == CelFunctionProvenance.Host,
             longest.Parameters,
-            [.. overloads.Where(overload => overload.Parameters.Count > 0).Select(overload => overload.Parameters[0].Type).Distinct()]);
+            [.. overloads.Where(overload => overload.Parameters.Count > 0).Select(overload => overload.Parameters[0].Type).Distinct()],
+            overloads.Any(overload => overload.Result == CelValueType.Duration));
     }
 
     private static string Parameter(CelFunctionParameter parameter) => $"{parameter.Name}: {parameter.Type}{Nullable(parameter.AcceptsNull)}";

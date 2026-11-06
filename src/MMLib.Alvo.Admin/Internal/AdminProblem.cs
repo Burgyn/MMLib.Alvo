@@ -164,6 +164,10 @@ internal sealed record AdminProblem(string Title, string Detail, string? Fix, Ex
         AlvoIdempotencyConflictException => "That request was already made with different content",
         ArgumentException and not ArgumentNullException when IsDataSite(site) => "The values were refused",
         NotSupportedException when site == ProblemSite.People => "This deployment does not support that",
+        /* An apply or a rollback gave up waiting for a table other transactions held, and changed nothing (HX-11
+           Ruling 20). Internal to Abstractions — no host's to catch — and named here through the D45 grant the
+           dashboard already holds, so the compiler, not a string, keeps the two in step (Ruling 78). */
+        AlvoApplyLockTimeoutException => "A table was busy, so nothing was applied",
         _ => null,
     };
 
