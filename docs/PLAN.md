@@ -93,7 +93,10 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   (the `ALVO1001` analyzer, the host-function budget, `expression-failed`, hook calibration) the tenth; HX-11
   (`field.validation` as a database `CHECK`, `rollup.where`, `now()` as one instant per request, CEL durations)
   the eleventh; HX-12 (`sequence`, partial and exclusion indexes) the twelfth; HX-13 (timers, cron schedules, data
-  migrations) the thirteenth; HX-14 (steps, sleep, debounce, concurrency limits) the fourteenth.
+  migrations) the thirteenth; HX-16 (query narrowings, record enrichers and `virtual` fields — host C# that shapes
+  what a read returns, never a row after its SQL) is done too, in three PRs, built beside HX-12 and HX-13 rather
+  than after them;
+  HX-14 (steps, sleep, debounce, concurrency limits) the fourteenth.
   This line runs ahead of F5's close, the way F4 ran beside F3; the marker stays on F5.
 
 ## 3a. What closed F4

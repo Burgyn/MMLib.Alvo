@@ -1,0 +1,21 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "reads-desk",
+  "access": { "admin": "'auditor' in @user.roles" },
+  "auth": { "roles": ["clerk", "auditor"] },
+  "entities": {
+    "notes": {
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 80 },
+        "region": { "type": "string", "required": true, "maxLength": 20 },
+        "display": { "type": "string", "virtual": true }
+      },
+      "rules": {
+        "list": "'clerk' in @user.roles || 'auditor' in @user.roles",
+        "get": "'clerk' in @user.roles || 'auditor' in @user.roles",
+        "create": "'auditor' in @user.roles"
+      }
+    }
+  }
+}

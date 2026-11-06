@@ -27,6 +27,12 @@ that the policy predicate is in the `WHERE` clause rather than applied afterward
 A `hidden` field is not omitted from the `SELECT` list — EF refuses a `FromSql` result set missing a mapped
 property — it is projected as a typed SQL `NULL` under its own alias, so the column is never read.
 
+A host **narrowing** (HX-16) is one more term of that same `WHERE`, after the tenant scope and before the row id, under
+its own parameter family `alvo_n` — never inside the caller's filter. **The returned key set** is the mask's, then
+every virtual field the caller may read and selected (as `null` until an enricher fills it), then whatever the host's
+enrichers hide; a `virtual` field has no column and is never in the `SELECT` list. Both are
+[`reads.md`](./reads.md).
+
 **`ORDER BY` and `LIMIT` are in that same statement, and nothing is composed over the root in LINQ.** That is
 a deliberate reversal of the plan's own *Deviations* 4, which put the ordering in a LINQ chain because EF
 wraps a `FromSql` body in a derived table whose row order is not guaranteed to survive. The reversal is
