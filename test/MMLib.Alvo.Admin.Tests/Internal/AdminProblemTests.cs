@@ -86,6 +86,26 @@ public class AdminProblemTests
             "Somebody applied a revision while this screen was open. Reload and try again.");
     }
 
+    /// <summary>
+    /// An apply that gave up waiting for a busy table changed nothing and is worth retrying (HX-11 Ruling 20): a refusal
+    /// with a retry fix, never a fault. The exception is internal to Abstractions, so it is made the way the dashboard
+    /// recognises it — by its full name — and a rename of the type fails here.
+    /// </summary>
+    [Fact]
+    public void A_lock_timeout_is_a_refusal_that_says_to_retry()
+    {
+        var timedOut = (Exception)Activator.CreateInstance(
+            typeof(ManagementRequestException).Assembly.GetType("MMLib.Alvo.Migrations.AlvoApplyLockTimeoutException", throwOnError: true)!)!;
+
+        var applied = AdminProblem.From(timedOut, ProblemSite.SchemaApply)!;
+        applied.IsFault.ShouldBeFalse();
+        applied.Title.ShouldBe("A table was busy, so nothing was applied");
+        applied.Detail.ShouldBe(timedOut.Message);
+        applied.Fix.ShouldBe("Another transaction held a table this apply needed. Nothing changed — wait a few seconds and apply again.");
+        AdminProblem.From(timedOut, ProblemSite.Rollback)!.Fix.ShouldBe(
+            "Another transaction held a table this restore needed. Nothing changed — wait a few seconds and restore again.");
+    }
+
     [Fact]
     public void A_scoped_read_without_a_tenant_is_told_about_the_tenant_rather_than_the_rules()
     {

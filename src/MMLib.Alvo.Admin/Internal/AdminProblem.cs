@@ -164,8 +164,25 @@ internal sealed record AdminProblem(string Title, string Detail, string? Fix, Ex
         AlvoIdempotencyConflictException => "That request was already made with different content",
         ArgumentException and not ArgumentNullException when IsDataSite(site) => "The values were refused",
         NotSupportedException when site == ProblemSite.People => "This deployment does not support that",
+        _ when IsLockTimeout(exception) => "A table was busy, so nothing was applied",
         _ => null,
     };
+
+    /// <summary>The internal lock-timeout refusal's full name — see <see cref="IsLockTimeout"/>.</summary>
+    private const string LockTimeoutTypeName = "MMLib.Alvo.Migrations.AlvoApplyLockTimeoutException";
+
+    /// <summary>
+    /// Whether an apply or a rollback gave up waiting for a table other transactions held, and changed nothing (HX-11
+    /// Ruling 20) — the refusal the Management API answers 409 with <c>Retry-After</c>.
+    /// </summary>
+    /// <remarks>
+    /// Recognised by its full name because the type is internal to Abstractions and deliberately so (it is no host's to
+    /// catch); a grant of every Abstractions internal to the dashboard for one type would be the wider hole.
+    /// <c>AdminProblemTests</c> builds it by this name, so a rename fails there rather than turning a retry into a fault.
+    /// </remarks>
+    /// <param name="exception">What was thrown.</param>
+    internal static bool IsLockTimeout(Exception exception)
+        => string.Equals(exception.GetType().FullName, LockTimeoutTypeName, StringComparison.Ordinal);
 
     /// <summary>
     /// Whether the data port is what was called, where an <see cref="ArgumentException"/> is its documented
