@@ -28,6 +28,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   zone (or revision), next run in its zone, last run and outcome, and *Run now*; a tile with the pending and due timer
   counts. The extension catalog carries them (`ManagementExtension.Cron`, `TimeZone`, `NextRunAt`, `LastRunAt`,
   `LastOutcome`, `AfterRevision`; `ManagementExtensionCatalog.Timers`).
+- **Steps** (HX-14): `IAlvoSteps` on `AlvoEventContext.Steps` and `AlvoJobContext.Steps`. `RunAsync(name, work)` runs a
+  named step until it completes once; a retry returns the stored result (JSON, at most 256 KiB) of every completed
+  step instead of running it again. Each step is at least once, so its work must be idempotent. `SleepUntilAsync(name,
+  at)` ends the attempt and resumes the delivery at `at` without spending an attempt. Docs: *Multi-step side effects*.
+- **`AlvoHandlerOptions.Debounce`** (HX-14, 1 second to 1 day): a handler's new delivery waits out the period, and a
+  newer change of the same record and tenant supersedes it, so a burst runs once with the latest state. The delivery
+  status **`superseded`** — finished, never replayed or redelivered.
+- **`AlvoHandlerOptions.Concurrency` / `AlvoConcurrency.PerKey("tenant" | "record", n)`** (HX-14, n 1–100): at most n
+  of a handler's deliveries run at once per tenant or per record, across replicas. The catalog shows it
+  (`ManagementExtension.Concurrency`, `tenant:2`).
+- **The attempt outcome `skipped`** (HX-14): a sleep's attempt, which is not counted against the retry policy.
+- **Steps on `GET …/deliveries/{id}`** (HX-14): `ManagementDelivery.Steps`, each a `ManagementDeliveryStep` with its name
+  and completion time — never its result.
+- **Dashboard: a delivery's *Steps*** (HX-14): the delivery pane lists its completed steps; a sleeping delivery reads
+  *sleeping until* its wake time, a superseded one *superseded* with no *Run again*, and a capped handler shows its cap.
 - **New core dependency: `Cronos`** 0.13.0 (MIT, no dependencies) — cron parsing and time-zone occurrences.
 - **Query narrowing** (HX-16): an embedded host can AND a filter into every non-system read of an entity — list, get and count — with `Entity(…).Narrow(…)`; it never widens what the rules allow and never applies to writes.
 - **Integrity in the descriptor** (HX-11). A field's `validation` is now enforced as a database `CHECK` constraint on
@@ -311,6 +326,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AlvoFrameworkEnvelope`, which only the framework can mint.
 - **`AlvoExtensionKind` gains `Schedule` (9) and `DataMigration` (10), `AlvoExtensionStage` gains `Scheduled` (5)**
   (HX-13): an exhaustive `switch` over them gains cases.
+- **`IDeliveryStore` gains `StepsAsync`, `RecordStepAsync` and `SleepAsync`** (HX-14), abstract, so a third-party
+  delivery store fails to compile until it implements them. A provider must also honour two new init members,
+  `DeliveryRequest.Debounce` (a due time, and superseding the lane's older waiting deliveries) and `DeliveryClaim.Limits`
+  (claim a capped subscriber's delivery only with a free slot of its key), as `DeliveryStoreContractTests` pins. The
+  framework tables gain `<prefix>_steps` and `<prefix>_concurrency_slots`.
 
 - **Breaking for clients that branch on 500:** a built-in CEL function's refusal of the caller's data answered 500
   `function-failed`; it answers 422 `expression-failed`, and is no longer logged at Error. Host functions keep 500.

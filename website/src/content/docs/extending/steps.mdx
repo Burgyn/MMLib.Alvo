@@ -1,0 +1,105 @@
+---
+title: Multi-step side effects
+description: Split a handler's side effects into named steps that each complete once, sleep until a time without spending an attempt, debounce a burst of changes into one delivery of the latest, and cap how many deliveries run at once.
+sidebar:
+  order: 11
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import confirmation from '../../../snippets/extending/steps/BookingConfirmation.cs?raw';
+import tests from '../../../snippets/extending/steps/BookingConfirmationTests.cs?raw';
+import descriptor from '../../../snippets/extending/time/booking-reminders.alvo.json?raw';
+
+A new booking should charge a deposit, e-mail a confirmation, and remind the customer a day before it starts. Written as
+one [event handler](/extending/event-handlers/), a failed e-mail retries the whole handler — and charges the deposit
+again. **Steps** fix that: each named step completes once, and a retry returns the stored result of every step that
+already completed instead of running it again.
+
+<Code code={descriptor} lang="json" title="booking-reminders.alvo.json" />
+
+<SourceExcerpt code={confirmation} from="public static class BookingConfirmation" to="public interface IPayments" title="BookingConfirmation.cs" />
+
+Steps live on the handler's context — `AlvoEventContext.Steps`, and `AlvoJobContext.Steps` for a
+[scheduled job](/extending/time/#schedules). They are not a service you resolve: outside a delivery they would have
+nothing to remember.
+
+## `RunAsync`: a step completes once
+
+- **Name every step.** A name is 1–200 characters, no control characters, and unique within one run of the handler. It
+  is the step's identity across retries, so keep it stable: a renamed step is a new step and runs again.
+- **A step is at least once, so its work must be idempotent.** The result is recorded after the work returns; a crash
+  between the two runs that one step again. Pass an idempotency key to the payment provider (here, the booking id).
+- **A completed step is never run again** for the same event and handler. A retry, a dispatcher restart or another
+  replica gets the stored result back.
+- **Results are JSON** (`System.Text.Json`, web defaults), at most 256 KiB. Return what the next steps need — a receipt
+  id, not the whole response. `RunAsync` without a result stores JSON `null`.
+- Two runners racing one step keep the first record, and both continue with its result.
+
+## `SleepUntilAsync`: wait without an attempt
+
+`SleepUntilAsync("day-before", at)` ends the attempt; the delivery goes back to pending, due at `at`, and runs again
+then. Completed steps return their stored results and the sleep returns, so the handler continues after it.
+
+- **A sleep spends no attempt.** Five sleeps and a failure still have the retry policy's full retries left.
+- **A time already passed returns at once.** A delivery woken early — say, by *run again* — sleeps again.
+- **Let it pass.** The sleep ends the attempt by an exception. A handler that catches it still sleeps, and every later
+  step of that attempt throws the same exception without running, so each step runs only after the wake.
+- **An ordered lane waits.** While a delivery sleeps, later deliveries of the same record for the same handler wait
+  behind it, as they wait behind a retry. Sleep in a handler that may hold its lane, or opt out with
+  `options.Ordering = AlvoOrdering.None`.
+- **For days, not months.** A sleep is the delivery's own due time; long-running workflows that wait for weeks or for
+  outside signals belong to a durable-workflow engine ([#374](https://github.com/Burgyn/MMLib.Alvo/issues/374)).
+
+## `Debounce`: one delivery of the latest
+
+`options.Debounce = TimeSpan.FromSeconds(5)` holds each new delivery for five seconds. A newer change of the same record
+in that window **supersedes** the waiting one: it ends as `superseded`, unrun, and only the newest runs — with the
+record's latest state.
+
+- **Trailing, latest wins**, per handler, record and tenant: changes in two tenants never supersede each other.
+- Only a delivery that never started is superseded. One that is running, retrying after a failure, or sleeping runs on.
+- 1 second to 1 day. A steady stream of changes faster than the window delays the delivery until it pauses.
+- A superseded delivery is finished. It cannot be run again or replayed: the newer one carries the record's state.
+
+## `Concurrency`: cap the running deliveries
+
+`options.Concurrency = AlvoConcurrency.PerKey("tenant", 2)` lets at most two of the handler's deliveries run at once per
+tenant, across every replica; `PerKey("record", 1)` at most one per record. The limit is 1–100.
+
+- Per handler: another handler's deliveries never count against it.
+- A capped delivery is claimed only together with a free slot. Its answer — success, failure or sleep — frees the slot.
+- A crashed runner's slot frees when its claim's lease expires (90 seconds at the defaults).
+- Lowering a limit lets deliveries already running finish; the new limit applies to the next claims.
+
+## Running again
+
+*Run again* (redeliver) and *replay* of a **succeeded** delivery delete its steps, so the whole handler runs again. A
+**dead** or **cancelled** delivery keeps them: fix the bug, run it again, and it resumes after the last step that
+completed. There is no way to force a full re-run of a dead delivery that completed steps — make the steps idempotent and
+start a new event if you need one.
+
+## Testing with a fake clock
+
+`AlvoTestHost` runs steps, sleeps, debounce and caps against a real database. Drain, advance the clock, drain again:
+
+<SourceExcerpt code={tests} from="public async Task The_deposit_is_charged_once" to="private static Task<AlvoTestHost> StartAsync" title="BookingConfirmationTests.cs" />
+
+A context built with `AlvoEventContext.Create` for a unit test, or a fixture run with `DeliverAsync`, gets steps that run
+their work every time, and a sleep that returns at once.
+
+## In the dashboard
+
+*Operations* shows a delivery's **Steps** under its attempts — each step's name and when it completed, never its
+result, which can hold personal data. A sleeping delivery reads *sleeping until* its wake time; a superseded one reads
+*superseded* and offers no *Run again*. A capped handler's row shows its cap, such as *per tenant · 2*.
+
+## Limits
+
+| Thing | Allowed |
+|---|---|
+| step name | 1–200 characters, no control characters, unique within one run |
+| steps per delivery | 1 000 |
+| step result | 256 KiB of UTF-8 JSON |
+| `Debounce` | 1 second to 1 day |
+| `PerKey` limit | 1–100 |
