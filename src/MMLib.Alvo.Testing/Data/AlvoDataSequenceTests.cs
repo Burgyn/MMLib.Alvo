@@ -44,12 +44,23 @@ public abstract class AlvoDataSequenceTests
     /// <param name="descriptor">The descriptor <paramref name="desired"/> maps from.</param>
     protected abstract Task ApplyAsync(SchemaModel current, SchemaModel desired, AlvoDescriptor descriptor);
 
+    /// <summary>
+    /// Skips the hundred-writer fact where this engine's write line cannot drain a hundred writers within its busy
+    /// timeout — SQLite's single writer on a Windows runner (#410). Empty by default: an engine whose writers run
+    /// concurrently always holds it.
+    /// </summary>
+    protected virtual void EnsureAHundredWritersFitTheBusyTimeout()
+    {
+    }
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>Acceptance (1): a hundred concurrent creates are numbered one to a hundred, without a gap or a duplicate.</summary>
     [Fact]
     public async Task A_hundred_concurrent_creates_number_one_to_a_hundred_without_gap_or_duplicate()
     {
+        EnsureAHundredWritersFitTheBusyTimeout();
+
         var data = await CreateAsync(Schema, Descriptor, _clock);
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
