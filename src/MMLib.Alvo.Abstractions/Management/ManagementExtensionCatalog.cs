@@ -6,4 +6,7 @@ public sealed record ManagementExtensionCatalog
 {
     /// <summary>Gets one entry per registered extension, by <c>Order</c> and then registration order.</summary>
     public required IReadOnlyList<ManagementExtension> Items { get; init; }
+
+    /// <summary>Gets the timers this instance holds; null when its data provider keeps no timers.</summary>
+    public ManagementTimerCounts? Timers { get; init; }
 }

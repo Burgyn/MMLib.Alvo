@@ -114,7 +114,7 @@ internal sealed class AlvoIdentityContextResolver(
     /// <c>TenantResolver</c> applies to an API key, applied to a session. An operator holds at most
     /// one tenant (<see cref="AlvoUser.Tenant"/>), so the only honest answers to "act in tenant X"
     /// are <i>yes, that is your tenant</i> and <i>no</i>. Acting in a second one is a cross-tenant
-    /// capability, which is <i>"a deliberate, audited grant"</i> deferred to #42.
+    /// capability, which is <i>"a deliberate, audited grant"</i> deferred to #376.
     /// </para>
     /// <para>
     /// <b>The refusal is the whole principal, not a null tenant.</b> Returning a principal with no

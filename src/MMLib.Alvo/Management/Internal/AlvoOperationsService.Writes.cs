@@ -1,5 +1,7 @@
 ﻿using MMLib.Alvo.Events;
+using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Scheduling;
 
 namespace MMLib.Alvo.Management.Internal;
 
@@ -19,6 +21,12 @@ internal sealed partial class AlvoOperationsService
     private const string DisableOperation = "disable-extension";
     private const string EnableOperation = "enable-extension";
     private const string ChainDepthExceeded = "chain-depth-exceeded";
+    private const string RunScheduleOperation = "run-schedule";
+    private const int RunPage = 50;
+
+    private const string NoTimers =
+        "No timer store is registered, so no schedule can be run. Register a relational data provider — UseSqlite or "
+        + "UsePostgreSql — which keeps schedules beside the outbox.";
 
     public async Task<ManagementDelivery> RedeliverAsync(string project, Guid delivery, string? reason, CancellationToken ct = default)
     {
@@ -85,13 +93,59 @@ internal sealed partial class AlvoOperationsService
         });
     }
 
-    public Task<ManagementDelivery> RunScheduleAsync(string project, string schedule, CancellationToken ct = default)
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The run's events are appended and fanned out at once — the dispatcher's later fan-out of the same events adds nothing —
+    /// so the answer is a delivery that exists: for a per-tenant schedule, the one of the first tenant's event, found by its
+    /// event id rather than as the newest row, since every later tenant's delivery is newer.
+    /// </remarks>
+    public async Task<ManagementDelivery> RunScheduleAsync(string project, string schedule, CancellationToken ct = default)
     {
         gate.Admit(ManagementOperation.RunSchedule, project);
-        ct.ThrowIfCancellationRequested();
+        var job = catalog.Schedule(schedule)
+            ?? throw new ManagementExtensionNotFoundException($"This host registers no schedule '{schedule}'. Schedules are registered in the host with AddSchedule.");
+        var events = await (runs ?? throw new ManagementRequestException(NoTimers)).EventsAsync(job, time.GetUtcNow(), manual: true, ct).ConfigureAwait(false);
+        if (events.Count == 0)
+        {
+            throw new ManagementConflictException($"'{schedule}' runs once per tenant, and the host's IAlvoTenantCatalog lists no tenant, so there is nothing to run.");
+        }
 
-        throw new ManagementExtensionNotFoundException(
-            $"This host registers no schedule '{schedule}'. Schedules are registered in the host with AddSchedule; it has none.");
+        await StartRunAsync(schedule, events, ct).ConfigureAwait(false);
+
+        return await RunDeliveryAsync(schedule, events[0].Envelope.Id, ct).ConfigureAwait(false);
+    }
+
+    private async Task StartRunAsync(string schedule, IReadOnlyList<AlvoFrameworkEnvelope> events, CancellationToken ct)
+    {
+        await (timers ?? throw new ManagementRequestException(NoTimers)).AppendRunAsync(events, ct).ConfigureAwait(false);
+        await Store.FanOutAsync([.. events.Select(framework => RunRequest(framework.Envelope, schedule))], ct).ConfigureAwait(false);
+        OperationsAudit.Write(logger, Entry(RunScheduleOperation, schedule, reason: null) with { Affected = events.Count });
+    }
+
+    private static DeliveryRequest RunRequest(AlvoEvent run, string schedule) => new()
+    {
+        EventId = run.Id,
+        Subscriber = schedule,
+        PartitionKey = run.PartitionKey,
+        TenantId = run.TenantId,
+        Kind = DeliveryKind.Schedule,
+    };
+
+    /// <summary>The delivery of <paramref name="eventId"/> for <paramref name="schedule"/>, paged by event id from that event on.</summary>
+    private async Task<ManagementDelivery> RunDeliveryAsync(string schedule, Guid eventId, CancellationToken ct)
+    {
+        Guid? after = null;
+        while (true)
+        {
+            var page = await Store.ListAsync(new DeliveryFilter { Subscriber = schedule, FromEventId = eventId, After = after, Limit = RunPage }, ct).ConfigureAwait(false);
+            if (page.FirstOrDefault(row => row.EventId == eventId) is { } row)
+            {
+                return await DetailAsync(row.Id, ct).ConfigureAwait(false);
+            }
+
+            after = page.Count == RunPage ? page[^1].Id : throw new InvalidOperationException(
+                $"The delivery of '{schedule}' for event '{eventId}' was just fanned out, and the store does not list it.");
+        }
     }
 
     private async Task ResetAsync(StoredDelivery row, string? reason, CancellationToken ct)

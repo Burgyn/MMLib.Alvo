@@ -2,6 +2,7 @@
 
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Scheduling;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Management.Internal;
@@ -24,7 +25,9 @@ internal sealed partial class AlvoOperationsService(
     ISchemaRegistry schemas,
     TimeProvider time,
     ILogger<AlvoOperationsService> logger,
-    IDeliveryStore? store = null)
+    IDeliveryStore? store = null,
+    ITimerStore? timers = null,
+    ScheduleRuns? runs = null)
 {
     internal const int SampleSize = 20;
 

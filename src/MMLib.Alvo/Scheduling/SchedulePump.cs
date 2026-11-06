@@ -172,7 +172,7 @@ internal sealed class SchedulePump(
 
         try
         {
-            var produced = await runs.EventsAsync(job, due.ScheduledFor, manual: false, ct).ConfigureAwait(false);
+            var produced = await runs.EventsAsync(job.Registration, due.ScheduledFor, manual: false, ct).ConfigureAwait(false);
             return cron.Next(Later(time.GetUtcNow(), due.ScheduledFor)) is { } next
                 && await schedules.AdvanceScheduleAsync(Advance(due, next, produced), ct).ConfigureAwait(false);
         }

@@ -1768,6 +1768,7 @@ namespace MMLib.Alvo.Management
     {
         public ManagementExtensionCatalog() { }
         public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementExtension> Items { get; init; }
+        public MMLib.Alvo.Management.ManagementTimerCounts? Timers { get; init; }
     }
     public sealed class ManagementExtensionNotFoundException : System.Exception
     {
@@ -1930,6 +1931,12 @@ namespace MMLib.Alvo.Management
         public ManagementSimulationException() { }
         public ManagementSimulationException(string message) { }
         public ManagementSimulationException(string message, System.Exception innerException) { }
+    }
+    public sealed class ManagementTimerCounts : System.IEquatable<MMLib.Alvo.Management.ManagementTimerCounts>
+    {
+        public ManagementTimerCounts() { }
+        public required int Due { get; init; }
+        public required int Pending { get; init; }
     }
     public sealed class ManagementWarnedBlock : System.IEquatable<MMLib.Alvo.Management.ManagementWarnedBlock>
     {

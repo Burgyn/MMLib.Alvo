@@ -18,16 +18,17 @@ internal sealed class ScheduleRuns(IAlvoTenantCatalog? tenants, TimeProvider tim
     internal const string ManualKey = "manual";
 
     /// <summary>The events of <paramref name="job"/>'s run for <paramref name="scheduledFor"/>, in the order the tenants are listed.</summary>
-    /// <param name="job">A bound schedule.</param>
+    /// <param name="job">A registered schedule.</param>
     /// <param name="scheduledFor">The occurrence; for a run started on demand, the moment it was started.</param>
     /// <param name="manual">Whether an operator started the run, rather than the cron.</param>
     /// <param name="ct">A token to cancel the tenant listing.</param>
-    internal async Task<IReadOnlyList<AlvoFrameworkEnvelope>> EventsAsync(BoundHandler job, DateTimeOffset scheduledFor, bool manual, CancellationToken ct)
+    internal async Task<IReadOnlyList<AlvoFrameworkEnvelope>> EventsAsync(
+        HandlerRegistration job, DateTimeOffset scheduledFor, bool manual, CancellationToken ct)
     {
-        var type = ((NamedEvent)job.Registration.Source).Type;
+        var type = ((NamedEvent)job.Source).Type;
         var payload = Payload(job.Id, scheduledFor, manual);
         var now = time.GetUtcNow();
-        var scopes = await ScopesAsync(job.Registration.Job!, ct).ConfigureAwait(false);
+        var scopes = await ScopesAsync(job.Job!, ct).ConfigureAwait(false);
 
         return [.. scopes.Select(tenant => Mint(type, $"schedules/{job.Id}", payload, tenant, now))];
     }

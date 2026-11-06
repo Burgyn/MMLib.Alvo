@@ -1,8 +1,10 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 
+using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Extensions;
+using MMLib.Alvo.Management;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Scheduling;
 
@@ -64,6 +66,7 @@ public sealed class FixedTenants(params TenantId[] tenants) : IAlvoTenantCatalog
 public abstract partial class TimeFacts
 {
     private const string Nightly = "nightly-roll";
+    private const string Desk = "booking-desk";
     private static readonly DateTimeOffset _oneAm = new(2026, 11, 7, 1, 0, 0, TimeSpan.Zero);
 
     protected TenantId TenantA { get; } = new(Guid.NewGuid());
@@ -161,6 +164,86 @@ public abstract partial class TimeFacts
         await using var second = await StartScheduledAsync(alvo => alvo.AddRetiredExtension(Nightly, AlvoRetirement.Discard), database);
 
         (await TimerStore(second).SchedulesAsync(Ct)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Run_now_creates_a_delivery_that_runs_without_moving_the_next_occurrence()
+    {
+        var log = new ScheduleLog();
+        await using var alvo = await StartScheduledAsync(alvo => alvo.AddSchedule<RecordingScheduledJob>(Nightly, "0 2 * * *").Services.AddSingleton(log));
+        await alvo.DrainEventsAsync(Ct);
+        var next = (await TimerStore(alvo).SchedulesAsync(Ct)).ShouldHaveSingleItem().NextRunAt;
+
+        var delivery = await AsOperator(alvo, "ops").RunScheduleAsync(Desk, Nightly, Ct);
+        (delivery.Status, delivery.Subscriber).ShouldBe(("pending", Nightly));
+        await alvo.DrainEventsAsync(Ct);
+
+        log.Runs.ShouldHaveSingleItem().ScheduledFor.ShouldBe(_oneAm);
+        (await TimerStore(alvo).SchedulesAsync(Ct)).ShouldHaveSingleItem().NextRunAt.ShouldBe(next);
+    }
+
+    [Fact]
+    public async Task Run_now_of_an_unknown_schedule_is_404()
+    {
+        await using var alvo = await StartScheduledAsync(alvo => alvo.AddSchedule<RecordingScheduledJob>(Nightly, "0 2 * * *").Services.AddSingleton(new ScheduleLog()));
+
+        await Should.ThrowAsync<ManagementExtensionNotFoundException>(() => AsOperator(alvo, "ops").RunScheduleAsync(Desk, "weekly-report", Ct));
+    }
+
+    [Fact]
+    public async Task Run_now_needs_developer()
+    {
+        await using var alvo = await StartScheduledAsync(alvo => alvo.AddSchedule<RecordingScheduledJob>(Nightly, "0 2 * * *").Services.AddSingleton(new ScheduleLog()));
+
+        await Should.ThrowAsync<ManagementForbiddenException>(() => AsOperator(alvo, "watch").RunScheduleAsync(Desk, Nightly, Ct));
+    }
+
+    [Fact]
+    public async Task The_catalog_shows_next_and_last_run_last_outcome_and_timer_counts()
+    {
+        var log = new ScheduleLog();
+        await using var alvo = await StartScheduledAsync(alvo => alvo.AddSchedule<RecordingScheduledJob>(Nightly, "0 2 * * *").Services.AddSingleton(log));
+        await Scheduler(alvo).ScheduleAsync("remind-later", _oneAm.AddDays(1), Reminder, Data("b1"), Tenant, Ct);
+        await alvo.DrainEventsAsync(Ct);
+        Time.Advance(TimeSpan.FromHours(1));
+        await alvo.DrainEventsAsync(Ct);
+
+        AsOperator(alvo, "watch");
+        var catalog = await alvo.Services.GetRequiredService<IAlvoManagement>().GetExtensionsAsync(Desk, Ct);
+
+        var schedule = catalog.Items.Single(item => item.Id == Nightly);
+        (schedule.NextRunAt, schedule.LastRunAt, schedule.LastOutcome).ShouldBe((_oneAm.AddDays(1).AddHours(1), _oneAm.AddHours(1), "succeeded"));
+        catalog.Timers.ShouldBe(new ManagementTimerCounts { Pending = 1, Due = 0 });
+    }
+
+    [Fact]
+    public async Task Run_now_on_each_tenant_answers_the_delivery_of_the_first_tenants_event()
+    {
+        var seen = new ConcurrentBag<string>();
+        await using var alvo = await StartScheduledAsync(alvo => alvo
+            .AddSchedule<NoteCountingJob>("count-notes", "0 2 * * *", configure: o => o.Scope = AlvoScheduleScope.EachTenant)
+            .Services.AddSingleton<IAlvoTenantCatalog>(new FixedTenants(TenantA, TenantB)).AddSingleton(seen));
+        await alvo.DrainEventsAsync(Ct);
+
+        var answered = await AsOperator(alvo, "ops").RunScheduleAsync(Desk, "count-notes", Ct);
+
+        var deliveries = await Deliveries(alvo, "count-notes");
+        deliveries.Count.ShouldBe(2);
+        var first = deliveries.Single(delivery => delivery.TenantId == TenantA.ToString());
+        answered.EventId.ShouldBe(first.EventId);
+        deliveries.Max(delivery => delivery.Id).ShouldNotBe(first.Id, "the second tenant's delivery is the newer one");
+    }
+
+    private static IAlvoOperations AsOperator(AlvoTestHost alvo, string role)
+    {
+        alvo.Services.GetRequiredService<IAlvoContextAccessor>().Principal = new AlvoPrincipal
+        {
+            Context = AlvoTestHost.Caller(role),
+            Scopes = new HashSet<ApiKeyScope>(),
+            KeyId = "ops-key",
+        };
+
+        return alvo.Services.GetRequiredService<IAlvoOperations>();
     }
 
     private async Task<AlvoTestHost> StartScheduledAsync(Action<IAlvoBuilder> configure, TimeDatabase? database = null)

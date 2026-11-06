@@ -11,6 +11,7 @@ using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Scheduling;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Secrets;
 using System.Globalization;
@@ -95,6 +96,7 @@ namespace MMLib.Alvo.Management.Internal;
 /// The clock a policy simulation binds its <c>now()</c> instant from when its caller bound none (HX-11 Ruling 1), so a
 /// <c>now()</c> rule or field mask previews as production judges it; the system clock when omitted.
 /// </param>
+/// <param name="timers">The timer store, read for each schedule's next and last run and the timer counts; none without a driver.</param>
 internal sealed partial class AlvoManagementService(
     IOptions<AlvoOptions> alvo,
     IOptions<AlvoManagementOptions> management,
@@ -117,7 +119,8 @@ internal sealed partial class AlvoManagementService(
     Func<RuntimeSchemaService> runtime,
     IDeliveryStore? deliveries,
     CommandSimulator? commands = null,
-    TimeProvider? time = null) : IAlvoManagement
+    TimeProvider? time = null,
+    ITimerStore? timers = null) : IAlvoManagement
 {
     /// <summary>What <see cref="ManagementInfo.DataProvider"/> reports when no driver is registered.</summary>
     private const string NoDriverRegistered = "none";
@@ -230,7 +233,7 @@ internal sealed partial class AlvoManagementService(
         EnsureMayPerform(ManagementOperation.GetExtensions);
         EnsureServed(project);
 
-        return await extensions.CatalogAsync(deliveries, ct).ConfigureAwait(false);
+        return await extensions.CatalogAsync(deliveries, timers, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
