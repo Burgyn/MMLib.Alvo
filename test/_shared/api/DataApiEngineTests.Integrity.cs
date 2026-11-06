@@ -83,7 +83,10 @@ public abstract partial class DataApiEngineTests
 
         refused.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await refused.ReadTextAsync());
         (await refused.ReadViolationsAsync()).ShouldBe([("/stock", "check")]);
-        (await refused.ReadTextAsync()).ShouldNotContain("-1");
+        // Without the traceId: a W3C trace id is random hex between dashes, so "00-1f…" would contain "-1" by chance.
+        var problem = await refused.ReadJsonObjectAsync();
+        problem.Remove("traceId");
+        problem.ToJsonString().ShouldNotContain("-1", Case.Sensitive, "the refused value is never echoed");
         (await ReadIntegrityAsync(world, "products", product))["stock"]!.GetValue<long>().ShouldBe(3);
     }
 

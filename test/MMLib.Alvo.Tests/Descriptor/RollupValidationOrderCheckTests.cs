@@ -67,6 +67,15 @@ public sealed class RollupValidationOrderCheckTests
     public void A_validation_over_a_rollup_the_same_apply_adds_is_not_refused() =>
         RollupValidationOrderCheck.Errors(Schema(where: null), Schema(where: Released, reservedValidation: "value <= stock")).ShouldBeEmpty();
 
+    /// <summary>
+    /// A stored plain field that becomes a rollup holds author-written values the backfill replaces, so it is a changed
+    /// definition like any other (Ruling 76 amended) — only a brand-new rollup field is exempt.
+    /// </summary>
+    [Fact]
+    public void A_plain_field_that_becomes_a_rollup_and_gains_a_validation_is_refused() =>
+        RollupValidationOrderCheck.Errors(Schema(where: null, plainReserved: true), Schema(where: Released, reservedValidation: "value <= stock"))
+            .ShouldHaveSingleItem().Path.ShouldBe("/entities/products/fields/reserved/validation");
+
     [Fact]
     public void An_entity_the_apply_creates_is_not_refused() =>
         RollupValidationOrderCheck.Errors(new SchemaModel([]), Schema(where: Released, reservedValidation: "value <= stock")).ShouldBeEmpty();
@@ -80,7 +89,7 @@ public sealed class RollupValidationOrderCheckTests
 
     private static SchemaModel Schema(
         string? where, string? reservedValidation = null, string? stockValidation = null, bool withFree = false,
-        string products = "products", string? productsRenamedFrom = null)
+        string products = "products", string? productsRenamedFrom = null, bool plainReserved = false)
     {
         var fields = new JsonObject
         {
@@ -96,6 +105,11 @@ public sealed class RollupValidationOrderCheckTests
                     ["rollup"] = new JsonObject { ["from"] = "reservations", ["op"] = "sum", ["field"] = "quantity", ["where"] = where },
                 },
                 reservedValidation);
+        }
+
+        if (plainReserved)
+        {
+            fields["reserved"] = new JsonObject { ["type"] = "integer" };
         }
 
         if (withFree)

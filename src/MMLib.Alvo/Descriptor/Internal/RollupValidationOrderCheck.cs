@@ -15,10 +15,10 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// deterministic and names the order that works: the rollup change in one apply, the validation in the next.
 /// </para>
 /// <para>
-/// <b>What it deliberately does not refuse.</b> A rollup the same apply <em>adds</em>, or adds to an existing field, holds no
-/// aggregate yet — the column is new, or its values are not a rollup's — so it is not a "definition that changes": the DDL
-/// admits the NULLs and the backfill's write is held to the constraint, refused by the engine at the validation's pointer if a
-/// row breaks it. An <em>unchanged</em> validation over a changed rollup is kept, not re-added, and the backfill's write is held
+/// <b>What it deliberately does not refuse</b> (Ruling 76, amended). A rollup the same apply adds as a <em>new</em> field holds
+/// no value yet — its column is new, so the DDL admits the NULLs and the backfill's write is held to the constraint, refused by
+/// the engine at the validation's pointer if a row breaks it. A stored <em>plain</em> field that becomes a rollup is not that
+/// case: its column holds author-written values the backfill replaces, so it counts as a changed definition and is refused. An <em>unchanged</em> validation over a changed rollup is kept, not re-added, and the backfill's write is held
 /// to it the same way. A parent the apply creates has no rows.
 /// </para>
 /// <para>
@@ -69,13 +69,13 @@ internal static class RollupValidationOrderCheck
     private static List<string> ChangedRollups(SchemaModel current, SchemaModel desired, IEnumerable<ValidationReadSet.Read> reads) =>
         [.. reads.Where(read => Changed(current, desired, read)).Select(read => $"'{read.Entity}.{read.Field}'").Order(StringComparer.Ordinal)];
 
-    // Only a stored field that already held a rollup can hold a stale aggregate: a new field, or one that becomes a rollup now,
-    // holds none (see the remarks for why an added rollup is not refused).
+    // Any stored field of that name holds values the backfill replaces — an old aggregate, or plain values a field that becomes
+    // a rollup now held; only a brand-new field holds none (see the remarks, Ruling 76 amended).
     private static bool Changed(SchemaModel current, SchemaModel desired, ValidationReadSet.Read read) =>
         Named(desired, read.Entity) is { } entity
         && Named(entity, read.Field) is { Rollup: not null } field
         && Stored(current, entity) is { } stored
-        && StoredField(stored, field) is { Rollup: not null } before
+        && StoredField(stored, field) is { } before
         && !Equals(before.Rollup, field.Rollup);
 
     private static EntitySchema? Stored(SchemaModel current, EntitySchema desired) =>

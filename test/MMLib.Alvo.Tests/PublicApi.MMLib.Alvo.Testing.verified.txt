@@ -211,6 +211,8 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Adding_a_validation_over_rows_that_break_it_is_refused_with_their_count() { }
         public System.Threading.Tasks.Task Adding_a_validation_to_a_populated_indexed_table_keeps_its_rows_and_its_index() { }
         public System.Threading.Tasks.Task Adding_and_dropping_a_validation_are_steps_naming_the_field() { }
+        public System.Threading.Tasks.Task An_added_rollup_whose_backfill_breaks_its_validation_appends_no_version_through_the_runtime_writer() { }
+        public System.Threading.Tasks.Task An_added_rollup_whose_backfill_breaks_its_validation_is_refused_and_nothing_is_applied() { }
         public System.Threading.Tasks.Task An_empty_validated_field_passes_its_check() { }
         public System.Threading.Tasks.Task An_update_that_breaks_it_leaves_the_row_as_it_was() { }
         protected abstract System.Threading.Tasks.Task ApplyAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired, MMLib.Alvo.Migrations.MigrationOptions options);

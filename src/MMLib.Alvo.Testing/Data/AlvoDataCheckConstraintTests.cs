@@ -430,6 +430,66 @@ public abstract class AlvoDataCheckConstraintTests
     }
 
     /// <summary>
+    /// Ruling 76's fail-closed half: a rollup added as a new field together with a validation reading it is not refused at
+    /// plan time, so when the backfill computes values that break the validation, the engine refuses the backfill's write
+    /// inside the apply's one transaction — answered at the validation, decoded by the constraint's name — and nothing of the
+    /// apply remains: no column, the rows as they were, and the store still writable (Task 12 review I2).
+    /// </summary>
+    [Fact]
+    public async Task An_added_rollup_whose_backfill_breaks_its_validation_is_refused_and_nothing_is_applied()
+    {
+        var data = await SeedOversoldAsync();
+
+        var refusal = await Should.ThrowAsync<DescriptorValidationException>(() => ApplyAsync(Unreserved, ReservedSchema));
+
+        AssertRefusedAtReserved(refusal);
+        await AssertNothingAppliedAsync(data);
+    }
+
+    /// <summary>
+    /// The same apply through the runtime writer — the path the Management API takes — appends no version either: an apply at
+    /// revision 0 still lands afterwards, and adds the column the refused apply never kept.
+    /// </summary>
+    [Fact]
+    public async Task An_added_rollup_whose_backfill_breaks_its_validation_appends_no_version_through_the_runtime_writer()
+    {
+        var data = await SeedOversoldAsync();
+
+        var refusal = await Should.ThrowAsync<DescriptorValidationException>(() => ApplyThroughTheRuntimeWriterAsync(Unreserved, ReservedSchema));
+
+        AssertRefusedAtReserved(refusal);
+        await AssertNothingAppliedAsync(data);
+        await ApplyThroughTheRuntimeWriterAsync(Unreserved, ReservedUnchecked);
+        (await ExecuteOutsideThePortAsync("SELECT \"reserved\" FROM \"products\"")).ShouldBeNull("revision 0 was still current, and this apply added the column");
+    }
+
+    /// <summary>One product with a stock of 1 and held reservations of 2 and 3, over the schema without <c>reserved</c>.</summary>
+    private async Task<IAlvoData> SeedOversoldAsync()
+    {
+        var data = await CreateAsync(Unreserved, UnreservedDescriptor);
+        var product = (Guid)(await data.CreateAsync("products", Row(1), Caller, cancellationToken: Ct))["id"]!;
+        await data.CreateAsync("reservations", Reservation(product, 2), Caller, cancellationToken: Ct);
+        await data.CreateAsync("reservations", Reservation(product, 3), Caller, cancellationToken: Ct);
+        return data;
+    }
+
+    private static void AssertRefusedAtReserved(DescriptorValidationException refusal)
+    {
+        var error = refusal.Result.Errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe("/entities/products/fields/reserved/validation");
+        error.Message.ShouldContain("could not be added or kept");
+    }
+
+    private async Task AssertNothingAppliedAsync(IAlvoData data)
+    {
+        (await ExecuteOutsideThePortAsync("SELECT \"reserved\" FROM \"products\"")).ShouldNotBeNull("the added column was rolled back with the backfill");
+        var products = (await data.QueryAsync(new AlvoQuery { Entity = "products" }, Caller, Ct)).Items;
+        products.ShouldHaveSingleItem()["stock"].ShouldBe(1L);
+        (await data.QueryAsync(new AlvoQuery { Entity = "reservations" }, Caller, Ct)).Items.Count.ShouldBe(2);
+        await data.CreateAsync("products", Row(4), Caller, cancellationToken: Ct);
+    }
+
+    /// <summary>
     /// Adding a validation to a table whose rows break it is refused when it is planned, at the validation, with the
     /// number of breaking rows (acceptance 2) — and nothing is applied.
     /// </summary>
@@ -714,6 +774,30 @@ public abstract class AlvoDataCheckConstraintTests
             ],
         },
     ]);
+
+    /// <summary><see cref="ReservedSchema"/> without <c>products.reserved</c>: the parent before the rollup is added.</summary>
+    private static SchemaModel Unreserved => new([
+        ReservedSchema.Entities[0] with { Fields = [.. ReservedSchema.Entities[0].Fields.Where(declared => declared.Name != "reserved")] },
+        ReservedSchema.Entities[1],
+    ]);
+
+    /// <summary><see cref="ReservedSchema"/> with <c>reserved</c> unvalidated.</summary>
+    private static SchemaModel ReservedUnchecked => new([
+        ReservedSchema.Entities[0] with
+        {
+            Fields = [.. ReservedSchema.Entities[0].Fields.Select(declared => declared.Name == "reserved" ? declared with { CheckExpression = null } : declared)],
+        },
+        ReservedSchema.Entities[1],
+    ]);
+
+    /// <summary><see cref="ReservedDescriptor"/> without <c>products.reserved</c>.</summary>
+    private static AlvoDescriptor UnreservedDescriptor => ReservedDescriptor with
+    {
+        Entities = new Dictionary<string, EntityDescriptor>(ReservedDescriptor.Entities, StringComparer.Ordinal)
+        {
+            ["products"] = Descriptor.Entities["products"],
+        },
+    };
 
     /// <summary><see cref="ReservedSchema"/> with <c>reserved</c> summing released reservations instead of held ones.</summary>
     private static SchemaModel ReservedCountingReleased => new([
