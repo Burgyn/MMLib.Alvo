@@ -125,9 +125,12 @@ test.describe('model a domain', () => {
       rollup: { from: 'invoices', op: 'count' },
     });
 
-    // `rollup.where` is refused, and the control says so in the framework's own words.
-    await expect(page.locator('[data-refused="rollup.where"] input')).toBeDisabled();
-    await expect(page.locator('[data-refused="rollup.where"]')).toContainText('a stored number that is silently wrong rather than absent');
+    // `rollup.where` is live since HX-11: typed, it lands in the rollup; emptied, it leaves it.
+    await expect(page.locator('[data-refused="rollup.where"]')).toHaveCount(0);
+    await page.fill('[data-rollup-where]', "status != 'void'");
+    expect((await working(page)).entities.customers.fields.invoice_count.rollup).toEqual({ from: 'invoices', op: 'count', where: "status != 'void'" });
+    await page.fill('[data-rollup-where]', '');
+    expect((await working(page)).entities.customers.fields.invoice_count.rollup).toEqual({ from: 'invoices', op: 'count' });
 
     await go(page, '#/schema/preview');
     await page.fill('#apply-reason', 'Count each customer\'s invoices');

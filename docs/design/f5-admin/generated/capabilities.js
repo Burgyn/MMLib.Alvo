@@ -50,11 +50,6 @@ export const CAPABILITIES = {
   ],
   "refused": [
     {
-      "slot": "field.validation",
-      "consequence": "Field 'validation' is not evaluated yet, so a value the expression forbids is accepted — the field is not constrained at all.",
-      "fix": "Remove 'validation'. Enforce the rule in a before-hook once #22 lands, or express it with a facet the API does validate — 'maxLength', 'precision'/'scale', enum 'values' or a 'format'."
-    },
-    {
       "slot": "field.default",
       "consequence": "Field 'default' is honoured as a literal, but not as a '$cel' expression: a CEL default is evaluated against the caller's context at insert time, which is the 'computed' machinery rather than a column default — so the value would be dropped and the field left null.",
       "fix": "Declare a literal default, which this build emits as a column DEFAULT, or remove 'default' and send the value explicitly on create (#113)."
@@ -63,11 +58,6 @@ export const CAPABILITIES = {
       "slot": "entity.softDelete",
       "consequence": "Soft delete is not supported yet: a delete would remove the row outright and reads would not exclude it, which is irrecoverable data loss where the schema promises recoverability.",
       "fix": "Remove 'softDelete' or track the soft-delete implementation issue. A flag written as false is not a declaration and maps normally."
-    },
-    {
-      "slot": "rollup.where",
-      "consequence": "A rollup's 'where' filter is not evaluated yet: the aggregate is still maintained, but it aggregates every record of the child entity instead of the subset this filter declares — a stored number that is silently wrong rather than absent.",
-      "fix": "Remove 'where' and aggregate every child record, or move the distinction into the model: a separate child entity, or a second rollup once filtered rollups land. A partial implementation is deliberately not offered — an aggregate over the wrong row set costs more than this refusal."
     },
     {
       "slot": "trigger.event",
