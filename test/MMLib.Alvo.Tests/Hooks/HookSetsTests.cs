@@ -18,6 +18,7 @@ public sealed class HookSetsTests
             new FieldSchema { Name = "total", Type = FieldType.Decimal, Precision = 6, Scale = 2 },
             new FieldSchema { Name = "net", Type = FieldType.Integer, Rollup = new RollupSchema { From = "lines", Via = "booking_id", Op = RollupOperation.Sum, Field = "amount" } },
             new FieldSchema { Name = "gross", Type = FieldType.Decimal, Precision = 8, Scale = 2, ComputedExpression = "total * 2" },
+            new FieldSchema { Name = "number", Type = FieldType.Integer, Sequence = new SequenceSchema() },
             new FieldSchema { Name = "deleted_at", Type = FieldType.DateTime, Nullable = true },
             new FieldSchema { Name = "created_by", Type = FieldType.Uuid, Nullable = true },
             new FieldSchema { Name = "updated_at", Type = FieldType.DateTime, Nullable = true },
@@ -40,6 +41,10 @@ public sealed class HookSetsTests
     [InlineData("title", "far too long a title", "max-length")]
     public void A_set_it_may_not_write_names_its_field_and_problem(string field, object? value, string problem) =>
         HookSets.FirstProblem(new Dictionary<string, object?> { [field] = value }, _entity).ShouldBe((field, problem));
+
+    [Fact]
+    public void A_mutate_targeting_a_sequence_field_is_refused_at_apply() =>
+        HookSets.FirstProblem(new Dictionary<string, object?> { ["number"] = 5L }, _entity).ShouldBe(("number", "maintained"));
 
     [Fact]
     public void A_hook_s_set_of_a_virtual_field_is_maintained() =>

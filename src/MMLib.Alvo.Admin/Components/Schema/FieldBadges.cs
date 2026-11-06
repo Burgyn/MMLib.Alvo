@@ -162,7 +162,7 @@ internal static class FieldBadges
         }
     }
 
-    /// <summary>What Alvo maintains for it: a computed value, a rollup, an index — or, for a virtual field, no column at all.</summary>
+    /// <summary>What Alvo maintains for it: a computed value, a rollup, a sequence, an index — or, for a virtual field, no column at all.</summary>
     private static IEnumerable<string> Maintenance(FieldSchema field)
     {
         if (field.IsVirtual)
@@ -178,6 +178,11 @@ internal static class FieldBadges
         if (field.Rollup is not null)
         {
             yield return "rollup";
+        }
+
+        if (field.Sequence is not null)
+        {
+            yield return "sequence";
         }
 
         if (field.Indexed)

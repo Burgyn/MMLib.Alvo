@@ -1,0 +1,11 @@
+{
+  "apiVersion": "alvo.dev/v1",
+  "name": "bad-sequence-format",
+  "entities": {
+    "orders": {
+      "fields": {
+        "code": { "type": "string", "sequence": { "format": "{n}-{n}" } }
+      }
+    }
+  }
+}

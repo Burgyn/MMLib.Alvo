@@ -53,6 +53,24 @@
     ]
   },
   {
+    file: sequence-two-numbers.json,
+    failures: [
+      {
+        Pointer: #/entities/orders/fields/code/sequence/format,
+        Message: Validation pattern - {n}-{n} did not match '^[^{}]*(\{(yyyy|yy|MM|dd)\}[^{}]*)*\{n(:([1-9]|1[0-8]))?\}[^{}]*(\{(yyyy|yy|MM|dd)\}[^{}]*)*$'
+      }
+    ]
+  },
+  {
+    file: sequence-unknown-period.json,
+    failures: [
+      {
+        Pointer: #/entities/orders/fields/number/sequence/period,
+        Message: Validation enum - did not validate against the enumeration.
+      }
+    ]
+  },
+  {
     file: typo-property.json,
     failures: [
       {

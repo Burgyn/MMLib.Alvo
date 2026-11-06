@@ -491,6 +491,7 @@ internal sealed class SchemaComponentBuilder(
         }
 
         return !readOnly.Contains(field.Name)
+            && !field.IsMaintained()
             && (!_managed.Contains(field.Name) || AlvoManagedColumns.IsCallerWritable(field.Name, isUpdate));
     }
 
@@ -527,7 +528,7 @@ internal sealed class SchemaComponentBuilder(
     /// are here, and the reason both are absent from the two request schemas.
     /// </remarks>
     private bool IsReadOnly(FieldSchema field) =>
-        readOnly.Contains(field.Name) || _managed.Contains(field.Name) || field.IsVirtual;
+        readOnly.Contains(field.Name) || _managed.Contains(field.Name) || field.IsMaintained() || field.IsVirtual;
 
     /// <summary>
     /// The names a create must carry: the fields the descriptor declared <c>required</c> that a caller may

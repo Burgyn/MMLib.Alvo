@@ -41,6 +41,10 @@ public class FormFieldsTests
             .ShouldBe(["external_ref", "labour_total", "lines_count"]);
 
     [Fact]
+    public void A_sequence_field_is_derived()
+        => FormFields.Derived(new FieldSchema { Name = "number", Type = FieldType.Integer, Sequence = new SequenceSchema() }).ShouldBeTrue();
+
+    [Fact]
     public void A_virtual_field_is_derived()
         => FormFields.Derived(new FieldSchema { Name = "display", Type = FieldType.String, IsVirtual = true }).ShouldBeTrue();
 

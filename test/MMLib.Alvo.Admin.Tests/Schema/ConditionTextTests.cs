@@ -329,6 +329,17 @@ public class ConditionTextTests
     }
 
     [Fact]
+    public void A_scope_keeps_a_sequence_field_readable()
+        => ConditionScope.From(
+                new EntitySchema
+                {
+                    Name = "orders",
+                    Fields = [new FieldSchema { Name = "number", Type = FieldType.Integer, Sequence = new SequenceSchema() }],
+                },
+                [])
+            .Field("number").ShouldNotBeNull();
+
+    [Fact]
     public void No_entity_is_a_scope_of_no_fields()
         => ConditionScope.From(null, []).Fields.ShouldBeEmpty();
 

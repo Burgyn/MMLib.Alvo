@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`sequence` on a field** (HX-12): a gapless number per tenant, optionally per another field's value and per UTC
+  year/month/day, stored as an integer or formatted text (`SO-{yyyy}-{n:4}`); the T-SQL double and any dialect without
+  `SequenceAllocationStatement` refuse it at apply.
 - **Virtual fields and record enrichers** (HX-16): a field declared `"virtual": true` has no column, is read-only and refused in writes, expressions and filter/sort/select (422 on the Data API); an embedded host's `Enrich(…)` fills it — or hides a field — on every read and write echo, after the caller's rules and masks. The applied schema a version row stores now records which fields are virtual; a binary older than this release reading a newer row ignores that and would plan a column for each virtual field, so do not roll a deployment back across it.
 - **Query narrowing** (HX-16): an embedded host can AND a filter into every non-system read of an entity — list, get and count — with `Entity(…).Narrow(…)`; it never widens what the rules allow and never applies to writes.
 - **Dashboard: the Reads lane** (HX-16): the Lifecycle tab draws a *Reads* lane — the host's narrowings (`narrows reads`) and enrichers (`shapes reads`), read-only — only in a host that registers one; the policy simulator lists a narrowing on a simulated list or get, and a virtual field wears a `virtual` badge on the Fields tab. Docs: *Shape what reads return*.
@@ -546,6 +549,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The OpenAPI document marks every framework-maintained field read-only** (HX-12): a `computed`, `rollup` or `sequence`
+  field is `readOnly` in the response schema and absent from the create and patch schemas (and from their `required`).
+  Every write to one was already refused with 403; a generated client no longer offers it.
 - **HX-11 appends enum members** — `AlvoConstraintKind.Check` and `CelValueType.Duration`: an exhaustive `switch` over
   either gains a case. `IFieldSqlRenderer.RenderEpochMicroseconds` is a new default interface member; a third-party
   dialect inherits `null`, and duration arithmetic over a field is then refused on it, naming the renderer.

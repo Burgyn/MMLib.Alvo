@@ -1,0 +1,11 @@
+{
+  "apiVersion": "alvo.dev/v1",
+  "name": "bad-sequence-period",
+  "entities": {
+    "orders": {
+      "fields": {
+        "number": { "type": "integer", "sequence": { "period": "week" } }
+      }
+    }
+  }
+}
