@@ -27,6 +27,15 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// (<see cref="IAlvoSqlDialect.RenderDistinct"/>): an unchanged parent costs neither a row version nor a row lock.
 /// </para>
 /// <para>
+/// <b>The cost of that, recorded rather than optimised (Task 11 review m3).</b> The correlated subquery is rendered twice —
+/// in <c>SET</c> and in the "differs" test — so it runs twice per parent row, and on PostgreSQL the child's <c>SHARE</c> lock
+/// (Ruling 74) is held for roughly twice the aggregate time over a large parent. The rewrite that runs it once is
+/// <c>UPDATE p SET f = s.v FROM (SELECT id, (&lt;sub&gt;) AS v FROM p) s WHERE p.id = s.id AND &lt;differs(p.f, s.v)&gt;</c>
+/// (PostgreSQL, and SQLite from 3.33). It is declined for now: the backfill runs once per rollup-definition change, not per
+/// write, and one statement shape is what both engines share; take it when an apply over a large parent shows the lock in a
+/// measurement.
+/// </para>
+/// <para>
 /// <b>No argument, no placeholder.</b> Every constant is the descriptor author's, rendered inline; the statements go into
 /// <c>MigrationPlan.Sql</c> verbatim and are executed as plain command text, so the filter needs no brace escaping here.
 /// </para>
@@ -53,21 +62,33 @@ internal static class RollupBackfill
     /// definition — <c>from</c>, <c>op</c>, <c>field</c>, <c>via</c>, <c>where</c> — differs from, or is absent in, the current
     /// field of that name: the values the table holds for it are not this definition's aggregate.
     /// </summary>
+    /// <remarks>
+    /// Every target passes <see cref="RollupRecompute.EnsureTenancyDoesNotCross"/> before it is returned, so a pair that
+    /// disagrees about tenancy — a schema that did not come through the mapper — fails the plan instead of composing a
+    /// subquery with no tenant predicate (Task 11 review m2).
+    /// </remarks>
     /// <param name="current">The schema the store holds, its declared renames already applied.</param>
     /// <param name="desired">The schema the apply produces.</param>
+    /// <exception cref="InvalidOperationException">A target's parent and child disagree about tenancy.</exception>
     internal static IReadOnlyList<Target> Targets(SchemaModel current, SchemaModel desired)
     {
         ArgumentNullException.ThrowIfNull(current);
         ArgumentNullException.ThrowIfNull(desired);
 
-        return [.. from parent in desired.Entities
-                   let stored = Named(current, parent.Name)
-                   where stored is not null
-                   from field in parent.Fields
-                   where field.Rollup is not null && Changed(stored, field)
-                   let child = Named(desired, field.Rollup!.From)
-                   where child is not null
-                   select new Target(parent, field, child)];
+        IReadOnlyList<Target> targets = [.. from parent in desired.Entities
+                                           let stored = Named(current, parent.Name)
+                                           where stored is not null
+                                           from field in parent.Fields
+                                           where field.Rollup is not null && Changed(stored, field)
+                                           let child = Named(desired, field.Rollup!.From)
+                                           where child is not null
+                                           select new Target(parent, field, child)];
+        foreach (var target in targets)
+        {
+            RollupRecompute.EnsureTenancyDoesNotCross(target.Parent, target.Child);
+        }
+
+        return targets;
     }
 
     /// <summary>Every <see cref="Targets"/> as one recompute statement each.</summary>
@@ -94,7 +115,7 @@ internal static class RollupBackfill
     /// </summary>
     /// <param name="stored">The current entity.</param>
     /// <param name="field">The desired field.</param>
-    internal static bool Changed(EntitySchema stored, FieldSchema field) =>
+    private static bool Changed(EntitySchema stored, FieldSchema field) =>
         stored.Fields.FirstOrDefault(candidate => string.Equals(candidate.Name, field.Name, StringComparison.Ordinal)) is not { } before
         || !Equals(before.Rollup, field.Rollup);
 
@@ -120,7 +141,8 @@ internal static class RollupBackfill
     }
 
     // The write path's tenant narrowing, correlated: a scoped child counts into its own tenant's parent only. A pair that
-    // disagrees about tenancy is refused at apply (RollupResolver) and never reaches here.
+    // disagrees about tenancy is refused at apply (RollupResolver) and again by Targets (the write path's belt), so it
+    // never reaches here.
     private static string TenantPredicate(EntitySchema parent, EntitySchema child, string alias, IAlvoSqlDialect dialect)
     {
         if (child.Tenancy != TenancyMode.Scoped)

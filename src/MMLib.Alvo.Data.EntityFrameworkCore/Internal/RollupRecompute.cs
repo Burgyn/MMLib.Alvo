@@ -218,9 +218,13 @@ internal sealed class RollupRecompute(
     /// refused <em>again</em> here is that the alternative is silent: with only one side scoped, an
     /// unqualified <c>tenant_id</c> in the child aggregate would bind to the parent's column in the enclosing
     /// statement and the subquery would quietly aggregate <b>every</b> tenant's children, or the parent's
-    /// <c>UPDATE</c> would carry no tenant predicate at all and write another tenant's row.
+    /// <c>UPDATE</c> would carry no tenant predicate at all and write another tenant's row. The apply's
+    /// <see cref="RollupBackfill"/> calls it too, for the same reason and against the same schema.
     /// </remarks>
-    private static void EnsureTenancyDoesNotCross(EntitySchema parent, EntitySchema child)
+    /// <param name="parent">The entity declaring the rollup.</param>
+    /// <param name="child">The aggregated entity.</param>
+    /// <exception cref="InvalidOperationException">Exactly one of the two is tenant-scoped.</exception>
+    internal static void EnsureTenancyDoesNotCross(EntitySchema parent, EntitySchema child)
     {
         if ((parent.Tenancy == TenancyMode.Scoped) == (child.Tenancy == TenancyMode.Scoped))
         {

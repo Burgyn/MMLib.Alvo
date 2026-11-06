@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
@@ -612,8 +613,18 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         var decision = SchemaStartupPolicy.Decide(applied, plan, _options.Value, outOfOrder);
 
         return decision.Outcome is SchemaStartupOutcome.Apply or SchemaStartupOutcome.Initialize
-            ? decision with { Plan = await _migrator.PlanAsync(current, boot.Desired, MigrationOptions, ct).ConfigureAwait(false) }
+            ? decision with { Plan = await PlanCountedAsync(current, boot.Desired, ct).ConfigureAwait(false) }
             : decision;
+    }
+
+    /// <summary>
+    /// The plan a boot that initializes or applies carries out: refused first when a validation it adds reads a rollup it
+    /// changes (HX-11 Ruling 73), then planned with the pre-apply violation count (Ruling 66).
+    /// </summary>
+    private Task<MigrationPlan> PlanCountedAsync(SchemaModel current, SchemaModel desired, CancellationToken ct)
+    {
+        RollupValidationOrderCheck.ThrowIfAny(current, desired);
+        return _migrator.PlanAsync(current, desired, MigrationOptions, ct);
     }
 
     /// <summary>

@@ -430,25 +430,6 @@ public abstract class AlvoDataCheckConstraintTests
     }
 
     /// <summary>
-    /// A validation added over a rollup whose definition the same apply changes is not counted on the values stored before
-    /// the backfill — they are the old definition's aggregate, so a count over them would report rows that comply once
-    /// the apply has run (Task 9 review m4).
-    /// </summary>
-    [Fact]
-    public async Task A_validation_over_a_rollup_the_plan_changes_is_not_counted_on_its_old_values()
-    {
-        var current = Unchecked(ReservedCountingReleased);
-        var data = await CreateAsync(current, ReservedDescriptor);
-        var product = (Guid)(await data.CreateAsync("products", Row(1), Caller, cancellationToken: Ct))["id"]!;
-        await data.CreateAsync("reservations", Reservation(product, 1, "held"), Caller, cancellationToken: Ct);
-        await data.CreateAsync("reservations", Reservation(product, 5, "released"), Caller, cancellationToken: Ct);
-
-        var plan = await PlanAsync(current, ReservedSchema);
-
-        plan.Steps.ShouldContain(step => step.Change.Field == "reserved" && step.Change.Kind == SchemaChangeKind.AlterField);
-    }
-
-    /// <summary>
     /// Adding a validation to a table whose rows break it is refused when it is planned, at the validation, with the
     /// number of breaking rows (acceptance 2) — and nothing is applied.
     /// </summary>
@@ -746,15 +727,6 @@ public abstract class AlvoDataCheckConstraintTests
             ],
         },
         ReservedSchema.Entities[1],
-    ]);
-
-    /// <summary><paramref name="schema"/> without the validation on <c>products.reserved</c>.</summary>
-    private static SchemaModel Unchecked(SchemaModel schema) => new([
-        schema.Entities[0] with
-        {
-            Fields = [.. schema.Entities[0].Fields.Select(declared => declared.Name == "reserved" ? declared with { CheckExpression = null } : declared)],
-        },
-        .. schema.Entities.Skip(1),
     ]);
 
     private static DateTimeOffset Instant => new(2026, 11, 1, 9, 0, 0, TimeSpan.Zero);

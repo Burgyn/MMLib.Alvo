@@ -49,7 +49,7 @@ public sealed class RollupFilterCheckTests
         var error = RollupDescriptors.Errors("label == 'x'", labelHidden: hidden).ShouldHaveSingleItem();
         error.Path.ShouldBe("/entities/products/fields/held_total/rollup/where");
         error.Message.ShouldContain("hidden");
-        error.Message.ShouldContain("'label'");
+        error.Message.ShouldContain("'reservations.label'", Case.Sensitive, "named as '<entity>.<field>', so a read reached through a grandchild is findable (Task 11 review m1)");
     }
 
     [Fact]

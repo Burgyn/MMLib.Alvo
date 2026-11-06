@@ -35,6 +35,8 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
     <PackageReference Include="Testcontainers.PostgreSql" />
+    <!-- The shared HX-11 integrity facts pin one request to one instant against a fake clock. -->
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
   </ItemGroup>
 
   <!-- The statement recorder, linked exactly as MMLib.Alvo.Api.Tests and both engine test projects link it:

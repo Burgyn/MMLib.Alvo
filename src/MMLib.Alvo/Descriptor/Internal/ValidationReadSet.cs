@@ -16,8 +16,11 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// <see cref="ComputedFieldCheck"/> and <see cref="RollupFilterCheck"/> refuse it on their own.
 /// </remarks>
 /// <param name="schema">The mapped schema, whose derived fields are expanded.</param>
-/// <param name="descriptor">The descriptor, whose <c>hidden</c> flags decide what is hidden.</param>
-internal sealed class ValidationReadSet(SchemaModel schema, AlvoDescriptor descriptor)
+/// <param name="descriptor">
+/// The descriptor, whose <c>hidden</c> flags decide what is hidden — or <see langword="null"/> for a caller that asks only what
+/// a validation reads (<see cref="RollupValidationOrderCheck"/>), for which nothing is hidden.
+/// </param>
+internal sealed class ValidationReadSet(SchemaModel schema, AlvoDescriptor? descriptor)
 {
     private readonly Dictionary<string, HashSet<string>> _hidden = new(StringComparer.Ordinal);
 
@@ -46,6 +49,15 @@ internal sealed class ValidationReadSet(SchemaModel schema, AlvoDescriptor descr
 
         return seen;
     }
+
+    /// <summary>
+    /// Every field <paramref name="field"/>'s <c>validation</c> reads — the field itself and every field its expression names —
+    /// each derived field expanded to its sources; empty when the field declares none.
+    /// </summary>
+    /// <param name="entity">The entity the field belongs to.</param>
+    /// <param name="field">The validated field.</param>
+    internal HashSet<Read> ValidationClosure(EntitySchema entity, FieldSchema field) =>
+        field.CheckExpression is { } validation ? Closure(entity, [field.Name, .. ExpressionReads(validation)]) : [];
 
     /// <summary>Whether the descriptor flags <paramref name="read"/> hidden, statically or per role.</summary>
     /// <param name="read">The field.</param>
@@ -85,7 +97,7 @@ internal sealed class ValidationReadSet(SchemaModel schema, AlvoDescriptor descr
     {
         if (!_hidden.TryGetValue(entity, out var hidden))
         {
-            hidden = descriptor.Entities.TryGetValue(entity, out var declared)
+            hidden = descriptor is not null && descriptor.Entities.TryGetValue(entity, out var declared)
                 ? declared.Fields
                     .Where(pair => pair.Value.Hidden is { IsExpression: true } or { Boolean: true })
                     .Select(pair => pair.Key)

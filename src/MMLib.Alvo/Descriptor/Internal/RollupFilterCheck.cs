@@ -87,7 +87,7 @@ internal static class RollupFilterCheck
             return null;
         }
 
-        var named = string.Join(", ", exposed.Select(read => $"'{read.Field}'").Order(StringComparer.Ordinal));
+        var named = string.Join(", ", exposed.Select(read => $"'{read.Entity}.{read.Field}'").Order(StringComparer.Ordinal));
         return Refusal(
             parent,
             field,

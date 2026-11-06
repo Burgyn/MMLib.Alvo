@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Extensions.Internal;
+﻿using MMLib.Alvo.Descriptor.Internal;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
@@ -94,6 +95,7 @@ internal sealed class SchemaMigrationRunner
         var current = appliedSnapshot?.Schema
             ?? await _introspector.IntrospectAsync(ct).ConfigureAwait(false);
 
+        RollupValidationOrderCheck.ThrowIfAny(current, desired);
         var plan = await _migrator.PlanAsync(current, desired, options, ct).ConfigureAwait(false);
 
         if (plan.IsEmpty)

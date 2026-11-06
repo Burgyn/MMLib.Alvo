@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations.Internal;
@@ -154,6 +155,7 @@ public sealed class RuntimeSchemaService
         var current = await CurrentAtAsync(project, expectedRevision, ct).ConfigureAwait(false);
         var currentSchema = current?.Schema ?? new SchemaModel([]);
 
+        RollupValidationOrderCheck.ThrowIfAny(currentSchema, desired);
         var plan = await _migrator.PlanAsync(currentSchema, desired, options, ct).ConfigureAwait(false);
         Guard(project, plan, options);
 
@@ -219,8 +221,9 @@ public sealed class RuntimeSchemaService
         var desired = DescriptorToSchemaMapper.Map(descriptor);
         var check = _extensions?.Check(descriptor, desired);
         var current = await CurrentAtAsync(project, expectedRevision, ct).ConfigureAwait(false);
-        var plan = await _migrator.PlanAsync(
-            current?.Schema ?? new SchemaModel([]), desired, options, ct).ConfigureAwait(false);
+        var currentSchema = current?.Schema ?? new SchemaModel([]);
+        RollupValidationOrderCheck.ThrowIfAny(currentSchema, desired);
+        var plan = await _migrator.PlanAsync(currentSchema, desired, options, ct).ConfigureAwait(false);
 
         return new DescriptorApplyPreview(
             plan, current?.Revision ?? 0, !plan.HasDestructiveChanges || options.AllowDestructive)
@@ -289,6 +292,7 @@ public sealed class RuntimeSchemaService
         var restored = target.Schema with { };
         var checkedCatalog = _extensions?.Check(AlvoDescriptor.Parse(target.DescriptorJson), restored)?.Catalog;
 
+        RollupValidationOrderCheck.ThrowIfAny(currentVersion.Schema, target.Schema);
         var plan = await _migrator.PlanAsync(currentVersion.Schema, target.Schema, options, ct).ConfigureAwait(false);
         Guard(project, plan, options);
 

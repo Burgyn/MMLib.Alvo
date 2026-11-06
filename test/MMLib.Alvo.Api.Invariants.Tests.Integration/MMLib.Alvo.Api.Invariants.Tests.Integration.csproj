@@ -42,6 +42,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <!-- It compiles test/_shared/api/*.cs, whose HX-11 integrity facts pin one request to one instant against a fake clock. -->
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <!-- The descriptor generator. CsCheck is used as a deterministic case generator rather than as a
          shrinking property runner — see GeneratedProject's own remarks for why. -->
     <PackageReference Include="CsCheck" />
