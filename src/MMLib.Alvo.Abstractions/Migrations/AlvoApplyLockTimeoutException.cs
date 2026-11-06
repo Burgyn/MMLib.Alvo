@@ -25,6 +25,16 @@ internal sealed class AlvoApplyLockTimeoutException : Exception
     /// <summary>The seconds a caller should wait before retrying — the bound the apply itself waits.</summary>
     internal const int RetryAfterSeconds = 5;
 
+    /// <summary>
+    /// Whether the wait that timed out was the version-row insert — the optimistic-lock gate — rather than the plan's DDL.
+    /// </summary>
+    /// <remarks>
+    /// That insert waits only on another writer's uncommitted row for the same revision, so a timeout there is a race
+    /// lost to a slow winner, and the boot converges on it instead of refusing the start (HX-11 Ruling 81). Set by the
+    /// runtime writer, which alone knows which statement was running.
+    /// </remarks>
+    internal bool AtTheVersionRow { get; init; }
+
     /// <summary>Initializes a new instance of the <see cref="AlvoApplyLockTimeoutException"/> class.</summary>
     public AlvoApplyLockTimeoutException()
         : base(Refusal)

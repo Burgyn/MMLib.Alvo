@@ -401,10 +401,43 @@ public sealed class AlvoBootServiceTests
 
         var refusal = (await world.BootAsync()).ShouldBeOfType<AlvoStartupRefusedException>();
 
+        world.WriteAttempts.ShouldBe(1, "a timeout in the plan's DDL is not a lost race and is never retried");
         refusal.Message.ShouldContain(AlvoApplyLockTimeoutException.Refusal);
         refusal.FixSuggestion.ShouldNotBeNullOrWhiteSpace();
         world.State.Phase.ShouldBe(AlvoBootPhase.Failed);
         world.State.Failure.ShouldNotBeNull().ShouldContain(AlvoApplyLockTimeoutException.Refusal);
+    }
+
+    /// <summary>
+    /// A version-row insert that timed out behind another replica's uncommitted revision is a lost race: the boot decides
+    /// again and serves once the winner's apply has landed (HX-11 Ruling 81, security review I-1).
+    /// </summary>
+    [Fact]
+    public async Task A_lock_timeout_on_the_version_row_is_a_lost_race_and_the_boot_converges()
+    {
+        using var world = new BootServiceWorld().BootingFrom(BootServiceWorld.City);
+        world.WriteFailure = new AlvoApplyLockTimeoutException { AtTheVersionRow = true };
+        world.WriteFailuresBeforeTheWriteLands = 2;
+
+        (await world.BootAsync()).ShouldBeNull();
+
+        world.WriteAttempts.ShouldBe(3);
+        world.State.Phase.ShouldBe(AlvoBootPhase.Ready);
+        world.RecordedRevisions().ShouldBe([1]);
+    }
+
+    /// <summary>A winner that never lets the version row go is waited out a bounded number of times, then refused.</summary>
+    [Fact]
+    public async Task A_version_row_held_past_every_bounded_attempt_is_a_refused_start()
+    {
+        using var world = new BootServiceWorld().BootingFrom(BootServiceWorld.City);
+        world.WriteFailure = new AlvoApplyLockTimeoutException { AtTheVersionRow = true };
+
+        var refusal = (await world.BootAsync()).ShouldBeOfType<AlvoStartupRefusedException>();
+
+        refusal.Message.ShouldContain(AlvoApplyLockTimeoutException.Refusal);
+        world.WriteAttempts.ShouldBe(6, "six attempts, each waiting out one lock timeout");
+        world.State.Phase.ShouldBe(AlvoBootPhase.Failed);
     }
 
     /// <summary>

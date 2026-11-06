@@ -169,6 +169,14 @@ internal sealed class BootServiceWorld : IDisposable
     /// <summary>What the writer throws instead of applying, when a fact asked it to.</summary>
     internal Exception? WriteFailure { get; set; }
 
+    /// <summary>How many attempts throw <see cref="WriteFailure"/> before the append is allowed to land — every one by default.</summary>
+    internal int WriteFailuresBeforeTheWriteLands { get; set; } = int.MaxValue;
+
+    /// <summary>How many times the boot reached the writer.</summary>
+    internal int WriteAttempts => _writer?.Attempts ?? 0;
+
+    private ConflictingRuntimeSchemaWriter? _writer;
+
     /// <summary>The configured startup mode, project and destructive allowance.</summary>
     internal AlvoSchemaOptions Options { get; } = new();
 
@@ -288,8 +296,8 @@ internal sealed class BootServiceWorld : IDisposable
         new(Source, new DescriptorValidator(), new CelCompiler(), _loggers.CreateLogger<DescriptorBootPlan>(), Extensions);
 
     private ConflictingRuntimeSchemaWriter Writer() =>
-        new ConflictingRuntimeSchemaWriter(
-            new InMemoryRuntimeSchemaWriter(_appends), ConflictsBeforeTheWriteLands, WriteFailure);
+        _writer = new ConflictingRuntimeSchemaWriter(
+            new InMemoryRuntimeSchemaWriter(_appends), ConflictsBeforeTheWriteLands, WriteFailure, WriteFailuresBeforeTheWriteLands);
 
     /// <summary>Runs the boot the way a host does, and hands back what it threw, if anything.</summary>
     internal async Task<Exception?> BootAsync()
@@ -434,11 +442,14 @@ internal sealed class BootServiceWorld : IDisposable
     /// </summary>
     /// <param name="inner">The writer the surviving attempt delegates to.</param>
     /// <param name="conflicts">How many attempts lose the race before one is allowed to win.</param>
-    /// <param name="failure">What every attempt throws instead, or <see langword="null"/>.</param>
-    private sealed class ConflictingRuntimeSchemaWriter(IRuntimeSchemaWriter inner, int conflicts, Exception? failure)
+    /// <param name="failure">What the first <paramref name="failures"/> attempts throw instead, or <see langword="null"/>.</param>
+    /// <param name="failures">How many attempts throw <paramref name="failure"/>.</param>
+    private sealed class ConflictingRuntimeSchemaWriter(IRuntimeSchemaWriter inner, int conflicts, Exception? failure, int failures)
         : IRuntimeSchemaWriter
     {
         private int _attempts;
+
+        internal int Attempts => _attempts;
 
         public Task<DescriptorVersion> ApplyAndAppendAsync(
             string project,
@@ -449,7 +460,7 @@ internal sealed class BootServiceWorld : IDisposable
             CancellationToken ct = default)
         {
             _attempts++;
-            if (failure is not null)
+            if (failure is not null && _attempts <= failures)
             {
                 return Task.FromException<DescriptorVersion>(failure);
             }

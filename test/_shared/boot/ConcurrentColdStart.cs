@@ -219,14 +219,23 @@ internal static class ConcurrentColdStart
     /// Descriptors applied one at a time, in order, by a host that starts and stops before the race — so the
     /// database already holds a <em>history</em> when the racing replicas boot.
     /// </param>
+    /// <param name="beforeTheRace">
+    /// Runs after <paramref name="deployedBefore"/> and before any racing replica is built — an engine leg's chance to
+    /// shape the database the race meets (a trigger that holds the winner's transaction open, say).
+    /// </param>
     internal static async Task<ColdStartRace> RaceAsync(
         Action<IAlvoBuilder> connectToTheOneDatabase,
         IReadOnlyList<string> descriptorPerReplica,
         CancellationToken ct,
         AlvoSchemaStartupMode? startup = null,
-        IReadOnlyList<string>? deployedBefore = null)
+        IReadOnlyList<string>? deployedBefore = null,
+        Func<CancellationToken, Task>? beforeTheRace = null)
     {
         await DeployOneAtATimeAsync(connectToTheOneDatabase, deployedBefore ?? [], ct);
+        if (beforeTheRace is not null)
+        {
+            await beforeTheRace(ct);
+        }
 
         var descriptorFiles = descriptorPerReplica.Select(WriteToATemporaryFile).ToList();
         using var startTogether = new Barrier(descriptorPerReplica.Count);

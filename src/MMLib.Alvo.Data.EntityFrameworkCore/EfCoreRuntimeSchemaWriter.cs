@@ -103,12 +103,14 @@ internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposa
         }
 
         var appended = candidate with { Revision = expectedRevision + 1 };
+        var atTheVersionRow = true;
         try
         {
             // Version-row insert first (the optimistic-lock gate), then the plan's DDL, then commit —
             // all in this one transaction, so a loser rolls back before touching the schema and a DDL
             // failure rolls the version row back too. See the type remarks for why order matters.
             await _rows.InsertAsync(connection, transaction, project, appended, ct).ConfigureAwait(false);
+            atTheVersionRow = false;
             await RelationalSqlBatch.ExecuteAsync(connection, plan.Sql, transaction, ct).ConfigureAwait(false);
             await MigrationFramingScope.VerifyAsync(connection, transaction, _framing, plan, ct).ConfigureAwait(false);
             await transaction.CommitAsync(ct).ConfigureAwait(false);
@@ -118,7 +120,7 @@ internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposa
             await _rows.ThrowIfConcurrencyConflictAsync(transaction, project, expectedRevision, ct).ConfigureAwait(false);
             if (CheckApplyRefusal.Translate(failure, _dialect, candidate.Schema) is { } refused)
             {
-                throw refused;
+                throw Located(refused, atTheVersionRow);
             }
 
             throw;
@@ -126,6 +128,15 @@ internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposa
 
         return appended;
     }
+
+    /// <summary>
+    /// Marks a lock timeout raised by the version-row insert as such: that insert waits only on another writer's
+    /// uncommitted row for the same revision, so the boot reads it as a lost race (HX-11 Ruling 81).
+    /// </summary>
+    private static Exception Located(Exception refused, bool atTheVersionRow) =>
+        atTheVersionRow && refused is AlvoApplyLockTimeoutException { InnerException: { } engine }
+            ? new AlvoApplyLockTimeoutException(engine) { AtTheVersionRow = true }
+            : refused;
 
     /// <summary>
     /// The dialect's lock-timeout bound, run before anything else in the transaction — the revision read and the version

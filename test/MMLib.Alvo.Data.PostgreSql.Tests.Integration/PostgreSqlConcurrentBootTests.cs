@@ -26,6 +26,9 @@ public sealed class PostgreSqlConcurrentBootTests : IClassFixture<PostgresFixtur
 {
     private const int Replicas = 3;
 
+    /// <summary>How long the slow winner holds its version row: past the shipped five-second lock timeout.</summary>
+    private static readonly TimeSpan _winnerHolds = TimeSpan.FromSeconds(7);
+
     private readonly string _databaseName = $"alvo_concurrent_boot_{Guid.NewGuid():N}";
     private readonly string _connectionString;
 
@@ -146,16 +149,72 @@ public sealed class PostgreSqlConcurrentBootTests : IClassFixture<PostgresFixtur
         reason.ShouldContain("revision 2");
     }
 
+    /// <summary>
+    /// A loser that waits out its lock timeout on the winner's uncommitted version row has lost a race, not met a
+    /// stuck table: it retries, meets the committed revision, and serves (HX-11 Ruling 81, security review I-1).
+    /// </summary>
+    /// <remarks>
+    /// The winner's transaction is held open past the five-second <c>lock_timeout</c> by a trigger that sleeps after
+    /// the first version-row insert — the shape of a winner whose CHECK scan or backfill runs long. Without the
+    /// distinction the loser's timeout became a refused start, and a rolling deploy crash-looped every losing replica
+    /// until the winner committed.
+    /// </remarks>
+    [Fact]
+    public async Task A_loser_waiting_out_its_lock_timeout_on_the_winners_version_row_converges()
+    {
+        EnsureEngineAvailable();
+
+        var race = await RaceAsync(
+            [ConcurrentColdStart.DriftedDescriptor, ConcurrentColdStart.DriftedDescriptor],
+            deployedBefore: [ConcurrentColdStart.Descriptor],
+            beforeTheRace: HoldTheFirstVersionRowInsertOpenAsync);
+
+        foreach (var replica in race.Replicas)
+        {
+            replica.Failure.ShouldBeNull($"a replica that lost the race behind a slow winner must converge. {replica.Explain()}");
+            replica.Phase.ShouldBe(AlvoBootPhase.Ready);
+            replica.AppliedRevision.ShouldBe(2);
+            replica.Rendezvoused.ShouldBeTrue("a race nobody met is not a race, and this fact would prove nothing");
+        }
+
+        race.RecordedRevisions.ShouldBe([1, 2]);
+        race.Replicas.Sum(replica => replica.AppliedSchemaWrites).ShouldBe(1, "the winner applied; the loser observed it");
+    }
+
+    /// <summary>The winner's transaction sleeps past the loser's lock timeout right after its version-row insert, once.</summary>
+    private async Task HoldTheFirstVersionRowInsertOpenAsync(CancellationToken ct)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            CREATE TABLE winner_slept (at timestamptz NOT NULL);
+            CREATE FUNCTION hold_the_winner() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM winner_slept) THEN
+                    INSERT INTO winner_slept VALUES (now());
+                    PERFORM pg_sleep({_winnerHolds.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)});
+                END IF;
+                RETURN NEW;
+            END $$;
+            CREATE TRIGGER hold_the_winner AFTER INSERT ON alvo_descriptor_versions
+                FOR EACH ROW EXECUTE FUNCTION hold_the_winner();
+            """;
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
     private Task<ColdStartRace> RaceAsync(
         IReadOnlyList<string> descriptorPerReplica,
         AlvoSchemaStartupMode? startup = null,
-        IReadOnlyList<string>? deployedBefore = null) =>
+        IReadOnlyList<string>? deployedBefore = null,
+        Func<CancellationToken, Task>? beforeTheRace = null) =>
         ConcurrentColdStart.RaceAsync(
             alvo => alvo.UsePostgreSql(_connectionString),
             descriptorPerReplica,
             TestContext.Current.CancellationToken,
             startup,
-            deployedBefore);
+            deployedBefore,
+            beforeTheRace);
 
     private static void EnsureEngineAvailable() =>
         Assert.SkipUnless(
