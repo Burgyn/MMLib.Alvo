@@ -22,7 +22,7 @@ public sealed class EntityLifecycleServiceTests
 
     private static readonly AlvoContext _caller = AlvoContext.System(null);
 
-    private readonly EntityLifecycleService _service = new(new CelFunctionBudgetPolicy(Options.Create(new AlvoExtensionOptions()), TimeProvider.System));
+    private readonly EntityLifecycleService _service = new(new CelFunctionBudgetPolicy(Options.Create(new AlvoExtensionOptions()), TimeProvider.System), AlvoChainDepthLimit.Default);
 
     [Fact]
     public void The_guard_judges_the_decision_s_catalog_not_the_one_published_since()

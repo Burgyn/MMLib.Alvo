@@ -8,7 +8,10 @@ namespace MMLib.Alvo.Scheduling;
 /// <param name="Stored">The row after the write, or <see langword="null"/> on a delete.</param>
 /// <param name="Caller">The writer, whose provenance a fired timer carries.</param>
 /// <param name="Now">The write's own instant, which <c>now()</c> resolves to.</param>
-internal sealed record EntityTimerWrite(string Entity, AlvoRecord? Previous, AlvoRecord? Stored, AlvoContext Caller, DateTimeOffset Now);
+/// <param name="CorrelationId">The correlation id of the event the write emitted, which a fired timer resumes.</param>
+/// <param name="CausationId">The id of the event the write emitted, which a fired timer is caused by.</param>
+internal sealed record EntityTimerWrite(
+    string Entity, AlvoRecord? Previous, AlvoRecord? Stored, AlvoContext Caller, DateTimeOffset Now, string? CorrelationId, string? CausationId);
 
 /// <summary>One timer a write arms or moves (<see cref="Arm"/> set), or cancels by key (<see cref="Arm"/> null).</summary>
 /// <param name="Scope">The timer's scope: the row's tenant, or empty.</param>

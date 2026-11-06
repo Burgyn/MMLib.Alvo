@@ -9,8 +9,9 @@ namespace MMLib.Alvo.Lifecycle;
 /// The core's <see cref="IEntityLifecycle"/>: reads the compiled lifecycle off the write's own decision, and judges it inside
 /// one host-function budget pass.
 /// </summary>
-/// <param name="budget">The host-function budget a transition's <c>when</c> runs under.</param>
-internal sealed class EntityLifecycleService(CelFunctionBudgetPolicy budget) : IEntityLifecycle
+/// <param name="budget">The host-function budget a transition's <c>when</c> and a timer's <c>at</c> and <c>when</c> run under.</param>
+/// <param name="depth">The chain-depth limit an armed timer's context must be within.</param>
+internal sealed class EntityLifecycleService(CelFunctionBudgetPolicy budget, AlvoChainDepthLimit depth) : IEntityLifecycle
 {
     /// <inheritdoc />
     public void EnsureTransition(PolicyDecision decision, DataOperation operation, AlvoRecord candidate, AlvoRecord? previous, AlvoContext caller)
@@ -33,8 +34,13 @@ internal sealed class EntityLifecycleService(CelFunctionBudgetPolicy budget) : I
     public IReadOnlyList<TimerChange> TimerChanges(PolicyDecision decision, EntityTimerWrite write)
     {
         ArgumentNullException.ThrowIfNull(write);
-        _ = LifecycleOf(decision);
-        return [];
+        if (LifecycleOf(decision).Timers is not { Count: > 0 } timers)
+        {
+            return [];
+        }
+
+        using var pass = budget.Enter();
+        return EntityTimerPlanner.Plan(timers, write, depth);
     }
 
     private static EntityLifecycle LifecycleOf(PolicyDecision decision)
