@@ -1,0 +1,52 @@
+﻿[
+  {
+    Sql: EXISTS (SELECT 1 FROM "customers" AS alvo_r1 WHERE (alvo_r1."id" = @alvo_q0) AND (COALESCE(alvo_r1."region" = @alvo_q1, FALSE)) AND (COALESCE(alvo_r1."owner_id" = @alvo_q2, FALSE)) AND (COALESCE(alvo_r1."tenant_id" = @alvo_q3, FALSE))),
+    Parameters: [
+      {
+        Key: alvo_q0,
+        Type: Guid,
+        Value: Guid_1
+      },
+      {
+        Key: alvo_q1,
+        Type: String,
+        Value: e'u;--
+      },
+      {
+        Key: alvo_q2,
+        Type: Guid,
+        Value: {alice-user-id}
+      },
+      {
+        Key: alvo_q3,
+        Type: Guid,
+        Value: {acme-tenant-id}
+      }
+    ]
+  },
+  {
+    Sql: EXISTS (SELECT 1 FROM "customers" AS alvo_r1 WHERE (alvo_r1."id" = @alvo_q0) AND (COALESCE(CAST(alvo_r1."credit_limit" AS numeric) >= CAST(@alvo_q1 AS numeric), FALSE)) AND (COALESCE(alvo_r1."owner_id" = @alvo_q2, FALSE)) AND (COALESCE(alvo_r1."tenant_id" = @alvo_q3, FALSE))),
+    Parameters: [
+      {
+        Key: alvo_q0,
+        Type: Guid,
+        Value: Guid_1
+      },
+      {
+        Key: alvo_q1,
+        Type: Decimal,
+        Value: 12.5
+      },
+      {
+        Key: alvo_q2,
+        Type: Guid,
+        Value: {alice-user-id}
+      },
+      {
+        Key: alvo_q3,
+        Type: Guid,
+        Value: {acme-tenant-id}
+      }
+    ]
+  }
+]

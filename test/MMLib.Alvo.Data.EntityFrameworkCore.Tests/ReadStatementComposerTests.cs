@@ -2,7 +2,10 @@
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Data;
+
+using FieldType = MMLib.Alvo.Schema.FieldType;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 
@@ -470,6 +473,59 @@ public class ReadStatementComposerTests
         {
             Narrowing = new ReadNarrowing(new AlvoComparison("status", AlvoFilterOperator.In, "not-a-list"), ["bad"]),
         })).Reason.ShouldBe(HookFailedException.InvalidFilter);
+
+    [Fact]
+    public Task A_relation_rule_is_an_exists_term_inside_the_using_term()
+    {
+        using var services = Services();
+        var composer = new ReadStatementComposer(
+            services.GetRequiredService<IPredicateRenderer>(), new TestFieldSqlRenderer(), new TestSqlDialect());
+        var fleetDecision = RelationDecision(services, DataOperation.List);
+
+        var page = composer.Compose(
+            Vans, fleetDecision, AlvoDataFixtures.Caller, new ReadStatementComposer.ReadStatementOptions(), ReadModelFixture.Rows(Vans));
+
+        page.Sql.ShouldContain("EXISTS (SELECT 1 FROM \"fleets\" AS alvo_r1 WHERE (alvo_r1.\"id\" = \"vans\".\"fleet_id\")");
+        return Verify(new { Page = page.Sql, Parameters = page.Parameters.Keys.Order(StringComparer.Ordinal) });
+    }
+
+    private static EntitySchema Fleets { get; } = new()
+    {
+        Name = "fleets",
+        Fields =
+        [
+            new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
+            new FieldSchema { Name = "owner_id", Type = FieldType.Uuid, Nullable = true },
+        ],
+    };
+
+    private static EntitySchema Vans { get; } = new()
+    {
+        Name = "vans",
+        Fields =
+        [
+            new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
+            new FieldSchema
+            {
+                Name = "fleet_id", Type = FieldType.Ref, Nullable = true, Reference = new RefSchema("fleets", OnDelete.Restrict),
+            },
+            new FieldSchema { Name = "plate", Type = FieldType.String, Nullable = true },
+        ],
+    };
+
+    private static PolicyDecision RelationDecision(IServiceProvider services, DataOperation operation)
+    {
+        var descriptor = AlvoDescriptor.Parse("""
+            { "apiVersion": "alvo.dev/v1", "name": "relations",
+              "entities": {
+                "fleets": { "fields": { "owner_id": { "type": "uuid" } }, "rules": { "list": "owner_id == @user.id" } },
+                "vans": { "fields": { "fleet_id": { "type": "ref", "entity": "fleets" }, "plate": { "type": "string" } },
+                          "rules": { "list": "fleet_id.owner_id == @user.id && plate != 'x'" } } } }
+            """);
+        var catalog = PolicyCatalog.Build(descriptor, new SchemaModel([Fleets, Vans]), services.GetRequiredService<ICelCompiler>());
+        services.GetRequiredService<IPolicyCatalogProvider>().SetCurrent(descriptor.Name, catalog);
+        return services.GetRequiredService<IPolicyEngine>().Resolve(Vans.Name, operation, AlvoDataFixtures.Caller);
+    }
 
     /// <summary>Everything between <c>WHERE</c> and whatever follows the terms.</summary>
     private static string WhereOf(ReadStatement statement)

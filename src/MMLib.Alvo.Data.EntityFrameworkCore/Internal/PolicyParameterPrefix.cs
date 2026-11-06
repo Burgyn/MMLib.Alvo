@@ -40,6 +40,12 @@ internal static class PolicyParameterPrefix
     /// <summary>The prefix for the keyset cursor predicate's bound values.</summary>
     internal const string Keyset = "alvo_k";
 
+    /// <summary>
+    /// The prefix for a write probe's bound values: one relation term's <c>EXISTS</c>, its outer post-image values
+    /// included, rendered alone into its own statement.
+    /// </summary>
+    internal const string Probe = "alvo_q";
+
     /// <summary>The single name a row id binds to.</summary>
     internal const string RowId = "alvo_id";
 
@@ -63,5 +69,5 @@ internal static class PolicyParameterPrefix
     /// so a message or format constant added to this type would fail it rather than escape it.
     /// </summary>
     internal static IReadOnlyList<string> All { get; } =
-        [Using, WithCheck, TenantScope, Narrowing, Filter, Keyset, RowId, RowLimit, RowOffset];
+        [Using, WithCheck, TenantScope, Narrowing, Filter, Keyset, Probe, RowId, RowLimit, RowOffset];
 }

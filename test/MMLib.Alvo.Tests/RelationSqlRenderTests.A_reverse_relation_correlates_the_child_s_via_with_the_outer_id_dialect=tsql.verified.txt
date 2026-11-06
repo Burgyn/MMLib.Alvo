@@ -1,0 +1,20 @@
+﻿{
+  Sql: EXISTS (SELECT 1 FROM [project_members] AS alvo_r1 WHERE (alvo_r1.[project_id] = [projects].[id]) AND ((CASE WHEN alvo_r1.[user_id] = @alvo_u0 THEN 1 ELSE 0 END = 1)) AND ((CASE WHEN alvo_r1.[user_id] = @alvo_u1 THEN 1 ELSE 0 END = 1)) AND ((CASE WHEN alvo_r1.[tenant_id] = @alvo_u2 THEN 1 ELSE 0 END = 1))),
+  Parameters: [
+    {
+      Key: alvo_u0,
+      Type: Guid,
+      Value: {alice-user-id}
+    },
+    {
+      Key: alvo_u1,
+      Type: Guid,
+      Value: {alice-user-id}
+    },
+    {
+      Key: alvo_u2,
+      Type: Guid,
+      Value: {acme-tenant-id}
+    }
+  ]
+}

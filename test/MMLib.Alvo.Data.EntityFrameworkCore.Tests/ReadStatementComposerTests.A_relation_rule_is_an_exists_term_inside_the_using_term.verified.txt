@@ -1,0 +1,8 @@
+﻿{
+  Page: SELECT "id", "fleet_id", "plate" FROM "vans" WHERE ((EXISTS (SELECT 1 FROM "fleets" AS alvo_r1 WHERE (alvo_r1."id" = "vans"."fleet_id") AND (COALESCE(alvo_r1."owner_id" = @alvo_u0, FALSE)) AND (COALESCE(alvo_r1."owner_id" = @alvo_u1, FALSE))) AND COALESCE("plate" <> @alvo_u2, FALSE))) AND (TRUE),
+  Parameters: [
+    alvo_u0,
+    alvo_u1,
+    alvo_u2
+  ]
+}

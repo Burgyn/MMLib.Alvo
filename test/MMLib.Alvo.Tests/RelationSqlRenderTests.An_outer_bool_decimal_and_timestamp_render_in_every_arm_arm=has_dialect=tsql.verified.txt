@@ -1,0 +1,42 @@
+﻿{
+  Column: {
+    Sql: EXISTS (SELECT 1 FROM [project_members] AS alvo_r1 WHERE (alvo_r1.[project_id] = [projects].[id]) AND ((([projects].[note] IS NOT NULL) AND (CASE WHEN alvo_r1.[note] = [projects].[note] THEN 1 ELSE 0 END = 1))) AND ((CASE WHEN alvo_r1.[user_id] = @alvo_u0 THEN 1 ELSE 0 END = 1)) AND ((CASE WHEN alvo_r1.[tenant_id] = @alvo_u1 THEN 1 ELSE 0 END = 1))),
+    Parameters: [
+      {
+        Key: alvo_u0,
+        Type: Guid,
+        Value: {alice-user-id}
+      },
+      {
+        Key: alvo_u1,
+        Type: Guid,
+        Value: {acme-tenant-id}
+      }
+    ]
+  },
+  Image: {
+    Sql: EXISTS (SELECT 1 FROM [project_members] AS alvo_r1 WHERE (alvo_r1.[project_id] = @alvo_q0) AND (((1 = 1) AND (CASE WHEN alvo_r1.[note] = @alvo_q1 THEN 1 ELSE 0 END = 1))) AND ((CASE WHEN alvo_r1.[user_id] = @alvo_q2 THEN 1 ELSE 0 END = 1)) AND ((CASE WHEN alvo_r1.[tenant_id] = @alvo_q3 THEN 1 ELSE 0 END = 1))),
+    Parameters: [
+      {
+        Key: alvo_q0,
+        Type: Guid,
+        Value: Guid_Empty
+      },
+      {
+        Key: alvo_q1,
+        Type: String,
+        Value: x
+      },
+      {
+        Key: alvo_q2,
+        Type: Guid,
+        Value: {alice-user-id}
+      },
+      {
+        Key: alvo_q3,
+        Type: Guid,
+        Value: {acme-tenant-id}
+      }
+    ]
+  }
+}

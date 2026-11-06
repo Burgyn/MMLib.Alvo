@@ -1,0 +1,45 @@
+﻿{
+  Sql: (EXISTS (SELECT 1 FROM "vendors" AS alvo_r1 WHERE (alvo_r1."id" = "orders"."vendor_id") AND (COALESCE(alvo_r1."region" = @alvo_u0, FALSE)) AND (EXISTS (SELECT 1 FROM "accounts" AS alvo_r2 WHERE (alvo_r2."id" = alvo_r1."account_id") AND (COALESCE(alvo_r2."owner_id" = @alvo_u1, FALSE)) AND (COALESCE(alvo_r2."owner_id" = @alvo_u2, FALSE)) AND (COALESCE(alvo_r2."tenant_id" = @alvo_u3, FALSE)))) AND (COALESCE(alvo_r1."tenant_id" = @alvo_u4, FALSE))) AND EXISTS (SELECT 1 FROM "customers" AS alvo_r3 WHERE (alvo_r3."id" = "orders"."customer_id") AND (COALESCE(alvo_r3."owner_id" = @alvo_u5, FALSE)) AND (COALESCE(alvo_r3."owner_id" = @alvo_u6, FALSE)) AND (COALESCE(alvo_r3."tenant_id" = @alvo_u7, FALSE)))),
+  Parameters: [
+    {
+      Key: alvo_u0,
+      Type: String,
+      Value: eu
+    },
+    {
+      Key: alvo_u1,
+      Type: Guid,
+      Value: {alice-user-id}
+    },
+    {
+      Key: alvo_u2,
+      Type: Guid,
+      Value: {alice-user-id}
+    },
+    {
+      Key: alvo_u3,
+      Type: Guid,
+      Value: {acme-tenant-id}
+    },
+    {
+      Key: alvo_u4,
+      Type: Guid,
+      Value: {acme-tenant-id}
+    },
+    {
+      Key: alvo_u5,
+      Type: Guid,
+      Value: {alice-user-id}
+    },
+    {
+      Key: alvo_u6,
+      Type: Guid,
+      Value: {alice-user-id}
+    },
+    {
+      Key: alvo_u7,
+      Type: Guid,
+      Value: {acme-tenant-id}
+    }
+  ]
+}
