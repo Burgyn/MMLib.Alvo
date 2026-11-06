@@ -47,6 +47,19 @@ public interface ITimerStore
     Task<bool> CancelAsync(string scope, string key, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Removes the timer of <paramref name="scope"/> and <paramref name="key"/> only while it is still armed at
+    /// <paramref name="generation"/> — so retiring a claimed timer never removes one re-armed since the claim.
+    /// </summary>
+    /// <param name="scope">The claimed timer's scope.</param>
+    /// <param name="key">The claimed timer's key.</param>
+    /// <param name="generation">The generation the claim read.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>
+    /// <see langword="true"/> when the timer was removed; <see langword="false"/> when it was moved, cancelled or fired since.
+    /// </returns>
+    Task<bool> CancelAsync(string scope, string key, Guid generation, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Leases up to <paramref name="batchSize"/> due timers that no unexpired lease holds, the earliest due first.
     /// </summary>
     /// <param name="batchSize">The most timers to take; at least one.</param>

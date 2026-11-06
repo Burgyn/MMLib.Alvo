@@ -65,7 +65,7 @@ public sealed class ExtensionCatalogTests
 
         catalog.RunningOn("tickets", "update").Select(item => item.Id).ShouldBe(["audit-every-save", "ticket-resolved"]);
         catalog.RunningOn("notes", "create").Select(item => item.Id).ShouldBe(["audit-every-save"]);
-        catalog.RunningOn("tickets", "list").ShouldBeEmpty("no extension runs on a read in this build");
+        catalog.RunningOn("tickets", "list").ShouldBeEmpty("no read extension covers tickets in this fixture");
         catalog.RunningOn("tickets", "delete").ShouldBeEmpty();
     }
 
@@ -74,6 +74,19 @@ public sealed class ExtensionCatalogTests
     {
         Catalog(Registered()).HonouredKinds.ShouldBe(["extensions.eventHandler"]);
         Catalog(ExtensionRegistry.Empty).HonouredKinds.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_narrowing_is_catalogued_as_a_read_on_list_and_get()
+    {
+        var catalog = Catalog(Registry(alvo => alvo.Entity("tickets", t => t.Narrow("open-only", (MMLib.Alvo.Reads.QueryNarrowing _) => null))));
+
+        var item = catalog.Items.ShouldHaveSingleItem();
+        (item.Kind, item.Stage, item.When, item.Entities.Single()).ShouldBe((AlvoExtensionKind.Narrowing, AlvoExtensionStage.Read, (string?)null, "tickets"));
+        item.Operations.ShouldBe(["list", "get"]);
+        catalog.HonouredKinds.ShouldContain("extensions.narrowing");
+        catalog.RunningOn("tickets", "list").ShouldHaveSingleItem().Id.ShouldBe("open-only");
+        catalog.RunningOn("tickets", "create").ShouldBeEmpty();
     }
 
     [Fact]

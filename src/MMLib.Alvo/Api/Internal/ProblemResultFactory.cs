@@ -384,6 +384,17 @@ internal static class ProblemResultFactory
             $"The write hook '{extension}' failed ({reason}), so nothing was written. Its own error is in the server log.",
             new Dictionary<string, object?>(StringComparer.Ordinal) { [ExtensionsMember] = new[] { extension }, ["reason"] = reason });
 
+    /// <summary>The 500 for a host read extension that failed; the read answered nothing.</summary>
+    /// <param name="extensions">The ids of the extensions the failed step ran.</param>
+    /// <param name="reason">The fixed reason.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult HookFailedRead(IReadOnlyList<string> extensions, string reason) =>
+        Problem(
+            StatusCodes.Status500InternalServerError,
+            AlvoProblemTypes.HookFailed,
+            $"The read extension '{string.Join("', '", extensions)}' failed ({reason}), so the read answered nothing. Its own error is in the server log.",
+            new Dictionary<string, object?>(StringComparer.Ordinal) { [ExtensionsMember] = extensions.ToArray(), ["reason"] = reason });
+
     /// <summary>The 422 for a built-in CEL function or hook arithmetic that refused the request's data.</summary>
     /// <param name="detail">Names the function and Alvo's reason, never the value.</param>
     /// <returns>The problem result.</returns>

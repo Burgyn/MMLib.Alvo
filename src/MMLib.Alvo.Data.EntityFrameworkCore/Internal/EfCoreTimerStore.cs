@@ -89,6 +89,18 @@ internal sealed partial class EfCoreTimerStore : ITimerStore
             cancellationToken);
     }
 
+    public Task<bool> CancelAsync(string scope, string key, Guid generation, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(key);
+
+        return WriteAsync(
+            async (connection, transaction, ct) =>
+                await ExecuteAsync(connection, transaction, TimerTable.FireSql(_timers), command => BindFence(command, scope, key, generation), ct)
+                    .ConfigureAwait(false) == 1,
+            cancellationToken);
+    }
+
     public async Task<IReadOnlyList<ClaimedTimer>> ClaimTimersAsync(int batchSize, TimeSpan lease, CancellationToken cancellationToken = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(batchSize);

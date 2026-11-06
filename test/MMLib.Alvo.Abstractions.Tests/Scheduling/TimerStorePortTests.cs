@@ -63,8 +63,11 @@ public sealed class TimerStorePortTests
     [InlineData("{\"depth\":-1}")]
     [InlineData("{\"depth\":\"deep\"}")]
     [InlineData("[]")]
-    public void Malformed_stored_provenance_reads_as_none(string json) =>
+    public void Malformed_stored_provenance_reads_as_none(string json)
+    {
         TimerProvenance.Read(json).ShouldBe(AlvoProvenance.None);
+        TimerProvenance.TryRead(json).ShouldBeNull();
+    }
 
     private static AlvoCustomEvent Message() => AlvoCustomEnvelope.Build(
         "reminders.due", "bookings/42", new Dictionary<string, object?> { ["booking"] = "42" }, AlvoContext.System(null), DateTimeOffset.UnixEpoch);

@@ -22,22 +22,22 @@ internal sealed class AlvoScheduler(ITimerStore store, IPolicyCatalogProvider ca
     : IAlvoScheduler
 {
     /// <inheritdoc/>
-    public Task ScheduleAsync(
+    public async Task ScheduleAsync(
         string key,
         DateTimeOffset at,
         string eventType,
         IReadOnlyDictionary<string, object?>? data,
         TenantId? tenant = null,
         CancellationToken cancellationToken = default) =>
-        store.UpsertAsync(Refused(() => TimerOf(key, at, eventType, data, tenant)), cancellationToken);
+        await store.UpsertAsync(Refused(() => TimerOf(key, at, eventType, data, tenant)), cancellationToken).ConfigureAwait(false);
 
     /// <inheritdoc/>
-    public Task<bool> CancelAsync(string key, TenantId? tenant = null, CancellationToken cancellationToken = default)
+    public async Task<bool> CancelAsync(string key, TenantId? tenant = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(key);
         var scope = Refused(() => ScopeOf(tenant));
 
-        return store.CancelAsync(scope?.ToString() ?? string.Empty, key, cancellationToken);
+        return await store.CancelAsync(scope?.ToString() ?? string.Empty, key, cancellationToken).ConfigureAwait(false);
     }
 
     private TimerEntry TimerOf(string key, DateTimeOffset at, string eventType, IReadOnlyDictionary<string, object?>? data, TenantId? tenant)
@@ -49,15 +49,20 @@ internal sealed class AlvoScheduler(ITimerStore store, IPolicyCatalogProvider ca
         depth.EnsureWithin(context);
         var message = AlvoCustomEnvelope.Build(eventType, subject, data, context, time.GetUtcNow());
 
-        return TimerEntry.Of(context.Tenant?.ToString() ?? string.Empty, key, at, message, StoredProvenance(context));
+        return TimerEntry.Of(context.Tenant?.ToString() ?? string.Empty, key, at, message, StoredProvenance(context, message.Envelope));
     }
 
-    private static AlvoProvenance StoredProvenance(AlvoContext context)
-    {
-        var provenance = AlvoEventProvenance.Effective(context);
-
-        return provenance with { CorrelationId = provenance.CorrelationId ?? AlvoEventProvenance.CorrelationIdOf(Guid.CreateVersion7()) };
-    }
+    /// <summary>
+    /// The calling flow's effective provenance, with the correlation and trace context the message envelope settled on — so a
+    /// timer armed under a W3C trace outside any flow belongs to that trace, as every other emit does.
+    /// </summary>
+    private static AlvoProvenance StoredProvenance(AlvoContext context, AlvoEvent envelope) =>
+        AlvoEventProvenance.Effective(context) with
+        {
+            CorrelationId = envelope.CorrelationId,
+            TraceParent = envelope.TraceParent,
+            TraceState = envelope.TraceState,
+        };
 
     private TenantId? ScopeOf(TenantId? tenant)
     {
@@ -71,7 +76,9 @@ internal sealed class AlvoScheduler(ITimerStore store, IPolicyCatalogProvider ca
     }
 
     private bool TenancyOn() =>
-        catalogs.Current?.Schema.Entities.Any(entity => entity.Tenancy == TenancyMode.Scoped) ?? false;
+        catalogs.Current is { } catalog
+            ? catalog.Schema.Entities.Any(entity => entity.Tenancy == TenancyMode.Scoped)
+            : throw Unprimed();
 
     private static T Refused<T>(Func<T> decide)
     {
@@ -98,4 +105,8 @@ internal sealed class AlvoScheduler(ITimerStore store, IPolicyCatalogProvider ca
         + "refused. Fix: pass tenant: — the tenant the timer's event belongs to (in a handler, the event's tenant).",
         "tenant");
 #pragma warning restore CA2208
+
+    private static InvalidOperationException Unprimed() => new(
+        "A timer was armed with no tenant before the schema was primed, so whether it needs one is unknown and it was refused. "
+        + "Fix: arm it after the host has started, or pass tenant: — the tenant the timer's event belongs to.");
 }

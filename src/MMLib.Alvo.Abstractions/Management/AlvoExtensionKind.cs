@@ -42,7 +42,14 @@ public enum AlvoExtensionKind
     [JsonStringEnumMemberName("afterDelete")]
     AfterDelete = 6,
 
+    /// <summary>
+    /// A query narrowing: host C# whose filter is ANDed into the SQL of every non-system list, get and count of an entity; it
+    /// can only remove rows from what the rules allow.
+    /// </summary>
+    [JsonStringEnumMemberName("narrowing")]
+    Narrowing = 7,
+
     /// <summary>A schedule: host C# run on a cron, once per occurrence across every replica, as a delivery.</summary>
     [JsonStringEnumMemberName("schedule")]
-    Schedule = 7,
+    Schedule = 9,
 }

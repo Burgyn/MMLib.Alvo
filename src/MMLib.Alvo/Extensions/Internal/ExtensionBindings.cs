@@ -3,6 +3,7 @@ using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Hooks.Internal;
+using MMLib.Alvo.Reads.Internal;
 using MMLib.Alvo.Rules;
 
 namespace MMLib.Alvo.Extensions.Internal;
@@ -48,18 +49,21 @@ internal sealed record BoundHandler(
 
 /// <summary>
 /// Every handler bound to one catalog, by <c>Order</c> and then registration order, every bound command, and every bound write
-/// hook — by <c>Order</c>, entity-specific before <c>"*"</c>, then registration order (Ruling 26).
+/// hook — by <c>Order</c>, entity-specific before <c>"*"</c>, then registration order (Ruling 26) — and every bound read
+/// extension, in registration order.
 /// </summary>
 internal sealed class ExtensionBindings
 {
     private readonly Dictionary<string, BoundHandler> _byId;
     private readonly Dictionary<string, BoundWriteHook> _hooksById;
+    private readonly Dictionary<string, BoundReadExtension> _readsById;
 
     internal ExtensionBindings(
         IEnumerable<BoundHandler> handlers,
         IEnumerable<HandlerRegistration>? unbound = null,
         IEnumerable<BoundCommand>? commands = null,
-        IEnumerable<BoundWriteHook>? writeHooks = null)
+        IEnumerable<BoundWriteHook>? writeHooks = null,
+        IEnumerable<BoundReadExtension>? readExtensions = null)
     {
         Unbound = [.. unbound ?? []];
         Commands = (commands ?? []).ToDictionary(command => command.Name, StringComparer.Ordinal);
@@ -70,6 +74,8 @@ internal sealed class ExtensionBindings
             .ThenBy(hook => hook.Registration.IsEveryEntity ? 1 : 0)
             .ThenBy(hook => hook.Registration.Sequence)];
         _hooksById = WriteHooks.ToDictionary(hook => hook.Id, StringComparer.Ordinal);
+        ReadExtensions = [.. (readExtensions ?? []).OrderBy(read => read.Registration.Sequence)];
+        _readsById = ReadExtensions.ToDictionary(read => read.Id, StringComparer.Ordinal);
     }
 
     internal static ExtensionBindings None { get; } = new([]);
@@ -82,6 +88,9 @@ internal sealed class ExtensionBindings
     /// <summary>The write hooks bound to this catalog, in the order they run.</summary>
     internal IReadOnlyList<BoundWriteHook> WriteHooks { get; }
 
+    /// <summary>The narrowings and enrichers bound to this catalog, in registration order.</summary>
+    internal IReadOnlyList<BoundReadExtension> ReadExtensions { get; }
+
     /// <summary>The commands bound to this catalog, by name.</summary>
     internal IReadOnlyDictionary<string, BoundCommand> Commands { get; }
 
@@ -92,6 +101,12 @@ internal sealed class ExtensionBindings
     /// write a registered, unbound hook covers fails closed (Ruling 7).
     /// </summary>
     internal BoundWriteHook? WriteHook(string id) => _hooksById.GetValueOrDefault(id);
+
+    /// <summary>
+    /// The bound read extension <paramref name="id"/>, or null when it does not bind this catalog: a read a registered, unbound
+    /// extension covers fails closed.
+    /// </summary>
+    internal BoundReadExtension? ReadExtension(string id) => _readsById.GetValueOrDefault(id);
 
     /// <summary>The bound command named <paramref name="name"/>, or null when it does not bind this catalog.</summary>
     internal BoundCommand? Command(string name) => Commands.GetValueOrDefault(name);

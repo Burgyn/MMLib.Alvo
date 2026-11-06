@@ -73,6 +73,8 @@ public sealed class ScheduleRegistrationTests
         catalog.Items.Single(item => item.Id == "orders-approved").Cron.ShouldBeNull();
         catalog.HonouredKinds.ShouldBe(["extensions.eventHandler", "extensions.schedule"]);
         ExtensionCatalog.WireName(AlvoExtensionKind.Schedule).ShouldBe("schedule");
+        ((int)AlvoExtensionKind.Schedule, (int)AlvoExtensionStage.Scheduled).ShouldBe((9, 5), "7 and 4 are the read extensions', 8 is reserved");
+        System.Text.Json.JsonSerializer.Serialize(AlvoExtensionStage.Scheduled).ShouldBe("\"scheduled\"");
     }
 
     [Fact]

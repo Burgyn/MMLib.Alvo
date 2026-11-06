@@ -71,6 +71,42 @@ public sealed class AlvoSchedulerTests
     }
 
     [Fact]
+    public async Task A_refusal_is_a_faulted_task_not_a_synchronous_throw()
+    {
+        Task call;
+        using (AlvoFlow.Enter(new AlvoProvenance { Depth = 9 }))
+        {
+            call = Scheduler().ScheduleAsync("k", _now, Reminder, null, _tenant, Ct);
+        }
+
+        call.IsFaulted.ShouldBeTrue();
+        await Should.ThrowAsync<AlvoChainDepthExceededException>(() => call);
+        Scheduler(Scoped()).CancelAsync("k", cancellationToken: Ct).IsFaulted.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task A_timer_armed_under_a_W3C_trace_outside_any_flow_takes_the_trace_as_its_correlation()
+    {
+        using var activity = new System.Diagnostics.Activity("request").SetIdFormat(System.Diagnostics.ActivityIdFormat.W3C).Start();
+
+        await Scheduler().ScheduleAsync("k", _now, Reminder, null, _tenant, Ct);
+
+        var stored = TimerProvenance.Read(_armed.ShouldHaveSingleItem().Provenance);
+        (stored.CorrelationId, stored.TraceParent).ShouldBe((activity.TraceId.ToString(), activity.Id));
+    }
+
+    [Fact]
+    public async Task Before_the_schema_is_primed_a_timer_needs_a_stated_tenant()
+    {
+        var refusal = await Should.ThrowAsync<InvalidOperationException>(
+            () => Scheduler(primed: false).ScheduleAsync("k", _now, Reminder, null, cancellationToken: Ct));
+
+        refusal.Message.ShouldContain("pass tenant:");
+        await Scheduler(primed: false).ScheduleAsync("k", _now, Reminder, null, _tenant, Ct);
+        _armed.ShouldHaveSingleItem().Scope.ShouldBe(_tenant.ToString());
+    }
+
+    [Fact]
     public async Task A_timer_inside_a_flow_records_its_correlation_causation_and_depth()
     {
         using (AlvoFlow.Enter(new AlvoProvenance { CorrelationId = "flow-1", CausationId = "event-1", Depth = 3 }))
@@ -167,10 +203,10 @@ public sealed class AlvoSchedulerTests
         refusal.Message.ShouldContain("[AlvoEvent(");
     }
 
-    private AlvoScheduler Scheduler(PolicyCatalog? catalog = null)
+    private AlvoScheduler Scheduler(PolicyCatalog? catalog = null, bool primed = true)
     {
         var catalogs = Substitute.For<IPolicyCatalogProvider>();
-        catalogs.Current.Returns(catalog ?? HandlerCatalog.Catalog());
+        catalogs.Current.Returns(primed ? catalog ?? HandlerCatalog.Catalog() : null);
 
         return new AlvoScheduler(_store, catalogs, AlvoChainDepthLimit.Default, new FakeTimeProvider(_now));
     }

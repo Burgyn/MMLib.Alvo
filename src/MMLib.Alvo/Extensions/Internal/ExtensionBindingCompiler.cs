@@ -3,6 +3,7 @@
 using MMLib.Alvo.Commands.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Hooks.Internal;
+using MMLib.Alvo.Reads.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Scheduling;
 
@@ -33,6 +34,7 @@ internal static class ExtensionBindingCompiler
         problems.AddRange(CommandProblems.Shared(registry));
         var relationalHooks = WriteHookBinding.Relational(services);
         problems.AddRange(registry.WriteHooks.SelectMany(hook => new WriteHookBinding(hook, compiler).CheckRegistration(services, relationalHooks).Problems));
+        problems.AddRange(registry.ReadExtensions.SelectMany(read => new ReadExtensionBinding(read).CheckRegistration(services, relationalHooks).Problems));
         problems.AddRange(ScheduleChecks.Check(registry, services, DateTimeOffset.UtcNow));
         var refused = Refused(problems);
 
@@ -47,6 +49,7 @@ internal static class ExtensionBindingCompiler
         var bound = BindHandlers(registry, catalog, compiler, services, problems);
         var commands = BindCommands(registry, catalog, compiler, services, problems);
         var hooks = BindWriteHooks(registry, catalog, compiler, services, problems);
+        var reads = BindReads(registry, catalog, services, problems);
         problems.AddRange(ScheduleChecks.Check(registry, services, DateTimeOffset.UtcNow));
         var refused = Refused(problems);
         List<BoundHandler> binds = [.. bound.Where(handler => !refused.Contains(handler.Id))];
@@ -55,7 +58,8 @@ internal static class ExtensionBindingCompiler
             binds,
             registry.Handlers.Where(handler => refused.Contains(handler.Id)),
             commands.Where(command => !refused.Contains(command.Name)),
-            boundHooks);
+            boundHooks,
+            reads.Where(read => !refused.Contains(read.Id)));
 
         return new(bindings, problems, [.. Ties(binds.Select(handler => handler.Registration)), .. HookTies(boundHooks.Select(hook => hook.Registration))]);
     }
@@ -109,6 +113,25 @@ internal static class ExtensionBindingCompiler
             if (binding.Bind(catalog) is { } boundHook)
             {
                 bound.Add(boundHook);
+            }
+
+            problems.AddRange(binding.Problems);
+        }
+
+        return bound;
+    }
+
+    private static List<BoundReadExtension> BindReads(
+        ExtensionRegistry registry, PolicyCatalog catalog, IServiceProviderIsService services, List<ExtensionProblem> problems)
+    {
+        var relational = WriteHookBinding.Relational(services);
+        var bound = new List<BoundReadExtension>();
+        foreach (var read in registry.ReadExtensions)
+        {
+            var binding = new ReadExtensionBinding(read).CheckRegistration(services, relational);
+            if (binding.Bind(catalog) is { } boundRead)
+            {
+                bound.Add(boundRead);
             }
 
             problems.AddRange(binding.Problems);
