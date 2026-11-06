@@ -7,9 +7,11 @@ using Microsoft.Extensions.Options;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Scheduling;
+using MMLib.Alvo.Tests.Expressions;
 using MMLib.Alvo.Tests.Extensions;
 
 using NSubstitute;
@@ -267,13 +269,24 @@ public sealed partial class OutboxDispatcherTests
     {
         var lifetime = Substitute.For<IHostApplicationLifetime>();
         lifetime.ApplicationStopping.Returns(stopping?.Token ?? CancellationToken.None);
-        return new(NoTimers(), dispatcher, deliveries ?? NoDeliveries(), lifetime);
+        return new(NoTimers(), NoSchedules(), dispatcher, deliveries ?? NoDeliveries(), lifetime);
     }
 
     /// <summary>A timer pump with no timer store, whose manual round answers an empty result.</summary>
     private static TimerPump NoTimers() => new(
         store: null, new AlvoBootState(), new PolicyCatalogProvider(), Options.Create(new AlvoEventOptions()), TimeProvider.System,
         NullLogger<TimerPump>.Instance);
+
+    /// <summary>A schedule pump with no timer store, whose manual round answers an empty result.</summary>
+    private static SchedulePump NoSchedules() => new(
+        store: null,
+        new ExtensionBinder(ExtensionRegistry.Empty, CelFixtures.Compiler, HandlerCatalog.EveryService(), NullLogger<ExtensionBinder>.Instance),
+        new ScheduleRuns(tenants: null, TimeProvider.System),
+        new AlvoBootState(),
+        new PolicyCatalogProvider(),
+        Options.Create(new AlvoEventOptions()),
+        TimeProvider.System,
+        NullLogger<SchedulePump>.Instance);
 
     /// <summary>A delivery dispatcher with one pending delivery whose handler waits for its token.</summary>
     private async Task<DeliveryDispatcher> BlockingDeliveryAsync(FakeDeliveryStore store)

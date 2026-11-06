@@ -4,7 +4,7 @@ namespace MMLib.Alvo.Events;
 
 /// <summary>
 /// The one door through which Alvo mints the events of its reserved <c>alvo</c> namespace — a command's completion
-/// (and, later, a schedule's run). A host cannot reach it: the custom-event door refuses the namespace. Its partition key
+/// and a schedule's run. A host cannot reach it: the custom-event door refuses the namespace. Its partition key
 /// carries the tenant, so one tenant's completions never queue behind another's in an ordered partition (Ruling 48).
 /// </summary>
 internal static class AlvoFrameworkEvent

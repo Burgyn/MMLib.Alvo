@@ -85,8 +85,6 @@ internal sealed class ExtensionBindings
     /// <summary>The commands bound to this catalog, by name.</summary>
     internal IReadOnlyDictionary<string, BoundCommand> Commands { get; }
 
-    internal TimeSpan LongestTimeout => Handlers.Count == 0 ? TimeSpan.Zero : Handlers.Max(handler => handler.Settings.Timeout);
-
     internal BoundHandler? Handler(string id) => _byId.GetValueOrDefault(id);
 
     /// <summary>

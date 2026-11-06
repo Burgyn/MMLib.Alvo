@@ -12,7 +12,8 @@ namespace MMLib.Alvo.Events.Internal;
 
 /// <summary>
 /// Claims and runs event-handler deliveries: the lane heads of the handlers this process registers, at most
-/// <see cref="AlvoDeliveryOptions.MaxConcurrency"/> at once (spec 2026-10-14 §4.8).
+/// <see cref="AlvoDeliveryOptions.MaxConcurrency"/> at once, and beside them the runs of its scheduled jobs and data
+/// migrations from a pool of their own, at most <see cref="AlvoDeliveryOptions.MaxJobConcurrency"/> at once (spec 2026-10-14 §4.8).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -28,7 +29,7 @@ namespace MMLib.Alvo.Events.Internal;
 /// round that succeeds). A delivery it could not answer for returns when its lease ends.
 /// </para>
 /// <para>
-/// <b>The lease is the batch's</b>: one claim takes a batch under one lease of the longest registered timeout +
+/// <b>The lease is the batch's</b>: one claim takes a batch of one pool under one lease of that pool's longest timeout +
 /// <see cref="DeliveryRunner.LeaseGrace"/> + <see cref="DeliveryRunner.SettleGrace"/>, never shorter than any row needs, so
 /// the runner's answer — which can come the timeout and the settle margin after the attempt started — lands inside it.
 /// </para>
@@ -101,19 +102,29 @@ internal sealed class DeliveryDispatcher(
         while (claimedInRound < events.Value.BatchSize)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var slots = Math.Min(deliveries.Value.MaxConcurrency, events.Value.BatchSize - claimedInRound);
-            var (claimant, claimed) = await ClaimAsync(bindings, slots, cancellationToken).ConfigureAwait(false);
-            if (claimed.Count == 0)
+            var claims = await ClaimBothPoolsAsync(bindings, events.Value.BatchSize - claimedInRound, cancellationToken).ConfigureAwait(false);
+            var claimed = claims.Sum(claim => claim.Deliveries.Count);
+            if (claimed == 0)
             {
                 break;
             }
 
-            claimedInRound += claimed.Count;
-            await Task.WhenAll(claimed.Select(delivery => RunContainedAsync(delivery, bindings, round, claimant, cancellationToken))).ConfigureAwait(false);
+            claimedInRound += claimed;
+            await Task.WhenAll(claims.SelectMany(claim => Start(claim, bindings, round, cancellationToken))).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
         }
 
         return round.Result(claimedInRound);
+    }
+
+    /// <summary>One manual iteration's claims: the handler pool's free slots, then the job pool's, within what the round has left.</summary>
+    private async Task<IReadOnlyList<PoolClaim>> ClaimBothPoolsAsync(ExtensionBindings bindings, int left, CancellationToken ct)
+    {
+        var handlers = await ClaimAsync(Pool(bindings, jobs: false), Math.Min(deliveries.Value.MaxConcurrency, left), ct).ConfigureAwait(false);
+        var jobs = await ClaimAsync(
+            Pool(bindings, jobs: true), Math.Min(deliveries.Value.MaxJobConcurrency, left - handlers.Deliveries.Count), ct).ConfigureAwait(false);
+
+        return [handlers, jobs];
     }
 
     /// <summary>
@@ -186,38 +197,40 @@ internal sealed class DeliveryDispatcher(
             return;
         }
 
-        var running = new List<Task>();
+        var running = new RunningPools();
         var failing = TimeSpan.Zero;
         try
         {
             while (!stop.IsCancellationRequested)
             {
-                running.RemoveAll(task => task.IsCompleted);
+                running.RemoveCompleted();
                 failing = await TickAsync(running, failing, stop).ConfigureAwait(false);
             }
         }
         finally
         {
-            await Task.WhenAll(running).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            await Task.WhenAll(running.All).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         }
     }
 
     /// <summary>
-    /// Claims the free slots and starts what it claimed; idles on the poll interval or the first finishing delivery when it
-    /// claimed nothing, and waits a growing backoff when the round failed.
+    /// Claims each pool's free slots and starts what it claimed; idles on the poll interval or the first finishing delivery when
+    /// it claimed nothing, and waits a growing backoff when the round failed.
     /// </summary>
     /// <returns>The backoff the next round starts from; <see cref="TimeSpan.Zero"/> after a round that succeeded.</returns>
-    private async Task<TimeSpan> TickAsync(List<Task> running, TimeSpan failing, CancellationToken stop)
+    private async Task<TimeSpan> TickAsync(RunningPools running, TimeSpan failing, CancellationToken stop)
     {
         try
         {
             await EnsureStoreAsync(stop).ConfigureAwait(false);
             var bindings = binder.For(catalogs.Current!);
-            var (claimant, claimed) = await ClaimAsync(bindings, deliveries.Value.MaxConcurrency - running.Count, stop).ConfigureAwait(false);
-            running.AddRange(claimed.Select(delivery => RunContainedAsync(delivery, bindings, round: null, claimant, stop)));
-            if (claimed.Count == 0)
+            var handlers = await ClaimAsync(Pool(bindings, jobs: false), deliveries.Value.MaxConcurrency - running.Handlers.Count, stop).ConfigureAwait(false);
+            running.Handlers.AddRange(Start(handlers, bindings, round: null, stop));
+            var jobs = await ClaimAsync(Pool(bindings, jobs: true), deliveries.Value.MaxJobConcurrency - running.Jobs.Count, stop).ConfigureAwait(false);
+            running.Jobs.AddRange(Start(jobs, bindings, round: null, stop));
+            if (handlers.Deliveries.Count + jobs.Deliveries.Count == 0)
             {
-                await Task.WhenAny([Task.Delay(events.Value.PollInterval, time, stop), .. running]).ConfigureAwait(false);
+                await Task.WhenAny([Task.Delay(events.Value.PollInterval, time, stop), .. running.All]).ConfigureAwait(false);
             }
 
             return TimeSpan.Zero;
@@ -246,31 +259,41 @@ internal sealed class DeliveryDispatcher(
     }
 
     /// <summary>
-    /// Claims up to <paramref name="batchSize"/> lane heads of the bound handlers that are not stood down, under a claimant
+    /// The handlers of one pool: event handlers, or jobs — scheduled jobs and data migrations, which run beside the handlers
+    /// up to <see cref="AlvoDeliveryOptions.MaxJobConcurrency"/>, so a long job never takes a handler's slot.
+    /// </summary>
+    private static List<BoundHandler> Pool(ExtensionBindings bindings, bool jobs) =>
+        [.. bindings.Handlers.Where(handler => handler.Registration.Job is not null == jobs)];
+
+    /// <summary>
+    /// Claims up to <paramref name="batchSize"/> lane heads of one pool's handlers that are not stood down, under a claimant
     /// minted for this one claim — the process prefix and a fresh guid — which every answer for what it took carries: a
     /// redeliver restarts a delivery's attempt count, so only the claimant tells a stale claim's answer from the current one.
     /// </summary>
-    private async Task<(string Claimant, IReadOnlyList<ClaimedDelivery> Claimed)> ClaimAsync(
-        ExtensionBindings bindings, int batchSize, CancellationToken ct)
+    private async Task<PoolClaim> ClaimAsync(List<BoundHandler> pool, int batchSize, CancellationToken ct)
     {
-        var claimable = bindings.Handlers.Where(handler => !abandoned.StoodDown(handler.Id)).ToList();
+        var claimable = pool.Where(handler => !abandoned.StoodDown(handler.Id)).ToList();
         var claimant = $"{_claimant}:{Guid.NewGuid():N}";
 
         return batchSize <= 0 || claimable.Count == 0
-            ? (claimant, [])
-            : (claimant, await store.ClaimAsync(ClaimOf(bindings, claimable, batchSize, claimant), ct).ConfigureAwait(false));
+            ? new(claimant, [])
+            : new(claimant, await store.ClaimAsync(ClaimOf(claimable, batchSize, claimant), ct).ConfigureAwait(false));
     }
 
-    private DeliveryClaim ClaimOf(ExtensionBindings bindings, List<BoundHandler> claimable, int batchSize, string claimant) => new()
+    /// <summary>The claim of one pool, its lease the longest timeout of that pool's handlers plus the runner's margins.</summary>
+    private DeliveryClaim ClaimOf(List<BoundHandler> claimable, int batchSize, string claimant) => new()
     {
         Claimant = claimant,
         Ordered = [.. claimable.Where(handler => handler.Settings.Ordering is AlvoOrdering.PerRecord).Select(handler => handler.Id)],
         Unordered = [.. claimable.Where(handler => handler.Settings.Ordering is AlvoOrdering.None).Select(handler => handler.Id)],
         BatchSize = batchSize,
-        Lease = bindings.LongestTimeout + DeliveryRunner.LeaseGrace + runner.SettleGrace,
+        Lease = claimable.Max(handler => handler.Settings.Timeout) + DeliveryRunner.LeaseGrace + runner.SettleGrace,
         OutboxMaxAttempts = events.Value.MaxAttempts,
         OutboxClaimLease = events.Value.ClaimLease,
     };
+
+    private IEnumerable<Task> Start(PoolClaim claim, ExtensionBindings bindings, DrainRound? round, CancellationToken stop) =>
+        [.. claim.Deliveries.Select(delivery => RunContainedAsync(delivery, bindings, round, claim.Claimant, stop))];
 
     /// <summary>Runs one delivery, containing whatever the runner throws so neither its round nor the loop is affected.</summary>
     private async Task RunContainedAsync(
@@ -298,4 +321,23 @@ internal sealed class DeliveryDispatcher(
     }
 
     private static string TypeOf(Exception failure) => failure.GetType().FullName ?? failure.GetType().Name;
+
+    /// <summary>What one claim of one pool took, and the claimant every answer for it carries.</summary>
+    private sealed record PoolClaim(string Claimant, IReadOnlyList<ClaimedDelivery> Deliveries);
+
+    /// <summary>The loop's deliveries still running, per pool, so each pool claims only its own free slots.</summary>
+    private sealed class RunningPools
+    {
+        internal List<Task> Handlers { get; } = [];
+
+        internal List<Task> Jobs { get; } = [];
+
+        internal IEnumerable<Task> All => [.. Handlers, .. Jobs];
+
+        internal void RemoveCompleted()
+        {
+            Handlers.RemoveAll(task => task.IsCompleted);
+            Jobs.RemoveAll(task => task.IsCompleted);
+        }
+    }
 }
