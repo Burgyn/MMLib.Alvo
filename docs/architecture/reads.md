@@ -45,8 +45,11 @@ cannot hold is `invalid-filter` at compose time rather than a bind-time crash.
 ## Who is narrowed
 
 Every caller whose `ActorKind` is not `AlvoActorKind.System` (D2, the `AlvoTransactionOptions` precedent) — inside a
-`TransactAsync` unit too. An event handler running as the system and every `AsSystem()` session are not narrowed; a host
-that hands Alvo a hand-built system context skips its own narrowing, by design.
+`TransactAsync` unit too. An event handler running as the system and every `AsSystem()` session are not narrowed. A
+handler running as the event's actor reads as that actor (`EventActor.Of`): narrowed for a user, an API key or an
+anonymous change, but not for an event recorded with auth type `system`, whose actor is `AlvoActorKind.System`. A host
+that hands Alvo a hand-built system context skips its own narrowing, by design. Enrichers run for every caller, the
+system included.
 
 ## Fail closed
 
@@ -68,7 +71,7 @@ Inside a unit the failure also poisons it (`AlvoFlow.Unit?.Blame(failure)`, the 
 a failed unit. A write's echo is enriched inside the write's own transaction, so an echo that fails rolls the write
 back — no committed write answers 500. A refusal the enricher catches (`invalid-hide`, `invalid-set`) still fails the
 read with its reason. A narrowing may name a field the caller's policy hides (D5) — it is host-authored, as a rule's `USING`
-is — and the runner logs `NarrowingNamesHiddenField` (Warning, ids only) once per extension and field, at first use,
+is — and the runner logs `NarrowingNamesHiddenField` (Warning, the extension id and the field name — never a value) once per extension and field, at first use,
 because the filter exists only at run time.
 
 ## A view, not a boundary

@@ -50,15 +50,17 @@ as the rules made it. The untyped form returns the `AlvoFilter` itself:
 - **ANDed after the rules.** The filter is its own term in the statement, beside the rules' `USING` and the tenant scope
   and never inside the caller's own `filter`: it can only remove rows the rules allow, never add one.
 - **Never for the system.** A caller whose `ActorKind` is the system is not narrowed — an event handler that runs
-  as the system, and every `AsSystem()` session, see every row the rules give the system. Every other caller is
-  narrowed — a handler running as the event's actor too, and a read inside a transaction unit.
+  as the system, and every `AsSystem()` session, see every row the rules give the system. A handler running as the
+  event's actor is narrowed like that actor — unless the event was itself recorded as the system's, when its actor is
+  the system and is not narrowed. Every other caller is narrowed, inside a transaction unit too. Enrichers are
+  different: they run for every caller, the system included.
 - **Writes are not narrowed.** An update, a replace or a delete reaches a row the narrowing hides from its caller's list.
   To stop a caller writing a row, say so in the entity's `update` and `delete` rules.
 
 :::caution[A narrowing may name a hidden field]
 A narrowing is host code, not caller input, so like a rule's `USING` it may filter on a field the caller's policy
 hides. Its effect is observable: which rows survive tells the caller something about that field. Alvo logs
-`NarrowingNamesHiddenField` (a warning, ids only) the first time each narrowing does so.
+`NarrowingNamesHiddenField` (a warning naming the extension and the field, never a value) the first time each narrowing does so.
 :::
 
 :::danger[A narrowing is a view, not a boundary]
@@ -74,7 +76,8 @@ answers with its id alone. What a caller must not read or write belongs in `rule
 ```
 
 A `virtual` field has no column. It appears in every row a caller may read and selected — `null` until an enricher
-fills it — and it is read-only everywhere: a create or a patch naming it answers 422 `virtual`, and it is never in a
+fills it — and it is read-only everywhere: a create or a patch naming it answers 422 `virtual` (or `unknown-field`, when the caller's policy hides the field,
+so a write cannot probe for it), and it is never in a
 `filter`, a sort, a `select`, a CEL expression, an index or an event's images (422 `virtual-field` on a query, a refusal
 at apply in the descriptor). OpenAPI marks it `readOnly`.
 
