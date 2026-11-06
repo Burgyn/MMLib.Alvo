@@ -5,6 +5,7 @@ using MMLib.Alvo.Events;
 using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Hooks;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Reads;
 
 using System.Net.Http;
 
@@ -72,4 +73,85 @@ public sealed class ExtensionBootRefusalTests
         refusal.Message.ShouldContain("'http'");
         refusal.Message.ShouldNotContain("/provider", customMessage: "the real SQLite composition is relational");
     }
+
+    [Fact]
+    public async Task A_narrowing_depending_on_IAlvoData_refuses_boot_naming_the_parameter()
+    {
+        var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(() => AlvoTestHost.StartAsync(alvo =>
+        {
+            alvo.FromDescriptor(ReadsDesk);
+            alvo.Entity("notes", n => n.Narrow<DataReadingNarrowing>("peeking-narrowing"));
+        }, cancellationToken: Ct));
+
+        refusal.Message.ShouldContain("extensions/peeking-narrowing/dependencies");
+        refusal.Message.ShouldContain("'data'");
+    }
+
+    [Fact]
+    public async Task A_narrowing_on_every_entity_refuses_boot()
+    {
+        var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(() => AlvoTestHost.StartAsync(alvo =>
+        {
+            alvo.FromDescriptor(ReadsDesk);
+            alvo.Entity("*", every => every.Narrow("everywhere", (QueryNarrowing _) => null));
+        }, cancellationToken: Ct));
+
+        refusal.Message.ShouldContain("'everywhere' (narrowing) at extensions/everywhere/entity");
+    }
+
+    [Fact]
+    public async Task A_narrowing_on_an_unknown_entity_refuses_boot_with_a_suggestion()
+    {
+        var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(() => AlvoTestHost.StartAsync(alvo =>
+        {
+            alvo.FromDescriptor(ReadsDesk);
+            alvo.Entity("note", n => n.Narrow("misspelled-narrowing", (QueryNarrowing _) => null));
+        }, cancellationToken: Ct));
+
+        refusal.Message.ShouldContain("'misspelled-narrowing' (narrowing) at extensions/misspelled-narrowing/entity");
+        refusal.FixSuggestion.Split(Environment.NewLine)
+            .Single(line => line.StartsWith("'misspelled-narrowing':", StringComparison.Ordinal))
+            .ShouldContain("Did you mean 'notes'?");
+    }
+
+    [Fact]
+    public async Task An_enricher_depending_on_IAlvoData_refuses_boot_naming_the_parameter()
+    {
+        var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(() => AlvoTestHost.StartAsync(alvo =>
+        {
+            alvo.FromDescriptor(ReadsDesk);
+            alvo.Entity("notes", n => n.Enrich<DataReadingEnricher>("peeking-enricher"));
+        }, cancellationToken: Ct));
+
+        refusal.Message.ShouldContain("'peeking-enricher'");
+        refusal.Message.ShouldContain("extensions/peeking-enricher/dependencies");
+    }
+
+    [Fact]
+    public async Task An_enricher_on_every_entity_refuses_boot()
+    {
+        var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(() => AlvoTestHost.StartAsync(alvo =>
+        {
+            alvo.FromDescriptor(ReadsDesk);
+            alvo.Entity("*", every => every.Enrich("everywhere", (Enrich<AlvoRecord> _) => { }));
+        }, cancellationToken: Ct));
+
+        refusal.Message.ShouldContain("'everywhere' (enricher) at extensions/everywhere/entity");
+    }
+
+    private static string ReadsDesk => Path.Combine(AppContext.BaseDirectory, "descriptors", "reads-desk.alvo.json");
+}
+
+public sealed class DataReadingNarrowing(IAlvoData data) : IQueryNarrowing
+{
+    public AlvoFilter? Narrow(QueryNarrowing query)
+    {
+        _ = data;
+        return null;
+    }
+}
+
+public sealed class DataReadingEnricher(IAlvoData data) : IRecordEnricher<AlvoRecord>
+{
+    public void Enrich(Enrich<AlvoRecord> row) => row.SetVirtual("display", data.GetType().Name);
 }

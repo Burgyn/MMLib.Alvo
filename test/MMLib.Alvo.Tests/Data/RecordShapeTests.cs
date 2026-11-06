@@ -189,6 +189,20 @@ public sealed class RecordShapeTests
             .Message.ShouldContain("leaves out of its event images (events.exclude)");
     }
 
+    [Fact]
+    public void A_non_nullable_property_mapping_a_virtual_field_is_refused_for_a_hook()
+    {
+        var entity = TypedFixtures.OrdersSchema with
+        {
+            Fields = [.. TypedFixtures.OrdersSchema.Fields.Select(field => field.Name == "note" ? field with { IsVirtual = true, Nullable = false } : field)],
+        };
+
+        var problem = ShapeMapping.Problems(RecordShape.Of(typeof(Order)), entity, fromEventImages: false).ShouldHaveSingleItem();
+
+        problem.Message.ShouldBe("'note' is virtual and holds nothing in a write or an event, but Order.Note cannot hold null.");
+        problem.Fix.ShouldBe("Declare Order.Note as String?, or remove the property.");
+    }
+
     private static MappedProperty Mapped(RecordShape shape, string property) =>
         shape.Properties.Single(candidate => candidate.Property.Name == property);
 

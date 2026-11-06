@@ -60,6 +60,27 @@ internal sealed class IndexFilterSql
             : throw Refused(entity, index, result.Errors.Select(error => $"does not compile: {error.Message}"));
     }
 
+    /// <summary>
+    /// The fields <paramref name="index"/>'s <c>where</c> reads, empty when it declares none, or <see langword="null"/> when
+    /// it does not compile or holds a node the walk does not know — so a caller deciding whether its columns exist yet is never
+    /// told a partial answer.
+    /// </summary>
+    /// <param name="entity">The entity the index belongs to.</param>
+    /// <param name="index">One of its indexes.</param>
+    internal IReadOnlySet<string>? Reads(EntitySchema entity, IndexSchema index)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        ArgumentNullException.ThrowIfNull(index);
+        if (index.Where is null)
+        {
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        var result = _compiler.Compile(index.Where, CelProfile.Rule, entity);
+        var reads = new HashSet<string>(StringComparer.Ordinal);
+        return result.IsSuccess && CheckConstraintSql.Collect(result.Expression!.Root, reads) ? reads : null;
+    }
+
     /// <summary>The JSON pointer of <paramref name="entity"/>'s index <paramref name="index"/>'s <c>where</c>.</summary>
     /// <param name="entity">The declaring entity.</param>
     /// <param name="index">One of its indexes.</param>

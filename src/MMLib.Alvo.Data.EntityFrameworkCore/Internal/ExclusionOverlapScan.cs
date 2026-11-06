@@ -20,14 +20,16 @@ internal static class ExclusionOverlapScan
 
     /// <summary>
     /// The added exclusions that can be counted against their table as it stands: the table exists under that name, no
-    /// declared rename touches it, and it holds every column the exclusion compares. Any other is guarded by the apply alone.
+    /// declared rename touches it, and it holds every column the exclusion compares and every field its <c>where</c> reads —
+    /// one the same plan adds cannot be counted yet (review I1). Any other is guarded by the apply alone.
     /// </summary>
     /// <param name="current">The schema the database holds.</param>
     /// <param name="prePass">The rename pre-pass, whose released exclusions name the renamed entities.</param>
     /// <param name="added">The exclusions the plan adds.</param>
+    /// <param name="filters">Learns which fields an exclusion's <c>where</c> reads.</param>
     internal static IReadOnlyList<ExclusionPlan.Declared> Countable(
-        SchemaModel current, RenamePrePass.Result prePass, IReadOnlyList<ExclusionPlan.Declared> added) =>
-        [.. added.Where(declared => IsCountable(declared.Definition, current, prePass))];
+        SchemaModel current, RenamePrePass.Result prePass, IReadOnlyList<ExclusionPlan.Declared> added, IndexFilterSql? filters) =>
+        [.. added.Where(declared => IsCountable(declared, current, prePass, filters))];
 
     /// <summary>The number of forbidden pairs among the rows <paramref name="definition"/>'s table holds.</summary>
     /// <param name="connection">An open connection to the database the plan is for.</param>
@@ -71,10 +73,22 @@ internal static class ExclusionOverlapScan
         Fix,
         DescriptorValidationSeverity.Error);
 
-    private static bool IsCountable(ExclusionConstraintDefinition definition, SchemaModel current, RenamePrePass.Result prePass) =>
-        current.Entities.FirstOrDefault(entity => string.Equals(entity.Name, definition.Table, StringComparison.Ordinal)) is { } stored
+    private static bool IsCountable(
+        ExclusionPlan.Declared declared, SchemaModel current, RenamePrePass.Result prePass, IndexFilterSql? filters) =>
+        current.Entities.FirstOrDefault(entity => string.Equals(entity.Name, declared.Definition.Table, StringComparison.Ordinal)) is { } stored
         && !prePass.ReleasedExclusions.Any(released => string.Equals(released.Entity.Name, stored.Name, StringComparison.Ordinal))
         && prePass.Renames.All(rename => rename.Change.Entity != stored.Name)
-        && definition.EqualityColumns.Append(definition.StartColumn).Append(definition.EndColumn)
-            .All(column => stored.Fields.Any(field => string.Equals(field.Name, column, StringComparison.Ordinal)));
+        && Reads(declared, filters) is { } reads
+        && reads.All(column => stored.Fields.Any(field => string.Equals(field.Name, column, StringComparison.Ordinal)));
+
+    private static IEnumerable<string>? Reads(ExclusionPlan.Declared declared, IndexFilterSql? filters)
+    {
+        var compared = declared.Definition.EqualityColumns.Append(declared.Definition.StartColumn).Append(declared.Definition.EndColumn);
+        if (declared.Index.Where is null)
+        {
+            return compared;
+        }
+
+        return filters?.Reads(declared.Entity, declared.Index) is { } filtered ? compared.Concat(filtered) : null;
+    }
 }

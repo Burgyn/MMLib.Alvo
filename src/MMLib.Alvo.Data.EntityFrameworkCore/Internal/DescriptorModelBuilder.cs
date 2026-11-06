@@ -58,7 +58,7 @@ internal static class DescriptorModelBuilder
         var entityBuilder = builder.Entity(entity.Name);
         entityBuilder.ToTable(entity.Name, table => ConfigureChecks(table, entity, checks));
 
-        foreach (var field in entity.Fields)
+        foreach (var field in entity.Fields.Where(field => !field.IsVirtual))
         {
             ConfigureField(entityBuilder, entity, field, computed);
         }

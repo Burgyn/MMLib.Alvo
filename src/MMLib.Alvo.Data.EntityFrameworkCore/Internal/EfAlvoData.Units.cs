@@ -274,13 +274,35 @@ internal sealed partial class EfAlvoData
     }
 
     /// <summary>One framework event (a command's completion) written into <paramref name="unit"/>'s transaction.</summary>
-    internal Task PublishFrameworkInUnitAsync(WriteUnit unit, AlvoEvent @event, CancellationToken cancellationToken)
+    internal Task PublishFrameworkInUnitAsync(WriteUnit unit, AlvoFrameworkEnvelope @event, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(@event);
         return unit.RunAsync(
             token => InUnitAsync(
-                unit, (connection, transaction, ct) => OutboxTable.InsertAsync(connection, transaction, _outboxTable, @event, ct), token),
+                unit, (connection, transaction, ct) => OutboxTable.InsertAsync(connection, transaction, _outboxTable, @event.Envelope, ct), token),
             cancellationToken);
+    }
+
+    /// <summary>
+    /// One timer-store write inside <paramref name="unit"/>'s transaction, under a savepoint of its own: the one store write
+    /// that joins the unit on the flow rather than refusing it, so a unit that rolls back takes the timer with it.
+    /// </summary>
+    internal Task<T> InFlowUnitAsync<T>(
+        WriteUnit unit, Func<DbConnection, DbTransaction, CancellationToken, Task<T>> write, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(write);
+        return unit.RunAsync(token => WrittenInUnitAsync(unit, write, token), cancellationToken);
+    }
+
+    private async Task<T> WrittenInUnitAsync<T>(
+        WriteUnit unit, Func<DbConnection, DbTransaction, CancellationToken, Task<T>> write, CancellationToken cancellationToken)
+    {
+        var result = default(T)!;
+        await InUnitAsync(
+            unit, async (connection, transaction, ct) => result = await write(connection, transaction, ct).ConfigureAwait(false), cancellationToken)
+            .ConfigureAwait(false);
+
+        return result;
     }
 
     /// <summary>

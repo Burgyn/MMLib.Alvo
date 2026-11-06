@@ -351,6 +351,24 @@ public class AlvoExceptionHandlerTests
         logs.Records.ShouldNotContain(LogLevel.Error, "the runner logged the hook's failure where it happened");
     }
 
+    [Fact]
+    public async Task A_read_hook_failure_names_every_extension_and_says_the_read_answered_nothing()
+    {
+        var logs = new RecordingLoggerProvider();
+        var context = Context(aborted: false, _alvoEndpoint);
+
+        await Handle(logs, context, new InvalidOperationException("wrapped", HookFailedException.OfRead(["north-only", "mine-only"], HookFailedException.InvalidFilter)));
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status500InternalServerError);
+        context.Response.Body.Position = 0;
+        var body = await new StreamReader(context.Response.Body).ReadToEndAsync(TestContext.Current.CancellationToken);
+        body.ShouldContain("errors/hook-failed");
+        body.ShouldContain("The read extension 'north-only', 'mine-only' failed (invalid-filter), so the read answered nothing. Its own error is in the server log.");
+        body.ShouldContain("\"extensions\":[\"north-only\",\"mine-only\"]");
+        body.ShouldContain("\"reason\":\"invalid-filter\"");
+        logs.Records.ShouldNotContain(LogLevel.Error, "the runner logged the extension's failure where it happened");
+    }
+
     /// <summary>
     /// Invokes the handler exactly the way <c>ExceptionHandlerMiddleware</c> does: the matched endpoint
     /// recorded onto <see cref="IExceptionHandlerFeature"/>, and then cleared off the context.

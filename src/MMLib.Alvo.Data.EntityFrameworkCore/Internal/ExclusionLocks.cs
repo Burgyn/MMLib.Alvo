@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore.Storage;
 using MMLib.Alvo.Schema;
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -21,7 +22,14 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// </para>
 /// <para>
 /// <b>An engine whose dialect answers no lock statement</b> — SQLite, whose single writer already sees every committed row —
-/// takes nothing. A key is a hash, so two resources may share one and queue needlessly; never the reverse.
+/// takes nothing, and the dialect is asked before any key is hashed. A key is a hash, so two resources may share one and
+/// queue needlessly; never the reverse.
+/// </para>
+/// <para>
+/// <b>Order, and its one residual.</b> Every writer takes its row lock and sequence counters before these keys. A parent's
+/// host <c>beforeUpdate</c> hook that creates a child booking holds the parent row and then waits for a key, while a plain
+/// booking create holds the key and then locks the parent in its rollup recompute — a deadlock D3 introduces for that rare
+/// pair, which the engine breaks by failing one side (review M1, listed for the stack-level security review).
 /// </para>
 /// </remarks>
 internal static class ExclusionLocks
@@ -36,19 +44,31 @@ internal static class ExclusionLocks
         AlvoDataContext db, IAlvoSqlDialect dialect, EntitySchema schema, IEnumerable<Func<string, object?>> rows,
         CancellationToken ct)
     {
-        if (!schema.Indexes.Any(index => index.Exclude is not null))
+        if (!schema.Indexes.Any(index => index.Exclude is not null) || dialect.TransactionLockStatement([Marker(0)], exclusive: true) is null)
         {
             return;
         }
 
         var keys = Keys(schema, rows).Order().ToList();
-        if (keys.Count == 0 || dialect.TransactionLockStatement([.. keys.Select((_, i) => $"@xk{i}")], exclusive: true) is not { } sql)
+        if (keys.Count > 0)
         {
-            return;
+            var sql = dialect.TransactionLockStatement([.. keys.Select((_, i) => Marker(i))], exclusive: true)!;
+            await ExecuteAsync(db, sql, keys, ct).ConfigureAwait(false);
         }
-
-        await ExecuteAsync(db, sql, keys, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// The lock key one row takes on one exclusion: SHA-256 over the exclusion's name and the row's equality values, each in a
+    /// spelling that does not depend on how the value was read — a create's candidate and an update's merged post-image of
+    /// one resource give one key.
+    /// </summary>
+    /// <param name="schema">The entity being written.</param>
+    /// <param name="index">An index of <paramref name="schema"/> declaring an exclusion.</param>
+    /// <param name="row">The row, as a lookup of a column's value.</param>
+    internal static long KeyFor(EntitySchema schema, IndexSchema index, Func<string, object?> row) =>
+        Key(IndexNames.Exclusion(schema, index), DescriptorModelBuilder.UniqueColumns(schema, index.Fields), row);
+
+    private static string Marker(int position) => $"@xk{position}";
 
     private static async Task ExecuteAsync(AlvoDataContext db, string sql, List<long> keys, CancellationToken ct)
     {
@@ -60,7 +80,7 @@ internal static class ExclusionLocks
             command.CommandText = sql;
             for (var i = 0; i < keys.Count; i++)
             {
-                RelationalSqlBatch.AddParameter(command, $"@xk{i}", keys[i]);
+                RelationalSqlBatch.AddParameter(command, Marker(i), keys[i]);
             }
 
             await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
@@ -69,12 +89,16 @@ internal static class ExclusionLocks
 
     private static IEnumerable<long> Keys(EntitySchema schema, IEnumerable<Func<string, object?>> rows) =>
         (from index in schema.Indexes.Where(index => index.Exclude is not null)
-         let name = IndexNames.Exclusion(schema, index)
-         let columns = DescriptorModelBuilder.UniqueColumns(schema, index.Fields)
          from row in rows
-         select Key(name, columns, row)).Distinct();
+         select KeyFor(schema, index, row)).Distinct();
 
     private static long Key(string name, IEnumerable<string> columns, Func<string, object?> row) =>
         BinaryPrimitives.ReadInt64BigEndian(SHA256.HashData(Encoding.UTF8.GetBytes(
-            name + "|" + string.Join("|", columns.Select(column => row(column) is { } value ? SequenceFormat.KeyText(value) : string.Empty)))));
+            name + "|" + string.Join("|", columns.Select(column => row(column) is { } value ? LockText(value) : string.Empty)))));
+
+    private static string LockText(object value) => value switch
+    {
+        decimal number => number.ToString("G29", CultureInfo.InvariantCulture),
+        _ => SequenceFormat.KeyText(value),
+    };
 }

@@ -735,6 +735,11 @@
           "$ref": "#/$defs/boolOrCel",
           "description": "Field cannot be modified via the API. true = always read-only; a CEL expression over @user makes it conditional."
         },
+        "virtual": {
+          "type": "boolean",
+          "default": false,
+          "description": "A field with no column: an embedded host's enricher fills it when a record is read (null otherwise). Read-only; refused in writes, in every CEL expression, and in filter/sort/select. Cannot be combined with computed, rollup, default, required, unique, index, validation, renamedFrom or type ref."
+        },
         "computed": {
           "$ref": "#/$defs/cel",
           "description": "Value derived from other fields of the SAME row (pure arithmetic/expression, deterministic, no side effects), e.g. unit_price * amount. May also reference this entity's rollup fields (the framework maintains the value). Field becomes read-only."

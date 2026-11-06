@@ -90,7 +90,8 @@ internal sealed class CheckConstraintSql
         return Collect(Compiled(entity, field, source).Root, reads) ? reads : null;
     }
 
-    private static bool Collect(CelNode node, HashSet<string> reads) => node switch
+    /// <summary>Adds every field <paramref name="node"/> reads to <paramref name="reads"/>; <see langword="false"/> for a node this walk does not know.</summary>
+    internal static bool Collect(CelNode node, HashSet<string> reads) => node switch
     {
         CelFieldRef fieldRef => Read(reads, fieldRef.FieldName),
         CelHas has => Read(reads, has.Field.FieldName),

@@ -4,6 +4,7 @@ using MMLib.Alvo.Commands.Internal;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.Management;
+using MMLib.Alvo.Reads.Internal;
 
 using System.Text.Json;
 
@@ -66,7 +67,7 @@ internal sealed class ExtensionCatalog(ExtensionRegistry registry, IOptions<Alvo
     private static ManagementExtension[] Describe(ExtensionRegistry registry, bool exposeTypeNames)
     {
         registry.Seal();
-        return [.. Handlers(registry, exposeTypeNames), .. Commands(registry, exposeTypeNames), .. WriteHooks(registry, exposeTypeNames)];
+        return [.. Handlers(registry, exposeTypeNames), .. Commands(registry, exposeTypeNames), .. WriteHooks(registry, exposeTypeNames), .. Reads(registry, exposeTypeNames)];
     }
 
     private static ManagementExtension[] Handlers(ExtensionRegistry registry, bool exposeTypeNames) =>
@@ -80,6 +81,9 @@ internal sealed class ExtensionCatalog(ExtensionRegistry registry, IOptions<Alvo
             .OrderBy(hook => hook.Settings.Order)
             .ThenBy(hook => hook.Sequence)
             .Select(hook => HookDescription.Of(hook, exposeTypeNames))];
+
+    private static ManagementExtension[] Reads(ExtensionRegistry registry, bool exposeTypeNames) =>
+        [.. registry.ReadExtensions.Select(read => ReadDescription.Of(read, exposeTypeNames))];
 
     private static ManagementExtension[] Commands(ExtensionRegistry registry, bool exposeTypeNames) =>
         [.. registry.Commands

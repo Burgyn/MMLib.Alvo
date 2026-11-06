@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Commands.Internal;
 using MMLib.Alvo.Hooks.Internal;
+using MMLib.Alvo.Reads.Internal;
 
 namespace MMLib.Alvo.Extensions.Internal;
 
@@ -19,6 +20,7 @@ internal sealed class ExtensionRegistry
         Handlers = [.. _registered.OfType<HandlerRegistration>()];
         Retired = [.. _registered.OfType<RetiredExtension>()];
         WriteHooks = [.. _registered.OfType<WriteHookRegistration>()];
+        ReadExtensions = [.. _registered.OfType<ReadExtensionRegistration>()];
     }
 
     internal static ExtensionRegistry Empty { get; } = new([]);
@@ -31,9 +33,12 @@ internal sealed class ExtensionRegistry
 
     internal IReadOnlyList<WriteHookRegistration> WriteHooks { get; }
 
+    /// <summary>Gets the narrowings and enrichers, in registration order — the order they run in.</summary>
+    internal IReadOnlyList<ReadExtensionRegistration> ReadExtensions { get; }
+
     internal IReadOnlyList<CommandRegistration> Commands => [.. All.OfType<CommandRegistration>()];
 
-    internal bool IsEmpty => Handlers.Count == 0 && Commands.Count == 0 && WriteHooks.Count == 0;
+    internal bool IsEmpty => Handlers.Count == 0 && Commands.Count == 0 && WriteHooks.Count == 0 && ReadExtensions.Count == 0;
 
     /// <summary>Ends mapping: a command mapped after the first binding throws (Rulings 13, 40).</summary>
     internal void Seal() => _commands?.Seal();

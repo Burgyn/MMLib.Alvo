@@ -40,6 +40,22 @@ public sealed class PostgreSqlExclusionPrerequisiteTests : IAsyncLifetime
             "Ask the database owner to run CREATE EXTENSION btree_gist; in this database (it ships with PostgreSQL and is trusted since PostgreSQL 13), then apply again.");
     }
 
+    /// <summary>
+    /// The right to create in the database is not enough: the extension lands in the schema first on the search path, and
+    /// since PostgreSQL 15 no role may create in <c>public</c> by default — so the probe refuses, rather than the apply
+    /// failing raw (review M2).
+    /// </summary>
+    [Fact]
+    public async Task With_the_database_right_but_not_the_schema_s_the_apply_is_refused_with_the_fix()
+    {
+        var migrator = await MigratorAsRoleAsync(mayCreateInTheDatabase: true, mayCreateInTheSchema: false);
+
+        var refusal = await Should.ThrowAsync<DescriptorValidationException>(
+            () => migrator.PlanAsync(new SchemaModel([]), Bookings, new MigrationOptions(), Ct));
+
+        refusal.Result.Errors.ShouldHaveSingleItem().Message.ShouldStartWith("Excluding overlaps needs PostgreSQL's btree_gist extension");
+    }
+
     [Fact]
     public async Task With_the_right_to_install_it_the_apply_installs_btree_gist_and_the_exclusion()
     {
@@ -53,7 +69,7 @@ public sealed class PostgreSqlExclusionPrerequisiteTests : IAsyncLifetime
         applied.Applied.ShouldBeTrue();
     }
 
-    private async Task<ISchemaMigrator> MigratorAsRoleAsync(bool mayCreateInTheDatabase)
+    private async Task<ISchemaMigrator> MigratorAsRoleAsync(bool mayCreateInTheDatabase, bool mayCreateInTheSchema = true)
     {
         Assert.SkipUnless(_fixture.Available, "Docker is unavailable on this platform, so the PostgreSQL engine cannot be started.");
         var name = $"alvo_noext_{Guid.NewGuid():N}"[..30];
@@ -64,7 +80,7 @@ public sealed class PostgreSqlExclusionPrerequisiteTests : IAsyncLifetime
             .. mayCreateInTheDatabase ? [$"GRANT CREATE ON DATABASE \"{name}\" TO \"{name}\""] : Array.Empty<string>(),
         ]);
         var database = new NpgsqlConnectionStringBuilder(_fixture.AdminConnectionString) { Database = name };
-        await ExecuteAsync(database.ToString(), [$"GRANT CREATE ON SCHEMA public TO \"{name}\""]);
+        await ExecuteAsync(database.ToString(), mayCreateInTheSchema ? [$"GRANT CREATE ON SCHEMA public TO \"{name}\""] : []);
 
         var asRole = new NpgsqlConnectionStringBuilder(database.ToString()) { Username = name, Password = Password };
         return _fixture.ServicesFor(asRole.ToString()).GetRequiredService<ISchemaMigrator>();

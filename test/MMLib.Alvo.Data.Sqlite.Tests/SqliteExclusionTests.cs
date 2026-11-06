@@ -30,5 +30,9 @@ public sealed class SqliteExclusionTests : AlvoDataExclusionTests, IAsyncDisposa
         OutOfBandStatement.ExecuteAsync(
             _host!.Services.GetRequiredService<AlvoDataContextFactory>(), sql, TestContext.Current.CancellationToken);
 
+    protected override async Task<IReadOnlyList<string>> ExclusionNamesAsync(string table) =>
+        [.. (await CatalogQuery.NamesAsync(_host!.Services, "SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = @table", table))
+            .Select(trigger => trigger[..^2]).Distinct()];
+
     public ValueTask DisposeAsync() => _fixture.DisposeAsync();
 }

@@ -41,4 +41,18 @@ public enum AlvoExtensionKind
     /// <summary>An after-delete hook: host C# run inside a delete's transaction after the row is removed.</summary>
     [JsonStringEnumMemberName("afterDelete")]
     AfterDelete = 6,
+
+    /// <summary>
+    /// A query narrowing: host C# whose filter is ANDed into the SQL of every non-system list, get and count of an entity; it
+    /// can only remove rows from what the rules allow.
+    /// </summary>
+    [JsonStringEnumMemberName("narrowing")]
+    Narrowing = 7,
+
+    /// <summary>
+    /// A record enricher: host C# run on every row a read or a write's echo returns, after the caller's rules and masks; it
+    /// can only hide a field or fill a field the descriptor declares virtual.
+    /// </summary>
+    [JsonStringEnumMemberName("enricher")]
+    Enricher = 8,
 }

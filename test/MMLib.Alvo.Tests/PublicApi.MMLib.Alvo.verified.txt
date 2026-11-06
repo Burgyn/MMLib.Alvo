@@ -351,6 +351,12 @@ namespace MMLib.Alvo.Extensions
         public MMLib.Alvo.Extensions.AlvoEntityBuilder BeforeWrite(string id, System.Delegate hook, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null) { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder BeforeWrite<THook>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
             where THook :  class, MMLib.Alvo.Hooks.IBeforeWriteHook { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder Enrich(string id, System.Action<MMLib.Alvo.Reads.Enrich<MMLib.Alvo.Data.AlvoRecord>> enrich) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder Enrich<TEnricher>(string id)
+            where TEnricher :  class, MMLib.Alvo.Reads.IRecordEnricher<MMLib.Alvo.Data.AlvoRecord> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder Narrow(string id, System.Func<MMLib.Alvo.Reads.QueryNarrowing, MMLib.Alvo.Data.AlvoFilter?> narrow) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder Narrow<TNarrowing>(string id)
+            where TNarrowing :  class, MMLib.Alvo.Reads.IQueryNarrowing { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder OnCreated(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder OnCreated<THandler>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
             where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoCreated<MMLib.Alvo.Data.AlvoRecord>> { }
@@ -394,6 +400,12 @@ namespace MMLib.Alvo.Extensions
             where THook :  class, MMLib.Alvo.Hooks.IBeforeWriteHook<T> { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> BeforeWrite<THook>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
             where THook :  class, MMLib.Alvo.Hooks.IBeforeWriteHook<T> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> Enrich(string id, System.Action<MMLib.Alvo.Reads.Enrich<T>> enrich) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> Enrich<TEnricher>(string id)
+            where TEnricher :  class, MMLib.Alvo.Reads.IRecordEnricher<T> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> Narrow(string id, System.Func<MMLib.Alvo.Reads.QueryNarrowing, System.Linq.Expressions.Expression<System.Func<T, bool>>?> narrow) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> Narrow<TNarrowing>(string id)
+            where TNarrowing :  class, MMLib.Alvo.Reads.IQueryNarrowing<T> { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnCreated(string id, System.Delegate handler, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Events.EventCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnCreated(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnCreated<THandler>(string id, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Events.EventCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
@@ -662,6 +674,41 @@ namespace MMLib.Alvo.Migrations
         public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion> RollbackAsync(string project, int targetRevision, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
     }
 }
+namespace MMLib.Alvo.Reads
+{
+    public sealed class Enrich<T>
+        where T :  class
+    {
+        public MMLib.Alvo.AlvoContext Caller { get; }
+        public string Entity { get; }
+        public MMLib.Alvo.Rules.DataOperation Operation { get; }
+        public T Row { get; }
+        public void Hide(string field) { }
+        public void Hide<TValue>(System.Linq.Expressions.Expression<System.Func<T, TValue>> field) { }
+        public void SetVirtual(string field, object? value) { }
+        public void SetVirtual<TValue>(System.Linq.Expressions.Expression<System.Func<T, TValue>> field, TValue value) { }
+    }
+    public interface IQueryNarrowing
+    {
+        MMLib.Alvo.Data.AlvoFilter? Narrow(MMLib.Alvo.Reads.QueryNarrowing query);
+    }
+    public interface IQueryNarrowing<T>
+        where T :  class
+    {
+        System.Linq.Expressions.Expression<System.Func<T, bool>>? Narrow(MMLib.Alvo.Reads.QueryNarrowing query);
+    }
+    public interface IRecordEnricher<T>
+        where T :  class
+    {
+        void Enrich(MMLib.Alvo.Reads.Enrich<T> row);
+    }
+    public sealed class QueryNarrowing
+    {
+        public MMLib.Alvo.AlvoContext Caller { get; }
+        public string Entity { get; }
+        public MMLib.Alvo.Rules.DataOperation Operation { get; }
+    }
+}
 namespace MMLib.Alvo.Rules
 {
     public interface IPolicyCatalogProvider : MMLib.Alvo.IRoleCatalogProvider, MMLib.Alvo.Schema.ISchemaRegistry
@@ -673,6 +720,14 @@ namespace MMLib.Alvo.Rules
     {
         public static MMLib.Alvo.Rules.PolicyCatalog Build(MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Expressions.ICelCompiler compiler) { }
         public static bool TryBuild(MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Expressions.ICelCompiler compiler, out MMLib.Alvo.Rules.PolicyCatalog? catalog, out System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.DescriptorValidationError> errors) { }
+    }
+}
+namespace MMLib.Alvo.Scheduling
+{
+    public static class AlvoSchedulerExtensions
+    {
+        public static System.Threading.Tasks.Task ScheduleAsync<TMessage>(this MMLib.Alvo.Scheduling.IAlvoScheduler scheduler, string key, System.DateTimeOffset at, TMessage message, MMLib.Alvo.TenantId? tenant = default, System.Threading.CancellationToken cancellationToken = default)
+            where TMessage :  class { }
     }
 }
 namespace Microsoft.AspNetCore.Builder

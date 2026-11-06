@@ -28,6 +28,12 @@ internal static class PolicyParameterPrefix
     /// <summary>The prefix for the synthesized tenant scope's parameters.</summary>
     internal const string TenantScope = "alvo_t";
 
+    /// <summary>
+    /// The prefix for a host narrowing's bound values: its own family, so the narrowing is a term of its own beside the
+    /// caller's filter and never merged into it.
+    /// </summary>
+    internal const string Narrowing = "alvo_n";
+
     /// <summary>The prefix for the caller filter's bound values.</summary>
     internal const string Filter = "alvo_f";
 
@@ -57,5 +63,5 @@ internal static class PolicyParameterPrefix
     /// so a message or format constant added to this type would fail it rather than escape it.
     /// </summary>
     internal static IReadOnlyList<string> All { get; } =
-        [Using, WithCheck, TenantScope, Filter, Keyset, RowId, RowLimit, RowOffset];
+        [Using, WithCheck, TenantScope, Narrowing, Filter, Keyset, RowId, RowLimit, RowOffset];
 }

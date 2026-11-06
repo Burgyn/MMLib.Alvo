@@ -35,5 +35,11 @@ public sealed class PostgreSqlExclusionTests : AlvoDataExclusionTests, IAsyncLif
         OutOfBandStatement.ExecuteAsync(
             _host!.Services.GetRequiredService<AlvoDataContextFactory>(), sql, TestContext.Current.CancellationToken);
 
+    protected override Task<IReadOnlyList<string>> ExclusionNamesAsync(string table) =>
+        CatalogQuery.NamesAsync(
+            _host!.Services,
+            "SELECT conname::text FROM pg_constraint WHERE contype = 'x' AND conrelid = (SELECT oid FROM pg_class WHERE relname = @table)",
+            table);
+
     public ValueTask DisposeAsync() => _fixture.DisposeAsync();
 }

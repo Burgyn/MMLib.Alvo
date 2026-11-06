@@ -381,7 +381,12 @@ internal static class CelTypeChecker
             }
 
             var type = CelFieldType.Of(field.Type);
-            return (fieldRef with { Type = type }, type, stateBad, position);
+            if (field.IsVirtual)
+            {
+                Errors.Add(VirtualFieldRead(fieldRef.FieldName, position));
+            }
+
+            return (fieldRef with { Type = type }, type, stateBad || field.IsVirtual, position);
         }
 
         private string FieldRefRefusal(CelFieldRef fieldRef) =>
@@ -1147,17 +1152,35 @@ internal static class CelTypeChecker
                 "Move this check into hooks.beforeUpdate/afterUpdate.",
                 position);
 
-            if (!ProfileReadsARow || ResolveField(changed.FieldName) is not null)
+            if (!ProfileReadsARow)
             {
                 return (changed, CelValueType.Bool, profileBad, position);
             }
 
-            Errors.Add(new CelCompilationError(
-                $"'{changed.FieldName}' is not a field of entity '{entity.Name}'.",
-                BuildUnknownFieldSuggestion(changed.FieldName),
-                position));
+            var field = ResolveField(changed.FieldName);
+            if (field is { IsVirtual: false })
+            {
+                return (changed, CelValueType.Bool, profileBad, position);
+            }
+
+            Errors.Add(field is null
+                ? new CelCompilationError(
+                    $"'{changed.FieldName}' is not a field of entity '{entity.Name}'.",
+                    BuildUnknownFieldSuggestion(changed.FieldName),
+                    position)
+                : VirtualFieldRead(changed.FieldName, position));
             return (changed, CelValueType.Bool, true, position);
         }
+
+        /// <summary>
+        /// The refusal of a virtual field in any slot: its value exists only in a read's answer, filled after every rule
+        /// and hook has run, so an expression evaluated in a write or a query would read a value that is never there.
+        /// </summary>
+        private static CelCompilationError VirtualFieldRead(string fieldName, int position) =>
+            new(
+                $"Field '{fieldName}' is virtual: it exists only in a read's answer, after every rule and hook has run, so no expression can read it.",
+                "Read a stored field, or compute the value in the enricher.",
+                position);
 
         /// <summary>
         /// Checks <c>now()</c>, the one call left with its own grammar and the <see cref="CelConstructKind.Call"/> row's

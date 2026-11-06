@@ -13,7 +13,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: code,
@@ -21,14 +22,16 @@
           Unique: true,
           Nullable: false,
           MaxLength: 2,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: name,
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: vat_rate,
@@ -38,7 +41,8 @@
           Nullable: false,
           Precision: 5,
           Scale: 2,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         }
       ]
     },
@@ -55,14 +59,16 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: name,
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: ico,
@@ -72,7 +78,8 @@
           MaxLength: 8,
           Format: sk-ico,
           FormatPattern: ^[0-9]{8}$,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: country_id,
@@ -83,7 +90,8 @@
           Reference: {
             TargetEntity: countries
           },
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: owner_id,
@@ -94,7 +102,8 @@
           Reference: {
             TargetEntity: users
           },
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: open_deals,
@@ -102,7 +111,8 @@
           Required: false,
           Unique: false,
           Nullable: true,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: tenant_id,
@@ -110,7 +120,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: true
+          Indexed: true,
+          IsVirtual: false
         },
         {
           Name: created_at,
@@ -118,7 +129,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: created_by,
@@ -126,7 +138,8 @@
           Required: false,
           Unique: false,
           Nullable: true,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: updated_at,
@@ -134,7 +147,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: updated_by,
@@ -142,7 +156,8 @@
           Required: false,
           Unique: false,
           Nullable: true,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         }
       ]
     },
@@ -158,7 +173,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: company_id,
@@ -170,14 +186,16 @@
             TargetEntity: companies,
             OnDelete: Cascade
           },
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: name,
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: email,
@@ -185,7 +203,8 @@
           Unique: false,
           Nullable: true,
           Format: email,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: phone,
@@ -193,7 +212,8 @@
           Unique: false,
           Nullable: true,
           Format: phone,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: tenant_id,
@@ -201,7 +221,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: true
+          Indexed: true,
+          IsVirtual: false
         },
         {
           Name: created_at,
@@ -209,7 +230,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: created_by,
@@ -217,7 +239,8 @@
           Required: false,
           Unique: false,
           Nullable: true,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: updated_at,
@@ -225,7 +248,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: updated_by,
@@ -233,7 +257,8 @@
           Required: false,
           Unique: false,
           Nullable: true,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         }
       ]
     },
@@ -250,7 +275,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: company_id,
@@ -261,14 +287,16 @@
           Reference: {
             TargetEntity: companies
           },
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: title,
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: amount,
@@ -278,7 +306,8 @@
           Nullable: true,
           Precision: 12,
           Scale: 2,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: stage,
@@ -292,14 +321,16 @@
             won,
             lost
           ],
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: commission_note,
           Required: false,
           Unique: false,
           Nullable: true,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: owner_id,
@@ -310,7 +341,8 @@
           Reference: {
             TargetEntity: users
           },
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: closed_at,
@@ -318,7 +350,8 @@
           Required: false,
           Unique: false,
           Nullable: true,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: tenant_id,
@@ -326,7 +359,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: true
+          Indexed: true,
+          IsVirtual: false
         },
         {
           Name: created_at,
@@ -334,7 +368,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: created_by,
@@ -342,7 +377,8 @@
           Required: false,
           Unique: false,
           Nullable: true,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: updated_at,
@@ -350,7 +386,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: updated_by,
@@ -358,7 +395,8 @@
           Required: false,
           Unique: false,
           Nullable: true,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         }
       ],
       EventImageExclusions: [
@@ -377,7 +415,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: deal_id,
@@ -388,14 +427,16 @@
           Reference: {
             TargetEntity: deals
           },
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: number,
           Required: true,
           Unique: true,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: issued_on,
@@ -403,7 +444,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: net_total,
@@ -413,7 +455,8 @@
           Nullable: true,
           Precision: 12,
           Scale: 2,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: vat_total,
@@ -423,7 +466,8 @@
           Nullable: true,
           Precision: 12,
           Scale: 2,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: gross_total,
@@ -434,7 +478,8 @@
           Precision: 12,
           Scale: 2,
           Indexed: false,
-          ComputedExpression: net_total + vat_total
+          ComputedExpression: net_total + vat_total,
+          IsVirtual: false
         },
         {
           Name: tenant_id,
@@ -442,7 +487,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: true
+          Indexed: true,
+          IsVirtual: false
         },
         {
           Name: created_at,
@@ -450,7 +496,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: created_by,
@@ -458,7 +505,8 @@
           Required: false,
           Unique: false,
           Nullable: true,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: updated_at,
@@ -466,7 +514,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: updated_by,
@@ -474,7 +523,8 @@
           Required: false,
           Unique: false,
           Nullable: true,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         }
       ]
     },
@@ -491,7 +541,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: invoice_id,
@@ -503,14 +554,16 @@
             TargetEntity: invoices,
             OnDelete: Cascade
           },
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: label,
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: unit_price,
@@ -520,7 +573,8 @@
           Nullable: false,
           Precision: 12,
           Scale: 2,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: amount,
@@ -530,7 +584,8 @@
           Nullable: false,
           Precision: 10,
           Scale: 2,
-          Indexed: false
+          Indexed: false,
+          IsVirtual: false
         },
         {
           Name: line_total,
@@ -541,7 +596,8 @@
           Precision: 12,
           Scale: 2,
           Indexed: false,
-          ComputedExpression: unit_price * amount
+          ComputedExpression: unit_price * amount,
+          IsVirtual: false
         },
         {
           Name: tenant_id,
@@ -549,7 +605,8 @@
           Required: true,
           Unique: false,
           Nullable: false,
-          Indexed: true
+          Indexed: true,
+          IsVirtual: false
         }
       ]
     }
