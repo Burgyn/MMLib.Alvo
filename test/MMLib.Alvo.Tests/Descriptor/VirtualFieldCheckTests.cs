@@ -22,6 +22,7 @@ public sealed class VirtualFieldCheckTests
     [InlineData("validation", "\"validation\": \"size(value) > 1\"")]
     [InlineData("renamedFrom", "\"renamedFrom\": \"label\"")]
     [InlineData("entity", "\"type\": \"ref\", \"entity\": \"comments\"")]
+    [InlineData("sequence", "\"type\": \"integer\", \"sequence\": {}")]
     public void A_virtual_field_combined_with_a_storage_key_is_refused_at_its_virtual_pointer(string key, string json)
     {
         var display = json.Contains("\"type\"", StringComparison.Ordinal)

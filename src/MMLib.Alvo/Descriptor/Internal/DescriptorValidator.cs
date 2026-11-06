@@ -220,6 +220,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         try
         {
             descriptor = AlvoDescriptor.Parse(descriptorJson);
+            into.AddRange(SequenceFieldCheck.Check(descriptor));
             schema = DescriptorToSchemaMapper.Map(descriptor);
 
             return true;

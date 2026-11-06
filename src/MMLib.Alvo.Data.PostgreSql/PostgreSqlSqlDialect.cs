@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Data.EntityFrameworkCore;
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Schema;
 using Npgsql;
 using System.Data.Common;
@@ -43,6 +44,15 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
 
         return $"SELECT {string.Join(", ", keyParameterMarkers.Select(marker => $"{function}({marker})"))}";
     }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <c>INSERT … ON CONFLICT DO UPDATE … RETURNING</c> under READ COMMITTED: a concurrent allocator of the same count
+    /// blocks on the counter row — or, for a count's first number, on the primary key's index entry — until the first
+    /// commits or rolls back, then takes the next value; a rolled-back first insert lets the waiter insert the start.
+    /// Implemented explicitly: the create path's question, not part of this type's own surface.
+    /// </remarks>
+    string? IAlvoSqlDialect.SequenceAllocationStatement(string table) => SequenceTable.Upsert(table);
 
     /// <inheritdoc/>
     /// <remarks>

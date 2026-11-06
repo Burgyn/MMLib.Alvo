@@ -49,6 +49,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     private readonly SchemaModel _schema;
     private readonly TimeProvider _time;
     private readonly Dictionary<string, List<AlvoRecord>> _rows = new(StringComparer.Ordinal);
+    private readonly InMemorySequences _sequences = new();
     private readonly Lock _gate = new();
 
     /// <summary>Initializes a new instance of the <see cref="InMemoryAlvoData"/> class.</summary>
@@ -191,6 +192,7 @@ public sealed class InMemoryAlvoData : IAlvoData
                 return Task.FromResult(replayed);
             }
 
+            postImage = _sequences.Numbered(schema, postImage, _time.GetUtcNow());
             RowsForLocked(entity).Add(postImage);
             RecordIdempotencyLocked(idempotency, context, (Guid)candidate[IdField]!);
         }
@@ -513,6 +515,7 @@ public sealed class InMemoryAlvoData : IAlvoData
             throw new AlvoConstraintViolationException(AlvoConstraintKind.Unique, [IdField]);
         }
 
+        postImage = _sequences.Numbered(schema, postImage, _time.GetUtcNow());
         list.Add(postImage);
         RecordIdempotencyLocked(idempotency, context, id);
 
@@ -651,7 +654,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     {
         var managed = AlvoManagedColumns.For(schema);
         return schema.Fields.Where(field =>
-            !managed.Contains(field.Name) && field.ComputedExpression is null && field.Rollup is null && !field.IsVirtual);
+            !managed.Contains(field.Name) && !field.IsMaintained() && !field.IsVirtual);
     }
 
     /// <summary>Places a created row in the caller's own tenant, on an entity that is scoped at all.</summary>
@@ -1434,6 +1437,9 @@ public sealed class InMemoryAlvoData : IAlvoData
     private AlvoBatchResult WrittenCreates(
         string entity, List<AlvoRecord> judged, AlvoContext context, AlvoIdempotency? idempotency)
     {
+        var schema = FindEntity(entity)!;
+        var instant = _time.GetUtcNow();
+        judged = [.. judged.Select(row => _sequences.Numbered(schema, row, instant))];
         RowsForLocked(entity).AddRange(judged);
         RecordIdempotencyLocked(idempotency, context, [.. judged.Select(RowIdOf)]);
 

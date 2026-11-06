@@ -1,0 +1,19 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "sequence-orders",
+  "description": "HX-12 over HTTP: an order's integer number and its formatted code are sequences the framework assigns inside the create's own transaction, so a caller can neither send nor change one.",
+  "auth": { "providers": ["local"], "roles": ["clerk"] },
+  "access": { "admin": "'clerk' in @user.roles" },
+  "entities": {
+    "orders": {
+      "fields": {
+        "branch": { "type": "string", "maxLength": 20, "required": true },
+        "number": { "type": "integer", "required": true, "sequence": {} },
+        "code": { "type": "string", "required": true, "sequence": { "period": "year", "format": "SO-{yyyy}-{n:4}" } },
+        "note": { "type": "string", "maxLength": 80 }
+      },
+      "rules": { "list": "true", "get": "true", "create": "true", "update": "true", "delete": "true" }
+    }
+  }
+}

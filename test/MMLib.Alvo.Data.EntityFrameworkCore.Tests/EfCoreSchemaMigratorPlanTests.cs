@@ -39,6 +39,30 @@ public class EfCoreSchemaMigratorPlanTests
 
     private static FieldSchema Id() => new() { Name = "id", Type = FieldType.Uuid, Required = true };
 
+    /// <summary>
+    /// A dialect that answers no allocation statement — <see cref="TestSqlDialect"/> inherits the declining default — cannot
+    /// keep a gapless counter, so a plan declaring a sequence is refused at the sequence, before anything is applied.
+    /// </summary>
+    [Fact]
+    public async Task A_declining_engine_refuses_the_apply_at_the_sequence()
+    {
+        var desired = new SchemaModel([
+            new EntitySchema
+            {
+                Name = "orders",
+                Fields = [Id(), new FieldSchema { Name = "number", Type = FieldType.Integer, Required = true, Sequence = new SequenceSchema() }],
+            },
+        ]);
+
+        var refused = await Should.ThrowAsync<MMLib.Alvo.Descriptor.DescriptorValidationException>(
+            () => NewSqliteMigrator().PlanAsync(new SchemaModel([]), desired, Options, TestContext.Current.CancellationToken));
+
+        var error = refused.Result.Errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe("/entities/orders/fields/number/sequence");
+        error.Message.ShouldBe("This database engine cannot enforce 'sequence'. Nothing was applied.");
+        error.FixSuggestion.ShouldBe("Remove 'sequence', or run Alvo on SQLite or PostgreSQL.");
+    }
+
     [Fact]
     public async Task Create_from_empty_produces_a_create_entity_step_with_sql()
     {
