@@ -19,7 +19,7 @@ internal static class EntityReader
             }
         }
 
-        return new EntityModel(name, name, entity.String("description"), fields.ToImmutable(), untyped.ToImmutable());
+        return EntityNames.Named(new EntityModel(name, name, entity.String("description"), fields.ToImmutable(), untyped.ToImmutable()));
     }
 
     private static void AddField(
@@ -60,7 +60,7 @@ internal static class EntityReader
     };
 
     private static FieldModel Managed(string name, FieldKind kind, bool nullable) =>
-        new(name, name, name, kind, nullable, Required: !nullable, HasDefault: false, CallerWritable: false, Description: null, default, null);
+        new(name, name, name, kind, nullable, Required: !nullable, HasDefault: false, CallerWritable: false, Description: null, default, null, FieldOrigin.Managed);
 
     private static FieldModel Field(string name, JsonObject field, FieldKind kind)
     {
@@ -78,8 +78,16 @@ internal static class EntityReader
             CallerWritable: IsCallerWritable(field, isVirtual),
             field.String("description"),
             EnumValues(field, kind),
-            kind == FieldKind.Enum ? name : null);
+            kind == FieldKind.Enum ? name : null,
+            Origin(field, isVirtual));
     }
+
+    private static FieldOrigin Origin(JsonObject field, bool isVirtual) =>
+        isVirtual ? FieldOrigin.Virtual
+        : field.Get("computed") is not null ? FieldOrigin.Computed
+        : field.Get("rollup") is not null ? FieldOrigin.Rollup
+        : field.Get("sequence") is not null ? FieldOrigin.Sequence
+        : FieldOrigin.Declared;
 
     private static bool IsCallerWritable(JsonObject field, bool isVirtual) =>
         !isVirtual

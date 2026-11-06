@@ -32,6 +32,7 @@ internal sealed record EntityModel(string Name, string ClassName, string? Descri
 /// <param name="Description">The field's <c>description</c>.</param>
 /// <param name="EnumValues">An enum field's values, in order.</param>
 /// <param name="EnumTypeName">An enum field's generated type name.</param>
+/// <param name="Origin">Who fills the field: a caller, Alvo, the store or the host's enricher.</param>
 internal sealed record FieldModel(
     string Name,
     string PropertyName,
@@ -43,7 +44,8 @@ internal sealed record FieldModel(
     bool CallerWritable,
     string? Description,
     EquatableArray<EnumValueModel> EnumValues,
-    string? EnumTypeName);
+    string? EnumTypeName,
+    FieldOrigin Origin);
 
 /// <summary>One value of an enum field and the generated member that stands for it.</summary>
 /// <param name="Value">The declared value.</param>
@@ -61,4 +63,15 @@ internal enum FieldKind
     DateTime,
     Uuid,
     Enum,
+}
+
+/// <summary>Who fills a field's value.</summary>
+internal enum FieldOrigin
+{
+    Declared,
+    Managed,
+    Computed,
+    Rollup,
+    Sequence,
+    Virtual,
 }
