@@ -49,11 +49,32 @@ internal static class CheckApplyRefusal
             return PredicateRefused(created.Entity, created.Index);
         }
 
-        return dialect.IsLockTimeout(provider)
-            ? new AlvoApplyLockTimeoutException(provider)
-            : dialect.DecodeConstraintViolation(provider) is { Kind: AlvoConstraintKind.Check } violation
-                ? Refused(desired, violation.ConstraintName)
-                : null;
+        if (dialect.IsLockTimeout(provider))
+        {
+            return new AlvoApplyLockTimeoutException(provider);
+        }
+
+        return dialect.DecodeConstraintViolation(provider) switch
+        {
+            { Kind: AlvoConstraintKind.Check } violation => Refused(desired, violation.ConstraintName),
+            { Kind: AlvoConstraintKind.Exclusion } violation => OverlapRefused(desired, violation.ConstraintName),
+            _ => null,
+        };
+    }
+
+    // An exclusion the apply adds over rows that overlap — written after the plan's count, or on a plan that did not count —
+    // is refused at the declaration the engine's name recomputes to over the schema being applied (HX-12).
+    private static DescriptorValidationException OverlapRefused(SchemaModel desired, string? name)
+    {
+        var owner = ExclusionPlan.Exclusions(desired)
+            .FirstOrDefault(pair => name is not null && string.Equals(IndexNames.Exclusion(pair.Entity, pair.Index), name, StringComparison.Ordinal));
+        return new(new DescriptorValidationResult([owner.Entity is null
+            ? new DescriptorValidationError(
+                "/",
+                "Rows overlap a range an exclusion this apply needs to hold forbids. Nothing was applied.",
+                "Correct or remove the overlapping rows first — or narrow the exclusion with 'where' — then apply again.",
+                DescriptorValidationSeverity.Error)
+            : ExclusionOverlapScan.Overlapping(owner.Entity, owner.Index)]));
     }
 
     // The engine does not name the index whose predicate it refused, so the pointer is the first partial index the plan

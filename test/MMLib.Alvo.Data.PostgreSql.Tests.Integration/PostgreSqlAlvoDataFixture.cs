@@ -123,6 +123,16 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
         return (hosts, connectionString);
     }
 
+    /// <summary>Gets the container's superuser connection string, for a fact that provisions a database or a role of its own.</summary>
+    internal string AdminConnectionString => PostgresTestContainer.ConnectionStringOf(_container!);
+
+    /// <summary>
+    /// Builds a host container over <paramref name="connectionString"/> — another role's, say — without migrating anything,
+    /// disposed with the fixture.
+    /// </summary>
+    /// <param name="connectionString">The database and role the host connects as.</param>
+    internal ServiceProvider ServicesFor(string connectionString) => BuildProvider(connectionString, time: null, configure: null);
+
     /// <summary>
     /// Starts recording after the migration, so a fact sees the statements its own act produced rather than the
     /// DDL the fixture ran. The generated database name is the marker, exactly as the SQLite fixture's file

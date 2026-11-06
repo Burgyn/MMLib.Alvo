@@ -395,6 +395,22 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Durations_and_now_agree_between_this_engine_and_the_interpreter_for_any_instants() { }
         public System.Threading.Tasks.Task This_engine_and_the_in_memory_backend_agree_on_every_case() { }
     }
+    public abstract class AlvoDataExclusionTests
+    {
+        protected AlvoDataExclusionTests() { }
+        protected abstract MMLib.Alvo.Migrations.ISchemaMigrator Migrator { get; }
+        public System.Threading.Tasks.Task Adding_an_exclusion_creates_it_and_removing_it_drops_it() { }
+        public System.Threading.Tasks.Task Adding_an_exclusion_over_overlapping_rows_is_refused_with_their_count() { }
+        public System.Threading.Tasks.Task An_exclusion_survives_a_later_apply_that_rebuilds_its_table() { }
+        public System.Threading.Tasks.Task Applying_an_uncounted_plan_over_overlapping_rows_is_refused_at_the_exclude_pointer() { }
+        public System.Threading.Tasks.Task Changing_an_exclusion_s_where_replaces_it() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
+        public System.Threading.Tasks.Task Every_admitted_equality_type_can_be_excluded_over() { }
+        protected abstract System.Threading.Tasks.Task<System.Exception?> ExecuteOutOfBandAsync(string sql);
+        protected abstract void RePrime(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
+        public System.Threading.Tasks.Task Renaming_a_range_field_keeps_the_exclusion_enforced() { }
+        public System.Threading.Tasks.Task Renaming_the_entity_keeps_the_exclusion_enforced() { }
+    }
     public abstract class AlvoDataFixture
     {
         protected AlvoDataFixture() { }

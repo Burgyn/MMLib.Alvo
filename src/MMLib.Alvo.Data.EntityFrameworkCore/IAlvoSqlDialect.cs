@@ -529,6 +529,17 @@ public interface IAlvoSqlDialect
     internal bool IsIndexPredicateRefusal(DbException failure) => false;
 
     /// <summary>
+    /// What this engine needs before an apply can add an exclusion — nothing, a statement the apply runs first, or a refusal
+    /// because the database lacks something the connection's role may not install (HX-12 D12). Asked once per plan that
+    /// adds one; <see cref="ExclusionPrerequisite.Ready"/> by default.
+    /// </summary>
+    /// <remarks>Internal, for <see cref="IsLockTimeout"/>'s reason: the published dialect port does not grow.</remarks>
+    /// <param name="connection">An open connection to the database being planned against.</param>
+    /// <param name="ct">A token to cancel the probe.</param>
+    internal ValueTask<ExclusionPrerequisite> ExclusionPrerequisiteAsync(DbConnection connection, CancellationToken ct) =>
+        ValueTask.FromResult(ExclusionPrerequisite.Ready);
+
+    /// <summary>
     /// The statement an apply runs before it recomputes rollups over <paramref name="child"/>, holding off every write to the
     /// child until the apply commits — or <see langword="null"/> for an engine on which no child write can interleave with
     /// the apply (HX-11 Ruling 32).

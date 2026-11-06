@@ -133,6 +133,10 @@ public class ChangeTrackerReachTests
     /// <c>CheckViolationScan</c> counts, at plan time, the rows a constraint about to be added would refuse — a read whose
     /// predicate is the constraint's own SQL, compiled from the descriptor with inline literals, over a delimited table
     /// name, so it carries no caller input and answers only a number;
+    /// <c>ExclusionOverlapScan</c> counts, at plan time, the pairs of rows an exclusion about to be added forbids, over the
+    /// exclusion's own overlap join and inline-literal filter, and answers only a number; <c>PostgreSqlSqlDialect</c> runs one
+    /// constant catalog probe (<c>btree_gist</c>'s presence and the role's right to install it) that names no entity table and
+    /// binds nothing (HX-12);
     /// <c>RollupRecompute</c> writes the parent's own aggregate columns from a subquery over the child table
     /// and narrows by the row id it read off the child row this caller was already authorised to write, so it
     /// composes no caller-influenced predicate and every identifier in it comes from the dialect;
@@ -242,11 +246,13 @@ public class ChangeTrackerReachTests
         "EfCoreRuntimeSchemaWriter.cs",
         "EfCoreSchemaMigrator.cs",
         "EfCoreSecretStore.cs",
+        "ExclusionOverlapScan.cs",
         "HookRejectionTable.cs",
         "IdempotencyTable.cs",
         "InboundWebhookTable.cs",
         "MigrationFramingScope.cs",
         "OutboxTable.cs",
+        "PostgreSqlSqlDialect.cs",
         "PredicateParameterBinder.cs",
         "RelationalReachability.cs",
         "RelationalSqlBatch.cs",

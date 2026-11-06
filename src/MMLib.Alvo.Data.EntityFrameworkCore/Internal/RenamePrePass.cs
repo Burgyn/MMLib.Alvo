@@ -30,16 +30,28 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// aligned copy omits it, an explicit <c>DROP INDEX IF EXISTS</c> of its old name runs <em>before</em> the renames, and the
 /// residual diff creates the desired one under its new name.
 /// </para>
+/// <para>
+/// <b>Its exclusions are released too</b> (HX-12): an exclusion's name hashes the same way and its enforcement reads the
+/// range's field names, so every exclusion of such an entity is omitted from the aligned copy and recorded in
+/// <see cref="Result.ReleasedExclusions"/> — the migrator drops each by its old definition before the renames, through the
+/// dialect that created it, and creates the desired one after the DDL.
+/// </para>
 /// </remarks>
 internal static class RenamePrePass
 {
     internal readonly record struct RenameEntry(MigrationOperation Operation, SchemaChange Change);
 
+    /// <summary>An exclusion a rename released: the current entity that declares it, and the index declaring it.</summary>
+    /// <param name="Entity">The entity as the database holds it, before the renames.</param>
+    /// <param name="Index">The index declaring the exclusion.</param>
+    internal readonly record struct ReleasedExclusion(EntitySchema Entity, IndexSchema Index);
+
     internal sealed record Result(
         SchemaModel AlignedCurrent,
         IReadOnlyList<RenameEntry> Renames,
         IReadOnlyList<RenameEntry> ReleasedChecks,
-        IReadOnlyList<RenameEntry> ReleasedIndexes);
+        IReadOnlyList<RenameEntry> ReleasedIndexes,
+        IReadOnlyList<ReleasedExclusion> ReleasedExclusions);
 
     /// <summary>
     /// Computes the name-aligned "current" schema and the explicit rename operations, from the
@@ -58,8 +70,18 @@ internal static class RenamePrePass
             alignedEntities.Add(AlignEntity(currentEntity, desired, renames, releasedChecks, releasedIndexes));
         }
 
-        return new Result(new SchemaModel(alignedEntities), renames, releasedChecks, releasedIndexes);
+        return new Result(new SchemaModel(alignedEntities), renames, releasedChecks, releasedIndexes, ReleasedExclusions(current, alignedEntities));
     }
+
+    private static List<ReleasedExclusion> ReleasedExclusions(SchemaModel current, List<EntitySchema> aligned) =>
+    [
+        .. from pair in current.Entities.Zip(aligned)
+           where pair.First.Indexes.Count(index => index.Exclude is not null) > pair.Second.Indexes.Count(index => index.Exclude is not null)
+           from index in pair.First.Indexes.Where(index => index.Exclude is not null)
+           select new ReleasedExclusion(pair.First, index),
+    ];
+
+    private static bool IsPartial(IndexSchema index) => index.Where is not null && index.Exclude is null;
 
     private static EntitySchema AlignEntity(
         EntitySchema currentEntity,
@@ -84,17 +106,17 @@ internal static class RenamePrePass
         };
     }
 
-    // The aligned indexes without the partial ones, each recorded as a drop of the index the database holds under the name
-    // the current entity, fields and predicate give it.
+    // The aligned indexes without the partial ones and the exclusions, each partial one recorded as a drop of the index the
+    // database holds under the name the current entity, fields and predicate give it.
     private static List<IndexSchema> ReleasePartialIndexes(
         EntitySchema currentEntity, string alignedName, List<IndexSchema> alignedIndexes, List<RenameEntry> releasedIndexes)
     {
-        foreach (var index in currentEntity.Indexes.Where(index => index.Where is not null))
+        foreach (var index in currentEntity.Indexes.Where(IsPartial))
         {
             releasedIndexes.Add(ReleasedIndex(alignedName, IndexNames.Partial(currentEntity, index)));
         }
 
-        return [.. alignedIndexes.Where(index => index.Where is null)];
+        return [.. alignedIndexes.Where(index => index.Where is null && index.Exclude is null)];
     }
 
     private static RenameEntry ReleasedIndex(string alignedName, string name) => new(

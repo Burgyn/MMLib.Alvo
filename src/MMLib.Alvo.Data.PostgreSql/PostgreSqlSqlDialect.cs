@@ -78,6 +78,44 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
             SurvivesTableRebuild: true);
     }
 
+    private const string BtreeGistProbe = """
+        SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'btree_gist'),
+               EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'btree_gist'),
+               has_database_privilege(current_database(), 'CREATE')
+        """;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <c>btree_gist</c> (HX-12 D12): a scalar <c>WITH =</c> in a GiST index needs it. Installed → nothing; available and this
+    /// role may create in the database → the plan's first statement installs it (contrib, trusted since PostgreSQL 13);
+    /// otherwise the apply is refused, naming what the database owner runs.
+    /// </remarks>
+    async ValueTask<ExclusionPrerequisite> IAlvoSqlDialect.ExclusionPrerequisiteAsync(DbConnection connection, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        var command = connection.CreateCommand();
+        await using (command.ConfigureAwait(false))
+        {
+            command.CommandText = BtreeGistProbe;
+            var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            await using (reader.ConfigureAwait(false))
+            {
+                await reader.ReadAsync(ct).ConfigureAwait(false);
+                return Prerequisite(installed: reader.GetBoolean(0), installable: reader.GetBoolean(1) && reader.GetBoolean(2));
+            }
+        }
+    }
+
+    private static ExclusionPrerequisite Prerequisite(bool installed, bool installable) => (installed, installable) switch
+    {
+        (true, _) => ExclusionPrerequisite.Ready,
+        (false, true) => new ExclusionPrerequisite("CREATE EXTENSION IF NOT EXISTS btree_gist"),
+        _ => new ExclusionPrerequisite(
+            Statement: null,
+            "Excluding overlaps needs PostgreSQL's btree_gist extension, which this database does not have and this connection's role may not install. Nothing was applied.",
+            "Ask the database owner to run CREATE EXTENSION btree_gist; in this database (it ships with PostgreSQL and is trusted since PostgreSQL 13), then apply again."),
+    };
+
     /// <inheritdoc/>
     /// <remarks>
     /// <paramref name="lockedPreImageFor"/> is ignored because PostgreSQL's locking grammar is the trailing
@@ -126,6 +164,9 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
     /// <summary>SQLSTATE 23514 — <c>check_violation</c>, what a field's validation raises.</summary>
     private const string CheckViolation = "23514";
 
+    /// <summary>SQLSTATE 23P01 — <c>exclusion_violation</c>, what an <c>EXCLUDE</c> constraint raises.</summary>
+    private const string ExclusionViolation = "23P01";
+
     /// <inheritdoc/>
     /// <remarks>
     /// <para>
@@ -166,6 +207,11 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
             CheckViolation => new SqlConstraintViolation
             {
                 Kind = AlvoConstraintKind.Check,
+                ConstraintName = NullIfEmpty(postgres.ConstraintName),
+            },
+            ExclusionViolation => new SqlConstraintViolation
+            {
+                Kind = AlvoConstraintKind.Exclusion,
                 ConstraintName = NullIfEmpty(postgres.ConstraintName),
             },
             _ => null,

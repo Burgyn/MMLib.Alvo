@@ -141,10 +141,11 @@ internal static partial class RenameGuessSplitter
                 : entity)
             .ToList());
 
-    // Whether the index covers the field or its predicate names it — an over-approximation over the predicate's text outside
+    // Whether the index covers the field, its exclusion ranges over it, or its predicate names it — an over-approximation over the predicate's text outside
     // its quoted constants, so a removed field never leaves behind a predicate the model builder cannot compile.
     private static bool Reads(IndexSchema index, string fieldName) =>
         index.Fields.Contains(fieldName, StringComparer.Ordinal)
+        || index.Exclude is { } range && (range.From == fieldName || range.To == fieldName)
         || index.Where is { } where
             && Regex.IsMatch(QuotedText().Replace(where, string.Empty), $@"\b{Regex.Escape(fieldName)}\b", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
