@@ -11,15 +11,15 @@ An entity's `hooks` hold lists under `beforeCreate`, `beforeUpdate` and `beforeD
 - `{"reject": "…"}` cancels the write; the text is the error the caller reads, so write it for them.
 - `{"mutate": {"<field>": …}}` sets fields before the write: each value is a JSON literal or `{"$cel": "…"}`.
 
-A before-hook runs inside the write's transaction, with no network: it can refuse or change this row, and
-nothing else. A hook without a `condition` runs on every write of its kind, and never on a schedule: a timed job is
-`automation`, which this build does not run.
+A before-hook runs inside the write's transaction, with no network: it can refuse or change this row
+only. A hook without a `condition` runs on every write of its kind, and never on a schedule: a timed job is
+host code — a schedule (`AddSchedule`) or a timer (`IAlvoScheduler`); `get_extensions` lists the schedules. The
+descriptor's `automation` does not run in this build.
 
 The shape: `schema/project.schema.json#/$defs/beforeHookList`.
 
 A `condition` reads the row as it will be with `new.<field>` on create and update, and as it was with `old.<field>`
-on update and delete; `changed(<field>)`, true when an update changes the field, is for update only. The other
-combinations are refused at apply: a delete has no `new.`, a create no `old.`.
+on update and delete; `changed(<field>)` is for update only. The other combinations are refused at apply.
 
 <!-- gen:cel-condition -->
 - allowed: `new.quantity <= 0.0` `new.quantity * new.unit_price > 1000.0` `old.unit_price != new.unit_price` `changed(unit_price)` `'technician' in @user.roles` `size(new.description) > 3` `lowerAscii(new.description) == 'brake pads'` `startsWith(new.description, 'Brake')`
@@ -43,9 +43,8 @@ A `substring` past the end fails the write, so to fit a field's `maxLength`, cut
 `substring(new.description, 0, math.least(size(new.description), 40))`. A value derived from other fields of the row
 belongs in a computed field, which stays true on every write; a `mutate` stamps it once.
 
-A host may register its own CEL functions, which compute a value and never run your code (the `function`
-action is refused); they work in a `condition` and a `mutate` only. Call `get_cel_functions` for this host's
-list and signatures — never assume one exists.
+Host CEL functions compute a value and never run your code (the `function` action is refused); they
+work in a `condition` and a `mutate` only. Call `get_cel_functions` for this host's list — never assume one exists.
 
 <!-- gen:cel-mutate -->
 - allowed: `now()` `lowerAscii(new.description)` `new.unit_price` `'part'` `trim(new.description)` `quantity * 2.0` `upperAscii(trim(new.description))` `math.round(new.unit_price * 1.2, 2)` `'#' + upperAscii(new.description)` `startsWith(new.description, 'Brake')`

@@ -32,6 +32,8 @@ Start with [Where logic goes](/extending/where-logic-goes/): the first question 
 - [Analyzer rules](/extending/analyzer-rules/) — `ALVO1001`, shipped inside `MMLib.Alvo`: what it reports in hooks and
   CEL functions that run inside the write's transaction, and what it cannot see.
 - [Transactions in your own code](/extending/transactions/) — several writes, batches and events as one unit, with savepoints and a time limit.
+- [Time: timers and schedules](/extending/time/) — a keyed timer that fires once at its latest time, a cron schedule
+  that runs once across replicas, a data migration that runs once per revision.
 - [Commands and inbound webhooks](/extending/commands/) — named, access-ruled actions over HTTP or in process; Standard Webhooks received verified and once.
 - [HTTP conventions](/extending/http-conventions/) — Alvo's caller on your own endpoints, conventions on one entity's routes, and the gate that stays on.
 - [Testing your backend](/extending/testing/) — `MMLib.Alvo.TestHost`: your descriptor through the real pipeline,
@@ -39,7 +41,7 @@ Start with [Where logic goes](/extending/where-logic-goes/): the first question 
 
 ## What lands next
 
-Timers and schedules arrive one release at a time; each page appears here when its feature ships. The design is public:
+The rest of the host-extensibility line arrives one release at a time; each page appears here when its feature ships. The design is public:
 [host extensibility](https://github.com/Burgyn/MMLib.Alvo/issues/370).
 
 ## One limit already enforced

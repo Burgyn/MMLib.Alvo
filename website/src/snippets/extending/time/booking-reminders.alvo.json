@@ -1,0 +1,31 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "booking-reminders",
+  "auth": { "roles": ["staff"] },
+  "entities": {
+    "bookings": {
+      "fields": {
+        "customer": { "type": "string", "required": true, "maxLength": 120 },
+        "starts_at": { "type": "datetime", "required": true }
+      },
+      "rules": {
+        "list": "'staff' in @user.roles",
+        "get": "'staff' in @user.roles",
+        "create": "'staff' in @user.roles",
+        "update": "'staff' in @user.roles",
+        "delete": "'staff' in @user.roles"
+      }
+    },
+    "slot_days": {
+      "fields": {
+        "day": { "type": "string", "required": true, "maxLength": 10 }
+      },
+      "rules": {
+        "list": "'staff' in @user.roles",
+        "get": "'staff' in @user.roles",
+        "create": "'admin' in @user.roles"
+      }
+    }
+  }
+}

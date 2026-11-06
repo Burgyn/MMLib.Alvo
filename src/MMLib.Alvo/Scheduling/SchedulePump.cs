@@ -28,6 +28,10 @@ namespace MMLib.Alvo.Scheduling;
 /// from the later of now and that occurrence, so a host down for a week runs a daily job once, not seven times.
 /// </para>
 /// <para>
+/// <b>Each round then starts the data migrations whose revision has been reached</b> (<see cref="DataMigrationStarter"/>); a
+/// failed start is logged and waits its own backoff, without holding the others back.
+/// </para>
+/// <para>
 /// <b>A process claims only the schedules it binds</b>, so an orphaned row runs nowhere and a replica that does not register a
 /// schedule never holds its lease. A run whose
 /// events cannot be minted — the tenant list failed — or whose advance the store failed is logged and returns with its lease.
@@ -37,6 +41,7 @@ namespace MMLib.Alvo.Scheduling;
 /// <param name="binder">Binds the registered schedules to the current catalog.</param>
 /// <param name="registry">The registrations, read for the ids this process declares retired.</param>
 /// <param name="runs">Mints the framework events of one occurrence.</param>
+/// <param name="migrations">Starts the data migrations whose revision has been reached.</param>
 /// <param name="boot">The readiness signal the loop and the sync wait on.</param>
 /// <param name="catalogs">The primed catalog the gates require.</param>
 /// <param name="events">The dispatch mode, poll interval and events switch, shared with the other dispatchers.</param>
@@ -47,6 +52,7 @@ internal sealed class SchedulePump(
     ExtensionBinder binder,
     ExtensionRegistry registry,
     ScheduleRuns runs,
+    DataMigrationStarter migrations,
     AlvoBootState boot,
     IPolicyCatalogProvider catalogs,
     IOptions<AlvoEventOptions> events,
@@ -158,12 +164,35 @@ internal sealed class SchedulePump(
             outcomes.Add(await RunOneAsync(schedules, bindings, due, ct).ConfigureAwait(false));
         }
 
+        var started = await StartMigrationsAsync(schedules, bindings, ct).ConfigureAwait(false);
+
         return new AlvoDrainResult
         {
-            Claimed = outcomes.Count(outcome => outcome is true),
-            Failed = outcomes.Count(outcome => outcome is null),
+            Claimed = outcomes.Count(outcome => outcome is true) + started.Started,
+            Failed = outcomes.Count(outcome => outcome is null) + started.Failed,
             Subscribers = [],
         };
+    }
+
+    /// <summary>Starts the due data migrations of every project this process serves; a failed read is logged, not thrown.</summary>
+    private async Task<MigrationRound> StartMigrationsAsync(ITimerStore schedules, ExtensionBindings bindings, CancellationToken ct)
+    {
+        var round = MigrationRound.None;
+        try
+        {
+            foreach (var project in boot.Projects.Where(entry => entry.Value is AlvoBootPhase.Ready).Select(entry => entry.Key))
+            {
+                var started = await migrations.StartDueAsync(schedules, bindings, project, ct).ConfigureAwait(false);
+                round = new(round.Started + started.Started, round.Failed + started.Failed);
+            }
+
+            return round;
+        }
+        catch (Exception failure) when (!ct.IsCancellationRequested)
+        {
+            SchedulePumpLog.MigrationRoundFailed(logger, TypeOf(failure));
+            return round with { Failed = round.Failed + 1 };
+        }
     }
 
     /// <summary>Mints one claimed occurrence's events and advances the schedule past it, in one commit.</summary>

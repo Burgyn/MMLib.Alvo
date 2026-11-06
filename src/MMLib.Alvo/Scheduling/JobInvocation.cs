@@ -30,6 +30,7 @@ internal static class JobInvocation
     private static Task RunAsync(object job, AlvoJobContext run, CancellationToken ct) => job switch
     {
         IAlvoScheduledJob scheduled => scheduled.RunAsync(run, ct),
+        IAlvoDataMigration migration => migration.RunAsync(run, ct),
         _ => throw new InvalidOperationException($"{job.GetType().Name} is registered as a job but implements no job interface."),
     };
 

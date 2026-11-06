@@ -35,10 +35,10 @@ public sealed class OperationsGatewayTests
         var management = Management(out var contract);
         contract.GetExtensionsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(new ManagementExtensionCatalog { Items = [] });
         var gateway = new OperationsGateway(operations, management);
-        await gateway.HandlersAsync(Ct);
+        await gateway.CatalogAsync(Ct);
 
         await gateway.SetPausedAsync("send-confirmation", paused: true, "down", Ct);
-        await gateway.HandlersAsync(Ct);
+        await gateway.CatalogAsync(Ct);
 
         await operations.Received(1).SetPausedAsync("default", "send-confirmation", true, "down", Arg.Any<CancellationToken>());
         await contract.Received(2).GetExtensionsAsync("default", Arg.Any<CancellationToken>());
@@ -52,11 +52,11 @@ public sealed class OperationsGatewayTests
             new ManagementExtensionCatalog { Items = [Handler(paused: false)] },
             new ManagementExtensionCatalog { Items = [Handler(paused: true)] });
         var gateway = new OperationsGateway(Substitute.For<IAlvoOperations>(), management);
-        await gateway.HandlersAsync(Ct);
+        await gateway.CatalogAsync(Ct);
 
-        var refreshed = await gateway.HandlersAsync(Ct);
+        var refreshed = await gateway.CatalogAsync(Ct);
 
-        refreshed.ShouldHaveSingleItem().Paused.ShouldBeTrue("another operator paused it; a refresh must show that");
+        refreshed.Handlers.ShouldHaveSingleItem().Paused.ShouldBeTrue("another operator paused it; a refresh must show that");
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public sealed class OperationsGatewayTests
             .Returns<ManagementExtensionCatalog>(_ => throw new ManagementForbiddenException("Viewer level is needed."));
         var gateway = new OperationsGateway(Substitute.For<IAlvoOperations>(), management);
 
-        await Should.ThrowAsync<ManagementForbiddenException>(() => gateway.HandlersAsync(Ct));
+        await Should.ThrowAsync<ManagementForbiddenException>(() => gateway.CatalogAsync(Ct));
     }
 
     [Fact]
@@ -84,6 +84,42 @@ public sealed class OperationsGatewayTests
         await operations.Received(1).ReplayAsync("default", Arg.Is<ManagementReplayRequest>(request => request.DryRun && request.IdempotencyKey == null), Arg.Any<CancellationToken>());
         await operations.Received(1).ReplayAsync("default", Arg.Is<ManagementReplayRequest>(request => !request.DryRun && request.IdempotencyKey == "key-1" && request.Reason == "endpoint back"), Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task The_catalog_splits_handlers_from_schedules_and_migrations_and_carries_the_timer_counts()
+    {
+        var management = Management(out var contract);
+        contract.GetExtensionsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(new ManagementExtensionCatalog
+        {
+            Items = [Handler(paused: false), Job("nightly-roll", AlvoExtensionKind.Schedule), Job("backfill", AlvoExtensionKind.DataMigration), Job("v", AlvoExtensionKind.Validate)],
+            Timers = new ManagementTimerCounts { Pending = 2, Due = 0 },
+        });
+        var gateway = new OperationsGateway(Substitute.For<IAlvoOperations>(), management);
+
+        var catalog = await gateway.CatalogAsync(Ct);
+
+        catalog.Handlers.ShouldHaveSingleItem().Id.ShouldBe("send-confirmation");
+        catalog.Jobs.Select(job => job.Id).ShouldBe(["nightly-roll", "backfill"]);
+        catalog.Timers.ShouldNotBeNull().Pending.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Run_now_asks_the_operations_port_for_the_dashboard_s_project()
+    {
+        var operations = Substitute.For<IAlvoOperations>();
+        var gateway = new OperationsGateway(operations, Management(out _));
+
+        await gateway.RunScheduleAsync("nightly-roll", Ct);
+
+        await operations.Received(1).RunScheduleAsync("default", "nightly-roll", Arg.Any<CancellationToken>());
+    }
+
+    private static ManagementExtension Job(string id, AlvoExtensionKind kind) => new()
+    {
+        Id = id,
+        Kind = kind,
+        Stage = AlvoExtensionStage.Scheduled,
+    };
 
     private static ManagementExtension Handler(bool paused) => new()
     {

@@ -130,7 +130,7 @@ dead** (the dry run's count first); the delivery list by status; and a delivery'
 ## Switching code off, and schedules
 
 `PUT …/extensions/{id}/enabled` switches a [validate hook](/extending/write-hooks/#validate-before-the-transaction)
-off and on; for an event handler it answers 409 naming the pause route, and for any other code 409 too. `POST …/schedules/{id}/run` answers 404 until schedules exist.
+off and on; for an event handler it answers 409 naming the pause route, and for any other code 409 too. `POST …/schedules/{id}/run` starts one run of a [schedule](/extending/time/#schedules) outside its cron, and answers 404 for an id this host registers no schedule under.
 
 ## Known limits
 

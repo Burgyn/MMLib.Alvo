@@ -19,7 +19,11 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     # 30, not 20: HX-03's delivery chaos criteria (SQLite + PostgreSQL) added ~6 min to ring2.
-    timeout-minutes: 30
+    # Windows gets 45: its ring2 is bound by SQLite's per-write cost there (#410) and swings ~35 % between runners.
+    # On 2026-11-06 PR #454's Windows leg took 25 of its 30 minutes; the next run (PR #457) spent 16 instead of 12
+    # minutes on the unit tier — in suites that PR did not touch (Host, Data.Sqlite) as much as in the one it did —
+    # and was cancelled at 30 mid-way through Data.Sqlite.Tests.Integration with nothing failed. Linux takes ~20.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 30 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
