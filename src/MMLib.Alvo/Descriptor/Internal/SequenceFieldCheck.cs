@@ -14,9 +14,11 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// still meets.
 /// </para>
 /// <para>
-/// A sequence is refused beside <c>default</c>, <c>computed</c>, <c>rollup</c> and <c>maxLength</c> because each of
-/// those claims the value or bounds it, while the framework assigns it; and <c>per</c> must name a <c>required</c> field
-/// whose value is a discrete key, because a missing or continuous value has no count to start.
+/// A sequence is refused beside <c>default</c>, <c>computed</c>, <c>rollup</c>, <c>maxLength</c> and a field-level
+/// <c>format</c> because each of those claims the value or bounds it, while the framework assigns it — a bound the
+/// rendered code could miss would refuse every create, with nothing at apply to say so. <c>per</c> must name a
+/// <c>required</c> field whose value is a discrete key and that the caller supplies, because a missing, continuous or
+/// framework-maintained value has no count to start when the number is allocated.
 /// </para>
 /// </remarks>
 internal static class SequenceFieldCheck
@@ -95,6 +97,7 @@ internal static class SequenceFieldCheck
             { Computed: not null } => "computed",
             { Rollup: not null } => "rollup",
             { MaxLength: not null } => "maxLength",
+            { Format: not null } => "format",
             _ => null,
         };
 
@@ -135,6 +138,11 @@ internal static class SequenceFieldCheck
             return $"names no field of '{finding.Entity}'";
         }
 
+        if (IsMaintained(target))
+        {
+            return "is maintained by the framework and has no value when the number is allocated";
+        }
+
         if (!_countableTypes.Contains(target.Type))
         {
             return $"is a {target.Type.ToString().ToLowerInvariant()} field and has no value to count by";
@@ -142,6 +150,9 @@ internal static class SequenceFieldCheck
 
         return target.Required == true ? null : "names a field that is not required";
     }
+
+    private static bool IsMaintained(FieldDescriptor field) =>
+        field.Computed is not null || field.Rollup is not null || field.Sequence is not null;
 
     private readonly record struct Finding(string Entity, string Field)
     {

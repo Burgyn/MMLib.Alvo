@@ -54,8 +54,6 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     private readonly Func<EntitySchema, RollupSchema, string?> _rollupFilter;
     private readonly ILogger _logger;
     private readonly Func<string> _schemaPrefix;
-
-    private static string DefaultSchemaPrefix() => new AlvoOptions().SchemaPrefix;
     private readonly ConditionalWeakTable<MigrationPlan, SchemaModel> _plannedAgainst = [];
 
     /// <summary>
@@ -131,6 +129,8 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         _schemaPrefix = schemaPrefix ?? DefaultSchemaPrefix;
     }
 
+    private static string DefaultSchemaPrefix() => new AlvoOptions().SchemaPrefix;
+
     /// <inheritdoc/>
     /// <remarks>
     /// <b>Planning reads the database when the plan adds a validation to a table that already holds rows</b>: each such
@@ -156,6 +156,7 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         if (counted)
         {
             await RefuseRowsThatBreakNewChecksAsync(current, desired, prePass, residual, ct).ConfigureAwait(false);
+            await RefuseSequenceRenameCollisionsAsync(desired, prePass, ct).ConfigureAwait(false);
         }
 
         var operations = ForThisEngine(AssembleOperations(prePass, residual));
@@ -227,6 +228,57 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         {
             ViolationCountFailed(_logger, target.Entity.Name, target.Field.Name, failure);
             return Uncountable(target);
+        }
+    }
+
+    /// <summary>
+    /// Refuses a declared rename onto a name that still holds an earlier sequence's counter rows (they are never deleted),
+    /// before the apply's key rewrite would hit the counter table's primary key mid-transaction.
+    /// </summary>
+    private async Task RefuseSequenceRenameCollisionsAsync(SchemaModel desired, RenamePrePass.Result prePass, CancellationToken ct)
+    {
+        var collisions = SequencePlan.Collisions(
+            prePass.Renames.Select(rename => rename.Operation), desired, SequenceTable.NameFor(_schemaPrefix()));
+        if (collisions.Count == 0)
+        {
+            return;
+        }
+
+        var connection = _connections.Create();
+        await using (connection.ConfigureAwait(false))
+        {
+            await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
+            var errors = new List<DescriptorValidationError>();
+            foreach (var collision in collisions)
+            {
+                if (await CountersUnderAsync(connection, collision.CountSql, ct).ConfigureAwait(false) > 0)
+                {
+                    errors.Add(collision.Error);
+                }
+            }
+
+            if (errors.Count > 0)
+            {
+                throw new DescriptorValidationException(new DescriptorValidationResult(errors));
+            }
+        }
+    }
+
+    /// <summary>The counter rows a collision probe finds; none when no create has made the counter table yet.</summary>
+    private static async Task<long> CountersUnderAsync(DbConnection connection, string countSql, CancellationToken ct)
+    {
+        var command = connection.CreateCommand();
+        await using (command.ConfigureAwait(false))
+        {
+            command.CommandText = countSql;
+            try
+            {
+                return Convert.ToInt64(await command.ExecuteScalarAsync(ct).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+            }
+            catch (DbException)
+            {
+                return 0;
+            }
         }
     }
 

@@ -31,9 +31,11 @@ internal static class SequenceFormat
     /// A key value in invariant text — a <c>per</c> value or a tenant id — so every store and every culture names one count
     /// the same way: a date as <c>yyyy-MM-dd</c>, a boolean as <c>true</c>/<c>false</c>, a uuid in its canonical form.
     /// </summary>
-    /// <param name="value">The row's value.</param>
-    internal static string KeyText(object value) => value switch
+    /// <param name="value">The row's value; <see langword="null"/> keys the empty count, and the insert's own
+    /// <c>NOT NULL</c> on the required <c>per</c> field then refuses the row and returns the number.</param>
+    internal static string KeyText(object? value) => value switch
     {
+        null => string.Empty,
         DateOnly date => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
         bool flag => flag ? "true" : "false",
         IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),

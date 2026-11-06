@@ -53,6 +53,46 @@ internal static class SequencePlan
         return statements.Count == 0 ? [] : [SequenceTable.Ddl(table), .. statements];
     }
 
+    /// <summary>
+    /// The renames whose target name may already hold counter rows — left by an earlier sequence of that name, which is
+    /// never deleted — each with the count that finds them and the refusal to give when it does: rewriting the renamed
+    /// count's keys onto them would hit the primary key in the middle of the apply.
+    /// </summary>
+    /// <param name="renames">The plan's declared renames, entities before their fields.</param>
+    /// <param name="desired">The schema being planned.</param>
+    /// <param name="table">The prefixed counter table.</param>
+    internal static IReadOnlyList<RenameCollision> Collisions(
+        IEnumerable<MigrationOperation> renames, SchemaModel desired, string table) =>
+        [.. renames.Select(rename => Collision(rename, desired, table)).OfType<RenameCollision>()];
+
+    private static RenameCollision? Collision(MigrationOperation rename, SchemaModel desired, string table) => rename switch
+    {
+        RenameTableOperation entity when IsSequenced(desired, entity.NewName!, field: null) => new RenameCollision(
+            $"SELECT COUNT(*) FROM {table} WHERE entity = {Literal(entity.NewName!)}",
+            Refusal($"/entities/{entity.NewName}/renamedFrom", $"'{entity.NewName}'", entity.Name)),
+        RenameColumnOperation field when IsSequenced(desired, field.Table, field.NewName) => new RenameCollision(
+            $"SELECT COUNT(*) FROM {table} WHERE entity = {Literal(field.Table)} AND field = {Literal(field.NewName)}",
+            Refusal($"/entities/{field.Table}/fields/{field.NewName}/renamedFrom", $"'{field.Table}.{field.NewName}'", field.Name)),
+        _ => null,
+    };
+
+    private static DescriptorValidationError Refusal(string pointer, string target, string from) => new(
+        pointer,
+        $"{target} still holds the sequence counts of an earlier declaration of that name, so renaming '{from}' to it would "
+        + "merge two counts and re-issue numbers. Nothing was applied.",
+        "Rename it to a name no earlier sequence used.",
+        DescriptorValidationSeverity.Error);
+
+    private static string Literal(string name) =>
+        AlvoSqlStringLiteral.TryQuote(name, out var literal)
+            ? literal
+            : throw new InvalidOperationException($"'{name}' cannot be written as a SQL literal.");
+
+    /// <summary>One rename's collision probe: the count that finds counter rows under its target, and the refusal.</summary>
+    /// <param name="CountSql">A statement answering one 64-bit count.</param>
+    /// <param name="Error">The refusal when the count is positive.</param>
+    internal sealed record RenameCollision(string CountSql, DescriptorValidationError Error);
+
     private static string? RenameStatement(MigrationOperation rename, SchemaModel desired, string table) => rename switch
     {
         RenameTableOperation entity when IsSequenced(desired, entity.NewName!, field: null) =>

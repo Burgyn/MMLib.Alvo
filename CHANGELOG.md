@@ -546,6 +546,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The OpenAPI document marks every framework-maintained field read-only** (HX-12): a `computed`, `rollup` or `sequence`
+  field is `readOnly` in the response schema and absent from the create and patch schemas (and from their `required`).
+  Every write to one was already refused with 403; a generated client no longer offers it.
 - **HX-11 appends enum members** — `AlvoConstraintKind.Check` and `CelValueType.Duration`: an exhaustive `switch` over
   either gains a case. `IFieldSqlRenderer.RenderEpochMicroseconds` is a new default interface member; a third-party
   dialect inherits `null`, and duration arithmetic over a field is then refused on it, naming the renderer.

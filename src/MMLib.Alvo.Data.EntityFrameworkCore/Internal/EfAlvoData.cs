@@ -1062,9 +1062,9 @@ internal sealed partial class EfAlvoData : IAlvoData
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
         List<Dictionary<string, object>> candidates, DateTimeOffset now, CancellationToken cancellationToken)
     {
+        await _sequences.AssignAsync(db, schema, [.. candidates], now, cancellationToken);
         foreach (var candidate in candidates)
         {
-            await _sequences.AssignAsync(db, schema, candidate, now, cancellationToken);
             db.Rows(schema.Name).Add(candidate);
         }
 

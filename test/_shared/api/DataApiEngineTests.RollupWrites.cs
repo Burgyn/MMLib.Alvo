@@ -118,6 +118,26 @@ public abstract partial class DataApiEngineTests
         await ShouldHoldTotalsAsync(world, invoice, net: 12, gross: 14);
     }
 
+    /// <summary>
+    /// The document says what the write guard does: a rollup and a computed field are read-only in the response schema and
+    /// absent from both request schemas, so no generated client offers a write that is always refused (HX-12).
+    /// </summary>
+    [Fact]
+    public async Task A_rollup_and_a_computed_field_are_read_only_in_the_document()
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            "rollup-invoices.alvo.json", [_invoiceWriter], new AlvoApiWorldSetup(MapOpenApiDocument: true, MapAlvoProblemDetails: true), Engine);
+
+        var schemas = (await world.OpenApiDocumentAsync())["components"]!["schemas"]!;
+
+        foreach (var field in new[] { "net_total", "gross_total" })
+        {
+            schemas["invoices"]!["properties"]![field]!["readOnly"]!.GetValue<bool>().ShouldBeTrue(field);
+            schemas["invoicesCreate"]!["properties"]!.AsObject().ShouldNotContainKey(field);
+            schemas["invoicesPatch"]!["properties"]!.AsObject().ShouldNotContainKey(field);
+        }
+    }
+
     private Task<AlvoApiWorld> StartRollupInvoicesAsync() =>
         AlvoApiWorld.FromDescriptorAsync(
             "rollup-invoices.alvo.json", [_invoiceWriter], new AlvoApiWorldSetup(MapAlvoProblemDetails: true), Engine);
