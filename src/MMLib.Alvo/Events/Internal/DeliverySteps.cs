@@ -14,7 +14,8 @@ namespace MMLib.Alvo.Events.Internal;
 /// <para>
 /// <b>A sleep is a step whose result is its wake instant.</b> Once that instant has passed the call returns; until then it
 /// sets <see cref="SleepRequested"/> and throws <see cref="StepSleep"/>. The runner reads the flag however the handler
-/// ended, so a handler that swallows the signal still sleeps.
+/// ended, so a handler that swallows the signal still sleeps; and every later step call of the attempt throws the signal
+/// again without running or recording anything, so no step runs before its wake time.
 /// </para>
 /// </remarks>
 internal sealed class DeliverySteps(IDeliveryStore store, Guid eventId, string subscriber, TimeProvider time) : IAlvoSteps
@@ -96,6 +97,11 @@ internal sealed class DeliverySteps(IDeliveryStore store, Guid eventId, string s
         StepNames.Check(name);
         lock (_gate)
         {
+            if (_sleepRequested is not null)
+            {
+                throw new StepSleep();
+            }
+
             if (_used.Count >= MaxSteps)
             {
                 throw new InvalidOperationException($"A delivery runs at most {MaxSteps} steps; '{name}' would be one more.");

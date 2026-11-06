@@ -16,7 +16,7 @@ public sealed record DeliveryStep
     /// <summary>Gets the step's name, unique within one run of the handler.</summary>
     public required string Name { get; init; }
 
-    /// <summary>Gets the step's result as JSON text; <c>null</c> for a step with no value.</summary>
+    /// <summary>Gets the step's result as JSON text; the JSON text <c>null</c> for a step with no value.</summary>
     public required string Result { get; init; }
 
     /// <summary>Gets when the step's work finished.</summary>

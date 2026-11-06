@@ -54,15 +54,21 @@ internal static class StepTable
         + $"AND {deliveries}.event_id = {table}.event_id AND {deliveries}.subscriber = {table}.subscriber)";
 
     /// <summary>
-    /// Deletes the steps of every succeeded delivery a replay's reset selects — <paramref name="selected"/>, the reset's own
-    /// predicate over <paramref name="deliveries"/> — run in the replay's transaction just before the reset.
+    /// Deletes the steps of every succeeded delivery a replay may reset — <paramref name="selected"/>, the replay's filter
+    /// over <paramref name="deliveries"/> (<see cref="DeliveryOperationsTable.ClearedOnReplaySql"/>) — run in the replay's
+    /// transaction just before the reset.
     /// </summary>
+    /// <remarks>
+    /// The deliveries table is aliased <c>replayed</c> and <paramref name="selected"/> names delivery columns unqualified:
+    /// every column it names exists on the deliveries table, so each binds to the innermost scope, never to the step table
+    /// that shares <c>event_id</c> and <c>subscriber</c> with it.
+    /// </remarks>
     /// <param name="table">The validated step table name.</param>
     /// <param name="deliveries">The validated delivery table name.</param>
-    /// <param name="selected">The reset's predicate, over unqualified delivery columns.</param>
+    /// <param name="selected">The replay's filter, over unqualified delivery columns.</param>
     internal static string ClearReplayedSql(string table, string deliveries, string selected) =>
-        $"DELETE FROM {table} WHERE EXISTS (SELECT 1 FROM {deliveries} WHERE {selected} AND {deliveries}.status = 'succeeded' "
-        + $"AND {deliveries}.event_id = {table}.event_id AND {deliveries}.subscriber = {table}.subscriber)";
+        $"DELETE FROM {table} WHERE EXISTS (SELECT 1 FROM {deliveries} replayed WHERE {selected} AND replayed.status = 'succeeded' "
+        + $"AND replayed.event_id = {table}.event_id AND replayed.subscriber = {table}.subscriber)";
 
     /// <summary>Reads every step of one subscriber's delivery of one event, in the order they completed.</summary>
     /// <param name="table">The validated table name.</param>

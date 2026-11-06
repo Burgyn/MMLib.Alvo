@@ -435,7 +435,19 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
     /// One transaction behind the database's write gate. <paramref name="work"/> opens it with a write, never a read
     /// (the port's remarks): SQLite then holds the write lock from the first statement instead of upgrading a read lock.
     /// </summary>
-    private async Task<T> InTransactionAsync<T>(Func<DbConnection, DbTransaction, Task<T>> work, CancellationToken ct)
+    private Task<T> InTransactionAsync<T>(Func<DbConnection, DbTransaction, Task<T>> work, CancellationToken ct) =>
+        InTransactionWhenAsync(work, _ => true, ct);
+
+    /// <summary>
+    /// <see cref="InTransactionAsync{T}"/> that commits only when <paramref name="work"/> answers <see langword="true"/>, and
+    /// otherwise rolls back what it wrote — for a write that must stand only if a later statement of the same transaction
+    /// matched.
+    /// </summary>
+    private Task<bool> InTransactionIfAsync(Func<DbConnection, DbTransaction, Task<bool>> work, CancellationToken ct) =>
+        InTransactionWhenAsync(work, changed => changed, ct);
+
+    /// <summary>One write-gated transaction that commits when <paramref name="commit"/> holds for the result, and otherwise rolls back.</summary>
+    private async Task<T> InTransactionWhenAsync<T>(Func<DbConnection, DbTransaction, Task<T>> work, Func<T, bool> commit, CancellationToken ct)
     {
         var connection = _connections.Create();
         await using (connection.ConfigureAwait(false))
@@ -447,34 +459,9 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
                 await using (transaction.ConfigureAwait(false))
                 {
                     var result = await work(connection, transaction).ConfigureAwait(false);
-                    await transaction.CommitAsync(ct).ConfigureAwait(false);
+                    await (commit(result) ? transaction.CommitAsync(ct) : transaction.RollbackAsync(ct)).ConfigureAwait(false);
 
                     return result;
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// <see cref="InTransactionAsync{T}"/> that commits only when <paramref name="work"/> answers <see langword="true"/>, and
-    /// otherwise rolls back what it wrote — for a write that must stand only if a later statement of the same transaction
-    /// matched.
-    /// </summary>
-    private async Task<bool> InTransactionIfAsync(Func<DbConnection, DbTransaction, Task<bool>> work, CancellationToken ct)
-    {
-        var connection = _connections.Create();
-        await using (connection.ConfigureAwait(false))
-        {
-            await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
-            using (await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false))
-            {
-                var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-                await using (transaction.ConfigureAwait(false))
-                {
-                    var changed = await work(connection, transaction).ConfigureAwait(false);
-                    await (changed ? transaction.CommitAsync(ct) : transaction.RollbackAsync(ct)).ConfigureAwait(false);
-
-                    return changed;
                 }
             }
         }

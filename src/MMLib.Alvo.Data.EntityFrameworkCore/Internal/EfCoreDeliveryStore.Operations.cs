@@ -161,7 +161,7 @@ internal sealed partial class EfCoreDeliveryStore
         DbConnection connection, DbTransaction transaction, DeliveryFilter filter, IReadOnlyList<string> subscribers, CancellationToken ct)
     {
         await LockSubscribersAsync(connection, transaction, subscribers, exclusive: true, ct).ConfigureAwait(false);
-        var selected = DeliveryOperationsTable.ReplayedSql(_table, filter, subscribers.Count);
+        var selected = DeliveryOperationsTable.ClearedOnReplaySql(filter, subscribers.Count);
         await ExecuteInAsync(connection, transaction, StepTable.ClearReplayedSql(_steps, _table, selected), command => BindReplay(command, filter, subscribers), ct)
             .ConfigureAwait(false);
 

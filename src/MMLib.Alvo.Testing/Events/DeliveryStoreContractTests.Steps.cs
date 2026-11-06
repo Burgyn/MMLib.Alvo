@@ -205,6 +205,30 @@ public abstract partial class DeliveryStoreContractTests
         (await world.Store.StepsAsync(dead.EventId, Confirm, Ct)).ShouldHaveSingleItem();
     }
 
+    /// <summary>
+    /// A replay leaves a succeeded delivery whose lane is running as it is; once the lane is free, a replay resets it and its
+    /// steps are gone, so it runs every step again.
+    /// </summary>
+    [Fact]
+    public async Task A_replay_resets_a_busy_lanes_succeeded_delivery_only_once_the_lane_is_free_and_then_without_its_steps()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        var succeeded = await FinishedWithStepAsync(world, KeyA, dead: false);
+        var later = await world.AppendEventAsync(KeyA);
+        await world.Store.FanOutAsync([Request(later, Confirm, KeyA)], Ct);
+        var running = (await world.Store.ClaimAsync(Claim(Confirm), Ct)).ShouldHaveSingleItem();
+
+        (await world.Store.ReplayAsync(new DeliveryFilter { Subscriber = Confirm, Limit = 20 }, Entry("replay", Confirm), Ct)).ShouldNotBeNull().Affected.ShouldBe(0);
+        (await world.Store.FindAsync(succeeded.Id, Ct)).ShouldNotBeNull().Status.ShouldBe("succeeded");
+
+        await world.Store.CompleteAsync(Attempt(running), Ct);
+        (await world.Store.ReplayAsync(new DeliveryFilter { Subscriber = Confirm, Limit = 20 }, Entry("replay", $"{Confirm}-again"), Ct)).ShouldNotBeNull().Affected.ShouldBe(2);
+
+        (await world.Store.FindAsync(succeeded.Id, Ct)).ShouldNotBeNull().Status.ShouldBe("pending");
+        (await world.Store.StepsAsync(succeeded.EventId, Confirm, Ct)).ShouldBeEmpty();
+    }
+
     private static async Task<DateTimeOffset> FannedOutAtAsync(IDeliveryStoreWorld world) =>
         (await world.Store.ListAsync(new DeliveryFilter { Limit = 1 }, Ct)).Single().NotBefore;
 

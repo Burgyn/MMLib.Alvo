@@ -761,6 +761,7 @@ namespace MMLib.Alvo.Testing.Events
         public System.Threading.Tasks.Task A_replay_clears_the_steps_of_the_succeeded_deliveries_it_resets() { }
         public System.Threading.Tasks.Task A_replay_naming_no_subscriber_resets_every_subscriber_s_replayable_deliveries() { }
         public System.Threading.Tasks.Task A_replay_never_resets_a_loop_break_nor_a_delivery_whose_record_is_running() { }
+        public System.Threading.Tasks.Task A_replay_resets_a_busy_lanes_succeeded_delivery_only_once_the_lane_is_free_and_then_without_its_steps() { }
         public System.Threading.Tasks.Task A_replay_resets_only_the_named_subscriber_s_finished_deliveries() { }
         public System.Threading.Tasks.Task A_replay_that_selects_nothing_still_records_its_row() { }
         public System.Threading.Tasks.Task A_replay_under_a_spent_key_changes_nothing() { }

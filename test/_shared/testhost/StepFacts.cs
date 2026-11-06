@@ -155,6 +155,7 @@ public abstract partial class StepFacts
         var sleeping = (await DeliveriesAsync(alvo)).ShouldHaveSingleItem();
         (sleeping.Status, sleeping.NotBefore).ShouldBe(("pending", Now.AddHours(1)));
         (await HistoryAsync(alvo)).ShouldHaveSingleItem().Outcome.ShouldBe("skipped");
+        (log.Runs("swallowed"), log.Runs("after")).ShouldBe((1, 0), "a step after a swallowed sleep waits for the wake");
         Time.Advance(TimeSpan.FromHours(1));
         await alvo.DrainEventsAsync(Ct);
         (await DeliveriesAsync(alvo)).ShouldHaveSingleItem().Status.ShouldBe("succeeded");

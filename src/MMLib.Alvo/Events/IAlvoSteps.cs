@@ -49,5 +49,10 @@ public interface IAlvoSteps
     /// <returns>A task that completes once <paramref name="at"/> has passed.</returns>
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty, longer than 200 characters or holds a control character.</exception>
     /// <exception cref="InvalidOperationException"><paramref name="name"/> was already used in this run, or the run has used 1 000 steps.</exception>
+    /// <remarks>
+    /// The attempt ends by an exception the handler should let pass. A handler that catches it still sleeps, and code it runs
+    /// outside steps afterwards still runs; but every later step call of that attempt throws the same exception without
+    /// running or recording its work, so each step runs only after the wake.
+    /// </remarks>
     Task SleepUntilAsync(string name, DateTimeOffset at, CancellationToken cancellationToken = default);
 }

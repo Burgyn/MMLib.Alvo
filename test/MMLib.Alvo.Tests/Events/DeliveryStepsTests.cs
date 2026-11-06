@@ -64,10 +64,15 @@ public sealed class DeliveryStepsTests
     [Theory]
     [InlineData("tab\there")]
     [InlineData("line\nbreak")]
-    [InlineData("")]
     public async Task A_name_with_a_control_character_is_refused(string name)
     {
         await Should.ThrowAsync<ArgumentException>(() => Steps().RunAsync(name, _ => Task.FromResult(1), Ct));
+    }
+
+    [Fact]
+    public async Task An_empty_name_is_refused()
+    {
+        await Should.ThrowAsync<ArgumentException>(() => Steps().RunAsync(string.Empty, _ => Task.FromResult(1), Ct));
     }
 
     [Fact]
@@ -116,6 +121,22 @@ public sealed class DeliveryStepsTests
 
         await Should.ThrowAsync<StepSleep>(() => steps.SleepUntilAsync("later", _now.AddHours(2).ToOffset(TimeSpan.FromHours(2)), Ct));
 
+        steps.SleepRequested.ShouldBe(_now.AddHours(2));
+    }
+
+    [Fact]
+    public async Task After_a_swallowed_sleep_no_later_step_runs_or_is_recorded()
+    {
+        var steps = Steps();
+        await Should.ThrowAsync<StepSleep>(() => steps.SleepUntilAsync("later", _now.AddHours(2), Ct));
+        var ran = 0;
+
+        await Should.ThrowAsync<StepSleep>(() => steps.RunAsync("send", _ => Task.FromResult(++ran), Ct));
+        await Should.ThrowAsync<StepSleep>(() => steps.RunAsync("log", _ => Task.FromResult(++ran), Ct));
+        await Should.ThrowAsync<StepSleep>(() => steps.SleepUntilAsync("past", _now.AddHours(-1), Ct));
+
+        ran.ShouldBe(0);
+        (await _store.StepsAsync(_event, Subscriber, Ct)).ShouldHaveSingleItem().Name.ShouldBe("later");
         steps.SleepRequested.ShouldBe(_now.AddHours(2));
     }
 

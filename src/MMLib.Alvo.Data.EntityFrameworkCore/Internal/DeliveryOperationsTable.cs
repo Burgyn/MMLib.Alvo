@@ -164,6 +164,17 @@ internal static class DeliveryOperationsTable
     internal static string ReplayedSql(string table, DeliveryFilter filter, int lockedSubscribers = 0) =>
         $"{Conditions(filter with { Replayable = true }, keyset: false)}{LockedSubscribers(filter, lockedSubscribers)} AND NOT {LaneRunning(table)}";
 
+    /// <summary>
+    /// What a replay clears the steps of: <see cref="ReplayedSql"/>'s filter and locked subscribers <b>without</b> its lane
+    /// term. Under the subscribers' exclusive locks a succeeded delivery is stable — only a redeliver or a replay moves it,
+    /// and both take that lock — but its lane's running delivery may answer between the clearing and the reset, two
+    /// statements apart on PostgreSQL; with the lane term the reset could then catch a row whose steps were kept. Without
+    /// it the clearing selects a superset the reset cannot escape; a succeeded delivery left un-reset by a busy lane loses
+    /// steps no run reads again before its next reset.
+    /// </summary>
+    internal static string ClearedOnReplaySql(DeliveryFilter filter, int lockedSubscribers = 0) =>
+        $"{Conditions(filter with { Replayable = true }, keyset: false)}{LockedSubscribers(filter, lockedSubscribers)}";
+
     /// <summary>The subscribers with a replayable delivery <paramref name="filter"/> selects — the locks a replay naming none takes.</summary>
     internal static string ReplaySubscribersSql(string table, DeliveryFilter filter) =>
         $"SELECT DISTINCT subscriber FROM {table} WHERE {Conditions(filter with { Replayable = true }, keyset: false)}";
