@@ -6,8 +6,8 @@ using MMLib.Alvo.Extensions.Internal;
 namespace MMLib.Alvo.Reads.Internal;
 
 /// <summary>
-/// How one read extension is called: a class built per read from the read's scope — or resolved, when registered — or a
-/// delegate that takes no service. A class's constructor parameters are kept for the boot ban.
+/// How one read extension is called: a class built per read from the read's scope — or resolved, when registered — and
+/// disposed after the call, asynchronously when it can be, or a delegate that takes no service. A class's constructor parameters are kept for the boot ban.
 /// </summary>
 internal sealed class ReadInvoker
 {
@@ -16,7 +16,7 @@ internal sealed class ReadInvoker
     private ReadInvoker(
         string? typeName,
         IReadOnlyList<(string Name, Type Type)> dependencies,
-        Func<IServiceProvider, QueryNarrowing, AlvoFilter?>? narrow,
+        Func<IServiceProvider, QueryNarrowing, ValueTask<AlvoFilter?>>? narrow,
         Func<IServiceProviderIsService, IReadOnlyList<Type>> unresolvable)
     {
         TypeName = typeName;
@@ -34,7 +34,7 @@ internal sealed class ReadInvoker
     internal IReadOnlyList<(string Name, Type Type)> Dependencies { get; }
 
     /// <summary>Gets the narrowing call, over the read's services; <see langword="null"/> for an enricher.</summary>
-    internal Func<IServiceProvider, QueryNarrowing, AlvoFilter?>? Narrow { get; }
+    internal Func<IServiceProvider, QueryNarrowing, ValueTask<AlvoFilter?>>? Narrow { get; }
 
     internal IReadOnlyList<Type> Unresolvable(IServiceProviderIsService services) => _unresolvable(services);
 
@@ -50,14 +50,14 @@ internal sealed class ReadInvoker
         return new(
             typeof(TNarrowing).FullName,
             ConstructorParameters(typeof(TNarrowing)),
-            (services, query) => InvokeClass(services, query, call),
+            (services, query) => InvokeClassAsync(services, query, call),
             isService => HandlerInvoker.ClassUnresolvable(typeof(TNarrowing), isService));
     }
 
     internal static ReadInvoker NarrowingDelegate(Func<QueryNarrowing, AlvoFilter?> narrow)
     {
         ArgumentNullException.ThrowIfNull(narrow);
-        return new(typeName: null, [], (_, query) => narrow(query), _ => []);
+        return new(typeName: null, [], (_, query) => ValueTask.FromResult(narrow(query)), _ => []);
     }
 
     private static (string Name, Type Type)[] ConstructorParameters(Type type) =>
@@ -66,7 +66,7 @@ internal sealed class ReadInvoker
             .Select(parameter => (parameter.Name ?? "?", parameter.ParameterType))
             .Distinct()];
 
-    private static TResult InvokeClass<TExtension, TResult>(
+    private static async ValueTask<TResult> InvokeClassAsync<TExtension, TResult>(
         IServiceProvider services, QueryNarrowing query, Func<TExtension, QueryNarrowing, TResult> call)
         where TExtension : class
     {
@@ -78,9 +78,9 @@ internal sealed class ReadInvoker
         }
         finally
         {
-            if (registered is null && extension is IDisposable disposable)
+            if (registered is null)
             {
-                disposable.Dispose();
+                await InvokerCalls.DisposeAsync(extension).ConfigureAwait(false);
             }
         }
     }

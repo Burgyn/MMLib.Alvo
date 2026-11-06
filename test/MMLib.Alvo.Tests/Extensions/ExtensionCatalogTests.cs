@@ -65,7 +65,7 @@ public sealed class ExtensionCatalogTests
 
         catalog.RunningOn("tickets", "update").Select(item => item.Id).ShouldBe(["audit-every-save", "ticket-resolved"]);
         catalog.RunningOn("notes", "create").Select(item => item.Id).ShouldBe(["audit-every-save"]);
-        catalog.RunningOn("tickets", "list").ShouldBeEmpty("no extension runs on a read in this build");
+        catalog.RunningOn("tickets", "list").ShouldBeEmpty("no read extension covers tickets in this fixture");
         catalog.RunningOn("tickets", "delete").ShouldBeEmpty();
     }
 
