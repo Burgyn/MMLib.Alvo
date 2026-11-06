@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Admin.Components.DesignSystem;
 using MMLib.Alvo.Admin.Components.Home;
 using MMLib.Alvo.Admin.Internal;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Schema;
 using MudBlazor;
@@ -24,6 +25,8 @@ public partial class Entity
 
     private SchemaModel? _schema;
     private EntitySchema? _entity;
+
+    private EntityDescriptor? _model;
     private IReadOnlyList<KeyValuePair<string, string>> _rules = [];
     private IReadOnlyList<KeyValuePair<string, string>> _hooks = [];
     private IReadOnlyList<string> _entities = [];
@@ -291,6 +294,7 @@ public partial class Entity
         _indexes = Copy.IndexesOf(EntityName);
         _fieldNames = [.. Copy.FieldsOf(EntityName).Select(field => field.Key)];
         _hooks = Copy.HooksOf(EntityName);
+        _model = Copy.EntityModelOf(EntityName);
 
         _fields = Copy.FieldChangesOf(EntityName);
         _staged = new StagedView(
