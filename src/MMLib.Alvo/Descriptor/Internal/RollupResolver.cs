@@ -258,7 +258,7 @@ internal sealed class RollupResolver(AlvoDescriptor descriptor)
     }
 
     /// <summary>The child's <c>ref</c> fields that target <paramref name="parent"/>, in declaration order.</summary>
-    private static IReadOnlyList<string> ReferencesTo(string parent, EntityDescriptor child) =>
+    internal static IReadOnlyList<string> ReferencesTo(string parent, EntityDescriptor child) =>
         [.. (child.Fields ?? new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal))
             .Where(candidate => string.Equals(candidate.Value.Entity, parent, StringComparison.Ordinal))
             .Select(candidate => candidate.Key)];

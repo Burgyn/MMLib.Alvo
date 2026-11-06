@@ -42,8 +42,15 @@ internal static class RelationLifter
         CelRelation r => r,
         _ when Hops(node) is { Count: 1 } hops => Forward(node, hops[0]),
         _ when Hops(node) is { Count: > 1 } hops => Refuse(node, errors, TwoRelations(hops), TwoRelationsFix),
+        _ when HoldsRelation(node) => Refuse(node, errors, NegatedMessage, NegatedFix),
         _ => node,
     };
+
+    /// <summary>
+    /// A relation below any node but <c>&amp;&amp;</c>/<c>||</c> could be inverted by it — <c>rel ? false : true</c> —
+    /// so it is refused as a negation whatever the profile table admits, rather than relying on that table.
+    /// </summary>
+    private static bool HoldsRelation(CelNode node) => CelRewriter.Any(node, static n => n is CelRelation);
 
     private static CelRelation Forward(CelNode leaf, CelHop hop) => new(
         CelRelationKind.Forward,

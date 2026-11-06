@@ -104,6 +104,35 @@ public sealed class RelationGraphTests
         warning.FixSuggestion.ShouldBe("Give 'customers' a list rule.");
     }
 
+    [Fact]
+    public void A_three_entity_cycle_is_reported_once()
+    {
+        var result = _validator.Validate(Project(Linked("a", "b", "list"), Linked("b", "c", "list"), Linked("c", "a", "list")));
+
+        Errors(result).ShouldHaveSingleItem().Message.ShouldBe(
+            "Rule cycle: the list rules of 'a' → 'b' → 'c' → 'a' read each other, so no caller's rows can be decided.");
+    }
+
+    [Fact]
+    public void A_long_cycle_draws_no_depth_error_beside_its_cycle_error()
+    {
+        var result = _validator.Validate(Project(
+            Linked("a", "b", "list"), Linked("b", "c", "list"), Linked("c", "d", "list"), Linked("d", "a", "list"),
+            Linked("x", "a", "list"), Linked("y", "a", "get")));
+
+        Errors(result).ShouldHaveSingleItem().Message.ShouldStartWith("Rule cycle: ");
+    }
+
+    [Fact]
+    public void A_create_rule_whose_only_slot_is_its_check_is_refused_when_too_deep()
+    {
+        var result = _validator.Validate(Project([.. Chain("a", "b", "c", "d"), Linked("x", "a", "create")]));
+
+        var error = Errors(result).ShouldHaveSingleItem();
+        error.Path.ShouldBe("/entities/x/rules/create");
+        error.Message.ShouldBe("'x.rules.create' reads relations 4 levels deep; at most 3 are allowed.");
+    }
+
     private static (string, JsonObject) Employees(params (string Operation, string Source)[] rules) =>
         ("employees", Entity([Ref("manager_id", "employees"), Field("region", "string")], rules));
 

@@ -78,13 +78,13 @@ public sealed class PolicyEngineRelationTests
             CelFixtures.Alice, CelFixtures.TenantlessAlice, _anonymousInAcme, AlvoContext.Anonymous,
         ];
 
-        var first = callers.Select(caller => engine.Resolve("orders", DataOperation.List, caller).Using!.Root).ToList();
-        var again = callers.Select(caller => engine.Resolve("orders", DataOperation.List, caller with { }).Using!.Root).ToList();
+        var first = callers.Select(caller => engine.Resolve("orders", DataOperation.List, caller).Using!).ToList();
+        var again = callers.Select(caller => engine.Resolve("orders", DataOperation.List, caller with { }).Using!).ToList();
 
         first.Zip(again).ShouldAllBe(pair => ReferenceEquals(pair.First, pair.Second));
         first.Distinct(ReferenceEqualityComparer.Instance).Count().ShouldBe(4);
-        Scope(first[0]).Denied.ShouldBeFalse();
-        first.Skip(1).ShouldAllBe(bound => Scope(bound).Denied);
+        Scope(first[0].Root).Denied.ShouldBeFalse();
+        first.Skip(1).ShouldAllBe(bound => Scope(bound.Root).Denied);
     }
 
     [Fact]
@@ -120,6 +120,24 @@ public sealed class PolicyEngineRelationTests
 
         BoundScope(decision.Using!).Denied.ShouldBeFalse();
         BoundScope(decision.WithCheck!).Denied.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_stale_has_relations_flag_cannot_skip_binding()
+    {
+        var catalog = Catalog(Shop("true"));
+        string[] names = ["accounts", "customers", "orders"];
+        var entities = names.ToDictionary(name => name, name => Policy(catalog, name));
+        entities["orders"] = entities["orders"] with
+        {
+            Operations = entities["orders"].Operations.ToDictionary(pair => pair.Key, pair => pair.Value with { HasRelations = false }),
+        };
+        var provider = new PolicyCatalogProvider();
+        provider.SetCurrent("relations", new PolicyCatalog(entities, catalog.Roles, catalog.Schema, catalog.ManagementAccess));
+
+        var decision = new PolicyEngine(provider).Resolve("orders", DataOperation.List, CelFixtures.Alice);
+
+        BoundScope(decision).Denied.ShouldBeFalse();
     }
 
     [Fact]
@@ -186,6 +204,12 @@ public sealed class PolicyEngineRelationTests
     private static RelationScope BoundScope(CompiledExpression expression) => Scope(expression.Root);
 
     private static RelationScope Scope(CelNode root) => root.ShouldBeOfType<CelRelation>().Scope.ShouldNotBeNull();
+
+    private static EntityPolicy Policy(PolicyCatalog catalog, string entity)
+    {
+        catalog.TryGetEntity(entity, out var policy).ShouldBeTrue();
+        return policy;
+    }
 
     private static CompiledExpression Rule(PolicyCatalog catalog, string entity, DataOperation operation)
     {

@@ -351,7 +351,7 @@ internal readonly record struct RequiredContext(bool TenantId, bool UserId)
 
     /// <summary>Whether this expression reads <c>@tenant.id</c> and <paramref name="context"/> carries no tenant.</summary>
     /// <param name="context">The caller resolving against the expression.</param>
-    public bool TenantIdMissingFrom(AlvoContext context) => TenantId && context.Tenant is null;
+    public bool TenantIdMissingFrom(AlvoContext context) => TenantId && !HasTenant(context);
 
     /// <summary>Whether this expression reads <c>@user.id</c> and <paramref name="context"/> carries no identity.</summary>
     /// <param name="context">The caller resolving against the expression.</param>
@@ -375,6 +375,13 @@ internal readonly record struct RequiredContext(bool TenantId, bool UserId)
     /// </summary>
     /// <param name="context">The caller.</param>
     internal static bool HasIdentity(AlvoContext context) => context.User.Value != Guid.Empty;
+
+    /// <summary>
+    /// Whether <paramref name="context"/> carries a tenant. The one test the tenant guard, the required-context gate and
+    /// the relation binder's cache key share.
+    /// </summary>
+    /// <param name="context">The caller.</param>
+    internal static bool HasTenant(AlvoContext context) => context.Tenant is not null;
 }
 
 /// <summary>

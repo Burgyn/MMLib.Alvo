@@ -49,42 +49,58 @@ internal static class RelationGraph
         IReadOnlyList<RelationConsumer> consumers,
         List<DescriptorValidationError> errors)
     {
-        var depth = new Dictionary<string, int>(StringComparer.Ordinal);
+        var walk = new Walk(listReads, errors);
         foreach (var entity in listReads.Keys.Order(StringComparer.Ordinal))
         {
-            Visit(entity, [], listReads, depth, errors);
-            RefuseTooDeep(new RelationConsumer(entity, "rules.list", ListPath(entity), listReads[entity]), depth[entity], errors);
+            Visit(entity, [], walk);
         }
 
-        foreach (var consumer in consumers)
+        foreach (var entity in listReads.Keys.Where(entity => !walk.Cyclic.Contains(entity)))
         {
-            RefuseTooDeep(consumer, consumer.Targets.Select(target => 1 + depth.GetValueOrDefault(target)).DefaultIfEmpty(0).Max(), errors);
+            RefuseTooDeep(new RelationConsumer(entity, "rules.list", ListPath(entity), listReads[entity]), walk.Depth[entity], errors);
+        }
+
+        foreach (var consumer in consumers.Where(consumer => !consumer.Targets.Any(walk.Cyclic.Contains)))
+        {
+            RefuseTooDeep(consumer, consumer.Targets.Select(target => 1 + walk.Depth.GetValueOrDefault(target)).DefaultIfEmpty(0).Max(), errors);
         }
     }
 
-    private static int Visit(
-        string entity,
-        List<string> path,
-        IReadOnlyDictionary<string, IReadOnlyList<string>> edges,
-        Dictionary<string, int> depth,
-        List<DescriptorValidationError> errors)
+    /// <summary>
+    /// One walk's state. An entity on a reported cycle, or one whose list rule reaches one, is <see cref="Cyclic"/>: its
+    /// depth only measures how far around the loop the walk went, so the cycle error stands for it alone.
+    /// </summary>
+    private sealed record Walk(IReadOnlyDictionary<string, IReadOnlyList<string>> Edges, List<DescriptorValidationError> Errors)
+    {
+        public Dictionary<string, int> Depth { get; } = new(StringComparer.Ordinal);
+
+        public HashSet<string> Cyclic { get; } = new(StringComparer.Ordinal);
+    }
+
+    private static int Visit(string entity, List<string> path, Walk walk)
     {
         if (path.Contains(entity, StringComparer.Ordinal))
         {
-            errors.Add(Cycle([.. path.SkipWhile(step => step != entity), entity]));
+            walk.Errors.Add(Cycle([.. path.SkipWhile(step => step != entity), entity]));
+            walk.Cyclic.UnionWith(path.SkipWhile(step => step != entity));
             return 0;
         }
 
-        if (depth.TryGetValue(entity, out var known))
+        if (walk.Depth.TryGetValue(entity, out var known))
         {
             return known;
         }
 
         path.Add(entity);
-        var deepest = edges.GetValueOrDefault(entity, []).Select(next => 1 + Visit(next, path, edges, depth, errors))
+        var deepest = walk.Edges.GetValueOrDefault(entity, []).Select(next => 1 + Visit(next, path, walk))
             .DefaultIfEmpty(0).Max();
+        if (walk.Edges.GetValueOrDefault(entity, []).Any(walk.Cyclic.Contains))
+        {
+            walk.Cyclic.Add(entity);
+        }
+
         path.RemoveAt(path.Count - 1);
-        depth[entity] = deepest;
+        walk.Depth[entity] = deepest;
         return deepest;
     }
 

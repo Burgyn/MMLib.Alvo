@@ -100,7 +100,7 @@ internal sealed class PolicyEngine : IPolicyEngine
     /// </summary>
     private static PolicyDecision? CheckTenantGuard(EntityPolicy policy, AlvoContext context)
     {
-        if (policy.Tenancy != TenancyMode.Scoped || context.Tenant is not null)
+        if (policy.Tenancy != TenancyMode.Scoped || RequiredContext.HasTenant(context))
         {
             return null;
         }
@@ -120,15 +120,18 @@ internal sealed class PolicyEngine : IPolicyEngine
             ?? Allow(policy, Bound(operationPolicy, resolution), resolution.Context);
     }
 
-    /// <summary>The operation's predicates with every relation bound for this caller; untouched when it reads none.</summary>
-    private OperationPolicy Bound(OperationPolicy policy, Resolution resolution) =>
-        !policy.HasRelations
+    /// <summary>
+    /// The operation's predicates with every relation bound for this caller; untouched when it reads none. Each tree is
+    /// searched rather than trusting a stored flag, which a <c>with</c> copy could leave stale over a relation tree.
+    /// </summary>
+    private OperationPolicy Bound(OperationPolicy policy, Resolution resolution)
+    {
+        var @using = Bind(resolution, UsingSlot, policy.Using);
+        var withCheck = Bind(resolution, CheckSlot, policy.WithCheck);
+        return ReferenceEquals(@using, policy.Using) && ReferenceEquals(withCheck, policy.WithCheck)
             ? policy
-            : policy with
-            {
-                Using = Bind(resolution, UsingSlot, policy.Using),
-                WithCheck = Bind(resolution, CheckSlot, policy.WithCheck),
-            };
+            : policy with { Using = @using, WithCheck = withCheck };
+    }
 
     private CompiledExpression? Bind(Resolution resolution, string slot, CompiledExpression? expression) =>
         _binder.Bind(resolution.Catalog, resolution.Entity, resolution.Operation, slot, expression, resolution.Context, resolution.Depth);

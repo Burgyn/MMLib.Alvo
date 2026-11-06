@@ -58,7 +58,7 @@ internal static class RelationCatalogBuilder
     {
         if (references.Count == 1)
         {
-            reverse[(parent, child.Name)] = (child, references[0]);
+            Put((parent, child.Name), (child, references[0]), reverse, ambiguous);
         }
         else
         {
@@ -67,7 +67,32 @@ internal static class RelationCatalogBuilder
 
         foreach (var reference in references)
         {
-            reverse[(parent, $"{child.Name}_via_{reference}")] = (child, reference);
+            Put((parent, $"{child.Name}_via_{reference}"), (child, reference), reverse, ambiguous);
+        }
+    }
+
+    /// <summary>
+    /// Names one way to reach a child, unless the spelling already names another: an entity literally called
+    /// <c>a_via_b</c> and child <c>a</c> through ref <c>b</c> would otherwise overwrite each other in enumeration order,
+    /// and a rule would read a table its author did not name. Both are then refused as ambiguous.
+    /// </summary>
+    private static void Put(
+        (string Entity, string Name) key,
+        (EntitySchema Child, string Via) target,
+        Dictionary<(string Entity, string Name), (EntitySchema Child, string Via)> reverse,
+        Dictionary<(string Entity, string Name), IReadOnlyList<string>> ambiguous)
+    {
+        if (ambiguous.TryGetValue(key, out var known))
+        {
+            ambiguous[key] = [.. known, target.Via];
+        }
+        else if (reverse.Remove(key, out var other) && (other.Child.Name, other.Via) != (target.Child.Name, target.Via))
+        {
+            ambiguous[key] = [other.Via, target.Via];
+        }
+        else
+        {
+            reverse[key] = target;
         }
     }
 
@@ -97,6 +122,11 @@ internal static class RelationCatalogBuilder
                 return RelationRefusals.Ambiguous(entity, member, references);
             }
 
+            if (IsRef(entities.GetValueOrDefault(entity), member))
+            {
+                return RelationRefusals.RefNotChild(entity, member);
+            }
+
             var children = ChildrenOf(entity);
             return entities.ContainsKey(member)
                 ? RelationRefusals.NotAChild(entity, member, children)
@@ -113,6 +143,9 @@ internal static class RelationCatalogBuilder
         private string ReasonFor(string target) => target == RelationRefusals.UsersEntity
             ? RelationRefusals.BuiltInUsers
             : unreadable.GetValueOrDefault(target, RelationRefusals.Undeclared);
+
+        private static bool IsRef(EntitySchema? schema, string member) =>
+            RefsOf(schema).Contains(member, StringComparer.Ordinal);
 
         private static IEnumerable<string> RefsOf(EntitySchema? schema) =>
             schema?.Fields.Where(candidate => candidate.Reference is not null).Select(candidate => candidate.Name) ?? [];

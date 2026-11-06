@@ -79,6 +79,11 @@ internal static partial class CelTypeChecker
 
         private (CelNode, CelValueType, bool, int) CheckOuterFieldRef(CelFieldRef fieldRef)
         {
+            if (fieldRef.FieldName == frame!.Variable)
+            {
+                return RefuseBareVariable(fieldRef);
+            }
+
             var outer = Nested(frame!.Outer, bodyFrame: null);
             var (field, type, error, position) = outer.CheckFieldRef(fieldRef);
             Adopt(outer);
@@ -87,11 +92,30 @@ internal static partial class CelTypeChecker
 
         private (CelNode, CelValueType, bool, int) CheckOuterHas(CelHas has)
         {
+            if (has.Field.FieldName == frame!.Variable)
+            {
+                return RefuseBareVariable(has);
+            }
+
             var outer = Nested(frame!.Outer, bodyFrame: null);
             var (presence, type, error, position) = outer.CheckHas(has);
             Adopt(outer);
             var field = ((CelHas)presence).Field;
             return (new CelOuterHas(new CelOuterFieldRef(field.FieldName, field.Type)), type, error, position);
+        }
+
+        /// <summary>
+        /// The macro's variable read bare: in CEL it would shadow an outer field of the same name, so rather than read the
+        /// outer row silently it is refused.
+        /// </summary>
+        private (CelNode, CelValueType, bool, int) RefuseBareVariable(CelNode node)
+        {
+            var position = _cursor;
+            Errors.Add(new CelCompilationError(
+                $"'{frame!.Variable}' names a row of '{frame.Receiver}', not a value.",
+                $"Read a field of '{frame.Variable}': {frame.Variable}.<field>.",
+                position));
+            return (node, CelValueType.Null, true, position);
         }
 
         /// <summary>Refuses relation syntax outside a rule, or in a compile given no catalog to resolve it.</summary>

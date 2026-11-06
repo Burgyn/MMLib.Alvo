@@ -41,6 +41,11 @@ internal static class RelationRefusals
         $"Reach a child that references '{parent}' ({List(children)}), or follow a 'ref' field with <ref>.<field>.",
         0);
 
+    internal static CelCompilationError RefNotChild(string parent, string receiver) => new(
+        $"'{receiver}' is a reference of '{parent}', not a child, so '{receiver}.exists(…)' has no rows to read.",
+        $"Follow the reference with {receiver}.<field>.",
+        0);
+
     internal static CelCompilationError UnreadableChild(string parent, string receiver, string reason, IEnumerable<string> children) =>
         NotAChild(parent, receiver, children) with { Message = $"'{receiver}' is {reason}, so a rule cannot read its rows." };
 

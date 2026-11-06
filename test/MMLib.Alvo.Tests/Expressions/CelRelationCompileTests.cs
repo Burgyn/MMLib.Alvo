@@ -1,5 +1,7 @@
 ﻿using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Rules.Internal;
+using MMLib.Alvo.Schema;
 
 using static MMLib.Alvo.Tests.Expressions.RelationFixtures;
 
@@ -226,6 +228,63 @@ public class CelRelationCompileTests
 
         error.Message.ShouldBe("'bronze' is not a declared value of this enum field.");
     }
+
+    [Theory]
+    [InlineData("project_members.exists(m, m)")]
+    [InlineData("project_members.exists(note, note == 'x')")]
+    [InlineData("project_members.exists(m, has(m))")]
+    public void The_exists_variable_read_bare_is_refused_rather_than_read_as_an_outer_field(string source)
+    {
+        var error = Compile(source, Projects).Errors.ShouldHaveSingleItem();
+
+        error.Message.ShouldEndWith("names a row of 'project_members', not a value.");
+        error.FixSuggestion.ShouldStartWith("Read a field of '");
+    }
+
+    [Fact]
+    public void An_exists_over_a_ref_field_says_to_follow_the_reference()
+    {
+        var error = Compile("customer_id.exists(c, c.region == 'eu')", Orders).Errors.ShouldHaveSingleItem();
+
+        error.Message.ShouldBe("'customer_id' is a reference of 'orders', not a child, so 'customer_id.exists(…)' has no rows to read.");
+        error.FixSuggestion.ShouldBe("Follow the reference with customer_id.<field>.");
+    }
+
+    [Fact]
+    public void A_via_spelling_that_is_also_an_entity_name_is_refused_as_ambiguous_whatever_the_order()
+    {
+        var parent = Schema("parents", Field("name", FieldType.String));
+        var child = Schema("a", Ref("b", "parents"));
+        var lookalike = Schema("a_via_b", Ref("x", "parents"));
+
+        foreach (var readable in new[] { new[] { parent, child, lookalike }, [parent, lookalike, child] })
+        {
+            var catalog = RelationCatalogBuilder.From(readable, new Dictionary<string, string>(StringComparer.Ordinal));
+            var result = ((ICelCompiler)new CelCompiler()).Compile("a_via_b.exists(r, true)", CelProfile.Rule, parent, catalog);
+
+            catalog.Reverse("parents", "a_via_b").ShouldBeNull();
+            result.IsSuccess.ShouldBeFalse();
+        }
+    }
+
+    [Fact]
+    public void A_relation_under_a_conditional_is_refused_as_a_negation_whatever_the_profile_admits()
+    {
+        var relation = CompileRule("customer_id.region == 'eu'", Orders).Root;
+        var errors = new List<CelCompilationError>();
+
+        RelationLifter.Lift(new CelConditional(relation, new CelLiteral(CelValueType.Bool, false), new CelLiteral(CelValueType.Bool, true)), errors);
+
+        errors.ShouldHaveSingleItem().Message.ShouldBe(RelationLifter.NegatedMessage);
+    }
+
+    private static EntitySchema Schema(string name, params FieldSchema[] fields) =>
+        new() { Name = name, Fields = [new FieldSchema { Name = "id", Type = FieldType.Uuid }, .. fields] };
+
+    private static FieldSchema Field(string name, FieldType type) => new() { Name = name, Type = type };
+
+    private static FieldSchema Ref(string name, string target) =>
+        new() { Name = name, Type = FieldType.Ref, Nullable = true, Reference = new RefSchema(target, OnDelete.Restrict) };
 
     private static CelFieldRef Inner(string name, CelValueType type) => new(name, type, CelRecordState.Current);
 }

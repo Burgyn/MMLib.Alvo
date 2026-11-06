@@ -24,7 +24,10 @@ internal static class CelRewriter
         },
         CelRelation relation => relation with { Body = Replace(relation.Body, replace) },
         CelHas has => Presence(has, Replace(has.Field, replace)),
-        _ => node.RebuildChildren(child => Replace(child, replace)),
+        CelOuterHas => node,
+        _ when IsLeaf(node) => node,
+        _ when node.ChildNodes is not null => node.RebuildChildren(child => Replace(child, replace)),
+        _ => throw Unknown(node),
     };
 
     /// <summary>Whether <paramref name="match"/> holds for <paramref name="node"/> or any node below it.</summary>
@@ -38,8 +41,20 @@ internal static class CelRewriter
         CelRelation relation => Any(relation.Body, match),
         CelHas has => Any(has.Field, match),
         CelOuterHas outerHas => Any(outerHas.Field, match),
-        _ => node.ChildNodes.Any(child => Any(child, match)),
+        _ when IsLeaf(node) => false,
+        _ when node.ChildNodes is { } children => children.Any(child => Any(child, match)),
+        _ => throw Unknown(node),
     };
+
+    private static bool IsLeaf(CelNode node) =>
+        node is CelLiteral or CelFieldRef or CelContextRef or CelChanged or CelOuterFieldRef;
+
+    /// <summary>
+    /// A node kind whose children this walk cannot see: it fails rather than read the node as a leaf, which would hide a
+    /// relation below it from the renderer's refusal and from binding.
+    /// </summary>
+    private static InvalidOperationException Unknown(CelNode node) => new(
+        $"'{node.GetType().Name}' is not a node kind the relation walk knows; it must declare its children.");
 
     /// <summary>Whether the tree holds a relation term anywhere.</summary>
     /// <param name="node">The tree to search.</param>

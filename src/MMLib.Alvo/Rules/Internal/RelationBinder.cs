@@ -25,7 +25,7 @@ namespace MMLib.Alvo.Rules.Internal;
 /// <param name="resolveList">Resolves an entity's <c>list</c> decision over one catalog snapshot, at a depth.</param>
 internal sealed class RelationBinder(Func<PolicyCatalog, string, AlvoContext, int, PolicyDecision> resolveList)
 {
-    private readonly ConditionalWeakTable<PolicyCatalog, ConcurrentDictionary<BindingKey, CelNode>> _bound = new();
+    private readonly ConditionalWeakTable<PolicyCatalog, BoundTrees> _bound = new();
 
     /// <summary>The expression with every relation bound for this caller, or the expression itself when it reads none.</summary>
     /// <param name="catalog">The one catalog snapshot this call resolves against.</param>
@@ -40,8 +40,10 @@ internal sealed class RelationBinder(Func<PolicyCatalog, string, AlvoContext, in
         AlvoContext context, int depth) =>
         expression is null || !CelRewriter.HasRelation(expression.Root)
             ? expression
-            : new(BoundRoot(catalog, KeyOf(entity, operation, slot, depth, context), expression.Root, context),
-                expression.Profile, expression.ResultType, expression.Source, expression.Entity);
+            : _bound.GetOrCreateValue(catalog).Expressions.GetOrAdd(
+                KeyOf(entity, operation, slot, depth, context),
+                key => new(BoundTree(catalog, key, expression.Root, context),
+                    expression.Profile, expression.ResultType, expression.Source, expression.Entity));
 
     /// <summary>A lookup check, stored as its relation term, bound for this caller.</summary>
     /// <param name="catalog">The one catalog snapshot this call resolves against.</param>
@@ -50,16 +52,17 @@ internal sealed class RelationBinder(Func<PolicyCatalog, string, AlvoContext, in
     /// <param name="check">The check's relation term.</param>
     /// <param name="context">The caller.</param>
     internal CelRelation Bind(PolicyCatalog catalog, string entity, string slot, CelRelation check, AlvoContext context) =>
-        (CelRelation)BoundRoot(catalog, KeyOf(entity, DataOperation.Create, slot, 0, context), check, context);
+        (CelRelation)_bound.GetOrCreateValue(catalog).Checks.GetOrAdd(
+            KeyOf(entity, DataOperation.Create, slot, 0, context), key => BoundTree(catalog, key, check, context));
 
     private static BindingKey KeyOf(string entity, DataOperation operation, string slot, int depth, AlvoContext context) =>
-        new(entity, operation, slot, depth, RequiredContext.HasIdentity(context), context.Tenant is not null);
+        new(entity, operation, slot, depth, RequiredContext.HasIdentity(context), RequiredContext.HasTenant(context));
 
-    private CelNode BoundRoot(PolicyCatalog catalog, BindingKey key, CelNode root, AlvoContext context) =>
-        _bound.GetOrCreateValue(catalog).GetOrAdd(key, _ => CelRewriter.Replace(root, node =>
+    private CelNode BoundTree(PolicyCatalog catalog, BindingKey key, CelNode root, AlvoContext context) =>
+        CelRewriter.Replace(root, node =>
             node is CelRelation { Scope: null } relation
                 ? relation with { Scope = Scope(catalog, relation, context, key.Depth) }
-                : null));
+                : null);
 
     private RelationScope Scope(PolicyCatalog catalog, CelRelation relation, AlvoContext context, int depth)
     {
@@ -70,6 +73,14 @@ internal sealed class RelationBinder(Func<PolicyCatalog, string, AlvoContext, in
 
         var related = resolveList(catalog, relation.Related.Name, context, depth + 1);
         return related.IsDenied ? RelationScope.Deny : new RelationScope(false, related.Using, related.TenantScope);
+    }
+
+    /// <summary>One catalog's bound expressions and bound checks.</summary>
+    private sealed class BoundTrees
+    {
+        public ConcurrentDictionary<BindingKey, CompiledExpression> Expressions { get; } = new();
+
+        public ConcurrentDictionary<BindingKey, CelNode> Checks { get; } = new();
     }
 
     /// <summary>One bound tree's identity: the inputs its related decisions depend on.</summary>

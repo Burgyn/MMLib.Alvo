@@ -93,7 +93,7 @@ internal sealed record CelCall(string Name, IReadOnlyList<CelNode> Arguments) : 
     public CelFunction? Function { get; init; }
 
     /// <inheritdoc/>
-    internal override IReadOnlyList<CelNode> ChildNodes => Arguments;
+    internal override IReadOnlyList<CelNode>? ChildNodes => Arguments;
 
     /// <inheritdoc/>
     internal override CelNode RebuildChildren(Func<CelNode, CelNode> rewrite) =>

@@ -15,10 +15,11 @@
 public abstract record CelNode
 {
     /// <summary>
-    /// The children of a node kind this assembly cannot name — the core's function call — for the internal relation
-    /// rewrite; every kind declared here is walked by name, so it answers empty.
+    /// The children of a node kind this assembly cannot name — the core's own nodes — for the internal relation rewrite;
+    /// <see langword="null"/> for a kind that does not declare them, which the rewrite refuses rather than read as a leaf.
+    /// Every kind declared here is walked by name.
     /// </summary>
-    internal virtual IReadOnlyList<CelNode> ChildNodes => [];
+    internal virtual IReadOnlyList<CelNode>? ChildNodes => null;
 
     /// <summary>This node rebuilt over its <see cref="ChildNodes"/>, each passed through <paramref name="rewrite"/>.</summary>
     /// <param name="rewrite">The rewrite applied to each child.</param>
