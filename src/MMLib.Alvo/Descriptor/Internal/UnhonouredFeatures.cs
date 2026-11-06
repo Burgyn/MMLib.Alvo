@@ -135,6 +135,23 @@ internal static class UnhonouredFeatures
         + "day matching lands, with nothing between it and delivery.");
 
     /// <summary>
+    /// Batch delivery — <c>delivery: "batch"</c> on a rule, or the <c>.batch</c> event shape — refused: one execution per
+    /// affected row is the only delivery this build runs (#193).
+    /// </summary>
+    internal static UnhonouredSlot BatchDelivery { get; } = new(
+        "batch",
+        "Batch delivery is not implemented: one execution per affected row is the only delivery this build runs, and an "
+        + "array payload would silently become one call per row.",
+        "Remove 'delivery' (perItem is the default), and trigger on the per-row event (entity.orders.created, not "
+        + "entity.orders.created.batch). Tracked in #193.");
+
+    /// <summary>An <c>auth.*</c> or <c>storage.*</c> trigger: refused, because nothing emits those events.</summary>
+    internal static UnhonouredSlot NonEntityTrigger { get; } = new(
+        "trigger.source",
+        "This build emits only entity events, so an auth or storage trigger would never fire.",
+        "Trigger on an entity event, or react in host code (an event handler) to what you need.");
+
+    /// <summary>
     /// A raw JSONata expression in any <c>$defs/jsonata</c>-typed slot: refused, never partially evaluated.
     /// </summary>
     /// <remarks>

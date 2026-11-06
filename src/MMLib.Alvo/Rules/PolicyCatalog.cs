@@ -38,11 +38,13 @@ public sealed class PolicyCatalog
     /// <param name="roles">The project's declared roles, built from the same descriptor.</param>
     /// <param name="schema">The schema every rule in <paramref name="entities"/> was compiled against.</param>
     /// <param name="managementAccess">The compiled <c>access</c> levels, built from the same descriptor in the same pass.</param>
+    /// <param name="automation">The enabled automation rules, compiled in the same pass; empty when the descriptor declares none.</param>
     internal PolicyCatalog(
         IReadOnlyDictionary<string, EntityPolicy> entities,
         RoleCatalog roles,
         SchemaModel schema,
-        ManagementAccessCatalog managementAccess)
+        ManagementAccessCatalog managementAccess,
+        IReadOnlyList<CompiledAutomationRule>? automation = null)
     {
         ArgumentNullException.ThrowIfNull(entities);
         ArgumentNullException.ThrowIfNull(roles);
@@ -52,7 +54,14 @@ public sealed class PolicyCatalog
         Roles = roles;
         Schema = schema;
         ManagementAccess = managementAccess;
+        Automation = automation ?? [];
     }
+
+    /// <summary>Gets the enabled automation rules, in declaration order; a disabled rule is validated and not compiled here.</summary>
+    internal IReadOnlyList<CompiledAutomationRule> Automation { get; }
+
+    /// <summary>Gets every entity's compiled policy, keyed by entity name.</summary>
+    internal IEnumerable<KeyValuePair<string, EntityPolicy>> Entities => _entities;
 
     /// <summary>
     /// Gets the roles this project recognises: the built-ins plus the descriptor's <c>auth.roles</c>.

@@ -135,12 +135,17 @@ test.describe('the honest edges', () => {
     console_.assertClean();
   });
 
-  test('works: Automations and Functions quote the warned table and offer nothing', async ({ page }) => {
+  test('works: Functions quotes the warned table and offers nothing; Automations no longer says not yet', async ({ page }) => {
     const console_ = guardConsole(page);
     await open(page, '#/automations');
     await reset(page);
 
-    for (const [route, block] of [['#/automations', 'automation'], ['#/functions', 'functions']]) {
+    await go(page, '#/automations');
+    await expect(page.locator('#app')).toContainText('its own retried delivery');
+    await expect(page.locator('.a-content .a-notyet')).toHaveCount(0);
+    expect(CAPABILITIES.warned.some((w) => w.block === 'automation')).toBe(false);
+
+    for (const [route, block] of [['#/functions', 'functions']]) {
       await go(page, route);
       const consequence = CAPABILITIES.warned.find((w) => w.block === block).consequence;
       await expect(page.locator('#app')).toContainText(consequence);

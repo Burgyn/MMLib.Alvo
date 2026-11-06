@@ -119,7 +119,7 @@ internal static class AfterHookCompiler
     /// written in — and then refuses, through <see cref="AfterImagePhase"/>, any row image the point's event does not
     /// carry (#325), and any field the entity leaves out of its event images (<c>events.exclude</c>).
     /// </summary>
-    private static CompiledExpression? CompileCondition(string? source, string path, AfterHookScope scope)
+    internal static CompiledExpression? CompileCondition(string? source, string path, AfterHookScope scope)
     {
         if (source is null)
         {

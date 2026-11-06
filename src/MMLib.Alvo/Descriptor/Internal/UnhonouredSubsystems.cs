@@ -138,27 +138,20 @@ internal static partial class UnhonouredSubsystems
             "no runtime entity can be created and the whole dynamic schema-registry driver is absent, so "
             + "every governance limit declared here bounds nothing (F7)"),
         new(
-            "automation",
-            descriptor => descriptor.Automation is { Count: > 0 },
-            "no rule is ever evaluated, so no declared action runs — which looks exactly like a condition "
-            + "that never matched"),
-        new(
             "templates",
             descriptor => descriptor.Templates is { Count: > 0 },
-            "a template referenced by an after-hook 'email' action is rendered, but one referenced only from an "
-            + "automation rule is not, because no rule is evaluated yet — and a 'bodyFile' is not read on either "
-            + "path"),
+            "a template's 'bodyFile' is not read"),
         new(
             "webhooks",
             descriptor => descriptor.Webhooks?.Endpoints is { Count: > 0 },
-            "an endpoint an after-hook posts to is delivered to, but one referenced only from an automation rule "
-            + "never receives anything; and no delivery is signed — 'secretRef' is not read and no Standard "
-            + "Webhooks HMAC header is sent, so a receiver cannot yet verify the sender (7.1), nor is the "
-            + "payload projected per endpoint (#152)"),
+            "no delivery is signed — 'secretRef' is not read for signing and no Standard Webhooks HMAC header is "
+            + "sent, so a receiver cannot yet verify the sender (7.1), nor is the payload projected per endpoint "
+            + "(#152)"),
         new(
             "functions",
             descriptor => descriptor.Functions is { Count: > 0 },
-            "no function is ever invoked, on any trigger or schedule it declares"),
+            "a csx script never runs; a 'function' action calls a host function registered with AddFunction "
+            + "instead"),
     ];
 
     /// <summary>

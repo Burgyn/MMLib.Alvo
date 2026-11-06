@@ -2611,6 +2611,22 @@ function screenIntegrations() {
   </div></div>`;
 }
 
+function screenAutomations() {
+  return `${header([{ label: 'Automations' }])}
+  <div class="a-content"><div class="a-stack" style="max-width:860px">
+    <div class="a-row"><h1 class="a-page-title p-tight">Automations</h1></div>
+    <p class="p-muted p-tight" style="max-width:70ch">When something happens, do something. A rule's trigger is an entity event or a five-field UTC cron; its condition and actions compile at apply, and every action runs as its own retried delivery, shown on Operations.</p>
+    <div class="a-panel">
+      <div class="a-section"><span class="a-section-title">Refused at apply</span></div>
+      ${['batch', 'trigger.source'].map((slot) => `<div style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border)">
+        <code class="a-mono">${esc(slot)}</code>
+        <div class="a-refused__reason">⚠ <span>${esc(refusal(slot)?.consequence ?? '')}</span></div>
+        <div class="a-refused__reason" style="color:var(--dim)"><span>→</span> <span>${esc(refusal(slot)?.fix ?? '')}</span></div></div>`).join('')}
+    </div>
+    <div class="p-note"><span class="p-note__tag">design</span><span>The list of rules is read-only here: a rule is edited in the descriptor, like every other block.</span></div>
+  </div></div>`;
+}
+
 function screenNotYet(key, title, lead, later) {
   return `${header([{ label: title }])}
   <div class="a-content"><div class="a-stack" style="max-width:860px">
@@ -3148,9 +3164,7 @@ const ROUTES = {
   '#/history': screenHistory,
   '#/settings': screenSettings,
   '#/notes': screenNotes,
-  '#/automations': () => screenNotYet('automation', 'Automations',
-    'When something happens, do something — a job is completed, so the customer is emailed. The hooks on an entity already do a narrow version of this; automation is the general one, and its engine is not built.',
-    'When it lands, this is a list of rules — a trigger, a condition, an ordered list of actions — with the dry run the schema editor has: pick a past event, see which rules would have fired and what each action would have sent.'),
+  '#/automations': screenAutomations,
   '#/functions': () => screenNotYet('functions', 'Functions',
     'Your own C# running inside Alvo, on a trigger or a schedule, with the same database context an endpoint has.',
     'When it lands, this lists functions with their trigger, their last run and their output — and the editor is a code pane, not a form. Nothing about it is drawn yet, because a code editor designed before the runtime exists is a guess.'),

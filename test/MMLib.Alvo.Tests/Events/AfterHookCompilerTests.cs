@@ -272,10 +272,11 @@ public class AfterHookCompilerTests
     [Fact]
     public void The_hook_compiler_is_reached_from_the_policy_catalog_builder_and_nowhere_else()
         => ShippedSources.FileNamesMentioning(nameof(AfterHookCompiler)).ShouldBe(
-            ["AfterHookCompiler.cs", "PolicyCatalogBuilder.cs"],
+            ["AfterHookCompiler.cs", "PolicyCatalogBuilder.cs", "AutomationCompiler.cs"],
             ignoreOrder: true,
-            "the hook compiler has one caller, and it is the pass that primes the policy catalog — a second "
-            + "caller is a second priming site, which is R11's failure");
+            "the hook compiler is reached from the pass that primes the policy catalog — the automation compiler "
+            + "borrows its condition step inside that same pass — and a caller outside it is a second priming site, "
+            + "which is R11's failure");
 
     [Fact]
     public void An_entity_declaring_no_hooks_carries_the_empty_catalog_rather_than_null()

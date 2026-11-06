@@ -11,21 +11,21 @@ slot that is not honoured, each with the consequence and the fix in the framewor
 These top-level blocks are honoured:
 
 <!-- gen:honoured -->
-`entities` `auth` `tenancy` `access` `formats`
+`entities` `auth` `tenancy` `access` `formats` `automation`
 <!-- /gen:honoured -->
 
 These are declared by the schema and accepted, and are not honoured, or only in part. The apply warns about all but
 `entity.realtime`, and a descriptor that sets them looks as if it works:
 
 <!-- gen:warned -->
-`dynamicEntities` `automation` `templates` `webhooks` `functions` `auth.providers` `entity.storage` `entity.realtime`
+`dynamicEntities` `templates` `webhooks` `functions` `auth.providers` `entity.storage` `entity.realtime`
 <!-- /gen:warned -->
 
 **After-hook `webhook` and `email`, the one exception.** An after-hook `webhook` or `email` action runs, and may be
 proposed, but only against an endpoint under `webhooks.endpoints` or a template under `templates` that the descriptor
 already declares — never a new `webhooks` or `templates` block, which is a warned block. The delivery is
 **unsigned**: no `secretRef` is read, no HMAC header is sent and the payload is not projected per endpoint, so the
-receiver cannot verify the sender. Say so when you offer it. Referenced only from `automation`, they do nothing. An
+receiver cannot verify the sender. Say so when you offer it. An `automation` rule's actions run the same way, each as its own retried delivery. An
 after-hook `condition` or template may read `@tenant.id` and `@user.roles`: the writer's tenant and roles as the event
 recorded them.
 
@@ -33,7 +33,7 @@ These are refused at apply, each with its reason in the capability report (`fiel
 literal is honoured):
 
 <!-- gen:refused -->
-`field.default` `entity.softDelete` `trigger.event` `JSONata` `email.data` `bodyFile` `http.call`
+`field.default` `entity.softDelete` `trigger.event` `batch` `trigger.source` `JSONata` `email.data` `bodyFile` `http.call`
 <!-- /gen:refused -->
 
 The after-hook action types in this list are refused as actions, not as blocks. The skills of each area say what to use instead.

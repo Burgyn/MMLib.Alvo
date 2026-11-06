@@ -49,6 +49,8 @@ internal static class PolicyCatalogBuilder
         }
 
         var managementAccess = AccessCatalogBuilder.Build(descriptor.Access, compiler, roles, errorList);
+        var automation = AutomationCompiler.Compile(new AutomationScope(
+            descriptor, schema, compiler, references.Templates, references.Endpoints, references.Host, errorList));
 
         if (errorList.Count > 0)
         {
@@ -57,7 +59,7 @@ internal static class PolicyCatalogBuilder
             return false;
         }
 
-        catalog = new PolicyCatalog(entities, roles, schema, managementAccess);
+        catalog = new PolicyCatalog(entities, roles, schema, managementAccess, automation);
         errors = [];
         return true;
     }

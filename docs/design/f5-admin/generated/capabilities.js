@@ -12,7 +12,8 @@ export const CAPABILITIES = {
     "auth",
     "tenancy",
     "access",
-    "formats"
+    "formats",
+    "automation"
   ],
   "warned": [
     {
@@ -20,20 +21,16 @@ export const CAPABILITIES = {
       "consequence": "no runtime entity can be created and the whole dynamic schema-registry driver is absent, so every governance limit declared here bounds nothing (F7)"
     },
     {
-      "block": "automation",
-      "consequence": "no rule is ever evaluated, so no declared action runs — which looks exactly like a condition that never matched"
-    },
-    {
       "block": "templates",
-      "consequence": "a template referenced by an after-hook 'email' action is rendered, but one referenced only from an automation rule is not, because no rule is evaluated yet — and a 'bodyFile' is not read on either path"
+      "consequence": "a template's 'bodyFile' is not read"
     },
     {
       "block": "webhooks",
-      "consequence": "an endpoint an after-hook posts to is delivered to, but one referenced only from an automation rule never receives anything; and no delivery is signed — 'secretRef' is not read and no Standard Webhooks HMAC header is sent, so a receiver cannot yet verify the sender (7.1), nor is the payload projected per endpoint (#152)"
+      "consequence": "no delivery is signed — 'secretRef' is not read for signing and no Standard Webhooks HMAC header is sent, so a receiver cannot yet verify the sender (7.1), nor is the payload projected per endpoint (#152)"
     },
     {
       "block": "functions",
-      "consequence": "no function is ever invoked, on any trigger or schedule it declares"
+      "consequence": "a csx script never runs; a 'function' action calls a host function registered with AddFunction instead"
     },
     {
       "block": "auth.providers",
@@ -63,6 +60,16 @@ export const CAPABILITIES = {
       "slot": "trigger.event",
       "consequence": "A wildcard event subscription is not matched yet: no rule fires for it today, and a matcher that fires it must scope every match to the envelope's tenant and pass a cross-tenant adversarial suite first — a fan-out across every tenant is the failure it would otherwise ship (#372).",
       "fix": "Name the entity and the operation exactly — 'entity.orders.created' rather than 'entity.orders.*' — and declare one rule per pair. Wildcards are refused rather than accepted-and-ignored because a descriptor outlives the build that applied it: accepted today, it becomes the fan-out above on the day matching lands, with nothing between it and delivery."
+    },
+    {
+      "slot": "batch",
+      "consequence": "Batch delivery is not implemented: one execution per affected row is the only delivery this build runs, and an array payload would silently become one call per row.",
+      "fix": "Remove 'delivery' (perItem is the default), and trigger on the per-row event (entity.orders.created, not entity.orders.created.batch). Tracked in #193."
+    },
+    {
+      "slot": "trigger.source",
+      "consequence": "This build emits only entity events, so an auth or storage trigger would never fire.",
+      "fix": "Trigger on an entity event, or react in host code (an event handler) to what you need."
     },
     {
       "slot": "JSONata",

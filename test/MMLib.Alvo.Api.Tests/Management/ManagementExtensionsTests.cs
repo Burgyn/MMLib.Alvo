@@ -93,8 +93,8 @@ public sealed class ManagementExtensionsTests
         await using var registering = await ManagedExtensions.StartAsync([_ops]);
         await using var plain = await ManagedFleet.StartAsync([_ops]);
 
-        (await HonouredAsync(registering)).ShouldBe(["entities", "auth", "tenancy", "access", "formats", "extensions.eventHandler"]);
-        (await HonouredAsync(plain)).ShouldBe(["entities", "auth", "tenancy", "access", "formats"]);
+        (await HonouredAsync(registering)).ShouldBe(["entities", "auth", "tenancy", "access", "formats", "automation", "extensions.eventHandler"]);
+        (await HonouredAsync(plain)).ShouldBe(["entities", "auth", "tenancy", "access", "formats", "automation"]);
     }
 
     [Fact]

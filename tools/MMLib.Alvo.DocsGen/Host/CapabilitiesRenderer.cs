@@ -29,6 +29,7 @@ internal static class CapabilitiesRenderer
         ["function"] = "entities-hooks",
         ["JSONata"] = "entities-hooks",
         ["bodyFile"] = "templates",
+        ["batch"] = "automation",
     };
 
     internal static GeneratedPage Render(JsonNode capabilities)
