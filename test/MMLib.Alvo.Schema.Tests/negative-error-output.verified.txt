@@ -89,6 +89,24 @@
     ]
   },
   {
+    file: state-machine-no-transitions.json,
+    failures: [
+      {
+        Pointer: #/entities/bookings/stateMachine/transitions,
+        Message: Validation minProperties - property count 0 is less than 1
+      }
+    ]
+  },
+  {
+    file: timer-without-at.json,
+    failures: [
+      {
+        Pointer: #/entities/bookings/timers/reminder,
+        Message: Validation properties - the required property 'at' was not present.
+      }
+    ]
+  },
+  {
     file: typo-property.json,
     failures: [
       {

@@ -12,7 +12,7 @@ namespace MMLib.Alvo.Data.PostgreSql.Tests.Integration;
 /// The whole <see cref="DeliveryStoreContractTests"/> suite against PostgreSQL, a fresh database per test instance, and
 /// the one fact a shape assertion cannot reach: two claimants racing one lane head.
 /// </summary>
-public sealed class PostgreSqlDeliveryStoreTests : DeliveryStoreContractTests, IClassFixture<PostgresFixture>
+public sealed class PostgreSqlDeliveryStoreTests : DeliveryStoreContractTests, IClassFixture<PostgresFixture>, IDisposable
 {
     private const string Subscriber = "send-confirmation";
 
@@ -175,6 +175,21 @@ public sealed class PostgreSqlDeliveryStoreTests : DeliveryStoreContractTests, I
     }
 
     protected override async Task<IDeliveryStoreWorld> WorldAsync() => await ConcreteWorldAsync();
+
+    /// <summary>
+    /// Closes this fact's idle pooled connections: every fact opens its own database, so pools left idle across a suite of
+    /// a hundred facts would exhaust the server's connection limit.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_connectionString.Length > 0)
+        {
+            using var connection = new NpgsqlConnection(_connectionString);
+            NpgsqlConnection.ClearPool(connection);
+        }
+
+        GC.SuppressFinalize(this);
+    }
 
     protected override void EnsureEngineAvailable() =>
         Assert.SkipUnless(!OperatingSystem.IsWindows(), "PostgreSQL Testcontainers requires a Linux Docker daemon.");

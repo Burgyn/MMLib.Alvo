@@ -179,6 +179,13 @@ internal sealed partial class AlvoOperationsService
                 $"Delivery '{row.Id}' is running under a claim. Wait for its attempt to be answered, then redeliver it if it ends dead.");
         }
 
+        if (row.Status == "superseded")
+        {
+            throw new ManagementConflictException(
+                $"Delivery '{row.Id}' was superseded by a newer debounced delivery of '{row.PartitionKey}' for '{row.Subscriber}', which "
+                + "carries the record's latest state. Redeliver or replay that one instead.");
+        }
+
         if (row.Status == "dead" && row.LastErrorType == ChainDepthExceeded)
         {
             throw new ManagementConflictException(

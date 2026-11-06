@@ -43,9 +43,27 @@ public sealed class AlvoHandlerOptions
         set => _retry = value ?? throw new ArgumentNullException(nameof(value));
     }
 
+    /// <summary>
+    /// Gets or sets how long a burst of one record's events is gathered before the handler runs once, with the latest; default
+    /// <see langword="null"/>, every event runs. Each new event of the record — of its partition key, in its tenant — restarts
+    /// the wait and supersedes the deliveries still waiting, which end <c>superseded</c>; one already running finishes. At
+    /// least 1 second and at most 1 day — a value outside refuses the start.
+    /// </summary>
+    public TimeSpan? Debounce { get; set; }
+
+    /// <summary>
+    /// Gets or sets how many of the handler's deliveries run at once per tenant or per record, across every replica; default
+    /// <see langword="null"/>, no cap beyond the dispatcher's own.
+    /// </summary>
+    public AlvoConcurrency? Concurrency { get; set; }
+
     internal bool OrderStated { get; private set; }
 
     internal static TimeSpan DefaultTimeout { get; } = TimeSpan.FromSeconds(30);
 
     internal static TimeSpan MaxTimeout { get; } = TimeSpan.FromHours(1);
+
+    internal static TimeSpan MinDebounce { get; } = TimeSpan.FromSeconds(1);
+
+    internal static TimeSpan MaxDebounce { get; } = TimeSpan.FromDays(1);
 }

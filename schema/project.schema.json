@@ -349,6 +349,15 @@
       "type": "string",
       "pattern": "^[a-z][a-z0-9_-]{0,62}$"
     },
+    "stateSources": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      },
+      "description": "The states a state-machine transition leaves: declared values of its field, or [\"*\"] alone for any state."
+    },
     "cel": {
       "type": "string",
       "minLength": 1,
@@ -649,6 +658,102 @@
                     "description": "A required field of the same type: where the range ends (exclusive)."
                   }
                 }
+              }
+            }
+          }
+        },
+        "stateMachine": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "field",
+            "transitions"
+          ],
+          "description": "Which values an enum field may move between. An update that changes `field` must match a declared transition, judged in the write's transaction before any host hook, or it is refused 422 (403 when the caller holds none of its roles). A delete is not a transition.",
+          "properties": {
+            "field": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]{0,62}$",
+              "description": "A stored enum field that holds the state."
+            },
+            "initial": {
+              "type": "string",
+              "description": "The value every create must store in `field`."
+            },
+            "transitions": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": {
+                "$ref": "#/$defs/identifier"
+              },
+              "description": "Named transitions. Several may reach one state; the move is allowed when any one admits it.",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "from",
+                  "to"
+                ],
+                "properties": {
+                  "description": {
+                    "type": "string",
+                    "description": "Human-readable description of the transition."
+                  },
+                  "from": {
+                    "$ref": "#/$defs/stateSources",
+                    "description": "The states it leaves; [\"*\"] alone is any state, including none."
+                  },
+                  "to": {
+                    "type": "string",
+                    "description": "The state it enters."
+                  },
+                  "roles": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "The caller must hold one of these roles, or the move is refused 403."
+                  },
+                  "when": {
+                    "$ref": "#/$defs/cel",
+                    "description": "A condition over old, new, changed() and @user; false refuses the move 422."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "timers": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/identifier"
+          },
+          "description": "Durable per-record timers, armed, moved and cancelled in the write's own transaction. Each fires its event once at its latest time, for host event handlers.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "at"
+            ],
+            "properties": {
+              "description": {
+                "type": "string",
+                "description": "Human-readable description of the timer."
+              },
+              "at": {
+                "$ref": "#/$defs/cel",
+                "description": "When it fires: a timestamp over the record's own fields, now() and duration('…'), e.g. starts_at - duration('24h'). Null leaves it unarmed."
+              },
+              "when": {
+                "$ref": "#/$defs/cel",
+                "description": "Armed only while this condition over the record's own fields holds; a write that makes it false cancels the timer."
+              },
+              "event": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                "description": "The custom event it fires; defaults to <entity>.<timer> with '-' as '_'."
               }
             }
           }

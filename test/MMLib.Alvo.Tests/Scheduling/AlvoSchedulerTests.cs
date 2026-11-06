@@ -43,6 +43,18 @@ public sealed class AlvoSchedulerTests
     }
 
     [Fact]
+    public async Task A_key_in_the_reserved_prefix_is_refused()
+    {
+        var scheduled = await Should.ThrowAsync<ArgumentException>(() => Scheduler().ScheduleAsync("alvo:x", _now, Reminder, null, _tenant, Ct));
+        var cancelled = await Should.ThrowAsync<ArgumentException>(() => Scheduler().CancelAsync("alvo:x", _tenant, Ct));
+
+        scheduled.Message.ShouldContain("declarative timers");
+        cancelled.Message.ShouldContain("declarative timers");
+        _armed.ShouldBeEmpty();
+        await _store.DidNotReceiveWithAnyArgs().CancelAsync(default!, default!, Ct);
+    }
+
+    [Fact]
     public async Task Scheduling_above_the_depth_limit_is_refused()
     {
         using (AlvoFlow.Enter(new AlvoProvenance { Depth = 9 }))

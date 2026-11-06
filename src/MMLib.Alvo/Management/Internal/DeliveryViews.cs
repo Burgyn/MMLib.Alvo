@@ -27,4 +27,7 @@ internal static class DeliveryViews
         Outcome = attempt.Outcome,
         ErrorType = attempt.ErrorType,
     };
+
+    /// <summary>A completed step by name and time; its result never leaves the store, since it can hold personal data.</summary>
+    internal static ManagementDeliveryStep Of(DeliveryStep step) => new() { Name = step.Name, CompletedAt = step.CompletedAt };
 }

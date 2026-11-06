@@ -1,0 +1,32 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "booking-lifecycle",
+  "description": "Bookings that move draft → confirmed → done, and a reminder a day before a confirmed one starts.",
+  "tenancy": { "enabled": true },
+  "auth": { "roles": ["staff", "manager"] },
+  "entities": {
+    "bookings": {
+      "tenancy": "scoped",
+      "fields": {
+        "status": { "type": "enum", "values": ["draft", "confirmed", "cancelled", "done"], "default": "draft" },
+        "starts_at": { "type": "datetime" },
+        "note": { "type": "text" }
+      },
+      "rules": { "list": "true", "get": "true", "create": "true", "update": "true", "delete": "true" },
+      "stateMachine": {
+        "field": "status",
+        "initial": "draft",
+        "transitions": {
+          "confirm": { "from": ["draft"], "to": "confirmed", "when": "new.starts_at > now()" },
+          "cancel": { "from": ["draft", "confirmed"], "to": "cancelled" },
+          "close": { "from": ["confirmed"], "to": "done", "roles": ["manager"] },
+          "reopen": { "from": ["*"], "to": "draft", "roles": ["admin"] }
+        }
+      },
+      "timers": {
+        "reminder": { "at": "starts_at - duration('24h')", "when": "status == 'confirmed'", "event": "bookings.reminder_due" }
+      }
+    }
+  }
+}

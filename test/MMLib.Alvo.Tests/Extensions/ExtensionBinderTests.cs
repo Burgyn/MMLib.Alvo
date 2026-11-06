@@ -104,6 +104,30 @@ public sealed class ExtensionBinderTests : IDisposable
         line.Message.ShouldContain("extensions/broken/timeout");
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(999)]
+    [InlineData(86_400_001)]
+    public void A_debounce_outside_one_second_to_one_day_refuses_the_start(long milliseconds)
+    {
+        var binder = Binder(alvo => alvo.Entity("tickets", t => t.OnCreated("bursty", OnCreated, configure: o => o.Debounce = TimeSpan.FromMilliseconds(milliseconds))));
+
+        binder.For(Catalog()).Unbound.Select(handler => handler.Id).ShouldBe(["bursty"]);
+
+        var line = _logs.Entries.Where(entry => entry.EventName == "ExtensionUnbound").ShouldHaveSingleItem();
+        line.Message.ShouldContain("extensions/bursty/debounce");
+    }
+
+    [Theory]
+    [InlineData(1_000)]
+    [InlineData(86_400_000)]
+    public void A_debounce_of_one_second_to_one_day_binds(long milliseconds)
+    {
+        var binder = Binder(alvo => alvo.Entity("tickets", t => t.OnCreated("bursty", OnCreated, configure: o => o.Debounce = TimeSpan.FromMilliseconds(milliseconds))));
+
+        binder.For(Catalog()).Handlers.Select(handler => handler.Id).ShouldBe(["bursty"]);
+    }
+
     [Fact]
     public void Each_new_catalog_is_bound_afresh_never_from_a_stale_one()
     {

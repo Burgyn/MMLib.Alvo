@@ -1052,6 +1052,46 @@ its execution ledger), so a later reader can tell a decision from an oversight. 
 23. **Jobs claim from their own pool**, `Alvo:Deliveries:MaxJobConcurrency` (default 2), with a 15-minute default timeout; run now needs `developer`.
 24. **Dashboard:** Operations draws a *Schedules* section (cron and zone or the revision, next run in the schedule's zone, last run, last outcome, *Run now* for a schedule only) and a *Timers* tile (`n pending · m due`) from the one catalog read; a refusal is drawn as every refusal (*HX-06 settled details* (23)).
 
+**HX-14 settled details.** Rulings and deviations taken while planning (1–13, from
+`docs/superpowers/plans/2026-11-06-hx-14-steps-flow-control.md` *Decisions*, one line each) and while building (14–33, from
+its plan review and execution ledger, P1–P19), so a later reader can tell a decision from an oversight. Where a ruling and
+§4.10 above, §4.8, §5 row `14` or §7 *HX-14* disagree, the ruling is what shipped. The architecture note is
+`docs/architecture/steps.md`.
+
+1. **A deviation from §4.10 — the sleep uses the delivery row, not a timer `step:{delivery}:{name}`.** `SleepUntilAsync` sets the delivery `pending`, `not_before = at`, `attempts − 1` (fenced) and records the attempt `skipped`; a timer fire appends to the outbox and cannot reset a delivery without a new `ITimerStore` member (*HX-13 settled details* (3)). Cost: a sleeping delivery is absent from the *Timers* tile; it shows as pending with a future due time.
+2. **A sleep is detected even if the handler swallows it:** `StepSleep` is thrown *and* the run is flagged; the runner answers "sleep" whenever the flag is set. Cost: none.
+3. **A sleep's step row stores the wake instant;** on resume `now ≥ at` returns, an early wake (a redeliver) sleeps again. Cost: one row per sleep.
+4. **Each step is at least once; completed steps are never re-run.** The record is written after `work` returns, outside any unit; two runners racing one step keep the first record and both continue with it. Cost: step bodies must be idempotent.
+5. **Results are System.Text.Json (`JsonSerializerOptions.Web`)**; the non-generic `RunAsync` stores the JSON text `null`; the result never leaves the store through the Management API (`ManagementDeliveryStep` is name and time). Cost: an operator cannot see a step's value (intended — it can be PII).
+6. **Steps are reached through the context** (`AlvoEventContext.Steps`, `AlvoJobContext.Steps`), not DI; `AlvoEventContext.Create` and a `DeliverAsync` fixture run get a pass-through (work every time, sleep returns at once). Cost: unit tests do not exercise memoization (`AlvoTestHost` does).
+7. **Redeliver or replay of a `succeeded` delivery deletes its steps** in the reset's transaction; `dead` and `cancelled` keep them, so a fixed bug resumes after the last good step. Cost: no full re-run of a dead delivery that completed steps.
+8. **Debounce is trailing and scoped to (subscriber, partition key, tenant):** the new row is due `now + Debounce`; in the same transaction every older waiting row of the lane becomes `superseded` (`completed_at = now`); `running` never is. Cost: a stream faster than the period delays delivery indefinitely (capped at 1 day, no Inngest-style timeout).
+9. **`superseded` is finished, but not replayable or redeliverable** (like `chain-depth-exceeded`); it holds no lane and no slot. Cost: an operator cannot force a stale event through.
+10. **Concurrency is per subscriber;** the slot key includes the subscriber, `record` the tenant too; rows are inserted lazily (`ON CONFLICT DO NOTHING`), only slots `0 … limit−1` are tried. Cost: after a limit is lowered, higher slots already held run on — a transient overshoot.
+11. **A slot's lease is the delivery's claim lease,** released by the fenced answer (complete, fail, sleep) in its transaction, only when the fence held. Cost: a crash costs one slot for up to the lease (90 s at the defaults).
+12. **`IDeliveryStore` gains `StepsAsync`, `RecordStepAsync`, `SleepAsync`** (abstract, breaking like HX-06's nine and HX-09's two); `DeliveryRequest.Debounce` and `DeliveryClaim.Limits` are init members a provider must honour, pinned by the contract suite. Cost: a third-party store fails to compile until it implements them.
+13. **#391 closes with the dashboard and docs.** HX-14 ships as one PR (the plan's slices A and B together).
+14. **Candidates per slot key are cut at the limit (P1):** `ROW_NUMBER() OVER (PARTITION BY subscriber, tenant[, partition key] ORDER BY event_id) <= @limit`, so one saturated key cannot fill the candidate read and starve another key.
+15. **A debounced fan-out takes an exclusive transaction lock on its lane (P2)** before the insert and the supersede: on PostgreSQL READ COMMITTED a blocked `UPDATE` re-checks only its outer `WHERE`, never the `MAX(newest)` subquery.
+16. **Only a delivery that never started is superseded (P3)** (`NOT EXISTS` over its attempts): a sleeping, retried, replayed or redelivered delivery runs on.
+17. **The lane's newest counts only `pending`, `retrying`, `running`, `succeeded` (P4).**
+18. **Slot before delivery, everywhere (P5):** an answer deletes its slot row (gated by `EXISTS(fence)`) before the fenced update, and **rolls back when the fence failed** — the `EXISTS` is read from the statement's snapshot on PostgreSQL. The claim is two-phase — every slot (keys ascending, slots ascending), then the deliveries those slots were taken for (ids ascending), giving back the slot of one it could not claim — a deviation from the plan's interleaved slot → delivery → slot. One bounded PostgreSQL deadlock window remains (a reclaimed delivery holding two expired rows of one key, a claimant and its late answer); `40P01` aborts one, a claim retries next round, an answer within its settle grace or by lease expiry.
+19. **Acceptance (3) is non-vacuous (P6, P7):** handlers wait on a gate until both hosts claimed; distinct partition keys; a third entrant would show as `MaxRunning == 3`, never as a hang.
+20. **`IAlvoSteps` steps per run, names and results are capped** (plan limits): 1–200 characters without control characters, unique per run, 1 000 steps, 256 KiB of result; `ArgumentException` for a bad name, `InvalidOperationException` for reuse, the 1 001st step or an oversize result, before anything is recorded.
+21. **`IDeliveryStoreWorld.ReadSlotsAsync` (P10)** is a default interface member returning `[]`, shaped `(Key, Slot, DeliveryId)`, used only by the EF and PostgreSQL facts.
+22. **The capped claim binds one subscriber at a time (P11)**, ordered or unordered; with no uncapped subscriber named the batch `UPDATE` is skipped.
+23. **Decision 7's step delete runs only when the reset matched (P12):** redeliver deletes first and rolls back when the reset matched nothing; replay deletes by its own filter plus the locked subscribers (a superset the reset cannot escape), `status = 'succeeded'`.
+24. **Slot rows are indexed by `delivery_id` and deleted when freed (P13);** a crashed runner's row and a fenced-out answer's row outlive their delivery until a taker of the key overwrites them — a stale row, and for up to one lease a slot.
+25. **The subscriber and tenant of a fan-out may hold no control character (P14)** — the slot and lane keys' inner parts; refused with `ArgumentException` before any write. The partition key, their last part, is not refused: it cannot make two keys collide, and refusing it could wedge the outbox on a custom event's key.
+26. **`Debounce` is 1 second to 1 day (P15),** refused at start with a fix.
+27. **`SleepUntilAsync` returns at once when `now ≥ at`, on the first call too (P16).**
+28. **The docs snippet reuses `time/booking-reminders.alvo.json` (P17)** — it has the `starts_at` a reminder needs; the plan's `booking-desk.alvo.json` (under `typed/`) has none.
+29. **A deviation from §4.8's DDL — the slot column is `slot_key`, not `key` (P18):** `KEY` is reserved in T-SQL.
+30. **Capped first, with a reserved share of the batch (P19, review ruling):** the claim runs its capped half first — the whole batch when every named subscriber is capped, else its larger half — then the uncapped batch with what is left, so an uncapped backlog that fills the batch cannot starve a capped handler and an uncapped one keeps the smaller half. A key that yields no slot is skipped for the rest of the claim (`limit`, not `limit²`, statements per saturated key). Two caps for one subscriber are refused. A batch of 1 has no halves: when both kinds are named, such claims alternate which half goes first (a counter per store instance), so each gets a claim within two rounds; an uncapped-first claim that wins its row runs no capped half, and one that wins none holds no row lock, so the slot-before-delivery order holds. Pinned by `DeliveryStoreContractTests.At_a_batch_of_one_capped_and_uncapped_backlogs_each_get_a_claim_within_two_rounds`. Cost: at a batch of 1 each kind waits at most one extra round.
+31. **`superseded` is a listable status** (filter, dashboard chip) but not in the finished set; a Management redeliver of one is a `ManagementConflictException` naming the newer delivery, not a silent no-op.
+32. **A sleep's attempt is the outcome `skipped`** in history and telemetry, and the dispatcher does not count it as a failure.
+33. **Dashboard:** the delivery pane lists *Steps* (name · completion time, UTC) under its attempts, or *No steps recorded*; a `pending` delivery whose last attempt is `skipped` and whose `not_before` is ahead reads *sleeping until 6 Nov 09:00* (UTC) with a clock icon, in the accent tone (the design system has no info tone); `superseded` is a neutral chip, a status filter, with no *Run again*; a capped handler shows *per tenant · 2*. A list row shows the plain status: the list read carries no history.
+
 ### 4.11 Functions and automation (HX-15)
 
 `AddFunction<TFunction>(name)` with `IAlvoFunction<TInput>` registers a keyed service and a catalog entry
@@ -1300,11 +1340,11 @@ Roslyn dependency is needed.
 | `AlvoConstraintKind.Check` | Abstractions / Data | 11 | appended. **Amended (HX-11):** `AlvoConstraintKind.Check`; `CelValueType.Duration`; `FieldSchema.CheckExpression`, `RollupSchema.Where`; the DIM `IFieldSqlRenderer.RenderEpochMicroseconds` — *HX-11 settled details* (6), (11), (18); `IPredicateRenderer.RenderConstraint` internal until HX-12, (17) |
 | `AlvoConstraintKind.Exclusion`; `IAlvoSqlDialect.ExclusionConstraint(…)` | Abstractions; EF driver | 12 | **DIM** returning null (precedent `GeneratedColumnDefinition`, `IAlvoSqlDialect.cs:312`); null → apply refuses `exclude` on that engine. **Amended (HX-12):** `IAlvoSqlDialect.SequenceAllocationStatement`, `ExclusionConstraintDefinition`, `ExclusionConstraintSql`, and the descriptor and schema members — *HX-12 settled details*, Amendments |
 | `IAlvoScheduler`, `IAlvoScheduledJob`, `AlvoJobContext`, `AlvoScheduleOptions`, `AlvoScheduleScope`, `IAlvoTenantCatalog`, `IAlvoDataMigration`, `AddSchedule<T>`, `AddDataMigration<T>`, `ITimerStore` + `TimerStoreContractTests`; **as built (*HX-13 settled details*):** also `TimerEntry`, `ClaimedTimer`, `TimerCounts`, `ScheduleDefinition`, `ClaimedSchedule`, `ScheduleAdvance`, `StoredSchedule`, `AlvoFrameworkEnvelope`, `AlvoSchedulerExtensions.ScheduleAsync<TMessage>`, `ITimerStoreWorld`, `AlvoDeliveryOptions.MaxJobConcurrency`, `AlvoExtensionKind.Schedule`/`.DataMigration`, `AlvoExtensionStage.Scheduled`, `ManagementExtension.Cron`/`.TimeZone`/`.NextRunAt`/`.LastRunAt`/`.LastOutcome`/`.AfterRevision`, `ManagementExtensionCatalog.Timers`, `ManagementTimerCounts` | core; Abstractions; Testing | 13 | |
-| `IAlvoSteps`, `AlvoConcurrency`, `AlvoHandlerOptions.Concurrency`/`Debounce` behaviour | core / Events | 14 | |
+| `IAlvoSteps`, `AlvoConcurrency`, `AlvoHandlerOptions.Concurrency`/`Debounce` behaviour; **as built (*HX-14 settled details*):** also `AlvoEventContext.Steps`, `AlvoJobContext.Steps`, the `IDeliveryStore` members `StepsAsync`/`RecordStepAsync`/`SleepAsync`, `DeliveryStep`, `DeliveryLimit`, `DeliveryRequest.Debounce`, `DeliveryClaim.Limits`, `ManagementExtension.Concurrency`, `ManagementDelivery.Steps`, `ManagementDeliveryStep`, `IDeliveryStoreWorld.ReadSlotsAsync` and the new `DeliveryStoreContractTests` facts | core / Events; Abstractions; Testing | 14 | |
 | `IAlvoFunction<TInput>`, `AlvoFunctionContext`, `AlvoFunctionSkippedException`, `AddFunction<T>`, `AddRequiredSecret` | core | 15 | |
 | `IRecordEnricher<T>`, `Enrich<T>`, `IQueryNarrowing<T>`, `QueryNarrowing`; `FieldSchema.IsVirtual` | core; Abstractions / Schema | 16 | **Amended (HX-16):** also the untyped `IQueryNarrowing` (`AlvoFilter?`, *HX-16 settled details* (10)); `AlvoEntityBuilder<T>.Narrow<TNarrowing>(string)`, `.Narrow(string, Func<QueryNarrowing, Expression<Func<T,bool>>?>)`, `.Enrich<TEnricher>(string)`, `.Enrich(string, Action<Enrich<T>>)` and `AlvoEntityBuilder.Narrow<TNarrowing>(string)`, `.Narrow(string, Func<QueryNarrowing, AlvoFilter?>)`, `.Enrich<TEnricher>(string)`, `.Enrich(string, Action<Enrich<AlvoRecord>>)` (core / `MMLib.Alvo.Extensions`); `AlvoExtensionKind.Narrowing = 7`, `.Enricher = 8`, `AlvoExtensionStage.Read = 4` (appended, *HX-04 settled details* (17)); `FieldDescriptor.Virtual` (`bool?`, init — the descriptor model). Everything else — `IReadExtensionRunner`, `IReadEnrichment`, `ReadNarrowing`, `VirtualFieldWrites` — is internal. |
 | (generator output only) | Analyzers in the `MMLib.Alvo` nupkg | 17 | |
-| schema-model members for `stateMachine`, `timers` | Abstractions / Schema | 18 | |
+| schema-model members for `stateMachine`, `timers` | Abstractions / Schema | 18 | **Amended (HX-18):** descriptor members only (*HX-18 settled details* (7)) — `EntityDescriptor.StateMachine`, `EntityDescriptor.Timers`, `EntityStateMachine`, `StateTransition`, `EntityTimer`; `AlvoConstraintKind.Transition` (appended); `ManagementTransitionVerdict`, `ManagementPolicyVerdict.Transitions`; no `Abstractions/Schema` member. `IEntityLifecycle`, `EntityTimerWrite` and `TimerChange` are internal. |
 | schema-model members for relation rules and `checks` | Abstractions / Schema | 19 | **Amended (HX-19):** `EntityCheck`, `EntityDescriptor.Checks`, `ManagementPolicyVerdict.Relations`, `ManagementRelationVerdict`; no `Abstractions/Schema` member (*HX-19 settled details* (14), (34)) |
 
 No `CelProfile` member and no CEL AST node is added (X7).
@@ -1932,6 +1972,79 @@ executed snippet, `data-path.md`, this section). The security-core review (`alvo
   (3) A reminder re-arms on `starts_at` change, cancels on status change, and a rolled-back write leaves no
   timer. (4) Graph renders (admin e2e).
 - **Why late:** builds on timers (HX-13) and durations (HX-11); pure descriptor work that blocks no host code.
+
+#### HX-18 settled details
+
+Decisions taken while planning (1–15, verbatim from `docs/superpowers/plans/2026-11-06-hx-18-state-machine-timers.md`
+*Decisions*), then the rulings of the plan and task reviews and the deviations taken while building (16–35), so a later
+reader can tell a decision from an oversight. Where a ruling and the scope above or §5 row `18` disagree, the ruling is
+what shipped.
+
+1. **Shape = named transitions** `transitions.<name> {from: [...], to, roles?, when?}` (django-fsm; names feed N-5 #375). Cost if wrong: a per-state `on` map would be a breaking schema change later.
+2. **Checked at stage 3**, over the candidate after the declarative `mutate`s, before host before-write; a host `Set` of the state field fails `invalid-set` (500). Cost: host code moves state only through a separate write (a command, a handler).
+3. **Undeclared move or false `when` → 422 `validation`** via appended `AlvoConstraintKind.Transition` (pointer `/<field>`, code `transition`, no value named); **no listed role → 403** (`AlvoAuthorizationException`). Cost: one public enum member; an exhaustive `switch` gains a case (CHANGELOG).
+4. **Several transitions may match a (from, to) pair**: the move is allowed when any one passes both `roles` and `when`, in declaration order; 403 only when none passes `roles`. Cost: none.
+5. **Unchanged state is no transition; a delete is no transition; a create must store `initial`** when declared (any value otherwise). Cost: "only drafts may be deleted" stays a `rules.delete`.
+6. **No system bypass**: `AlvoContext.System` holds `admin`, so a job moves a role-gated state only through a transition listing `admin`; `from: ["*"]` matches any stored value, including null and values outside the machine. Cost: one more transition for jobs.
+7. **Descriptor members only** — no `EntitySchema`/`SchemaModel` member (deviation from §5 row `18`): nothing below the core reads them, and the applied-schema JSON stays unchanged. Cost: a provider sees the machine only through the internal port.
+8. **Refused at apply:** a non-enum, non-stored or `hidden` state field; a value outside `values`; `"*"` beside other sources; `to` inside its own `from`; `initial` ≠ a declared field `default`; an undeclared role; either member on `storage: "dynamic"`. Cost: dynamic entities wait for a follow-up.
+9. **Timer key `alvo:<entity>:<timer>:<id>`, scope = the row's `tenant_id` text or `""`**; `IAlvoScheduler.ScheduleAsync`/`CancelAsync` refuse a key starting `alvo:`. Cost: a host key with that prefix (none can predate HX-18's release) is refused.
+10. **Arming:** `due(row) = when(row) ? at(row) : null`; create arms a non-null due; update upserts only when `due(new) ≠ due(old)`; a null `due(new)` and every delete cancel by key, unconditionally. Cost: one PK delete per timer per write; a changed `at` expression, or a timer added to an entity, reaches an existing row only at its next write that changes its due (backfill = an HX-13 data migration).
+11. **Written by the driver at the emit site on the write's own connection and transaction** through `TimerWrites` (shared with `EfCoreTimerStore`), not `ITimerStore.UpsertAsync`: its unit-join re-enters the unit the write already holds, and a hook-free write has no unit. Cost: §7's "through the unit's `ITimerStore`" holds in substance (same table, same SQL, same transaction), not in the call.
+12. **`at` compiles in `Condition` with result type `Timestamp`** through an internal `IValueCompiler` that `CelCompiler` implements (no new `CelProfile`, HX-11 (12)); timer `at`/`when` read bare fields only — `old.`, `new.`, `changed()` refused. Cost: a host-replaced `ICelCompiler` makes apply refuse `timers`.
+13. **Fired event** = `event` (default `<entity>.<timer>`, `-` → `_`, refused at apply if malformed or in a reserved namespace), as `System(scope)` carrying the writer's provenance, data `{entity, id, timer, at}`; consumed by host handlers — descriptor automation cannot subscribe (`$defs/eventPattern` stays frozen). Cost: a descriptor-only project needs one handler to act on a timer.
+14. **In a batch** a transition refusal is that row's `AlvoRowRefusal` (code `transition`); a role refusal is the existing `Forbidden(index, …)`. Cost: none.
+15. **Not an extension:** no `AlvoExtensionKind`/`Stage` value and no catalog row; the dashboard shows them on the entity's new *States* tab and in the simulator. Cost: the Lifecycle tab does not list them.
+16. **Plan review S1/S5: the facts' desk declares no `softDelete`,** which apply refuses in this build; the deletion fact
+    is a hard delete, and the rollback fact relies on `TransactAsync` alone (no "after-write throws" half).
+17. **S2: `EfAlvoData` requires its `IEntityLifecycle`** (`ThrowIfNull`, guard test); an allowed decision carrying no
+    compiled lifecycle throws rather than skipping the guard (fail closed). A future public way to build an allow
+    decision must carry the lifecycle, or every write through it is refused.
+18. **S3: an armed timer resumes the writer's correlation** — `EntityTimerWrite` carries the emitted outbox event's
+    `CorrelationId` and its id as `CausationId` into the `System(scope)` context's provenance.
+19. **S4: a move racing a claimed fire** keeps the claimed generation; after the update `FireAsync` with the old
+    generation returns false, and the timer fires once, at the new time (fresh v7 generation per upsert).
+20. **S6: `timers` are refused at apply on an entity a cascade `ref` reaches,** since a cascade delete removes rows
+    outside the write path that would cancel their timers.
+21. **S7: back-filling existing rows is unsupported.** A timer added to an entity, or a changed `at`/`when`, reaches a
+    stored row only at its next write that changes its due (Decision 10). Follow-up: arm existing rows when a timer is
+    added or changed — an HX-13 data migration re-planning every row of the entity (keyset-paged, idempotent by key),
+    offered by the dashboard when an apply adds or changes a timer.
+22. **S8: timer `at`/`when` also refuse `@user`/`@tenant`,** beside `old.`/`new.`/`changed()`: a timer is re-judged at
+    every write by whichever caller makes it.
+23. **S9: the guard runs twice on a write a host before-write patched** — stage 3 inside the declarative before-hooks,
+    and again at stage 5 beside `EnsureWriteAllowed` over `Merge(preImage, hostVetted)`, so a host `Set` of a field a
+    `when` reads cannot pass a refused move. On update it always runs at stage 5 (so a `when` is evaluated twice per
+    update; accepted and documented, review m3); on create only when a host patched.
+24. **S10: the planner calls `AlvoChainDepthLimit.EnsureWithin`** on the armed context before each arm; a writer past the
+    limit refuses the write. `EntityTimerPlanner.Plan` takes the depth limit as a third parameter.
+25. **S11: the guard and the planner read the write decision's catalog** (`PolicyDecision.Lifecycle`), never the catalog
+    an apply has published since. `WriteExtensionRunner`'s `invalid-set` check of the state field reads the runner's
+    current catalog (review m4); the stage-5 re-check backstops a raced apply.
+26. **S12–S14:** `EvaluateInstant` converts through `CelInterpreter.TryToDateTimeOffset`; `alvo_timers` is created through
+    `IfNotExistsDdl`; the schema's `event` pattern is asserted to agree with `AlvoEventName.IsWellFormed`.
+27. **S15: relation reads (HX-19) are refused in a transition `when` and a timer `at`/`when`** at apply — the parser
+    builds relation nodes only for a compile handed a relation catalog, and these slots get none (tests pin it).
+28. **S16: `ITimerStore` is public,** so a host can write an `alvo:` key directly through the store; only
+    `IAlvoScheduler` refuses the prefix (*time.md*).
+29. **S17 (review m6): a batch refused only by transitions answers 422 `validation`,** like a single write; a batch with
+    any policy refusal stays 403 `forbidden`, each row keeping its own `code`.
+30. **S18 (review m7): a timer `at`/`when` reading a rollup field is refused at apply** — a rollup is recomputed by a raw
+    update with no emit, so the timer would keep its old due.
+31. **Review M8: `onDelete: setNull` on a ref a timer reads** changes the row outside the write path, so the timer keeps
+    its old due until the row's next write. Accepted, documented, not refused.
+32. **Review M9: a transition `when` reading a field hidden from the caller** makes 200-vs-422 an oracle on that field —
+    the property `WITH CHECK` already has. Accepted; for the stack-level security review.
+33. **M10 / CRV1001: `transitions.<n>.from` is `{"$ref": "#/$defs/stateSources"}`,** not an inline array: the Corvus
+    source generator fails with CRV1001 on an inline array property named `from`. Wire shape identical.
+34. **`InMemoryAlvoData` enforces neither member** (review m1), for the "runs no hook" reason; transitions and timers are
+    tested with `MMLib.Alvo.TestHost`.
+35. **Built otherwise than the plan said:** the port calls take the decision, so `EmitAsync` and `RunBeforeUpdate` gain a
+    `PolicyDecision`; `ArmTimersAsync` takes the write's `DbConnection`/`DbTransaction`; the docs snippet descriptor is
+    `booking-lifecycle.alvo.json` (descriptor snippets are copied flat, and `bookings.alvo.json` is *Integrity*'s); the
+    States tab lists transitions as rows rather than a `<table>` (the dashboard's list idiom, legible at phone width);
+    `StatesTab` is public like every Schema tab (the Admin public-API baseline gains it); the transition fix text is one
+    internal constant in Abstractions.
 
 ### HX-19 — Relation rules and lookup `checks`
 - **Scope:** Rule-profile navigation over `ref` fields and reverse relations (`via` resolution as rollups) →

@@ -188,6 +188,12 @@ public sealed record ManagementPolicyVerdict(
     /// rule or check of this operation reads a related row.
     /// </summary>
     public IReadOnlyList<ManagementRelationVerdict> Relations { get; init; } = [];
+
+    /// <summary>
+    /// Gets each transition of the entity's state machine and whether this caller may take it; listed for an
+    /// <c>update</c> only, in declaration order. Empty for any other operation and for an entity without a state machine.
+    /// </summary>
+    public IReadOnlyList<ManagementTransitionVerdict> Transitions { get; init; } = [];
 }
 
 /// <summary>One relation a decision reads through, and the related entity's <c>list</c> decision it was bound to.</summary>

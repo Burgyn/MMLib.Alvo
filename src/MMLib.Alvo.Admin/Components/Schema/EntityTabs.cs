@@ -41,6 +41,9 @@ internal static class EntityTabs
     /// <summary>The Lifecycle tab's slug.</summary>
     public const string Lifecycle = "lifecycle";
 
+    /// <summary>The States tab's slug.</summary>
+    public const string States = "states";
+
     /// <summary>The Indexes tab's slug.</summary>
     public const string Indexes = "indexes";
 
@@ -55,6 +58,7 @@ internal static class EntityTabs
         new("Rules", Rules),
         new("On write", OnWrite),
         new("Lifecycle", Lifecycle),
+        new("States", States),
         new("Indexes", Indexes),
         new("API", Api),
     ];

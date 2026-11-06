@@ -67,6 +67,8 @@ internal sealed partial class SystemSchemaInitializer
         _timersTableName = TimerTable.NameFor(schemaPrefix);
         _schedulesTableName = ScheduleTable.NameFor(schemaPrefix);
         _dataMigrationsTableName = DataMigrationTable.NameFor(schemaPrefix);
+        _stepsTableName = StepTable.NameFor(schemaPrefix);
+        _concurrencySlotsTableName = ConcurrencySlotTable.NameFor(schemaPrefix);
     }
 
     private readonly string _idempotencyTableName;
@@ -83,6 +85,8 @@ internal sealed partial class SystemSchemaInitializer
     private readonly string _timersTableName;
     private readonly string _schedulesTableName;
     private readonly string _dataMigrationsTableName;
+    private readonly string _stepsTableName;
+    private readonly string _concurrencySlotsTableName;
 
     /// <summary>Gets the fully-prefixed descriptor-versions table name, e.g. <c>alvo_descriptor_versions</c>.</summary>
     public string TableName { get; }
@@ -110,6 +114,12 @@ internal sealed partial class SystemSchemaInitializer
     /// Creates the framework's bookkeeping tables if they do not already exist. Safe to call repeatedly —
     /// a second (or Nth) call is a no-op — and safe to call from several processes at once.
     /// </summary>
+    /// <remarks>
+    /// Every bookkeeping table and its indexes, including those a store also ensures for itself: a store that
+    /// first created a table once its replica was serving would race a replica still introspecting the schema
+    /// in its boot — PostgreSQL's catalog reads are separate statements, so the table read could miss a table
+    /// whose index the index read then found, and the introspection fails.
+    /// </remarks>
     // Deferred: Postgres schema cohabitation (spec §2.13) — embedded mode living inside a host's
     // own Postgres schema — is intentionally out of scope for this PR and tracked as follow-up
     // work. PR-A deliberately uses a plain, cross-engine table-name prefix instead, identically on
@@ -159,6 +169,9 @@ internal sealed partial class SystemSchemaInitializer
         await CreateIndexIfMissingAsync(TimerTable.DueIndexDdl(_timersTableName), ct).ConfigureAwait(false);
         await CreateIfMissingAsync(_schedulesTableName, ScheduleTable.Ddl(_schedulesTableName), ct).ConfigureAwait(false);
         await CreateIfMissingAsync(_dataMigrationsTableName, DataMigrationTable.Ddl(_dataMigrationsTableName), ct).ConfigureAwait(false);
+        await CreateIfMissingAsync(_stepsTableName, StepTable.Ddl(_stepsTableName), ct).ConfigureAwait(false);
+        await CreateIfMissingAsync(_concurrencySlotsTableName, ConcurrencySlotTable.Ddl(_concurrencySlotsTableName), ct).ConfigureAwait(false);
+        await CreateIndexIfMissingAsync(ConcurrencySlotTable.DeliveryIndexDdl(_concurrencySlotsTableName), ct).ConfigureAwait(false);
     }
 
     /// <summary>

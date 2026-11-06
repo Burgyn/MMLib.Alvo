@@ -19,7 +19,7 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// <see cref="EchoLength"/> characters on a whole character, in backticks, with every character that could break a
 /// line or reorder what a reader sees turned into a space.
 /// </remarks>
-internal sealed class CelCompiler : ICelCompiler
+internal sealed class CelCompiler : ICelCompiler, IValueCompiler
 {
     /// <summary>
     /// The maximum depth of the parsed tree, measured as the number of nodes on the deepest
@@ -62,6 +62,15 @@ internal sealed class CelCompiler : ICelCompiler
         return Compile(source, profile, entity, detectQuoted: true, relations: null);
     }
 
+    /// <inheritdoc />
+    public CelCompilationResult CompileValue(string source, CelProfile profile, EntitySchema entity, CelValueType expected)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(entity);
+
+        return Compile(source, profile, entity, detectQuoted: false, relations: null, expected);
+    }
+
     /// <inheritdoc/>
     CelCompilationResult ICelCompiler.Compile(string source, CelProfile profile, EntitySchema entity, CelRelationCatalog relations)
     {
@@ -73,7 +82,8 @@ internal sealed class CelCompiler : ICelCompiler
     }
 
     private CelCompilationResult Compile(
-        string source, CelProfile profile, EntitySchema entity, bool detectQuoted, CelRelationCatalog? relations)
+        string source, CelProfile profile, EntitySchema entity, bool detectQuoted, CelRelationCatalog? relations,
+        CelValueType? expected = null)
     {
         var parsed = TryParse(source, relations is not null, out var syntaxError);
         if (parsed is null)
@@ -87,7 +97,7 @@ internal sealed class CelCompiler : ICelCompiler
             return CelCompilationResult.Failure(depthError);
         }
 
-        return CheckAndAssemble(new Authored(source, profile, entity, parsed, detectQuoted, relations));
+        return CheckAndAssemble(new Authored(source, profile, entity, parsed, detectQuoted, relations, expected));
     }
 
     private CelNode? TryParse(string source, bool allowRelations, out CelCompilationError? syntaxError)
@@ -136,7 +146,17 @@ internal sealed class CelCompiler : ICelCompiler
     }
 
     private CelCompilationError? ValidateResultType(Authored authored, CelValueType resultType, int position) =>
-        ValidateValueResult(authored, resultType, position) ?? ValidatePredicateResult(authored, resultType, position);
+        authored.Expected is { } expected
+            ? ExpectedResult(authored, resultType, expected, position)
+            : ValidateValueResult(authored, resultType, position) ?? ValidatePredicateResult(authored, resultType, position);
+
+    private static CelCompilationError? ExpectedResult(Authored authored, CelValueType resultType, CelValueType expected, int position) =>
+        resultType == expected ? null : new CelCompilationError(
+            $"This expression must evaluate to a {expected}; it evaluates to {resultType}.{EchoSentence(authored.Source)}",
+            expected == CelValueType.Timestamp
+                ? "Give a point in time, e.g. starts_at - duration('24h') or now() + duration('48h')."
+                : $"Change the expression so it yields a {expected}.",
+            position);
 
     /// <summary>The Computed and Mutate refusals: each keeps its first sentence byte for byte, then echoes the source.</summary>
     private static CelCompilationError? ValidateValueResult(Authored authored, CelValueType resultType, int position)
@@ -319,5 +339,6 @@ internal sealed class CelCompiler : ICelCompiler
 
     /// <summary>What was authored, and how: the one argument the result-type check needs.</summary>
     private readonly record struct Authored(
-        string Source, CelProfile Profile, EntitySchema Entity, CelNode Parsed, bool DetectQuoted, CelRelationCatalog? Relations);
+        string Source, CelProfile Profile, EntitySchema Entity, CelNode Parsed, bool DetectQuoted, CelRelationCatalog? Relations,
+        CelValueType? Expected);
 }

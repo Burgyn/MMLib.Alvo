@@ -56,8 +56,7 @@ internal sealed partial class EfCoreTimerStore : ITimerStore
     private async Task EnsureTablesAsync(DbConnection connection, CancellationToken ct)
     {
         await OutboxTable.EnsureAsync(connection, _outbox, ct).ConfigureAwait(false);
-        await IfNotExistsDdl.CreateTableAsync(connection, _timers, TimerTable.Ddl(_timers), ct).ConfigureAwait(false);
-        await IfNotExistsDdl.CreateIndexAsync(connection, TimerTable.DueIndexDdl(_timers), ct).ConfigureAwait(false);
+        await TimerTable.EnsureAsync(connection, _timers, ct).ConfigureAwait(false);
         await IfNotExistsDdl.CreateTableAsync(connection, _schedules, ScheduleTable.Ddl(_schedules), ct).ConfigureAwait(false);
         await IfNotExistsDdl.CreateTableAsync(connection, _migrations, DataMigrationTable.Ddl(_migrations), ct).ConfigureAwait(false);
     }
@@ -70,8 +69,7 @@ internal sealed partial class EfCoreTimerStore : ITimerStore
         return JoinedWriteAsync(
             async (connection, transaction, ct) =>
             {
-                await ExecuteAsync(connection, transaction, TimerTable.UpsertSql(_timers), command => BindTimer(command, timer, generation), ct)
-                    .ConfigureAwait(false);
+                await TimerWrites.UpsertAsync(connection, transaction, _timers, timer, generation, ct).ConfigureAwait(false);
                 return generation;
             },
             cancellationToken);
@@ -84,8 +82,7 @@ internal sealed partial class EfCoreTimerStore : ITimerStore
 
         return JoinedWriteAsync(
             async (connection, transaction, ct) =>
-                await ExecuteAsync(connection, transaction, TimerTable.CancelSql(_timers), command => BindKey(command, scope, key), ct)
-                    .ConfigureAwait(false) == 1,
+                await TimerWrites.CancelAsync(connection, transaction, _timers, scope, key, ct).ConfigureAwait(false) == 1,
             cancellationToken);
     }
 
@@ -96,7 +93,7 @@ internal sealed partial class EfCoreTimerStore : ITimerStore
 
         return WriteAsync(
             async (connection, transaction, ct) =>
-                await ExecuteAsync(connection, transaction, TimerTable.FireSql(_timers), command => BindFence(command, scope, key, generation), ct)
+                await TimerWrites.ExecuteAsync(connection, transaction, TimerTable.FireSql(_timers), command => TimerWrites.BindFence(command, scope, key, generation), ct)
                     .ConfigureAwait(false) == 1,
             cancellationToken);
     }
@@ -127,7 +124,7 @@ internal sealed partial class EfCoreTimerStore : ITimerStore
 
         return InTransactionAsync(
             async (connection, transaction, ct) =>
-                await ExecuteAsync(connection, transaction, TimerTable.FireSql(_timers), command => BindFence(command, scope, key, generation), ct).ConfigureAwait(false) == 1
+                await TimerWrites.ExecuteAsync(connection, transaction, TimerTable.FireSql(_timers), command => TimerWrites.BindFence(command, scope, key, generation), ct).ConfigureAwait(false) == 1
                 && await AppendedAsync(connection, transaction, [customEvent.Envelope], ct).ConfigureAwait(false),
             committed => committed,
             cancellationToken);
@@ -142,27 +139,6 @@ internal sealed partial class EfCoreTimerStore : ITimerStore
             cancellationToken).ConfigureAwait(false);
 
         return rows.Single();
-    }
-
-    private static void BindTimer(DbCommand command, TimerEntry timer, Guid generation)
-    {
-        BindFence(command, timer.Scope, timer.Key, generation);
-        RelationalSqlBatch.AddParameter(command, "@due_at", Instant(timer.DueAt));
-        RelationalSqlBatch.AddParameter(command, "@message_type", timer.MessageType);
-        RelationalSqlBatch.AddParameter(command, "@payload", timer.Payload);
-        RelationalSqlBatch.AddParameter(command, "@provenance", timer.Provenance);
-    }
-
-    private static void BindFence(DbCommand command, string scope, string key, Guid generation)
-    {
-        BindKey(command, scope, key);
-        RelationalSqlBatch.AddParameter(command, "@generation", generation.ToString());
-    }
-
-    private static void BindKey(DbCommand command, string scope, string key)
-    {
-        RelationalSqlBatch.AddParameter(command, "@scope", scope);
-        RelationalSqlBatch.AddParameter(command, "@key", key);
     }
 
     private void BindClaim(DbCommand command, int batchSize, TimeSpan lease)
@@ -235,20 +211,6 @@ internal sealed partial class EfCoreTimerStore : ITimerStore
                     return result;
                 }
             }
-        }
-    }
-
-    private static async Task<int> ExecuteAsync(
-        DbConnection connection, DbTransaction transaction, string sql, Action<DbCommand> bind, CancellationToken ct)
-    {
-        var command = connection.CreateCommand();
-        await using (command.ConfigureAwait(false))
-        {
-            command.Transaction = transaction;
-            command.CommandText = sql;
-            bind(command);
-
-            return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
     }
 

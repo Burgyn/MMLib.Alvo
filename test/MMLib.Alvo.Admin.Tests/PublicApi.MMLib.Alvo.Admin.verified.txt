@@ -911,6 +911,17 @@ namespace MMLib.Alvo.Admin.Components.Schema
         public void Dispose() { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
     }
+    public class StatesTab : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public StatesTab() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Entity { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public MMLib.Alvo.Descriptor.EntityDescriptor? Model { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
+    }
     [Microsoft.AspNetCore.Authorization.Authorize]
     [Microsoft.AspNetCore.Components.Route("/admin/transfer")]
     public class Transfer : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable

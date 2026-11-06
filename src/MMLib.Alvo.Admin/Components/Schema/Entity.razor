@@ -266,6 +266,9 @@
             case EntityTabs.Lifecycle:
                 <LifecycleTab @key="EntityName" Entity="@EntityName" Hooks="@_hooks" Extensions="@_extensions" Stats="@_stats" />
                 break;
+            case EntityTabs.States:
+                <StatesTab @key="EntityName" Entity="@EntityName" Model="@_model" />
+                break;
             case EntityTabs.Indexes:
                 <Indexes Entity="@IndexView(_entity!)" Declared="_indexes" Editable="DeclaredHere"
                          OnAdd="AddIndex" OnRemove="RemoveIndex" />

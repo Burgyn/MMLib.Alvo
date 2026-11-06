@@ -396,6 +396,7 @@ namespace MMLib.Alvo.Data
         Referenced = 1,
         Check = 2,
         Exclusion = 3,
+        Transition = 4,
     }
     public sealed class AlvoConstraintViolationException : System.Exception
     {
@@ -810,8 +811,10 @@ namespace MMLib.Alvo.Descriptor
         public string? RenamedFrom { get; init; }
         public MMLib.Alvo.Descriptor.AccessRules? Rules { get; init; }
         public bool? SoftDelete { get; init; }
+        public MMLib.Alvo.Descriptor.EntityStateMachine? StateMachine { get; init; }
         public MMLib.Alvo.Descriptor.StorageMode? Storage { get; init; }
         public MMLib.Alvo.Descriptor.EntityTenancy? Tenancy { get; init; }
+        public System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.EntityTimer>? Timers { get; init; }
     }
     public sealed class EntityEvents : System.IEquatable<MMLib.Alvo.Descriptor.EntityEvents>
     {
@@ -836,6 +839,13 @@ namespace MMLib.Alvo.Descriptor
         public bool? Unique { get; init; }
         public string? Where { get; init; }
     }
+    public sealed class EntityStateMachine : System.IEquatable<MMLib.Alvo.Descriptor.EntityStateMachine>
+    {
+        public EntityStateMachine() { }
+        public required string Field { get; init; }
+        public string? Initial { get; init; }
+        public required System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.StateTransition> Transitions { get; init; }
+    }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.EntityTenancy>))]
     public enum EntityTenancy
     {
@@ -843,6 +853,14 @@ namespace MMLib.Alvo.Descriptor
         Scoped = 0,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("global")]
         Global = 1,
+    }
+    public sealed class EntityTimer : System.IEquatable<MMLib.Alvo.Descriptor.EntityTimer>
+    {
+        public EntityTimer() { }
+        public required string At { get; init; }
+        public string? Description { get; init; }
+        public string? Event { get; init; }
+        public string? When { get; init; }
     }
     public sealed class EntityUpdateAction : MMLib.Alvo.Descriptor.AutomationAction, System.IEquatable<MMLib.Alvo.Descriptor.EntityUpdateAction>
     {
@@ -1035,6 +1053,15 @@ namespace MMLib.Alvo.Descriptor
         [System.Text.Json.Serialization.JsonStringEnumMemberName("day")]
         Day = 2,
     }
+    public sealed class StateTransition : System.IEquatable<MMLib.Alvo.Descriptor.StateTransition>
+    {
+        public StateTransition() { }
+        public string? Description { get; init; }
+        public required System.Collections.Generic.IReadOnlyList<string> From { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string>? Roles { get; init; }
+        public required string To { get; init; }
+        public string? When { get; init; }
+    }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.StorageMode>))]
     public enum StorageMode
     {
@@ -1210,6 +1237,7 @@ namespace MMLib.Alvo.Events
         public required int BatchSize { get; init; }
         public required string Claimant { get; init; }
         public required System.TimeSpan Lease { get; init; }
+        public System.Collections.Generic.IReadOnlyCollection<MMLib.Alvo.Events.DeliveryLimit> Limits { get; init; }
         public required System.Collections.Generic.IReadOnlyCollection<string> Ordered { get; init; }
         public required System.TimeSpan OutboxClaimLease { get; init; }
         public required int OutboxMaxAttempts { get; init; }
@@ -1234,6 +1262,13 @@ namespace MMLib.Alvo.Events
         public string? Subscriber { get; init; }
         public System.Guid? ToEventId { get; init; }
     }
+    public sealed class DeliveryLimit : System.IEquatable<MMLib.Alvo.Events.DeliveryLimit>
+    {
+        public DeliveryLimit() { }
+        public required string Key { get; init; }
+        public required int Limit { get; init; }
+        public required string Subscriber { get; init; }
+    }
     public sealed class DeliveryOperationEntry : System.IEquatable<MMLib.Alvo.Events.DeliveryOperationEntry>
     {
         public DeliveryOperationEntry() { }
@@ -1254,6 +1289,7 @@ namespace MMLib.Alvo.Events
         public const string UnboundReason = "unbound";
         public DeliveryRequest() { }
         public string? DeadReason { get; init; }
+        public System.TimeSpan? Debounce { get; init; }
         public required System.Guid EventId { get; init; }
         public required string Kind { get; init; }
         public required string PartitionKey { get; init; }
@@ -1266,6 +1302,15 @@ namespace MMLib.Alvo.Events
         public int Busy { get; init; }
         public required int Count { get; init; }
         public required System.Collections.Generic.IReadOnlyList<System.Guid> Sample { get; init; }
+    }
+    public sealed class DeliveryStep : System.IEquatable<MMLib.Alvo.Events.DeliveryStep>
+    {
+        public DeliveryStep() { }
+        public required System.DateTimeOffset CompletedAt { get; init; }
+        public required System.Guid EventId { get; init; }
+        public required string Name { get; init; }
+        public required string Result { get; init; }
+        public required string Subscriber { get; init; }
     }
     public interface IAlvoEvents
     {
@@ -1287,11 +1332,14 @@ namespace MMLib.Alvo.Events
         System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliveryOperationEntry?> FindOperationAsync(string scope, string key, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.StoredDelivery>> ListAsync(MMLib.Alvo.Events.DeliveryFilter filter, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> PendingSubscribersAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliveryStep> RecordStepAsync(MMLib.Alvo.Events.DeliveryStep completed, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> RedeliverAsync(System.Guid id, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliveryOperationEntry?> ReplayAsync(MMLib.Alvo.Events.DeliveryFilter filter, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Events.DeliverySelection> SelectAsync(MMLib.Alvo.Events.DeliveryFilter filter, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> SetDisabledAsync(string subscriber, bool disabled, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> SetPausedAsync(string subscriber, bool paused, MMLib.Alvo.Events.DeliveryOperationEntry entry, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<bool> SleepAsync(MMLib.Alvo.Events.DeliveryAttempt attempt, System.DateTimeOffset wakeAt, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.DeliveryStep>> StepsAsync(System.Guid eventId, string subscriber, System.Threading.CancellationToken cancellationToken = default);
     }
     public interface IEmailSender
     {
@@ -1719,6 +1767,7 @@ namespace MMLib.Alvo.Management
         public required System.DateTimeOffset NotBefore { get; init; }
         public required string PartitionKey { get; init; }
         public required string Status { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementDeliveryStep> Steps { get; init; }
         public required string Subscriber { get; init; }
         public string? TenantId { get; init; }
     }
@@ -1755,6 +1804,12 @@ namespace MMLib.Alvo.Management
         public string? Subscriber { get; init; }
         public System.DateTimeOffset? To { get; init; }
     }
+    public sealed class ManagementDeliveryStep : System.IEquatable<MMLib.Alvo.Management.ManagementDeliveryStep>
+    {
+        public ManagementDeliveryStep() { }
+        public required System.DateTimeOffset CompletedAt { get; init; }
+        public required string Name { get; init; }
+    }
     public sealed class ManagementDescriptor : System.IEquatable<MMLib.Alvo.Management.ManagementDescriptor>
     {
         public ManagementDescriptor(string Project, int Revision, string DescriptorJson) { }
@@ -1786,6 +1841,7 @@ namespace MMLib.Alvo.Management
         public ManagementExtension() { }
         public string? Access { get; init; }
         public int? AfterRevision { get; init; }
+        public string? Concurrency { get; init; }
         public string? Cron { get; init; }
         public string? Description { get; init; }
         public bool Enabled { get; init; }
@@ -1882,6 +1938,7 @@ namespace MMLib.Alvo.Management
         public System.Collections.Generic.IReadOnlyList<string> ReadOnlyFields { get; init; }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRelationVerdict> Relations { get; init; }
         public string? TenantScope { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementTransitionVerdict> Transitions { get; init; }
         public string? Using { get; init; }
         public string? WithCheck { get; init; }
     }
@@ -1993,6 +2050,16 @@ namespace MMLib.Alvo.Management
         public ManagementTimerCounts() { }
         public required int Due { get; init; }
         public required int Pending { get; init; }
+    }
+    public sealed class ManagementTransitionVerdict : System.IEquatable<MMLib.Alvo.Management.ManagementTransitionVerdict>
+    {
+        public ManagementTransitionVerdict() { }
+        public bool? Allowed { get; init; }
+        public required System.Collections.Generic.IReadOnlyList<string> From { get; init; }
+        public required string Name { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> Roles { get; init; }
+        public required string To { get; init; }
+        public string? When { get; init; }
     }
     public sealed class ManagementWarnedBlock : System.IEquatable<MMLib.Alvo.Management.ManagementWarnedBlock>
     {

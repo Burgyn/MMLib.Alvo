@@ -293,7 +293,11 @@ internal sealed class DeliveryDispatcher(
         Lease = claimable.Max(handler => handler.Settings.Timeout) + DeliveryRunner.LeaseGrace + runner.SettleGrace,
         OutboxMaxAttempts = events.Value.MaxAttempts,
         OutboxClaimLease = events.Value.ClaimLease,
+        Limits = [.. claimable.Where(handler => handler.Settings.Concurrency is not null).Select(Limit)],
     };
+
+    private static DeliveryLimit Limit(BoundHandler handler) =>
+        new() { Subscriber = handler.Id, Key = handler.Settings.Concurrency!.Key, Limit = handler.Settings.Concurrency.Limit };
 
     private IEnumerable<Task> Start(PoolClaim claim, ExtensionBindings bindings, DrainRound? round, CancellationToken stop) =>
         [.. claim.Deliveries.Select(delivery => RunContainedAsync(delivery, bindings, round, claim.Claimant, stop))];

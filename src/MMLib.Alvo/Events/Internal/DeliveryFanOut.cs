@@ -87,7 +87,7 @@ internal sealed class DeliveryFanOut(
         }
         else
         {
-            plan.Requests.Add(request);
+            plan.Requests.Add(request with { Debounce = handler.Settings.Debounce });
         }
     }
 

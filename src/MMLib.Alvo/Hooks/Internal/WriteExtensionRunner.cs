@@ -293,6 +293,11 @@ internal sealed class WriteExtensionRunner(
             return SetRefused(run, sets.Keys.First(), HookSets.Undeclared);
         }
 
+        if (StateField(catalog, run.Invocation.Entity) is { } state && sets.ContainsKey(state))
+        {
+            return SetRefused(run, state, HookSets.StateMachineField);
+        }
+
         if (HookSets.FirstProblem(sets, entity) is not { } problem)
         {
             run.Replace(HookSets.Coerced(sets, entity));
@@ -301,6 +306,9 @@ internal sealed class WriteExtensionRunner(
 
         return SetRefused(run, Hidden(catalog, entity.Name).Contains(problem.Field) ? "a hidden field" : problem.Field, problem.Problem);
     }
+
+    private static string? StateField(PolicyCatalog? catalog, string entity) =>
+        catalog is not null && catalog.TryGetEntity(entity, out var policy) ? policy.Lifecycle.StateMachine?.Field : null;
 
     private HookFailedException SetRefused(HookRun run, string field, string problem)
     {
