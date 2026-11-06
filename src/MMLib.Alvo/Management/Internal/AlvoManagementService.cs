@@ -10,6 +10,7 @@ using MMLib.Alvo.Events;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Lifecycle;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Scheduling;
@@ -99,6 +100,7 @@ namespace MMLib.Alvo.Management.Internal;
 /// <c>now()</c> rule or field mask previews as production judges it; the system clock when omitted.
 /// </param>
 /// <param name="timers">The timer store, read for each schedule's next and last run and the timer counts; none without a driver.</param>
+/// <param name="transitions">What each state-machine transition answers in a policy simulation; none in a container built without it.</param>
 internal sealed partial class AlvoManagementService(
     IOptions<AlvoOptions> alvo,
     IOptions<AlvoManagementOptions> management,
@@ -122,7 +124,8 @@ internal sealed partial class AlvoManagementService(
     IDeliveryStore? deliveries,
     CommandSimulator? commands = null,
     TimeProvider? time = null,
-    ITimerStore? timers = null) : IAlvoManagement
+    ITimerStore? timers = null,
+    TransitionSimulator? transitions = null) : IAlvoManagement
 {
     /// <summary>What <see cref="ManagementInfo.DataProvider"/> reports when no driver is registered.</summary>
     private const string NoDriverRegistered = "none";
@@ -254,6 +257,7 @@ internal sealed partial class AlvoManagementService(
         {
             Extensions = extensions.RunningOn(simulation.Entity, simulation.Operation),
             Commands = commands?.Simulate(simulation.Entity, caller) ?? [],
+            Transitions = transitions?.Simulate(simulation.Entity, simulation.Operation, caller) ?? [],
         });
     }
 

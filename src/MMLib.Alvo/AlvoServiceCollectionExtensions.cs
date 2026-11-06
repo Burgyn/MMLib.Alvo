@@ -17,6 +17,7 @@ using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.InboundWebhooks;
 using MMLib.Alvo.Internal;
+using MMLib.Alvo.Lifecycle;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Migrations.Internal;
@@ -81,6 +82,7 @@ public static class AlvoServiceCollectionExtensions
         services.AddAlvoAuth();
         services.AddAlvoExpressions();
         services.AddAlvoRules();
+        services.AddAlvoLifecycle();
         services.AddAlvoManagement();
         services.AddAlvoExtensions();
         services.AddAlvoWriteHooks();

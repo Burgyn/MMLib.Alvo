@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+﻿using System.Data.Common;
+
+namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
 /// <summary>
 /// Alvo's timer table: one row per armed timer, keyed by scope and key, fenced by a generation every upsert mints afresh.
@@ -38,6 +40,16 @@ internal static class TimerTable
             PRIMARY KEY (scope, timer_key)
         )
         """;
+
+    /// <summary>Creates the table and its due index if either is missing — on any connection, outside any write transaction.</summary>
+    /// <param name="connection">An open connection.</param>
+    /// <param name="table">The validated table name.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    internal static async Task EnsureAsync(DbConnection connection, string table, CancellationToken ct)
+    {
+        await IfNotExistsDdl.CreateTableAsync(connection, table, Ddl(table), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateIndexAsync(connection, DueIndexDdl(table), ct).ConfigureAwait(false);
+    }
 
     /// <summary>The index a claim and a due count seek by.</summary>
     /// <param name="table">The validated table name.</param>

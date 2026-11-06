@@ -179,17 +179,17 @@ internal static class BeforeHookCompiler
 
     private static IEnumerable<PhaseRefusal> Unanswerable(CelNode root, BeforeHookPoint point)
     {
-        if (!point.HasPreImage && Reads(root, CelRecordState.Old))
+        if (!point.HasPreImage && CelImageReads.Reads(root, CelRecordState.Old))
         {
             yield return NoPreImage(point);
         }
 
-        if (!point.HasPostImage && Reads(root, CelRecordState.New))
+        if (!point.HasPostImage && CelImageReads.Reads(root, CelRecordState.New))
         {
             yield return NoPostImage(point);
         }
 
-        if (!(point.HasPreImage && point.HasPostImage) && ReadsChanged(root))
+        if (!(point.HasPreImage && point.HasPostImage) && CelImageReads.ReadsChanged(root))
         {
             yield return NoComparison(point);
         }
@@ -218,13 +218,6 @@ internal static class BeforeHookCompiler
     /// <param name="Message">What cannot be answered, and what happens instead.</param>
     /// <param name="Fix">The reference to use instead.</param>
     private sealed record PhaseRefusal(string Message, string Fix);
-
-    private static bool Reads(CelNode node, CelRecordState state) =>
-        (node is CelFieldRef fieldRef && fieldRef.State == state)
-        || CelTree.Children(node).Any(child => Reads(child, state));
-
-    private static bool ReadsChanged(CelNode node) =>
-        node is CelChanged || CelTree.Children(node).Any(ReadsChanged);
 
     /// <summary>
     /// Compiles the one action a before-hook carries. The schema's <c>oneOf</c> makes <c>reject</c> and

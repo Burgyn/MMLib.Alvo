@@ -22,13 +22,13 @@ internal sealed partial class EfCoreTimerStore
             {
                 foreach (var schedule in schedules.OrderBy(schedule => schedule.Id, StringComparer.Ordinal))
                 {
-                    await ExecuteAsync(connection, transaction, ScheduleTable.SyncSql(_schedules), command => BindSchedule(command, schedule), ct)
+                    await TimerWrites.ExecuteAsync(connection, transaction, ScheduleTable.SyncSql(_schedules), command => BindSchedule(command, schedule), ct)
                         .ConfigureAwait(false);
                 }
 
                 return retired.Count == 0
                     ? 0
-                    : await ExecuteAsync(
+                    : await TimerWrites.ExecuteAsync(
                         connection, transaction, ScheduleTable.RetireSql(_schedules, retired.Count), command => BindIds(command, "@retired", retired), ct)
                         .ConfigureAwait(false);
             },
@@ -67,7 +67,7 @@ internal sealed partial class EfCoreTimerStore
 
         return InTransactionAsync(
             async (connection, transaction, ct) =>
-                await ExecuteAsync(connection, transaction, ScheduleTable.AdvanceSql(_schedules), command => BindAdvance(command, advance), ct).ConfigureAwait(false) == 1
+                await TimerWrites.ExecuteAsync(connection, transaction, ScheduleTable.AdvanceSql(_schedules), command => BindAdvance(command, advance), ct).ConfigureAwait(false) == 1
                 && await AppendedAsync(connection, transaction, Envelopes(advance.Events), ct).ConfigureAwait(false),
             advanced => advanced,
             cancellationToken);
@@ -95,7 +95,7 @@ internal sealed partial class EfCoreTimerStore
 
         return InTransactionAsync(
             async (connection, transaction, ct) =>
-                await ExecuteAsync(connection, transaction, DataMigrationTable.StartSql(_migrations), command => BindMigration(command, id, revision), ct).ConfigureAwait(false) == 1
+                await TimerWrites.ExecuteAsync(connection, transaction, DataMigrationTable.StartSql(_migrations), command => BindMigration(command, id, revision), ct).ConfigureAwait(false) == 1
                 && await AppendedAsync(connection, transaction, Envelopes(events), ct).ConfigureAwait(false),
             started => started,
             cancellationToken);

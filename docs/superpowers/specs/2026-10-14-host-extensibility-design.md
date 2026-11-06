@@ -1344,7 +1344,7 @@ Roslyn dependency is needed.
 | `IAlvoFunction<TInput>`, `AlvoFunctionContext`, `AlvoFunctionSkippedException`, `AddFunction<T>`, `AddRequiredSecret` | core | 15 | |
 | `IRecordEnricher<T>`, `Enrich<T>`, `IQueryNarrowing<T>`, `QueryNarrowing`; `FieldSchema.IsVirtual` | core; Abstractions / Schema | 16 | **Amended (HX-16):** also the untyped `IQueryNarrowing` (`AlvoFilter?`, *HX-16 settled details* (10)); `AlvoEntityBuilder<T>.Narrow<TNarrowing>(string)`, `.Narrow(string, Func<QueryNarrowing, Expression<Func<T,bool>>?>)`, `.Enrich<TEnricher>(string)`, `.Enrich(string, Action<Enrich<T>>)` and `AlvoEntityBuilder.Narrow<TNarrowing>(string)`, `.Narrow(string, Func<QueryNarrowing, AlvoFilter?>)`, `.Enrich<TEnricher>(string)`, `.Enrich(string, Action<Enrich<AlvoRecord>>)` (core / `MMLib.Alvo.Extensions`); `AlvoExtensionKind.Narrowing = 7`, `.Enricher = 8`, `AlvoExtensionStage.Read = 4` (appended, *HX-04 settled details* (17)); `FieldDescriptor.Virtual` (`bool?`, init — the descriptor model). Everything else — `IReadExtensionRunner`, `IReadEnrichment`, `ReadNarrowing`, `VirtualFieldWrites` — is internal. |
 | (generator output only) | Analyzers in the `MMLib.Alvo` nupkg | 17 | |
-| schema-model members for `stateMachine`, `timers` | Abstractions / Schema | 18 | |
+| schema-model members for `stateMachine`, `timers` | Abstractions / Schema | 18 | **Amended (HX-18):** descriptor members only (*HX-18 settled details* (7)) — `EntityDescriptor.StateMachine`, `EntityDescriptor.Timers`, `EntityStateMachine`, `StateTransition`, `EntityTimer`; `AlvoConstraintKind.Transition` (appended); `ManagementTransitionVerdict`, `ManagementPolicyVerdict.Transitions`; no `Abstractions/Schema` member. `IEntityLifecycle`, `EntityTimerWrite` and `TimerChange` are internal. |
 | schema-model members for relation rules and `checks` | Abstractions / Schema | 19 | **Amended (HX-19):** `EntityCheck`, `EntityDescriptor.Checks`, `ManagementPolicyVerdict.Relations`, `ManagementRelationVerdict`; no `Abstractions/Schema` member (*HX-19 settled details* (14), (34)) |
 
 No `CelProfile` member and no CEL AST node is added (X7).
@@ -1972,6 +1972,79 @@ executed snippet, `data-path.md`, this section). The security-core review (`alvo
   (3) A reminder re-arms on `starts_at` change, cancels on status change, and a rolled-back write leaves no
   timer. (4) Graph renders (admin e2e).
 - **Why late:** builds on timers (HX-13) and durations (HX-11); pure descriptor work that blocks no host code.
+
+#### HX-18 settled details
+
+Decisions taken while planning (1–15, verbatim from `docs/superpowers/plans/2026-11-06-hx-18-state-machine-timers.md`
+*Decisions*), then the rulings of the plan and task reviews and the deviations taken while building (16–35), so a later
+reader can tell a decision from an oversight. Where a ruling and the scope above or §5 row `18` disagree, the ruling is
+what shipped.
+
+1. **Shape = named transitions** `transitions.<name> {from: [...], to, roles?, when?}` (django-fsm; names feed N-5 #375). Cost if wrong: a per-state `on` map would be a breaking schema change later.
+2. **Checked at stage 3**, over the candidate after the declarative `mutate`s, before host before-write; a host `Set` of the state field fails `invalid-set` (500). Cost: host code moves state only through a separate write (a command, a handler).
+3. **Undeclared move or false `when` → 422 `validation`** via appended `AlvoConstraintKind.Transition` (pointer `/<field>`, code `transition`, no value named); **no listed role → 403** (`AlvoAuthorizationException`). Cost: one public enum member; an exhaustive `switch` gains a case (CHANGELOG).
+4. **Several transitions may match a (from, to) pair**: the move is allowed when any one passes both `roles` and `when`, in declaration order; 403 only when none passes `roles`. Cost: none.
+5. **Unchanged state is no transition; a delete is no transition; a create must store `initial`** when declared (any value otherwise). Cost: "only drafts may be deleted" stays a `rules.delete`.
+6. **No system bypass**: `AlvoContext.System` holds `admin`, so a job moves a role-gated state only through a transition listing `admin`; `from: ["*"]` matches any stored value, including null and values outside the machine. Cost: one more transition for jobs.
+7. **Descriptor members only** — no `EntitySchema`/`SchemaModel` member (deviation from §5 row `18`): nothing below the core reads them, and the applied-schema JSON stays unchanged. Cost: a provider sees the machine only through the internal port.
+8. **Refused at apply:** a non-enum, non-stored or `hidden` state field; a value outside `values`; `"*"` beside other sources; `to` inside its own `from`; `initial` ≠ a declared field `default`; an undeclared role; either member on `storage: "dynamic"`. Cost: dynamic entities wait for a follow-up.
+9. **Timer key `alvo:<entity>:<timer>:<id>`, scope = the row's `tenant_id` text or `""`**; `IAlvoScheduler.ScheduleAsync`/`CancelAsync` refuse a key starting `alvo:`. Cost: a host key with that prefix (none can predate HX-18's release) is refused.
+10. **Arming:** `due(row) = when(row) ? at(row) : null`; create arms a non-null due; update upserts only when `due(new) ≠ due(old)`; a null `due(new)` and every delete cancel by key, unconditionally. Cost: one PK delete per timer per write; a changed `at` expression, or a timer added to an entity, reaches an existing row only at its next write that changes its due (backfill = an HX-13 data migration).
+11. **Written by the driver at the emit site on the write's own connection and transaction** through `TimerWrites` (shared with `EfCoreTimerStore`), not `ITimerStore.UpsertAsync`: its unit-join re-enters the unit the write already holds, and a hook-free write has no unit. Cost: §7's "through the unit's `ITimerStore`" holds in substance (same table, same SQL, same transaction), not in the call.
+12. **`at` compiles in `Condition` with result type `Timestamp`** through an internal `IValueCompiler` that `CelCompiler` implements (no new `CelProfile`, HX-11 (12)); timer `at`/`when` read bare fields only — `old.`, `new.`, `changed()` refused. Cost: a host-replaced `ICelCompiler` makes apply refuse `timers`.
+13. **Fired event** = `event` (default `<entity>.<timer>`, `-` → `_`, refused at apply if malformed or in a reserved namespace), as `System(scope)` carrying the writer's provenance, data `{entity, id, timer, at}`; consumed by host handlers — descriptor automation cannot subscribe (`$defs/eventPattern` stays frozen). Cost: a descriptor-only project needs one handler to act on a timer.
+14. **In a batch** a transition refusal is that row's `AlvoRowRefusal` (code `transition`); a role refusal is the existing `Forbidden(index, …)`. Cost: none.
+15. **Not an extension:** no `AlvoExtensionKind`/`Stage` value and no catalog row; the dashboard shows them on the entity's new *States* tab and in the simulator. Cost: the Lifecycle tab does not list them.
+16. **Plan review S1/S5: the facts' desk declares no `softDelete`,** which apply refuses in this build; the deletion fact
+    is a hard delete, and the rollback fact relies on `TransactAsync` alone (no "after-write throws" half).
+17. **S2: `EfAlvoData` requires its `IEntityLifecycle`** (`ThrowIfNull`, guard test); an allowed decision carrying no
+    compiled lifecycle throws rather than skipping the guard (fail closed). A future public way to build an allow
+    decision must carry the lifecycle, or every write through it is refused.
+18. **S3: an armed timer resumes the writer's correlation** — `EntityTimerWrite` carries the emitted outbox event's
+    `CorrelationId` and its id as `CausationId` into the `System(scope)` context's provenance.
+19. **S4: a move racing a claimed fire** keeps the claimed generation; after the update `FireAsync` with the old
+    generation returns false, and the timer fires once, at the new time (fresh v7 generation per upsert).
+20. **S6: `timers` are refused at apply on an entity a cascade `ref` reaches,** since a cascade delete removes rows
+    outside the write path that would cancel their timers.
+21. **S7: back-filling existing rows is unsupported.** A timer added to an entity, or a changed `at`/`when`, reaches a
+    stored row only at its next write that changes its due (Decision 10). Follow-up: arm existing rows when a timer is
+    added or changed — an HX-13 data migration re-planning every row of the entity (keyset-paged, idempotent by key),
+    offered by the dashboard when an apply adds or changes a timer.
+22. **S8: timer `at`/`when` also refuse `@user`/`@tenant`,** beside `old.`/`new.`/`changed()`: a timer is re-judged at
+    every write by whichever caller makes it.
+23. **S9: the guard runs twice on a write a host before-write patched** — stage 3 inside the declarative before-hooks,
+    and again at stage 5 beside `EnsureWriteAllowed` over `Merge(preImage, hostVetted)`, so a host `Set` of a field a
+    `when` reads cannot pass a refused move. On update it always runs at stage 5 (so a `when` is evaluated twice per
+    update; accepted and documented, review m3); on create only when a host patched.
+24. **S10: the planner calls `AlvoChainDepthLimit.EnsureWithin`** on the armed context before each arm; a writer past the
+    limit refuses the write. `EntityTimerPlanner.Plan` takes the depth limit as a third parameter.
+25. **S11: the guard and the planner read the write decision's catalog** (`PolicyDecision.Lifecycle`), never the catalog
+    an apply has published since. `WriteExtensionRunner`'s `invalid-set` check of the state field reads the runner's
+    current catalog (review m4); the stage-5 re-check backstops a raced apply.
+26. **S12–S14:** `EvaluateInstant` converts through `CelInterpreter.TryToDateTimeOffset`; `alvo_timers` is created through
+    `IfNotExistsDdl`; the schema's `event` pattern is asserted to agree with `AlvoEventName.IsWellFormed`.
+27. **S15: relation reads (HX-19) are refused in a transition `when` and a timer `at`/`when`** at apply — the parser
+    builds relation nodes only for a compile handed a relation catalog, and these slots get none (tests pin it).
+28. **S16: `ITimerStore` is public,** so a host can write an `alvo:` key directly through the store; only
+    `IAlvoScheduler` refuses the prefix (*time.md*).
+29. **S17 (review m6): a batch refused only by transitions answers 422 `validation`,** like a single write; a batch with
+    any policy refusal stays 403 `forbidden`, each row keeping its own `code`.
+30. **S18 (review m7): a timer `at`/`when` reading a rollup field is refused at apply** — a rollup is recomputed by a raw
+    update with no emit, so the timer would keep its old due.
+31. **Review M8: `onDelete: setNull` on a ref a timer reads** changes the row outside the write path, so the timer keeps
+    its old due until the row's next write. Accepted, documented, not refused.
+32. **Review M9: a transition `when` reading a field hidden from the caller** makes 200-vs-422 an oracle on that field —
+    the property `WITH CHECK` already has. Accepted; for the stack-level security review.
+33. **M10 / CRV1001: `transitions.<n>.from` is `{"$ref": "#/$defs/stateSources"}`,** not an inline array: the Corvus
+    source generator fails with CRV1001 on an inline array property named `from`. Wire shape identical.
+34. **`InMemoryAlvoData` enforces neither member** (review m1), for the "runs no hook" reason; transitions and timers are
+    tested with `MMLib.Alvo.TestHost`.
+35. **Built otherwise than the plan said:** the port calls take the decision, so `EmitAsync` and `RunBeforeUpdate` gain a
+    `PolicyDecision`; `ArmTimersAsync` takes the write's `DbConnection`/`DbTransaction`; the docs snippet descriptor is
+    `booking-lifecycle.alvo.json` (descriptor snippets are copied flat, and `bookings.alvo.json` is *Integrity*'s); the
+    States tab lists transitions as rows rather than a `<table>` (the dashboard's list idiom, legible at phone width);
+    `StatesTab` is public like every Schema tab (the Admin public-API baseline gains it); the transition fix text is one
+    internal constant in Abstractions.
 
 ### HX-19 — Relation rules and lookup `checks`
 - **Scope:** Rule-profile navigation over `ref` fields and reverse relations (`via` resolution as rollups) →

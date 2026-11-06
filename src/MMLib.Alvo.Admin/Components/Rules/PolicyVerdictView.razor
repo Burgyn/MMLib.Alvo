@@ -151,6 +151,30 @@ else
     </div>
 }
 
+@if (Verdict.Transitions.Count > 0)
+{
+    <div class="a-field" data-testid="verdict-transitions">
+        <span class="a-label">Transitions — may this caller take them?</span>
+        @foreach (var transition in Verdict.Transitions)
+        {
+            <div class="a-field" data-testid="@($"verdict-transition-{transition.Name}")">
+                <div class="a-row a-row--wrap">
+                    <span class="a-badge @TransitionVerdicts.Tone(transition)" data-testid="verdict-transition-answer">@TransitionVerdicts.Answer(transition)</span>
+                    <span class="a-mono a-name">@transition.Name</span>
+                </div>
+                <code class="a-mono" data-testid="verdict-transition-move">@TransitionVerdicts.Move(transition)</code>
+                @if (transition.When is { } when)
+                {
+                    <code class="a-mono" data-testid="verdict-transition-when">when @when</code>
+                }
+            </div>
+        }
+        <span class="a-section__sub">
+            The update rule above applies too; a condition is decided per record — this screen scores no record.
+        </span>
+    </div>
+}
+
 @if (Verdict.Extensions.Count > 0)
 {
     <div class="a-field" data-testid="verdict-extensions">

@@ -468,6 +468,22 @@ internal static class ProblemResultFactory
         Problem(StatusCodes.Status422UnprocessableEntity, AlvoProblemTypes.Validation, violations);
 
     /// <summary>
+    /// What a refused batch answers: the <c>422</c> <see cref="AlvoProblemTypes.Validation"/> a single write gets when every
+    /// row was refused by its entity's state machine, and <see cref="RowsForbidden"/> otherwise.
+    /// </summary>
+    /// <remarks>
+    /// A batch mixing a policy refusal with a state-machine one stays <c>403</c>: the caller cannot fix the policy row by
+    /// changing a value, so the stronger refusal names the status, and every row still carries its own <c>code</c>.
+    /// </remarks>
+    /// <param name="violations">Every refused row, one entry each.</param>
+    internal static IResult RowsRefused(IReadOnlyList<AlvoViolation> violations) =>
+        violations.Count > 0 && violations.All(violation => violation.Code == TransitionCode)
+            ? Validation(violations)
+            : RowsForbidden(violations);
+
+    private const string TransitionCode = "transition";
+
+    /// <summary>
     /// The <c>403</c> a batch answers when its rows were refused by <b>policy</b> rather than by the entity's
     /// declared shape — carrying the same <c>violations</c> array, one entry per refused row.
     /// </summary>
@@ -571,8 +587,11 @@ internal static class ProblemResultFactory
         exception.DescriptorMessage is { } message
             ? [LookupCheckViolation(exception.Fields, message)]
             : exception.Fields.Count > 0
-                ? [.. exception.Fields.Select(CheckViolation)]
-                : [new AlvoViolation(string.Empty, CodeFor(exception.Kind), CheckDocumentMessage, FixFor(exception.Kind))];
+                ? [.. exception.Fields.Select(field => CheckViolation(field, exception))]
+                : [new AlvoViolation(string.Empty, CodeFor(exception.Kind), DocumentMessageFor(exception), FixFor(exception.Kind))];
+
+    private static string DocumentMessageFor(AlvoConstraintViolationException exception) =>
+        exception.Kind == AlvoConstraintKind.Transition ? exception.Message : CheckDocumentMessage;
 
     /// <summary>
     /// A failed lookup check: one entry at the lookup field, or at the whole document when the descriptor hides it, carrying
@@ -594,10 +613,13 @@ internal static class ProblemResultFactory
 
     private const string CheckDocumentMessage = "This write would leave a record breaking a validation the descriptor declares.";
 
-    /// <summary>The entry for one field whose validation refused the value sent for it.</summary>
+    /// <summary>The entry for one field whose validation, or whose state machine, refused the value sent for it.</summary>
     /// <param name="field">The field name, from the entity's schema.</param>
-    private static AlvoViolation CheckViolation(string field) =>
-        new("/" + field, "check", CheckFieldMessage, "Send a value the field's validation accepts.");
+    /// <param name="exception">The port's refusal, of kind <see cref="AlvoConstraintKind.Check"/> or <see cref="AlvoConstraintKind.Transition"/>.</param>
+    private static AlvoViolation CheckViolation(string field, AlvoConstraintViolationException exception) =>
+        exception.Kind == AlvoConstraintKind.Transition
+            ? new("/" + field, CodeFor(exception.Kind), exception.Message, AlvoConstraintViolationException.TransitionFix)
+            : new("/" + field, CodeFor(exception.Kind), CheckFieldMessage, "Send a value the field's validation accepts.");
 
     /// <summary>The stable code for a refusal that names no field.</summary>
     /// <param name="kind">Which constraint refused the request.</param>
@@ -606,6 +628,7 @@ internal static class ProblemResultFactory
         AlvoConstraintKind.Referenced => "referenced",
         AlvoConstraintKind.Check => "check",
         AlvoConstraintKind.Exclusion => "exclusion",
+        AlvoConstraintKind.Transition => TransitionCode,
         _ => "unique",
     };
 
@@ -616,6 +639,7 @@ internal static class ProblemResultFactory
         AlvoConstraintKind.Referenced => "Delete the records that reference this one, or point them at something else, then retry.",
         AlvoConstraintKind.Check => "Change the values this write sends so every record it touches keeps its validations.",
         AlvoConstraintKind.Exclusion => ExclusionFix,
+        AlvoConstraintKind.Transition => AlvoConstraintViolationException.TransitionFix,
         _ => "Send a value no other record holds on the field declared unique.",
     };
 
@@ -653,7 +677,7 @@ internal static class ProblemResultFactory
         AlvoRecordNotFoundException => NotFound(),
         AlvoPreconditionFailedException precondition => Problem(StatusCodes.Status412PreconditionFailed, AlvoProblemTypes.PreconditionFailed, precondition.Message),
         AlvoIdempotencyConflictException conflict => Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.IdempotencyConflict, conflict.Message),
-        AlvoConstraintViolationException { Kind: AlvoConstraintKind.Check } check => Problem(
+        AlvoConstraintViolationException { Kind: AlvoConstraintKind.Check or AlvoConstraintKind.Transition } check => Problem(
             StatusCodes.Status422UnprocessableEntity, AlvoProblemTypes.Validation, CheckViolations(check)),
         AlvoConstraintViolationException constraint => Conflict(constraint),
         AlvoChainDepthExceededException loop => ChainDepthExceeded(loop.Message),

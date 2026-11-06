@@ -1,0 +1,101 @@
+---
+title: State machines and timers in the descriptor
+description: Declare which values a status field may move between — named transitions with roles and a CEL condition, refused in the write before any host hook — and per-record timers that are armed, moved and cancelled in the write's own transaction.
+sidebar:
+  order: 8
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import descriptor from '../../../snippets/extending/state-machines/booking-lifecycle.alvo.json?raw';
+import tests from '../../../snippets/extending/state-machines/BookingLifecycleTests.cs?raw';
+
+A booking is a draft, then confirmed, then done — and never done straight from a draft. A confirmed booking reminds
+someone a day before it starts. Both are facts about the record, so both live in the descriptor: a `stateMachine` says
+which moves of a status field are legal, and `timers` say when the record should wake something up.
+
+<Code code={descriptor} lang="json" title="booking-lifecycle.alvo.json" />
+
+## Declare the states a record may move between
+
+`stateMachine` names one `enum` field and its `transitions`, each by name:
+
+<SourceExcerpt code={descriptor} from="stateMachine" to="reopen" lang="json" title="booking-lifecycle.alvo.json" />
+
+- **`from`** lists the states a transition leaves, and **`to`** the one it enters. `["*"]` means any state — including an
+  empty one and a value outside the machine — and stands alone.
+- **`initial`**, when declared, is the state every create must store; a create that sends none stores the field's
+  `default`, which must then be the same value. Without `initial`, a create may store any state.
+- An update that **changes** the field must take a declared transition. An update that leaves it alone — or a `PATCH`
+  that does not name it — is no transition, and a delete is none either.
+
+Apply refuses a machine it cannot enforce: a state field that is not a stored, visible `enum`, a state outside its
+`values`, `"*"` beside other sources, a `to` inside its own `from`, an undeclared role, and either member on a
+`storage: "dynamic"` entity.
+
+## What a refused move answers
+
+A move no transition admits is refused in the write, and nothing is stored:
+
+- **422** [`validation`](/reference/problem-types/#validation), one violation with code `transition` pointing at the
+  state field (`/status`). The message names neither the stored state nor the one sent.
+- **403** [`forbidden`](/reference/problem-types/#forbidden) when a transition matches the move but the caller holds none
+  of its `roles`.
+- **In a batch**, the refused row carries code `transition` (or `forbidden`) at its index, and the batch writes nothing.
+  A batch refused only by transitions answers 422, like a single write; one with any policy refusal answers 403.
+
+<SourceExcerpt code={tests} from="Skipping_a_step_is_refused" to="AlvoConstraintKind.Transition" title="BookingLifecycleTests.cs" />
+
+## Roles and conditions
+
+`roles` lists the roles of which the caller must hold one; `when` is a CEL condition over `old` and `new` (and
+`changed()`, `now()`, `@user`, `@tenant`), judged like a rule's `WITH CHECK`. Several transitions may cover the same move:
+the move is allowed when any one of them passes both.
+
+- **The system caller holds `admin`.** A job or a migration moves a role-gated state only through a transition that lists
+  `admin` — there is no bypass, which is why `reopen` above exists.
+- **A `when` that fails refuses the write.** A condition that throws is never read as true.
+- A `when` reads the record only: a relation (`customer_id.owner_id`) is refused at apply.
+
+<SourceExcerpt code={tests} from="Only_a_manager_closes_a_booking" to="closed[" title="BookingLifecycleTests.cs" />
+
+## Host hooks see a legal move
+
+The machine is checked after the descriptor's before-hooks and before any host
+[before-write hook](/extending/write-hooks/): a declarative `mutate` that moves the state must take a transition too, and
+a host hook only ever sees a move the machine admits. A host hook may not set the state field itself — that fails with
+`invalid-set` — and when it changes a field a `when` reads, the move is judged again over what will be stored. Host code
+moves a state through its own write: a command or an event handler.
+
+## Timers that follow a record
+
+Each entry under `timers` is one durable timer per record:
+
+<SourceExcerpt code={descriptor} from="timers" to="reminder" lang="json" title="booking-lifecycle.alvo.json" />
+
+- **`at`** is a CEL timestamp over the record's own fields (`starts_at - duration('24h')`); **`when`** is the condition
+  it is armed under. A record whose `when` is false, or whose `at` is empty, has no timer.
+- **Armed in the write.** A create arms it; an update moves it only when its due changes; an update that makes it
+  inactive, and every delete, cancels it. All of it in the write's own transaction, so a rolled-back write leaves no
+  timer.
+- **Keyed and scoped.** The key is `alvo:<entity>:<timer>:<id>`, in the record's tenant. `IAlvoScheduler` refuses
+  keys starting `alvo:`.
+- **The event.** When it fires, it publishes `event` (default `<entity>.<timer>`) as the system, carrying the data
+  `entity`, `id`, `timer` and `at`. Handle it in code with
+  [`AddEventHandler`](/extending/event-handlers/):
+
+<SourceExcerpt code={tests} from="A_confirmed_booking_is_reminded_a_day_before" to="ShouldHaveSingleItem" title="BookingLifecycleTests.cs" />
+
+`at` and `when` read bare fields only — never `old.`/`new.`/`changed()`, the caller, a relation, or a rollup field
+(a rollup is recomputed without a write of the record, so the timer would not move with it).
+
+## What is not covered
+
+- **Deletes** are not transitions: "only drafts may be deleted" is a `rules.delete`.
+- **Dynamic entities** carry neither member yet.
+- **Existing rows** are not back-filled: a timer added to an entity, or a changed `at`, reaches a stored record at its next
+  write that changes its due. Arm the rest with a data migration.
+- **Descriptor automation** cannot subscribe to a timer's event; a host handler acts on it.
+- **Transition commands** — invoking a transition by name — are not part of this release.
+- The in-memory test double (`InMemoryAlvoData`) enforces neither member; test transitions and timers with
+  `MMLib.Alvo.TestHost`, as above.

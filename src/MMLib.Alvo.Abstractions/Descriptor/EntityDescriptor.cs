@@ -51,6 +51,15 @@ public sealed record EntityDescriptor
     /// </summary>
     public IReadOnlyList<EntityCheck>? Checks { get; init; }
 
+    /// <summary>
+    /// Which values an enum field may move between; an update that changes the field must match a declared transition.
+    /// <see langword="null"/> when the entity declares none.
+    /// </summary>
+    public EntityStateMachine? StateMachine { get; init; }
+
+    /// <summary>Durable per-record timers, keyed by timer name; <see langword="null"/> when the entity declares none.</summary>
+    public IReadOnlyDictionary<string, EntityTimer>? Timers { get; init; }
+
     /// <summary>Extension keys (<c>x-*</c>) preserved verbatim through apply and export.</summary>
     [JsonExtensionData]
     public IDictionary<string, JsonElement>? Extensions { get; set; }

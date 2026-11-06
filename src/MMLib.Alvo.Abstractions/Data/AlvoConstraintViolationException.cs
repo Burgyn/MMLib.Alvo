@@ -74,6 +74,13 @@ public sealed class AlvoConstraintViolationException : Exception
     /// <summary>The wording of an overlapping range, naming neither the other record, its range, nor the fields.</summary>
     private const string ExclusionMessage = "The write would overlap a range another record already holds.";
 
+    /// <summary>The wording of a refused state move, naming neither the stored state nor the one sent.</summary>
+    private const string TransitionMessage = "This write would move a record to a state its state machine does not allow from its current one.";
+
+    /// <summary>The fix a refused state move carries, single row or batch row alike.</summary>
+    internal const string TransitionFix =
+        "Send a state a declared transition reaches from the current one — the entity's stateMachine lists them — or leave the field unchanged.";
+
     /// <summary>The wording of a restrict refusal, naming neither the referencing entity nor how many rows.</summary>
     private const string ReferencedMessage =
         "Other records still reference this record, so it cannot be removed. Delete those records, or point "
@@ -164,6 +171,7 @@ public sealed class AlvoConstraintViolationException : Exception
         AlvoConstraintKind.Referenced => ReferencedMessage,
         AlvoConstraintKind.Check => CheckMessage,
         AlvoConstraintKind.Exclusion => ExclusionMessage,
+        AlvoConstraintKind.Transition => TransitionMessage,
         _ => UniqueMessage,
     };
 }
