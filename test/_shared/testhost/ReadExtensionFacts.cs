@@ -208,7 +208,132 @@ public abstract class ReadExtensionFacts
         sampled.ShouldBe(50);
     }
 
+    [Fact]
+    public async Task A_virtual_field_has_no_column_and_reads_as_null()
+    {
+        var database = await DatabaseAsync();
+        await using var alvo = await StartAsync(database, _ => { });
+        var clerk = Clerk();
+
+        var created = await alvo.Data.CreateAsync(Notes, NoteValues(clerk, "a", "north"), clerk, cancellationToken: Ct);
+        var id = (Guid)created[AlvoManagedColumns.Id]!;
+        var listed = (await alvo.Data.QueryAsync(new AlvoQuery { Entity = Notes }, clerk, Ct)).Items.ShouldHaveSingleItem();
+        var got = (await alvo.Data.GetAsync(Notes, id, clerk, Ct)).ShouldNotBeNull();
+
+        foreach (var record in new[] { created, listed, got })
+        {
+            record.Values.ShouldContainKey("display");
+            record["display"].ShouldBeNull();
+        }
+
+        (await database.Columns(Notes)).ShouldNotContain("display");
+        (await database.Columns(Notes)).ShouldContain("title");
+    }
+
+    [Fact]
+    public async Task A_virtual_field_is_absent_when_the_policy_hides_it_or_the_read_does_not_select_it()
+    {
+        await using var alvo = await StartAsync(await DatabaseAsync(), _ => { });
+        var clerk = Clerk();
+        var auditor = AlvoTestHost.Caller("auditor") with { Tenant = clerk.Tenant };
+        var id = await CreateAsync(alvo, clerk, "a", "north");
+
+        var asClerk = (await alvo.Data.GetAsync(Notes, id, clerk, Ct)).ShouldNotBeNull();
+        var asAuditor = (await alvo.Data.GetAsync(Notes, id, auditor, Ct)).ShouldNotBeNull();
+        var projected = (await alvo.Data.QueryAsync(new AlvoQuery { Entity = Notes, Select = ["title"] }, clerk, Ct)).Items.ShouldHaveSingleItem();
+
+        asClerk.Values.ShouldNotContainKey("internal_code");
+        asAuditor.Values.ShouldContainKey("internal_code");
+        asAuditor["internal_code"].ShouldBeNull();
+        projected.Values.ShouldNotContainKey("display");
+    }
+
+    [Fact]
+    public async Task Turning_a_stored_field_virtual_is_a_destructive_drop()
+    {
+        var database = await DatabaseAsync();
+        await using var alvo = await StartAsync(database, _ => { });
+        var clerk = Clerk();
+        await ApplyAsync(alvo, StoredDisplay(), allowDestructive: false);
+        var id = await CreateAsync(alvo, clerk, "a", "north");
+        (await alvo.Data.UpdateAsync(Notes, id, new Dictionary<string, object?> { ["display"] = "kept" }, clerk, cancellationToken: Ct))["display"].ShouldBe("kept");
+        (await database.Columns(Notes)).ShouldContain("display");
+
+        await Should.ThrowAsync<MMLib.Alvo.Migrations.DestructiveChangeNotAllowedException>(
+            () => ApplyAsync(alvo, ReadsDesk(), allowDestructive: false));
+        (await database.Columns(Notes)).ShouldContain("display");
+
+        await ApplyAsync(alvo, ReadsDesk(), allowDestructive: true);
+        (await database.Columns(Notes)).ShouldNotContain("display");
+        (await alvo.Data.GetAsync(Notes, id, clerk, Ct)).ShouldNotBeNull()["display"].ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task A_write_naming_a_virtual_field_is_refused_on_create_update_replace_and_batch()
+    {
+        await using var alvo = await StartAsync(await DatabaseAsync(), _ => { });
+        var clerk = Clerk();
+        var id = await CreateAsync(alvo, clerk, "a", "north");
+        var forged = NoteValues(clerk, "forged", "south");
+        forged["display"] = "x";
+
+        await Refused(alvo.Data.CreateAsync(Notes, forged, clerk, cancellationToken: Ct));
+        await Refused(alvo.Data.UpdateAsync(Notes, id, new Dictionary<string, object?> { ["display"] = null }, clerk, cancellationToken: Ct));
+        await Refused(alvo.Data.ReplaceAsync(Notes, id, Without(forged, "tenant_id"), clerk, cancellationToken: Ct));
+        var batch = await alvo.Data.CreateManyAsync(Notes, [forged], clerk, cancellationToken: Ct);
+
+        batch.Refusals.ShouldHaveSingleItem().Message.ShouldContain("'display' is virtual");
+        var stored = (await alvo.Data.QueryAsync(new AlvoQuery { Entity = Notes }, AlvoContext.System(clerk.Tenant), Ct)).Items.ShouldHaveSingleItem();
+        stored["title"].ShouldBe("a");
+    }
+
+    [Fact]
+    public async Task A_replace_never_demands_a_virtual_field()
+    {
+        await using var alvo = await StartAsync(await DatabaseAsync(), _ => { });
+        var clerk = Clerk();
+        var id = await CreateAsync(alvo, clerk, "a", "north");
+        var whole = Without(NoteValues(clerk, "replaced", "south"), "tenant_id");
+
+        var replaced = await alvo.Data.ReplaceAsync(Notes, id, whole, clerk, cancellationToken: Ct);
+
+        replaced.Row["title"].ShouldBe("replaced");
+    }
+
     protected abstract Task<ReadsDatabase> DatabaseAsync();
+
+    private static async Task Refused(Task write) =>
+        (await Should.ThrowAsync<AlvoAuthorizationException>(write)).Message.ShouldContain("'display' is virtual and cannot be written");
+
+    private static Dictionary<string, object?> Without(Dictionary<string, object?> values, string field)
+    {
+        var copy = new Dictionary<string, object?>(values, StringComparer.Ordinal);
+        copy.Remove(field);
+        return copy;
+    }
+
+    private static string ReadsDesk() => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "descriptors", "reads-desk.alvo.json"));
+
+    private static string StoredDisplay()
+    {
+        var descriptor = System.Text.Json.Nodes.JsonNode.Parse(ReadsDesk())!;
+        descriptor["entities"]![Notes]!["fields"]!["display"] = new System.Text.Json.Nodes.JsonObject { ["type"] = "string" };
+        return descriptor.ToJsonString();
+    }
+
+    private static async Task ApplyAsync(AlvoTestHost alvo, string descriptorJson, bool allowDestructive)
+    {
+        using var scope = alvo.Services.CreateScope();
+        var auditor = AlvoTestHost.Caller("auditor");
+        scope.ServiceProvider.GetRequiredService<MMLib.Alvo.Auth.IAlvoContextAccessor>().Principal =
+            new MMLib.Alvo.Auth.AlvoPrincipal { Context = auditor, Scopes = new HashSet<MMLib.Alvo.Auth.ApiKeyScope>(), KeyId = "reads-desk" };
+        var management = scope.ServiceProvider.GetRequiredService<MMLib.Alvo.Management.IAlvoManagement>();
+        var current = await management.GetDescriptorAsync("reads-desk", Ct);
+
+        (await management.ApplyDescriptorAsync(
+            "reads-desk", new MMLib.Alvo.Management.ManagementApplyRequest(descriptorJson, current.Revision, allowDestructive), Ct))
+            .Applied.ShouldBeTrue();
+    }
 
     private static void NowhereOnly(IAlvoBuilder alvo) => alvo.Entity(Notes, n => n.Narrow(
         "nowhere", (QueryNarrowing _) => new AlvoComparison("region", AlvoFilterOperator.Eq, "nowhere")));
@@ -261,7 +386,22 @@ public abstract class ReadExtensionFacts
         return (Guid)created[AlvoManagedColumns.Id]!;
     }
 
-    protected sealed record ReadsDatabase(Action<IAlvoBuilder> Use, string Marker);
+    /// <summary>An engine's database for one fact: how to use it, the capture's marker, and its table's column names.</summary>
+    protected sealed record ReadsDatabase(Action<IAlvoBuilder> Use, string Marker, Func<string, Task<IReadOnlyList<string>>> Columns);
+
+    /// <summary>The first column of every row <paramref name="command"/> answers, as text.</summary>
+    protected static async Task<IReadOnlyList<string>> NamesAsync(System.Data.Common.DbCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var names = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(Ct);
+        while (await reader.ReadAsync(Ct))
+        {
+            names.Add(reader.GetString(0));
+        }
+
+        return names;
+    }
 
     private sealed class RegionSwitch(string value)
     {

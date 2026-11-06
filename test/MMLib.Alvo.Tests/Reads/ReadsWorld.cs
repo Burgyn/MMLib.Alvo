@@ -41,7 +41,8 @@ internal sealed class ReadsWorld : IAsyncDisposable
                 "title": { "type": "string", "required": true, "maxLength": 80 },
                 "owner_id": { "type": "uuid", "required": true },
                 "region": { "type": "string", "maxLength": 20 },
-                "salary": { "type": "integer", "hidden": "!('auditor' in @user.roles)" }
+                "salary": { "type": "integer", "hidden": "!('auditor' in @user.roles)" },
+                "display": { "type": "string", "virtual": true }
               },
               "rules": { "list": "true", "get": "true" }
             },

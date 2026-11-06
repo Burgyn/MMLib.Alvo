@@ -98,6 +98,7 @@ internal static class WritePayloadGuard
         return ManagedColumnRefusal(values, entity, isUpdate)
             ?? ComputedRefusal(values, entity)
             ?? RollupRefusal(values, entity)
+            ?? VirtualRefusal(values, entity)
             ?? ReadOnlyRefusal(values, decision.ReadOnlyFields);
     }
 
@@ -179,6 +180,17 @@ internal static class WritePayloadGuard
             + "child rows inside every write to them, so a value sent here would be a stored total that is not the "
             + "children's. Remove it from the payload — its value follows from the rows it aggregates.";
     }
+
+    /// <summary>
+    /// Refuses a payload that names a <c>virtual</c> field: no column holds it, and its value exists only in a read's
+    /// answer, filled by the host's enricher. Like the rollup arm, nothing below the port would refuse it — there is no
+    /// column for an engine to reject — so this arm is the whole guarantee, and an explicit <see langword="null"/> is
+    /// refused too.
+    /// </summary>
+    private static string? VirtualRefusal(IReadOnlyDictionary<string, object?> values, EntitySchema? entity) =>
+        entity?.Fields.Where(field => field.IsVirtual).FirstOrDefault(field => values.ContainsKey(field.Name)) is { } field
+            ? $"Field '{field.Name}' is virtual and cannot be written: an enricher fills it when the record is read. Remove it from the payload."
+            : null;
 
     /// <summary>
     /// Refuses every column the framework manages for this entity that a caller may not supply on this

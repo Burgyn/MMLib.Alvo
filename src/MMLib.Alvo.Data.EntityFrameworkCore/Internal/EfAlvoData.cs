@@ -222,7 +222,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         var (kept, nextCursor) = Paginated(fetched, query.Limit);
         return new AlvoPage
         {
-            Items = [.. kept.Select(row => RecordMaterializer.ToRecord(row, decision.HiddenFields, options.Unselected))],
+            Items = [.. kept.Select(row => Shaped(row, entity, decision.HiddenFields, options.Unselected))],
             NextCursor = nextCursor,
             TotalCount = total,
         };
@@ -314,10 +314,11 @@ internal sealed partial class EfAlvoData : IAlvoData
 
         using var db = ContextFor(unit);
         await using var joined = await ReadScopeAsync(db, unit, cancellationToken);
-        var row = await SingleAsync(db, Entity(db, entity), decision, context, id, lockFor: null, cancellationToken, narrowing: narrowing);
+        var schema = Entity(db, entity);
+        var row = await SingleAsync(db, schema, decision, context, id, lockFor: null, cancellationToken, narrowing: narrowing);
         await ReleaseAsync(joined, cancellationToken);
 
-        return row is null ? null : RecordMaterializer.ToRecord(row, decision.HiddenFields, FrozenSet<string>.Empty);
+        return row is null ? null : Shaped(row, schema, decision.HiddenFields, FrozenSet<string>.Empty);
     }
 
     /// <inheritdoc/>
@@ -827,7 +828,7 @@ internal sealed partial class EfAlvoData : IAlvoData
 
         var narrowing = NarrowingOf(schema.Name, DataOperation.Get, context);
         var row = await SingleAsync(db, schema, read, context, rowId, lockFor: null, cancellationToken, narrowing: narrowing);
-        return row is null ? null : RecordMaterializer.ToRecord(row, read.HiddenFields, FrozenSet<string>.Empty);
+        return row is null ? null : Shaped(row, schema, read.HiddenFields, FrozenSet<string>.Empty);
     }
 
     /// <summary>
@@ -863,7 +864,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             var rows = await PageAsync(db, schema, read, context, RowsIn(chunk) with { Narrowing = narrowing }, cancellationToken);
             foreach (var row in rows)
             {
-                readable[RowIdOf(row)] = RecordMaterializer.ToRecord(row, read.HiddenFields, FrozenSet<string>.Empty);
+                readable[RowIdOf(row)] = Shaped(row, schema, read.HiddenFields, FrozenSet<string>.Empty);
             }
         }
 

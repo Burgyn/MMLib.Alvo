@@ -275,6 +275,24 @@ public class InMemoryAlvoDataTests
             "ghosts", new Dictionary<string, object?> { ["title"] = "x" }, caller, cancellationToken: ct));
     }
 
+    [Fact]
+    public async Task A_write_naming_a_virtual_field_is_refused()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var fields = new Dictionary<string, FieldDescriptor>(StringField(), StringComparer.Ordinal)
+        {
+            ["display"] = new() { Type = DescField.String, Virtual = true },
+        };
+        var data = CreateStore("items", fields);
+
+        var refused = await Should.ThrowAsync<AlvoAuthorizationException>(() => data.CreateAsync(
+            "items", new Dictionary<string, object?> { ["title"] = "x", ["display"] = "forged" }, Caller(), cancellationToken: ct));
+
+        refused.Message.ShouldBe(
+            "Field 'display' is virtual and cannot be written: an enricher fills it when the record is read. Remove it from the payload.");
+        (await data.QueryAsync(new AlvoQuery { Entity = "items" }, Caller(), ct)).Items.ShouldBeEmpty();
+    }
+
     private static Dictionary<string, FieldDescriptor> StringField() => new(StringComparer.Ordinal)
     {
         ["title"] = new() { Type = DescField.String },
@@ -357,6 +375,7 @@ public class InMemoryAlvoDataTests
                 Nullable = field.Nullable ?? field.Required != true,
                 Precision = field.Precision,
                 Scale = field.Scale,
+                IsVirtual = field.Virtual == true,
             });
         }
 

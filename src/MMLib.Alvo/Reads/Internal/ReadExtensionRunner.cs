@@ -117,7 +117,7 @@ internal sealed class ReadExtensionRunner(
 
     private static bool Filterable(string name, EntitySchema schema) =>
         AlvoManagedColumns.For(schema).Contains(name)
-        || schema.Fields.Any(field => string.Equals(field.Name, name, StringComparison.Ordinal));
+        || schema.Fields.Any(field => !field.IsVirtual && string.Equals(field.Name, name, StringComparison.Ordinal));
 
     private void WarnOfHidden(string id, IEnumerable<string> fields, EntityPolicy? policy)
     {

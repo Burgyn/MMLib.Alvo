@@ -137,7 +137,7 @@ internal static class RenamePrePass
         Dictionary<string, string> fieldRenames,
         List<RenameEntry> renames)
     {
-        var desiredField = desiredEntity?.Fields
+        var desiredField = currentField.IsVirtual ? null : desiredEntity?.Fields
             .FirstOrDefault(f => string.Equals(f.RenamedFrom, currentField.Name, StringComparison.Ordinal));
 
         if (desiredField is null || string.Equals(desiredField.Name, currentField.Name, StringComparison.Ordinal))

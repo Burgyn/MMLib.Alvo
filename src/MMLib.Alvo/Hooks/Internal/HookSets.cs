@@ -65,7 +65,8 @@ internal static class HookSets
         || AlvoManagedColumns.Audit.Contains(field.Name)
         || field.Name == AlvoManagedColumns.VersionColumn(entity)
         || field.ComputedExpression is not null
-        || field.Rollup is not null;
+        || field.Rollup is not null
+        || field.IsVirtual;
 
     private static bool Holds(FieldSchema field, object? value) => value is null || FieldClrType.Of(field).IsInstanceOfType(value);
 }

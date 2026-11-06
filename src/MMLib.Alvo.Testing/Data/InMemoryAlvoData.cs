@@ -629,7 +629,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         }
     }
 
-    /// <summary>The fields a replacement owns: declared, not framework-managed, not engine-computed.</summary>
+    /// <summary>The fields a replacement owns: declared, not framework-managed, not engine-computed, not virtual.</summary>
     /// <param name="schema">The entity as the applied schema declares it.</param>
     /// <param name="decision">The caller's verdict, for the fields it froze and the fields it masks.</param>
     private static IEnumerable<FieldSchema> CallerOwnedFields(EntitySchema schema, PolicyDecision decision) =>
@@ -646,7 +646,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     {
         var managed = AlvoManagedColumns.For(schema);
         return schema.Fields.Where(field =>
-            !managed.Contains(field.Name) && field.ComputedExpression is null && field.Rollup is null);
+            !managed.Contains(field.Name) && field.ComputedExpression is null && field.Rollup is null && !field.IsVirtual);
     }
 
     /// <summary>Places a created row in the caller's own tenant, on an entity that is scoped at all.</summary>
@@ -988,7 +988,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     private static void EnsureNoManagedColumnWrite(
         IReadOnlyDictionary<string, object?> values, EntitySchema entity, bool isUpdate)
     {
-        if (ManagedColumnRefusal(values, entity, isUpdate) is { } reason)
+        if ((ManagedColumnRefusal(values, entity, isUpdate) ?? VirtualRefusal(values, entity)) is { } reason)
         {
             throw new AlvoAuthorizationException(reason);
         }
@@ -1024,6 +1024,12 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// check: an inconsistency between the catalog and this store's schema must not be the one path on
     /// which an unvalidated payload reaches the rows.
     /// </remarks>
+    /// <summary>A payload naming a <c>virtual</c> field, which no column holds — word for word the relational driver's refusal.</summary>
+    private static string? VirtualRefusal(IReadOnlyDictionary<string, object?> values, EntitySchema entity) =>
+        entity.Fields.Where(field => field.IsVirtual).FirstOrDefault(field => values.ContainsKey(field.Name)) is { } field
+            ? $"Field '{field.Name}' is virtual and cannot be written: an enricher fills it when the record is read. Remove it from the payload."
+            : null;
+
     private EntitySchema EnsureFieldsDeclared(string entity, IReadOnlyDictionary<string, object?> values)
     {
         var (schema, refusal) = DeclaredFieldsRefusal(entity, values);
@@ -1594,6 +1600,7 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         return undeclared
             ?? ManagedColumnRefusal(values, schema!, isUpdate)
+            ?? VirtualRefusal(values, schema!)
             ?? ReadOnlyRefusal(values, decision.ReadOnlyFields);
     }
 
