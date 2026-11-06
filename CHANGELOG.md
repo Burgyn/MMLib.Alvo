@@ -32,6 +32,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`sequence` on a field** (HX-12): a gapless number per tenant, optionally per another field's value and per UTC
   year/month/day, stored as an integer or formatted text (`SO-{yyyy}-{n:4}`); the T-SQL double and any dialect without
   `SequenceAllocationStatement` refuse it at apply.
+- **`indexes[].where` and `indexes[].exclude`** (HX-12): `indexes[].where` (partial indexes; a partial `unique` allows
+  duplicates outside it) and `indexes[].exclude` (no overlapping `[from, to)` ranges among rows with equal `fields`; 409
+  `exclusion` at the range's pointer; PostgreSQL installs or requires `btree_gist`); `AlvoConstraintKind.Exclusion`.
+  Adding an exclusion over overlapping rows is refused at apply — and in a dry run — with their count; a dialect that
+  cannot enforce one refuses `exclude` at apply. A `where` cannot compare with a `timestamp('…')` constant yet.
+- **Dashboard and docs for HX-12's integrity keywords.** The field editor offers *Sequence* beside rollup and computed
+  (a `per` picker over required fields a caller writes, a period, a start, and a format checked as it is typed with a
+  preview of the first number); the Indexes tab's add form gains *Only where* (checked live against the host) and
+  *Exclude overlaps* (start and end pickers over required date and datetime fields; it hides *Unique*), and each row
+  badges its `where` and its range. The *Integrity in the descriptor* page gains sections on `sequence`, partial unique
+  indexes and `exclude`, with an executed snippet; the indexes and field-types descriptor skills teach both keywords.
 - **Virtual fields and record enrichers** (HX-16): a field declared `"virtual": true` has no column, is read-only and refused in writes, expressions and filter/sort/select (422 on the Data API); an embedded host's `Enrich(…)` fills it — or hides a field — on every read and write echo, after the caller's rules and masks. The applied schema a version row stores now records which fields are virtual; a binary older than this release reading a newer row ignores that and would plan a column for each virtual field, so do not roll a deployment back across it.
 - **Query narrowing** (HX-16): an embedded host can AND a filter into every non-system read of an entity — list, get and count — with `Entity(…).Narrow(…)`; it never widens what the rules allow and never applies to writes.
 - **Integrity in the descriptor** (HX-11). A field's `validation` is now enforced as a database `CHECK` constraint on

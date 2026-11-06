@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Admin.Components.Schema;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Admin.Tests.Schema;
 
@@ -283,6 +284,62 @@ public class WorkingCopyIndexTests
 
         copy.Json.ShouldNotContain("invoices");
         copy.IndexesOf("invoices").ShouldBeEmpty();
+    }
+
+    /// <summary>HX-12: a partial exclusion is written in the schema's own shape and read back as declared.</summary>
+    [Fact]
+    public void An_index_with_where_and_exclude_round_trips()
+    {
+        var copy = Copy();
+
+        copy.AddIndex("work_orders", ["code"], unique: false, "status != 'cancelled'", new ExclusionSchema("scheduled_for", "ends_at"));
+
+        Declared(copy).ShouldBe("""{"fields":["code"],"where":"status != 'cancelled'","exclude":{"from":"scheduled_for","to":"ends_at"}}""");
+        var read = copy.IndexesOf("work_orders").ShouldHaveSingleItem();
+        read.Where.ShouldBe("status != 'cancelled'");
+        read.Exclude.ShouldBe(new ExclusionSchema("scheduled_for", "ends_at"));
+    }
+
+    /// <summary>
+    /// Two entries over the same fields that differ only in their <c>exclude</c> are two indexes: the screen's reading is
+    /// matched whole, so a stale position never removes the other one.
+    /// </summary>
+    [Fact]
+    public void Removing_an_exclusion_index_matches_it_by_its_exclude()
+    {
+        var copy = Copy();
+        copy.AddIndex("work_orders", ["code"], unique: false);
+        copy.AddIndex("work_orders", ["code"], unique: false, exclude: new ExclusionSchema("scheduled_for", "ends_at"));
+        var plain = copy.IndexesOf("work_orders")[0];
+
+        copy.RemoveIndex("work_orders", 1, plain).ShouldBeFalse();
+        copy.RemoveIndex("work_orders", 1, copy.IndexesOf("work_orders")[1]).ShouldBeTrue();
+
+        copy.IndexesOf("work_orders").ShouldHaveSingleItem().Exclude.ShouldBeNull();
+    }
+
+    /// <summary>A <c>where</c> or <c>exclude</c> of the wrong shape spoils that facet only, as an unreadable <c>unique</c> does.</summary>
+    [Theory]
+    [InlineData("""{ "fields": ["status"], "where": 7 }""")]
+    [InlineData("""{ "fields": ["status"], "exclude": { "from": "a" } }""")]
+    [InlineData("""{ "fields": ["status"], "exclude": "a" }""")]
+    public void An_unreadable_where_or_exclude_is_read_as_absent(string declared)
+    {
+        var copy = new WorkingCopy();
+        copy.Take(
+            $$"""
+            {
+              "apiVersion": "v1",
+              "name": "field-service",
+              "entities": { "work_orders": { "fields": { "status": { "type": "string" } }, "indexes": [ {{declared}} ] } }
+            }
+            """,
+            revision: 3);
+
+        var read = copy.IndexesOf("work_orders").ShouldHaveSingleItem();
+        read.Fields.ShouldBe(["status"]);
+        read.Where.ShouldBeNull();
+        read.Exclude.ShouldBeNull();
     }
 
     /// <summary>

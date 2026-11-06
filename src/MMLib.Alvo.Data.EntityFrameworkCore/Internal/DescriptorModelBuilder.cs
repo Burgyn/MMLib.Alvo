@@ -25,14 +25,22 @@ internal static class DescriptorModelBuilder
     /// Renders a field's <c>validation</c> to this driver's CHECK constraint SQL, or <see langword="null"/> when the
     /// container registered no expression services — see <see cref="EnsureChecksAreRenderable"/>.
     /// </param>
+    /// <param name="filters">
+    /// Renders an index's <c>where</c> to this driver's partial-index predicate, or <see langword="null"/> when the container
+    /// registered no expression services — see <see cref="EnsureFiltersAreRenderable"/>.
+    /// </param>
     public static IModel Build(
-        SchemaModel model, Func<ModelBuilder> newBuilder, ComputedColumnSql? computed = null, CheckConstraintSql? checks = null)
+        SchemaModel model,
+        Func<ModelBuilder> newBuilder,
+        ComputedColumnSql? computed = null,
+        CheckConstraintSql? checks = null,
+        IndexFilterSql? filters = null)
     {
         var builder = newBuilder();
 
         foreach (var entity in model.Entities)
         {
-            ConfigureEntity(builder, entity, computed, checks);
+            ConfigureEntity(builder, entity, computed, checks, filters);
         }
 
         var knownEntityNames = model.Entities.Select(e => e.Name).ToHashSet(StringComparer.Ordinal);
@@ -44,7 +52,8 @@ internal static class DescriptorModelBuilder
         return builder.FinalizeModel();
     }
 
-    private static void ConfigureEntity(ModelBuilder builder, EntitySchema entity, ComputedColumnSql? computed, CheckConstraintSql? checks)
+    private static void ConfigureEntity(
+        ModelBuilder builder, EntitySchema entity, ComputedColumnSql? computed, CheckConstraintSql? checks, IndexFilterSql? filters)
     {
         var entityBuilder = builder.Entity(entity.Name);
         entityBuilder.ToTable(entity.Name, table => ConfigureChecks(table, entity, checks));
@@ -56,7 +65,8 @@ internal static class DescriptorModelBuilder
 
         entityBuilder.HasKey("id");
 
-        ConfigureIndexes(entityBuilder, entity);
+        EnsureFiltersAreRenderable(entity, filters);
+        ConfigureIndexes(entityBuilder, entity, filters);
     }
 
     /// <summary>
@@ -98,18 +108,48 @@ internal static class DescriptorModelBuilder
     /// of the columns its own message names. One method called from both places is what makes the two models'
     /// index sets one decision rather than two.
     /// </para>
+    /// <para>
+    /// <b>A partial index is declared by its hashed name in both models</b> (<see cref="IndexNames.Partial"/>), so the
+    /// translator resolves a partial unique violation PostgreSQL reports by name. Only the migration model carries its
+    /// predicate: the runtime model passes no <paramref name="filters"/>, and it never generates DDL.
+    /// </para>
     /// </remarks>
-    internal static void ConfigureIndexes(EntityTypeBuilder entityBuilder, EntitySchema entity)
+    /// <param name="entityBuilder">The entity's builder.</param>
+    /// <param name="entity">The entity whose indexes are declared.</param>
+    /// <param name="filters">Renders a partial index's predicate, or <see langword="null"/> for the runtime model.</param>
+    internal static void ConfigureIndexes(EntityTypeBuilder entityBuilder, EntitySchema entity, IndexFilterSql? filters = null)
     {
         foreach (var field in entity.Fields.Where(field => field.Unique))
         {
             entityBuilder.HasIndex([.. UniqueColumns(entity, [field.Name])]).IsUnique();
         }
 
-        foreach (var index in entity.Indexes)
+        foreach (var index in entity.Indexes.Where(index => index.Exclude is null))
         {
             var columns = index.Unique ? UniqueColumns(entity, index.Fields) : index.Fields;
-            entityBuilder.HasIndex([.. columns]).IsUnique(index.Unique);
+            var built = index.Where is null
+                ? entityBuilder.HasIndex([.. columns])
+                : Filtered(entityBuilder.HasIndex([.. columns], IndexNames.Partial(entity, index)), filters, entity, index);
+            built.IsUnique(index.Unique);
+        }
+    }
+
+    private static IndexBuilder Filtered(IndexBuilder builder, IndexFilterSql? filters, EntitySchema entity, IndexSchema index) =>
+        filters is null ? builder : builder.HasFilter(filters.For(entity, index));
+
+    /// <summary>
+    /// Refuses an index <c>where</c> when no expression services reached this model builder, naming the registration that is
+    /// missing — <see cref="EnsureComputedIsRenderable"/>'s reason: a partial unique index the store silently widened to the
+    /// whole table would refuse writes the descriptor allows.
+    /// </summary>
+    private static void EnsureFiltersAreRenderable(EntitySchema entity, IndexFilterSql? filters)
+    {
+        if (filters is null && entity.Indexes.Any(index => index.Where is not null))
+        {
+            throw new InvalidOperationException(
+                $"An index of '{entity.Name}' declares 'where', which becomes a partial index whose predicate is rendered from "
+                + "CEL — but this container registered no expression services, so there is nothing to render it with. Call "
+                + "AddAlvo() on the same service collection as UseSqlite()/UsePostgreSql().");
         }
     }
 
@@ -126,7 +166,7 @@ internal static class DescriptorModelBuilder
     /// </remarks>
     /// <param name="entity">The entity the index belongs to.</param>
     /// <param name="fields">The fields the index was declared over.</param>
-    private static IReadOnlyList<string> UniqueColumns(EntitySchema entity, IReadOnlyList<string> fields) =>
+    internal static IReadOnlyList<string> UniqueColumns(EntitySchema entity, IReadOnlyList<string> fields) =>
         entity.Tenancy == TenancyMode.Scoped && !fields.Contains(AlvoManagedColumns.TenantId, StringComparer.Ordinal)
             ? [AlvoManagedColumns.TenantId, .. fields]
             : fields;

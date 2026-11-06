@@ -100,6 +100,57 @@ public class RoundTripTests
         });
     }
 
+    [Fact]
+    public void A_generated_index_validates_and_survives_parse_and_serialize()
+    {
+        var schema = SchemaValidator.Load();
+
+        GeneratedIndexDescriptor().Sample(descriptor =>
+        {
+            SchemaValidator.Failures(schema, descriptor).ShouldBeEmpty(descriptor);
+            var index = AlvoDescriptor.Parse(descriptor).Entities["bookings"].Indexes.ShouldNotBeNull(descriptor).ShouldHaveSingleItem();
+            index.Fields.ShouldNotBeEmpty(descriptor);
+            (index.Exclude is null).ShouldBe(!descriptor.Contains("\"exclude\"", StringComparison.Ordinal), descriptor);
+            Canonicalizer.Canonicalize(AlvoDescriptor.Serialize(AlvoDescriptor.Parse(descriptor)))
+                .ShouldBe(Canonicalizer.Canonicalize(descriptor), descriptor);
+        });
+    }
+
+    private static readonly string[] _indexedFields = ["room"];
+
+    private static Gen<string> GeneratedIndexDescriptor() =>
+        Gen.Select(
+            Gen.OneOfConst<bool?>(null, false, true),
+            Gen.OneOfConst<string?>(null, "active", "status != 'cancelled'", "room == 'a' && active"),
+            Gen.Bool,
+            IndexDescriptor);
+
+    private static string IndexDescriptor(bool? unique, string? where, bool excluding)
+    {
+        var index = new Dictionary<string, object?>
+        {
+            ["fields"] = _indexedFields,
+            ["unique"] = unique,
+            ["where"] = where,
+            ["exclude"] = excluding ? new { from = "starts_at", to = "ends_at" } : null,
+        }.Where(member => member.Value is not null).ToDictionary(member => member.Key, member => member.Value);
+        var fields = new Dictionary<string, object>
+        {
+            ["room"] = new { type = "string", required = true },
+            ["active"] = new { type = "boolean", required = true },
+            ["status"] = new { type = "string" },
+            ["starts_at"] = new { type = "datetime", required = true },
+            ["ends_at"] = new { type = "datetime", required = true },
+        };
+
+        return JsonSerializer.Serialize(new
+        {
+            apiVersion = "alvo.dev/v1",
+            name = "indexes",
+            entities = new { bookings = new { fields, indexes = new[] { index } } },
+        });
+    }
+
     private static string ReverseTopLevelMembers(string json)
     {
         using JsonDocument document = JsonDocument.Parse(json);

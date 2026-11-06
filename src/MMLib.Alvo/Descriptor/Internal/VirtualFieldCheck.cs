@@ -69,8 +69,14 @@ internal static class VirtualFieldCheck
     private static IEnumerable<string> IndexPaths(EntityDescriptor declaring, string entity, string field) =>
         (declaring.Indexes ?? [])
             .Select((index, position) => (index, position))
-            .Where(pair => pair.index.Fields.Contains(field, StringComparer.Ordinal))
-            .Select(pair => $"/entities/{entity}/indexes/{pair.position}/fields");
+            .SelectMany(pair => IndexKeysNaming(pair.index, field).Select(key => $"/entities/{entity}/indexes/{pair.position}/{key}"));
+
+    private static IEnumerable<string> IndexKeysNaming(EntityIndex index, string field) =>
+        new[] { (Key: "fields", Names: index.Fields.Contains(field, StringComparer.Ordinal)),
+                (Key: "exclude/from", Names: index.Exclude?.From == field),
+                (Key: "exclude/to", Names: index.Exclude?.To == field) }
+            .Where(pair => pair.Names)
+            .Select(pair => pair.Key);
 
     private static IEnumerable<string> RollupPaths(AlvoDescriptor descriptor, string child, string field) =>
         from parent in descriptor.Entities

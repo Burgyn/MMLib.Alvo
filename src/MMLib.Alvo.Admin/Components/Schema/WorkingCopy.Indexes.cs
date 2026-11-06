@@ -18,9 +18,13 @@ internal sealed partial class WorkingCopy
     /// <param name="entity">The entity the index is on.</param>
     /// <param name="fields">The fields it covers, in the order they are declared in.</param>
     /// <param name="unique">Whether it enforces uniqueness across them.</param>
-    public void AddIndex(string entity, IReadOnlyList<string> fields, bool unique)
+    /// <param name="where">The CEL filter of a partial index, or <see langword="null"/> for every row.</param>
+    /// <param name="exclude">The range no two rows with equal <paramref name="fields"/> may overlap, or <see langword="null"/>.</param>
+    public void AddIndex(
+        string entity, IReadOnlyList<string> fields, bool unique, string? where = null, ExclusionSchema? exclude = null)
     {
         ArgumentNullException.ThrowIfNull(fields);
+        var index = IndexJson(new IndexSchema(fields, unique) { Where = where, Exclude = exclude });
 
         Edit(root =>
         {
@@ -35,22 +39,41 @@ internal sealed partial class WorkingCopy
                 declared["indexes"] = indexes;
             }
 
-            var index = new JsonObject
-            {
-                ["fields"] = new JsonArray([.. fields.Select(field => JsonValue.Create(field))]),
-            };
-
-            /* Written only when true, for the reason the field editor writes its own booleans that way:
-               `unique: false` is the schema's default, and a descriptor full of defaults is a descriptor
-               whose diffs stop saying what changed. */
-            if (unique)
-            {
-                index["unique"] = true;
-            }
-
             indexes.Add(index);
             return true;
         });
+    }
+
+    /// <summary>One index in the schema's own shape: <c>fields</c>, then each of <c>unique</c>, <c>where</c> and <c>exclude</c> it declares.</summary>
+    /// <remarks>
+    /// <c>unique</c> is written only when true, for the reason the field editor writes its own booleans that way:
+    /// <c>unique: false</c> is the schema's default, and a descriptor full of defaults is a descriptor whose diffs stop
+    /// saying what changed.
+    /// </remarks>
+    /// <param name="index">The index.</param>
+    internal static JsonObject IndexJson(IndexSchema index)
+    {
+        var declared = new JsonObject
+        {
+            ["fields"] = new JsonArray([.. index.Fields.Select(field => JsonValue.Create(field))]),
+        };
+
+        if (index.Unique)
+        {
+            declared["unique"] = true;
+        }
+
+        if (index.Where is { Length: > 0 } where)
+        {
+            declared["where"] = where;
+        }
+
+        if (index.Exclude is { } range)
+        {
+            declared["exclude"] = new JsonObject { ["from"] = range.From, ["to"] = range.To };
+        }
+
+        return declared;
     }
 
     /// <summary>
@@ -114,9 +137,12 @@ internal sealed partial class WorkingCopy
         => Read(() => StagedChanges.NewEntries(
             AppliedEntityOf(entity)?["indexes"] as JsonArray, WorkingEntityOf(entity)?["indexes"] as JsonArray));
 
-    /// <summary>Whether two readings of an index declare the same one.</summary>
-    private static bool SameIndex(IndexSchema actual, IndexSchema expected)
-        => actual.Unique == expected.Unique && actual.Fields.SequenceEqual(expected.Fields, StringComparer.Ordinal);
+    /// <summary>Whether two readings of an index declare the same one — its filter and its range included.</summary>
+    /// <param name="actual">One reading.</param>
+    /// <param name="expected">The other.</param>
+    internal static bool SameIndex(IndexSchema actual, IndexSchema expected)
+        => actual.Unique == expected.Unique && actual.Fields.SequenceEqual(expected.Fields, StringComparer.Ordinal)
+            && string.Equals(actual.Where, expected.Where, StringComparison.Ordinal) && actual.Exclude == expected.Exclude;
 
     /// <summary>
     /// One declared index, in the shape every screen already reads.
@@ -147,8 +173,18 @@ internal sealed partial class WorkingCopy
 
         return new(
             index["fields"] is JsonArray fields ? [.. fields.Select(Name).OfType<string>()] : [],
-            index["unique"] is JsonValue unique && unique.TryGetValue<bool>(out var enforced) && enforced);
+            index["unique"] is JsonValue unique && unique.TryGetValue<bool>(out var enforced) && enforced)
+        {
+            Where = Name(index["where"]),
+            Exclude = Range(index["exclude"]),
+        };
     }
+
+    /// <summary>A declared <c>exclude</c>, or nothing when it is not one with both ends — the apply is what refuses it.</summary>
+    private static ExclusionSchema? Range(JsonNode? declared)
+        => declared is JsonObject range && Name(range["from"]) is { } from && Name(range["to"]) is { } to
+            ? new ExclusionSchema(from, to)
+            : null;
 
     /// <summary>One field name, or nothing when the entry is not one.</summary>
     private static string? Name(JsonNode? field) =>

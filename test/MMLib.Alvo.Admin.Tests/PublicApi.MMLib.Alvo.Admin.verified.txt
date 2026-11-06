@@ -837,7 +837,7 @@ namespace MMLib.Alvo.Admin.Components.Schema
             public string Point { get; init; }
         }
     }
-    public class Indexes : Microsoft.AspNetCore.Components.ComponentBase
+    public class Indexes : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public Indexes() { }
         [Microsoft.AspNetCore.Components.EditorRequired]
@@ -853,6 +853,7 @@ namespace MMLib.Alvo.Admin.Components.Schema
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<int> OnRemove { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
     }
     public class LifecycleTab : Microsoft.AspNetCore.Components.ComponentBase
     {

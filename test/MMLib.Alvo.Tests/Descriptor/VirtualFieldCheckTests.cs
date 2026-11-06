@@ -45,6 +45,16 @@ public sealed class VirtualFieldCheckTests
         error.Message.ShouldBe($"Field 'notes.display' is virtual: {NoColumnTail}");
     }
 
+    [Theory]
+    [InlineData("from", "{\"from\": \"display\", \"to\": \"title\"}")]
+    [InlineData("to", "{\"from\": \"title\", \"to\": \"display\"}")]
+    public void A_virtual_field_as_an_exclusion_s_range_end_is_refused_at_that_end(string end, string exclude)
+    {
+        var error = VirtualErrors(Notes(Virtual, indexes: $"[{{\"fields\": [\"title\"], \"exclude\": {exclude}}}]")).ShouldHaveSingleItem();
+
+        error.Path.ShouldBe($"/entities/notes/indexes/0/exclude/{end}");
+    }
+
     [Fact]
     public void A_rollup_over_a_virtual_child_field_is_refused_at_the_rollup()
     {

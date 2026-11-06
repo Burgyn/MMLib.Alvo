@@ -9,6 +9,9 @@
     after watching a list get slow used to be the one thing they had to leave the dashboard for.
 *@
 @inject AdminInterop Interop
+@inject ManagementGateway Gateway
+@inject ILogger<Indexes> Logger
+@implements IDisposable
 
 @* A create inside a tab sits in its section's head, right-aligned (spec §3.7), as New field does on Fields. *@
 <SectionHead Title="Indexes">
@@ -58,6 +61,14 @@ else
             {
                 <span class="a-badge a-badge--accent">unique</span>
             }
+            @if (index.Exclude is { } range)
+            {
+                <span class="a-badge a-badge--accent" data-testid="index-exclude">no overlap of @range.From–@range.To</span>
+            }
+            @if (index.Where is { Length: > 0 } where)
+            {
+                <span class="a-badge a-mono" data-testid="index-where" title="@where">where @Short(where)</span>
+            }
             @if (Staged.IsNewIndex(at))
             {
                 <span class="a-badge a-badge--accent" data-testid="index-staged">new</span>
@@ -81,7 +92,7 @@ else
 {
     <AlvoEditor TestId="index-editor" Title="New index" SubmitText="Add to the working copy" SubmitTestId="index-add"
                 Subtitle="Pick the fields in the order a query filters on them: an index on (a, b) serves a filter on a, and on a and b, and does nothing for b alone."
-                Dirty="@(_chosen.Count > 0 || _unique)" OnSubmit="AddAsync" OnClose="CloseAdding">
+                Dirty="@_draft.Dirty" OnSubmit="AddAsync" OnClose="CloseAdding">
         @RefusalPanel.Of(_refusal, "That index cannot be added")
 
         @*
@@ -91,20 +102,73 @@ else
         *@
         <div class="a-stack a-stack--gap-3" data-testid="index-fields">
             <span class="a-label" id="index-fields-label">Fields</span>
-            <ChipGroup TValue="string" Items="Names(Declarable)" Selected="_chosen" Multiple="true"
+            <ChipGroup TValue="string" Items="Names(Declarable)" Selected="_draft.Chosen" Multiple="true"
                        aria-labelledby="index-fields-label" SelectedChanged="Choose" ChipContent="Chip" />
 
             @if (Maintained.Count > 0)
             {
                 <span class="a-label" id="index-maintained-label">Maintained by Alvo</span>
-                <ChipGroup TValue="string" Items="Names(Maintained)" Selected="_chosen" Multiple="true"
+                <ChipGroup TValue="string" Items="Names(Maintained)" Selected="_draft.Chosen" Multiple="true"
                            aria-labelledby="index-maintained-label" data-testid="index-fields-maintained"
                            SelectedChanged="Choose" ChipContent="Chip" />
             }
         </div>
 
-        <MudCheckBox T="bool" Value="_unique" ValueChanged="on => _unique = on" data-testid="index-unique"
-                     Label="Enforce uniqueness across these fields" />
+        @* An exclusion already refuses equal fields whose ranges overlap, and the apply refuses the pair. *@
+        @if (_draft.UniqueOffered)
+        {
+            <MudCheckBox T="bool" Value="_draft.Unique" ValueChanged="on => _draft.Unique = on" data-testid="index-unique"
+                         Label="Enforce uniqueness across these fields" />
+        }
+
+        <MudCheckBox T="bool" Value="_draft.Excludes" ValueChanged="ChooseExcludes" data-testid="index-exclude-overlaps"
+                     Label="Exclude overlaps — no two rows with these fields equal may hold overlapping ranges" />
+
+        @if (_draft.Excludes)
+        {
+            @if (IndexDraft.RangeFields(Entity) is { Count: > 0 } starts)
+            {
+                <Field Label="Range starts at" LabelId="index-exclude-from">
+                    <ChildContent>
+                        <ChipGroup TValue="string" Items="starts" Selected="[_draft.From]" aria-labelledby="index-exclude-from"
+                                   data-testid="index-exclude-from" SelectedChanged="ChooseFrom" />
+                    </ChildContent>
+                    <Hint>Inclusive. Offered: the required date and datetime fields a caller writes.</Hint>
+                </Field>
+                <Field Label="Range ends at" LabelId="index-exclude-to">
+                    <ChildContent>
+                        <ChipGroup TValue="string" Items="_draft.EndFields(Entity)" Selected="[_draft.To]" aria-labelledby="index-exclude-to"
+                                   data-testid="index-exclude-to" SelectedChanged="picked => _draft.To = picked[0]" />
+                    </ChildContent>
+                    <Hint>
+                        Exclusive, and of the start's type: a booking that ends at 12:00 and one that starts at 12:00 do not
+                        overlap. A write that would overlap is refused 409; on PostgreSQL the apply needs the btree_gist extension.
+                    </Hint>
+                </Field>
+            }
+            else
+            {
+                <Refusal data-testid="index-exclude-none">
+                    <code class="a-mono">@Entity.Name</code> has no required date or datetime field a caller writes, so there is
+                    no range to keep from overlapping — add a start and an end on the Fields tab first.
+                </Refusal>
+            }
+        }
+
+        <Field Label="Only where" For="index-where">
+            <ChildContent>
+                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" Lines="1" id="index-where"
+                              data-testid="index-where-box" Class="a-mono" spellcheck="false"
+                              Placeholder="e.g. status != 'cancelled' — leave empty for every row"
+                              aria-describedby="@DescribedBy" Value="_draft.Where" ValueChanged="TypeWhere" />
+                @Findings
+            </ChildContent>
+            <Hint>
+                CEL over this entity's own fields — only the rows it accepts are indexed, and a unique index is unique among
+                them alone. No caller, no now() and no hidden field: the database holds it as DDL.
+                @ChordHint.Of("adds the index")
+            </Hint>
+        </Field>
     </AlvoEditor>
 }
 
@@ -117,7 +181,7 @@ else
     /// <summary>One field to pick, with its position in the index while it is in it.</summary>
     private RenderFragment Chip(string name) => @<text>
         <span class="a-mono">@name</span>
-        @if (_chosen.IndexOf(name) is >= 0 and var order)
+        @if (_draft.Chosen.IndexOf(name) is >= 0 and var order)
         {
             <span class="a-badge">@(order + 1)</span>
         }
@@ -131,8 +195,12 @@ else
     private List<FieldSchema> Maintained
         => Entity.Fields.Where(column => AlvoManagedColumns.For(Entity).Contains(column.Name)).ToList();
 
-    private List<string> _chosen = [];
-    private bool _unique;
+    private const string WhereBox = "index-where";
+    private const int WhereBadgeLimit = 32;
+
+    private IndexDraft _draft = new();
+    private readonly ExpressionCheck _check = new();
+    private readonly ComponentLifetime _lifetime = new();
     private readonly RefusalState<string> _refusal = new();
     private bool _adding;
     private IndexSchema? _removing;
@@ -193,7 +261,8 @@ else
     private void Choose(IReadOnlyList<string> fields)
     {
         _refusal.Clear();
-        _chosen = [.. fields];
+        _draft.Chosen = [.. fields];
+        _ = CheckAsync();
     }
 
     /// <summary>
@@ -207,15 +276,15 @@ else
     /// </remarks>
     private async Task AddAsync()
     {
-        if (_chosen.Count == 0)
+        if (_draft.Build(out var refusal) is not { } index)
         {
-            _refusal.Show("An index covers at least one field. Pick one above.");
+            _refusal.Show(refusal!);
             return;
         }
 
         /* The working copy appends, so the new index lands after every row drawn now. */
         var position = Declared.Count;
-        await OnAdd.InvokeAsync(new IndexSchema([.. _chosen], _unique));
+        await OnAdd.InvokeAsync(index);
         _reveal = position;
         _reveals++;
         CloseAdding();
@@ -224,8 +293,8 @@ else
     /// <summary>Closes the editor and forgets what was picked, so the next one starts empty.</summary>
     private void CloseAdding()
     {
-        _chosen = [];
-        _unique = false;
+        _draft = new();
+        _ = CheckAsync();
         _refusal.Clear();
         _adding = false;
     }
@@ -276,7 +345,7 @@ else
     {
         for (var position = 0; position < Declared.Count; position++)
         {
-            if (Declared[position].Unique == index.Unique && Declared[position].Fields.SequenceEqual(index.Fields))
+            if (WorkingCopy.SameIndex(Declared[position], index))
             {
                 return position;
             }
@@ -286,4 +355,7 @@ else
     }
 
     private static string RemoveButton(int position) => $"#index-row-{position} [data-testid='index-remove']";
+
+    /// <summary>A filter short enough to sit in a badge; the whole of it is the badge's title.</summary>
+    private static string Short(string where) => where.Length <= WhereBadgeLimit ? where : where[..WhereBadgeLimit] + "…";
 }

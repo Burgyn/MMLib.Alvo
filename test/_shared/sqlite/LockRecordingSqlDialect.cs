@@ -101,4 +101,7 @@ internal sealed class LockRecordingSqlDialect : IAlvoSqlDialect
     /// </summary>
     /// <param name="table">The prefixed counter table.</param>
     string? IAlvoSqlDialect.SequenceAllocationStatement(string table) => ((IAlvoSqlDialect)_inner).SequenceAllocationStatement(table);
+
+    ExclusionConstraintSql? IAlvoSqlDialect.ExclusionConstraint(ExclusionConstraintDefinition definition) =>
+        ((IAlvoSqlDialect)_inner).ExclusionConstraint(definition);
 }

@@ -1,4 +1,5 @@
-﻿using System.Globalization;
+﻿using MMLib.Alvo.Schema;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -88,6 +89,28 @@ internal static class ExpressionSlots
         => facets?["rollup"] is JsonObject
             ? ForField(workingJson, entity, editing, field, facets, source, "rollup", "where")
             : null;
+
+    /// <summary>Appends the index the Indexes form would add, with the typed <c>where</c>, to a clone of the working copy.</summary>
+    /// <remarks>Appended, as <see cref="WorkingCopy.AddIndex"/> appends it, so the filter is judged at the entry Add would write.</remarks>
+    /// <param name="workingJson">The working copy's text; not modified.</param>
+    /// <param name="entity">The entity the index is on.</param>
+    /// <param name="index">The index the form holds now.</param>
+    /// <param name="source">The CEL as it stands in the <i>Only where</i> box.</param>
+    /// <returns>The clone's text and the filter's JSON Pointer, or <see langword="null"/> when there is no such entity.</returns>
+    public static (string Json, string Path)? ForIndexWhere(string workingJson, string entity, IndexSchema index, string source)
+    {
+        ArgumentNullException.ThrowIfNull(index);
+        if (Clone(workingJson) is not { } root || Entity(root, entity) is not { } declared)
+        {
+            return null;
+        }
+
+        var indexes = declared["indexes"] as JsonArray ?? (JsonArray)(declared["indexes"] = new JsonArray());
+        var placed = WorkingCopy.IndexJson(index);
+        placed["where"] = source;
+        indexes.Add(placed);
+        return (root.ToJsonString(), Pointer("entities", entity, "indexes", (indexes.Count - 1).ToString(CultureInfo.InvariantCulture), "where"));
+    }
 
     /// <summary>Writes <paramref name="source"/> at <paramref name="slot"/> inside a copy of the facets, and saves the field on a scratch copy.</summary>
     private static (string Json, string Path)? ForField(
