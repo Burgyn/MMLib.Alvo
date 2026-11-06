@@ -158,7 +158,11 @@ internal static class DeliveryOperationsTable
     /// with no locked subscriber is refused rather than rendered unnarrowed.
     /// </remarks>
     internal static string ReplaySql(string table, DeliveryFilter filter, int lockedSubscribers = 0) =>
-        $"UPDATE {table} SET {Reset} WHERE {Conditions(filter with { Replayable = true }, keyset: false)}{LockedSubscribers(filter, lockedSubscribers)} AND NOT {LaneRunning(table)} RETURNING id, event_id";
+        $"UPDATE {table} SET {Reset} WHERE {ReplayedSql(table, filter, lockedSubscribers)} RETURNING id, event_id";
+
+    /// <summary>The predicate <see cref="ReplaySql"/> resets by, which a replay's step clearing selects by too.</summary>
+    internal static string ReplayedSql(string table, DeliveryFilter filter, int lockedSubscribers = 0) =>
+        $"{Conditions(filter with { Replayable = true }, keyset: false)}{LockedSubscribers(filter, lockedSubscribers)} AND NOT {LaneRunning(table)}";
 
     /// <summary>The subscribers with a replayable delivery <paramref name="filter"/> selects — the locks a replay naming none takes.</summary>
     internal static string ReplaySubscribersSql(string table, DeliveryFilter filter) =>

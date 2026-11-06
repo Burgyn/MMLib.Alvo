@@ -60,9 +60,10 @@ internal sealed partial class EfCoreDeliveryStore
         var subscribers = await ReadAsync(DeliveryOperationsTable.SubscriberOfSql(_table), command => BindId(command, id), reader => reader.GetString(0), cancellationToken)
             .ConfigureAwait(false);
 
-        return subscribers.Count == 1 && await InTransactionAsync(async (connection, transaction) =>
+        return subscribers.Count == 1 && await InTransactionIfAsync(async (connection, transaction) =>
         {
             await LockSubscribersAsync(connection, transaction, subscribers, exclusive: true, cancellationToken).ConfigureAwait(false);
+            await ClearSucceededStepsAsync(connection, transaction, id, cancellationToken).ConfigureAwait(false);
             var reset = await ExecuteInAsync(connection, transaction, DeliveryOperationsTable.RedeliverSql(_table), command =>
             {
                 BindId(command, id);
@@ -160,16 +161,27 @@ internal sealed partial class EfCoreDeliveryStore
         DbConnection connection, DbTransaction transaction, DeliveryFilter filter, IReadOnlyList<string> subscribers, CancellationToken ct)
     {
         await LockSubscribersAsync(connection, transaction, subscribers, exclusive: true, ct).ConfigureAwait(false);
+        var selected = DeliveryOperationsTable.ReplayedSql(_table, filter, subscribers.Count);
+        await ExecuteInAsync(connection, transaction, StepTable.ClearReplayedSql(_steps, _table, selected), command => BindReplay(command, filter, subscribers), ct)
+            .ConfigureAwait(false);
 
-        return await RelationalSqlBatch.ReadRowsAsync(connection, transaction, DeliveryOperationsTable.ReplaySql(_table, filter, subscribers.Count), command =>
+        return await RelationalSqlBatch.ReadRowsAsync(
+            connection,
+            transaction,
+            DeliveryOperationsTable.ReplaySql(_table, filter, subscribers.Count),
+            command => BindReplay(command, filter, subscribers),
+            reader => (Id: reader.GetString(0), EventId: reader.GetString(1)),
+            ct).ConfigureAwait(false);
+    }
+
+    private void BindReplay(DbCommand command, DeliveryFilter filter, IReadOnlyList<string> subscribers)
+    {
+        BindFilter(command, filter, keyset: false, limit: false);
+        RelationalSqlBatch.AddParameter(command, "@now", Now);
+        if (filter.Subscriber is null)
         {
-            BindFilter(command, filter, keyset: false, limit: false);
-            RelationalSqlBatch.AddParameter(command, "@now", Now);
-            if (filter.Subscriber is null)
-            {
-                BindLockedSubscribers(command, subscribers);
-            }
-        }, reader => (Id: reader.GetString(0), EventId: reader.GetString(1)), ct).ConfigureAwait(false);
+            BindLockedSubscribers(command, subscribers);
+        }
     }
 
     private static void BindLockedSubscribers(DbCommand command, IReadOnlyList<string> subscribers)

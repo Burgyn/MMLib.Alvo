@@ -369,7 +369,16 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     }
 
     public Task<bool> SleepAsync(DeliveryAttempt attempt, DateTimeOffset wakeAt, CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException("Task 3");
+        Task.FromResult(Answer(attempt, row => Sleep(row, wakeAt), "skipped", errorType: null));
+
+    private static void Sleep(Row row, DateTimeOffset wakeAt)
+    {
+        row.Status = "pending";
+        row.NotBefore = wakeAt;
+        row.Attempts--;
+        row.ClaimedBy = null;
+        row.LastErrorType = null;
+    }
 
     /// <summary>Refuses a log row whose idempotency key comes without its scope, as the EF store does, before anything changes.</summary>
     private static void EnsureEntry(DeliveryOperationEntry entry)
@@ -397,6 +406,11 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
 
     private void Reset(Row row)
     {
+        if (row.Status == "succeeded")
+        {
+            _steps.RemoveAll(step => step.EventId == row.EventId && step.Subscriber == row.Subscriber);
+        }
+
         row.Status = "pending";
         row.Attempts = 0;
         row.NotBefore = time.GetUtcNow();

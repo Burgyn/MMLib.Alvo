@@ -99,6 +99,42 @@ public sealed class DeliveryStepsTests
     }
 
     [Fact]
+    public async Task A_sleep_until_a_passed_instant_returns_at_once_even_on_its_first_call()
+    {
+        var steps = Steps();
+
+        await steps.SleepUntilAsync("past", _now.AddMinutes(-1), Ct);
+
+        steps.SleepRequested.ShouldBeNull();
+        (await _store.StepsAsync(_event, Subscriber, Ct)).ShouldHaveSingleItem().Name.ShouldBe("past");
+    }
+
+    [Fact]
+    public async Task A_sleep_until_a_later_instant_records_it_flags_the_run_and_ends_it()
+    {
+        var steps = Steps();
+
+        await Should.ThrowAsync<StepSleep>(() => steps.SleepUntilAsync("later", _now.AddHours(2).ToOffset(TimeSpan.FromHours(2)), Ct));
+
+        steps.SleepRequested.ShouldBe(_now.AddHours(2));
+    }
+
+    [Fact]
+    public async Task A_resumed_sleep_returns_once_its_stored_wake_time_passed_and_sleeps_again_before()
+    {
+        await _store.RecordStepAsync(Stored("wait", "\"2026-11-06T11:00:00+00:00\""), Ct);
+
+        var early = Steps();
+        await Should.ThrowAsync<StepSleep>(() => early.SleepUntilAsync("wait", _now.AddYears(1), Ct));
+        early.SleepRequested.ShouldBe(_now.AddHours(2), "the stored wake time wins over the one asked for now");
+
+        _clock.Advance(TimeSpan.FromHours(2));
+        var resumed = Steps();
+        await resumed.SleepUntilAsync("wait", _now.AddYears(1), Ct);
+        resumed.SleepRequested.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task The_pass_through_runs_work_every_time_and_never_sleeps()
     {
         var context = AlvoEventContext.Create(Event(), Substitute.For<IAlvoSession>(), Subscriber);

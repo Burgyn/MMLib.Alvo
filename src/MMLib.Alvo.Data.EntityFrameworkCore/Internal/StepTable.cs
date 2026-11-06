@@ -43,6 +43,27 @@ internal static class StepTable
     internal static string ReadOneSql(string table) =>
         $"SELECT result, completed_at FROM {table} WHERE event_id = @event_id AND subscriber = @subscriber AND step = @step";
 
+    /// <summary>
+    /// Deletes the steps of the delivery <c>@id</c> while it is <c>succeeded</c> — run first in a redeliver's transaction,
+    /// which is rolled back when its reset then matches nothing.
+    /// </summary>
+    /// <param name="table">The validated step table name.</param>
+    /// <param name="deliveries">The validated delivery table name.</param>
+    internal static string ClearSucceededSql(string table, string deliveries) =>
+        $"DELETE FROM {table} WHERE EXISTS (SELECT 1 FROM {deliveries} WHERE {deliveries}.id = @id AND {deliveries}.status = 'succeeded' "
+        + $"AND {deliveries}.event_id = {table}.event_id AND {deliveries}.subscriber = {table}.subscriber)";
+
+    /// <summary>
+    /// Deletes the steps of every succeeded delivery a replay's reset selects — <paramref name="selected"/>, the reset's own
+    /// predicate over <paramref name="deliveries"/> — run in the replay's transaction just before the reset.
+    /// </summary>
+    /// <param name="table">The validated step table name.</param>
+    /// <param name="deliveries">The validated delivery table name.</param>
+    /// <param name="selected">The reset's predicate, over unqualified delivery columns.</param>
+    internal static string ClearReplayedSql(string table, string deliveries, string selected) =>
+        $"DELETE FROM {table} WHERE EXISTS (SELECT 1 FROM {deliveries} WHERE {selected} AND {deliveries}.status = 'succeeded' "
+        + $"AND {deliveries}.event_id = {table}.event_id AND {deliveries}.subscriber = {table}.subscriber)";
+
     /// <summary>Reads every step of one subscriber's delivery of one event, in the order they completed.</summary>
     /// <param name="table">The validated table name.</param>
     internal static string ReadSql(string table) =>

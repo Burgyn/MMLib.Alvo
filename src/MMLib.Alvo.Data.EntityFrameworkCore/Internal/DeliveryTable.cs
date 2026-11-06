@@ -31,6 +31,7 @@ internal static class DeliveryTable
     internal const string Dead = "dead";
     internal const string Cancelled = "cancelled";
     internal const string FailedOutcome = "failed";
+    internal const string SkippedOutcome = "skipped";
 
     private const string Claimable =
         "((status IN ('pending', 'retrying') AND not_before <= @now) OR (status = 'running' AND lease_until < @now))";
@@ -210,6 +211,17 @@ internal static class DeliveryTable
         $"""
         INSERT INTO {attempts} (delivery_id, attempt, started_at, duration_ms, outcome, error_type)
         SELECT @id, COALESCE(MAX(attempt), 0) + 1, @started_at, @duration_ms, @outcome, @error_type FROM {attempts} WHERE delivery_id = @id
+        """;
+
+    /// <summary>
+    /// Puts a running delivery back to pending, due at <c>@wake_at</c>, and gives back the attempt its claim counted — a
+    /// sleep is not an attempt — if the claimant still holds it.
+    /// </summary>
+    internal static string SleepSql(string table) =>
+        $"""
+        UPDATE {table} SET status = 'pending', not_before = @wake_at, attempts = attempts - 1,
+                           lease_until = NULL, claimed_by = NULL, last_error_type = NULL
+         WHERE {Fence}
         """;
 
     internal static string PendingSubscribersSql(string table) =>

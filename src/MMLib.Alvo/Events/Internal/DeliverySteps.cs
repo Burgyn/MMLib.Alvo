@@ -7,8 +7,15 @@ namespace MMLib.Alvo.Events.Internal;
 /// stored result, any other runs its work and is recorded first-writer-wins, after the work returned.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The record is written with <see cref="CancellationToken.None"/>: a step whose work finished is recorded even when the
 /// attempt's token fired meanwhile, so the retry does not run it again.
+/// </para>
+/// <para>
+/// <b>A sleep is a step whose result is its wake instant.</b> Once that instant has passed the call returns; until then it
+/// sets <see cref="SleepRequested"/> and throws <see cref="StepSleep"/>. The runner reads the flag however the handler
+/// ended, so a handler that swallows the signal still sleeps.
+/// </para>
 /// </remarks>
 internal sealed class DeliverySteps(IDeliveryStore store, Guid eventId, string subscriber, TimeProvider time) : IAlvoSteps
 {
@@ -20,6 +27,19 @@ internal sealed class DeliverySteps(IDeliveryStore store, Guid eventId, string s
     private readonly Lock _gate = new();
     private readonly HashSet<string> _used = new(StringComparer.Ordinal);
     private Task<Dictionary<string, DeliveryStep>>? _completed;
+    private DateTimeOffset? _sleepRequested;
+
+    /// <summary>Gets the instant this attempt asked to sleep until, or <see langword="null"/> when it did not.</summary>
+    internal DateTimeOffset? SleepRequested
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _sleepRequested;
+            }
+        }
+    }
 
     public async Task<T> RunAsync<T>(string name, Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken = default)
     {
@@ -49,8 +69,27 @@ internal sealed class DeliverySteps(IDeliveryStore store, Guid eventId, string s
         await RecordAsync(name, NoValue).ConfigureAwait(false);
     }
 
-    public Task SleepUntilAsync(string name, DateTimeOffset at, CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException("Task 3");
+    public async Task SleepUntilAsync(string name, DateTimeOffset at, CancellationToken cancellationToken = default)
+    {
+        Claim(name);
+        var wake = await StoredAsync(name, cancellationToken).ConfigureAwait(false) is { } stored
+            ? Deserialize<DateTimeOffset>(stored.Result)
+            : Deserialize<DateTimeOffset>((await RecordAsync(name, Serialize(at.ToUniversalTime())).ConfigureAwait(false)).Result);
+        if (time.GetUtcNow() < wake)
+        {
+            Sleep(wake);
+        }
+    }
+
+    private void Sleep(DateTimeOffset wake)
+    {
+        lock (_gate)
+        {
+            _sleepRequested = wake;
+        }
+
+        throw new StepSleep();
+    }
 
     private void Claim(string name)
     {

@@ -742,9 +742,12 @@ namespace MMLib.Alvo.Testing.Events
         public System.Threading.Tasks.Task A_paused_subscriber_is_listed_with_who_when_and_why() { }
         public System.Threading.Tasks.Task A_paused_subscriber_is_not_claimed_and_its_lane_drains_in_order_after_resume() { }
         public System.Threading.Tasks.Task A_recorded_step_is_read_back_with_its_result() { }
+        public System.Threading.Tasks.Task A_redeliver_clears_the_steps_of_a_succeeded_delivery_and_keeps_those_of_a_dead_one() { }
         public System.Threading.Tasks.Task A_redeliver_whose_log_row_is_refused_changes_nothing() { }
         public System.Threading.Tasks.Task A_redeliver_writes_one_log_row() { }
         public System.Threading.Tasks.Task A_redelivered_delivery_runs_again_with_a_fresh_budget_and_keeps_its_history() { }
+        public System.Threading.Tasks.Task A_refused_redeliver_keeps_the_steps() { }
+        public System.Threading.Tasks.Task A_replay_clears_the_steps_of_the_succeeded_deliveries_it_resets() { }
         public System.Threading.Tasks.Task A_replay_naming_no_subscriber_resets_every_subscriber_s_replayable_deliveries() { }
         public System.Threading.Tasks.Task A_replay_never_resets_a_loop_break_nor_a_delivery_whose_record_is_running() { }
         public System.Threading.Tasks.Task A_replay_resets_only_the_named_subscriber_s_finished_deliveries() { }
@@ -759,6 +762,10 @@ namespace MMLib.Alvo.Testing.Events
         public System.Threading.Tasks.Task A_second_record_of_one_step_keeps_the_first_result() { }
         public System.Threading.Tasks.Task A_selection_asking_for_no_rows_is_refused() { }
         public System.Threading.Tasks.Task A_selection_counts_exactly_samples_in_event_order_and_changes_nothing() { }
+        public System.Threading.Tasks.Task A_sleep_by_a_claimant_that_lost_its_lease_changes_nothing() { }
+        public System.Threading.Tasks.Task A_sleep_returns_the_delivery_due_at_its_wake_time_without_spending_an_attempt() { }
+        public System.Threading.Tasks.Task A_sleeping_delivery_reads_as_pending_at_its_wake_time() { }
+        public System.Threading.Tasks.Task A_sleeping_ordered_delivery_holds_its_lane() { }
         public System.Threading.Tasks.Task An_attempt_is_answered_for_once_and_only_by_its_claimant() { }
         public System.Threading.Tasks.Task An_earlier_event_at_the_ceiling_under_a_stale_claim_holds_no_lane_back() { }
         public System.Threading.Tasks.Task An_earlier_event_on_its_last_attempt_under_a_live_claim_holds_the_lane() { }

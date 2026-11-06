@@ -22,6 +22,7 @@ internal enum DeliveryRunOutcome
     Dead,
     LeaseLost,
     Shutdown,
+    Slept,
 }
 
 /// <summary>
@@ -202,7 +203,9 @@ internal sealed class DeliveryRunner(
         try
         {
             var steps = new DeliverySteps(store, delivery.EventId, delivery.Subscriber, time);
-            return await InvokeAsync(@event, delivery, handler, steps, stopping).ConfigureAwait(false);
+            var verdict = await InvokeAsync(@event, delivery, handler, steps, stopping).ConfigureAwait(false);
+
+            return steps.SleepRequested is { } wakeAt ? AttemptVerdict.Sleep(wakeAt) : verdict;
         }
         catch (Exception) when (stopping.IsCancellationRequested)
         {
@@ -214,6 +217,7 @@ internal sealed class DeliveryRunner(
     {
         DeliveryRunOutcome.Succeeded => AlvoHookTelemetry.Succeeded,
         DeliveryRunOutcome.LeaseLost => AlvoHookTelemetry.LeaseLost,
+        DeliveryRunOutcome.Slept => AlvoHookTelemetry.Skipped,
         _ => AlvoHookTelemetry.Failed,
     };
 
@@ -378,6 +382,13 @@ internal sealed class DeliveryRunner(
 
     private async Task<DeliveryRunOutcome> AnswerAsync(DeliveryAttempt attempt, AlvoRetryPolicy policy, AttemptVerdict verdict, AnswerWindow window)
     {
+        if (verdict.WakeAt is { } wakeAt)
+        {
+            return await AnsweredAsync(() => store.SleepAsync(attempt, wakeAt, CancellationToken.None), attempt, window).ConfigureAwait(false)
+                ? DeliveryRunOutcome.Slept
+                : LeaseLost(attempt);
+        }
+
         if (verdict.Succeeded)
         {
             return await AnsweredAsync(() => store.CompleteAsync(attempt, CancellationToken.None), attempt, window).ConfigureAwait(false)
@@ -476,11 +487,13 @@ internal sealed class DeliveryRunner(
             Narrowed ? this : this with { AnswerBy = AnswerBy < now + grace ? AnswerBy : now + grace, Narrowed = true };
     }
 
-    internal readonly record struct AttemptVerdict(string? ErrorType, bool Retryable)
+    internal readonly record struct AttemptVerdict(string? ErrorType, bool Retryable, DateTimeOffset? WakeAt = null)
     {
         internal static AttemptVerdict Success => new(null, false);
 
-        internal bool Succeeded => ErrorType is null;
+        internal bool Succeeded => ErrorType is null && WakeAt is null;
+
+        internal static AttemptVerdict Sleep(DateTimeOffset wakeAt) => new(null, false, wakeAt);
 
         internal static AttemptVerdict Retry(string errorType) => new(errorType, true);
 

@@ -28,8 +28,25 @@ internal sealed partial class EfCoreDeliveryStore
         return InTransactionAsync((connection, transaction) => RecordStepInAsync(connection, transaction, completed, cancellationToken), cancellationToken);
     }
 
-    public Task<bool> SleepAsync(DeliveryAttempt attempt, DateTimeOffset wakeAt, CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException("Task 3");
+    public Task<bool> SleepAsync(DeliveryAttempt attempt, DateTimeOffset wakeAt, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(attempt);
+
+        return AnswerAsync(
+            DeliveryTable.SleepSql(_table),
+            command => RelationalSqlBatch.AddParameter(command, "@wake_at", StoredInstant.Text(wakeAt.ToUniversalTime())),
+            attempt,
+            DeliveryTable.SkippedOutcome,
+            errorType: null,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Deletes a succeeded delivery's steps — the transaction's opening write — so its redeliver runs every step again; a
+    /// dead or cancelled one keeps them and resumes after its last completed step.
+    /// </summary>
+    private Task<int> ClearSucceededStepsAsync(DbConnection connection, DbTransaction transaction, Guid id, CancellationToken ct) =>
+        ExecuteInAsync(connection, transaction, StepTable.ClearSucceededSql(_steps, _table), command => BindId(command, id), ct);
 
     private async Task<DeliveryStep> RecordStepInAsync(DbConnection connection, DbTransaction transaction, DeliveryStep completed, CancellationToken ct)
     {

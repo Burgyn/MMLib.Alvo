@@ -389,6 +389,31 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
         }
     }
 
+    /// <summary>
+    /// <see cref="InTransactionAsync{T}"/> that commits only when <paramref name="work"/> answers <see langword="true"/>, and
+    /// otherwise rolls back what it wrote — for a write that must stand only if a later statement of the same transaction
+    /// matched.
+    /// </summary>
+    private async Task<bool> InTransactionIfAsync(Func<DbConnection, DbTransaction, Task<bool>> work, CancellationToken ct)
+    {
+        var connection = _connections.Create();
+        await using (connection.ConfigureAwait(false))
+        {
+            await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
+            using (await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false))
+            {
+                var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+                await using (transaction.ConfigureAwait(false))
+                {
+                    var changed = await work(connection, transaction).ConfigureAwait(false);
+                    await (changed ? transaction.CommitAsync(ct) : transaction.RollbackAsync(ct)).ConfigureAwait(false);
+
+                    return changed;
+                }
+            }
+        }
+    }
+
     private static async Task<int> ExecuteInAsync(DbConnection connection, DbTransaction transaction, string sql, Action<DbCommand> bind, CancellationToken ct)
     {
         var command = connection.CreateCommand();
