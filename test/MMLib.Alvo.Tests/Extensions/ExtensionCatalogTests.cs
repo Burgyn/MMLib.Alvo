@@ -141,6 +141,17 @@ public sealed class ExtensionCatalogTests
     }
 
     [Fact]
+    public void A_limited_handler_shows_its_concurrency()
+    {
+        var catalog = Catalog(Registry(alvo => alvo
+            .Entity("tickets", tickets => tickets.OnCreated("capped", OnCreated, configure: options => options.Concurrency = AlvoConcurrency.PerKey("tenant", 2)))
+            .Entity("tickets", tickets => tickets.OnUpdated("uncapped", OnUpdated))));
+
+        catalog.Items.Single(item => item.Id == "capped").Concurrency.ShouldBe("tenant:2");
+        catalog.Items.Single(item => item.Id == "uncapped").Concurrency.ShouldBeNull();
+    }
+
+    [Fact]
     public void An_internal_command_runs_before_any_transaction_and_has_no_route()
     {
         var catalog = Catalog(Registry(alvo => alvo.AddCommand<Escalate>("escalate_ticket", "true")));

@@ -1701,6 +1701,7 @@ namespace MMLib.Alvo.Management
         public required System.DateTimeOffset NotBefore { get; init; }
         public required string PartitionKey { get; init; }
         public required string Status { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementDeliveryStep> Steps { get; init; }
         public required string Subscriber { get; init; }
         public string? TenantId { get; init; }
     }
@@ -1737,6 +1738,12 @@ namespace MMLib.Alvo.Management
         public string? Subscriber { get; init; }
         public System.DateTimeOffset? To { get; init; }
     }
+    public sealed class ManagementDeliveryStep : System.IEquatable<MMLib.Alvo.Management.ManagementDeliveryStep>
+    {
+        public ManagementDeliveryStep() { }
+        public required System.DateTimeOffset CompletedAt { get; init; }
+        public required string Name { get; init; }
+    }
     public sealed class ManagementDescriptor : System.IEquatable<MMLib.Alvo.Management.ManagementDescriptor>
     {
         public ManagementDescriptor(string Project, int Revision, string DescriptorJson) { }
@@ -1768,6 +1775,7 @@ namespace MMLib.Alvo.Management
         public ManagementExtension() { }
         public string? Access { get; init; }
         public int? AfterRevision { get; init; }
+        public string? Concurrency { get; init; }
         public string? Cron { get; init; }
         public string? Description { get; init; }
         public bool Enabled { get; init; }
