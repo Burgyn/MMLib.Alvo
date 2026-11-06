@@ -29,10 +29,12 @@ proposes it** — see *`Mutate`, the fourth profile* below for where the two dif
 | `in` (role membership) | ✓ | ✗ | ✓ | ✗ | ✓ |
 | `has(field)` | ✓ | ✓ | ✓ | ✗ | ✗ |
 | Arithmetic (`+ - * /`, unary `-`) | ✗ | ✓ | ✓ | ✓ | ✗ |
+| Temporal arithmetic (`ts ± dur`, `dur + ts`, `ts - ts`, `dur ± dur` — *Time*) | ✓ | ✗ | ✓ | ✓ | ✗ |
+| Duration constant (`duration('90m')`, folded to a literal — *Time*) | ✓ | ✗ | ✓ | ✓ | ✗ |
 | String concatenation (`+` over two strings) | ✗ | ✓ | ✗ | ✓ | ✗ |
 | Ternary conditional | ✗ | ✓ | ✗ | ✗ | ✗ |
 | `changed(field)` | ✗ | ✗ | ✓ | ✗ | ✗ |
-| Legacy call (`now()`) | ✗ | ✗ | ✗ | ✓ | ✗ |
+| Legacy call (`now()`) | ✓ | ✗ | ✓ | ✓ | ✗ |
 | Catalogued function call (built-ins and host functions; each function's own profiles narrow this ceiling) | ✗ | ✗ | ✓ | ✓ | ✗ |
 
 **Note the row that split.** `@user` and `@tenant` were one row (`@user`/`@tenant` context ref)
@@ -49,8 +51,10 @@ is legal.
 
 - **Rule** — `entities.*.rules.*` (the `USING`/`WITH CHECK` predicates) and `hidden`/`readOnly`
   field flags. Must evaluate to `Bool`. Sees the current row and `@user`/`@tenant`; never `old.`/
-  `new.` (there is no "before" row for an authorization check) and never arithmetic or a ternary
-  (a row-scoping predicate is a filter, not a calculation).
+  `new.` (there is no "before" row for an authorization check) and never numeric arithmetic or a ternary
+  (a row-scoping predicate is a filter, not a calculation). Its one arithmetic is temporal —
+  `created_at > now() - duration('24h')` — because a time window is a filter (*Time*, HX-11 Ruling 12). A field's
+  `validation` and a rollup's `where` are compiled in this profile too, under the narrower stored-predicate surface.
 - **Computed** — a `computed` field's expression (source `#21`, not yet compiled to SQL as of this
   PR). Must evaluate to a non-boolean scalar (`Int`/`Decimal`/`String`/`Timestamp`/`Uuid`) — a bare
   boolean is rejected with a "wrap it in a ternary" fix suggestion, since a database column can't
@@ -148,21 +152,23 @@ rationale: [the CEL functions design](../superpowers/specs/2026-10-05-f5-cel-fun
 #### The legacy call
 
 Outside the catalog an identifier followed by `(` is a syntax error (deviation 7). `now()` keeps its own grammar, byte
-for byte, and stays `Mutate`-only — positive and closed, on `_allowedProfiles`' own principle that a name missing from
-the list compiles in no profile rather than in every one:
+for byte. It was `Mutate`-only until HX-11; it is now legal in `Rule`, `Condition` and `Mutate` and refused in
+`Computed` and `Access` — positive and closed, on `_allowedProfiles`' own principle that a name missing from the list
+compiles in no profile rather than in every one:
 
 | Call | Result type | What it is |
 |---|---|---|
-| `now()` | `Timestamp` | the instant this write is already stamped with |
+| `now()` | `Timestamp` | the request's instant — or, in a condition judged after the commit, the event's `time` (*Time*) |
 
-**Why `now()` is not a clock read.** It resolves to the `DateTimeOffset` the write's own audit stamp
-already used, bound once per write by the caller and threaded in — `CelInterpreter` never touches
-`TimeProvider` itself. So `now()` twice in one write returns the same value, a value a hook writes
-and the row's own `created_at`/`updated_at` cannot disagree, and the whole thing is testable with a
-fake clock. It is also **never rendered to SQL**, and that is §0 principle 3 rather than a
-limitation: Postgres's `now()` is *transaction-start* time while SQLite's `CURRENT_TIMESTAMP` is
-second-precision *text*, so rendering it would let two engines answer differently for one descriptor.
-`@now` was considered and rejected — it would widen the closed `@`-context set and be its first
+**Why `now()` is not a clock read.** It resolves to the one instant bound for the request on the flow
+(`AlvoFlow.Instant`) — `CelInterpreter` never touches `TimeProvider` itself. So every `now()` one request evaluates
+returns the same value, a rule's `USING` and its `WITH CHECK` cannot disagree about one row, and the whole thing is
+testable with a fake clock. It is **not** the audit stamp: `created_at`/`updated_at` are one clock read per write
+(HX-11 Ruling 2, `data-path.md` *Every timestamp is one instant*), so a `mutate: now()` and the same write's
+`updated_at` can differ by microseconds. In a rule it **is** rendered to SQL — as a bound parameter, never as the
+engine's own clock: Postgres's `now()` is *transaction-start* time while SQLite's `CURRENT_TIMESTAMP` is
+second-precision *text*, so the engine's clock would let two engines answer differently for one descriptor (§0
+principle 3). `@now` was considered and rejected — it would widen the closed `@`-context set and be its first
 memberless context reference.
 
 `lowerAscii` was the legacy pair's other half until slice D, field-only and `Mutate`-only; it is now an ordinary
@@ -172,7 +178,7 @@ built-in (below), so `lowerAscii(trim(new.email))` parses and a condition may ca
 
 `Condition` and `Mutate`, interpreter only. Every parameter is non-nullable, so a null argument makes the call
 null; nothing is culture-sensitive; a position or a size counts Unicode code points. Overloads of one name share
-parameter names by position, so the dashboard's insert template is stable. `now` alone is `Mutate`-only; `duration` is also legal in `Rule`. A failure
+parameter names by position, so the dashboard's insert template is stable. `now` and `duration` are also legal in `Rule`. A failure
 named here fails the write closed (*Resolution, null and failure* below) with the reason quoted, which never carries a
 value from the row.
 
@@ -189,7 +195,7 @@ value from the row.
 | `math.greatest` | `(a: Int, b: Int) -> Int`, `(a: Decimal, b: Decimal) -> Decimal` | the larger, `a` when equal; an `Int` beside a `Decimal` binds the `Decimal` overload |
 | `math.least` | `(a: Int, b: Int) -> Int`, `(a: Decimal, b: Decimal) -> Decimal` | the smaller, `a` when equal; as `math.greatest` |
 | `math.round` | `(x: Int) -> Int`, `(x: Decimal) -> Decimal`, `(x: Decimal, digits: Int) -> Decimal` | to a whole number, or to `digits` fractional digits, halves away from zero (`math.round(2.345, 2)` = `2.35`, `math.round(-2.345, 2)` = `-2.35`, no padding); the `Int` overload is the identity; `digits` outside 0–28 fails closed ("digits must be from 0 to 28"), and a literal one is refused at apply |
-| `now` | `() -> Timestamp` | the instant this write is stamped with — the legacy call above, `Mutate` only |
+| `now` | `() -> Timestamp` | the request's instant (the event's `time` after the commit) — the legacy call above, also legal in `Rule` |
 | `replace` | `(text: String, search: String, replacement: String) -> String` | every non-overlapping occurrence, left to right, ordinal; an empty `search` returns `text`; a result that would grow the text past 1,048,576 characters fails closed |
 | `size` | `(text: String) -> Int` | Unicode code points |
 | `startsWith` | `(text: String, prefix: String) -> Bool` | ordinal, no Unicode normalisation (a decomposed `é` starts with `e`); an empty prefix is `true` |
@@ -592,6 +598,105 @@ untrusted input, never emit it verbatim — this matters especially for F7's dyn
 interpolates it into a SQL string literal rather than a quoted identifier, where quoting rules
 differ.
 
+## Time (HX-11)
+
+Design and rulings: [the HX-11 plan](../superpowers/plans/2026-11-06-hx-11-integrity-check-now.md), *Rulings*, recorded
+in [the host-extensibility spec](../superpowers/specs/2026-10-14-host-extensibility-design.md) as *HX-11 settled
+details*. The numbers below are those rulings.
+
+### The value types
+
+`Timestamp` (a `datetime` field, a `date` field read as midnight UTC, `now()`, `timestamp('…')`) and `Duration`
+(`CelValueType.Duration`, appended — an exhaustive `switch` over the enum gains a case). A duration exists only as a
+constant: `duration('…')` is type-checked, parsed by `CelDuration` and folded into a `CelLiteral` of type `Duration`, so
+no `duration` call survives compilation (7). Its grammar is Go's `time.ParseDuration`, as CEL's: an optional sign,
+then one or more `<decimal><unit>` components with units `h m s ms us µs μs ns`, or a bare `0`; its range is CEL's,
+±315 576 000 000 s; its precision is the microsecond (8). A number longer than 20 characters is reported as out of
+range, not as malformed (52).
+
+### The overloads
+
+Exactly CEL's (9), as a construct kind of their own — `CelConstructKind.TemporalArithmetic`, admitted in `Rule`,
+`Condition` and `Mutate` — rather than a profile (12):
+
+| Expression | Result |
+|---|---|
+| `timestamp + duration`, `duration + timestamp`, `timestamp - duration` | `Timestamp` |
+| `timestamp - timestamp` | `Duration` |
+| `duration + duration`, `duration - duration` | `Duration` |
+| `==`, `!=`, `<`, `<=`, `>`, `>=` over two durations | `Bool` |
+
+`*`, `/` and unary `-` on a duration, and a duration mixed with a number, are refused with a fix. Numeric arithmetic
+stays refused in `Rule`: `hourly_rate * 2.0` is still a refused example.
+
+### Range errors, per profile
+
+A timestamp result outside years 1–9999 or a duration past ±315 576 000 000 s (10):
+
+- **`Rule`, in process** (`WITH CHECK`, a mask): the whole predicate is `false` — never a `null` that `!` would turn
+  into a grant (57). A constant fold past the range at render time renders the whole predicate `FALSE`.
+- **`Rule`, in SQL**: integer microseconds carry no such bound, so `USING` and `WITH CHECK` can disagree only for a
+  result before year 1 or after year 9999 — reachable, since a caller may store `9999-12-31T12:00:00Z`; the in-process
+  side denies.
+- **`Condition`, `Mutate`**: `CelFunctionException` (`_+_`/`_-_`, "the result is outside the range of a Timestamp"),
+  which fails the write — `422 expression-failed` when the operands are the caller's, as for every built-in.
+- **A constraint** (`validation`): a constant fold out of range refuses the apply at the validation's pointer — never
+  `CHECK (FALSE)`, which would refuse every write (59).
+- **At apply**: a constant shift of `now()` that leaves the range at both 1970 and 9999 is refused; one that fails at
+  only one end (`now() + duration('1h')` at year 9999) is not, or every expiry rule would be.
+
+### The SQL domain is integer microseconds
+
+A temporal subtree with **no field** is folded in process: `created_at > now() - duration('24h')` renders
+`"created_at" > @alvo_u0` with one bound `DateTimeOffset`, sargable and needing no dialect function (4). A subtree that
+reads a field enters the microsecond domain through `IFieldSqlRenderer.RenderEpochMicroseconds(string timestampSql)`
+— a default interface member answering `null`, so a third-party dialect that does not declare it gets a
+`NotSupportedException` naming its renderer type, reported by the apply or the request (11):
+
+| Engine | Epoch microseconds of `x` |
+|---|---|
+| SQLite | `(CAST(round(unixepoch(x, 'subsec') * 1000) AS INTEGER) * 1000)` — rounded in milliseconds, then scaled, so the double stays below 2⁵³ across years 1–9999 |
+| PostgreSQL | `CAST(EXTRACT(EPOCH FROM x) * 1000000 AS bigint)` — exact on PostgreSQL 14+ |
+| T-SQL (golden only) | `DATEDIFF_BIG(microsecond, '1970-01-01T00:00:00', x)` |
+
+Integers make `==` on a duration exact. **SQLite's date functions are millisecond-precise**, so on SQLite a temporal
+comparison in SQL reads stored instants rounded to the millisecond while PostgreSQL and the interpreter are exact — a
+§0 principle 3 deviation stated like the decimal `REAL` one (#162); the agreement property draws millisecond-aligned
+instants, with an edge stratum near both ends of the range. Below the microsecond, a caller-written `datetime` is not
+truncated, so the in-process check compares 100 ns ticks where the stored row holds microseconds. Requires SQLite ≥
+3.42 and PostgreSQL ≥ 14.
+
+### Where `now()` is bound
+
+`AlvoFlow.Instant` — an internal `AsyncLocal<DateTimeOffset?>`, microsecond-truncated — is bound **once per request**
+(1):
+
+- **Over HTTP**, by the caller filters (`RequestInstant.Enter`): `AlvoContextFilter` (Data API routes),
+  `AlvoCallerFilter` (`WithAlvoCaller()` routes), `CommandEndpointFilter` (mapped commands, which do not run
+  `AlvoCallerFilter`) and `ManagementCallerFilter`.
+- **In process**, if none is bound (`AlvoFlow.EnsureInstant`), by each public `IAlvoData` entry point of `EfAlvoData`
+  and `InMemoryAlvoData`, `TransactAsync`, `IAlvoCommands.InvokeAsync` (a command's access rule is judged before any data
+  call) and `IAlvoManagement.SimulatePolicyAsync`. `InstantBindingArchitectureTests` enumerates the entry points.
+- **Overridden with the event's `time`** (`AlvoFlow.EnterInstant`) around a condition judged after the commit — an
+  after-hook's condition and an event handler's `when` at fan-out — and **only** there: a handler's body is new work and
+  runs on a fresh instant, bound by its first data or command call (58).
+
+No stamp reads it: audit and version stamps stay one clock read per write (2). An unbound instant fails closed — the
+interpreter throws its own defect and the renderer an `InvalidOperationException`; neither reads a clock (5).
+
+### The stored-predicate surface
+
+A field's `validation` (a `CHECK`) and a rollup's `where` (ANDed into the recompute's subquery) are `Rule`-profile
+expressions with no caller and no instant: the database judges them on every write. `StoredPredicateSurface` refuses,
+at the slot's pointer, a role test (`in`), any `@user`/`@tenant` read, `now()` ("would change its answer with no
+write") and any call that survives type checking; a folded `duration('…')` is a literal by then and passes (13, 31).
+Each slot adds its own rules: a validation also refuses `old.`/`changed()` (accepting `new.<f>` as a spelling of the
+row), reading across a hidden field (61) and a dynamic entity (30); a `where` also refuses a hidden child field (71).
+Both are rendered by the internal `IPredicateRenderer.RenderConstraint`, which writes every constant **inline** —
+integers and decimals invariant-culture, booleans as the dialect's literals, text through `RenderStringLiteral`, a
+duration as its integer microseconds — and throws if a context value or `now()` reaches it (16, 17). The literals are
+the descriptor author's, never a request's; a property per engine proves none escapes.
+
 ## One writer
 
 `CelText` (`src/MMLib.Alvo/Expressions/Internal/CelText.cs`) is the only code that writes CEL text — today for the
@@ -713,10 +818,10 @@ renumbering would silently repoint every citation:
 16. **`now()` as a nullary function** — conformant CEL has no `now`; a host supplies time as a
     variable. Alvo spells it as a call because `Mutate` needs the call machinery for `lowerAscii`
     regardless, and because `@now` would widen the closed `@`-context set and be its first
-    memberless member. It is a **bound instant** rather than a clock read, and never rendered to SQL
-    — both stated above.
+    memberless member. It is a **bound instant** rather than a clock read — one per request — and reaches SQL only
+    as a bound parameter, both stated above and under *Time*.
 
-The legacy call `now()` is admitted in `Mutate` only; the catalogued functions (built-ins and host functions) are
+The legacy call `now()` is admitted in `Rule`, `Condition` and `Mutate` (HX-11); the catalogued functions (built-ins and host functions) are
 admitted in `Condition` and `Mutate`, each within its own profile list. Narrowing 7 stands for every other profile and every other
 name: an identifier followed by `(` that is neither `has`/`changed` nor a catalogued function is still a syntax error.
 
@@ -786,6 +891,16 @@ name: an identifier followed by `(` that is neither `has`/`changed` nor a catalo
     zero, and overflow and division by zero are errors.
 36. **`string()` refuses a `date` field** at apply. CEL's core has no date type; Alvo's `date` reaches CEL as midnight
     UTC, and pinning that text now would make a future Date type's natural `2026-10-05` a breaking change.
+
+**Added by HX-11** (time; *Time* above):
+
+37. **`duration()` takes a constant only**, folded into a typed literal at type check — CEL admits any string
+    expression. A constant is validated at apply, never parsed inside a write, and it is the only shape a `CHECK` or a
+    SQL `USING` can carry (HX-11 Ruling 7). No duration is computed from a field.
+38. **A duration is a whole number of microseconds** (CEL: nanoseconds). `'1ns'` and `'0.5us'` are refused: Alvo stores
+    instants to the microsecond and the SQL domain is integer microseconds (Ruling 8).
+39. **A range error in a rule's in-process evaluation denies the whole predicate** (CEL: an error, which `||` absorbs
+    when the other side is true). Alvo never lets `!` turn the error into a grant; stricter, never looser (Ruling 57).
 
 **Residual caveat, not a narrowing:** the string-collation caveat on `==`/`!=` documented above — it
 is a real divergence *risk* between the two backends under a non-default collation, not a construct

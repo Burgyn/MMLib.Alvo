@@ -513,6 +513,15 @@ therefore injects a clock fixed 7 ticks past a whole microsecond, and asserts bo
 value *and* its equality with the envelope — because equality alone is free on SQLite and the stamp alone is
 satisfied by a driver that floors the column and leaves the envelope at full precision.
 
+**`now()` is not the stamp (HX-11 Ruling 2).** CEL's `now()` is the request's instant — one value bound on the flow
+(`AlvoFlow.Instant`) for every expression one request evaluates (`cel.md`, *Time*) — while `created_at`, `updated_at`
+and, through `AlvoManagedColumns.VersionColumn`, the `ETag` stay one `WriteInstantNow()` read per write, exactly as
+before HX-11. The two can differ by microseconds — more if a hook ran long — so a before-hook's `mutate: now()` is not
+guaranteed to equal the same write's `updated_at`; the event's `time` stays the stamp. The stamp was briefly planned as
+the request instant and reverted: an `ETag` that repeats for two committed writes of one row — a command writing a row
+twice, a batch touching one row twice — lets `If-Match` pass against a version the caller never read, a lost update.
+Whoever needs the stamp reads `updated_at`.
+
 **Deliberately not covered: `date`.** `PredicateParameterBinder.AsDate` keeps its own rule — the calendar date
 the caller wrote, read at the offset they wrote it with. Normalising one to UTC would shift the day for any
 caller east or west of UTC, so `StoredInstant` tests the column's CLR type and leaves `DateOnly` alone.
@@ -966,7 +975,7 @@ only (SQLite serialises writers, so a lost update is structurally impossible the
 report a guarantee it never tested), and with the window widened, because without the widening the naive
 implementation measured 40 of 40 and looked correct.
 
-Six consequences worth naming:
+Seven consequences worth naming:
 
 - **Both statements are narrowed by `tenant_id` when the pair is tenant-scoped, and neither may lean on the
   foreign key.** A `ref` is a foreign key on the parent's `id` alone — not on `(tenant_id, id)` — so a child row
@@ -1009,6 +1018,55 @@ Six consequences worth naming:
   `/rows/{index}`). Before the fix a `PATCH {"net_total": 1}` answered `200` and stored the `1`, and a computed
   field reading the rollup followed it. The recompute never passes through the guard, so the maintainer is
   unaffected.
+- **A filtered aggregate (`rollup.where`, HX-11) rests on the same argument.** The filter is ANDed into the
+  recompute's subquery, so a child that enters or leaves it — a reservation moving from `held` to `released` —
+  recomputes its parent under the same parent lock, from scratch, in the same transaction; no second mechanism and no
+  second correctness argument.
+
+### `rollup.where`: the filter (HX-11 Rulings 31, 32)
+
+`where` is a `Rule`-profile predicate over the **child**, compiled under the stored-predicate surface (`cel.md`,
+*Time*): no caller, no `now()`, no function, no role test, and no hidden child field (Ruling 71) — a filtered count
+would be a predicate oracle over a hidden value. It is rendered by the internal `IPredicateRenderer.RenderConstraint`,
+constants inline, and ANDed into `RollupRecompute`'s subquery. Its columns are **unqualified**: the compiler guarantees
+each exists on the child, and the innermost scope binds first — unlike `tenant_id`, which the child may lack, the reason
+`ChildTenantPredicate` qualifies. On the write path the inlined text goes through `RawSqlFormat.Escape` (`{` → `{{`,
+`}` → `}}`), because EF formats raw SQL with its arguments and a constant holding a brace would otherwise be read as a
+placeholder. The compiled filter is cached per child `EntitySchema` instance and `where` text, in a
+`ConditionalWeakTable`, so a retired revision's entries are collectable (Ruling 70). CEL's list literal is not in this
+build: `stage in ['lead', 'offer']` is refused, `stage == 'lead' || stage == 'offer'` is the working form.
+
+### The apply recomputes a rollup it adds or changes
+
+An apply that adds a rollup to an existing table, or changes one's `from`, `op`, `field`, `via` or `where`, recomputes
+it in its own transaction, after the DDL, one correlated statement per field (`RollupBackfill`):
+`UPDATE parent SET f = (<sub>) WHERE f IS DISTINCT FROM (<sub>)` — SQLite's spelling of the "differs" is `IS NOT`
+(`IAlvoSqlDialect.RenderDistinct`) — with the write path's own aggregate, foreign-key, tenant and filter predicates, so
+the value the backfill writes is the one the next child write would compute, and an unchanged parent costs neither a row
+version nor a row lock. This also fixed a rollup added to a populated parent, which until then read empty until a
+child write happened to recompute it. The subquery runs twice per parent row (in `SET` and in the test); the
+`UPDATE … FROM` rewrite that runs it once is recorded in `RollupBackfill`'s remarks and declined until a measurement
+asks for it.
+
+**PostgreSQL locks each child in `SHARE` mode, before the DDL** (`IAlvoSqlDialect.BackfillLockStatement`, Ruling 74):
+for every distinct child that already exists, in ordinal name order, right after the `lock_timeout` statement.
+Without it, a child write committing while the backfill waits for a parent row lock is missing from the value written
+— the same EvalPlanQual window as above. `SHARE` admits readers and conflicts with the `ROW EXCLUSIVE` every insert,
+update and delete takes, so a child write queues behind the apply and recomputes under the new definition once it
+commits. Taken before the DDL because a writer writes the child first and locks the parent second; an apply that took
+the parent first (its `ALTER TABLE`) and then waited for a child would deadlock against it. **SQLite** needs no lock:
+the apply holds the single write lock. The lock is bounded by the apply's 5 s `lock_timeout` like every other.
+
+**What the lock does not cover, stated rather than smoothed over:**
+
+- **A process whose schema predates its re-prime** (Ruling 72, amended). A child write that captured the schema before
+  the apply — queued behind the lock, or starting between the commit and the applying replica's `SetCurrent`, or on
+  **another replica** until it restarts or applies (the multi-replica limitation in `management-api.md`) — recomputes
+  with the old definition after the apply commits, and the parent's stored value stays stale until its next child
+  write. Roll every replica after a change to a rollup's definition. A revision fence at recompute is a follow-up.
+- **A parent delete that cascades to its children** runs parent then child, and can still deadlock against the apply
+  in any position of the lock. The engine's detector resolves it by failing one side — an unmapped `40P01` today, a
+  follow-up.
 
 The empty answer is the engine's: `0` for `count` and `NULL` for the other four. A `COALESCE(…, 0)` here would
 make "no children yet" indistinguishable from "children summing to zero" on a field an author declared
@@ -1019,6 +1077,108 @@ on both engines: `invoice_items.line_total = unit_price * amount` is *computed*,
 sum(line_total)` is a *rollup* over it, and `invoices.gross_total = net_total + vat_total` is *computed again
 over a column the framework maintains* — which works because a generated column tracks an application-written
 one. The fourth rung, `vat_total` as a before-hook, needs PR #160 and is named in that fact rather than skipped.
+
+## `validation` is the engine's `CHECK` (HX-11)
+
+A field's `validation` becomes a `CHECK` constraint on its table, so the engine refuses every write that breaks it —
+Alvo's, a hook's, an out-of-band one. It is DDL, like `computed`, and unlike a rollup it needs no cooperation from the
+write path. Rulings are numbered as in `cel.md`'s *Time*.
+
+**The rewrite.** The descriptor mapper (`FieldValidation`) rewrites the declaration into
+`FieldSchema.CheckExpression`: bare `value` → the declaring field, `new.<f>` → `<f>`, written back canonically (13). A
+field named `value` makes bare `value` ambiguous and is refused (14). The validator (`CheckConstraintCheck`) compiles it
+for `Rule` against the entity under the stored-predicate surface and renders it, refusing at
+`/entities/<e>/fields/<f>/validation` what a `CHECK` cannot carry: a caller, a role test, `now()`, a function, `old.`,
+`changed()`, numeric arithmetic (29; validate a computed field instead, 47), a text constant the dialect cannot quote
+(55), a reading across a hidden field, closed over computed and rollup derivation (61), and any validation on a
+`storage: dynamic` entity (30, #41).
+
+**The constraint** is `(<field> IS NULL OR <two-valued predicate>)` (`CheckConstraintSql`): the declaring field's own
+`NULL` passes, as SQL's `CHECK` and JSON Schema pass an absent value, and every other operand goes through the
+renderer's two-valued fold, so a comparison with another empty field is false and refuses the row — the interpreter's
+answer (15). Constants are inline (16): there is no bind parameter in DDL.
+
+**The name is computed, never parsed** (`CheckConstraintNames`, 19): `ck_<entity>_<field>` cut to 51 characters, then
+`_` and 8 hex digits of SHA-256 over `<entity>.<field>` — 63 bytes at most, PostgreSQL's identifier limit. The hash is
+what keeps `order_line`+`total` and `order`+`line_total` apart. A refusal is placed by recomputing each validated
+field's name (`Owner`: the written entity first, then the parents rolling it up, then the rest), never by splitting
+the engine's. A rename re-creates the constraint under its new name.
+
+**The DDL, per engine.** `DescriptorModelBuilder` declares `HasCheckConstraint` and EF's own generator writes it:
+
+- **SQLite**: EF's table rebuild (`CREATE TABLE "ef_temp_…" … CONSTRAINT … CHECK (…)`, copy, drop, rename), framed by
+  `MigrationBatchFraming` — foreign keys off around it and verified after (21). The apply copies the table under the
+  write lock.
+- **PostgreSQL**: a plain `ALTER TABLE … ADD CONSTRAINT … CHECK (…)` inside the apply's one transaction — **not**
+  `NOT VALID` followed by `VALIDATE`, a deliberate deviation from spec §6.1 (20). Alvo applies a descriptor atomically,
+  and `VALIDATE` only avoids blocking when it commits in a *later* transaction. The cost is real: `ADD CONSTRAINT`
+  takes `ACCESS EXCLUSIVE`, which blocks **reads and writes** of the table, held until the apply commits — through
+  the validating scan, every later statement and the rollup backfills — and the pre-apply count plus the validation
+  read the table twice.
+
+Both classify the step as non-destructive ("Adds the field's validation as a CHECK constraint.").
+
+**The PostgreSQL apply waits at most 5 s for a lock.** Every apply transaction on PostgreSQL — both executors,
+`EfCoreSchemaMigrator.ApplyAsync` and `EfCoreRuntimeSchemaWriter` — starts with `SET LOCAL lock_timeout = '5s'`
+(`IAlvoSqlDialect.ApplyLockTimeoutStatement`), so every PostgreSQL plan's SQL, a dry run's included, now leads with that
+statement. `SET LOCAL` ends with the transaction and never leaks onto a pooled connection. Five seconds is long enough
+for an ordinary request transaction ahead of the apply to finish, and short enough that readers queued behind the
+apply's lock request stall at most that long. A `55P03` (`IsLockTimeout`) becomes `AlvoApplyLockTimeoutException`, an
+internal type: the Management API answers **409 `conflict` with `Retry-After: 5`**, nothing applied, and the boot
+refuses the start (`AlvoStartupRefusedException`), never a 500. It is a behaviour change for two concurrent applies:
+the loser, blocked more than 5 s on the winner's uncommitted version row, now answers 409 where it answered 412 (a retry
+then yields the 412), and at boot it is a refused start rather than the lost-race retry. An embedded host calling
+`EfCoreSchemaMigrator.ApplyAsync` directly receives the internal exception — deliberately, as its doc comment states.
+SQLite has one writer and no lock queue to bound.
+
+**The scan runs at plan time** (`CheckViolationScan`, 22, 49), so a dry run reports it: for each added or changed
+constraint, `SELECT COUNT(*) FROM <table> WHERE NOT (<check>)` across every tenant — only when the table exists, is
+neither created nor renamed in this plan, and every column the check reads exists under that name and is neither
+renamed nor retyped; otherwise the DDL alone guards it. A count above zero refuses the plan at the validation's pointer
+with the number ("2 row(s) of 'products' break this validation, so the CHECK constraint cannot be added. Nothing was
+applied."). The number is operator-facing (23): it crosses tenants and reaches a Management API caller — and, through
+the assistant's dry run, its model provider — and never names a row, an id or a value. A count the database cannot run
+(a drifted table) refuses at the same pointer rather than escaping as a provider exception (Ruling 67). The boot counts
+only when it will apply (Ruling 66), so a boot that skips the apply never scans.
+
+**Whatever the engine refuses during the apply** — a row written after the count, a skipped scan, a backfilled rollup
+breaking a parent's existing validation — is translated by one helper, `CheckApplyRefusal.Translate`, called from both
+executors: a `DescriptorValidationException` at the owning validation's pointer, found over the **desired** schema
+("…could not be added or kept. Nothing was applied."), or the lock-timeout refusal above (22).
+
+**A validation and the rollup it reads cannot change in one apply** (`RollupValidationOrderCheck`, Rulings 73, 76): a
+validation added or changed in the same apply as a change to a rollup it reads (directly or through a computed field)
+is refused before planning — at Apply, Preview, Rollback, `SchemaMigrationRunner` and the boot's counted plan — because
+the constraint would be judged against the values the old definition stored, before the backfill recomputes them.
+The fix is two applies, the rollup first; a rollback carries its own fix (apply the target's rollup change as an
+intermediate descriptor first). A rollup **added as a new field** is exempt: its column is `NULL` at DDL time, and a
+backfill that breaks a validation fails the whole apply through the translation above, nothing applied. A plain field
+that *becomes* a rollup counts as changed.
+
+**Decoding a write's refusal.** `IAlvoSqlDialect.DecodeConstraintViolation` gains `AlvoConstraintKind.Check`:
+PostgreSQL reads SQLSTATE `23514` and the constraint name; SQLite reads the extended code `275`
+(`SQLITE_CONSTRAINT_CHECK`) and the name after `CHECK constraint failed: ` — the one place SQLite names it.
+`ConstraintViolationTranslator` places the name with `CheckConstraintNames.Owner` over the applied model and raises
+`AlvoConstraintViolationException(Check, fields)`, which the Data API answers **422 `validation`**, violation code
+`check` (24; `data-api.md`). `Check` follows `Unique` at every translation site — single writes, batches, units, the
+replay loop (27) — and the rollup recompute is translated once, at its body (45).
+
+**The pointer.** The written entity's own validated field; for a parent's validation broken through a rollup
+recompute, the child field the rollup aggregates — the value the caller sent (`/quantity`), never the parent's field
+(25); nothing (`""`) for a `count` rollup, a write with no body (a delete), a name the schema cannot place, or a field the
+descriptor flags `hidden` statically or per role (`PolicyDecision.Unnameable`, the descriptor's flag rather than the
+caller's mask, 24). A broken `CHECK` is never a framework invariant, so it is always the caller's 422, even naming
+nothing. A value a hook wrote is still 422: the database cannot tell whose value it was (26). The message never echoes
+a value or the expression.
+
+**Two accepted risks.** A validation on a rollup parent (`reserved <= stock`) answers a child write 422-or-success even
+when the caller cannot read the parent row: that one bit is the oversell protection itself, and row readability is not
+static, so it cannot be refused at apply (Ruling 62). And a *visible* computed or rollup field over a hidden field,
+with no validation, is a pre-existing exposure outside HX-11 (Ruling 63, a follow-up).
+
+**No in-process pre-check** (28): the database is the one authority, race-free under concurrent writers.
+`InMemoryAlvoData` does not enforce `CHECK`, like `computed`; the facts live in the real-engine suites
+(`AlvoDataCheckConstraintTests`, inherited per engine).
 
 ## `softDelete` is refused, not silently ignored
 

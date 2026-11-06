@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Integrity in the descriptor** (HX-11). A field's `validation` is now enforced as a database `CHECK` constraint on
+  SQLite and PostgreSQL, for every write — Alvo's, a hook's, and one that bypasses Alvo. A write that breaks one answers
+  422 `validation` with violation code `check` and a pointer at the field (at the child field the caller sent when a
+  rollup recompute breaks a parent's validation; `""` for a hidden field). Adding one over rows that break it is refused
+  at apply — and in a dry run — with their count, at the validation's pointer. A validation reads its own row only: no
+  caller, `now()`, function or numeric arithmetic, and no hidden field beside its own. It is not in the OpenAPI document.
+  Docs: *Integrity in the descriptor*.
+- **`rollup.where`** (HX-11): a rollup aggregates only the children a CEL condition over the child admits, kept
+  consistent in the child write's transaction and recomputed by an apply that adds or changes it.
+- **`now()` in rules and hook conditions** (HX-11), beside `mutate`: one instant per request — a rule's filter, its
+  check on the written row and every hook read the same value; a condition judged after the commit reads the event's
+  `time`. `created_at`/`updated_at` stay one clock read per write.
+- **CEL durations** (HX-11): `duration('90m')` (a constant) and CEL's timestamp arithmetic — `ts ± dur`, `ts - ts`,
+  `dur ± dur`, duration comparisons — on both engines, in rules too (`created_at > now() - duration('24h')`).
+- **Typed `when` reads the clock** (HX-11): `DateTimeOffset.UtcNow`/`.Now` translate to `now()`, a `static readonly
+  TimeSpan` to a duration, and `+`/`-` over them to CEL's operators.
+- **Dashboard: *Validation* and *Where*** (HX-11). The field editor's *Validation* box (every field kind) and the rollup
+  section's *Where* box are live, checked as you type; the refusal badges for both are gone.
+
 - **`ALVO1001`, an analyzer shipped inside `MMLib.Alvo`** (HX-10, #387). Before-write, after-write, before-delete and
   after-delete hooks — classes and delegates — and `AddCelFunction` delegates are checked at build time for the network
   (`HttpClient`, sockets, mail…), a database connection, a file, a second Alvo data port (`IAlvoData`, `IAlvoEvents`…),
@@ -524,6 +543,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **HX-11 appends enum members** — `AlvoConstraintKind.Check` and `CelValueType.Duration`: an exhaustive `switch` over
+  either gains a case. `IFieldSqlRenderer.RenderEpochMicroseconds` is a new default interface member; a third-party
+  dialect inherits `null`, and duration arithmetic over a field is then refused on it, naming the renderer.
+- **A PostgreSQL apply waits at most 5 s for a table lock** (HX-11). Every apply transaction starts with
+  `SET LOCAL lock_timeout = '5s'` (so every PostgreSQL plan's SQL now leads with it); one that gives up changes nothing
+  and answers 409 `conflict` with `Retry-After: 5` from the Management API, or refuses the start at boot. Behaviour
+  change: of two concurrent applies, the loser blocked more than 5 s now answers 409 where it answered 412 (a retry then
+  answers 412). Adding a validation on PostgreSQL holds the table — readers included — until the apply commits.
+
 - A built-in refusing a value a host function produced, the stored row (`old.`), or a value a hook wrote stays 500
   `function-failed`; only the caller's own data answers 422, and only on the generated Data API routes (commands keep 500).
   The caller's own data is a field the request's body sent: a refusal of a field an update left alone, of a default, a
@@ -937,6 +965,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comment-style rules).
 
 ### Fixed
+
+- **A rollup added to a populated parent is filled by the apply** (HX-11), instead of reading empty until a child write
+  happened to recompute it; an apply that changes a rollup's definition recomputes it too.
 
 - **The outbox claim on SQLite could fail with "database is locked" under concurrent writers** (HX-03). It now runs in
   a write-first transaction (`BEGIN IMMEDIATE`), like the new delivery claim: `Microsoft.Data.Sqlite` retries a busy
