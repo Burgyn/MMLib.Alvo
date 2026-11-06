@@ -22,6 +22,13 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// with its claim's lease.
 /// </para>
 /// <para>
+/// <b>Two kinds of row outlive their delivery.</b> A crashed runner's row, and the row of a running capped delivery that an
+/// operator cancelled or whose subscriber was retired, whose late answer then fails its fence: no answer deletes either. Each
+/// is free once its lease expires, and a taker overwrites it the next time its key is claimed; a per-record key whose record
+/// never gets another event keeps the row, and a key holds one slot less until the lease expires. Neither breaks the cap —
+/// the cost is a stale row and, for up to one lease, a slot.
+/// </para>
+/// <para>
 /// <b>The column is <c>slot_key</c>, not the spec's <c>key</c></b>: <c>KEY</c> is reserved in T-SQL, and the names stay
 /// portable to the Azure SQL provider. A deliberate deviation from the spec's DDL.
 /// </para>

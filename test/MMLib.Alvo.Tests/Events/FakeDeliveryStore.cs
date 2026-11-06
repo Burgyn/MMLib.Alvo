@@ -132,7 +132,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
 
     private void Supersede(DeliveryRequest lane)
     {
-        var rows = _rows.Where(row => row.Subscriber == lane.Subscriber && row.PartitionKey == lane.PartitionKey && row.TenantId == lane.TenantId).ToList();
+        var rows = _rows.Where(row => row.Subscriber == lane.Subscriber && row.PartitionKey == lane.PartitionKey && (row.TenantId ?? string.Empty) == (lane.TenantId ?? string.Empty)).ToList();
         if (rows.Where(row => _live.Contains(row.Status)).Select(row => row.EventId.ToString()).Max(StringComparer.Ordinal) is not { } newest)
         {
             return;
@@ -156,16 +156,22 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         lock (_gate)
         {
             var now = time.GetUtcNow();
-            var heads = _rows.Where(row => Claimable(row, claim, now))
+            var claimable = _rows.Where(row => Claimable(row, claim, now))
                 .OrderBy(row => row.EventId.ToString(), StringComparer.Ordinal)
                 .ThenBy(row => row.Subscriber, StringComparer.Ordinal)
-                .Where(row => TookSlot(row, claim, now))
-                .Take(claim.BatchSize)
                 .ToList();
+            var capped = claimable.Where(row => Capped(claim, row.Subscriber) && TookSlot(row, claim, now)).Take(CappedRoom(claim)).ToList();
+            var uncapped = claimable.Where(row => !Capped(claim, row.Subscriber)).Take(claim.BatchSize - capped.Count).ToList();
 
-            return Task.FromResult<IReadOnlyList<ClaimedDelivery>>([.. heads.Select(row => Claim(row, claim, now))]);
+            return Task.FromResult<IReadOnlyList<ClaimedDelivery>>([.. capped.Concat(uncapped).Select(row => Claim(row, claim, now))]);
         }
     }
+
+    private static bool Capped(DeliveryClaim claim, string subscriber) => claim.Limits.Any(limit => limit.Subscriber == subscriber);
+
+    /// <summary>The capped share of the batch: all of it when every named subscriber is capped, else its larger half.</summary>
+    private static int CappedRoom(DeliveryClaim claim) =>
+        claim.Ordered.Concat(claim.Unordered).All(subscriber => Capped(claim, subscriber)) ? claim.BatchSize : claim.BatchSize - (claim.BatchSize / 2);
 
     /// <summary>
     /// Whether <paramref name="row"/> may run under its subscriber's cap, taking a place when it does; evaluated lazily, so

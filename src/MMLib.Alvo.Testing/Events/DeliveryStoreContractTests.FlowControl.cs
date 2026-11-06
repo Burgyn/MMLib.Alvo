@@ -275,6 +275,28 @@ public abstract partial class DeliveryStoreContractTests
         claimed.Count(delivery => delivery.Subscriber == Audit).ShouldBe(3);
     }
 
+    /// <summary>
+    /// An uncapped backlog older than a capped delivery, and big enough to fill the batch, takes no more than its share: the
+    /// claim still takes the capped delivery, and the uncapped subscriber still gets the rest.
+    /// </summary>
+    [Fact]
+    public async Task A_capped_subscriber_is_claimed_beside_an_uncapped_backlog_that_fills_the_batch()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        for (var index = 0; index < 5; index++)
+        {
+            var key = $"audit:{index}";
+            await world.Store.FanOutAsync([Request(await world.AppendEventAsync(key), Audit, key) with { TenantId = TenantA }], Ct);
+        }
+
+        await world.Store.FanOutAsync([Request(await world.AppendEventAsync("tickets:1"), Confirm, "tickets:1") with { TenantId = TenantA }], Ct);
+
+        var claimed = await world.Store.ClaimAsync(Capped("tenant", 1) with { Ordered = [Confirm, Audit], BatchSize = 2 }, Ct);
+
+        claimed.Select(delivery => delivery.Subscriber).Order(StringComparer.Ordinal).ShouldBe([Audit, Confirm]);
+    }
+
     private static DeliveryRequest Debounced(Guid @event, string key, string tenant) =>
         Request(@event, Confirm, key) with { TenantId = tenant, Debounce = _debounce };
 

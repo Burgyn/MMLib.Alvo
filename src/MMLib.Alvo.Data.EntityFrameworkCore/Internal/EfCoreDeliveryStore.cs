@@ -254,29 +254,38 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
     }
 
     /// <summary>
-    /// The uncapped subscribers' batch claim, then — in the same transaction, with the room the batch left — the capped
-    /// subscribers' claim slot by slot. A claim naming no uncapped subscriber skips the batch statement.
+    /// The capped subscribers' claim first, slot by slot, with a reserved share of the batch — the whole batch when no
+    /// uncapped subscriber is named, else its larger half — then, in the same transaction, the uncapped subscribers' batch
+    /// claim with the room the capped claim left. A claim naming no uncapped subscriber skips the batch statement.
     /// </summary>
+    /// <remarks>
+    /// Capped first, so an uncapped backlog that fills the batch cannot starve a capped handler, and an uncapped handler
+    /// keeps at least the smaller half; and so the claim's transaction locks every slot before any delivery row.
+    /// </remarks>
     private async Task<List<ClaimedDelivery>> ClaimInTransactionAsync(DbConnection connection, DbTransaction transaction, DeliveryClaim claim, CancellationToken ct)
     {
         var caps = Caps(claim);
         var (ordered, unordered) = Uncapped(claim, caps);
-        var claimed = ordered.Count + unordered.Count == 0
+        var uncapped = ordered.Count + unordered.Count;
+        var claimed = caps.Count == 0
             ? []
-            : await RelationalSqlBatch.ReadRowsAsync(
+            : await ClaimCappedAsync(connection, transaction, claim, caps, CappedRoom(claim.BatchSize, uncapped), ct).ConfigureAwait(false);
+        var left = claim.BatchSize - claimed.Count;
+        if (uncapped > 0 && left > 0)
+        {
+            claimed.AddRange(await RelationalSqlBatch.ReadRowsAsync(
                 connection,
                 transaction,
                 DeliveryTable.ClaimSql(_table, _outbox, _controls, ordered.Count, unordered.Count),
-                command => BindClaim(command, claim, [.. ordered, .. unordered]),
+                command => BindClaim(command, claim with { BatchSize = left }, [.. ordered, .. unordered]),
                 ReadClaimed,
-                ct).ConfigureAwait(false);
-        if (caps.Count > 0 && claimed.Count < claim.BatchSize)
-        {
-            claimed.AddRange(await ClaimCappedAsync(connection, transaction, claim, caps, claim.BatchSize - claimed.Count, ct).ConfigureAwait(false));
+                ct).ConfigureAwait(false));
         }
 
         return claimed;
     }
+
+    private static int CappedRoom(int batch, int uncapped) => uncapped == 0 ? batch : batch - (batch / 2);
 
     private void BindClaim(DbCommand command, DeliveryClaim claim, IReadOnlyList<string> subscribers)
     {

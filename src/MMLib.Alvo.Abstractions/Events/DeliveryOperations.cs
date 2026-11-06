@@ -33,7 +33,7 @@ public sealed record StoredDelivery
     /// <summary>Gets the earliest instant it may be claimed.</summary>
     public required DateTimeOffset NotBefore { get; init; }
 
-    /// <summary>Gets when it ended — succeeded, dead or cancelled — or <see langword="null"/> while it has not.</summary>
+    /// <summary>Gets when it ended — succeeded, dead, cancelled or superseded — or <see langword="null"/> while it has not.</summary>
     public DateTimeOffset? CompletedAt { get; init; }
 
     /// <summary>Gets the type name or fixed reason of its last failure — never an exception message.</summary>

@@ -11,10 +11,20 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Lock order: every slot before any delivery.</b> The claim first takes slots — keys ascending, slots ascending — for at
-/// most the room its batch left, and only then claims the deliveries it took slots for, ids ascending, giving back the slot
-/// of one it could not claim. An answer frees its slot before it updates its delivery. So no two writers wait on each other
-/// in opposite orders over the same rows, and claimants racing one key cannot deadlock.
+/// <b>Lock order: every slot before any delivery.</b> The claim runs its capped half first: it takes slots — keys ascending,
+/// slots ascending — for at most the capped share of its batch, then claims the deliveries it took slots for, ids ascending,
+/// giving back the slot of one it could not claim, and only then runs the uncapped batch statement. An answer frees its slot
+/// before it updates its delivery. A key that yields no slot is not tried again for the claim's later candidates: a slot
+/// freed meanwhile is picked up by the next round.
+/// </para>
+/// <para>
+/// <b>One bounded deadlock window remains on PostgreSQL.</b> A delivery reclaimed after its lease expired can take a lower
+/// free slot while its expired row still names it, so it holds two rows of one key. If that second lease expires too, a
+/// claimant taking the lower row and then reaching the higher one, and the delivery's answer deleting the higher row and
+/// then waiting on the lower, wait on each other. PostgreSQL aborts one with <c>40P01</c>: a failed claim is retried by the
+/// dispatcher's next round; a failed answer is retried by the runner within its settle grace, and beyond that its lease
+/// expires and the delivery runs again — the at-least-once delivery it always was. It needs two expired leases on one key at
+/// once plus a late answer.
 /// </para>
 /// <para>
 /// <b>The candidate read is a read in a writing transaction.</b> On SQLite the transaction is begun by a writer that holds the
@@ -30,7 +40,6 @@ internal sealed partial class EfCoreDeliveryStore
     private static Dictionary<string, DeliveryLimit> Caps(DeliveryClaim claim) =>
         claim.Limits
             .Where(limit => claim.Ordered.Contains(limit.Subscriber) || claim.Unordered.Contains(limit.Subscriber))
-            .DistinctBy(limit => limit.Subscriber)
             .ToDictionary(limit => limit.Subscriber, StringComparer.Ordinal);
 
     private static (List<string> Ordered, List<string> Unordered) Uncapped(DeliveryClaim claim, Dictionary<string, DeliveryLimit> caps) =>
@@ -50,6 +59,11 @@ internal sealed partial class EfCoreDeliveryStore
 
             ArgumentOutOfRangeException.ThrowIfLessThan(limit.Limit, 1, nameof(claim));
             ArgumentOutOfRangeException.ThrowIfGreaterThan(limit.Limit, ConcurrencySlotTable.MaxLimit, nameof(claim));
+        }
+
+        if (claim.Limits.GroupBy(limit => limit.Subscriber, StringComparer.Ordinal).FirstOrDefault(group => group.Count() > 1) is { } twice)
+        {
+            throw new ArgumentException($"'{twice.Key}' has more than one concurrency cap; a subscriber has at most one.", nameof(claim));
         }
     }
 
@@ -96,13 +110,17 @@ internal sealed partial class EfCoreDeliveryStore
         return [.. all.OrderBy(candidate => candidate.SlotKey, StringComparer.Ordinal).ThenBy(candidate => candidate.EventId.ToString(), StringComparer.Ordinal)];
     }
 
-    /// <summary>Takes one free slot for each candidate in lock order, until <paramref name="room"/> candidates hold one.</summary>
+    /// <summary>
+    /// Takes one free slot for each candidate in lock order, until <paramref name="room"/> candidates hold one; a key that
+    /// yielded none is skipped for the rest of the claim.
+    /// </summary>
     private async Task<List<TakenSlot>> TakeSlotsAsync(
         DbConnection connection, DbTransaction transaction, DeliveryClaim claim, List<Candidate> candidates, int room, CancellationToken ct)
     {
         var taken = new List<TakenSlot>();
         var ensured = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var candidate in candidates)
+        var full = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var candidate in candidates.Where(candidate => !full.Contains(candidate.SlotKey)))
         {
             if (taken.Count == room)
             {
@@ -118,6 +136,10 @@ internal sealed partial class EfCoreDeliveryStore
             if (await TakeSlotAsync(connection, transaction, claim, candidate, ct).ConfigureAwait(false) is { } slot)
             {
                 taken.Add(new TakenSlot(candidate, slot));
+            }
+            else
+            {
+                full.Add(candidate.SlotKey);
             }
         }
 

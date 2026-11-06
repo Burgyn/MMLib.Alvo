@@ -69,6 +69,30 @@ public sealed class SqliteDeliveryStoreTests : DeliveryStoreContractTests, IDisp
         (await world.Store.ListAsync(new DeliveryFilter { Limit = 10 }, TestContext.Current.CancellationToken)).ShouldBeEmpty();
     }
 
+    /// <summary>A claim naming two caps for one subscriber is refused rather than keeping one of them silently.</summary>
+    [Fact]
+    public async Task A_claim_refuses_two_caps_for_one_subscriber()
+    {
+        await using var world = await DeliveryStoreWorld.StartAsync(Connect, new SqliteSqlDialect());
+        var claim = new DeliveryClaim
+        {
+            Claimant = "claimant",
+            Ordered = [Subscriber],
+            BatchSize = 10,
+            Lease = TimeSpan.FromMinutes(1),
+            OutboxMaxAttempts = 5,
+            OutboxClaimLease = TimeSpan.FromMinutes(1),
+            Limits =
+            [
+                new DeliveryLimit { Subscriber = Subscriber, Key = "tenant", Limit = 1 },
+                new DeliveryLimit { Subscriber = Subscriber, Key = "record", Limit = 5 },
+            ],
+        };
+
+        (await Should.ThrowAsync<ArgumentException>(() => world.Store.ClaimAsync(claim, TestContext.Current.CancellationToken)))
+            .Message.ShouldContain("more than one concurrency cap");
+    }
+
     /// <summary>
     /// Claimants on separate threads, each claiming and then answering in its own write transaction, wait for SQLite's
     /// write lock instead of failing with <c>SQLITE_BUSY</c>, and take every delivery exactly once.

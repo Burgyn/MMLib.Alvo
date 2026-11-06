@@ -714,6 +714,7 @@ namespace MMLib.Alvo.Testing.Events
     {
         protected DeliveryStoreContractTests() { }
         public System.Threading.Tasks.Task A_cancelled_delivery_does_not_block_its_lane() { }
+        public System.Threading.Tasks.Task A_capped_subscriber_is_claimed_beside_an_uncapped_backlog_that_fills_the_batch() { }
         public System.Threading.Tasks.Task A_claim_for_no_deliveries_is_refused() { }
         public System.Threading.Tasks.Task A_claim_returns_lane_heads_in_event_order_up_to_its_batch() { }
         public System.Threading.Tasks.Task A_claim_takes_capped_and_uncapped_subscribers_together() { }
