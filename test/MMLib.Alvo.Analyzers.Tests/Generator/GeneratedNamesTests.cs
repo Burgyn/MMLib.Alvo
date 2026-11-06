@@ -45,6 +45,43 @@ public sealed class GeneratedNamesTests
             .ShouldBe([("InProgress", "in-progress"), ("InProgress2", "In_Progress"), ("_1st", "1st"), ("Value3", "--")]);
     }
 
+    private const string Reserved = """
+        { "apiVersion": "alvo.dev/v1", "name": "help-desk", "auth": { "roles": ["to_string", "equals", "get_type", "reference_equals", "agent"] },
+          "entities": { "tickets": { "fields": {
+            "create": { "type": "string" },
+            "patch": { "type": "string" },
+            "equals": { "type": "string" },
+            "get_hash_code": { "type": "string" },
+            "get_type": { "type": "string" },
+            "memberwise_clone": { "type": "string" },
+            "finalize": { "type": "string" },
+            "reference_equals": { "type": "string" },
+            "kind": { "type": "enum", "values": ["to_string", "equals", "get_hash_code", "get_type", "has_flag", "compare_to", "get_type_code", "parse", "plain"] } } } } }
+        """;
+
+    [Fact]
+    public void Names_an_inherited_or_generated_member_uses_are_suffixed_and_compile()
+    {
+        var assembly = GeneratorHarness.Load(Reserved);
+
+        assembly.GetType("HelpDesk.Ticket", throwOnError: true)!.GetProperties()
+            .Where(p => p.GetCustomAttribute<AlvoFieldAttribute>() is not null).Select(p => p.Name)
+            .ShouldBe(["Id", "CreateValue", "PatchValue", "EqualsValue", "GetHashCodeValue", "GetTypeValue", "MemberwiseCloneValue", "FinalizeValue", "ReferenceEqualsValue", "Kind"]);
+        assembly.GetType("HelpDesk.TicketKind", throwOnError: true)!.GetFields(BindingFlags.Public | BindingFlags.Static).Select(f => f.Name)
+            .ShouldBe(["ToStringValue", "EqualsValue", "GetHashCodeValue", "GetTypeValue", "HasFlagValue", "CompareToValue", "GetTypeCodeValue", "ParseValue", "Plain"]);
+        assembly.GetType("HelpDesk.HelpDeskRoles", throwOnError: true)!.GetFields().Select(f => f.Name)
+            .ShouldBe(["Anon", "Authenticated", "Admin", "ToStringValue", "EqualsValue", "GetTypeValue", "ReferenceEqualsValue", "Agent"]);
+    }
+
+    [Fact]
+    public void A_duplicated_field_key_keeps_its_last_definition_once()
+    {
+        var model = GeneratorHarness.Model(Descriptors.With(
+            """{ "tickets": { "fields": { "title": { "type": "string" }, "body": { "type": "string" }, "title": { "type": "integer" } } } }"""));
+
+        model.Entities[0].Fields.Select(f => (f.Name, f.Kind)).ShouldBe([("id", FieldKind.Uuid), ("body", FieldKind.String), ("title", FieldKind.Integer)]);
+    }
+
     [Fact]
     public void A_keyword_parameter_is_escaped()
     {

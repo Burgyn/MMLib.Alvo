@@ -4,7 +4,7 @@
 /// One descriptor as the generator emits from it: strings, flags and <see cref="EquatableArray{T}"/> only, so an edit that
 /// leaves it equal reuses every cached step after the read.
 /// </summary>
-/// <param name="File">The descriptor's file name, for the generated header.</param>
+/// <param name="File">The descriptor's file name, for diagnostics.</param>
 /// <param name="Project">The project's <c>name</c>.</param>
 /// <param name="Namespace">The namespace the generated types go in.</param>
 /// <param name="Roles">The built-in roles, then the declared ones, each once.</param>

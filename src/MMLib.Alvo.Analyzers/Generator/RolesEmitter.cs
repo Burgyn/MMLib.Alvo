@@ -18,7 +18,7 @@ internal static class RolesEmitter
         var used = new HashSet<string>(StringComparer.Ordinal) { className };
         for (var i = 0; i < model.Roles.Count; i++)
         {
-            Role(writer, model.Roles[i], CSharpNames.Unique(CSharpNames.Member(model.Roles[i], i), used), first: i == 0);
+            Role(writer, model.Roles[i], CSharpNames.Unique(CSharpNames.RoleMember(model.Roles[i], i), used), first: i == 0);
         }
 
         return writer.Close().ToString();

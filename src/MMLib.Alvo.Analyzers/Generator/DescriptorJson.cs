@@ -8,6 +8,11 @@ namespace MMLib.Alvo.Analyzers.Generator;
 /// A strict RFC 8259 reader of a descriptor's text into a <see cref="JsonNode"/> tree — the generator's own, because an
 /// analyzer cannot carry System.Text.Json next to the copy its compiler host already loaded.
 /// </summary>
+/// <remarks>
+/// Two deliberate differences from <c>System.Text.Json</c>'s defaults, both harmless to a generator: it reads up to
+/// <see cref="MaxDepth"/> levels where <c>JsonDocument</c> stops at 64, and it passes a lone surrogate escape
+/// (<c>\ud800</c>) through where <c>JsonDocument</c> refuses it — the emitter escapes such a character again.
+/// </remarks>
 internal static class DescriptorJson
 {
     internal const int MaxDepth = 256;
@@ -18,12 +23,15 @@ internal static class DescriptorJson
 
     private sealed class Reader(string text)
     {
-        private int _position = text.Length > 0 && text[0] == '﻿' ? 1 : 0;
+        private readonly int _start = text.Length > 0 && text[0] == '\uFEFF' ? 1 : 0;
+
+        private int _position;
 
         private int _depth;
 
         internal JsonNode Document()
         {
+            _position = _start;
             var root = Value();
             SkipWhitespace();
 
@@ -262,7 +270,7 @@ internal static class DescriptorJson
         private DescriptorJsonException Error(string message, int position)
         {
             var line = 1;
-            var lineStart = 0;
+            var lineStart = _start;
             for (var i = 0; i < position && i < text.Length; i++)
             {
                 if (text[i] == '\n')

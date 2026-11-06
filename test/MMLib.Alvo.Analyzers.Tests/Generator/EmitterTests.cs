@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Analyzers.Generator;
 using MMLib.Alvo.Schema;
+using System.Reflection;
 
 namespace MMLib.Alvo.Analyzers.Tests.Generator;
 
@@ -238,6 +239,23 @@ public sealed class EmitterTests
         var emitted = EntityEmitter.ClrType(model, model.Entities[0].Fields[1]);
 
         Resolved(emitted).ShouldBe(FieldClrType.Of(type));
+    }
+
+    [Fact]
+    public void Every_field_type_is_either_mapped_or_deliberately_untyped()
+    {
+        var mapped = typeof(EmitterTests).GetMethod(nameof(Every_field_type_maps_to_the_applied_schema_s_CLR_type))!
+            .GetCustomAttributes<InlineDataAttribute>().Select(row => (FieldType)row.Data[0]!);
+
+        Enum.GetValues<FieldType>().Except([.. mapped, FieldType.Json, FieldType.Enum]).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_lone_surrogate_is_escaped_in_a_literal_and_replaced_in_a_doc_comment()
+    {
+        GeneratedText.Literal("a\ud800b").ShouldBe("\"a\\ud800b\"");
+        GeneratedText.Literal("\ud83d\ude00").ShouldBe("\"\ud83d\ude00\"");
+        GeneratedText.Xml("a\ud800\uffffb").ShouldBe("a  b");
     }
 
     [Theory]

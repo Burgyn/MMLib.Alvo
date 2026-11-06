@@ -26,13 +26,14 @@ internal static class GeneratedText
     internal static string Literal(string value)
     {
         var builder = new StringBuilder("\"");
-        foreach (var c in value)
+        for (var i = 0; i < value.Length; i++)
         {
+            var c = value[i];
             builder.Append(c switch
             {
                 '"' => "\\\"",
                 '\\' => "\\\\",
-                _ when c < ' ' || c is '\u0085' or '\u2028' or '\u2029' => "\\u" + ((int)c).ToString("x4", CultureInfo.InvariantCulture),
+                _ when c < ' ' || c is '\u0085' or '\u2028' or '\u2029' || IsLoneSurrogate(value, i) => Escaped(c),
                 _ => c.ToString(),
             });
         }
@@ -47,13 +48,20 @@ internal static class GeneratedText
     private static string OneLine(string value)
     {
         var builder = new StringBuilder(value.Length);
-        foreach (var c in value)
+        for (var i = 0; i < value.Length; i++)
         {
-            builder.Append(char.IsControl(c) || c is '\u2028' or '\u2029' ? ' ' : c);
+            var c = value[i];
+            builder.Append(char.IsControl(c) || c is '\u2028' or '\u2029' or '\uFFFE' or '\uFFFF' || IsLoneSurrogate(value, i) ? ' ' : c);
         }
 
         return builder.ToString();
     }
+
+    private static string Escaped(char c) => "\\u" + ((int)c).ToString("x4", CultureInfo.InvariantCulture);
+
+    private static bool IsLoneSurrogate(string value, int i) =>
+        char.IsHighSurrogate(value[i]) ? i + 1 >= value.Length || !char.IsLowSurrogate(value[i + 1])
+        : char.IsLowSurrogate(value[i]) && (i == 0 || !char.IsHighSurrogate(value[i - 1]));
 
     private static string InformationalVersion()
     {

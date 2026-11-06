@@ -31,7 +31,9 @@ internal static class WrapperEmitter
     private static string Remarks(EntityModel entity)
     {
         var untyped = entity.Untyped.Count == 0 ? "none" : string.Join(", ", entity.Untyped.Select(field => $"'{GeneratedText.Xml(field)}'"));
-        var reachable = $"Fields reachable only as <c>Record[\"field\"]</c>: {untyped}.";
+        var reachable = entity.Untyped.Count == 0
+            ? "Fields reachable only as <c>Record[\"field\"]</c>: none."
+            : $"Fields reachable only as <c>Record[\"field\"]</c>, and written only through <c>Record.With</c>: {untyped}.";
 
         return entity.Description is { } description ? $"{GeneratedText.Xml(description)} {reachable}" : reachable;
     }

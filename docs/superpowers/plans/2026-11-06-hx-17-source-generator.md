@@ -48,6 +48,10 @@
 10. **Discovery** = the entry assembly and every assembly it references transitively that references `MMLib.Alvo`, types carrying `GeneratedCode` tool `MMLib.Alvo.Analyzers` + `[AlvoEntity]` + `IAlvoEntity`. Cost: a generated class in a dynamically loaded plugin is not checked.
 11. **Ignored descriptor keys:** everything the model does not read (HX-14/15/18's `steps`, `stateMachine`, `timers`, `functions.*.input`, `automation`) — the reader is tolerant; generating function input types is a follow-up issue. `dynamicEntities` (runtime types) are not generated; an entity with `storage: dynamic` is. Cost: none until a host asks.
 12. **Field order** = descriptor order, managed columns first (`id`, `tenant_id`, audit four). Cost: none.
+13. **Singular (ruling G6', supersedes the three rules of Decision 3):** a last word in the table {`statuses`→`status`, `buses`→`bus`, `people`→`person`, `children`→`child`, `data`→`data`} is replaced; else `ies`→`y`; else `(sses|xes|zes|ches|shes)` drops `es`; else a trailing `s` is dropped unless the name ends in `ss`, `us` or `is`. Accepted quirks: `news`→`New`, `movies`→`Movy`, `series`→`Sery`, `quizzes`→`Quizz`, `aliases`→`Aliase`. Cost: changing it later renames consumer types.
+14. **Property nullability = `!field.Nullable`** (the model folds `nullable ?? !required` and `virtual` in), exactly what `ShapeMapping.Nullability` checks — not the literal "required and not virtual", under which `required: true, nullable: true` would fail `As<T>()`. Cost: none.
+15. **`GeneratedCode` version read by reflection:** one cached `AssemblyInformationalVersionAttribute` read (the `+sha` cut), off the cached-model path — the lesser breach of "no reflection", since no reflection-free read of an assembly attribute exists and a build-time constant would need a MinVer-ordered generated source. Cost: none.
+16. **Reserved member names:** a property, enum member or role constant equal to a member `object` (or, for enum members, `System.Enum`) already has, or to `Record`/`Patch`/`Create` on the class, is suffixed `Value`; duplicate field keys keep the last definition once. Cost: none.
 
 ## File structure
 

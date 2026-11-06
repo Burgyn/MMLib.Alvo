@@ -11,7 +11,7 @@ internal static class EntityReader
         var untyped = ImmutableArray.CreateBuilder<string>();
         fields.AddRange(ManagedColumns(entity, tenancyEnabled));
         var excluded = new HashSet<string>(entity.Object("events")?.Strings("exclude") ?? [], StringComparer.Ordinal);
-        foreach (var member in entity.Object("fields")?.Members ?? default)
+        foreach (var member in LastOfEachKey(entity.Object("fields")?.Members ?? default))
         {
             if (member.Value is JsonObject field)
             {
@@ -20,6 +20,21 @@ internal static class EntityReader
         }
 
         return EntityNames.Named(new EntityModel(name, name, entity.String("description"), fields.ToImmutable(), untyped.ToImmutable()));
+    }
+
+    private static Stack<JsonMember> LastOfEachKey(EquatableArray<JsonMember> members)
+    {
+        var later = new HashSet<string>(StringComparer.Ordinal);
+        var kept = new Stack<JsonMember>();
+        for (var i = members.Count - 1; i >= 0; i--)
+        {
+            if (later.Add(members[i].Key))
+            {
+                kept.Push(members[i]);
+            }
+        }
+
+        return kept;
     }
 
     private static void AddField(

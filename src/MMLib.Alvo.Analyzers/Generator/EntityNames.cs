@@ -31,7 +31,7 @@ internal static class EntityNames
     {
         var used = new HashSet<string>(StringComparer.Ordinal);
 
-        return values.Select((value, index) => value with { MemberName = CSharpNames.Unique(CSharpNames.Member(value.Value, index), used) })
+        return values.Select((value, index) => value with { MemberName = CSharpNames.Unique(CSharpNames.EnumMember(value.Value, index), used) })
             .ToImmutableArray();
     }
 }

@@ -22,7 +22,18 @@ internal static class CSharpNames
 
     private static readonly HashSet<string> _inheritedMembers = new(StringComparer.Ordinal)
     {
-        "Record", "Patch", "Create", "Equals", "GetHashCode", "GetType", "ToString", "MemberwiseClone", "Finalize",
+        "Record", "Patch", "Create", "Equals", "GetHashCode", "GetType", "ToString", "MemberwiseClone", "Finalize", "ReferenceEquals",
+    };
+
+    private static readonly HashSet<string> _objectMembers = new(StringComparer.Ordinal)
+    {
+        "Equals", "GetHashCode", "GetType", "ToString", "MemberwiseClone", "Finalize", "ReferenceEquals",
+    };
+
+    private static readonly HashSet<string> _enumMembers = new(_objectMembers, StringComparer.Ordinal)
+    {
+        "CompareTo", "Format", "GetName", "GetNames", "GetTypeCode", "GetUnderlyingType", "GetValues", "GetValuesAsUnderlyingType",
+        "HasFlag", "IsDefined", "Parse", "TryFormat", "TryParse",
     };
 
     /// <summary>
@@ -101,6 +112,12 @@ internal static class CSharpNames
         return name.Length == 0 ? $"Value{index}" : name;
     }
 
+    /// <summary>An enum member: <see cref="Member"/>, suffixed with <c>Value</c> when <see cref="System.Enum"/> or <see cref="object"/> already has a member of that name.</summary>
+    internal static string EnumMember(string raw, int index) => Suffixed(Member(raw, index), _enumMembers);
+
+    /// <summary>A role constant: <see cref="Member"/>, suffixed with <c>Value</c> when <see cref="object"/> already has a member of that name.</summary>
+    internal static string RoleMember(string raw, int index) => Suffixed(Member(raw, index), _objectMembers);
+
     /// <summary>A property: <see cref="Pascal"/>, suffixed with <c>Value</c> when it is the class's name or a member the class already has.</summary>
     internal static string Property(string field, string className)
     {
@@ -132,6 +149,8 @@ internal static class CSharpNames
     internal static IEnumerable<string> TypeNames(EntityModel entity) =>
         new[] { entity.ClassName, Patch(entity.ClassName) }
             .Concat(entity.Fields.Where(field => field.EnumTypeName is not null).Select(field => field.EnumTypeName!));
+
+    private static string Suffixed(string name, HashSet<string> reserved) => reserved.Contains(name) ? name + "Value" : name;
 
     private static string? Irregular(string name)
     {

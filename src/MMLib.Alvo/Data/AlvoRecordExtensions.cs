@@ -33,7 +33,9 @@ public static class AlvoRecordExtensions
     /// <remarks>
     /// The typed read of a single field, for host code and generated typed classes alike: a whole number, an id or a day
     /// stored as text, an instant and an enum's declared value (<see cref="AlvoEnumValueAttribute"/>, else snake_case) are
-    /// converted; a null answers <see langword="default"/> when <typeparamref name="T"/> takes null.
+    /// converted; a null answers <see langword="default"/> when <typeparamref name="T"/> takes null. A reference type always
+    /// takes null at run time, so <c>Get&lt;string&gt;</c> answers null for a null field where <see cref="As{T}"/> refuses a
+    /// non-nullable property; ask for <c>string?</c> to say so.
     /// </remarks>
     /// <typeparam name="T">The field's host type: <see cref="string"/>, <see cref="long"/>, <see cref="int"/>, <see cref="decimal"/>,
     /// <see cref="bool"/>, <see cref="Guid"/>, <see cref="DateOnly"/>, <see cref="DateTimeOffset"/>, an enum, or one of them nullable.</typeparam>

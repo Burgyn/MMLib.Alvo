@@ -78,6 +78,14 @@ public sealed class DescriptorJsonTests
     [InlineData("tru")]
     [InlineData("{} {}")]
     [InlineData("\"raw \u0001 control\"")]
+    [InlineData("[1,]")]
+    [InlineData("-01")]
+    [InlineData("1e")]
+    [InlineData("\"\\u12\"")]
+    [InlineData("{\"a\":1 /*c*/}")]
+    [InlineData("NaN")]
+    [InlineData("\uFEFF")]
+    [InlineData("'x'")]
     public void Malformed_documents_are_refused_like_System_Text_Json(string text)
     {
         Should.Throw<JsonException>(() => JsonDocument.Parse(text));
@@ -87,6 +95,64 @@ public sealed class DescriptorJsonTests
     [Fact]
     public void A_document_nested_past_the_depth_limit_is_refused_not_overflowed() =>
         Should.Throw<DescriptorJsonException>(() => DescriptorJson.Parse(new string('[', 100_000)));
+
+    [Fact]
+    public void The_depth_limit_admits_256_levels_and_refuses_257()
+    {
+        DescriptorJson.Parse(Nested(DescriptorJson.MaxDepth)).ShouldBeOfType<JsonArray>();
+        Should.Throw<DescriptorJsonException>(() => DescriptorJson.Parse(Nested(DescriptorJson.MaxDepth + 1)));
+    }
+
+    [Fact]
+    public void One_character_mutations_of_an_example_are_accepted_or_refused_like_System_Text_Json()
+    {
+        var example = Descriptors.HelpDesk;
+        var mutation = Gen.Select(Gen.Int[0, 2], Gen.Int[0, example.Length - 1], Gen.OneOfConst('{', '}', '[', ']', ',', ':', '"', '\\', ' ', '0', 'a', '-', '.', 'e', '/'),
+            (kind, at, c) => kind switch
+            {
+                0 => example.Remove(at, 1),
+                1 => example.Insert(at, c.ToString()),
+                _ => example.Remove(at, 1).Insert(at, c.ToString()),
+            });
+
+        mutation.Sample(text => Accepts(text).ShouldBe(StjAccepts(text), text), iter: 3000, seed: Seed);
+    }
+
+    [Fact]
+    public void A_column_after_a_byte_order_mark_counts_from_the_first_character_of_the_text()
+    {
+        var error = Should.Throw<DescriptorJsonException>(() => DescriptorJson.Parse("\uFEFF{,}"));
+
+        error.Column.ShouldBe(2);
+    }
+
+    private static string Nested(int depth) => new string('[', depth) + new string(']', depth);
+
+    private static bool Accepts(string text)
+    {
+        try
+        {
+            DescriptorJson.Parse(text);
+            return true;
+        }
+        catch (DescriptorJsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool StjAccepts(string text)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(text, new JsonDocumentOptions { MaxDepth = DescriptorJson.MaxDepth });
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
 
     [Fact]
     public void Duplicate_keys_keep_the_last_value()
