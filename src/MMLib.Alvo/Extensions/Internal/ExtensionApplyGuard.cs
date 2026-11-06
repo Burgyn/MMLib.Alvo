@@ -11,7 +11,7 @@ namespace MMLib.Alvo.Extensions.Internal;
 internal sealed record ExtensionApplyCheck(PolicyCatalog Catalog, IReadOnlyList<DescriptorValidationError> Warnings);
 
 /// <summary>
-/// Refuses a change that would unbind an extension — a handler, a command or a write hook: one that binds the catalog the
+/// Refuses a change that would unbind an extension — a handler, a command, a write hook or a read extension: one that binds the catalog the
 /// provider holds and would not bind the proposed one — HX-03's own compiler, through the binder's per-catalog cache, so the
 /// guard cannot drift from the boot. It keeps a runtime apply, a rollback, a dry run and <c>ApplyAlvoDescriptorAsync</c> from
 /// unbinding one; the boot refuses on its own, through <see cref="ExtensionBinder.EnsureBindable"/>. An extension that was
@@ -76,6 +76,6 @@ internal sealed class ExtensionApplyGuard(
         }
 
         var bindings = binder.Result(current).Bindings;
-        return [.. bindings.Handlers.Select(handler => handler.Id), .. bindings.Commands.Keys, .. bindings.WriteHooks.Select(hook => hook.Id)];
+        return [.. bindings.Handlers.Select(handler => handler.Id), .. bindings.Commands.Keys, .. bindings.WriteHooks.Select(hook => hook.Id), .. bindings.ReadExtensions.Select(read => read.Id)];
     }
 }

@@ -129,7 +129,8 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<IRelationalWriteGate>(),
         services.GetService<IWriteExtensionRunner>(),
         services.GetRequiredService<IServiceScopeFactory>(),
-        services.GetService<EfCoreHookRejectionLog>());
+        services.GetService<EfCoreHookRejectionLog>(),
+        services.GetService<IReadExtensionRunner>());
 
     /// <summary>Creates the readiness probe every EF-backed driver shares (#133).</summary>
     /// <remarks>
