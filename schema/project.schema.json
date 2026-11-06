@@ -1250,7 +1250,7 @@
               "additionalProperties": {
                 "$ref": "#/$defs/valueOrExpr"
               },
-              "description": "Field -> literal value or tagged {\"$cel\": \"...\"} expression; {{...}} sugar allowed in string values."
+              "description": "Field -> literal value or tagged {\"$cel\": \"...\"} expression; a string containing {{...}} is refused at apply (it is not rendered here); compute values with {\"$cel\": \"...\"}."
             }
           }
         },

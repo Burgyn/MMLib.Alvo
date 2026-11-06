@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Schema;
+using System.Text.Json.Serialization;
 
 namespace MMLib.Alvo.Functions.Internal;
 
@@ -20,7 +21,7 @@ internal sealed record FunctionInputSchema(
 
     /// <summary>
     /// The one serializer configuration of function input: the schema is exported with it and the run binds with it, so what
-    /// the schema calls required or non-nullable is what the binder refuses.
+    /// the schema calls required, non-nullable or a number is what the binder refuses — a number is read only from a JSON number.
     /// </summary>
     internal static JsonSerializerOptions SerializerOptions { get; } = Frozen();
 
@@ -54,6 +55,7 @@ internal sealed record FunctionInputSchema(
     {
         var options = new JsonSerializerOptions(JsonSerializerOptions.Web)
         {
+            NumberHandling = JsonNumberHandling.Strict,
             RespectNullableAnnotations = true,
             RespectRequiredConstructorParameters = true,
         };

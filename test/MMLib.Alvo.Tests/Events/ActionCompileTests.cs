@@ -73,8 +73,8 @@ public sealed class ActionCompileTests
         var error = SingleError(Function("""{ "orderId": "x", "amount": true }"""));
 
         error.Path.ShouldBe($"{HookPath}/input/amount");
-        error.Message.ShouldBe("'amount' is boolean, and function 'issue-invoice' takes string or number there.");
-        error.FixSuggestion.ShouldBe("Write a string or number value, or a {\"$cel\": \"…\"} that yields one.");
+        error.Message.ShouldBe("'amount' is boolean, and function 'issue-invoice' takes number there.");
+        error.FixSuggestion.ShouldBe("Write a number value, or a {\"$cel\": \"…\"} that yields one.");
     }
 
     [Fact]
@@ -137,11 +137,12 @@ public sealed class ActionCompileTests
     {
         var required = SingleError(Update("invoices", """{ "number": null, "amount": 1 }"""));
         required.Path.ShouldBe($"{HookPath}/payload/number");
-        required.Message.ShouldBe("Field 'number' is required on 'invoices', so a create cannot set it to null.");
+        required.Message.ShouldBe("Field 'number' is required on 'invoices', so an 'entity.update' cannot set it to null.");
 
         Errors(Update("invoices", """{ "number": "INV-1", "amount": 1, "note": null }""")).ShouldBeEmpty();
-        Errors(Update("invoices", """{ "number": null }""", recordId: "\"{{new.invoice_id}}\"")).ShouldBeEmpty(
-            "an update leaves the row's other values in place, so the write itself judges a null there");
+        Errors(Update("invoices", """{ "note": null }""", recordId: "\"{{new.invoice_id}}\"")).ShouldBeEmpty();
+        SingleError(Update("invoices", """{ "number": null }""", recordId: "\"{{new.invoice_id}}\"")).Path
+            .ShouldBe($"{HookPath}/payload/number", "a null into a required field fails every update, so it is refused at apply too");
     }
 
     [Fact]
@@ -160,6 +161,45 @@ public sealed class ActionCompileTests
 
         error.Path.ShouldBe($"{HookPath}/entity");
         error.Message.ShouldContain("tenant");
+    }
+
+    [Fact]
+    public void An_entity_update_from_a_tenant_scoped_trigger_into_a_global_entity_is_refused()
+    {
+        var error = SingleError(Update("invoices", """{ "number": "INV-1", "amount": 1 }""", tenancy: true, ordersTenancy: "scoped"));
+
+        error.Path.ShouldBe($"{HookPath}/entity");
+        error.Message.ShouldContain("runs as the system and bypasses the target's rules");
+    }
+
+    [Fact]
+    public void An_entity_update_payload_template_string_is_refused_with_the_cel_form_as_the_fix()
+    {
+        var error = SingleError(Update("invoices", """{ "number": "INV-{{new.total}}", "amount": 1 }"""));
+
+        error.Path.ShouldBe($"{HookPath}/payload/number");
+        error.Message.ShouldContain("written verbatim");
+        error.FixSuggestion.ShouldNotBeNull().ShouldContain("$cel");
+        Errors(Update("invoices", """{ "number": "INV-1 {not a placeholder}", "amount": 1 }""")).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void An_entity_update_record_id_placeholder_must_read_a_uuid_field()
+    {
+        var error = SingleError(Update("invoices", """{ "note": "x" }""", recordId: "\"{{new.total}}\""));
+
+        error.Path.ShouldBe($"{HookPath}/recordId");
+        error.Message.ShouldBe("'total' is not a UUID field, so it cannot name the record to update.");
+        Errors(Update("invoices", """{ "note": "x" }""", recordId: "\"{{new.id}}\"")).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_host_less_validator_refuses_entity_update()
+    {
+        var errors = new DescriptorValidator().Validate(Update("invoices", """{ "number": "INV-1", "amount": 1 }""")).Errors
+            .Where(error => error.Severity == DescriptorValidationSeverity.Error);
+
+        errors.ShouldHaveSingleItem().Path.ShouldBe($"{HookPath}/type");
     }
 
     [Fact]
@@ -205,18 +245,19 @@ public sealed class ActionCompileTests
     private static string Function(string input, string name = "issue-invoice", string functionsBlock = "") =>
         Descriptor($$"""{ "type": "function", "name": "{{name}}", "input": {{input}} }""", functionsBlock);
 
-    private static string Update(string entity, string payload, string? recordId = null, bool tenancy = false) =>
+    private static string Update(string entity, string payload, string? recordId = null, bool tenancy = false, string ordersTenancy = "global") =>
         Descriptor(
             $$"""{ "type": "entity.update", "entity": "{{entity}}"{{(recordId is null ? string.Empty : $", \"recordId\": {recordId}")}}, "payload": {{payload}} }""",
-            tenancy ? """, "tenancy": { "enabled": true }""" : string.Empty);
+            tenancy ? """, "tenancy": { "enabled": true }""" : string.Empty,
+            ordersTenancy);
 
-    private static string Descriptor(string action, string extra = "") => $$"""
+    private static string Descriptor(string action, string extra = "", string ordersTenancy = "global") => $$"""
         {
           "apiVersion": "alvo.dev/v1",
           "name": "actions"{{extra}},
           "entities": {
             "orders": {
-              "tenancy": "global",
+              "tenancy": "{{ordersTenancy}}",
               "fields": {
                 "total": { "type": "decimal", "precision": 12, "scale": 2 },
                 "invoice_id": { "type": "uuid" }

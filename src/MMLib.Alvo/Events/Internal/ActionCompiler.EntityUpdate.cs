@@ -23,7 +23,9 @@ internal static partial class ActionCompiler
     {
         if (scope.Host is not { Host.HasActionLedger: true } host)
         {
-            scope.Errors.Add(Error($"{path}/{TypeSlot}", NoLedger, NoLedgerFix));
+            scope.Errors.Add(scope.Host is null
+                ? Error($"{path}/{TypeSlot}", NoHost, NoHostFix)
+                : Error($"{path}/{TypeSlot}", NoLedger, NoLedgerFix));
             return null;
         }
 
@@ -56,11 +58,12 @@ internal static partial class ActionCompiler
 
     private static EntitySchema? UpdateTarget(string name, string path, ActionHost host, AfterHookScope scope)
     {
-        var target = host.Model.Entities.FirstOrDefault(entity =>
-            entity.Storage == EntityStorage.Physical && string.Equals(entity.Name, name, StringComparison.Ordinal));
-        if (target is null)
+        var target = host.Model.Entities.FirstOrDefault(entity => string.Equals(entity.Name, name, StringComparison.Ordinal));
+        if (target is null || target.Storage != EntityStorage.Physical)
         {
-            scope.Errors.Add(UndeclaredEntity(name, $"{path}/{EntitySlot}", host));
+            scope.Errors.Add(target is null
+                ? UndeclaredEntity(name, $"{path}/{EntitySlot}", host)
+                : Error($"{path}/{EntitySlot}", $"'{name}' is a dynamic entity, which this build does not store, so this 'entity.update' could never write.", "Write into an entity with physical storage."));
             return null;
         }
 
@@ -133,9 +136,27 @@ internal static partial class ActionCompiler
         }
 
         return TemplatePlaceholder.TryResolve(only.Text, scope.Schema, out var refusal)
-            ? AfterImagePhase.Refusals(template, AfterImages.At(scope.Point), scope.Point, path)
+            ? [.. AfterImagePhase.Refusals(template, AfterImages.At(scope.Point), scope.Point, path), .. RecordIdFieldRefusals(only.Text, path, scope)]
             : [Error(path, refusal!, RecordIdFix)];
     }
+
+    /// <summary>A placeholder over a field that is not a UUID, or one the entity leaves out of its event images, never names a record.</summary>
+    private static IEnumerable<DescriptorValidationError> RecordIdFieldRefusals(string placeholder, string path, AfterHookScope scope)
+    {
+        var field = TemplatePlaceholder.RowImageRead(placeholder)!.Value.Field;
+        if (scope.Schema.EventImageExclusions.Contains(field, StringComparer.Ordinal))
+        {
+            yield return Error(path, ExcludedPlaceholder(field), ExcludedPlaceholderFix(scope, field));
+        }
+        else if (!IsUuidField(scope.Schema, field))
+        {
+            yield return Error(path, $"'{field}' is not a UUID field, so it cannot name the record to update.", RecordIdFix);
+        }
+    }
+
+    private static bool IsUuidField(EntitySchema entity, string field) =>
+        string.Equals(field, "id", StringComparison.Ordinal)
+        || entity.Fields.Any(candidate => string.Equals(candidate.Name, field, StringComparison.Ordinal) && CelFieldType.Of(candidate) == CelValueType.Uuid);
 
     private static DescriptorValidationError NotARecordId(string source, string path) =>
         Error(path, $"'{source}' is neither a record id nor one placeholder over the triggering row.", RecordIdFix);
@@ -147,4 +168,8 @@ internal static partial class ActionCompiler
     private const string NoLedger = "This composition keeps no command ledger, so 'entity.update' cannot be written exactly once.";
 
     private const string NoLedgerFix = "Use a relational provider (UseSqlite, UsePostgreSql).";
+
+    private const string NoHost = "This descriptor is compiled without a host, so 'entity.update' has nothing to write through.";
+
+    private const string NoHostFix = "Apply the descriptor through a host composed with AddAlvo and a relational provider.";
 }

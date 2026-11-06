@@ -335,6 +335,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **`FunctionAction.Input` is a `FunctionInput?`, not a `string?`** (HX-15): a `function` action's `input` is an object of
+  literals and `{"$cel": "…"}` values (`FunctionInput.Fields`), checked at apply against the registered function's input
+  schema; the JSONata string form parses into `FunctionInput.Transform` and stays refused. Code that read the string
+  reads `Input.Transform`.
+- **An `entity.update` payload is stricter at apply** (HX-15): a `null` into a required field is refused on an update
+  as well as a create, and a string value containing `{{…}}` is refused — it was never rendered and would be written
+  verbatim; use `{"$cel": "…"}`. A function input's number property no longer accepts a string literal.
 - **`ITimerStore` is a new provider obligation** (HX-13): a data provider that implements `IOutboxStore` implements
   `ITimerStore` over the same database, so a timer fire or a schedule advance and its outbox append commit together;
   `TimerStoreContractTests` (`MMLib.Alvo.Testing`) is the suite it must pass. Its schedule and migration writes take an

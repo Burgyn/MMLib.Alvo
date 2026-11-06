@@ -11,8 +11,8 @@ namespace MMLib.Alvo.Events.Internal;
 
 /// <summary>
 /// One <c>entity.update</c> payload entry: a field of the target the framework does not own, and a value of its type — a
-/// JSON <c>null</c> entry is the null literal it was written as (#328), refused only where a create would leave a required
-/// field empty.
+/// JSON <c>null</c> entry is the null literal it was written as (#328), refused into a required field, on a create and an
+/// update alike, since the write would refuse it every time.
 /// </summary>
 internal static partial class ActionCompiler
 {
@@ -30,10 +30,26 @@ internal static partial class ActionCompiler
         }
 
         value ??= _nullLiteral;
+        if (IsTemplateString(value))
+        {
+            scope.Errors.Add(Error(slot, TemplateInPayload, TemplateInPayloadFix));
+            return null;
+        }
+
         return value.IsExpression
             ? CompilePayloadExpression(value.Expression!, field, slot, scope)
             : CompilePayloadLiteral(value.Literal!.Value, field, target, slot, scope);
     }
+
+    private static bool IsTemplateString(ValueOrExpr value) =>
+        value is { IsExpression: false, Literal: { ValueKind: JsonValueKind.String } literal }
+        && AlvoTemplate.TryParse(literal.GetString()!, out var template, out _)
+        && template!.Placeholders.Count > 0;
+
+    private const string TemplateInPayload =
+        "This value uses '{{…}}', which an 'entity.update' payload does not render in this build, so it would be written verbatim.";
+
+    private const string TemplateInPayloadFix = "Write {\"$cel\": \"…\"} instead, e.g. {\"$cel\": \"new.number\"}.";
 
     private static FieldSchema? WritableField(string name, PayloadTarget target, string path, AfterHookScope scope)
     {
@@ -109,7 +125,7 @@ internal static partial class ActionCompiler
     {
         var isNull = literal.ValueKind == JsonValueKind.Null;
         var refusal = isNull
-            ? (field.Required && target.IsCreate ? $"Field '{field.Name}' is required on '{target.Entity.Name}', so a create cannot set it to null." : null)
+            ? (field.Required ? $"Field '{field.Name}' is required on '{target.Entity.Name}', so an 'entity.update' cannot set it to null." : null)
             : FieldLiteral.Convert(literal, CelFieldType.Of(field)) is null
                 ? $"This literal is a JSON {literal.ValueKind.ToString().ToLowerInvariant()}, and '{field.Name}' is declared as '{field.Type}'."
                 : null;
@@ -118,9 +134,11 @@ internal static partial class ActionCompiler
             return new CompiledValue(literal, Expression: null);
         }
 
-        scope.Errors.Add(Error(path, refusal, isNull ? RequiredNullFix : $"Write a literal a '{field.Type}' field holds, or a {{\"$cel\": \"…\"}} that yields one."));
+        scope.Errors.Add(Error(path, refusal, isNull ? RequiredNullFix(target) : $"Write a literal a '{field.Type}' field holds, or a {{\"$cel\": \"…\"}} that yields one."));
         return null;
     }
 
-    private const string RequiredNullFix = "Write a value, or name a 'recordId' so the action updates a record instead of creating one.";
+    private static string RequiredNullFix(PayloadTarget target) => target.IsCreate
+        ? "Write a value; a create must fill every required field."
+        : "Write a value, or remove the entry so the update leaves the field as it is.";
 }

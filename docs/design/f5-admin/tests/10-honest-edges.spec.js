@@ -97,8 +97,8 @@ test.describe('the honest edges', () => {
     expect(text).toContain(templates);
     expect(text).not.toContain('Treat the endpoint as unauthenticated until signing lands');
 
-    // The three refused action types are shown, disabled, with their own reason.
-    for (const type of ['function', 'http.call', 'entity.update']) {
+    // The refused action type is shown, disabled, with its own reason.
+    for (const type of ['http.call']) {
       await expect(page.locator('#app')).toContainText(type);
     }
     await expect(page.locator('#app')).toContainText('refused at apply');
@@ -120,13 +120,13 @@ test.describe('the honest edges', () => {
     }
     await expect(page.locator('.a-modal')).toContainText('cannot</strong> reach the network'.replace(/<[^>]+>/g, ''));
 
-    // An AFTER hook gets $defs/action's five, three of them disabled with their own refusal.
+    // An AFTER hook gets $defs/action's five, one of them disabled with its own refusal.
     await page.click('[data-act="hookpoint"][data-value="afterUpdate"]');
     await page.waitForTimeout(60);
-    for (const kind of ['webhook', 'email']) {
+    for (const kind of ['webhook', 'email', 'function', 'entity.update']) {
       await expect(page.locator(`[data-act="hookkind"][data-value="${kind}"]`)).toBeEnabled();
     }
-    for (const kind of ['function', 'http.call', 'entity.update']) {
+    for (const kind of ['http.call']) {
       await expect(page.locator(`[data-act="hookkind"][data-value="${kind}"]`)).toBeDisabled();
     }
     await expect(page.locator('[data-act="hookkind"][data-value="reject"]')).toHaveCount(0);

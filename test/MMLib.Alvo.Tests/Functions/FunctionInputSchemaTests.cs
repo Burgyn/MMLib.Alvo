@@ -49,7 +49,7 @@ public sealed class FunctionInputSchemaTests
         schema.Accepts("amount", Literal("3")).ShouldBeTrue();
         schema.Accepts("amount", Literal("3.5")).ShouldBeFalse();
         schema.Accepts("amount", Literal("true")).ShouldBeFalse();
-        schema.Accepts("amount", Literal("\"3\"")).ShouldBeTrue("the Web options the binder uses read a number from a string");
+        schema.Accepts("amount", Literal("\"3\"")).ShouldBeFalse("the binder reads a number only from a number");
         schema.Accepts("note", Literal("null")).ShouldBeTrue();
         schema.Accepts("orderId", Literal("null")).ShouldBeFalse();
     }
@@ -64,6 +64,7 @@ public sealed class FunctionInputSchemaTests
         options.RespectRequiredConstructorParameters.ShouldBeTrue();
         options.PropertyNamingPolicy.ShouldBe(JsonNamingPolicy.CamelCase);
         Should.Throw<JsonException>(() => JsonSerializer.Deserialize<PositionalInput>("""{ "amount": 1 }""", options));
+        Should.Throw<JsonException>(() => JsonSerializer.Deserialize<PositionalInput>("""{ "orderId": "o", "amount": "1" }""", options));
     }
 
     private static JsonElement Literal(string json) => JsonElement.Parse(json);
