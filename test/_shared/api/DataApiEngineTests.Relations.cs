@@ -1,0 +1,65 @@
+﻿using System.Net;
+using System.Text.Json.Nodes;
+
+namespace MMLib.Alvo.Api.Tests;
+
+/// <summary>
+/// A relation rule over HTTP, on every engine: an order is listed, counted, read and patched only through a customer the
+/// caller may list, and a hidden one answers exactly as a row an owner rule hides.
+/// </summary>
+public abstract partial class DataApiEngineTests
+{
+    private static readonly Guid _relationsTenant = Guid.NewGuid();
+
+    private static readonly string[] _relationScopes = ["customers:read", "customers:write", "orders:read", "orders:write"];
+
+    private static readonly TestApiKey _relationsClerk = new("relations-clerk", ["clerk"], _relationScopes, _relationsTenant);
+
+    private static readonly TestApiKey _relationsAlice = new("relations-alice", ["member"], _relationScopes, _relationsTenant);
+
+    private static readonly TestApiKey _relationsBob = new("relations-bob", ["member"], _relationScopes, _relationsTenant);
+
+    [Fact]
+    public async Task A_relation_rule_scopes_list_get_count_and_patch_over_http_on_every_engine()
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            "relations-desk.alvo.json", [_relationsClerk, _relationsAlice, _relationsBob]);
+        var aliceOrder = await CreateRelatedOrderAsync(world, _relationsAlice);
+        var bobOrder = await CreateRelatedOrderAsync(world, _relationsBob);
+
+        using var page = await world.SendAsync(
+            HttpMethod.Get, "/api/orders", _relationsAlice, headers: new Dictionary<string, string> { ["Prefer"] = "count=exact" });
+        using var hidden = await world.SendAsync(HttpMethod.Get, $"/api/orders/{bobOrder}", _relationsAlice);
+        using var patched = await world.SendAsync(
+            HttpMethod.Patch, $"/api/orders/{bobOrder}", _relationsAlice, body: new JsonObject { ["note"] = "x" });
+        using var own = await world.SendAsync(
+            HttpMethod.Patch, $"/api/orders/{aliceOrder}", _relationsAlice, body: new JsonObject { ["note"] = "mine" });
+
+        page.StatusCode.ShouldBe(HttpStatusCode.OK, await page.ReadTextAsync());
+        var body = await page.ReadJsonObjectAsync();
+        body["items"]!.AsArray().Select(row => row!["id"]!.GetValue<Guid>()).ShouldBe([aliceOrder]);
+        body["count"]!.GetValue<long>().ShouldBe(1);
+        hidden.StatusCode.ShouldBe(HttpStatusCode.NotFound, await hidden.ReadTextAsync());
+        patched.StatusCode.ShouldBe(HttpStatusCode.NotFound, await patched.ReadTextAsync());
+        own.StatusCode.ShouldBe(HttpStatusCode.OK, await own.ReadTextAsync());
+    }
+
+    private static async Task<Guid> CreateRelatedOrderAsync(AlvoApiWorld world, TestApiKey owner)
+    {
+        using var customer = await world.SendAsync(HttpMethod.Post, "/api/customers", _relationsClerk, body: new JsonObject
+        {
+            ["owner_id"] = owner.User,
+            ["active"] = true,
+            ["tenant_id"] = _relationsTenant,
+        });
+        customer.StatusCode.ShouldBe(HttpStatusCode.Created, await customer.ReadTextAsync());
+        using var order = await world.SendAsync(HttpMethod.Post, "/api/orders", owner, body: new JsonObject
+        {
+            ["customer_id"] = (await customer.ReadJsonObjectAsync())["id"]!.GetValue<Guid>(),
+            ["note"] = "order",
+            ["tenant_id"] = _relationsTenant,
+        });
+        order.StatusCode.ShouldBe(HttpStatusCode.Created, await order.ReadTextAsync());
+        return (await order.ReadJsonObjectAsync())["id"]!.GetValue<Guid>();
+    }
+}

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "relations-desk",
+  "tenancy": { "enabled": true },
+  "auth": { "roles": ["clerk", "member"] },
+  "entities": {
+    "customers": {
+      "tenancy": "scoped",
+      "fields": {
+        "owner_id": { "type": "uuid", "required": true },
+        "active": { "type": "boolean" }
+      },
+      "rules": {
+        "list": "owner_id == @user.id",
+        "get": "owner_id == @user.id",
+        "create": "'clerk' in @user.roles"
+      }
+    },
+    "orders": {
+      "tenancy": "scoped",
+      "fields": {
+        "customer_id": { "type": "ref", "entity": "customers" },
+        "note": { "type": "string", "maxLength": 80 }
+      },
+      "rules": {
+        "list": "customer_id.active == true",
+        "get": "customer_id.active == true",
+        "update": "customer_id.active == true",
+        "create": "'clerk' in @user.roles || customer_id.owner_id == @user.id"
+      }
+    }
+  }
+}

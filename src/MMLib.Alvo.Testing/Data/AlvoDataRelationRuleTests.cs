@@ -128,9 +128,9 @@ public abstract partial class AlvoDataRelationRuleTests
         }
     }
 
-    private async Task<(IAlvoData Data, RelationWorld World)> RelationWorldAsync()
+    private async Task<(IAlvoData Data, RelationWorld World)> RelationWorldAsync(string? pinsList = RelationWorld.PinsByOwner)
     {
-        var data = await CreateAsync(RelationWorld.Schema(), RelationWorld.Descriptor());
+        var data = await CreateAsync(RelationWorld.Schema(), RelationWorld.Descriptor(pinsList));
         return (data, new RelationWorld(data));
     }
 

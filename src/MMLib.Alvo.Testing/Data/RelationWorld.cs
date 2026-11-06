@@ -23,6 +23,13 @@ internal sealed class RelationWorld(IAlvoData data)
     internal const string Regions = "regions";
     internal const string Sites = "sites";
     internal const string Employees = "employees";
+    internal const string Notes = "notes";
+    internal const string Boards = "boards";
+    internal const string Pins = "pins";
+    internal const string Stickers = "stickers";
+
+    /// <summary>The <c>pins</c> list rule of the default world: a pin is listed by its owner.</summary>
+    internal const string PinsByOwner = "owner_id == @user.id";
 
     private const string Seeding = "'admin' in @user.roles";
 
@@ -51,10 +58,10 @@ internal sealed class RelationWorld(IAlvoData data)
     };
 
     internal Dictionary<string, object?> Order(Guid? customer, string note = "order") =>
-        Row(("customer_id", customer), ("note", note));
+        Row(("customer_id", customer), ("note", note), ("tenant_id", Tenant1.Value));
 
     internal Dictionary<string, object?> Quote(Guid customer, decimal amount, DateTimeOffset placedAt) =>
-        Row(("customer_id", customer), ("amount", amount), ("placed_at", placedAt));
+        Row(("customer_id", customer), ("amount", amount), ("placed_at", placedAt), ("tenant_id", Tenant1.Value));
 
     internal Task<Guid> SeedCustomerAsync(AlvoContext owner, bool active, decimal creditLimit = 0m) =>
         SeedAsync(Customers, owner.Tenant!.Value, ("owner_id", owner.User.Value), ("active", active), ("region", "eu"),
@@ -74,7 +81,7 @@ internal sealed class RelationWorld(IAlvoData data)
 
     private static AlvoContext Seeder(TenantId tenant) => Caller(Guid.NewGuid(), tenant, Role.Admin);
 
-    private Dictionary<string, object?> Row(params (string Field, object? Value)[] values)
+    private static Dictionary<string, object?> Row(params (string Field, object? Value)[] values)
     {
         var row = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach (var (field, value) in values)
@@ -82,13 +89,20 @@ internal sealed class RelationWorld(IAlvoData data)
             row[field] = value;
         }
 
-        row.TryAdd("tenant_id", A.Tenant!.Value.Value);
         return row;
     }
 
     private static async Task<Guid> IdOf(Task<AlvoRecord> created) => (Guid)(await created)["id"]!;
 
-    internal static AlvoDescriptor Descriptor() => AlvoDescriptor.Parse(DescriptorJson);
+    /// <summary>The world's descriptor, with <c>pins</c> listed by <paramref name="pinsList"/>, or by no rule at all.</summary>
+    /// <param name="pinsList">The <c>pins</c> list rule; <see langword="null"/> declares none.</param>
+    internal static AlvoDescriptor Descriptor(string? pinsList = PinsByOwner) =>
+        AlvoDescriptor.Parse(DescriptorJson.Replace("\"__PINS_RULES__\"", PinsRules(pinsList), StringComparison.Ordinal));
+
+    private static string PinsRules(string? pinsList) =>
+        pinsList is null
+            ? $"{{ \"create\": \"{Seeding}\" }}"
+            : $"{{ \"list\": \"{pinsList}\", \"create\": \"{Seeding}\" }}";
 
     internal static SchemaModel Schema() => new(
     [
@@ -100,12 +114,17 @@ internal sealed class RelationWorld(IAlvoData data)
         Global(Regions, Text("name")),
         Scoped(Sites, Ref("region_id", Regions), Uuid("manager_id")),
         Scoped(Employees, Ref("manager_id", Employees), Text("region")),
+        Scoped(Notes, Uuid("owner_id"), Text("note")),
+        Scoped(Boards, Text("name")),
+        Scoped(Pins, Ref("board_id", Boards), Text("color"), Uuid("owner_id")),
+        Scoped(Stickers, Ref("pin_id", Pins)),
     ]);
 
     private const string DescriptorJson = $$"""
         {
           "apiVersion": "alvo.dev/v1", "name": "relation-rules",
           "tenancy": { "enabled": true },
+          "auth": { "roles": ["manager"] },
           "entities": {
             "customers": { "tenancy": "scoped",
               "fields": { "owner_id": { "type": "uuid" }, "active": { "type": "boolean" }, "region": { "type": "string" },
@@ -138,7 +157,22 @@ internal sealed class RelationWorld(IAlvoData data)
               "rules": { "list": "manager_id == @user.id", "create": "{{Seeding}}", "update": "{{Seeding}}" } },
             "employees": { "tenancy": "scoped",
               "fields": { "manager_id": { "type": "ref", "entity": "employees" }, "region": { "type": "string" } },
-              "rules": { "list": "'authenticated' in @user.roles", "get": "manager_id.region == 'eu'", "create": "{{Seeding}}" } }
+              "rules": { "list": "'authenticated' in @user.roles", "get": "manager_id.region == 'eu'", "create": "{{Seeding}}" } },
+            "notes": { "tenancy": "scoped",
+              "fields": { "owner_id": { "type": "uuid" }, "note": { "type": "string" } },
+              "rules": { "list": "owner_id == @user.id", "get": "owner_id == @user.id", "update": "owner_id == @user.id",
+                         "delete": "owner_id == @user.id", "create": "{{Seeding}}" } },
+            "boards": { "tenancy": "scoped",
+              "fields": { "name": { "type": "string" } },
+              "rules": { "list": "pins.exists(p, p.color == 'red')", "get": "pins.exists(p, p.color == 'red')",
+                         "create": "{{Seeding}}" } },
+            "pins": { "tenancy": "scoped",
+              "fields": { "board_id": { "type": "ref", "entity": "boards" }, "color": { "type": "string" },
+                          "owner_id": { "type": "uuid" } },
+              "rules": "__PINS_RULES__" },
+            "stickers": { "tenancy": "scoped",
+              "fields": { "pin_id": { "type": "ref", "entity": "pins" } },
+              "rules": { "list": "true", "create": "pin_id.color == 'red'" } }
           }
         }
         """;

@@ -560,6 +560,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_batch_create_reports_each_row_whose_relation_fails_at_its_index() { }
         public System.Threading.Tasks.Task A_create_through_a_relation_the_caller_satisfies_succeeds() { }
         public System.Threading.Tasks.Task A_create_whose_relation_the_caller_cannot_satisfy_is_refused() { }
+        public System.Threading.Tasks.Task A_global_row_is_visible_through_the_caller_s_tenant_children_only() { }
         public System.Threading.Tasks.Task A_null_reference_never_satisfies_a_forward_relation() { }
         [Xunit.InlineData(new object[] {
                 "100.49",
@@ -578,8 +579,44 @@ namespace MMLib.Alvo.Testing.Data
                 0,
                 false})]
         public System.Threading.Tasks.Task A_probe_compares_outer_decimal_and_timestamp_values_as_the_columns_do(string amount, int millisecondsAfterSince, bool admitted) { }
+        public System.Threading.Tasks.Task A_related_row_turning_invisible_hides_the_outer_row_on_the_next_read() { }
+        public System.Threading.Tasks.Task A_reverse_relation_admits_a_project_only_to_its_members() { }
+        public System.Threading.Tasks.Task A_self_reference_reads_the_outer_row_s_key() { }
+        [Xunit.InlineData(new object[] {
+                "a role the caller lacks",
+                "\'manager\' in @user.roles",
+                false,
+                true,
+                false})]
+        [Xunit.InlineData(new object[] {
+                "another tenant\'s",
+                "owner_id == @user.id",
+                true,
+                true,
+                false})]
+        [Xunit.InlineData(new object[] {
+                "another user\'s",
+                "owner_id == @user.id",
+                false,
+                false,
+                false})]
+        [Xunit.InlineData(new object[] {
+                "no list rule",
+                null,
+                false,
+                true,
+                false})]
+        [Xunit.InlineData(new object[] {
+                "the caller\'s own (control)",
+                "owner_id == @user.id",
+                false,
+                true,
+                true})]
+        public System.Threading.Tasks.Task An_exists_never_matches_a_related_row_the_caller_cannot_list(string why, string? pinsList, bool inOtherTenant, bool ownedByCaller, bool visible) { }
         public System.Threading.Tasks.Task An_update_moving_a_row_to_a_related_row_the_caller_cannot_list_is_refused() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
+        public System.Threading.Tasks.Task Two_tenants_with_the_same_user_id_never_see_each_other_s_rows_through_a_relation() { }
+        public System.Threading.Tasks.Task Two_users_list_get_count_and_write_only_through_their_own_related_rows() { }
     }
     public abstract class AlvoDataReplaceTests : MMLib.Alvo.Testing.Data.AlvoDataFixture
     {
