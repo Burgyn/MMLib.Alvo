@@ -46,6 +46,19 @@ internal static class QueryViolations
     internal static AlvoViolation UnavailableField(string pointer) =>
         new(pointer, "unavailable-field", UnavailableFieldMessage, _fieldFix);
 
+    /// <summary>
+    /// The refusal for a <c>virtual</c> field a caller may read but cannot filter, sort or select: it has no column,
+    /// and its value is filled after the read. Asked only of a field the resolver returned, so a hidden virtual field
+    /// still earns <see cref="UnavailableField"/>.
+    /// </summary>
+    /// <param name="pointer">Which parameter the name appeared in.</param>
+    /// <param name="name">The declared field's own name — the schema's text, never the caller's.</param>
+    internal static AlvoViolation VirtualField(string pointer, string name) => new(
+        pointer,
+        "virtual-field",
+        $"'{name}' is virtual: the host fills it after the read, so it cannot be filtered, sorted or selected.",
+        "Filter, sort and select by stored fields; read the virtual field from the returned records.");
+
     /// <summary>The refusal for an operator spelling that is not on the allow-list.</summary>
     internal static AlvoViolation UnknownOperator() => new(
         FilterPointer,

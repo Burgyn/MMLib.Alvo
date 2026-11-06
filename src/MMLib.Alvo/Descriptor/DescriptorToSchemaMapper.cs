@@ -524,6 +524,7 @@ internal static class DescriptorToSchemaMapper
             // The literal as declared. See FieldSchema.Default for why it is not converted here, and
             // FieldDefault for what is refused before it gets this far.
             Default = FieldDefault.Resolve(entity, name, f),
+            IsVirtual = f.Virtual == true,
         };
     }
 

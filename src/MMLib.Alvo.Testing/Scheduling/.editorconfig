@@ -1,0 +1,9 @@
+﻿# TimerStoreContractTests is xUnit test code even though it lives in src/, not test/ — it is inherited by every
+# ITimerStore implementation's own test project, so its [Fact] methods follow the same descriptive snake_case convention
+# as test/.editorconfig, for the reason src/MMLib.Alvo.Testing/Events/.editorconfig records. Scoped to those files.
+
+[TimerStoreContractTests.cs]
+dotnet_diagnostic.CA1707.severity = none
+
+[TimerStoreContractTests.Schedules.cs]
+dotnet_diagnostic.CA1707.severity = none

@@ -53,7 +53,7 @@ internal static class GridQuery
 
         var managed = AlvoManagedColumns.For(entity);
         return [.. entity.Fields
-            .Where(field => field.Type == FieldType.String)
+            .Where(field => field.Type == FieldType.String && !field.IsVirtual)
             .Where(field => !managed.Contains(field.Name) && !masks.MayBeHidden(field.Name))
             .Select(field => field.Name)
             .Take(AlvoFilter.MaxTerms - 1)];
@@ -138,14 +138,15 @@ internal static class GridQuery
     /// <summary>Whether a header offers a sort.</summary>
     /// <remarks>
     /// A reference is not sortable: its order is the order of uuids, which is no order a reader can use,
-    /// and the label the cell shows lives in another table.
+    /// and the label the cell shows lives in another table. A virtual field is not sortable either: it has no
+    /// column, so the Data API refuses it in an order.
     /// </remarks>
     public static bool Sortable(FieldSchema field, FieldMasks masks)
     {
         ArgumentNullException.ThrowIfNull(field);
         ArgumentNullException.ThrowIfNull(masks);
 
-        return field.Type is not (FieldType.Ref or FieldType.Json) && !masks.MayBeHidden(field.Name);
+        return field.Type is not (FieldType.Ref or FieldType.Json) && !field.IsVirtual && !masks.MayBeHidden(field.Name);
     }
 
     /// <summary>One page of the grid.</summary>

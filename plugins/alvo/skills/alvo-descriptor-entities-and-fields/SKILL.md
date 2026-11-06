@@ -17,7 +17,7 @@ An entity takes these keys:
 A field takes these keys:
 
 <!-- gen:field-keys -->
-`type` `description` `renamedFrom` `required` `unique` `nullable` `default` `maxLength` `precision` `scale` `values` `entity` `onDelete` `format` `validation` `index` `hidden` `readOnly` `computed` `rollup` `sequence`
+`type` `description` `renamedFrom` `required` `unique` `nullable` `default` `maxLength` `precision` `scale` `values` `entity` `onDelete` `format` `validation` `index` `hidden` `readOnly` `virtual` `computed` `rollup` `sequence`
 <!-- /gen:field-keys -->
 
 No field may be named one of these, which the Data API's query string uses, and no entity may be named `users`, the

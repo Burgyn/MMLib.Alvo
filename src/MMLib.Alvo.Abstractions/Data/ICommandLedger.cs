@@ -31,7 +31,7 @@ internal interface ICommandLedger
     /// in one transaction, which is refused (<see cref="CommandClaimLostException"/>) when the run no longer holds the claim.
     /// </summary>
     Task CompleteAsync(
-        AlvoEvent completion, CommandKey? key, CommandAnswer? answer, DateTimeOffset now, CancellationToken cancellationToken);
+        AlvoFrameworkEnvelope completion, CommandKey? key, CommandAnswer? answer, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>Forgets every key claimed before <paramref name="claimedBefore"/>; answers how many.</summary>
     Task<int> SweepAsync(DateTimeOffset claimedBefore, CancellationToken cancellationToken);

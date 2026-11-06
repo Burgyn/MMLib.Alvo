@@ -163,6 +163,16 @@ public sealed record FieldSchema
     public SequenceSchema? Sequence { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether the field is virtual: a field with no column, absent from storage, read-only,
+    /// filled by a host enricher when a record is read, <see langword="null"/> otherwise.
+    /// </summary>
+    /// <remarks>
+    /// No migration creates a column for it, no projection selects it, and every write, CEL expression and
+    /// filter, sort or select that names it is refused: its value exists only in a read's answer.
+    /// </remarks>
+    public bool IsVirtual { get; init; }
+
+    /// <summary>
     /// Gets the value a create takes when it omits this field, or <see langword="null"/> when the field has
     /// no default.
     /// </summary>

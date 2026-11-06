@@ -72,9 +72,14 @@ internal static class ShapeMapping
     }
 
     private static IEnumerable<ShapeProblem> Nullability(string owner, MappedProperty property, FieldSchema field) =>
-        field.Nullable && !property.AcceptsNull
-            ? [new($"'{field.Name}' may be empty, but {owner} cannot hold null.", $"Declare {owner} as {property.ValueType.Name}?.")]
+        property.AcceptsNull ? []
+            : field.IsVirtual ? [Virtual(owner, property, field)]
+            : field.Nullable ? [new($"'{field.Name}' may be empty, but {owner} cannot hold null.", $"Declare {owner} as {property.ValueType.Name}?.")]
             : [];
+
+    private static ShapeProblem Virtual(string owner, MappedProperty property, FieldSchema field) => new(
+        $"'{field.Name}' is virtual and holds nothing in a write or an event, but {owner} cannot hold null.",
+        $"Declare {owner} as {property.ValueType.Name}?, or remove the property.");
 
     private static IEnumerable<ShapeProblem> Excluded(string owner, MappedProperty property, EntitySchema entity, bool fromEventImages) =>
         fromEventImages && entity.EventImageExclusions.Contains(property.Field, StringComparer.Ordinal)

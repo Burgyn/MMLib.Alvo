@@ -12,6 +12,7 @@ using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Scheduling;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Secrets;
 
@@ -107,6 +108,7 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton<IAlvoDataReachability>(CreateReachability);
         builder.Services.TryAddSingleton<IOutboxStore>(CreateOutboxStore);
         builder.Services.TryAddSingleton<IDeliveryStore>(CreateDeliveryStore);
+        builder.Services.TryAddSingleton<ITimerStore>(CreateTimerStore);
         AddSecretStore(builder.Services);
 
         return builder;
@@ -127,7 +129,8 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<IRelationalWriteGate>(),
         services.GetService<IWriteExtensionRunner>(),
         services.GetRequiredService<IServiceScopeFactory>(),
-        services.GetService<EfCoreHookRejectionLog>());
+        services.GetService<EfCoreHookRejectionLog>(),
+        services.GetService<IReadExtensionRunner>());
 
     /// <summary>Creates the readiness probe every EF-backed driver shares (#133).</summary>
     /// <remarks>
@@ -195,6 +198,12 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<IAlvoSqlDialect>(),
         services.GetRequiredService<IOptions<AlvoOptions>>().Value,
         services.GetRequiredService<TimeProvider>());
+
+    private static EfCoreTimerStore CreateTimerStore(IServiceProvider services) => new(
+        services.GetRequiredService<RelationalConnectionFactory>(),
+        services.GetRequiredService<IOptions<AlvoOptions>>().Value,
+        services.GetRequiredService<TimeProvider>(),
+        services.GetRequiredService<EfAlvoData>);
 
     private static EfCoreHookRejectionLog CreateHookRejectionLog(IServiceProvider services) => new(
         services.GetRequiredService<RelationalConnectionFactory>(),

@@ -43,7 +43,7 @@ internal static class RecordWriter
     /// </para>
     /// <para>
     /// A field the store maintains — <c>computed</c> or <c>rollup</c> in <paramref name="entity"/> — is never sent, like a
-    /// managed column, so a read-model type that maps one stays writable (Ruling 52).
+    /// managed column, so a read-model type that maps one stays writable (Ruling 52); nor is a <c>virtual</c> one.
     /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">The type has a mapping problem no descriptor can cure.</exception>
@@ -66,10 +66,13 @@ internal static class RecordWriter
         return isCreate ? WithTenant(values, shape, nameof(record)) : values;
     }
 
-    /// <summary>The fields of <paramref name="entity"/> the store maintains itself: <c>computed</c>, <c>rollup</c> and <c>sequence</c>.</summary>
+    /// <summary>
+    /// The fields of <paramref name="entity"/> a write never sends: <c>computed</c>, <c>rollup</c> and <c>sequence</c>,
+    /// which the store maintains itself, and <c>virtual</c>, which no column holds.
+    /// </summary>
     internal static IReadOnlySet<string> Maintained(EntitySchema? entity) => entity is null
         ? new HashSet<string>(StringComparer.Ordinal)
-        : entity.Fields.Where(field => field.IsMaintained())
+        : entity.Fields.Where(field => field.IsMaintained() || field.IsVirtual)
             .Select(field => field.Name)
             .ToHashSet(StringComparer.Ordinal);
 

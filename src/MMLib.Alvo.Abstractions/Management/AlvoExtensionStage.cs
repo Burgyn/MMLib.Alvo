@@ -2,7 +2,7 @@
 
 namespace MMLib.Alvo.Management;
 
-/// <summary>When, relative to a write, an extension runs.</summary>
+/// <summary>When, relative to a write or a read, an extension runs.</summary>
 /// <remarks>
 /// Append only, never reordered or renumbered — the same rule, and the same caveat for an older typed client, as
 /// <see cref="AlvoExtensionKind"/>.
@@ -28,4 +28,8 @@ public enum AlvoExtensionStage
     /// <summary>Inside the write's own transaction: it can refuse or undo the write, and may not leave the process.</summary>
     [JsonStringEnumMemberName("inTransaction")]
     InTransaction = 3,
+
+    /// <summary>Inside a read, as its SQL is composed or its rows are returned: it shapes what the read answers and never writes.</summary>
+    [JsonStringEnumMemberName("read")]
+    Read = 4,
 }

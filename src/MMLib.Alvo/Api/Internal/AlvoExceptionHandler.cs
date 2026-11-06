@@ -113,7 +113,7 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
 
         if (HookFailure(exception, MaxWrapperDepth) is { } hook)
         {
-            await ProblemResultFactory.HookFailed(hook.Extension, hook.Reason).ExecuteAsync(httpContext).ConfigureAwait(false);
+            await HookFailed(hook).ExecuteAsync(httpContext).ConfigureAwait(false);
             return;
         }
 
@@ -212,6 +212,10 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
     }
 
     private const int MaxWrapperDepth = 16;
+
+    private static IResult HookFailed(HookFailedException hook) => hook.Stage == HookFailureStage.Read
+        ? ProblemResultFactory.HookFailedRead(hook.Extensions, hook.Reason)
+        : ProblemResultFactory.HookFailed(hook.Extension, hook.Reason);
 
     /// <summary>
     /// A hook failure in <paramref name="exception"/> or in what wraps it, found the way a function's failure is. The hook's

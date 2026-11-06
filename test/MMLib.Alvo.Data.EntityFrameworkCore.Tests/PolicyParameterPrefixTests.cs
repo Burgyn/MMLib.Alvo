@@ -32,6 +32,10 @@ public class PolicyParameterPrefixTests
         => new[] { PolicyParameterPrefix.Using, PolicyParameterPrefix.WithCheck, PolicyParameterPrefix.TenantScope }
             .Distinct(StringComparer.Ordinal).Count().ShouldBe(3);
 
+    [Fact]
+    public void A_host_narrowing_binds_under_its_own_family()
+        => PolicyParameterPrefix.All.ShouldContain(PolicyParameterPrefix.Narrowing);
+
     /// <summary>
     /// Every literal this type declares is in <see cref="PolicyParameterPrefix.All"/>. Comparing
     /// <c>All</c> against a hand-written list of the same constants would not close this: a seventh

@@ -62,7 +62,7 @@ internal sealed class EfAlvoTransaction(EfAlvoData port, WriteUnit unit, AlvoCon
         port.PublishInUnitAsync(unit, type, subject, data, context, cancellationToken);
 
     /// <inheritdoc/>
-    public Task PublishFrameworkAsync(AlvoEvent @event, CancellationToken cancellationToken) =>
+    public Task PublishFrameworkAsync(AlvoFrameworkEnvelope @event, CancellationToken cancellationToken) =>
         port.PublishFrameworkInUnitAsync(unit, @event, cancellationToken);
 
     /// <inheritdoc/>

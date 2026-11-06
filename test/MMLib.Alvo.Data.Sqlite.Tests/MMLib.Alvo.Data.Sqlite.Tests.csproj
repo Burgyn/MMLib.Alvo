@@ -14,6 +14,7 @@
     <PackageReference Include="Microsoft.Extensions.Configuration" />
     <PackageReference Include="Microsoft.Extensions.Options" />
     <PackageReference Include="CsCheck" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
   </ItemGroup>
 
   <!-- The SQLite fixture and the dialect it records locks through, shared with
@@ -51,6 +52,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/AlvoDataBeforeHookWorld.cs" Link="_shared/AlvoDataBeforeHookWorld.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/OutboxStoreWorld.cs" Link="_shared/OutboxStoreWorld.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/DeliveryStoreWorld.cs" Link="_shared/DeliveryStoreWorld.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/TimerStoreWorld.cs" Link="_shared/TimerStoreWorld.cs" />
   </ItemGroup>
 
   <!-- The world the two event acceptance criteria run over, shared with
