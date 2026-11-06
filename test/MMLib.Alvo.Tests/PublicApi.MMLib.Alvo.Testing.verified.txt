@@ -558,10 +558,16 @@ namespace MMLib.Alvo.Testing.Data
     {
         protected AlvoDataRelationRuleTests() { }
         public System.Threading.Tasks.Task A_batch_create_reports_each_row_whose_relation_fails_at_its_index() { }
+        public System.Threading.Tasks.Task A_batch_reports_the_failing_row_s_check_at_its_index() { }
         public System.Threading.Tasks.Task A_create_through_a_relation_the_caller_satisfies_succeeds() { }
         public System.Threading.Tasks.Task A_create_whose_relation_the_caller_cannot_satisfy_is_refused() { }
+        public System.Threading.Tasks.Task A_failing_lookup_check_refuses_with_its_message_and_the_lookup_pointer() { }
         public System.Threading.Tasks.Task A_global_row_is_visible_through_the_caller_s_tenant_children_only() { }
+        public System.Threading.Tasks.Task A_hidden_lookup_field_is_not_named_by_the_refusal() { }
+        public System.Threading.Tasks.Task A_lookup_check_over_a_row_the_caller_cannot_list_refuses() { }
+        public System.Threading.Tasks.Task A_null_lookup_skips_its_check() { }
         public System.Threading.Tasks.Task A_null_reference_never_satisfies_a_forward_relation() { }
+        public System.Threading.Tasks.Task A_passing_lookup_check_lets_the_write_through() { }
         [Xunit.InlineData(new object[] {
                 "100.49",
                 1,
@@ -613,7 +619,9 @@ namespace MMLib.Alvo.Testing.Data
                 true,
                 true})]
         public System.Threading.Tasks.Task An_exists_never_matches_a_related_row_the_caller_cannot_list(string why, string? pinsList, bool inOtherTenant, bool ownedByCaller, bool visible) { }
+        public System.Threading.Tasks.Task An_update_changing_quantity_re_runs_the_check() { }
         public System.Threading.Tasks.Task An_update_moving_a_row_to_a_related_row_the_caller_cannot_list_is_refused() { }
+        public System.Threading.Tasks.Task An_update_that_changes_no_field_a_check_reads_skips_it() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
         public System.Threading.Tasks.Task Two_tenants_with_the_same_user_id_never_see_each_other_s_rows_through_a_relation() { }
         public System.Threading.Tasks.Task Two_users_list_get_count_and_write_only_through_their_own_related_rows() { }

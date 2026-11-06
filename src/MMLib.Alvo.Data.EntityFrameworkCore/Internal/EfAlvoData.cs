@@ -474,7 +474,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// seen is how a retry turns into a second insert of the same object.
     /// </para>
     /// <para>
-    /// <b>A <c>WITH CHECK</c> that reads a relation is judged inside the write's transaction, not here,</b> when the
+    /// <b>A <c>WITH CHECK</c> that reads a relation, or a lookup check, is judged inside the write's transaction, not here,</b> when the
     /// caller is about to open one (<paramref name="deferRelations"/>): its probe is a read, and before
     /// <c>BeginAsync</c> it would run outside a unit's transaction on the unit's own connection, and see no row the unit
     /// wrote. The write judges it with <see cref="EnsureRelationsHoldAsync"/> once the transaction is open.
@@ -499,8 +499,8 @@ internal sealed partial class EfAlvoData : IAlvoData
     }
 
     /// <summary>
-    /// The verdict <see cref="AuthorizedCandidateAsync"/> deferred: a <c>WITH CHECK</c> that reads a relation, judged by its
-    /// probe inside the transaction that is now open. A rule that reads none was judged already.
+    /// The verdict <see cref="AuthorizedCandidateAsync"/> deferred: a <c>WITH CHECK</c> that reads a relation, and the lookup
+    /// checks, judged by their probes inside the transaction that is now open. A write that probes nothing was judged already.
     /// </summary>
     private async Task EnsureRelationsHoldAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, Dictionary<string, object> candidate,
@@ -513,7 +513,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     }
 
     private static bool ProbesRelations(PolicyDecision decision) =>
-        decision.WithCheck is { } check && CelRewriter.HasRelation(check.Root);
+        decision.Checks.Count > 0 || (decision.WithCheck is { } check && CelRewriter.HasRelation(check.Root));
 
     /// <summary>
     /// One create carrying an idempotency token, retried while storage refuses the write because a rival
@@ -1169,7 +1169,68 @@ internal sealed partial class EfAlvoData : IAlvoData
         {
             throw new AlvoAuthorizationException(reason);
         }
+
+        if (await FailingCheckAsync(db, schema, decision, postImage, previous, context, cancellationToken).ConfigureAwait(false) is { } check)
+        {
+            throw new AlvoConstraintViolationException(
+                decision.Unnameable.Contains(check.Lookup) ? [] : [check.Lookup], check.Message);
+        }
     }
+
+    /// <summary>
+    /// The first of the decision's lookup checks, in declaration order, that refuses this row, or <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Run after <c>WITH CHECK</c>, by both its callers</b>, so a caller the rules refuse learns nothing from a check.
+    /// Each one is a probe: one correlated <c>EXISTS</c> over the looked-up row, with the related <c>list</c> rule and
+    /// tenant scope inside, its outer values bound from the post-image. A row the caller cannot list fails the check.
+    /// </para>
+    /// <para>
+    /// A null lookup skips its check, as SQL's <c>CHECK</c> passes an unknown, and an update runs a check only when a field
+    /// it reads changed, as a foreign key is re-checked only when its key did. The probe takes no lock, so a concurrent
+    /// change to the looked-up row after it is not seen.
+    /// </para>
+    /// </remarks>
+    private async Task<DescriptorCheck?> FailingCheckAsync(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoRecord postImage, AlvoRecord? previous,
+        AlvoContext context, CancellationToken cancellationToken)
+    {
+        foreach (var check in decision.Checks.Where(check => Applies(check, postImage, previous)))
+        {
+            if (!await _probe.HoldsAsync(db, check.Relation, schema, context, postImage, cancellationToken).ConfigureAwait(false))
+            {
+                return check;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool Applies(DescriptorCheck check, AlvoRecord postImage, AlvoRecord? previous) =>
+        postImage.Values.GetValueOrDefault(check.Lookup) is not null
+        && (previous is null || check.Reads.Any(field =>
+            !Equals(postImage.Values.GetValueOrDefault(field), previous.Values.GetValueOrDefault(field))));
+
+    /// <summary>
+    /// One batch row's refusal, or <see langword="null"/> when it may be written: the rules first, as
+    /// <see cref="EnsureWriteAllowedAsync"/> judges a single row, then the lookup checks, each reported with its own message.
+    /// </summary>
+    private async Task<AlvoRowRefusal?> RowRefusalAsync(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoRecord postImage, AlvoRecord? previous,
+        AlvoContext context, int index, CancellationToken cancellationToken)
+    {
+        if (await WriteRefusalAsync(db, schema, decision, postImage, previous, context, cancellationToken).ConfigureAwait(false) is { } reason)
+        {
+            return Forbidden(index, reason);
+        }
+
+        return await FailingCheckAsync(db, schema, decision, postImage, previous, context, cancellationToken).ConfigureAwait(false) is { } check
+            ? new AlvoRowRefusal(index, CheckCode, check.Message, null)
+            : null;
+    }
+
+    private const string CheckCode = "check";
 
     /// <summary>
     /// Why this row may not be written, or <see langword="null"/> when it may.
@@ -2940,8 +3001,8 @@ internal sealed partial class EfAlvoData : IAlvoData
             db.Rows(schema.Name).EntityType,
             Stamped(schema, WholeRowValues(schema, values), context, now, isUpdate: false));
 
-        return await WriteRefusalAsync(db, schema, decision, Unmasked(candidate), previous: null, context, cancellationToken).ConfigureAwait(false) is { } rejected
-            ? (null, Forbidden(index, rejected))
+        return await RowRefusalAsync(db, schema, decision, Unmasked(candidate), previous: null, context, index, cancellationToken).ConfigureAwait(false) is { } rejected
+            ? (null, rejected)
             : (candidate, null);
     }
 
@@ -2994,8 +3055,8 @@ internal sealed partial class EfAlvoData : IAlvoData
 
         var patched = Patched(db.Rows(schema.Name).EntityType, candidate, patch);
 
-        return await WriteRefusalAsync(db, schema, decision, Unmasked(patched), previous: null, context, cancellationToken).ConfigureAwait(false) is { } refused
-            ? (null, Forbidden(index, refused))
+        return await RowRefusalAsync(db, schema, decision, Unmasked(patched), previous: null, context, index, cancellationToken).ConfigureAwait(false) is { } refused
+            ? (null, refused)
             : (patched, null);
     }
 
@@ -3085,9 +3146,9 @@ internal sealed partial class EfAlvoData : IAlvoData
 
             vetted = hostVetted!;
 
-            if (await WriteRefusalAsync(db, schema, decision, Merge(preImage, vetted), preImage, context, cancellationToken) is { } rejected)
+            if (await RowRefusalAsync(db, schema, decision, Merge(preImage, vetted), preImage, context, index, cancellationToken) is { } rejected)
             {
-                refusals.Add(Forbidden(index, rejected));
+                refusals.Add(rejected);
                 continue;
             }
 

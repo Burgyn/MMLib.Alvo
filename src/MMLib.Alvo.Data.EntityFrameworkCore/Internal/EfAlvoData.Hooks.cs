@@ -113,8 +113,8 @@ internal sealed partial class EfAlvoData
 
         var patched = Patched(db.Rows(schema.Name).EntityType, candidate, patch);
 
-        return await WriteRefusalAsync(db, schema, decision, Unmasked(patched), previous: null, context, cancellationToken).ConfigureAwait(false) is { } refusal
-            ? (null, Forbidden(index, refusal))
+        return await RowRefusalAsync(db, schema, decision, Unmasked(patched), previous: null, context, index, cancellationToken).ConfigureAwait(false) is { } refusal
+            ? (null, refusal)
             : (patched, null);
     }
 

@@ -11,7 +11,11 @@ public abstract partial class DataApiEngineTests
 {
     private static readonly Guid _relationsTenant = Guid.NewGuid();
 
-    private static readonly string[] _relationScopes = ["customers:read", "customers:write", "orders:read", "orders:write"];
+    private static readonly string[] _relationScopes =
+    [
+        "customers:read", "customers:write", "orders:read", "orders:write", "products:read", "products:write",
+        "order_lines:read", "order_lines:write",
+    ];
 
     private static readonly TestApiKey _relationsClerk = new("relations-clerk", ["clerk"], _relationScopes, _relationsTenant);
 
@@ -51,6 +55,37 @@ public abstract partial class DataApiEngineTests
         own.StatusCode.ShouldBe(HttpStatusCode.OK, await own.ReadTextAsync());
         placed.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await placed.ReadTextAsync());
         (await placed.ReadJsonObjectAsync())["violations"]![0]!["code"]!.GetValue<string>().ShouldBe("unresolved-reference");
+    }
+
+    [Fact]
+    public async Task A_failing_lookup_check_answers_422_with_its_message_and_pointer_on_every_engine()
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            "relations-desk.alvo.json", [_relationsClerk, _relationsAlice, _relationsBob]);
+        using var product = await world.SendAsync(HttpMethod.Post, "/api/products", _relationsClerk, body: new JsonObject
+        {
+            ["active"] = false,
+            ["stock"] = 5,
+            ["tenant_id"] = _relationsTenant,
+        });
+        product.StatusCode.ShouldBe(HttpStatusCode.Created, await product.ReadTextAsync());
+
+        using var line = await world.SendAsync(HttpMethod.Post, "/api/order_lines", _relationsAlice, body: new JsonObject
+        {
+            ["product_id"] = (await product.ReadJsonObjectAsync())["id"]!.GetValue<Guid>(),
+            ["quantity"] = 1,
+            ["tenant_id"] = _relationsTenant,
+        });
+
+        line.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await line.ReadTextAsync());
+        var problem = await line.ReadJsonObjectAsync();
+        problem["type"]!.GetValue<string>().ShouldEndWith("validation");
+        var violation = problem["violations"]!.AsArray().ShouldHaveSingleItem()!;
+        violation["pointer"]!.GetValue<string>().ShouldBe("/product_id");
+        violation["code"]!.GetValue<string>().ShouldBe("check");
+        violation["message"]!.GetValue<string>().ShouldBe("This product is not available in that quantity.");
+        violation["fixSuggestion"]!.GetValue<string>().ShouldBe(
+            "Point 'product_id' at a record that satisfies this check, or change the values the check compares.");
     }
 
     private static async Task<Guid> CreateRelatedOrderAsync(AlvoApiWorld world, TestApiKey owner)

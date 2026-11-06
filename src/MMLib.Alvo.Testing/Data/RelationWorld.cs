@@ -10,11 +10,21 @@ namespace MMLib.Alvo.Testing.Data;
 /// The relation-rule world, tenancy on: <c>customers</c> listed by owner; <c>orders</c> listed through an active customer
 /// and created through an owned one; <c>quotes</c> created under the customer's credit limit and start; <c>projects</c>
 /// listed by membership; <c>regions</c> (global) listed through a managed <c>site</c>; <c>employees</c> read through
-/// their manager's region. Every create rule also admits the built-in <c>admin</c> role, which seeds rows in their own tenant.
+/// their manager's region; <c>order_lines</c> and <c>gift_lines</c> (whose lookup is hidden) checked against an active,
+/// stocked <c>products</c> row. Every create rule also admits the built-in <c>admin</c> role, which seeds rows in their own tenant.
 /// </summary>
 /// <param name="data">The port the world is seeded through.</param>
 internal sealed class RelationWorld(IAlvoData data)
 {
+    internal Task<Guid> SeedProductAsync(TenantId tenant, bool active, int stock) =>
+        SeedAsync(Products, tenant, ("active", active), ("stock", stock));
+
+    internal Dictionary<string, object?> Line(Guid? product, int quantity, string note = "line") =>
+        Row(("product_id", product), ("quantity", quantity), ("note", note), ("tenant_id", Tenant1.Value));
+
+    internal Dictionary<string, object?> Gift(Guid? product, int quantity) =>
+        Row(("product_id", product), ("quantity", quantity), ("tenant_id", Tenant1.Value));
+
     internal const string Customers = "customers";
     internal const string Orders = "orders";
     internal const string Quotes = "quotes";
@@ -27,6 +37,12 @@ internal sealed class RelationWorld(IAlvoData data)
     internal const string Boards = "boards";
     internal const string Pins = "pins";
     internal const string Stickers = "stickers";
+    internal const string Products = "products";
+    internal const string OrderLines = "order_lines";
+    internal const string GiftLines = "gift_lines";
+
+    /// <summary>The message of the lookup check <c>order_lines</c> and <c>gift_lines</c> declare.</summary>
+    internal const string Unavailable = "This product is not available in that quantity.";
 
     /// <summary>The <c>pins</c> list rule of the default world: a pin is listed by its owner.</summary>
     internal const string PinsByOwner = "owner_id == @user.id";
@@ -118,6 +134,9 @@ internal sealed class RelationWorld(IAlvoData data)
         Scoped(Boards, Text("name")),
         Scoped(Pins, Ref("board_id", Boards), Text("color"), Uuid("owner_id")),
         Scoped(Stickers, Ref("pin_id", Pins)),
+        Scoped(Products, Bool("active"), Int("stock")),
+        Scoped(OrderLines, Ref("product_id", Products), Int("quantity"), Text("note")),
+        Scoped(GiftLines, Ref("product_id", Products), Int("quantity")),
     ]);
 
     private const string DescriptorJson = $$"""
@@ -172,7 +191,23 @@ internal sealed class RelationWorld(IAlvoData data)
               "rules": "__PINS_RULES__" },
             "stickers": { "tenancy": "scoped",
               "fields": { "pin_id": { "type": "ref", "entity": "pins" } },
-              "rules": { "list": "true", "create": "pin_id.color == 'red'" } }
+              "rules": { "list": "true", "create": "pin_id.color == 'red'" } },
+            "products": { "tenancy": "scoped",
+              "fields": { "active": { "type": "boolean" }, "stock": { "type": "integer" } },
+              "rules": { "list": "'authenticated' in @user.roles", "get": "'authenticated' in @user.roles",
+                         "create": "{{Seeding}}", "update": "{{Seeding}}" } },
+            "order_lines": { "tenancy": "scoped",
+              "fields": { "product_id": { "type": "ref", "entity": "products" }, "quantity": { "type": "integer" },
+                          "note": { "type": "string" } },
+              "rules": { "list": "true", "get": "true", "create": "'authenticated' in @user.roles",
+                         "update": "'authenticated' in @user.roles" },
+              "checks": [ { "lookup": "product_id", "expr": "product_id.active && quantity <= product_id.stock",
+                            "message": "{{Unavailable}}" } ] },
+            "gift_lines": { "tenancy": "scoped",
+              "fields": { "product_id": { "type": "ref", "entity": "products", "hidden": true }, "quantity": { "type": "integer" } },
+              "rules": { "list": "true", "get": "true", "create": "'authenticated' in @user.roles" },
+              "checks": [ { "lookup": "product_id", "expr": "product_id.active && quantity <= product_id.stock",
+                            "message": "{{Unavailable}}" } ] }
           }
         }
         """;
@@ -199,6 +234,8 @@ internal sealed class RelationWorld(IAlvoData data)
     private static FieldSchema Uuid(string name) => new() { Name = name, Type = FieldType.Uuid, Nullable = true };
 
     private static FieldSchema Bool(string name) => new() { Name = name, Type = FieldType.Boolean, Nullable = true };
+
+    private static FieldSchema Int(string name) => new() { Name = name, Type = FieldType.Integer, Nullable = true };
 
     private static FieldSchema Text(string name) => new() { Name = name, Type = FieldType.String, Nullable = true };
 

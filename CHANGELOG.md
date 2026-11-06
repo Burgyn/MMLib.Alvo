@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Lookup checks** (HX-19): `entities.<e>.checks: [{ lookup, expr, message }]` follows a ref field to the row it names and refuses a create, or an update that changes a field the check reads, when that row is not one the caller may list or fails `expr` — 422 `validation`, violation code `check`, the check's own `message` and a pointer at the lookup field (none when the field is hidden). A null lookup skips the check; a check reads no `@user`/`@tenant`, and apply refuses one that does or reads no `<lookup>.<field>`.
 - **Virtual fields and record enrichers** (HX-16): a field declared `"virtual": true` has no column, is read-only and refused in writes, expressions and filter/sort/select (422 on the Data API); an embedded host's `Enrich(…)` fills it — or hides a field — on every read and write echo, after the caller's rules and masks. The applied schema a version row stores now records which fields are virtual; a binary older than this release reading a newer row ignores that and would plan a column for each virtual field, so do not roll a deployment back across it.
 - **Query narrowing** (HX-16): an embedded host can AND a filter into every non-system read of an entity — list, get and count — with `Entity(…).Narrow(…)`; it never widens what the rules allow and never applies to writes.
 - **Integrity in the descriptor** (HX-11). A field's `validation` is now enforced as a database `CHECK` constraint on

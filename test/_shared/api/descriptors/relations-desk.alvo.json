@@ -29,6 +29,37 @@
         "update": "customer_id.active == true",
         "create": "'clerk' in @user.roles || customer_id.owner_id == @user.id"
       }
+    },
+    "products": {
+      "tenancy": "scoped",
+      "fields": {
+        "active": { "type": "boolean" },
+        "stock": { "type": "integer" }
+      },
+      "rules": {
+        "list": "'member' in @user.roles || 'clerk' in @user.roles",
+        "get": "'member' in @user.roles || 'clerk' in @user.roles",
+        "create": "'clerk' in @user.roles"
+      }
+    },
+    "order_lines": {
+      "tenancy": "scoped",
+      "fields": {
+        "product_id": { "type": "ref", "entity": "products" },
+        "quantity": { "type": "integer" }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "'member' in @user.roles"
+      },
+      "checks": [
+        {
+          "lookup": "product_id",
+          "expr": "product_id.active && quantity <= product_id.stock",
+          "message": "This product is not available in that quantity."
+        }
+      ]
     }
   }
 }
