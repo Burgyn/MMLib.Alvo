@@ -23,7 +23,7 @@
   - Each next slice: `git fetch origin && git switch -c hx/13<x>-… origin/main` once the previous PR merged; if it has not, branch from the previous slice and retarget the PR to `main` after it merges (rebase, never merge `main` in).
 - **Parallel work:** HX-12 (`alvo_sequences`, exclusion/partial indexes) and HX-16 (reads) land independently. Do not use their symbols. Shared-file edits stay small and **append-only**: `AlvoFrameworkTables` (append the three suffixes at the end of the constants), `Directory.Packages.props` (one line), `CHANGELOG.md`, `docs/PLAN.md`, the spec, `PublicApi.*.verified.txt`, skills. On a rebase conflict in those files keep both sides.
 - **Public surface added is exactly** (each item beyond §5 row `13` is a Decision below):
-  - Abstractions `MMLib.Alvo.Scheduling` (slice A): `IAlvoScheduler`, `ITimerStore`, `TimerEntry`, `ClaimedTimer`, `TimerCounts`, `ScheduleDefinition`, `ClaimedSchedule`, `ScheduleAdvance`, `StoredSchedule`; (slice B) `IAlvoTenantCatalog`.
+  - Abstractions `MMLib.Alvo.Scheduling` (slice A): `IAlvoScheduler`, `ITimerStore`, `TimerEntry` (sealed class, **internal** factory), `ClaimedTimer`, `TimerCounts`, `ScheduleDefinition`, `ClaimedSchedule`, `ScheduleAdvance`, `StoredSchedule`; (slice B) `IAlvoTenantCatalog`. Abstractions `MMLib.Alvo.Events` (slice A): `AlvoFrameworkEnvelope` (sealed, **internal** constructor — minted only by `AlvoFrameworkEvent.Create`).
   - Abstractions `MMLib.Alvo.Management`: (B) `AlvoExtensionKind.Schedule = 7`, `AlvoExtensionStage.Scheduled = 4`, `ManagementExtension.Cron`, `.TimeZone`, `.NextRunAt`, `.LastRunAt`, `.LastOutcome`, `ManagementExtensionCatalog.Timers`, `ManagementTimerCounts`; (C) `AlvoExtensionKind.DataMigration = 8`, `ManagementExtension.AfterRevision`.
   - Core `MMLib.Alvo.Scheduling`: (A) `AlvoSchedulerExtensions.ScheduleAsync<TMessage>`; (B) `IAlvoScheduledJob`, `AlvoJobContext`, `AlvoScheduleOptions`, `AlvoScheduleScope`; (C) `IAlvoDataMigration`. Core `MMLib.Alvo.Extensions`: (B) `AlvoDeliveryOptions.MaxJobConcurrency`. DI namespace `AlvoExtensionBuilderExtensions`: (B) `AddSchedule<TJob>`, (C) `AddDataMigration<TMigration>`.
   - Testing (A): `MMLib.Alvo.Testing.Scheduling.TimerStoreContractTests`, `ITimerStoreWorld`.
@@ -47,13 +47,14 @@
 5. **Tenant** = the argument, else the open unit's caller tenant; required when the current schema has a `Scoped` entity; an argument differing from the open unit's tenant is refused. Cost: a cross-tenant timer from inside a unit is impossible (intended).
 6. **A schedule/migration is a `HandlerRegistration` with a `JobSpec`** (one id, one delivery engine), `AlvoOrdering.None` so a dead run never blocks the next occurrence. Cost: two runs overlap if one outlasts the period.
 7. **Missed occurrences fire once, then resume from `max(now, scheduledFor)`** (no backlog). Cost: a host down for a week runs a daily job once, not seven times.
-8. **`alvo_schedules` gains `cron`, `time_zone`; drops `last_outcome`** (read from the newest delivery). A changed cron/zone recomputes `next_run_at` at sync. Cost: an occurrence leased across a redeploy that changed the cron does not run.
+8. **`alvo_schedules` gains `cron`, `time_zone`; drops `last_outcome`** (read from the newest delivery). Sync runs once at host start: a changed cron/zone recomputes `next_run_at`, an id no longer registered is deleted. Cost: an occurrence leased across a redeploy that changed the cron does not run; during a rolling deploy a replica still registering a removed schedule re-creates its row until it stops.
 9. **Cron = Cronos `CronFormat.Standard` (5 fields)**, zone = `TimeZoneInfo.FindSystemTimeZoneById` (IANA), both checked at boot with every problem at once. Cost: no sub-minute schedules (use a timer).
-10. **Data migration**: event `alvo.migration.<id>` (E12 extended), one run per tenant from `IAlvoTenantCatalog` when the schema has a `Scoped` entity (no catalog → boot refuses), else one run with `Tenant = null`; no `configure` overload (15 min, default retry); started by `SchedulePump` polling the applied revision — no apply hook. Cost: up to one poll interval between an apply and the migration.
+10. **Data migration — deviation from §4.10** ("as `System(null)` iterating tenants"): event `alvo.migration.<id>` (E12 extended), **one run per tenant** listed by `IAlvoTenantCatalog` when the schema has a `Scoped` entity, else one run with `Tenant = null`, so no run reads another tenant; tenants created after the start never get the migration. No catalog: refused at boot when the boot schema is scoped; a schema that becomes scoped by a later apply is guarded at run time (logged `TenantCatalogMissing`, skipped, not marked, retried each round). No `configure` overload (15 min, default retry); started by `SchedulePump` polling the applied revision — no apply hook. Cost: a migration needing a cross-tenant view cannot have one; up to one poll interval between an apply and the start.
 11. **Dashboard data rides appended init members** (`ManagementExtension.Cron…LastOutcome`, `ManagementExtensionCatalog.Timers`) — no `IAlvoOperations` member. Cost: the catalog read does two more store reads.
 12. **Run now on `EachTenant`** creates one run per tenant and returns the first tenant's delivery; fan-out is immediate (`IDeliveryStore.FanOutAsync`, idempotent with the dispatcher's later fan-out). Cost: the answer names one of n runs.
 13. **A self-re-arming loop is stopped by fan-out** (dead `chain-depth-exceeded`, as HX-03 stops event loops); handlers never run above depth 8, so `ScheduleAsync`'s own refusal is pinned at an ambient depth of 9. Cost: none.
 14. **#376 closes with slice B; #390 with slice D.**
+15. **`ITimerStore` never takes a bare `AlvoEvent`** (R-7, E12): timer fires take an `AlvoCustomEvent` (the custom door refuses `alvo.*`); schedule/migration/run-now writes take `AlvoFrameworkEnvelope`, which only `AlvoFrameworkEvent.Create` can mint (its return type changes; `CommandCompletion`/`IAlvoCommandUnit` follow); `TimerEntry` is built only by the core's writer, so provenance and depth are never caller-controlled. Cost: a third-party provider reads these types but cannot build them outside its tests.
 
 ## Review Focus
 
@@ -66,7 +67,7 @@
 ## File structure
 
 **Abstractions** `src/MMLib.Alvo.Abstractions/Scheduling/` (new): `IAlvoScheduler.cs`, `ITimerStore.cs`, `TimerStoreRecords.cs`, `IAlvoTenantCatalog.cs` (B). `AlvoFrameworkTables.cs` (+3 suffixes). `Management/{AlvoExtensionKind,AlvoExtensionStage,ManagementExtension,ManagementExtensionCatalog}.cs`, `Management/ManagementTimerCounts.cs` (B).
-**Core** `src/MMLib.Alvo/Scheduling/` (new slice): `Setup.cs`, `AlvoScheduler.cs`, `TimerProvenance.cs`, `TimerPump.cs`, `AlvoSchedulerExtensions.cs`; (B) `IAlvoScheduledJob.cs`, `AlvoJobContext.cs`, `AlvoScheduleOptions.cs`, `AlvoScheduleScope.cs`, `CronSchedule.cs`, `JobSpec.cs`, `JobInvoker.cs`, `SchedulePump.cs`, `ScheduleRuns.cs`, `ScheduleChecks.cs`; (C) `IAlvoDataMigration.cs`, `DataMigrationStarter.cs`. Modified: `Events/Internal/{EventPump,DeliveryDispatcher,DeliveryFanOut,DeliveryVocabulary}.cs`, `Extensions/Internal/{ExtensionRegistration,ExtensionBindingCompiler,ExtensionCatalog}.cs`, `Extensions/{AlvoExtensionBuilderExtensions,AlvoDeliveryOptions}.cs`, `Management/Internal/AlvoOperationsService.Writes.cs`, `AlvoServiceCollectionExtensions.cs`, `MMLib.Alvo.csproj`.
+**Core** `src/MMLib.Alvo/Scheduling/` (new slice): `Setup.cs`, `AlvoScheduler.cs`, `TimerPump.cs`, `AlvoSchedulerExtensions.cs`; (B) `IAlvoScheduledJob.cs`, `AlvoJobContext.cs`, `AlvoScheduleOptions.cs`, `AlvoScheduleScope.cs`, `CronSchedule.cs`, `JobSpec.cs`, `SchedulePump.cs`, `ScheduleRuns.cs`, `ScheduleChecks.cs`; (C) `IAlvoDataMigration.cs`, `DataMigrationStarter.cs`. Modified: `Events/Internal/{EventPump,DeliveryDispatcher,DeliveryFanOut,DeliveryVocabulary}.cs`, `Extensions/Internal/{ExtensionRegistration,ExtensionBindingCompiler,ExtensionCatalog,HandlerInvoker}.cs`, `Extensions/{AlvoExtensionBuilderExtensions,AlvoDeliveryOptions}.cs`, `Management/Internal/AlvoOperationsService.Writes.cs`, `AlvoServiceCollectionExtensions.cs`, `MMLib.Alvo.csproj`.
 **EF driver**: `Internal/{TimerTable,ScheduleTable,DataMigrationTable}.cs`, `Internal/EfCoreTimerStore.cs` (new); `AlvoEfCoreProvider.cs`, `Internal/EfAlvoData.Units.cs` (one internal entry).
 **Analyzers**: `AlvoSymbols.cs` (allow `IAlvoScheduler`).
 **Testing**: `src/MMLib.Alvo.Testing/Scheduling/{TimerStoreContractTests,TimerStoreContractTests.Schedules,ITimerStoreWorld}.cs`.
@@ -81,21 +82,32 @@
 ## Task 1: `ITimerStore` and the timer table — upsert, cancel, claim, fire in one commit
 
 **Files:**
-- Create: `src/MMLib.Alvo.Abstractions/Scheduling/{ITimerStore,TimerStoreRecords}.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/{TimerTable,EfCoreTimerStore}.cs`, `src/MMLib.Alvo.Testing/Scheduling/{ITimerStoreWorld,TimerStoreContractTests}.cs`, `test/_shared/ef/TimerStoreWorld.cs`, `test/MMLib.Alvo.Data.Sqlite.Tests/SqliteTimerStoreTests.cs`, `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlTimerStoreTests.cs`
-- Modify: `src/MMLib.Alvo.Abstractions/AlvoFrameworkTables.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/AlvoEfCoreProvider.cs`, both engine test `.csproj` (link `TimerStoreWorld.cs`), the Abstractions and Testing public-API baselines.
+- Create: `src/MMLib.Alvo.Abstractions/Scheduling/{ITimerStore,TimerStoreRecords,TimerEntry,TimerProvenance}.cs`, `src/MMLib.Alvo.Abstractions/Events/AlvoFrameworkEnvelope.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/{TimerTable,EfCoreTimerStore}.cs`, `src/MMLib.Alvo.Testing/Scheduling/{ITimerStoreWorld,TimerStoreContractTests}.cs`, `test/_shared/ef/TimerStoreWorld.cs`, `test/MMLib.Alvo.Data.Sqlite.Tests/SqliteTimerStoreTests.cs`, `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlTimerStoreTests.cs`, `test/MMLib.Alvo.Abstractions.Tests/Scheduling/TimerStorePortTests.cs`
+- Modify: `src/MMLib.Alvo.Abstractions/AlvoFrameworkTables.cs`, `src/MMLib.Alvo.Abstractions/Events/AlvoFrameworkEvent.cs` (returns `AlvoFrameworkEnvelope`), `src/MMLib.Alvo.Abstractions/Data/IAlvoCommandUnit.cs` (`PublishFrameworkAsync(AlvoFrameworkEnvelope, …)`), `src/MMLib.Alvo/Commands/Internal/CommandCompletion.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/{EfAlvoTransaction,EfAlvoData.Units,SystemSchemaInitializer}.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/AlvoEfCoreProvider.cs`, `test/MMLib.Alvo.Tests/Events/AlvoFrameworkEventTests.cs`, `test/_shared/ef/LedgerFacts.cs` (`.Envelope` where they read the event), both engine test `.csproj` (link `TimerStoreWorld.cs`), the Abstractions and Testing public-API baselines.
 
 **Interfaces — Produces** (namespace `MMLib.Alvo.Scheduling`; the schedule/migration members are declared here and implemented in Task 2):
 
 ```csharp
-public sealed record TimerEntry
+namespace MMLib.Alvo.Events;
+public sealed class AlvoFrameworkEnvelope            // an event of the reserved alvo namespace, built only by Alvo
 {
-    public required string Scope { get; init; }          // tenant id text, or "" for none
-    public required string Key { get; init; }
-    public required DateTimeOffset DueAt { get; init; }
-    public required string MessageType { get; init; }
-    public required string Payload { get; init; }        // the flat data, JSON
-    public required string Provenance { get; init; }     // opaque to the store, JSON written by the core
+    internal AlvoFrameworkEnvelope(AlvoEvent envelope) => Envelope = envelope;
+    public AlvoEvent Envelope { get; }
 }
+// AlvoFrameworkEvent.Create(...) now returns AlvoFrameworkEnvelope (it is the only caller of the constructor).
+
+namespace MMLib.Alvo.Scheduling;
+public sealed class TimerEntry                       // built only by the core's scheduler (IVT); a provider reads it
+{
+    internal static TimerEntry Of(string scope, string key, DateTimeOffset dueAt, AlvoCustomEvent message, AlvoProvenance provenance);
+    public string Scope { get; }          // tenant id text, or "" for none
+    public string Key { get; }
+    public DateTimeOffset DueAt { get; }  // UTC
+    public string MessageType { get; }    // message.Envelope.Type — custom only, by construction
+    public string Payload { get; }        // the message's data through AlvoEventJson
+    public string Provenance { get; }     // TimerProvenance.Write(provenance), opaque to the store
+}
+internal static class TimerProvenance { internal static string Write(AlvoProvenance p); internal static AlvoProvenance Read(string json); } // malformed → None
 public sealed record ClaimedTimer
 {
     public required string Scope { get; init; }  public required string Key { get; init; }
@@ -111,7 +123,7 @@ public sealed record ScheduleAdvance
 {
     public required string Id { get; init; }  public required string Claimant { get; init; }
     public required DateTimeOffset ScheduledFor { get; init; }  public required DateTimeOffset NextRunAt { get; init; }
-    public required IReadOnlyList<AlvoEvent> Events { get; init; }
+    public required IReadOnlyList<AlvoFrameworkEnvelope> Events { get; init; }
 }
 public sealed record StoredSchedule
 { public required string Id { get; init; } public required string Cron { get; init; } public required string TimeZone { get; init; } public required DateTimeOffset NextRunAt { get; init; } public DateTimeOffset? LastRunAt { get; init; } }
@@ -122,19 +134,19 @@ public interface ITimerStore
     Task<Guid> UpsertAsync(TimerEntry timer, CancellationToken cancellationToken = default);       // enlists in the flow's unit when it owns it
     Task<bool> CancelAsync(string scope, string key, CancellationToken cancellationToken = default); // enlists likewise
     Task<IReadOnlyList<ClaimedTimer>> ClaimTimersAsync(int batchSize, TimeSpan lease, CancellationToken cancellationToken = default);
-    Task<bool> FireAsync(string scope, string key, Guid generation, AlvoEvent @event, CancellationToken cancellationToken = default);
+    Task<bool> FireAsync(string scope, string key, Guid generation, AlvoCustomEvent @event, CancellationToken cancellationToken = default);
     Task<TimerCounts> CountTimersAsync(CancellationToken cancellationToken = default);
     Task SyncSchedulesAsync(IReadOnlyList<ScheduleDefinition> schedules, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ClaimedSchedule>> ClaimSchedulesAsync(string claimant, TimeSpan lease, CancellationToken cancellationToken = default);
     Task<bool> AdvanceScheduleAsync(ScheduleAdvance advance, CancellationToken cancellationToken = default);
-    Task AppendRunAsync(IReadOnlyList<AlvoEvent> events, CancellationToken cancellationToken = default);
+    Task AppendRunAsync(IReadOnlyList<AlvoFrameworkEnvelope> events, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<StoredSchedule>> SchedulesAsync(CancellationToken cancellationToken = default);
-    Task<bool> StartMigrationAsync(string id, int revision, IReadOnlyList<AlvoEvent> events, CancellationToken cancellationToken = default);
+    Task<bool> StartMigrationAsync(string id, int revision, IReadOnlyList<AlvoFrameworkEnvelope> events, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<string>> StartedMigrationsAsync(CancellationToken cancellationToken = default);
 }
 ```
 
-XML docs state the contract each test below pins: `FireAsync` deletes the row only at that generation and appends the event in the same transaction, returning `false` (and appending nothing) when the row moved, was cancelled, or was already fired; a provider implements `ITimerStore` and `IOutboxStore` over one database.
+`SyncSchedulesAsync` upserts the given schedules **and deletes every stored id not among them** (an empty list empties the table). XML docs state the contract each test below pins: `FireAsync` deletes the row only at that generation and appends the event in the same transaction, returning `false` (and appending nothing) when the row moved, was cancelled, or was already fired; a provider implements `ITimerStore` and `IOutboxStore` over one database.
 
 `ITimerStoreWorld` (Testing): `ITimerStore Store`, `DateTimeOffset Now`, `void Advance(TimeSpan)`, `Task<IReadOnlyList<string>> OutboxTypesAsync()` (types appended, in id order), `Task BreakOutboxAsync()` (drops the outbox table so the next append fails), `Task<IReadOnlyList<(string Id, int Revision)>> MigrationRowsAsync()`.
 
@@ -178,7 +190,27 @@ public async Task A_reschedule_during_a_claim_fences_the_stale_fire_and_the_new_
 }
 ```
 
-Also, each in the same style: `A_cancel_during_a_claim_leaves_the_fire_nothing_to_append` (claim, `CancelAsync` → `true`, fire → `false`, outbox empty); `A_stale_claim_cannot_fire_a_timer_cancelled_and_rescheduled_under_the_same_key` (claim gen g1, cancel, upsert same key due in 1 h, fire(g1) → `false`, the row is still there: `CountTimersAsync().Pending == 1`); `The_same_key_in_two_scopes_is_two_timers` (scopes `"a"`, `"b"`; cancel `"a"` → `b` still claimable); `A_fire_removes_the_timer_and_appends_its_event_in_one_commit` (after fire: `Pending == 0`, outbox has the event with its id); `A_fire_whose_outbox_append_fails_leaves_the_timer_in_place` (`BreakOutboxAsync`, fire throws, then `Pending == 1` and after the lease runs out the timer is claimable again with the same generation); `An_expired_lease_makes_a_timer_claimable_again` (advance past `_lease`); `A_claim_takes_the_earliest_due_first_and_at_most_the_batch` (3 due, batch 2 → the two earliest); `Counts_split_pending_from_due` (`Pending` = all rows, `Due` = `due_at <= now`); `A_cancel_of_an_unknown_key_answers_false`.
+Also, each in the same style: `A_cancel_during_a_claim_leaves_the_fire_nothing_to_append` (claim, `CancelAsync` → `true`, fire → `false`, outbox empty); `A_stale_claim_cannot_fire_a_timer_cancelled_and_rescheduled_under_the_same_key` (claim gen g1, cancel, upsert same key due in 1 h, fire(g1) → `false`, the row is still there: `CountTimersAsync().Pending == 1`); `The_same_key_in_two_scopes_is_two_timers` (scopes `"a"`, `"b"`; cancel `"a"` → `b` still claimable); `A_fire_removes_the_timer_and_appends_its_event_in_one_commit` (after fire: `Pending == 0`, outbox has the event with its id); `A_fire_whose_outbox_append_fails_leaves_the_timer_in_place` (`BreakOutboxAsync`, fire throws, then `Pending == 1` and after the lease runs out the timer is claimable again with the same generation); `An_expired_lease_makes_a_timer_claimable_again` (advance past `_lease`); `A_claim_takes_the_earliest_due_first_and_at_most_the_batch` (3 due, batch 2 → the two earliest); `Counts_split_pending_from_due` (`Pending` = all rows, `Due` = `due_at <= now`); `A_cancel_of_an_unknown_key_answers_false`. Helpers: `Timer(key, due)` = `TimerEntry.Of("", key, due, Custom("reminders.due"), AlvoProvenance.None)`; `Event(type)` = an `AlvoCustomEvent` built through `AlvoCustomEnvelope.Build`; `Framework(type)` = `AlvoFrameworkEvent.Create(…)` — the Testing package reaches these through Abstractions' existing `InternalsVisibleTo("MMLib.Alvo.Testing")`.
+
+And the port pin (`TimerStorePortTests`, Abstractions.Tests, ruling R-7):
+
+```csharp
+[Fact]
+public void A_host_built_schedule_event_cannot_reach_the_outbox_through_ITimerStore()
+{
+    var eventParameters = typeof(ITimerStore).GetMethods().SelectMany(method => method.GetParameters())
+        .Select(parameter => parameter.ParameterType).Concat(typeof(ScheduleAdvance).GetProperties().Select(property => property.PropertyType));
+
+    eventParameters.ShouldNotContain(typeof(AlvoEvent));
+    eventParameters.ShouldNotContain(typeof(IReadOnlyList<AlvoEvent>));
+    typeof(AlvoFrameworkEnvelope).GetConstructors(BindingFlags.Public | BindingFlags.Instance).ShouldBeEmpty();
+    typeof(AlvoFrameworkEnvelope).GetMethods(BindingFlags.Public | BindingFlags.Static).ShouldBeEmpty();
+    typeof(TimerEntry).GetConstructors(BindingFlags.Public | BindingFlags.Instance).ShouldBeEmpty();
+    Should.Throw<ArgumentException>(() => AlvoCustomEvent.Create(HostBuilt("alvo.schedule.nightly_roll")));
+}
+```
+
+(`HostBuilt` = a public `new AlvoEvent { … }` with that type, the way a host would build one.)
 
 - [ ] **Step 2: Run to verify they fail** — `dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests --filter-class '*SqliteTimerStoreTests'`. Expected: compile failure (`ITimerStore` missing).
 
@@ -240,21 +272,21 @@ internal static class TimerTable
 
 `ClaimSql`'s remark (XML doc on the method) repeats the outbox's argument: the outer `WHERE` repeats `Claimable` because PostgreSQL's EvalPlanQual re-check runs only the outer predicate, so a second claimant woken on a row another claimant just leased sees `lease_until > @now` and skips it. An upsert clears `lease_until`, so a moved timer is claimable at its new time even while the old claim's lease runs.
 
-`EfCoreTimerStore` (internal, `ITimerStore`): constructor `(RelationalConnectionFactory connections, AlvoOptions options, TimeProvider time, Func<EfAlvoData> data)`; table names from `options.SchemaPrefix`; `EnsureAsync` creates the three tables and their indexes inside the write gate (the `EfCoreOutboxStore.EnsureAsync` shape; `ScheduleTable`/`DataMigrationTable` DDL arrive in Task 2 — `EnsureAsync` calls them there). Every write runs through one gated-transaction helper copied from `EfCoreCommandLedger` (open → `WriteGate.EnterAsync` → `BeginTransactionAsync` → work → commit when it says so). The fire:
+**The tables are created at boot**, beside the deliveries: `SystemSchemaInitializer.EnsureAsync` creates `TimerTable.Ddl` through `IfNotExistsDdl.CreateTableAsync` and `DueIndexDdl` through `CreateIndexIfMissingAsync` (Task 2 adds `ScheduleTable`/`DataMigrationTable` there). `EfCoreTimerStore` (internal, `ITimerStore`): constructor `(RelationalConnectionFactory connections, AlvoOptions options, TimeProvider time, Func<EfAlvoData> data)`; table names from `options.SchemaPrefix`; `EnsureAsync` re-runs the same `IfNotExistsDdl` calls inside the write gate — idempotent, a no-op once boot created them, there for a store started without a boot (the contract worlds). Every write runs through one gated-transaction helper copied from `EfCoreCommandLedger` (open → `WriteGate.EnterAsync` → `BeginTransactionAsync` → work → commit when it says so). The fire:
 
 ```csharp
-public Task<bool> FireAsync(string scope, string key, Guid generation, AlvoEvent @event, CancellationToken cancellationToken = default)
+public Task<bool> FireAsync(string scope, string key, Guid generation, AlvoCustomEvent @event, CancellationToken cancellationToken = default)
 {
     ArgumentNullException.ThrowIfNull(@event);
     return InTransactionAsync(
         async (connection, transaction, ct) =>
             await ExecuteAsync(connection, transaction, TimerTable.FireSql(_timers), command => BindKey(command, scope, key, generation), ct).ConfigureAwait(false) == 1
-            && await AppendedAsync(connection, transaction, [@event], ct).ConfigureAwait(false),
+            && await AppendedAsync(connection, transaction, [@event.Envelope], ct).ConfigureAwait(false),
         committed => committed,
         cancellationToken);
 }
 
-private async Task<bool> AppendedAsync(DbConnection connection, DbTransaction transaction, IReadOnlyList<AlvoEvent> events, CancellationToken ct)
+private async Task<bool> AppendedAsync(DbConnection connection, DbTransaction transaction, IEnumerable<AlvoEvent> events, CancellationToken ct)
 {
     foreach (var @event in events)
     {
@@ -265,18 +297,18 @@ private async Task<bool> AppendedAsync(DbConnection connection, DbTransaction tr
 }
 ```
 
-`UpsertAsync` mints `Guid.CreateVersion7(_time.GetUtcNow())`, binds `due_at = StoredInstant.Text(timer.DueAt.ToUniversalTime())`, and routes through `WriteAsync(write)` — which Task 3 teaches to enlist; here it is the gated transaction. `ClaimTimersAsync` binds `@now`, `@lease_until = now + lease`, `@batch` and reads with `RelationalSqlBatch.ReadWrittenRowsAsync`. Register in `AlvoEfCoreProvider`: `builder.Services.TryAddSingleton<ITimerStore>(CreateTimerStore)` beside `IDeliveryStore` (`Func<EfAlvoData>` = `services.GetRequiredService<EfAlvoData>`). Schedule/migration members throw `NotImplementedException` until Task 2 (nothing calls them yet).
+`AlvoFrameworkEnvelope` and the `AlvoFrameworkEvent.Create` return change land here (callers read `.Envelope`; `IAlvoCommandUnit.PublishFrameworkAsync` and `EfAlvoData.PublishFrameworkInUnitAsync` take the envelope type). `TimerEntry.Of` checks the key (1–200 chars, no control characters), takes `MessageType`/`Payload` from the custom event (payload = its data written by `AlvoEventJson`, the writer `AlvoCustomEnvelope.EnsureWritable` probes with) and `Provenance` from `TimerProvenance.Write`. `UpsertAsync` mints `Guid.CreateVersion7(_time.GetUtcNow())`, binds `due_at = StoredInstant.Text(timer.DueAt)`, and routes through `WriteAsync(write)` — which Task 3 teaches to enlist; here it is the gated transaction. `ClaimTimersAsync` binds `@now`, `@lease_until = now + lease`, `@batch` and reads with `RelationalSqlBatch.ReadWrittenRowsAsync`. Register in `AlvoEfCoreProvider`: `builder.Services.TryAddSingleton<ITimerStore>(CreateTimerStore)` beside `IDeliveryStore` (`Func<EfAlvoData>` = `services.GetRequiredService<EfAlvoData>`). Schedule/migration members throw `NotImplementedException` until Task 2 (nothing calls them yet).
 
 `TimerStoreWorld` (`test/_shared/ef/`, the `DeliveryStoreWorld` shape) builds the store over a SQLite file or a PostgreSQL database, a `FakeTimeProvider` at `2026-11-06T09:00Z`; `BreakOutboxAsync` runs `DROP TABLE <outbox>`. Engine subclasses follow `SqliteDeliveryStoreTests` / `PostgreSqlDeliveryStoreTests` (skip when Docker is unavailable).
 
-- [ ] **Step 4: Run** both engine classes; expected PASS. Then `dotnet test --project test/MMLib.Alvo.Abstractions.Tests --filter-class '*PublicApiApprovalTests'` and the Testing baseline in `test/MMLib.Alvo.Tests`; accept only the Task-1 symbols.
+- [ ] **Step 4: Run** both engine classes, `'*TimerStorePortTests'`, `'*AlvoFrameworkEventTests'`, and the ledger/command classes that read framework events (`'*LedgerTests'` on both engines, `test/MMLib.Alvo.Tests --filter-class '*Command*'`); expected PASS. Then `dotnet test --project test/MMLib.Alvo.Abstractions.Tests --filter-class '*PublicApiApprovalTests'` and the Testing baseline in `test/MMLib.Alvo.Tests`; accept only the Task-1 symbols.
 - [ ] **Step 5: Commit** — `feat(scheduling): ITimerStore with a fenced, single-commit timer fire on both engines`.
 
 ## Task 2: Schedules and data migrations in the store — sync, lease, advance once, start once
 
 **Files:**
 - Create: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/{ScheduleTable,DataMigrationTable}.cs`, `src/MMLib.Alvo.Testing/Scheduling/TimerStoreContractTests.Schedules.cs`
-- Modify: `EfCoreTimerStore.cs`, `test/_shared/ef/TimerStoreWorld.cs`
+- Modify: `EfCoreTimerStore.cs`, `Internal/SystemSchemaInitializer.cs` (the two tables via `IfNotExistsDdl`), `test/_shared/ef/TimerStoreWorld.cs`
 
 **Interfaces:** Consumes Task 1's records. Produces working `SyncSchedulesAsync`, `ClaimSchedulesAsync`, `AdvanceScheduleAsync`, `AppendRunAsync`, `SchedulesAsync`, `StartMigrationAsync`, `StartedMigrationsAsync`.
 
@@ -304,7 +336,7 @@ public async Task Racing_claimants_advance_one_occurrence_once()
 }
 ```
 
-Also: `An_advance_by_a_claimant_whose_lease_was_taken_over_changes_nothing` (claim by w1, advance past lease, claim by w2, w1's advance → `false`, w2's → `true`, one event); `An_advance_whose_outbox_append_fails_leaves_the_occurrence_due` (`BreakOutboxAsync`, advance throws, `NextRunAt` unchanged); `An_advance_appends_one_event_per_tenant_in_one_commit` (`Events` of three → three outbox rows, `LastRunAt == ScheduledFor`); `Syncing_a_changed_cron_moves_the_next_run_and_an_unchanged_one_keeps_it` (sync `0 2 * * *`/next t1, sync same with next t2 → stays t1; sync `0 3 * * *`/t3 → t3); `A_schedule_not_yet_due_is_not_claimed`; `A_run_now_appends_its_events_without_moving_the_schedule`; `A_migration_starts_once_and_appends_its_events_with_its_mark` (second `StartMigrationAsync` same id, any revision → `false`, one event; `StartedMigrationsAsync() == ["backfill"]`; `MigrationRowsAsync() == [("backfill", 3)]`); `A_migration_whose_outbox_append_fails_is_not_marked`.
+Also: `An_advance_by_a_claimant_whose_lease_was_taken_over_changes_nothing` (claim by w1, advance past lease, claim by w2, w1's advance → `false`, w2's → `true`, one event); `An_advance_whose_outbox_append_fails_leaves_the_occurrence_due` (`BreakOutboxAsync`, advance throws, `NextRunAt` unchanged); `An_advance_appends_one_event_per_tenant_in_one_commit` (`Events` of three → three outbox rows, `LastRunAt == ScheduledFor`); `Syncing_a_changed_cron_moves_the_next_run_and_an_unchanged_one_keeps_it` (sync `0 2 * * *`/next t1, sync same with next t2 → stays t1; sync `0 3 * * *`/t3 → t3); `Syncing_drops_schedules_no_longer_registered` (sync `a`, `b`; sync `a` → `SchedulesAsync` lists `a` only; sync `[]` → empty); `A_schedule_not_yet_due_is_not_claimed`; `A_run_now_appends_its_events_without_moving_the_schedule`; `A_migration_starts_once_and_appends_its_events_with_its_mark` (second `StartMigrationAsync` same id, any revision → `false`, one event; `StartedMigrationsAsync() == ["backfill"]`; `MigrationRowsAsync() == [("backfill", 3)]`); `A_migration_whose_outbox_append_fails_is_not_marked`.
 
 - [ ] **Step 2: Run** — expected FAIL (`NotImplementedException`).
 
@@ -348,7 +380,7 @@ internal static string AdvanceSql(string table) =>
     """;
 ```
 
-`AdvanceScheduleAsync` = the Task 1 helper: `AdvanceSql` == 1 → `AppendedAsync(advance.Events)` → commit; else no commit. The fence is `leased_by` **and** `next_run_at = @scheduled_for`: a claimant whose lease expired and was re-claimed fails on `leased_by`; a sync that moved the occurrence fails on `next_run_at`. `DataMigrationTable`: `CREATE TABLE IF NOT EXISTS {t} (id TEXT NOT NULL PRIMARY KEY, revision INTEGER NOT NULL, started_at TEXT NOT NULL)`; `StartSql` = `INSERT INTO {t} (id, revision, started_at) VALUES (@id, @revision, @started_at) ON CONFLICT (id) DO NOTHING`; `StartMigrationAsync` = insert == 1 → append → commit. `AppendRunAsync` = append only, one transaction. `EnsureAsync` now creates all three tables.
+`SyncSchedulesAsync`, in one gated transaction: `SyncSql` per definition, then `DELETE FROM {t} WHERE id NOT IN (@id0, @id1, …)` — or `DELETE FROM {t}` when the list is empty. `AdvanceScheduleAsync` = the Task 1 helper: `AdvanceSql` == 1 → `AppendedAsync(advance.Events.Select(e => e.Envelope))` → commit; else no commit. The fence is `leased_by` **and** `next_run_at = @scheduled_for`: a claimant whose lease expired and was re-claimed fails on `leased_by`; a sync that moved the occurrence fails on `next_run_at`. `DataMigrationTable`: `CREATE TABLE IF NOT EXISTS {t} (id TEXT NOT NULL PRIMARY KEY, revision INTEGER NOT NULL, started_at TEXT NOT NULL)`; `StartSql` = `INSERT INTO {t} (id, revision, started_at) VALUES (@id, @revision, @started_at) ON CONFLICT (id) DO NOTHING`; `StartMigrationAsync` = insert == 1 → append → commit. `AppendRunAsync` = append only, one transaction. `SystemSchemaInitializer.EnsureAsync` and `EfCoreTimerStore.EnsureAsync` now create all three tables.
 
 - [ ] **Step 4: Run** both engines; PASS.
 - [ ] **Step 5: Commit** — `feat(scheduling): schedules advance one occurrence once and migrations start once, in the outbox's commit`.
@@ -356,8 +388,8 @@ internal static string AdvanceSql(string table) =>
 ## Task 3: `IAlvoScheduler` — tenant, provenance, depth, and joining the open unit
 
 **Files:**
-- Create: `src/MMLib.Alvo.Abstractions/Scheduling/IAlvoScheduler.cs`, `src/MMLib.Alvo/Scheduling/{Setup,AlvoScheduler,TimerProvenance,AlvoSchedulerExtensions}.cs`, `test/MMLib.Alvo.Tests/Scheduling/AlvoSchedulerTests.cs`, `test/_shared/testhost/TimeFacts.cs`, `test/MMLib.Alvo.TestHost.Tests/SqliteTimeTests.cs`, `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlTimeTests.cs`, `test/_shared/testhost/descriptors/booking-desk.alvo.json` (entity `bookings`: `starts_at` datetime, `note` text, tenancy scoped; rule `true` for role `staff`)
-- Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/{EfAlvoData.Units,EfCoreTimerStore}.cs`, `src/MMLib.Alvo/AlvoServiceCollectionExtensions.cs`, `src/MMLib.Alvo.Analyzers/AlvoSymbols.cs`, `test/MMLib.Alvo.Analyzers.Tests/Alvo1001AwaitTests.cs`, public-API baselines.
+- Create: `src/MMLib.Alvo.Abstractions/Scheduling/IAlvoScheduler.cs`, `src/MMLib.Alvo/Scheduling/{Setup,AlvoScheduler,AlvoSchedulerExtensions}.cs`, `test/MMLib.Alvo.Tests/Scheduling/AlvoSchedulerTests.cs`, `test/_shared/testhost/TimeFacts.cs`, `test/MMLib.Alvo.TestHost.Tests/SqliteTimeTests.cs`, `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlTimeTests.cs`, `test/_shared/testhost/descriptors/booking-desk.alvo.json` (entity `bookings`: `starts_at` datetime, `note` text, tenancy scoped; rule `true` for role `staff`)
+- Modify: `src/MMLib.Alvo.Abstractions/Identity/IAlvoFlowUnit.cs` (internal — gains `AlvoContext Caller { get; }`; `WriteUnit` already has it) and its four test doubles: `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/WriteGateUnitRefusalTests.cs` (`OpenUnit`), `…/UnitSavepointJoinTests.cs` (`OtherUnit`), `…/EfAlvoDataUnitRefusalTests.cs` (`OpenUnit`), `test/MMLib.Alvo.Tests/Data/FakeFlowUnit.cs`; `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/{EfAlvoData.Units,EfCoreTimerStore}.cs`, `src/MMLib.Alvo/AlvoServiceCollectionExtensions.cs`, `src/MMLib.Alvo.Analyzers/AlvoSymbols.cs`, `test/MMLib.Alvo.Analyzers.Tests/Alvo1001AwaitTests.cs`, public-API baselines.
 
 **Interfaces — Produces:**
 
@@ -373,11 +405,6 @@ public static class AlvoSchedulerExtensions   // core
 {
     public static Task ScheduleAsync<TMessage>(this IAlvoScheduler scheduler, string key, DateTimeOffset at, TMessage message,
         TenantId? tenant = null, CancellationToken cancellationToken = default) where TMessage : class;
-}
-internal static class TimerProvenance   // core
-{
-    internal static string Write(AlvoProvenance provenance);
-    internal static AlvoProvenance Read(string json);   // malformed → AlvoProvenance.None
 }
 internal Task EfAlvoData.InFlowUnitAsync(WriteUnit unit, Func<DbConnection, DbTransaction, CancellationToken, Task> write, CancellationToken ct);
 ```
@@ -411,26 +438,18 @@ and `A_timer_scheduled_in_a_committed_unit_takes_the_units_tenant` (the stored s
 public async Task ScheduleAsync(string key, DateTimeOffset at, string eventType, IReadOnlyDictionary<string, object?>? data,
     TenantId? tenant = null, CancellationToken cancellationToken = default)
 {
-    TimerKey.Ensure(key);
-    AlvoEventName.EnsureCustom(eventType, nameof(eventType));
-    AlvoCustomEnvelope.EnsureWritable(data);
     var context = AlvoContext.System(ScopeOf(tenant));
     depth.EnsureWithin(context);
     var provenance = AlvoEventProvenance.Effective(context);
-    await store.UpsertAsync(new TimerEntry
-    {
-        Scope = context.Tenant?.ToString() ?? string.Empty,
-        Key = key,
-        DueAt = at.ToUniversalTime(),
-        MessageType = eventType,
-        Payload = AlvoCustomEnvelope.Json(data),
-        Provenance = TimerProvenance.Write(provenance with { CorrelationId = provenance.CorrelationId ?? Guid.NewGuid().ToString("N") }),
-    }, cancellationToken).ConfigureAwait(false);
+    var message = AlvoCustomEnvelope.Build(eventType, $"timers/{key}", data, context, time.GetUtcNow());
+    await store.UpsertAsync(TimerEntry.Of(
+        context.Tenant?.ToString() ?? string.Empty, key, at.ToUniversalTime(), message,
+        provenance with { CorrelationId = provenance.CorrelationId ?? Guid.NewGuid().ToString("N") }), cancellationToken).ConfigureAwait(false);
 }
 
 private TenantId? ScopeOf(TenantId? tenant)
 {
-    var unitTenant = AlvoFlow.Unit is IAlvoFlowUnit unit ? unit.Caller.Tenant : null;
+    var unitTenant = AlvoFlow.Unit?.Caller.Tenant;
     if (tenant is { } stated && unitTenant is { } open && stated != open)
     {
         throw TenantMismatch(stated, open);
@@ -440,7 +459,7 @@ private TenantId? ScopeOf(TenantId? tenant)
 }
 ```
 
-(`IAlvoFlowUnit` gains an internal `AlvoContext Caller { get; }` if it lacks one — `WriteUnit.Caller` exists; use whatever `AlvoCustomEnvelope` already exposes for the JSON payload, else serialise with `AlvoEventJson`. `TenancyOn()` = `catalogs.Current?` schema has an entity with `Tenancy == TenancyMode.Scoped`.) `CancelAsync` resolves the scope the same way. The typed extension reads `RecordShape.Of(typeof(TMessage)).EventType` (else `ArgumentException`, the `AddEventHandler<TMessage, THandler>` wording) and the record's values through the shape's existing writer.
+(`AlvoCustomEnvelope.Build` runs `EnsureCustom` — an `alvo.*` type is refused — and `EnsureWritable`; the key is checked by `TimerEntry.Of`; provenance and depth come only from this writer, never from the caller. `TenancyOn()` = `catalogs.Current?` schema has an entity with `Tenancy == TenancyMode.Scoped`.) `CancelAsync` resolves the scope the same way. The typed extension reads `RecordShape.Of(typeof(TMessage)).EventType` (else `ArgumentException`, the `AddEventHandler<TMessage, THandler>` wording) and the record's values through the shape's existing writer.
 
 **Joining the unit** (R-B1's one exception, R-8). `EfAlvoData.Units.cs` gains:
 
@@ -460,7 +479,7 @@ private Task WriteAsync(Func<DbConnection, DbTransaction, CancellationToken, Tas
 
 `UpsertAsync` and `CancelAsync` go through it, so the unit's savepoint, one-call-at-a-time rule and poisoning apply unchanged; a rolled-back unit takes the row with it. **Analyzer** (*HX-10 settled details* (39)): `AlvoSymbols` resolves `MMLib.Alvo.Scheduling.IAlvoScheduler` and `IsTransactionCall` also answers `true` for its members and for `AlvoSchedulerExtensions.ScheduleAsync`.
 
-- [ ] **Step 4: Run** the three classes plus `Alvo1001AwaitTests`; PASS. Accept the baselines (Abstractions: `IAlvoScheduler`; core: `AlvoSchedulerExtensions`).
+- [ ] **Step 4: Run** the three classes plus `Alvo1001AwaitTests`, `'*AlvoFlowUnitTests'`, and the doubles' classes in `test/MMLib.Alvo.Data.EntityFrameworkCore.Tests` (`'*WriteGateUnitRefusalTests'`, `'*UnitSavepointJoinTests'`, `'*EfAlvoDataUnitRefusalTests'`); PASS. Accept the baselines (Abstractions: `IAlvoScheduler`; core: `AlvoSchedulerExtensions`).
 - [ ] **Step 5: Commit** — `feat(scheduling): IAlvoScheduler records tenant, provenance and depth, and joins the open unit`.
 
 ## Task 4: `TimerPump` — fire due timers, in the drain and in the background **[slice end]**
@@ -469,7 +488,7 @@ private Task WriteAsync(Func<DbConnection, DbTransaction, CancellationToken, Tas
 - Create: `src/MMLib.Alvo/Scheduling/TimerPump.cs`, `test/_shared/testhost/descriptors/` handler fixtures as needed
 - Modify: `src/MMLib.Alvo/Events/Internal/{EventPump,DeliveryDispatcher}.cs` (extract the gate sequence into `Events/Internal/DispatcherGates.cs`), `Scheduling/Setup.cs`, `test/_shared/testhost/TimeFacts.cs`
 
-**Interfaces:** Consumes `ITimerStore.ClaimTimersAsync/FireAsync`, `TimerProvenance.Read`. Produces `internal sealed class TimerPump : BackgroundService` with `internal Task<AlvoDrainResult> ManualRoundAsync(CancellationToken)`; `EventPump(TimerPump timers, OutboxDispatcher outbox, DeliveryDispatcher deliveries, …)` whose round is **timers → outbox → deliveries**, results summed; `internal static class DispatcherGates { Task<bool> OpenAsync(AlvoEventOptions, AlvoBootState, IPolicyCatalogProvider, Action logManual, Action logUnprimed, CancellationToken) }`.
+**Interfaces:** Consumes `ITimerStore.ClaimTimersAsync/FireAsync/CancelAsync`, `TimerProvenance.Read` (Abstractions, internal). Produces `internal sealed class TimerPump : BackgroundService` with `internal Task<AlvoDrainResult> ManualRoundAsync(CancellationToken)`; `EventPump(TimerPump timers, OutboxDispatcher outbox, DeliveryDispatcher deliveries, …)` whose round is **timers → outbox → deliveries**, results summed; `internal static class DispatcherGates { Task<bool> OpenAsync(AlvoEventOptions, AlvoBootState, IPolicyCatalogProvider, Action logManual, Action logUnprimed, CancellationToken) }`.
 
 - [ ] **Step 1: Failing facts** in `TimeFacts` (both engines). The handler records what it received into a singleton `ReminderLog`:
 
@@ -505,7 +524,7 @@ public async Task A_timer_scheduled_in_a_handler_fires_with_the_handlers_correla
 }
 ```
 
-Also: `A_rescheduled_reminder_fires_once_at_its_new_time_even_when_it_races_a_claim` (claim through the store with a 1-min lease, `ScheduleAsync` same key +2 h, drain — nothing; advance 2 h; drain → one reminder, at the new time); `A_reminder_cancelled_while_claimed_never_fires`; `A_timer_survives_a_restart_of_the_host` (schedule, dispose host, start a second host over the same database, advance, drain → one reminder); `A_self_re_arming_timer_stops_at_the_depth_limit` (handler on `Reminder` re-arms the same key +1 h; loop drains/advances 10 times; the handler ran exactly 4 times — at depths 2, 4, 6, 8 — and the deliveries list one `dead` with `last_error_type = chain-depth-exceeded`); `A_timer_due_in_the_past_fires_on_the_next_drain` (`at` = now − 1 h with a `+02:00` offset).
+Also: `A_rescheduled_reminder_fires_once_at_its_new_time_even_when_it_races_a_claim` (claim through the store with a 1-min lease, `ScheduleAsync` same key +2 h, drain — nothing; advance 2 h; drain → one reminder, at the new time); `A_reminder_cancelled_while_claimed_never_fires`; `A_timer_survives_a_restart_of_the_host` (schedule, dispose host, start a second host over the same database, advance, drain → one reminder); `A_typed_reminder_round_trips_a_guid_and_a_timestamp` (`ScheduleAsync<BookingReminderDue>` with a `Guid BookingId` and a `DateTimeOffset StartsAt`; the typed handler `AddEventHandler<BookingReminderDue, …>` receives both equal to what was sent); `A_self_re_arming_timer_stops_at_the_depth_limit` (the first timer is armed **outside any flow**, at depth 0; the handler on `Reminder` re-arms the same key +1 h; loop drains/advances 10 times; the handler ran exactly 4 times — at depths 2, 4, 6, 8 — and the deliveries list one `dead` with `last_error_type = chain-depth-exceeded`); `A_timer_due_in_the_past_fires_on_the_next_drain` (`at` = now − 1 h with a `+02:00` offset).
 
 - [ ] **Step 2: Run** `'*SqliteTimeTests'`; FAIL (nothing fires).
 
@@ -519,21 +538,40 @@ private async Task<AlvoDrainResult> RoundAsync(CancellationToken ct)
     var fired = 0;
     foreach (var timer in claimed)
     {
-        fired += await store.FireAsync(timer.Scope, timer.Key, timer.Generation, EventOf(timer), ct).ConfigureAwait(false) ? 1 : 0;
+        fired += await FireOneAsync(timer, ct).ConfigureAwait(false) ? 1 : 0;
     }
 
     return new AlvoDrainResult { Claimed = fired, Failed = 0, Subscribers = [] };
 }
 
-private AlvoEvent EventOf(ClaimedTimer timer)
+private async Task<bool> FireOneAsync(ClaimedTimer timer, CancellationToken ct)
 {
-    var stored = TimerProvenance.Read(timer.Provenance);
-    var context = AlvoContext.System(TenantOf(timer.Scope)) with { Provenance = stored with { Depth = stored.Depth + 1 } };
-    return AlvoCustomEnvelope.Build(timer.MessageType, $"timers/{timer.Key}", AlvoCustomEnvelope.ReadJson(timer.Payload), context, time.GetUtcNow()).Envelope;
+    if (EventOf(timer) is not { } @event)
+    {
+        await store!.CancelAsync(timer.Scope, timer.Key, ct).ConfigureAwait(false);
+        return false;
+    }
+
+    return await store!.FireAsync(timer.Scope, timer.Key, timer.Generation, @event, ct).ConfigureAwait(false);
+}
+
+private AlvoCustomEvent? EventOf(ClaimedTimer timer)
+{
+    try
+    {
+        var stored = TimerProvenance.Read(timer.Provenance);
+        var context = AlvoContext.System(TenantOf(timer.Scope)) with { Provenance = stored with { Depth = stored.Depth + 1 } };
+        return AlvoCustomEnvelope.Build(timer.MessageType, $"timers/{timer.Key}", PayloadOf(timer.Payload), context, time.GetUtcNow());
+    }
+    catch (Exception failure) when (failure is ArgumentException or JsonException or FormatException)
+    {
+        TimerLog.TimerUnbuildable(logger, timer.Scope, timer.Key, failure.GetType().Name);
+        return null;
+    }
 }
 ```
 
-(`Build` here must not re-check depth — fan-out owns the refusal for fired events, Decision 13; use the builder `IAlvoEvents.PublishAsync` uses.) A fire that throws is logged (`TimerFireFailed`, the exception type only) and left for the lease to expire; a malformed payload is logged and the timer is cancelled (it can never fire). The background loop is `DeliveryDispatcher`'s (gates via `DispatcherGates`, `PollInterval`, backoff on failure). `EventPump.DrainAsync` sums three steps.
+(`PayloadOf` reads the stored data back through `AlvoEventJson`. `Build` does not re-check depth — fan-out owns the refusal for fired events, Decision 13. **A stored row that cannot be built** — a malformed payload, a scope that is not a tenant id, a type the custom door now refuses — is logged once and cancelled, never thrown every round.) A `FireAsync` that throws (storage) is logged (`TimerFireFailed`, the exception type only) and left for the lease to expire. Add `A_stored_timer_that_cannot_be_built_is_cancelled_not_retried` to `TimeFacts` (corrupt the row's payload with a raw `UPDATE`, drain twice → no event, `Pending == 0`, one log line). The background loop is `DeliveryDispatcher`'s (gates via `DispatcherGates`, `PollInterval`, backoff on failure). `EventPump.DrainAsync` sums three steps.
 
 - [ ] **Step 4: Run** `'*SqliteTimeTests'`, `'*PostgreSqlTimeTests'`, `test/MMLib.Alvo.TestHost.Tests` whole (the drain changed); PASS. `scripts/test-ring1`.
 - [ ] **Step 5: Commit** — `feat(scheduling): TimerPump fires due timers as events, in the drain and in the background`.
@@ -547,7 +585,7 @@ private AlvoEvent EventOf(ClaimedTimer timer)
 
 **Files:**
 - Create: `src/MMLib.Alvo/Scheduling/{IAlvoScheduledJob,AlvoJobContext,AlvoScheduleOptions,AlvoScheduleScope,CronSchedule,JobSpec,ScheduleChecks}.cs`, `src/MMLib.Alvo.Abstractions/Scheduling/IAlvoTenantCatalog.cs`, `test/MMLib.Alvo.Tests/Scheduling/{CronScheduleTests,ScheduleRegistrationTests}.cs`
-- Modify: `Directory.Packages.props` (`<PackageVersion Include="Cronos" Version="0.13.0" />`), `src/MMLib.Alvo/MMLib.Alvo.csproj`, `docs/architecture/package-boundary.md` (Cronos beside Corvus: MIT, no dependencies, why), `Extensions/{AlvoExtensionBuilderExtensions,AlvoDeliveryOptions}.cs`, `Extensions/Internal/{ExtensionRegistration,ExtensionBindingCompiler,ExtensionCatalog,AlvoDeliveryOptionsConfiguration}.cs`, `Abstractions/Management/{AlvoExtensionKind,AlvoExtensionStage,ManagementExtension}.cs`, `test/MMLib.Alvo.Tests/ExtensionCatalogTests.*.verified.txt` if it moves, baselines.
+- Modify: `Directory.Packages.props` (`<PackageVersion Include="Cronos" Version="0.13.0" />`), `src/MMLib.Alvo/MMLib.Alvo.csproj`, `docs/architecture/package-boundary.md` (Cronos beside Corvus: MIT, no dependencies, why), `Extensions/{AlvoExtensionBuilderExtensions,AlvoDeliveryOptions}.cs`, `Extensions/Internal/{ExtensionRegistration,ExtensionRegistrations,ExtensionBindingCompiler,ExtensionCatalog,AlvoDeliveryOptionsConfiguration,HandlerInvoker}.cs` (`HandlerInvoker` gains the `ForJob<TJob>()` factory), `Abstractions/Management/{AlvoExtensionKind,AlvoExtensionStage,ManagementExtension}.cs`, `test/MMLib.Alvo.Tests/ExtensionCatalogTests.*.verified.txt` if it moves, baselines.
 
 **Interfaces — Produces:**
 
@@ -556,9 +594,10 @@ namespace MMLib.Alvo.Scheduling;
 public interface IAlvoScheduledJob { Task RunAsync(AlvoJobContext context, CancellationToken cancellationToken); }
 public sealed class AlvoJobContext
 {
-    public static AlvoJobContext Create(string id, DateTimeOffset scheduledFor, TenantId? tenant, IAlvoSession data, int attempt = 1);
+    public static AlvoJobContext Create(string id, DateTimeOffset scheduledFor, TenantId? tenant, IAlvoSession data, int attempt = 1, int? revision = null);
     public string Id { get; }  public DateTimeOffset ScheduledFor { get; }  public TenantId? Tenant { get; }
     public IAlvoSession Data { get; }  public int Attempt { get; }
+    public int? Revision { get; }      // the revision a data migration started at; null for a schedule
 }
 public enum AlvoScheduleScope { Global = 0, EachTenant = 1 }
 public sealed class AlvoScheduleOptions
@@ -575,11 +614,12 @@ public static IAlvoBuilder AddSchedule<TJob>(this IAlvoBuilder builder, string i
 // AlvoDeliveryOptions: public int MaxJobConcurrency { get; set; } = 2;   (validated ≥ 1)
 internal sealed record JobSpec(string DeliveryKind, string? Cron, string? TimeZone, AlvoScheduleScope Scope, int? AfterRevision);
 // HandlerRegistration gains: JobSpec? Job = null  (appended optional parameter)
-internal static class CronSchedule
+internal sealed class CronSchedule
 {
-    internal static bool TryParse(string cron, string timeZone, out CronSchedule? schedule, out string? problem);
+    internal static bool TryParse(string cron, string timeZone, DateTimeOffset now, out CronSchedule? schedule, out string? problem);
     internal DateTimeOffset? Next(DateTimeOffset after);   // exclusive, in the zone, UTC result
 }
+// HandlerInvoker: internal static HandlerInvoker ForJob<TJob>() where TJob : class   (TJob is IAlvoScheduledJob or, from Task 8, IAlvoDataMigration)
 internal static class ScheduleEvents { internal static string TypeFor(string id); internal static string MigrationTypeFor(string id); }  // "alvo.schedule." + id.Replace('-', '_')
 ```
 
@@ -617,11 +657,11 @@ public void Bratislava_fall_back_runs_an_hourly_schedule_in_both_two_oclocks()
 }
 ```
 
-plus `A_seconds_field_an_unknown_zone_and_a_malformed_cron_are_problems_not_exceptions`. `ScheduleRegistrationTests`: `An_each_tenant_schedule_without_a_tenant_catalog_refuses_boot` (acceptance 6a — `AlvoTestHost.StartAsync` throws `AlvoStartupRefusedException` whose message names `extensions/nightly-roll/scope` and whose fix names `IAlvoTenantCatalog`); `Every_cron_and_zone_problem_is_refused_at_boot_at_once` (two bad schedules → one refusal, two locators `extensions/<id>/cron`, `extensions/<id>/timeZone`); `A_schedule_id_follows_the_extension_grammar_and_collides_with_a_handler_id`; `The_catalog_lists_a_schedule_with_its_kind_stage_cron_and_zone` (Kind `Schedule`, Stage `Scheduled`, `Event = "alvo.schedule.nightly_roll"`, `Cron`, `TimeZone`, `Timeout = 15 min`, `RunAs = "system"`).
+plus `A_seconds_field_an_unknown_zone_and_a_malformed_cron_are_problems_not_exceptions` and `A_cron_with_no_next_occurrence_is_a_problem` (`0 0 30 2 *` — 30 February). `ScheduleRegistrationTests`: `An_each_tenant_schedule_without_a_tenant_catalog_refuses_boot` (acceptance 6a — `AlvoTestHost.StartAsync` throws `AlvoStartupRefusedException` whose message names `extensions/nightly-roll/scope` and whose fix names `IAlvoTenantCatalog`); `Every_cron_and_zone_problem_is_refused_at_boot_at_once` (two bad schedules → one refusal, two locators `extensions/<id>/cron`, `extensions/<id>/timeZone`); `A_schedule_id_follows_the_extension_grammar_and_collides_with_a_handler_id`; `The_catalog_lists_a_schedule_with_its_kind_stage_cron_and_zone` (Kind `Schedule`, Stage `Scheduled`, `Event = "alvo.schedule.nightly_roll"`, `Cron`, `TimeZone`, `Timeout = 15 min`, `RunAs = "system"`).
 
 - [ ] **Step 2: Run** `--filter-class '*CronScheduleTests'` and `'*ScheduleRegistrationTests'`; FAIL.
 
-- [ ] **Step 3: Implement.** `CronSchedule` wraps `CronExpression.TryParse(cron, CronFormat.Standard, out var expression)` and `TimeZoneInfo.FindSystemTimeZoneById(zone)` (catching `TimeZoneNotFoundException`/`InvalidTimeZoneException` into `problem`); `Next(after) => expression.GetNextOccurrence(after, zone)?.ToUniversalTime()`. `AddSchedule<TJob>`:
+- [ ] **Step 3: Implement.** `CronSchedule` wraps `CronExpression.TryParse(cron, CronFormat.Standard, out var expression)` and `TimeZoneInfo.FindSystemTimeZoneById(zone)` (catching `TimeZoneNotFoundException`/`InvalidTimeZoneException` into `problem`), and reports `problem` when `Next(now)` is `null` (the expression never fires); `Next(after) => expression.GetNextOccurrence(after, zone)?.ToUniversalTime()`. `AddSchedule<TJob>`:
 
 ```csharp
 ArgumentNullException.ThrowIfNull(builder);
@@ -633,10 +673,10 @@ builder.Services.TryAddTransient<TJob>();
 ExtensionRegistrations.AddHandler(
     builder.Services, id, new NamedEvent(ScheduleEvents.TypeFor(id)), when: null,
     handler => { handler.Timeout = options.Timeout; handler.Retry = options.Retry; handler.Description = options.Description; handler.Ordering = AlvoOrdering.None; },
-    JobInvoker.For<TJob>(), typed: null, job: new JobSpec(DeliveryKind.Schedule, cron, timeZone, options.Scope, AfterRevision: null));
+    HandlerInvoker.ForJob<TJob>(), typed: null, job: new JobSpec(DeliveryKind.Schedule, cron, timeZone, options.Scope, AfterRevision: null));
 ```
 
-(`ExtensionRegistrations.AddHandler` gains the optional `JobSpec? job` and passes it to `HandlerRegistration`; `id` is checked there against E3's grammar as every handler's is; the namespace check lets an `alvo.` `NamedEvent` through only when `job` is set.) `JobInvoker.For<TJob>()` is a `HandlerInvoker` over `AlvoRecord` that resolves `TJob` from the delivery scope and calls `RunAsync(AlvoJobContext.Create(id, scheduledFor, @event.TenantId, context.Data, context.Attempt), ct)`, `scheduledFor` read from the payload key `scheduledFor`. `ScheduleChecks.Check(registry, IServiceProviderIsService)` — called from `ExtensionBindingCompiler.Check` — returns one `ExtensionProblem` per bad cron, bad zone, and `EachTenant` with `!isService.IsService(typeof(IAlvoTenantCatalog))` (message `"… runs once per tenant, and this host registers no IAlvoTenantCatalog to list them."`, fix `"Register an IAlvoTenantCatalog in DI, or use AlvoScheduleScope.Global."`). `DeliveryVocabulary.DeliveryKind` gains `Schedule = "schedule"`, `Migration = "migration"`; `DeliveryFanOut.Request` takes `handler.Registration.Job?.DeliveryKind ?? DeliveryKind.Handler`. `ExtensionCatalog.Handlers` excludes registrations with a `Job`; a new `Jobs(registry, exposeTypeNames)` lists them with the members above.
+(`ExtensionRegistrations.AddHandler` gains the optional `JobSpec? job` and passes it to `HandlerRegistration`; `id` is checked there against E3's grammar as every handler's is.) `HandlerInvoker.ForJob<TJob>()` is a `HandlerInvoker` over `AlvoRecord` that resolves `TJob` from the delivery scope and calls `RunAsync(AlvoJobContext.Create(context.Subscriber, scheduledFor, @event.TenantId, context.Data, context.Attempt, revision), ct)`, `scheduledFor` read from the payload key `scheduledFor`, `revision` from `revision` when present; its `Unresolvable` check is `ClassUnresolvable(typeof(TJob), …)`. `ScheduleChecks.Check(registry, IServiceProviderIsService)` — called from `ExtensionBindingCompiler.Check` — returns one `ExtensionProblem` per bad cron, bad zone, and `EachTenant` with `!isService.IsService(typeof(IAlvoTenantCatalog))` (message `"… runs once per tenant, and this host registers no IAlvoTenantCatalog to list them."`, fix `"Register an IAlvoTenantCatalog in DI, or use AlvoScheduleScope.Global."`). `DeliveryVocabulary.DeliveryKind` gains `Schedule = "schedule"`, `Migration = "migration"`; `DeliveryFanOut.Request` takes `handler.Registration.Job?.DeliveryKind ?? DeliveryKind.Handler`. `ExtensionCatalog.Handlers` excludes registrations with a `Job`; a new `Jobs(registry, exposeTypeNames)` lists them with the members above.
 
 - [ ] **Step 4: Run** the two classes plus `'*ExtensionCatalogTests'` and `'*ExtensionBindingCompilerTests'`; PASS. Accept baselines (Abstractions: `IAlvoTenantCatalog`, the enum values, the `ManagementExtension` members; core: the job types, `AddSchedule`, `MaxJobConcurrency`).
 - [ ] **Step 5: Commit** — `feat(scheduling): AddSchedule registers a cron job, checked with Cronos at boot`.
@@ -647,7 +687,7 @@ ExtensionRegistrations.AddHandler(
 - Create: `src/MMLib.Alvo/Scheduling/{SchedulePump,ScheduleRuns}.cs`, `test/_shared/testhost/TimeFacts.Schedules.cs`, `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlScheduleRaceTests.cs`, `test/MMLib.Alvo.Tests/Scheduling/FrameworkEventMintingTests.cs`
 - Modify: `Events/Internal/{EventPump,DeliveryDispatcher}.cs`, `Scheduling/Setup.cs`
 
-**Interfaces:** Consumes `ITimerStore` schedule members, `CronSchedule`, `IAlvoTenantCatalog`, `AlvoFrameworkEvent.Create`. Produces `internal sealed class SchedulePump : BackgroundService` (`ManualRoundAsync`), round order now **timers → schedules → outbox → deliveries**; `internal sealed class ScheduleRuns(IAlvoTenantCatalog? tenants, TimeProvider time) { Task<IReadOnlyList<AlvoEvent>> EventsAsync(BoundHandler job, DateTimeOffset scheduledFor, bool manual, CancellationToken ct); }`.
+**Interfaces:** Consumes `ITimerStore` schedule members, `CronSchedule`, `IAlvoTenantCatalog`, `AlvoFrameworkEvent.Create`. Produces `internal sealed class SchedulePump : BackgroundService` (`ManualRoundAsync`), round order now **timers → schedules → outbox → deliveries**; `internal sealed class ScheduleRuns(IAlvoTenantCatalog? tenants, TimeProvider time) { Task<IReadOnlyList<AlvoFrameworkEnvelope>> EventsAsync(BoundHandler job, DateTimeOffset scheduledFor, bool manual, CancellationToken ct); }`; `SchedulePump.StartAsync` override that syncs once the binding is primed.
 
 - [ ] **Step 1: Failing tests.** In `TimeFacts.Schedules.cs` (both engines): `A_due_occurrence_runs_once_as_a_schedule_delivery` (`0 2 * * *` UTC, clock 01:00, advance 1 h, drain → one run with `ScheduledFor == 02:00Z`; the delivery's `kind` is `schedule`); `A_missed_occurrence_fires_once_and_resumes_from_now` (advance 3 days, drain → one run; next run = the next 02:00 after now); `A_failing_run_does_not_block_the_next_occurrence` (job throws on its first scheduled time with `Retry` 1 attempt → dead; next day's occurrence runs); and acceptance 6b:
 
@@ -655,21 +695,22 @@ ExtensionRegistrations.AddHandler(
 [Fact]
 public async Task An_each_tenant_schedule_runs_once_per_tenant_and_reads_only_its_own_rows()
 {
-    var seen = new ConcurrentBag<(TenantId? Tenant, IReadOnlyList<string> Notes)>();
+    var seen = new ConcurrentBag<string>();
     await using var alvo = await StartAsync(alvo => alvo
         .AddSchedule<NoteCountingJob>("count-notes", "0 2 * * *", configure: o => o.Scope = AlvoScheduleScope.EachTenant)
         .Services.AddSingleton<IAlvoTenantCatalog>(new FixedTenants(TenantA, TenantB)).AddSingleton(seen));
     await SeedBookingAsync(alvo, TenantA, "a-note");
     await SeedBookingAsync(alvo, TenantB, "b-note");
+    await alvo.DrainEventsAsync(Ct);
 
     Time.Advance(TimeSpan.FromHours(1));
     await alvo.DrainEventsAsync(Ct);
 
-    seen.OrderBy(run => run.Tenant.ToString()).ShouldBe([(TenantA, ["a-note"]), (TenantB, ["b-note"])]);
+    seen.ShouldBe([$"{TenantA}:a-note", $"{TenantB}:b-note"], ignoreOrder: true);
 }
 ```
 
-(`NoteCountingJob` queries `bookings` through `context.Data` and records `note` values.) `PostgreSqlScheduleRaceTests` (acceptance 4):
+(`NoteCountingJob` queries `bookings` through `context.Data` and adds `$"{context.Tenant}:{note}"` per row, so a run that read another tenant's row shows up as an extra string.) `PostgreSqlScheduleRaceTests` (acceptance 4):
 
 ```csharp
 [Fact]
@@ -685,6 +726,7 @@ public async Task Three_dispatchers_fire_one_cron_occurrence_exactly_once()
             .AddSchedule<RecordingJob>("nightly-roll", "0 2 * * *").Services.AddSingleton(runs), time, cancellationToken: Ct));
     }
 
+    await hosts[0].DrainEventsAsync(Ct);
     time.Advance(TimeSpan.FromHours(1));
     await Task.WhenAll(hosts.Select(host => Task.Run(() => host.DrainEventsAsync(Ct), Ct)));
     await hosts[0].DrainEventsAsync(Ct);
@@ -698,25 +740,29 @@ public async Task Three_dispatchers_fire_one_cron_occurrence_exactly_once()
 
 - [ ] **Step 2: Run** `'*SqliteTimeTests'`, `'*FrameworkEventMintingTests'`; FAIL.
 
-- [ ] **Step 3: Implement.** `SchedulePump(ITimerStore? store, ExtensionBinder binder, ScheduleRuns runs, AlvoBootState boot, IPolicyCatalogProvider catalogs, IOptions<AlvoEventOptions> events, TimeProvider time, ILogger<SchedulePump> logger)`. Per round: on the first round (and whenever the binding changes) `SyncSchedulesAsync` with `NextRunAt = CronSchedule.Next(now)` for every bound job with a `Cron`; then
+- [ ] **Step 3: Implement.** `SchedulePump(ITimerStore? store, ExtensionBinder binder, ScheduleRuns runs, AlvoBootState boot, IPolicyCatalogProvider catalogs, IOptions<AlvoEventOptions> events, TimeProvider time, ILogger<SchedulePump> logger)`. **Sync at start, not on a round:** `StartAsync` (override, calling `base.StartAsync` after) awaits `boot.SettledAsync`; when the boot is `Ready` with a primed catalog — in both dispatch modes — it binds and calls `SyncSchedulesAsync` once with `NextRunAt = CronSchedule.Next(now)` for every bound job with a `Cron` (a job whose `Next` is `null` is left out and logged `ScheduleNeverFires`; boot already refused it, so this is defence only). Unregistered ids are deleted by the sync (Decision 8). `_claimant` is a per-instance field, `$"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}"`, so two pumps in one process (the race test's three hosts) never share a fence. Facts that advance the clock **drain once before `Advance`** so the start-time sync is observable as quiet. Per round:
 
 ```csharp
 var claimed = await store.ClaimSchedulesAsync(_claimant, Lease, ct).ConfigureAwait(false);
 foreach (var due in claimed)
 {
-    if (bindings.Handler(due.Id) is not { Registration.Job.Cron: { } } job || !CronSchedule.TryParse(job.Registration.Job.Cron, job.Registration.Job.TimeZone!, out var cron, out _))
+    if (bindings.Handler(due.Id) is not { Registration.Job.Cron: { } } job || !CronSchedule.TryParse(job.Registration.Job.Cron, job.Registration.Job.TimeZone!, time.GetUtcNow(), out var cron, out _))
     {
         continue;
     }
 
     var events = await runs.EventsAsync(job, due.ScheduledFor, manual: false, ct).ConfigureAwait(false);
-    var next = cron!.Next(Later(time.GetUtcNow(), due.ScheduledFor))!.Value;
+    if (cron!.Next(Later(time.GetUtcNow(), due.ScheduledFor)) is not { } next)
+    {
+        continue;
+    }
+
     advanced += await store.AdvanceScheduleAsync(new ScheduleAdvance
     { Id = due.Id, Claimant = _claimant, ScheduledFor = due.ScheduledFor, NextRunAt = next, Events = events }, ct).ConfigureAwait(false) ? 1 : 0;
 }
 ```
 
-(extract the loop body into a method to stay under 25 lines; a claimed id no longer bound is left to its lease.) `ScheduleRuns.EventsAsync` builds one event per tenant for `EachTenant` (`tenants!.ListTenantsAsync`) else one with no tenant: `AlvoFrameworkEvent.Create(((NamedEvent)job.Registration.Source).Type, $"schedules/{id}", { schedule = id, scheduledFor = iso, manual? }, AlvoContext.System(tenant) with { Provenance = new AlvoProvenance { CorrelationId = Guid.NewGuid().ToString("N"), Depth = 0 } }, now)` — the hop table's *schedule run: new correlation, depth 0*. **Job pool:** `DeliveryDispatcher` claims twice per tick — handlers (`Job is null`) up to `MaxConcurrency − running handlers`, jobs up to `MaxJobConcurrency − running jobs`, each with its own lease (`longest timeout of that pool + 60 s`) — two `ClaimAsync` calls over disjoint subscriber lists, two running lists; the manual round does the same. `RunAs` is `System` for jobs (fan-out's run-as is the event's tenant, so a run reads only its tenant).
+(extract the loop body into a method to stay under 25 lines; a claimed id no longer bound is left to its lease.) `ScheduleRuns.EventsAsync` builds one event per tenant for `EachTenant` (`tenants!.ListTenantsAsync`) else one with no tenant — the only place besides `CommandCompletion` and `DataMigrationStarter` that mints an `AlvoFrameworkEnvelope`: `AlvoFrameworkEvent.Create(((NamedEvent)job.Registration.Source).Type, $"schedules/{id}", { schedule = id, scheduledFor = iso, manual? }, AlvoContext.System(tenant) with { Provenance = new AlvoProvenance { CorrelationId = Guid.NewGuid().ToString("N"), Depth = 0 } }, now)` — the hop table's *schedule run: new correlation, depth 0*. **Job pool:** `DeliveryDispatcher` claims twice per tick — handlers (`Job is null`) up to `MaxConcurrency − running handlers`, jobs up to `MaxJobConcurrency − running jobs`, each with its own lease (`longest timeout of that pool + 60 s`) — two `ClaimAsync` calls over disjoint subscriber lists, two running lists; the manual round does the same. `RunAs` is `System` for jobs (fan-out's run-as is the event's tenant, so a run reads only its tenant).
 
 - [ ] **Step 4: Run** `'*SqliteTimeTests'`, `'*PostgreSqlTimeTests'`, `'*PostgreSqlScheduleRaceTests'`, `'*FrameworkEventMintingTests'`, `'*EventHandlerFacts*'` (the dispatcher changed); PASS.
 - [ ] **Step 5: Commit** — `feat(scheduling): SchedulePump runs each occurrence once, per tenant on EachTenant, from a separate job pool`.
@@ -729,9 +775,9 @@ foreach (var due in claimed)
 
 **Interfaces — Produces:** `public sealed record ManagementTimerCounts { public required int Pending { get; init; } public required int Due { get; init; } }`; `ManagementExtensionCatalog.Timers` (`ManagementTimerCounts?`, init, null when no `ITimerStore`); `ExtensionCatalog.CatalogAsync(IDeliveryStore?, ITimerStore?, CancellationToken)` fills `NextRunAt`/`LastRunAt` from `SchedulesAsync`, `LastOutcome` from the newest delivery of that subscriber (`IDeliveryStore.ListAsync(new DeliveryFilter { Subscriber = id, Limit = 1 })` — its `Status`), `Timers` from `CountTimersAsync`.
 
-- [ ] **Step 1: Failing tests.** `TimeFacts.Schedules`: `Run_now_creates_a_delivery_that_runs_without_moving_the_next_occurrence` (`IAlvoOperations.RunScheduleAsync(project, "nightly-roll")` answers a `ManagementDelivery` with `Status = "pending"`, `Subscriber = "nightly-roll"`; drain → one run with `ScheduledFor == now`; `NextRunAt` unchanged); `Run_now_of_an_unknown_schedule_is_404` (`ManagementExtensionNotFoundException`); `The_catalog_shows_next_and_last_run_last_outcome_and_timer_counts`. Management unit test (existing operations suite): `Run_now_needs_developer` (viewer → `ManagementForbiddenException`).
-- [ ] **Step 2: Run** — FAIL (404 for every id).
-- [ ] **Step 3: Implement.** `RunScheduleAsync`: gate as today; resolve the bound job (`Kind` `schedule`) or throw `ManagementExtensionNotFoundException` (message unchanged in shape: `This host registers no schedule '<id>'.`); `events = ScheduleRuns.EventsAsync(job, now, manual: true)`; `ITimerStore.AppendRunAsync(events)`; `IDeliveryStore.FanOutAsync` one `DeliveryRequest { Kind = "schedule", TenantId = event's, PartitionKey = event's }` per event; write the operations audit line (`OperationsAudit.Write`, operation `run-schedule`); return `ManagementDelivery` of the first (`FindAsync` by event id + subscriber through `ListAsync(new DeliveryFilter { Subscriber = id, FromEventId = first.Id, Limit = 1 })`). Repoint C4: replace `#42` with `#376` in the four comments (wording otherwise unchanged).
+- [ ] **Step 1: Failing tests.** `TimeFacts.Schedules`: `Run_now_creates_a_delivery_that_runs_without_moving_the_next_occurrence` (`IAlvoOperations.RunScheduleAsync(project, "nightly-roll")` answers a `ManagementDelivery` with `Status = "pending"`, `Subscriber = "nightly-roll"`; drain → one run with `ScheduledFor == now`; `NextRunAt` unchanged); `Run_now_of_an_unknown_schedule_is_404` (`ManagementExtensionNotFoundException`); `The_catalog_shows_next_and_last_run_last_outcome_and_timer_counts`; `Run_now_on_each_tenant_answers_the_delivery_of_the_first_tenants_event` (two tenants; the answer's `EventId` is the first event's, though the second tenant's delivery is newer). Also add `Run_now_needs_developer` (viewer → `ManagementForbiddenException`) to the operations suite — it **passes already** (the gate exists since HX-06) and is a regression pin, not part of the FAIL claim below.
+- [ ] **Step 2: Run** — the new `TimeFacts.Schedules` facts FAIL (404 for every id); `Run_now_needs_developer` passes.
+- [ ] **Step 3: Implement.** `RunScheduleAsync`: gate as today; resolve the bound job (`Kind` `schedule`) or throw `ManagementExtensionNotFoundException` (message unchanged in shape: `This host registers no schedule '<id>'.`); `events = ScheduleRuns.EventsAsync(job, now, manual: true)`; `ITimerStore.AppendRunAsync(events)`; `IDeliveryStore.FanOutAsync` one `DeliveryRequest { Kind = "schedule", TenantId = event's, PartitionKey = event's }` per event; write the operations audit line (`OperationsAudit.Write`, operation `run-schedule`); return the `ManagementDelivery` **of the first event** — bounded by its id, never "newest first": `ListAsync(new DeliveryFilter { Subscriber = id, FromEventId = first.Envelope.Id, Limit = 1 })`, then assert the row's `EventId == first.Envelope.Id` (else `InvalidOperationException` — the fan-out above just wrote it). Repoint C4: replace `#42` with `#376` in the four comments (wording otherwise unchanged).
 - [ ] **Step 4: Run** the affected classes, then `scripts/test-ring1`; PASS. Accept the Abstractions baseline (`ManagementTimerCounts`, `ManagementExtensionCatalog.Timers`). If the Management OpenAPI snapshot moves (new response members), dispatch `alvo-snapshot-judge`.
 - [ ] **Step 5: Commit** — `feat(operations): run a schedule now, and show its next and last run in the catalog`.
 - [ ] **Step 6: Ship slice B** — ring2, `alvo-plan-guard`, PR report, push `hx/13b-schedules`, PR to `main` with `Part of #390` and, on its own line, `Closes #376`; label `needs-deep-review`.
@@ -744,7 +790,7 @@ foreach (var due in claimed)
 
 **Files:**
 - Create: `src/MMLib.Alvo/Scheduling/{IAlvoDataMigration,DataMigrationStarter}.cs`, `test/_shared/testhost/TimeFacts.Migrations.cs`
-- Modify: `Extensions/AlvoExtensionBuilderExtensions.cs`, `Scheduling/{SchedulePump,ScheduleChecks,JobInvoker}.cs`, `Extensions/Internal/ExtensionCatalog.cs`, `Abstractions/Management/{AlvoExtensionKind,ManagementExtension}.cs`, `test/MMLib.Alvo.Tests/Scheduling/{ScheduleRegistrationTests,FrameworkEventMintingTests}.cs`, baselines
+- Modify: `Extensions/AlvoExtensionBuilderExtensions.cs`, `Scheduling/{SchedulePump,ScheduleChecks,DataMigrationStarter}.cs`, `Extensions/Internal/HandlerInvoker.cs`, `Extensions/Internal/ExtensionCatalog.cs`, `Abstractions/Management/{AlvoExtensionKind,ManagementExtension}.cs`, `test/MMLib.Alvo.Tests/Scheduling/{ScheduleRegistrationTests,FrameworkEventMintingTests}.cs`, baselines
 
 **Interfaces — Produces:**
 
@@ -752,7 +798,7 @@ foreach (var due in claimed)
 public interface IAlvoDataMigration { Task RunAsync(AlvoJobContext context, CancellationToken cancellationToken); }
 public static IAlvoBuilder AddDataMigration<TMigration>(this IAlvoBuilder builder, string id, int afterRevision)
     where TMigration : class, IAlvoDataMigration;
-internal sealed class DataMigrationStarter(ITimerStore store, IAppliedSchemaStore applied, ScheduleRuns runs, IPolicyCatalogProvider catalogs, TimeProvider time)
+internal sealed class DataMigrationStarter(ITimerStore store, IAppliedSchemaStore applied, IAlvoTenantCatalog? tenants, IPolicyCatalogProvider catalogs, TimeProvider time, ILogger<DataMigrationStarter> logger)
 { internal Task<int> StartDueAsync(ExtensionBindings bindings, string project, CancellationToken ct); }
 ```
 
@@ -785,10 +831,10 @@ public async Task A_data_migration_runs_once_per_revision_across_restarts_rollba
 }
 ```
 
-(`runs` records `context`'s revision, read by the migration from the payload key `revision`; `ApplyAsync`/`RollbackAsync` go through `IAlvoManagement`.) Also `A_scoped_schema_runs_the_migration_once_per_tenant` (catalog of two → two runs, each `context.Tenant` set); `A_migration_on_a_scoped_schema_without_a_tenant_catalog_refuses_boot`; `The_catalog_lists_a_migration_with_its_revision`. `FrameworkEventMintingTests` adds `DataMigrationStarter.cs` to the allowed set.
+(`runs` records `context.Revision`; `ApplyAsync`/`RollbackAsync` go through `IAlvoManagement`.) Also `A_scoped_schema_runs_the_migration_once_per_tenant` (catalog of two → two runs, each `context.Tenant` set); `A_migration_on_a_scoped_schema_without_a_tenant_catalog_refuses_boot`; `A_schema_scoped_by_a_later_apply_holds_the_migration_until_a_catalog_exists` (boot unscoped with no catalog and `afterRevision: 2`; apply a scoped revision 2 → drain → no run, `MigrationRowsAsync` empty, one `TenantCatalogMissing` log; restart with a catalog of two → one run per tenant, both with `Revision == 2`); `The_catalog_lists_a_migration_with_its_revision`. `FrameworkEventMintingTests` adds `DataMigrationStarter.cs` to the allowed set.
 
 - [ ] **Step 2: Run** `'*SqliteTimeTests'`; FAIL.
-- [ ] **Step 3: Implement.** `AddDataMigration` registers like `AddSchedule` with `NamedEvent(ScheduleEvents.MigrationTypeFor(id))`, `JobSpec(DeliveryKind.Migration, null, null, AlvoScheduleScope.Global, afterRevision)`, default job options, `JobInvoker.For<TMigration>()` (the invoker accepts `IAlvoDataMigration` too; `scheduledFor` = the start instant). `afterRevision < 1` → `ArgumentOutOfRangeException`. `ScheduleChecks` adds the tenant-catalog problem for migrations when the bound catalog's schema has a `Scoped` entity (checked in `Compile`, which sees the catalog). `DataMigrationStarter.StartDueAsync`: caches `StartedMigrationsAsync` once per process (adds to the cache on each start); for each bound migration not started, reads `applied.GetCurrentAsync(project)` (once per call, only when one is pending); when `Revision >= AfterRevision`, builds the events (one per tenant on a scoped schema via `IAlvoTenantCatalog`, else one, payload `{ migration = id, revision = applied.Revision }`, subject `migrations/<id>`) with `AlvoFrameworkEvent.Create`, and calls `StartMigrationAsync(id, applied.Revision, events)`. `SchedulePump`'s round calls it after the schedules. Rollback creates a new, higher revision (`RollbackAsync` is append-only) and the started row is permanent, so neither a rollback nor a re-apply re-runs it.
+- [ ] **Step 3: Implement.** `AddDataMigration` registers like `AddSchedule` with `NamedEvent(ScheduleEvents.MigrationTypeFor(id))`, `JobSpec(DeliveryKind.Migration, null, null, AlvoScheduleScope.Global, afterRevision)`, default job options, `HandlerInvoker.ForJob<TMigration>()` (it accepts `IAlvoDataMigration` too; `scheduledFor` = the start instant, `AlvoJobContext.Revision` = the payload's `revision`). `afterRevision < 1` → `ArgumentOutOfRangeException`. `ScheduleChecks` adds the tenant-catalog problem for migrations when the **boot** catalog's schema has a `Scoped` entity (checked in `Compile`, which sees the catalog). **Scoped after boot** (an apply adds the first scoped entity, no catalog registered): `DataMigrationStarter` checks again at run time — logs `TenantCatalogMissing` (migration id, revision) and skips without marking, so it starts on the first round after a catalog exists (Decision 10). `ScheduleRuns`/`EachTenant` needs no runtime guard: boot refuses it without a catalog whatever the schema. `DataMigrationStarter.StartDueAsync`: caches `StartedMigrationsAsync` once per process (adds to the cache on each start); for each bound migration not started, reads `applied.GetCurrentAsync(project)` (once per call, only when one is pending); when `Revision >= AfterRevision`, builds the events (one per tenant on a scoped schema via `IAlvoTenantCatalog`, else one, payload `{ migration = id, revision = applied.Revision }`, subject `migrations/<id>`) with `AlvoFrameworkEvent.Create`, and calls `StartMigrationAsync(id, applied.Revision, events)`. `SchedulePump`'s round calls it after the schedules. Rollback creates a new, higher revision (`RollbackAsync` is append-only) and the started row is permanent, so neither a rollback nor a re-apply re-runs it.
 - [ ] **Step 4: Run** both engines' `TimeFacts`, `'*ScheduleRegistrationTests'`, `'*FrameworkEventMintingTests'`; then `scripts/test-ring1`. Accept baselines.
 - [ ] **Step 5: Commit** — `feat(scheduling): AddDataMigration runs once per revision, per tenant on a scoped schema`.
 - [ ] **Step 6: Ship slice C** — ring2, plan-guard, PR report, push, PR (`Part of #390`), `needs-deep-review`.
@@ -842,10 +888,10 @@ public async Task A_schedule_runs_now_and_shows_its_last_run()
 - [ ] **Step 2: Run** `dotnet test --project test/MMLib.Alvo.DocsSnippets.Tests`; FAIL.
 - [ ] **Step 3: Write.**
   - **Docs page *Time: timers and schedules*** (excerpts by `SourceExcerpt` anchors): a keyed timer (schedule, move = same key, cancel; at-least-once handler, exactly-once fire); inside a transaction (joins the unit, a rollback leaves no timer — the HX-18 path); tenants (argument or the unit's; required on a scoped schema); depth (a timer that re-arms itself stops at 8 — the dead `chain-depth-exceeded` delivery); schedules (5-field cron, IANA zone, DST rules quoted from Cronos, one run across replicas, missed occurrences once, `EachTenant` + `IAlvoTenantCatalog`, job pool and 15-min timeout, run now); data migrations (once per revision, never re-run by rollback); testing with a fake clock + `DrainEventsAsync`; the dashboard's *Schedules* section; limits (no sub-minute cron, no backlog, a run that outlasts its period overlaps the next).
-  - **`docs/architecture/time.md`**: the three tables (DDL), the claim/fence/fire transactions with the EvalPlanQual argument, generation-as-token (Decision 1), unit enlistment, provenance per hop, the pump round order, the job pool, Decisions 1–13 as *settled* with their cost.
+  - **`docs/architecture/time.md`**: the three tables (DDL), the claim/fence/fire transactions with the EvalPlanQual argument, generation-as-token (Decision 1), unit enlistment, provenance per hop, the pump round order, the job pool, Decisions 1–15 as *settled* with their cost; the framework-envelope rule (Decision 15) with the port pin that holds it.
   - **Skill**: in `alvo-descriptor-hooks`, replace `a timed job is \`automation\`, which this build does not run.` with `a timed job is host code — a schedule (\`AddSchedule\`) or a timer (\`IAlvoScheduler\`); \`get_extensions\` lists the schedules already registered. The descriptor's \`automation\` does not run in this build.` Run `dotnet test --project test/MMLib.Alvo.Ai.Tests` (region/size caps).
   - **CHANGELOG** `[Unreleased]`: *Added* — timers, schedules, data migrations, run now, the Operations *Schedules* section, `Cronos` dependency, `Alvo:Deliveries:MaxJobConcurrency`; *Changed (breaking)* — `ITimerStore` is a new provider obligation (a provider implementing `IOutboxStore` implements it over the same database), `AlvoExtensionKind`/`AlvoExtensionStage` gain members (an exhaustive `switch` gains cases).
-  - **Spec**: under §4.10 append *HX-13 settled details* — Decisions 1–14 verbatim, one line each, and amend §5 row `13` with the symbols beyond it (Global Constraints list).
+  - **Spec**: under §4.10 append *HX-13 settled details* — Decisions 1–15 verbatim, one line each (Decision 10 is recorded as a **deviation** from §4.10's `System(null)` iterating tenants, with its cost: tenants created later never get the migration), and amend §5 row `13` with the symbols beyond it (Global Constraints list).
   - **PLAN.md**: append HX-13 to the HX line (`HX-13 (timers, cron schedules, data migrations) the thirteenth`).
 - [ ] **Step 4: Run** `test/MMLib.Alvo.DocsSnippets.Tests`, `test/MMLib.Alvo.Ai.Tests`, `test/MMLib.Alvo.DocsGen.Tests`, then `scripts/test-ring1`; PASS.
 - [ ] **Step 5: Commit** — `docs(scheduling): Time — timers and schedules; the architecture doc, skill, CHANGELOG and spec`.
@@ -869,4 +915,4 @@ public async Task A_schedule_runs_now_and_shows_its_last_run()
 | (10) fake clock + drain delivers a 24 h reminder | `TimeFacts.A_fake_clock_and_a_drain_deliver_a_24_hour_reminder` (T4, both) |
 | (11) self-re-arming timer stops at depth 8; `ScheduleAsync` refused above it | `TimeFacts.A_self_re_arming_timer_stops_at_the_depth_limit` (T4, both); `AlvoSchedulerTests.Scheduling_above_the_depth_limit_is_refused` (T3) |
 | (12) `ScheduleAsync` in a rolled-back `TransactAsync` leaves no row | `TimeFacts.A_timer_scheduled_in_a_rolled_back_unit_leaves_no_row` (T3, both) |
-| (13) `alvo.schedule.*` minted only through the framework path | `FrameworkEventMintingTests.Only_the_framework_paths_call_AlvoFrameworkEvent_Create`, `…A_host_cannot_publish_or_schedule_a_schedule_run` (T6); `AlvoSchedulerTests.A_framework_event_type_cannot_be_scheduled` (T3) |
+| (13) `alvo.schedule.*` minted only through the framework path | `TimerStorePortTests.A_host_built_schedule_event_cannot_reach_the_outbox_through_ITimerStore` (T1); `FrameworkEventMintingTests.Only_the_framework_paths_call_AlvoFrameworkEvent_Create`, `…A_host_cannot_publish_or_schedule_a_schedule_run` (T6); `AlvoSchedulerTests.A_framework_event_type_cannot_be_scheduled` (T3) |
