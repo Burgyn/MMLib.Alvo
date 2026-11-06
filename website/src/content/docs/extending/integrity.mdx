@@ -85,8 +85,9 @@ is refused would otherwise tell a caller something about a value they cannot rea
 its own value alone is allowed even when hidden. One answer is allowed on purpose: a validation on a rollup parent, like
 `reserved <= stock`, refuses a child write even when the caller cannot read the parent row. That answer is the oversell
 protection itself, and it can reveal more than "this product is fully reserved": a caller who may create and delete
-lines can try quantities until they find the product's remaining headroom. If that is confidential, make the line's
-`create` rule require that the product be readable.
+lines can try quantities until they find the product's remaining headroom. No rule can close this today, because a
+rule reads only the written row, `@user` and `@tenant`; if the headroom is confidential, keep such a validation off a
+parent the line's writers cannot read.
 
 ## Adding one to rows that break it
 

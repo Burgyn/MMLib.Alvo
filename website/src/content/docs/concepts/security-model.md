@@ -54,8 +54,8 @@ Where the guarantees stop:
   itself, and whether a caller may read a row is decided per request, so it cannot be refused when the descriptor is
   applied. It is more than "the product is at capacity": a caller who may create and delete order lines can try
   quantities and recover the product's remaining headroom, `stock − reserved`, exactly, because each refusal changes
-  nothing. If that headroom is confidential, give the child's `create` rule a condition that requires the parent to be
-  readable.
+  nothing. No rule can close this today, because a rule reads only the written row, `@user` and `@tenant`; if that
+  headroom is confidential, keep such a validation off a parent the child's writers cannot read.
 - **Long reads can hold off a schema change on PostgreSQL.** An apply that adds a `CHECK` or changes a table needs an
   exclusive lock, and it waits at most five seconds for it. A caller who can keep a read running longer than that on
   the table makes every apply answer `409` (retry) and a starting host in `Apply` mode refuse to start, for as long as
