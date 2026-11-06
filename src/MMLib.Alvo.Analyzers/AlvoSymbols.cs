@@ -108,7 +108,11 @@ internal sealed class AlvoSymbols
     private bool IsScheduler(IMethodSymbol method) =>
         (_schedulerExtensions is not null && Same(method.ContainingType?.OriginalDefinition, _schedulerExtensions))
         || (_scheduler is not null && method.ContainingType is { } type
-            && (Same(type.OriginalDefinition, _scheduler) || type.AllInterfaces.Any(contract => Same(contract, _scheduler))));
+            && (Same(type.OriginalDefinition, _scheduler) || ImplementsSchedulerMember(type, method)));
+
+    private bool ImplementsSchedulerMember(INamedTypeSymbol type, IMethodSymbol method) =>
+        type.AllInterfaces.Any(contract => Same(contract, _scheduler))
+        && _scheduler!.GetMembers().Any(member => Same(type.FindImplementationForInterfaceMember(member), method.OriginalDefinition));
 
     private bool IsSession(ITypeSymbol? type) =>
         _session is not null && type is not null
