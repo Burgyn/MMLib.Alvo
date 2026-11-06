@@ -55,6 +55,7 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
     private readonly string _log;
     private readonly string _steps;
     private readonly string _slots;
+    private int _singleClaims;
 
     internal EfCoreDeliveryStore(RelationalConnectionFactory connections, IAlvoSqlDialect dialect, AlvoOptions options, TimeProvider time)
     {
@@ -260,30 +261,49 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
     /// </summary>
     /// <remarks>
     /// Capped first, so an uncapped backlog that fills the batch cannot starve a capped handler, and an uncapped handler
-    /// keeps at least the smaller half; and so the claim's transaction locks every slot before any delivery row.
+    /// keeps at least the smaller half; and so the claim's transaction locks every slot before any delivery row. A batch of
+    /// one has no halves: such claims alternate which half goes first, so each kind gets a claim within two rounds. An
+    /// uncapped-first claim of one that wins a row runs no capped half, and one that wins none holds no row lock, so the
+    /// lock order still holds.
     /// </remarks>
     private async Task<List<ClaimedDelivery>> ClaimInTransactionAsync(DbConnection connection, DbTransaction transaction, DeliveryClaim claim, CancellationToken ct)
     {
         var caps = Caps(claim);
         var (ordered, unordered) = Uncapped(claim, caps);
-        var uncapped = ordered.Count + unordered.Count;
-        var claimed = caps.Count == 0
-            ? []
-            : await ClaimCappedAsync(connection, transaction, claim, caps, CappedRoom(claim.BatchSize, uncapped), ct).ConfigureAwait(false);
-        var left = claim.BatchSize - claimed.Count;
-        if (uncapped > 0 && left > 0)
+        var uncappedFirst = UncappedFirst(claim, caps.Count, ordered.Count + unordered.Count);
+        var claimed = uncappedFirst ? await ClaimUncappedAsync(connection, transaction, claim, ordered, unordered, claim.BatchSize, ct).ConfigureAwait(false) : [];
+        if (caps.Count > 0 && claimed.Count < claim.BatchSize)
         {
-            claimed.AddRange(await RelationalSqlBatch.ReadRowsAsync(
-                connection,
-                transaction,
-                DeliveryTable.ClaimSql(_table, _outbox, _controls, ordered.Count, unordered.Count),
-                command => BindClaim(command, claim with { BatchSize = left }, [.. ordered, .. unordered]),
-                ReadClaimed,
-                ct).ConfigureAwait(false));
+            var room = uncappedFirst ? claim.BatchSize - claimed.Count : CappedRoom(claim.BatchSize, ordered.Count + unordered.Count);
+            claimed.AddRange(await ClaimCappedAsync(connection, transaction, claim, caps, room, ct).ConfigureAwait(false));
+        }
+
+        if (!uncappedFirst && claimed.Count < claim.BatchSize)
+        {
+            claimed.AddRange(await ClaimUncappedAsync(connection, transaction, claim, ordered, unordered, claim.BatchSize - claimed.Count, ct).ConfigureAwait(false));
         }
 
         return claimed;
     }
+
+    /// <summary>
+    /// Whether this claim runs its uncapped half first: only when a batch of one cannot hold both shares and both kinds are
+    /// named, and then on every other such claim of this store, so neither half starves the other.
+    /// </summary>
+    private bool UncappedFirst(DeliveryClaim claim, int capped, int uncapped) =>
+        claim.BatchSize < 2 && capped > 0 && uncapped > 0 && Interlocked.Increment(ref _singleClaims) % 2 == 0;
+
+    private async Task<List<ClaimedDelivery>> ClaimUncappedAsync(
+        DbConnection connection, DbTransaction transaction, DeliveryClaim claim, List<string> ordered, List<string> unordered, int batch, CancellationToken ct) =>
+        ordered.Count + unordered.Count == 0
+            ? []
+            : await RelationalSqlBatch.ReadRowsAsync(
+                connection,
+                transaction,
+                DeliveryTable.ClaimSql(_table, _outbox, _controls, ordered.Count, unordered.Count),
+                command => BindClaim(command, claim with { BatchSize = batch }, [.. ordered, .. unordered]),
+                ReadClaimed,
+                ct).ConfigureAwait(false);
 
     private static int CappedRoom(int batch, int uncapped) => uncapped == 0 ? batch : batch - (batch / 2);
 

@@ -120,7 +120,8 @@ committed row, fails, and moves to the next slot. Once all `limit` rows are held
 1. Read up to `limit` candidates per slot key (`ROW_NUMBER() … <= @limit`, so one saturated key cannot fill the read).
 2. Insert the key's rows lazily (`ON CONFLICT DO NOTHING`), then take slots — keys ascending, slots ascending — for at
    most the capped share of the batch: all of it when every named subscriber is capped, else its larger half. A key that
-   yields no slot is skipped for the rest of the claim.
+   yields no slot is skipped for the rest of the claim. A batch of one alternates which half goes first, so neither
+   kind starves the other.
 3. Claim the deliveries the slots were taken for, ids ascending; give back the slot of one no longer claimable.
 4. Run the uncapped batch `UPDATE` with what is left of the batch.
 

@@ -36,6 +36,8 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     internal ConcurrentQueue<AlvoProvenance?> AnswerFlows { get; } = new();
 
     /// <summary>Every claim made, in order.</summary>
+    private int _singleClaims;
+
     internal ConcurrentQueue<DeliveryClaim> Claims { get; } = new();
 
     internal IReadOnlyList<Row> Rows
@@ -160,12 +162,21 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
                 .OrderBy(row => row.EventId.ToString(), StringComparer.Ordinal)
                 .ThenBy(row => row.Subscriber, StringComparer.Ordinal)
                 .ToList();
-            var capped = claimable.Where(row => Capped(claim, row.Subscriber) && TookSlot(row, claim, now)).Take(CappedRoom(claim)).ToList();
-            var uncapped = claimable.Where(row => !Capped(claim, row.Subscriber)).Take(claim.BatchSize - capped.Count).ToList();
+            var uncappedFirst = UncappedFirst(claim);
+            var early = uncappedFirst ? claimable.Where(row => !Capped(claim, row.Subscriber)).Take(claim.BatchSize).ToList() : [];
+            var capped = claimable.Where(row => Capped(claim, row.Subscriber) && TookSlot(row, claim, now))
+                .Take(uncappedFirst ? claim.BatchSize - early.Count : CappedRoom(claim)).ToList();
+            var uncapped = uncappedFirst ? early : claimable.Where(row => !Capped(claim, row.Subscriber)).Take(claim.BatchSize - capped.Count).ToList();
 
             return Task.FromResult<IReadOnlyList<ClaimedDelivery>>([.. capped.Concat(uncapped).Select(row => Claim(row, claim, now))]);
         }
     }
+
+    private bool UncappedFirst(DeliveryClaim claim) =>
+        claim.BatchSize < 2
+        && claim.Ordered.Concat(claim.Unordered).Any(subscriber => Capped(claim, subscriber))
+        && !claim.Ordered.Concat(claim.Unordered).All(subscriber => Capped(claim, subscriber))
+        && ++_singleClaims % 2 == 0;
 
     private static bool Capped(DeliveryClaim claim, string subscriber) => claim.Limits.Any(limit => limit.Subscriber == subscriber);
 

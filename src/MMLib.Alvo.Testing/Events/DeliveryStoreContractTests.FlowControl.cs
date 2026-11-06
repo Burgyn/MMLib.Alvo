@@ -297,6 +297,29 @@ public abstract partial class DeliveryStoreContractTests
         claimed.Select(delivery => delivery.Subscriber).Order(StringComparer.Ordinal).ShouldBe([Audit, Confirm]);
     }
 
+    /// <summary>
+    /// A batch of one cannot hold both shares, so neither a capped nor an uncapped backlog may take every round: within two
+    /// claims each subscriber gets one.
+    /// </summary>
+    [Fact]
+    public async Task At_a_batch_of_one_capped_and_uncapped_backlogs_each_get_a_claim_within_two_rounds()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        for (var index = 0; index < 3; index++)
+        {
+            var key = $"tickets:{index}";
+            var @event = await world.AppendEventAsync(key);
+            await world.Store.FanOutAsync([Request(@event, Confirm, key) with { TenantId = TenantA }, Request(@event, Audit, key) with { TenantId = TenantA }], Ct);
+        }
+
+        var claim = Capped("tenant", 3) with { Ordered = [Confirm, Audit], BatchSize = 1 };
+        var first = await world.Store.ClaimAsync(claim, Ct);
+        var second = await world.Store.ClaimAsync(claim, Ct);
+
+        first.Concat(second).Select(delivery => delivery.Subscriber).Order(StringComparer.Ordinal).ShouldBe([Audit, Confirm]);
+    }
+
     private static DeliveryRequest Debounced(Guid @event, string key, string tenant) =>
         Request(@event, Confirm, key) with { TenantId = tenant, Debounce = _debounce };
 

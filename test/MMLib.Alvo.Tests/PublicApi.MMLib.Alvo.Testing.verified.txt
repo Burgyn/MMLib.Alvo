@@ -792,6 +792,7 @@ namespace MMLib.Alvo.Testing.Events
         public System.Threading.Tasks.Task An_unknown_delivery_is_not_found_and_has_no_attempts() { }
         public System.Threading.Tasks.Task An_unordered_subscriber_does_not_wait_for_an_earlier_unfanned_event() { }
         public System.Threading.Tasks.Task An_unordered_subscriber_is_not_blocked_by_a_dead_earlier_delivery() { }
+        public System.Threading.Tasks.Task At_a_batch_of_one_capped_and_uncapped_backlogs_each_get_a_claim_within_two_rounds() { }
         protected virtual void EnsureEngineAvailable() { }
         public System.Threading.Tasks.Task Pausing_twice_changes_nothing_the_second_time() { }
         public System.Threading.Tasks.Task Redelivering_a_dead_delivery_makes_it_the_head_of_its_lane_again() { }
