@@ -81,6 +81,25 @@ public abstract partial class TimerStoreContractTests
         fresh.Generation.ShouldNotBe(stale.Generation);
     }
 
+    /// <summary>
+    /// A cancel fenced by the generation a claim read removes nothing once the timer was re-armed since; at the current
+    /// generation it removes the timer.
+    /// </summary>
+    [Fact]
+    public async Task A_cancel_at_a_stale_generation_leaves_a_timer_re_armed_since_the_claim()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        await world.Store.UpsertAsync(Timer("t-1", world.Now), Ct);
+        var stale = (await world.Store.ClaimTimersAsync(10, _lease, Ct)).ShouldHaveSingleItem();
+        var current = await world.Store.UpsertAsync(Timer("t-1", world.Now.AddHours(1)), Ct);
+
+        (await world.Store.CancelAsync(stale.Scope, stale.Key, stale.Generation, Ct)).ShouldBeFalse();
+        (await world.Store.CountTimersAsync(Ct)).Pending.ShouldBe(1);
+        (await world.Store.CancelAsync(stale.Scope, stale.Key, current, Ct)).ShouldBeTrue();
+        (await world.Store.CountTimersAsync(Ct)).Pending.ShouldBe(0);
+    }
+
     /// <summary>A cancel while a claim is in flight leaves its fire nothing to delete and nothing to append.</summary>
     [Fact]
     public async Task A_cancel_during_a_claim_leaves_the_fire_nothing_to_append()

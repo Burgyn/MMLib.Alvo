@@ -257,15 +257,17 @@ public abstract partial class TimeFacts
         log.Received.ShouldHaveSingleItem().Data.Record.ShouldNotBeNull()["booking"].ShouldBe("late");
     }
 
-    [Fact]
-    public async Task A_stored_timer_that_cannot_be_built_is_cancelled_not_retried()
+    [Theory]
+    [InlineData("payload")]
+    [InlineData("provenance")]
+    public async Task A_stored_timer_that_cannot_be_built_is_cancelled_not_retried(string corrupted)
     {
         var log = new ReminderLog();
         var capture = new TimerLogCapture();
         var database = await DatabaseAsync();
         await using var alvo = await StartAsync(log, database: database, logs: capture);
         await Scheduler(alvo).ScheduleAsync("broken", _now, Reminder, Data("b1"), Tenant, Ct);
-        await ExecuteAsync(database.Connect, "UPDATE alvo_timers SET payload = '{not json'");
+        await ExecuteAsync(database.Connect, $"UPDATE alvo_timers SET {corrupted} = '{{not json'");
 
         await alvo.DrainEventsAsync(Ct);
         await alvo.DrainEventsAsync(Ct);

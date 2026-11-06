@@ -40,7 +40,12 @@ internal static class TimerProvenance
     /// <summary>Reads what <see cref="Write"/> wrote; anything malformed reads as <see cref="AlvoProvenance.None"/>.</summary>
     /// <param name="json">The stored text.</param>
     /// <returns>The provenance.</returns>
-    internal static AlvoProvenance Read(string json)
+    internal static AlvoProvenance Read(string json) => TryRead(json) ?? AlvoProvenance.None;
+
+    /// <summary>Reads what <see cref="Write"/> wrote, strictly: anything malformed reads as <see langword="null"/>.</summary>
+    /// <param name="json">The stored text.</param>
+    /// <returns>The provenance, or <see langword="null"/> when the text is not one — the timer pump's sign of a corrupted row.</returns>
+    internal static AlvoProvenance? TryRead(string json)
     {
         try
         {
@@ -49,7 +54,7 @@ internal static class TimerProvenance
         }
         catch (Exception failure) when (failure is JsonException or ArgumentException or InvalidOperationException or FormatException or KeyNotFoundException)
         {
-            return AlvoProvenance.None;
+            return null;
         }
     }
 

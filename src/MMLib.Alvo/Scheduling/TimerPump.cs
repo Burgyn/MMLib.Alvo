@@ -24,8 +24,9 @@ namespace MMLib.Alvo.Scheduling;
 /// the chain-depth limit, so a timer that re-arms itself ends as a dead delivery.
 /// </para>
 /// <para>
-/// <b>A row that cannot be built</b> — a malformed payload, a scope that is not a tenant id, a type the custom door now
-/// refuses — is logged once and cancelled, never thrown every round. A fire the store fails is logged and left for its lease
+/// <b>A row that cannot be built</b> — a malformed payload or provenance, a scope that is not a tenant id, a type the custom
+/// door now refuses — is logged once and cancelled at the generation its claim read, never thrown every round. A corrupted
+/// provenance is not read as none: that would restart a loop's chain depth. A fire the store fails is logged and left for its lease
 /// to return it.
 /// </para>
 /// <para>
@@ -61,7 +62,7 @@ internal sealed class TimerPump(
             return Quiet;
         }
 
-        EnsureManualGates();
+        DispatcherGates.EnsureManual(events.Value, boot, catalogs);
         return await RoundAsync(store, cancellationToken).ConfigureAwait(false);
     }
 
@@ -151,7 +152,7 @@ internal sealed class TimerPump(
     {
         if (EventOf(timer) is not { } fired)
         {
-            await timers.CancelAsync(timer.Scope, timer.Key, ct).ConfigureAwait(false);
+            await timers.CancelAsync(timer.Scope, timer.Key, timer.Generation, ct).ConfigureAwait(false);
             return false;
         }
 
@@ -184,31 +185,14 @@ internal sealed class TimerPump(
 
     private static AlvoContext FiringContext(ClaimedTimer timer)
     {
-        var stored = TimerProvenance.Read(timer.Provenance);
+        var stored = TimerProvenance.TryRead(timer.Provenance)
+            ?? throw new FormatException("The timer's stored provenance is not one Alvo wrote.");
 
         return AlvoContext.System(TenantOf(timer.Scope)) with { Provenance = stored with { Depth = stored.Depth + 1 } };
     }
 
     private static TenantId? TenantOf(string scope) =>
         scope.Length == 0 ? null : TenantId.Parse(scope, CultureInfo.InvariantCulture);
-
-    private void EnsureManualGates()
-    {
-        var settings = events.Value;
-        if (settings.DispatchMode is not AlvoEventDispatchMode.Manual || !settings.Enabled)
-        {
-            throw new InvalidOperationException(
-                "A manual timer round was refused before anything fired: the dispatch mode is not manual, or events are off. "
-                + $"Configured: mode '{settings.DispatchMode}', enabled {settings.Enabled}.");
-        }
-
-        if (boot.Phase is not AlvoBootPhase.Ready || catalogs.Current is null)
-        {
-            throw new InvalidOperationException(
-                "A manual timer round was refused before anything fired: the boot has not primed a schema. Start the host, let "
-                + "its boot finish, and apply a descriptor first.");
-        }
-    }
 
     /// <summary>Brings the store up once; the loop and the manual rounds never run in one process together, so no lock.</summary>
     private async Task EnsureStoreAsync(ITimerStore timers, CancellationToken ct)

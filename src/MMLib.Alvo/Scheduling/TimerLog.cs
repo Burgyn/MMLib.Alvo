@@ -8,7 +8,7 @@ internal static partial class TimerLog
     [LoggerMessage(
         Level = LogLevel.Error,
         Message = "Alvo cancelled timer {Key} of scope '{Scope}': its stored row cannot be built into an event ({ErrorType}) — "
-            + "a malformed payload, a scope that is not a tenant id, or a type the custom-event door refuses. It is not retried.")]
+            + "a malformed payload or provenance, a scope that is not a tenant id, or a type the custom-event door refuses. It is not retried.")]
     internal static partial void TimerUnbuildable(ILogger logger, string scope, string key, string errorType);
 
     [LoggerMessage(

@@ -1006,6 +1006,7 @@ namespace MMLib.Alvo.Testing.Scheduling
     public abstract class TimerStoreContractTests
     {
         protected TimerStoreContractTests() { }
+        public System.Threading.Tasks.Task A_cancel_at_a_stale_generation_leaves_a_timer_re_armed_since_the_claim() { }
         public System.Threading.Tasks.Task A_cancel_during_a_claim_leaves_the_fire_nothing_to_append() { }
         public System.Threading.Tasks.Task A_cancel_of_an_unknown_key_answers_false() { }
         public System.Threading.Tasks.Task A_claim_takes_the_earliest_due_first_and_at_most_the_batch() { }
