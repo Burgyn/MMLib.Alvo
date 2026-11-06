@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Extensions.Internal;
+﻿using MMLib.Alvo.Scheduling;
+
+namespace MMLib.Alvo.Extensions.Internal;
 
 /// <summary>
 /// One piece of host code registered with Alvo — the <c>CelFunctionRegistration</c> precedent: an internal singleton per
@@ -8,9 +10,19 @@
 /// <param name="Sequence">Its place among every registration of this host, in call order.</param>
 internal abstract record ExtensionRegistration(string Id, int Sequence);
 
-/// <summary>An event handler; <paramref name="Typed"/> is set when it was registered over a host type.</summary>
+/// <summary>
+/// An event handler; <paramref name="Typed"/> is set when it was registered over a host type, and <paramref name="Job"/> when
+/// it is a scheduled job or a data migration — a handler of the framework event Alvo mints for each of its runs.
+/// </summary>
 internal sealed record HandlerRegistration(
-    string Id, int Sequence, HandlerSource Source, string? When, HandlerSettings Settings, HandlerInvoker Invoker, TypedHandler? Typed = null)
+    string Id,
+    int Sequence,
+    HandlerSource Source,
+    string? When,
+    HandlerSettings Settings,
+    HandlerInvoker Invoker,
+    TypedHandler? Typed = null,
+    JobSpec? Job = null)
     : ExtensionRegistration(Id, Sequence);
 
 /// <summary>An id that is no longer registered, and what happens to its unfinished work.</summary>

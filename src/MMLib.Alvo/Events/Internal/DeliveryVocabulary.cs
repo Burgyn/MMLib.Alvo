@@ -4,6 +4,8 @@
 internal static class DeliveryKind
 {
     internal const string Handler = "handler";
+    internal const string Schedule = "schedule";
+    internal const string Migration = "migration";
 }
 
 /// <summary>The fixed reasons a delivery records; any other failure records its exception's type name, never its message.</summary>

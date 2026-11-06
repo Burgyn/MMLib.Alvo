@@ -10,6 +10,7 @@ using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Host;
 using MMLib.Alvo.Identity;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Scheduling;
 using System.Reflection;
 
 namespace MMLib.Alvo.DocsGen.Configuration;
@@ -57,6 +58,7 @@ internal static class OptionsCatalog
         [typeof(AlvoHookOptions)] = "Set per write hook by the `configure` argument of an entity's `Validate`, `BeforeWrite`, `AfterWrite`, `BeforeDelete` and `AfterDelete`; it is not a configuration section.",
         [typeof(AlvoTransactionOptions)] = "A per-call argument to `IAlvoTransactions.TransactAsync(…)`, one unit at a time; it is not a configuration section.",
         [typeof(AlvoWebhookReceiverOptions)] = "Set per receiver by the `configure` argument of `MapAlvoWebhookReceiver(…)`; it is not a configuration section.",
+        [typeof(AlvoScheduleOptions)] = "Set per schedule by the `configure` argument of `AddSchedule(…)`; it is not a configuration section.",
     };
 
     internal static IReadOnlyList<ConfigurationSection> Read(IEnumerable<Assembly> assemblies, XmlDocs docs)

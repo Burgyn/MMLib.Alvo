@@ -57,6 +57,27 @@ public sealed class AlvoDeliveryOptionsTests
         refused.Message.ShouldContain("Alvo:Deliveries:MaxConcurrency");
     }
 
+    [Fact]
+    public void Two_job_runs_run_at_once_by_default_and_the_count_is_bound_from_its_section()
+    {
+        using var defaults = Container(new());
+        using var bound = Container(new() { ["Alvo:Deliveries:MaxJobConcurrency"] = "5" });
+
+        defaults.GetRequiredService<IOptions<AlvoDeliveryOptions>>().Value.MaxJobConcurrency.ShouldBe(2);
+        bound.GetRequiredService<IOptions<AlvoDeliveryOptions>>().Value.MaxJobConcurrency.ShouldBe(5);
+    }
+
+    [Fact]
+    public void A_job_concurrency_below_one_is_refused_beside_an_unusable_handler_concurrency()
+    {
+        using var services = Container(new() { ["Alvo:Deliveries:MaxConcurrency"] = "0", ["Alvo:Deliveries:MaxJobConcurrency"] = "0" });
+
+        var refused = Should.Throw<OptionsValidationException>(() => services.GetRequiredService<IOptions<AlvoDeliveryOptions>>().Value);
+
+        refused.Failures.Count().ShouldBe(2);
+        refused.Message.ShouldContain("Alvo__Deliveries__MaxJobConcurrency");
+    }
+
     private static ServiceProvider Container(Dictionary<string, string?> settings) => new ServiceCollection()
         .AddSingleton<IConfiguration>(new ConfigurationBuilder().AddInMemoryCollection(settings).Build())
         .AddAlvoExtensions()

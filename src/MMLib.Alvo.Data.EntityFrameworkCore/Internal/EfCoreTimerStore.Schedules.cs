@@ -11,9 +11,11 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// </summary>
 internal sealed partial class EfCoreTimerStore
 {
-    public Task SyncSchedulesAsync(IReadOnlyList<ScheduleDefinition> schedules, CancellationToken cancellationToken = default)
+    public Task SyncSchedulesAsync(
+        IReadOnlyList<ScheduleDefinition> schedules, IReadOnlyList<string> retired, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(schedules);
+        ArgumentNullException.ThrowIfNull(retired);
 
         return WriteAsync(
             async (connection, transaction, ct) =>
@@ -24,16 +26,25 @@ internal sealed partial class EfCoreTimerStore
                         .ConfigureAwait(false);
                 }
 
-                return await ExecuteAsync(
-                    connection, transaction, ScheduleTable.PruneSql(_schedules, schedules.Count), command => BindKept(command, schedules), ct)
-                    .ConfigureAwait(false);
+                return retired.Count == 0
+                    ? 0
+                    : await ExecuteAsync(
+                        connection, transaction, ScheduleTable.RetireSql(_schedules, retired.Count), command => BindIds(command, "@retired", retired), ct)
+                        .ConfigureAwait(false);
             },
             cancellationToken);
     }
 
-    public async Task<IReadOnlyList<ClaimedSchedule>> ClaimSchedulesAsync(string claimant, TimeSpan lease, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ClaimedSchedule>> ClaimSchedulesAsync(
+        string claimant, IReadOnlyList<string> ids, TimeSpan lease, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(claimant);
+        ArgumentNullException.ThrowIfNull(ids);
+        if (ids.Count == 0)
+        {
+            return [];
+        }
+
         var connection = _connections.Create();
         await using (connection.ConfigureAwait(false))
         {
@@ -41,7 +52,7 @@ internal sealed partial class EfCoreTimerStore
             using (await _connections.WriteGate.EnterAsync(cancellationToken).ConfigureAwait(false))
             {
                 var claimed = await RelationalSqlBatch.ReadWrittenRowsAsync(
-                    connection, ScheduleTable.ClaimSql(_schedules), command => BindScheduleClaim(command, claimant, lease), ReadClaimedSchedule, cancellationToken)
+                    connection, ScheduleTable.ClaimSql(_schedules, ids.Count), command => BindScheduleClaim(command, claimant, ids, lease), ReadClaimedSchedule, cancellationToken)
                     .ConfigureAwait(false);
 
                 return [.. claimed.OrderBy(schedule => schedule.ScheduledFor).ThenBy(schedule => schedule.Id, StringComparer.Ordinal)];
@@ -108,16 +119,17 @@ internal sealed partial class EfCoreTimerStore
         RelationalSqlBatch.AddParameter(command, "@next_run_at", Instant(schedule.NextRunAt));
     }
 
-    private static void BindKept(DbCommand command, IReadOnlyList<ScheduleDefinition> schedules)
+    private static void BindIds(DbCommand command, string prefix, IReadOnlyList<string> ids)
     {
-        for (var index = 0; index < schedules.Count; index++)
+        for (var index = 0; index < ids.Count; index++)
         {
-            RelationalSqlBatch.AddParameter(command, $"@id{index}", schedules[index].Id);
+            RelationalSqlBatch.AddParameter(command, $"{prefix}{index}", ids[index]);
         }
     }
 
-    private void BindScheduleClaim(DbCommand command, string claimant, TimeSpan lease)
+    private void BindScheduleClaim(DbCommand command, string claimant, IReadOnlyList<string> ids, TimeSpan lease)
     {
+        BindIds(command, "@id", ids);
         var now = _time.GetUtcNow();
         RelationalSqlBatch.AddParameter(command, "@now", Instant(now));
         RelationalSqlBatch.AddParameter(command, "@lease_until", Instant(now + lease));

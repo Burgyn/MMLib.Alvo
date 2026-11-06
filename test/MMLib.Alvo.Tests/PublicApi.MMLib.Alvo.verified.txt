@@ -336,6 +336,7 @@ namespace MMLib.Alvo.Extensions
         public const string SectionName = "Alvo:Deliveries";
         public AlvoDeliveryOptions() { }
         public int MaxConcurrency { get; set; }
+        public int MaxJobConcurrency { get; set; }
     }
     public sealed class AlvoEntityBuilder
     {
@@ -724,10 +725,37 @@ namespace MMLib.Alvo.Rules
 }
 namespace MMLib.Alvo.Scheduling
 {
+    public sealed class AlvoJobContext
+    {
+        public int Attempt { get; }
+        public MMLib.Alvo.Data.IAlvoSession Data { get; }
+        public string Id { get; }
+        public int? Revision { get; }
+        public System.DateTimeOffset ScheduledFor { get; }
+        public MMLib.Alvo.TenantId? Tenant { get; }
+        public static MMLib.Alvo.Scheduling.AlvoJobContext Create(string id, System.DateTimeOffset scheduledFor, MMLib.Alvo.TenantId? tenant, MMLib.Alvo.Data.IAlvoSession data, int attempt = 1, int? revision = default) { }
+    }
+    public sealed class AlvoScheduleOptions
+    {
+        public AlvoScheduleOptions() { }
+        public string? Description { get; set; }
+        public MMLib.Alvo.Extensions.AlvoRetryPolicy Retry { get; set; }
+        public MMLib.Alvo.Scheduling.AlvoScheduleScope Scope { get; set; }
+        public System.TimeSpan Timeout { get; set; }
+    }
+    public enum AlvoScheduleScope
+    {
+        Global = 0,
+        EachTenant = 1,
+    }
     public static class AlvoSchedulerExtensions
     {
         public static System.Threading.Tasks.Task ScheduleAsync<TMessage>(this MMLib.Alvo.Scheduling.IAlvoScheduler scheduler, string key, System.DateTimeOffset at, TMessage message, MMLib.Alvo.TenantId? tenant = default, System.Threading.CancellationToken cancellationToken = default)
             where TMessage :  class { }
+    }
+    public interface IAlvoScheduledJob
+    {
+        System.Threading.Tasks.Task RunAsync(MMLib.Alvo.Scheduling.AlvoJobContext context, System.Threading.CancellationToken cancellationToken);
     }
 }
 namespace Microsoft.AspNetCore.Builder
@@ -799,6 +827,8 @@ namespace Microsoft.Extensions.DependencyInjection
             where TMessage :  class
             where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<TMessage> { }
         public static MMLib.Alvo.IAlvoBuilder AddRetiredExtension(this MMLib.Alvo.IAlvoBuilder builder, string id, MMLib.Alvo.Extensions.AlvoRetirement retirement) { }
+        public static MMLib.Alvo.IAlvoBuilder AddSchedule<TJob>(this MMLib.Alvo.IAlvoBuilder builder, string id, string cron, string timeZone = "UTC", System.Action<MMLib.Alvo.Scheduling.AlvoScheduleOptions>? configure = null)
+            where TJob :  class, MMLib.Alvo.Scheduling.IAlvoScheduledJob { }
         public static MMLib.Alvo.IAlvoBuilder Entities(this MMLib.Alvo.IAlvoBuilder builder, System.Collections.Generic.IEnumerable<string> entities, System.Action<MMLib.Alvo.Extensions.AlvoEntityBuilder> configure) { }
         public static MMLib.Alvo.IAlvoBuilder Entity(this MMLib.Alvo.IAlvoBuilder builder, string entity, System.Action<MMLib.Alvo.Extensions.AlvoEntityBuilder> configure) { }
         public static MMLib.Alvo.IAlvoBuilder Entity<T>(this MMLib.Alvo.IAlvoBuilder builder, System.Action<MMLib.Alvo.Extensions.AlvoEntityBuilder<T>> configure)
