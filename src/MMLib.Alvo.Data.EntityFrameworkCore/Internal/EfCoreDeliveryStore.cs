@@ -8,7 +8,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// <summary>
 /// The relational <see cref="IDeliveryStore"/>: one connection per call, one statement — or a write-first transaction: the
 /// claim's one <c>UPDATE … RETURNING</c> (<see cref="RelationalSqlBatch.ReadWrittenRowsAsync"/>), or, to answer for an
-/// attempt, the fenced update then the attempt row — over <see cref="DeliveryTable"/>'s SQL.
+/// attempt, the slot release, the fenced update then the attempt row — over <see cref="DeliveryTable"/>'s SQL.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -54,6 +54,7 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
     private readonly string _controls;
     private readonly string _log;
     private readonly string _steps;
+    private readonly string _slots;
 
     internal EfCoreDeliveryStore(RelationalConnectionFactory connections, IAlvoSqlDialect dialect, AlvoOptions options, TimeProvider time)
     {
@@ -71,6 +72,7 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
         _controls = DeliveryOperationsTable.ControlsNameFor(options.SchemaPrefix);
         _log = DeliveryOperationsTable.LogNameFor(options.SchemaPrefix);
         _steps = StepTable.NameFor(options.SchemaPrefix);
+        _slots = ConcurrencySlotTable.NameFor(options.SchemaPrefix);
     }
 
     public async Task EnsureAsync(CancellationToken cancellationToken = default)
@@ -84,6 +86,7 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
                 await OutboxTable.EnsureAsync(connection, _outbox, cancellationToken).ConfigureAwait(false);
                 await DeliveryTable.EnsureAsync(connection, _table, _attempts, _outbox, _steps, cancellationToken).ConfigureAwait(false);
                 await DeliveryOperationsTable.EnsureAsync(connection, _table, _controls, _log, cancellationToken).ConfigureAwait(false);
+                await ConcurrencySlotTable.EnsureAsync(connection, _slots, cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -91,7 +94,7 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
     public Task<int> FanOutAsync(IReadOnlyList<DeliveryRequest> requests, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(requests);
-
+        EnsureKeyParts(requests);
         if (requests.Count == 0)
         {
             return Task.FromResult(0);
@@ -139,6 +142,7 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
     {
         ArgumentNullException.ThrowIfNull(claim);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(claim.BatchSize);
+        EnsureLimits(claim);
         if (claim.Ordered.Count + claim.Unordered.Count == 0)
         {
             return [];
@@ -213,13 +217,7 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
                 await using (transaction.ConfigureAwait(false))
                 {
                     await LockSubscribersAsync(connection, transaction, [.. claim.Ordered, .. claim.Unordered], exclusive: false, ct).ConfigureAwait(false);
-                    var claimed = await RelationalSqlBatch.ReadRowsAsync(
-                        connection,
-                        transaction,
-                        DeliveryTable.ClaimSql(_table, _outbox, _controls, claim.Ordered.Count, claim.Unordered.Count),
-                        command => BindClaim(command, claim),
-                        ReadClaimed,
-                        ct).ConfigureAwait(false);
+                    var claimed = await ClaimInTransactionAsync(connection, transaction, claim, ct).ConfigureAwait(false);
                     await transaction.CommitAsync(ct).ConfigureAwait(false);
 
                     return claimed;
@@ -255,7 +253,32 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
         }, ct).ConfigureAwait(false);
     }
 
-    private void BindClaim(DbCommand command, DeliveryClaim claim)
+    /// <summary>
+    /// The uncapped subscribers' batch claim, then — in the same transaction, with the room the batch left — the capped
+    /// subscribers' claim slot by slot. A claim naming no uncapped subscriber skips the batch statement.
+    /// </summary>
+    private async Task<List<ClaimedDelivery>> ClaimInTransactionAsync(DbConnection connection, DbTransaction transaction, DeliveryClaim claim, CancellationToken ct)
+    {
+        var caps = Caps(claim);
+        var (ordered, unordered) = Uncapped(claim, caps);
+        var claimed = ordered.Count + unordered.Count == 0
+            ? []
+            : await RelationalSqlBatch.ReadRowsAsync(
+                connection,
+                transaction,
+                DeliveryTable.ClaimSql(_table, _outbox, _controls, ordered.Count, unordered.Count),
+                command => BindClaim(command, claim, [.. ordered, .. unordered]),
+                ReadClaimed,
+                ct).ConfigureAwait(false);
+        if (caps.Count > 0 && claimed.Count < claim.BatchSize)
+        {
+            claimed.AddRange(await ClaimCappedAsync(connection, transaction, claim, caps, claim.BatchSize - claimed.Count, ct).ConfigureAwait(false));
+        }
+
+        return claimed;
+    }
+
+    private void BindClaim(DbCommand command, DeliveryClaim claim, IReadOnlyList<string> subscribers)
     {
         var now = _time.GetUtcNow();
         RelationalSqlBatch.AddParameter(command, "@now", StoredInstant.Text(now));
@@ -264,10 +287,9 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
         RelationalSqlBatch.AddParameter(command, "@batch", claim.BatchSize);
         RelationalSqlBatch.AddParameter(command, "@outbox_max_attempts", claim.OutboxMaxAttempts);
         RelationalSqlBatch.AddParameter(command, "@outbox_stale_before", StoredInstant.Text(now - claim.OutboxClaimLease));
-        var index = 0;
-        foreach (var subscriber in claim.Ordered.Concat(claim.Unordered))
+        for (var index = 0; index < subscribers.Count; index++)
         {
-            RelationalSqlBatch.AddParameter(command, $"@s{index++}", subscriber);
+            RelationalSqlBatch.AddParameter(command, $"@s{index}", subscribers[index]);
         }
     }
 
@@ -356,13 +378,14 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
         var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
         await using (transaction.ConfigureAwait(false))
         {
+            await ExecuteInAsync(connection, transaction, ConcurrencySlotTable.ReleaseSql(_slots, _table), command => BindFence(command, attempt), ct).ConfigureAwait(false);
             var held = await FencedUpdateAsync(connection, transaction, sql, bind, attempt, ct).ConfigureAwait(false) == 1;
             if (held)
             {
                 await InsertAttemptAsync(connection, transaction, attempt, outcome, errorType, ct).ConfigureAwait(false);
             }
 
-            await transaction.CommitAsync(ct).ConfigureAwait(false);
+            await (held ? transaction.CommitAsync(ct) : transaction.RollbackAsync(ct)).ConfigureAwait(false);
 
             return held;
         }

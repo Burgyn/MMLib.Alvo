@@ -80,6 +80,13 @@ public sealed record DeliveryClaim
     /// dispatched or its claim goes stale.
     /// </summary>
     public required TimeSpan OutboxClaimLease { get; init; }
+
+    /// <summary>
+    /// Gets the caps on how many deliveries of a subscriber the claim names may run at once per key; a subscriber with none
+    /// is capped only by <see cref="BatchSize"/>. A capped delivery is claimed only together with a free place under its
+    /// key's cap, held until its attempt is answered or its lease expires, so the cap holds across claimants and replicas.
+    /// </summary>
+    public IReadOnlyCollection<DeliveryLimit> Limits { get; init; } = [];
 }
 
 /// <summary>One claimed delivery, with the envelope it is for.</summary>
@@ -166,6 +173,12 @@ public sealed record DeliveryFailure
 /// and an answer for a delivery retired while it ran all change nothing. A claimant names one claim, not a process: a
 /// delivery put back to pending restarts its attempt count, so the claimant is what tells a stale claim's answer from the
 /// current one.
+/// </para>
+/// <para>
+/// <b>Caps.</b> A subscriber a claim names in <see cref="DeliveryClaim.Limits"/> has at most its limit of deliveries running
+/// per key — per tenant, or per partition key of a tenant — whoever claimed them: a capped delivery is claimed only together
+/// with a free place under its key's cap. <see cref="CompleteAsync"/>, <see cref="FailAsync"/> and <see cref="SleepAsync"/>
+/// give the place back in their transaction, and only when their fence held; a place whose delivery's lease expired is free.
 /// </para>
 /// <para>
 /// <b>The operator's members</b> read deliveries, put finished ones back to pending, pause a subscriber and record each of

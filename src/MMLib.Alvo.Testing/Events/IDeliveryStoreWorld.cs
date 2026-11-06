@@ -38,4 +38,12 @@ public interface IDeliveryStoreWorld : IAsyncDisposable
     /// <summary>Every row of the operations log, by when it was written and then by id.</summary>
     /// <returns>The rows, as the store would find them.</returns>
     Task<IReadOnlyList<DeliveryOperationEntry>> OperationsAsync();
+
+    /// <summary>
+    /// Every concurrency slot row the store keeps — its key, its number and the delivery holding it — for an engine's own
+    /// facts about the slots; a store that keeps no slot rows answers none, which is the default.
+    /// </summary>
+    /// <returns>The rows, in no promised order.</returns>
+    Task<IReadOnlyList<(string Key, int Slot, Guid? DeliveryId)>> ReadSlotsAsync() =>
+        Task.FromResult<IReadOnlyList<(string Key, int Slot, Guid? DeliveryId)>>([]);
 }

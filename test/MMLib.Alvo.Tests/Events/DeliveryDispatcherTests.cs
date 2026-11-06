@@ -91,6 +91,30 @@ public sealed class DeliveryDispatcherTests : IDisposable
     }
 
     [Fact]
+    public async Task A_capped_handler_is_claimed_with_its_cap()
+    {
+        var store = new FakeDeliveryStore(_clock);
+        var dispatcher = Dispatcher(store, (AlvoCreated<AlvoRecord> _) => Task.CompletedTask, options => options.Concurrency = AlvoConcurrency.PerKey("tenant", 2));
+        await FanOutAsync(store, Handler, "tickets:1");
+
+        await dispatcher.ManualRoundAsync(Ct);
+
+        store.Claims.First().Limits.ShouldHaveSingleItem().ShouldBe(new DeliveryLimit { Subscriber = Handler, Key = "tenant", Limit = 2 });
+    }
+
+    [Fact]
+    public async Task An_uncapped_handler_is_claimed_with_no_cap()
+    {
+        var store = new FakeDeliveryStore(_clock);
+        var dispatcher = Dispatcher(store, (AlvoCreated<AlvoRecord> _) => Task.CompletedTask);
+        await FanOutAsync(store, Handler, "tickets:1");
+
+        await dispatcher.ManualRoundAsync(Ct);
+
+        store.Claims.First().Limits.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task A_claim_holds_for_the_longest_handler_timeout_its_grace_and_its_settle_margin()
     {
         var store = new FakeDeliveryStore(_clock);

@@ -21,6 +21,55 @@ public sealed class SqliteDeliveryStoreTests : DeliveryStoreContractTests, IDisp
         Path.Combine(Path.GetTempPath(), $"alvo-delivery-store-tests-{Guid.NewGuid():N}.db");
 
     /// <summary>
+    /// A capped key's slot rows are created on its first claim, and an answer deletes the row its delivery held rather than
+    /// leaving it free, so a per-record cap leaves nothing behind once its deliveries are done.
+    /// </summary>
+    [Fact]
+    public async Task An_answer_deletes_the_slot_row_its_delivery_held()
+    {
+        await using var world = await DeliveryStoreWorld.StartAsync(Connect, new SqliteSqlDialect());
+        var @event = await world.AppendEventAsync("tickets:a");
+        await world.Store.FanOutAsync(
+            [new DeliveryRequest { EventId = @event, Subscriber = Subscriber, PartitionKey = "tickets:a", TenantId = "tenant-a", Kind = "handler" }],
+            TestContext.Current.CancellationToken);
+        var claim = new DeliveryClaim
+        {
+            Claimant = "worker-1",
+            Ordered = [Subscriber],
+            BatchSize = 5,
+            Lease = TimeSpan.FromMinutes(1),
+            OutboxMaxAttempts = 10,
+            OutboxClaimLease = TimeSpan.FromMinutes(5),
+            Limits = [new DeliveryLimit { Subscriber = Subscriber, Key = "record", Limit = 3 }],
+        };
+        var claimed = (await world.Store.ClaimAsync(claim, TestContext.Current.CancellationToken)).ShouldHaveSingleItem();
+
+        var slots = await world.ReadSlotsAsync();
+        slots.Select(slot => slot.Slot).ShouldBe([0, 1, 2], ignoreOrder: true);
+        slots.ShouldContain(slot => slot.Slot == 0 && slot.DeliveryId == claimed.Id);
+        slots.Select(slot => slot.Key).Distinct().ShouldHaveSingleItem().ShouldBe($"{Subscriber}\u001frecord\u001ftenant-a\u001ftickets:a");
+
+        var attempt = new DeliveryAttempt { Delivery = claimed, Claimant = "worker-1", StartedAt = DateTimeOffset.UnixEpoch, Duration = TimeSpan.Zero };
+        (await world.Store.CompleteAsync(attempt, TestContext.Current.CancellationToken)).ShouldBeTrue();
+
+        (await world.ReadSlotsAsync()).Select(slot => slot.Slot).ShouldBe([1, 2], ignoreOrder: true);
+    }
+
+    /// <summary>A fan-out naming a tenant with a control character is refused before anything is written.</summary>
+    [Fact]
+    public async Task A_fan_out_refuses_a_tenant_with_a_control_character()
+    {
+        await using var world = await DeliveryStoreWorld.StartAsync(Connect, new SqliteSqlDialect());
+        var @event = await world.AppendEventAsync("tickets:a");
+
+        await Should.ThrowAsync<ArgumentException>(() => world.Store.FanOutAsync(
+            [new DeliveryRequest { EventId = @event, Subscriber = Subscriber, PartitionKey = "tickets:a", TenantId = "a\u001fb", Kind = "handler" }],
+            TestContext.Current.CancellationToken));
+
+        (await world.Store.ListAsync(new DeliveryFilter { Limit = 10 }, TestContext.Current.CancellationToken)).ShouldBeEmpty();
+    }
+
+    /// <summary>
     /// Claimants on separate threads, each claiming and then answering in its own write transaction, wait for SQLite's
     /// write lock instead of failing with <c>SQLITE_BUSY</c>, and take every delivery exactly once.
     /// </summary>

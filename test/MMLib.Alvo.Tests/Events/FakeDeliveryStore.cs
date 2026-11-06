@@ -25,6 +25,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     private readonly Dictionary<string, SubscriberControl> _paused = new(StringComparer.Ordinal);
     private readonly HashSet<string> _disabled = new(StringComparer.Ordinal);
     private readonly List<DeliveryStep> _steps = [];
+    private readonly List<(string Key, Guid Delivery, DateTimeOffset LeaseUntil)> _slots = [];
 
     internal int FanOutFailures { get; set; }
 
@@ -158,11 +159,34 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
             var heads = _rows.Where(row => Claimable(row, claim, now))
                 .OrderBy(row => row.EventId.ToString(), StringComparer.Ordinal)
                 .ThenBy(row => row.Subscriber, StringComparer.Ordinal)
+                .Where(row => TookSlot(row, claim, now))
                 .Take(claim.BatchSize)
                 .ToList();
 
             return Task.FromResult<IReadOnlyList<ClaimedDelivery>>([.. heads.Select(row => Claim(row, claim, now))]);
         }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="row"/> may run under its subscriber's cap, taking a place when it does; evaluated lazily, so
+    /// only rows the batch still has room for take one.
+    /// </summary>
+    private bool TookSlot(Row row, DeliveryClaim claim, DateTimeOffset now)
+    {
+        if (claim.Limits.FirstOrDefault(limit => limit.Subscriber == row.Subscriber) is not { } limit)
+        {
+            return true;
+        }
+
+        var key = $"{row.Subscriber}\u001f{limit.Key}\u001f{row.TenantId}\u001f{(limit.Key == "record" ? row.PartitionKey : string.Empty)}";
+        _slots.RemoveAll(slot => slot.Key == key && slot.LeaseUntil < now);
+        if (_slots.Count(slot => slot.Key == key) >= limit.Limit)
+        {
+            return false;
+        }
+
+        _slots.Add((key, row.Id, now + claim.Lease));
+        return true;
     }
 
     public Task<bool> CompleteAsync(DeliveryAttempt attempt, CancellationToken cancellationToken = default) =>
@@ -553,6 +577,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
                 return false;
             }
 
+            _slots.RemoveAll(slot => slot.Delivery == row.Id);
             change(row);
             row.LeaseUntil = null;
             _attempts.Add((row.Id, row.Attempts, outcome));

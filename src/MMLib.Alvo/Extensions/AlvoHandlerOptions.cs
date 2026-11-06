@@ -51,6 +51,12 @@ public sealed class AlvoHandlerOptions
     /// </summary>
     public TimeSpan? Debounce { get; set; }
 
+    /// <summary>
+    /// Gets or sets how many of the handler's deliveries run at once per tenant or per record, across every replica; default
+    /// <see langword="null"/>, no cap beyond the dispatcher's own.
+    /// </summary>
+    public AlvoConcurrency? Concurrency { get; set; }
+
     internal bool OrderStated { get; private set; }
 
     internal static TimeSpan DefaultTimeout { get; } = TimeSpan.FromSeconds(30);

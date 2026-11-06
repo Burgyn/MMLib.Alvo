@@ -338,6 +338,13 @@ namespace MMLib.Alvo.Events
 }
 namespace MMLib.Alvo.Extensions
 {
+    public sealed class AlvoConcurrency
+    {
+        public string Key { get; }
+        public int Limit { get; }
+        public override string ToString() { }
+        public static MMLib.Alvo.Extensions.AlvoConcurrency PerKey(string key, int limit) { }
+    }
     public sealed class AlvoDeliveryOptions
     {
         public const string SectionName = "Alvo:Deliveries";
@@ -450,6 +457,7 @@ namespace MMLib.Alvo.Extensions
     public sealed class AlvoHandlerOptions
     {
         public AlvoHandlerOptions() { }
+        public MMLib.Alvo.Extensions.AlvoConcurrency? Concurrency { get; set; }
         public System.TimeSpan? Debounce { get; set; }
         public string? Description { get; set; }
         public int Order { get; set; }

@@ -194,6 +194,50 @@ internal static class DeliveryTable
             """;
     }
 
+    /// <summary>
+    /// The candidates of one capped subscriber — claimable as <see cref="ClaimSql"/> would claim them — at most
+    /// <c>@limit</c> per slot key, oldest event first, up to <c>@candidates</c>. A hint the claim then tries slot by slot,
+    /// never the enforcement: the slot rows and <see cref="ClaimOneSql"/> are.
+    /// </summary>
+    /// <remarks>
+    /// The per-key cut keeps one saturated key — a tenant with many deliveries waiting — from filling the whole candidate
+    /// read and hiding every other key's deliveries from the claim.
+    /// </remarks>
+    /// <param name="table">The validated deliveries table name.</param>
+    /// <param name="outbox">The validated outbox table name.</param>
+    /// <param name="controls">The validated subscriber controls table name.</param>
+    /// <param name="ordered">Whether the subscriber's lanes are ordered.</param>
+    /// <param name="perRecord">Whether the cap counts per record (partition key) of a tenant, not per tenant.</param>
+    internal static string CandidatesSql(string table, string outbox, string controls, bool ordered, bool perRecord) =>
+        $"""
+        SELECT id, event_id, subscriber, partition_key, tenant_id FROM (
+            SELECT id, event_id, subscriber, partition_key, tenant_id,
+                   ROW_NUMBER() OVER (PARTITION BY subscriber, COALESCE(tenant_id, ''){(perRecord ? ", partition_key" : string.Empty)} ORDER BY event_id) AS place
+              FROM {table}
+             WHERE {OneSubscriber(table, outbox, controls, ordered)}) ranked
+         WHERE place <= @limit
+         ORDER BY event_id
+         LIMIT @candidates
+        """;
+
+    /// <summary>
+    /// Claims the one delivery <c>@id</c> of the capped subscriber <c>@s0</c>, if it is still claimable — the outer condition
+    /// repeats the whole claimability test, as <see cref="ClaimSql"/>'s does.
+    /// </summary>
+    /// <param name="table">The validated deliveries table name.</param>
+    /// <param name="outbox">The validated outbox table name.</param>
+    /// <param name="controls">The validated subscriber controls table name.</param>
+    /// <param name="ordered">Whether the subscriber's lanes are ordered.</param>
+    internal static string ClaimOneSql(string table, string outbox, string controls, bool ordered) =>
+        $"""
+        UPDATE {table} SET status = 'running', claimed_by = @claimed_by, attempts = attempts + 1, lease_until = @lease_until
+         WHERE id = @id AND {OneSubscriber(table, outbox, controls, ordered)}
+        RETURNING id, event_id, subscriber, partition_key, attempts
+        """;
+
+    private static string OneSubscriber(string table, string outbox, string controls, bool ordered) =>
+        $"{Claimable} AND {Registered(1)} AND {NotPaused(table, controls)} AND {LaneHead(table, outbox, ordered ? 1 : 0, ordered ? 0 : 1)}";
+
     private static string NotPaused(string table, string controls) =>
         $"NOT EXISTS (SELECT 1 FROM {controls} paused WHERE paused.subscriber = {table}.subscriber AND paused.paused_at IS NOT NULL)";
 

@@ -6,7 +6,10 @@ using Xunit;
 
 namespace MMLib.Alvo.Testing.Events;
 
-/// <summary>Flow control: a debounced fan-out supersedes its lane's waiting deliveries.</summary>
+/// <summary>
+/// Flow control: a debounced fan-out supersedes its lane's waiting deliveries, and a capped subscriber runs no more of one
+/// key's deliveries at once than its cap.
+/// </summary>
 public abstract partial class DeliveryStoreContractTests
 {
     private const string TenantA = "tenant-a";
@@ -139,8 +142,153 @@ public abstract partial class DeliveryStoreContractTests
         (await DeliveryOfAsync(world, older)).Status.ShouldBe("superseded");
     }
 
+    /// <summary>A claim takes no more of one tenant's deliveries than the cap, and another claimant takes none beside them.</summary>
+    [Fact]
+    public async Task A_claim_takes_no_more_deliveries_of_one_tenant_than_its_limit()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        await FanOutInTenantAsync(world, TenantA, 5);
+
+        (await world.Store.ClaimAsync(Capped("tenant", 2), Ct)).Count.ShouldBe(2);
+        (await world.Store.ClaimAsync(Capped("tenant", 2) with { Claimant = OtherClaimant }, Ct)).ShouldBeEmpty();
+    }
+
+    /// <summary>A completed delivery gives its place back, so the next claim takes the next delivery of its key.</summary>
+    [Fact]
+    public async Task A_completed_delivery_frees_its_slot_for_the_next_claim()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        await FanOutInTenantAsync(world, TenantA, 2);
+        var first = (await world.Store.ClaimAsync(Capped("tenant", 1), Ct)).ShouldHaveSingleItem();
+
+        (await world.Store.CompleteAsync(Attempt(first), Ct)).ShouldBeTrue();
+
+        (await world.Store.ClaimAsync(Capped("tenant", 1), Ct)).ShouldHaveSingleItem().Id.ShouldNotBe(first.Id);
+    }
+
+    /// <summary>A failed attempt and a sleep give the delivery's place back too.</summary>
+    [Fact]
+    public async Task A_failed_or_sleeping_delivery_frees_its_slot()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        await FanOutInTenantAsync(world, TenantA, 3);
+        var failing = (await world.Store.ClaimAsync(Capped("tenant", 1), Ct)).ShouldHaveSingleItem();
+        await world.Store.FailAsync(Attempt(failing), Failure("boom", TimeSpan.FromHours(1)), Ct);
+        var sleeping = (await world.Store.ClaimAsync(Capped("tenant", 1), Ct)).ShouldHaveSingleItem();
+
+        await world.Store.SleepAsync(Attempt(sleeping), (await DeliveryOfAsync(world, sleeping.EventId)).NotBefore + _sleep, Ct);
+
+        (await world.Store.ClaimAsync(Capped("tenant", 1), Ct)).ShouldHaveSingleItem().Id.ShouldNotBeOneOf(failing.Id, sleeping.Id);
+    }
+
+    /// <summary>A place held by a delivery whose lease expired is taken again.</summary>
+    [Fact]
+    public async Task A_slot_whose_lease_expired_is_taken_again()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        await FanOutInTenantAsync(world, TenantA, 2);
+        (await world.Store.ClaimAsync(Capped("tenant", 1) with { Claimant = OtherClaimant }, Ct)).ShouldHaveSingleItem();
+
+        world.Advance(_lease + TimeSpan.FromSeconds(1));
+
+        (await world.Store.ClaimAsync(Capped("tenant", 1), Ct)).ShouldHaveSingleItem();
+    }
+
+    /// <summary>
+    /// A late finisher whose lease was taken over answers nothing, and gives back no place: the delivery's new claimant still
+    /// holds it, and the key stays at its cap until that claimant answers.
+    /// </summary>
+    [Fact]
+    public async Task A_late_finisher_releases_no_slot_it_no_longer_holds()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        await FanOutInTenantAsync(world, TenantA, 2);
+        var late = (await world.Store.ClaimAsync(Capped("tenant", 1) with { Claimant = OtherClaimant }, Ct)).ShouldHaveSingleItem();
+        world.Advance(_lease + TimeSpan.FromSeconds(1));
+        var current = (await world.Store.ClaimAsync(Capped("tenant", 1), Ct)).ShouldHaveSingleItem();
+
+        (await world.Store.CompleteAsync(Attempt(late) with { Claimant = OtherClaimant }, Ct)).ShouldBeFalse();
+
+        (await world.Store.ClaimAsync(Capped("tenant", 1) with { Claimant = "worker-3" }, Ct)).ShouldBeEmpty("the current claimant still holds the place");
+        (await world.Store.CompleteAsync(Attempt(current), Ct)).ShouldBeTrue();
+        (await world.Store.ClaimAsync(Capped("tenant", 1) with { Claimant = "worker-3" }, Ct)).ShouldHaveSingleItem();
+    }
+
+    /// <summary>The record key caps each record of each tenant on its own: one record's cap holds no other record back.</summary>
+    [Fact]
+    public async Task The_record_key_limits_each_record_of_each_tenant_on_its_own()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        foreach (var (key, tenant) in new[] { (KeyA, TenantA), (KeyA, TenantA), (KeyB, TenantA), (KeyA, TenantB) })
+        {
+            await world.Store.FanOutAsync([Request(await world.AppendEventAsync(key), Confirm, key) with { TenantId = tenant }], Ct);
+        }
+
+        var claimed = await world.Store.ClaimAsync(Capped("record", 1) with { Ordered = [], Unordered = [Confirm] }, Ct);
+
+        claimed.Count.ShouldBe(3, "one of each (tenant, record): a-in-A, b-in-A, a-in-B");
+        (await world.Store.ClaimAsync(Capped("record", 1) with { Ordered = [], Unordered = [Confirm], Claimant = OtherClaimant }, Ct)).ShouldBeEmpty();
+    }
+
+    /// <summary>A tenant at its cap with many deliveries waiting does not keep another tenant's delivery from the same claim.</summary>
+    [Fact]
+    public async Task A_saturated_key_does_not_starve_another_keys_deliveries()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        await FanOutInTenantAsync(world, TenantA, 10);
+        await FanOutInTenantAsync(world, TenantB, 1);
+
+        var claimed = await world.Store.ClaimAsync(Capped("tenant", 1) with { BatchSize = 2 }, Ct);
+
+        var tenants = new List<string?>();
+        foreach (var delivery in claimed)
+        {
+            tenants.Add((await DeliveryOfAsync(world, delivery.EventId)).TenantId);
+        }
+
+        tenants.ShouldBe([TenantA, TenantB], ignoreOrder: true);
+    }
+
+    /// <summary>One claim takes a capped subscriber's deliveries under its cap and an uncapped one's as usual.</summary>
+    [Fact]
+    public async Task A_claim_takes_capped_and_uncapped_subscribers_together()
+    {
+        EnsureEngineAvailable();
+        await using var world = await WorldAsync();
+        for (var index = 0; index < 3; index++)
+        {
+            var key = $"tickets:{index}";
+            var @event = await world.AppendEventAsync(key);
+            await world.Store.FanOutAsync([Request(@event, Confirm, key) with { TenantId = TenantA }, Request(@event, Audit, key) with { TenantId = TenantA }], Ct);
+        }
+
+        var claimed = await world.Store.ClaimAsync(Capped("tenant", 1) with { Ordered = [Confirm, Audit] }, Ct);
+
+        claimed.Count(delivery => delivery.Subscriber == Confirm).ShouldBe(1);
+        claimed.Count(delivery => delivery.Subscriber == Audit).ShouldBe(3);
+    }
+
     private static DeliveryRequest Debounced(Guid @event, string key, string tenant) =>
         Request(@event, Confirm, key) with { TenantId = tenant, Debounce = _debounce };
+
+    private static DeliveryClaim Capped(string key, int limit) =>
+        Claim(Confirm) with { Limits = [new DeliveryLimit { Subscriber = Confirm, Key = key, Limit = limit }] };
+
+    private static async Task FanOutInTenantAsync(IDeliveryStoreWorld world, string tenant, int deliveries)
+    {
+        for (var index = 0; index < deliveries; index++)
+        {
+            var key = $"tickets:{tenant}:{index}";
+            await world.Store.FanOutAsync([Request(await world.AppendEventAsync(key), Confirm, key) with { TenantId = tenant }], Ct);
+        }
+    }
 
     private static async Task<StoredDelivery> DeliveryOfAsync(IDeliveryStoreWorld world, Guid @event) =>
         (await world.Store.ListAsync(new DeliveryFilter { Limit = 100 }, Ct)).Single(delivery => delivery.EventId == @event);

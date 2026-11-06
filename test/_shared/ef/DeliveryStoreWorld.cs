@@ -99,6 +99,24 @@ internal sealed class DeliveryStoreWorld : IDeliveryStoreWorld
         }
     }
 
+    public async Task<IReadOnlyList<(string Key, int Slot, Guid? DeliveryId)>> ReadSlotsAsync()
+    {
+        var connection = _connect();
+        await using (connection.ConfigureAwait(false))
+        {
+            await connection.OpenAsync(Ct);
+
+            return await RelationalSqlBatch.ReadRowsAsync(
+                connection,
+                transaction: null,
+                $"SELECT slot_key, slot, delivery_id FROM {ConcurrencySlotTable.NameFor(SchemaPrefix)}",
+                _ => { },
+                reader => (reader.GetString(0), Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture),
+                    reader.IsDBNull(2) ? (Guid?)null : Guid.Parse(reader.GetString(2), CultureInfo.InvariantCulture)),
+                Ct);
+        }
+    }
+
     /// <summary>Puts a delivery back to pending with its claim count at zero, as an operator's redeliver does.</summary>
     internal async Task ResetAsync(Guid delivery)
     {
