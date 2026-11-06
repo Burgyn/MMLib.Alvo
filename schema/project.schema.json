@@ -454,7 +454,7 @@
     "rules": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Per-operation authorization rules — CEL, compiled into a SQL predicate. Missing operation = deny (secure-by-default).",
+      "description": "Per-operation authorization rules — CEL, compiled into a SQL predicate. Missing operation = deny (secure-by-default). A rule may read a related row: `<ref>.<field>` follows a ref field, `<child>.exists(x, x.<field> …)` reaches the records that reference this one; the related entity's own list rule always applies.",
       "properties": {
         "list": {
           "$ref": "#/$defs/cel"
@@ -526,6 +526,35 @@
         },
         "rules": {
           "$ref": "#/$defs/rules"
+        },
+        "checks": {
+          "type": "array",
+          "description": "Write-time conditions over a related row, e.g. a line may only reference an active product. Each check follows its `lookup` ref field to the row it names (one the caller may list) and refuses the write with 422 and `message` when `expr` is false for it. `expr` reads this row by field name and the related row as `<lookup>.<field>`; it never reads @user/@tenant. A null `lookup` skips the check. Runs on create, and on update only when a field it reads changed.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "lookup",
+              "expr",
+              "message"
+            ],
+            "properties": {
+              "lookup": {
+                "$ref": "#/$defs/identifier",
+                "description": "A ref field of this entity; the check reads the row it points at."
+              },
+              "expr": {
+                "$ref": "#/$defs/cel",
+                "description": "CEL over this row and `<lookup>.<field>`; true lets the write through."
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300,
+                "description": "Shown to the caller when the check fails."
+              }
+            }
+          }
         },
         "hooks": {
           "type": "object",

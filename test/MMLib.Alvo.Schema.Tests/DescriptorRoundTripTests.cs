@@ -78,6 +78,33 @@ public class DescriptorRoundTripTests
     }
 
     [Fact]
+    public void Lookup_checks_validate_and_survive_the_round_trip()
+    {
+        const string json = """
+            {"$schema": "https://alvo.dev/schema/v1/project.json", "apiVersion": "alvo.dev/v1", "name": "checks",
+             "entities": {
+               "products": {"fields": {"active": {"type": "boolean"}, "stock": {"type": "integer"}}},
+               "order_lines": {"fields": {"product_id": {"type": "ref", "entity": "products"}, "quantity": {"type": "integer"}},
+                 "checks": [
+                   {"lookup": "product_id", "expr": "product_id.active", "message": "This product is not on sale."},
+                   {"lookup": "product_id", "expr": "quantity <= product_id.stock", "message": "Not enough in stock."}]}}}
+            """;
+
+        SchemaValidator.Failures(SchemaValidator.Load(), json).ShouldBeEmpty();
+        var descriptor = AlvoDescriptor.Parse(json);
+        descriptor.Entities["order_lines"].Checks.ShouldNotBeNull().Select(check => check.Message)
+            .ShouldBe(["This product is not on sale.", "Not enough in stock."]);
+        Canonicalizer.Canonicalize(AlvoDescriptor.Serialize(descriptor)).ShouldBe(Canonicalizer.Canonicalize(json));
+    }
+
+    [Fact]
+    public void A_lookup_check_without_a_message_fails_the_schema() =>
+        SchemaValidator.Failures(
+            SchemaValidator.Load(),
+            """{"apiVersion": "alvo.dev/v1", "name": "checks", "entities": {"lines": {"fields": {"note": {"type": "string"}}, "checks": [{"lookup": "note", "expr": "true"}]}}}""")
+            .ShouldNotBeEmpty();
+
+    [Fact]
     public void A_virtual_flag_that_is_not_a_boolean_fails_the_schema() =>
         SchemaValidator.Failures(SchemaValidator.Load(), WithDisplay("\"yes\"")).ShouldNotBeEmpty();
 

@@ -38,15 +38,17 @@ internal static class PolicyCatalogBuilder
             descriptor.Templates ?? _emptyTemplates,
             descriptor.Webhooks?.Endpoints ?? _emptyEndpoints);
         var relations = RelationCatalogBuilder.From(descriptor, schema);
+        var checkConsumers = new List<RelationConsumer>();
 
         foreach (var entitySchema in schema.Entities)
         {
             var entityDescriptor = descriptor.Entities.GetValueOrDefault(entitySchema.Name);
             var build = new EntityBuild(entitySchema, compiler, roles, references, errorList, relations);
-            entities[entitySchema.Name] = BuildEntity(entityDescriptor, build);
+            entities[entitySchema.Name] = BuildEntity(entityDescriptor, build, checkConsumers);
         }
 
-        RelationGraph.Check(ListReads(entities), Consumers(entities), errorList);
+        CheckCompiler.RefuseDynamic(descriptor, errorList);
+        RelationGraph.Check(ListReads(entities), [.. Consumers(entities), .. checkConsumers], errorList);
 
         var managementAccess = AccessCatalogBuilder.Build(descriptor.Access, compiler, roles, errorList);
 
@@ -100,7 +102,7 @@ internal static class PolicyCatalogBuilder
 
     private static readonly Dictionary<string, WebhookEndpoint> _emptyEndpoints = new(StringComparer.Ordinal);
 
-    private static EntityPolicy BuildEntity(EntityDescriptor? descriptor, EntityBuild build)
+    private static EntityPolicy BuildEntity(EntityDescriptor? descriptor, EntityBuild build, List<RelationConsumer> checkConsumers)
     {
         var tenantScope = SynthesizeTenantScope(build);
         var operations = CompileRules(descriptor?.Rules, tenantScope, build);
@@ -113,7 +115,22 @@ internal static class PolicyCatalogBuilder
             build.Schema.Tenancy, tenantScope, operations, hidden, readOnly, afterHooks, beforeHooks)
         {
             Relations = RelationGraph.Targets(operations[DataOperation.List].Using?.Root),
+            Checks = CompileChecks(descriptor, build, checkConsumers),
         };
+    }
+
+    /// <summary>
+    /// The entity's lookup checks, each also recorded as a consumer of its target's <c>list</c> rule, so its chain counts
+    /// toward the depth limit; a check adds no <c>list</c> edge, so it can close no cycle.
+    /// </summary>
+    private static IReadOnlyList<DescriptorCheck> CompileChecks(
+        EntityDescriptor? descriptor, EntityBuild build, List<RelationConsumer> checkConsumers)
+    {
+        var compiled = CheckCompiler.CompileAll(
+            descriptor?.Checks, new CheckScope(build.Schema, build.Compiler, build.Relations, build.Errors));
+        checkConsumers.AddRange(compiled.Select(check => new RelationConsumer(
+            build.Name, $"checks.{check.Index}", $"{build.Path}/checks/{check.Index}/expr", [check.Check.Relation.Related.Name])));
+        return [.. compiled.Select(check => check.Check)];
     }
 
     /// <summary>Each entity, and the entities its <c>list</c> rule reads: the edges the cycle and depth walk follows.</summary>

@@ -32,4 +32,10 @@ internal sealed class CelRelationCatalog(
     /// <param name="member">The ref, or the <c>exists</c> receiver.</param>
     /// <param name="field">The field read through the ref, or <see langword="null"/> for an <c>exists</c> receiver.</param>
     internal CelCompilationError Refusal(string entity, string member, string? field) => refusal(entity, member, field);
+
+    /// <summary>
+    /// Whether the compile lifts each forward comparison into its own relation term, as a rule needs; a lookup check
+    /// turns off the lift, because its whole condition is the body of one relation.
+    /// </summary>
+    internal bool LiftsForwardPaths { get; init; } = true;
 }

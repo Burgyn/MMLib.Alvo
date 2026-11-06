@@ -786,10 +786,18 @@ namespace MMLib.Alvo.Descriptor
         public required string Template { get; init; }
         public required string To { get; init; }
     }
+    public sealed class EntityCheck : System.IEquatable<MMLib.Alvo.Descriptor.EntityCheck>
+    {
+        public EntityCheck() { }
+        public required string Expr { get; init; }
+        public required string Lookup { get; init; }
+        public required string Message { get; init; }
+    }
     public sealed class EntityDescriptor : System.IEquatable<MMLib.Alvo.Descriptor.EntityDescriptor>
     {
         public EntityDescriptor() { }
         public bool? Audit { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.EntityCheck>? Checks { get; init; }
         public string? Description { get; init; }
         public MMLib.Alvo.Descriptor.EntityEvents? Events { get; init; }
         [System.Text.Json.Serialization.JsonExtensionData]

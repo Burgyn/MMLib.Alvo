@@ -183,6 +183,9 @@ internal sealed record EntityPolicy(
 
     /// <summary>The entities this entity's <c>list</c> rule reads through relation terms, each once.</summary>
     internal IReadOnlyList<string> Relations { get; init; } = [];
+
+    /// <summary>The entity's compiled lookup checks, in declaration order, each still unbound.</summary>
+    internal IReadOnlyList<DescriptorCheck> Checks { get; init; } = [];
 }
 
 /// <summary>

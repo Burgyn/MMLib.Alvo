@@ -34,8 +34,23 @@ internal static class RelationWarnings
                from related in RelationGraph.Targets(compiled.Expression!.Root)
                where descriptor.Entities.GetValueOrDefault(related)?.Rules?.List is null
                select Warning($"/entities/{entity.Name}/rules/{rule.Operation}", related),
+            .. CheckWarnings(descriptor, schema),
         ];
     }
+
+    /// <summary>
+    /// One warning per lookup check whose lookup points at an entity with no list rule: the check's row is never visible, so
+    /// every write the check applies to is refused.
+    /// </summary>
+    private static IEnumerable<DescriptorValidationError> CheckWarnings(AlvoDescriptor descriptor, SchemaModel schema) =>
+        from entity in schema.Entities
+        let checks = descriptor.Entities.GetValueOrDefault(entity.Name)?.Checks ?? []
+        from index in Enumerable.Range(0, checks.Count)
+        let related = entity.Fields.FirstOrDefault(field => field.Name == checks[index].Lookup)?.Reference?.TargetEntity
+        where related is not null && related != RelationRefusals.UsersEntity
+            && schema.Entities.Any(target => target.Name == related)
+            && descriptor.Entities.GetValueOrDefault(related)?.Rules?.List is null
+        select Warning($"/entities/{entity.Name}/checks/{index}/expr", related);
 
     private static IEnumerable<(string Operation, string Source)> Sources(AccessRules rules) =>
         new (string Operation, string? Source)[]

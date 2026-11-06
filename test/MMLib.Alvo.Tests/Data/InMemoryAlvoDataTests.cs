@@ -371,6 +371,28 @@ public class InMemoryAlvoDataTests
     }
 
     [Fact]
+    public async Task A_lookup_check_is_refused_not_skipped()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var lines = Rules.RelationDescriptors.Entity(
+            [Rules.RelationDescriptors.Ref("product_id", "products")], ("list", "true"), ("get", "true"), ("create", "true"));
+        lines["checks"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject
+        {
+            ["lookup"] = "product_id",
+            ["expr"] = "product_id.active",
+            ["message"] = "Not on sale.",
+        });
+        var descriptor = AlvoDescriptor.Parse(Rules.RelationDescriptors.Project(
+            ("products", Rules.RelationDescriptors.Entity([Rules.RelationDescriptors.Field("active", "boolean")], ("list", "true"))),
+            ("order_lines", lines)));
+        var schema = DescriptorToSchemaMapper.Map(descriptor);
+        var data = new InMemoryAlvoData(EngineOver(descriptor, schema), new PredicateEvaluator(), schema);
+
+        await Should.ThrowAsync<NotSupportedException>(() =>
+            data.CreateAsync("order_lines", new Dictionary<string, object?>(StringComparer.Ordinal), Caller(), cancellationToken: ct));
+    }
+
+    [Fact]
     public async Task A_create_whose_echo_reads_a_relation_is_refused_before_it_writes()
     {
         var ct = TestContext.Current.CancellationToken;

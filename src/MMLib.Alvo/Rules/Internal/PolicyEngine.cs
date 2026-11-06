@@ -117,8 +117,20 @@ internal sealed class PolicyEngine : IPolicyEngine
         }
 
         return CheckRequiredContext(operationPolicy, resolution.Context)
-            ?? Allow(policy, Bound(operationPolicy, resolution), resolution.Context);
+            ?? Allow(policy, Bound(operationPolicy, resolution), resolution.Context) with { Checks = BoundChecks(policy, resolution) };
     }
+
+    /// <summary>
+    /// The entity's lookup checks, each bound to the caller's <c>list</c> decision on the entity it reads, for a write that
+    /// stores a row; no other operation runs them.
+    /// </summary>
+    private IReadOnlyList<DescriptorCheck> BoundChecks(EntityPolicy policy, Resolution resolution) =>
+        resolution.Operation is DataOperation.Create or DataOperation.Update && policy.Checks.Count > 0
+            ? [.. policy.Checks.Select((check, index) => check with
+            {
+                Relation = _binder.Bind(resolution.Catalog, resolution.Entity, $"checks/{index}", check.Relation, resolution.Context),
+            })]
+            : [];
 
     /// <summary>
     /// The operation's predicates with every relation bound for this caller; untouched when it reads none. Each tree is

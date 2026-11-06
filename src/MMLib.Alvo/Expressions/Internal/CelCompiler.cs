@@ -122,10 +122,11 @@ internal sealed class CelCompiler : ICelCompiler
 
     /// <summary>
     /// Lifts every forward path of a relation-catalog compile into its own relation term, once the tree checked clean;
-    /// a compile with no catalog holds no path, so it is returned untouched.
+    /// a compile with no catalog holds no path, so it is returned untouched, and a lookup check's catalog asks for its
+    /// paths unlifted, for the check compiler to wrap whole.
     /// </summary>
     private static CelNode Lift(CelNode root, Authored authored, List<CelCompilationError> errors) =>
-        authored.Relations is null || errors.Count > 0 ? root : RelationLifter.Lift(root, errors);
+        authored.Relations is not { LiftsForwardPaths: true } || errors.Count > 0 ? root : RelationLifter.Lift(root, errors);
 
     private List<CelCompilationError> AppendResultTypeError(
         IReadOnlyList<CelCompilationError> errors, Authored authored, CelValueType resultType, int position)

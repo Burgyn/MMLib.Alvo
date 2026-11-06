@@ -1259,7 +1259,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     }
 
     private static PolicyDecision Refused(PolicyDecision decision) =>
-        ReadsRelation(decision.Using) || ReadsRelation(decision.WithCheck)
+        ReadsRelation(decision.Using) || ReadsRelation(decision.WithCheck) || decision.Checks.Count > 0
             ? throw new NotSupportedException(
                 "Relation rules and lookup checks need a relational driver; InMemoryAlvoData is the policy-contract double.")
             : decision;
