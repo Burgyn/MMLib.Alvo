@@ -1,0 +1,186 @@
+---
+title: Integrity in the descriptor
+description: State in the descriptor what the database must never hold — a field's validation as a CHECK constraint, a filtered rollup, time with now() and durations.
+sidebar:
+  order: 8
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import descriptor from '../../../snippets/extending/integrity/inventory.alvo.json?raw';
+import tests from '../../../snippets/extending/integrity/InventoryIntegrityTests.cs?raw';
+
+Some rules are not about who may write, but about what may be stored at all: stock never goes negative, a product is
+never reserved past its stock, a sale lasts at most thirty days. Say them in the descriptor, and the **database**
+enforces them, for every write.
+
+The example is a shop's stock. A product counts its held reservations in a filtered rollup, and a validation keeps that
+count within the stock:
+
+<Code code={descriptor} lang="json" title="inventory.alvo.json" />
+
+:::caution
+A validation is enforced by the database for every write — Alvo's, a hook's, and one that bypasses Alvo. It is not part
+of the OpenAPI document.
+:::
+
+## A validation is a constraint the database enforces
+
+A field's `validation` is a CEL condition over its own row. Alvo writes it into the table as a `CHECK` constraint:
+`value` is the field, and the row's other fields are read by name.
+
+<SourceExcerpt code={descriptor} from="value >= 0" to="value <= stock" lang="json" title="inventory.alvo.json" />
+
+**An empty field passes its own validation.** The constraint is `value IS NULL OR <your condition>`, as SQL's `CHECK`
+and JSON Schema both treat an absent value; use `required` for presence. Any *other* field the condition reads follows
+CEL's two-valued rule instead: a comparison with an empty field is false, so the row is refused. To accept a row that
+leaves the other field empty, say so — the sale's end is checked only when the sale has a start:
+
+<SourceExcerpt code={descriptor} from="720h" to="720h" lang="json" title="inventory.alvo.json" />
+
+**It reads the row and nothing else.** A validation is judged by the database on every write, with no caller and no
+clock, so the apply refuses one that reads `@user` or `@tenant`, tests a role, calls `now()` or any function,
+reads `old.` or calls `changed()`. Arithmetic over numbers (`quantity * unit_price <= 10000`) is refused too; put it in
+a [computed field](/guides/computed-and-rollups/) and validate that field, since a computed or a rollup field can carry
+a validation like any other. Timestamp arithmetic with a duration constant is allowed — see *Time* below. A validation
+on a dynamic entity is refused ([#41](https://github.com/Burgyn/MMLib.Alvo/issues/41)).
+
+**A write that breaks it is a 422.** The second reservation would hold three lamps when two are in stock:
+
+<SourceExcerpt code={tests} from="public async Task A_reservation_past_the_stock" to="ShouldBe(2L);" title="InventoryIntegrityTests.cs" />
+
+In `IAlvoData` the refusal is an `AlvoConstraintViolationException` with `Kind` `Check`. Over HTTP it is
+[`validation`](/reference/problem-types/#validation), with one violation whose code is `check` (the document trimmed
+to what you act on):
+
+```json
+{
+  "type": "https://alvo.dev/errors/validation",
+  "status": 422,
+  "detail": "This value breaks the validation the descriptor declares for this field.",
+  "violations": [
+    {
+      "pointer": "/quantity",
+      "code": "check",
+      "message": "This value breaks the validation the descriptor declares for this field.",
+      "fixSuggestion": "Send a value the field's validation accepts."
+    }
+  ]
+}
+```
+
+The pointer names the field to fix, never the value or the expression:
+
+- **A field's own validation** points at that field: `/stock`, or `/sale_ends_at` when a change to `sale_starts_at`
+  breaks the end's validation.
+- **A validation broken through a rollup** points at the child field the caller sent, here the reservation's
+  `/quantity`; the parent's `reserved` is never named. For a `count` rollup, or a delete, the pointer is `""`.
+- **A hidden field is never named.** A field the descriptor marks `hidden`, for anyone, gets the pointer `""`.
+
+A value a hook wrote is refused the same way: the database cannot tell whose value it was.
+
+**What a validation may not reveal.** A validation that reads another field is refused at apply when the validated
+field, or any field it reads, is `hidden` — also through a computed or rollup field derived from one: whether a write
+is refused would otherwise tell a caller something about a value they cannot read. A stored field validated against
+its own value alone is allowed even when hidden. One answer is allowed on purpose: a validation on a rollup parent, like
+`reserved <= stock`, refuses a child write even when the caller cannot read the parent row. That one bit — "this product
+is fully reserved" — is the oversell protection itself.
+
+## Adding one to rows that break it
+
+A validation added to a table that already holds rows breaking it is refused at apply, at the validation's pointer,
+with the number of rows: `2 row(s) of 'products' break this validation, so the CHECK constraint cannot be added.
+Nothing was applied.` The dry run (`?dryRun=true`, the dashboard's Preview, the assistant's check) reports the same
+refusal, so you see it before you apply. Correct those rows, or relax the expression, then apply again.
+
+The apply is atomic: the constraint, the rest of the descriptor's changes and any rollup recompute commit together, or
+nothing does. A row written after the count but before the constraint lands is caught by the constraint itself, and the
+apply is refused at the same pointer.
+
+:::note
+Every dry run counts — on PostgreSQL the apply then holds the table for its whole transaction, readers included, and
+gives up after 5 s with a retryable 409; the count reaches whoever ran the dry run, the assistant included.
+:::
+
+The 409 is [`conflict`](/reference/problem-types/#conflict) with `Retry-After: 5`, and nothing was applied; retry it.
+At startup the same wait is a refused start. The count is a number of rows across every tenant, never a row, an id or a
+value.
+
+A validation added or changed in the same apply as a change to a rollup it reads is refused too: the constraint would
+be judged against the numbers the old definition stored. Apply the rollup change first, then the validation; a rollback
+that would do both says to apply the target's rollup change as an intermediate descriptor first. A rollup added as a new
+field is the exception — its values are computed in the apply, and a value that breaks a validation refuses the whole
+apply, with nothing applied.
+
+## A rollup that counts some children
+
+A rollup's `where` is a CEL condition over the **child's** fields; only the children it admits are aggregated. Above,
+`reserved` sums `quantity` over held reservations only, so a released one gives its lamps back:
+
+<SourceExcerpt code={descriptor} from="reserved" to="where" lang="json" title="inventory.alvo.json" />
+
+- **Kept in the child's transaction.** A child write that enters or leaves the filter — a reservation released —
+  recomputes its parent's rollup in the same transaction, under the parent's row lock, exactly as an unfiltered rollup.
+- **Recomputed on apply.** An apply that adds a rollup to a table holding rows, or changes one's `from`, `op`, `field`,
+  `via` or `where`, recomputes it for every parent before it commits; on PostgreSQL, writes to the child wait for the
+  apply. Roll every replica after such a change: a process still holding the old definition — another replica until it
+  restarts or applies, or a child write that began just before the apply — recomputes with it, and the parent's value
+  stays stale until its next child write.
+- **No caller and no clock.** A filter reads no `@user`, `@tenant`, role test, `now()` or function: the stored number
+  would go stale with no write to move it. It may not read a hidden child field either — a filtered count would reveal
+  it.
+- **No list literals.** CEL's `stage in ['lead', 'offer']` is not supported; write `stage == 'lead' || stage == 'offer'`.
+
+## Time: `now()` and durations
+
+`now()` is the instant of the request. Every `now()` one request evaluates — a rule's filter, its check on the row
+being written, a hook's condition, a `mutate` value — reads the same instant, so two parts of one request cannot
+disagree about the time. A condition judged after the commit — an after-hook's, an event handler's `when` — reads the
+event's `time` instead; an event handler's body is new work and runs on an instant of its own.
+
+| Where | `now()` |
+|---|---|
+| A rule (`rules`, `hidden`, `readOnly`) | ✓ the request's instant — in SQL, a bound parameter |
+| A hook `condition` and a `mutate` value | ✓ the request's instant; after the commit, the event's `time` |
+| A `computed` field, the `access` block | ✗ a column and a project-wide level have no instant |
+| A `validation`, a rollup's `where` | ✗ stored, and judged again by writes that come later |
+
+:::note
+`now()` is the instant of the request; `created_at`/`updated_at` are read when the row is written, so a `mutate: now()`
+can differ from `updated_at` by microseconds.
+:::
+
+**Durations are CEL's.** `duration('…')` takes a constant: an optional sign, then one or more numbers each followed by
+a unit — `h`, `m`, `s`, `ms`, `us`, `ns` — such as `'90m'`, `'1h30m'`, `'-1.5h'`, or `'0'`. Its range is CEL's, about
+ten thousand years either way, and it must be a whole number of microseconds, the precision Alvo stores instants with.
+The arithmetic is CEL's too: a timestamp plus or minus a duration, a duration plus a timestamp, a timestamp minus a
+timestamp (a duration), a duration plus or minus a duration, and every comparison between two durations. A rule may use
+it, though it has no other arithmetic:
+
+```json
+"rules": { "list": "created_at > now() - duration('24h')" }
+```
+
+A result outside the years 1 to 9999 fails closed: a rule's check on a row being written denies it, and a hook's
+condition or `mutate` fails the write.
+
+**On SQLite, to the millisecond.** SQLite's date functions are millisecond-precise, so a time comparison inside SQL
+there reads stored instants rounded to the millisecond; PostgreSQL and the in-memory check are exact to the
+microsecond. A row within a millisecond of a boundary can be judged differently by the two on SQLite.
+
+**In a typed `when`.** A condition written as a lambda translates `DateTimeOffset.UtcNow` (and `DateTimeOffset.Now`)
+to `now()`, a `static readonly TimeSpan` field to a duration, and `+`/`-` over them to CEL's operators:
+`e.New.DueAt < DateTimeOffset.UtcNow - Grace`. `DateTime.Now`, `DateTime.Today` and `TimeProvider` stay refused. See
+[Typed or CEL](/extending/typed-or-cel/).
+
+## Validation, before-hook or write hook?
+
+| Use | When the rule… | Example |
+|---|---|---|
+| a `validation` | is about one row and must always hold, whoever writes | `stock >= 0`, `reserved <= stock`, a sale of at most 30 days |
+| a [before-hook](/guides/before-hooks/) | decides a value at write time, or depends on the transition or the caller | stamp `closed_at` with `now()`; refuse reopening a closed ticket |
+| a [write hook](/extending/write-hooks/) | spans rows or calls a service | a booking inside the resource's opening hours; a registered VAT id |
+
+A sale longer than thirty days is a rule about one row, so it is a validation:
+
+<SourceExcerpt code={tests} from="public async Task A_sale_longer" to="refusal.Fields.ShouldBe" title="InventoryIntegrityTests.cs" />
