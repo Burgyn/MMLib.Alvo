@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `exclusion` at the range's pointer; PostgreSQL installs or requires `btree_gist`); `AlvoConstraintKind.Exclusion`.
   Adding an exclusion over overlapping rows is refused at apply — and in a dry run — with their count; a dialect that
   cannot enforce one refuses `exclude` at apply. A `where` cannot compare with a `timestamp('…')` constant yet.
+- **Dashboard and docs for HX-12's integrity keywords.** The field editor offers *Sequence* beside rollup and computed
+  (a `per` picker over required fields a caller writes, a period, a start, and a format checked as it is typed with a
+  preview of the first number); the Indexes tab's add form gains *Only where* (checked live against the host) and
+  *Exclude overlaps* (start and end pickers over required date and datetime fields; it hides *Unique*), and each row
+  badges its `where` and its range. The *Integrity in the descriptor* page gains sections on `sequence`, partial unique
+  indexes and `exclude`, with an executed snippet; the indexes and field-types descriptor skills teach both keywords.
 - **Integrity in the descriptor** (HX-11). A field's `validation` is now enforced as a database `CHECK` constraint on
   SQLite and PostgreSQL, for every write — Alvo's, a hook's, and one that bypasses Alvo. A write that breaks one answers
   422 `validation` with violation code `check` and a pointer at the field (at the child field the caller sent when a

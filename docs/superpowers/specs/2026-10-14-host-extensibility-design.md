@@ -1235,7 +1235,7 @@ Roslyn dependency is needed.
 | `AlvoWriteRejectedException` (core / Hooks), `AlvoBudgetExceededException` (Abstractions / Data); `AlvoProblemTypes.HookFailed` | core; Abstractions | 09 | R-M9 |
 | `AlvoProblemTypes.ExpressionFailed`; `AddCelFunction` accepts a trailing `CancellationToken` (no new overload); `AlvoExtensionOptions.CelFunctionBudget` | core | 10 | #315, #309; *HX-10 settled details* (1), (4) |
 | `AlvoConstraintKind.Check` | Abstractions / Data | 11 | appended. **Amended (HX-11):** `AlvoConstraintKind.Check`; `CelValueType.Duration`; `FieldSchema.CheckExpression`, `RollupSchema.Where`; the DIM `IFieldSqlRenderer.RenderEpochMicroseconds` — *HX-11 settled details* (6), (11), (18); `IPredicateRenderer.RenderConstraint` internal until HX-12, (17) |
-| `AlvoConstraintKind.Exclusion`; `IAlvoSqlDialect.ExclusionConstraint(…)` | Abstractions; EF driver | 12 | **DIM** returning null (precedent `GeneratedColumnDefinition`, `IAlvoSqlDialect.cs:312`); null → apply refuses `exclude` on that engine |
+| `AlvoConstraintKind.Exclusion`; `IAlvoSqlDialect.ExclusionConstraint(…)` | Abstractions; EF driver | 12 | **DIM** returning null (precedent `GeneratedColumnDefinition`, `IAlvoSqlDialect.cs:312`); null → apply refuses `exclude` on that engine. **Amended (HX-12):** `IAlvoSqlDialect.SequenceAllocationStatement`, `ExclusionConstraintDefinition`, `ExclusionConstraintSql`, and the descriptor and schema members — *HX-12 settled details*, Amendments |
 | `IAlvoScheduler`, `IAlvoScheduledJob`, `AlvoJobContext`, `AlvoScheduleOptions`, `AlvoScheduleScope`, `IAlvoTenantCatalog`, `IAlvoDataMigration`, `AddSchedule<T>`, `AddDataMigration<T>`, `ITimerStore` + `TimerStoreContractTests` | core; Abstractions; Testing | 13 | |
 | `IAlvoSteps`, `AlvoConcurrency`, `AlvoHandlerOptions.Concurrency`/`Debounce` behaviour | core / Events | 14 | |
 | `IAlvoFunction<TInput>`, `AlvoFunctionContext`, `AlvoFunctionSkippedException`, `AddFunction<T>`, `AddRequiredSecret` | core | 15 | |
@@ -1710,6 +1710,89 @@ later ruling amends an earlier one, both are kept and the earlier says so. Docs:
   create consumes no number. (3) Overlapping bookings → 409 with pointer under concurrent writers, both
   engines. (4) A partial unique index allows duplicates outside `where`. (5) The T-SQL double renders the
   shape. (6) No `btree_gist` → apply refusal with fix.
+
+#### HX-12 settled details
+
+The plan is `docs/superpowers/plans/2026-11-06-hx-12-integrity-sequence-exclusion.md`; its Decisions are recorded here
+verbatim, then the rulings its reviews added, then the amendments to this spec.
+
+**Delivery.** Three slices, three PRs to `main`, each green and shippable alone, each rebased onto `main` after the
+previous merges: **A** `hx/12a-sequence` (the `sequence` keyword, the counter table and its allocation, HTTP facts),
+**B** `hx/12b-partial-exclusion-indexes` (`indexes[].where`, `indexes[].exclude`, the dialects, the apply's scan and
+prerequisite, the 409), **C** `hx/12c-integrity-surfaces` (the dashboard editors, the skills, the docs page with an
+executed snippet, `data-path.md`, this section). The security-core review (`alvo-security-core-review` and
+`/security-review`) runs once, over the whole stack, after slice C.
+
+**Decisions** (the plan's, verbatim):
+
+- D1 `exclude: { from, to }` is a half-open `[from, to)` range of two `date`/`datetime` fields; `fields` are `WITH =` columns, `tenant_id` prepended on a scoped entity (as `UniqueColumns`). SQLite compares `datetime` bounds in HX-11's epoch domain (millisecond-rounded, scaled to µs), PostgreSQL in microseconds, so two bounds differing only below 1 ms can overlap on one engine and not the other (documented). — Cost: an inclusive-end use case needs a second keyword; the sub-millisecond disparity.
+- D2 SQLite enforces an exclusion with `AFTER INSERT`/`AFTER UPDATE` triggers (§6.1's "in-transaction overlap check", run by the engine so every write path is covered; `BEGIN IMMEDIATE` makes it see the committed winner). — Cost: two triggers per exclusion to keep through rebuilds (Review Focus 1).
+- D3 On PostgreSQL, a write to an entity with an exclusion first takes `TransactionLockStatement` keys (one per exclusion: SHA-256 of name + tenant + equality values), so concurrent inserters of one resource queue instead of hitting `40P01` deadlocks between exclusion waiters. — Cost: writers to one resource serialize (they must anyway).
+- D4 Inverted ranges: the mapper ANDs `value >= new.<from>` into the `to` field's `CheckExpression`, reusing HX-11's `CHECK` end to end (DDL, rebuild, scan, 422 decode). — Cost: an apply refusal over inverted rows points at `/fields/<to>/validation`, a path the author did not write.
+- D5 `SequenceAllocationStatement` is a **public** DIM returning `null` (§5 names only `ExclusionConstraint`; the statement is not ANSI, §6.1 *Azure SQL*); `null` → apply refuses `sequence`. The T-SQL double answers `MERGE … WITH (HOLDLOCK) … OUTPUT`. — Cost: one public member.
+- D6 The number is allocated after before-hooks, immediately before the `INSERT`, keyed on the write's stamp instant in UTC; before-hooks see no number; `per` reads the post-hook row; a later change of `per` does not renumber. — Cost: local-time period boundaries need a follow-up `timeZone`.
+- D7 Counter rows are never deleted (removing then re-adding a sequence resumes; a rollback never re-issues); a declared entity/field rename rewrites their keys in the apply transaction. — Cost: orphan rows of a few bytes.
+- D8 `sequence` is allowed on `integer` (no `format`) and `string` (`format` required); refused with `default`, `computed`, `rollup`, `maxLength`; `per` names a `required` field of type string/integer/enum/ref/uuid/date/boolean, not itself. — Cost: authors relax a refusal later, never the reverse.
+- D9 `IPredicateRenderer.RenderConstraint` stays internal: Ruling 17 made it public only "when `where` or a third-party renderer needs it", and the EF driver renders `where` through its existing `InternalsVisibleTo`. — Cost: one member to publish later, non-breaking.
+- D10 Partial and exclusion indexes carry hashed names (constants above); a changed definition is a new name, so the plan is drop-old + create-new and the diff is a set difference. — Cost: a rebuild of the index on any `where` edit.
+- D11 `where` (index and exclusion) admits HX-11's stored-predicate surface minus `now()` and temporal arithmetic, over this entity's own declared fields, and refuses a field carrying any `hidden` flag (Ruling 71's oracle argument). — Cost: a legitimate filter on a hidden field is refused.
+- D12 `btree_gist`: the plan probes `pg_extension`/`pg_available_extensions`/`has_database_privilege(…,'CREATE')`; installed → nothing; installable → the plan's first statement is `CREATE EXTENSION IF NOT EXISTS btree_gist`; otherwise the refusal above. — Cost: an apply may install an extension (trusted, contrib).
+- D13 Soft-deleted rows still count for exclusions and partial unique indexes, exactly as for `unique` today (follow-up issue filed in Task 9). — Cost: a deleted booking blocks its slot until purged.
+- D15 Allocation is one `INSERT … ON CONFLICT DO UPDATE … RETURNING` upsert, not §6.1's literal `UPDATE alvo_sequences … RETURNING`: a new partition's first number needs the insert, and insert-then-update is two statements racing on one key. Same row lock, same rollback. — Cost: none beyond the spec amendment's wording.
+- D16 The T-SQL double **declines** `exclude` (SQL Server has no exclusion constraint); AC (5) is the sequence `MERGE` golden plus that decline golden, and a declining dialect makes the apply refuse the keyword. — Cost: Azure SQL (#92) designs its own enforcement.
+- D17 An `exclude` whose `from`/`to` field carries any `hidden` flag is **refused** at apply (`ExclusionIndexCheck`), consistent with D11: a 409 pointing at, or a scan counting over, a hidden range discloses it. — Cost: a hidden booking window cannot be excluded.
+- D18 `exclude`'s **equality** `fields` may be hidden: the 409 names only the range start and is the same existence oracle a `unique` index on a hidden field already is. — Cost: that oracle, stated rather than new.
+- D19 (review R4) Timestamp literals in `where` are not supported in HX-12: `timestamp('…')` stays an in-process function a Rule cannot call (Task 4's Rule-profile fold and UTC constant writer are withdrawn — they let a rule bind a raw instant against a `date` and a non-UTC offset), so Review Focus 3 is narrowed to a `where` that needs no timestamp literal; follow-up issue. — Cost: a partial index or exclusion cannot filter on a fixed instant until then.
+- D14 `InMemoryAlvoData` assigns sequence numbers (a host's unit test reads them) but enforces neither exclusion nor partial index (HX-11 Ruling 28). `EfCoreSchemaIntrospector` is unchanged (first-run adoption only). — Cost: in-memory tests cannot see a 409 from `exclude`.
+
+**Rulings added in review and implementation:**
+
+- R1 (admin): a hook's settable targets leave out sequence fields, as they leave out every maintained field; a
+  condition may still read one (a condition reading a number is legitimate); the Fields tab badges a sequence like a
+  rollup. — Cost if wrong: one dashboard list.
+- R2: the SQLite exclusion's supporting index is named through `IndexNames` hashing (no plain `_ix` suffix) and is part
+  of a released exclusion's drops. — Cost: a rename leaves an orphan index until the next drop.
+- R3: a sent or patched sequence number answers `403 forbidden` (`WritePayloadGuard`), exactly as a computed or rollup
+  value does — not the plan's 422; widening every maintained-field refusal to 422 is out of scope. — Cost: the plan's
+  text said 422.
+- R4 (= D19): the Rule-profile `timestamp('…')` fold and the UTC constant writer are withdrawn; a `where` with a
+  timestamp literal is refused at its pointer on both engines (`AlvoDataPartialIndexTests.A_where_comparing_with_a_timestamp_constant_is_refused_at_its_pointer`).
+- An exclusion refusal is `409 conflict` with violation code `exclusion` at `/<from>` (`""` when the constraint name
+  cannot be resolved); the message and fix are the plan's constants. Its apply-time twin is decoded from PostgreSQL
+  `23P01` or SQLite's tagged abort (`SQLITE_CONSTRAINT_TRIGGER` 1811 with `alvo_exclusion:<name>`; an untagged 1811 is
+  a `RESTRICT` foreign key and falls back to the message-only path).
+- `btree_gist` is probed by an internal dialect member (`ExclusionPrerequisiteAsync`, default ready): installed →
+  nothing; installable → `CREATE EXTENSION IF NOT EXISTS btree_gist` right after the lock-timeout statement; otherwise
+  the apply is refused with the fix, on the counted and uncounted paths alike. The engine supplies the wording, so the
+  shared migrator never names a PostgreSQL extension.
+- `per` may not name a maintained field (computed, rollup or sequence) — slice A review I1: such a target holds no
+  value yet when the number is allocated, so every create would fail while the in-memory store counted silently.
+- A batch create locks its counters in canonical key order, so two batches cannot deadlock on each other's counters.
+- The T-SQL double declines `exclude` (D16) and answers `MERGE … WITH (HOLDLOCK) … OUTPUT` for a sequence (D5).
+- SQLite's in-apply overlap check is a no-op `UPDATE … SET id = id` over the overlapping rows, which fires the new
+  trigger: `RAISE` is legal only inside a trigger, so a count cannot abort a plain batch.
+- The dashboard's `Indexes` component implements `IDisposable` (its *Only where* box is checked live, like the field
+  editor's boxes), so `PublicApi.MMLib.Alvo.Admin` grows by that interface and its `Dispose()` — Razor-component
+  surface, HX-04 ruling 19. `WorkingCopy.AddIndex` takes the schema's `ExclusionSchema`, the record `IndexSchema`
+  already carries, rather than the descriptor's `IndexExclusion`.
+
+**Amendments.**
+
+- §5 row `12` gains `IAlvoSqlDialect.SequenceAllocationStatement(string)` (a public DIM answering `null`, D5),
+  `ExclusionConstraintDefinition` and `ExclusionConstraintSql` (EF driver); the descriptor members
+  `FieldDescriptor.Sequence`, `FieldSequence`, `SequencePeriod`, `EntityIndex.Where`, `EntityIndex.Exclude`,
+  `IndexExclusion`; and the schema members `FieldSchema.Sequence`, `SequenceSchema`, `SequenceResetPeriod`,
+  `IndexSchema.Where`, `IndexSchema.Exclude`, `ExclusionSchema`. `MMLib.Alvo.Testing` gains the abstract suites
+  `AlvoDataSequenceTests`, `AlvoDataPartialIndexTests` and `AlvoDataExclusionTests`.
+- *HX-11 settled details* (17): `IPredicateRenderer.RenderConstraint` **stays internal** after HX-12 (D9) — the EF
+  driver renders `where` through its existing `InternalsVisibleTo`; publishing it waits for a third-party renderer.
+- §6.1's literal `UPDATE alvo_sequences … RETURNING` is one `INSERT … ON CONFLICT DO UPDATE … RETURNING` upsert (D15).
+- §6.1 *Azure SQL*: a sequence is the `MERGE` shape the T-SQL double pins; an exclusion has no SQL Server equivalent
+  and is declined (D16), for #92 to design.
+
+**Follow-ups** (titles and bodies in the plan's working notes, filed by the maintainer): timestamp literals in `where`
+(D19); soft-deleted rows counting toward `unique`, partial `unique` and `exclude` (D13); a `timeZone` for `period`
+(D6); `btree_gist` type support by server version; a test that proves the D3 advisory locks necessary.
 
 ### HX-13 — Timers, schedules, data migrations
 - **Scope:** §4.10 without steps; `ITimerStore` + contract suite; Cronos (E5); `IAlvoTenantCatalog`;

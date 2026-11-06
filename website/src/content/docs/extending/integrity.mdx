@@ -1,6 +1,6 @@
 ---
 title: Integrity in the descriptor
-description: State in the descriptor what the database must never hold — a field's validation as a CHECK constraint, a filtered rollup, time with now() and durations.
+description: State in the descriptor what the database must never hold — a field's validation as a CHECK constraint, a filtered rollup, time with now() and durations, gapless sequence numbers, partial unique indexes and ranges that never overlap.
 sidebar:
   order: 8
 ---
@@ -9,6 +9,8 @@ import { Code } from '@astrojs/starlight/components';
 import SourceExcerpt from '../../../components/SourceExcerpt.astro';
 import descriptor from '../../../snippets/extending/integrity/inventory.alvo.json?raw';
 import tests from '../../../snippets/extending/integrity/InventoryIntegrityTests.cs?raw';
+import bookings from '../../../snippets/extending/integrity/bookings.alvo.json?raw';
+import bookingTests from '../../../snippets/extending/integrity/BookingIntegrityTests.cs?raw';
 
 Some rules are not about who may write, but about what may be stored at all: stock never goes negative, a product is
 never reserved past its stock, a sale lasts at most thirty days. Say them in the descriptor, and the **database**
@@ -175,6 +177,104 @@ microsecond. A row within a millisecond of a boundary can be judged differently 
 to `now()`, a `static readonly TimeSpan` field to a duration, and `+`/`-` over them to CEL's operators:
 `e.New.DueAt < DateTimeOffset.UtcNow - Grace`. `DateTime.Now`, `DateTime.Today` and `TimeProvider` stay refused. See
 [Typed or CEL](/extending/typed-or-cel/).
+
+## Numbers that never skip: `sequence`
+
+An invoice, an order or a booking often needs a number people read aloud — `B-2026-001`, then `B-2026-002` — with no
+gap and no repeat. A field's `sequence` asks Alvo to assign one on create. The example is a meeting room's bookings,
+numbered per room and per year:
+
+<Code code={bookings} lang="json" title="bookings.alvo.json" />
+
+<SourceExcerpt code={bookings} from="sequence" to="sequence" lang="json" title="bookings.alvo.json" />
+
+- **`integer` or `string`.** An `integer` field stores the number. A `string` field needs `format`, the text stored:
+  exactly one `{n}` — or `{n:3}` to pad it to three digits, up to 18 — and any of `{yyyy}`, `{yy}`, `{MM}` and `{dd}`,
+  read from the create's own instant in UTC.
+- **What counts separately.** Every tenant counts on its own. `per` names a required field a caller writes — a string,
+  integer, enum, ref, uuid, date or boolean, never another sequence, computed or rollup field — and each of its values
+  counts on its own. `period` (`year`, `month` or `day`) starts a new count each UTC period. `start` is the first
+  number of every count, 1 by default.
+- **Gapless and never reused.** The number is taken in the create's own transaction, just before the row is
+  inserted, so a create that fails or is rolled back gives its number back, and no two creates ever get the same one.
+  Concurrent creates into one count wait for each other until the first commits. A number is never handed out
+  twice: removing the sequence and adding it again resumes the count, and renaming the entity or the field keeps it.
+- **Alvo writes it.** A create or update that sends the field is refused `403`, as for a computed field. A
+  before-hook does not see the number yet; `per` is read after the before-hooks ran, and changing it later does not
+  renumber a record.
+- **Where it is refused.** With `default`, `computed`, `rollup` or `maxLength`; on a dynamic entity
+  ([#41](https://github.com/Burgyn/MMLib.Alvo/issues/41)); and by an engine that cannot take the number in the write's
+  transaction — SQLite and PostgreSQL both can.
+
+<SourceExcerpt code={bookingTests} from="public async Task Bookings_are_numbered" to="ShouldBe((AlvoConstraintKind.Exclusion" title="BookingIntegrityTests.cs" />
+
+## Unique among some rows: `where`
+
+An index's `where` is a CEL condition over the entity's own fields; only the rows it accepts are indexed — a *partial*
+index. With `unique`, the fields are unique **among those rows**, and duplicates outside them are allowed: a cancelled
+booking may carry the same external reference as a confirmed one.
+
+<SourceExcerpt code={bookings} from="unique" to="unique" lang="json" title="bookings.alvo.json" />
+
+The database holds the condition as part of the index, so it reads no caller, no role, no `now()` and no hidden field.
+A timestamp literal is not supported in it yet either. Changing the condition re-creates the index. Like any `unique`
+index, a partial one cannot be created while the rows it accepts hold duplicates.
+
+## No double booking: `exclude`
+
+`exclude` says that no two rows with equal `fields` may hold overlapping ranges. Above, one room is never booked twice
+at once, unless a booking is cancelled:
+
+<SourceExcerpt code={bookings} from="exclude" to="exclude" lang="json" title="bookings.alvo.json" />
+
+- **The range is `[from, to)`.** It includes its start and excludes its end, so a booking from 10:00 may follow one
+  that ends at 10:00. An empty range (`from` equal to `to`) overlaps nothing. `from` and `to` are two required `date`
+  or two required `datetime` fields a caller writes, neither of them hidden nor one of the `fields`. The `fields` are
+  compared for equality, `tenant_id` first on a scoped entity. A range whose end comes before its start is a `422` at
+  the end field.
+- **A write that would overlap is a 409.** In `IAlvoData` it is an `AlvoConstraintViolationException` with `Kind`
+  `Exclusion`, naming the range's start field. Over HTTP it is [`conflict`](/reference/problem-types/#conflict), with
+  the code `exclusion` (trimmed to what you act on):
+
+```json
+{
+  "type": "https://alvo.dev/errors/conflict",
+  "status": 409,
+  "violations": [
+    {
+      "pointer": "/starts_at",
+      "code": "exclusion",
+      "message": "Another record already holds a range here that overlaps this one.",
+      "fixSuggestion": "Choose a range that does not overlap one another record already holds, then retry."
+    }
+  ]
+}
+```
+
+It names neither the other record nor its range. Concurrent writers to one room wait for each other, and one wins.
+
+- **Adding one to rows that overlap is refused.** `3 pair(s) of 'bookings' rows overlap, so this exclusion cannot be
+  added. Nothing was applied.` — at `/entities/bookings/indexes/0/exclude`, and in the dry run first. Correct the rows,
+  or narrow the exclusion with `where`.
+- **An exclusion is never also `unique`**: it already refuses equal fields whose ranges overlap.
+
+:::note[PostgreSQL needs btree_gist]
+On PostgreSQL an exclusion is an `EXCLUDE USING gist` constraint, which compares the equality fields through the
+btree_gist extension. It ships with PostgreSQL and is trusted since PostgreSQL 13, so the apply installs it when the
+connection's role may create in the database. When it may not, the apply is refused with the fix: ask the database
+owner to run `CREATE EXTENSION btree_gist;`, then apply again. SQLite enforces an exclusion with triggers; its
+`datetime` bounds compare to the millisecond, PostgreSQL's to the microsecond.
+:::
+
+:::caution
+Rows deleted by `softDelete` still count — for an exclusion, a partial `unique` index and an ordinary `unique` alike —
+so a deleted booking keeps its slot until it is purged. Leave such rows out with `where` if the entity has a status
+that says so.
+:::
+
+A cancelled booking may take the same slot:
+
+<SourceExcerpt code={bookingTests} from="public async Task A_cancelled_booking" to="B-2026-002" title="BookingIntegrityTests.cs" />
 
 ## Validation, before-hook or write hook?
 

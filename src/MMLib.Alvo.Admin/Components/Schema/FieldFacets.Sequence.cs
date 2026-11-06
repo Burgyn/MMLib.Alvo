@@ -1,7 +1,6 @@
 ﻿using MMLib.Alvo.Schema;
 using System.Globalization;
 using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
 
@@ -67,7 +66,7 @@ internal sealed partial class FieldFacets
     public static IReadOnlyList<string> SequencePerOffered(IReadOnlyList<KeyValuePair<string, string>> fields, string? self)
         => [.. (fields ?? []).Where(field => field.Key != self && Countable(Parse(field.Value))).Select(field => field.Key)];
 
-    /// <summary>The first number this sequence would assign, as stored, on <paramref name="now"/>'s UTC date; nothing while the form cannot say.</summary>
+    /// <summary>The first number this sequence would assign, as stored, on <paramref name="now"/>'s UTC date — rendered by the drivers' own <c>SequenceFormat</c>; nothing while the form cannot say.</summary>
     /// <param name="now">The clock's instant.</param>
     public string? SequencePreview(DateTimeOffset now)
     {
@@ -79,19 +78,8 @@ internal sealed partial class FieldFacets
         var number = start ?? 1;
         return Type == FieldType.Integer
             ? number.ToString(CultureInfo.InvariantCulture)
-            : SequenceSchema.FormatToken().Replace(SequenceFormat, token => Rendered(token, number, now.UtcDateTime));
+            : MMLib.Alvo.Schema.SequenceFormat.Render(SequenceFormat, number, now);
     }
-
-    private static string Rendered(Match token, long number, DateTime utc) => token.Groups["token"].Value switch
-    {
-        "yyyy" => utc.ToString("yyyy", CultureInfo.InvariantCulture),
-        "yy" => utc.ToString("yy", CultureInfo.InvariantCulture),
-        "MM" => utc.ToString("MM", CultureInfo.InvariantCulture),
-        "dd" => utc.ToString("dd", CultureInfo.InvariantCulture),
-        _ => number.ToString("D" + Width(token), CultureInfo.InvariantCulture),
-    };
-
-    private static string Width(Match token) => token.Groups["width"] is { Success: true } width ? width.Value : "1";
 
     private static bool Countable(JsonObject field)
         => Flag(field["required"])

@@ -1,6 +1,6 @@
 ---
 name: alvo-descriptor-field-types-and-formats
-description: Use when an Alvo descriptor field needs a type or its facets — string or text, decimal precision and scale, enum values, a ref and its onDelete, or a format such as email.
+description: Use when an Alvo descriptor field needs a type or its facets — string or text, decimal precision and scale, enum values, a ref and its onDelete, a format such as email, or a sequence number.
 ---
 
 # Field types and formats in an Alvo descriptor
@@ -42,6 +42,19 @@ A `string` field's `format` is a built-in:
 
 or the name of a format declared under `/formats/<name>` as `{"pattern": "…", "description": "…"}`. A name that
 is neither is refused at apply. Reuse a declared format before adding one: the descriptor lists them.
+
+## Sequence numbers
+
+A field's `sequence` makes Alvo number each create — gapless, never reused, counted per tenant:
+
+- `"type": "integer"` stores the number itself. `"type": "string"` needs `format`, the text stored:
+  `"SO-{yyyy}-{n:4}"` gives SO-2026-0042. Exactly one `{n}`, or `{n:4}` to pad to four digits (1 to 18), plus any
+  of `{yyyy}` `{yy}` `{MM}` `{dd}` from the create's UTC date.
+- `per` names a required string, integer, enum, ref, uuid, date or boolean field a caller writes: each of its values
+  counts on its own. `period` (`year`, `month` or `day`) restarts the count each UTC period. `start` is the first
+  number, 1 by default.
+- Alvo writes the value: a write that sends it is refused 403. `default`, `computed`, `rollup` and `maxLength` are
+  each refused beside it. A rolled-back create gives its number back. Not accepted on a `storage: dynamic` entity.
 
 <!-- example: add-rental-deposit-note -->
 **An optional note on how the deposit of a rental was settled.**
