@@ -111,6 +111,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_data_migration_runs_once_per_revision_across_restarts_rollback_and_reapply()
     {
+        EnsureEngineAvailable();
         var database = await DatabaseAsync();
         var log = new MigrationLog();
         await using (var first = await StartMigratingAsync(database, DeskFile, log, afterRevision: 2))
@@ -135,6 +136,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_scoped_schema_runs_the_migration_once_per_tenant_and_each_run_reads_only_its_own_rows()
     {
+        EnsureEngineAvailable();
         var log = new MigrationLog();
         var seen = new ConcurrentBag<string>();
         await using var alvo = await StartMigratingAsync(
@@ -153,6 +155,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_replica_still_on_the_unscoped_catalog_starts_per_tenant_runs_at_the_first_scoped_revision()
     {
+        EnsureEngineAvailable();
         var database = await DatabaseAsync();
         var applier = new MigrationLog();
         var stale = new MigrationLog();
@@ -169,6 +172,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_failed_start_is_retried_after_its_backoff_not_every_round_and_then_starts()
     {
+        EnsureEngineAvailable();
         var log = new MigrationLog();
         var logs = new MigrationLogCapture();
         var tenants = new FlakyTenants(1, TenantA, TenantB);
@@ -189,6 +193,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_migration_that_has_run_does_not_refuse_a_boot_on_a_schema_scoped_since()
     {
+        EnsureEngineAvailable();
         var database = await DatabaseAsync();
         var log = new MigrationLog();
         await using (var first = await StartMigratingAsync(database, DeskFile, log, afterRevision: 1))
@@ -206,6 +211,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_migration_on_a_scoped_schema_without_a_tenant_catalog_refuses_boot()
     {
+        EnsureEngineAvailable();
         var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(
             () => StartMigratingAsync(null, BookingDesk, new MigrationLog(), afterRevision: 1));
 
@@ -216,6 +222,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_schema_scoped_by_a_later_apply_holds_the_migration_until_a_catalog_exists()
     {
+        EnsureEngineAvailable();
         var database = await DatabaseAsync();
         var log = new MigrationLog();
         var logs = new MigrationLogCapture();
