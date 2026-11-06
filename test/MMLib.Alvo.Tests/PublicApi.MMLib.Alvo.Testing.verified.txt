@@ -989,6 +989,38 @@ namespace MMLib.Alvo.Testing.Rules
         public void Update_carries_both_using_and_with_check_from_updates_own_distinctive_source() { }
     }
 }
+namespace MMLib.Alvo.Testing.Scheduling
+{
+    public interface ITimerStoreWorld : System.IAsyncDisposable
+    {
+        System.DateTimeOffset Now { get; }
+        MMLib.Alvo.Scheduling.ITimerStore Store { get; }
+        void Advance(System.TimeSpan duration);
+        System.Threading.Tasks.Task BreakOutboxAsync();
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Id",
+                "Revision"})]
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<System.ValueTuple<string, int>>> MigrationRowsAsync();
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> OutboxTypesAsync();
+    }
+    public abstract class TimerStoreContractTests
+    {
+        protected TimerStoreContractTests() { }
+        public System.Threading.Tasks.Task A_cancel_during_a_claim_leaves_the_fire_nothing_to_append() { }
+        public System.Threading.Tasks.Task A_cancel_of_an_unknown_key_answers_false() { }
+        public System.Threading.Tasks.Task A_claim_takes_the_earliest_due_first_and_at_most_the_batch() { }
+        public System.Threading.Tasks.Task A_due_timer_is_claimed_once_and_fired_once() { }
+        public System.Threading.Tasks.Task A_fire_removes_the_timer_and_appends_its_event_in_one_commit() { }
+        public System.Threading.Tasks.Task A_fire_whose_outbox_append_fails_leaves_the_timer_in_place() { }
+        public System.Threading.Tasks.Task A_reschedule_during_a_claim_fences_the_stale_fire_and_the_new_generation_fires_once() { }
+        public System.Threading.Tasks.Task A_stale_claim_cannot_fire_a_timer_cancelled_and_rescheduled_under_the_same_key() { }
+        public System.Threading.Tasks.Task An_expired_lease_makes_a_timer_claimable_again() { }
+        public System.Threading.Tasks.Task Counts_split_pending_from_due() { }
+        protected virtual void EnsureEngineAvailable() { }
+        public System.Threading.Tasks.Task The_same_key_in_two_scopes_is_two_timers() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Scheduling.ITimerStoreWorld> WorldAsync();
+    }
+}
 namespace MMLib.Alvo.Testing.Secrets
 {
     public sealed class InMemorySecretStore : MMLib.Alvo.Secrets.ISecretStore

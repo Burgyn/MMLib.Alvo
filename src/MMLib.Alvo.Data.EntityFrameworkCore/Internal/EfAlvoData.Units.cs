@@ -274,12 +274,12 @@ internal sealed partial class EfAlvoData
     }
 
     /// <summary>One framework event (a command's completion) written into <paramref name="unit"/>'s transaction.</summary>
-    internal Task PublishFrameworkInUnitAsync(WriteUnit unit, AlvoEvent @event, CancellationToken cancellationToken)
+    internal Task PublishFrameworkInUnitAsync(WriteUnit unit, AlvoFrameworkEnvelope @event, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(@event);
         return unit.RunAsync(
             token => InUnitAsync(
-                unit, (connection, transaction, ct) => OutboxTable.InsertAsync(connection, transaction, _outboxTable, @event, ct), token),
+                unit, (connection, transaction, ct) => OutboxTable.InsertAsync(connection, transaction, _outboxTable, @event.Envelope, ct), token),
             cancellationToken);
     }
 
