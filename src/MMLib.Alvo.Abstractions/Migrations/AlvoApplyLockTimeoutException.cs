@@ -12,8 +12,10 @@
 /// </para>
 /// <para>
 /// <b>Internal.</b> It is a fact about one apply, answered by the Management API (409 <c>conflict</c> with
-/// <c>Retry-After</c>) and by the boot (a refused start): neither a host nor a provider outside the family has a reason
-/// to construct or catch it.
+/// <c>Retry-After</c>) and by the boot (a refused start). The dashboard catches it by type through the D45 grant (Ruling
+/// 78). The cost is deliberate and recorded (Ruling 82): an embedded host calling <c>IAlvoManagement</c> in-process
+/// cannot catch it by type and must treat it as a failed apply carrying <see cref="Refusal"/>; a public, catchable
+/// refusal type for the Management port is a follow-up, designed once for every refusal rather than for this one.
 /// </para>
 /// </remarks>
 internal sealed class AlvoApplyLockTimeoutException : Exception

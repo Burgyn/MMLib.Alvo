@@ -1175,7 +1175,7 @@ a value or the expression.
 when the caller cannot read the parent row: that answer is the oversell protection itself, and row readability is not
 static, so it cannot be refused at apply (Ruling 62). It is more than one bit: a caller who may create and delete
 children can binary-search a quantity and recover the parent's remaining headroom (`stock − reserved`) exactly, in
-O(log n) refusals that change nothing. A child write rule that requires the parent to be readable closes it. A
+O(log n) refusals that change nothing. No rule closes it today, because the Rule profile reads only the written row, `@user` and `@tenant` and cannot ask whether the parent is readable; a host that must hide the headroom keeps such a validation off a parent its child writers cannot read. A
 *visible* computed or rollup field over a hidden field, with no validation, is a pre-existing exposure outside HX-11
 (Ruling 63, a follow-up). Two availability risks are accepted with follow-ups (Ruling 81): on PostgreSQL, a Data API
 read that outlasts the five-second lock timeout keeps an apply needing `ACCESS EXCLUSIVE` on that table from acquiring

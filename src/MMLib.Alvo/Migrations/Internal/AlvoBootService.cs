@@ -939,15 +939,16 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         new() { AllowDestructive = _options.Value.AllowDestructive };
 
     /// <summary>
-    /// The refusal used when the policy refused without saying why — unreachable through
-    /// <see cref="SchemaStartupPolicy"/>, and a refusal with no text would be worse than a wrong one.
-    /// </summary>
-    /// <summary>
     /// How many times a boot decides again while another replica's apply holds the version row — each attempt waits out
-    /// one lock timeout, so this bounds the wait at that many timeouts (HX-11 Ruling 81).
+    /// one lock timeout. The single converge re-decide may run the loop once more, so the hard ceiling is twice this
+    /// many timeouts (HX-11 Ruling 81).
     /// </summary>
     private const int SlowWinnerAttempts = 6;
 
+    /// <summary>
+    /// The refusal used when the policy refused without saying why — unreachable through
+    /// <see cref="SchemaStartupPolicy"/>, and a refusal with no text would be worse than a wrong one.
+    /// </summary>
     private const string UnexplainedRefusal =
         "Alvo cannot start: the project schema was refused and no reason was recorded. This is a defect in "
         + "Alvo itself — please report it with the descriptor that produced it.";
