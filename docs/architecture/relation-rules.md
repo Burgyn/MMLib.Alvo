@@ -117,6 +117,19 @@ with a check's lookup itself (not a ref, an unreadable target) at `/entities/<e>
   (`quantity * product_id.cost <= 1000`), and its 422 then tells the caller whether that value passes. A rule over a
   related field has the same property. The check's author chose the condition and owns what it discloses.
 
+## Simulator and editor
+
+- **`ManagementPolicyVerdict.Relations`** lists each relation the bound `USING`, `WITH CHECK` and lookup checks read
+  through, once each and in that order, as a `ManagementRelationVerdict`: `Via` is the ref for a forward relation and
+  `<child>.<ref>` for a reverse one, `Allowed` is false when the related `list` decision is a denial (the relation then
+  matches nothing), and `Using`/`TenantScope` are the related decision's CEL sources for the simulated caller. It reads
+  the decision the engine already bound, so it cannot disagree with what a query renders.
+- **The dashboard** shows them under *Reads through* in the policy verdict. The rules editor lists, under each box, the
+  relation terms apply would compile on this entity (`RelationHints`, internal): `<ref>.<field>` per ref to a declared
+  physical entity, and `<child>.exists(x, …)` per child — only `<child>_via_<ref>` when the child references the entity
+  more than once. It is a hint over the working copy's JSON, not a second compiler: the live check says whether a typed
+  term compiles.
+
 ## Not done
 
 - **Host narrowings inside `EXISTS`.** A narrowing is a view, not a boundary; the related scope is the rules'.
