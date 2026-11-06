@@ -14,16 +14,18 @@ public sealed class Enrich<T>
 {
     private readonly RowShaping _row;
 
+    private T? _materialized;
+
     internal Enrich(RowShaping row, AlvoContext caller, DataOperation operation)
     {
         _row = row;
         Caller = caller;
         Operation = operation;
-        Row = row.As<T>();
     }
 
     /// <summary>Gets the row as the caller receives it so far — a field the caller may not read is absent (a typed property reads its default).</summary>
-    public T Row { get; }
+    /// <remarks>Read once, at first use: a <see cref="Hide(string)"/> or <see cref="SetVirtual(string, object?)"/> made after that is not reflected in it.</remarks>
+    public T Row => _materialized ??= _row.As<T>();
 
     /// <summary>Gets the caller the row is returned to; the system too, which is enriched like any caller.</summary>
     public AlvoContext Caller { get; }

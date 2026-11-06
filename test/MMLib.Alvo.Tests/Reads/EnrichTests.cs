@@ -28,6 +28,59 @@ public sealed class ThrowingDisposalEnricher(ThrowingDisposalService service) : 
     public void Enrich(Enrich<AlvoRecord> row) => _ = service;
 }
 
+internal static class DisposalLog
+{
+    private static readonly System.Collections.Concurrent.ConcurrentQueue<string> _entries = new();
+
+    internal static IReadOnlyList<string> Entries => [.. _entries];
+
+    internal static void Add(string entry) => _entries.Enqueue(entry);
+
+    internal static void Clear() => _entries.Clear();
+}
+
+public sealed class ScopedProbe : IAsyncDisposable
+{
+    public ValueTask DisposeAsync()
+    {
+        DisposalLog.Add("scope");
+        return ValueTask.CompletedTask;
+    }
+}
+
+public sealed class FirstThrowingDisposal(ScopedProbe probe) : IRecordEnricher<AlvoRecord>, IDisposable
+{
+    public void Enrich(Enrich<AlvoRecord> row) => _ = probe;
+
+    public void Dispose()
+    {
+        DisposalLog.Add("first");
+        throw new InvalidOperationException("disposal secret");
+    }
+}
+
+public sealed class SecondThrowingDisposal : IRecordEnricher<AlvoRecord>, IAsyncDisposable
+{
+    public void Enrich(Enrich<AlvoRecord> row)
+    {
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        DisposalLog.Add("second");
+        throw new InvalidOperationException("disposal secret");
+    }
+}
+
+public sealed class CleanDisposal : IRecordEnricher<AlvoRecord>, IDisposable
+{
+    public void Enrich(Enrich<AlvoRecord> row)
+    {
+    }
+
+    public void Dispose() => DisposalLog.Add("clean");
+}
+
 public sealed class TitleEnricher : IRecordEnricher<AlvoRecord>
 {
     internal static int Built { get; set; }
@@ -63,8 +116,10 @@ public sealed class EnrichTests
     [InlineData("tenant_id")]
     [InlineData("created_at")]
     [InlineData("updated_at")]
+    [InlineData("deleted_at")]
     public void Hide_of_a_framework_column_is_invalid_hide(string column) =>
-        Should.Throw<ReadShapingRefusal>(() => Shaping().Hide(column)).Reason.ShouldBe(HookFailedException.InvalidHide);
+        Should.Throw<ReadShapingRefusal>(() => new RowShaping(_notes with { SoftDelete = true }, Row(), () => FormatCatalog.Build([_notes])).Hide(column))
+            .Reason.ShouldBe(HookFailedException.InvalidHide);
 
     [Fact]
     public void SetVirtual_fills_a_carried_virtual_field()
@@ -289,6 +344,68 @@ public sealed class EnrichTests
         }
 
         world.Logs.Entries.ShouldAllBe(entry => !entry.Message.Contains("disposal secret", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_refusal_the_enricher_catches_still_fails_the_read()
+    {
+        await using var world = ReadsWorld.Start(alvo => alvo.Entity("notes", n => n.Enrich("swallowing", (Enrich<AlvoRecord> row) =>
+        {
+            try
+            {
+                row.SetVirtual("title", "forged");
+            }
+            catch (Exception swallowed)
+            {
+                GC.KeepAlive(swallowed);
+            }
+        })));
+
+        (await FailureAsync(world)).Reason.ShouldBe(HookFailedException.InvalidSet);
+    }
+
+    [Fact]
+    public async Task Every_instance_and_the_scope_are_disposed_even_when_two_disposals_throw()
+    {
+        DisposalLog.Clear();
+        await using var world = ReadsWorld.Start(
+            alvo => alvo.Entity("notes", n => n
+                .Enrich<FirstThrowingDisposal>("first")
+                .Enrich<SecondThrowingDisposal>("second")
+                .Enrich<CleanDisposal>("clean")),
+            services: services => services.AddScoped<ScopedProbe>());
+        var unit = new FakeFlowUnit();
+
+        using (AlvoFlow.EnterUnit(unit, AlvoProvenance.None))
+        {
+            var enrichment = world.Runner.BeginEnrichment("notes", DataOperation.List, ReadsWorld.Caller).ShouldNotBeNull();
+            enrichment.Enrich(Row());
+
+            var failure = await Should.ThrowAsync<HookFailedException>(async () => await enrichment.DisposeAsync());
+
+            failure.Reason.ShouldBe(HookFailedException.Exception);
+            failure.Extensions.ShouldBe(["first", "second", "clean"]);
+            unit.Blamed.ShouldHaveSingleItem().ShouldBeSameAs(failure);
+        }
+
+        DisposalLog.Entries.ShouldBe(["first", "second", "clean", "scope"]);
+        world.Logs.Entries.ShouldAllBe(entry => !entry.Message.Contains("disposal secret", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_registered_enricher_is_resolved_from_the_scope_and_left_to_its_container()
+    {
+        DisposalLog.Clear();
+        await using var world = ReadsWorld.Start(
+            alvo => alvo.Entity("notes", n => n.Enrich<CleanDisposal>("registered")),
+            services: services => services.AddSingleton<CleanDisposal>());
+
+        await using (var enrichment = world.Runner.BeginEnrichment("notes", DataOperation.List, ReadsWorld.Caller).ShouldNotBeNull())
+        {
+            enrichment.Enrich(Row());
+        }
+
+        DisposalLog.Entries.ShouldBeEmpty();
     }
 
     private static async Task<HookFailedException> FailureAsync(ReadsWorld world)

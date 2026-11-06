@@ -35,6 +35,12 @@ public sealed partial class AlvoEntityBuilder<T>
     }
 
     /// <summary>Shapes every row a read or a write's echo returns of the entity by a <typeparamref name="TEnricher"/>, built once per read.</summary>
+    /// <remarks>
+    /// Alvo builds the class once per read and disposes it after the read. When the host registered the type in its services,
+    /// the instance is resolved from the read's scope instead and Alvo does not dispose it: a singleton is shared by
+    /// concurrent reads of every caller, so its thread safety, and anything it keeps from one caller to the next, are the
+    /// host's to get right.
+    /// </remarks>
     /// <typeparam name="TEnricher">The enricher class.</typeparam>
     /// <param name="id">A stable id, lower-case letters, digits and hyphens.</param>
     /// <returns>This builder.</returns>
