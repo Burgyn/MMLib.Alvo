@@ -18,8 +18,8 @@ Put a derived value on the lowest rung that expresses it:
 `{"from": "<child>", "op": "…", "field": "<child field>"}`: `from` is an entity with a `ref` to this one, `field` is
 needed by every `op` but `count`, and `via` names the child's `ref` when it has several. `where` filters the
 children with a CEL condition over the child's own fields — `"where": "status == 'held'"` — kept consistent in the
-same transaction; it reads no caller (`@user`, `@tenant`) and no `now()`, because the stored number would go stale
-with no write to move it.
+same transaction; it reads no caller or `now()` (the number would go stale with no write to move it), no function,
+no hidden child field.
 
 <!-- gen:rollup-ops -->
 `sum` `count` `avg` `min` `max`

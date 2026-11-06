@@ -3,6 +3,7 @@ using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
@@ -78,14 +79,29 @@ internal static partial class EvalCases
     /// <c>CHECK</c> expression, compiled as a rule over parts — refuses a price of -1 and admits 0, an ordinary price
     /// and the largest one <c>precision 8, scale 2</c> holds, so a validation that also refuses real prices fails.
     /// </summary>
-    /// <remarks>Read only for a proposal the real dry run accepted, so the descriptor parses and maps.</remarks>
+    /// <remarks>
+    /// Read only for a proposal the real dry run accepted, so the descriptor should parse and map; one that does not —
+    /// or that lost <c>parts.unit_price</c> — fails the case rather than crashing the run.
+    /// </remarks>
     private static bool KeepsThePriceNonNegative(TurnRecord turn)
     {
-        var schema = DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(turn.Proposal!.DescriptorJson));
-        var parts = schema.Entities.Single(entity => entity.Name == "parts");
-        var check = parts.Fields.Single(field => field.Name == "unit_price").CheckExpression;
-        var compiled = check is null ? null : new CelCompiler().Compile(check, CelProfile.Rule, parts).Expression;
+        var compiled = PriceCheck(turn.Proposal!.DescriptorJson);
         return compiled is not null && !Admits(compiled, -1m) && _admittedPrices.All(price => Admits(compiled, price));
+    }
+
+    /// <summary>The proposed <c>parts.unit_price</c> validation compiled as a rule over parts, or <see langword="null"/>.</summary>
+    private static CompiledExpression? PriceCheck(string descriptorJson)
+    {
+        try
+        {
+            var parts = DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(descriptorJson)).Entities.SingleOrDefault(entity => entity.Name == "parts");
+            var check = parts?.Fields.SingleOrDefault(field => field.Name == "unit_price")?.CheckExpression;
+            return check is null ? null : new CelCompiler().Compile(check, CelProfile.Rule, parts!).Expression;
+        }
+        catch (Exception unmappable) when (unmappable is InvalidDataException or InvalidOperationException or JsonException or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     private static bool Admits(CompiledExpression check, decimal price) =>

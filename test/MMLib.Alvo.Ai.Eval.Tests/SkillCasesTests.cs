@@ -179,6 +179,16 @@ public sealed class SkillCasesTests
         Grade("reject_negative_price", Turn(Edited(document => document.Fields("parts")["unit_price"]!["validation"] = "value >= 0"),
             Proposed, refusals: ["refused"], calls: [Loads(EntitiesAndFields, 1), Propose(Refused("validation", "Refused."), 2)])).Passed.ShouldBeFalse();
 
+    /// <summary>
+    /// A proposal the grader cannot map — here a validation that does not parse, under a dry run that claims it was
+    /// accepted — fails the case instead of crashing the run.
+    /// </summary>
+    [Theory]
+    [InlineData("value >=")]
+    [InlineData("@user.id == value")]
+    public void Negative_price_fails_a_validation_the_grader_cannot_map_instead_of_throwing(string validation) =>
+        Grade("reject_negative_price", Validating(validation, EntitiesAndFields)).Passed.ShouldBeFalse();
+
     [Fact]
     public void Rentals_count_fails_the_right_rollup_beside_a_counter_hook() =>
         Grade("rollup_rentals_count", Proposing("rollup_rentals_count", document =>
