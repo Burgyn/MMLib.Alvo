@@ -70,7 +70,15 @@ public sealed class GeneratedNamesTests
     [InlineData("analysis", "Analysis")]
     [InlineData("news", "New")]
     [InlineData("data", "Data")]
-    [InlineData("people", "People")]
+    [InlineData("people", "Person")]
+    [InlineData("children", "Child")]
+    [InlineData("buses", "Bus")]
+    [InlineData("order_statuses", "OrderStatus")]
+    [InlineData("houses", "House")]
+    [InlineData("cases", "Case")]
+    [InlineData("responses", "Response")]
+    [InlineData("branches", "Branch")]
+    [InlineData("campus", "Campus")]
     public void Singular_rules(string entity, string className) => CSharpNames.Class(entity).ShouldBe(className);
 
     [Theory]

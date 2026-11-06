@@ -11,6 +11,15 @@ internal static class CSharpNames
 {
     private static readonly HashSet<string> _reservedClassNames = new(StringComparer.Ordinal) { "Record", "Patch", "Create" };
 
+    private static readonly KeyValuePair<string, string>[] _irregular =
+    [
+        new("statuses", "status"),
+        new("buses", "bus"),
+        new("people", "person"),
+        new("children", "child"),
+        new("data", "data"),
+    ];
+
     private static readonly HashSet<string> _inheritedMembers = new(StringComparer.Ordinal)
     {
         "Record", "Patch", "Create", "Equals", "GetHashCode", "GetType", "ToString", "MemberwiseClone", "Finalize",
@@ -49,11 +58,17 @@ internal static class CSharpNames
     }
 
     /// <summary>
-    /// The singular of an entity name by three rules only: <c>ies</c> → <c>y</c>; <c>(s|x|z|ch|sh)es</c> → drop <c>es</c>;
-    /// a trailing <c>s</c> not after <c>s</c>, <c>u</c> or <c>i</c> dropped.
+    /// The singular of an entity name: a last word in the irregular table (<c>statuses</c>, <c>buses</c>, <c>people</c>,
+    /// <c>children</c>, <c>data</c>) is replaced; otherwise <c>ies</c> → <c>y</c>; <c>(sses|xes|zes|ches|shes)</c> → drop
+    /// <c>es</c>; else a trailing <c>s</c> is dropped unless the name ends in <c>ss</c>, <c>us</c> or <c>is</c>.
     /// </summary>
     internal static string Singular(string name)
     {
+        if (Irregular(name) is { } irregular)
+        {
+            return irregular;
+        }
+
         if (EndsWith(name, "ies"))
         {
             return name.Substring(0, name.Length - 3) + "y";
@@ -118,8 +133,25 @@ internal static class CSharpNames
         new[] { entity.ClassName, Patch(entity.ClassName) }
             .Concat(entity.Fields.Where(field => field.EnumTypeName is not null).Select(field => field.EnumTypeName!));
 
+    private static string? Irregular(string name)
+    {
+        foreach (var pair in _irregular)
+        {
+            if (EndsWithWord(name, pair.Key))
+            {
+                return name.Substring(0, name.Length - pair.Key.Length) + pair.Value;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool EndsWithWord(string name, string word) =>
+        name.EndsWith(word, StringComparison.Ordinal)
+        && (name.Length == word.Length || !char.IsLetterOrDigit(name[name.Length - word.Length - 1]));
+
     private static bool EndsWithSibilantPlural(string name) =>
-        EndsWith(name, "ses") || EndsWith(name, "xes") || EndsWith(name, "zes") || EndsWith(name, "ches") || EndsWith(name, "shes");
+        EndsWith(name, "sses") || EndsWith(name, "xes") || EndsWith(name, "zes") || EndsWith(name, "ches") || EndsWith(name, "shes");
 
     private static bool EndsWith(string name, string suffix) =>
         name.Length > suffix.Length && name.EndsWith(suffix, StringComparison.Ordinal);
