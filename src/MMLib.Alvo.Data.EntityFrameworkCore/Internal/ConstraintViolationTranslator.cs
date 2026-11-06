@@ -203,11 +203,21 @@ internal static class ConstraintViolationTranslator
             return [];
         }
 
-        var field = string.Equals(owner.Entity.Name, written.Schema.Name, StringComparison.Ordinal)
+        var field = IsTheWrittenEntitysOwnField(owner, written.Schema)
             ? owner.Field.Name
             : written.BodySent ? RolledUpChildField(owner.Field, written.Schema) : null;
         return field is null || written.Unnameable.Contains(field) ? [] : [field];
     }
+
+    /// <summary>
+    /// Whether the broken validation is the written entity's own field rather than a parent's rollup — and a rollup over
+    /// its own entity is a parent's field too, so its refusal points at the child field, never at the rollup (Ruling 25).
+    /// </summary>
+    /// <param name="owner">The entity and field whose validation broke.</param>
+    /// <param name="written">The entity the write touched.</param>
+    private static bool IsTheWrittenEntitysOwnField((EntitySchema Entity, FieldSchema Field) owner, EntitySchema written) =>
+        string.Equals(owner.Entity.Name, written.Name, StringComparison.Ordinal)
+        && !string.Equals(owner.Field.Rollup?.From, written.Name, StringComparison.Ordinal);
 
     /// <summary>The child field a parent's rollup aggregates from <paramref name="written"/>, or none for a <c>count</c>.</summary>
     /// <param name="parentField">The parent's validated field.</param>

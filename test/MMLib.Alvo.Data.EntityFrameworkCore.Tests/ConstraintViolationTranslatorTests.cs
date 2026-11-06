@@ -190,6 +190,23 @@ public class ConstraintViolationTranslatorTests
         (refused.Kind, refused.Fields.Count).ShouldBe((AlvoConstraintKind.Check, 0));
     }
 
+    /// <summary>
+    /// A rollup over its own entity is still a parent's field: a child write that pushes its parent past the validation
+    /// names the child field it sent, never the parent's rollup field (HX-11 Ruling 25, security review m-1).
+    /// </summary>
+    [Fact]
+    public async Task A_self_rollup_s_check_names_the_child_field_never_the_rollup_field() =>
+        (await Should.ThrowAsync<AlvoConstraintViolationException>(
+            async () => await Checked(CheckConstraintNames.For("task", "effort_total"), Subtasks, Nothing)))
+            .Fields.ShouldBe(["effort"]);
+
+    /// <summary>A <c>count</c> over its own entity aggregates no child field, so it names nothing.</summary>
+    [Fact]
+    public async Task A_self_count_s_check_names_nothing() =>
+        (await Should.ThrowAsync<AlvoConstraintViolationException>(
+            async () => await Checked(CheckConstraintNames.For("task", "subtask_count"), Subtasks, Nothing)))
+            .Fields.ShouldBeEmpty();
+
     private static Task Checked(string? constraintName, EntitySchema written, IReadOnlySet<string> unnameable, bool bodySent = true) =>
         ConstraintViolationTranslator.TranslatedAsync(
             () => Task.FromException(Collision()),
@@ -232,7 +249,30 @@ public class ConstraintViolationTranslatorTests
             ],
         },
         Line,
+        Subtasks,
     ]);
+
+    /// <summary>A task whose validated rollups aggregate its own subtasks: a count, and a sum of their <c>effort</c>.</summary>
+    private static EntitySchema Subtasks => new()
+    {
+        Name = "task",
+        Fields =
+        [
+            new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
+            new FieldSchema { Name = "parent_id", Type = FieldType.Uuid, Nullable = true },
+            new FieldSchema { Name = "effort", Type = FieldType.Integer, Nullable = true },
+            new FieldSchema
+            {
+                Name = "subtask_count", Type = FieldType.Integer, CheckExpression = "subtask_count <= 10",
+                Rollup = new RollupSchema { From = "task", Op = RollupOperation.Count, Via = "parent_id" },
+            },
+            new FieldSchema
+            {
+                Name = "effort_total", Type = FieldType.Integer, CheckExpression = "effort_total <= 100",
+                Rollup = new RollupSchema { From = "task", Op = RollupOperation.Sum, Field = "effort", Via = "parent_id" },
+            },
+        ],
+    };
 
     private static EntitySchema Line => new()
     {
