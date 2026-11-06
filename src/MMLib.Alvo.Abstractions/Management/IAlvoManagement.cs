@@ -209,6 +209,14 @@ public interface IAlvoManagement
     /// migration — the plan the original apply ran is <see cref="GetRevisionAsync"/>'s business, and
     /// re-planning it is impossible from a base that has moved.
     /// </para>
+    /// <para>
+    /// <b>On PostgreSQL an apply waits at most five seconds for a table lock</b> (HX-11) — adding a field's
+    /// <c>validation</c> takes the table's <c>ACCESS EXCLUSIVE</c> lock, and a rollup recompute holds its child's
+    /// writes. One that gives up changes nothing and is a retryable refusal: over HTTP the Management API answers
+    /// <c>409 conflict</c> with <c>Retry-After: 5</c>; an in-process caller receives an exception of an internal type,
+    /// <c>AlvoApplyLockTimeoutException</c>, which it cannot catch by name — deliberately, since only the family's own
+    /// surfaces answer it. Retry the same request.
+    /// </para>
     /// </remarks>
     /// <param name="project">The project name.</param>
     /// <param name="request">The descriptor, the expected revision, and the allowances.</param>
@@ -259,6 +267,14 @@ public interface IAlvoManagement
     /// for the same reason: <c>access</c> lives inside the descriptor, so a history that ever held a looser
     /// block would otherwise be a standing escalation.
     /// </para>
+    /// <para>
+    /// <b>On PostgreSQL an apply waits at most five seconds for a table lock</b> (HX-11) — adding a field's
+    /// <c>validation</c> takes the table's <c>ACCESS EXCLUSIVE</c> lock, and a rollup recompute holds its child's
+    /// writes. One that gives up changes nothing and is a retryable refusal: over HTTP the Management API answers
+    /// <c>409 conflict</c> with <c>Retry-After: 5</c>; an in-process caller receives an exception of an internal type,
+    /// <c>AlvoApplyLockTimeoutException</c>, which it cannot catch by name — deliberately, since only the family's own
+    /// surfaces answer it. Retry the same request.
+    /// </para>
     /// </remarks>
     /// <param name="project">The project name.</param>
     /// <param name="targetRevision">The revision to restore.</param>
@@ -278,6 +294,10 @@ public interface IAlvoManagement
     /// <exception cref="ManagementEscalationException">
     /// The target revision's <c>access</c> block differs from the applied one and the caller is not an
     /// administrator.
+    /// </exception>
+    /// <exception cref="Descriptor.DescriptorValidationException">
+    /// The target cannot be applied over the current schema — rows break a validation it restores, or it changes a
+    /// rollup in the same step as a validation that reads it.
     /// </exception>
     /// <exception cref="Migrations.DescriptorConcurrencyException">The expected revision is not the current one.</exception>
     /// <exception cref="Migrations.DestructiveChangeNotAllowedException">

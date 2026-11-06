@@ -392,6 +392,21 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         _dialect.ApplyLockTimeoutStatement is { } statement ? [statement] : [];
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <b>A <c>CHECK</c> the engine refuses during the apply</b> — rows written after the plan's count, or a recomputed
+    /// rollup breaking a parent's validation — is a <see cref="DescriptorValidationException"/> at the owning validation's
+    /// pointer, and nothing is applied (HX-11 Ruling 22).
+    /// </para>
+    /// <para>
+    /// <b>A lock timeout escapes as an internal exception, deliberately.</b> On an engine whose dialect bounds the apply's
+    /// lock wait (PostgreSQL, five seconds), giving up raises <c>AlvoApplyLockTimeoutException</c>, an internal type: the
+    /// family's own surfaces answer it — the Management API with a <c>409</c> and <c>Retry-After</c>, the boot with a
+    /// refused start — and an embedded host calling this member directly receives it as an exception it cannot catch by
+    /// name. Nothing was applied; the same plan may be retried. Publishing the type would make one apply's retry signal a
+    /// contract no host has asked for (HX-11 Ruling 20, Task 9 review m3).
+    /// </para>
+    /// </remarks>
     public async Task<MigrationResult> ApplyAsync(MigrationPlan plan, MigrationOptions options, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(plan);
