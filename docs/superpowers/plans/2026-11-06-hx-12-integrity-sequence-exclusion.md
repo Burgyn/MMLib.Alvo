@@ -16,7 +16,7 @@ third-party driver) makes the apply refuse the keyword. Partial indexes are EF's
 constraint renderer's inline-literal SQL. A refusal is decoded as the new `AlvoConstraintKind.Exclusion` and
 answered 409 at the range's pointer.
 
-**Tech Stack:** .NET 10 (C# 14), EF Core 10 migrations (`HasFilter`, `SqlOperation`), Npgsql + PostgreSQL 16
+**Tech Stack:** .NET 10 (C# 14), EF Core 10 migrations (`HasFilter`, raw statements around the generated SQL), Npgsql + PostgreSQL 16
 (Testcontainers, `btree_gist` from contrib), Microsoft.Data.Sqlite (≥ 3.42: `RETURNING`, upsert, `unixepoch(…,'subsec')`),
 xUnit v3 on MTP, Shouldly, Verify, `Microsoft.Extensions.Time.Testing`, Blazor/MudBlazor + bUnit, Microsoft.Playwright,
 Astro/Starlight.
@@ -62,7 +62,13 @@ standard answer for invoice numbers where `CREATE SEQUENCE` is gap-prone by desi
     `MMLib.Alvo.Schema`: `IndexSchema.Where` (`string?`, init), `IndexSchema.Exclude` (`ExclusionSchema?`, init),
     `ExclusionSchema(string From, string To)`. EF: `IAlvoSqlDialect.ExclusionConstraint(ExclusionConstraintDefinition)`
     (DIM → `null`), `ExclusionConstraintDefinition`, `ExclusionConstraintSql`.
-  - Everything else is `internal`; `IPredicateRenderer.RenderConstraint` **stays internal** (D9). Core `MMLib.Alvo`
+  - Everything else is `internal`; `IPredicateRenderer.RenderConstraint` **stays internal** (D9). Every driver
+    (`SqliteSqlDialect`, `PostgreSqlSqlDialect`, the T-SQL double) implements the new DIMs **explicitly**
+    (`string? IAlvoSqlDialect.SequenceAllocationStatement(…)`), so the `Data.Sqlite`, `Data.PostgreSql` and
+    `Testing.EntityFrameworkCore` baselines do not grow by them. Baselines that **do** grow: `MMLib.Alvo.Testing`
+    (in `test/MMLib.Alvo.Tests`) by the three public abstract suites `AlvoDataSequenceTests`, `AlvoDataPartialIndexTests`,
+    `AlvoDataExclusionTests` (precedent `AlvoDataCheckConstraintTests`), and `Testing.EntityFrameworkCore` by the new
+    facts of the public `AlvoSqlDialectContractTests`. Core `MMLib.Alvo`
     public API must not grow. Admin may grow only by Razor components (public by construction, HX-04 ruling 19).
 - **Wire and naming constants (verbatim):**
   - framework table `<prefix>_sequences` (`AlvoFrameworkTables.SequencesSuffix = "_sequences"`), columns
@@ -74,7 +80,7 @@ standard answer for invoice numbers where `CREATE SEQUENCE` is gap-prone by desi
     exclusion `xc_` + entity cut to 46 + `_` + 8 hex of SHA-256(`<entity>|<fields,>|<from>|<to>|<where>`); SQLite
     triggers `<xc name>_i`, `<xc name>_u`; SQLite raise text `alvo_exclusion:<xc name>`.
   - 409 for `Exclusion`: type `conflict` (as `Unique`), violation code **`exclusion`**, pointer `/<from>` (or `""` when
-    the field carries any `hidden` flag — Ruling X), message `Another record already holds a range here that overlaps this one.`,
+    the name cannot be resolved; a hidden range field is refused at apply, D17), message `Another record already holds a range here that overlaps this one.`,
     fix `Choose a range that does not overlap one another record already holds, then retry.`;
     `AlvoConstraintViolationException` message for `Exclusion`: `The write would overlap a range another record already holds.`
   - apply refusals (`DescriptorValidationException`, 422 `validation`, code `descriptor`):
@@ -120,9 +126,9 @@ standard answer for invoice numbers where `CREATE SEQUENCE` is gap-prone by desi
 5. **Partitions start at `start`:** two tenants, two `per` values, and a year rollover (FakeTimeProvider) each count
    from `start`; the same partition never restarts. `AlvoDataSequenceTests.Each_tenant_per_value_and_period_counts_from_start` (Task 2).
 
-## Decisions (the spec does not settle these; one line each, with the cost if wrong)
+## Decisions (the spec does not settle these, or this plan deviates; one line each, with the cost if wrong)
 
-- D1 `exclude: { from, to }` is a half-open `[from, to)` range of two `date`/`datetime` fields; `fields` are `WITH =` columns, `tenant_id` prepended on a scoped entity (as `UniqueColumns`). — Cost: an inclusive-end use case needs a second keyword.
+- D1 `exclude: { from, to }` is a half-open `[from, to)` range of two `date`/`datetime` fields; `fields` are `WITH =` columns, `tenant_id` prepended on a scoped entity (as `UniqueColumns`). SQLite compares `datetime` bounds in HX-11's epoch domain (millisecond-rounded, scaled to µs), PostgreSQL in microseconds, so two bounds differing only below 1 ms can overlap on one engine and not the other (documented). — Cost: an inclusive-end use case needs a second keyword; the sub-millisecond disparity.
 - D2 SQLite enforces an exclusion with `AFTER INSERT`/`AFTER UPDATE` triggers (§6.1's "in-transaction overlap check", run by the engine so every write path is covered; `BEGIN IMMEDIATE` makes it see the committed winner). — Cost: two triggers per exclusion to keep through rebuilds (Review Focus 1).
 - D3 On PostgreSQL, a write to an entity with an exclusion first takes `TransactionLockStatement` keys (one per exclusion: SHA-256 of name + tenant + equality values), so concurrent inserters of one resource queue instead of hitting `40P01` deadlocks between exclusion waiters. — Cost: writers to one resource serialize (they must anyway).
 - D4 Inverted ranges: the mapper ANDs `value >= new.<from>` into the `to` field's `CheckExpression`, reusing HX-11's `CHECK` end to end (DDL, rebuild, scan, 422 decode). — Cost: an apply refusal over inverted rows points at `/fields/<to>/validation`, a path the author did not write.
@@ -135,6 +141,10 @@ standard answer for invoice numbers where `CREATE SEQUENCE` is gap-prone by desi
 - D11 `where` (index and exclusion) admits HX-11's stored-predicate surface minus `now()` and temporal arithmetic, over this entity's own declared fields, and refuses a field carrying any `hidden` flag (Ruling 71's oracle argument). — Cost: a legitimate filter on a hidden field is refused.
 - D12 `btree_gist`: the plan probes `pg_extension`/`pg_available_extensions`/`has_database_privilege(…,'CREATE')`; installed → nothing; installable → the plan's first statement is `CREATE EXTENSION IF NOT EXISTS btree_gist`; otherwise the refusal above. — Cost: an apply may install an extension (trusted, contrib).
 - D13 Soft-deleted rows still count for exclusions and partial unique indexes, exactly as for `unique` today (follow-up issue filed in Task 9). — Cost: a deleted booking blocks its slot until purged.
+- D15 Allocation is one `INSERT … ON CONFLICT DO UPDATE … RETURNING` upsert, not §6.1's literal `UPDATE alvo_sequences … RETURNING`: a new partition's first number needs the insert, and insert-then-update is two statements racing on one key. Same row lock, same rollback. — Cost: none beyond the spec amendment's wording.
+- D16 The T-SQL double **declines** `exclude` (SQL Server has no exclusion constraint); AC (5) is the sequence `MERGE` golden plus that decline golden, and a declining dialect makes the apply refuse the keyword. — Cost: Azure SQL (#92) designs its own enforcement.
+- D17 An `exclude` whose `from`/`to` field carries any `hidden` flag is **refused** at apply (`ExclusionIndexCheck`), consistent with D11: a 409 pointing at, or a scan counting over, a hidden range discloses it. — Cost: a hidden booking window cannot be excluded.
+- D18 `exclude`'s **equality** `fields` may be hidden: the 409 names only the range start and is the same existence oracle a `unique` index on a hidden field already is. — Cost: that oracle, stated rather than new.
 - D14 `InMemoryAlvoData` assigns sequence numbers (a host's unit test reads them) but enforces neither exclusion nor partial index (HX-11 Ruling 28). `EfCoreSchemaIntrospector` is unchanged (first-run adoption only). — Cost: in-memory tests cannot see a 409 from `exclude`.
 
 ## File structure
@@ -148,7 +158,7 @@ standard answer for invoice numbers where `CREATE SEQUENCE` is gap-prone by desi
 | `src/MMLib.Alvo/Descriptor/DescriptorToSchemaMapper.cs` | maps; D4 range check synthesis |
 | `src/MMLib.Alvo/Descriptor/Internal/SequenceFieldCheck.cs` (new) | `sequence` findings incl. dynamic |
 | `src/MMLib.Alvo/Descriptor/Internal/IndexFilterCheck.cs`, `ExclusionIndexCheck.cs` (new) | `where` / `exclude` findings |
-| `src/MMLib.Alvo/Schema/MaintainedFields.cs` (new, internal) | one `IsMaintained` (computed ∨ rollup ∨ sequence) for the four call sites |
+| `src/MMLib.Alvo.Abstractions/Schema/MaintainedFields.cs` (new, internal) | one `IsMaintained` (computed ∨ rollup ∨ sequence) for every call site in core, EF, Testing and Admin (existing grants) |
 | `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/SequenceTable.cs`, `SequenceNumbers.cs`, `SequenceFormat.cs` (new) | table, allocation, rendering |
 | `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/IndexNames.cs`, `IndexFilterSql.cs` (new) | hashed names, `where` SQL |
 | `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/ExclusionPlan.cs`, `ExclusionOverlapSql.cs`, `ExclusionLocks.cs` (new) | migrator ops, scan + trigger join, D3 locks |
@@ -168,8 +178,9 @@ standard answer for invoice numbers where `CREATE SEQUENCE` is gap-prone by desi
 ## Task 1: `sequence` in the descriptor — schema, models, findings, maintained-field semantics
 
 **Files:**
-- Modify: `schema/project.schema.json` (`$defs/field/properties/sequence`), `src/MMLib.Alvo.Abstractions/Descriptor/FieldDescriptor.cs`, `DescriptorEnums.cs`, `src/MMLib.Alvo.Abstractions/Schema/FieldSchema.cs`, `src/MMLib.Alvo/Descriptor/DescriptorToSchemaMapper.cs`, `src/MMLib.Alvo/Descriptor/Internal/DescriptorValidator.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/WritePayloadGuard.cs`, `src/MMLib.Alvo/Hooks/Internal/HookSets.cs`, `src/MMLib.Alvo/Hooks/Internal/WriteExtensionRunner.cs`, `src/MMLib.Alvo/Api/Internal/RecordValidator.cs`, `src/MMLib.Alvo/Data/Internal/RecordWriter.cs`, the OpenAPI field schema writer (where `computed` sets `readOnly: true`)
-- Create: `src/MMLib.Alvo.Abstractions/Schema/SequenceSchema.cs`, `src/MMLib.Alvo/Descriptor/Internal/SequenceFieldCheck.cs`, `src/MMLib.Alvo/Schema/MaintainedFields.cs`, `examples/_negative/sequence-two-numbers.json`, `examples/_negative/sequence-unknown-period.json` (+ `expectations.json` rows)
+- Modify: `schema/project.schema.json` (`$defs/field/properties/sequence`), `src/MMLib.Alvo.Abstractions/Descriptor/FieldDescriptor.cs`, `DescriptorEnums.cs`, `src/MMLib.Alvo.Abstractions/Schema/FieldSchema.cs`, `src/MMLib.Alvo/Descriptor/DescriptorToSchemaMapper.cs`, `src/MMLib.Alvo/Descriptor/Internal/DescriptorValidator.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/WritePayloadGuard.cs`, `src/MMLib.Alvo/Hooks/Internal/HookSets.cs`, `src/MMLib.Alvo/Hooks/Internal/WriteExtensionRunner.cs`, `src/MMLib.Alvo/Api/Internal/RecordValidator.cs`, `src/MMLib.Alvo/Data/Internal/RecordWriter.cs`, `WholeRowGuard.cs`, `src/MMLib.Alvo.Testing/Data/InMemoryAlvoData.cs`, Admin `FormFields.cs`, `GridColumns.cs`, `HookFields.cs`, `ConditionText.cs`, every other `Rollup is (not )?null` hit, the OpenAPI field schema writer (where `computed` sets `readOnly: true`)
+- Create: `src/MMLib.Alvo.Abstractions/Schema/SequenceSchema.cs`, `src/MMLib.Alvo/Descriptor/Internal/SequenceFieldCheck.cs`, `src/MMLib.Alvo.Abstractions/Schema/MaintainedFields.cs`, `examples/_negative/sequence-two-numbers.json`, `examples/_negative/sequence-unknown-period.json` (+ `expectations.json` rows)
+- Create (tests): `test/MMLib.Alvo.Api.Tests/RecordValidatorTests.cs` (no such class exists yet)
 - Test: `test/MMLib.Alvo.Schema.Tests/{RoundTripTests,ExamplesTests,SnapshotTests}.cs`, `test/MMLib.Alvo.Tests/Descriptor/SequenceFieldCheckTests.cs`, `test/MMLib.Alvo.Abstractions.Tests` public-API baseline
 
 **Interfaces:**
@@ -217,18 +228,26 @@ Re-run the schema tests — PASS. Accept the Abstractions public-API baseline (e
 - [ ] **Step 4: Implement `SequenceFieldCheck`** (internal, `IReadOnlyList<DescriptorValidationError> Check(AlvoDescriptor)`),
 called from `DescriptorValidator` beside the HX-11 validation checks, the dynamic refusal before the physical filter
 drops dynamic entities (as `FieldValidation`'s Ruling 30 refusal does). The format grammar lives once, in
-`src/MMLib.Alvo.Abstractions/Schema/SequenceSchema.cs` as `internal static bool IsValidFormat(string)` (the token regex
-of Task 2's `SequenceFormat` plus "exactly one `{n…}`, no other brace"), reached by core, EF and Admin through
+`src/MMLib.Alvo.Abstractions/Schema/SequenceSchema.cs`: this task defines there
+`[GeneratedRegex(@"\{(?<token>n(?::(?<width>1[0-8]|[1-9]))?|yyyy|yy|MM|dd)\}", RegexOptions.CultureInvariant)] internal static partial Regex FormatToken();`
+(the class becomes `partial`) and `internal static bool IsValidFormat(string)` (every `{`/`}` belongs to a
+`FormatToken()` match, and exactly one match is an `{n…}`); Task 2's `SequenceFormat` uses `SequenceSchema.FormatToken()`
+and declares no regex of its own. Both are reached by core, EF and Admin through
 Abstractions' existing `InternalsVisibleTo` grants; facts `SequenceFieldCheckTests.A_format_with_two_numbers_or_an_unknown_token_is_refused`. Run `dotnet test --project test/MMLib.Alvo.Tests --filter-class '*SequenceFieldCheckTests'` — PASS.
 
 - [ ] **Step 5: Maintained-field semantics, failing first.** Add facts:
 `WritePayloadGuardTests.A_payload_naming_a_sequence_field_is_refused_like_a_computed_one` (same code, pointer at the field),
 `HookSetsTests.A_mutate_targeting_a_sequence_field_is_refused_at_apply`,
 `RecordValidatorTests.A_required_sequence_field_absent_from_a_create_is_not_reported_missing`,
-`OpenApiDocumentFacts.A_sequence_field_is_read_only_in_the_document` (in `test/_shared/api`). Then replace the four
-`ComputedExpression is not null || Rollup is not null` predicates with `field.IsMaintained()` and extend
+`OpenApiDocumentFacts.A_sequence_field_is_read_only_in_the_document` (in `test/_shared/api`),
+`WholeRowGuardTests.A_replace_need_not_resend_a_sequence_number`. Then **grep the whole repo** —
+`grep -rnE 'Rollup is (not )?null' src` — and convert every hit that decides "the framework maintains this field" to
+`field.IsMaintained()` (or `!field.IsMaintained()`). Known sites, at least: `HookSets.cs:67`, `WriteExtensionRunner.cs:373`,
+`RecordValidator.cs:156`, `RecordWriter.cs:72`, `WholeRowGuard.cs:193` (`DeclaredFields` — a replace that updates must
+keep the stored number, not demand or overwrite it), `InMemoryAlvoData.cs:649`, and in Admin `FormFields.cs:27`,
+`GridColumns.cs:85`, `HookFields.cs:47`, `ConditionText.cs:67`; a hit that genuinely means "rollup only" stays. Extend
 `WritePayloadGuard.ComputedRefusal`'s field set to `IsMaintained()` with the message naming "assigned by the framework".
-Run the four classes in `MMLib.Alvo.Tests`, `MMLib.Alvo.Data.EntityFrameworkCore.Tests`, `MMLib.Alvo.Api.Tests` — PASS.
+Run those classes in `MMLib.Alvo.Tests`, `MMLib.Alvo.Data.EntityFrameworkCore.Tests`, `MMLib.Alvo.Api.Tests` and `MMLib.Alvo.Admin.Tests` — PASS.
 
 - [ ] **Step 6: Commit** — `feat(descriptor): declare a field's sequence`.
 
@@ -256,13 +275,10 @@ period and `null`. Then:
 
 ```csharp
 // src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/SequenceFormat.cs
-internal static partial class SequenceFormat
+internal static class SequenceFormat
 {
-    [GeneratedRegex(@"\{(?<token>n(?::(?<width>1[0-8]|[1-9]))?|yyyy|yy|MM|dd)\}", RegexOptions.CultureInvariant)]
-    private static partial Regex Token();
-
     internal static string Render(string format, long number, DateTimeOffset instant) =>
-        Token().Replace(format, match => Part(match, number, instant.UtcDateTime));
+        SequenceSchema.FormatToken().Replace(format, match => Part(match, number, instant.UtcDateTime));
 
     internal static string PeriodKey(SequenceResetPeriod? period, DateTimeOffset instant) => period switch
     {
@@ -327,23 +343,28 @@ internal static class SequenceTable
         """;
 
     internal static string RenameEntity(string table, string from, string to) =>
-        $"UPDATE {table} SET entity = {AlvoSqlStringLiteral.Quote(to)} WHERE entity = {AlvoSqlStringLiteral.Quote(from)}";
+        $"UPDATE {table} SET entity = {Literal(to)} WHERE entity = {Literal(from)}";
 
     internal static string RenameField(string table, string entity, string from, string to) =>
-        $"UPDATE {table} SET field = {AlvoSqlStringLiteral.Quote(to)} WHERE entity = {AlvoSqlStringLiteral.Quote(entity)} AND field = {AlvoSqlStringLiteral.Quote(from)}";
+        $"UPDATE {table} SET field = {Literal(to)} WHERE entity = {Literal(entity)} AND field = {Literal(from)}";
+
+    private static string Literal(string name) =>
+        AlvoSqlStringLiteral.TryQuote(name, out var literal)
+            ? literal
+            : throw new InvalidOperationException($"'{name}' cannot be written as a SQL literal, so its sequence counter cannot be renamed.");
 
     internal static Task EnsureAsync(DbConnection connection, string table, CancellationToken ct) =>
         IfNotExistsDdl.CreateTableAsync(connection, table, Ddl(table), ct);
 }
 ```
 
-SQLite and PostgreSQL implement `SequenceAllocationStatement(table) => SequenceTable.Upsert(table)` (on PostgreSQL
+SQLite and PostgreSQL implement it **explicitly** — `string? IAlvoSqlDialect.SequenceAllocationStatement(string table) => SequenceTable.Upsert(table);` — so neither driver's public-API baseline grows (on PostgreSQL
 `INSERT … ON CONFLICT DO UPDATE` under READ COMMITTED: a concurrent allocator of the same key blocks on the row — or on
 the unique index for a new key — until the first commits or rolls back, then takes the next value; a rolled-back
 first insert lets the waiter insert `start`). The T-SQL double:
 
 ```csharp
-public string? SequenceAllocationStatement(string table) =>
+string? IAlvoSqlDialect.SequenceAllocationStatement(string table) =>
     $"""
     MERGE {table} WITH (HOLDLOCK) AS s
     USING (SELECT @entity AS entity, @field AS field, @tenant AS tenant_key, @scope AS scope_key, @period AS period_key) AS k
@@ -377,7 +398,10 @@ sequence, `code` string sequence `"SO-{yyyy}-{n:4}"` `period: year`, `branch` re
   - `A_declining_engine_refuses_the_apply_at_the_sequence` — host with a dialect decorator answering `null`: the plan
     throws `DescriptorValidationException` at `/entities/orders/fields/number/sequence` with the declining-dialect sentence.
 Subclasses `SqliteSequenceTests` / `PostgreSqlSequenceTests` (fixtures as `SqliteCheckConstraintTests` /
-`PostgreSqlCheckConstraintTests`). Run both — FAIL (no number assigned).
+`PostgreSqlCheckConstraintTests`). **AC (1) on PostgreSQL needs headroom:** `PostgreSqlSequenceTests` uses its own
+container started with `.WithCommand("-c", "max_connections=200")` and a connection string with
+`Maximum Pool Size=150`, set in that class's fixture only, so 100 concurrent writers neither queue on nor exhaust the
+pool and the fact really contends on the counter row. Run both — FAIL (no number assigned).
 
 - [ ] **Step 4: Allocation.**
 
@@ -432,7 +456,7 @@ under its existing lock and assigns the same way (rolled back with its own snaps
 
 - [ ] **Step 5: The migrator.** In `EfCoreSchemaMigrator.PlanAsync`, when `desired` declares any sequence and
 `_dialect.SequenceAllocationStatement("t") is null`, throw the declining-dialect refusal at the first sequence's
-pointer. In `AssembleOperations`, for each declared rename in `prePass.Renames` append a `SqlOperation` with
+pointer. In `GenerateSql`, after EF's DDL, append for each declared rename in `prePass.Renames` the raw statement
 `SequenceTable.RenameEntity`/`RenameField` (identifiers are descriptor names, `^[a-z][a-z0-9_]*$`, quoted by the
 literal writer). Counter rows are never deleted (D7). Run both engine subclasses — PASS.
 
@@ -519,17 +543,27 @@ foreach (var index in entity.Indexes.Where(index => index.Exclude is null))
     var columns = index.Unique ? UniqueColumns(entity, index.Fields) : index.Fields;
     var built = index.Where is null
         ? entityBuilder.HasIndex([.. columns])
-        : entityBuilder.HasIndex([.. columns], IndexNames.Partial(entity, index)).HasFilter(filters!.For(entity, index.Where));
+        : Filtered(entityBuilder.HasIndex([.. columns], IndexNames.Partial(entity, index)), filters, entity, index.Where);
     built.IsUnique(index.Unique);
 }
 ```
 
-`ConfigureIndexes` gains an `IndexFilterSql? filters` parameter (both call sites pass the one their model builder
-already holds beside `CheckConstraintSql`), and `UniqueColumns` becomes `internal` (Tasks 6–7 reuse it). `filters` is
-an `IndexFilterSql` built like `CheckConstraintSql` (refuse with the "call AddAlvo()" sentence when absent —
-`EnsureChecksAreRenderable`'s precedent). `RenamePrePass.AlignIndexes` and `RenameGuessSplitter` copy `Where`/`Exclude`
-with `with { … }`. A rename of a field the `where` reads is the same name change HX-11 handles for `CHECK`: the
-`where` text is re-rendered, so the name changes and the index is recreated.
+`ConfigureIndexes` gains an `IndexFilterSql? filters` parameter, and `UniqueColumns` becomes `internal` (Tasks 6–7
+reuse it). `filters` is an `IndexFilterSql` built like `CheckConstraintSql`. The migrator's `DescriptorModelBuilder`
+passes its own (and refuses a missing one with the "call AddAlvo()" sentence — `EnsureChecksAreRenderable`'s
+precedent); `AlvoDataContext.ConfigureEntity` (~L150, the runtime model) has none and passes `null` — then the index is
+still declared **by its hashed name** (`HasIndex(columns, name)`, so the translator resolves a partial unique violation)
+and `HasFilter` is skipped (the runtime model never generates DDL):
+`Filtered(builder, filters, entity, where) => filters is null ? builder : builder.HasFilter(filters.For(entity, where))`.
+
+**Renames follow HX-11's `CHECK` handling.** `RenamePrePass`'s aligned current model sets `Where = null` and
+`Exclude = null` on every index of a renamed entity or one that reads a renamed field (as it sets
+`CheckExpression = null` and records `ReleasedChecks`), and records them as **released**: the plan emits an explicit
+drop of each by its **old** name (`DROP INDEX IF EXISTS "<old ix name>"`; for an exclusion the dialect's `Drop` of the
+old definition) **before** the rename operations, skipping a table the plan truly drops; the desired model then
+creates them under the new name. `RenameGuessSplitter` copies `Where`/`Exclude` with `with { … }`. Facts (both
+engines): `AlvoDataPartialIndexTests.Renaming_a_field_a_where_reads_recreates_the_index_under_its_new_name`,
+`…Renaming_an_entity_with_a_partial_unique_index_keeps_it_enforced`.
 
 - [ ] **Step 4: Engine suite, failing then passing.** `AlvoDataPartialIndexTests` (scoped `members`: `email` string,
 `active` boolean required, index `{fields:["email"], unique:true, where:"active"}`):
@@ -576,7 +610,7 @@ public sealed record ExclusionConstraintSql(
 ExclusionConstraintSql? ExclusionConstraint(ExclusionConstraintDefinition definition) => null;
 ```
 
-  `ExclusionOverlapSql.Pairs(definition, Func<string, string> epoch) : string` — the `FROM … JOIN …` body both the SQLite
+  `ExclusionOverlapSql.Pairs(ExclusionConstraintDefinition definition, Func<string, string> epoch, string? newRowId) : string` — the `FROM … JOIN …` body both the SQLite
   trigger and the pre-apply scan (Task 6) select from.
 
 - [ ] **Step 1: Schema + model.**
@@ -603,6 +637,7 @@ Mapper (D4): for each exclusion, the `To` field's `CheckExpression` becomes `val
 `A_range_field_that_is_missing_optional_or_not_temporal_is_refused`, `Range_fields_of_different_types_are_refused`,
 `A_range_field_listed_in_fields_is_refused`, `An_equality_field_of_type_json_is_refused`,
 `An_exclusion_marked_unique_is_refused`, `A_computed_rollup_or_sequence_range_field_is_refused`,
+`A_hidden_range_field_is_refused` (D17; a hidden *equality* field has no finding, D18),
 `An_exclusion_on_a_dynamic_entity_is_refused_naming_41`, `A_valid_exclusion_has_no_findings`; the `where` beside an
 `exclude` goes through Task 4's `IndexFilterCheck`. Implement `ExclusionIndexCheck`. PASS.
 
@@ -616,7 +651,7 @@ Mapper (D4): for each exclusion, the `To` field's `CheckExpression` becomes `val
 - [ ] **Step 4: Implement.** PostgreSQL:
 
 ```csharp
-public ExclusionConstraintSql? ExclusionConstraint(ExclusionConstraintDefinition d)
+ExclusionConstraintSql? IAlvoSqlDialect.ExclusionConstraint(ExclusionConstraintDefinition d)
 {
     var range = d.RangeType == FieldType.Date ? "daterange" : "tstzrange";
     var equal = d.EqualityColumns.Select(column => $"{RenderColumn(column)} WITH =");
@@ -630,7 +665,8 @@ public ExclusionConstraintSql? ExclusionConstraint(ExclusionConstraintDefinition
 ```
 
 The shared join (`ExclusionOverlapSql`, internal, in the EF package; `epoch` wraps a `datetime` operand — SQLite passes
-its field renderer's `RenderEpochMicroseconds`, PostgreSQL the identity — and is the identity for `date`):
+`s => fields.RenderEpochMicroseconds(s)!` over its `IFieldSqlRenderer fields`, PostgreSQL the identity — and is unused
+for `date`; `newRowId` is `null` for the scan, `NEW."id"` for a trigger):
 
 ```csharp
 internal static string Pairs(ExclusionConstraintDefinition d, Func<string, string> epoch, string? newRowId)
@@ -650,21 +686,27 @@ internal static string Pairs(ExclusionConstraintDefinition d, Func<string, strin
 ```
 
 (`Quote` is the public `AlvoSqlIdentifier.Quote` — double quotes, valid on both engines. Each side filters inside its
-own single-table subquery, so the unqualified `Filter` resolves unambiguously; the two
+own single-table subquery, and the non-unique `<name>_ix` over the equality columns and `from` lets SQLite seek the
+`o` side instead of scanning the table on every write, so the unqualified `Filter` resolves unambiguously; the two
 `start < end` terms make an empty or inverted row overlap nothing — Review Focus 2.) SQLite:
 
 ```csharp
-public ExclusionConstraintSql? ExclusionConstraint(ExclusionConstraintDefinition d) => new(
-    Create: [Trigger(d, "_i", "INSERT"), Trigger(d, "_u", "UPDATE")],
-    Drop: [$"DROP TRIGGER IF EXISTS {RenderColumn(d.Name + "_i")}", $"DROP TRIGGER IF EXISTS {RenderColumn(d.Name + "_u")}"],
+ExclusionConstraintSql? IAlvoSqlDialect.ExclusionConstraint(ExclusionConstraintDefinition d) => new(
+    Create: [SupportingIndex(d), Trigger(d, "_i", "INSERT"), Trigger(d, "_u", "UPDATE")],
+    Drop: [$"DROP TRIGGER IF EXISTS {RenderColumn(d.Name + "_i")}", $"DROP TRIGGER IF EXISTS {RenderColumn(d.Name + "_u")}",
+           $"DROP INDEX IF EXISTS {RenderColumn(d.Name + "_ix")}"],
     SurvivesTableRebuild: false);
+
+private string SupportingIndex(ExclusionConstraintDefinition d) =>
+    $"CREATE INDEX IF NOT EXISTS {RenderColumn(d.Name + "_ix")} ON {RenderColumn(d.Table)} "
+    + $"({string.Join(", ", d.EqualityColumns.Append(d.StartColumn).Select(RenderColumn))})";
 
 private string Trigger(ExclusionConstraintDefinition d, string suffix, string verb) =>
     $"""
     CREATE TRIGGER IF NOT EXISTS {RenderColumn(d.Name + suffix)} AFTER {verb} ON {RenderColumn(d.Table)}
     BEGIN
         SELECT RAISE(ABORT, '{ExclusionRaisePrefix}{d.Name}')
-        WHERE EXISTS (SELECT 1 FROM {ExclusionOverlapSql.Pairs(d, _fields.RenderEpochMicroseconds!, "NEW.\"id\"")});
+        WHERE EXISTS (SELECT 1 FROM {ExclusionOverlapSql.Pairs(d, s => _fields.RenderEpochMicroseconds(s)!, "NEW.\"id\"")});
     END
     """;
 ```
@@ -740,11 +782,15 @@ internal static class ExclusionPlan
 ```
 
 `touchedTables` = every table named by an EF operation in the residual (any `TableOperation`/`ColumnOperation`/index or
-check operation), which is exactly the set SQLite may rebuild. `EfCoreSchemaMigrator.AssembleOperations` wraps the EF
-operations as `SqlOperation`s `Before` + EF + `After`. When `desired` declares an exclusion and the dialect answers `null`,
+check operation), which is exactly the set SQLite may rebuild. These statements are **not** EF `SqlOperation`s (an EF
+SQLite rebuild sequenced after them would drop the triggers with the old table): `GenerateSql` prepends the released
+drops and `Before` to EF's generated commands and appends `After` **after** all EF DDL and **before** the rollup
+backfill. When `desired` declares an exclusion and the dialect answers `null`,
 throw the declining-dialect refusal at the first one's pointer. A dropped table's exclusion needs no drop (the table
-takes it along): `Before` skips names whose table `desired` no longer has. A renamed table's (or column's) definition gets
-a new name or new text, so the diff recreates it.
+takes it along): `Before` skips names whose table `desired` no longer has. A rename goes through Task 4's **released**
+path (old-name drop before the rename operations, recreation under the new name after); facts (both engines)
+`AlvoDataExclusionTests.Renaming_a_range_field_keeps_the_exclusion_enforced` and
+`…Renaming_the_entity_keeps_the_exclusion_enforced` (an out-of-band overlapping insert fails after each).
 
 - [ ] **Step 3: The overlap scan and the prerequisite.** In `PlanAsync`'s counted path (beside
 `RefuseRowsThatBreakNewChecksAsync`), for every **added** definition whose table already exists in `current`, run
@@ -780,7 +826,15 @@ async ValueTask<ExclusionPrerequisite> IAlvoSqlDialect.ExclusionPrerequisiteAsyn
 ```
 
 `Refused` → the btree_gist refusal at the first added exclusion's pointer; a `Statement` is prepended to the plan's SQL
-(after the HX-11 lock-timeout statement). The uncounted planner path (`IUncountedSchemaPlanner`) runs the probe too —
+(after the HX-11 lock-timeout statement). **An engine refusal at apply is translated too** (`ExclusionApplyRefusal`,
+beside `CheckApplyRefusal` in the same `catch … when` of `EfCoreSchemaMigrator` ~L455): PostgreSQL `23P01` raised by
+`ADD CONSTRAINT … EXCLUDE` (overlapping rows on the uncounted path, or written between plan and apply) becomes the
+overlap refusal at that exclusion's `/entities/<e>/indexes/<i>/exclude` pointer, without a count
+(`Rows of '<e>' overlap, so this exclusion cannot be added. Nothing was applied.`, same fix), the name resolved through
+`IndexNames.Exclusion` over the planned-against schema. SQLite's triggers do not inspect existing rows, so where
+`SurvivesTableRebuild` is `false` the uncounted path runs the overlap count **inside** the apply transaction, after
+`After`, refusing the same way. Facts: `AlvoDataExclusionTests.Applying_an_uncounted_plan_over_overlapping_rows_is_refused_at_the_exclude_pointer`
+(both engines). The uncounted planner path (`IUncountedSchemaPlanner`) runs the probe too —
 three catalog reads, no table scan. Run `AlvoDataExclusionTests` (both), `PostgreSqlExclusionPrerequisiteTests` — PASS.
 
 - [ ] **Step 4: Commit** — `feat(data): plan, scan and survive exclusion constraints; refuse without btree_gist`.
@@ -797,8 +851,8 @@ three catalog reads, no table scan. Run `AlvoDataExclusionTests` (both), `Postgr
 - Test: `AlvoDataExclusionTests` (Task 6's), `SqliteSqlDialect`/`PostgreSqlSqlDialect` decode tests
 
 **Interfaces:**
-- Produces: `AlvoConstraintKind.Exclusion`; `AlvoConstraintViolationException(Exclusion, [from])` or `[]` when the range
-  start carries any `hidden` flag.
+- Produces: `AlvoConstraintKind.Exclusion`; `AlvoConstraintViolationException(Exclusion, [from])` (a hidden range
+  field is refused at apply, D17; `[]` only for a name the translator cannot resolve).
 
 - [ ] **Step 1: Failing facts.** Decode: `SqliteSqlDialectTests.A_trigger_abort_tagged_as_an_exclusion_decodes_its_name`,
 `…An_untagged_trigger_abort_is_not_a_constraint_violation`; `PostgreSqlSqlDialectTests.An_exclusion_violation_decodes_its_constraint_name`.
@@ -810,7 +864,7 @@ three catalog reads, no table scan. Run `AlvoDataExclusionTests` (both), `Postgr
     `A_cancelled_booking_outside_the_where_does_not_block`, `A_patch_moving_a_booking_onto_another_is_refused`.
   - Review Focus 2 `An_empty_range_overlaps_nothing_on_either_engine`, `An_inverted_range_is_refused_at_its_end_field`
     (`Kind: Check`, `Fields: ["ends_at"]` — D4).
-  - `An_overlap_on_a_hidden_range_names_no_field` (`starts_at` with `hidden: true` → `Fields: []`).
+  - `Concurrent_patches_moving_two_bookings_onto_one_slot_admit_one` (the D3 lock on the update path).
 HTTP (`DataApiEngineTests.Exclusion.cs`, both engines): **AC (3)**
 `Overlapping_bookings_are_409_at_the_range_pointer_under_concurrent_writers_on_every_engine` (10 concurrent POSTs →
 one 201, nine 409 with `type` conflict and one violation `{pointer:"/starts_at", code:"exclusion"}`),
@@ -821,8 +875,8 @@ record's on an index declaring `exclude`; fixed by choosing another range.") and
 `ConstraintTrigger = 1811` → `message.Contains(ExclusionRaisePrefix)` ? `new() { Kind = Exclusion, ConstraintName = name after the prefix }` : `null`
 (also in the message-only fallback path); PostgreSQL: `ExclusionViolation = "23P01"` → `new() { Kind = Exclusion, ConstraintName = pg.ConstraintName }`.
 `ConstraintViolationTranslator`: for `Exclusion`, find the applied entity's index with
-`IndexNames.Exclusion(entity, index) == name`; the named field is `index.Exclude.From` unless in `written.Unnameable`
-(Ruling X); an unresolvable name → no field (pointer `""`), never a 500. `ProblemResultFactory`: `CodeFor(Exclusion) => "exclusion"`,
+`IndexNames.Exclusion(entity, index) == name`; the named field is `index.Exclude.From` (still filtered through
+`written.Unnameable` as defence in depth, Ruling X); an unresolvable name → no field (pointer `""`), never a 500. `ProblemResultFactory`: `CodeFor(Exclusion) => "exclusion"`,
 `FixFor` per the constants, and `ConflictViolations` maps an `Exclusion` with fields to one violation at `/<from>` with the
 409 message above. `AdminProblemFixes` gets the same fix text.
 
@@ -833,7 +887,7 @@ record's on an index declaring `exclude`; fixed by choosing another range.") and
 internal static class ExclusionLocks
 {
     internal static async Task TakeAsync(
-        AlvoDataContext db, IAlvoSqlDialect dialect, EntitySchema schema, IEnumerable<IReadOnlyDictionary<string, object?>> rows,
+        AlvoDataContext db, IAlvoSqlDialect dialect, EntitySchema schema, IEnumerable<IReadOnlyDictionary<string, object>> rows,
         CancellationToken ct)
     {
         var keys = Keys(schema, rows).Order().ToList();
@@ -856,19 +910,23 @@ internal static class ExclusionLocks
         }
     }
 
-    private static IEnumerable<long> Keys(EntitySchema schema, IEnumerable<IReadOnlyDictionary<string, object?>> rows) =>
+    private static IEnumerable<long> Keys(EntitySchema schema, IEnumerable<IReadOnlyDictionary<string, object>> rows) =>
         (from index in schema.Indexes.Where(index => index.Exclude is not null)
          from row in rows
          select Key(IndexNames.Exclusion(schema, index), DescriptorModelBuilder.UniqueColumns(schema, index.Fields), row)).Distinct();
 
-    private static long Key(string name, IEnumerable<string> columns, IReadOnlyDictionary<string, object?> row) =>
+    private static long Key(string name, IEnumerable<string> columns, IReadOnlyDictionary<string, object> row) =>
         BinaryPrimitives.ReadInt64BigEndian(SHA256.HashData(Encoding.UTF8.GetBytes(
             name + "|" + string.Join("|", columns.Select(c => Convert.ToString(row.GetValueOrDefault(c), CultureInfo.InvariantCulture))))));
 }
 ```
 
-`EfAlvoData` calls it immediately before each `SaveChangesAsync` of a create, batch create, update (post-image values)
-and replace on an entity with an exclusion; SQLite's `TransactionLockStatement` is `null`, so it is a no-op there.
+(`rows` are the write path's own `Dictionary<string, object>` rows, typed without `?`, so no nullability-variance
+conversion (CS8620) arises.) `EfAlvoData` calls it immediately before each `SaveChangesAsync` of a create, batch create
+and replace-that-creates on an entity with an exclusion. **Updates and replace-updates do not save through the change
+tracker** — they run `ExecuteUpdateAsync` in `EfAlvoData.AffectedAsync` (~L2161) — so there the call goes immediately
+before `AffectedAsync`, keyed on the **merged post-image** (the locked pre-image overlaid with the patch or replacement
+values), the row the exclusion will judge; SQLite's `TransactionLockStatement` is `null`, so it is a no-op there.
 Run every Step 1 class on both engines — PASS. Accept the Abstractions baseline (`AlvoConstraintKind.Exclusion`).
 
 - [ ] **Step 4: CHANGELOG** — *Added*: "`indexes[].where` (partial indexes; a partial `unique` allows duplicates outside
@@ -887,8 +945,10 @@ range's pointer; PostgreSQL installs or requires `btree_gist`); `AlvoConstraintK
 
 **Files:**
 - Modify: `src/MMLib.Alvo.Admin/Components/Schema/FieldFacets.Maintained.cs` (+ `.Notes.cs`), `FieldEditor.razor(.cs)`,
-  `FieldBadges.cs`, `Indexes.razor`, `WorkingCopy.Indexes.cs`, `test/MMLib.Alvo.Admin.Tests.EndToEnd/IntegrityEditorScenarios.cs`
-- Test: `test/MMLib.Alvo.Admin.Tests/Schema/{FieldFacetsSequenceTests,WorkingCopyIndexTests,IndexesEditorTests}.cs`
+  `FieldBadges.cs`, `Indexes.razor`, `WorkingCopy.Indexes.cs`, `test/MMLib.Alvo.Admin.Tests.EndToEnd/IntegrityEditorScenarios.cs` (shared `IntegrityEditor` helpers only)
+- Create: `test/MMLib.Alvo.Admin.Tests.EndToEnd/IntegrityEditorSequenceScenarios.cs`, `test/MMLib.Alvo.Admin.Tests.EndToEnd/IntegrityEditorExclusionScenarios.cs`,
+  `test/MMLib.Alvo.Admin.Tests/Schema/FieldFacetsSequenceTests.cs`, `test/MMLib.Alvo.Admin.Tests/Schema/IndexesEditorTests.cs`
+- Test: `test/MMLib.Alvo.Admin.Tests/Schema/WorkingCopyIndexTests.cs` (existing)
 
 **Interfaces:**
 - Produces: `WorkingCopy.AddIndex(string entity, IReadOnlyList<string> fields, bool unique, string? where = null, IndexExclusion? exclude = null)`
@@ -948,7 +1008,7 @@ PostgreSQL upsert wait, why not `CREATE SEQUENCE`) and *Exclusions: gist on Post
 rebuild replay, the scan, the prerequisite).
 
 - [ ] **Step 4: CHANGELOG + spec.** CHANGELOG *Added*: the dashboard editors and docs. In the spec, after §7 *HX-12*, add
-**HX-12 settled details**: D1–D14 verbatim from this plan, the three-slice delivery, and the amendments — §5 row `12`
+**HX-12 settled details**: D1–D18 verbatim from this plan, the three-slice delivery, and the amendments — §5 row `12`
 gains `SequenceAllocationStatement`, `ExclusionConstraintDefinition`, `ExclusionConstraintSql`, the schema/descriptor
 members; Ruling 17's `RenderConstraint` stays internal (D9). File follow-up issues (D13 soft-delete awareness; a
 `timeZone` for `period`, D6) with `gh issue create`, linked to #370.
