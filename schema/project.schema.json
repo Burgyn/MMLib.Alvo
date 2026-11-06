@@ -599,6 +599,27 @@
               "where": {
                 "$ref": "#/$defs/cel",
                 "description": "Index only the rows this CEL predicate over the entity's own fields accepts — a partial index. With unique, duplicates outside it are allowed."
+              },
+              "exclude": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "from",
+                  "to"
+                ],
+                "description": "No two rows with equal `fields` may hold overlapping [from, to) ranges (an empty range overlaps nothing). A write that would is refused 409. PostgreSQL needs the btree_gist extension.",
+                "properties": {
+                  "from": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]{0,62}$",
+                    "description": "A required date or datetime field: where the range starts (inclusive)."
+                  },
+                  "to": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]{0,62}$",
+                    "description": "A required field of the same type: where the range ends (exclusive)."
+                  }
+                }
               }
             }
           }

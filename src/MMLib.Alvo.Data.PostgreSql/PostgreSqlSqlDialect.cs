@@ -56,6 +56,30 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
 
     /// <inheritdoc/>
     /// <remarks>
+    /// One <c>EXCLUDE USING gist</c> table constraint: each equality column <c>WITH =</c> (a scalar in a GiST index needs the
+    /// <c>btree_gist</c> extension) and the half-open range — <c>tstzrange</c> for a <c>datetime</c>, <c>daterange</c> for a
+    /// <c>date</c>, bounds <c>'[)'</c> — <c>WITH &amp;&amp;</c>, under the index's <c>where</c>. An empty range overlaps nothing.
+    /// A table constraint, so it survives anything short of dropping the table.
+    /// </remarks>
+    ExclusionConstraintSql? IAlvoSqlDialect.ExclusionConstraint(ExclusionConstraintDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        var range = definition.RangeType == FieldType.Date ? "daterange" : "tstzrange";
+        var equal = definition.EqualityColumns.Select(column => $"{RenderColumn(column)} WITH =");
+        var overlap = $"{range}({RenderColumn(definition.StartColumn)}, {RenderColumn(definition.EndColumn)}, '[)') WITH &&";
+        var where = definition.Filter is null ? string.Empty : $" WHERE ({definition.Filter})";
+        return new(
+            Create:
+            [
+                $"ALTER TABLE {RenderColumn(definition.Table)} ADD CONSTRAINT {RenderColumn(definition.Name)} "
+                + $"EXCLUDE USING gist ({string.Join(", ", [.. equal, overlap])}){where}",
+            ],
+            Drop: [$"ALTER TABLE {RenderColumn(definition.Table)} DROP CONSTRAINT IF EXISTS {RenderColumn(definition.Name)}"],
+            SurvivesTableRebuild: true);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
     /// <paramref name="lockedPreImageFor"/> is ignored because PostgreSQL's locking grammar is the trailing
     /// clause this dialect already answers from <see cref="RowLockClause"/>. Hinting the table source as well
     /// would be locking twice, which the port forbids.

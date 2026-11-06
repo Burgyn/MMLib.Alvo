@@ -10,4 +10,10 @@ public sealed record IndexSchema(IReadOnlyList<string> Fields, bool Unique)
     /// <see langword="null"/> for a whole-table index. The source, not SQL: each driver renders it when it builds its model.
     /// </summary>
     public string? Where { get; init; }
+
+    /// <summary>
+    /// The range no two rows with equal <see cref="Fields"/> may overlap, or <see langword="null"/> for an ordinary index.
+    /// An exclusion is not a B-tree index: each driver enforces it through its dialect's exclusion constraint.
+    /// </summary>
+    public ExclusionSchema? Exclude { get; init; }
 }

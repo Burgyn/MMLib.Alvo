@@ -1,6 +1,7 @@
 ﻿using Microsoft.Data.Sqlite;
 using MMLib.Alvo.Data.EntityFrameworkCore;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Schema;
 using System.Data.Common;
 
@@ -155,6 +156,49 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     /// the create path's question, not part of this type's own surface.
     /// </remarks>
     string? IAlvoSqlDialect.SequenceAllocationStatement(string table) => SequenceTable.Upsert(table);
+
+    private static readonly IFieldSqlRenderer _fields = new SqliteFieldSqlRenderer();
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <b>Two <c>AFTER</c> triggers over one overlap join</b> (HX-12 D2): SQLite has no exclusion constraint, so the engine
+    /// runs the check on every write path — the data API, a batch, an out-of-band statement — and aborts with
+    /// <c>alvo_exclusion:&lt;name&gt;</c>. Under <c>BEGIN IMMEDIATE</c> a writer sees every committed row, so the check is
+    /// race-free. An ordinary index over the equality columns and the range start lets the trigger seek its candidates.
+    /// </para>
+    /// <para>
+    /// <b>A table rebuild drops all three</b> with the old table, so <see cref="ExclusionConstraintSql.SurvivesTableRebuild"/>
+    /// is <see langword="false"/> and every create is <c>IF NOT EXISTS</c>, to be replayed after one. Datetime bounds are
+    /// compared through the driver's epoch rendering, millisecond-rounded (D1).
+    /// </para>
+    /// </remarks>
+    ExclusionConstraintSql? IAlvoSqlDialect.ExclusionConstraint(ExclusionConstraintDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        return new(
+            Create: [SupportingIndex(definition), Trigger(definition, "_i", "INSERT"), Trigger(definition, "_u", "UPDATE")],
+            Drop:
+            [
+                $"DROP TRIGGER IF EXISTS {RenderColumn(definition.Name + "_i")}",
+                $"DROP TRIGGER IF EXISTS {RenderColumn(definition.Name + "_u")}",
+                $"DROP INDEX IF EXISTS {RenderColumn(IndexNames.ExclusionSupport(definition))}",
+            ],
+            SurvivesTableRebuild: false);
+    }
+
+    private string SupportingIndex(ExclusionConstraintDefinition definition) =>
+        $"CREATE INDEX IF NOT EXISTS {RenderColumn(IndexNames.ExclusionSupport(definition))} ON {RenderColumn(definition.Table)} "
+        + $"({string.Join(", ", definition.EqualityColumns.Append(definition.StartColumn).Select(RenderColumn))})";
+
+    private string Trigger(ExclusionConstraintDefinition definition, string suffix, string verb) =>
+        $"""
+        CREATE TRIGGER IF NOT EXISTS {RenderColumn(definition.Name + suffix)} AFTER {verb} ON {RenderColumn(definition.Table)}
+        BEGIN
+            SELECT RAISE(ABORT, '{ExclusionOverlapSql.RaisePrefix}{definition.Name}')
+            WHERE EXISTS (SELECT 1 FROM {ExclusionOverlapSql.Pairs(definition, column => _fields.RenderEpochMicroseconds(column)!, "NEW.\"id\"")});
+        END
+        """;
 
     /// <summary><c>SQLITE_CONSTRAINT_UNIQUE</c> (2067): a <c>UNIQUE</c> index refused the row.</summary>
     private const int ConstraintUnique = 2067;

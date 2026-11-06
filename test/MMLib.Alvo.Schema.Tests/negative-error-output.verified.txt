@@ -44,6 +44,15 @@
     ]
   },
   {
+    file: index-exclude-missing-to.json,
+    failures: [
+      {
+        Pointer: #/entities/bookings/indexes/0/exclude,
+        Message: Validation properties - the required property 'to' was not present.
+      }
+    ]
+  },
+  {
     file: index-where-not-cel-string.json,
     failures: [
       {

@@ -124,7 +124,7 @@ internal static class DescriptorModelBuilder
             entityBuilder.HasIndex([.. UniqueColumns(entity, [field.Name])]).IsUnique();
         }
 
-        foreach (var index in entity.Indexes)
+        foreach (var index in entity.Indexes.Where(index => index.Exclude is null))
         {
             var columns = index.Unique ? UniqueColumns(entity, index.Fields) : index.Fields;
             var built = index.Where is null

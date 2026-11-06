@@ -86,6 +86,11 @@ internal static class IndexFilterCheck
         {
             yield return "where";
         }
+
+        if (index.Exclude is not null)
+        {
+            yield return "exclude";
+        }
     }
 
     private static IEnumerable<DescriptorValidationError> ErrorsFor(

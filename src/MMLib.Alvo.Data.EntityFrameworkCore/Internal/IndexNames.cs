@@ -5,7 +5,8 @@ using System.Text;
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
 /// <summary>
-/// The one name a partial index has — a pure function of its whole definition, computed and never parsed (D10).
+/// The one name a partial index or an exclusion has — a pure function of its whole definition, computed and never parsed
+/// (D10).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -29,6 +30,21 @@ internal static class IndexNames
     /// <param name="index">An index declaring <see cref="IndexSchema.Where"/>.</param>
     internal static string Partial(EntitySchema entity, IndexSchema index) =>
         Named("ix_", entity.Name, $"{entity.Name}|{string.Join(',', index.Fields)}|{index.Unique}|{index.Where}");
+
+    /// <summary>The name of <paramref name="entity"/>'s exclusion <paramref name="index"/>.</summary>
+    /// <param name="entity">The declaring entity.</param>
+    /// <param name="index">An index declaring <see cref="IndexSchema.Exclude"/>.</param>
+    internal static string Exclusion(EntitySchema entity, IndexSchema index) =>
+        Named("xc_", entity.Name, $"{entity.Name}|{string.Join(',', index.Fields)}|{index.Exclude!.From}|{index.Exclude.To}|{index.Where}");
+
+    /// <summary>
+    /// The name of the ordinary index a driver keeps beside the exclusion <paramref name="definition"/> to seek its overlap
+    /// check — hashed from the exclusion's own name, so it changes exactly when the exclusion does and never collides with
+    /// a name a column list would give.
+    /// </summary>
+    /// <param name="definition">The exclusion the index serves.</param>
+    internal static string ExclusionSupport(ExclusionConstraintDefinition definition) =>
+        Named("ix_", definition.Table, $"{definition.Name}|support");
 
     private static string Named(string prefix, string entity, string canonical) =>
         $"{prefix}{entity[..Math.Min(entity.Length, MaxReadable)]}_{Hash(canonical)}";

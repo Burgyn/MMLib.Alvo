@@ -260,8 +260,7 @@ internal static class DescriptorToSchemaMapper
         // is DOUBLY dead code — see AddManagedColumns' own remark, which is where the consequence bites.
         AddManagedColumns(fields, e, tenancy, audit, softDelete: false);
 
-        var indexes = (e.Indexes ?? [])
-            .Select(i => new IndexSchema(i.Fields, i.Unique == true) { Where = i.Where }).ToList();
+        var indexes = (e.Indexes ?? []).Select(MapIndex).ToList();
 
         return new EntitySchema
         {
@@ -278,10 +277,48 @@ internal static class DescriptorToSchemaMapper
             // Same hardcode, same reason, same day it changes — see the comment above AddManagedColumns.
             SoftDelete = false,
             Audit = audit,
-            Fields = fields,
+            Fields = WithRangeChecks(fields, indexes),
             Indexes = indexes,
             EventImageExclusions = e.Events?.Exclude ?? [],
         };
+    }
+
+    private static IndexSchema MapIndex(EntityIndex index) => new(index.Fields, index.Unique == true)
+    {
+        Where = index.Where,
+        Exclude = index.Exclude is { } range ? new ExclusionSchema(range.From, range.To) : null,
+    };
+
+    /// <summary>
+    /// Folds every exclusion's <c>to &gt;= from</c> into its end field's validation (HX-12 D4), so an inverted range is the
+    /// same <c>CHECK</c> end to end as a declared validation — refused 422 at the end field, never PostgreSQL's range error.
+    /// </summary>
+    /// <remarks>
+    /// Only where both range fields exist and share a temporal type: anything else is <c>ExclusionIndexCheck</c>'s refusal,
+    /// which a synthesized validation that does not compile would only echo at a pointer the author never wrote.
+    /// </remarks>
+    /// <param name="fields">The entity's mapped fields.</param>
+    /// <param name="indexes">The entity's mapped indexes.</param>
+    private static List<FieldSchema> WithRangeChecks(List<FieldSchema> fields, List<IndexSchema> indexes)
+    {
+        foreach (var range in indexes.Select(index => index.Exclude).OfType<ExclusionSchema>().Where(range => IsTemporalPair(fields, range)))
+        {
+            fields = [.. fields.Select(field => string.Equals(field.Name, range.To, StringComparison.Ordinal) ? WithRangeCheck(field, range.From) : field)];
+        }
+
+        return fields;
+    }
+
+    private static bool IsTemporalPair(List<FieldSchema> fields, ExclusionSchema range) =>
+        fields.FirstOrDefault(field => string.Equals(field.Name, range.From, StringComparison.Ordinal)) is { Type: SchemaFieldType.Date or SchemaFieldType.DateTime } from
+        && fields.FirstOrDefault(field => string.Equals(field.Name, range.To, StringComparison.Ordinal)) is { } to
+        && to.Type == from.Type
+        && !string.Equals(range.From, range.To, StringComparison.Ordinal);
+
+    private static FieldSchema WithRangeCheck(FieldSchema end, string start)
+    {
+        var ordered = $"{end.Name} >= {start}";
+        return end with { CheckExpression = end.CheckExpression is { } own ? $"({own}) && {ordered}" : ordered };
     }
 
     /// <summary>Injects the managed columns an entity's traits earn.</summary>

@@ -38,6 +38,16 @@ public class TSqlSqlDialectContractTests : AlvoSqlDialectContractTests
             OUTPUT inserted.last_value;
             """,
             StringCompareShould.IgnoreLineEndings);
+
+    /// <summary>
+    /// Acceptance (5), the exclusion half: SQL Server has no exclusion constraint, so the double declines one and an apply
+    /// declaring <c>exclude</c> is refused (D16).
+    /// </summary>
+    [Fact]
+    public void The_TSql_double_declines_an_exclusion() =>
+        CreateDialect().ExclusionConstraint(new ExclusionConstraintDefinition(
+            "bookings", "xc_bookings_0a1b2c3d", ["room"], "starts_at", "ends_at", MMLib.Alvo.Schema.FieldType.DateTime, Filter: null))
+            .ShouldBeNull();
 }
 
 /// <summary>

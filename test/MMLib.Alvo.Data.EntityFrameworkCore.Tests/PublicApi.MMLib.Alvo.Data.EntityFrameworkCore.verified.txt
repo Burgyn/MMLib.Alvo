@@ -43,11 +43,30 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore
         public System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Secrets.SecretName>> ListNamesAsync(System.Threading.CancellationToken ct = default) { }
         public System.Threading.Tasks.ValueTask SetAsync(MMLib.Alvo.Secrets.SecretName name, string value, System.Threading.CancellationToken ct = default) { }
     }
+    public sealed class ExclusionConstraintDefinition : System.IEquatable<MMLib.Alvo.Data.EntityFrameworkCore.ExclusionConstraintDefinition>
+    {
+        public ExclusionConstraintDefinition(string Table, string Name, System.Collections.Generic.IReadOnlyList<string> EqualityColumns, string StartColumn, string EndColumn, MMLib.Alvo.Schema.FieldType RangeType, string? Filter) { }
+        public string EndColumn { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> EqualityColumns { get; init; }
+        public string? Filter { get; init; }
+        public string Name { get; init; }
+        public MMLib.Alvo.Schema.FieldType RangeType { get; init; }
+        public string StartColumn { get; init; }
+        public string Table { get; init; }
+    }
+    public sealed class ExclusionConstraintSql : System.IEquatable<MMLib.Alvo.Data.EntityFrameworkCore.ExclusionConstraintSql>
+    {
+        public ExclusionConstraintSql(System.Collections.Generic.IReadOnlyList<string> Create, System.Collections.Generic.IReadOnlyList<string> Drop, bool SurvivesTableRebuild) { }
+        public System.Collections.Generic.IReadOnlyList<string> Create { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> Drop { get; init; }
+        public bool SurvivesTableRebuild { get; init; }
+    }
     public interface IAlvoSqlDialect
     {
         bool GeneratedColumnAddRequiresTableRebuild { get; }
         MMLib.Alvo.Data.EntityFrameworkCore.MigrationBatchFraming MigrationFraming { get; }
         MMLib.Alvo.Data.EntityFrameworkCore.SqlConstraintViolation? DecodeConstraintViolation(System.Data.Common.DbException failure);
+        MMLib.Alvo.Data.EntityFrameworkCore.ExclusionConstraintSql? ExclusionConstraint(MMLib.Alvo.Data.EntityFrameworkCore.ExclusionConstraintDefinition definition);
         string? GeneratedColumnDefinition(string columnName, string storeType, string renderedExpression);
         string RenderColumn(string columnName);
         string RenderNullProjection(string storeType);

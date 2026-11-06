@@ -822,6 +822,7 @@ namespace MMLib.Alvo.Descriptor
     public sealed class EntityIndex : System.IEquatable<MMLib.Alvo.Descriptor.EntityIndex>
     {
         public EntityIndex() { }
+        public MMLib.Alvo.Descriptor.IndexExclusion? Exclude { get; init; }
         public required System.Collections.Generic.IReadOnlyList<string> Fields { get; init; }
         public bool? Unique { get; init; }
         public string? Where { get; init; }
@@ -961,6 +962,12 @@ namespace MMLib.Alvo.Descriptor
     public interface IDescriptorValidator
     {
         MMLib.Alvo.Descriptor.DescriptorValidationResult Validate(string descriptorJson);
+    }
+    public sealed class IndexExclusion : System.IEquatable<MMLib.Alvo.Descriptor.IndexExclusion>
+    {
+        public IndexExclusion() { }
+        public required string From { get; init; }
+        public required string To { get; init; }
     }
     public sealed class MessageTemplate : System.IEquatable<MMLib.Alvo.Descriptor.MessageTemplate>
     {
@@ -2163,6 +2170,12 @@ namespace MMLib.Alvo.Schema
         Physical = 0,
         Dynamic = 1,
     }
+    public sealed class ExclusionSchema : System.IEquatable<MMLib.Alvo.Schema.ExclusionSchema>
+    {
+        public ExclusionSchema(string From, string To) { }
+        public string From { get; init; }
+        public string To { get; init; }
+    }
     public static class FieldClrType
     {
         public static System.Type Of(MMLib.Alvo.Schema.FieldSchema field) { }
@@ -2217,6 +2230,7 @@ namespace MMLib.Alvo.Schema
     public sealed class IndexSchema : System.IEquatable<MMLib.Alvo.Schema.IndexSchema>
     {
         public IndexSchema(System.Collections.Generic.IReadOnlyList<string> Fields, bool Unique) { }
+        public MMLib.Alvo.Schema.ExclusionSchema? Exclude { get; init; }
         public System.Collections.Generic.IReadOnlyList<string> Fields { get; init; }
         public bool Unique { get; init; }
         public string? Where { get; init; }

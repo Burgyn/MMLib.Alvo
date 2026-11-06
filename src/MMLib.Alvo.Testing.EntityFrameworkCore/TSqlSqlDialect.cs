@@ -155,6 +155,10 @@ public sealed class TSqlSqlDialect : IAlvoSqlDialect
     /// number cannot both take the insert branch — with <c>OUTPUT</c> answering the number. Implemented explicitly, so this
     /// double's public surface does not grow by the create path's question.
     /// </remarks>
+    /// <inheritdoc/>
+    /// <remarks>Declined: SQL Server has no exclusion constraint, so an apply declaring <c>exclude</c> is refused (HX-12 D16).</remarks>
+    ExclusionConstraintSql? IAlvoSqlDialect.ExclusionConstraint(ExclusionConstraintDefinition definition) => null;
+
     string? IAlvoSqlDialect.SequenceAllocationStatement(string table) =>
         $"""
         MERGE {table} WITH (HOLDLOCK) AS s
