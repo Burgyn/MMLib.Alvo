@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **State machines** (HX-18): `entities.<e>.stateMachine { field, initial?, transitions: { <name>: { from, to, roles?, when? } } }`
+  names which values an `enum` field may move between. An update that changes the field must take a declared
+  transition — checked in the write after the declarative before-hooks and before any host before-write hook, and
+  again over what will be stored when a host hook patched — else 422 `validation` with code `transition` at the
+  field; a transition whose `roles` the caller lacks is 403; a create stores `initial`. `from: ["*"]` means any state;
+  the system caller holds `admin`. In a batch the row is refused with code `transition` (a batch refused only by
+  transitions answers 422). Dashboard: the entity's *States* tab draws the graph, and the policy simulator answers
+  per transition whether the caller may take it (`ManagementPolicyVerdict.Transitions`, `ManagementTransitionVerdict`).
+  Docs: *State machines and timers in the descriptor*.
+- **Declarative timers** (HX-18): `entities.<e>.timers.<name> { at, when?, event? }` — `at` a CEL timestamp over the
+  record's own fields (`starts_at - duration('24h')`), armed, moved and cancelled in the write's own transaction
+  (create arms, an update moves it only when its due changes, an inactive `when` or a delete cancels), keyed
+  `alvo:<entity>:<timer>:<id>` in the row's tenant, and fired through the timer pump as `event` (default
+  `<entity>.<timer>`) with data `entity`, `id`, `timer`, `at` for host handlers. Existing rows are not back-filled.
 - **Rules over relations** (HX-19): a rule may follow a ref (`customer_id.owner_id == @user.id`) or reach the rows that reference this one (`project_members.exists(m, m.user_id == @user.id)`, `<child>_via_<field>` when ambiguous). Each term is one correlated `EXISTS` in the query that ANDs in the related entity's own `list` rule and tenant scope, so it never matches a row the caller could not list (a host narrowing is not part of it); a write judges it in SQL inside its transaction. Apply refuses a cycle among `list` rules, a chain deeper than 3, a relation under `!`, and a relation outside `rules`/`checks`. Not supported by `InMemoryAlvoData`. Docs: *Rules over relations*.
 - **Dashboard: relations** (HX-19): the policy simulator lists, under *Reads through*, each relation a decision reads and the related `list` rule it was bound to for the caller (`ManagementPolicyVerdict.Relations`); the rules editor offers the relation terms of the entity under each rule; a lookup-check refusal is shown with its own message, not as a field validation.
 - **Lookup checks** (HX-19): `entities.<e>.checks: [{ lookup, expr, message }]` follows a ref field to the row it names and refuses a create, or an update that changes a field the check reads, when that row is not one the caller may list or fails `expr` — 422 `validation`, violation code `check`, the check's own `message` and a pointer at the lookup field (none when the field is hidden). A null lookup skips the check; a check reads no `@user`/`@tenant`, and apply refuses one that does or reads no `<lookup>.<field>`.
@@ -590,6 +604,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`AlvoConstraintKind.Transition`** (HX-18) is appended: an exhaustive `switch` over `AlvoConstraintKind` gains a case.
+- **`IAlvoScheduler` refuses keys starting `alvo:`** (HX-18): `ScheduleAsync` and `CancelAsync` reserve the prefix for
+  declarative timers. `ITimerStore` does not refuse it.
 - **The OpenAPI document marks every framework-maintained field read-only** (HX-12): a `computed`, `rollup` or `sequence`
   field is `readOnly` in the response schema and absent from the create and patch schemas (and from their `required`).
   Every write to one was already refused with 403; a generated client no longer offers it.
