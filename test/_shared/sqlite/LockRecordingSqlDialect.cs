@@ -94,4 +94,11 @@ internal sealed class LockRecordingSqlDialect : IAlvoSqlDialect
     /// <param name="left">The left expression.</param>
     /// <param name="right">The right expression.</param>
     string IAlvoSqlDialect.RenderDistinct(string left, string right) => ((IAlvoSqlDialect)_inner).RenderDistinct(left, right);
+
+    /// <summary>
+    /// Forwarded, and <b>not optional</b>: the member's default declines, so a wrapper that forgot it would make every
+    /// sequenced entity refuse its apply while looking like a wrapper that only records locks.
+    /// </summary>
+    /// <param name="table">The prefixed counter table.</param>
+    string? IAlvoSqlDialect.SequenceAllocationStatement(string table) => ((IAlvoSqlDialect)_inner).SequenceAllocationStatement(table);
 }

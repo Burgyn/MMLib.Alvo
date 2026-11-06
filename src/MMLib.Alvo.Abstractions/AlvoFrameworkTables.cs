@@ -72,6 +72,9 @@ internal static class AlvoFrameworkTables
     /// <summary>The suffix of the table holding one row per rejection by a host write hook.</summary>
     internal const string HookRejectionsSuffix = "_hook_rejections";
 
+    /// <summary>The counter table every <c>sequence</c> field allocates its numbers from.</summary>
+    internal const string SequencesSuffix = "_sequences";
+
     /// <summary>The suffix of the table holding administrator accounts.</summary>
     internal const string IdentityUsersSuffix = "_identity_users";
 
@@ -139,6 +142,7 @@ internal static class AlvoFrameworkTables
             schemaPrefix + CommandRequestsSuffix,
             schemaPrefix + InboundWebhooksSuffix,
             schemaPrefix + HookRejectionsSuffix,
+            schemaPrefix + SequencesSuffix,
             .. IdentitySuffixes.Select(suffix => schemaPrefix + suffix),
         ];
     }

@@ -589,6 +589,20 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task The_write_check_refuses_the_candidate_on_the_create_branch() { }
         public System.Threading.Tasks.Task The_write_check_refuses_the_candidate_on_the_replace_branch() { }
     }
+    public abstract class AlvoDataSequenceTests
+    {
+        protected AlvoDataSequenceTests() { }
+        protected abstract MMLib.Alvo.Data.IAlvoTransactions Transactions { get; }
+        public System.Threading.Tasks.Task A_batch_create_numbers_its_rows_in_order() { }
+        public System.Threading.Tasks.Task A_create_rolled_back_with_its_unit_consumes_no_number() { }
+        public System.Threading.Tasks.Task A_hundred_concurrent_creates_number_one_to_a_hundred_without_gap_or_duplicate() { }
+        public System.Threading.Tasks.Task A_replace_that_creates_assigns_a_number_and_one_that_updates_keeps_it() { }
+        public System.Threading.Tasks.Task A_rolled_back_create_consumes_no_number() { }
+        protected abstract System.Threading.Tasks.Task ApplyAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.TimeProvider time);
+        public System.Threading.Tasks.Task Each_tenant_per_value_and_period_counts_from_start() { }
+        public System.Threading.Tasks.Task Renaming_a_sequenced_entity_and_field_keeps_counting() { }
+    }
     public abstract class AlvoDataSqlSnapshotTests
     {
         protected AlvoDataSqlSnapshotTests() { }

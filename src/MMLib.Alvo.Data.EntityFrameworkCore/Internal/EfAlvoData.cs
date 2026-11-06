@@ -74,6 +74,8 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// <summary>The idempotency table's ensure outside any write, once per process — see <see cref="EnsureIdempotencyTableOutsideAsync"/>.</summary>
     private readonly OnceDdl _idempotencyDdl;
     private readonly string _outboxTable;
+    private readonly string _sequenceTable;
+    private readonly SequenceNumbers _sequences;
     private readonly string _commandTable;
 
     /// <summary>The causation-chain limit every write face enforces before it reads or writes a row.</summary>
@@ -127,6 +129,8 @@ internal sealed partial class EfAlvoData : IAlvoData
         _idempotencyTable = IdempotencyTable.NameFor(options.SchemaPrefix);
         _idempotencyDdl = new OnceDdl(EnsureIdempotencyTableOnOwnContextAsync);
         _outboxTable = OutboxTable.NameFor(options.SchemaPrefix);
+        _sequenceTable = SequenceTable.NameFor(options.SchemaPrefix);
+        _sequences = new SequenceNumbers(dialect, _sequenceTable);
         _commandTable = CommandLedgerTable.NameFor(options.SchemaPrefix);
         _operationsLog = DeliveryOperationsTable.LogNameFor(options.SchemaPrefix);
         _depthLimit = depthLimit;
@@ -352,7 +356,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         await using var transaction = await BeginAsync(db, unit, cancellationToken);
         candidate = RunBeforeCreate(db, schema, decision, context, candidate, now);
         candidate = await HostBeforeCreateAsync(db, schema, decision, context, candidate, AlvoWriteOperation.Create, now, cancellationToken);
-        var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
+        var stored = await InsertAsync(db, schema, decision, context, candidate, now, cancellationToken);
         await RecomputeRollupsAsync(db, schema, [stored!], decision.Unnameable, cancellationToken);
         stored = await AfterSavedAsync(db, schema, decision, context, AlvoWriteOperation.Create, preImage: null, stored, now, cancellationToken);
         await EmitAsync(
@@ -667,7 +671,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     {
         candidate = RunBeforeCreate(db, schema, decision, context, candidate, now);
         candidate = await HostBeforeCreateAsync(db, schema, decision, context, candidate, AlvoWriteOperation.Create, now, cancellationToken);
-        var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
+        var stored = await InsertAsync(db, schema, decision, context, candidate, now, cancellationToken);
         await RecomputeRollupsAsync(db, schema, [stored!], decision.Unnameable, cancellationToken);
         stored = await AfterSavedAsync(db, schema, decision, context, AlvoWriteOperation.Create, preImage: null, stored, now, cancellationToken);
         await EmitAsync(
@@ -1015,8 +1019,9 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// </remarks>
     private async Task<Dictionary<string, object>> InsertAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
-        Dictionary<string, object> candidate, CancellationToken cancellationToken, bool callerKeyed = false)
+        Dictionary<string, object> candidate, DateTimeOffset now, CancellationToken cancellationToken, bool callerKeyed = false)
     {
+        await _sequences.AssignAsync(db, schema, candidate, now, cancellationToken);
         db.Rows(schema.Name).Add(candidate);
         await ConstraintViolationTranslator.TranslatedAsync(
             () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema,
@@ -1051,13 +1056,15 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// <param name="decision">The verdict the policy engine returned for this caller.</param>
     /// <param name="context">The caller performing the batch.</param>
     /// <param name="candidates">The rows the judging pass approved.</param>
+    /// <param name="now">The batch's stamp, which names each sequence number's period.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     private async Task<List<Dictionary<string, object>>> InsertManyAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
-        List<Dictionary<string, object>> candidates, CancellationToken cancellationToken)
+        List<Dictionary<string, object>> candidates, DateTimeOffset now, CancellationToken cancellationToken)
     {
         foreach (var candidate in candidates)
         {
+            await _sequences.AssignAsync(db, schema, candidate, now, cancellationToken);
             db.Rows(schema.Name).Add(candidate);
         }
 
@@ -1637,7 +1644,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             EnsureWriteAllowed(decision, Unmasked(candidate), previous: null, context);
         }
 
-        var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken, callerKeyed: true);
+        var stored = await InsertAsync(db, schema, decision, context, candidate, now, cancellationToken, callerKeyed: true);
         await RecomputeRollupsAsync(db, schema, [stored!], decision.Unnameable, cancellationToken);
         stored = await AfterSavedAsync(db, schema, decision, context, AlvoWriteOperation.Replace, preImage: null, stored, now, cancellationToken);
         await EmitAsync(
@@ -2418,7 +2425,8 @@ internal sealed partial class EfAlvoData : IAlvoData
             cancellationToken);
 
     /// <summary>
-    /// Ensures the outbox table exists, once per process and <b>before</b> the write transaction begins.
+    /// Ensures the outbox table — and the sequence counter table a create allocates from — exists, once per process and
+    /// <b>before</b> the write transaction begins.
     /// </summary>
     /// <remarks>
     /// The same arrangement — and the same reasoning — as <see cref="EnsureIdempotencyTableAsync"/>: nothing
@@ -2438,6 +2446,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         var connection = db.Database.GetDbConnection();
         await RelationalSqlBatch.OpenAsync(connection, cancellationToken);
         await OutboxTable.EnsureAsync(connection, _outboxTable, cancellationToken);
+        await SequenceTable.EnsureAsync(connection, _sequenceTable, cancellationToken);
         _outboxTableEnsured = true;
     }
 
@@ -2805,7 +2814,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             return BatchOutcome.Refused(refusals);
         }
 
-        var stored = await InsertManyAsync(db, schema, decision, context, judged, cancellationToken);
+        var stored = await InsertManyAsync(db, schema, decision, context, judged, now, cancellationToken);
 
         await RecomputeRollupsAsync(db, schema, stored!, decision.Unnameable, cancellationToken);
         using var held = HeldWhileHooksRun(schema, AlvoWriteOperation.Create, stored.Select(RowIdOf));

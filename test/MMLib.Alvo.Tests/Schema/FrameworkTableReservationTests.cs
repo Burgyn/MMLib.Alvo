@@ -24,11 +24,15 @@ public class FrameworkTableReservationTests
     }
 
     [Fact]
-    public void The_reserved_set_is_the_eleven_bookkeeping_tables_plus_the_seven_identity_ones()
+    public void The_reserved_set_is_the_twelve_bookkeeping_tables_plus_the_seven_identity_ones()
     {
-        AlvoFrameworkTables.NamesFor("alvo").Count.ShouldBe(18);
+        AlvoFrameworkTables.NamesFor("alvo").Count.ShouldBe(19);
         AlvoFrameworkTables.IdentitySuffixes.Count.ShouldBe(7);
     }
+
+    [Fact]
+    public void The_sequence_counter_table_is_reserved() =>
+        AlvoFrameworkTables.NamesFor("alvo").ShouldContain("alvo_sequences");
 
     [Fact]
     public void The_delivery_tables_are_reserved()
