@@ -90,6 +90,9 @@ internal sealed partial class EfAlvoData : IAlvoData
     private readonly EfCoreHookRejectionLog? _rejections;
     private readonly string _operationsLog;
 
+    /// <summary>The host's read extensions; <see langword="null"/> when the core registers none, and then no read is narrowed.</summary>
+    private readonly IReadExtensionRunner? _reads;
+
     internal EfAlvoData(
         IPolicyEngine policy,
         IPredicateEvaluator evaluator,
@@ -105,7 +108,8 @@ internal sealed partial class EfAlvoData : IAlvoData
         IRelationalWriteGate? writeGate = null,
         IWriteExtensionRunner? extensions = null,
         IServiceScopeFactory? scopes = null,
-        EfCoreHookRejectionLog? rejections = null)
+        EfCoreHookRejectionLog? rejections = null,
+        IReadExtensionRunner? reads = null)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(evaluator);
@@ -121,7 +125,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         _policy = policy;
         _evaluator = evaluator;
         _hooks = hooks;
-        _statements = new ReadStatementComposer(predicates, fields, dialect);
+        _statements = new ReadStatementComposer(predicates, fields, dialect, reads is null ? null : reads.Refused);
         _dialect = dialect;
         _rollups = new RollupRecompute(dialect, fields, compiler, predicates);
         _contexts = contexts;
@@ -138,6 +142,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         _extensions = extensions ?? NoWriteExtensions.Instance;
         _scopes = scopes;
         _rejections = rejections;
+        _reads = reads;
     }
 
     /// <summary>
@@ -203,8 +208,9 @@ internal sealed partial class EfAlvoData : IAlvoData
         var entity = Entity(db, query.Entity);
         QueryFieldGuard.EnsureAvailable(QueryFields(query), entity, decision.HiddenFields);
 
-        var anchor = await AnchorAsync(db, entity, decision, context, query, cancellationToken);
-        var options = ReadOptions(query, anchor, entity);
+        var narrowing = await NarrowingOfAsync(query.Entity, DataOperation.List, context, cancellationToken);
+        var anchor = await AnchorAsync(db, entity, decision, context, query, narrowing, cancellationToken);
+        var options = ReadOptions(query, anchor, entity) with { Narrowing = narrowing };
         var total = await TotalCountAsync(db, entity, decision, context, query, options, cancellationToken);
 
         // A cursor this provider never issued — stale, forged, or from another tenant — finds no anchor and
@@ -308,10 +314,11 @@ internal sealed partial class EfAlvoData : IAlvoData
         string entity, Guid id, AlvoContext context, WriteUnit? unit, CancellationToken cancellationToken)
     {
         var decision = Resolve(entity, DataOperation.Get, context);
+        var narrowing = await NarrowingOfAsync(entity, DataOperation.Get, context, cancellationToken);
 
         using var db = ContextFor(unit);
         await using var joined = await ReadScopeAsync(db, unit, cancellationToken);
-        var row = await SingleAsync(db, Entity(db, entity), decision, context, id, lockFor: null, cancellationToken);
+        var row = await SingleAsync(db, Entity(db, entity), decision, context, id, lockFor: null, cancellationToken, narrowing: narrowing);
         await ReleaseAsync(joined, cancellationToken);
 
         return row is null ? null : RecordMaterializer.ToRecord(row, decision.HiddenFields, FrozenSet<string>.Empty);
@@ -822,7 +829,8 @@ internal sealed partial class EfAlvoData : IAlvoData
             return IdOnly(rowId);
         }
 
-        var row = await SingleAsync(db, schema, read, context, rowId, lockFor: null, cancellationToken);
+        var narrowing = await NarrowingOfAsync(schema.Name, DataOperation.Get, context, cancellationToken);
+        var row = await SingleAsync(db, schema, read, context, rowId, lockFor: null, cancellationToken, narrowing: narrowing);
         return row is null ? null : RecordMaterializer.ToRecord(row, read.HiddenFields, FrozenSet<string>.Empty);
     }
 
@@ -853,9 +861,10 @@ internal sealed partial class EfAlvoData : IAlvoData
             return readable;
         }
 
+        var narrowing = await NarrowingOfAsync(schema.Name, DataOperation.Get, context, cancellationToken);
         foreach (var chunk in rowIds.Chunk(AlvoFilter.MaxInCandidates))
         {
-            var rows = await PageAsync(db, schema, read, context, RowsIn(chunk), cancellationToken);
+            var rows = await PageAsync(db, schema, read, context, RowsIn(chunk) with { Narrowing = narrowing }, cancellationToken);
             foreach (var row in rows)
             {
                 readable[RowIdOf(row)] = RecordMaterializer.ToRecord(row, read.HiddenFields, FrozenSet<string>.Empty);
@@ -2266,14 +2275,15 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// </summary>
     private async Task<Dictionary<string, object>?> SingleAsync(
         AlvoDataContext db, EntitySchema? entity, PolicyDecision decision, AlvoContext context,
-        Guid id, PreImageMutation? lockFor, CancellationToken cancellationToken, bool unmasked = false)
+        Guid id, PreImageMutation? lockFor, CancellationToken cancellationToken, bool unmasked = false,
+        ReadNarrowing? narrowing = null)
     {
         var schema = entity ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         var statement = _statements.Compose(
             schema,
             decision,
             context,
-            new ReadStatementComposer.ReadStatementOptions { RowId = id, LockFor = lockFor, Unmasked = unmasked },
+            new ReadStatementComposer.ReadStatementOptions { RowId = id, LockFor = lockFor, Unmasked = unmasked, Narrowing = narrowing },
             db.Rows(schema.Name).EntityType);
 
         var rows = await Materialize(db, schema, statement).ToListAsync(cancellationToken);
@@ -2288,14 +2298,14 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// </summary>
     private async Task<KeysetAnchor?> AnchorAsync(
         AlvoDataContext db, EntitySchema? entity, PolicyDecision decision, AlvoContext context,
-        AlvoQuery query, CancellationToken cancellationToken)
+        AlvoQuery query, ReadNarrowing? narrowing, CancellationToken cancellationToken)
     {
         if (query.After is null || !KeysetCursor.TryDecode(query.After, out var anchorId))
         {
             return null;
         }
 
-        var row = await SingleAsync(db, entity, decision, context, anchorId, lockFor: null, cancellationToken);
+        var row = await SingleAsync(db, entity, decision, context, anchorId, lockFor: null, cancellationToken, narrowing: narrowing);
         return row is null
             ? null
             : new KeysetAnchor(query.Sort, [.. query.Sort.Select(key => row.GetValueOrDefault(key.Field))], anchorId);

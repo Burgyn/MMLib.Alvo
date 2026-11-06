@@ -408,6 +408,69 @@ public class ReadStatementComposerTests
             AlvoDataFixtures.Vehicle, decision, AlvoDataFixtures.Caller, null!));
     }
 
+    [Fact]
+    public Task A_narrowing_is_its_own_term_after_the_tenant_scope()
+    {
+        var narrowing = new ReadNarrowing(new AlvoComparison("plate", AlvoFilterOperator.Eq, "ACME-001"), ["fleet-only"]);
+        var page = Compose(new ReadStatementComposer.ReadStatementOptions
+        {
+            Narrowing = narrowing,
+            Filter = new AlvoComparison("status", AlvoFilterOperator.Neq, "scrapped"),
+        });
+
+        page.Sql.IndexOf("@alvo_n0", StringComparison.Ordinal).ShouldBeGreaterThan(page.Sql.IndexOf("@alvo_t0", StringComparison.Ordinal));
+        page.Sql.IndexOf("@alvo_n0", StringComparison.Ordinal).ShouldBeLessThan(page.Sql.IndexOf("@alvo_f0", StringComparison.Ordinal));
+        return Verify(new { Page = page.Sql, Count = ComposeCount(new ReadStatementComposer.ReadStatementOptions { Narrowing = narrowing }).Sql });
+    }
+
+    [Fact]
+    public void A_narrowing_over_a_field_the_renderer_refuses_is_the_extension_s_failure_never_a_403()
+        => Should.Throw<HookFailedException>(() => Compose(new ReadStatementComposer.ReadStatementOptions
+        {
+            Narrowing = new ReadNarrowing(new AlvoComparison("no_such_field", AlvoFilterOperator.Eq, "x"), ["bad"]),
+        })).Stage.ShouldBe(HookFailureStage.Read);
+
+    [Fact]
+    public void A_narrowing_value_the_field_cannot_hold_is_the_extension_s_failure_not_the_caller_s()
+    {
+        var failure = Should.Throw<HookFailedException>(() => ComposeCount(new ReadStatementComposer.ReadStatementOptions
+        {
+            Narrowing = new ReadNarrowing(new AlvoComparison("mileage", AlvoFilterOperator.Eq, "many"), ["bad", "worse"]),
+        }));
+
+        (failure.Reason, failure.Stage).ShouldBe((HookFailedException.InvalidFilter, HookFailureStage.Read));
+        failure.Extensions.ShouldBe(["bad", "worse"]);
+    }
+
+    [Fact]
+    public void A_refused_narrowing_is_handed_to_the_core_to_log_and_its_answer_is_thrown()
+    {
+        using var services = Services();
+        (IReadOnlyList<string> Ids, string Reason, Exception Cause)? handed = null;
+        var answer = HookFailedException.OfRead(["bad"], HookFailedException.InvalidFilter);
+        var composer = new ReadStatementComposer(
+            services.GetRequiredService<IPredicateRenderer>(), new TestFieldSqlRenderer(), new TestSqlDialect(),
+            (ids, reason, cause) => { handed = (ids, reason, cause); return answer; });
+        var decision = SnapshotFixture.Decision(services, SnapshotFixture.VehicleWith(list: "owner_id == @user.id"), DataOperation.List);
+        var options = new ReadStatementComposer.ReadStatementOptions
+        {
+            Narrowing = new ReadNarrowing(new AlvoComparison("mileage", AlvoFilterOperator.Eq, "many"), ["bad"]),
+        };
+
+        Should.Throw<HookFailedException>(() => composer.ComposeCount(AlvoDataFixtures.Vehicle, decision, AlvoDataFixtures.Caller, options))
+            .ShouldBeSameAs(answer);
+        handed!.Value.Ids.ShouldBe(["bad"]);
+        handed.Value.Reason.ShouldBe(HookFailedException.InvalidFilter);
+        handed.Value.Cause.ShouldBeOfType<ArgumentException>();
+    }
+
+    [Fact]
+    public void A_malformed_narrowing_is_the_extension_s_failure()
+        => Should.Throw<HookFailedException>(() => Compose(new ReadStatementComposer.ReadStatementOptions
+        {
+            Narrowing = new ReadNarrowing(new AlvoComparison("status", AlvoFilterOperator.In, "not-a-list"), ["bad"]),
+        })).Reason.ShouldBe(HookFailedException.InvalidFilter);
+
     /// <summary>Everything between <c>WHERE</c> and whatever follows the terms.</summary>
     private static string WhereOf(ReadStatement statement)
     {
