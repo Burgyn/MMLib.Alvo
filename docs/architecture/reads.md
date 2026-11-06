@@ -65,7 +65,9 @@ answers 500 `hook-failed` with `extensions` and `reason`, and the failure is log
 | `invalid-set` | `RowShaping.SetVirtual` | a field that is not virtual, or a value outside its type and facets |
 
 Inside a unit the failure also poisons it (`AlvoFlow.Unit?.Blame(failure)`, the write-hook precedent): a failed read is
-a failed unit. A narrowing may name a field the caller's policy hides (D5) — it is host-authored, as a rule's `USING`
+a failed unit. A write's echo is enriched inside the write's own transaction, so an echo that fails rolls the write
+back — no committed write answers 500. A refusal the enricher catches (`invalid-hide`, `invalid-set`) still fails the
+read with its reason. A narrowing may name a field the caller's policy hides (D5) — it is host-authored, as a rule's `USING`
 is — and the runner logs `NarrowingNamesHiddenField` (Warning, ids only) once per extension and field, at first use,
 because the filter exists only at run time.
 
@@ -91,7 +93,10 @@ Every materialised row — a page, a get, a write echo (single and batch, row by
 
 An enrichment opens only when there is a row to shape, so an unbound enricher fails only reads that return rows. Class
 extensions come from one `CreateAsyncScope()` per read, opened only when a class extension is registered on the entity;
-a class enricher is built once per read, at its first row, and disposed with the enrichment (D14).
+a class enricher is built once per read, at its first row, and disposed with the enrichment — every instance Alvo built,
+then the scope, each attempted even when an earlier one throws (D14). A class the host registered in its services is
+resolved from that scope and not disposed by Alvo. `Enrich<T>.Row` materialises once, at first use: a move made after
+that is not reflected in it.
 
 ## What is never enriched
 

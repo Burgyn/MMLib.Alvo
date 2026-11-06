@@ -713,7 +713,7 @@
         "virtual": {
           "type": "boolean",
           "default": false,
-          "description": "A field with no column: an embedded host's enricher fills it when a record is read (null otherwise). Read-only; refused in writes, in every CEL expression, and in filter/sort/select. Cannot be combined with computed, rollup, default, required, unique, index, validation, renamedFrom or type ref."
+          "description": "A field with no column: an embedded host's enricher fills it when a record is read (null otherwise). Read-only; refused in writes, in every CEL expression, and in filter/sort/select. Cannot be combined with computed, rollup, default, required, nullable: false, unique, index, validation, renamedFrom or type ref; cannot be named in an entity's indexes[].fields, a rollup's field or via, events.exclude or a before-hook's mutate; and an entity with storage: dynamic holds none."
         },
         "computed": {
           "$ref": "#/$defs/cel",
