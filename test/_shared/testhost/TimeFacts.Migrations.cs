@@ -28,12 +28,48 @@ public sealed class RecordingMigration(MigrationLog log) : IAlvoDataMigration
     }
 }
 
-/// <summary>Records the schedule pump's <c>TenantCatalogMissing</c> lines.</summary>
+/// <summary>Adds <c>tenant:note</c> for every booking its run can read, so a run that read another tenant's row shows.</summary>
+public sealed class NoteReadingMigration(ConcurrentBag<string> seen) : IAlvoDataMigration
+{
+    public async Task RunAsync(AlvoJobContext context, CancellationToken cancellationToken)
+    {
+        var bookings = await context.Data.QueryAsync(new AlvoQuery { Entity = "bookings" }, cancellationToken);
+        foreach (var booking in bookings.Items)
+        {
+            seen.Add($"{context.Tenant}:{booking["note"]}");
+        }
+    }
+}
+
+/// <summary>Lists two tenants, after failing the first <see cref="FailuresLeft"/> times it is asked.</summary>
+public sealed class FlakyTenants(int failures, params TenantId[] tenants) : IAlvoTenantCatalog
+{
+    public int FailuresLeft { get; private set; } = failures;
+
+    public int Calls { get; private set; }
+
+    public Task<IReadOnlyList<TenantId>> ListTenantsAsync(CancellationToken cancellationToken = default)
+    {
+        Calls++;
+        if (FailuresLeft > 0)
+        {
+            FailuresLeft--;
+            throw new InvalidOperationException("the tenant directory is down");
+        }
+
+        return Task.FromResult<IReadOnlyList<TenantId>>(tenants);
+    }
+}
+
+/// <summary>Records the schedule pump's <c>TenantCatalogMissing</c> and <c>MigrationStartFailed</c> lines.</summary>
 internal sealed class MigrationLogCapture : ILoggerProvider, ILogger
 {
     private readonly ConcurrentQueue<string> _missing = new();
+    private readonly ConcurrentQueue<string> _failed = new();
 
     internal IReadOnlyList<string> TenantCatalogMissing => [.. _missing];
+
+    internal IReadOnlyList<string> MigrationStartFailed => [.. _failed];
 
     public ILogger CreateLogger(string categoryName) => this;
 
@@ -47,6 +83,11 @@ internal sealed class MigrationLogCapture : ILoggerProvider, ILogger
         if (eventId.Name == "TenantCatalogMissing")
         {
             _missing.Enqueue(formatter(state, exception));
+        }
+
+        if (eventId.Name == "MigrationStartFailed")
+        {
+            _failed.Enqueue(formatter(state, exception));
         }
     }
 
@@ -92,16 +133,74 @@ public abstract partial class TimeFacts
     }
 
     [Fact]
-    public async Task A_scoped_schema_runs_the_migration_once_per_tenant()
+    public async Task A_scoped_schema_runs_the_migration_once_per_tenant_and_each_run_reads_only_its_own_rows()
     {
         var log = new MigrationLog();
+        var seen = new ConcurrentBag<string>();
         await using var alvo = await StartMigratingAsync(
-            await DatabaseAsync(), BookingDesk, log, afterRevision: 1, new FixedTenants(TenantA, TenantB));
+            await DatabaseAsync(), BookingDesk, log, afterRevision: 1, new FixedTenants(TenantA, TenantB),
+            also: builder => builder.AddDataMigration<NoteReadingMigration>("read-notes", afterRevision: 1).Services.AddSingleton(seen));
+        await SeedBookingAsync(alvo, TenantA, "a-note");
+        await SeedBookingAsync(alvo, TenantB, "b-note");
 
         await alvo.DrainEventsAsync(Ct);
 
         log.Runs.Select(run => run.Tenant).ShouldBe([TenantA, TenantB], ignoreOrder: true);
         log.Runs.ShouldAllBe(run => run.Revision == 1 && run.Id == Backfill);
+        seen.ShouldBe([$"{TenantA}:a-note", $"{TenantB}:b-note"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task A_replica_still_on_the_unscoped_catalog_starts_per_tenant_runs_at_the_first_scoped_revision()
+    {
+        var database = await DatabaseAsync();
+        var applier = new MigrationLog();
+        var stale = new MigrationLog();
+        await using var first = await StartMigratingAsync(database, DeskFile, applier, afterRevision: 2, new FixedTenants(TenantA, TenantB));
+        await using var second = await StartMigratingAsync(database, DeskFile, stale, afterRevision: 2, new FixedTenants(TenantA, TenantB));
+
+        await ApplyAsync(first, DeskWithBookings);
+        await second.DrainEventsAsync(Ct);
+
+        stale.Runs.Select(run => run.Tenant).ShouldBe([TenantA, TenantB], ignoreOrder: true);
+        stale.Runs.ShouldAllBe(run => run.Revision == 2);
+    }
+
+    [Fact]
+    public async Task A_failed_start_is_retried_after_its_backoff_not_every_round_and_then_starts()
+    {
+        var log = new MigrationLog();
+        var logs = new MigrationLogCapture();
+        var tenants = new FlakyTenants(1, TenantA, TenantB);
+        await using var alvo = await StartMigratingAsync(await DatabaseAsync(), BookingDesk, log, afterRevision: 1, tenants, logs);
+
+        await alvo.DrainEventsAsync(Ct);
+        await alvo.DrainEventsAsync(Ct);
+        (tenants.Calls, log.Runs.Count, logs.MigrationStartFailed.Count).ShouldBe((1, 0, 1));
+        (await TimerStore(alvo).StartedMigrationsAsync(Ct)).ShouldBeEmpty();
+
+        Time.Advance(TimeSpan.FromMinutes(1));
+        await alvo.DrainEventsAsync(Ct);
+
+        log.Runs.Select(run => run.Tenant).ShouldBe([TenantA, TenantB], ignoreOrder: true);
+        (await TimerStore(alvo).StartedMigrationsAsync(Ct)).ShouldBe([Backfill]);
+    }
+
+    [Fact]
+    public async Task A_migration_that_has_run_does_not_refuse_a_boot_on_a_schema_scoped_since()
+    {
+        var database = await DatabaseAsync();
+        var log = new MigrationLog();
+        await using (var first = await StartMigratingAsync(database, DeskFile, log, afterRevision: 1))
+        {
+            await first.DrainEventsAsync(Ct);
+            await ApplyAsync(first, DeskWithBookings);
+        }
+
+        await using var second = await StartMigratingAsync(database, DeskWithBookings, log, afterRevision: 1);
+        await second.DrainEventsAsync(Ct);
+
+        log.Runs.ShouldHaveSingleItem().Tenant.ShouldBeNull();
     }
 
     [Fact]
@@ -138,7 +237,13 @@ public abstract partial class TimeFacts
     }
 
     private async Task<AlvoTestHost> StartMigratingAsync(
-        TimeDatabase? database, string descriptor, MigrationLog log, int afterRevision, IAlvoTenantCatalog? tenants = null, MigrationLogCapture? logs = null)
+        TimeDatabase? database,
+        string descriptor,
+        MigrationLog log,
+        int afterRevision,
+        IAlvoTenantCatalog? tenants = null,
+        MigrationLogCapture? logs = null,
+        Action<IAlvoBuilder>? also = null)
     {
         var used = database ?? await DatabaseAsync();
 
@@ -157,6 +262,8 @@ public abstract partial class TimeFacts
                 {
                     alvo.Services.AddSingleton<ILoggerProvider>(logs);
                 }
+
+                also?.Invoke(alvo);
             },
             Time,
             cancellationToken: Ct);

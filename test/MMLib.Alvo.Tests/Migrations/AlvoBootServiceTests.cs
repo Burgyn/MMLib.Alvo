@@ -36,6 +36,7 @@ public sealed class AlvoBootServiceTests
     [InlineData("state")]
     [InlineData("options")]
     [InlineData("extensionState")]
+    [InlineData("migrationCheck")]
     [InlineData("logger")]
     public void Every_port_the_boot_needs_is_refused_by_name_when_it_is_missing(string port)
     {
