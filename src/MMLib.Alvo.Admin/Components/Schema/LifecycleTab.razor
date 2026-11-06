@@ -1,10 +1,11 @@
 ﻿@*
-    What runs on this entity, by when it runs. Up to four lanes. Before the transaction and In the transaction: the host's
+    What runs on this entity, by when it runs. Up to five lanes. Before the transaction and In the transaction: the host's
     write hooks — validate hooks outside the write's transaction, before/after-write and delete hooks inside it — drawn
     only in a host that registers a write hook (Ruling 29, HX-08 Ruling 57's rule), so the container never shows them.
     After commit: the descriptor's after-hooks, which the On write tab edits (one editor, not two), and the host's event
     handlers. And Commands — the commands the host maps on a row of this entity — drawn only in a host that maps a
-    command on some route (HX-08 Ruling 57). Host code is read-only here, marked by the accent badge every piece of host
+    command on some route (HX-08 Ruling 57). Reads, drawn between After commit and Commands — the host's narrowings and
+    enrichers — only in a host that registers one (HX-16). Host code is read-only here, marked by the accent badge every piece of host
     code wears, as the function list's "this host" does, and carries this instance's p95 and 24 h rejections when the
     operator may read them.
 *@
@@ -85,6 +86,28 @@
     }
 </div>
 
+@if (_showsReads)
+{
+    <div data-testid="lifecycle-reads">
+        <SectionHead Title="Reads">
+            <Subtitle>
+                Host code that runs on every read of this entity: a narrowing can only AND a filter into the rules' SQL (never for
+                the system); an enricher can only hide a field or fill a virtual one. Writes are not narrowed.
+            </Subtitle>
+        </SectionHead>
+        @if (_reads.Count == 0)
+        {
+            <div data-testid="lifecycle-reads-empty">
+                <EmptyState Title="Nothing shapes a read of this entity" Body="The host registers no narrowing or enricher for it." />
+            </div>
+        }
+        @foreach (var extension in _reads)
+        {
+            @CodeItem(extension)
+        }
+    </div>
+}
+
 @if (_showsCommands)
 {
     <div data-testid="lifecycle-commands">
@@ -125,6 +148,8 @@
     private IReadOnlyList<ManagementExtension> _before = [];
     private IReadOnlyList<ManagementExtension> _inside = [];
     private bool _showsWriteLanes;
+    private IReadOnlyList<ManagementExtension> _reads = [];
+    private bool _showsReads;
 
     /// <summary>The entity whose lane this is.</summary>
     [Parameter, EditorRequired]
@@ -151,6 +176,8 @@
         _before = LifecycleLane.BeforeTransaction(Entity, Extensions);
         _inside = LifecycleLane.InTransaction(Entity, Extensions);
         _showsWriteLanes = LifecycleLane.HasWriteHooks(Extensions);
+        _reads = LifecycleLane.Reads(Entity, Extensions);
+        _showsReads = LifecycleLane.HasReads(Extensions);
     }
 
     /// <summary>One piece of host code as every code lane draws it: read-only, with its stage and this instance's numbers.</summary>

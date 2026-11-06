@@ -47,6 +47,11 @@ public class FieldBadgesTests
             .ShouldBe(["computed"]);
     }
 
+    [Fact]
+    public void A_virtual_field_wears_the_virtual_badge()
+        => FieldBadges.Of(new FieldSchema { Name = "display", Type = FieldType.Text, Nullable = true, IsVirtual = true })
+            .ShouldBe(["virtual"]);
+
     /// <summary>
     /// <c>hidden</c> and <c>readOnly</c> are read off the declaration, which <see cref="FieldSchema"/> does not carry
     /// (#267's read half): <c>true</c> is always, a CEL string is for some callers, <c>false</c> is nothing.
