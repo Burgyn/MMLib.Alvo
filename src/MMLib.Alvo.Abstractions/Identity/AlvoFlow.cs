@@ -29,6 +29,7 @@ internal static class AlvoFlow
     private static readonly AsyncLocal<AlvoProvenance?> _provenance = new();
     private static readonly AsyncLocal<IAlvoFlowUnit?> _unit = new();
     private static readonly AsyncLocal<DateTimeOffset?> _instant = new();
+    private static readonly AsyncLocal<bool> _rulesOnlyRead = new();
 
     /// <summary>The ambient provenance, or <see langword="null"/> outside any framework flow.</summary>
     internal static AlvoProvenance? Provenance => _provenance.Value;
@@ -42,6 +43,21 @@ internal static class AlvoFlow
 
     /// <summary>The instant every <c>now()</c> on this flow reads, in UTC and whole microseconds, or <see langword="null"/> when none is bound.</summary>
     internal static DateTimeOffset? Instant => _instant.Value;
+
+    /// <summary>
+    /// Gets a value indicating whether the reads on this flow answer under the rules alone — no host narrowing — as a
+    /// reference probe does, which must agree with the port's own reference check.
+    /// </summary>
+    internal static bool IsRulesOnlyRead => _rulesOnlyRead.Value;
+
+    /// <summary>Makes the reads on this flow rules-only until the returned scope is disposed.</summary>
+    /// <returns>A scope whose disposal restores whatever was ambient before.</returns>
+    internal static IDisposable EnterRulesOnlyRead()
+    {
+        var restore = new RulesOnlyRestore(_rulesOnlyRead.Value);
+        _rulesOnlyRead.Value = true;
+        return restore;
+    }
 
     /// <summary>Binds <paramref name="instant"/>, truncated to the microsecond, until the returned scope is disposed.</summary>
     /// <param name="instant">The instant <c>now()</c> reads — a request's start, or an event's time.</param>
@@ -144,5 +160,10 @@ internal static class AlvoFlow
             _unit.Value = unit;
             _instant.Value = instant;
         }
+    }
+
+    private sealed class RulesOnlyRestore(bool was) : IDisposable
+    {
+        public void Dispose() => _rulesOnlyRead.Value = was;
     }
 }

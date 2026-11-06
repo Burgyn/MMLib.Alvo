@@ -351,6 +351,9 @@ namespace MMLib.Alvo.Extensions
         public MMLib.Alvo.Extensions.AlvoEntityBuilder BeforeWrite(string id, System.Delegate hook, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null) { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder BeforeWrite<THook>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
             where THook :  class, MMLib.Alvo.Hooks.IBeforeWriteHook { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder Narrow(string id, System.Func<MMLib.Alvo.Reads.QueryNarrowing, MMLib.Alvo.Data.AlvoFilter?> narrow) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder Narrow<TNarrowing>(string id)
+            where TNarrowing :  class, MMLib.Alvo.Reads.IQueryNarrowing { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder OnCreated(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder OnCreated<THandler>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
             where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Events.AlvoCreated<MMLib.Alvo.Data.AlvoRecord>> { }
@@ -394,6 +397,9 @@ namespace MMLib.Alvo.Extensions
             where THook :  class, MMLib.Alvo.Hooks.IBeforeWriteHook<T> { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> BeforeWrite<THook>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
             where THook :  class, MMLib.Alvo.Hooks.IBeforeWriteHook<T> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> Narrow(string id, System.Func<MMLib.Alvo.Reads.QueryNarrowing, System.Linq.Expressions.Expression<System.Func<T, bool>>?> narrow) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> Narrow<TNarrowing>(string id)
+            where TNarrowing :  class, MMLib.Alvo.Reads.IQueryNarrowing<T> { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnCreated(string id, System.Delegate handler, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Events.EventCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnCreated(string id, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> OnCreated<THandler>(string id, System.Linq.Expressions.Expression<System.Func<MMLib.Alvo.Events.EventCondition<T>, bool>> when, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
@@ -660,6 +666,24 @@ namespace MMLib.Alvo.Migrations
         public RuntimeSchemaService(MMLib.Alvo.Descriptor.IDescriptorValidator validator, MMLib.Alvo.Migrations.ISchemaMigrator migrator, MMLib.Alvo.Migrations.IDescriptorVersionStore store, MMLib.Alvo.Migrations.IRuntimeSchemaWriter writer, MMLib.Alvo.Expressions.ICelCompiler compiler, MMLib.Alvo.Rules.IPolicyCatalogProvider policyCatalogProvider) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion> ApplyAsync(string project, string descriptorJson, int expectedRevision, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion> RollbackAsync(string project, int targetRevision, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
+    }
+}
+namespace MMLib.Alvo.Reads
+{
+    public interface IQueryNarrowing
+    {
+        MMLib.Alvo.Data.AlvoFilter? Narrow(MMLib.Alvo.Reads.QueryNarrowing query);
+    }
+    public interface IQueryNarrowing<T>
+        where T :  class
+    {
+        System.Linq.Expressions.Expression<System.Func<T, bool>>? Narrow(MMLib.Alvo.Reads.QueryNarrowing query);
+    }
+    public sealed class QueryNarrowing
+    {
+        public MMLib.Alvo.AlvoContext Caller { get; }
+        public string Entity { get; }
+        public MMLib.Alvo.Rules.DataOperation Operation { get; }
     }
 }
 namespace MMLib.Alvo.Rules

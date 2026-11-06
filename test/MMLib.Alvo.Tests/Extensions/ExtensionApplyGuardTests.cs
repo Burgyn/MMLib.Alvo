@@ -323,6 +323,21 @@ public sealed class ExtensionApplyGuardTests
         precise.Message.ShouldContain("its condition reads it");
     }
 
+    [Fact]
+    public void An_apply_that_unbinds_a_narrowing_is_refused()
+    {
+        var withoutNotes = new SchemaModel([.. HandlerCatalog.Schema.Entities.Where(entity => entity.Name != "notes")]);
+        var guard = Guard(alvo => alvo.Entity("notes", n => n.Narrow("notes-view", (MMLib.Alvo.Reads.QueryNarrowing _) => null)));
+
+        var errors = Refused(guard, withoutNotes);
+
+        var precise = Precise(errors).ShouldHaveSingleItem();
+        precise.Path.ShouldBe("/entities/notes");
+        precise.Message.ShouldContain("'notes-view' (narrowing, in this host)");
+        precise.FixSuggestion.ShouldBe("Remove the registration and redeploy first, or keep the entity.");
+        errors.ShouldContain(error => error.Path.Length == 0 && error.Message.Contains("so the narrowing would never run"));
+    }
+
     private static Action<IAlvoBuilder> OnStatus(string id) =>
         alvo => alvo.Entity("tickets", t => t.OnUpdated(id, OnUpdated, when: "changed(status)"));
 

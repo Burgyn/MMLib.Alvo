@@ -1,0 +1,4 @@
+﻿{
+  Page: SELECT "id", "tenant_id", "owner_id", "plate", "status", "secret_note", "mileage", "price", "is_public", "due_on", "created_at" FROM "vehicle" WHERE (COALESCE("owner_id" = @alvo_u0, FALSE)) AND (COALESCE("tenant_id" = @alvo_t0, FALSE)) AND ("plate" = @alvo_n0) AND ("status" <> @alvo_f0),
+  Count: SELECT COUNT(*) FROM "vehicle" WHERE (COALESCE("owner_id" = @alvo_u0, FALSE)) AND (COALESCE("tenant_id" = @alvo_t0, FALSE)) AND ("plate" = @alvo_n0)
+}
