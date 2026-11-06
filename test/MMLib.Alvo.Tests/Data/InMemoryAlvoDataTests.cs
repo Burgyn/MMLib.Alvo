@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
@@ -345,6 +346,70 @@ public class InMemoryAlvoDataTests
     }
 
     private static AlvoContext Caller() => new() { User = UserId.New(), Roles = new HashSet<Role> { Role.Authenticated } };
+
+    /// <summary>
+    /// A relation rule needs the correlated <c>EXISTS</c> a relational driver runs; the in-memory double refuses one on
+    /// every operation rather than evaluate it as a post-filter or ignore it.
+    /// </summary>
+    [Fact]
+    public async Task A_relation_rule_is_refused_not_ignored()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var descriptor = AlvoDescriptor.Parse(Rules.RelationDescriptors.Project(
+            ("customers", Rules.RelationDescriptors.Entity([Rules.RelationDescriptors.Field("region", "string")], ("list", "true"))),
+            ("orders", Rules.RelationDescriptors.Entity(
+                [Rules.RelationDescriptors.Ref("customer_id", "customers")],
+                ("list", "customer_id.region == 'eu'"), ("get", "customer_id.region == 'eu'"), ("create", "customer_id.region == 'eu'")))));
+        var schema = DescriptorToSchemaMapper.Map(descriptor);
+        var data = new InMemoryAlvoData(EngineOver(descriptor, schema), new PredicateEvaluator(), schema);
+        var caller = Caller();
+
+        await Should.ThrowAsync<NotSupportedException>(() => data.QueryAsync(new AlvoQuery { Entity = "orders" }, caller, ct));
+        await Should.ThrowAsync<NotSupportedException>(() => data.GetAsync("orders", Guid.NewGuid(), caller, ct));
+        await Should.ThrowAsync<NotSupportedException>(() =>
+            data.CreateAsync("orders", new Dictionary<string, object?>(StringComparer.Ordinal), caller, cancellationToken: ct));
+    }
+
+    [Fact]
+    public async Task A_lookup_check_is_refused_not_skipped()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var lines = Rules.RelationDescriptors.Entity(
+            [Rules.RelationDescriptors.Ref("product_id", "products")], ("list", "true"), ("get", "true"), ("create", "true"));
+        lines["checks"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject
+        {
+            ["lookup"] = "product_id",
+            ["expr"] = "product_id.active",
+            ["message"] = "Not on sale.",
+        });
+        var descriptor = AlvoDescriptor.Parse(Rules.RelationDescriptors.Project(
+            ("products", Rules.RelationDescriptors.Entity([Rules.RelationDescriptors.Field("active", "boolean")], ("list", "true"))),
+            ("order_lines", lines)));
+        var schema = DescriptorToSchemaMapper.Map(descriptor);
+        var data = new InMemoryAlvoData(EngineOver(descriptor, schema), new PredicateEvaluator(), schema);
+
+        await Should.ThrowAsync<NotSupportedException>(() =>
+            data.CreateAsync("order_lines", new Dictionary<string, object?>(StringComparer.Ordinal), Caller(), cancellationToken: ct));
+    }
+
+    [Fact]
+    public async Task A_create_whose_echo_reads_a_relation_is_refused_before_it_writes()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var descriptor = AlvoDescriptor.Parse(Rules.RelationDescriptors.Project(
+            ("customers", Rules.RelationDescriptors.Entity([Rules.RelationDescriptors.Field("region", "string")], ("list", "true"))),
+            ("orders", Rules.RelationDescriptors.Entity(
+                [Rules.RelationDescriptors.Ref("customer_id", "customers")],
+                ("list", "true"), ("get", "customer_id.region == 'eu'"), ("create", "true")))));
+        var schema = DescriptorToSchemaMapper.Map(descriptor);
+        var data = new InMemoryAlvoData(EngineOver(descriptor, schema), new PredicateEvaluator(), schema);
+        var caller = Caller();
+
+        await Should.ThrowAsync<NotSupportedException>(() =>
+            data.CreateAsync("orders", new Dictionary<string, object?>(StringComparer.Ordinal), caller, cancellationToken: ct));
+
+        (await data.QueryAsync(new AlvoQuery { Entity = "orders" }, caller, ct)).Items.ShouldBeEmpty();
+    }
 
     private static InMemoryAlvoData CreateStore(string entity, Dictionary<string, FieldDescriptor> fields, params AlvoRecord[] seed)
     {

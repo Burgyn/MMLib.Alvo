@@ -11,7 +11,7 @@ snake_case. Pointers are RFC 6901 and operations RFC 6902 JSON Patch.
 An entity takes these keys:
 
 <!-- gen:entity-keys -->
-`description` `renamedFrom` `storage` `tenancy` `softDelete` `audit` `fields` `rules` `hooks` `events` `realtime` `indexes` `stateMachine` `timers`
+`description` `renamedFrom` `storage` `tenancy` `softDelete` `audit` `fields` `rules` `checks` `hooks` `events` `realtime` `indexes` `stateMachine` `timers`
 <!-- /gen:entity-keys -->
 
 A field takes these keys:
@@ -47,10 +47,12 @@ Types and facets are in `alvo-descriptor-field-types-and-formats`; `computed` an
 - `"events": {"exclude": ["<field>"]}` leaves fields out of the entity's event images, so no webhook body, after-hook
   or extension reads them; `id`, `tenant_id` and the managed columns stay. A field or entity an extension reads
   (`get_extensions`) cannot be removed or excluded: apply refuses it, naming the extension.
+- `virtual: true` — no column; a host enricher fills it on read (else null). Read-only; never in writes, CEL, filter/sort/select, indexes, events.
+  Only for an embedded host that registers `Enrich`.
 
 ## A new entity is one `add`
 
-A new entity is one `add` at `/entities/<entity>` carrying the whole object: its fields, its traits and its `rules`.
+A new entity is one `add` at `/entities/<entity>` carrying the whole object: fields, traits and `rules`.
 An entity without `rules` is reachable by nobody; `alvo-descriptor-rules-and-cel` says how to write them.
 
 <!-- example: new-entity-suppliers -->
@@ -71,7 +73,7 @@ An entity without `rules` is reachable by nobody; `alvo-descriptor-rules-and-cel
 ## Renames keep data; removals lose it
 
 A rename is a `move` of the member plus `renamedFrom` naming the old name. Without `renamedFrom` the apply sees a
-drop and an add, and the column's data is lost. `move` puts the member last in its object; that order means nothing.
+drop and an add, and the column's data is lost. `move` puts the member last; that order means nothing.
 The same holds for an entity: `move` it under `/entities` and set its `renamedFrom`.
 
 <!-- example: rename-technician-phone -->

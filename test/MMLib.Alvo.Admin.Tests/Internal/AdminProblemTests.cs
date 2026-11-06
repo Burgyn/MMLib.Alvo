@@ -137,6 +137,32 @@ public class AdminProblemTests
             "A value breaks a validation the descriptor declares. Each field's validation is on the entity's Fields tab.");
     }
 
+    /// <summary>
+    /// A lookup check's refusal is the author's sentence about a related row, not a field's validation: the fix names the
+    /// lookup, and never sends the operator to the Fields tab for a rule that is not there.
+    /// </summary>
+    [Fact]
+    public void A_lookup_check_refusal_carries_the_author_s_message_and_names_the_lookup()
+    {
+        var problem = AdminProblem.From(LookupCheckRefusal(["product_id"], "This product is not available."), ProblemSite.RecordWrite)!;
+        var hidden = AdminProblem.From(LookupCheckRefusal([], "This product is not available."), ProblemSite.RecordWrite)!;
+
+        problem.Detail.ShouldBe("This product is not available.");
+        problem.Fix.ShouldBe(
+            "Point product_id at a record that satisfies this check, or change the values the check compares. The check is declared in the entity's checks.");
+        hidden.Fix.ShouldBe(
+            "Point the reference at a record that satisfies this check, or change the values the check compares. The check is declared in the entity's checks.");
+    }
+
+    /// <summary>The refusal a lookup check raises; its constructor is internal to the engine, so it is reached as the engine reaches it.</summary>
+    private static AlvoConstraintViolationException LookupCheckRefusal(IReadOnlyList<string> fields, string message) =>
+        (AlvoConstraintViolationException)Activator.CreateInstance(
+            typeof(AlvoConstraintViolationException),
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            [fields, message],
+            culture: null)!;
+
     [Fact]
     public void An_argument_exception_is_the_data_ports_refusal_only_where_the_data_port_was_called()
     {

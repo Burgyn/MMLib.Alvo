@@ -29,6 +29,7 @@ public class CelTreeChildrenTests
     private static readonly CelFieldRef _title = new("title", CelValueType.String, CelRecordState.Current);
     private static readonly CelFieldRef _other = new("status", CelValueType.String, CelRecordState.Current);
     private static readonly CelLiteral _literal = new(CelValueType.String, "x");
+    private static readonly CelOuterFieldRef _outer = new("region", CelValueType.String);
 
     /// <summary>One entry per node kind: the node, and the children it must report, in order.</summary>
     /// <remarks>
@@ -47,6 +48,12 @@ public class CelTreeChildrenTests
         (nameof(CelConditional), new CelConditional(_title, _other, _literal), [_title, _other, _literal]),
         (nameof(CelHas), new CelHas(_title), [_title]),
         (nameof(CelCall), new CelCall(CelCall.LowerAscii, [_title]), [_title]),
+        (nameof(CelPath), new CelPath("customer_id", "region", 0), []),
+        (nameof(CelExistsMacro), new CelExistsMacro("members", "m", _title, 0), [_title]),
+        (nameof(CelHop), new CelHop("customer_id", RelationFixtures.Customers, _title), [_title]),
+        (nameof(CelRelation), new CelRelation(CelRelationKind.Forward, RelationFixtures.Customers, "id", "customer_id", "customer_id", _title), [_title]),
+        (nameof(CelOuterFieldRef), _outer, []),
+        (nameof(CelOuterHas), new CelOuterHas(_outer), [_outer]),
     ];
 
     public static TheoryData<string, CelNode, CelNode[]> EveryKind()

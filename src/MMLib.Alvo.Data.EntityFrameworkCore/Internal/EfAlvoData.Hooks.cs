@@ -64,16 +64,18 @@ internal sealed partial class EfAlvoData
 
         var patch = await _extensions.BeforeWriteAsync(Invocation(schema, operation, context, now) with { New = Unmasked(declared) }, cancellationToken).ConfigureAwait(false);
 
-        return patch.Count == 0 ? declared : JudgedPatch(db, schema, decision, context, declared, patch);
+        return patch.Count == 0
+            ? declared
+            : await JudgedPatchAsync(db, schema, decision, context, declared, patch, cancellationToken).ConfigureAwait(false);
     }
 
-    private Dictionary<string, object> JudgedPatch(
+    private async Task<Dictionary<string, object>> JudgedPatchAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context, Dictionary<string, object> candidate,
-        IReadOnlyDictionary<string, object?> patch)
+        IReadOnlyDictionary<string, object?> patch, CancellationToken cancellationToken)
     {
         EnsureHookMayWrite(patch, decision);
         var patched = Patched(db.Rows(schema.Name).EntityType, candidate, patch);
-        EnsureWriteAllowed(decision, Unmasked(patched), previous: null, context);
+        await EnsureWriteAllowedAsync(db, schema, decision, Unmasked(patched), previous: null, context, cancellationToken).ConfigureAwait(false);
         EnsureTransition(decision, DataOperation.Create, Unmasked(patched), previous: null, context);
 
         return patched;
@@ -112,7 +114,7 @@ internal sealed partial class EfAlvoData
 
         var patched = Patched(db.Rows(schema.Name).EntityType, candidate, patch);
 
-        return WriteRefusal(decision, Unmasked(patched), previous: null, context) is { } refusal ? (null, Forbidden(index, refusal))
+        return await RowRefusalAsync(db, schema, decision, Unmasked(patched), previous: null, context, index, cancellationToken).ConfigureAwait(false) is { } refusal ? (null, refusal)
             : TransitionRefusal(decision, DataOperation.Create, Unmasked(patched), previous: null, context, index) is { } moved ? (null, moved)
             : (patched, null);
     }
@@ -332,7 +334,7 @@ internal sealed partial class EfAlvoData
 
         using var db = _contexts.Create();
         var now = WriteInstantNow();
-        var (_, candidate) = AuthorizedCandidate(db, entity, values, decision, context, now);
+        var (_, candidate) = await AuthorizedCandidateAsync(db, entity, values, decision, context, now, cancellationToken).ConfigureAwait(false);
         await _extensions.ValidateAsync(
             Validation(entity, AlvoWriteOperation.Create, context, now) with { New = WithoutId(Unmasked(candidate)) }, cancellationToken).ConfigureAwait(false);
     }
@@ -341,7 +343,7 @@ internal sealed partial class EfAlvoData
     /// Stages 0–2 of an update or a replace: the caller's own payload checks first, by the very guard the write runs
     /// (<c>UpdatableEntity</c> or <c>ReplaceableEntity</c>; Ruling 41 — no hook sees a payload the write will refuse), E9's
     /// pre-read — autocommit, unmasked, under the operation's own decision (Ruling 13) — and the validate hooks. A row the pre-read
-    /// does not find is judged by <see cref="EnsureCreatable"/> before any hook runs, against <c>createsWith</c> — a replace's
+    /// does not find is judged by <see cref="EnsureCreatableAsync"/> before any hook runs, against <c>createsWith</c> — a replace's
     /// create decision, or <see langword="null"/> for an update, which never creates — and the write's <c>precondition</c>.
     /// </summary>
     private async Task ValidateChangeAsync(
@@ -360,7 +362,7 @@ internal sealed partial class EfAlvoData
         var old = await PreReadAsync(db, schema, decision, context, id, cancellationToken).ConfigureAwait(false);
         if (old is null)
         {
-            EnsureCreatable(db, schema, createsWith, precondition, context, id, values, now);
+            await EnsureCreatableAsync(db, schema, createsWith, precondition, context, id, values, now, cancellationToken).ConfigureAwait(false);
         }
 
         await _extensions.ValidateAsync(
@@ -375,9 +377,9 @@ internal sealed partial class EfAlvoData
     /// will refuse, exactly as a plain create (Ruling 60). A precondition is checked first, as <c>CreatedByReplaceAsync</c> checks
     /// it: a version names a row that is not there, so it answers 412 whether or not a validate hook is registered (Ruling 61).
     /// </summary>
-    private void EnsureCreatable(
+    private async Task EnsureCreatableAsync(
         AlvoDataContext db, EntitySchema schema, PolicyDecision? createsWith, AlvoPrecondition? precondition, AlvoContext context, Guid id,
-        IReadOnlyDictionary<string, object?> values, DateTimeOffset now)
+        IReadOnlyDictionary<string, object?> values, DateTimeOffset now, CancellationToken cancellationToken)
     {
         if (createsWith is null)
         {
@@ -385,7 +387,8 @@ internal sealed partial class EfAlvoData
         }
 
         AlvoPrecondition.EnsureMatches(precondition, storedVersion: null);
-        EnsureWriteAllowed(createsWith, Unmasked(ReplaceCandidate(db, schema, createsWith, context, id, values, now)), previous: null, context);
+        var candidate = Unmasked(ReplaceCandidate(db, schema, createsWith, context, id, values, now));
+        await EnsureWriteAllowedAsync(db, schema, createsWith, candidate, previous: null, context, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<AlvoRecord?> PreReadAsync(
@@ -450,13 +453,14 @@ internal sealed partial class EfAlvoData
 
     /// <summary>One create row: its payload and rule refusal, or its validation.</summary>
     private Func<AlvoDataContext, EntitySchema, DateTimeOffset, int, Task<RowValidation>> CreateRowValidation(
-        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, PolicyDecision decision, AlvoContext context) =>
-        (db, schema, now, index) => Task.FromResult(JudgedCandidate(db, schema, decision, context, rows[index], now, index) switch
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, PolicyDecision decision, AlvoContext context,
+        CancellationToken cancellationToken) =>
+        async (db, schema, now, index) => await JudgedCandidateAsync(db, schema, decision, context, rows[index], now, index, cancellationToken).ConfigureAwait(false) switch
         {
             ({ } candidate, null) => new RowValidation(
                 Validation(schema.Name, AlvoWriteOperation.Create, context, now) with { New = WithoutId(Unmasked(candidate)) }, null),
             (_, var refusal) => new RowValidation(null, refusal),
-        });
+        };
 
     /// <summary>
     /// One update row: a repeat of an earlier row's id, its payload refusal, the row unavailable to this caller (fail closed,

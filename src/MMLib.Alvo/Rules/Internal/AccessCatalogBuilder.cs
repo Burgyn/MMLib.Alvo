@@ -23,7 +23,7 @@ internal static class AccessCatalogBuilder
     /// <remarks>
     /// The <see cref="CelProfile.Access"/> profile refuses every field reference before the checker
     /// resolves a name, so this schema's emptiness is never the thing that produces the error — the
-    /// profile is. It exists because <see cref="ICelCompiler.Compile"/> takes an entity, and inventing an
+    /// profile is. It exists because <see cref="ICelCompiler.Compile(string, CelProfile, EntitySchema)"/> takes an entity, and inventing an
     /// overload that does not would widen a published port for one caller.
     /// </remarks>
     internal static EntitySchema ProjectScope { get; } = new() { Name = "<project>", Fields = [] };

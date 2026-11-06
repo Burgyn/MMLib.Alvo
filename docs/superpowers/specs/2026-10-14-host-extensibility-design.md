@@ -1076,6 +1076,39 @@ synchronous, in-transaction.
   `AlvoFilter`), ANDed into the compiled SQL for list, get and count of **non-system** callers (handler
   `System` contexts and `AsSystem` are not narrowed). Writes are not narrowed. The simulator lists narrowings.
 
+**HX-16 settled details.** Decisions taken while planning (1–15, verbatim from `docs/superpowers/plans/2026-11-06-hx-16-reads.md` *Decisions (not settled by the spec)*, in the plan's form "decision — cost if wrong", with (4), (9) and (13) as amended by the review rulings the plan records, and (4)'s note to carry its last two clauses here dropped) and while building (16–31), so a later reader can tell a decision from an oversight. Where a detail and §4.12/§4.13's text above disagree, the detail is what shipped. A narrowing is a view, not an authorization boundary: what a caller must not read or write belongs in rules.
+- (1) **A driver port, not an `IAlvoData` decorator**: a decorator cannot AND into `get` (it would turn a get into a list under the other rule), would push the narrowing through the caller-filter limits and hidden-field guard, and units bypass decorators. `InMemoryAlvoData` runs no read extension (documented, as it runs no unit — HX-07) but refuses a write naming a virtual field like the driver. — Cost: an in-memory test sees no narrowing or enrichment.
+- (2) **System = `context.ActorKind == AlvoActorKind.System`** (the `AlvoTransactionOptions` precedent); every other caller is narrowed, inside a unit too. — Cost: a host passing a hand-built system context skips its own narrowing, by design.
+- (3) **Write echoes and idempotent replays are read back under the `get` decision *and* the narrowing (operation `Get`), then enriched with the write's operation**; a narrowed-out echo answers the id alone, as a `get`-excluded one does. Only the write's target rows and pre-images are not narrowed ("writes are not narrowed"). A narrowing is a **view, not an authorization boundary** — the docs and the spec say "use rules" for what a caller must not touch. — Cost: one narrowing call per write echo.
+- (4) **Fail closed**: a registered narrowing or enricher that is unbound for the current catalog, throws, is untranslatable, exceeds `AlvoFilter` limits or names a missing or virtual field fails the read with 500 `hook-failed`. An enricher's echo runs inside the write's transaction, so its failure rolls the write back too (no committed write answers 500); an enrichment opens only for a read that returns rows, so an unbound enricher fails only those (nothing to shape, nothing to leak). — Cost: a defective extension takes its entity's reads down instead of leaking rows.
+- (5) **A narrowing may name a field the policy hides from the caller**, as a rule's `USING` may (host-authored, not caller-controlled); the runner logs `NarrowingNamesHiddenField` (Warning, ids only) once per extension and field — at first use, since the filter exists only at run time. — Cost: the predicate is observable through which rows survive; refusing later is one check in `ReadExtensionRunner.Checked`.
+- (6) **The enricher sees the masked row only**; `SetVirtual` on a virtual field the row does not carry (hidden from this caller, or not selected) is a no-op, so an enricher can never resurrect a hidden field. — Cost: no virtual value derived from data the caller cannot read.
+- (7) **`Hide` refuses framework columns** (`AlvoManagedColumns.For(entity)`: `id`, `tenant_id`, audit, version, `deleted_at`) — `invalid-hide`. — Cost: none known; keeps ETags and cursors intact.
+- (8) **A virtual field the caller may read and selected is always present, `null` until an enricher fills it** — a stable key set, and `As<T>()` keeps working. — Cost: payload bytes.
+- (9) **`virtual` is refused with** `computed`, `rollup`, `default`, `required`, `nullable: false` (it always reads null), `unique`, `index`, `validation`, `renamedFrom`, type `ref`, in `indexes[].fields`, as a rollup's `field`/`via`, in `events.exclude`, as a declarative before-hook `mutate` target, and on a dynamic entity. — Cost: each relaxes later additively.
+- (10) **Untyped path:** the enricher is `IRecordEnricher<AlvoRecord>` (no new type); the narrowing is a new `IQueryNarrowing` returning `AlvoFilter?` (X7: untyped = `AlvoFilter`). Delegate forms are `Func<>`/`Action<>` without DI parameters (HX-09's `Delegate` forms resolve DI). — Cost: DI in delegates is an additive overload later.
+- (11) **No options type; order = registration order; `"*"` refused at boot.** Catalog: a narrowing lists operations `list`, `get`; an enricher `list`, `get`, `create`, `update`; `When` is `null` (deviation from §4.13 "narrowing shows its filter" — the filter is per caller). — Cost: a follow-up to render it in the simulator.
+- (12) **The §4.4.5 boot ban covers the narrowing too** (§4.12 names the enricher; both run in the same read, possibly inside a unit). — Cost: a narrowing cannot look up memberships through `IAlvoData`; it reads them from the caller or a cache.
+- (13) **Port refusal families:** a virtual field in a write payload is `AlvoAuthorizationException` (the computed/rollup precedent; the Data API answers 422 first through `RecordValidator`); in a port filter/sort/select it is the undeclared-field refusal (indistinguishable from hidden); the Data API answers 422 `virtual-field` for one the caller can read. A virtual field the caller's policy hides is, in a write payload too, indistinguishable from an unknown one: 422 `unknown-field` over HTTP, the undeclared-field refusal at the port (review ruling I3a). — Cost: an embedded caller sees 403 where HTTP sees 422.
+- (14) **No telemetry span per read** (failures logged with ids only; `Hooks.AssertRan` counts no read), and **class extensions come from one `CreateAsyncScope()` per read**, opened only when a class extension is registered on the entity. — Cost: no p95 in the *Reads* lane; a scope per read on such entities.
+- (15) **The Data API's reference probe (`RecordValidator.IsResolvableAsync`) reads under rules only** — neither narrowing nor enrichment — inside an internal `AlvoFlow.EnterRulesOnlyRead()` scope the runner honours, so the 422 for an unresolvable `ref` matches the port, which checks references under rules alone. — Cost: a caller can reference a row its narrowing hides (the view is not a boundary, Decision 3).
+- (16) **Wire constants, as built.** A read failure is `HookFailedException.OfRead(ids, reason)` (`Stage = HookFailureStage.Read`), message `The read extension '<ids>' failed (<reason>), so the read answered nothing.`, reasons `exception`, `unbound`, `translation`, `invalid-filter`, `invalid-hide`, `invalid-set`; the Data API answers it through `ProblemResultFactory.HookFailedRead`: 500 `hook-failed`, detail `The read extension '<ids joined by "', '">' failed (<reason>), so the read answered nothing. Its own error is in the server log.`, `extensions` (the ids) and `reason`. A Data API write naming a virtual field is 422 `validation`, code `virtual`, pointer `/<field>`; a query naming one is 422 code `virtual-field` with pointer **`filter`, `order` or `select`** — the parameter name, without a leading slash, as `unavailable-field` already answers (the plan's `/filter`, `/order`, `/select` is corrected here). The port's write refusal is `AlvoAuthorizationException` `Field '<field>' is virtual and cannot be written: an enricher fills it when the record is read. Remove it from the payload.` (one wording, `VirtualFieldWrites`, shared by the EF driver and `InMemoryAlvoData`). Boot refusals sit at `extensions/<id>/dependencies`, `entity`, `record`, `provider`.
+- (17) **The port is asynchronous.** `IReadExtensionRunner.NarrowingAsync` returns a `ValueTask<ReadNarrowing?>` and `IReadEnrichment` is `IAsyncDisposable`: a class extension's DI scope comes from `CreateAsyncScope()` and is disposed with `DisposeAsync`, so a scoped service that implements only `IAsyncDisposable` is safe. A disposal that throws fails the read `exception`, naming the class extensions' ids, logged and blamed on the unit like any other read failure.
+- (18) **A failed read poisons a unit.** Every read failure — narrowing, enrichment, or a narrowing value the composer cannot bind — calls `AlvoFlow.Unit?.Blame(failure)`, the write-hook precedent: a unit whose read failed cannot commit.
+- (19) **A class enricher's instance is per read**, built at its first row and reused for every row of that read (a page, a batch echo), then disposed with the enrichment — every instance Alvo built, then the read's scope, each attempted even when an earlier one throws, the first failure failing the read; per row would mean N activations per page. A class the host registered in its services is resolved from the read's scope instead and Alvo does not dispose it: a singleton is shared by concurrent reads of every caller, so its thread safety is the host's.
+- (20) **`virtual` with `nullable: false` is refused at apply** (a virtual field always reads null until filled), and so is a declarative before-hook `mutate` targeting a virtual field (`BeforeHookCompiler`, pointer `<hook>/<i>/action/mutate/<f>`); both are in (9).
+- (21) **A write naming a policy-hidden virtual field answers `unknown-field`** over HTTP and the undeclared-field refusal at the port (review ruling I3(a), in (13)), so a write cannot probe for a field the caller's policy hides.
+- (22) **Echoes and replays are read back under the narrowing**, and enriched with the write's operation: a create, its replay and a batch create are enriched as `Create`; an update, a replace (including a replace that creates the row) and their replays as `Update`, so a first answer and its replay are identical; a delete reads nothing back and is not enriched (with (3)).
+- (23) **The reference probe is rules-only** (with (15)): neither the narrowing nor the enrichers run inside `AlvoFlow.EnterRulesOnlyRead()`, and `BeginEnrichment` returns no enrichment there.
+- (24) **A narrowing value the field cannot hold is `invalid-filter` at compose time.** `ReadStatementComposer` runs each column-bound narrowing value through the binder's own conversion, so a mistyped value fails the read as the host's defect (500) rather than as a bind-time crash.
+- (25) **A typed enricher's row reads a policy-hidden mapped property as its default** (every missing field may be absent when `Enrich<T>.Row` materialises), but `ShapeMapping` refuses at boot a non-nullable CLR property on a virtual field, for every typed binding (hook, handler, narrowing, enricher): a virtual field is present as `null` until filled.
+- (26) **An enricher's write echo runs inside the write's transaction**, so an enrichment failure on the echo rolls the write back (no committed write answers 500), and **an unbound enricher fails only reads that return rows** — an enrichment opens only when there is a row to shape (with (4)).
+- (27) **`Enrich<T>.Row` is a snapshot taken at first read**: it materialises the row once, on first use, so a `Hide` or `SetVirtual` made after that is not reflected in it.
+- (28) **A refusal the enricher catches still fails the read with its reason** (`invalid-hide`, `invalid-set`): catching the refusal of a `Hide` or `SetVirtual` does not let the read go on.
+- (29) **The `virtual` schema description lists every refused combination** (`schema/project.schema.json` `$defs/field/properties/virtual`): the keys of (9), `indexes[].fields`, a rollup's `field`/`via`, `events.exclude`, a before-hook `mutate` target and a `storage: dynamic` entity — `VirtualFieldCheck` and `BeforeHookCompiler.Target` are the authority.
+- (30) **A handler running as the event's actor is narrowed as that actor** (with (2)): `EventActor.Of` maps the envelope's auth type to the actor kind, so an event recorded as a user's, an API key's or an anonymous change is narrowed, while an event recorded with auth type `system` has an `AlvoActorKind.System` actor and is not narrowed. Enrichers run for every caller, the system included.
+- (31) **`NarrowingNamesHiddenField` names the field** as well as the extension (a descriptor name, never a value); (5)'s and (14)'s "ids only" means no data and no host text is logged.
+
 ### 4.13 Extension catalog
 
 ```csharp
@@ -1097,7 +1130,7 @@ public sealed record ManagementExtension
 public sealed record ManagementExtensionCatalog { public required IReadOnlyList<ManagementExtension> Items { get; init; } }
 ```
 
-`When` is always text (CEL; narrowing shows its filter). `TypeName` is null unless
+`When` is always text (CEL; narrowing shows its filter — **amended by *HX-16 settled details* (11):** a narrowing's `When` is `null`, because its filter is per caller). `TypeName` is null unless
 `Alvo:Extensions:ExposeTypeNames=true`. Reached by `IAlvoManagement.GetExtensionsAsync(project)` →
 `GET {m}/projects/{p}/extensions` (Viewer). The capability report lists registered kinds under `Honoured`.
 `ManagementPolicyVerdict` gains `Extensions` as an **init** property defaulting to `[]` (not positional).
@@ -1269,10 +1302,10 @@ Roslyn dependency is needed.
 | `IAlvoScheduler`, `IAlvoScheduledJob`, `AlvoJobContext`, `AlvoScheduleOptions`, `AlvoScheduleScope`, `IAlvoTenantCatalog`, `IAlvoDataMigration`, `AddSchedule<T>`, `AddDataMigration<T>`, `ITimerStore` + `TimerStoreContractTests`; **as built (*HX-13 settled details*):** also `TimerEntry`, `ClaimedTimer`, `TimerCounts`, `ScheduleDefinition`, `ClaimedSchedule`, `ScheduleAdvance`, `StoredSchedule`, `AlvoFrameworkEnvelope`, `AlvoSchedulerExtensions.ScheduleAsync<TMessage>`, `ITimerStoreWorld`, `AlvoDeliveryOptions.MaxJobConcurrency`, `AlvoExtensionKind.Schedule`/`.DataMigration`, `AlvoExtensionStage.Scheduled`, `ManagementExtension.Cron`/`.TimeZone`/`.NextRunAt`/`.LastRunAt`/`.LastOutcome`/`.AfterRevision`, `ManagementExtensionCatalog.Timers`, `ManagementTimerCounts` | core; Abstractions; Testing | 13 | |
 | `IAlvoSteps`, `AlvoConcurrency`, `AlvoHandlerOptions.Concurrency`/`Debounce` behaviour | core / Events | 14 | |
 | `IAlvoFunction<TInput>`, `AlvoFunctionContext`, `AlvoFunctionSkippedException`, `AddFunction<T>`, `AddRequiredSecret` | core | 15 | |
-| `IRecordEnricher<T>`, `Enrich<T>`, `IQueryNarrowing<T>`, `QueryNarrowing`; `FieldSchema.IsVirtual` | core; Abstractions / Schema | 16 | |
+| `IRecordEnricher<T>`, `Enrich<T>`, `IQueryNarrowing<T>`, `QueryNarrowing`; `FieldSchema.IsVirtual` | core; Abstractions / Schema | 16 | **Amended (HX-16):** also the untyped `IQueryNarrowing` (`AlvoFilter?`, *HX-16 settled details* (10)); `AlvoEntityBuilder<T>.Narrow<TNarrowing>(string)`, `.Narrow(string, Func<QueryNarrowing, Expression<Func<T,bool>>?>)`, `.Enrich<TEnricher>(string)`, `.Enrich(string, Action<Enrich<T>>)` and `AlvoEntityBuilder.Narrow<TNarrowing>(string)`, `.Narrow(string, Func<QueryNarrowing, AlvoFilter?>)`, `.Enrich<TEnricher>(string)`, `.Enrich(string, Action<Enrich<AlvoRecord>>)` (core / `MMLib.Alvo.Extensions`); `AlvoExtensionKind.Narrowing = 7`, `.Enricher = 8`, `AlvoExtensionStage.Read = 4` (appended, *HX-04 settled details* (17)); `FieldDescriptor.Virtual` (`bool?`, init — the descriptor model). Everything else — `IReadExtensionRunner`, `IReadEnrichment`, `ReadNarrowing`, `VirtualFieldWrites` — is internal. |
 | (generator output only) | Analyzers in the `MMLib.Alvo` nupkg | 17 | |
 | schema-model members for `stateMachine`, `timers` | Abstractions / Schema | 18 | |
-| schema-model members for relation rules and `checks` | Abstractions / Schema | 19 | |
+| schema-model members for relation rules and `checks` | Abstractions / Schema | 19 | **Amended (HX-19):** `EntityCheck`, `EntityDescriptor.Checks`, `ManagementPolicyVerdict.Relations`, `ManagementRelationVerdict`; no `Abstractions/Schema` member (*HX-19 settled details* (14), (34)) |
 
 No `CelProfile` member and no CEL AST node is added (X7).
 
@@ -1911,6 +1944,90 @@ executed snippet, `data-path.md`, this section). The security-core review (`alvo
   pointer.
 - **Why last:** the largest change to the predicate compiler and the riskiest security-core PR; lands on a
   stable catalog, simulator and read pipeline.
+
+#### HX-19 settled details
+
+Decisions taken while planning (1–15, verbatim from `docs/superpowers/plans/2026-11-06-hx-19-relation-rules.md`
+*Decisions*), the reading of acceptance (2) they fix (16), and the rulings of the plan and task reviews and the
+deviations taken while building (17–37), so a later reader can tell a decision from an oversight. Where a ruling and
+the scope above, §5 row `19` or §6.1 disagree, the ruling is what shipped. Each decision reads: the decision, then the
+cost if it is wrong.
+
+1. **Syntax.** Forward is `<ref>.<field>`. Reverse is CEL's `<child>.exists(x, p)`, with `<child>_via_<field>` when the child references this entity more than once (rollup `via` resolution, PocketBase spelling). — Renaming syntax later is a breaking descriptor change.
+2. **One hop per term.** Deeper reach composes through the related entity's own `list` rule, which is ANDed in. A chain deeper than 3 is refused at apply. — A 4-deep chain needs a stored field or a rollup.
+3. **A relation term is refused under `!` in rules,** so a rule only narrows as related rows vanish. `!=` inside a term is fine. — "No blocking row" needs a rollup count.
+4. **`EXISTS` carries the related `list` USING plus its tenant scope.** A denied related `list` is a constant `FALSE`. **Host narrowings are not ANDed in**: a narrowing is a view, writes are not narrowed (§4.12, HX-16 D3), and AC (2)'s "cannot list" means *by rules*. — A host using a narrowing as security sees relations match rows it hides; the fix is to put that condition into the rule.
+5. **Relations are legal only in `rules.*` and `checks[].expr`.** Hook conditions, `validation`, `rollup.where`, `hidden`/`readOnly`, command access and `computed` keep today's refusal unchanged, because the parser builds relation nodes only on request. — None; widening a slot later is additive.
+6. **Internal nodes.** A tree holding `CelRelation` is refused by the public `IPredicateRenderer.Render`, the interpreter and `InMemoryAlvoData`, each with `NotSupportedException`. §5's "no CEL AST node is added" holds for the public API. — A third-party renderer or the in-memory double cannot run relation rules.
+7. **Binding happens in `PolicyEngine.Resolve`, over one catalog snapshot read once per call,** cached per (catalog, entity, operation, slot, depth, has-identity, has-tenant). Has-identity is `RequiredContext.HasIdentity` (the all-zero `UserId` is anonymous), shared with the required-context gate. Those are the only inputs a related decision's allow or deny depends on; role literals render later, per caller. — A wrong key binds a wrong scope; `PolicyEngineRelationTests` pins all four bit combinations, the anonymous-after-authenticated case and the depth key.
+8. **`WITH CHECK` relation terms are probed in SQL inside the write's transaction,** with the outer values bound from the post-image. The rest stays interpreted. — One round trip per relation term per written row.
+9. **A cycle means a cycle among `list` rules, self-loops included.** Other operations and checks only consume `list`, but their chains count: a non-`list` rule or a check whose target's `list` depth plus 1 exceeds 3 is refused. A relation to an entity with no `list` rule draws an apply warning from its own validator pass. — Hierarchies cannot write a self-relation in `list`; they use `get`/`update` or a stored field.
+10. **Targets are declared physical entities only.** `users` and `storage: dynamic` (#41) are refused. Tenancy may cross: nothing is materialised, so each caller's own related scope applies, unlike rollups. — A global outer row is visible to a tenant through that tenant's related rows only.
+11. **A check is forward over `lookup` only, and its whole `expr` is the `EXISTS` body,** so negation inside is allowed and fails closed when the row is invisible. A check refuses `@user`/`@tenant` and allows `now()`. A null lookup skips the check (SQL `CHECK`). — A check cannot read a child or the caller.
+12. **Checks run after `WITH CHECK`,** so authorization comes first and a forbidden caller learns nothing. They run on create and batch create, and on update or replace only when a field the check reads changed (`RI_FKey_check_upd`). The first failing check in declaration order refuses. **The probe takes no lock** (no `FOR KEY SHARE`): a concurrent transaction may change the looked-up row between the probe and the commit, the TOCTOU a PostgreSQL RLS sub-select also has; the architecture doc says so. — A related row changed later or concurrently is not re-validated, as with an unlocked foreign-key read, and an agent fixes one check per round trip.
+13. **The refusal is `AlvoConstraintViolationException(Check, [lookup])` plus an internal `DescriptorMessage`.** The author's text is server-owned, not caller-supplied. No `AlvoConstraintKind` value is added, because HX-12 appends in parallel. — A host can tell a lookup check from a column `CHECK` only by `Fields` and `Message`.
+14. **Public additions are `EntityCheck` and `EntityDescriptor.Checks`, not "schema-model members" as §5 row 19 says.** Rules and checks live in the descriptor model, not `EntitySchema`. `ManagementPolicyVerdict.Relations` is added so the simulator can name bound scopes. — Two public types more than §5.
+15. **The interpreter's `_ => null` default stays, and `CelRelation`/`CelOuterFieldRef` get explicit throwing arms.** A `null` under `!` reads as true, so a missing arm would fail open. — None.
+16. **Acceptance (2), read by Decision 4:** "a related row the caller cannot list" means *by the related entity's
+    rules* — its `list` rule and tenant scope, both ANDed inside the `EXISTS` (a denied `list` is constant `FALSE`). A
+    host narrowing (HX-16) is **not** part of the `EXISTS`: a narrowing is a view, not a boundary. *Rules over
+    relations* says so.
+17. **Plan review: the cache key's identity bit is `RequiredContext.HasIdentity`** (the all-zero user id is anonymous),
+    so an anonymous caller is never served a scope bound for an authenticated one; pinned by
+    `PolicyEngineRelationTests`.
+18. **`CelNode` gains two `internal virtual` members, `ChildNodes` and `RebuildChildren`,** so the Abstractions-side
+    `CelRewriter` descends into a core node (`CelCall`) it cannot name; a node that declares no children makes the walk
+    throw rather than read it as a leaf. The public surface is unchanged.
+19. **The catalog's refusal delegate returns a `CelCompilationError`** (message and fix), and the texts the brief left
+    open were worded in `RelationRefusals`: an `exists` over a non-child, a second relation inside an `exists` body, a
+    bare `exists` variable, and `ref.exists(…)`.
+20. **The reverse walk reads the applied schema** (`FieldSchema.Reference`); only `RollupResolver`'s alternatives text
+    is shared, and a parity fact holds the `_via_` spellings equal to `RollupResolver.ReferencesTo`. A `_via_` spelling
+    that collides with an entity name is ambiguous, whatever the enumeration order.
+21. **`'<e>.<path>'` in the depth text is `'<entity>.rules.<op>'`** (or `checks.<i>`); every `list` entity is checked
+    after its walk, so a too-deep chain is refused at every rule that starts it; entities on a cycle draw no depth error.
+22. **The lifter refuses a relation under any node other than `&&`/`||`** with the negation text — a ternary can
+    invert one as surely as `!`.
+23. **`IPredicateRenderer`'s internal relation member takes the outer `EntitySchema`,** and the read composer uses it
+    only when a tree holds a relation, so a host-registered third-party renderer keeps working for every other rule.
+24. **In a probe, a null or unconvertible outer value renders its comparison `FALSE`,** and a null outer key the whole
+    relation `FALSE` without reading a table; `has(outer)` is a constant decided by the post-image, a JSON `null` being
+    absent; an outer timestamp is a constant instant on the temporal path.
+25. **The probe runs through EF's `SqlQueryRaw<int>`** on the write's context, so it joins that context's transaction.
+26. **Task 4–6 review I1: a create's relation verdict and its lookup checks are deferred until `BeginAsync`** (on a
+    plain, a keyed and a unit create), so the probe runs inside the write's transaction as Decision 8 says. The
+    validate-hook stage may still answer early. Pinned by statement: `RelationEngineFacts` records that every probe ran
+    with a transaction (Task 7–8 review I1).
+27. **Task 4–6 review I2: aliases are `_alvo_rN`,** which no entity name can spell, so an entity called `alvo_r1`
+    cannot capture its own qualifier (red first on both engines).
+28. **`CelRelationCatalog.LiftsForwardPaths`** (internal, default true): a check's compile sets it false, so its whole
+    `expr` stays one relation body (Decision 11).
+29. **A check's lookup problems are refused at `/entities/<e>/checks/<i>/lookup`** — not a reference, an unreadable
+    target — and a check on a `storage: dynamic` entity at `/entities/<e>/checks/<i>`; `expr` problems stay at
+    `/checks/<i>/expr`.
+30. **`AlvoConstraintViolationException` does not implement `IRowRefusal`.** A batch builds its row refusal directly
+    (`index`, `check`, the message, no fix), so a hook's own unique or FK violation is never mistaken for a row
+    refusal.
+31. **Task 7–8 review I2: the port suite's `products` list rule is role-gated** (`restricted == false || 'buyer' in
+    @user.roles`), so a same-tenant product the caller cannot list fails the check — the related `USING`, not only the
+    tenant scope, is proven inside a check's probe; `CheckCompilerTests` asserts the bound check scope's `USING`.
+32. **Task 7–8 review m2: a keyed create's replay does not re-run lookup checks.** The deferred verdict runs on the
+    branch that inserts; a retry after the product changed answers the recorded row (Decision 12).
+33. **A check reading a hidden related field answers one bit per request,** as a rule over one does; the author owns
+    it, and `docs/architecture/relation-rules.md` says so.
+34. **`ManagementPolicyVerdict.Relations` names each relation once,** from the bound `USING`, `WITH CHECK` and checks in
+    that order: `Via` is the ref (forward) or `<child>.<ref>` (reverse), `Allowed = !Scope.Denied`, with the related
+    `USING` and tenant-scope sources. The dashboard shows them under *Reads through*, and the rules editor lists the
+    relation terms apply would compile under each box (`RelationHints`, internal), in `_via_` form only for an
+    ambiguous child.
+35. **The dashboard names a lookup-check refusal as one,** through the existing Admin grant to Abstractions' internals
+    (`AlvoConstraintViolationException.DescriptorMessage`), never as a field validation.
+36. **Not asserted over HTTP:** a probe refusal (403) whose ref the caller can resolve — the HTTP facts meet reference
+    resolution's 422 `unresolved-reference` first; the port suites cover the probe on both engines.
+37. **Follow-up, not covered:** an update through a hidden lookup (`Unnameable` on the update decision) is proven on
+    create only; the fixture's `gift_lines` declares no `update` rule. `ManagementRelationVerdict.Allowed` reports a
+    structural denial only (a role condition stays in `Using`), and the verdict lists the relations a decision reads
+    directly, not those nested in a related `list` rule.
 
 ---
 

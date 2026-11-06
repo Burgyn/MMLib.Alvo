@@ -1,0 +1,137 @@
+---
+title: Shape what reads return
+description: Narrow which rows a caller reads, and hide a field or fill a virtual one in every row a read returns — in C#, after the rules, without ever rewriting a row.
+sidebar:
+  order: 8
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import extensions from '../../../snippets/extending/reads/ReadsDeskExtensions.cs?raw';
+import tests from '../../../snippets/extending/reads/ReadsDeskExtensionsTests.cs?raw';
+import descriptor from '../../../snippets/extending/reads/reads-desk.alvo.json?raw';
+
+The descriptor's `rules` decide which rows a caller may read, and a field's `hidden` decides what it may see of them.
+When that decision needs your C# — a region the caller's directory knows, a label built from two fields — an embedded
+host registers a **read extension** on an entity.
+
+## What a read extension can do
+
+Two verbs, and nothing else:
+
+| Extension | Runs | May | May not |
+|---|---|---|---|
+| **narrowing** (`Narrow`) | once per list, get or count, for every caller but the system | AND one more filter into the read's SQL, after the rules | widen what the rules allow; touch a write |
+| **enricher** (`Enrich`) | on every row a read returns — a page, a get, a write's echo | hide a field; fill a field the descriptor declares `virtual` | change a stored value; add a row; resurrect a field the caller cannot see |
+
+There is no hook that rewrites a row after the SQL ran. A row changed after the query no longer matches the page it came
+on, its cursor or its count: paging and counting would lie. A narrowing is part of the query instead, so the page, the
+anchor of the next page and the total all see it; an enricher only removes what the rules already allowed or fills a
+field nothing stores.
+
+## The reads desk
+
+Clerks read the notes of their own region; auditors read every note. Every note carries a `display` label that nothing
+stores.
+
+<Code code={descriptor} lang="json" title="reads-desk.alvo.json" />
+
+<SourceExcerpt code={extensions} from="public static IAlvoBuilder AddReadsDesk" to=".Enrich<NoteLabel>" title="ReadsDeskExtensions.cs" />
+
+## Narrow a read
+
+<SourceExcerpt code={extensions} from="public sealed class OwnRegionNarrowing" to="}" title="OwnRegionNarrowing" />
+
+`Narrow` returns a predicate over your class, translated to an `AlvoFilter` on every call, or `null` to leave the read
+as the rules made it. The untyped form returns the `AlvoFilter` itself:
+
+<SourceExcerpt code={extensions} from="public static IAlvoBuilder AddUntypedNarrowing" to="AlvoFilterOperator.Eq" title="The same narrowing, untyped" />
+
+- **ANDed after the rules.** The filter is its own term in the statement, beside the rules' `USING` and the tenant scope
+  and never inside the caller's own `filter`: it can only remove rows the rules allow, never add one.
+- **Never for the system.** A caller whose `ActorKind` is the system is not narrowed — an event handler that runs
+  as the system, and every `AsSystem()` session, see every row the rules give the system. A handler running as the
+  event's actor is narrowed like that actor — unless the event was itself recorded as the system's, when its actor is
+  the system and is not narrowed. Every other caller is narrowed, inside a transaction unit too. Enrichers are
+  different: they run for every caller, the system included.
+- **Writes are not narrowed.** An update, a replace or a delete reaches a row the narrowing hides from its caller's list.
+  To stop a caller writing a row, say so in the entity's `update` and `delete` rules.
+
+:::caution[A narrowing may name a hidden field]
+A narrowing is host code, not caller input, so like a rule's `USING` it may filter on a field the caller's policy
+hides. Its effect is observable: which rows survive tells the caller something about that field. Alvo logs
+`NarrowingNamesHiddenField` (a warning naming the extension and the field, never a value) the first time each narrowing does so.
+:::
+
+:::danger[A narrowing is a view, not a boundary]
+A narrowing shapes what reads show; it does not decide what a caller may touch. A write still reaches a row the
+narrowing hides, and a `ref` still resolves to one — a write's echo is read back under the narrowing, so such a row
+answers with its id alone. What a caller must not read or write belongs in `rules`.
+:::
+
+## Fill a virtual field
+
+```json
+"display": { "type": "string", "virtual": true }
+```
+
+A `virtual` field has no column. It appears in every row a caller may read and selected — `null` until an enricher
+fills it — and it is read-only everywhere: a create or a patch naming it answers 422 `virtual` (or `unknown-field`, when the caller's policy hides the field,
+so a write cannot probe for it), and it is never in a
+`filter`, a sort, a `select`, a CEL expression, an index or an event's images (422 `virtual-field` on a query, a refusal
+at apply in the descriptor). OpenAPI marks it `readOnly`.
+
+<SourceExcerpt code={extensions} from="public sealed class NoteLabel" title="NoteLabel" />
+
+The enricher sees the row **after** the caller's mask, so `row.Row` holds only what this caller may read. `SetVirtual`
+on a virtual field the row does not carry — hidden from this caller, or not in the `select` — does nothing: an enricher
+can never bring back a field the caller cannot see. One class instance serves every row of one read.
+
+## Hide a field per caller
+
+`row.Hide("salary")` removes a field from the row this caller gets. Prefer the descriptor's `hidden` first: a
+`"hidden": "!('auditor' in @user.roles)"` is shown by the policy simulator, refuses the field in the caller's `filter`
+and `sort`, and an agent can read and change it. `Hide` is for a decision only your code can make. It refuses the
+framework's own columns (`id`, `tenant_id`, the audit fields, the version, `deleted_at`), which ETags and cursors need.
+
+## What an extension may not do
+
+A read extension fails **closed**: anything below fails the whole read with 500 `hook-failed`, naming the extension and
+the reason, rather than answering rows it did not shape. Its own error stays in your log.
+
+| Reason | When |
+|---|---|
+| `exception` | the narrowing or the enricher threw |
+| `unbound` | it is registered, but the applied schema no longer binds it (its entity or field is gone) |
+| `translation` | a typed narrowing's predicate cannot be translated to an `AlvoFilter` |
+| `invalid-filter` | the filter exceeds the `AlvoFilter` limits, or names a missing or a virtual field |
+| `invalid-hide` | `Hide` named a framework column |
+| `invalid-set` | `SetVirtual` named a field that is not virtual, or a value the field cannot hold |
+
+Inside a transaction unit, the failed read also fails the unit.
+
+## No data port
+
+A narrowing and an enricher run inside a read, which may run inside a unit's transaction. One whose constructor or
+delegate takes `IAlvoData`, another data port or a network client (anything from `System.Net.Http`, say) refuses boot:
+
+```text
+The enricher takes a MMLib.Alvo.Data.IAlvoData ('data'): code that runs inside a read, which may be inside a unit's
+transaction, may not reach the network or another data port.
+```
+
+Read what it needs from the caller (`query.Caller`, `row.Caller`) or from a cache filled outside the read; an event
+handler can keep that cache current. A read extension also names its entities — `Entity("*", …)` refuses boot — and
+runs only over a relational provider (`UseSqlite`, `UsePostgreSql`).
+
+:::note
+Older Alvo writing calls a **dynamic** entity — one the host's end-users define at runtime — a "virtual entity". That
+is unrelated: a virtual *field* is a field of any physical entity that an enricher fills on read.
+:::
+
+## Testing
+
+<SourceExcerpt code={tests} from="public async Task The_snippet_narrows_the_clerk" to="north.Items.Select" title="ReadsDeskExtensionsTests.cs" />
+
+`AlvoTestHost` runs your narrowings and enrichers through the real SQLite pipeline, as above. The in-memory reference
+(`InMemoryAlvoData`) runs no read extension — it still refuses a write naming a virtual field.

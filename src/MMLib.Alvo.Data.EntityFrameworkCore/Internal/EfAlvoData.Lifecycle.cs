@@ -8,7 +8,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
 /// <summary>
 /// The descriptor's <c>stateMachine</c> in the write: judged at stage 3 over the candidate the declarative hooks left, before
-/// any host hook, and again at stage 5 beside <see cref="EnsureWriteAllowed"/> over what the host's patch left — and its
+/// any host hook, and again at stage 5 beside <see cref="EnsureWriteAllowedAsync"/> over what the host's patch left — and its
 /// <c>timers</c>, armed, moved and cancelled beside the write's outbox event, in the write's own transaction.
 /// </summary>
 internal sealed partial class EfAlvoData
@@ -34,7 +34,7 @@ internal sealed partial class EfAlvoData
     /// <b>Twice per write, and the second run is not redundant.</b> Stage 3 runs before any host hook, so a host never sees a move
     /// the machine refuses. A host's before-write may not set the state field (<c>invalid-set</c>), but it may set a field a
     /// transition's <c>when</c> reads; stage 5 therefore judges the move again over what will actually be stored, as
-    /// <see cref="EnsureWriteAllowed"/> judges the rules again.
+    /// <see cref="EnsureWriteAllowedAsync"/> judges the rules again.
     /// </remarks>
     private void EnsureTransition(
         PolicyDecision decision, DataOperation operation, AlvoRecord candidate, AlvoRecord? previous, AlvoContext context) =>

@@ -1,0 +1,42 @@
+﻿{
+  Column: {
+    Sql: EXISTS (SELECT 1 FROM "customers" AS _alvo_r1 WHERE (_alvo_r1."id" = "orders"."customer_id") AND (COALESCE(CAST(_alvo_r1."credit_limit" AS numeric) >= CAST("orders"."amount" AS numeric), FALSE)) AND (COALESCE(_alvo_r1."owner_id" = @alvo_u0, FALSE)) AND (COALESCE(_alvo_r1."tenant_id" = @alvo_u1, FALSE))),
+    Parameters: [
+      {
+        Key: alvo_u0,
+        Type: Guid,
+        Value: {alice-user-id}
+      },
+      {
+        Key: alvo_u1,
+        Type: Guid,
+        Value: {acme-tenant-id}
+      }
+    ]
+  },
+  Image: {
+    Sql: EXISTS (SELECT 1 FROM "customers" AS _alvo_r1 WHERE (_alvo_r1."id" = @alvo_q0) AND (COALESCE(CAST(_alvo_r1."credit_limit" AS numeric) >= CAST(@alvo_q1 AS numeric), FALSE)) AND (COALESCE(_alvo_r1."owner_id" = @alvo_q2, FALSE)) AND (COALESCE(_alvo_r1."tenant_id" = @alvo_q3, FALSE))),
+    Parameters: [
+      {
+        Key: alvo_q0,
+        Type: Guid,
+        Value: Guid_1
+      },
+      {
+        Key: alvo_q1,
+        Type: Decimal,
+        Value: 12.5
+      },
+      {
+        Key: alvo_q2,
+        Type: Guid,
+        Value: {alice-user-id}
+      },
+      {
+        Key: alvo_q3,
+        Type: Guid,
+        Value: {acme-tenant-id}
+      }
+    ]
+  }
+}

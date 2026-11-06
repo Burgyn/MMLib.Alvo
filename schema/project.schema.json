@@ -463,7 +463,7 @@
     "rules": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Per-operation authorization rules — CEL, compiled into a SQL predicate. Missing operation = deny (secure-by-default).",
+      "description": "Per-operation authorization rules — CEL, compiled into a SQL predicate. Missing operation = deny (secure-by-default). A rule may read a related row: `<ref>.<field>` follows a ref field, `<child>.exists(x, x.<field> …)` reaches the records that reference this one; the related entity's own list rule always applies.",
       "properties": {
         "list": {
           "$ref": "#/$defs/cel"
@@ -535,6 +535,35 @@
         },
         "rules": {
           "$ref": "#/$defs/rules"
+        },
+        "checks": {
+          "type": "array",
+          "description": "Write-time conditions over a related row, e.g. a line may only reference an active product. Each check follows its `lookup` ref field to the row it names (one the caller may list) and refuses the write with 422 and `message` when `expr` is false for it. `expr` reads this row by field name and the related row as `<lookup>.<field>`; it never reads @user/@tenant. A null `lookup` skips the check. Runs on create, and on update only when a field it reads changed.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "lookup",
+              "expr",
+              "message"
+            ],
+            "properties": {
+              "lookup": {
+                "$ref": "#/$defs/identifier",
+                "description": "A ref field of this entity; the check reads the row it points at."
+              },
+              "expr": {
+                "$ref": "#/$defs/cel",
+                "description": "CEL over this row and `<lookup>.<field>`; true lets the write through."
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300,
+                "description": "Shown to the caller when the check fails."
+              }
+            }
+          }
         },
         "hooks": {
           "type": "object",
@@ -843,7 +872,7 @@
         "virtual": {
           "type": "boolean",
           "default": false,
-          "description": "A field with no column: an embedded host's enricher fills it when a record is read (null otherwise). Read-only; refused in writes, in every CEL expression, and in filter/sort/select. Cannot be combined with computed, rollup, default, required, unique, index, validation, renamedFrom or type ref."
+          "description": "A field with no column: an embedded host's enricher fills it when a record is read (null otherwise). Read-only; refused in writes, in every CEL expression, and in filter/sort/select. Cannot be combined with computed, rollup, default, required, nullable: false, unique, index, validation, renamedFrom or type ref; cannot be named in an entity's indexes[].fields, a rollup's field or via, events.exclude or a before-hook's mutate; and an entity with storage: dynamic holds none."
         },
         "computed": {
           "$ref": "#/$defs/cel",
