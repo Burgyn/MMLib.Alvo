@@ -67,13 +67,31 @@ public class InstantBindingArchitectureTests
         "MMLib.Alvo.Management.IAlvoManagement",
     ];
 
-    /// <summary>Entry points that bind nothing, each with why none is needed.</summary>
+    /// <summary>Entry members that bind nothing, each with why none is needed.</summary>
     private static readonly IReadOnlyDictionary<string, string> _exempt = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["MMLib.Alvo.Api.Internal.NoStoreResponseFilter"] = "sets a response header; evaluates no CEL",
-        ["MMLib.Alvo.Management.Internal.ManagementAccessEndpointFilter"] =
-            "runs only inside ManagementCallerFilter (ManagementEndpoints.Gate), whose instant is bound",
+        ["MMLib.Alvo.Api.Internal.NoStoreResponseFilter::InvokeAsync"] = "sets a response header; evaluates no CEL",
+        ["MMLib.Alvo.Management.Internal.ManagementAccessEndpointFilter::InvokeAsync"] =
+            "judges the access CEL profile, which refuses now() when it compiles (CelTypeChecker.AccessNoInstantMessage)",
+        ["MMLib.Alvo.Data.IAlvoTransactions::TransactAsync"] =
+            "the contract's default body for the untyped overload; it calls the typed TransactAsync, which binds",
+        [$"{Management}::GetInfoAsync"] = "reads the host's identity; evaluates no CEL",
+        [$"{Management}::ListProjectsAsync"] = "lists the served projects; evaluates no CEL",
+        [$"{Management}::GetDescriptorAsync"] = "reads the stored descriptor; evaluates no CEL",
+        [$"{Management}::ListRevisionsAsync"] = "reads the version history; evaluates no CEL",
+        [$"{Management}::GetRevisionAsync"] = "reads one stored revision; evaluates no CEL",
+        [$"{Management}::GetSchemaAsync"] = "reads the applied schema; evaluates no CEL",
+        [$"{Management}::GetCapabilitiesAsync"] = "reads the host's capabilities; evaluates no CEL",
+        [$"{Management}::GetCelFunctionsAsync"] = "lists the CEL catalog; evaluates no CEL",
+        [$"{Management}::GetExtensionsAsync"] = "lists the extension catalog; evaluates no CEL",
+        [$"{Management}::CheckExpressionAsync"] = "compiles and type-checks one expression; never evaluates it",
+        [$"{Management}::ApplyDescriptorAsync"] =
+            "compiles and migrates; a CHECK and a rollup filter refuse now() at compile time, so the DDL and backfill read none",
+        [$"{Management}::RollbackAsync"] = "an apply of a stored revision; reads no now() for the same reason",
+        [$"{Management}::SetAiConnectionAsync"] = "stores a connection; evaluates no CEL",
     };
+
+    private const string Management = "MMLib.Alvo.Management.Internal.AlvoManagementService";
 
     [Fact]
     public void Every_instant_binding_site_is_enumerated()
@@ -88,31 +106,50 @@ public class InstantBindingArchitectureTests
     public void The_data_port_binds_at_every_entry()
     {
         var entries = BindingCallers(_driver)
-            .Where(site => site.StartsWith("MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::", StringComparison.Ordinal));
+            .Where(site => site.StartsWith("MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::", StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal);
 
-        entries.Count().ShouldBeGreaterThanOrEqualTo(10, "every IAlvoData member binds an instant for an embedded call");
+        entries.ShouldBe(
+            [
+                "MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::CreateAsync",
+                "MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::CreateManyAsync",
+                "MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::DeleteAsync",
+                "MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::DeleteManyAsync",
+                "MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::EnsureInstant",
+                "MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::GetAsync",
+                "MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::QueryAsync",
+                "MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::ReplaceAsync",
+                "MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::UpdateAsync",
+                "MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::UpdateManyAsync",
+            ],
+            ignoreOrder: false,
+            "every IAlvoData member binds an instant for an embedded call");
     }
 
-    public static TheoryData<string> EntryPoints() => [.. EntryPointTypes().Select(type => type.FullName!)];
+    public static TheoryData<string> EntryMembers() => [.. EntryMemberNames()];
 
+    /// <summary>
+    /// Per member, not per type: each method that implements an entry contract binds an instant itself, or is exempt with a
+    /// reason — so a new member on a type that already binds elsewhere is caught (Task 12 review m1).
+    /// </summary>
     [Theory]
-    [MemberData(nameof(EntryPoints))]
-    public void Every_entry_point_binds_an_instant_or_says_why_not(string entryPoint)
+    [MemberData(nameof(EntryMembers))]
+    public void Every_entry_member_binds_an_instant_or_says_why_not(string member)
     {
-        var binds = BindingCallers(_core).Concat(BindingCallers(_driver)).Any(site => site.StartsWith($"{entryPoint}::", StringComparison.Ordinal));
+        var binds = BindingCallers(_core).Concat(BindingCallers(_driver)).Contains(member);
 
-        (binds || _exempt.ContainsKey(entryPoint)).ShouldBeTrue(
-            $"'{entryPoint}' can evaluate a now() and binds no instant: bind one with AlvoFlow.EnsureInstant or RequestInstant.Enter, "
+        (binds || _exempt.ContainsKey(member)).ShouldBeTrue(
+            $"'{member}' can evaluate a now() and binds no instant: bind one with AlvoFlow.EnsureInstant or RequestInstant.Enter, "
             + "or record in _exempt why it needs none");
     }
 
     [Fact]
-    public void Every_exemption_names_a_live_entry_point_that_binds_nothing()
+    public void Every_exemption_names_a_live_entry_member_that_binds_nothing()
     {
-        var entries = EntryPointTypes().Select(type => type.FullName!).ToHashSet(StringComparer.Ordinal);
-        var callers = BindingCallers(_core).Concat(BindingCallers(_driver)).ToList();
+        var members = EntryMemberNames().ToHashSet(StringComparer.Ordinal);
+        var callers = BindingCallers(_core).Concat(BindingCallers(_driver)).ToHashSet(StringComparer.Ordinal);
 
-        _exempt.Keys.ShouldAllBe(name => entries.Contains(name) && !callers.Any(site => site.StartsWith(name + "::", StringComparison.Ordinal)));
+        _exempt.Keys.ShouldAllBe(name => members.Contains(name) && !callers.Contains(name));
     }
 
     /// <summary>The scan sees what it must, so an empty answer cannot pass for "no site".</summary>
@@ -122,6 +159,7 @@ public class InstantBindingArchitectureTests
         BindingCallers(_core).ShouldContain("MMLib.Alvo.Api.Internal.AlvoContextFilter::InvokeAsync");
         BindingCallers(_driver).ShouldContain("MMLib.Alvo.Data.EntityFrameworkCore.Internal.EfAlvoTransactions::TransactAsync");
         EntryPointTypes().ShouldContain(typeof(EfAlvoData));
+        EntryMemberNames().ShouldContain("MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::QueryAsync");
     }
 
     private static IEnumerable<string> BindingSites()
@@ -138,6 +176,19 @@ public class InstantBindingArchitectureTests
             .SelectMany(assembly => assembly.GetTypes())
             .Where(type => type is { IsClass: true, IsAbstract: false } && !type.Name.StartsWith('<'))
             .Where(type => type.GetInterfaces().Any(contract => _entryContracts.Contains(contract.FullName ?? string.Empty)));
+
+    /// <summary>
+    /// Every method implementing an entry contract, as <c>Namespace.Type::Member</c> — the name the IL walk folds a body
+    /// into. Overloads share one name, so an overload binds when any body of that name does.
+    /// </summary>
+    private static IEnumerable<string> EntryMemberNames() =>
+        EntryPointTypes()
+            .SelectMany(type => type.GetInterfaces()
+                .Where(contract => _entryContracts.Contains(contract.FullName ?? string.Empty))
+                .SelectMany(contract => type.GetInterfaceMap(contract).TargetMethods)
+                .Select(method => $"{method.DeclaringType!.FullName!.Replace('+', '/')}::{method.Name}"))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal);
 
     private static readonly Dictionary<Assembly, IReadOnlySet<string>> _callers = [];
 

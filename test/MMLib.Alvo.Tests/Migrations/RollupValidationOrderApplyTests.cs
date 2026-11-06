@@ -30,7 +30,9 @@ public sealed class RollupValidationOrderApplyTests
         var refusal = await Should.ThrowAsync<DescriptorValidationException>(
             () => world.Service.ApplyAsync(RuntimeSchemaWorld.Project, Inventory(Released, validated: true), 1, new MigrationOptions(), Ct));
 
-        refusal.Result.Errors.ShouldHaveSingleItem().Path.ShouldBe(Pointer);
+        var error = refusal.Result.Errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe(Pointer);
+        error.FixSuggestion.ShouldBe("Apply the rollup change first, then the validation.");
         (await world.Versions.ListAsync(RuntimeSchemaWorld.Project, Ct)).Count.ShouldBe(1);
     }
 
@@ -67,7 +69,9 @@ public sealed class RollupValidationOrderApplyTests
         var refusal = await Should.ThrowAsync<DescriptorValidationException>(
             () => world.Service.RollbackAsync(RuntimeSchemaWorld.Project, 1, new MigrationOptions { AllowDestructive = true }, Ct));
 
-        refusal.Result.Errors.ShouldHaveSingleItem().Path.ShouldBe(Pointer);
+        var error = refusal.Result.Errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe(Pointer);
+        error.FixSuggestion.ShouldBe("Apply the target's rollup change as an intermediate descriptor first, then roll back.");
         (await world.Versions.ListAsync(RuntimeSchemaWorld.Project, Ct)).Count.ShouldBe(2);
     }
 

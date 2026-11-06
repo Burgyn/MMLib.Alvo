@@ -31,13 +31,20 @@ internal static class RollupValidationOrderCheck
 {
     private const string Fix = "Apply the rollup change first, then the validation.";
 
+    /// <summary>
+    /// The fix a rollback names instead: a rollback cannot be split in two, so the order that works goes through an
+    /// intermediate descriptor (Task 12 review m3).
+    /// </summary>
+    internal const string RollbackFix = "Apply the target's rollup change as an intermediate descriptor first, then roll back.";
+
     /// <summary>Throws when <see cref="Errors"/> refuses anything.</summary>
     /// <param name="current">The schema the store holds.</param>
     /// <param name="desired">The schema the apply produces.</param>
+    /// <param name="fix">The fix each refusal names; the apply's own order when omitted, <see cref="RollbackFix"/> for a rollback.</param>
     /// <exception cref="DescriptorValidationException">A validation reads a rollup the same apply changes.</exception>
-    internal static void ThrowIfAny(SchemaModel current, SchemaModel desired)
+    internal static void ThrowIfAny(SchemaModel current, SchemaModel desired, string fix = Fix)
     {
-        var errors = Errors(current, desired);
+        var errors = Errors(current, desired, fix);
         if (errors.Count > 0)
         {
             throw new DescriptorValidationException(new DescriptorValidationResult(errors));
@@ -47,7 +54,8 @@ internal static class RollupValidationOrderCheck
     /// <summary>One refusal per validation added or changed over a rollup whose definition the apply changes.</summary>
     /// <param name="current">The schema the store holds.</param>
     /// <param name="desired">The schema the apply produces.</param>
-    internal static IReadOnlyList<DescriptorValidationError> Errors(SchemaModel current, SchemaModel desired)
+    /// <param name="fix">The fix each refusal names.</param>
+    internal static IReadOnlyList<DescriptorValidationError> Errors(SchemaModel current, SchemaModel desired, string fix = Fix)
     {
         ArgumentNullException.ThrowIfNull(current);
         ArgumentNullException.ThrowIfNull(desired);
@@ -60,7 +68,7 @@ internal static class RollupValidationOrderCheck
                    where field.CheckExpression is not null && AddedOrChanged(stored, field)
                    let changed = ChangedRollups(current, desired, reads.ValidationClosure(entity, field))
                    where changed.Count > 0
-                   select Refusal(entity, field, changed)];
+                   select Refusal(entity, field, changed, fix)];
     }
 
     private static bool AddedOrChanged(EntitySchema stored, FieldSchema field) =>
@@ -90,11 +98,11 @@ internal static class RollupValidationOrderCheck
     private static FieldSchema? Named(EntitySchema entity, string name) =>
         entity.Fields.FirstOrDefault(field => string.Equals(field.Name, name, StringComparison.Ordinal));
 
-    private static DescriptorValidationError Refusal(EntitySchema entity, FieldSchema field, IReadOnlyList<string> rollups) => new(
+    private static DescriptorValidationError Refusal(EntitySchema entity, FieldSchema field, IReadOnlyList<string> rollups, string fix) => new(
         $"/entities/{entity.Name}/fields/{field.Name}/validation",
         $"Field '{entity.Name}.{field.Name}' declares a validation that reads the rollup {string.Join(", ", rollups)}, whose "
         + "definition this apply changes: the CHECK constraint would be judged against the values the old definition stored, "
         + "before the apply recomputes them. Nothing was applied.",
-        Fix,
+        fix,
         DescriptorValidationSeverity.Error);
 }

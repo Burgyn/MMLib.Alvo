@@ -245,12 +245,14 @@ public abstract partial class DataApiEngineTests
     private static async Task<Guid> FirstIntegrityIdAsync(AlvoApiWorld world, string entity)
     {
         using var response = await world.SendAsync(HttpMethod.Get, $"/api/{entity}?limit=1", _clerk);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.ReadTextAsync());
         return (await response.ReadItemsAsync())[0]["id"]!.GetValue<Guid>();
     }
 
     private static async Task<int> IntegrityRevisionAsync(AlvoApiWorld world)
     {
         using var response = await world.SendAsync(HttpMethod.Get, IntegrityDescriptorPath, _clerk);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.ReadTextAsync());
         return (await response.ReadJsonObjectAsync())["revision"]!.GetValue<int>();
     }
 

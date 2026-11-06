@@ -292,7 +292,7 @@ public sealed class RuntimeSchemaService
         var restored = target.Schema with { };
         var checkedCatalog = _extensions?.Check(AlvoDescriptor.Parse(target.DescriptorJson), restored)?.Catalog;
 
-        RollupValidationOrderCheck.ThrowIfAny(currentVersion.Schema, target.Schema);
+        RollupValidationOrderCheck.ThrowIfAny(currentVersion.Schema, target.Schema, RollupValidationOrderCheck.RollbackFix);
         var plan = await _migrator.PlanAsync(currentVersion.Schema, target.Schema, options, ct).ConfigureAwait(false);
         Guard(project, plan, options);
 
