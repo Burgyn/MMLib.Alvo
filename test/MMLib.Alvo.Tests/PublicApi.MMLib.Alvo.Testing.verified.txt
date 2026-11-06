@@ -721,6 +721,11 @@ namespace MMLib.Alvo.Testing.Events
         public System.Threading.Tasks.Task A_dead_delivery_blocks_its_own_lane_and_no_other() { }
         public System.Threading.Tasks.Task A_dead_request_is_recorded_dead() { }
         public System.Threading.Tasks.Task A_dead_unbound_delivery_does_not_block_its_lane() { }
+        public System.Threading.Tasks.Task A_debounced_fan_out_is_due_after_its_debounce() { }
+        public System.Threading.Tasks.Task A_debounced_fan_out_never_supersedes_a_running_delivery() { }
+        public System.Threading.Tasks.Task A_debounced_fan_out_never_supersedes_a_sleeping_delivery() { }
+        public System.Threading.Tasks.Task A_debounced_fan_out_supersedes_only_its_own_tenants_lane() { }
+        public System.Threading.Tasks.Task A_debounced_fan_out_supersedes_the_lanes_waiting_delivery() { }
         public System.Threading.Tasks.Task A_delivery_cancelled_while_it_runs_is_not_revived_by_its_late_answer() { }
         public System.Threading.Tasks.Task A_delivery_dead_lettered_while_it_runs_is_not_revived_by_its_late_answer() { }
         public System.Threading.Tasks.Task A_delivery_is_dead_once_its_last_attempt_fails() { }
@@ -732,6 +737,7 @@ namespace MMLib.Alvo.Testing.Events
         public System.Threading.Tasks.Task A_lane_is_claimed_one_event_at_a_time_in_event_order() { }
         public System.Threading.Tasks.Task A_lane_is_one_subscriber_s_and_blocks_no_other_subscriber_of_the_record() { }
         public System.Threading.Tasks.Task A_late_answer_from_before_a_redeliver_changes_nothing() { }
+        public System.Threading.Tasks.Task A_late_fan_out_of_an_older_event_is_superseded_at_once() { }
         public System.Threading.Tasks.Task A_late_finisher_whose_lease_was_reclaimed_changes_nothing() { }
         public System.Threading.Tasks.Task A_page_above_the_store_s_ceiling_is_refused() { }
         public System.Threading.Tasks.Task A_page_asking_for_no_rows_is_refused() { }
@@ -766,6 +772,7 @@ namespace MMLib.Alvo.Testing.Events
         public System.Threading.Tasks.Task A_sleep_returns_the_delivery_due_at_its_wake_time_without_spending_an_attempt() { }
         public System.Threading.Tasks.Task A_sleeping_delivery_reads_as_pending_at_its_wake_time() { }
         public System.Threading.Tasks.Task A_sleeping_ordered_delivery_holds_its_lane() { }
+        public System.Threading.Tasks.Task A_superseded_delivery_holds_no_lane_and_is_not_replayable() { }
         public System.Threading.Tasks.Task An_attempt_is_answered_for_once_and_only_by_its_claimant() { }
         public System.Threading.Tasks.Task An_earlier_event_at_the_ceiling_under_a_stale_claim_holds_no_lane_back() { }
         public System.Threading.Tasks.Task An_earlier_event_on_its_last_attempt_under_a_live_claim_holds_the_lane() { }

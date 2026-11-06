@@ -18,7 +18,10 @@ public sealed record ManagementDelivery
     /// <summary>Gets the event's tenant, or <see langword="null"/>.</summary>
     public string? TenantId { get; init; }
 
-    /// <summary>Gets where it is: <c>pending</c>, <c>running</c>, <c>succeeded</c>, <c>retrying</c>, <c>dead</c> or <c>cancelled</c>.</summary>
+    /// <summary>
+    /// Gets where it is: <c>pending</c>, <c>running</c>, <c>succeeded</c>, <c>retrying</c>, <c>dead</c>, <c>cancelled</c> or
+    /// <c>superseded</c> — ended unrun by a newer debounced delivery of its lane, and never replayed.
+    /// </summary>
     public required string Status { get; init; }
 
     /// <summary>Gets how many times it was attempted since it was last put back to pending.</summary>

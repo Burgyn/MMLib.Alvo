@@ -1224,6 +1224,7 @@ namespace MMLib.Alvo.Events
         public const string UnboundReason = "unbound";
         public DeliveryRequest() { }
         public string? DeadReason { get; init; }
+        public System.TimeSpan? Debounce { get; init; }
         public required System.Guid EventId { get; init; }
         public required string Kind { get; init; }
         public required string PartitionKey { get; init; }

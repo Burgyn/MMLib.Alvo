@@ -30,6 +30,7 @@ internal static class DeliveryTable
     internal const string Retrying = "retrying";
     internal const string Dead = "dead";
     internal const string Cancelled = "cancelled";
+    internal const string Superseded = "superseded";
     internal const string FailedOutcome = "failed";
     internal const string SkippedOutcome = "skipped";
 
@@ -128,7 +129,43 @@ internal static class DeliveryTable
         """;
 
     private static string FanOutRow(int row) =>
-        $"(@id{row}, @event_id{row}, @subscriber{row}, @partition_key{row}, @tenant_id{row}, @kind{row}, @status{row}, 0, @now, @completed_at{row}, @last_error_type{row})";
+        $"(@id{row}, @event_id{row}, @subscriber{row}, @partition_key{row}, @tenant_id{row}, @kind{row}, @status{row}, 0, @not_before{row}, @completed_at{row}, @last_error_type{row})";
+
+    /// <summary>
+    /// Supersedes every waiting delivery of one lane — subscriber, partition key and tenant — whose event is older than the
+    /// lane's newest live one; run after the insert, in its transaction, once per debounced lane.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The status term sits in the outer <c>WHERE</c></b>, so on PostgreSQL a claim that turned the row running first wins:
+    /// the blocked supersede re-checks the row and skips it; supersede first, and the claim's own outer re-check fails.
+    /// </para>
+    /// <para>
+    /// <b>Only a delivery that never started is superseded</b> (no attempt recorded): a sleeping one has done part of its
+    /// work, and a retried one has tried it. The lane's newest counts only live rows — pending, retrying, running or
+    /// succeeded — so a re-fan-out of an event whose own row ended dead, cancelled or superseded makes nothing newer.
+    /// </para>
+    /// <para>
+    /// The tenant term keeps a custom event's shared partition key apart per tenant. The store takes the lane's lock
+    /// exclusively first (<see cref="DebounceLockKey"/>), so two concurrent fan-outs of one lane each see the other's row.
+    /// </para>
+    /// </remarks>
+    internal static string SupersedeSql(string table, string attempts) =>
+        $"""
+        UPDATE {table} SET status = 'superseded', completed_at = @now, lease_until = NULL
+         WHERE subscriber = @subscriber AND partition_key = @partition_key
+           AND COALESCE(tenant_id, '') = COALESCE(@tenant_id, '')
+           AND status IN ('pending', 'retrying')
+           AND NOT EXISTS (SELECT 1 FROM {attempts} started WHERE started.delivery_id = {table}.id)
+           AND event_id < (SELECT MAX(newest.event_id) FROM {table} newest
+                            WHERE newest.subscriber = @subscriber AND newest.partition_key = @partition_key
+                              AND COALESCE(newest.tenant_id, '') = COALESCE(@tenant_id, '')
+                              AND newest.status IN ('pending', 'retrying', 'running', 'succeeded'))
+        """;
+
+    /// <summary>The key of one debounced lane's transaction lock: the table, the subscriber, the tenant and the partition key.</summary>
+    internal static long DebounceLockKey(string table, string subscriber, string? tenantId, string partitionKey) =>
+        DeliveryOperationsTable.LockKey($"{table}:debounce:{subscriber}\u001f{tenantId}\u001f{partitionKey}");
 
     /// <summary>
     /// The claim: one conditional update whose outer condition repeats the claimability test — pending or due, a subscriber

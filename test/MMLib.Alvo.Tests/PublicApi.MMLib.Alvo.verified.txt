@@ -450,6 +450,7 @@ namespace MMLib.Alvo.Extensions
     public sealed class AlvoHandlerOptions
     {
         public AlvoHandlerOptions() { }
+        public System.TimeSpan? Debounce { get; set; }
         public string? Description { get; set; }
         public int Order { get; set; }
         public MMLib.Alvo.Extensions.AlvoOrdering Ordering { get; set; }

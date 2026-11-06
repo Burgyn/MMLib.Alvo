@@ -21,3 +21,6 @@ dotnet_diagnostic.CA1707.severity = none
 
 [DeliveryStoreContractTests.Steps.cs]
 dotnet_diagnostic.CA1707.severity = none
+
+[DeliveryStoreContractTests.FlowControl.cs]
+dotnet_diagnostic.CA1707.severity = none

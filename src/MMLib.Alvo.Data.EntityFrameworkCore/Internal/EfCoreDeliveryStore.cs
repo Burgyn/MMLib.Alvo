@@ -92,9 +92,47 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
     {
         ArgumentNullException.ThrowIfNull(requests);
 
-        return requests.Count == 0
-            ? Task.FromResult(0)
-            : ExecuteAsync(DeliveryTable.FanOutSql(_table, requests.Count), command => BindRequests(command, requests), cancellationToken);
+        if (requests.Count == 0)
+        {
+            return Task.FromResult(0);
+        }
+
+        var lanes = DebouncedLanes(requests);
+
+        return lanes.Count == 0
+            ? ExecuteAsync(DeliveryTable.FanOutSql(_table, requests.Count), command => BindRequests(command, requests), cancellationToken)
+            : InTransactionAsync((connection, transaction) => FanOutDebouncedAsync(connection, transaction, requests, lanes, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>
+    /// The debounced fan-out: each debounced lane's lock taken exclusively, in ascending key order, then the insert, then one
+    /// supersede per lane — so a concurrent fan-out of the same lane waits, and each sees the other's row.
+    /// </summary>
+    private async Task<int> FanOutDebouncedAsync(
+        DbConnection connection, DbTransaction transaction, IReadOnlyList<DeliveryRequest> requests, List<DeliveryRequest> lanes, CancellationToken ct)
+    {
+        await LockAsync(connection, transaction, lanes.Select(lane => DeliveryTable.DebounceLockKey(_table, lane.Subscriber, lane.TenantId, lane.PartitionKey)), exclusive: true, ct)
+            .ConfigureAwait(false);
+        var inserted = await ExecuteInAsync(connection, transaction, DeliveryTable.FanOutSql(_table, requests.Count), command => BindRequests(command, requests), ct)
+            .ConfigureAwait(false);
+        foreach (var lane in lanes)
+        {
+            await ExecuteInAsync(connection, transaction, DeliveryTable.SupersedeSql(_table, _attempts), command => BindLane(command, lane), ct).ConfigureAwait(false);
+        }
+
+        return inserted;
+    }
+
+    private static List<DeliveryRequest> DebouncedLanes(IReadOnlyList<DeliveryRequest> requests) =>
+        [.. (from request in requests where request.Debounce is not null && request.DeadReason is null select request)
+            .DistinctBy(request => (request.Subscriber, request.TenantId, request.PartitionKey))];
+
+    private void BindLane(DbCommand command, DeliveryRequest lane)
+    {
+        RelationalSqlBatch.AddParameter(command, "@now", Now);
+        RelationalSqlBatch.AddParameter(command, "@subscriber", lane.Subscriber);
+        RelationalSqlBatch.AddParameter(command, "@partition_key", lane.PartitionKey);
+        RelationalSqlBatch.AddParameter(command, "@tenant_id", (object?)lane.TenantId ?? DBNull.Value);
     }
 
     public async Task<IReadOnlyList<ClaimedDelivery>> ClaimAsync(DeliveryClaim claim, CancellationToken cancellationToken = default)
@@ -195,10 +233,14 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
     /// answers, or nothing on an engine with one writer — so the transaction's next statement starts after any conflicting
     /// claim or reset of those subscribers committed.
     /// </summary>
-    private async Task LockSubscribersAsync(
-        DbConnection connection, DbTransaction transaction, IEnumerable<string> subscribers, bool exclusive, CancellationToken ct)
+    private Task LockSubscribersAsync(
+        DbConnection connection, DbTransaction transaction, IEnumerable<string> subscribers, bool exclusive, CancellationToken ct) =>
+        LockAsync(connection, transaction, subscribers.Distinct(StringComparer.Ordinal).Select(subscriber => DeliveryOperationsTable.SubscriberLockKey(_table, subscriber)), exclusive, ct);
+
+    /// <summary>Takes transaction locks on <paramref name="lockKeys"/>, distinct and ascending, or nothing on an engine with one writer.</summary>
+    private async Task LockAsync(DbConnection connection, DbTransaction transaction, IEnumerable<long> lockKeys, bool exclusive, CancellationToken ct)
     {
-        var keys = subscribers.Distinct(StringComparer.Ordinal).Select(subscriber => DeliveryOperationsTable.SubscriberLockKey(_table, subscriber)).Distinct().Order().ToList();
+        var keys = lockKeys.Distinct().Order().ToList();
         if (keys.Count == 0 || _dialect.TransactionLockStatement([.. keys.Select((_, index) => $"@lock{index}")], exclusive) is not { } sql)
         {
             return;
@@ -264,24 +306,25 @@ internal sealed partial class EfCoreDeliveryStore : IDeliveryStore
 
     private void BindRequests(DbCommand command, IReadOnlyList<DeliveryRequest> requests)
     {
-        RelationalSqlBatch.AddParameter(command, "@now", Now);
+        var now = _time.GetUtcNow();
         for (var row = 0; row < requests.Count; row++)
         {
-            BindRequest(command, row, requests[row]);
+            BindRequest(command, row, requests[row], now);
         }
     }
 
-    private void BindRequest(DbCommand command, int row, DeliveryRequest request)
+    private static void BindRequest(DbCommand command, int row, DeliveryRequest request, DateTimeOffset now)
     {
         var dead = request.DeadReason is not null;
-        RelationalSqlBatch.AddParameter(command, $"@id{row}", AlvoEventId.Create(_time.GetUtcNow()).ToString());
+        RelationalSqlBatch.AddParameter(command, $"@id{row}", AlvoEventId.Create(now).ToString());
         RelationalSqlBatch.AddParameter(command, $"@event_id{row}", request.EventId.ToString());
         RelationalSqlBatch.AddParameter(command, $"@subscriber{row}", request.Subscriber);
         RelationalSqlBatch.AddParameter(command, $"@partition_key{row}", request.PartitionKey);
         RelationalSqlBatch.AddParameter(command, $"@tenant_id{row}", (object?)request.TenantId ?? DBNull.Value);
         RelationalSqlBatch.AddParameter(command, $"@kind{row}", request.Kind);
+        RelationalSqlBatch.AddParameter(command, $"@not_before{row}", StoredInstant.Text(now + (dead ? TimeSpan.Zero : request.Debounce ?? TimeSpan.Zero)));
         RelationalSqlBatch.AddParameter(command, $"@status{row}", dead ? DeliveryTable.Dead : DeliveryTable.Pending);
-        RelationalSqlBatch.AddParameter(command, $"@completed_at{row}", dead ? Now : DBNull.Value as object);
+        RelationalSqlBatch.AddParameter(command, $"@completed_at{row}", dead ? StoredInstant.Text(now) : DBNull.Value as object);
         RelationalSqlBatch.AddParameter(command, $"@last_error_type{row}", (object?)request.DeadReason ?? DBNull.Value);
     }
 

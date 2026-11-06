@@ -33,6 +33,14 @@ public sealed record DeliveryRequest
     /// deep, a handler not bound — or <see langword="null"/> for a delivery to run.
     /// </summary>
     public string? DeadReason { get; init; }
+
+    /// <summary>
+    /// Gets how long a delivery to run waits before it is due, or <see langword="null"/> to be due at once. A debounced
+    /// delivery also supersedes, in the same fan-out, every delivery of its lane — the same subscriber, partition key and
+    /// tenant — with an older event that is still waiting and never started: each ends <c>superseded</c>, so only the
+    /// newest runs. A running, sleeping or retried delivery is never superseded.
+    /// </summary>
+    public TimeSpan? Debounce { get; init; }
 }
 
 /// <summary>What one claim asks for: whose deliveries, how many, and for how long.</summary>
@@ -172,7 +180,11 @@ public interface IDeliveryStore
     /// <returns>A task that completes when the storage exists.</returns>
     Task EnsureAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Records one delivery per request; a request whose (event, subscriber) pair already exists is skipped.</summary>
+    /// <summary>
+    /// Records one delivery per request; a request whose (event, subscriber) pair already exists is skipped. A request with a
+    /// <see cref="DeliveryRequest.Debounce"/> is due that long after now and supersedes its lane's older waiting deliveries,
+    /// in the same transaction.
+    /// </summary>
     /// <param name="requests">The deliveries one event fans out to, all recorded together or not at all.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>How many rows were new.</returns>

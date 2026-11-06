@@ -22,7 +22,8 @@ public sealed record StoredDelivery
     public required string Kind { get; init; }
 
     /// <summary>
-    /// Gets where it is: <c>pending</c>, <c>running</c>, <c>succeeded</c>, <c>retrying</c>, <c>dead</c> or <c>cancelled</c>.
+    /// Gets where it is: <c>pending</c>, <c>running</c>, <c>succeeded</c>, <c>retrying</c>, <c>dead</c>, <c>cancelled</c> or
+    /// <c>superseded</c> — ended unrun by a newer debounced delivery of its lane, and never redelivered or replayed.
     /// </summary>
     public required string Status { get; init; }
 

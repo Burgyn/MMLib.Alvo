@@ -13,6 +13,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
     private static readonly string[] _unfinished = ["pending", "running", "retrying"];
     private static readonly string[] _blocking = ["pending", "running", "retrying", "dead"];
     private static readonly string[] _finished = ["succeeded", "dead", "cancelled"];
+    private static readonly string[] _live = ["pending", "retrying", "running", "succeeded"];
 
     private readonly Lock _gate = new();
     private readonly List<Row> _rows = [];
@@ -119,8 +120,30 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
                 .Where(request => !_rows.Exists(row => row.EventId == request.EventId && row.Subscriber == request.Subscriber))
                 .ToList();
             _rows.AddRange(fresh.Select(NewRow));
+            foreach (var lane in requests.Where(request => request.Debounce is not null && request.DeadReason is null))
+            {
+                Supersede(lane);
+            }
 
             return Task.FromResult(fresh.Count);
+        }
+    }
+
+    private void Supersede(DeliveryRequest lane)
+    {
+        var rows = _rows.Where(row => row.Subscriber == lane.Subscriber && row.PartitionKey == lane.PartitionKey && row.TenantId == lane.TenantId).ToList();
+        if (rows.Where(row => _live.Contains(row.Status)).Select(row => row.EventId.ToString()).Max(StringComparer.Ordinal) is not { } newest)
+        {
+            return;
+        }
+
+        foreach (var row in rows.Where(row => row.Status is "pending" or "retrying"
+            && !_attempts.Exists(attempt => attempt.Delivery == row.Id)
+            && string.CompareOrdinal(row.EventId.ToString(), newest) < 0))
+        {
+            row.Status = "superseded";
+            row.CompletedAt = time.GetUtcNow();
+            row.LeaseUntil = null;
         }
     }
 
@@ -469,7 +492,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
         Kind = request.Kind,
         Status = request.DeadReason is null ? "pending" : "dead",
         LastErrorType = request.DeadReason,
-        NotBefore = time.GetUtcNow(),
+        NotBefore = time.GetUtcNow() + (request.DeadReason is null ? request.Debounce ?? TimeSpan.Zero : TimeSpan.Zero),
         CompletedAt = request.DeadReason is null ? null : time.GetUtcNow(),
     };
 
