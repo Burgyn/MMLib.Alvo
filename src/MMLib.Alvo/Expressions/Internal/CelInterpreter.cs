@@ -290,6 +290,46 @@ internal static class CelInterpreter
     }
 
     /// <summary>
+    /// Evaluates a timestamp-valued expression — a timer's <c>at</c> — against the stored row, failing closed exactly as
+    /// <see cref="EvaluateMutation"/> does: a function failure escapes as itself, any other exception as a
+    /// <see cref="CelFunctionException"/>, so a timer is never armed at a time its expression did not give.
+    /// </summary>
+    /// <param name="expression">The compiled <see cref="CelValueType.Timestamp"/> expression.</param>
+    /// <param name="current">The row the timer belongs to, as stored.</param>
+    /// <param name="context">The context <c>@user</c>/<c>@tenant</c> would resolve against; a timer expression reads neither.</param>
+    /// <param name="now">The instant <c>now()</c> resolves to — the write's own.</param>
+    /// <returns>The instant, or <see langword="null"/> when the expression yields none.</returns>
+    internal static DateTimeOffset? EvaluateInstant(CompiledExpression expression, AlvoRecord current, AlvoContext context, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        ArgumentNullException.ThrowIfNull(current);
+        ArgumentNullException.ThrowIfNull(context);
+
+        try
+        {
+            var state = new EvalState(current, null, context, now, failClosed: true);
+            return Instant(Evaluate(expression.Root, state));
+        }
+        catch (CelFunctionException failure) when (failure is { OnCallerData: true, Judged: false })
+        {
+            throw failure.JudgedBy(expression.Root);
+        }
+#pragma warning disable CA1031
+        catch (Exception failure) when (failure is not CelFunctionException)
+#pragma warning restore CA1031
+        {
+            throw HookDefect(failure);
+        }
+    }
+
+    private static DateTimeOffset? Instant(object? value) => value switch
+    {
+        null => null,
+        _ when TryToDateTimeOffset(value, out var instant) => instant,
+        _ => throw new InvalidOperationException("A timestamp-valued expression evaluated to a present value that is not a timestamp."),
+    };
+
+    /// <summary>
     /// Whether this expression's arithmetic fails closed — the one place an evaluation reads
     /// <see cref="CompiledExpression.Profile"/> for it, through <see cref="CelHookArithmetic.FailsClosed"/>, the predicate
     /// the type checker's literal-zero-divisor refusal reads too.

@@ -1,6 +1,7 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Lifecycle;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 using System.Runtime.CompilerServices;
@@ -152,6 +153,9 @@ internal sealed record EntityPolicy(
     EntityAfterHooks AfterHooks,
     EntityBeforeHooks BeforeHooks)
 {
+    /// <summary>The compiled <c>stateMachine</c> and <c>timers</c>, or <see cref="EntityLifecycle.None"/> when the entity declares neither.</summary>
+    internal EntityLifecycle Lifecycle { get; init; } = EntityLifecycle.None;
+
     /// <summary>
     /// Every field <paramref name="flags"/> carries a flag for — a static <see langword="true"/> or a per-caller
     /// expression alike — independent of what any one caller's mask resolves to.

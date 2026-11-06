@@ -3,6 +3,7 @@ using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Internal;
+using MMLib.Alvo.Lifecycle;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Rules.Internal;
@@ -105,7 +106,10 @@ internal static class PolicyCatalogBuilder
         var afterHooks = CompileAfterHooks(descriptor, build);
         var beforeHooks = CompileBeforeHooks(descriptor, EntityPolicy.Flagged(hidden), build);
         return new EntityPolicy(
-            build.Schema.Tenancy, tenantScope, operations, hidden, readOnly, afterHooks, beforeHooks);
+            build.Schema.Tenancy, tenantScope, operations, hidden, readOnly, afterHooks, beforeHooks)
+        {
+            Lifecycle = LifecycleCompiler.Compile(descriptor, new LifecycleScope(build.Schema, build.Compiler, build.Roles, build.Path, build.Errors)),
+        };
     }
 
     /// <summary>
