@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Scheduling;
 using MMLib.Alvo.Schema;
 using System.Collections.Frozen;
 using System.Data.Common;
@@ -379,7 +380,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         await RecomputeRollupsAsync(db, schema, [stored!], decision.Unnameable, cancellationToken);
         stored = await AfterSavedAsync(db, schema, decision, context, AlvoWriteOperation.Create, preImage: null, stored, now, cancellationToken);
         await EmitAsync(
-            db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
+            db, transaction, schema, decision, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
             cancellationToken);
         var echoed = await EchoedAsync(db, schema, context, RowIdOf(stored), DataOperation.Create, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -694,7 +695,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         await RecomputeRollupsAsync(db, schema, [stored!], decision.Unnameable, cancellationToken);
         stored = await AfterSavedAsync(db, schema, decision, context, AlvoWriteOperation.Create, preImage: null, stored, now, cancellationToken);
         await EmitAsync(
-            db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
+            db, transaction, schema, decision, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
             cancellationToken);
         await records.InsertAsync([(Guid)candidate[AlvoDataContext.IdColumn]], now, cancellationToken);
 
@@ -1351,7 +1352,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             db, schema, decision, context, id, Stamped(schema, values, context, now, isUpdate: true), AlvoWriteOperation.Update,
             precondition, now, cancellationToken);
         await EmitAsync(
-            db, transaction, schema, OutboxOperation.Updated, context, now, Unmasked(postImage), preImage,
+            db, transaction, schema, decision, OutboxOperation.Updated, context, now, Unmasked(postImage), preImage,
             cancellationToken);
 
         return postImage;
@@ -1652,7 +1653,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             precondition,
             now, cancellationToken);
         await EmitAsync(
-            db, transaction, schema, OutboxOperation.Updated, context, now, Unmasked(postImage), preImage,
+            db, transaction, schema, decision, OutboxOperation.Updated, context, now, Unmasked(postImage), preImage,
             cancellationToken);
 
         return AlvoReplaceResult.ReplacedRow(await EchoedAsync(db, schema, context, id, DataOperation.Update, cancellationToken));
@@ -1684,7 +1685,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         await RecomputeRollupsAsync(db, schema, [stored!], decision.Unnameable, cancellationToken);
         stored = await AfterSavedAsync(db, schema, decision, context, AlvoWriteOperation.Replace, preImage: null, stored, now, cancellationToken);
         await EmitAsync(
-            db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
+            db, transaction, schema, decision, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
             cancellationToken);
 
         return AlvoReplaceResult.CreatedRow(await EchoedAsync(db, schema, context, RowIdOf(stored), DataOperation.Update, cancellationToken));
@@ -1969,7 +1970,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     {
         var preImage = await EraseAsync(db, schema, decision, context, id, precondition, now, cancellationToken);
         await EmitAsync(
-            db, transaction, schema, OutboxOperation.Deleted, context, now, postImage: null, preImage,
+            db, transaction, schema, decision, OutboxOperation.Deleted, context, now, postImage: null, preImage,
             cancellationToken);
     }
 
@@ -2457,16 +2458,18 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// <see cref="RecordedCreateAsync"/> records.
     /// </para>
     /// </remarks>
-    private Task EmitAsync(
-        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, OutboxOperation operation,
+    private async Task EmitAsync(
+        AlvoDataContext db, IDbContextTransaction transaction, EntitySchema schema, PolicyDecision decision, OutboxOperation operation,
         AlvoContext context, DateTimeOffset now, AlvoRecord? postImage, AlvoRecord? preImage,
-        CancellationToken cancellationToken) =>
-        OutboxTable.InsertAsync(
-            db.Database.GetDbConnection(),
-            transaction.GetDbTransaction(),
-            _outboxTable,
-            OutboxEventFactory.For(schema, operation, context, now, postImage, preImage),
-            cancellationToken);
+        CancellationToken cancellationToken)
+    {
+        var (connection, inner) = (db.Database.GetDbConnection(), transaction.GetDbTransaction());
+        var emitted = OutboxEventFactory.For(schema, operation, context, now, postImage, preImage);
+        await OutboxTable.InsertAsync(connection, inner, _outboxTable, emitted, cancellationToken);
+        var write = new EntityTimerWrite(
+            schema.Name, preImage, postImage, context, ExpressionInstant(now), emitted.CorrelationId, emitted.Id.ToString());
+        await ArmTimersAsync(connection, inner, decision, write, cancellationToken);
+    }
 
     /// <summary>
     /// Ensures the outbox table — and the sequence counter table a create allocates from — exists, once per process and
@@ -2491,6 +2494,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         await RelationalSqlBatch.OpenAsync(connection, cancellationToken);
         await OutboxTable.EnsureAsync(connection, _outboxTable, cancellationToken);
         await SequenceTable.EnsureAsync(connection, _sequenceTable, cancellationToken);
+        await TimerTable.EnsureAsync(connection, _timerTable, cancellationToken);
         _outboxTableEnsured = true;
     }
 
@@ -2874,7 +2878,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         foreach (var row in stored)
         {
             await EmitAsync(
-                db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(row), preImage: null,
+                db, transaction, schema, decision, OutboxOperation.Created, context, now, Unmasked(row), preImage: null,
                 cancellationToken);
         }
 
@@ -3135,7 +3139,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         foreach (var (_, _, preImage, postImage) in written)
         {
             await EmitAsync(
-                db, transaction, schema, OutboxOperation.Updated, context, now, Unmasked(postImage), preImage,
+                db, transaction, schema, decision, OutboxOperation.Updated, context, now, Unmasked(postImage), preImage,
                 cancellationToken);
         }
 
@@ -3242,7 +3246,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         foreach (var (_, _, preImage) in judged)
         {
             await EmitAsync(
-                db, transaction, schema, OutboxOperation.Deleted, context, now, postImage: null, preImage,
+                db, transaction, schema, decision, OutboxOperation.Deleted, context, now, postImage: null, preImage,
                 cancellationToken);
         }
 

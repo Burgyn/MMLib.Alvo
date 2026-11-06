@@ -1,10 +1,15 @@
-﻿using MMLib.Alvo.Rules;
+﻿using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+using MMLib.Alvo.Rules;
+using MMLib.Alvo.Scheduling;
+
+using System.Data.Common;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
 /// <summary>
 /// The descriptor's <c>stateMachine</c> in the write: judged at stage 3 over the candidate the declarative hooks left, before
-/// any host hook, and again at stage 5 beside <see cref="EnsureWriteAllowed"/> over what the host's patch left.
+/// any host hook, and again at stage 5 beside <see cref="EnsureWriteAllowed"/> over what the host's patch left — and its
+/// <c>timers</c>, armed, moved and cancelled beside the write's outbox event, in the write's own transaction.
 /// </summary>
 internal sealed partial class EfAlvoData
 {
@@ -51,6 +56,37 @@ internal sealed partial class EfAlvoData
         catch (AlvoAuthorizationException forbidden)
         {
             return Forbidden(index, forbidden.Message);
+        }
+    }
+
+    /// <summary>
+    /// Writes the timer changes one write makes into the timer table, on the write's own connection and transaction, so the
+    /// timers commit or roll back with the row and its event.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One site</b>: every write path emits once per row with its unmasked images, and a replay never reaches the emit, so
+    /// a replayed write arms nothing twice.
+    /// </para>
+    /// <para>
+    /// <b>The upsert mints a fresh generation and clears the lease</b>, so a fire the timer pump claimed before this write
+    /// moved the timer finds a different generation and retires nothing; the timer fires once, at its new time. Lock order:
+    /// the write holds its row, then the timer row; a fire touches the timer row and the outbox only — no cycle.
+    /// </para>
+    /// </remarks>
+    private async Task ArmTimersAsync(
+        DbConnection connection, DbTransaction transaction, PolicyDecision decision, EntityTimerWrite write, CancellationToken cancellationToken)
+    {
+        if (!_lifecycle.ArmsTimers(decision))
+        {
+            return;
+        }
+
+        foreach (var change in _lifecycle.TimerChanges(decision, write))
+        {
+            _ = change.Arm is { } timer
+                ? await TimerWrites.UpsertAsync(connection, transaction, _timerTable, timer, Guid.CreateVersion7(_time.GetUtcNow()), cancellationToken)
+                : await TimerWrites.CancelAsync(connection, transaction, _timerTable, change.Scope, change.Key, cancellationToken);
         }
     }
 
