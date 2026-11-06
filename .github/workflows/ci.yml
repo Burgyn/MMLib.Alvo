@@ -316,7 +316,12 @@ jobs:
     name: Admin dashboard scenarios
     # Pinned: ubuntu-latest moved to 26.04, where Playwright ships no Chromium ("does not support chromium on ubuntu26.04-x64"). Unpin once it does.
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # Two budgets, not one. The browser's system packages come from the runner's apt mirror, and on a
+    # bad day azure.archive.ubuntu.com serves them at ~30 kB/s: three runs on 2026-11-06 spent 8-11
+    # minutes fetching ~20 MB of fonts, which left a 13-minute suite under 10 of a shared 20 and got
+    # it cancelled with no test output. The install now has its own ceiling, and the suite keeps a
+    # step-level one — that step timeout, not the job's, is the guard against a scenario that hangs.
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -328,8 +333,13 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Build and install the browser
+        timeout-minutes: 15
+        run: bash scripts/test-admin-e2e --install-only
+
       - name: Scenarios
-        run: bash scripts/test-admin-e2e
+        timeout-minutes: 22
+        run: bash scripts/test-admin-e2e --skip-install
 
       - name: Upload the failure trace
         if: failure()
