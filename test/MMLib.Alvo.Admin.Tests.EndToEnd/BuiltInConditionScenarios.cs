@@ -16,7 +16,7 @@ public sealed class BuiltInConditionScenarios(HostFunctionWorld world) : IClassF
         await FunctionOfferScenarios.TextModeAsync(session);
 
         var list = await FunctionOfferScenarios.OpenListAsync(session, "hook-condition");
-        (await list.GetByTestId("fn-now").CountAsync()).ShouldBe(0, "now() is not a Condition function — the list has loaded, so this absence means it");
+        (await list.GetByTestId("fn-now").CountAsync()).ShouldBe(1, "now() reads the request's instant in a condition too (HX-11 Ruling 3)");
         await list.GetByTestId("fn-insert-endsWith").ClickAsync();
         await FunctionOfferScenarios.WaitForValueAsync(session, "hook-condition", "endsWith(text, suffix)");
         await session.WaitForFocusOnAsync("hook-condition");

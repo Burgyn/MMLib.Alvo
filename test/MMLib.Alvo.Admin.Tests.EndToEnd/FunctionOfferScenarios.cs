@@ -43,7 +43,7 @@ public sealed class FunctionOfferScenarios(RecordingWorld world) : IClassFixture
         await session.Page.Keyboard.PressAsync("Home");
 
         var list = await OpenListAsync(session, "hook-condition");
-        (await list.GetByTestId("fn-now").CountAsync()).ShouldBe(0, "now() is not a Condition function — the list has loaded, so this absence means it");
+        (await list.GetByTestId("fn-now").CountAsync()).ShouldBe(1, "now() reads the request's instant in a condition too (HX-11 Ruling 3)");
         await list.GetByTestId("fn-insert-size").ClickAsync();
 
         await WaitForValueAsync(session, "hook-condition", "size(text) > 3");
