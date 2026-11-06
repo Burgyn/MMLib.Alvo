@@ -1544,6 +1544,8 @@ namespace MMLib.Alvo.Management
         BeforeDelete = 5,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("afterDelete")]
         AfterDelete = 6,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("narrowing")]
+        Narrowing = 7,
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Management.AlvoExtensionStage>))]
     public enum AlvoExtensionStage
@@ -1556,6 +1558,8 @@ namespace MMLib.Alvo.Management
         PreTransaction = 2,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("inTransaction")]
         InTransaction = 3,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("read")]
+        Read = 4,
     }
     public sealed class DeliveryFixture : System.IEquatable<MMLib.Alvo.Management.DeliveryFixture>
     {

@@ -4,12 +4,14 @@ using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Hooks.Internal;
+using MMLib.Alvo.Reads.Internal;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Extensions.Internal;
 
 /// <summary>
-/// Turns binding problems into descriptor findings; a command's and a write hook's refusals are their own
+/// Turns binding problems into descriptor findings; a command's and a write hook's refusals are their own, and a read
+/// extension's point at each entity it names that the change removes
 /// (<see cref="CommandApplyRefusals"/>, <see cref="WriteHookApplyRefusals"/>). A refusal names, for a handler the change unbinds, the entity, the
 /// field or the <c>events.exclude</c> item the change removed or excluded, or the field whose new type the condition no
 /// longer compiles against, or that its typed record maps and could no longer fill — each existed before the change,
@@ -30,7 +32,9 @@ internal static class ExtensionApplyRefusals
                 ? CommandApplyRefusals.For(command, refused, current, proposed, compiler)
                 : WriteHookOf(registry, refused.Key) is { } writeHook
                     ? WriteHookApplyRefusals.For(writeHook, refused, current, proposed, compiler)
-                    : ForHandler(Registered(registry, refused.Key), refused, current, proposed, compiler))];
+                    : ReadExtensionOf(registry, refused.Key) is { } read
+                        ? ForRead(read, refused, proposed)
+                        : ForHandler(Registered(registry, refused.Key), refused, current, proposed, compiler))];
 
     internal static IReadOnlyList<DescriptorValidationError> Warnings(IReadOnlyList<ExtensionProblem> problems) =>
         [.. problems.Select(problem => Generic(problem, DescriptorValidationSeverity.Warning))];
@@ -44,6 +48,22 @@ internal static class ExtensionApplyRefusals
 
     private static WriteHookRegistration? WriteHookOf(ExtensionRegistry registry, string id) =>
         registry.WriteHooks.FirstOrDefault(candidate => string.Equals(candidate.Id, id, StringComparison.Ordinal));
+
+    private static ReadExtensionRegistration? ReadExtensionOf(ExtensionRegistry registry, string id) =>
+        registry.ReadExtensions.FirstOrDefault(candidate => string.Equals(candidate.Id, id, StringComparison.Ordinal));
+
+    private static DescriptorValidationError[] ForRead(ReadExtensionRegistration read, IEnumerable<ExtensionProblem> problems, SchemaModel proposed) =>
+        [.. read.Entities.Where(entity => Named(proposed, entity) is null).Select(entity => ReadEntityRemoved(read, entity)),
+         .. problems.Select(problem => Generic(problem, DescriptorValidationSeverity.Error))];
+
+    private static DescriptorValidationError ReadEntityRemoved(ReadExtensionRegistration read, string entity)
+    {
+        var kind = ReadExtensionBinding.KindOf(read.Kind);
+        return Error(
+            $"/entities/{entity}",
+            $"Entity '{entity}' is bound by extension '{read.Id}' ({kind}, in this host): without it the {kind} would never run, and every read it covers would fail as unbound.",
+            FixPrefix + "entity.");
+    }
 
     private static HandlerRegistration Registered(ExtensionRegistry registry, string id) =>
         registry.Handlers.First(candidate => string.Equals(candidate.Id, id, StringComparison.Ordinal));

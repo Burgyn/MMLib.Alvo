@@ -77,6 +77,19 @@ public sealed class ExtensionCatalogTests
     }
 
     [Fact]
+    public void A_narrowing_is_catalogued_as_a_read_on_list_and_get()
+    {
+        var catalog = Catalog(Registry(alvo => alvo.Entity("tickets", t => t.Narrow("open-only", (MMLib.Alvo.Reads.QueryNarrowing _) => null))));
+
+        var item = catalog.Items.ShouldHaveSingleItem();
+        (item.Kind, item.Stage, item.When, item.Entities.Single()).ShouldBe((AlvoExtensionKind.Narrowing, AlvoExtensionStage.Read, (string?)null, "tickets"));
+        item.Operations.ShouldBe(["list", "get"]);
+        catalog.HonouredKinds.ShouldContain("extensions.narrowing");
+        catalog.RunningOn("tickets", "list").ShouldHaveSingleItem().Id.ShouldBe("open-only");
+        catalog.RunningOn("tickets", "create").ShouldBeEmpty();
+    }
+
+    [Fact]
     public void A_kind_s_wire_name_is_its_serialised_form()
         => ExtensionCatalog.WireName(AlvoExtensionKind.EventHandler).ShouldBe("eventHandler");
 

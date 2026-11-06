@@ -1,0 +1,26 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "reads-desk",
+  "tenancy": { "enabled": true },
+  "auth": { "roles": ["clerk", "auditor"] },
+  "entities": {
+    "notes": {
+      "tenancy": "scoped",
+      "audit": true,
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 80 },
+        "owner_id": { "type": "uuid", "required": true },
+        "region": { "type": "string", "maxLength": 20 },
+        "salary": { "type": "integer", "hidden": "!('auditor' in @user.roles)" }
+      },
+      "rules": {
+        "list": "owner_id == @user.id || 'auditor' in @user.roles || 'admin' in @user.roles",
+        "get": "owner_id == @user.id || 'auditor' in @user.roles || 'admin' in @user.roles",
+        "create": "'clerk' in @user.roles || 'auditor' in @user.roles",
+        "update": "owner_id == @user.id",
+        "delete": "owner_id == @user.id"
+      }
+    }
+  }
+}
