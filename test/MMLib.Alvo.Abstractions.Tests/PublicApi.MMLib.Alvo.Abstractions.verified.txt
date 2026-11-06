@@ -787,10 +787,18 @@ namespace MMLib.Alvo.Descriptor
         public required string Template { get; init; }
         public required string To { get; init; }
     }
+    public sealed class EntityCheck : System.IEquatable<MMLib.Alvo.Descriptor.EntityCheck>
+    {
+        public EntityCheck() { }
+        public required string Expr { get; init; }
+        public required string Lookup { get; init; }
+        public required string Message { get; init; }
+    }
     public sealed class EntityDescriptor : System.IEquatable<MMLib.Alvo.Descriptor.EntityDescriptor>
     {
         public EntityDescriptor() { }
         public bool? Audit { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.EntityCheck>? Checks { get; init; }
         public string? Description { get; init; }
         public MMLib.Alvo.Descriptor.EntityEvents? Events { get; init; }
         [System.Text.Json.Serialization.JsonExtensionData]
@@ -1911,6 +1919,7 @@ namespace MMLib.Alvo.Management
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementExtension> Extensions { get; init; }
         public System.Collections.Generic.IReadOnlyList<string> HiddenFields { get; init; }
         public System.Collections.Generic.IReadOnlyList<string> ReadOnlyFields { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRelationVerdict> Relations { get; init; }
         public string? TenantScope { get; init; }
         public string? Using { get; init; }
         public string? WithCheck { get; init; }
@@ -1936,6 +1945,15 @@ namespace MMLib.Alvo.Management
         public string Consequence { get; init; }
         public string Fix { get; init; }
         public string Slot { get; init; }
+    }
+    public sealed class ManagementRelationVerdict : System.IEquatable<MMLib.Alvo.Management.ManagementRelationVerdict>
+    {
+        public ManagementRelationVerdict(string Via, string Entity, bool Allowed, string? Using, string? TenantScope) { }
+        public bool Allowed { get; init; }
+        public string Entity { get; init; }
+        public string? TenantScope { get; init; }
+        public string? Using { get; init; }
+        public string Via { get; init; }
     }
     public sealed class ManagementReplayPlan : System.IEquatable<MMLib.Alvo.Management.ManagementReplayPlan>
     {

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "projects",
+  "description": "Projects seen by their members, tasks seen through their project, and order lines checked against their product.",
+  "auth": { "roles": ["clerk", "member"] },
+  "entities": {
+    "projects": {
+      "fields": {
+        "name": { "type": "string", "maxLength": 80, "required": true },
+        "archived": { "type": "boolean", "required": true }
+      },
+      "rules": {
+        "list": "'clerk' in @user.roles || project_members.exists(m, m.user_id == @user.id)",
+        "get": "'clerk' in @user.roles || project_members.exists(m, m.user_id == @user.id)",
+        "create": "'clerk' in @user.roles"
+      }
+    },
+    "project_members": {
+      "fields": {
+        "project_id": { "type": "ref", "entity": "projects", "required": true, "index": true },
+        "user_id": { "type": "uuid", "required": true }
+      },
+      "rules": {
+        "list": "'clerk' in @user.roles || user_id == @user.id",
+        "create": "'clerk' in @user.roles"
+      }
+    },
+    "tasks": {
+      "fields": {
+        "project_id": { "type": "ref", "entity": "projects", "required": true },
+        "title": { "type": "string", "maxLength": 120, "required": true }
+      },
+      "rules": {
+        "list": "project_id.archived == false",
+        "get": "project_id.archived == false",
+        "create": "project_id.archived == false"
+      }
+    },
+    "products": {
+      "fields": {
+        "name": { "type": "string", "maxLength": 80, "required": true },
+        "active": { "type": "boolean", "required": true },
+        "stock": { "type": "integer", "required": true }
+      },
+      "rules": { "list": "true", "get": "true", "create": "'clerk' in @user.roles" }
+    },
+    "order_lines": {
+      "fields": {
+        "product_id": { "type": "ref", "entity": "products", "required": true },
+        "quantity": { "type": "integer", "required": true }
+      },
+      "rules": { "list": "true", "get": "true", "create": "true" },
+      "checks": [
+        {
+          "lookup": "product_id",
+          "expr": "product_id.active && quantity <= product_id.stock",
+          "message": "This product is not available in that quantity."
+        }
+      ]
+    }
+  }
+}

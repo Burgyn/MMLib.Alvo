@@ -44,7 +44,17 @@ internal static class CelParser
     /// <param name="source">The CEL expression source.</param>
     /// <param name="catalog">The functions this compilation knows.</param>
     /// <exception cref="CelSyntaxException">The source is too long, nests too deeply, or violates the grammar.</exception>
-    public static CelNode Parse(string source, CelFunctionCatalog catalog)
+    public static CelNode Parse(string source, CelFunctionCatalog catalog) => Parse(source, catalog, allowRelations: false);
+
+    /// <summary>
+    /// Parses CEL source into an untyped AST; with <paramref name="allowRelations"/>, <c>ref.field</c> and
+    /// <c>child.exists(x, …)</c> parse as relation syntax. Without it every path is refused exactly as before.
+    /// </summary>
+    /// <param name="source">The CEL expression source.</param>
+    /// <param name="catalog">The functions this compilation knows.</param>
+    /// <param name="allowRelations">Whether the compile was given a relation catalog: a rule or a lookup check.</param>
+    /// <exception cref="CelSyntaxException">The source is too long, nests too deeply, or violates the grammar.</exception>
+    public static CelNode Parse(string source, CelFunctionCatalog catalog, bool allowRelations)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(catalog);
@@ -58,11 +68,16 @@ internal static class CelParser
         }
 
         var tokens = CelLexer.Tokenize(source);
-        return new RecursiveDescentParser(tokens, catalog).ParseProgram();
+        return new RecursiveDescentParser(tokens, catalog, allowRelations).ParseProgram();
     }
 
-    private sealed class RecursiveDescentParser(IReadOnlyList<CelToken> tokens, CelFunctionCatalog catalog)
+    private sealed class RecursiveDescentParser(IReadOnlyList<CelToken> tokens, CelFunctionCatalog catalog, bool allowRelations)
     {
+        private const string ExistsMacro = "exists";
+
+        private const string OneHopSuggestion =
+            "A rule term follows one relation; deeper reach composes through the related entity's own list rule.";
+
         private const string RolesMembershipSuggestion =
             "A caller holds a set of roles — test membership instead: 'editor' in @user.roles";
 
@@ -428,7 +443,51 @@ internal static class CelParser
                 return ParseCatalogCall(qualified);
             }
 
+            if (IsRelationPath(identifierToken))
+            {
+                return ParseRelationPath(identifierToken);
+            }
+
             return ResolveFieldReference(identifierToken);
+        }
+
+        /// <summary>
+        /// Whether <c>identifier.</c> starts relation syntax: only in a compile given a relation catalog, never over
+        /// <c>old</c>/<c>new</c>, and never as a receiver call other than <c>exists</c>, which keeps today's refusal.
+        /// </summary>
+        private bool IsRelationPath(CelToken receiver) =>
+            allowRelations
+            && Current.Kind == CelTokenKind.Dot
+            && receiver.Text is not ("old" or "new")
+            && ReceiverCallName() is null or ExistsMacro;
+
+        private CelNode ParseRelationPath(CelToken receiver)
+        {
+            Expect(CelTokenKind.Dot);
+            var member = Expect(CelTokenKind.Identifier);
+            if (member.Text == ExistsMacro && Current.Kind == CelTokenKind.LeftParen)
+            {
+                return ParseExistsMacro(receiver);
+            }
+
+            if (Current.Kind == CelTokenKind.Dot)
+            {
+                throw new CelSyntaxException(
+                    "Alvo has no nested field access; use a single field name.", receiver.Position, OneHopSuggestion);
+            }
+
+            return new CelPath(receiver.Text, member.Text, receiver.Position);
+        }
+
+        /// <summary>Parses CEL's <c>receiver.exists(variable, body)</c>; the body counts as one nested level.</summary>
+        private CelExistsMacro ParseExistsMacro(CelToken receiver)
+        {
+            Expect(CelTokenKind.LeftParen);
+            var variable = Expect(CelTokenKind.Identifier);
+            Expect(CelTokenKind.Comma);
+            var body = ParseNestedGroup();
+            Expect(CelTokenKind.RightParen);
+            return new CelExistsMacro(receiver.Text, variable.Text, body, receiver.Position);
         }
 
         /// <summary>

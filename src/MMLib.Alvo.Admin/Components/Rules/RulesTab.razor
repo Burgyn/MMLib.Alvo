@@ -65,6 +65,7 @@ else
        unsaved until then; Escape puts back what the working copy declares. Enter is a newline. Each box is its
        own form, so the chord is alvo.js's one (data-alvo-chord-submit), as in every multi-line box, and the
        hint under it says all three keys. *@
+    var relations = Copy is { } working ? RelationHints.For(working.Json, Entity) : Array.Empty<RelationHint>();
     @foreach (var operation in _operations)
     {
         var declared = Declared(operation);
@@ -108,6 +109,19 @@ else
                     </ChildContent>
                     <Hint>@RuleHint</Hint>
                 </Field>
+                @* The relation terms apply would compile here, offered under every box; the related entity's own list rule
+                   always applies inside them, which is the one thing a reader of the term would not guess. *@
+                @if (relations.Count > 0)
+                {
+                    <p class="a-note" data-testid="@($"relation-hints-{operation}")">
+                        Reads through a related row:
+                        @foreach (var (hint, index) in relations.Select((hint, index) => (hint, index)))
+                        {
+                            <span>@(index == 0 ? string.Empty : " · ")<code class="a-mono">@hint.Term</code> (@hint.Entity)</span>
+                        }
+                        — the related entity's own list rule always applies, one hop, never under <code class="a-mono">!</code>.
+                    </p>
+                }
                 <div class="a-row">
                     <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" Submit="true" data-testid="@($"rule-save-{operation}")"
                                 Disabled="@(!Drafts.IsDirty(operation, declared))">Save rule</AlvoButton>

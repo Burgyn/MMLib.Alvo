@@ -11,7 +11,7 @@ snake_case. Pointers are RFC 6901 and operations RFC 6902 JSON Patch.
 An entity takes these keys:
 
 <!-- gen:entity-keys -->
-`description` `renamedFrom` `storage` `tenancy` `softDelete` `audit` `fields` `rules` `hooks` `events` `realtime` `indexes`
+`description` `renamedFrom` `storage` `tenancy` `softDelete` `audit` `fields` `rules` `checks` `hooks` `events` `realtime` `indexes`
 <!-- /gen:entity-keys -->
 
 A field takes these keys:
@@ -47,6 +47,8 @@ Types and facets are in `alvo-descriptor-field-types-and-formats`; `computed` an
 - `"events": {"exclude": ["<field>"]}` leaves fields out of the entity's event images, so no webhook body, after-hook
   or extension reads them; `id`, `tenant_id` and the managed columns stay. A field or entity an extension reads
   (`get_extensions`) cannot be removed or excluded: apply refuses it, naming the extension.
+- `virtual: true` — no column; a host enricher fills it on read (else null). Read-only; never in writes, CEL, filter/sort/select, indexes, events.
+  Only for an embedded host that registers `Enrich`.
 
 ## A new entity is one `add`
 

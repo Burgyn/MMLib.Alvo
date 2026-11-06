@@ -1,0 +1,52 @@
+﻿{
+  Column: {
+    Sql: EXISTS (SELECT 1 FROM [project_members] AS _alvo_r1 WHERE (_alvo_r1.[project_id] = [projects].[id]) AND (((CASE WHEN _alvo_r1.[user_id] = @alvo_u0 THEN 1 ELSE 0 END = 1) AND (COALESCE([projects].[archived], 0) = 1))) AND ((CASE WHEN _alvo_r1.[user_id] = @alvo_u1 THEN 1 ELSE 0 END = 1)) AND ((CASE WHEN _alvo_r1.[tenant_id] = @alvo_u2 THEN 1 ELSE 0 END = 1))),
+    Parameters: [
+      {
+        Key: alvo_u0,
+        Type: Guid,
+        Value: {alice-user-id}
+      },
+      {
+        Key: alvo_u1,
+        Type: Guid,
+        Value: {alice-user-id}
+      },
+      {
+        Key: alvo_u2,
+        Type: Guid,
+        Value: {acme-tenant-id}
+      }
+    ]
+  },
+  Image: {
+    Sql: EXISTS (SELECT 1 FROM [project_members] AS _alvo_r1 WHERE (_alvo_r1.[project_id] = @alvo_q0) AND (((CASE WHEN _alvo_r1.[user_id] = @alvo_q1 THEN 1 ELSE 0 END = 1) AND (COALESCE(@alvo_q2, 0) = 1))) AND ((CASE WHEN _alvo_r1.[user_id] = @alvo_q3 THEN 1 ELSE 0 END = 1)) AND ((CASE WHEN _alvo_r1.[tenant_id] = @alvo_q4 THEN 1 ELSE 0 END = 1))),
+    Parameters: [
+      {
+        Key: alvo_q0,
+        Type: Guid,
+        Value: Guid_1
+      },
+      {
+        Key: alvo_q1,
+        Type: Guid,
+        Value: {alice-user-id}
+      },
+      {
+        Key: alvo_q2,
+        Type: Boolean,
+        Value: true
+      },
+      {
+        Key: alvo_q3,
+        Type: Guid,
+        Value: {alice-user-id}
+      },
+      {
+        Key: alvo_q4,
+        Type: Guid,
+        Value: {acme-tenant-id}
+      }
+    ]
+  }
+}

@@ -12,7 +12,7 @@
 public sealed record CelCompilationError(string Message, string? FixSuggestion, int Position);
 
 /// <summary>
-/// The outcome of <see cref="ICelCompiler.Compile"/>: either a <see cref="CompiledExpression"/> a
+/// The outcome of <see cref="ICelCompiler.Compile(string, CelProfile, Schema.EntitySchema)"/>: either a <see cref="CompiledExpression"/> a
 /// renderer can trust, or every problem that made the source unusable, so the caller can report
 /// them all in one round trip rather than fixing one error at a time.
 /// </summary>

@@ -1,0 +1,20 @@
+﻿{
+  Sql: EXISTS (SELECT 1 FROM "customers" AS _alvo_r1 WHERE (_alvo_r1."id" = "orders"."customer_id") AND (COALESCE(_alvo_r1."region" = @alvo_u0, FALSE)) AND (COALESCE(_alvo_r1."owner_id" = @alvo_u1, FALSE)) AND (COALESCE(_alvo_r1."tenant_id" = @alvo_u2, FALSE))),
+  Parameters: [
+    {
+      Key: alvo_u0,
+      Type: String,
+      Value: eu
+    },
+    {
+      Key: alvo_u1,
+      Type: Guid,
+      Value: {alice-user-id}
+    },
+    {
+      Key: alvo_u2,
+      Type: Guid,
+      Value: {acme-tenant-id}
+    }
+  ]
+}

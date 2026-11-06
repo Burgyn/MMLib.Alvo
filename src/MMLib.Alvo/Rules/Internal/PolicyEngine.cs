@@ -9,7 +9,7 @@ namespace MMLib.Alvo.Rules.Internal;
 /// The default <see cref="IPolicyEngine"/>: resolves the <see cref="IPolicyCatalogProvider.Current"/>
 /// catalog against one entity/operation/caller triple, with no blocking wait and no caching of a
 /// build failure — the catalog is built and primed elsewhere (the boot, <c>RuntimeSchemaService</c>, <c>SchemaMigrationRunner</c>),
-/// never lazily, by <see cref="Resolve"/> itself. Reads as five steps, in order: not-yet-primed (deny,
+/// never lazily, by <see cref="Resolve(string, DataOperation, AlvoContext)"/> itself. Reads as five steps, in order: not-yet-primed (deny,
 /// the correct default-deny answer for "no descriptor has been applied yet"), look up the entity (deny
 /// if unknown or blank, never throw), the tenant guard (deny before any rule is consulted when a
 /// tenant-scoped entity's caller carries no tenant), the operation lookup (deny when the relevant rule
@@ -44,12 +44,15 @@ internal sealed class PolicyEngine : IPolicyEngine
 
     private readonly IPolicyCatalogProvider _provider;
 
+    private readonly RelationBinder _binder;
+
     /// <summary>Initializes a new instance of the <see cref="PolicyEngine"/> class.</summary>
-    /// <param name="provider">Holds the catalog this engine resolves against; read once per <see cref="Resolve"/> call.</param>
+    /// <param name="provider">Holds the catalog this engine resolves against; read once per <see cref="Resolve(string, DataOperation, AlvoContext)"/> call.</param>
     public PolicyEngine(IPolicyCatalogProvider provider)
     {
         ArgumentNullException.ThrowIfNull(provider);
         _provider = provider;
+        _binder = new RelationBinder((catalog, entity, context, depth) => Resolve(catalog, entity, DataOperation.List, context, depth));
     }
 
     /// <inheritdoc/>
@@ -63,13 +66,28 @@ internal sealed class PolicyEngine : IPolicyEngine
             return PolicyDecision.Deny("No descriptor has been applied yet; no policy is configured.");
         }
 
+        return Resolve(catalog, entity, operation, context, depth: 0);
+    }
+
+    /// <summary>
+    /// Resolves against one catalog snapshot, read once by the public <see cref="Resolve(string, DataOperation, AlvoContext)"/>
+    /// and passed down every relation's recursion, so a re-apply landing mid-call cannot mix two revisions' rules in one
+    /// decision.
+    /// </summary>
+    /// <param name="catalog">The catalog snapshot.</param>
+    /// <param name="entity">The entity.</param>
+    /// <param name="operation">The operation.</param>
+    /// <param name="context">The caller.</param>
+    /// <param name="depth">How many relations deep this decision is; 0 for a caller's own request.</param>
+    internal PolicyDecision Resolve(PolicyCatalog catalog, string entity, DataOperation operation, AlvoContext context, int depth)
+    {
         if (string.IsNullOrWhiteSpace(entity) || !catalog.TryGetEntity(entity, out var policy))
         {
             return PolicyDecision.Deny(DenyReasonForOperation(operation));
         }
 
         return CheckTenantGuard(policy, context)
-            ?? ResolveOperation(operation, policy, context);
+            ?? ResolveOperation(new Resolution(catalog, entity, operation, context, depth), policy);
     }
 
     /// <summary>
@@ -82,7 +100,7 @@ internal sealed class PolicyEngine : IPolicyEngine
     /// </summary>
     private static PolicyDecision? CheckTenantGuard(EntityPolicy policy, AlvoContext context)
     {
-        if (policy.Tenancy != TenancyMode.Scoped || context.Tenant is not null)
+        if (policy.Tenancy != TenancyMode.Scoped || RequiredContext.HasTenant(context))
         {
             return null;
         }
@@ -90,16 +108,53 @@ internal sealed class PolicyEngine : IPolicyEngine
         return PolicyDecision.Deny("The caller has no tenant, and this entity is tenant-scoped.");
     }
 
-    private static PolicyDecision ResolveOperation(DataOperation operation, EntityPolicy policy, AlvoContext context)
+    private PolicyDecision ResolveOperation(Resolution resolution, EntityPolicy policy)
     {
+        var operation = resolution.Operation;
         if (!policy.Operations.TryGetValue(operation, out var operationPolicy) || IsUnconfigured(operation, operationPolicy))
         {
             return PolicyDecision.Deny(DenyReasonForOperation(operation));
         }
 
-        return CheckRequiredContext(operationPolicy, context)
-            ?? Allow(policy, operationPolicy, context);
+        return CheckRequiredContext(operationPolicy, resolution.Context)
+            ?? Allow(policy, Bound(operationPolicy, resolution), resolution.Context) with { Checks = BoundChecks(policy, resolution) };
     }
+
+    /// <summary>
+    /// The entity's lookup checks, each bound to the caller's <c>list</c> decision on the entity it reads, for a write that
+    /// stores a row; no other operation runs them.
+    /// </summary>
+    private IReadOnlyList<DescriptorCheck> BoundChecks(EntityPolicy policy, Resolution resolution) =>
+        resolution.Operation is DataOperation.Create or DataOperation.Update && policy.Checks.Count > 0
+            ? [.. policy.Checks.Select((check, index) => check with
+            {
+                Relation = _binder.Bind(resolution.Catalog, resolution.Entity, $"checks/{index}", check.Relation, resolution.Context),
+            })]
+            : [];
+
+    /// <summary>
+    /// The operation's predicates with every relation bound for this caller; untouched when it reads none. Each tree is
+    /// searched rather than trusting a stored flag, which a <c>with</c> copy could leave stale over a relation tree.
+    /// </summary>
+    private OperationPolicy Bound(OperationPolicy policy, Resolution resolution)
+    {
+        var @using = Bind(resolution, UsingSlot, policy.Using);
+        var withCheck = Bind(resolution, CheckSlot, policy.WithCheck);
+        return ReferenceEquals(@using, policy.Using) && ReferenceEquals(withCheck, policy.WithCheck)
+            ? policy
+            : policy with { Using = @using, WithCheck = withCheck };
+    }
+
+    private CompiledExpression? Bind(Resolution resolution, string slot, CompiledExpression? expression) =>
+        _binder.Bind(resolution.Catalog, resolution.Entity, resolution.Operation, slot, expression, resolution.Context, resolution.Depth);
+
+    private const string UsingSlot = "using";
+
+    private const string CheckSlot = "check";
+
+    /// <summary>One decision being resolved: the snapshot, what is asked, by whom, and how many relations deep.</summary>
+    private readonly record struct Resolution(
+        PolicyCatalog Catalog, string Entity, DataOperation Operation, AlvoContext Context, int Depth);
 
     /// <summary>
     /// Denies when a predicate this operation would hand out reads a caller/tenant context value the
