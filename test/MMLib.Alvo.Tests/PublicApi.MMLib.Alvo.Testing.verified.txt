@@ -288,7 +288,9 @@ namespace MMLib.Alvo.Testing.Data
     public abstract class AlvoDataComputedRollupTests
     {
         protected AlvoDataComputedRollupTests() { }
+        protected abstract string? BackfillLock { get; }
         protected abstract string DistinctOperator { get; }
+        public System.Threading.Tasks.Task A_backfill_holds_the_child_before_the_parent_s_ddl_and_says_so() { }
         public System.Threading.Tasks.Task A_backfill_never_aggregates_another_tenants_children() { }
         public System.Threading.Tasks.Task A_backfill_rewrites_only_the_parents_whose_aggregate_changes() { }
         public System.Threading.Tasks.Task A_child_moving_across_the_filter_moves_the_aggregate_both_ways() { }

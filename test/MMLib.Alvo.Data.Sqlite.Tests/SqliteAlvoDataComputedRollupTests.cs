@@ -56,5 +56,8 @@ public sealed class SqliteAlvoDataComputedRollupTests : AlvoDataComputedRollupTe
     /// <inheritdoc/>
     protected override string DistinctOperator => "IS NOT";
 
+    /// <inheritdoc/>
+    protected override string? BackfillLock => null;
+
     public ValueTask DisposeAsync() => _fixture.DisposeAsync();
 }

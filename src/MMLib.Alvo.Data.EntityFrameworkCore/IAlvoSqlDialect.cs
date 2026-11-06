@@ -480,6 +480,14 @@ public interface IAlvoSqlDialect
     /// write lock for its whole transaction.
     /// </para>
     /// <para>
+    /// <b>Taken before the DDL</b>, right after <see cref="ApplyLockTimeoutStatement"/>, for every pre-existing child in
+    /// ordinal name order (HX-11 Ruling 74): a writer writes the child row first and locks the parent row second, so an
+    /// apply that took the parent first (its <c>ALTER TABLE</c>, or an earlier backfill's row locks) and then waited for a
+    /// child would deadlock against it. <b>The residual:</b> a parent delete that cascades to its children runs parent then
+    /// child, and can still deadlock against the apply in any position of this lock. That is rarer, and the engine's
+    /// deadlock detector resolves it by failing one side — an unmapped <c>40P01</c> today (a follow-up).
+    /// </para>
+    /// <para>
     /// <b>Internal</b>, for <see cref="ApplyLockTimeoutStatement"/>'s reason: the published dialect port does not grow.
     /// </para>
     /// </remarks>

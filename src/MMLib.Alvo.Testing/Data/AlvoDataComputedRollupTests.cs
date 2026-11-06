@@ -110,6 +110,13 @@ public abstract class AlvoDataComputedRollupTests
     /// <summary>The engine's NULL-safe "differs" operator: <c>IS DISTINCT FROM</c> on PostgreSQL, <c>IS NOT</c> on SQLite.</summary>
     protected abstract string DistinctOperator { get; }
 
+    /// <summary>
+    /// The statement this engine's apply holds the child <c>reservations</c> with before it recomputes a rollup over it —
+    /// <c>LOCK TABLE … IN SHARE MODE</c> on PostgreSQL — or <see langword="null"/> for an engine on which no child write can
+    /// interleave with an apply (SQLite).
+    /// </summary>
+    protected abstract string? BackfillLock { get; }
+
     private async Task ApplyAsync(SchemaModel current, SchemaModel desired) =>
         (await MigrateAsync(current, desired)).Applied.ShouldBeTrue();
 
@@ -638,6 +645,33 @@ public abstract class AlvoDataComputedRollupTests
         var plan = await PlanAsync(FilteredSchema, ReleasedFilterSchema);
 
         plan.Sql[^1].ShouldContain(DistinctOperator, Case.Sensitive, "an unchanged parent is not rewritten (no WAL, no row lock)");
+    }
+
+    /// <summary>
+    /// Where the backfill's child lock sits (Ruling 74): right after the lock timeout and <em>before</em> EF's DDL, so the
+    /// apply takes the child before the parent — a writer's own order, child row first, parent row lock second — and never
+    /// waits for the child while holding the parent's DDL lock. The step names what it costs on an engine that locks; on
+    /// one that does not, there is neither a lock nor a note.
+    /// </summary>
+    [Fact]
+    public async Task A_backfill_holds_the_child_before_the_parent_s_ddl_and_says_so()
+    {
+        await CreateAsync(WithoutRollupSchema, FilteredDescriptor);
+
+        var plan = await PlanAsync(WithoutRollupSchema, FilteredSchema);
+
+        var step = plan.Steps.Single(candidate => candidate.Change.Detail == "Recomputes the rollup for every record.");
+        plan.Sql[^1].ShouldStartWith("UPDATE", Case.Insensitive, "the recompute follows the DDL that adds its column");
+        if (BackfillLock is null)
+        {
+            plan.Sql.ShouldNotContain(statement => statement.Contains("LOCK TABLE", StringComparison.OrdinalIgnoreCase));
+            step.Reason.ShouldBeNull();
+            return;
+        }
+
+        plan.Sql.ToList().IndexOf(BackfillLock).ShouldBe(1, "right after the lock timeout, before the parent's ALTER TABLE");
+        plan.Sql.Count(statement => statement.Contains("LOCK TABLE", StringComparison.OrdinalIgnoreCase)).ShouldBe(1);
+        step.Reason.ShouldBe("Locks writes to 'reservations' and every changed parent row until the apply commits.");
     }
 
     /// <summary>

@@ -149,9 +149,10 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
 
         var operations = ForThisEngine(AssembleOperations(prePass, residual));
         var backfill = Backfill(prePass.AlignedCurrent, desired);
+        var locks = BackfillLocks(current, backfill);
         var steps = BuildSemanticSteps(prePass, desired, residual);
-        steps.AddRange(backfill.Select(BackfillStep));
-        var sql = GenerateSql(operations, desiredModel, backfill);
+        steps.AddRange(backfill.Select(statement => BackfillStep(statement, locks)));
+        var sql = GenerateSql(operations, desiredModel, locks, backfill);
 
         var plan = new MigrationPlan { Steps = steps, Sql = sql };
         _plannedAgainst.AddOrUpdate(plan, desired);
@@ -311,10 +312,12 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     // excludes a not-yet-added column from its INSERT ... SELECT). Generating per operation would
     // emit SQL referencing columns that do not exist at that point.
     // The dialect's lock-timeout statement leads, so it is the first statement of the apply's transaction on either executor
-    // and a dry run shows it (HX-11 Ruling 20). The rollup backfill follows EF's DDL, so it reads and writes the columns the
-    // DDL has just made (Ruling 32).
+    // and a dry run shows it (HX-11 Ruling 20). The backfill's child locks come next, before the DDL — so the apply takes
+    // each child before its parent, a writer's own order (Ruling 74) — and the rollup backfill follows EF's DDL, so it reads
+    // and writes the columns the DDL has just made (Ruling 32).
     private IReadOnlyList<string> GenerateSql(
-        List<MigrationOperation> operations, IModel desiredModel, IReadOnlyList<RollupBackfill.Statement> backfill)
+        List<MigrationOperation> operations, IModel desiredModel, SortedDictionary<string, string> locks,
+        IReadOnlyList<RollupBackfill.Statement> backfill)
     {
         if (operations.Count == 0 && backfill.Count == 0)
         {
@@ -324,7 +327,7 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         var ddl = operations.Count == 0
             ? []
             : _sqlGenerator.Generate(operations, desiredModel).Select(command => command.CommandText);
-        return [.. LockTimeout, .. ddl, .. BackfillSql(backfill)];
+        return [.. LockTimeout, .. locks.Values, .. ddl, .. backfill.Select(statement => statement.Sql)];
     }
 
     /// <summary>
@@ -345,22 +348,28 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         return RollupBackfill.Statements(alignedCurrent, desired, _dialect, fields, _rollupFilter);
     }
 
-    // Each child's lock leads the first recompute over it, so every child write waits for the apply (Ruling 32).
-    private IEnumerable<string> BackfillSql(IReadOnlyList<RollupBackfill.Statement> backfill)
+    /// <summary>
+    /// The child lock of every distinct child the backfill reads that already exists in <paramref name="current"/>, keyed by
+    /// name in ordinal order (Ruling 74): one fixed order across applies, and none for a child the plan creates — it has
+    /// no table before the DDL, and no writer to hold off. An engine whose dialect answers no lock contributes nothing.
+    /// </summary>
+    private SortedDictionary<string, string> BackfillLocks(SchemaModel current, IReadOnlyList<RollupBackfill.Statement> backfill)
     {
-        var locked = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var statement in backfill)
+        var locks = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var child in backfill.Select(statement => statement.Child))
         {
-            if (locked.Add(statement.Child.Name) && _dialect.BackfillLockStatement(statement.Child) is { } lockStatement)
+            if (!locks.ContainsKey(child.Name)
+                && current.Entities.Any(entity => string.Equals(entity.Name, child.Name, StringComparison.Ordinal))
+                && _dialect.BackfillLockStatement(child) is { } statement)
             {
-                yield return lockStatement;
+                locks.Add(child.Name, statement);
             }
-
-            yield return statement.Sql;
         }
+
+        return locks;
     }
 
-    private MigrationStep BackfillStep(RollupBackfill.Statement statement) => ToStep(
+    private static MigrationStep BackfillStep(RollupBackfill.Statement statement, SortedDictionary<string, string> locks) => ToStep(
         new SchemaChange
         {
             Kind = SchemaChangeKind.AlterField,
@@ -368,9 +377,9 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
             Field = statement.Field,
             Detail = "Recomputes the rollup for every record.",
         },
-        _dialect.BackfillLockStatement(statement.Child) is null
-            ? null
-            : $"Locks writes to '{statement.Child.Name}' and every changed parent row until the apply commits.");
+        locks.ContainsKey(statement.Child.Name)
+            ? $"Locks writes to '{statement.Child.Name}' and every changed parent row until the apply commits."
+            : null);
 
     private static string? NoFilterRenderer(EntitySchema child, RollupSchema rollup) =>
         rollup.Where is null

@@ -55,5 +55,8 @@ public sealed class PostgreSqlAlvoDataComputedRollupTests : AlvoDataComputedRoll
     /// <inheritdoc/>
     protected override string DistinctOperator => "IS DISTINCT FROM";
 
+    /// <inheritdoc/>
+    protected override string? BackfillLock => "LOCK TABLE \"reservations\" IN SHARE MODE";
+
     public ValueTask DisposeAsync() => _fixture.DisposeAsync();
 }

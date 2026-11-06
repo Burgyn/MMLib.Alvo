@@ -2,7 +2,9 @@
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
+using Npgsql;
 using Xunit;
 using DescField = MMLib.Alvo.Descriptor.FieldType;
 using SchemaField = MMLib.Alvo.Schema.FieldType;
@@ -121,8 +123,71 @@ public sealed class PostgreSqlRollupRaceTests : IAsyncLifetime
         (await host.Data.GetAsync(Orders, order, Caller, Ct))![Total].ShouldBe(Sales * 1m, "every sale line, and no refund line");
     }
 
+    /// <summary>
+    /// A child write in flight when an apply changes the filter is in the apply's backfill (Ruling 32, review I2): the
+    /// apply's <c>SHARE</c> lock on the child waits for the writer's <c>ROW EXCLUSIVE</c>, so the backfill's snapshot is
+    /// taken after the writer commits. Without the lock the backfill reads past the uncommitted row and the parent stays
+    /// short of it.
+    /// </summary>
+    /// <remarks>
+    /// Deterministic, with no widening: the writer is a raw transaction held open until the apply's backend is seen waiting
+    /// on a lock in <c>pg_stat_activity</c>, and only then committed. An apply that never waits — no lock — completes on its
+    /// own, and the poll stops there too.
+    /// </remarks>
+    [Fact]
+    public async Task An_apply_waits_for_a_child_write_in_flight_and_its_backfill_includes_it()
+    {
+        var (hosts, connectionString) = await _fixture.StartReplicasAsync(SchemaFor(Sale), DescriptorFor(Sale), replicas: 1);
+        var host = hosts[0];
+        var order = await CreateOrderAsync(host.Data);
+        var migrator = host.Services.GetRequiredService<ISchemaMigrator>();
+        var plan = await migrator.PlanAsync(SchemaFor(Sale), SchemaFor(Refund), new MigrationOptions(), Ct);
+
+        await using var writer = new NpgsqlConnection(connectionString);
+        await writer.OpenAsync(Ct);
+        await using var held = await writer.BeginTransactionAsync(Ct);
+        await InsertRefundAsync(writer, held, order);
+        var apply = migrator.ApplyAsync(plan, new MigrationOptions(), Ct);
+        await UntilWaitingOnALockOrDoneAsync(connectionString, apply);
+        await held.CommitAsync(Ct);
+
+        (await apply).Applied.ShouldBeTrue();
+        host.RePrime(SchemaFor(Refund));
+        (await host.Data.GetAsync(Orders, order, Caller, Ct))![Total].ShouldBe(1m, "the held refund line, committed while the apply waited");
+    }
+
     /// <summary>The filter the race facts start from.</summary>
     private const string Sale = "kind == 'sale'";
+
+    /// <summary>The filter the in-flight fact's apply switches to.</summary>
+    private const string Refund = "kind == 'refund'";
+
+    /// <summary>One refund line of <paramref name="order"/>, written in <paramref name="transaction"/> and not committed.</summary>
+    private static async Task InsertRefundAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid order)
+    {
+        await using var insert = new NpgsqlCommand(
+            $"INSERT INTO \"{Lines}\" (\"id\", \"{Order}\", \"amount\", \"kind\") VALUES (@id, @parent, 1, 'refund')",
+            connection,
+            transaction);
+        insert.Parameters.AddWithValue("id", Guid.NewGuid());
+        insert.Parameters.AddWithValue("parent", order);
+        await insert.ExecuteNonQueryAsync(Ct);
+    }
+
+    /// <summary>Polls until another backend of the database waits on a lock, or <paramref name="apply"/> has finished.</summary>
+    private static async Task UntilWaitingOnALockOrDoneAsync(string connectionString, Task apply)
+    {
+        await using var probe = new NpgsqlConnection(connectionString);
+        await probe.OpenAsync(Ct);
+        await using var query = new NpgsqlCommand(
+            "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() "
+            + "AND wait_event_type = 'Lock'",
+            probe);
+        while (!apply.IsCompleted && (long)(await query.ExecuteScalarAsync(Ct))! == 0)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(20), Ct);
+        }
+    }
 
     /// <summary>How many of the <see cref="Writers"/> lines are sales: every third line is a refund.</summary>
     private const int Sales = Writers - Refunds;
