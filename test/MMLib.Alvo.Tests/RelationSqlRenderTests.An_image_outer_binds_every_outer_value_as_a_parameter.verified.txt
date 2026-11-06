@@ -1,6 +1,6 @@
 ﻿[
   {
-    Sql: EXISTS (SELECT 1 FROM "customers" AS alvo_r1 WHERE (alvo_r1."id" = @alvo_q0) AND (COALESCE(alvo_r1."region" = @alvo_q1, FALSE)) AND (COALESCE(alvo_r1."owner_id" = @alvo_q2, FALSE)) AND (COALESCE(alvo_r1."tenant_id" = @alvo_q3, FALSE))),
+    Sql: EXISTS (SELECT 1 FROM "customers" AS _alvo_r1 WHERE (_alvo_r1."id" = @alvo_q0) AND (COALESCE(_alvo_r1."region" = @alvo_q1, FALSE)) AND (COALESCE(_alvo_r1."owner_id" = @alvo_q2, FALSE)) AND (COALESCE(_alvo_r1."tenant_id" = @alvo_q3, FALSE))),
     Parameters: [
       {
         Key: alvo_q0,
@@ -25,7 +25,7 @@
     ]
   },
   {
-    Sql: EXISTS (SELECT 1 FROM "customers" AS alvo_r1 WHERE (alvo_r1."id" = @alvo_q0) AND (COALESCE(CAST(alvo_r1."credit_limit" AS numeric) >= CAST(@alvo_q1 AS numeric), FALSE)) AND (COALESCE(alvo_r1."owner_id" = @alvo_q2, FALSE)) AND (COALESCE(alvo_r1."tenant_id" = @alvo_q3, FALSE))),
+    Sql: EXISTS (SELECT 1 FROM "customers" AS _alvo_r1 WHERE (_alvo_r1."id" = @alvo_q0) AND (COALESCE(CAST(_alvo_r1."credit_limit" AS numeric) >= CAST(@alvo_q1 AS numeric), FALSE)) AND (COALESCE(_alvo_r1."owner_id" = @alvo_q2, FALSE)) AND (COALESCE(_alvo_r1."tenant_id" = @alvo_q3, FALSE))),
     Parameters: [
       {
         Key: alvo_q0,

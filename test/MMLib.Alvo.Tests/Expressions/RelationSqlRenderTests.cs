@@ -37,8 +37,8 @@ public sealed partial class RelationSqlRenderTests
     {
         var sql = Read("test", "orders", "customer_id.region == region").Sql;
 
-        sql.ShouldContain("COALESCE(alvo_r1.\"region\" = \"orders\".\"region\", FALSE)");
-        sql.ShouldContain("alvo_r1.\"id\" = \"orders\".\"customer_id\"");
+        sql.ShouldContain("COALESCE(_alvo_r1.\"region\" = \"orders\".\"region\", FALSE)");
+        sql.ShouldContain("_alvo_r1.\"id\" = \"orders\".\"customer_id\"");
     }
 
     public static TheoryData<string, AlvoContext> DeniedCallers() => new()
@@ -69,7 +69,7 @@ public sealed partial class RelationSqlRenderTests
         markers.Distinct().Count().ShouldBe(markers.Count);
         markers.ToHashSet().SetEquals(predicate.Parameters.Keys).ShouldBeTrue();
         predicate.Parameters.Keys.ShouldAllBe(name => name.StartsWith(Prefix, StringComparison.Ordinal));
-        Aliases().Matches(predicate.Sql).Select(match => match.Value).ShouldBe(["AS alvo_r1", "AS alvo_r2", "AS alvo_r3"]);
+        Aliases().Matches(predicate.Sql).Select(match => match.Value).ShouldBe(["AS _alvo_r1", "AS _alvo_r2", "AS _alvo_r3"]);
         return Verify(Snapshot(predicate));
     }
 
@@ -118,6 +118,17 @@ public sealed partial class RelationSqlRenderTests
         forOther.Root.ShouldBeSameAs(forManager.Root);
         Render("test", forManager, RelationRenderWorld.Manager, ReadOf("test", "orders")).Sql.ShouldContain("AND (TRUE) AND");
         Render("test", forOther, CelFixtures.Alice, ReadOf("test", "orders")).Sql.ShouldContain("AND (FALSE) AND");
+    }
+
+    [Fact]
+    public void A_json_null_outer_value_is_absent_to_has_in_a_probe()
+    {
+        var relation = (CelRelation)_world.Bound("projects", "project_members.exists(m, has(note) && m.note == 'x')", CelFixtures.Alice).Root;
+        using var json = System.Text.Json.JsonDocument.Parse("null");
+
+        var probe = Probe("test", relation, "projects", Image(("id", _project), ("note", json.RootElement.Clone())));
+
+        probe.Sql.ShouldContain("((FALSE AND ");
     }
 
     internal static SqlPredicate Read(string dialect, string entity, string source)
@@ -171,6 +182,6 @@ public sealed partial class RelationSqlRenderTests
     [GeneratedRegex(@"@(alvo_\w+)")]
     private static partial Regex Markers();
 
-    [GeneratedRegex(@"AS alvo_r\d+")]
+    [GeneratedRegex(@"AS _alvo_r\d+")]
     private static partial Regex Aliases();
 }

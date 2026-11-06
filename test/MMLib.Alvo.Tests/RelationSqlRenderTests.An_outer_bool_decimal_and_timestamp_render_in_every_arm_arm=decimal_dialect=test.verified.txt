@@ -1,6 +1,6 @@
 ﻿{
   Column: {
-    Sql: EXISTS (SELECT 1 FROM "customers" AS alvo_r1 WHERE (alvo_r1."id" = "orders"."customer_id") AND (COALESCE(CAST(alvo_r1."credit_limit" AS numeric) >= CAST("orders"."amount" AS numeric), FALSE)) AND (COALESCE(alvo_r1."owner_id" = @alvo_u0, FALSE)) AND (COALESCE(alvo_r1."tenant_id" = @alvo_u1, FALSE))),
+    Sql: EXISTS (SELECT 1 FROM "customers" AS _alvo_r1 WHERE (_alvo_r1."id" = "orders"."customer_id") AND (COALESCE(CAST(_alvo_r1."credit_limit" AS numeric) >= CAST("orders"."amount" AS numeric), FALSE)) AND (COALESCE(_alvo_r1."owner_id" = @alvo_u0, FALSE)) AND (COALESCE(_alvo_r1."tenant_id" = @alvo_u1, FALSE))),
     Parameters: [
       {
         Key: alvo_u0,
@@ -15,12 +15,12 @@
     ]
   },
   Image: {
-    Sql: EXISTS (SELECT 1 FROM "customers" AS alvo_r1 WHERE (alvo_r1."id" = @alvo_q0) AND (COALESCE(CAST(alvo_r1."credit_limit" AS numeric) >= CAST(@alvo_q1 AS numeric), FALSE)) AND (COALESCE(alvo_r1."owner_id" = @alvo_q2, FALSE)) AND (COALESCE(alvo_r1."tenant_id" = @alvo_q3, FALSE))),
+    Sql: EXISTS (SELECT 1 FROM "customers" AS _alvo_r1 WHERE (_alvo_r1."id" = @alvo_q0) AND (COALESCE(CAST(_alvo_r1."credit_limit" AS numeric) >= CAST(@alvo_q1 AS numeric), FALSE)) AND (COALESCE(_alvo_r1."owner_id" = @alvo_q2, FALSE)) AND (COALESCE(_alvo_r1."tenant_id" = @alvo_q3, FALSE))),
     Parameters: [
       {
         Key: alvo_q0,
         Type: Guid,
-        Value: Guid_Empty
+        Value: Guid_1
       },
       {
         Key: alvo_q1,

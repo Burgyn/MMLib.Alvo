@@ -9,7 +9,11 @@ namespace MMLib.Alvo.Tests.Expressions;
 /// </summary>
 public sealed partial class RelationSqlRenderTests
 {
-    private static readonly Dictionary<string, (string Entity, string Source, AlvoRecord Row, Type? Bound)> _arms = new(StringComparer.Ordinal)
+    /// <summary>
+    /// Built on each read, never as a static initialiser: it reads <c>_project</c> and <c>_customer</c>, which the other half
+    /// of this partial class declares, and C# leaves the initialiser order across partial files unspecified.
+    /// </summary>
+    private static Dictionary<string, (string Entity, string Source, AlvoRecord Row, Type? Bound)> ArmTable => new(StringComparer.Ordinal)
     {
         ["bool"] = ("projects", "project_members.exists(m, m.user_id == @user.id && archived)",
             Image(("id", _project.ToString()), ("archived", true)), typeof(bool)),
@@ -33,7 +37,7 @@ public sealed partial class RelationSqlRenderTests
     [MemberData(nameof(Arms))]
     public Task An_outer_bool_decimal_and_timestamp_render_in_every_arm(string arm, string dialect)
     {
-        var (entity, source, row, bound) = _arms[arm];
+        var (entity, source, row, bound) = ArmTable[arm];
         var expression = _world.Bound(entity, source, CelFixtures.Alice);
 
         var column = Render(dialect, expression, CelFixtures.Alice, ReadOf(dialect, entity));

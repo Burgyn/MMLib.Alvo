@@ -1,5 +1,7 @@
 ﻿using MMLib.Alvo.Schema;
 
+using System.Text.Json;
+
 namespace MMLib.Alvo.Expressions.Internal;
 
 /// <summary>
@@ -10,8 +12,9 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// <remarks>
 /// <para>
 /// <b>Every nested scope renders into its parent's parameter bag</b>, so one top-level predicate has one prefix and its
-/// names never repeat however deep the relations go. Aliases are <c>alvo_r1</c>, <c>alvo_r2</c>, … per top-level render:
-/// lower-case ASCII, valid bare on every engine.
+/// names never repeat however deep the relations go. Aliases are <c>_alvo_r1</c>, <c>_alvo_r2</c>, … per top-level render:
+/// lower-case ASCII, valid bare on every engine, and led by an underscore no entity name can start with, so an alias never names
+/// the outer table it is correlated with.
 /// </para>
 /// <para>
 /// <b>The outer row is never read bare inside an <c>EXISTS</c></b>: a related table declaring a same-named column would
@@ -21,7 +24,7 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// </remarks>
 internal sealed partial class SqlPredicateRenderer
 {
-    private const string AliasPrefix = "alvo_r";
+    private const string AliasPrefix = "_alvo_r";
 
     /// <inheritdoc />
     SqlPredicate IPredicateRenderer.Render(
@@ -112,10 +115,16 @@ internal sealed partial class SqlPredicateRenderer
     /// <c>has()</c> over the outer row. A post-image's presence is known before the statement exists, so it renders as a
     /// constant predicate rather than a null parameter an engine could not type.
     /// </summary>
+    /// <summary>
+    /// <c>has(outer)</c>: a column test in a read, a constant in a probe — present when the post-image holds a value, and a
+    /// JSON <c>null</c> counts as absent, as it does everywhere else an image value is read.
+    /// </summary>
     private static PredicateFragment RenderOuterHas(CelOuterHas has, RenderScope scope) =>
         OuterRow(scope, has.Field) is RowSource.Image image
-            ? new PredicateFragment(scope.Fields.RenderBooleanPredicate(image.Row[has.Field.FieldName] is not null), true)
+            ? new PredicateFragment(scope.Fields.RenderBooleanPredicate(IsPresent(image.Row[has.Field.FieldName])), true)
             : RenderHas(RenderOuterField(has.Field, scope));
+
+    private static bool IsPresent(object? value) => value is not (null or JsonElement { ValueKind: JsonValueKind.Null });
 
     private static RowSource OuterRow(RenderScope scope, CelNode reader) => scope.Outer ?? throw new InvalidOperationException(
         $"'{reader.GetType().Name}' reads the outer row outside a relation; only a relation's body has one.");

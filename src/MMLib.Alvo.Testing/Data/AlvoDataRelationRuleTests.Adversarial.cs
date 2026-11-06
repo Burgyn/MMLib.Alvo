@@ -49,7 +49,12 @@ public abstract partial class AlvoDataRelationRuleTests
         (await data.GetAsync(RelationWorld.Regions, region, inTenant2, Ct)).ShouldBeNull();
     }
 
-    /// <summary>One user id in two tenants: each tenant's rows are reached only through that tenant's related rows.</summary>
+    /// <summary>
+    /// One user id in two tenants: a relation that would match the other tenant's rows reaches none of them. The outer
+    /// tenant scope already keeps them apart here; the related tenant scope inside the <c>EXISTS</c> is pinned by
+    /// <see cref="A_global_row_is_visible_through_the_caller_s_tenant_children_only"/> and the other-tenant row of
+    /// <see cref="An_exists_never_matches_a_related_row_the_caller_cannot_list"/>.
+    /// </summary>
     [Fact]
     public async Task Two_tenants_with_the_same_user_id_never_see_each_other_s_rows_through_a_relation()
     {
@@ -69,8 +74,8 @@ public abstract partial class AlvoDataRelationRuleTests
         (await data.GetAsync(RelationWorld.Orders, order2, inTenant1, Ct)).ShouldBeNull();
         (await data.GetAsync(RelationWorld.Projects, project2, inTenant1, Ct)).ShouldBeNull();
         (await data.GetAsync(RelationWorld.Projects, project2, inTenant2, Ct)).ShouldNotBeNull();
-        await Should.ThrowAsync<Exception>(() =>
-            data.UpdateAsync(RelationWorld.Orders, order2, Patch("note", "x"), inTenant1, cancellationToken: Ct));
+        await ShouldBeRefusedLikeAnOwnerMissAsync(data, world, (entity, id) =>
+            data.UpdateAsync(entity, id, Patch("note", "x"), inTenant1, cancellationToken: Ct), order2);
         (await data.GetAsync(RelationWorld.Orders, order2, inTenant2, Ct)).ShouldNotBeNull()["note"].ShouldBe("order");
     }
 
@@ -109,6 +114,10 @@ public abstract partial class AlvoDataRelationRuleTests
         page.Items.Count.ShouldBe(visible ? 1 : 0);
         (got is not null).ShouldBe(visible);
         (sticker is null).ShouldBe(visible && !inOtherTenant);
+        if (sticker is not null)
+        {
+            sticker.ShouldBeOfType<AlvoAuthorizationException>();
+        }
     }
 
     /// <summary>A project is reached only by its members, through the reverse relation.</summary>

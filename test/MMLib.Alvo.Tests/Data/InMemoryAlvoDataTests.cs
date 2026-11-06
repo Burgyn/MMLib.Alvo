@@ -370,6 +370,25 @@ public class InMemoryAlvoDataTests
             data.CreateAsync("orders", new Dictionary<string, object?>(StringComparer.Ordinal), caller, cancellationToken: ct));
     }
 
+    [Fact]
+    public async Task A_create_whose_echo_reads_a_relation_is_refused_before_it_writes()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var descriptor = AlvoDescriptor.Parse(Rules.RelationDescriptors.Project(
+            ("customers", Rules.RelationDescriptors.Entity([Rules.RelationDescriptors.Field("region", "string")], ("list", "true"))),
+            ("orders", Rules.RelationDescriptors.Entity(
+                [Rules.RelationDescriptors.Ref("customer_id", "customers")],
+                ("list", "true"), ("get", "customer_id.region == 'eu'"), ("create", "true")))));
+        var schema = DescriptorToSchemaMapper.Map(descriptor);
+        var data = new InMemoryAlvoData(EngineOver(descriptor, schema), new PredicateEvaluator(), schema);
+        var caller = Caller();
+
+        await Should.ThrowAsync<NotSupportedException>(() =>
+            data.CreateAsync("orders", new Dictionary<string, object?>(StringComparer.Ordinal), caller, cancellationToken: ct));
+
+        (await data.QueryAsync(new AlvoQuery { Entity = "orders" }, caller, ct)).Items.ShouldBeEmpty();
+    }
+
     private static InMemoryAlvoData CreateStore(string entity, Dictionary<string, FieldDescriptor> fields, params AlvoRecord[] seed)
     {
         var schema = new SchemaModel([EntitySchemaOf(entity, fields)]);

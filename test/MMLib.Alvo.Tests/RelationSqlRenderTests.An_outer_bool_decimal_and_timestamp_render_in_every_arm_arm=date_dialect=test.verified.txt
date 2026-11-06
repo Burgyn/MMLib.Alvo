@@ -1,6 +1,6 @@
 ﻿{
   Column: {
-    Sql: EXISTS (SELECT 1 FROM "customers" AS alvo_r1 WHERE (alvo_r1."id" = "orders"."customer_id") AND (COALESCE(alvo_r1."opened_on" <= "orders"."due_on", FALSE)) AND (COALESCE(alvo_r1."owner_id" = @alvo_u0, FALSE)) AND (COALESCE(alvo_r1."tenant_id" = @alvo_u1, FALSE))),
+    Sql: EXISTS (SELECT 1 FROM "customers" AS _alvo_r1 WHERE (_alvo_r1."id" = "orders"."customer_id") AND (COALESCE(_alvo_r1."opened_on" <= "orders"."due_on", FALSE)) AND (COALESCE(_alvo_r1."owner_id" = @alvo_u0, FALSE)) AND (COALESCE(_alvo_r1."tenant_id" = @alvo_u1, FALSE))),
     Parameters: [
       {
         Key: alvo_u0,
@@ -15,12 +15,12 @@
     ]
   },
   Image: {
-    Sql: EXISTS (SELECT 1 FROM "customers" AS alvo_r1 WHERE (alvo_r1."id" = @alvo_q0) AND (COALESCE(EPOCH_US(alvo_r1."opened_on") <= @alvo_q1, FALSE)) AND (COALESCE(alvo_r1."owner_id" = @alvo_q2, FALSE)) AND (COALESCE(alvo_r1."tenant_id" = @alvo_q3, FALSE))),
+    Sql: EXISTS (SELECT 1 FROM "customers" AS _alvo_r1 WHERE (_alvo_r1."id" = @alvo_q0) AND (COALESCE(EPOCH_US(_alvo_r1."opened_on") <= @alvo_q1, FALSE)) AND (COALESCE(_alvo_r1."owner_id" = @alvo_q2, FALSE)) AND (COALESCE(_alvo_r1."tenant_id" = @alvo_q3, FALSE))),
     Parameters: [
       {
         Key: alvo_q0,
         Type: Guid,
-        Value: Guid_Empty
+        Value: Guid_1
       },
       {
         Key: alvo_q1,

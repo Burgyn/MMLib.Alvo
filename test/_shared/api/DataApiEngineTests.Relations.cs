@@ -4,8 +4,8 @@ using System.Text.Json.Nodes;
 namespace MMLib.Alvo.Api.Tests;
 
 /// <summary>
-/// A relation rule over HTTP, on every engine: an order is listed, counted, read and patched only through a customer the
-/// caller may list, and a hidden one answers exactly as a row an owner rule hides.
+/// A relation rule over HTTP, on every engine: an order is listed, counted, read, patched and placed only through a
+/// customer the caller may list, and a hidden one answers exactly as a row an owner rule hides.
 /// </summary>
 public abstract partial class DataApiEngineTests
 {
@@ -34,6 +34,13 @@ public abstract partial class DataApiEngineTests
             HttpMethod.Patch, $"/api/orders/{bobOrder}", _relationsAlice, body: new JsonObject { ["note"] = "x" });
         using var own = await world.SendAsync(
             HttpMethod.Patch, $"/api/orders/{aliceOrder}", _relationsAlice, body: new JsonObject { ["note"] = "mine" });
+        var aliceCustomer = (await own.ReadJsonObjectAsync())["customer_id"]!.GetValue<Guid>();
+        using var placed = await world.SendAsync(HttpMethod.Post, "/api/orders", _relationsBob, body: new JsonObject
+        {
+            ["customer_id"] = aliceCustomer,
+            ["note"] = "not mine",
+            ["tenant_id"] = _relationsTenant,
+        });
 
         page.StatusCode.ShouldBe(HttpStatusCode.OK, await page.ReadTextAsync());
         var body = await page.ReadJsonObjectAsync();
@@ -42,6 +49,8 @@ public abstract partial class DataApiEngineTests
         hidden.StatusCode.ShouldBe(HttpStatusCode.NotFound, await hidden.ReadTextAsync());
         patched.StatusCode.ShouldBe(HttpStatusCode.NotFound, await patched.ReadTextAsync());
         own.StatusCode.ShouldBe(HttpStatusCode.OK, await own.ReadTextAsync());
+        placed.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await placed.ReadTextAsync());
+        (await placed.ReadJsonObjectAsync())["violations"]![0]!["code"]!.GetValue<string>().ShouldBe("unresolved-reference");
     }
 
     private static async Task<Guid> CreateRelatedOrderAsync(AlvoApiWorld world, TestApiKey owner)

@@ -1240,6 +1240,34 @@ public sealed class InMemoryAlvoData : IAlvoData
     private static string Cursor(AlvoRecord row) => row["id"]?.ToString() ?? string.Empty;
 
     /// <summary>
+    /// The engine's decision, refused when it reads a related entity: this double evaluates rules in memory over its own
+    /// rows, and judging a relation that way would be a post-filter, not the correlated <c>EXISTS</c> the relational
+    /// driver runs — so it throws rather than evaluate or ignore one.
+    /// </summary>
+    /// <remarks>
+    /// A <c>create</c> or <c>update</c> echoes the written row under the caller's <c>get</c> decision, so that decision is
+    /// judged here too, before anything is written: a refusal raised at the echo would leave a row behind a call that threw.
+    /// </remarks>
+    private PolicyDecision Resolve(string entity, DataOperation operation, AlvoContext context)
+    {
+        if (operation is DataOperation.Create or DataOperation.Update)
+        {
+            Refused(_policy.Resolve(entity, DataOperation.Get, context));
+        }
+
+        return Refused(_policy.Resolve(entity, operation, context));
+    }
+
+    private static PolicyDecision Refused(PolicyDecision decision) =>
+        ReadsRelation(decision.Using) || ReadsRelation(decision.WithCheck)
+            ? throw new NotSupportedException(
+                "Relation rules and lookup checks need a relational driver; InMemoryAlvoData is the policy-contract double.")
+            : decision;
+
+    private static bool ReadsRelation(CompiledExpression? expression) =>
+        expression is not null && CelRewriter.HasRelation(expression.Root);
+
+    /// <summary>
     /// <see cref="PolicyDecision.DenyReason"/> is already designed, at the policy layer, never to
     /// name the entity or echo caller-supplied text (see <c>PolicyEngine</c>'s own docs) — the
     /// tenant guard's reason deliberately names "tenant" specifically, a conscious, narrow oracle an
@@ -1247,23 +1275,6 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// than mapping it to one more-generic message, trusting the policy layer's own tradeoff instead
     /// of re-deciding it here.
     /// </summary>
-    /// <summary>
-    /// The engine's decision, refused when it reads a related entity: this double evaluates rules in memory over its own
-    /// rows, and judging a relation that way would be a post-filter, not the correlated <c>EXISTS</c> the relational
-    /// driver runs — so it throws rather than evaluate or ignore one.
-    /// </summary>
-    private PolicyDecision Resolve(string entity, DataOperation operation, AlvoContext context)
-    {
-        var decision = _policy.Resolve(entity, operation, context);
-        return ReadsRelation(decision.Using) || ReadsRelation(decision.WithCheck)
-            ? throw new NotSupportedException(
-                "Relation rules and lookup checks need a relational driver; InMemoryAlvoData is the policy-contract double.")
-            : decision;
-    }
-
-    private static bool ReadsRelation(CompiledExpression? expression) =>
-        expression is not null && CelRewriter.HasRelation(expression.Root);
-
     private static AlvoAuthorizationException Denied(PolicyDecision decision) =>
         new(decision.DenyReason ?? "The operation was not authorized.");
 

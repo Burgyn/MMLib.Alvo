@@ -485,7 +485,7 @@ public class ReadStatementComposerTests
         var page = composer.Compose(
             Vans, fleetDecision, AlvoDataFixtures.Caller, new ReadStatementComposer.ReadStatementOptions(), ReadModelFixture.Rows(Vans));
 
-        page.Sql.ShouldContain("EXISTS (SELECT 1 FROM \"fleets\" AS alvo_r1 WHERE (alvo_r1.\"id\" = \"vans\".\"fleet_id\")");
+        page.Sql.ShouldContain("EXISTS (SELECT 1 FROM \"fleets\" AS _alvo_r1 WHERE (_alvo_r1.\"id\" = \"vans\".\"fleet_id\")");
         return Verify(new { Page = page.Sql, Parameters = page.Parameters.Keys.Order(StringComparer.Ordinal) });
     }
 

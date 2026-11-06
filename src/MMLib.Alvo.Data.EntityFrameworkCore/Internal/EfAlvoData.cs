@@ -364,10 +364,11 @@ internal sealed partial class EfAlvoData : IAlvoData
     {
         using var db = ContextFor(unit);
         var now = WriteInstantNow();
-        var (schema, candidate) = await AuthorizedCandidateAsync(db, entity, values, decision, context, now, cancellationToken);
+        var (schema, candidate) = await AuthorizedCandidateAsync(db, entity, values, decision, context, now, cancellationToken, deferRelations: true);
         await EnsureOutboxTableAsync(db, cancellationToken);
 
         await using var transaction = await BeginAsync(db, unit, cancellationToken);
+        await EnsureRelationsHoldAsync(db, schema, decision, candidate, context, cancellationToken);
         candidate = await RunBeforeCreateAsync(db, schema, decision, context, candidate, now, cancellationToken);
         candidate = await HostBeforeCreateAsync(db, schema, decision, context, candidate, AlvoWriteOperation.Create, now, cancellationToken);
         var stored = await InsertAsync(db, schema, decision, context, candidate, cancellationToken);
@@ -467,13 +468,21 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// not write and already checked against <c>WITH CHECK</c> and the tenant scope.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Built per attempt rather than once, so a retried attempt re-stamps its audit instant and mints a fresh
     /// row id: the previous attempt's id was rolled back, and reusing a candidate a change tracker has already
     /// seen is how a retry turns into a second insert of the same object.
+    /// </para>
+    /// <para>
+    /// <b>A <c>WITH CHECK</c> that reads a relation is judged inside the write's transaction, not here,</b> when the
+    /// caller is about to open one (<paramref name="deferRelations"/>): its probe is a read, and before
+    /// <c>BeginAsync</c> it would run outside a unit's transaction on the unit's own connection, and see no row the unit
+    /// wrote. The write judges it with <see cref="EnsureRelationsHoldAsync"/> once the transaction is open.
+    /// </para>
     /// </remarks>
     private async Task<(EntitySchema Schema, Dictionary<string, object> Candidate)> AuthorizedCandidateAsync(
         AlvoDataContext db, string entity, IReadOnlyDictionary<string, object?> values, PolicyDecision decision,
-        AlvoContext context, DateTimeOffset now, CancellationToken cancellationToken)
+        AlvoContext context, DateTimeOffset now, CancellationToken cancellationToken, bool deferRelations = false)
     {
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: false);
@@ -481,10 +490,30 @@ internal sealed partial class EfAlvoData : IAlvoData
         var candidate = Candidate(
             db.Rows(entity).EntityType,
             Stamped(schema, WholeRowValues(schema, values), context, now, isUpdate: false));
-        await EnsureWriteAllowedAsync(db, schema, decision, Unmasked(candidate), previous: null, context, cancellationToken).ConfigureAwait(false);
+        if (!(deferRelations && ProbesRelations(decision)))
+        {
+            await EnsureWriteAllowedAsync(db, schema, decision, Unmasked(candidate), previous: null, context, cancellationToken).ConfigureAwait(false);
+        }
 
         return (schema, candidate);
     }
+
+    /// <summary>
+    /// The verdict <see cref="AuthorizedCandidateAsync"/> deferred: a <c>WITH CHECK</c> that reads a relation, judged by its
+    /// probe inside the transaction that is now open. A rule that reads none was judged already.
+    /// </summary>
+    private async Task EnsureRelationsHoldAsync(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision decision, Dictionary<string, object> candidate,
+        AlvoContext context, CancellationToken cancellationToken)
+    {
+        if (ProbesRelations(decision))
+        {
+            await EnsureWriteAllowedAsync(db, schema, decision, Unmasked(candidate), previous: null, context, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static bool ProbesRelations(PolicyDecision decision) =>
+        decision.WithCheck is { } check && CelRewriter.HasRelation(check.Root);
 
     /// <summary>
     /// One create carrying an idempotency token, retried while storage refuses the write because a rival
@@ -631,11 +660,12 @@ internal sealed partial class EfAlvoData : IAlvoData
     {
         using var db = ContextFor(FlowUnit);
         var now = WriteInstantNow();
-        var (schema, candidate) = await AuthorizedCandidateAsync(db, entity, values, decision, context, now, cancellationToken);
+        var (schema, candidate) = await AuthorizedCandidateAsync(db, entity, values, decision, context, now, cancellationToken, deferRelations: true);
         await EnsureIdempotencyTableAsync(db, cancellationToken);
         await EnsureOutboxTableAsync(db, cancellationToken);
 
         await using var transaction = await BeginAsync(db, FlowUnit, cancellationToken);
+        await EnsureRelationsHoldAsync(db, schema, decision, candidate, context, cancellationToken);
         var records = new IdempotencyScope(
             db.Database.GetDbConnection(), transaction.GetDbTransaction(), _idempotencyTable, token, context);
 
@@ -2536,7 +2566,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         using var instant = AlvoFlow.EnsureInstant(_time);
         var decision = BatchDecision(entity, DataOperation.Create, rows.Count, context, idempotency);
         var refused = await ValidateRowsAsync(
-            entity, AlvoWriteOperation.Create, rows.Count, CreateRowValidation(rows, decision, context), context, idempotency, cancellationToken);
+            entity, AlvoWriteOperation.Create, rows.Count, CreateRowValidation(rows, decision, context, cancellationToken), context, idempotency, cancellationToken);
         if (refused.Count > 0)
         {
             return AlvoBatchResult.Refused(BatchWrite.InRequestOrder([.. refused]));

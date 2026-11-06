@@ -452,8 +452,9 @@ internal sealed partial class EfAlvoData
 
     /// <summary>One create row: its payload and rule refusal, or its validation.</summary>
     private Func<AlvoDataContext, EntitySchema, DateTimeOffset, int, Task<RowValidation>> CreateRowValidation(
-        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, PolicyDecision decision, AlvoContext context) =>
-        async (db, schema, now, index) => await JudgedCandidateAsync(db, schema, decision, context, rows[index], now, index, CancellationToken.None).ConfigureAwait(false) switch
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, PolicyDecision decision, AlvoContext context,
+        CancellationToken cancellationToken) =>
+        async (db, schema, now, index) => await JudgedCandidateAsync(db, schema, decision, context, rows[index], now, index, cancellationToken).ConfigureAwait(false) switch
         {
             ({ } candidate, null) => new RowValidation(
                 Validation(schema.Name, AlvoWriteOperation.Create, context, now) with { New = WithoutId(Unmasked(candidate)) }, null),
