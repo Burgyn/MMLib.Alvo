@@ -48,6 +48,11 @@ public class FieldBadgesTests
     }
 
     [Fact]
+    public void A_virtual_field_wears_the_virtual_badge()
+        => FieldBadges.Of(new FieldSchema { Name = "display", Type = FieldType.Text, Nullable = true, IsVirtual = true })
+            .ShouldBe(["virtual"]);
+
+    [Fact]
     public void A_sequence_field_says_so()
         => FieldBadges.Of(new FieldSchema { Name = "n", Type = FieldType.Integer, Nullable = true, Sequence = new SequenceSchema() })
             .ShouldBe(["sequence"]);

@@ -75,6 +75,38 @@ public sealed class LifecycleLaneTests
     public void The_badge_label_counts_in_words(int count, string label)
         => LifecycleLane.BadgeLabel(count).ShouldBe(label);
 
+    [Fact]
+    public void The_reads_lane_holds_only_read_stage_extensions_of_the_entity()
+    {
+        IReadOnlyList<ManagementExtension> all =
+        [
+            _reschedule,
+            Read("own-region", AlvoExtensionKind.Narrowing, ["work_orders"]),
+            Read("order-label", AlvoExtensionKind.Enricher, ["*"]),
+            Read("region-label", AlvoExtensionKind.Enricher, ["regions"]),
+        ];
+
+        LifecycleLane.Reads("work_orders", all).Select(item => item.Id).ShouldBe(["own-region", "order-label"]);
+        LifecycleLane.HasReads(all).ShouldBeTrue();
+        LifecycleLane.HasReads([_reschedule, _every]).ShouldBeFalse("a host with no read extension draws no Reads lane");
+    }
+
+    [Fact]
+    public void A_narrowing_and_an_enricher_have_their_own_stage_labels()
+    {
+        LifecycleLane.StageLabel(Read("own-region", AlvoExtensionKind.Narrowing, ["work_orders"])).ShouldBe("narrows reads");
+        LifecycleLane.StageLabel(Read("order-label", AlvoExtensionKind.Enricher, ["work_orders"])).ShouldBe("shapes reads");
+    }
+
+    private static ManagementExtension Read(string id, AlvoExtensionKind kind, IReadOnlyList<string> entities) => new()
+    {
+        Id = id,
+        Kind = kind,
+        Stage = AlvoExtensionStage.Read,
+        Entities = entities,
+        Operations = ["list", "get"],
+    };
+
     private static ManagementExtension Extension(string id, IReadOnlyList<string> entities, IReadOnlyList<string> operations) => new()
     {
         Id = id,

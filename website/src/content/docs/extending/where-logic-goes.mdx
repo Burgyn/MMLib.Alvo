@@ -20,6 +20,7 @@ until it ships, use the row above it or an after-hook `webhook`.
 | The effect has several steps (payment → invoice → ERP) | handler + `IAlvoSteps` | Each step runs once; a retry continues where it failed. | planned |
 | The same effect must be visible and configurable in the descriptor | `IAlvoFunction` + `"type": "function"` | An agent wires it with a condition; the code is named and typed. | planned |
 | Not CRUD, or an inbound webhook | `MapAlvoCommand` / `MapAlvoWebhookReceiver` / minimal API | Your own route and contract; Alvo's rules and hooks still apply. A named command is visible to agents. | available — [commands and inbound webhooks](/extending/commands/) |
-| Hide a field, or add a derived one, on read | `IRecordEnricher` | Only hides or fills a declared virtual field; never rewrites rows. | planned |
+| Only some rows for some callers, decided in code | `IQueryNarrowing` | ANDed into the read's SQL after the rules, so pages and counts agree; never widens, never narrows a write. | available — [Shape what reads return](/extending/reads/) |
+| Hide a field, or add a derived one, on read | `IRecordEnricher` | Only hides or fills a declared virtual field; never rewrites rows. | available — [Shape what reads return](/extending/reads/) |
 | Rate limits, captcha, caching, headers, CORS | endpoint filter, convention | An HTTP concern; ASP.NET Core has the tool. | available — [HTTP conventions](/extending/http-conventions/) |
 | Something must happen at a time, or regularly | `IAlvoScheduler`, `AddSchedule` | Keyed timers and cron on the outbox, one run across replicas. | available — [Time: timers and schedules](/extending/time/) |

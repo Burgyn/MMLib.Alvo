@@ -339,6 +339,15 @@ methods that build an `AlvoQuery` through `FilterTranslator` — once per call, 
 values the driver binds — and read through the unchanged port, so every policy, tenancy and hidden-field rule applies
 exactly as to an untyped read. The guide is *Typed or CEL* on the docs site.
 
+## Registering a read extension
+
+`Entity<T>(t => t.Narrow<OwnRegion>("own-region").Enrich<NoteLabel>("note-label"))` (or the untyped
+`Narrow(id, Func<QueryNarrowing, AlvoFilter?>)` / `Enrich(id, Action<Enrich<AlvoRecord>>)`) adds one internal
+`ReadExtensionRegistration`, bound at boot like a handler (locators `extensions/<id>/dependencies`, `entity`, `record`,
+`provider`; `"*"` refused) and listed in the catalog as kind `narrowing`/`enricher`, stage `read`. The mechanism — the
+driver port, where the narrowing sits in the statement, the enricher's moves, the virtual field's refusal sites — is
+[reads.md](reads.md); the guide is *Shape what reads return* on the docs site.
+
 ## Pitfalls (banned)
 
 - **Never call `BuildServiceProvider()` during registration** — it builds a second
