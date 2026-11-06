@@ -85,7 +85,7 @@ public sealed class IntegrityEditorWhereScenarios(BikeWorkshopWorld world) : ICl
     private static ILocatorAssertions Expect(ILocator locator) => Assertions.Expect(locator);
 }
 
-/// <summary>The steps both integrity scenarios share: open a declared field's sheet, and save, preview and apply it.</summary>
+/// <summary>The steps the integrity scenarios share: open a declared or a new field's sheet, and save, preview and apply it.</summary>
 internal static class IntegrityEditor
 {
     /// <summary>Opens the field editor on a declared field and answers its sheet.</summary>
@@ -95,6 +95,16 @@ internal static class IntegrityEditor
         await session.Page.GetByTestId($"edit-field-{field}").ClickAsync();
         var sheet = session.Page.GetByTestId("field-sheet");
         await sheet.WaitForAsync();
+        return sheet;
+    }
+
+    /// <summary>Opens the field editor on a new field of <paramref name="entity"/>, named <paramref name="field"/>, and answers its sheet.</summary>
+    public static async Task<ILocator> NewFieldAsync(AdminSession session, string entity, string field)
+    {
+        await session.GoAsync($"/schema/{entity}");
+        await session.Page.GetByTestId("add-field").ClickAsync();
+        var sheet = session.Page.GetByTestId("field-sheet");
+        await sheet.GetByRole(AriaRole.Textbox, new() { Name = "Name", Exact = true }).FillAsync(field);
         return sheet;
     }
 

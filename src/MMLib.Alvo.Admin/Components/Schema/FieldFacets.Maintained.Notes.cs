@@ -4,16 +4,16 @@ using System.Text.Json.Nodes;
 namespace MMLib.Alvo.Admin.Components.Schema;
 
 /* What the editor says about a maintained field's facets that the save carries, drops or rewrites without a
-   control — each one said, never silent (docs/todo-admin.md §8d item 17's rule, applied to rollup and computed). */
+   control — each one said, never silent (docs/todo-admin.md §8d item 17's rule, applied to rollup, computed and sequence). */
 internal sealed partial class FieldFacets
 {
     private static readonly string[] _withheld = ["required", "unique"];
 
-    private static readonly string[] _maintainedFacets = ["rollup", "computed"];
+    private static readonly string[] _maintainedFacets = ["rollup", "computed", "sequence"];
 
     /// <summary>Every note the field's kind owes: withheld flags, a dropped kind, a rewritten type, a dropped rollup key.</summary>
     private IEnumerable<FacetNote> MaintainedNotes()
-        => [.. Withheld(), .. DroppedKinds(), .. RetypedRollup(), .. DroppedFromRollup()];
+        => [.. Withheld(), .. DroppedKinds(), .. RetypedRollup(), .. DroppedFromRollup(), .. DroppedFromSequence()];
 
     /// <summary>A required or unique on a maintained value: carried, and said.</summary>
     private IEnumerable<FacetNote> Withheld()
@@ -32,6 +32,7 @@ internal sealed partial class FieldFacets
     {
         FieldKind.Rollup => "rollup",
         FieldKind.Computed => "computed",
+        FieldKind.Sequence => "sequence",
         _ => null,
     };
 
@@ -39,6 +40,7 @@ internal sealed partial class FieldFacets
     {
         FieldKind.Rollup => "a field is a rollup or computed, never both — the apply refuses the pair, so it opens as the rollup and this is removed.",
         FieldKind.Computed => "the field is computed now, so it does not follow.",
+        FieldKind.Sequence => "the field is a sequence now, so it does not follow.",
         _ => "the field is written by callers now, so it does not follow.",
     };
 
@@ -69,6 +71,16 @@ internal sealed partial class FieldFacets
                 $"not a ref from {RollupFrom} to this entity, which the apply refuses — removed, so the apply follows {source.Via[0]}, the one ref here.");
         }
     }
+
+    /// <summary>A declared <c>maxLength</c> or field-level <c>format</c> beside a sequence, which <see cref="WriteSequence"/> drops: the apply refuses each beside one.</summary>
+    private IEnumerable<FacetNote> DroppedFromSequence()
+        => Kind == FieldKind.Sequence
+            ? _droppedBesideSequence.Where(facet => _declared[facet] is not null).Select(facet => new FacetNote(
+                facet, _declared[facet]!.ToJsonString(), FacetFate.Removed,
+                $"the framework writes a sequence's text, and the apply refuses a {facet} beside it — removed."))
+            : [];
+
+    private static readonly string[] _droppedBesideSequence = ["maxLength", "format"];
 
     private static string Quoted(string text) => JsonValue.Create(text).ToJsonString();
 }

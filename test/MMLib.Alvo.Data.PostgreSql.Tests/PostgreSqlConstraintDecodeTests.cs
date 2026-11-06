@@ -91,6 +91,15 @@ public class PostgreSqlConstraintDecodeTests
         (decoded.Kind, decoded.ConstraintName).ShouldBe((AlvoConstraintKind.Check, expected));
     }
 
+    /// <summary>An exclusion constraint's refusal (<c>23P01</c>) decodes as an exclusion, carrying its name (HX-12).</summary>
+    [Fact]
+    public void An_exclusion_violation_decodes_its_constraint_name()
+    {
+        var decoded = _dialect.DecodeConstraintViolation(Failure("23P01", "xc_bookings_6423bd5f")).ShouldNotBeNull();
+
+        (decoded.Kind, decoded.ConstraintName).ShouldBe((AlvoConstraintKind.Exclusion, "xc_bookings_6423bd5f"));
+    }
+
     /// <summary>Anything else is not a constraint violation this driver claims to understand.</summary>
     [Fact]
     public void A_state_this_driver_does_not_decode_answers_nothing()

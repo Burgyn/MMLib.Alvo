@@ -7,7 +7,8 @@
 /// <remarks>
 /// One member per <em>fix</em>, and nothing else: a <see cref="Unique"/> collision is repaired by sending another
 /// value, a <see cref="Referenced"/> one by removing the records that point at this one, and a <see cref="Check"/>
-/// one by sending a value the field's validation accepts. A member encoding <em>which</em> constraint, or a string
+/// one by sending a value the field's validation accepts, an <see cref="Exclusion"/> one by choosing a range no other record
+/// overlaps. A member encoding <em>which</em> constraint, or a string
 /// carrying the engine's own constraint name, would key the refusal on its reason rather than its kind — the
 /// schema-and-data oracle every deny reason in this framework is worded to avoid.
 /// </remarks>
@@ -27,4 +28,10 @@ public enum AlvoConstraintKind
     /// stored; the refusal names the validated field when the caller may know it, and never a value.
     /// </summary>
     Check,
+
+    /// <summary>
+    /// A row would hold a range overlapping another record's on an index declaring <c>exclude</c>; fixed by choosing another
+    /// range. The refusal names the range's start field when the caller may know it, and never the other record or a value.
+    /// </summary>
+    Exclusion,
 }

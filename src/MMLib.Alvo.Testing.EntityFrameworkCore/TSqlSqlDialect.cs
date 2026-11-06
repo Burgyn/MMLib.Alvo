@@ -150,6 +150,10 @@ public sealed class TSqlSqlDialect : IAlvoSqlDialect
     }
 
     /// <inheritdoc/>
+    /// <remarks>Declined: SQL Server has no exclusion constraint, so an apply declaring <c>exclude</c> is refused (HX-12 D16).</remarks>
+    ExclusionConstraintSql? IAlvoSqlDialect.ExclusionConstraint(ExclusionConstraintDefinition definition) => null;
+
+    /// <inheritdoc/>
     /// <remarks>
     /// One <c>MERGE</c> under <c>HOLDLOCK</c> — serializable range locks on the key, so two allocators of a count's first
     /// number cannot both take the insert branch — with <c>OUTPUT</c> answering the number. Implemented explicitly, so this

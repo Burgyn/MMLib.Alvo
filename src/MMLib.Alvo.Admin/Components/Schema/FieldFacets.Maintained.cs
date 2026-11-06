@@ -4,8 +4,8 @@ using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
 
-/* The two kinds whose value is maintained for the field — a rollup (RollupResolver) and a computed column
-   (ComputedColumnSql) — and exactly what the apply accepts of each.
+/* Two of the kinds whose value is maintained for the field — a rollup (RollupResolver) and a computed column
+   (ComputedColumnSql) — and exactly what the apply accepts of each; the third, a sequence, is FieldFacets.Sequence.cs.
 
    Two rules pull in different directions here and both hold: a NEW choice is offered conservatively (avg over
    decimals, number fields only, the scalar computed types), and an EXISTING declaration the core accepts is saved
@@ -149,6 +149,10 @@ internal sealed partial class FieldFacets
             Kind = FieldKind.Computed;
             Computed = Text(facets["computed"]);
         }
+        else if (facets["sequence"] is JsonObject sequence)
+        {
+            ReadSequence(sequence);
+        }
 
         _declaredKind = Kind;
     }
@@ -168,6 +172,7 @@ internal sealed partial class FieldFacets
 
         WriteRollupType(facets);
         facets.Remove("computed");
+        facets.Remove("sequence");
         WriteRollupObject(RollupObject(facets), Source!);
         Toggle(facets, "index", Indexed);
         return WriteDefault(facets);
@@ -266,6 +271,7 @@ internal sealed partial class FieldFacets
         }
 
         facets.Remove("rollup");
+        facets.Remove("sequence");
         facets["type"] = Word(Type);
         facets["computed"] = Computed.Trim();
         Toggle(facets, "index", Indexed);

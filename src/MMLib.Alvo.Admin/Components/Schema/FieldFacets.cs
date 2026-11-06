@@ -247,6 +247,7 @@ internal sealed partial class FieldFacets
         {
             FieldKind.Rollup => WriteRollup(facets),
             FieldKind.Computed => WriteComputed(facets),
+            FieldKind.Sequence => WriteSequence(facets),
             _ => WriteSupplied(facets),
         } ?? WriteValidation(facets) ?? RefuseWhatTheApplyRefuses(facets);
         return refusal is null ? facets : null;
@@ -261,6 +262,7 @@ internal sealed partial class FieldFacets
     {
         facets.Remove("rollup");
         facets.Remove("computed");
+        facets.Remove("sequence");
         facets["type"] = Word(Type);
         Toggle(facets, "required", Required);
         if (WriteDefault(facets) is { } refused)
@@ -282,7 +284,7 @@ internal sealed partial class FieldFacets
     /// The choices made so far, for a form that cannot <see cref="Build"/> yet: every box an operator can type into
     /// before naming the field, so text typed there makes the form dirty.
     /// </summary>
-    public string Unbuilt => string.Join('|', "unbuilt", Kind, Type, Values, Computed, Validation, RollupWhere);
+    public string Unbuilt => string.Join('|', "unbuilt", Kind, Type, Values, Computed, Validation, RollupWhere, SequenceFormat, SequenceStart);
 
     /// <summary>Writes the typed validation in place, or removes it when the box is empty.</summary>
     private string? WriteValidation(JsonObject facets)

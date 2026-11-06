@@ -128,6 +128,11 @@ internal static class ConstraintViolationTranslator
             return new AlvoConstraintViolationException(AlvoConstraintKind.Check, CheckFields(violation, written), failure);
         }
 
+        if (violation.Kind == AlvoConstraintKind.Exclusion)
+        {
+            return new AlvoConstraintViolationException(AlvoConstraintKind.Exclusion, ExclusionFields(violation, written), failure);
+        }
+
         var fields = CallerFields(violation, written.Rows, written.Schema, written.CallerKeyed);
         return fields.Count == 0
             ? null
@@ -207,6 +212,24 @@ internal static class ConstraintViolationTranslator
             ? owner.Field.Name
             : written.BodySent ? RolledUpChildField(owner.Field, written.Schema) : null;
         return field is null || written.Unnameable.Contains(field) ? [] : [field];
+    }
+
+    /// <summary>
+    /// The field an exclusion refusal points at: the range's start on the written entity's exclusion whose name the engine
+    /// reported, or nothing for a name this entity cannot place — never a 500 (HX-12).
+    /// </summary>
+    /// <remarks>
+    /// A hidden range field is refused at apply (D17); the <see cref="Written.Unnameable"/> filter is defence in depth.
+    /// </remarks>
+    /// <param name="violation">What the dialect decoded.</param>
+    /// <param name="written">The write the violation interrupted.</param>
+    private static IReadOnlyList<string> ExclusionFields(SqlConstraintViolation violation, Written written)
+    {
+        var start = written.Schema.Indexes
+            .Where(index => index.Exclude is not null)
+            .FirstOrDefault(index => string.Equals(IndexNames.Exclusion(written.Schema, index), violation.ConstraintName, StringComparison.Ordinal))?
+            .Exclude!.From;
+        return start is null || written.Unnameable.Contains(start) ? [] : [start];
     }
 
     /// <summary>
