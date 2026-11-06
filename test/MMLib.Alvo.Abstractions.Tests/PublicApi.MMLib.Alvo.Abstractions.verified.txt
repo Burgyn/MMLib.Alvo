@@ -802,8 +802,10 @@ namespace MMLib.Alvo.Descriptor
         public string? RenamedFrom { get; init; }
         public MMLib.Alvo.Descriptor.AccessRules? Rules { get; init; }
         public bool? SoftDelete { get; init; }
+        public MMLib.Alvo.Descriptor.EntityStateMachine? StateMachine { get; init; }
         public MMLib.Alvo.Descriptor.StorageMode? Storage { get; init; }
         public MMLib.Alvo.Descriptor.EntityTenancy? Tenancy { get; init; }
+        public System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.EntityTimer>? Timers { get; init; }
     }
     public sealed class EntityEvents : System.IEquatable<MMLib.Alvo.Descriptor.EntityEvents>
     {
@@ -828,6 +830,13 @@ namespace MMLib.Alvo.Descriptor
         public bool? Unique { get; init; }
         public string? Where { get; init; }
     }
+    public sealed class EntityStateMachine : System.IEquatable<MMLib.Alvo.Descriptor.EntityStateMachine>
+    {
+        public EntityStateMachine() { }
+        public required string Field { get; init; }
+        public string? Initial { get; init; }
+        public required System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.StateTransition> Transitions { get; init; }
+    }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.EntityTenancy>))]
     public enum EntityTenancy
     {
@@ -835,6 +844,14 @@ namespace MMLib.Alvo.Descriptor
         Scoped = 0,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("global")]
         Global = 1,
+    }
+    public sealed class EntityTimer : System.IEquatable<MMLib.Alvo.Descriptor.EntityTimer>
+    {
+        public EntityTimer() { }
+        public required string At { get; init; }
+        public string? Description { get; init; }
+        public string? Event { get; init; }
+        public string? When { get; init; }
     }
     public sealed class EntityUpdateAction : MMLib.Alvo.Descriptor.AutomationAction, System.IEquatable<MMLib.Alvo.Descriptor.EntityUpdateAction>
     {
@@ -1026,6 +1043,15 @@ namespace MMLib.Alvo.Descriptor
         Month = 1,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("day")]
         Day = 2,
+    }
+    public sealed class StateTransition : System.IEquatable<MMLib.Alvo.Descriptor.StateTransition>
+    {
+        public StateTransition() { }
+        public string? Description { get; init; }
+        public required System.Collections.Generic.IReadOnlyList<string> From { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string>? Roles { get; init; }
+        public required string To { get; init; }
+        public string? When { get; init; }
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.StorageMode>))]
     public enum StorageMode

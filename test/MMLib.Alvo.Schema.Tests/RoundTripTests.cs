@@ -151,6 +151,78 @@ public class RoundTripTests
         });
     }
 
+    [Fact]
+    public void A_generated_state_machine_and_timers_validate_and_survive_parse_and_serialize()
+    {
+        var schema = SchemaValidator.Load();
+
+        GeneratedLifecycleDescriptor().Sample(descriptor =>
+        {
+            SchemaValidator.Failures(schema, descriptor).ShouldBeEmpty(descriptor);
+            var bookings = AlvoDescriptor.Parse(descriptor).Entities["bookings"];
+            bookings.Extensions.ShouldBeNull(descriptor);
+            bookings.StateMachine.ShouldNotBeNull(descriptor).Transitions["reopen"].From.ShouldBe(_anySource, descriptor);
+            bookings.Timers.ShouldNotBeNull(descriptor)["reminder"].At.ShouldBe("starts_at - duration('24h')", descriptor);
+            Canonicalizer.Canonicalize(AlvoDescriptor.Serialize(AlvoDescriptor.Parse(descriptor)))
+                .ShouldBe(Canonicalizer.Canonicalize(descriptor), descriptor);
+        });
+    }
+
+    private static readonly string[] _draftSource = ["draft"];
+    private static readonly string[] _anySource = ["*"];
+    private static readonly string[] _bookingStates = ["draft", "confirmed"];
+
+    private static Gen<string> GeneratedLifecycleDescriptor() =>
+        Gen.Select(
+            Gen.OneOfConst<string?>(null, "draft"),
+            Gen.OneOfConst<string[]?>(null, ["manager"], ["manager", "admin"]),
+            Gen.OneOfConst<string?>(null, "new.starts_at > now()"),
+            Gen.OneOfConst<string?>(null, "status == 'confirmed'"),
+            Gen.OneOfConst<string?>(null, "bookings.reminder_due"),
+            LifecycleDescriptor);
+
+    private static string LifecycleDescriptor(string? initial, string[]? roles, string? when, string? timerWhen, string? timerEvent)
+    {
+        var confirm = Present(new Dictionary<string, object?>
+        {
+            ["from"] = _draftSource,
+            ["to"] = "confirmed",
+            ["roles"] = roles,
+            ["when"] = when,
+        });
+        var stateMachine = Present(new Dictionary<string, object?>
+        {
+            ["field"] = "status",
+            ["initial"] = initial,
+            ["transitions"] = new Dictionary<string, object>
+            {
+                ["confirm"] = confirm,
+                ["reopen"] = new { from = _anySource, to = "draft", description = "Back to the start." },
+            },
+        });
+        var reminder = Present(new Dictionary<string, object?>
+        {
+            ["at"] = "starts_at - duration('24h')",
+            ["when"] = timerWhen,
+            ["event"] = timerEvent,
+        });
+        var fields = new Dictionary<string, object>
+        {
+            ["status"] = new { type = "enum", values = _bookingStates, required = true },
+            ["starts_at"] = new { type = "datetime" },
+        };
+
+        return JsonSerializer.Serialize(new
+        {
+            apiVersion = "alvo.dev/v1",
+            name = "lifecycles",
+            entities = new { bookings = new { fields, stateMachine, timers = new Dictionary<string, object> { ["reminder"] = reminder } } },
+        });
+    }
+
+    private static Dictionary<string, object?> Present(Dictionary<string, object?> members) =>
+        members.Where(member => member.Value is not null).ToDictionary(member => member.Key, member => member.Value);
+
     private static string ReverseTopLevelMembers(string json)
     {
         using JsonDocument document = JsonDocument.Parse(json);

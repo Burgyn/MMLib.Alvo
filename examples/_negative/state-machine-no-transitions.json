@@ -1,0 +1,12 @@
+{
+  "apiVersion": "alvo.dev/v1",
+  "name": "bad-state-machine",
+  "entities": {
+    "bookings": {
+      "fields": {
+        "status": { "type": "enum", "values": ["draft", "confirmed"], "required": true }
+      },
+      "stateMachine": { "field": "status", "transitions": {} }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "apiVersion": "alvo.dev/v1",
+  "name": "bad-timer",
+  "entities": {
+    "bookings": {
+      "fields": {
+        "starts_at": { "type": "datetime", "required": true }
+      },
+      "timers": { "reminder": { "when": "starts_at > now()" } }
+    }
+  }
+}
