@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Timers** (HX-13): `IAlvoScheduler.ScheduleAsync(key, at, …)` — and the typed `ScheduleAsync<TMessage>` over an
+  `[AlvoEvent]` class — arms a keyed timer that fires its custom event exactly once at its latest time; the same key
+  moves it, `CancelAsync` deletes it. Inside a unit it joins the unit's transaction, so a rollback leaves no timer. Its
+  event carries the arming flow's correlation, causation and depth, so a self-re-arming timer stops at the chain-depth
+  limit. Docs: *Time: timers and schedules*.
+- **Schedules** (HX-13): `AddSchedule<TJob>(id, cron, timeZone)` runs an `IAlvoScheduledJob` per five-field cron
+  occurrence in an IANA zone (Cronos's DST rules), one run across replicas, a missed occurrence once, and once per tenant
+  with `AlvoScheduleScope.EachTenant` and an `IAlvoTenantCatalog`. Each run is a `schedule` delivery — retries,
+  history, dead letter. **Run now**: `POST …/schedules/{id}/run` (developer) and `IAlvoOperations.RunScheduleAsync`.
+  A schedule removed from code leaves an inert row until its id is declared with `AddRetiredExtension`.
+- **Data migrations** (HX-13): `AddDataMigration<T>(id, afterRevision)` runs an `IAlvoDataMigration` once, as a
+  `migration` delivery, after the descriptor reaches the revision — once per tenant on a tenant-scoped schema — and
+  never again after a rollback and re-apply.
+- **`Alvo:Deliveries:MaxJobConcurrency`** (HX-13, default 2): scheduled jobs and migrations run from a pool of their
+  own, with a 15-minute default timeout, so a long job never takes an event handler's slot.
+- **Dashboard: *Schedules* and *Timers* on Operations** (HX-13): each schedule and data migration with its cron and
+  zone (or revision), next run in its zone, last run and outcome, and *Run now*; a tile with the pending and due timer
+  counts. The extension catalog carries them (`ManagementExtension.Cron`, `TimeZone`, `NextRunAt`, `LastRunAt`,
+  `LastOutcome`, `AfterRevision`; `ManagementExtensionCatalog.Timers`).
+- **New core dependency: `Cronos`** 0.13.0 (MIT, no dependencies) — cron parsing and time-zone occurrences.
 - **Query narrowing** (HX-16): an embedded host can AND a filter into every non-system read of an entity — list, get and count — with `Entity(…).Narrow(…)`; it never widens what the rules allow and never applies to writes.
 - **Integrity in the descriptor** (HX-11). A field's `validation` is now enforced as a database `CHECK` constraint on
   SQLite and PostgreSQL, for every write — Alvo's, a hook's, and one that bypasses Alvo. A write that breaks one answers
@@ -284,6 +304,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the docs site's tutorial and the source of the README's "See it" section.
 
 ### Changed (breaking)
+
+- **`ITimerStore` is a new provider obligation** (HX-13): a data provider that implements `IOutboxStore` implements
+  `ITimerStore` over the same database, so a timer fire or a schedule advance and its outbox append commit together;
+  `TimerStoreContractTests` (`MMLib.Alvo.Testing`) is the suite it must pass. Its schedule and migration writes take an
+  `AlvoFrameworkEnvelope`, which only the framework can mint.
+- **`AlvoExtensionKind` gains `Schedule` (9) and `DataMigration` (10), `AlvoExtensionStage` gains `Scheduled` (5)**
+  (HX-13): an exhaustive `switch` over them gains cases.
 
 - **Breaking for clients that branch on 500:** a built-in CEL function's refusal of the caller's data answered 500
   `function-failed`; it answers 422 `expression-failed`, and is no longer logged at Error. Host functions keep 500.

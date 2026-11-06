@@ -1,0 +1,134 @@
+---
+title: 'Time: timers and schedules'
+description: A keyed timer that fires once at its latest time, a cron schedule that runs one occurrence once across replicas, and a data migration that runs once per revision — all three as deliveries, testable with a fake clock.
+sidebar:
+  order: 11
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import reminders from '../../../snippets/extending/time/BookingReminders.cs?raw';
+import tests from '../../../snippets/extending/time/BookingRemindersTests.cs?raw';
+import descriptor from '../../../snippets/extending/time/booking-reminders.alvo.json?raw';
+
+A booking needs a reminder a day before it starts, and the desk needs tomorrow's slots opened every night. Neither is a
+reaction to a write alone: one must happen **at a time**, the other **regularly**. Alvo gives host code three tools for
+that, and runs all three the way it runs an [event handler](/extending/event-handlers/) — as deliveries, with retries,
+history, a dead letter and *run again*:
+
+| You need | Use | Runs |
+|---|---|---|
+| Something once, at a time that depends on a record | a **timer** — `IAlvoScheduler.ScheduleAsync(key, at, …)` | the handlers of the event it fires |
+| Something regularly | a **schedule** — `AddSchedule<TJob>(id, cron, timeZone)` | your `IAlvoScheduledJob` |
+| A data fix-up once, after a descriptor revision | a **data migration** — `AddDataMigration<T>(id, afterRevision)` | your `IAlvoDataMigration` |
+
+Timers, schedules and migrations live in the database beside the outbox, so they need a database driver (SQLite or
+PostgreSQL); the in-memory `InMemoryAlvoData` has none.
+
+<Code code={descriptor} lang="json" title="booking-reminders.alvo.json" />
+
+## A keyed timer
+
+A timer has a **key** you choose. Arming the same key again **moves** it; cancelling it deletes it. At its time it fires
+an event — a custom event, here the typed `BookingReminderDue` — once, and every handler of that event runs.
+
+<SourceExcerpt code={reminders} from="[AlvoEvent(" to="public sealed record BookingReminderDue" title="BookingReminders.cs" />
+
+<SourceExcerpt code={reminders} from="public static IAlvoBuilder AddBookingReminders" to="private static string Key" title="BookingReminders.cs" />
+
+- **Move = the same key.** `reminder:<booking id>` is armed on create and armed again when `starts_at` changes; one
+  timer, at the latest time. A booking deleted takes its reminder with it.
+- **Fires exactly once, handlers at least once.** The fire and the event's place in the outbox commit together, or
+  neither does — a move or a cancel that lands while the timer is being fired wins, and the stale fire appends nothing.
+  The handlers then run as deliveries, which are at least once: make them idempotent, as every handler.
+- **A time already past fires on the next round.** Times are stored in UTC.
+- **Keys** are 1–200 characters, none of them a control character. The event type must be your own — the `alvo.`
+  namespace is refused.
+
+### Inside a transaction
+
+`ScheduleAsync` and `CancelAsync` called while a unit is open — a [`TransactAsync`](/extending/transactions/) delegate,
+or a write hook — write through that unit's transaction: a rollback leaves no timer, and a commit arms it with the
+rows.
+
+### Tenants
+
+A timer belongs to a tenant: the `tenant` argument, or else the open unit's tenant. On a descriptor with a tenant-scoped
+entity one is required, and an argument that differs from the open unit's tenant is refused. The same key in two
+tenants is two timers. The fired event carries the tenant, and its handlers run as the system in that tenant.
+
+### Depth
+
+A timer armed from a handler remembers the handler's correlation, causation and depth, and its event is one level
+deeper. A timer that re-arms itself from its own handler therefore climbs one level per round, and is stopped at the
+[chain-depth limit](/extending/#one-limit-already-enforced) (8 by default) — a dead `chain-depth-exceeded` delivery, as
+an event loop is. `ScheduleAsync` itself is refused past the limit.
+
+## Schedules
+
+<SourceExcerpt code={reminders} from="public sealed class RollSlots" title="BookingReminders.cs" />
+
+`AddSchedule<RollSlots>("roll-slots", "0 2 * * *", "Europe/Bratislava")` (in the registration above) runs the job at
+02:00 Bratislava time every night.
+
+- **Cron** is the standard five fields (minute, hour, day of month, month, day of week) — no seconds. The **zone** is
+  an IANA id. Both are checked at start, and every problem is reported at once.
+- **Daylight saving time**, as [Cronos](https://github.com/HangfireIO/Cronos) defines it: a time in the spring-forward
+  gap runs at the end of the gap; in the fall-back overlap a fixed time runs once, and an hourly (or wildcard-hour)
+  schedule runs in both hours.
+- **One run across replicas.** Each occurrence is claimed by one process and advanced in the same transaction that
+  queues its run; three replicas racing it produce one run.
+- **Missed occurrences run once.** A host that was down over several occurrences runs the job once when it comes back,
+  then continues from the next one — no backlog.
+- **Each run is a `schedule` delivery** with retries (`options.Retry`) and a timeout (`options.Timeout`, 15 minutes by
+  default). A run that fails for good is dead, and the next occurrence still runs. Jobs take their own pool,
+  [`Alvo:Deliveries:MaxJobConcurrency`](/reference/configuration/#alvodeliveries) (2 by default), so a long job never
+  takes an event handler's slot.
+- **`AlvoJobContext`** says which occurrence this is (`ScheduledFor`), which tenant (`Tenant`), which attempt, and gives
+  the run a data session as the system in that tenant (`Data`).
+- **Per tenant.** `options.Scope = AlvoScheduleScope.EachTenant` runs one run per tenant, each reading only its own
+  rows. Alvo does not know your tenants: register an `IAlvoTenantCatalog` that lists them, or the host refuses to start.
+- **Run now.** The dashboard's *Run now*, or `POST …/schedules/{id}/run` (the `developer` level), starts one run
+  outside the cron; the next occurrence stays where it was. On `EachTenant` it starts one run per tenant.
+
+### Changing and removing a schedule
+
+Each host process records the schedules it registers when it starts. A changed cron or zone moves the next run; an
+unchanged one keeps it. **Removing a schedule from code does not delete its stored row** — another replica may still
+run the old build. The row is inert: nothing runs it and the catalog does not list it. Declare the id retired with
+`AddRetiredExtension` to delete it. Keep a schedule's cron and zone identical across hosts: two processes that
+register one id differently overwrite each other at start.
+
+## Data migrations
+
+`AddDataMigration<BackfillCodes>("backfill-codes", afterRevision: 4)` runs `BackfillCodes` once, as a `migration`
+delivery, after the descriptor reaches revision 4 — at the boot or the apply that gets there, within one poll of the
+schedule pump. A rollback below revision 4 neither undoes it nor runs it again on a later re-apply.
+
+On a descriptor with a tenant-scoped entity a migration runs **once per tenant** your `IAlvoTenantCatalog` lists, each
+as the system in that tenant, so no run reads another tenant's rows. A tenant created after the migration started does
+not get it — make the fix-up part of creating a tenant if it must. A migration cannot be run now: it runs once per
+revision.
+
+## Testing with a fake clock
+
+`AlvoTestHost` takes a `FakeTimeProvider`. A drain runs timers, then schedules, then events, then deliveries, so
+advancing the clock and draining is all a test needs:
+
+<SourceExcerpt code={tests} from="public async Task The_reminder_arrives" to="rolled.Items.ShouldHaveSingleItem()" title="BookingRemindersTests.cs" />
+
+Drain once before you advance the clock: the first round records the host's schedules from the clock's current time.
+
+## In the dashboard
+
+*Operations* lists the schedules and data migrations under the handlers: the cron and zone (or the revision a
+migration waits for), the next run in the schedule's own zone, the last run and its outcome, and **Run now** for a
+schedule. A *Timers* tile counts the armed timers and how many are due — a due count that stays above zero means
+nothing is firing them. Each run is a delivery in the list beside it, with its attempts.
+
+## Limits
+
+- No sub-minute cron: use a timer.
+- No backlog: a missed occurrence runs once.
+- A run that outlasts its period overlaps the next occurrence's.
+- A data migration that needs a view across tenants cannot have one.

@@ -158,6 +158,7 @@ export default defineConfig({
           page('Validate and guard writes', 'extending/write-hooks'),
           page('Analyzer rules', 'extending/analyzer-rules'),
           page('Transactions in your own code', 'extending/transactions'),
+          page('Time: timers and schedules', 'extending/time'),
           page('Commands and inbound webhooks', 'extending/commands'),
           page('HTTP conventions', 'extending/http-conventions'),
           page('Testing your backend', 'extending/testing'),
