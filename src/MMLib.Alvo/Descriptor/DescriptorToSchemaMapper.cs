@@ -37,6 +37,8 @@ internal static class DescriptorToSchemaMapper
         var formats = DeclaredFormats(d);
         EnsureNoWildcardSubscription(d);
         EnsureNoValidationOnADynamicEntity(d);
+        EnsureNoSequenceOnADynamicEntity(d);
+        EnsureNoIndexIntegrityOnADynamicEntity(d);
 
         // Built once, from the WHOLE descriptor: resolving a rollup's foreign key needs the CHILD entity's
         // fields, which the per-entity pass below cannot see. See RollupResolver's own remarks for why the
@@ -111,6 +113,40 @@ internal static class DescriptorToSchemaMapper
         if (declared.Entity is not null)
         {
             throw new InvalidDataException(FieldValidation.DynamicMessage(declared.Entity, declared.Field));
+        }
+    }
+
+    /// <summary>
+    /// Refuses, at apply, a <c>sequence</c> on a <c>storage: dynamic</c> entity — before the physical filter drops the
+    /// entity and the declaration with it; the validator reports the same refusal at its pointer.
+    /// </summary>
+    /// <param name="d">The parsed descriptor.</param>
+    /// <exception cref="InvalidDataException">A dynamic entity's field declares a sequence.</exception>
+    private static void EnsureNoSequenceOnADynamicEntity(AlvoDescriptor d)
+    {
+        var declared = d.Entities
+            .Where(entity => !IsPhysical(entity.Value))
+            .SelectMany(entity => entity.Value.Fields
+                .Where(field => field.Value.Sequence is not null)
+                .Select(field => (Entity: entity.Key, Field: field.Key)))
+            .FirstOrDefault();
+        if (declared.Entity is not null)
+        {
+            throw new InvalidDataException(SequenceFieldCheck.DynamicMessage(declared.Entity, declared.Field));
+        }
+    }
+
+    /// <summary>
+    /// Refuses, at apply, an index <c>where</c> or <c>exclude</c> on a <c>storage: dynamic</c> entity — before the physical
+    /// filter drops the entity and the declaration with it; the validator reports the same refusal at its pointer.
+    /// </summary>
+    /// <param name="d">The parsed descriptor.</param>
+    /// <exception cref="InvalidDataException">A dynamic entity's index declares one.</exception>
+    private static void EnsureNoIndexIntegrityOnADynamicEntity(AlvoDescriptor d)
+    {
+        if (IndexFilterCheck.DynamicErrors(d) is [var first, ..])
+        {
+            throw new InvalidDataException(first.Message);
         }
     }
 
@@ -224,8 +260,7 @@ internal static class DescriptorToSchemaMapper
         // is DOUBLY dead code — see AddManagedColumns' own remark, which is where the consequence bites.
         AddManagedColumns(fields, e, tenancy, audit, softDelete: false);
 
-        var indexes = (e.Indexes ?? [])
-            .Select(i => new IndexSchema(i.Fields, i.Unique == true)).ToList();
+        var indexes = (e.Indexes ?? []).Select(MapIndex).ToList();
 
         return new EntitySchema
         {
@@ -242,10 +277,48 @@ internal static class DescriptorToSchemaMapper
             // Same hardcode, same reason, same day it changes — see the comment above AddManagedColumns.
             SoftDelete = false,
             Audit = audit,
-            Fields = fields,
+            Fields = WithRangeChecks(fields, indexes),
             Indexes = indexes,
             EventImageExclusions = e.Events?.Exclude ?? [],
         };
+    }
+
+    private static IndexSchema MapIndex(EntityIndex index) => new(index.Fields, index.Unique == true)
+    {
+        Where = index.Where,
+        Exclude = index.Exclude is { } range ? new ExclusionSchema(range.From, range.To) : null,
+    };
+
+    /// <summary>
+    /// Folds every exclusion's <c>to &gt;= from</c> into its end field's validation (HX-12 D4), so an inverted range is the
+    /// same <c>CHECK</c> end to end as a declared validation — refused 422 at the end field, never PostgreSQL's range error.
+    /// </summary>
+    /// <remarks>
+    /// Only where both range fields exist and share a temporal type: anything else is <c>ExclusionIndexCheck</c>'s refusal,
+    /// which a synthesized validation that does not compile would only echo at a pointer the author never wrote.
+    /// </remarks>
+    /// <param name="fields">The entity's mapped fields.</param>
+    /// <param name="indexes">The entity's mapped indexes.</param>
+    private static List<FieldSchema> WithRangeChecks(List<FieldSchema> fields, List<IndexSchema> indexes)
+    {
+        foreach (var range in indexes.Select(index => index.Exclude).OfType<ExclusionSchema>().Where(range => IsTemporalPair(fields, range)))
+        {
+            fields = [.. fields.Select(field => string.Equals(field.Name, range.To, StringComparison.Ordinal) ? WithRangeCheck(field, range.From) : field)];
+        }
+
+        return fields;
+    }
+
+    private static bool IsTemporalPair(List<FieldSchema> fields, ExclusionSchema range) =>
+        fields.FirstOrDefault(field => string.Equals(field.Name, range.From, StringComparison.Ordinal)) is { Type: SchemaFieldType.Date or SchemaFieldType.DateTime } from
+        && fields.FirstOrDefault(field => string.Equals(field.Name, range.To, StringComparison.Ordinal)) is { } to
+        && to.Type == from.Type
+        && !string.Equals(range.From, range.To, StringComparison.Ordinal);
+
+    private static FieldSchema WithRangeCheck(FieldSchema end, string start)
+    {
+        var ordered = $"{end.Name} >= {start}";
+        return end with { CheckExpression = end.CheckExpression is { } own ? $"({own}) && {ordered}" : ordered };
     }
 
     /// <summary>Injects the managed columns an entity's traits earn.</summary>
@@ -446,12 +519,24 @@ internal static class DescriptorToSchemaMapper
                 ? FieldValidation.Canonical(entity, name, validation, [.. declaring.Fields.Keys])
                 : null,
             Rollup = rollups.Resolve(entity, declaring, name, f),
+            Sequence = MapSequence(f.Sequence),
 
             // The literal as declared. See FieldSchema.Default for why it is not converted here, and
             // FieldDefault for what is refused before it gets this far.
             Default = FieldDefault.Resolve(entity, name, f),
+            IsVirtual = f.Virtual == true,
         };
     }
+
+    private static SequenceSchema? MapSequence(FieldSequence? sequence) => sequence is null
+        ? null
+        : new SequenceSchema
+        {
+            Per = sequence.Per,
+            Period = MapPeriod(sequence.Period),
+            Start = sequence.Start ?? 1,
+            Format = sequence.Format,
+        };
 
     /// <summary>
     /// Refuses, at apply, every feature <see cref="UnhonouredFeatures"/> records as declared by the frozen
@@ -534,6 +619,14 @@ internal static class DescriptorToSchemaMapper
         FieldType.Enum => SchemaFieldType.Enum,
         FieldType.Ref => SchemaFieldType.Ref,
         _ => throw new InvalidDataException($"Unknown field type '{t}'."),
+    };
+
+    private static SequenceResetPeriod? MapPeriod(SequencePeriod? period) => period switch
+    {
+        SequencePeriod.Year => SequenceResetPeriod.Year,
+        SequencePeriod.Month => SequenceResetPeriod.Month,
+        SequencePeriod.Day => SequenceResetPeriod.Day,
+        _ => null,
     };
 
     private static OnDelete MapOnDelete(OnDeleteAction? od) => od switch

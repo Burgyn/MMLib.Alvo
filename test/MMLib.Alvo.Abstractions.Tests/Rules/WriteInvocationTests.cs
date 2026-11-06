@@ -24,6 +24,8 @@ public sealed class WriteInvocationTests
         ((int)AlvoExtensionStage.InTransaction).ShouldBe(3);
         ((int)AlvoExtensionKind.Narrowing, (int)AlvoExtensionStage.Read).ShouldBe((7, 4));
         System.Text.Json.JsonSerializer.Serialize(AlvoExtensionKind.Narrowing).ShouldBe("\"narrowing\"");
+        ((int)AlvoExtensionKind.Enricher).ShouldBe(8);
+        System.Text.Json.JsonSerializer.Serialize(AlvoExtensionKind.Enricher).ShouldBe("\"enricher\"");
         System.Text.Json.JsonSerializer.Serialize(AlvoExtensionStage.Read).ShouldBe("\"read\"");
         System.Text.Json.JsonSerializer.Serialize(AlvoExtensionKind.BeforeDelete).ShouldBe("\"beforeDelete\"");
         System.Text.Json.JsonSerializer.Serialize(AlvoExtensionStage.InTransaction).ShouldBe("\"inTransaction\"");

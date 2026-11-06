@@ -60,9 +60,10 @@ tenants is two timers. The fired event carries the tenant, and its handlers run 
 ### Depth
 
 A timer armed from a handler remembers the handler's correlation, causation and depth, and its event is one level
-deeper. A timer that re-arms itself from its own handler therefore climbs one level per round, and is stopped at the
-[chain-depth limit](/extending/#one-limit-already-enforced) (8 by default) — a dead `chain-depth-exceeded` delivery, as
-an event loop is. `ScheduleAsync` itself is refused past the limit.
+deeper than the handler. A handler already runs one level deeper than the event it handles, so a timer that re-arms
+itself from its own handler climbs **two levels per cycle**: at the
+[chain-depth limit](/extending/#one-limit-already-enforced) of 8 (the default) it fires about four times, then stops
+with a dead `chain-depth-exceeded` delivery, as an event loop does. `ScheduleAsync` itself is refused past the limit.
 
 ## Schedules
 
@@ -89,7 +90,8 @@ an event loop is. `ScheduleAsync` itself is refused past the limit.
 - **Per tenant.** `options.Scope = AlvoScheduleScope.EachTenant` runs one run per tenant, each reading only its own
   rows. Alvo does not know your tenants: register an `IAlvoTenantCatalog` that lists them, or the host refuses to start.
 - **Run now.** The dashboard's *Run now*, or `POST …/schedules/{id}/run` (the `developer` level), starts one run
-  outside the cron; the next occurrence stays where it was. On `EachTenant` it starts one run per tenant.
+  outside the cron; the next occurrence stays where it was. On `EachTenant` it starts one run per tenant, and answers
+  409 when the catalog lists no tenants.
 
 ### Changing and removing a schedule
 
@@ -124,7 +126,8 @@ advancing the clock and draining is all a test needs:
 
 <SourceExcerpt code={tests} from="public async Task The_reminder_arrives" to="rolled.Items.ShouldHaveSingleItem()" title="BookingRemindersTests.cs" />
 
-Drain once before you advance the clock: the first round records the host's schedules from the clock's current time.
+Drain once before you advance the clock, so the schedules are recorded from the clock's current time even if the
+boot was not yet ready when the pumps started.
 
 ## In the dashboard
 

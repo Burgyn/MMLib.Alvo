@@ -275,6 +275,20 @@ public sealed class TypedWriteTests
     }
 
     [Fact]
+    public async Task A_typed_create_never_sends_a_virtual_property()
+    {
+        var withVirtualLabel = OrdersSchema with
+        {
+            Fields = [.. OrdersSchema.Fields, new FieldSchema { Name = "label", Type = FieldType.String, Nullable = true, IsVirtual = true }],
+        };
+        var (inner, sent) = Capturing(TotalsRecord());
+
+        await new SchemaSession(inner, withVirtualLabel).CreateAsync(new OrderWithTotals { Note = "n", Label = "forged" }, Ct);
+
+        sent.ShouldHaveSingleItem().Keys.ShouldNotContain("label");
+    }
+
+    [Fact]
     public async Task A_typed_replace_never_sends_a_computed_or_rollup_field()
     {
         var inner = Substitute.For<IAlvoSession>();

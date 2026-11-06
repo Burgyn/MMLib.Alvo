@@ -150,6 +150,27 @@ public sealed class TSqlSqlDialect : IAlvoSqlDialect
     }
 
     /// <inheritdoc/>
+    /// <remarks>Declined: SQL Server has no exclusion constraint, so an apply declaring <c>exclude</c> is refused (HX-12 D16).</remarks>
+    ExclusionConstraintSql? IAlvoSqlDialect.ExclusionConstraint(ExclusionConstraintDefinition definition) => null;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// One <c>MERGE</c> under <c>HOLDLOCK</c> — serializable range locks on the key, so two allocators of a count's first
+    /// number cannot both take the insert branch — with <c>OUTPUT</c> answering the number. Implemented explicitly, so this
+    /// double's public surface does not grow by the create path's question.
+    /// </remarks>
+    string? IAlvoSqlDialect.SequenceAllocationStatement(string table) =>
+        $"""
+        MERGE {table} WITH (HOLDLOCK) AS s
+        USING (SELECT @entity AS entity, @field AS field, @tenant AS tenant_key, @scope AS scope_key, @period AS period_key) AS k
+        ON s.entity = k.entity AND s.field = k.field AND s.tenant_key = k.tenant_key AND s.scope_key = k.scope_key AND s.period_key = k.period_key
+        WHEN MATCHED THEN UPDATE SET last_value = s.last_value + 1
+        WHEN NOT MATCHED THEN INSERT (entity, field, tenant_key, scope_key, period_key, last_value)
+            VALUES (k.entity, k.field, k.tenant_key, k.scope_key, k.period_key, @start)
+        OUTPUT inserted.last_value;
+        """;
+
+    /// <inheritdoc/>
     /// <remarks>
     /// <para>
     /// <b>Nothing, and the reason is a property of this stand-in rather than of T-SQL.</b> A real SQL Server /

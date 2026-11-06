@@ -31,6 +31,15 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
     /// <summary>Gets whether a real engine was started, so a caller can skip rather than fail.</summary>
     public bool Available => _container is not null;
 
+    /// <summary>
+    /// The server's <c>max_connections</c>, or <see langword="null"/> for the image's default — raised by a suite whose
+    /// facts hold a hundred concurrent writers open at once.
+    /// </summary>
+    public int? MaxConnections { get; init; }
+
+    /// <summary>The host's connection pool size, or <see langword="null"/> for Npgsql's default of 100.</summary>
+    public int? MaxPoolSize { get; init; }
+
     public async ValueTask InitializeAsync()
     {
         // Windows GitHub runners run Docker in Windows-container mode when they run it at all, and that
@@ -42,7 +51,8 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
             return;
         }
 
-        var container = new PostgreSqlBuilder("postgres:16-alpine").Build();
+        var builder = new PostgreSqlBuilder("postgres:16-alpine");
+        var container = (MaxConnections is { } max ? builder.WithCommand("-c", $"max_connections={max}") : builder).Build();
         await container.StartAsync();
         _container = container;
     }
@@ -113,6 +123,16 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
         return (hosts, connectionString);
     }
 
+    /// <summary>Gets the container's superuser connection string, for a fact that provisions a database or a role of its own.</summary>
+    internal string AdminConnectionString => PostgresTestContainer.ConnectionStringOf(_container!);
+
+    /// <summary>
+    /// Builds a host container over <paramref name="connectionString"/> — another role's, say — without migrating anything,
+    /// disposed with the fixture.
+    /// </summary>
+    /// <param name="connectionString">The database and role the host connects as.</param>
+    internal ServiceProvider ServicesFor(string connectionString) => BuildProvider(connectionString, time: null, configure: null);
+
     /// <summary>
     /// Starts recording after the migration, so a fact sees the statements its own act produced rather than the
     /// DDL the fixture ran. The generated database name is the marker, exactly as the SQLite fixture's file
@@ -168,7 +188,13 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
         create.CommandText = $"CREATE DATABASE \"{name}\"";
         await create.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
 
-        return (new NpgsqlConnectionStringBuilder(adminConnectionString) { Database = name }.ToString(), name);
+        var connectionString = new NpgsqlConnectionStringBuilder(adminConnectionString) { Database = name };
+        if (MaxPoolSize is { } pool)
+        {
+            connectionString.MaxPoolSize = pool;
+        }
+
+        return (connectionString.ToString(), name);
     }
 
     /// <summary>
@@ -251,9 +277,14 @@ public sealed class PostgreSqlAlvoDataHost
 
     /// <summary>Re-primes the policy catalog (and therefore the applied schema) from <paramref name="schema"/>.</summary>
     /// <param name="schema">The schema the rules are re-compiled against and that the read model is rebuilt from.</param>
-    public void RePrime(SchemaModel schema)
+    public void RePrime(SchemaModel schema) => RePrime(schema, _descriptor);
+
+    /// <summary>Re-primes the policy catalog from <paramref name="schema"/> and a descriptor an apply changed.</summary>
+    /// <param name="schema">The schema the rules are re-compiled against and that the read model is rebuilt from.</param>
+    /// <param name="descriptor">The descriptor <paramref name="schema"/> maps from — a rename changes its entity names.</param>
+    public void RePrime(SchemaModel schema, AlvoDescriptor descriptor)
     {
-        var catalog = PolicyCatalog.Build(_descriptor, schema, _services.GetRequiredService<ICelCompiler>());
-        _services.GetRequiredService<IPolicyCatalogProvider>().SetCurrent(_descriptor.Name, catalog);
+        var catalog = PolicyCatalog.Build(descriptor, schema, _services.GetRequiredService<ICelCompiler>());
+        _services.GetRequiredService<IPolicyCatalogProvider>().SetCurrent(descriptor.Name, catalog);
     }
 }

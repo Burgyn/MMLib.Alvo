@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Timers** (HX-13): `IAlvoScheduler.ScheduleAsync(key, at, …)` — and the typed `ScheduleAsync<TMessage>` over an
   `[AlvoEvent]` class — arms a keyed timer that fires its custom event exactly once at its latest time; the same key
   moves it, `CancelAsync` deletes it. Inside a unit it joins the unit's transaction, so a rollback leaves no timer. Its
-  event carries the arming flow's correlation, causation and depth, so a self-re-arming timer stops at the chain-depth
-  limit. Docs: *Time: timers and schedules*.
+  event carries the arming flow's correlation, causation and depth, so a self-re-arming timer climbs two levels per
+  cycle and stops at the chain-depth limit (about four fires at the default 8). Docs: *Time: timers and schedules*.
 - **Schedules** (HX-13): `AddSchedule<TJob>(id, cron, timeZone)` runs an `IAlvoScheduledJob` per five-field cron
   occurrence in an IANA zone (Cronos's DST rules), one run across replicas, a missed occurrence once, and once per tenant
   with `AlvoScheduleScope.EachTenant` and an `IAlvoTenantCatalog`. Each run is a `schedule` delivery — retries,
@@ -44,6 +44,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dashboard: a delivery's *Steps*** (HX-14): the delivery pane lists its completed steps; a sleeping delivery reads
   *sleeping until* its wake time, a superseded one *superseded* with no *Run again*, and a capped handler shows its cap.
 - **New core dependency: `Cronos`** 0.13.0 (MIT, no dependencies) — cron parsing and time-zone occurrences.
+- **`sequence` on a field** (HX-12): a gapless number per tenant, optionally per another field's value and per UTC
+  year/month/day, stored as an integer or formatted text (`SO-{yyyy}-{n:4}`); the T-SQL double and any dialect without
+  `SequenceAllocationStatement` refuse it at apply.
+- **`indexes[].where` and `indexes[].exclude`** (HX-12): `indexes[].where` (partial indexes; a partial `unique` allows
+  duplicates outside it) and `indexes[].exclude` (no overlapping `[from, to)` ranges among rows with equal `fields`; 409
+  `exclusion` at the range's pointer; PostgreSQL installs or requires `btree_gist`); `AlvoConstraintKind.Exclusion`.
+  Adding an exclusion over overlapping rows is refused at apply — and in a dry run — with their count; a dialect that
+  cannot enforce one refuses `exclude` at apply. A `where` cannot compare with a `timestamp('…')` constant yet.
+- **Dashboard and docs for HX-12's integrity keywords.** The field editor offers *Sequence* beside rollup and computed
+  (a `per` picker over required fields a caller writes, a period, a start, and a format checked as it is typed with a
+  preview of the first number); the Indexes tab's add form gains *Only where* (checked live against the host) and
+  *Exclude overlaps* (start and end pickers over required date and datetime fields; it hides *Unique*), and each row
+  badges its `where` and its range. The *Integrity in the descriptor* page gains sections on `sequence`, partial unique
+  indexes and `exclude`, with an executed snippet; the indexes and field-types descriptor skills teach both keywords.
+- **Virtual fields and record enrichers** (HX-16): a field declared `"virtual": true` has no column, is read-only and refused in writes, expressions and filter/sort/select (422 on the Data API); an embedded host's `Enrich(…)` fills it — or hides a field — on every read and write echo, after the caller's rules and masks. The applied schema a version row stores now records which fields are virtual; a binary older than this release reading a newer row ignores that and would plan a column for each virtual field, so do not roll a deployment back across it.
 - **Query narrowing** (HX-16): an embedded host can AND a filter into every non-system read of an entity — list, get and count — with `Entity(…).Narrow(…)`; it never widens what the rules allow and never applies to writes.
 - **Integrity in the descriptor** (HX-11). A field's `validation` is now enforced as a database `CHECK` constraint on
   SQLite and PostgreSQL, for every write — Alvo's, a hook's, and one that bypasses Alvo. A write that breaks one answers
@@ -591,6 +606,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The OpenAPI document marks every framework-maintained field read-only** (HX-12): a `computed`, `rollup` or `sequence`
+  field is `readOnly` in the response schema and absent from the create and patch schemas (and from their `required`).
+  Every write to one was already refused with 403; a generated client no longer offers it.
 - **HX-11 appends enum members** — `AlvoConstraintKind.Check` and `CelValueType.Duration`: an exhaustive `switch` over
   either gains a case. `IFieldSqlRenderer.RenderEpochMicroseconds` is a new default interface member; a third-party
   dialect inherits `null`, and duration arithmetic over a field is then refused on it, naming the renderer.

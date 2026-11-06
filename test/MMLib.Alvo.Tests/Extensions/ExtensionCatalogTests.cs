@@ -90,6 +90,20 @@ public sealed class ExtensionCatalogTests
     }
 
     [Fact]
+    public void An_enricher_is_catalogued_as_a_read_on_reads_and_echoes()
+    {
+        var catalog = Catalog(Registry(alvo => alvo.Entity("tickets", t => t.Enrich(
+            "labelled", (MMLib.Alvo.Reads.Enrich<MMLib.Alvo.Data.AlvoRecord> _) => { }))));
+
+        var item = catalog.Items.ShouldHaveSingleItem();
+        (item.Kind, item.Stage, item.When, item.Entities.Single()).ShouldBe((AlvoExtensionKind.Enricher, AlvoExtensionStage.Read, (string?)null, "tickets"));
+        item.Operations.ShouldBe(["list", "get", "create", "update"]);
+        catalog.HonouredKinds.ShouldContain("extensions.enricher");
+        catalog.RunningOn("tickets", "create").ShouldHaveSingleItem().Id.ShouldBe("labelled");
+        catalog.RunningOn("tickets", "delete").ShouldBeEmpty();
+    }
+
+    [Fact]
     public void A_kind_s_wire_name_is_its_serialised_form()
         => ExtensionCatalog.WireName(AlvoExtensionKind.EventHandler).ShouldBe("eventHandler");
 

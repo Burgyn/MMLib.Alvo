@@ -1,0 +1,20 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "exclusion-bookings",
+  "description": "HX-12 over HTTP: no two bookings of one room may hold overlapping [starts_at, ends_at) ranges unless one is cancelled, so concurrent overlapping creates answer one 201 and 409s at the range's start.",
+  "auth": { "providers": ["local"], "roles": ["clerk"] },
+  "access": { "admin": "'clerk' in @user.roles" },
+  "entities": {
+    "bookings": {
+      "fields": {
+        "room": { "type": "string", "maxLength": 20, "required": true },
+        "starts_at": { "type": "datetime", "required": true },
+        "ends_at": { "type": "datetime", "required": true },
+        "status": { "type": "string", "maxLength": 20, "required": true }
+      },
+      "indexes": [ { "fields": ["room"], "exclude": { "from": "starts_at", "to": "ends_at" }, "where": "status != 'cancelled'" } ],
+      "rules": { "list": "true", "get": "true", "create": "true", "update": "true", "delete": "true" }
+    }
+  }
+}

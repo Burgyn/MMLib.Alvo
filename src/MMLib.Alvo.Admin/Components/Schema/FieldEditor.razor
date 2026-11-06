@@ -83,7 +83,7 @@
         else
         {
             <Field Label="Type" LabelId="new-field-type">
-                <ChipGroup TValue="FieldType" Items="@(_facets.Kind == FieldKind.Computed ? _facets.ComputedTypesOffered : _types)"
+                <ChipGroup TValue="FieldType" Items="@TypesOffered"
                            Selected="[_facets.Type]" aria-labelledby="new-field-type"
                            Label="Word" SelectedChanged="types => ChooseType(types[0])" />
             </Field>
@@ -136,7 +136,7 @@
             </span>
         </div>
 
-        @if (_facets.Kind != FieldKind.Rollup)
+        @if (_facets.Kind is not (FieldKind.Rollup or FieldKind.Sequence))
         {
             @switch (_facets.Type)
             {
@@ -278,6 +278,72 @@
                     @ChordHint.Of("saves")
                 </Hint>
             </Field>
+        }
+
+        @if (_facets.Kind == FieldKind.Sequence)
+        {
+            <Field Label="Counted per" LabelId="sequence-per">
+                <ChildContent>
+                    <ChipGroup TValue="string" Items="_facets.PerChoices" Selected="[_facets.SequencePer]" aria-labelledby="sequence-per"
+                               data-testid="sequence-per" Label="@(option => option.Length == 0 ? "one count" : option)"
+                               SelectedChanged="picked => _facets.SequencePer = picked[0]" />
+                </ChildContent>
+                <Hint>
+                    Each value of the field chosen keeps a count of its own — one series per room, per branch. Offered: the
+                    required fields a caller writes whose value is a key. Every tenant always counts on its own.
+                </Hint>
+            </Field>
+
+            <Field Label="Restarts" LabelId="sequence-period">
+                <ChildContent>
+                    <ChipGroup TValue="string" Items="FieldFacets.SequencePeriods" Selected="[_facets.SequencePeriod]"
+                               aria-labelledby="sequence-period" data-testid="sequence-period"
+                               Label="@(period => period.Length == 0 ? "never" : $"every {period}")"
+                               SelectedChanged="picked => _facets.SequencePeriod = picked[0]" />
+                </ChildContent>
+                <Hint>A new count starts at each UTC calendar period, read from the create's own time.</Hint>
+            </Field>
+
+            <Field Label="Start" For="sequence-start">
+                <ChildContent>
+                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="sequence-start" data-testid="sequence-start"
+                                  InputMode="InputMode.numeric" Placeholder="1" aria-describedby="sequence-start-hint" autocomplete="off"
+                                  Value="_facets.SequenceStart" ValueChanged="text => _facets.SequenceStart = text ?? string.Empty" />
+                </ChildContent>
+                <Hint>The first number of every count. Leave it empty to start at 1.</Hint>
+            </Field>
+
+            @if (_facets.Type == FieldType.String)
+            {
+                <Field Label="Format" For="sequence-format">
+                    <ChildContent>
+                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="sequence-format" data-testid="sequence-format"
+                                      Class="a-mono" spellcheck="false" autocomplete="off" Placeholder="e.g. B-{yyyy}-{n:3}"
+                                      aria-describedby="@(FormatProblemShown ? "sequence-format-hint sequence-format-check" : "sequence-format-hint")"
+                                      Error="FormatProblemShown"
+                                      Value="_facets.SequenceFormat" ValueChanged="text => _facets.SequenceFormat = text ?? string.Empty" />
+                        @if (FormatProblemShown)
+                        {
+                            <p class="a-field__problem" id="sequence-format-check" role="status" data-testid="check-sequence-format">
+                                @_facets.SequenceFormatProblem
+                            </p>
+                        }
+                    </ChildContent>
+                    <Hint>
+                        The text stored: one <code class="a-mono">{n}</code>, or <code class="a-mono">{n:4}</code> to pad it to four
+                        digits, and any of <code class="a-mono">{yyyy}</code> <code class="a-mono">{yy}</code>
+                        <code class="a-mono">{MM}</code> <code class="a-mono">{dd}</code> from the create's UTC date.
+                    </Hint>
+                </Field>
+            }
+
+            @if (_facets.SequencePreview(Clock.GetUtcNow()) is { } first)
+            {
+                <span class="a-hint" data-testid="sequence-preview">
+                    A new count starts at <code class="a-mono">@first</code>. Numbers are never reused, and a write that is rolled
+                    back returns its number.
+                </span>
+            }
         }
 
         @* Every kind, a maintained value included (HX-11 Ruling 47): the database judges the stored value, whoever wrote it. *@

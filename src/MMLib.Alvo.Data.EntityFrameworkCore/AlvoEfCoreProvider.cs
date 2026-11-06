@@ -235,7 +235,9 @@ public static class AlvoEfCoreProvider
             CheckConstraints(services, registration),
             registration.Fields,
             RollupFilters(services, registration),
-            services.GetService<ILogger<EfCoreSchemaMigrator>>());
+            services.GetService<ILogger<EfCoreSchemaMigrator>>(),
+            () => services.GetRequiredService<IOptions<AlvoOptions>>().Value.SchemaPrefix,
+            IndexFilters(services, registration));
     }
 
     /// <summary>
@@ -275,6 +277,15 @@ public static class AlvoEfCoreProvider
     private static CheckConstraintSql? CheckConstraints(IServiceProvider services, RelationalProviderRegistration registration) =>
         services.GetService<ICelCompiler>() is { } compiler && services.GetService<IPredicateRenderer>() is { } renderer
             ? new CheckConstraintSql(compiler, renderer, registration.Fields)
+            : null;
+
+    /// <summary>
+    /// The CEL-to-partial-index-predicate renderer, or <see langword="null"/> when this container has no expression
+    /// services — <see cref="ComputedColumns"/>' reasoning.
+    /// </summary>
+    private static IndexFilterSql? IndexFilters(IServiceProvider services, RelationalProviderRegistration registration) =>
+        services.GetService<ICelCompiler>() is { } compiler && services.GetService<IPredicateRenderer>() is { } renderer
+            ? new IndexFilterSql(compiler, renderer, registration.Fields)
             : null;
 
     private static EfCoreSchemaIntrospector CreateIntrospector(IServiceProvider services, RelationalProviderRegistration registration)

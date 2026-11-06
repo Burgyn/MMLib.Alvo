@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Data.EntityFrameworkCore;
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Schema;
 using Npgsql;
 using System.Data.Common;
@@ -43,6 +44,82 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
 
         return $"SELECT {string.Join(", ", keyParameterMarkers.Select(marker => $"{function}({marker})"))}";
     }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <c>INSERT … ON CONFLICT DO UPDATE … RETURNING</c> under READ COMMITTED: a concurrent allocator of the same count
+    /// blocks on the counter row — or, for a count's first number, on the primary key's index entry — until the first
+    /// commits or rolls back, then takes the next value; a rolled-back first insert lets the waiter insert the start.
+    /// Implemented explicitly: the create path's question, not part of this type's own surface.
+    /// </remarks>
+    string? IAlvoSqlDialect.SequenceAllocationStatement(string table) => SequenceTable.Upsert(table);
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// One <c>EXCLUDE USING gist</c> table constraint: each equality column <c>WITH =</c> (a scalar in a GiST index needs the
+    /// <c>btree_gist</c> extension) and the half-open range — <c>tstzrange</c> for a <c>datetime</c>, <c>daterange</c> for a
+    /// <c>date</c>, bounds <c>'[)'</c> — <c>WITH &amp;&amp;</c>, under the index's <c>where</c>. An empty range overlaps nothing.
+    /// A table constraint, so it survives anything short of dropping the table.
+    /// </remarks>
+    ExclusionConstraintSql? IAlvoSqlDialect.ExclusionConstraint(ExclusionConstraintDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        var range = definition.RangeType == FieldType.Date ? "daterange" : "tstzrange";
+        var equal = definition.EqualityColumns.Select(column => $"{RenderColumn(column)} WITH =");
+        var overlap = $"{range}({RenderColumn(definition.StartColumn)}, {RenderColumn(definition.EndColumn)}, '[)') WITH &&";
+        var where = definition.Filter is null ? string.Empty : $" WHERE ({definition.Filter})";
+        return new(
+            Create:
+            [
+                $"ALTER TABLE {RenderColumn(definition.Table)} ADD CONSTRAINT {RenderColumn(definition.Name)} "
+                + $"EXCLUDE USING gist ({string.Join(", ", [.. equal, overlap])}){where}",
+            ],
+            Drop: [$"ALTER TABLE {RenderColumn(definition.Table)} DROP CONSTRAINT IF EXISTS {RenderColumn(definition.Name)}"],
+            SurvivesTableRebuild: true);
+    }
+
+    private const string BtreeGistProbe = """
+        SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'btree_gist'),
+               EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'btree_gist'),
+               COALESCE((has_database_privilege(current_database(), 'CREATE')
+                         AND has_schema_privilege(current_schema(), 'CREATE')
+                         AND current_setting('server_version_num')::int >= 130000)
+                        OR (SELECT rolsuper FROM pg_roles WHERE rolname = current_user), FALSE)
+        """;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <c>btree_gist</c> (HX-12 D12): a scalar <c>WITH =</c> in a GiST index needs it. Installed → nothing; available and this
+    /// role may install it → the plan's first statement installs it; otherwise the apply is refused, naming what the database
+    /// owner runs. A role may install it as a superuser, or with <c>CREATE</c> on the database <em>and</em> on the schema the
+    /// extension lands in (the first on the search path; since PostgreSQL 15 nobody's by default) on a server that trusts it
+    /// (PostgreSQL 13 and later) — review M2.
+    /// </remarks>
+    async ValueTask<ExclusionPrerequisite> IAlvoSqlDialect.ExclusionPrerequisiteAsync(DbConnection connection, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        var command = connection.CreateCommand();
+        await using (command.ConfigureAwait(false))
+        {
+            command.CommandText = BtreeGistProbe;
+            var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            await using (reader.ConfigureAwait(false))
+            {
+                await reader.ReadAsync(ct).ConfigureAwait(false);
+                return Prerequisite(installed: reader.GetBoolean(0), installable: reader.GetBoolean(1) && reader.GetBoolean(2));
+            }
+        }
+    }
+
+    private static ExclusionPrerequisite Prerequisite(bool installed, bool installable) => (installed, installable) switch
+    {
+        (true, _) => ExclusionPrerequisite.Ready,
+        (false, true) => new ExclusionPrerequisite("CREATE EXTENSION IF NOT EXISTS btree_gist"),
+        _ => new ExclusionPrerequisite(
+            Statement: null,
+            "Excluding overlaps needs PostgreSQL's btree_gist extension, which this database does not have and this connection's role may not install. Nothing was applied.",
+            "Ask the database owner to run CREATE EXTENSION btree_gist; in this database (it ships with PostgreSQL and is trusted since PostgreSQL 13), then apply again."),
+    };
 
     /// <inheritdoc/>
     /// <remarks>
@@ -92,6 +169,9 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
     /// <summary>SQLSTATE 23514 — <c>check_violation</c>, what a field's validation raises.</summary>
     private const string CheckViolation = "23514";
 
+    /// <summary>SQLSTATE 23P01 — <c>exclusion_violation</c>, what an <c>EXCLUDE</c> constraint raises.</summary>
+    private const string ExclusionViolation = "23P01";
+
     /// <inheritdoc/>
     /// <remarks>
     /// <para>
@@ -134,6 +214,11 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
                 Kind = AlvoConstraintKind.Check,
                 ConstraintName = NullIfEmpty(postgres.ConstraintName),
             },
+            ExclusionViolation => new SqlConstraintViolation
+            {
+                Kind = AlvoConstraintKind.Exclusion,
+                ConstraintName = NullIfEmpty(postgres.ConstraintName),
+            },
             _ => null,
         };
     }
@@ -152,6 +237,13 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
     /// <inheritdoc/>
     /// <remarks>Decided from the SQLSTATE alone, like <see cref="DecodeConstraintViolation"/>.</remarks>
     bool IAlvoSqlDialect.IsLockTimeout(DbException failure) => failure is PostgresException { SqlState: LockNotAvailable };
+
+    /// <summary>SQLSTATE 42P17 — <c>invalid_object_definition</c>, what an index predicate calling a non-immutable function raises.</summary>
+    private const string InvalidObjectDefinition = "42P17";
+
+    /// <inheritdoc/>
+    /// <remarks>Decided from the SQLSTATE alone, like <see cref="DecodeConstraintViolation"/>.</remarks>
+    bool IAlvoSqlDialect.IsIndexPredicateRefusal(DbException failure) => failure is PostgresException { SqlState: InvalidObjectDefinition };
 
     /// <inheritdoc/>
     /// <remarks>

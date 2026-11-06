@@ -90,7 +90,7 @@ internal static class OperationsView
     /// <c>in 3 h (02:00 Europe/Bratislava)</c>; a dash for a migration or a schedule whose first start has not recorded it.
     /// </summary>
     public static string NextRun(ManagementExtension job, DateTimeOffset now) => job is { NextRunAt: { } next, TimeZone: { } zone }
-        ? $"{Until(next - now)} ({Local(next, zone)} {zone})"
+        ? $"{Until(next - now)} ({Local(next, zone)})"
         : "—";
 
     /// <summary>How long ago a schedule's last occurrence ran, or <c>never</c>.</summary>
@@ -117,8 +117,11 @@ internal static class OperationsView
 
     private static string Whole(double amount, string unit) => string.Create(CultureInfo.InvariantCulture, $"{Math.Round(amount):0} {unit}");
 
-    private static string Local(DateTimeOffset instant, string zone) =>
-        TimeZoneInfo.ConvertTime(instant, TimeZoneInfo.FindSystemTimeZoneById(zone)).ToString("HH:mm", CultureInfo.InvariantCulture);
+    private static string Local(DateTimeOffset instant, string zone) => TimeZoneInfo.TryFindSystemTimeZoneById(zone, out var found)
+        ? $"{Clock(TimeZoneInfo.ConvertTime(instant, found))} {zone}"
+        : $"{Clock(instant.ToUniversalTime())} UTC — {zone} is unknown here";
+
+    private static string Clock(DateTimeOffset instant) => instant.ToString("HH:mm", CultureInfo.InvariantCulture);
 
     private static IEnumerable<string> AttemptParts(ManagementDeliveryAttempt attempt)
     {

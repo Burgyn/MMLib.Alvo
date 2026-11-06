@@ -1,0 +1,14 @@
+{
+  "apiVersion": "alvo.dev/v1",
+  "name": "bad-index-exclude",
+  "entities": {
+    "bookings": {
+      "fields": {
+        "room": { "type": "string", "required": true },
+        "starts_at": { "type": "datetime", "required": true },
+        "ends_at": { "type": "datetime", "required": true }
+      },
+      "indexes": [ { "fields": ["room"], "exclude": { "from": "starts_at" } } ]
+    }
+  }
+}

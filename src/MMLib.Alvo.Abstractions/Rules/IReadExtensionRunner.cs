@@ -37,4 +37,25 @@ internal interface IReadExtensionRunner
     /// <param name="cause">What refused the term; only its type is logged.</param>
     /// <returns>The failure to throw.</returns>
     HookFailedException Refused(IReadOnlyList<string> extensions, string reason, Exception cause);
+
+    /// <summary>The enrichment of one read, or <see langword="null"/> when no enricher binds the entity. Dispose it after the read.</summary>
+    /// <param name="entity">The entity being read.</param>
+    /// <param name="operation"><see cref="DataOperation.List"/>, <see cref="DataOperation.Get"/>, or the write whose echo is read.</param>
+    /// <param name="context">The caller the rows are returned to — the system too, which is enriched like any caller.</param>
+    /// <returns>The enrichment every returned row passes through, or <see langword="null"/>.</returns>
+    /// <exception cref="HookFailedException">An enricher is not bound for the current catalog; the read answers nothing.</exception>
+    IReadEnrichment? BeginEnrichment(string entity, DataOperation operation, AlvoContext context);
+}
+
+/// <summary>
+/// The enrichment of one read: every row it returns, after the policy mask, passes through the entity's enrichers in
+/// registration order. Disposing it ends the read's service scope.
+/// </summary>
+internal interface IReadEnrichment : IAsyncDisposable
+{
+    /// <summary>The row as the enrichers shaped it: a field hidden, or a virtual field filled — nothing else.</summary>
+    /// <param name="row">The row as the caller's rules and masks left it.</param>
+    /// <returns>The shaped row.</returns>
+    /// <exception cref="HookFailedException">An enricher threw or tried a move it may not make; the read answers nothing.</exception>
+    AlvoRecord Enrich(AlvoRecord row);
 }

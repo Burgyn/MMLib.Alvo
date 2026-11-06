@@ -82,8 +82,10 @@ export const SCHEMA_FACETS = {
     "index",
     "hidden",
     "readOnly",
+    "virtual",
     "computed",
-    "rollup"
+    "rollup",
+    "sequence"
   ],
   "onDelete": [
     "restrict",

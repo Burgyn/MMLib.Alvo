@@ -1,0 +1,13 @@
+{
+  "apiVersion": "alvo.dev/v1",
+  "name": "bad-index-where",
+  "entities": {
+    "members": {
+      "fields": {
+        "email": { "type": "string" },
+        "active": { "type": "boolean", "required": true }
+      },
+      "indexes": [ { "fields": ["email"], "unique": true, "where": 42 } ]
+    }
+  }
+}

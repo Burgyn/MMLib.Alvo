@@ -33,7 +33,7 @@ internal static class QueryFieldGuard
     /// </summary>
     private const string UnavailableQueryFieldMessage = AlvoAuthorizationException.QueryFieldUnavailable;
 
-    private const string UndeclaredPayloadFieldMessage = "The payload names a field that is not writable on this entity.";
+    private const string UndeclaredPayloadFieldMessage = VirtualFieldWrites.UndeclaredPayloadField;
 
     /// <summary>
     /// Refuses a filter or sort key the caller cannot read — one the entity does not declare, or one the
@@ -49,10 +49,10 @@ internal static class QueryFieldGuard
         ArgumentNullException.ThrowIfNull(fields);
         ArgumentNullException.ThrowIfNull(hiddenFields);
 
-        var declared = DeclaredFields(entity);
+        var queryable = QueryableFields(entity);
         foreach (var field in fields)
         {
-            if (hiddenFields.Contains(field) || !declared.Contains(field))
+            if (hiddenFields.Contains(field) || !queryable.Contains(field))
             {
                 throw new AlvoAuthorizationException(UnavailableQueryFieldMessage);
             }
@@ -76,7 +76,7 @@ internal static class QueryFieldGuard
     {
         ArgumentNullException.ThrowIfNull(entity);
 
-        return entity.Fields.FirstOrDefault(candidate => string.Equals(candidate.Name, field, StringComparison.Ordinal))
+        return entity.Fields.FirstOrDefault(candidate => !candidate.IsVirtual && string.Equals(candidate.Name, field, StringComparison.Ordinal))
             ?? throw new AlvoAuthorizationException(UnavailableQueryFieldMessage);
     }
 
@@ -111,6 +111,13 @@ internal static class QueryFieldGuard
     /// </summary>
     private static HashSet<string> DeclaredFields(EntitySchema? entity) =>
         entity is null ? [] : [.. entity.Fields.Select(field => field.Name)];
+
+    /// <summary>
+    /// The declared fields a statement may name: every one but a <c>virtual</c> field, which has no column. Refused with
+    /// the undeclared field's message, so an embedded caller learns nothing a hidden field would not tell it.
+    /// </summary>
+    private static HashSet<string> QueryableFields(EntitySchema? entity) =>
+        entity is null ? [] : [.. entity.Fields.Where(field => !field.IsVirtual).Select(field => field.Name)];
 
     /// <summary>
     /// The fail-closed belt on the read path: a mask that hides the row key, or a field this read model does

@@ -49,11 +49,16 @@ internal static class WritePayloadGuard
     /// <param name="entity">The entity being written, or <see langword="null"/> when the applied schema does not declare it.</param>
     /// <param name="decision">The verdict <see cref="IPolicyEngine"/> returned for this caller.</param>
     /// <param name="isUpdate">Whether this is an update rather than a create.</param>
+    /// <param name="hidden">
+    /// The fields the caller may not know of, when it is wider than <paramref name="decision"/>'s — a replace judges a
+    /// virtual field against both of its branches at once.
+    /// </param>
     /// <exception cref="AlvoAuthorizationException">A key is undeclared, framework-managed or read-only.</exception>
     internal static void EnsureWritable(
-        IReadOnlyDictionary<string, object?> values, EntitySchema? entity, PolicyDecision decision, bool isUpdate)
+        IReadOnlyDictionary<string, object?> values, EntitySchema? entity, PolicyDecision decision, bool isUpdate,
+        IReadOnlySet<string>? hidden = null)
     {
-        if (PayloadRefusal(values, entity, decision, isUpdate) is { } reason)
+        if (PayloadRefusal(values, entity, decision, isUpdate, hidden) is { } reason)
         {
             throw new AlvoAuthorizationException(reason);
         }
@@ -80,8 +85,10 @@ internal static class WritePayloadGuard
     /// <param name="entity">The entity being written, or <see langword="null"/> when the applied schema does not declare it.</param>
     /// <param name="decision">The verdict <see cref="IPolicyEngine"/> returned for this caller.</param>
     /// <param name="isUpdate">Whether this is an update rather than a create.</param>
+    /// <param name="hidden">The fields the caller may not know of; <paramref name="decision"/>'s own when <see langword="null"/>.</param>
     internal static string? PayloadRefusal(
-        IReadOnlyDictionary<string, object?> values, EntitySchema? entity, PolicyDecision decision, bool isUpdate)
+        IReadOnlyDictionary<string, object?> values, EntitySchema? entity, PolicyDecision decision, bool isUpdate,
+        IReadOnlySet<string>? hidden = null)
     {
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(decision);
@@ -98,6 +105,8 @@ internal static class WritePayloadGuard
         return ManagedColumnRefusal(values, entity, isUpdate)
             ?? ComputedRefusal(values, entity)
             ?? RollupRefusal(values, entity)
+            ?? SequenceRefusal(values, entity)
+            ?? VirtualFieldWrites.Refusal(values, entity, hidden ?? decision.HiddenFields)
             ?? ReadOnlyRefusal(values, decision.ReadOnlyFields);
     }
 
@@ -178,6 +187,28 @@ internal static class WritePayloadGuard
             : $"Field '{rollup.Name}' is a rollup maintained by Alvo and cannot be written: it is recomputed from its "
             + "child rows inside every write to them, so a value sent here would be a stored total that is not the "
             + "children's. Remove it from the payload — its value follows from the rows it aggregates.";
+    }
+
+
+    /// <summary>
+    /// Refuses a payload that names a <c>sequence</c> field. The framework allocates the number inside the create's own
+    /// transaction, so a value a caller sent would be one the count never issued — a duplicate or a gap.
+    /// </summary>
+    /// <remarks>
+    /// Like <see cref="RollupRefusal"/>, this arm is the whole guarantee: a sequence is an ordinary column, and nothing
+    /// in the engine stops a write to it. The allocator is not a caller and never passes through this type.
+    /// </remarks>
+    private static string? SequenceRefusal(IReadOnlyDictionary<string, object?> values, EntitySchema? entity)
+    {
+        var sequence = entity?.Fields
+            .Where(field => field.Sequence is not null)
+            .FirstOrDefault(field => values.ContainsKey(field.Name));
+
+        return sequence is null
+            ? null
+            : $"Field '{sequence.Name}' is a sequence number assigned by the framework and cannot be written: Alvo "
+            + "allocates it inside the create's own transaction, so a value sent here would be a number the count "
+            + "never issued. Remove it from the payload.";
     }
 
     /// <summary>

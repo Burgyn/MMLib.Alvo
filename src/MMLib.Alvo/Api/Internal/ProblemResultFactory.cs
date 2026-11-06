@@ -521,9 +521,26 @@ internal static class ProblemResultFactory
     /// <summary>One violation per named field, or one for the whole document when none was named.</summary>
     /// <param name="exception">The port's refusal.</param>
     private static IReadOnlyList<AlvoViolation> ConflictViolations(AlvoConstraintViolationException exception) =>
-        exception.Kind == AlvoConstraintKind.Unique && exception.Fields.Count > 0
-            ? [.. exception.Fields.Select(UniqueViolation)]
-            : [new AlvoViolation(string.Empty, CodeFor(exception.Kind), exception.Message, FixFor(exception.Kind))];
+        exception switch
+        {
+            { Kind: AlvoConstraintKind.Unique, Fields.Count: > 0 } => [.. exception.Fields.Select(UniqueViolation)],
+            { Kind: AlvoConstraintKind.Exclusion, Fields.Count: > 0 } => [ExclusionViolation(exception.Fields[0])],
+            _ => [new AlvoViolation(string.Empty, CodeFor(exception.Kind), exception.Message, FixFor(exception.Kind))],
+        };
+
+    private const string ExclusionFix = "Choose a range that does not overlap one another record already holds, then retry.";
+
+    /// <summary>The entry for the range an exclusion refused, pointed at the range's start field (HX-12).</summary>
+    /// <remarks>
+    /// Like <see cref="UniqueViolation"/>, it names neither the other record nor its range: only that one exists, which is
+    /// the existence oracle a <c>unique</c> index already is (D18).
+    /// </remarks>
+    /// <param name="start">The range's start field, from the entity's schema.</param>
+    private static AlvoViolation ExclusionViolation(string start) => new(
+        "/" + start,
+        "exclusion",
+        "Another record already holds a range here that overlaps this one.",
+        ExclusionFix);
 
     /// <summary>The entry for one field a unique constraint refused.</summary>
     /// <remarks>
@@ -570,6 +587,7 @@ internal static class ProblemResultFactory
     {
         AlvoConstraintKind.Referenced => "referenced",
         AlvoConstraintKind.Check => "check",
+        AlvoConstraintKind.Exclusion => "exclusion",
         _ => "unique",
     };
 
@@ -579,6 +597,7 @@ internal static class ProblemResultFactory
     {
         AlvoConstraintKind.Referenced => "Delete the records that reference this one, or point them at something else, then retry.",
         AlvoConstraintKind.Check => "Change the values this write sends so every record it touches keeps its validations.",
+        AlvoConstraintKind.Exclusion => ExclusionFix,
         _ => "Send a value no other record holds on the field declared unique.",
     };
 

@@ -395,6 +395,7 @@ namespace MMLib.Alvo.Data
         Unique = 0,
         Referenced = 1,
         Check = 2,
+        Exclusion = 3,
     }
     public sealed class AlvoConstraintViolationException : System.Exception
     {
@@ -822,8 +823,10 @@ namespace MMLib.Alvo.Descriptor
     public sealed class EntityIndex : System.IEquatable<MMLib.Alvo.Descriptor.EntityIndex>
     {
         public EntityIndex() { }
+        public MMLib.Alvo.Descriptor.IndexExclusion? Exclude { get; init; }
         public required System.Collections.Generic.IReadOnlyList<string> Fields { get; init; }
         public bool? Unique { get; init; }
+        public string? Where { get; init; }
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.EntityTenancy>))]
     public enum EntityTenancy
@@ -861,10 +864,20 @@ namespace MMLib.Alvo.Descriptor
         public bool? Required { get; init; }
         public MMLib.Alvo.Descriptor.Rollup? Rollup { get; init; }
         public int? Scale { get; init; }
+        public MMLib.Alvo.Descriptor.FieldSequence? Sequence { get; init; }
         public required MMLib.Alvo.Descriptor.FieldType Type { get; init; }
         public bool? Unique { get; init; }
         public string? Validation { get; init; }
         public System.Collections.Generic.IReadOnlyList<string>? Values { get; init; }
+        public bool? Virtual { get; init; }
+    }
+    public sealed class FieldSequence : System.IEquatable<MMLib.Alvo.Descriptor.FieldSequence>
+    {
+        public FieldSequence() { }
+        public string? Format { get; init; }
+        public string? Per { get; init; }
+        public MMLib.Alvo.Descriptor.SequencePeriod? Period { get; init; }
+        public long? Start { get; init; }
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.FieldType>))]
     public enum FieldType
@@ -952,6 +965,12 @@ namespace MMLib.Alvo.Descriptor
     {
         MMLib.Alvo.Descriptor.DescriptorValidationResult Validate(string descriptorJson);
     }
+    public sealed class IndexExclusion : System.IEquatable<MMLib.Alvo.Descriptor.IndexExclusion>
+    {
+        public IndexExclusion() { }
+        public required string From { get; init; }
+        public required string To { get; init; }
+    }
     public sealed class MessageTemplate : System.IEquatable<MMLib.Alvo.Descriptor.MessageTemplate>
     {
         public MessageTemplate() { }
@@ -997,6 +1016,16 @@ namespace MMLib.Alvo.Descriptor
         Min = 3,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("max")]
         Max = 4,
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.SequencePeriod>))]
+    public enum SequencePeriod
+    {
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("year")]
+        Year = 0,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("month")]
+        Month = 1,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("day")]
+        Day = 2,
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.StorageMode>))]
     public enum StorageMode
@@ -1571,6 +1600,8 @@ namespace MMLib.Alvo.Management
         AfterDelete = 6,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("narrowing")]
         Narrowing = 7,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("enricher")]
+        Enricher = 8,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("schedule")]
         Schedule = 9,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("dataMigration")]
@@ -2286,6 +2317,12 @@ namespace MMLib.Alvo.Schema
         Physical = 0,
         Dynamic = 1,
     }
+    public sealed class ExclusionSchema : System.IEquatable<MMLib.Alvo.Schema.ExclusionSchema>
+    {
+        public ExclusionSchema(string From, string To) { }
+        public string From { get; init; }
+        public string To { get; init; }
+    }
     public static class FieldClrType
     {
         public static System.Type Of(MMLib.Alvo.Schema.FieldSchema field) { }
@@ -2302,6 +2339,7 @@ namespace MMLib.Alvo.Schema
         public string? Format { get; init; }
         public string? FormatPattern { get; init; }
         public bool Indexed { get; init; }
+        public bool IsVirtual { get; init; }
         public int? MaxLength { get; init; }
         public required string Name { get; init; }
         public bool Nullable { get; init; }
@@ -2311,6 +2349,7 @@ namespace MMLib.Alvo.Schema
         public bool Required { get; init; }
         public MMLib.Alvo.Schema.RollupSchema? Rollup { get; init; }
         public int? Scale { get; init; }
+        public MMLib.Alvo.Schema.SequenceSchema? Sequence { get; init; }
         public required MMLib.Alvo.Schema.FieldType Type { get; init; }
         public bool Unique { get; init; }
     }
@@ -2339,8 +2378,10 @@ namespace MMLib.Alvo.Schema
     public sealed class IndexSchema : System.IEquatable<MMLib.Alvo.Schema.IndexSchema>
     {
         public IndexSchema(System.Collections.Generic.IReadOnlyList<string> Fields, bool Unique) { }
+        public MMLib.Alvo.Schema.ExclusionSchema? Exclude { get; init; }
         public System.Collections.Generic.IReadOnlyList<string> Fields { get; init; }
         public bool Unique { get; init; }
+        public string? Where { get; init; }
     }
     public enum OnDelete
     {
@@ -2375,6 +2416,20 @@ namespace MMLib.Alvo.Schema
     {
         public SchemaModel(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.EntitySchema> Entities) { }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.EntitySchema> Entities { get; init; }
+    }
+    public enum SequenceResetPeriod
+    {
+        Year = 0,
+        Month = 1,
+        Day = 2,
+    }
+    public sealed class SequenceSchema : System.IEquatable<MMLib.Alvo.Schema.SequenceSchema>
+    {
+        public SequenceSchema() { }
+        public string? Format { get; init; }
+        public string? Per { get; init; }
+        public MMLib.Alvo.Schema.SequenceResetPeriod? Period { get; init; }
+        public long Start { get; init; }
     }
     public enum TenancyMode
     {

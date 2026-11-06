@@ -124,6 +124,15 @@ public sealed class ReadExtensionRunnerTests
     }
 
     [Fact]
+    public async Task A_narrowing_over_a_virtual_field_is_invalid_filter()
+    {
+        await using var world = ReadsWorld.Start(alvo => alvo.Entity("notes", n => n.Narrow(
+            "by-display", (QueryNarrowing _) => new AlvoComparison("display", AlvoFilterOperator.Eq, "x"))));
+
+        (await FailureAsync(world)).Reason.ShouldBe(HookFailedException.InvalidFilter);
+    }
+
+    [Fact]
     public async Task A_narrowing_over_a_framework_column_is_allowed()
     {
         var id = new AlvoComparison("id", AlvoFilterOperator.Eq, Guid.Empty);

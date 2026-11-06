@@ -23,6 +23,31 @@ public class TSqlSqlDialectContractTests : AlvoSqlDialectContractTests
     public void The_epoch_is_microseconds_since_1970_as_datediff_big() =>
         CreateFieldRenderer().RenderEpochMicroseconds("[created_at]")
             .ShouldBe("DATEDIFF_BIG(microsecond, '1970-01-01T00:00:00', [created_at])");
+
+    /// <summary>Acceptance (5), the sequence half: SQL Server keeps a gapless counter with one <c>MERGE</c> under <c>HOLDLOCK</c>.</summary>
+    [Fact]
+    public void The_TSql_double_allocates_a_sequence_number_with_one_MERGE_under_HOLDLOCK() =>
+        CreateDialect().SequenceAllocationStatement("alvo_sequences").ShouldBe(
+            """
+            MERGE alvo_sequences WITH (HOLDLOCK) AS s
+            USING (SELECT @entity AS entity, @field AS field, @tenant AS tenant_key, @scope AS scope_key, @period AS period_key) AS k
+            ON s.entity = k.entity AND s.field = k.field AND s.tenant_key = k.tenant_key AND s.scope_key = k.scope_key AND s.period_key = k.period_key
+            WHEN MATCHED THEN UPDATE SET last_value = s.last_value + 1
+            WHEN NOT MATCHED THEN INSERT (entity, field, tenant_key, scope_key, period_key, last_value)
+                VALUES (k.entity, k.field, k.tenant_key, k.scope_key, k.period_key, @start)
+            OUTPUT inserted.last_value;
+            """,
+            StringCompareShould.IgnoreLineEndings);
+
+    /// <summary>
+    /// Acceptance (5), the exclusion half: SQL Server has no exclusion constraint, so the double declines one and an apply
+    /// declaring <c>exclude</c> is refused (D16).
+    /// </summary>
+    [Fact]
+    public void The_TSql_double_declines_an_exclusion() =>
+        CreateDialect().ExclusionConstraint(new ExclusionConstraintDefinition(
+            "bookings", "xc_bookings_0a1b2c3d", ["room"], "starts_at", "ends_at", MMLib.Alvo.Schema.FieldType.DateTime, Filter: null))
+            .ShouldBeNull();
 }
 
 /// <summary>
@@ -53,6 +78,11 @@ public class TestSqlDialectContractTests : AlvoSqlDialectContractTests
 
         dialect.GeneratedColumnDefinition("line_total", "numeric(18,2)", "(1 + 1)").ShouldBeNull();
     }
+
+    /// <summary>An implementor that adds nothing cannot keep a gapless counter, so an apply declaring a sequence is refused.</summary>
+    [Fact]
+    public void An_implementor_that_adds_nothing_cannot_allocate_a_sequence_number() =>
+        CreateDialect().SequenceAllocationStatement("alvo_sequences").ShouldBeNull();
 }
 
 /// <summary>

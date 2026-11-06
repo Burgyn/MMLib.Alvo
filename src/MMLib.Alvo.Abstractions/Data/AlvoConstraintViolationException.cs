@@ -71,6 +71,9 @@ public sealed class AlvoConstraintViolationException : Exception
     private const string CheckMessage =
         "A value this request supplies breaks a validation the descriptor declares. Send values every validation accepts.";
 
+    /// <summary>The wording of an overlapping range, naming neither the other record, its range, nor the fields.</summary>
+    private const string ExclusionMessage = "The write would overlap a range another record already holds.";
+
     /// <summary>The wording of a restrict refusal, naming neither the referencing entity nor how many rows.</summary>
     private const string ReferencedMessage =
         "Other records still reference this record, so it cannot be removed. Delete those records, or point "
@@ -129,7 +132,7 @@ public sealed class AlvoConstraintViolationException : Exception
     /// <summary>
     /// The entity's own field names the conflict concerns — one for an ordinary <c>unique</c> field, several
     /// for a composite unique index, the validated field for a <see cref="AlvoConstraintKind.Check"/> the caller may
-    /// know of, and none when the engine reports no columns (SQLite says only <c>FOREIGN KEY constraint failed</c>), when
+    /// know of, the range's start field for an <see cref="AlvoConstraintKind.Exclusion"/>, and none when the engine reports no columns (SQLite says only <c>FOREIGN KEY constraint failed</c>), when
     /// the kind is <see cref="AlvoConstraintKind.Referenced"/>, or when the validated field is one the descriptor hides.
     /// </summary>
     public IReadOnlyList<string> Fields { get; }
@@ -138,6 +141,7 @@ public sealed class AlvoConstraintViolationException : Exception
     {
         AlvoConstraintKind.Referenced => ReferencedMessage,
         AlvoConstraintKind.Check => CheckMessage,
+        AlvoConstraintKind.Exclusion => ExclusionMessage,
         _ => UniqueMessage,
     };
 }

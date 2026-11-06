@@ -366,6 +366,9 @@ namespace MMLib.Alvo.Extensions
         public MMLib.Alvo.Extensions.AlvoEntityBuilder BeforeWrite(string id, System.Delegate hook, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null) { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder BeforeWrite<THook>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
             where THook :  class, MMLib.Alvo.Hooks.IBeforeWriteHook { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder Enrich(string id, System.Action<MMLib.Alvo.Reads.Enrich<MMLib.Alvo.Data.AlvoRecord>> enrich) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder Enrich<TEnricher>(string id)
+            where TEnricher :  class, MMLib.Alvo.Reads.IRecordEnricher<MMLib.Alvo.Data.AlvoRecord> { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder Narrow(string id, System.Func<MMLib.Alvo.Reads.QueryNarrowing, MMLib.Alvo.Data.AlvoFilter?> narrow) { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder Narrow<TNarrowing>(string id)
             where TNarrowing :  class, MMLib.Alvo.Reads.IQueryNarrowing { }
@@ -412,6 +415,9 @@ namespace MMLib.Alvo.Extensions
             where THook :  class, MMLib.Alvo.Hooks.IBeforeWriteHook<T> { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> BeforeWrite<THook>(string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHookOptions>? configure = null)
             where THook :  class, MMLib.Alvo.Hooks.IBeforeWriteHook<T> { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> Enrich(string id, System.Action<MMLib.Alvo.Reads.Enrich<T>> enrich) { }
+        public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> Enrich<TEnricher>(string id)
+            where TEnricher :  class, MMLib.Alvo.Reads.IRecordEnricher<T> { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> Narrow(string id, System.Func<MMLib.Alvo.Reads.QueryNarrowing, System.Linq.Expressions.Expression<System.Func<T, bool>>?> narrow) { }
         public MMLib.Alvo.Extensions.AlvoEntityBuilder<T> Narrow<TNarrowing>(string id)
             where TNarrowing :  class, MMLib.Alvo.Reads.IQueryNarrowing<T> { }
@@ -687,6 +693,18 @@ namespace MMLib.Alvo.Migrations
 }
 namespace MMLib.Alvo.Reads
 {
+    public sealed class Enrich<T>
+        where T :  class
+    {
+        public MMLib.Alvo.AlvoContext Caller { get; }
+        public string Entity { get; }
+        public MMLib.Alvo.Rules.DataOperation Operation { get; }
+        public T Row { get; }
+        public void Hide(string field) { }
+        public void Hide<TValue>(System.Linq.Expressions.Expression<System.Func<T, TValue>> field) { }
+        public void SetVirtual(string field, object? value) { }
+        public void SetVirtual<TValue>(System.Linq.Expressions.Expression<System.Func<T, TValue>> field, TValue value) { }
+    }
     public interface IQueryNarrowing
     {
         MMLib.Alvo.Data.AlvoFilter? Narrow(MMLib.Alvo.Reads.QueryNarrowing query);
@@ -695,6 +713,11 @@ namespace MMLib.Alvo.Reads
         where T :  class
     {
         System.Linq.Expressions.Expression<System.Func<T, bool>>? Narrow(MMLib.Alvo.Reads.QueryNarrowing query);
+    }
+    public interface IRecordEnricher<T>
+        where T :  class
+    {
+        void Enrich(MMLib.Alvo.Reads.Enrich<T> row);
     }
     public sealed class QueryNarrowing
     {

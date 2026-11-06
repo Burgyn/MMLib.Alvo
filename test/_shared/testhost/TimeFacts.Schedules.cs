@@ -76,6 +76,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_due_occurrence_runs_once_as_a_schedule_delivery()
     {
+        EnsureEngineAvailable();
         var log = new ScheduleLog();
         await using var alvo = await StartScheduledAsync(alvo => alvo.AddSchedule<RecordingScheduledJob>(Nightly, "0 2 * * *").Services.AddSingleton(log));
         await alvo.DrainEventsAsync(Ct);
@@ -93,6 +94,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_missed_occurrence_fires_once_and_resumes_from_now()
     {
+        EnsureEngineAvailable();
         var log = new ScheduleLog();
         await using var alvo = await StartScheduledAsync(alvo => alvo.AddSchedule<RecordingScheduledJob>(Nightly, "0 2 * * *").Services.AddSingleton(log));
         await alvo.DrainEventsAsync(Ct);
@@ -108,6 +110,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_failing_run_does_not_block_the_next_occurrence()
     {
+        EnsureEngineAvailable();
         var log = new ScheduleLog();
         await using var alvo = await StartScheduledAsync(alvo => alvo
             .AddSchedule<FailingFirstScheduledJob>(Nightly, "0 2 * * *", configure: options => options.Retry = AlvoRetryPolicy.None)
@@ -126,6 +129,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task An_each_tenant_schedule_runs_once_per_tenant_and_reads_only_its_own_rows()
     {
+        EnsureEngineAvailable();
         var seen = new ConcurrentBag<string>();
         await using var alvo = await StartScheduledAsync(alvo => alvo
             .AddSchedule<NoteCountingJob>("count-notes", "0 2 * * *", configure: o => o.Scope = AlvoScheduleScope.EachTenant)
@@ -143,9 +147,14 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task An_each_tenant_schedule_without_a_tenant_catalog_refuses_the_start()
     {
-        var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(() => StartScheduledAsync(alvo => alvo
-            .AddSchedule<RecordingScheduledJob>(Nightly, "0 2 * * *", configure: o => o.Scope = AlvoScheduleScope.EachTenant)
-            .Services.AddSingleton(new ScheduleLog())));
+        EnsureEngineAvailable();
+        var database = await DatabaseAsync();
+
+        var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(() => StartScheduledAsync(
+            alvo => alvo
+                .AddSchedule<RecordingScheduledJob>(Nightly, "0 2 * * *", configure: o => o.Scope = AlvoScheduleScope.EachTenant)
+                .Services.AddSingleton(new ScheduleLog()),
+            database));
 
         refusal.Message.ShouldContain($"extensions/{Nightly}/scope");
         refusal.FixSuggestion.ShouldContain("IAlvoTenantCatalog");
@@ -154,6 +163,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_retired_schedule_is_removed_at_the_next_start()
     {
+        EnsureEngineAvailable();
         var database = await DatabaseAsync();
         await using (var first = await StartScheduledAsync(
             alvo => alvo.AddSchedule<RecordingScheduledJob>(Nightly, "0 2 * * *").Services.AddSingleton(new ScheduleLog()), database))
@@ -173,6 +183,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_process_without_the_schedule_neither_removes_nor_runs_it()
     {
+        EnsureEngineAvailable();
         var log = new ScheduleLog();
         var database = await DatabaseAsync();
         await using var worker = await StartScheduledAsync(
@@ -192,6 +203,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task Run_now_creates_a_delivery_that_runs_without_moving_the_next_occurrence()
     {
+        EnsureEngineAvailable();
         var log = new ScheduleLog();
         await using var alvo = await StartScheduledAsync(alvo => alvo.AddSchedule<RecordingScheduledJob>(Nightly, "0 2 * * *").Services.AddSingleton(log));
         await alvo.DrainEventsAsync(Ct);
@@ -208,6 +220,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task Run_now_of_an_unknown_schedule_is_404()
     {
+        EnsureEngineAvailable();
         await using var alvo = await StartScheduledAsync(alvo => alvo.AddSchedule<RecordingScheduledJob>(Nightly, "0 2 * * *").Services.AddSingleton(new ScheduleLog()));
 
         await Should.ThrowAsync<ManagementExtensionNotFoundException>(() => AsOperator(alvo, "ops").RunScheduleAsync(Desk, "weekly-report", Ct));
@@ -216,6 +229,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task A_schedule_cannot_be_switched_off_and_the_refusal_says_how_to_run_it()
     {
+        EnsureEngineAvailable();
         await using var alvo = await StartScheduledAsync(alvo => alvo.AddSchedule<RecordingScheduledJob>(Nightly, "0 2 * * *").Services.AddSingleton(new ScheduleLog()));
 
         var refusal = await Should.ThrowAsync<ManagementConflictException>(() => AsOperator(alvo, "boss").SetEnabledAsync(Desk, Nightly, false, "maintenance", Ct));
@@ -227,6 +241,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task Run_now_needs_developer()
     {
+        EnsureEngineAvailable();
         await using var alvo = await StartScheduledAsync(alvo => alvo.AddSchedule<RecordingScheduledJob>(Nightly, "0 2 * * *").Services.AddSingleton(new ScheduleLog()));
 
         await Should.ThrowAsync<ManagementForbiddenException>(() => AsOperator(alvo, "watch").RunScheduleAsync(Desk, Nightly, Ct));
@@ -235,6 +250,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task The_catalog_shows_next_and_last_run_last_outcome_and_timer_counts()
     {
+        EnsureEngineAvailable();
         var log = new ScheduleLog();
         await using var alvo = await StartScheduledAsync(alvo => alvo.AddSchedule<RecordingScheduledJob>(Nightly, "0 2 * * *").Services.AddSingleton(log));
         await Scheduler(alvo).ScheduleAsync("remind-later", _oneAm.AddDays(1), Reminder, Data("b1"), Tenant, Ct);
@@ -253,6 +269,7 @@ public abstract partial class TimeFacts
     [Fact]
     public async Task Run_now_on_each_tenant_answers_the_delivery_of_the_first_tenants_event()
     {
+        EnsureEngineAvailable();
         var seen = new ConcurrentBag<string>();
         await using var alvo = await StartScheduledAsync(alvo => alvo
             .AddSchedule<NoteCountingJob>("count-notes", "0 2 * * *", configure: o => o.Scope = AlvoScheduleScope.EachTenant)
