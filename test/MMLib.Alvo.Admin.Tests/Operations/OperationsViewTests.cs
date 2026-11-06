@@ -131,6 +131,62 @@ public sealed class OperationsViewTests
         OperationsView.TimersLine(null).ShouldBe("this host keeps no timers");
     }
 
+    [Fact]
+    public void A_sleeping_delivery_reads_sleeping_until_its_wake_time()
+    {
+        var now = new DateTimeOffset(2026, 11, 5, 18, 0, 0, TimeSpan.Zero);
+        var sleeping = Delivery("pending") with
+        {
+            NotBefore = new DateTimeOffset(2026, 11, 6, 9, 0, 0, TimeSpan.Zero),
+            History = [Attempt(1, "skipped")],
+        };
+
+        OperationsView.StatusLabel(sleeping, now).ShouldBe("sleeping until 6 Nov 09:00");
+        OperationsView.BadgeClass(sleeping, now).ShouldBe("a-badge a-badge--accent");
+        OperationsView.IsSleeping(sleeping, now).ShouldBeTrue();
+        OperationsView.StatusLabel(sleeping, sleeping.NotBefore).ShouldBe("pending");
+        OperationsView.StatusLabel(sleeping with { History = [Attempt(1, "failed")] }, now).ShouldBe("pending");
+        OperationsView.StatusLabel(sleeping with { History = [] }, now).ShouldBe("pending");
+        OperationsView.StatusLabel(sleeping with { Status = "retrying" }, now).ShouldBe("retrying");
+    }
+
+    [Fact]
+    public void A_superseded_delivery_has_its_own_chip_and_no_redeliver()
+    {
+        var superseded = Delivery("superseded");
+
+        OperationsView.StatusLabel(superseded, DateTimeOffset.UnixEpoch).ShouldBe("superseded");
+        OperationsView.BadgeClass(superseded, DateTimeOffset.UnixEpoch).ShouldBe("a-badge");
+        OperationsView.CanRedeliver(superseded).ShouldBeFalse();
+        OperationsView.StatusFilters.ShouldContain("superseded");
+    }
+
+    [Fact]
+    public void A_limited_handler_row_shows_its_concurrency()
+    {
+        var handler = new ManagementExtension { Id = "confirm-booking", Kind = AlvoExtensionKind.EventHandler, Stage = AlvoExtensionStage.PostCommit };
+
+        OperationsView.ConcurrencyLine(handler with { Concurrency = "tenant:2" }).ShouldBe("per tenant · 2");
+        OperationsView.ConcurrencyLine(handler with { Concurrency = "record:1" }).ShouldBe("per record · 1");
+        OperationsView.ConcurrencyLine(handler).ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_delivery_s_steps_read_as_name_and_completion_time()
+    {
+        var delivery = Delivery("retrying") with
+        {
+            Steps =
+            [
+                new ManagementDeliveryStep { Name = "charge-deposit", CompletedAt = new DateTimeOffset(2026, 11, 6, 9, 0, 12, TimeSpan.Zero) },
+                new ManagementDeliveryStep { Name = "send-confirmation", CompletedAt = new DateTimeOffset(2026, 11, 6, 9, 0, 13, TimeSpan.Zero) },
+            ],
+        };
+
+        OperationsView.Steps(delivery).ShouldBe(["charge-deposit · 6 Nov 09:00:12", "send-confirmation · 6 Nov 09:00:13"]);
+        OperationsView.Steps(Delivery("pending")).ShouldBeEmpty();
+    }
+
     private static ManagementExtension Schedule() => new()
     {
         Id = "nightly-roll",
@@ -149,5 +205,13 @@ public sealed class OperationsViewTests
         Status = status,
         Attempts = 1,
         NotBefore = DateTimeOffset.UnixEpoch,
+    };
+
+    private static ManagementDeliveryAttempt Attempt(int number, string outcome) => new()
+    {
+        Attempt = number,
+        StartedAt = DateTimeOffset.UnixEpoch,
+        Duration = TimeSpan.FromMilliseconds(5),
+        Outcome = outcome,
     };
 }

@@ -13,7 +13,7 @@ internal static class OperationsView
     private static readonly JsonSerializerOptions _fixtureJson = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     /// <summary>The statuses the delivery list filters by, in the order an operator looks for trouble.</summary>
-    public static IReadOnlyList<string> StatusFilters { get; } = ["dead", "retrying", "pending", "running", "succeeded", "cancelled"];
+    public static IReadOnlyList<string> StatusFilters { get; } = ["dead", "retrying", "pending", "running", "succeeded", "cancelled", "superseded"];
 
     /// <summary>The badge a delivery status is drawn with.</summary>
     public static string BadgeClass(string status) => status switch
@@ -24,6 +24,33 @@ internal static class OperationsView
         "pending" or "running" => "a-badge a-badge--accent",
         _ => "a-badge",
     };
+
+    /// <summary>The badge a delivery is drawn with: a sleeping one reads as waiting, like a pending one.</summary>
+    public static string BadgeClass(ManagementDelivery delivery, DateTimeOffset now) =>
+        IsSleeping(delivery, now) ? "a-badge a-badge--accent" : BadgeClass(delivery.Status);
+
+    /// <summary>
+    /// What a delivery's chip reads: <c>sleeping until 6 Nov 09:00</c> (UTC) for one whose handler is asleep, else its status.
+    /// </summary>
+    public static string StatusLabel(ManagementDelivery delivery, DateTimeOffset now) => IsSleeping(delivery, now)
+        ? $"sleeping until {delivery.NotBefore.UtcDateTime.ToString("d MMM HH:mm", CultureInfo.InvariantCulture)}"
+        : delivery.Status;
+
+    /// <summary>
+    /// Whether a delivery's handler is asleep: it is pending, its wake time is ahead, and its last attempt was skipped — the
+    /// mark a sleep leaves. Only a delivery read with its history can tell.
+    /// </summary>
+    public static bool IsSleeping(ManagementDelivery delivery, DateTimeOffset now) =>
+        delivery is { Status: "pending", History: [.., { Outcome: "skipped" }] } && delivery.NotBefore > now;
+
+    /// <summary>The steps a delivery's handler completed, each as its name and when it finished (UTC).</summary>
+    public static IReadOnlyList<string> Steps(ManagementDelivery delivery) =>
+        [.. delivery.Steps.Select(step => $"{step.Name}{Separator}{step.CompletedAt.UtcDateTime.ToString("d MMM HH:mm:ss", CultureInfo.InvariantCulture)}")];
+
+    /// <summary>A handler's cap on its running deliveries, such as <c>per tenant · 2</c>, or null for none.</summary>
+    public static string? ConcurrencyLine(ManagementExtension handler) => handler.Concurrency?.Split(':') is [var key, var limit]
+        ? $"per {key}{Separator}{limit}"
+        : null;
 
     /// <summary>A duration in the largest unit it fills, or a dash for none.</summary>
     public static string Duration(TimeSpan? value) => value switch

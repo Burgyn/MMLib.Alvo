@@ -49,6 +49,10 @@
                                 {
                                     <span class="a-badge a-badge--warn" data-testid="@($"ops-handler-paused-{handler.Id}")">paused</span>
                                 }
+                                @if (OperationsView.ConcurrencyLine(handler) is { } concurrency)
+                                {
+                                    <span class="a-badge" title="At most this many of its deliveries run at once" data-testid="@($"ops-handler-concurrency-{handler.Id}")">@concurrency</span>
+                                }
                             </div>
                             @if (handler.Description is { } description)
                             {
@@ -130,7 +134,7 @@
                         <ListRow class="@($"a-listrow--stacked{(delivery.Id == _selected?.Id ? " a-listrow--accent" : string.Empty)}")"
                                  data-testid="@($"ops-row-{delivery.Id}")" OnClick="() => OpenAsync(delivery.Id)">
                             <div class="a-row a-row--wrap">
-                                <span class="@OperationsView.BadgeClass(delivery.Status)" data-testid="ops-delivery-status">@delivery.Status</span>
+                                <span class="@OperationsView.BadgeClass(delivery, Now)" data-testid="ops-delivery-status">@OperationsView.StatusLabel(delivery, Now)</span>
                                 <span class="a-mono">@delivery.Subscriber</span>
                                 <span class="a-section__sub a-mono">@delivery.PartitionKey</span>
                             </div>
@@ -154,15 +158,35 @@
                 {
                     <div class="a-card a-card--roomy">
                         <div class="a-row">
-                            <span class="@OperationsView.BadgeClass(_selected.Status)">@_selected.Status</span>
+                            <span class="@OperationsView.BadgeClass(_selected, Now)" data-testid="ops-selected-status">
+                                @if (OperationsView.IsSleeping(_selected, Now))
+                                {
+                                    <Icon Path="@Icons.History" Size="12" />
+                                }
+                                @OperationsView.StatusLabel(_selected, Now)
+                            </span>
                             <span class="a-mono">@_selected.Subscriber</span>
                         </div>
-                        <ol class="a-stack" data-testid="ops-delivery-history">
+                        <ol class="a-stack" aria-label="Attempts" data-testid="ops-delivery-history">
                             @foreach (var attempt in _selected.History)
                             {
                                 <li class="a-section__sub">@OperationsView.AttemptLine(attempt)</li>
                             }
                         </ol>
+                        <span class="a-section__title">Steps</span>
+                        @if (OperationsView.Steps(_selected) is { Count: > 0 } steps)
+                        {
+                            <ol class="a-stack" aria-label="Steps" data-testid="ops-delivery-steps">
+                                @foreach (var step in steps)
+                                {
+                                    <li class="a-section__sub a-mono">@step</li>
+                                }
+                            </ol>
+                        }
+                        else
+                        {
+                            <span class="a-section__sub" data-testid="ops-delivery-no-steps">No steps recorded</span>
+                        }
                         <div class="a-row a-actions">
                             @if (OperationsView.CanRedeliver(_selected))
                             {
