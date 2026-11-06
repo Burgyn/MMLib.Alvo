@@ -27,8 +27,9 @@ What a rule may contain:
 - refused: `hourly_rate * 2.0` `changed(active)` `old.active == true` `trim(full_name) == 'x'` `'user_id == @user.id'` `'true'`
 <!-- /gen:cel-rule -->
 
-A rule compares and combines with `&&`, `||` and `!`. It has no arithmetic, no `old.`/`new.` and no `changed()`: those
-belong to hooks and computed fields, each in its own skill.
+A rule compares and combines with `&&`, `||` and `!`. It has no numeric arithmetic (timestamp ± duration is the
+exception: `now() - duration('24h')`), no `old.`/`new.` and no `changed()`: those belong to hooks and computed fields,
+each in its own skill.
 
 A rule calls no function — not `trim`, not a host function: a rule filters in SQL. Two forms are not calls: `now()`,
 the instant of the request, and `duration('…')`, a constant such as `duration('90m')` (units `h m s ms us ns`).

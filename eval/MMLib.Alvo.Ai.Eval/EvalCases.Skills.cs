@@ -33,6 +33,7 @@ internal static partial class EvalCases
     private const string ReadsTheAssignee = "assigned_user_id==@user.id";
     private const string BecomesReturned = "new.status=='returned'";
     private static readonly string[] _priceSlots = ["beforeCreate", "beforeUpdate"];
+    private static readonly decimal[] _admittedPrices = [0m, 12.50m, 999999.99m];
     private static readonly string[] _keptGrants = ["'admin'in@user.roles", "'manager'in@user.roles", ReadsTheAssignee];
     private static readonly string[] _uniquePair = ["order_id", "part_id"];
     private static readonly string[] _readRules = [$"{ServiceOrdersRules}/get", $"{ServiceOrdersRules}/list"];
@@ -74,7 +75,8 @@ internal static partial class EvalCases
 
     /// <summary>
     /// Whether the proposed <c>parts.unit_price</c> validation, as the core makes it — mapped to its canonical
-    /// <c>CHECK</c> expression, compiled as a rule over parts — refuses a price of -1 and admits a price of 0.
+    /// <c>CHECK</c> expression, compiled as a rule over parts — refuses a price of -1 and admits 0, an ordinary price
+    /// and the largest one <c>precision 8, scale 2</c> holds, so a validation that also refuses real prices fails.
     /// </summary>
     /// <remarks>Read only for a proposal the real dry run accepted, so the descriptor parses and maps.</remarks>
     private static bool KeepsThePriceNonNegative(TurnRecord turn)
@@ -83,7 +85,7 @@ internal static partial class EvalCases
         var parts = schema.Entities.Single(entity => entity.Name == "parts");
         var check = parts.Fields.Single(field => field.Name == "unit_price").CheckExpression;
         var compiled = check is null ? null : new CelCompiler().Compile(check, CelProfile.Rule, parts).Expression;
-        return compiled is not null && !Admits(compiled, -1m) && Admits(compiled, 0m);
+        return compiled is not null && !Admits(compiled, -1m) && _admittedPrices.All(price => Admits(compiled, price));
     }
 
     private static bool Admits(CompiledExpression check, decimal price) =>

@@ -164,7 +164,9 @@ public sealed class SkillCasesTests
     [InlineData("value >= -1")]
     [InlineData("value < 0")]
     [InlineData("value != 0")]
-    public void Negative_price_fails_a_validation_that_admits_a_negative_or_refuses_zero(string validation) =>
+    [InlineData("value == 0")]
+    [InlineData("value >= 0 && value < 1")]
+    public void Negative_price_fails_a_validation_that_admits_a_negative_or_refuses_zero_or_a_positive_price(string validation) =>
         Grade("reject_negative_price", Validating(validation, EntitiesAndFields)).Passed.ShouldBeFalse();
 
     [Fact]
