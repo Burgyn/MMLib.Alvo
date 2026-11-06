@@ -38,6 +38,7 @@ internal static class DescriptorToSchemaMapper
         EnsureNoWildcardSubscription(d);
         EnsureNoValidationOnADynamicEntity(d);
         EnsureNoSequenceOnADynamicEntity(d);
+        EnsureNoIndexIntegrityOnADynamicEntity(d);
 
         // Built once, from the WHOLE descriptor: resolving a rollup's foreign key needs the CHILD entity's
         // fields, which the per-entity pass below cannot see. See RollupResolver's own remarks for why the
@@ -132,6 +133,20 @@ internal static class DescriptorToSchemaMapper
         if (declared.Entity is not null)
         {
             throw new InvalidDataException(SequenceFieldCheck.DynamicMessage(declared.Entity, declared.Field));
+        }
+    }
+
+    /// <summary>
+    /// Refuses, at apply, an index <c>where</c> or <c>exclude</c> on a <c>storage: dynamic</c> entity — before the physical
+    /// filter drops the entity and the declaration with it; the validator reports the same refusal at its pointer.
+    /// </summary>
+    /// <param name="d">The parsed descriptor.</param>
+    /// <exception cref="InvalidDataException">A dynamic entity's index declares one.</exception>
+    private static void EnsureNoIndexIntegrityOnADynamicEntity(AlvoDescriptor d)
+    {
+        if (IndexFilterCheck.DynamicErrors(d) is [var first, ..])
+        {
+            throw new InvalidDataException(first.Message);
         }
     }
 
@@ -246,7 +261,7 @@ internal static class DescriptorToSchemaMapper
         AddManagedColumns(fields, e, tenancy, audit, softDelete: false);
 
         var indexes = (e.Indexes ?? [])
-            .Select(i => new IndexSchema(i.Fields, i.Unique == true)).ToList();
+            .Select(i => new IndexSchema(i.Fields, i.Unique == true) { Where = i.Where }).ToList();
 
         return new EntitySchema
         {

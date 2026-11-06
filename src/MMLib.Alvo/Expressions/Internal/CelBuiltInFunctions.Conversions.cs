@@ -21,8 +21,11 @@ internal static partial class CelBuiltInFunctions
         "The value as a whole number: a decimal cut toward zero (2.9 is 2), or a text of digits with an optional sign; anything else fails the write.",
         arguments => type == CelValueType.Decimal ? IntOf((decimal)arguments[0]!) : IntOf((string)arguments[0]!), Parameter("value", type));
 
+    /// <summary>The name of CEL's <c>timestamp(string)</c>, which a Rule folds into a constant (D11 of HX-12).</summary>
+    internal const string TimestampName = "timestamp";
+
     private static CelFunction Timestamp => InProcess(
-        "timestamp", CelValueType.Timestamp,
+        TimestampName, CelValueType.Timestamp,
         "The text read as an RFC 3339 instant, such as 2026-10-05T12:00:00Z or 2026-10-05T14:00:00+02:00; anything else fails the write.",
         arguments => TimestampOf((string)arguments[0]!), Parameter("text", CelValueType.String));
 
@@ -85,14 +88,14 @@ internal static partial class CelBuiltInFunctions
         var match = Rfc3339().Match(text);
         if (!match.Success)
         {
-            throw new CelFunctionException("timestamp", TimestampFailure);
+            throw new CelFunctionException(TimestampName, TimestampFailure);
         }
 
         var fraction = match.Groups["fraction"].Value;
         var kept = $"{match.Groups["main"].Value}{(fraction.Length > 0 ? "." + fraction[..Math.Min(7, fraction.Length)] : string.Empty)}{match.Groups["zone"].Value}";
         return DateTimeOffset.TryParseExact(kept, Rfc3339Formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var instant)
             ? instant
-            : throw new CelFunctionException("timestamp", TimestampFailure);
+            : throw new CelFunctionException(TimestampName, TimestampFailure);
     }
 
     /// <summary>RFC 3339 §5.6, ASCII digits only (<c>\d</c> would admit every Unicode digit).</summary>

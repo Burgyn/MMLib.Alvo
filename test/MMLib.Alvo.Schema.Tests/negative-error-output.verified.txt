@@ -44,6 +44,15 @@
     ]
   },
   {
+    file: index-where-not-cel-string.json,
+    failures: [
+      {
+        Pointer: #/entities/members/indexes/0/where,
+        Message: Validation type - should have been 'string' but was 'Number'.
+      }
+    ]
+  },
+  {
     file: reserved-users-entity.json,
     failures: [
       {

@@ -32,7 +32,8 @@ internal static class CheckApplyRefusal
     /// <param name="failure">What the apply threw.</param>
     /// <param name="dialect">The driver's dialect, which decodes the engine's failure.</param>
     /// <param name="desired">The schema the apply was bringing the database to.</param>
-    internal static Exception? Translate(Exception failure, IAlvoSqlDialect dialect, SchemaModel desired)
+    /// <param name="sql">The plan's statements, which name the partial indexes the apply creates.</param>
+    internal static Exception? Translate(Exception failure, IAlvoSqlDialect dialect, SchemaModel desired, IReadOnlyList<string>? sql = null)
     {
         ArgumentNullException.ThrowIfNull(failure);
         ArgumentNullException.ThrowIfNull(dialect);
@@ -43,12 +44,35 @@ internal static class CheckApplyRefusal
             return null;
         }
 
+        if (dialect.IsIndexPredicateRefusal(provider))
+        {
+            return PredicateRefused(desired, sql ?? []);
+        }
+
         return dialect.IsLockTimeout(provider)
             ? new AlvoApplyLockTimeoutException(provider)
             : dialect.DecodeConstraintViolation(provider) is { Kind: AlvoConstraintKind.Check } violation
                 ? Refused(desired, violation.ConstraintName)
                 : null;
     }
+
+    // The engine does not name the index whose predicate it refused, so the pointer is the first partial index the plan
+    // creates — in a plan that creates several, the one the engine reached first — and the document's root when none is found.
+    private static DescriptorValidationException PredicateRefused(SchemaModel desired, IReadOnlyList<string> sql)
+    {
+        var created = desired.Entities
+            .SelectMany(entity => entity.Indexes.Where(index => index.Where is not null).Select(index => (Entity: entity, Index: index)))
+            .FirstOrDefault(pair => sql.Any(statement => Creates(statement, IndexNames.Partial(pair.Entity, pair.Index))));
+        return new(new DescriptorValidationResult([new(
+            created.Entity is null ? "/" : IndexFilterSql.Pointer(created.Entity, created.Index),
+            "The database refused this index's 'where' as a partial index predicate. Nothing was applied.",
+            "Compare this entity's fields with constants directly — no duration arithmetic — then apply again.",
+            DescriptorValidationSeverity.Error)]));
+    }
+
+    private static bool Creates(string statement, string name) =>
+        statement.Contains("CREATE", StringComparison.OrdinalIgnoreCase)
+        && statement.Contains(name, StringComparison.Ordinal);
 
     private static DescriptorValidationException Refused(SchemaModel desired, string? name) =>
         name is not null && CheckConstraintNames.Owner(desired, name) is { } owner

@@ -163,6 +163,13 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
     /// <remarks>Decided from the SQLSTATE alone, like <see cref="DecodeConstraintViolation"/>.</remarks>
     bool IAlvoSqlDialect.IsLockTimeout(DbException failure) => failure is PostgresException { SqlState: LockNotAvailable };
 
+    /// <summary>SQLSTATE 42P17 — <c>invalid_object_definition</c>, what an index predicate calling a non-immutable function raises.</summary>
+    private const string InvalidObjectDefinition = "42P17";
+
+    /// <inheritdoc/>
+    /// <remarks>Decided from the SQLSTATE alone, like <see cref="DecodeConstraintViolation"/>.</remarks>
+    bool IAlvoSqlDialect.IsIndexPredicateRefusal(DbException failure) => failure is PostgresException { SqlState: InvalidObjectDefinition };
+
     /// <inheritdoc/>
     /// <remarks>
     /// <c>SHARE</c> admits readers and the apply's own statements, and conflicts with the <c>ROW EXCLUSIVE</c> every insert,

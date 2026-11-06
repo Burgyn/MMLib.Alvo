@@ -491,6 +491,15 @@ public interface IAlvoSqlDialect
     internal bool IsLockTimeout(DbException failure) => false;
 
     /// <summary>
+    /// Whether <paramref name="failure"/> is this engine refusing a partial index's predicate — PostgreSQL's <c>42P17</c> over
+    /// a function that is not <c>IMMUTABLE</c>, SQLite's non-deterministic use of a function in an index — so the apply
+    /// answers it at the index's <c>where</c> rather than as a 500 (HX-12). <see langword="false"/> by default.
+    /// </summary>
+    /// <remarks>Internal, for <see cref="IsLockTimeout"/>'s reason: the published dialect port does not grow.</remarks>
+    /// <param name="failure">The provider's own exception, unwrapped.</param>
+    internal bool IsIndexPredicateRefusal(DbException failure) => false;
+
+    /// <summary>
     /// The statement an apply runs before it recomputes rollups over <paramref name="child"/>, holding off every write to the
     /// child until the apply commits — or <see langword="null"/> for an engine on which no child write can interleave with
     /// the apply (HX-11 Ruling 32).

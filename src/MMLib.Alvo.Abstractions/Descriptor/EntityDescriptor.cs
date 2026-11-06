@@ -58,6 +58,12 @@ public sealed record EntityIndex
 
     /// <summary>Whether the index enforces uniqueness across the covered fields.</summary>
     public bool? Unique { get; init; }
+
+    /// <summary>
+    /// A CEL predicate over the entity's own fields: only the rows it accepts are indexed — a partial index. With
+    /// <see cref="Unique"/>, duplicates outside it are allowed.
+    /// </summary>
+    public string? Where { get; init; }
 }
 
 /// <summary>What an entity's events carry (schema <c>entity.events</c>).</summary>

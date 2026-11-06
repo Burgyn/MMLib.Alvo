@@ -54,6 +54,7 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     private readonly Func<EntitySchema, RollupSchema, string?> _rollupFilter;
     private readonly ILogger _logger;
     private readonly Func<string> _schemaPrefix;
+    private readonly IndexFilterSql? _filters;
 
     private static string DefaultSchemaPrefix() => new AlvoOptions().SchemaPrefix;
     private readonly ConditionalWeakTable<MigrationPlan, SchemaModel> _plannedAgainst = [];
@@ -96,6 +97,10 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     /// takes <see cref="AlvoOptions"/>' default. Read when a plan is built, never here: the container validates the options
     /// by resolving this migrator, so reading them while it is constructed would re-enter that resolution.
     /// </param>
+    /// <param name="filters">
+    /// Renders an index's <c>where</c> to this driver's partial-index predicate, or <see langword="null"/> when the container
+    /// registered no expression services — a schema declaring one is then refused by name.
+    /// </param>
     internal EfCoreSchemaMigrator(
         IMigrationsModelDiffer differ,
         IMigrationsSqlGenerator sqlGenerator,
@@ -108,7 +113,8 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         IFieldSqlRenderer? fields = null,
         Func<EntitySchema, RollupSchema, string?>? rollupFilter = null,
         ILogger? logger = null,
-        Func<string>? schemaPrefix = null)
+        Func<string>? schemaPrefix = null,
+        IndexFilterSql? filters = null)
     {
         ArgumentNullException.ThrowIfNull(differ);
         ArgumentNullException.ThrowIfNull(sqlGenerator);
@@ -129,6 +135,7 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         _rollupFilter = rollupFilter ?? NoFilterRenderer;
         _logger = logger ?? NullLogger.Instance;
         _schemaPrefix = schemaPrefix ?? DefaultSchemaPrefix;
+        _filters = filters;
     }
 
     /// <inheritdoc/>
@@ -261,12 +268,14 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         return (prePass, desiredModel, residual);
     }
 
-    // Assembles the full, ordered operation list: declared renames first (so later operations see
-    // the new names), then the drops of the CHECK constraints a rename released (see RenamePrePass), then the
+    // Assembles the full, ordered operation list: the drops of the partial indexes a rename released (by their old names,
+    // which no rename changes), then declared renames (so later operations see the new names), then the drops of the CHECK constraints a rename released (see RenamePrePass), then the
     // (normalized) residual diff, which adds them back under their new names.
     private static List<MigrationOperation> AssembleOperations(RenamePrePass.Result prePass, IReadOnlyList<MigrationOperation> residual)
     {
-        var operations = new List<MigrationOperation>(prePass.Renames.Count + prePass.ReleasedChecks.Count + residual.Count);
+        var operations = new List<MigrationOperation>(
+            prePass.ReleasedIndexes.Count + prePass.Renames.Count + prePass.ReleasedChecks.Count + residual.Count);
+        operations.AddRange(prePass.ReleasedIndexes.Select(released => released.Operation));
         operations.AddRange(prePass.Renames.Select(rename => rename.Operation));
         operations.AddRange(prePass.ReleasedChecks.Select(released => released.Operation));
         operations.AddRange(residual);
@@ -284,7 +293,9 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     private List<MigrationStep> BuildSemanticSteps(
         RenamePrePass.Result prePass, SchemaModel desired, IReadOnlyList<MigrationOperation> residual)
     {
-        var steps = new List<MigrationStep>(prePass.Renames.Count + prePass.ReleasedChecks.Count + residual.Count);
+        var steps = new List<MigrationStep>(
+            prePass.ReleasedIndexes.Count + prePass.Renames.Count + prePass.ReleasedChecks.Count + residual.Count);
+        steps.AddRange(prePass.ReleasedIndexes.Select(released => ToStep(released.Change)));
         steps.AddRange(prePass.Renames.Select(rename => ToStep(rename.Change)));
         steps.AddRange(prePass.ReleasedChecks.Select(released => ToStep(released.Change, CostNote(released.Operation))));
         steps.AddRange(residual.Select(operation =>
@@ -465,7 +476,7 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
                 await ExecuteFramedAsync(connection, plan, ct).ConfigureAwait(false);
             }
         }
-        catch (Exception failure) when (CheckApplyRefusal.Translate(failure, _dialect, PlannedAgainst(plan)) is { } refused)
+        catch (Exception failure) when (CheckApplyRefusal.Translate(failure, _dialect, PlannedAgainst(plan), plan.Sql) is { } refused)
         {
             throw refused;
         }
@@ -510,7 +521,7 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         // DescriptorModelBuilder.Build returns a FinalizeModel()'d model; GetRelationalModel()
         // additionally requires the runtime initializer to have run (Task 0 report, gotcha #1).
         CheckConstraintNames.EnsureDistinct(schema);
-        var model = DescriptorModelBuilder.Build(schema, _newModelBuilder, _computed, _checks);
+        var model = DescriptorModelBuilder.Build(schema, _newModelBuilder, _computed, _checks, _filters);
         var initialized = _modelRuntimeInitializer.Initialize(model, designTime: true);
         EnsureEveryGeneratedColumnIsExpressible(initialized);
 

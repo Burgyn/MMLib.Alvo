@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using MMLib.Alvo.Schema;
+using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
@@ -25,7 +26,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// EF would emit for a genuine drop/add — every column facet (type, nullability, default, length,
 /// precision, computed SQL) intact — rather than being hand-reconstructed and risking drift.
 /// </remarks>
-internal static class RenameGuessSplitter
+internal static partial class RenameGuessSplitter
 {
     /// <summary>
     /// Replaces every guessed rename in <paramref name="residual"/> with its equivalent Drop+Add
@@ -135,10 +136,20 @@ internal static class RenameGuessSplitter
                     Fields = [.. entity.Fields.Where(f => !string.Equals(f.Name, fieldName, StringComparison.Ordinal))],
                     // Drop any index that referenced the removed field, or DescriptorModelBuilder's
                     // HasIndex would point at a property that no longer exists and FinalizeModel throws.
-                    Indexes = [.. entity.Indexes.Where(index => !index.Fields.Contains(fieldName, StringComparer.Ordinal))],
+                    Indexes = [.. entity.Indexes.Where(index => !Reads(index, fieldName))],
                 }
                 : entity)
             .ToList());
+
+    // Whether the index covers the field or its predicate names it — an over-approximation over the predicate's text outside
+    // its quoted constants, so a removed field never leaves behind a predicate the model builder cannot compile.
+    private static bool Reads(IndexSchema index, string fieldName) =>
+        index.Fields.Contains(fieldName, StringComparer.Ordinal)
+        || index.Where is { } where
+            && Regex.IsMatch(QuotedText().Replace(where, string.Empty), $@"\b{Regex.Escape(fieldName)}\b", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
+    [GeneratedRegex(@"'(?:[^'\\]|\\.)*'|""(?:[^""\\]|\\.)*""", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex QuotedText();
 
     private static SchemaModel RemoveEntity(SchemaModel schema, string entityName) =>
         new([.. schema.Entities.Where(e => !string.Equals(e.Name, entityName, StringComparison.Ordinal))]);

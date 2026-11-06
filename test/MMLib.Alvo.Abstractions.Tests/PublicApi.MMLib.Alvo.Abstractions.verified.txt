@@ -824,6 +824,7 @@ namespace MMLib.Alvo.Descriptor
         public EntityIndex() { }
         public required System.Collections.Generic.IReadOnlyList<string> Fields { get; init; }
         public bool? Unique { get; init; }
+        public string? Where { get; init; }
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.EntityTenancy>))]
     public enum EntityTenancy
@@ -2218,6 +2219,7 @@ namespace MMLib.Alvo.Schema
         public IndexSchema(System.Collections.Generic.IReadOnlyList<string> Fields, bool Unique) { }
         public System.Collections.Generic.IReadOnlyList<string> Fields { get; init; }
         public bool Unique { get; init; }
+        public string? Where { get; init; }
     }
     public enum OnDelete
     {

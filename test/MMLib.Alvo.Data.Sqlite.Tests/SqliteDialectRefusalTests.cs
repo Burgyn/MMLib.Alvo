@@ -49,6 +49,23 @@ public class SqliteDialectRefusalTests
     }
 
     /// <summary>
+    /// SQLite's refusal of a partial index predicate calling a function non-deterministically is recognised as one, so the
+    /// apply answers it at the index's <c>where</c> (HX-12); an unrelated failure under the same generic code is not.
+    /// </summary>
+    [Fact]
+    public void A_non_deterministic_index_predicate_is_an_index_predicate_refusal()
+    {
+        var refused = RefusedWrite(
+            "CREATE TABLE members (joined_at TEXT);",
+            "INSERT INTO members VALUES ('2026-01-01');",
+            "CREATE INDEX ix ON members (joined_at) WHERE unixepoch('now') > 5;");
+        var unrelated = RefusedWrite("CREATE TABLE a (x INTEGER);", "INSERT INTO a VALUES (1);", "SELECT * FROM missing;");
+
+        ((IAlvoSqlDialect)_dialect).IsIndexPredicateRefusal(refused).ShouldBeTrue(refused.Message);
+        ((IAlvoSqlDialect)_dialect).IsIndexPredicateRefusal(unrelated).ShouldBeFalse(unrelated.Message);
+    }
+
+    /// <summary>
     /// A unique violation names the columns the index covers, with the table qualifier stripped: the shared
     /// path already knows which entity it is writing and resolves the names against it.
     /// </summary>

@@ -24,12 +24,22 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// aligned copy carries no validation for it, a <see cref="DropCheckConstraintOperation"/> removes the old-named
 /// constraint after the renames, and the residual diff adds the desired ones under their new names.
 /// </para>
+/// <para>
+/// <b>Its partial indexes are re-created the same way</b> (HX-12 D10): a partial index's name hashes the entity, its fields
+/// and its predicate, and the predicate reads field names — so every partial index of such an entity is released: the
+/// aligned copy omits it, an explicit <c>DROP INDEX IF EXISTS</c> of its old name runs <em>before</em> the renames, and the
+/// residual diff creates the desired one under its new name.
+/// </para>
 /// </remarks>
 internal static class RenamePrePass
 {
     internal readonly record struct RenameEntry(MigrationOperation Operation, SchemaChange Change);
 
-    internal sealed record Result(SchemaModel AlignedCurrent, IReadOnlyList<RenameEntry> Renames, IReadOnlyList<RenameEntry> ReleasedChecks);
+    internal sealed record Result(
+        SchemaModel AlignedCurrent,
+        IReadOnlyList<RenameEntry> Renames,
+        IReadOnlyList<RenameEntry> ReleasedChecks,
+        IReadOnlyList<RenameEntry> ReleasedIndexes);
 
     /// <summary>
     /// Computes the name-aligned "current" schema and the explicit rename operations, from the
@@ -41,17 +51,22 @@ internal static class RenamePrePass
         var alignedEntities = new List<EntitySchema>(current.Entities.Count);
         var renames = new List<RenameEntry>();
         var releasedChecks = new List<RenameEntry>();
+        var releasedIndexes = new List<RenameEntry>();
 
         foreach (var currentEntity in current.Entities)
         {
-            alignedEntities.Add(AlignEntity(currentEntity, desired, renames, releasedChecks));
+            alignedEntities.Add(AlignEntity(currentEntity, desired, renames, releasedChecks, releasedIndexes));
         }
 
-        return new Result(new SchemaModel(alignedEntities), renames, releasedChecks);
+        return new Result(new SchemaModel(alignedEntities), renames, releasedChecks, releasedIndexes);
     }
 
     private static EntitySchema AlignEntity(
-        EntitySchema currentEntity, SchemaModel desired, List<RenameEntry> renames, List<RenameEntry> releasedChecks)
+        EntitySchema currentEntity,
+        SchemaModel desired,
+        List<RenameEntry> renames,
+        List<RenameEntry> releasedChecks,
+        List<RenameEntry> releasedIndexes)
     {
         var desiredEntity = FindDesiredCounterpart(currentEntity, desired);
         var alignedName = ResolveEntityRename(currentEntity, desiredEntity, renames);
@@ -63,9 +78,28 @@ internal static class RenamePrePass
             Name = alignedName,
             RenamedFrom = null,
             Fields = renamed ? ReleaseChecks(currentEntity, alignedName, alignedFields, releasedChecks) : alignedFields,
-            Indexes = AlignIndexes(currentEntity, fieldRenames),
+            Indexes = renamed
+                ? ReleasePartialIndexes(currentEntity, alignedName, AlignIndexes(currentEntity, fieldRenames), releasedIndexes)
+                : AlignIndexes(currentEntity, fieldRenames),
         };
     }
+
+    // The aligned indexes without the partial ones, each recorded as a drop of the index the database holds under the name
+    // the current entity, fields and predicate give it.
+    private static List<IndexSchema> ReleasePartialIndexes(
+        EntitySchema currentEntity, string alignedName, List<IndexSchema> alignedIndexes, List<RenameEntry> releasedIndexes)
+    {
+        foreach (var index in currentEntity.Indexes.Where(index => index.Where is not null))
+        {
+            releasedIndexes.Add(ReleasedIndex(alignedName, IndexNames.Partial(currentEntity, index)));
+        }
+
+        return [.. alignedIndexes.Where(index => index.Where is null)];
+    }
+
+    private static RenameEntry ReleasedIndex(string alignedName, string name) => new(
+        new SqlOperation { Sql = $"DROP INDEX IF EXISTS {AlvoSqlIdentifier.Quote(name)}" },
+        new SchemaChange { Kind = SchemaChangeKind.DropIndex, Entity = alignedName, Detail = name });
 
     // The aligned fields with no validation, each validated one recorded as a drop of the constraint the database holds
     // under the entity's and field's current names, on the table as it is named after the renames.

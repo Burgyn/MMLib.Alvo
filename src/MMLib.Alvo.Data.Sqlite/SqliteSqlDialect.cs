@@ -227,6 +227,22 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     /// <summary>SQLITE_CONSTRAINT (19): some constraint refused the statement, without saying which.</summary>
     private const int Constraint = 19;
 
+    /// <summary>SQLITE_ERROR (1): the generic code SQLite raises a refused index expression or predicate under.</summary>
+    private const int GenericError = 1;
+
+    /// <summary>SQLite's own text for a function an index may not call, such as <c>non-deterministic use of date() in an index</c>.</summary>
+    private const string NonDeterministicUsePrefix = "non-deterministic use of";
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// SQLite reports it under its generic code, so the narrowing is the code and then SQLite's own unlocalized text — the
+    /// message names the function, never a value.
+    /// </remarks>
+    bool IAlvoSqlDialect.IsIndexPredicateRefusal(DbException failure) =>
+        failure is SqliteException { SqliteErrorCode: GenericError } sqlite
+        && sqlite.Message.Contains(NonDeterministicUsePrefix, StringComparison.Ordinal)
+        && sqlite.Message.Contains("in an index", StringComparison.Ordinal);
+
     /// <summary>SQLite's own prefix on a foreign-key failure, which names nothing else at all.</summary>
     private const string ForeignKeyFailurePrefix = "FOREIGN KEY constraint failed";
 
