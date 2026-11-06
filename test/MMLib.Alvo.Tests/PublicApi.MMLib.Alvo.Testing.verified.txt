@@ -554,6 +554,33 @@ namespace MMLib.Alvo.Testing.Data
         protected virtual void EnsureEngineAvailable() { }
         public System.Threading.Tasks.Task Probing_twice_answers_twice() { }
     }
+    public abstract class AlvoDataRelationRuleTests
+    {
+        protected AlvoDataRelationRuleTests() { }
+        public System.Threading.Tasks.Task A_batch_create_reports_each_row_whose_relation_fails_at_its_index() { }
+        public System.Threading.Tasks.Task A_create_through_a_relation_the_caller_satisfies_succeeds() { }
+        public System.Threading.Tasks.Task A_create_whose_relation_the_caller_cannot_satisfy_is_refused() { }
+        public System.Threading.Tasks.Task A_null_reference_never_satisfies_a_forward_relation() { }
+        [Xunit.InlineData(new object[] {
+                "100.49",
+                1,
+                true})]
+        [Xunit.InlineData(new object[] {
+                "100.50",
+                -1,
+                false})]
+        [Xunit.InlineData(new object[] {
+                "100.50",
+                0,
+                true})]
+        [Xunit.InlineData(new object[] {
+                "100.51",
+                0,
+                false})]
+        public System.Threading.Tasks.Task A_probe_compares_outer_decimal_and_timestamp_values_as_the_columns_do(string amount, int millisecondsAfterSince, bool admitted) { }
+        public System.Threading.Tasks.Task An_update_moving_a_row_to_a_related_row_the_caller_cannot_list_is_refused() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
+    }
     public abstract class AlvoDataReplaceTests : MMLib.Alvo.Testing.Data.AlvoDataFixture
     {
         protected AlvoDataReplaceTests() { }

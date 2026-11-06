@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
@@ -345,6 +346,29 @@ public class InMemoryAlvoDataTests
     }
 
     private static AlvoContext Caller() => new() { User = UserId.New(), Roles = new HashSet<Role> { Role.Authenticated } };
+
+    /// <summary>
+    /// A relation rule needs the correlated <c>EXISTS</c> a relational driver runs; the in-memory double refuses one on
+    /// every operation rather than evaluate it as a post-filter or ignore it.
+    /// </summary>
+    [Fact]
+    public async Task A_relation_rule_is_refused_not_ignored()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var descriptor = AlvoDescriptor.Parse(Rules.RelationDescriptors.Project(
+            ("customers", Rules.RelationDescriptors.Entity([Rules.RelationDescriptors.Field("region", "string")], ("list", "true"))),
+            ("orders", Rules.RelationDescriptors.Entity(
+                [Rules.RelationDescriptors.Ref("customer_id", "customers")],
+                ("list", "customer_id.region == 'eu'"), ("get", "customer_id.region == 'eu'"), ("create", "customer_id.region == 'eu'")))));
+        var schema = DescriptorToSchemaMapper.Map(descriptor);
+        var data = new InMemoryAlvoData(EngineOver(descriptor, schema), new PredicateEvaluator(), schema);
+        var caller = Caller();
+
+        await Should.ThrowAsync<NotSupportedException>(() => data.QueryAsync(new AlvoQuery { Entity = "orders" }, caller, ct));
+        await Should.ThrowAsync<NotSupportedException>(() => data.GetAsync("orders", Guid.NewGuid(), caller, ct));
+        await Should.ThrowAsync<NotSupportedException>(() =>
+            data.CreateAsync("orders", new Dictionary<string, object?>(StringComparer.Ordinal), caller, cancellationToken: ct));
+    }
 
     private static InMemoryAlvoData CreateStore(string entity, Dictionary<string, FieldDescriptor> fields, params AlvoRecord[] seed)
     {

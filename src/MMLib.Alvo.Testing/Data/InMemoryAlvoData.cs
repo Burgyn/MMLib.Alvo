@@ -99,7 +99,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         using var instant = AlvoFlow.EnsureInstant(_time);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var decision = _policy.Resolve(query.Entity, DataOperation.List, context);
+        var decision = Resolve(query.Entity, DataOperation.List, context);
         if (decision.IsDenied)
         {
             throw Denied(decision);
@@ -145,7 +145,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         using var instant = AlvoFlow.EnsureInstant(_time);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var decision = _policy.Resolve(entity, DataOperation.Get, context);
+        var decision = Resolve(entity, DataOperation.Get, context);
         if (decision.IsDenied)
         {
             throw Denied(decision);
@@ -169,7 +169,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         AlvoChainDepthLimit.Default.EnsureWithin(context);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var decision = _policy.Resolve(entity, DataOperation.Create, context);
+        var decision = Resolve(entity, DataOperation.Create, context);
         if (decision.IsDenied)
         {
             throw Denied(decision);
@@ -241,7 +241,7 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         EnsureSameRequest(record, token);
 
-        var read = _policy.Resolve(entity, DataOperation.Get, context);
+        var read = Resolve(entity, DataOperation.Get, context);
         if (read.IsDenied)
         {
             return IdOnly(RecordedRow(record));
@@ -304,7 +304,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// <param name="context">The caller who wrote them.</param>
     private List<AlvoRecord> Echoed(string entity, List<AlvoRecord> written, AlvoContext context)
     {
-        var read = _policy.Resolve(entity, DataOperation.Get, context);
+        var read = Resolve(entity, DataOperation.Get, context);
 
         return [.. written.Select(row => read.IsDenied || !IsVisible(row, read, context)
             ? IdOnly(RowIdOf(row))
@@ -369,7 +369,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         AlvoChainDepthLimit.Default.EnsureWithin(context);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var decision = _policy.Resolve(entity, DataOperation.Update, context);
+        var decision = Resolve(entity, DataOperation.Update, context);
         if (decision.IsDenied)
         {
             throw Denied(decision);
@@ -673,7 +673,7 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// <param name="context">The caller.</param>
     private PolicyDecision Allowed(string entity, DataOperation operation, AlvoContext context)
     {
-        var decision = _policy.Resolve(entity, operation, context);
+        var decision = Resolve(entity, operation, context);
         return decision.IsDenied ? throw Denied(decision) : decision;
     }
 
@@ -689,7 +689,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         AlvoChainDepthLimit.Default.EnsureWithin(context);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var decision = _policy.Resolve(entity, DataOperation.Delete, context);
+        var decision = Resolve(entity, DataOperation.Delete, context);
         if (decision.IsDenied)
         {
             throw Denied(decision);
@@ -1247,6 +1247,23 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// than mapping it to one more-generic message, trusting the policy layer's own tradeoff instead
     /// of re-deciding it here.
     /// </summary>
+    /// <summary>
+    /// The engine's decision, refused when it reads a related entity: this double evaluates rules in memory over its own
+    /// rows, and judging a relation that way would be a post-filter, not the correlated <c>EXISTS</c> the relational
+    /// driver runs — so it throws rather than evaluate or ignore one.
+    /// </summary>
+    private PolicyDecision Resolve(string entity, DataOperation operation, AlvoContext context)
+    {
+        var decision = _policy.Resolve(entity, operation, context);
+        return ReadsRelation(decision.Using) || ReadsRelation(decision.WithCheck)
+            ? throw new NotSupportedException(
+                "Relation rules and lookup checks need a relational driver; InMemoryAlvoData is the policy-contract double.")
+            : decision;
+    }
+
+    private static bool ReadsRelation(CompiledExpression? expression) =>
+        expression is not null && CelRewriter.HasRelation(expression.Root);
+
     private static AlvoAuthorizationException Denied(PolicyDecision decision) =>
         new(decision.DenyReason ?? "The operation was not authorized.");
 
@@ -1362,7 +1379,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         EnsureBatchIsNotEmpty(rowCount);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var decision = _policy.Resolve(entity, operation, context);
+        var decision = Resolve(entity, operation, context);
 
         return decision.IsDenied ? throw Denied(decision) : decision;
     }
@@ -1673,7 +1690,7 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         EnsureSameRequest(record, token);
 
-        var read = _policy.Resolve(entity, DataOperation.Get, context);
+        var read = Resolve(entity, DataOperation.Get, context);
         var stored = RowsForLocked(entity);
         var rows = read.IsDenied
             ? [.. record.RowIds.Select(IdOnly)]
