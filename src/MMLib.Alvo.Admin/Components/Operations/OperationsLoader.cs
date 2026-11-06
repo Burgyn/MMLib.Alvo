@@ -3,13 +3,20 @@ using MMLib.Alvo.Management;
 
 namespace MMLib.Alvo.Admin.Components.Operations;
 
-/// <summary>What one load of the Operations page read: the handlers, their numbers, a page of deliveries, the open delivery.</summary>
+/// <summary>
+/// What one load of the Operations page read: the handlers, the schedules and data migrations, the timer counts, the
+/// handlers' numbers, a page of deliveries, the open delivery.
+/// </summary>
 /// <param name="Handlers">The host's event handlers.</param>
+/// <param name="Jobs">The host's schedules and data migrations.</param>
+/// <param name="Timers">How many timers the host holds, or <see langword="null"/> when its data provider keeps none.</param>
 /// <param name="Stats">This instance's per-handler numbers.</param>
 /// <param name="Deliveries">The first page of deliveries of the status asked for.</param>
 /// <param name="Selected">The open delivery read again, or <see langword="null"/> when none was open.</param>
 internal sealed record OperationsSnapshot(
     IReadOnlyList<ManagementExtension> Handlers,
+    IReadOnlyList<ManagementExtension> Jobs,
+    ManagementTimerCounts? Timers,
     ManagementExtensionStats Stats,
     IReadOnlyList<ManagementDelivery> Deliveries,
     ManagementDelivery? Selected);
@@ -63,11 +70,11 @@ internal sealed class OperationsLoader(OperationsGateway gateway)
 
     private async Task<OperationsSnapshot> ReadAsync(string? status, Guid? selected, CancellationToken ct)
     {
-        var handlers = await gateway.HandlersAsync(ct);
+        var catalog = await gateway.CatalogAsync(ct);
         var stats = await gateway.StatsAsync(ct);
         var deliveries = (await gateway.DeliveriesAsync(status, ct)).Items;
         var open = selected is { } id ? await gateway.DeliveryAsync(id, ct) : null;
 
-        return new OperationsSnapshot(handlers, stats, deliveries, open);
+        return new OperationsSnapshot(catalog.Handlers, catalog.Jobs, catalog.Timers, stats, deliveries, open);
     }
 }

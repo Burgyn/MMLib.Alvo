@@ -5,6 +5,7 @@ using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Scheduling;
 using MMLib.Alvo.Schema;
 using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
@@ -75,6 +76,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     private readonly AlvoBootState _state;
     private readonly IOptions<AlvoSchemaOptions> _options;
     private readonly ExtensionStateGuard _extensionState;
+    private readonly DataMigrationBootCheck _migrationCheck;
     private readonly ILogger<AlvoBootService> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="AlvoBootService"/> class.</summary>
@@ -91,6 +93,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// <param name="state">What the boot publishes for a readiness probe to read.</param>
     /// <param name="options">The startup mode and destructive allowance, already validated by the host.</param>
     /// <param name="extensionState">Retires and refuses the durable work of ids this host no longer registers.</param>
+    /// <param name="migrationCheck">Refuses a data migration not yet started on a scoped schema without a tenant list.</param>
     /// <param name="logger">Records what the boot decided, so a restart's no-op is visible.</param>
     public AlvoBootService(
         DescriptorBootPlan bootPlan,
@@ -103,6 +106,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         AlvoBootState state,
         IOptions<AlvoSchemaOptions> options,
         ExtensionStateGuard extensionState,
+        DataMigrationBootCheck migrationCheck,
         ILogger<AlvoBootService> logger)
     {
         ArgumentNullException.ThrowIfNull(bootPlan);
@@ -115,6 +119,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(extensionState);
+        ArgumentNullException.ThrowIfNull(migrationCheck);
         ArgumentNullException.ThrowIfNull(logger);
 
         _bootPlan = bootPlan;
@@ -127,6 +132,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         _state = state;
         _options = options;
         _extensionState = extensionState;
+        _migrationCheck = migrationCheck;
         _logger = logger;
     }
 
@@ -242,7 +248,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         var stored = await _history.GetCurrentAsync(project, ct).ConfigureAwait(false);
         if (stored is null)
         {
-            await RefuseOrphanedWorkAsync(project, ct).ConfigureAwait(false);
+            await RefuseOrphanedWorkAsync(project, catalog: null, ct).ConfigureAwait(false);
             await RetireThenReadyAsync(project, SchemaStartupOutcome.Awaiting, revision: null, ct).ConfigureAwait(false);
 
             return;
@@ -253,7 +259,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
             return;
         }
 
-        await RefuseOrphanedWorkAsync(project, ct).ConfigureAwait(false);
+        await RefuseOrphanedWorkAsync(project, boot.Catalog, ct).ConfigureAwait(false);
         _ = Prime(boot, stored.Revision);
         await RetireThenReadyAsync(project, SchemaStartupOutcome.Unchanged, stored.Revision, ct).ConfigureAwait(false);
     }
@@ -611,7 +617,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         var decision = await DecideAsync(boot, applied, ct).ConfigureAwait(false);
         if (decision.Outcome is not (SchemaStartupOutcome.Refuse or SchemaStartupOutcome.StandDown))
         {
-            await RefuseOrphanedWorkAsync(boot.Descriptor.Name, ct).ConfigureAwait(false);
+            await RefuseOrphanedWorkAsync(boot.Descriptor.Name, boot.Catalog, ct).ConfigureAwait(false);
         }
 
         var revision = await CarryOutAsync(boot, applied, decision, ct).ConfigureAwait(false);
@@ -781,12 +787,21 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// it. Recorded first, because <see cref="StartingAsync"/> rethrows an <see cref="AlvoStartupRefusedException"/>
     /// untouched.
     /// </para>
+    /// <para>
+    /// The same step refuses a data migration not yet started on the scoped <paramref name="catalog"/> the boot primes when
+    /// the host registers no tenant list: it reads which migrations have run, so it belongs here rather than in stage 0.
+    /// </para>
     /// </remarks>
-    private async Task RefuseOrphanedWorkAsync(string project, CancellationToken ct)
+    private async Task RefuseOrphanedWorkAsync(string project, PolicyCatalog? catalog, CancellationToken ct)
     {
         try
         {
             await _extensionState.RefuseOrphansAsync(ct).ConfigureAwait(false);
+            if (catalog is not null)
+            {
+                await _migrationCheck.RefuseAsync(catalog, ct).ConfigureAwait(false);
+            }
+
         }
         catch (AlvoStartupRefusedException refusal)
         {

@@ -753,6 +753,10 @@ namespace MMLib.Alvo.Scheduling
         public static System.Threading.Tasks.Task ScheduleAsync<TMessage>(this MMLib.Alvo.Scheduling.IAlvoScheduler scheduler, string key, System.DateTimeOffset at, TMessage message, MMLib.Alvo.TenantId? tenant = default, System.Threading.CancellationToken cancellationToken = default)
             where TMessage :  class { }
     }
+    public interface IAlvoDataMigration
+    {
+        System.Threading.Tasks.Task RunAsync(MMLib.Alvo.Scheduling.AlvoJobContext context, System.Threading.CancellationToken cancellationToken);
+    }
     public interface IAlvoScheduledJob
     {
         System.Threading.Tasks.Task RunAsync(MMLib.Alvo.Scheduling.AlvoJobContext context, System.Threading.CancellationToken cancellationToken);
@@ -820,6 +824,8 @@ namespace Microsoft.Extensions.DependencyInjection
             where TCommand :  class { }
         public static MMLib.Alvo.IAlvoBuilder AddCommand<TCommand>(this MMLib.Alvo.IAlvoBuilder builder, string name, string access)
             where TCommand :  class { }
+        public static MMLib.Alvo.IAlvoBuilder AddDataMigration<TMigration>(this MMLib.Alvo.IAlvoBuilder builder, string id, int afterRevision)
+            where TMigration :  class, MMLib.Alvo.Scheduling.IAlvoDataMigration { }
         public static MMLib.Alvo.IAlvoBuilder AddEventHandler(this MMLib.Alvo.IAlvoBuilder builder, string id, string eventType, System.Delegate handler, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null) { }
         public static MMLib.Alvo.IAlvoBuilder AddEventHandler<THandler>(this MMLib.Alvo.IAlvoBuilder builder, string id, string eventType, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
             where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<MMLib.Alvo.Data.AlvoRecord> { }

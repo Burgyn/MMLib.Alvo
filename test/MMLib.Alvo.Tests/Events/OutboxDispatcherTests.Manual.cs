@@ -283,6 +283,8 @@ public sealed partial class OutboxDispatcherTests
         new ExtensionBinder(ExtensionRegistry.Empty, CelFixtures.Compiler, HandlerCatalog.EveryService(), NullLogger<ExtensionBinder>.Instance),
         ExtensionRegistry.Empty,
         new ScheduleRuns(tenants: null, TimeProvider.System),
+        new DataMigrationStarter(
+            new ScheduleRuns(tenants: null, TimeProvider.System), applied: null, TimeProvider.System, NullLogger<DataMigrationStarter>.Instance),
         new AlvoBootState(),
         new PolicyCatalogProvider(),
         Options.Create(new AlvoEventOptions()),

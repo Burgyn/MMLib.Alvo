@@ -22,4 +22,4 @@ until it ships, use the row above it or an after-hook `webhook`.
 | Not CRUD, or an inbound webhook | `MapAlvoCommand` / `MapAlvoWebhookReceiver` / minimal API | Your own route and contract; Alvo's rules and hooks still apply. A named command is visible to agents. | available — [commands and inbound webhooks](/extending/commands/) |
 | Hide a field, or add a derived one, on read | `IRecordEnricher` | Only hides or fills a declared virtual field; never rewrites rows. | planned |
 | Rate limits, captcha, caching, headers, CORS | endpoint filter, convention | An HTTP concern; ASP.NET Core has the tool. | available — [HTTP conventions](/extending/http-conventions/) |
-| Something must happen at a time, or regularly | `IAlvoScheduler`, `AddSchedule` | Keyed timers and cron on the outbox, one run across replicas. | planned |
+| Something must happen at a time, or regularly | `IAlvoScheduler`, `AddSchedule` | Keyed timers and cron on the outbox, one run across replicas. | available — [Time: timers and schedules](/extending/time/) |

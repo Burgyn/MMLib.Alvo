@@ -1583,6 +1583,8 @@ namespace MMLib.Alvo.Management
         Enricher = 8,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("schedule")]
         Schedule = 9,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("dataMigration")]
+        DataMigration = 10,
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Management.AlvoExtensionStage>))]
     public enum AlvoExtensionStage
@@ -1775,6 +1777,7 @@ namespace MMLib.Alvo.Management
     {
         public ManagementExtension() { }
         public string? Access { get; init; }
+        public int? AfterRevision { get; init; }
         public string? Cron { get; init; }
         public string? Description { get; init; }
         public bool Enabled { get; init; }

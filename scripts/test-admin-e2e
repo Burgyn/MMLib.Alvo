@@ -9,12 +9,24 @@
 # Usage:
 #   scripts/test-admin-e2e                       every scenario
 #   scripts/test-admin-e2e --filter SignIn       the scenarios whose name matches
+#   scripts/test-admin-e2e --install-only        build and install the browser, run nothing
+#   scripts/test-admin-e2e --skip-install ...    run the scenarios over a browser already installed
 #
 # The first run downloads a headless Chromium through Playwright's own installer.
+#
+# The two phase flags exist for CI, which gives each phase its own step timeout: the browser's
+# system packages come from the runner's apt mirror, whose speed is not ours, and a slow mirror
+# must not spend the suite's budget (ci.yml's admin-e2e job says what that cost).
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 project="$root/test/MMLib.Alvo.Admin.Tests.EndToEnd"
+
+phase=all
+case "${1:-}" in
+  --install-only) phase=install; shift ;;
+  --skip-install) phase=test; shift ;;
+esac
 
 echo "[admin-e2e] dotnet build"
 dotnet build "$project/MMLib.Alvo.Admin.Tests.EndToEnd.csproj" -c Debug --nologo
@@ -23,14 +35,21 @@ dotnet build "$project/MMLib.Alvo.Admin.Tests.EndToEnd.csproj" -c Debug --nologo
 # quick once the browser is cached, so it runs every time rather than being guarded by a marker
 # file that would go stale when the package version moves.
 installer="$project/bin/Debug/net10.0/playwright.ps1"
-if [ -f "$installer" ]; then
-  echo "[admin-e2e] playwright install chromium"
-  pwsh "$installer" install chromium --with-deps 2>/dev/null \
-    || pwsh "$installer" install chromium \
-    || echo "[admin-e2e] playwright install failed; assuming a browser is already present" >&2
-else
-  echo "[admin-e2e] no playwright.ps1 in the build output — is Microsoft.Playwright referenced?" >&2
-  exit 1
+if [ "$phase" != test ]; then
+  if [ -f "$installer" ]; then
+    echo "[admin-e2e] playwright install chromium"
+    pwsh "$installer" install chromium --with-deps 2>/dev/null \
+      || pwsh "$installer" install chromium \
+      || echo "[admin-e2e] playwright install failed; assuming a browser is already present" >&2
+  else
+    echo "[admin-e2e] no playwright.ps1 in the build output — is Microsoft.Playwright referenced?" >&2
+    exit 1
+  fi
+fi
+
+if [ "$phase" = install ]; then
+  echo "[admin-e2e] browser installed; no scenarios run (--install-only)"
+  exit 0
 fi
 
 echo "[admin-e2e] dotnet test"
