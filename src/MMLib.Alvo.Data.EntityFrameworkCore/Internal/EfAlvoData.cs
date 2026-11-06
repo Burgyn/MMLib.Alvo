@@ -111,6 +111,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         ArgumentNullException.ThrowIfNull(predicates);
         ArgumentNullException.ThrowIfNull(fields);
         ArgumentNullException.ThrowIfNull(dialect);
+        ArgumentNullException.ThrowIfNull(compiler);
         ArgumentNullException.ThrowIfNull(contexts);
         ArgumentNullException.ThrowIfNull(time);
         ArgumentNullException.ThrowIfNull(options);
@@ -120,7 +121,6 @@ internal sealed partial class EfAlvoData : IAlvoData
         _hooks = hooks;
         _statements = new ReadStatementComposer(predicates, fields, dialect);
         _dialect = dialect;
-        ArgumentNullException.ThrowIfNull(compiler);
         _rollups = new RollupRecompute(dialect, fields, compiler, predicates);
         _contexts = contexts;
         _time = time;

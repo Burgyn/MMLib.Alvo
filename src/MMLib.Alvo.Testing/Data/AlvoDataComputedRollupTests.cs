@@ -561,6 +561,24 @@ public abstract class AlvoDataComputedRollupTests
         (await ReadAsync(data, product))[HeldTotal].ShouldBe(2m);
     }
 
+    /// <summary>
+    /// The adversarial pair over a <em>filtered</em> rollup (HX-11 Task 10 review m3): the filter is ANDed after the tenant
+    /// predicate, so an <c>||</c> inside it can only widen which of the tenant's own children count — never reach Globex's
+    /// child that names Acme's product and matches the filter.
+    /// </summary>
+    [Fact]
+    public async Task A_filter_with_an_or_never_aggregates_another_tenants_children()
+    {
+        var data = await CreateAsync(ScopedFilteredSchema(EitherStatus), ScopedFilteredDescriptor(EitherStatus));
+        var product = await CreateProductAsync(data, Acme);
+        await CreateReservationAsync(data, product, 10m, "held", Acme);
+        await CreateReservationAsync(data, product, 5m, "released", Globex);
+
+        await CreateReservationAsync(data, product, 2m, "released", Acme);
+
+        (await ReadAsync(data, product, Acme))[HeldTotal].ShouldBe(12m, "Acme's own two children, and nothing of Globex's");
+    }
+
     private const string Invoices = "invoices";
 
     private const string Items = "invoice_items";
@@ -908,30 +926,58 @@ public abstract class AlvoDataComputedRollupTests
     private const string Reservations = "reservations";
     private const string HeldTotal = "held_total";
 
-    private static async Task<Guid> CreateProductAsync(IAlvoData data) =>
-        (Guid)(await data.CreateAsync(
-            Products, new Dictionary<string, object?>(StringComparer.Ordinal) { ["name"] = "widget" }, Caller, cancellationToken: Ct))["id"]!;
+    private static async Task<Guid> CreateProductAsync(IAlvoData data, AlvoContext? caller = null)
+    {
+        var payload = caller?.Tenant is null ? new Dictionary<string, object?>(StringComparer.Ordinal) : Owned(caller);
+        payload["name"] = "widget";
+        return (Guid)(await data.CreateAsync(Products, payload, caller ?? Caller, cancellationToken: Ct))["id"]!;
+    }
+
+    private static Task<Guid> CreateReservationAsync(
+        IAlvoData data, Guid product, decimal quantity, string status, string? label = null) =>
+        CreateReservationAsync(data, product, quantity, status, Caller, label);
 
     private static async Task<Guid> CreateReservationAsync(
-        IAlvoData data, Guid product, decimal quantity, string status, string? label = null) =>
-        (Guid)(await data.CreateAsync(
-            Reservations,
-            new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["product_id"] = product,
-                ["quantity"] = quantity,
-                ["status"] = status,
-                ["label"] = label,
-            },
-            Caller,
-            cancellationToken: Ct))["id"]!;
+        IAlvoData data, Guid product, decimal quantity, string status, AlvoContext caller, string? label = null)
+    {
+        var payload = caller.Tenant is null ? new Dictionary<string, object?>(StringComparer.Ordinal) : Owned(caller);
+        payload["product_id"] = product;
+        payload["quantity"] = quantity;
+        payload["status"] = status;
+        payload["label"] = label;
+        return (Guid)(await data.CreateAsync(Reservations, payload, caller, cancellationToken: Ct))["id"]!;
+    }
 
     private static Task<AlvoRecord> UpdateStatusAsync(IAlvoData data, Guid reservation, string status) =>
         data.UpdateAsync(
             Reservations, reservation, new Dictionary<string, object?>(StringComparer.Ordinal) { ["status"] = status }, Caller, cancellationToken: Ct);
 
-    private static async Task<AlvoRecord> ReadAsync(IAlvoData data, Guid product) =>
-        (await data.GetAsync(Products, product, Caller, Ct))!;
+    private static async Task<AlvoRecord> ReadAsync(IAlvoData data, Guid product, AlvoContext? caller = null) =>
+        (await data.GetAsync(Products, product, caller ?? Caller, Ct))!;
+
+    /// <summary>A filter admitting both statuses through an <c>||</c>.</summary>
+    private const string EitherStatus = "status == 'held' || status == 'released'";
+
+    /// <summary>The filtered pair with both entities tenant-scoped, as the adversarial facts need.</summary>
+    private static AlvoDescriptor ScopedFilteredDescriptor(string where)
+    {
+        var filtered = FilteredDescriptorFor(where);
+        return filtered with
+        {
+            Tenancy = new Tenancy { Enabled = true },
+            Entities = filtered.Entities.ToDictionary(
+                pair => pair.Key, pair => pair.Value with { Tenancy = EntityTenancy.Scoped }, StringComparer.Ordinal),
+        };
+    }
+
+    /// <summary>The schema <see cref="ScopedFilteredDescriptor"/> maps to, with the managed <c>tenant_id</c> on both.</summary>
+    private static SchemaModel ScopedFilteredSchema(string where) => new([
+        .. FilteredSchemaFor(where).Entities.Select(entity => entity with
+        {
+            Tenancy = TenancyMode.Scoped,
+            Fields = [.. entity.Fields, TenantColumn],
+        }),
+    ]);
 
     /// <summary><c>products.held_total</c>: the <c>sum</c> of held reservations' <c>quantity</c>.</summary>
     private static AlvoDescriptor FilteredDescriptor => FilteredDescriptorFor("status == 'held'");

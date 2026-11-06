@@ -223,7 +223,8 @@ public static class AlvoEfCoreProvider
             connections,
             registration.Dialect,
             ComputedColumns(services, registration),
-            CheckConstraints(services, registration));
+            CheckConstraints(services, registration),
+            services.GetService<ILogger<EfCoreSchemaMigrator>>());
     }
 
     /// <summary>

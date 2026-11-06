@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Migrations;
@@ -37,7 +39,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// locking (PR-B), not by this type.
 /// </para>
 /// </remarks>
-public sealed class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSchemaPlanner
+public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSchemaPlanner
 {
     private readonly IMigrationsModelDiffer _differ;
     private readonly IMigrationsSqlGenerator _sqlGenerator;
@@ -47,6 +49,7 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSchemaPlan
     private readonly IAlvoSqlDialect _dialect;
     private readonly ComputedColumnSql? _computed;
     private readonly CheckConstraintSql? _checks;
+    private readonly ILogger _logger;
     private readonly ConditionalWeakTable<MigrationPlan, SchemaModel> _plannedAgainst = [];
 
     /// <summary>
@@ -69,6 +72,10 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSchemaPlan
     /// Renders a field's <c>validation</c> to this driver's CHECK constraint SQL, or <see langword="null"/> when the
     /// container registered no expression services — a schema declaring one is then refused by name.
     /// </param>
+    /// <param name="logger">
+    /// Where a violation count the database could not run is recorded for the operator, the caller seeing only the
+    /// refusal; <see langword="null"/> discards it.
+    /// </param>
     internal EfCoreSchemaMigrator(
         IMigrationsModelDiffer differ,
         IMigrationsSqlGenerator sqlGenerator,
@@ -77,7 +84,8 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSchemaPlan
         RelationalConnectionFactory connections,
         IAlvoSqlDialect dialect,
         ComputedColumnSql? computed,
-        CheckConstraintSql? checks)
+        CheckConstraintSql? checks,
+        ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(differ);
         ArgumentNullException.ThrowIfNull(sqlGenerator);
@@ -94,6 +102,7 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSchemaPlan
         _dialect = dialect;
         _computed = computed;
         _checks = checks;
+        _logger = logger ?? NullLogger.Instance;
     }
 
     /// <inheritdoc/>
@@ -155,7 +164,7 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSchemaPlan
         }
     }
 
-    private static async Task<List<DescriptorValidationError>> BreakingRowsAsync(
+    private async Task<List<DescriptorValidationError>> BreakingRowsAsync(
         DbConnection connection, IReadOnlyList<CheckViolationScan.Target> targets, CancellationToken ct)
     {
         var errors = new List<DescriptorValidationError>();
@@ -172,7 +181,9 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSchemaPlan
 
     // A count the database cannot run (a drifted table missing a column `current` still names) refuses at the validation
     // it was counting for, rather than escaping as a provider exception: fail-closed, and a 422 a dry run can show (Ruling 67).
-    private static async Task<DescriptorValidationError?> BreakingRowsAsync(
+    // The provider's exception never reaches the caller, so it is logged for the operator, who may need it to tell a
+    // drifted table from a transient fault (Task 10 review m4).
+    private async Task<DescriptorValidationError?> BreakingRowsAsync(
         DbConnection connection, CheckViolationScan.Target target, CancellationToken ct)
     {
         try
@@ -180,8 +191,9 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSchemaPlan
             var count = await CheckViolationScan.CountAsync(connection, target.Add.Table, target.Add.Sql, ct).ConfigureAwait(false);
             return count > 0 ? BreakingRows(target, count) : null;
         }
-        catch (DbException)
+        catch (DbException failure)
         {
+            ViolationCountFailed(_logger, target.Entity.Name, target.Field.Name, failure);
             return Uncountable(target);
         }
     }
@@ -444,4 +456,9 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSchemaPlan
                 + "columns.");
         }
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Could not count the rows of '{Entity}' that break the validation of '{Field}'; the plan was refused at that validation.")]
+    private static partial void ViolationCountFailed(ILogger logger, string entity, string field, Exception exception);
 }

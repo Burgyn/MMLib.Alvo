@@ -291,6 +291,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_computed_field_can_be_added_to_an_entity_that_already_holds_a_row() { }
         public System.Threading.Tasks.Task A_computed_field_is_the_expression_over_the_row_the_write_stored() { }
         public System.Threading.Tasks.Task A_filter_whose_constant_holds_braces_aggregates_exactly_the_matching_children() { }
+        public System.Threading.Tasks.Task A_filter_with_an_or_never_aggregates_another_tenants_children() { }
         public System.Threading.Tasks.Task A_filtered_rollup_counts_only_the_children_its_filter_admits() { }
         public System.Threading.Tasks.Task A_new_computed_field_can_be_added_to_a_parent_that_already_holds_rows() { }
         public System.Threading.Tasks.Task A_payload_naming_a_computed_field_is_refused_rather_than_ignored() { }

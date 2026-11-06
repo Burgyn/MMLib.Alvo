@@ -99,13 +99,16 @@ public sealed class CheckConstraintCheckTests
     public void A_validation_reaching_a_hidden_child_field_through_a_rollup_filter_is_refused(string op)
     {
         var field = op == "count" ? string.Empty : ", \"field\": \"amount\"";
-        var error = ValidateBins(
+        var errors = ValidateBins(
             """{}""",
             """{"type": "integer"}""",
             $$"""{"type": "integer", "rollup": {"from": "lines", "op": "{{op}}"{{field}}, "where": "flag == 'on'"}, "validation": "value <= 100"}""",
-            childExtraJson: """, "flag": {"type": "string", "hidden": true}""").ShouldHaveSingleItem();
+            childExtraJson: """, "flag": {"type": "string", "hidden": true}""");
 
-        error.Path.ShouldBe("/entities/bins/fields/reserved/validation");
+        // The filter is refused at its own pointer as well (Ruling 71); this fact is about the validation's refusal.
+        errors.Select(error => error.Path).ShouldBe(
+            ["/entities/bins/fields/reserved/validation", "/entities/bins/fields/reserved/rollup/where"], ignoreOrder: true);
+        var error = errors.Single(candidate => candidate.Path == "/entities/bins/fields/reserved/validation");
         error.Message.ShouldContain("'lines.flag'");
     }
 
