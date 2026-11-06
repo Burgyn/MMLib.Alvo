@@ -65,6 +65,12 @@ internal static class FilterTermParser
             return false;
         }
 
+        if (declared.IsVirtual)
+        {
+            violation = QueryViolations.VirtualField(QueryViolations.FilterPointer, declared.Name);
+            return false;
+        }
+
         return TryCompare(declared, operatorAndValue, scope, out filter, out violation);
     }
 

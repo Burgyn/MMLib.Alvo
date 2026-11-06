@@ -485,7 +485,7 @@ internal sealed class SchemaComponentBuilder(
             return !hidden.Contains(field.Name);
         }
 
-        if (hidden.Contains(field.Name) && !field.Required)
+        if (field.IsVirtual || (hidden.Contains(field.Name) && !field.Required))
         {
             return false;
         }
@@ -527,7 +527,7 @@ internal sealed class SchemaComponentBuilder(
     /// are here, and the reason both are absent from the two request schemas.
     /// </remarks>
     private bool IsReadOnly(FieldSchema field) =>
-        readOnly.Contains(field.Name) || _managed.Contains(field.Name);
+        readOnly.Contains(field.Name) || _managed.Contains(field.Name) || field.IsVirtual;
 
     /// <summary>
     /// The names a create must carry: the fields the descriptor declared <c>required</c> that a caller may
@@ -654,11 +654,12 @@ internal sealed class SchemaComponentBuilder(
     /// The field's own description, plus the enforced facets JSON Schema draft 2020-12 cannot express.
     /// </summary>
     /// <remarks>
-    /// Only two are appended, and both are refusals a caller would otherwise meet as an unexplained 422.
+    /// Two are refusals a caller would otherwise meet as an unexplained 422.
     /// A decimal's <c>precision</c>/<c>scale</c> has no faithful keyword — <c>multipleOf: 0.01</c> is the
     /// usual encoding and is a binary-floating-point trap in half the validators that read it — and a
-    /// <c>json</c> field's read-side representation is the asymmetry <see cref="WireShapeOf"/> records. Every
-    /// other declared facet reaches a real keyword, so nothing else is narrated.
+    /// <c>json</c> field's read-side representation is the asymmetry <see cref="WireShapeOf"/> records. A
+    /// <c>virtual</c> field is the third note: <c>readOnly</c> says a request may not carry it, and only prose can say
+    /// who fills it. Every other declared facet reaches a real keyword, so nothing else is narrated.
     /// </remarks>
     private static string? FieldDescription(FieldSchema field)
     {
@@ -679,6 +680,11 @@ internal sealed class SchemaComponentBuilder(
             notes.Add(
                 "Accepts any JSON value on a write, and reads back as a string carrying that value's JSON "
                 + "text.");
+        }
+
+        if (field.IsVirtual)
+        {
+            notes.Add("Virtual: filled by the host when the record is read.");
         }
 
         return notes.Count == 0 ? null : string.Join(" ", notes);

@@ -85,6 +85,12 @@ internal static class RecordValidator
         }
 
         var supplied = request.Values.TryGetValue(field.Name, out var value);
+        if (supplied && field.IsVirtual)
+        {
+            violations.Add(PayloadViolations.Virtual(field));
+            return;
+        }
+
         if (supplied && request.ReadOnlyFields.Contains(field.Name))
         {
             violations.Add(PayloadViolations.ReadOnly(field));

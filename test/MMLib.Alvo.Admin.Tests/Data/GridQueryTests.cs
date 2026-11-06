@@ -43,6 +43,21 @@ public class GridQueryTests
             "a masked term refuses the whole query, and a managed column is not what anyone types");
 
     [Fact]
+    public void A_virtual_string_field_is_never_searched()
+    {
+        var entity = _orders with
+        {
+            Fields = [.. _orders.Fields, new FieldSchema { Name = "display", Type = FieldType.String, IsVirtual = true }],
+        };
+
+        GridQuery.Searchable(entity, _masks).ShouldNotContain("display");
+    }
+
+    [Fact]
+    public void A_virtual_field_is_not_sortable()
+        => GridQuery.Sortable(new FieldSchema { Name = "display", Type = FieldType.String, IsVirtual = true }, _masks).ShouldBeFalse();
+
+    [Fact]
     public void A_term_is_an_ilike_contains_over_every_searchable_field()
     {
         var filter = GridQuery.Search(["reference", "title"], "  0002 ");
