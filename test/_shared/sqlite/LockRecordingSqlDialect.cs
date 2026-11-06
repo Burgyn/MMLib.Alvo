@@ -89,4 +89,9 @@ internal sealed class LockRecordingSqlDialect : IAlvoSqlDialect
     /// <param name="exclusive">Whether the locks are exclusive.</param>
     public string? TransactionLockStatement(IReadOnlyList<string> keyParameterMarkers, bool exclusive) =>
         ((IAlvoSqlDialect)_inner).TransactionLockStatement(keyParameterMarkers, exclusive);
+
+    /// <summary>Forwarded, so the rollup backfill a migration through this fixture plans is SQLite's own.</summary>
+    /// <param name="left">The left expression.</param>
+    /// <param name="right">The right expression.</param>
+    string IAlvoSqlDialect.RenderDistinct(string left, string right) => ((IAlvoSqlDialect)_inner).RenderDistinct(left, right);
 }

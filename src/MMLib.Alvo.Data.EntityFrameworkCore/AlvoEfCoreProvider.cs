@@ -224,8 +224,20 @@ public static class AlvoEfCoreProvider
             registration.Dialect,
             ComputedColumns(services, registration),
             CheckConstraints(services, registration),
+            registration.Fields,
+            RollupFilters(services, registration),
             services.GetService<ILogger<EfCoreSchemaMigrator>>());
     }
+
+    /// <summary>
+    /// How the apply's rollup backfill renders a <c>rollup.where</c> — the write path's own <see cref="RollupRecompute"/> —
+    /// or <see langword="null"/> when this container has no expression services, <see cref="ComputedColumns"/>' reasoning.
+    /// </summary>
+    private static Func<EntitySchema, RollupSchema, string?>? RollupFilters(
+        IServiceProvider services, RelationalProviderRegistration registration) =>
+        services.GetService<ICelCompiler>() is { } compiler && services.GetService<IPredicateRenderer>() is { } renderer
+            ? new RollupRecompute(registration.Dialect, registration.Fields, compiler, renderer).Filter
+            : null;
 
     /// <summary>
     /// The CEL-to-generated-column renderer, or <see langword="null"/> when this container has no expression

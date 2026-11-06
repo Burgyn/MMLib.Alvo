@@ -464,4 +464,37 @@ public interface IAlvoSqlDialect
     /// </summary>
     /// <param name="failure">The provider's own exception, unwrapped.</param>
     internal bool IsLockTimeout(DbException failure) => false;
+
+    /// <summary>
+    /// The statement an apply runs before it recomputes rollups over <paramref name="child"/>, holding off every write to the
+    /// child until the apply commits — or <see langword="null"/> for an engine on which no child write can interleave with
+    /// the apply (HX-11 Ruling 32).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why it exists.</b> The backfill's <c>UPDATE parent … = (SELECT … FROM child …)</c> reads the child from the
+    /// statement's snapshot, and on an engine that re-checks only the outer <c>WHERE</c> once a parent row lock is granted, a
+    /// child row committed in between is missing from the value written — the window <c>RollupRecompute</c>'s remarks
+    /// measured. A lock that lets readers through but queues writers closes it: a child write waits for the apply, and its
+    /// own recompute then runs against the new definition. SQLite needs none, because an apply holds the database's single
+    /// write lock for its whole transaction.
+    /// </para>
+    /// <para>
+    /// <b>Internal</b>, for <see cref="ApplyLockTimeoutStatement"/>'s reason: the published dialect port does not grow.
+    /// </para>
+    /// </remarks>
+    /// <param name="child">The entity a rollup aggregates.</param>
+    internal string? BackfillLockStatement(EntitySchema child) => null;
+
+    /// <summary>
+    /// The engine's NULL-safe "differs" between two SQL expressions — true when exactly one is <c>NULL</c> or both are
+    /// non-<c>NULL</c> and unequal — with which the rollup backfill writes only the parents whose aggregate changes.
+    /// </summary>
+    /// <remarks>
+    /// The SQL-standard <c>IS DISTINCT FROM</c> by default; an engine with its own spelling (SQLite's <c>IS NOT</c>)
+    /// overrides it. Internal, like <see cref="BackfillLockStatement"/>.
+    /// </remarks>
+    /// <param name="left">The left expression, already rendered.</param>
+    /// <param name="right">The right expression, already rendered.</param>
+    internal string RenderDistinct(string left, string right) => $"{left} IS DISTINCT FROM {right}";
 }

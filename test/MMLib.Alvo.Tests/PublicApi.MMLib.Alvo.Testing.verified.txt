@@ -193,6 +193,7 @@ namespace MMLib.Alvo.Testing.Data
         protected static MMLib.Alvo.AlvoContext Caller { get; }
         protected static MMLib.Alvo.Descriptor.AlvoDescriptor Descriptor { get; }
         protected static MMLib.Alvo.Schema.SchemaModel Schema { get; }
+        public System.Threading.Tasks.Task A_backfill_that_breaks_an_existing_parent_validation_is_refused_at_that_validation() { }
         public System.Threading.Tasks.Task A_before_hook_value_that_breaks_a_validation_is_refused_at_the_field() { }
         public System.Threading.Tasks.Task A_child_the_rollup_filter_excludes_never_pushes_the_parent_past_its_validation() { }
         public System.Threading.Tasks.Task A_count_the_database_cannot_run_is_refused_at_the_validation_and_applies_nothing() { }
@@ -203,6 +204,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_rollup_pushing_a_parent_past_its_validation_is_refused_at_the_child_field() { }
         public System.Threading.Tasks.Task A_validation_on_a_computed_field_holds_in_the_engine() { }
         public System.Threading.Tasks.Task A_validation_on_a_field_added_in_the_same_apply_is_guarded_by_the_ddl_alone() { }
+        public System.Threading.Tasks.Task A_validation_over_a_rollup_the_plan_changes_is_not_counted_on_its_old_values() { }
         public System.Threading.Tasks.Task A_validation_reading_a_sibling_renamed_in_the_same_apply_is_refused_at_its_pointer_and_never_500() { }
         public System.Threading.Tasks.Task A_validation_reading_an_empty_other_field_refuses_the_row() { }
         public System.Threading.Tasks.Task A_write_that_breaks_a_validation_is_refused_naming_the_field() { }
@@ -286,6 +288,9 @@ namespace MMLib.Alvo.Testing.Data
     public abstract class AlvoDataComputedRollupTests
     {
         protected AlvoDataComputedRollupTests() { }
+        protected abstract string DistinctOperator { get; }
+        public System.Threading.Tasks.Task A_backfill_never_aggregates_another_tenants_children() { }
+        public System.Threading.Tasks.Task A_backfill_rewrites_only_the_parents_whose_aggregate_changes() { }
         public System.Threading.Tasks.Task A_child_moving_across_the_filter_moves_the_aggregate_both_ways() { }
         public System.Threading.Tasks.Task A_child_write_in_one_tenant_never_moves_another_tenants_rollup() { }
         public System.Threading.Tasks.Task A_computed_field_can_be_added_to_an_entity_that_already_holds_a_row() { }
@@ -295,16 +300,19 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_filtered_rollup_counts_only_the_children_its_filter_admits() { }
         public System.Threading.Tasks.Task A_new_computed_field_can_be_added_to_a_parent_that_already_holds_rows() { }
         public System.Threading.Tasks.Task A_payload_naming_a_computed_field_is_refused_rather_than_ignored() { }
+        public System.Threading.Tasks.Task A_rollup_added_to_a_populated_parent_is_filled_by_the_apply() { }
         public System.Threading.Tasks.Task A_rollup_over_no_children_is_the_operations_own_empty_answer() { }
         public System.Threading.Tasks.Task A_tenants_rollup_never_aggregates_another_tenants_children() { }
         public System.Threading.Tasks.Task Adding_a_computed_field_is_not_classified_destructive() { }
         public System.Threading.Tasks.Task An_update_to_a_source_field_moves_the_computed_value_with_it() { }
+        public System.Threading.Tasks.Task Changing_a_filter_on_an_apply_recomputes_every_parent_at_once() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
         public System.Threading.Tasks.Task Deleting_a_child_lowers_the_parents_aggregates() { }
         public System.Threading.Tasks.Task Every_rollup_operation_is_maintained_over_the_same_children() { }
         protected abstract System.Threading.Tasks.Task<System.Exception?> ExecuteOutOfBandAsync(string sql);
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationResult> MigrateAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired);
         public System.Threading.Tasks.Task Moving_a_child_between_parents_recomputes_both() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationPlan> PlanAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired);
         public System.Threading.Tasks.Task The_engine_accepts_the_same_write_to_an_ordinary_column() { }
         public System.Threading.Tasks.Task The_engine_itself_refuses_a_write_to_a_computed_column() { }
         public System.Threading.Tasks.Task The_whole_ladder_moves_when_a_child_is_added_and_again_when_one_is_removed() { }

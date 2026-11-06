@@ -99,6 +99,20 @@ public abstract class AlvoDataComputedRollupTests
     /// <param name="desired">The schema to migrate it to.</param>
     protected abstract Task<MigrationResult> MigrateAsync(SchemaModel current, SchemaModel desired);
 
+    /// <summary>
+    /// Plans the change from <paramref name="current"/> to <paramref name="desired"/> against the store the most recent
+    /// <see cref="CreateAsync"/> stood up, without applying it.
+    /// </summary>
+    /// <param name="current">The schema the store currently holds.</param>
+    /// <param name="desired">The schema to migrate it to.</param>
+    protected abstract Task<MigrationPlan> PlanAsync(SchemaModel current, SchemaModel desired);
+
+    /// <summary>The engine's NULL-safe "differs" operator: <c>IS DISTINCT FROM</c> on PostgreSQL, <c>IS NOT</c> on SQLite.</summary>
+    protected abstract string DistinctOperator { get; }
+
+    private async Task ApplyAsync(SchemaModel current, SchemaModel desired) =>
+        (await MigrateAsync(current, desired)).Applied.ShouldBeTrue();
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>
@@ -579,6 +593,71 @@ public abstract class AlvoDataComputedRollupTests
         (await ReadAsync(data, product, Acme))[HeldTotal].ShouldBe(12m, "Acme's own two children, and nothing of Globex's");
     }
 
+    /// <summary>
+    /// An apply that changes a rollup's filter recomputes every parent in that apply (Ruling 32): the stored aggregate never
+    /// waits for a child write to catch up with the new definition.
+    /// </summary>
+    [Fact]
+    public async Task Changing_a_filter_on_an_apply_recomputes_every_parent_at_once()
+    {
+        var data = await CreateAsync(FilteredSchema, FilteredDescriptor);
+        var product = await CreateProductAsync(data);
+        await CreateReservationAsync(data, product, 2m, "held");
+        await CreateReservationAsync(data, product, 5m, "released");
+
+        await ApplyAsync(FilteredSchema, ReleasedFilterSchema);
+
+        (await ReadAsync(data, product))["held_total"].ShouldBe(5m, "the backfill ran in the apply, before any child write");
+    }
+
+    /// <summary>
+    /// A rollup added to a parent that already holds rows is filled by the apply, rather than reading empty until a child
+    /// write (Ruling 32 — the old staleness this fixes).
+    /// </summary>
+    [Fact]
+    public async Task A_rollup_added_to_a_populated_parent_is_filled_by_the_apply()
+    {
+        var data = await CreateAsync(WithoutRollupSchema, FilteredDescriptor);
+        var product = await CreateProductAsync(data);
+        await CreateReservationAsync(data, product, 2m, "held");
+
+        await ApplyAsync(WithoutRollupSchema, FilteredSchema);
+
+        (await ReadAsync(data, product))["held_total"].ShouldBe(2m);
+    }
+
+    /// <summary>
+    /// The backfill writes only the parents whose aggregate differs, by the engine's NULL-safe comparison — an unchanged
+    /// parent costs neither a row version nor a row lock (Ruling 32).
+    /// </summary>
+    [Fact]
+    public async Task A_backfill_rewrites_only_the_parents_whose_aggregate_changes()
+    {
+        await CreateAsync(FilteredSchema, FilteredDescriptor);
+
+        var plan = await PlanAsync(FilteredSchema, ReleasedFilterSchema);
+
+        plan.Sql[^1].ShouldContain(DistinctOperator, Case.Sensitive, "an unchanged parent is not rewritten (no WAL, no row lock)");
+    }
+
+    /// <summary>
+    /// The backfill's tenant predicate, pinned (Ruling 32): Globex's released child names Acme's product, and the apply that
+    /// switches the filter to <c>released</c> recomputes Acme's row from Acme's own children alone.
+    /// </summary>
+    [Fact]
+    public async Task A_backfill_never_aggregates_another_tenants_children()
+    {
+        var data = await CreateAsync(ScopedFilteredSchema("status == 'held'"), ScopedFilteredDescriptor("status == 'held'"));
+        var product = await CreateProductAsync(data, Acme);
+        await CreateReservationAsync(data, product, 10m, "held", Acme);
+        await CreateReservationAsync(data, product, 2m, "released", Acme);
+        await CreateReservationAsync(data, product, 5m, "released", Globex);
+
+        await ApplyAsync(ScopedFilteredSchema("status == 'held'"), ScopedFilteredSchema("status == 'released'"));
+
+        (await ReadAsync(data, product, Acme))[HeldTotal].ShouldBe(2m, "Acme's own released child, and nothing of Globex's");
+    }
+
     private const string Invoices = "invoices";
 
     private const string Items = "invoice_items";
@@ -957,6 +1036,20 @@ public abstract class AlvoDataComputedRollupTests
 
     /// <summary>A filter admitting both statuses through an <c>||</c>.</summary>
     private const string EitherStatus = "status == 'held' || status == 'released'";
+
+    /// <summary><see cref="FilteredSchema"/> with the filter switched to released reservations.</summary>
+    private static SchemaModel ReleasedFilterSchema => FilteredSchemaFor("status == 'released'");
+
+    /// <summary><see cref="FilteredSchema"/> before <c>held_total</c> was declared.</summary>
+    private static SchemaModel WithoutRollupSchema
+    {
+        get
+        {
+            var filtered = FilteredSchema;
+            var products = filtered.Entities[0];
+            return new([products with { Fields = [.. products.Fields.Where(declared => declared.Name != HeldTotal)] }, filtered.Entities[1]]);
+        }
+    }
 
     /// <summary>The filtered pair with both entities tenant-scoped, as the adversarial facts need.</summary>
     private static AlvoDescriptor ScopedFilteredDescriptor(string where)

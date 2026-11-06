@@ -153,6 +153,19 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
     /// <remarks>Decided from the SQLSTATE alone, like <see cref="DecodeConstraintViolation"/>.</remarks>
     bool IAlvoSqlDialect.IsLockTimeout(DbException failure) => failure is PostgresException { SqlState: LockNotAvailable };
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <c>SHARE</c> admits readers and the apply's own statements, and conflicts with the <c>ROW EXCLUSIVE</c> every insert,
+    /// update and delete takes — so a child write queues behind the apply and commits after it, recomputing under the new
+    /// definition (HX-11 Ruling 32). Held until the apply commits, and bounded by its <c>lock_timeout</c> like every other
+    /// lock the apply waits for.
+    /// </remarks>
+    string? IAlvoSqlDialect.BackfillLockStatement(EntitySchema child)
+    {
+        ArgumentNullException.ThrowIfNull(child);
+        return $"LOCK TABLE {RenderTable(child, lockedPreImageFor: null)} IN SHARE MODE";
+    }
+
     /// <summary>
     /// <see langword="null"/> for an absent name, because <c>PostgresException</c> answers
     /// <see cref="string.Empty"/> rather than <see langword="null"/> when the server sent no constraint

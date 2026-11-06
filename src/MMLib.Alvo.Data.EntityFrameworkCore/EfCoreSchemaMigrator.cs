@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
 using System.Data.Common;
@@ -49,6 +50,8 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     private readonly IAlvoSqlDialect _dialect;
     private readonly ComputedColumnSql? _computed;
     private readonly CheckConstraintSql? _checks;
+    private readonly IFieldSqlRenderer? _fields;
+    private readonly Func<EntitySchema, RollupSchema, string?> _rollupFilter;
     private readonly ILogger _logger;
     private readonly ConditionalWeakTable<MigrationPlan, SchemaModel> _plannedAgainst = [];
 
@@ -72,6 +75,15 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     /// Renders a field's <c>validation</c> to this driver's CHECK constraint SQL, or <see langword="null"/> when the
     /// container registered no expression services — a schema declaring one is then refused by name.
     /// </param>
+    /// <param name="fields">
+    /// This driver's field renderer, with which an apply recomputes the rollups it adds or changes
+    /// (<see cref="RollupBackfill"/>), or <see langword="null"/> for a container wired without one — a plan that needs a
+    /// backfill is then refused by name rather than leaving the parents stale.
+    /// </param>
+    /// <param name="rollupFilter">
+    /// Renders a rollup's <c>where</c> over its child — the write path's own rendering — or <see langword="null"/> when the
+    /// container registered no expression services, and a filtered rollup's backfill is refused by name.
+    /// </param>
     /// <param name="logger">
     /// Where a violation count the database could not run is recorded for the operator, the caller seeing only the
     /// refusal; <see langword="null"/> discards it.
@@ -85,6 +97,8 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         IAlvoSqlDialect dialect,
         ComputedColumnSql? computed,
         CheckConstraintSql? checks,
+        IFieldSqlRenderer? fields = null,
+        Func<EntitySchema, RollupSchema, string?>? rollupFilter = null,
         ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(differ);
@@ -102,6 +116,8 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         _dialect = dialect;
         _computed = computed;
         _checks = checks;
+        _fields = fields;
+        _rollupFilter = rollupFilter ?? NoFilterRenderer;
         _logger = logger ?? NullLogger.Instance;
     }
 
@@ -132,8 +148,10 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         }
 
         var operations = ForThisEngine(AssembleOperations(prePass, residual));
+        var backfill = Backfill(prePass.AlignedCurrent, desired);
         var steps = BuildSemanticSteps(prePass, desired, residual);
-        var sql = GenerateSql(operations, desiredModel);
+        steps.AddRange(backfill.Select(BackfillStep));
+        var sql = GenerateSql(operations, desiredModel, backfill);
 
         var plan = new MigrationPlan { Steps = steps, Sql = sql };
         _plannedAgainst.AddOrUpdate(plan, desired);
@@ -293,11 +311,73 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     // excludes a not-yet-added column from its INSERT ... SELECT). Generating per operation would
     // emit SQL referencing columns that do not exist at that point.
     // The dialect's lock-timeout statement leads, so it is the first statement of the apply's transaction on either executor
-    // and a dry run shows it (HX-11 Ruling 20).
-    private IReadOnlyList<string> GenerateSql(List<MigrationOperation> operations, IModel desiredModel) =>
-        operations.Count == 0
+    // and a dry run shows it (HX-11 Ruling 20). The rollup backfill follows EF's DDL, so it reads and writes the columns the
+    // DDL has just made (Ruling 32).
+    private IReadOnlyList<string> GenerateSql(
+        List<MigrationOperation> operations, IModel desiredModel, IReadOnlyList<RollupBackfill.Statement> backfill)
+    {
+        if (operations.Count == 0 && backfill.Count == 0)
+        {
+            return [];
+        }
+
+        var ddl = operations.Count == 0
             ? []
-            : [.. LockTimeout, .. _sqlGenerator.Generate(operations, desiredModel).Select(command => command.CommandText)];
+            : _sqlGenerator.Generate(operations, desiredModel).Select(command => command.CommandText);
+        return [.. LockTimeout, .. ddl, .. BackfillSql(backfill)];
+    }
+
+    /// <summary>
+    /// The rollup recomputes this plan needs (HX-11 Ruling 32), over the current schema as the declared renames leave it —
+    /// so a renamed parent or field is compared under its new name.
+    /// </summary>
+    private IReadOnlyList<RollupBackfill.Statement> Backfill(SchemaModel alignedCurrent, SchemaModel desired)
+    {
+        if (RollupBackfill.Targets(alignedCurrent, desired).Count == 0)
+        {
+            return [];
+        }
+
+        var fields = _fields ?? throw new InvalidOperationException(
+            "This plan adds or changes a rollup on a table that already holds rows, which the apply recomputes — and this "
+            + "migrator was built without the driver's field renderer to write that recompute with. Register the driver "
+            + "through its UseSqlite/UsePostgreSql entry point, which supplies it.");
+        return RollupBackfill.Statements(alignedCurrent, desired, _dialect, fields, _rollupFilter);
+    }
+
+    // Each child's lock leads the first recompute over it, so every child write waits for the apply (Ruling 32).
+    private IEnumerable<string> BackfillSql(IReadOnlyList<RollupBackfill.Statement> backfill)
+    {
+        var locked = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var statement in backfill)
+        {
+            if (locked.Add(statement.Child.Name) && _dialect.BackfillLockStatement(statement.Child) is { } lockStatement)
+            {
+                yield return lockStatement;
+            }
+
+            yield return statement.Sql;
+        }
+    }
+
+    private MigrationStep BackfillStep(RollupBackfill.Statement statement) => ToStep(
+        new SchemaChange
+        {
+            Kind = SchemaChangeKind.AlterField,
+            Entity = statement.Entity,
+            Field = statement.Field,
+            Detail = "Recomputes the rollup for every record.",
+        },
+        _dialect.BackfillLockStatement(statement.Child) is null
+            ? null
+            : $"Locks writes to '{statement.Child.Name}' and every changed parent row until the apply commits.");
+
+    private static string? NoFilterRenderer(EntitySchema child, RollupSchema rollup) =>
+        rollup.Where is null
+            ? null
+            : throw new InvalidOperationException(
+                $"A rollup over '{child.Name}' declares a 'where' filter, which the apply's recompute renders with the "
+                + "expression services — and this container registered none. Call AddAlvo() on the host's builder.");
 
     private IEnumerable<string> LockTimeout =>
         _dialect.ApplyLockTimeoutStatement is { } statement ? [statement] : [];

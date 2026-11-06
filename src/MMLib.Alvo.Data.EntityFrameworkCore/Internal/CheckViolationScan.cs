@@ -36,8 +36,10 @@ internal static class CheckViolationScan
     /// A constraint is countable only when its table exists in <paramref name="current"/> under that name and is not
     /// renamed by this plan, <b>and every column it reads</b> exists there under the same name and is neither the target of
     /// a declared rename nor altered by this plan — otherwise the count would name a column that does not exist yet, or
-    /// read one whose values the apply is about to change. Every other constraint is guarded by the DDL alone, and an
-    /// engine refusal there is translated by <see cref="CheckApplyRefusal"/>.
+    /// read one whose values the apply is about to change. A rollup whose definition the plan changes is one of those: the
+    /// table holds the old definition's aggregate until the apply's backfill (<see cref="RollupBackfill"/>), so a count
+    /// over it would judge values the apply replaces (Task 9 review m4). Every other constraint is guarded by the DDL
+    /// alone, and an engine refusal there is translated by <see cref="CheckApplyRefusal"/>.
     /// </remarks>
     /// <param name="current">The schema the database holds.</param>
     /// <param name="desired">The schema being planned.</param>
@@ -65,7 +67,7 @@ internal static class CheckViolationScan
         }
 
         return checks.Reads(owner.Entity, owner.Field) is { } reads
-            && reads.All(column => Unchanged(column, stored, renames, residual))
+            && reads.All(column => Unchanged(column, stored, renames, residual) && !Recomputed(column, stored, entity))
             ? new Target(owner.Entity, owner.Field, add)
             : null;
     }
@@ -75,6 +77,10 @@ internal static class CheckViolationScan
         stored.Fields.Any(field => field.Name == column)
         && !renames.OfType<RenameColumnOperation>().Any(rename => rename.Table == stored.Name && rename.NewName == column)
         && !residual.OfType<AlterColumnOperation>().Any(alter => alter.Table == stored.Name && alter.Name == column);
+
+    private static bool Recomputed(string column, EntitySchema stored, EntitySchema desired) =>
+        desired.Fields.FirstOrDefault(field => field.Name == column) is { Rollup: not null } field
+        && RollupBackfill.Changed(stored, field);
 
     private static EntitySchema? Named(SchemaModel schema, string name) =>
         schema.Entities.FirstOrDefault(entity => string.Equals(entity.Name, name, StringComparison.Ordinal));

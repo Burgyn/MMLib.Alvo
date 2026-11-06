@@ -100,6 +100,46 @@ public sealed class PostgreSqlRollupRaceTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// A filtered rollup under the same race (HX-11 acceptance 3): children land on both sides of
+    /// <c>kind == 'sale'</c>, and the parent's <c>sum</c> counts exactly the sale lines — the filter rides the
+    /// lock-then-recompute, so no admitted child is lost and no excluded one counted.
+    /// </summary>
+    /// <remarks>
+    /// Its control was run (2026-11-06): with <c>RollupRecompute</c>'s parent lock skipped, <c>total</c> read <b>1</b> of 13
+    /// while every writer committed.
+    /// </remarks>
+    [Fact]
+    public async Task Concurrent_child_writes_on_both_sides_of_the_filter_all_land_correctly()
+    {
+        var host = await _fixture.StartAsync(SchemaFor(Sale), DescriptorFor(Sale), configure: Sleeping);
+        var order = await CreateOrderAsync(host.Data);
+
+        var writes = StartWriters(host.Data, order);
+        await ObserveAsync(writes);
+
+        writes.ShouldAllBe(write => write.IsCompletedSuccessfully, "a rollup that serialises by failing writers is not a fix");
+        (await host.Data.GetAsync(Orders, order, Caller, Ct))![Total].ShouldBe(Sales * 1m, "every sale line, and no refund line");
+    }
+
+    /// <summary>The filter the race facts start from.</summary>
+    private const string Sale = "kind == 'sale'";
+
+    /// <summary>How many of the <see cref="Writers"/> lines are sales: every third line is a refund.</summary>
+    private const int Sales = Writers - Refunds;
+
+    /// <summary>How many of the <see cref="Writers"/> lines are refunds.</summary>
+    private const int Refunds = (Writers + 2) / 3;
+
+    /// <summary>One writer per line — every third a <c>refund</c>, the rest <c>sale</c> — all started at once.</summary>
+    private static Task<AlvoRecord>[] StartWriters(IAlvoData data, Guid order) =>
+        [.. Enumerable.Range(0, Writers).Select(index => CreateLineAsync(data, order, index % 3 == 0 ? "refund" : "sale"))];
+
+    /// <summary>Waits for every writer, observing a fault rather than rethrowing it — see the first fact.</summary>
+    private static Task ObserveAsync(Task<AlvoRecord>[] writes) =>
+        Task.WhenAll(writes.Select(write => write.ContinueWith(
+            _ => { }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default)));
+
+    /// <summary>
     /// Registers the widening renderer <em>after</em> <c>AddAlvo</c>, which is the same seam a host uses to
     /// substitute one of a driver's services: the driver registers its own with <c>TryAdd</c>, so the last
     /// explicit registration is the one resolved.
@@ -138,6 +178,10 @@ public sealed class PostgreSqlRollupRaceTests : IAsyncLifetime
 
         public string RenderCaseInsensitiveLike(string left, string right) => inner.RenderCaseInsensitiveLike(left, right);
 
+        /// <summary>Forwarded, so a filter's text constant renders as the driver's own literal.</summary>
+        /// <param name="value">The constant.</param>
+        public string? RenderStringLiteral(string value) => inner.RenderStringLiteral(value);
+
         public (string Left, string Right) RenderComparableOperands(string left, string right, CelValueType type) =>
             type == CelValueType.Decimal ? (Slow(left), Slow(right)) : inner.RenderComparableOperands(left, right, type);
 
@@ -170,14 +214,17 @@ public sealed class PostgreSqlRollupRaceTests : IAsyncLifetime
             Orders, new Dictionary<string, object?>(StringComparer.Ordinal), Caller, cancellationToken: Ct))["id"]!;
 
     /// <summary>One child worth exactly <c>1</c>, so the expected total is the writer count and nothing else.</summary>
-    private static Task<AlvoRecord> CreateLineAsync(IAlvoData data, Guid order) =>
+    private static Task<AlvoRecord> CreateLineAsync(IAlvoData data, Guid order, string kind = "sale") =>
         data.CreateAsync(
             Lines,
-            new Dictionary<string, object?>(StringComparer.Ordinal) { [Order] = order, ["amount"] = 1m },
+            new Dictionary<string, object?>(StringComparer.Ordinal) { [Order] = order, ["amount"] = 1m, ["kind"] = kind },
             Caller,
             cancellationToken: Ct);
 
-    private static AlvoDescriptor Descriptor => new()
+    private static AlvoDescriptor Descriptor => DescriptorFor(where: null);
+
+    /// <summary>The pair with <c>orders.total</c> filtered by <paramref name="where"/>, or unfiltered.</summary>
+    private static AlvoDescriptor DescriptorFor(string? where) => new()
     {
         ApiVersion = "alvo.dev/v1",
         Name = "rollup-race",
@@ -188,7 +235,7 @@ public sealed class PostgreSqlRollupRaceTests : IAsyncLifetime
                 Tenancy = EntityTenancy.Global,
                 Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
                 {
-                    [Total] = new() { Type = DescField.Decimal, Rollup = new() { From = Lines, Op = RollupOp.Sum, Field = "amount" } },
+                    [Total] = new() { Type = DescField.Decimal, Rollup = new() { From = Lines, Op = RollupOp.Sum, Field = "amount", Where = where } },
                     [LineCount] = new() { Type = DescField.Integer, Rollup = new() { From = Lines, Op = RollupOp.Count } },
                 },
                 Rules = AllowAll,
@@ -200,6 +247,7 @@ public sealed class PostgreSqlRollupRaceTests : IAsyncLifetime
                 {
                     [Order] = new() { Type = DescField.Ref, Entity = Orders, Required = true },
                     ["amount"] = new() { Type = DescField.Decimal, Required = true },
+                    ["kind"] = new() { Type = DescField.String },
                 },
                 Rules = AllowAll,
             },
@@ -209,7 +257,10 @@ public sealed class PostgreSqlRollupRaceTests : IAsyncLifetime
     private static AccessRules AllowAll =>
         new() { List = "true", Get = "true", Create = "true", Update = "true", Delete = "true" };
 
-    private static SchemaModel Schema => new([
+    private static SchemaModel Schema => SchemaFor(where: null);
+
+    /// <summary>The schema <see cref="DescriptorFor"/> maps to.</summary>
+    private static SchemaModel SchemaFor(string? where) => new([
         new EntitySchema
         {
             Name = Orders,
@@ -224,7 +275,7 @@ public sealed class PostgreSqlRollupRaceTests : IAsyncLifetime
                     Precision = 18,
                     Scale = 2,
                     Nullable = true,
-                    Rollup = new RollupSchema { From = Lines, Op = RollupOperation.Sum, Field = "amount", Via = Order },
+                    Rollup = new RollupSchema { From = Lines, Op = RollupOperation.Sum, Field = "amount", Via = Order, Where = where },
                 },
                 new FieldSchema
                 {
@@ -250,6 +301,7 @@ public sealed class PostgreSqlRollupRaceTests : IAsyncLifetime
                     Reference = new RefSchema(Orders, MMLib.Alvo.Schema.OnDelete.Cascade),
                 },
                 new FieldSchema { Name = "amount", Type = SchemaField.Decimal, Precision = 18, Scale = 2, Required = true },
+                new FieldSchema { Name = "kind", Type = SchemaField.String, Nullable = true },
             ],
         },
     ]);

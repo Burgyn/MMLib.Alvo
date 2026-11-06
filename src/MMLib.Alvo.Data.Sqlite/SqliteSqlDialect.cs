@@ -37,6 +37,10 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     public string RenderColumn(string columnName) => AlvoSqlIdentifier.Quote(columnName);
 
     /// <inheritdoc/>
+    /// <remarks>SQLite's own NULL-safe comparison, which every SQLite version this driver supports understands.</remarks>
+    string IAlvoSqlDialect.RenderDistinct(string left, string right) => $"{left} IS NOT {right}";
+
+    /// <inheritdoc/>
     public string RenderNullProjection(string storeType)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(storeType);
