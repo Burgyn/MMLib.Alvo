@@ -73,6 +73,11 @@ internal static class FunctionOffer
     public static Insertion Template(OfferedFunction function, string? firstArgument)
     {
         Debug.Assert(firstArgument is null || function.Parameters.Count > 0, "A parameterless function never takes a first argument.");
+        if (function.TakesConstantOnly && firstArgument is null && function.Parameters.Count == 1)
+        {
+            return ConstantTemplate(function);
+        }
+
         var arguments = function.Parameters
             .Select((parameter, index) => index == 0 && firstArgument is not null ? firstArgument : parameter.Name)
             .ToList();
@@ -132,6 +137,17 @@ internal static class FunctionOffer
         var to = Math.Clamp(end, from, text.Length);
         var written = string.Concat(text.AsSpan(0, from), template.Text, text.AsSpan(to));
         return new Insertion(written, from + template.SelectFrom, template.SelectLength);
+    }
+
+    /// <summary>
+    /// <c>duration('1h')</c>, with <c>1h</c> selected: a constant-only function's placeholder must itself be a constant, or
+    /// the inserted call names a field (<c>text</c>) the check refuses before the operator has typed anything.
+    /// </summary>
+    private static Insertion ConstantTemplate(OfferedFunction function)
+    {
+        const string Example = "1h";
+        var text = $"{function.Name}('{Example}')";
+        return new Insertion(text, function.Name.Length + 2, Example.Length);
     }
 
     private static OfferedFunction Offer(IGrouping<string, CelFunctionInfo> overloads)

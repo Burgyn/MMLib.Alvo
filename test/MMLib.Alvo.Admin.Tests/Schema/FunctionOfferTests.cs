@@ -132,6 +132,19 @@ public class FunctionOfferTests
         FunctionOffer.FirstArgument(offered, "beforeCreate", new FieldSchema { Name = "code", Type = FieldType.String }).ShouldBeNull();
     }
 
+    /// <summary>
+    /// A constant-only function inserts a constant it compiles with, its inside selected to retype — a bare
+    /// <c>duration(text)</c> named a field <c>text</c> the check then refused (HX-11 Task 1 note).
+    /// </summary>
+    [Fact]
+    public void A_function_that_yields_a_duration_inserts_a_constant_with_its_inside_selected()
+    {
+        var catalog = new[] { Info("duration", CelValueType.Duration, CelFunctionProvenance.BuiltIn, _both, ("text", CelValueType.String)) };
+
+        FunctionOffer.Template(FunctionOffer.For(catalog, CelProfile.Mutate).Single(), firstArgument: null)
+            .ShouldBe(new Insertion("duration('1h')", 10, 2));
+    }
+
     [Fact]
     public void An_int_field_fills_a_decimal_parameter() =>
         FunctionOffer.FirstArgument(Offered("tax"), "beforeCreate", new FieldSchema { Name = "qty", Type = FieldType.Integer }).ShouldBe("new.qty");

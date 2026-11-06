@@ -34,7 +34,8 @@ public sealed class FunctionOfferAgreementTests
     public void Every_template_compiles_once_its_placeholders_are_values(string name)
     {
         var offered = Offered(name, CelProfile.Mutate);
-        FunctionOffer.Template(offered, firstArgument: null).Text.ShouldBe(Call(offered, [.. offered.Parameters.Select(p => p.Name)]));
+        FunctionOffer.Template(offered, firstArgument: null).Text
+            .ShouldBe(Call(offered, offered.TakesConstantOnly ? Values(offered) : [.. offered.Parameters.Select(p => p.Name)]));
 
         var source = StorableValue(offered, Call(offered, Values(offered)));
 
