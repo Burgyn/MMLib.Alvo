@@ -225,7 +225,7 @@ internal sealed class HandlerBinding(HandlerRegistration handler, ICelCompiler c
     }
 
     private void Add(string slot, string message, string fix) =>
-        _problems.Add(new ExtensionProblem(handler.Id, ExtensionBindingCompiler.HandlerKind, Locator(slot), message, fix));
+        _problems.Add(new ExtensionProblem(handler.Id, ExtensionBindingCompiler.KindOf(handler), Locator(slot), message, fix));
 
     private string Locator(string slot) => $"extensions/{handler.Id}/{slot}";
 

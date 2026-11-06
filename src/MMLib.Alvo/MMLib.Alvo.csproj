@@ -46,6 +46,8 @@
     <!-- Runtime support types (JsonAny/ValidationContext/etc.) the generated code needs at
          execution time — a normal lightweight runtime dependency, no Roslyn. -->
     <PackageReference Include="Corvus.Json.ExtendedTypes" />
+    <!-- Cron parsing for AddSchedule: MIT, no dependencies, and DST-correct in an IANA zone. -->
+    <PackageReference Include="Cronos" />
   </ItemGroup>
 
   <!--

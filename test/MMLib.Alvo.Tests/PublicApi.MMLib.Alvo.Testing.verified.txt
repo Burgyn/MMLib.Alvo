@@ -1009,6 +1009,7 @@ namespace MMLib.Alvo.Testing.Scheduling
         public System.Threading.Tasks.Task A_cancel_at_a_stale_generation_leaves_a_timer_re_armed_since_the_claim() { }
         public System.Threading.Tasks.Task A_cancel_during_a_claim_leaves_the_fire_nothing_to_append() { }
         public System.Threading.Tasks.Task A_cancel_of_an_unknown_key_answers_false() { }
+        public System.Threading.Tasks.Task A_claim_takes_only_the_ids_it_names() { }
         public System.Threading.Tasks.Task A_claim_takes_the_earliest_due_first_and_at_most_the_batch() { }
         public System.Threading.Tasks.Task A_due_timer_is_claimed_once_and_fired_once() { }
         public System.Threading.Tasks.Task A_fire_removes_the_timer_and_appends_its_event_in_one_commit() { }
@@ -1029,7 +1030,7 @@ namespace MMLib.Alvo.Testing.Scheduling
         protected virtual void EnsureEngineAvailable() { }
         public System.Threading.Tasks.Task Racing_claimants_advance_one_occurrence_once() { }
         public System.Threading.Tasks.Task Syncing_a_changed_cron_moves_the_next_run_and_an_unchanged_one_keeps_it() { }
-        public System.Threading.Tasks.Task Syncing_drops_schedules_no_longer_registered() { }
+        public System.Threading.Tasks.Task Syncing_deletes_a_retired_schedule_and_never_an_unlisted_one() { }
         public System.Threading.Tasks.Task The_same_key_in_two_scopes_is_two_timers() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Scheduling.ITimerStoreWorld> WorldAsync();
     }

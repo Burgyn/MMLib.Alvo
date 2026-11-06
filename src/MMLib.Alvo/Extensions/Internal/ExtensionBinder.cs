@@ -14,7 +14,11 @@ namespace MMLib.Alvo.Extensions.Internal;
 /// and logs the rest once per catalog). Each catalog is bound once.
 /// </summary>
 internal sealed class ExtensionBinder(
-    ExtensionRegistry registry, ICelCompiler compiler, IServiceProviderIsService services, ILogger<ExtensionBinder> logger)
+    ExtensionRegistry registry,
+    ICelCompiler compiler,
+    IServiceProviderIsService services,
+    ILogger<ExtensionBinder> logger,
+    TimeProvider? time = null)
 {
     private readonly ConditionalWeakTable<PolicyCatalog, CatalogBinding> _bindings = new();
 
@@ -23,7 +27,7 @@ internal sealed class ExtensionBinder(
     internal void EnsureRegistrable()
     {
         registry.Seal();
-        var result = ExtensionBindingCompiler.Check(registry, compiler, services);
+        var result = ExtensionBindingCompiler.Check(registry, compiler, services, Now);
         foreach (var tie in result.Ties)
         {
             ExtensionLog.ExtensionOrderTie(logger, tie.Target, tie.Order, string.Join(", ", tie.Ids));
@@ -72,10 +76,13 @@ internal sealed class ExtensionBinder(
     private static string Described(IEnumerable<ExtensionProblem> problems) =>
         string.Join("; ", problems.Select(problem => $"{problem.Locator}: {problem.Message}"));
 
+    /// <summary>The instant a schedule's cron must still fire after — the host's clock, so a boot check agrees with a fake one.</summary>
+    private DateTimeOffset Now => (time ?? TimeProvider.System).GetUtcNow();
+
     private CatalogBinding Binding(PolicyCatalog catalog)
     {
         registry.Seal();
-        return _bindings.GetValue(catalog, primed => new(ExtensionBindingCompiler.Compile(registry, primed, compiler, services)));
+        return _bindings.GetValue(catalog, primed => new(ExtensionBindingCompiler.Compile(registry, primed, compiler, services, Now)));
     }
 
     /// <summary>One catalog's binding, and whether its unbound extensions were reported.</summary>
