@@ -44,7 +44,7 @@ internal sealed class ExtensionStateGuard(ExtensionRegistry registry, IDeliveryS
         await EnsureStoreAsync(cancellationToken).ConfigureAwait(false);
         var known = registry.All.Select(registration => registration.Id).ToHashSet(StringComparer.Ordinal);
         var orphans = (await store.PendingSubscribersAsync(cancellationToken).ConfigureAwait(false))
-            .Where(id => !known.Contains(id)).ToList();
+            .Where(id => !known.Contains(id) && !DescriptorActionIds.IsDescriptorAction(id)).ToList();
         if (orphans.Count > 0)
         {
             throw Orphaned(orphans);

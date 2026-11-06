@@ -6,8 +6,8 @@ using MMLib.Alvo.Rules;
 namespace MMLib.Alvo.Events.Internal;
 
 /// <summary>
-/// Runs one compiled after-hook's action against one event: a <c>webhook</c> POST, or an <c>email</c> through
-/// the mail port. The other three action types the frozen schema declares never reach here.
+/// Runs one compiled <c>webhook</c> or <c>email</c> action against one event, as its own delivery: a POST, or a message through
+/// the mail port. <see cref="DescriptorActionRunner"/> routes the other action types elsewhere.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -41,8 +41,9 @@ internal sealed class EventActionExecutor(
     IEmailSender email,
     ILogger<EventActionExecutor> logger)
 {
-    /// <summary>Runs <paramref name="hook"/>'s action for <paramref name="event"/>.</summary>
-    /// <param name="hook">The compiled hook, whose condition has already selected it.</param>
+    /// <summary>Runs <paramref name="action"/> for <paramref name="event"/>.</summary>
+    /// <param name="action">The compiled action, whose condition has already selected it.</param>
+    /// <param name="subscriber">The delivery's subscriber id, which names it in the log and in a refusal.</param>
     /// <param name="event">The event the action's templates render against.</param>
     /// <param name="cancellationToken">A token to cancel the action; cancelled when the host is shutting down.</param>
     /// <exception cref="InvalidOperationException">
@@ -50,12 +51,13 @@ internal sealed class EventActionExecutor(
     /// resolved endpoint — both unreachable from a descriptor, and both an invariant rather than an
     /// author's mistake.
     /// </exception>
-    internal Task ExecuteAsync(CompiledAfterHook hook, AlvoEvent @event, CancellationToken cancellationToken)
+    internal Task ExecuteAsync(CompiledAction action, string subscriber, AlvoEvent @event, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(hook);
+        ArgumentNullException.ThrowIfNull(action);
         ArgumentNullException.ThrowIfNull(@event);
+        var hook = new ActionRun(action, subscriber);
 
-        return hook.Action.Action switch
+        return action.Action switch
         {
             WebhookAction => DeliverAsync(hook, @event, cancellationToken),
             EmailAction => SendAsync(hook, @event, cancellationToken),
@@ -63,7 +65,10 @@ internal sealed class EventActionExecutor(
         };
     }
 
-    private async Task DeliverAsync(CompiledAfterHook hook, AlvoEvent @event, CancellationToken cancellationToken)
+    /// <summary>One action and the subscriber id it runs as.</summary>
+    private sealed record ActionRun(CompiledAction Action, string Path);
+
+    private async Task DeliverAsync(ActionRun hook, AlvoEvent @event, CancellationToken cancellationToken)
     {
         await webhooks
             .PostAsync(EndpointOf(hook), BodyOf(hook, @event), cancellationToken)
@@ -72,7 +77,7 @@ internal sealed class EventActionExecutor(
         Executed(hook, @event);
     }
 
-    private async Task SendAsync(CompiledAfterHook hook, AlvoEvent @event, CancellationToken cancellationToken)
+    private async Task SendAsync(ActionRun hook, AlvoEvent @event, CancellationToken cancellationToken)
     {
         await email.SendAsync(Checked(hook, MessageOf(hook.Action, @event)), cancellationToken).ConfigureAwait(false);
 
@@ -95,7 +100,7 @@ internal sealed class EventActionExecutor(
     /// does not parse is refused here rather than sent.
     /// </para>
     /// </remarks>
-    private static string BodyOf(CompiledAfterHook hook, AlvoEvent @event) =>
+    private static string BodyOf(ActionRun hook, AlvoEvent @event) =>
         !hook.Action.Templates.TryGetValue(ActionSlot.Payload, out var payload) ? AlvoEventJson.Write(WithoutClaims(@event))
         : JsonPayload.TryRender(payload, @event, out var body) ? body
         : throw NotJson(hook);
@@ -110,7 +115,7 @@ internal sealed class EventActionExecutor(
     /// The message, refused before it reaches the port when a rendered header is not one — a recipient that is
     /// not exactly one mailbox, or a line break in the recipient or the subject.
     /// </summary>
-    private static AlvoMailMessage Checked(CompiledAfterHook hook, AlvoMailMessage message) =>
+    private static AlvoMailMessage Checked(ActionRun hook, AlvoMailMessage message) =>
         MailHeaders.RefusedSlot(message) is { } slot ? throw UnsafeHeader(hook, slot) : message;
 
     /// <summary>
@@ -125,28 +130,28 @@ internal sealed class EventActionExecutor(
     private static string Render(CompiledAction action, string slot, AlvoEvent @event) =>
         action.Templates.TryGetValue(slot, out var template) ? template.Render(@event) : string.Empty;
 
-    private void Executed(CompiledAfterHook hook, AlvoEvent @event) => EventLog.ActionExecuted(
+    private void Executed(ActionRun hook, AlvoEvent @event) => EventLog.ActionExecuted(
         logger, hook.Path, hook.Action.TypeName, @event.Id, @event.Type);
 
-    private static WebhookTarget EndpointOf(CompiledAfterHook hook) =>
+    private static WebhookTarget EndpointOf(ActionRun hook) =>
         hook.Action.Endpoint ?? throw UnresolvedEndpoint(hook);
 
     /// <summary>
     /// The arm no descriptor can reach: the three remaining action types are refused when a descriptor is
     /// applied, so this exists only so a hand-built catalog fails loudly instead of silently doing nothing.
     /// </summary>
-    private static InvalidOperationException UnreachableAction(CompiledAfterHook hook) => new(
-        $"After-hook '{hook.Path}' carries a "
+    private static InvalidOperationException UnreachableAction(ActionRun hook) => new(
+        $"Action '{hook.Path}' carries a "
         + $"'{ActionType.NameOf(hook.Action.Action)}' action, which this build refuses when a "
-        + "descriptor is applied and therefore never runs. Reaching this point means the policy catalog was "
+        + "descriptor is applied and therefore never runs here. Reaching this point means the policy catalog was "
         + "built by hand rather than from a descriptor.");
 
     /// <summary>
     /// A payload that rendered to something other than JSON. The body is not quoted: it carries row data,
     /// and this exception is attached to the dispatcher's Warning line.
     /// </summary>
-    private static InvalidOperationException NotJson(CompiledAfterHook hook) => new(
-        $"After-hook '{hook.Path}' rendered a webhook payload that is not a JSON document, so it was not sent. "
+    private static InvalidOperationException NotJson(ActionRun hook) => new(
+        $"Action '{hook.Path}' rendered a webhook payload that is not a JSON document, so it was not sent. "
         + "Its template is checked when the descriptor is applied and every value is encoded for its position, "
         + "so reaching this point is a defect in the renderer rather than an authoring mistake. The body is not "
         + "repeated here because it carries row data.");
@@ -155,14 +160,14 @@ internal sealed class EventActionExecutor(
     /// A rendered recipient or subject that is not a safe mail header. The value is not quoted, for the same
     /// reason as <see cref="NotJson"/> and one more: a line break in it would forge a log line of its own.
     /// </summary>
-    private static InvalidOperationException UnsafeHeader(CompiledAfterHook hook, string slot) => new(
-        $"After-hook '{hook.Path}' rendered an email '{slot}' that is not a safe mail header, so the message was "
+    private static InvalidOperationException UnsafeHeader(ActionRun hook, string slot) => new(
+        $"Action '{hook.Path}' rendered an email '{slot}' that is not a safe mail header, so the message was "
         + "not sent: a recipient must be exactly one mailbox address with no display name and no list, and "
         + "neither the recipient nor the subject may carry a line break or another control character. The "
         + "value came from the event's record and is not repeated here.");
 
-    private static InvalidOperationException UnresolvedEndpoint(CompiledAfterHook hook) => new(
-        $"After-hook '{hook.Path}' is a webhook action with no resolved endpoint. An endpoint is resolved "
+    private static InvalidOperationException UnresolvedEndpoint(ActionRun hook) => new(
+        $"Action '{hook.Path}' is a webhook action with no resolved endpoint. An endpoint is resolved "
         + "from 'webhooks.endpoints' when the descriptor is applied — where an unknown name, a relative URL "
         + "and a non-HTTPS one are all refused — so reaching this point means the policy catalog was built by "
         + "hand rather than from a descriptor.");

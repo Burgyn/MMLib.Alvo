@@ -79,17 +79,19 @@ internal sealed class LoopbackWebhookReceiver : IDisposable
 
     /// <summary>Waits until at least <paramref name="count"/> deliveries have arrived.</summary>
     /// <param name="count">How many deliveries to wait for.</param>
+    /// <param name="timeout">How long to wait; a minute when omitted.</param>
     /// <returns>Every delivery recorded so far.</returns>
     /// <exception cref="TimeoutException">Fewer than <paramref name="count"/> arrived inside the budget.</exception>
-    internal async Task<IReadOnlyList<string>> WaitForDeliveriesAsync(int count)
+    internal async Task<IReadOnlyList<string>> WaitForDeliveriesAsync(int count, TimeSpan? timeout = null)
     {
-        var deadline = DateTimeOffset.UtcNow + _deliveryBudget;
+        var budget = timeout ?? _deliveryBudget;
+        var deadline = DateTimeOffset.UtcNow + budget;
         while (Deliveries.Count < count)
         {
             if (DateTimeOffset.UtcNow > deadline)
             {
                 throw new TimeoutException(
-                    $"Waited {_deliveryBudget} for {count} webhook delivery/deliveries on {Url}; "
+                    $"Waited {budget} for {count} webhook delivery/deliveries on {Url}; "
                     + $"{Deliveries.Count} arrived.");
             }
 

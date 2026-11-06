@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Testing.Events;
@@ -94,9 +95,12 @@ internal sealed class AlvoEventCriteriaWorld : IAlvoEventWorld
     /// <inheritdoc/>
     public async Task DrainAsync()
     {
+        await _deliveryStore.EnsureAsync(Ct);
         for (var claim = 0; claim < MaxClaims; claim++)
         {
-            if (await _dispatcher.PumpOneBatchAsync(Ct) == 0)
+            var fannedOut = await _dispatcher.PumpOneBatchAsync(Ct);
+            var delivered = (await _deliveries.PumpOneRoundAsync(Ct)).Claimed;
+            if (fannedOut == 0 && delivered == 0)
             {
                 return;
             }
@@ -141,6 +145,8 @@ internal sealed class AlvoEventCriteriaWorld : IAlvoEventWorld
         _meter = meter;
         _tally = new OutboxTallyProbe(services);
         _dispatcher = services.GetServices<IHostedService>().OfType<OutboxDispatcher>().Single();
+        _deliveries = services.GetRequiredService<DeliveryDispatcher>();
+        _deliveryStore = services.GetRequiredService<IDeliveryStore>();
     }
 
     /// <summary>
@@ -188,6 +194,8 @@ internal sealed class AlvoEventCriteriaWorld : IAlvoEventWorld
     private readonly RecordingEventLog _log;
     private readonly RecordingMeterListener _meter;
     private readonly OutboxDispatcher _dispatcher;
+    private readonly DeliveryDispatcher _deliveries;
+    private readonly IDeliveryStore _deliveryStore;
     private readonly OutboxTallyProbe _tally;
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

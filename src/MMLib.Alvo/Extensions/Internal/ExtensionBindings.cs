@@ -114,7 +114,7 @@ internal sealed class ExtensionBindings
     /// <summary>The bound handlers whose source selects <paramref name="event"/>, in order, each with the condition to judge.</summary>
     internal IEnumerable<(BoundHandler Handler, BoundCondition Condition)> Selecting(AlvoEvent @event)
     {
-        foreach (var handler in Handlers)
+        foreach (var handler in Handlers.Where(handler => !handler.Registration.TriggerOnly))
         {
             if (handler.Selects(@event) is { } condition)
             {

@@ -19,4 +19,7 @@ public sealed class AlvoDeliveryOptions
     /// <see cref="MaxConcurrency"/> handler deliveries, so a long job never takes a handler's slot; default 2, from 1 to 256.
     /// </summary>
     public int MaxJobConcurrency { get; set; } = 2;
+
+    /// <summary>How long one descriptor action — a hook or rule's webhook, email, function or entity.update — may run.</summary>
+    internal TimeSpan ActionTimeout { get; set; } = AlvoHandlerOptions.DefaultTimeout;
 }

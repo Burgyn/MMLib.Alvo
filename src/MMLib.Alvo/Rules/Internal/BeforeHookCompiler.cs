@@ -144,7 +144,7 @@ internal static class BeforeHookCompiler
     /// <remarks>
     /// <c>@user</c> and <c>@tenant</c> are not refused here: a before-hook runs inside the request, so there is a
     /// real caller for both to resolve against. An after-hook reads them from the event envelope instead, and its
-    /// dispatcher declines to select a hook whose envelope lacks them (<c>EventSubscriptions</c>).
+    /// dispatcher declines to select a hook whose envelope lacks them (<c>HandlerCondition</c>).
     /// </remarks>
     private static CompiledExpression? CompileCondition(
         string? source, BeforeHookPoint point, string path, BeforeHookScope scope)

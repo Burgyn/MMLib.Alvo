@@ -307,6 +307,7 @@ internal sealed class DeliveryRunner(
     private static AttemptVerdict VerdictOf(Exception failure) =>
         IsDepthRefusal(failure) ? AttemptVerdict.Dead(DeliveryErrors.ChainDepthExceeded)
         : failure is RecordUnreadableException ? AttemptVerdict.Dead(DeliveryErrors.RecordUnreadable)
+        : failure is ActionRefusedException refused ? AttemptVerdict.Dead(refused.Reason)
         : AttemptVerdict.Retry(TypeOf(failure));
 
     private static string TypeOf(Exception failure) => failure.GetType().FullName ?? failure.GetType().Name;

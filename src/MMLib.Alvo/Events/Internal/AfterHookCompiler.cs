@@ -85,12 +85,15 @@ internal static class AfterHookCompiler
 
         var compiled = new List<CompiledAfterHook>(declared.Count);
         var pointScope = scope with { Point = point };
+        var pointer = $"{scope.EntityPath}/hooks/{point}";
+        var taken = new HashSet<string>(StringComparer.Ordinal);
         for (var index = 0; index < declared.Count; index++)
         {
-            var hook = CompileHook(declared[index], $"{scope.EntityPath}/hooks/{point}/{index}", pointScope);
+            var hook = CompileHook(declared[index], $"{pointer}/{index}", pointScope);
             if (hook is not null)
             {
-                compiled.Add(hook);
+                var id = DescriptorActionIds.Unique(DescriptorActionIds.Hook(pointer, declared[index].Condition, declared[index].Action), taken);
+                compiled.Add(hook with { SubscriberId = id });
             }
         }
 

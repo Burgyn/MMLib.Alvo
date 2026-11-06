@@ -62,7 +62,7 @@ internal sealed class DeliveryFanOut(
 
         foreach (var handler in bindings.UnboundSelecting(@event))
         {
-            plan.Dead(Request(@event, handler.Id, handler.Job?.DeliveryKind), DeliveryRequest.UnboundReason, () => { });
+            plan.Dead(Request(@event, handler.Id, handler.DeliveryKind), DeliveryRequest.UnboundReason, () => { });
         }
 
         return plan;
@@ -70,7 +70,7 @@ internal sealed class DeliveryFanOut(
 
     private void Add(FanOutPlan plan, AlvoEvent @event, BoundHandler handler, HandlerJudgement judgement)
     {
-        var request = Request(@event, handler.Id, handler.Registration.Job?.DeliveryKind);
+        var request = Request(@event, handler.Id, handler.Registration.DeliveryKind);
         if (judgement.Verdict is HandlerVerdict.NoMatch)
         {
             Unread(@event, handler, judgement);
@@ -99,13 +99,13 @@ internal sealed class DeliveryFanOut(
         }
     }
 
-    private static DeliveryRequest Request(AlvoEvent @event, string subscriber, string? kind = null) => new()
+    private static DeliveryRequest Request(AlvoEvent @event, string subscriber, string kind) => new()
     {
         EventId = @event.Id,
         Subscriber = subscriber,
         PartitionKey = @event.PartitionKey,
         TenantId = @event.TenantId,
-        Kind = kind ?? DeliveryKind.Handler,
+        Kind = kind,
     };
 
     /// <summary>One event's requests, and what to announce once they are written.</summary>

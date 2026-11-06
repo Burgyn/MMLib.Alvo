@@ -1,6 +1,7 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Functions.Internal;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
@@ -264,6 +265,10 @@ internal sealed record EntityAfterHooks(
         DataOperation.Delete => AfterDelete,
         _ => [],
     };
+
+    /// <summary>The three lists by the handler verb whose event selects them.</summary>
+    internal IEnumerable<(HandlerVerb Verb, IReadOnlyList<CompiledAfterHook> Hooks)> ByVerb() =>
+        [(HandlerVerb.Created, AfterCreate), (HandlerVerb.Updated, AfterUpdate), (HandlerVerb.Deleted, AfterDelete)];
 }
 
 /// <summary>
@@ -292,7 +297,14 @@ internal sealed record CompiledAfterHook(
     CompiledExpression? Condition,
     RequiredContext Required,
     CompiledAction Action,
-    bool ReadsRoles = false);
+    bool ReadsRoles = false)
+{
+    /// <summary>
+    /// Gets the subscriber id its deliveries are recorded under: the point's pointer, <c>#</c> and a hash of the condition and
+    /// action (<see cref="DescriptorActionIds"/>); <see cref="Path"/> for a hook built by hand.
+    /// </summary>
+    internal string SubscriberId { get; init; } = Path;
+}
 
 /// <summary>
 /// One compiled action: the parsed descriptor action, plus every <c>{{…}}</c> template it declares, already

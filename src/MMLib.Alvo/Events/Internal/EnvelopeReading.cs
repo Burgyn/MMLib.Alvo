@@ -9,7 +9,7 @@ namespace MMLib.Alvo.Events.Internal;
 
 /// <summary>How a stored envelope is read for a subscription: its data-event type, its caller as at the event, and a condition over its images.</summary>
 /// <remarks>
-/// Shared by <see cref="EventSubscriptions"/> (descriptor after-hooks) and <see cref="HandlerCondition"/> (host handlers),
+/// Read by <see cref="HandlerCondition"/> for every subscriber — host handlers and descriptor actions alike —
 /// so the two subscription kinds cannot drift. The caller is built from the envelope — <c>authid</c>, <c>tenantid</c>,
 /// <c>authclaims</c> — never from whoever dispatches; what the envelope does not carry is left absent.
 /// </remarks>

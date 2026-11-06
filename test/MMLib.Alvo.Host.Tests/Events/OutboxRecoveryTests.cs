@@ -66,34 +66,25 @@ public class OutboxRecoveryTests
     }
 
     /// <summary>
-    /// A claim held by a host that went away is recovered once its lease expires, and the entry is delivered.
+    /// A host that goes away mid-action has already retired its outbox entry: the event was fanned out before the action
+    /// ran, so what it leaves behind is a delivery claimed under its lease — which the delivery engine recovers, not the
+    /// outbox (the killed-host facts measure that recovery).
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The lease is the only mechanism that recovers a claim nobody will finish — nothing releases it, nothing
-    /// times it out at the store — so this is the fact the crash criterion's second half depends on. The first
-    /// host holds a delivery open until it is disposed, which leaves <c>claimed_at</c> set and
-    /// <c>dispatched_at</c> unset, exactly as a killed process would.
-    /// </para>
-    /// <para>
-    /// <b>The second host's lease is short, and that is the whole instrument.</b> A lease longer than the fact's
-    /// own patience would make this pass by timing out rather than by recovering, so the second host runs with
-    /// the shortest lease the options validation accepts above its poll interval.
-    /// </para>
-    /// </remarks>
     [Fact]
-    public async Task A_claim_abandoned_by_a_disposed_host_is_recovered_after_its_lease_expires()
+    public async Task A_host_that_goes_away_mid_action_leaves_its_event_retired_and_its_delivery_claimed()
     {
         var database = AlvoHostWorld.TempDatabasePath();
         try
         {
-            var abandoned = await AbandonOneClaimAsync(database);
+            var hanging = new HangingWebhookHandler();
+            await using (var first = await StartAsync(database, hanging, Settings()))
+            {
+                await CreateAsync(first, "W-1");
+                await hanging.UntilRequestedAsync();
+            }
 
-            await DeliveredByTheNextHostAsync(
-                database,
-                abandoned,
-                Settings(claimLease: ShortLease),
-                "the abandoned claim's own entry is what the lease must hand back");
+            SqliteOutboxProbe.Rows(database).ShouldHaveSingleItem().Dispatched.ShouldBeTrue("fan-out preceded the action");
+            RunningDeliveries(database).ShouldBe(1, "the action's delivery is still held by the claim of the host that went away");
         }
         finally
         {
@@ -101,13 +92,15 @@ public class OutboxRecoveryTests
         }
     }
 
-    /// <summary>
-    /// Starts a second host over the same database and asserts it delivers and retires <paramref name="pending"/>.
-    /// </summary>
-    /// <param name="database">The database the first host left the entry in.</param>
-    /// <param name="pending">The row the first host left undelivered.</param>
-    /// <param name="settings">The event settings the second host runs with.</param>
-    /// <param name="because">Why this entry, by id, is the one that had to arrive.</param>
+    private static long RunningDeliveries(string database)
+    {
+        using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={database};Pooling=False");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM alvo_deliveries WHERE status = 'running' AND claimed_by IS NOT NULL";
+        return (long)command.ExecuteScalar()!;
+    }
+
     private static async Task DeliveredByTheNextHostAsync(
         string database, OutboxRowState pending, Dictionary<string, string?> settings, string because)
     {
@@ -142,22 +135,6 @@ public class OutboxRecoveryTests
     /// Leaves one entry claimed by a host that is then disposed, and hands back the row it abandoned.
     /// </summary>
     /// <param name="database">The database both hosts run over.</param>
-    private static async Task<OutboxRowState> AbandonOneClaimAsync(string database)
-    {
-        var hanging = new HangingWebhookHandler();
-        await using (var first = await StartAsync(database, hanging, Settings()))
-        {
-            await CreateAsync(first, "W-1");
-            await hanging.UntilRequestedAsync();
-        }
-
-        var row = SqliteOutboxProbe.Rows(database).ShouldHaveSingleItem();
-        row.Claimed.ShouldBeTrue("the first host was disposed mid-delivery, so its claim must still be on the row");
-        row.Dispatched.ShouldBeFalse("a delivery that never completed must not have retired the entry");
-
-        return row;
-    }
-
     private static Task<AlvoHostWorld> StartAsync(
         string database, HttpMessageHandler receiver, Dictionary<string, string?> settings) =>
         AlvoHostWorld.StartAsync(
@@ -250,8 +227,6 @@ public class OutboxRecoveryTests
     /// flight on the very next tick. This is the value just above that floor, so the recovery a fact waits for is
     /// the lease expiring rather than the fact's own patience running out.
     /// </remarks>
-    private const string ShortLease = "00:00:00.100";
-
     private static readonly TimeSpan _waitBudget = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan _pollDelay = TimeSpan.FromMilliseconds(20);
 

@@ -201,8 +201,8 @@ public abstract class OutboxChaosCriteriaTests
             "every seeded event matches the one declared hook, so nothing may be counted as filtered — a "
             + $"filtered event is retired without delivery and never retried. {run.Describe()}");
         metrics.CountOf(FailedCounter).ShouldBe(
-            run.Refused,
-            $"one increment per failed attempt, so the counter and the receiver must agree; {run.Describe()}");
+            0,
+            $"the outbox only fans out, so a refused webhook fails its delivery and never its entry; {run.Describe()}");
         run.Accepted.ShouldBe(
             EventCount,
             "at-least-once permits more, but a second accepted delivery of one event would mean an entry was "

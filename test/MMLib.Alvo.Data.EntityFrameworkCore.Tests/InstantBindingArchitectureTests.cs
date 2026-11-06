@@ -52,7 +52,7 @@ public class InstantBindingArchitectureTests
         ["MMLib.Alvo.Commands.Internal.AlvoCommands::InvokeAsync"] = "a command invoked in-process (IAlvoCommands)",
         ["MMLib.Alvo.Management.Internal.AlvoManagementService::SimulatePolicyAsync"] = "the policy simulator, which judges a rule",
         ["MMLib.Alvo.Events.Internal.HandlerCondition::Judge"] = "a handler's condition, at the event's time (Ruling 58)",
-        ["MMLib.Alvo.Events.Internal.EventSubscriptions::Selects"] = "an after-hook's condition, at the event's time",
+        ["MMLib.Alvo.Events.Internal.ActionValues::Evaluate"] = "a descriptor action's values, at the event's time",
         ["MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::EnsureInstant"] = "the data port's binder, for TransactAsync (wrapper)",
         ["MMLib.Alvo.Data.EntityFrameworkCore.Internal.EfAlvoTransactions::TransactAsync"] = "one instant for a whole unit",
     };

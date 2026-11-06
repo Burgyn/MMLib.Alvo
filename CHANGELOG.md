@@ -335,6 +335,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **Every descriptor action is its own delivery** (HX-15): an after-hook's `webhook`/`email` (and every automation
+  action) is fanned out as a delivery of kind `action` (`function` for a function), retried on `AlvoRetryPolicy.Default`,
+  dead-lettered and visible on Operations like a handler; the outbox only fans out, so a failing action no longer
+  re-runs its siblings or holds its event. Its subscriber id is the point's pointer plus a content hash
+  (`/entities/orders/hooks/afterCreate#1f0c9a2e`), no longer `/…/afterCreate/0`; `AlvoHookRecorder.AssertRan` takes the
+  pointer alone. A condition that throws records a dead `when-failed` delivery instead of dropping the hook, and an
+  event past the chain-depth limit records dead `chain-depth-exceeded` rows for its actions. Editing an action makes a
+  new subscriber: the old one's pending rows stay unclaimed until swept, and an edited cron rule leaves its old stored
+  schedule row inert.
 - **`FunctionAction.Input` is a `FunctionInput?`, not a `string?`** (HX-15): a `function` action's `input` is an object of
   literals and `{"$cel": "…"}` values (`FunctionInput.Fields`), checked at apply against the registered function's input
   schema; the JSONata string form parses into `FunctionInput.Transform` and stays refused. Code that read the string

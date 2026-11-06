@@ -17,7 +17,8 @@ namespace MMLib.Alvo.Scheduling;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The schedules this process registers are synced once, when the host starts</b> (<see cref="StartAsync"/>) — a new id
+/// <b>The schedules this process binds are synced when the host starts</b> (<see cref="StartAsync"/>), and again by the first
+/// round over each newly applied catalog — so a cron rule an apply adds is scheduled without a restart — a new id
 /// gets its first occurrence, a changed cron or zone moves its next run, and an id declared with <c>AddRetiredExtension</c> is
 /// removed. A schedule this process does not register is neither removed nor claimed: processes sharing one database — a web
 /// host and a worker — register different schedules. A boot that had no primed catalog at start leaves the sync to the first
@@ -64,7 +65,7 @@ internal sealed class SchedulePump(
 
     /// <summary>This pump's fence: per instance, so two pumps in one process never advance each other's claims.</summary>
     private readonly string _claimant = $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
-    private int _synced;
+    private PolicyCatalog? _syncedFor;
 
     /// <summary>One round on the caller's schedule, behind the manual round's gates, which it checks itself.</summary>
     /// <exception cref="InvalidOperationException">A gate is shut; nothing was claimed.</exception>
@@ -151,7 +152,7 @@ internal sealed class SchedulePump(
 
     private async Task<AlvoDrainResult> RoundAsync(ITimerStore schedules, PolicyCatalog catalog, CancellationToken ct)
     {
-        if (Volatile.Read(ref _synced) == 0)
+        if (!ReferenceEquals(Volatile.Read(ref _syncedFor), catalog))
         {
             await SyncAsync(schedules, catalog, ct).ConfigureAwait(false);
         }
@@ -257,7 +258,7 @@ internal sealed class SchedulePump(
             await schedules.SyncSchedulesAsync(definitions, retired, ct).ConfigureAwait(false);
         }
 
-        Volatile.Write(ref _synced, 1);
+        Volatile.Write(ref _syncedFor, catalog);
     }
 
     private static List<string> ScheduleIds(ExtensionBindings bindings) =>

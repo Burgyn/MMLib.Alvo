@@ -43,7 +43,12 @@ internal static class ExtensionBindingCompiler
 
     /// <summary>Both passes against <paramref name="catalog"/>: what binds, what is left unbound, and why.</summary>
     internal static ExtensionBindingResult Compile(
-        ExtensionRegistry registry, PolicyCatalog catalog, ICelCompiler compiler, IServiceProviderIsService services, DateTimeOffset? now = null)
+        ExtensionRegistry registry,
+        PolicyCatalog catalog,
+        ICelCompiler compiler,
+        IServiceProviderIsService services,
+        DateTimeOffset? now = null,
+        TimeSpan? actionTimeout = null)
     {
         var problems = new List<ExtensionProblem>(ExtensionIdProblems.Of(registry));
         var bound = BindHandlers(registry, catalog, compiler, services, problems);
@@ -53,9 +58,10 @@ internal static class ExtensionBindingCompiler
         problems.AddRange(ScheduleChecks.Check(registry, services, now ?? DateTimeOffset.UtcNow));
         var refused = Refused(problems);
         List<BoundHandler> binds = [.. bound.Where(handler => !refused.Contains(handler.Id))];
+        var actions = DescriptorActionBindings.Bind(catalog, actionTimeout ?? AlvoHandlerOptions.DefaultTimeout).ToList();
         List<BoundWriteHook> boundHooks = [.. hooks.Where(hook => !refused.Contains(hook.Id))];
         var bindings = new ExtensionBindings(
-            binds,
+            [.. binds, .. actions],
             registry.Handlers.Where(handler => refused.Contains(handler.Id)),
             commands.Where(command => !refused.Contains(command.Name)),
             boundHooks,

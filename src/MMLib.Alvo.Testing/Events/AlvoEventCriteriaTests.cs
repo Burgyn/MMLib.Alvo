@@ -235,7 +235,7 @@ public abstract class AlvoEventCriteriaTests
     private const string Archived = "archived";
 
     private const string UpdatedEventType = $"entity.{Entity}.updated";
-    private const string ApprovalHookPointer = $"/entities/{Entity}/hooks/afterUpdate/0";
+    private const string ApprovalHookPointer = $"/entities/{Entity}/hooks/afterUpdate#";
     private const string WebhookActionType = "webhook";
 
     private const string ApprovalEndpoint = "approval-sync";
