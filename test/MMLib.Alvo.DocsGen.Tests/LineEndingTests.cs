@@ -33,7 +33,7 @@ public partial class LineEndingTests
     [Fact]
     public void A_page_and_its_imports_checked_out_with_crlf_render_as_lf()
     {
-        var docs = Directory.CreateTempSubdirectory("llms-crlf-").FullName;
+        var docs = Directory.CreateDirectory(Path.Combine(Directory.CreateTempSubdirectory("llms-crlf-").FullName, "docs")).FullName;
         var generated = Path.Combine(docs, "..", "generated");
         Directory.CreateDirectory(Path.Combine(generated, "exchanges", "g"));
         Directory.CreateDirectory(Path.Combine(docs, "guides"));
