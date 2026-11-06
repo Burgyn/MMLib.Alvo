@@ -4,8 +4,9 @@
   "name": "booking-desk",
   "description": "The time facts' desk: a tenant-scoped booking whose reminders are timers.",
   "tenancy": { "enabled": true },
-  "auth": { "roles": ["staff", "ops", "watch"] },
+  "auth": { "roles": ["staff", "ops", "watch", "boss"] },
   "access": {
+    "admin": "'boss' in @user.roles",
     "developer": "'ops' in @user.roles",
     "viewer": "'watch' in @user.roles"
   },

@@ -152,7 +152,7 @@ public abstract partial class TimeFacts
     }
 
     [Fact]
-    public async Task A_schedule_no_longer_registered_is_removed_at_the_next_start()
+    public async Task A_retired_schedule_is_removed_at_the_next_start()
     {
         var database = await DatabaseAsync();
         await using (var first = await StartScheduledAsync(
@@ -164,6 +164,29 @@ public abstract partial class TimeFacts
         await using var second = await StartScheduledAsync(alvo => alvo.AddRetiredExtension(Nightly, AlvoRetirement.Discard), database);
 
         (await TimerStore(second).SchedulesAsync(Ct)).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A web host and a worker on one database: the web host registers no schedule. Its start removes nothing and its rounds
+    /// claim nothing, so the worker's schedule keeps running — on the worker.
+    /// </summary>
+    [Fact]
+    public async Task A_process_without_the_schedule_neither_removes_nor_runs_it()
+    {
+        var log = new ScheduleLog();
+        var database = await DatabaseAsync();
+        await using var worker = await StartScheduledAsync(
+            alvo => alvo.AddSchedule<RecordingScheduledJob>(Nightly, "0 2 * * *").Services.AddSingleton(log), database);
+        await using var web = await StartScheduledAsync(_ => { }, database);
+        await worker.DrainEventsAsync(Ct);
+        (await TimerStore(web).SchedulesAsync(Ct)).ShouldHaveSingleItem().Id.ShouldBe(Nightly);
+
+        Time.Advance(TimeSpan.FromHours(1));
+        (await web.DrainEventsAsync(Ct)).Claimed.ShouldBe(0);
+        log.Runs.ShouldBeEmpty();
+        await worker.DrainEventsAsync(Ct);
+
+        log.Runs.ShouldHaveSingleItem().ScheduledFor.ShouldBe(_oneAm.AddHours(1));
     }
 
     [Fact]
@@ -188,6 +211,17 @@ public abstract partial class TimeFacts
         await using var alvo = await StartScheduledAsync(alvo => alvo.AddSchedule<RecordingScheduledJob>(Nightly, "0 2 * * *").Services.AddSingleton(new ScheduleLog()));
 
         await Should.ThrowAsync<ManagementExtensionNotFoundException>(() => AsOperator(alvo, "ops").RunScheduleAsync(Desk, "weekly-report", Ct));
+    }
+
+    [Fact]
+    public async Task A_schedule_cannot_be_switched_off_and_the_refusal_says_how_to_run_it()
+    {
+        await using var alvo = await StartScheduledAsync(alvo => alvo.AddSchedule<RecordingScheduledJob>(Nightly, "0 2 * * *").Services.AddSingleton(new ScheduleLog()));
+
+        var refusal = await Should.ThrowAsync<ManagementConflictException>(() => AsOperator(alvo, "boss").SetEnabledAsync(Desk, Nightly, false, "maintenance", Ct));
+
+        refusal.Message.ShouldContain($"'{Nightly}' is a schedule");
+        refusal.Message.ShouldContain($"schedules/{Nightly}/run");
     }
 
     [Fact]

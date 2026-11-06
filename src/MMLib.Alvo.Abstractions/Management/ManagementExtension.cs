@@ -111,5 +111,9 @@ public sealed record ManagementExtension
     /// Gets the status of a schedule's newest delivery — <c>pending</c>, <c>running</c>, <c>retrying</c>, <c>succeeded</c> or
     /// <c>dead</c>; null for any other kind, or before its first run.
     /// </summary>
+    /// <remarks>
+    /// A per-tenant schedule's occurrence is one delivery per tenant, and this is the status of the newest of them alone — one
+    /// tenant's run; the delivery list, filtered by the schedule's id, shows every tenant's.
+    /// </remarks>
     public string? LastOutcome { get; init; }
 }

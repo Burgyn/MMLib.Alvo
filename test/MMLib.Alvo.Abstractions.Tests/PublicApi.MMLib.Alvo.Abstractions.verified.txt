@@ -2160,7 +2160,7 @@ namespace MMLib.Alvo.Scheduling
         System.Threading.Tasks.Task AppendRunAsync(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.AlvoFrameworkEnvelope> events, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> CancelAsync(string scope, string key, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> CancelAsync(string scope, string key, System.Guid generation, System.Threading.CancellationToken cancellationToken = default);
-        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.ClaimedSchedule>> ClaimSchedulesAsync(string claimant, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.ClaimedSchedule>> ClaimSchedulesAsync(string claimant, System.Collections.Generic.IReadOnlyList<string> ids, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.ClaimedTimer>> ClaimTimersAsync(int batchSize, System.TimeSpan lease, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Scheduling.TimerCounts> CountTimersAsync(System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task EnsureAsync(System.Threading.CancellationToken cancellationToken = default);
@@ -2168,7 +2168,7 @@ namespace MMLib.Alvo.Scheduling
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.StoredSchedule>> SchedulesAsync(System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<bool> StartMigrationAsync(string id, int revision, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Events.AlvoFrameworkEnvelope> events, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> StartedMigrationsAsync(System.Threading.CancellationToken cancellationToken = default);
-        System.Threading.Tasks.Task SyncSchedulesAsync(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.ScheduleDefinition> schedules, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task SyncSchedulesAsync(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Scheduling.ScheduleDefinition> schedules, System.Collections.Generic.IReadOnlyList<string> retired, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<System.Guid> UpsertAsync(MMLib.Alvo.Scheduling.TimerEntry timer, System.Threading.CancellationToken cancellationToken = default);
     }
     public sealed class ScheduleAdvance : System.IEquatable<MMLib.Alvo.Scheduling.ScheduleAdvance>
