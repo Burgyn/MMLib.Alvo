@@ -475,9 +475,11 @@ public interface IAlvoSqlDialect
     /// <b>Why it exists.</b> The backfill's <c>UPDATE parent … = (SELECT … FROM child …)</c> reads the child from the
     /// statement's snapshot, and on an engine that re-checks only the outer <c>WHERE</c> once a parent row lock is granted, a
     /// child row committed in between is missing from the value written — the window <c>RollupRecompute</c>'s remarks
-    /// measured. A lock that lets readers through but queues writers closes it: a child write waits for the apply, and its
-    /// own recompute then runs against the new definition. SQLite needs none, because an apply holds the database's single
-    /// write lock for its whole transaction.
+    /// measured. A lock that lets readers through but queues writers closes it: a child write waits for the apply, so the
+    /// backfill misses no committed child. That queued write still recomputes with the definition its process captured
+    /// before the apply, until that process re-primes — the accepted stale window of HX-11 Ruling 72, healed by the parent's
+    /// next child write. SQLite needs none, because an apply holds the database's single write lock for its whole
+    /// transaction.
     /// </para>
     /// <para>
     /// <b>Taken before the DDL</b>, right after <see cref="ApplyLockTimeoutStatement"/>, for every pre-existing child in

@@ -83,8 +83,10 @@ A value a hook wrote is refused the same way: the database cannot tell whose val
 field, or any field it reads, is `hidden` — also through a computed or rollup field derived from one: whether a write
 is refused would otherwise tell a caller something about a value they cannot read. A stored field validated against
 its own value alone is allowed even when hidden. One answer is allowed on purpose: a validation on a rollup parent, like
-`reserved <= stock`, refuses a child write even when the caller cannot read the parent row. That one bit — "this product
-is fully reserved" — is the oversell protection itself.
+`reserved <= stock`, refuses a child write even when the caller cannot read the parent row. That answer is the oversell
+protection itself, and it can reveal more than "this product is fully reserved": a caller who may create and delete
+lines can try quantities until they find the product's remaining headroom. If that is confidential, make the line's
+`create` rule require that the product be readable.
 
 ## Adding one to rows that break it
 

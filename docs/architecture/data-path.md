@@ -1171,10 +1171,18 @@ caller's mask, 24). A broken `CHECK` is never a framework invariant, so it is al
 nothing. A value a hook wrote is still 422: the database cannot tell whose value it was (26). The message never echoes
 a value or the expression.
 
-**Two accepted risks.** A validation on a rollup parent (`reserved <= stock`) answers a child write 422-or-success even
-when the caller cannot read the parent row: that one bit is the oversell protection itself, and row readability is not
-static, so it cannot be refused at apply (Ruling 62). And a *visible* computed or rollup field over a hidden field,
-with no validation, is a pre-existing exposure outside HX-11 (Ruling 63, a follow-up).
+**Accepted risks.** A validation on a rollup parent (`reserved <= stock`) answers a child write 422-or-success even
+when the caller cannot read the parent row: that answer is the oversell protection itself, and row readability is not
+static, so it cannot be refused at apply (Ruling 62). It is more than one bit: a caller who may create and delete
+children can binary-search a quantity and recover the parent's remaining headroom (`stock − reserved`) exactly, in
+O(log n) refusals that change nothing. A child write rule that requires the parent to be readable closes it. A
+*visible* computed or rollup field over a hidden field, with no validation, is a pre-existing exposure outside HX-11
+(Ruling 63, a follow-up). Two availability risks are accepted with follow-ups (Ruling 81): on PostgreSQL, a Data API
+read that outlasts the five-second lock timeout keeps an apply needing `ACCESS EXCLUSIVE` on that table from acquiring
+it — each Management apply answers 409 and a boot in Apply mode refuses its start, so a caller who can run long reads
+can hold off schema change; and the pre-apply violation count is a full `COUNT(*)` with no statement or lock timeout,
+run on every dry run as well, so a large table makes each preview a full scan that can also wait behind a concurrent
+apply.
 
 **No in-process pre-check** (28): the database is the one authority, race-free under concurrent writers.
 `InMemoryAlvoData` does not enforce `CHECK`, like `computed`; the facts live in the real-engine suites

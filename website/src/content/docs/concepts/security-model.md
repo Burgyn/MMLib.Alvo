@@ -50,9 +50,19 @@ Where the guarantees stop:
   Do not make a guessable value, such as an e-mail address, `unique` if its existence is confidential.
 - **A validation on a rollup parent answers for a parent the caller may not read.** A field's
   [`validation`](/extending/integrity/) is a `CHECK` the database enforces on every row, so `reserved <= stock` refuses
-  a child write with a `422` even when the caller's rule hides the product: the caller learns that the product is at
-  capacity. That one bit is the oversell protection itself, and whether a caller may read a row is decided per request,
-  so it cannot be refused when the descriptor is applied.
+  a child write with a `422` even when the caller's rule hides the product. That answer is the oversell protection
+  itself, and whether a caller may read a row is decided per request, so it cannot be refused when the descriptor is
+  applied. It is more than "the product is at capacity": a caller who may create and delete order lines can try
+  quantities and recover the product's remaining headroom, `stock − reserved`, exactly, because each refusal changes
+  nothing. If that headroom is confidential, give the child's `create` rule a condition that requires the parent to be
+  readable.
+- **Long reads can hold off a schema change on PostgreSQL.** An apply that adds a `CHECK` or changes a table needs an
+  exclusive lock, and it waits at most five seconds for it. A caller who can keep a read running longer than that on
+  the table makes every apply answer `409` (retry) and a starting host in `Apply` mode refuse to start, for as long as
+  such reads continue. Bound slow Data API reads (indexes, timeouts at your proxy) on tables you change often.
+- **The dry run counts violating rows with a full scan.** Before a validation is added, the apply — and every preview
+  of it — counts the rows that break it with a `COUNT(*)` that has no timeout. On a large table each preview is a full
+  scan. It needs Developer access to the Management API.
 - **The schema's shape is public.** Which entities exist and their non-hidden fields are published by the routes and
   the OpenAPI document. Data and the names of hidden fields are not.
 
