@@ -18,6 +18,15 @@ public sealed class PostgreSqlCheckDdlTests : IClassFixture<PostgresFixture>, ID
     public PostgreSqlCheckDdlTests(PostgresFixture fixture)
     {
         ArgumentNullException.ThrowIfNull(fixture);
+
+        if (OperatingSystem.IsWindows())
+        {
+            // No container on Windows-container runners, so the connection string is empty; every fact skips in
+            // VerifyPlanAsync before touching _services (the PostgreSqlGeneratedSqlSnapshotTests pattern).
+            _services = new ServiceCollection().BuildServiceProvider();
+            return;
+        }
+
         var builder = new TestAlvoBuilder(new ServiceCollection());
         builder.UsePostgreSql(fixture.ConnectionString);
         builder.Services.AddAlvo();
@@ -47,6 +56,7 @@ public sealed class PostgreSqlCheckDdlTests : IClassFixture<PostgresFixture>, ID
     /// </summary>
     private async Task VerifyPlanAsync(SchemaModel current, SchemaModel desired)
     {
+        Assert.SkipUnless(!OperatingSystem.IsWindows(), "PostgreSQL Testcontainers requires a Linux Docker daemon; unavailable on Windows-container runners.");
         var empty = new SchemaModel([]);
         await MigrateAsync(empty, current);
         var plan = await Migrator.PlanAsync(current, desired, new MigrationOptions(), TestContext.Current.CancellationToken);
