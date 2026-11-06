@@ -156,6 +156,7 @@ export default defineConfig({
           page('See your extensions in the dashboard', 'extending/extension-catalog'),
           page('Operate deliveries', 'extending/operate-deliveries'),
           page('Validate and guard writes', 'extending/write-hooks'),
+          page('Integrity in the descriptor', 'extending/integrity'),
           page('Analyzer rules', 'extending/analyzer-rules'),
           page('Transactions in your own code', 'extending/transactions'),
           page('Time: timers and schedules', 'extending/time'),

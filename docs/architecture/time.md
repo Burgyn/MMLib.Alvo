@@ -125,14 +125,23 @@ tenant and answers the first tenant's delivery (Decision 12).
 
 ## Data migrations
 
-`SchedulePump` polls the applied revision; once it reaches a migration's `afterRevision`, the migration's start row is
-inserted (`alvo_data_migrations`, insert-if-absent) and `alvo.migration.<id>` appended in one transaction. A rollback
-below the revision neither undoes nor re-runs it; a later re-apply finds the row and does nothing (acceptance (7)).
+`SchedulePump` polls the applied revision; the first revision a round reads at or after a migration's `afterRevision`
+is the one it starts at (Decision 16 — "a revision number reached", not "a revision with this shape": a rollback that
+lands before the start makes it start over the older shape). Its start row is inserted (`alvo_data_migrations`,
+insert-if-absent) and `alvo.migration.<id>` appended in one transaction. A rollback below the revision neither undoes
+nor re-runs it; a later re-apply finds the row and does nothing (acceptance (7)).
 
-**Per tenant** (Decision 10, a deviation from §4.10's `System(null)` iterating tenants): on a schema with a scoped
-entity, one run per tenant `IAlvoTenantCatalog` lists, each as the system **in that tenant**, so no run reads another
-tenant's rows. A tenant created after the migration started never gets it. Without a catalog the boot is refused when
-the boot schema is scoped; a schema that becomes scoped by a later apply is guarded at run time — logged
+**Per tenant** (Decision 10, a deviation from §4.10's `System(null)` iterating tenants): when **the start revision's own
+schema** (`AppliedSchema.Schema`) has a scoped entity — never the process's catalog, which a replica that did not make
+the apply still holds — one run per tenant `IAlvoTenantCatalog` lists, each as the system **in that tenant**, so no run
+reads another tenant's rows. A tenant created after the migration started never gets it. A scoped schema with **zero
+tenants** marks the migration started with no runs and logs `MigrationStartedWithNoTenants` at Information.
+
+**Failures (Decision 17).** Each migration's start fails on its own: a throwing tenant list or a rejected append is
+logged with the migration's id, nothing is marked, and that migration alone is retried after 1 min, doubling to 15 min;
+the others go on. Without a catalog the boot refuses — the process does not start — but only for migrations **not yet
+started** (read from the store beside the orphaned-work check), so a finished migration's registration never refuses a
+later boot. A schema that becomes scoped by a later apply, on a host with no catalog, is held at run time — logged
 `TenantCatalogMissing`, skipped, not marked, retried each round.
 
 ## Framework envelopes (Decision 15)
@@ -178,8 +187,13 @@ outbox → deliveries**. A timer that falls due fires, fans out and runs in the 
    (upsert own, delete only retired, claim only bound). Cost: an occurrence leased across a redeploy that changed the
    cron does not run; inert rows linger until retired.
 9. **Cronos `CronFormat.Standard`, IANA zones, checked at boot.** Cost: no sub-minute schedules (use a timer).
-10. **Migration: one run per tenant** (deviation). Cost: no cross-tenant view; tenants created later never get it; up
-    to one poll interval between an apply and the start.
+10. **Migration: one run per tenant** (deviation), decided by the start revision's own schema. Cost: no cross-tenant
+    view; tenants created later never get it; up to one poll interval between an apply and the start.
+16. **A migration starts at the first applied revision a round reads at or after `afterRevision`.** Cost: a migration
+    that needs a shape must check for it itself.
+17. **Migration starts fail independently and back off** (1 min doubling to 15 min); zero tenants mark it started; the
+    boot refusal covers only migrations not yet started. Cost: a tenant list that is down delays a migration by up to
+    15 min after it recovers.
 11. **Dashboard data rides appended init members** (`ManagementExtension.Cron…LastOutcome`, `AfterRevision`,
     `ManagementExtensionCatalog.Timers`). Cost: the catalog read does two more store reads.
 12. **Run now on `EachTenant`** answers the first tenant's delivery. Cost: the answer names one of n runs.

@@ -105,10 +105,17 @@ register one id differently overwrite each other at start.
 delivery, after the descriptor reaches revision 4 — at the boot or the apply that gets there, within one poll of the
 schedule pump. A rollback below revision 4 neither undoes it nor runs it again on a later re-apply.
 
-On a descriptor with a tenant-scoped entity a migration runs **once per tenant** your `IAlvoTenantCatalog` lists, each
-as the system in that tenant, so no run reads another tenant's rows. A tenant created after the migration started does
-not get it — make the fix-up part of creating a tenant if it must. A migration cannot be run now: it runs once per
-revision.
+It starts at the first revision Alvo reads at or after 4 — a revision *number* reached, not a shape: if a rollback
+lands first, it runs over the older shape, so check for the fields you need.
+
+When that revision's descriptor has a tenant-scoped entity, a migration runs **once per tenant** your
+`IAlvoTenantCatalog` lists, each as the system in that tenant, so no run reads another tenant's rows. Without a catalog
+the host refuses to start while such a migration has not yet started. A tenant created after the migration started
+does not get it — make the fix-up part of creating a tenant if it must. With no tenants at all the migration counts as
+done, and the log says so.
+
+A start that fails — the tenant list throws, say — is logged and that migration alone is tried again after a minute,
+then two, up to 15; the other migrations go on. A migration cannot be run now: it runs once per revision.
 
 ## Testing with a fake clock
 
