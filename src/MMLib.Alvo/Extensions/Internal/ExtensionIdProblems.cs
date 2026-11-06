@@ -69,6 +69,7 @@ internal static class ExtensionIdProblems
         RetiredExtension => ExtensionBindingCompiler.RetiredKind,
         CommandRegistration => CommandBinding.Kind,
         WriteHookRegistration hook => WriteHookBinding.KindOf(hook.Stage),
+        HandlerRegistration handler => ExtensionBindingCompiler.KindOf(handler),
         _ => ExtensionBindingCompiler.HandlerKind,
     };
 

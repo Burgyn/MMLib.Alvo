@@ -4,6 +4,7 @@ using MMLib.Alvo.Commands.Internal;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.Management;
+using MMLib.Alvo.Scheduling;
 
 using System.Text.Json;
 
@@ -66,14 +67,21 @@ internal sealed class ExtensionCatalog(ExtensionRegistry registry, IOptions<Alvo
     private static ManagementExtension[] Describe(ExtensionRegistry registry, bool exposeTypeNames)
     {
         registry.Seal();
-        return [.. Handlers(registry, exposeTypeNames), .. Commands(registry, exposeTypeNames), .. WriteHooks(registry, exposeTypeNames)];
+        return [.. Handlers(registry, exposeTypeNames), .. Jobs(registry, exposeTypeNames), .. Commands(registry, exposeTypeNames), .. WriteHooks(registry, exposeTypeNames)];
     }
 
     private static ManagementExtension[] Handlers(ExtensionRegistry registry, bool exposeTypeNames) =>
         [.. registry.Handlers
+            .Where(handler => handler.Job is null)
             .OrderBy(handler => handler.Settings.Order)
             .ThenBy(handler => handler.Sequence)
             .Select(handler => HandlerDescription.Of(handler, exposeTypeNames))];
+
+    private static ManagementExtension[] Jobs(ExtensionRegistry registry, bool exposeTypeNames) =>
+        [.. registry.Handlers
+            .Where(handler => handler.Job is not null)
+            .OrderBy(handler => handler.Sequence)
+            .Select(handler => JobDescription.Of(handler, handler.Job!, exposeTypeNames))];
 
     private static ManagementExtension[] WriteHooks(ExtensionRegistry registry, bool exposeTypeNames) =>
         [.. registry.WriteHooks

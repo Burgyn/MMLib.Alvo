@@ -1548,6 +1548,8 @@ namespace MMLib.Alvo.Management
         BeforeDelete = 5,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("afterDelete")]
         AfterDelete = 6,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("schedule")]
+        Schedule = 7,
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Management.AlvoExtensionStage>))]
     public enum AlvoExtensionStage
@@ -1560,6 +1562,8 @@ namespace MMLib.Alvo.Management
         PreTransaction = 2,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("inTransaction")]
         InTransaction = 3,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("scheduled")]
+        Scheduled = 4,
     }
     public sealed class DeliveryFixture : System.IEquatable<MMLib.Alvo.Management.DeliveryFixture>
     {
@@ -1736,6 +1740,7 @@ namespace MMLib.Alvo.Management
     {
         public ManagementExtension() { }
         public string? Access { get; init; }
+        public string? Cron { get; init; }
         public string? Description { get; init; }
         public bool Enabled { get; init; }
         public System.Collections.Generic.IReadOnlyList<string> Entities { get; init; }
@@ -1743,6 +1748,9 @@ namespace MMLib.Alvo.Management
         public string? HttpMethod { get; init; }
         public required string Id { get; init; }
         public required MMLib.Alvo.Management.AlvoExtensionKind Kind { get; init; }
+        public string? LastOutcome { get; init; }
+        public System.DateTimeOffset? LastRunAt { get; init; }
+        public System.DateTimeOffset? NextRunAt { get; init; }
         public System.Collections.Generic.IReadOnlyList<string> Operations { get; init; }
         public int Order { get; init; }
         public string? Ordering { get; init; }
@@ -1750,6 +1758,7 @@ namespace MMLib.Alvo.Management
         public string? Route { get; init; }
         public string? RunAs { get; init; }
         public required MMLib.Alvo.Management.AlvoExtensionStage Stage { get; init; }
+        public string? TimeZone { get; init; }
         public System.TimeSpan? Timeout { get; init; }
         public bool TopLevelOnly { get; init; }
         public string? TypeName { get; init; }
@@ -2129,6 +2138,10 @@ namespace MMLib.Alvo.Scheduling
     {
         System.Threading.Tasks.Task<bool> CancelAsync(string key, MMLib.Alvo.TenantId? tenant = default, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task ScheduleAsync(string key, System.DateTimeOffset at, string eventType, System.Collections.Generic.IReadOnlyDictionary<string, object?>? data, MMLib.Alvo.TenantId? tenant = default, System.Threading.CancellationToken cancellationToken = default);
+    }
+    public interface IAlvoTenantCatalog
+    {
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.TenantId>> ListTenantsAsync(System.Threading.CancellationToken cancellationToken = default);
     }
     public interface ITimerStore
     {

@@ -41,4 +41,8 @@ public enum AlvoExtensionKind
     /// <summary>An after-delete hook: host C# run inside a delete's transaction after the row is removed.</summary>
     [JsonStringEnumMemberName("afterDelete")]
     AfterDelete = 6,
+
+    /// <summary>A schedule: host C# run on a cron, once per occurrence across every replica, as a delivery.</summary>
+    [JsonStringEnumMemberName("schedule")]
+    Schedule = 7,
 }

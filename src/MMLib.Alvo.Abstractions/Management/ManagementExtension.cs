@@ -94,4 +94,22 @@ public sealed record ManagementExtension
 
     /// <summary>Gets whether it runs: only a validate hook can be switched off, by an administrator.</summary>
     public bool Enabled { get; init; } = true;
+
+    /// <summary>Gets a schedule's five-field cron; null for any other kind.</summary>
+    public string? Cron { get; init; }
+
+    /// <summary>Gets the IANA time zone a schedule's cron is read in; null for any other kind.</summary>
+    public string? TimeZone { get; init; }
+
+    /// <summary>Gets when a schedule next runs, in UTC; null for any other kind, or before its first start has recorded it.</summary>
+    public DateTimeOffset? NextRunAt { get; init; }
+
+    /// <summary>Gets the occurrence a schedule last ran for, in UTC; null for any other kind, or before its first run.</summary>
+    public DateTimeOffset? LastRunAt { get; init; }
+
+    /// <summary>
+    /// Gets the status of a schedule's newest delivery — <c>pending</c>, <c>running</c>, <c>retrying</c>, <c>succeeded</c> or
+    /// <c>dead</c>; null for any other kind, or before its first run.
+    /// </summary>
+    public string? LastOutcome { get; init; }
 }

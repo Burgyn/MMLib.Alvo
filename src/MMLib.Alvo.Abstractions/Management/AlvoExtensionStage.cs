@@ -28,4 +28,8 @@ public enum AlvoExtensionStage
     /// <summary>Inside the write's own transaction: it can refuse or undo the write, and may not leave the process.</summary>
     [JsonStringEnumMemberName("inTransaction")]
     InTransaction = 3,
+
+    /// <summary>On time rather than on a write: its runs are framework events Alvo appends to the outbox, delivered after they commit.</summary>
+    [JsonStringEnumMemberName("scheduled")]
+    Scheduled = 4,
 }

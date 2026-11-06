@@ -4,6 +4,7 @@ using MMLib.Alvo.Commands.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Scheduling;
 
 namespace MMLib.Alvo.Extensions.Internal;
 
@@ -18,6 +19,9 @@ internal static class ExtensionBindingCompiler
     internal const string HandlerKind = "eventHandler";
     internal const string RetiredKind = "retired";
 
+    /// <summary>The kind a handler registration's problems are reported under: a job's delivery kind, else an event handler.</summary>
+    internal static string KindOf(HandlerRegistration handler) => handler.Job?.DeliveryKind ?? HandlerKind;
+
     /// <summary>The catalog-free pass: problems no descriptor can cure, and the ties among the handlers that pass it.</summary>
     internal static ExtensionRegistrationResult Check(
         ExtensionRegistry registry, ICelCompiler compiler, IServiceProviderIsService services)
@@ -29,6 +33,7 @@ internal static class ExtensionBindingCompiler
         problems.AddRange(CommandProblems.Shared(registry));
         var relationalHooks = WriteHookBinding.Relational(services);
         problems.AddRange(registry.WriteHooks.SelectMany(hook => new WriteHookBinding(hook, compiler).CheckRegistration(services, relationalHooks).Problems));
+        problems.AddRange(ScheduleChecks.Check(registry, services, DateTimeOffset.UtcNow));
         var refused = Refused(problems);
 
         return new(problems, [.. Ties(registry.Handlers.Where(handler => !refused.Contains(handler.Id))), .. HookTies(registry.WriteHooks.Where(hook => !refused.Contains(hook.Id)))]);
@@ -42,6 +47,7 @@ internal static class ExtensionBindingCompiler
         var bound = BindHandlers(registry, catalog, compiler, services, problems);
         var commands = BindCommands(registry, catalog, compiler, services, problems);
         var hooks = BindWriteHooks(registry, catalog, compiler, services, problems);
+        problems.AddRange(ScheduleChecks.Check(registry, services, DateTimeOffset.UtcNow));
         var refused = Refused(problems);
         List<BoundHandler> binds = [.. bound.Where(handler => !refused.Contains(handler.Id))];
         List<BoundWriteHook> boundHooks = [.. hooks.Where(hook => !refused.Contains(hook.Id))];
