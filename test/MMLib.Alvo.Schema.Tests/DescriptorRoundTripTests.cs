@@ -66,6 +66,26 @@ public class DescriptorRoundTripTests
         AssertEventExclusionsSurvive(descriptor);
     }
 
+    [Fact]
+    public void A_virtual_field_validates_and_survives_the_round_trip()
+    {
+        string json = WithDisplay("true");
+
+        SchemaValidator.Failures(SchemaValidator.Load(), json).ShouldBeEmpty();
+        var descriptor = AlvoDescriptor.Parse(json);
+        descriptor.Entities["notes"].Fields["display"].Virtual.ShouldBe(true);
+        Canonicalizer.Canonicalize(AlvoDescriptor.Serialize(descriptor)).ShouldBe(Canonicalizer.Canonicalize(json));
+    }
+
+    [Fact]
+    public void A_virtual_flag_that_is_not_a_boolean_fails_the_schema() =>
+        SchemaValidator.Failures(SchemaValidator.Load(), WithDisplay("\"yes\"")).ShouldNotBeEmpty();
+
+    private static string WithDisplay(string isVirtual) =>
+        "{\"$schema\": \"https://alvo.dev/schema/v1/project.json\", \"apiVersion\": \"alvo.dev/v1\", \"name\": \"virtuals\", "
+        + "\"entities\": {\"notes\": {\"fields\": {\"title\": {\"type\": \"string\"}, "
+        + $"\"display\": {{\"type\": \"string\", \"virtual\": {isVirtual}}}}}}}}}}}";
+
     private static void AssertEventExclusionsSurvive(AlvoDescriptor descriptor)
         => descriptor.Entities["deals"].Events.ShouldNotBeNull().Exclude.ShouldBe(["commission_note"]);
 
