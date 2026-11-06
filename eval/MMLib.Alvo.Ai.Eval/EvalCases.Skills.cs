@@ -1,4 +1,9 @@
-﻿using System.Text.Json.Nodes;
+﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Expressions.Internal;
+
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Ai.Eval;
@@ -21,6 +26,7 @@ internal static partial class EvalCases
     private const string Capabilities = "get_capabilities";
     private const string RentalsHooks = "/entities/rentals/hooks";
     private const string PartsHooks = "/entities/parts/hooks";
+    private const string PriceValidation = "/entities/parts/fields/unit_price/validation";
     private const string OrderLines = "/entities/order_lines";
     private const string OrderLinesIndexes = $"{OrderLines}/indexes";
     private const string ServiceOrdersRules = "/entities/service_orders/rules";
@@ -45,22 +51,44 @@ internal static partial class EvalCases
     }
 
     /// <summary>
-    /// Only parts' hooks change, with a <c>reject</c> of a negative <c>unit_price</c> in both <c>beforeCreate</c> and
-    /// <c>beforeUpdate</c> — hooks are the only way this build keeps a price non-negative, since a field's
-    /// <c>validation</c> is refused, and a <c>validation</c> added beside them is a change outside the hooks.
+    /// One of two right answers, and not both: only parts' hooks change, with a <c>reject</c> of a negative
+    /// <c>unit_price</c> in both <c>beforeCreate</c> and <c>beforeUpdate</c>; or the one change is a <c>validation</c>
+    /// on <c>parts.unit_price</c> that refuses a negative price and admits zero (HX-11). Hooks with a validation beside
+    /// them are two answers at once, and fail.
     /// </summary>
     /// <remarks>
-    /// The price is the row as it will be (<c>new.unit_price</c>): <c>&lt; 0</c>, <c>0 &gt;</c>, or <c>!(… &gt;= 0)</c>.
-    /// <b>A known limit:</b> a wrapped operand such as <c>double(new.unit_price) &lt; 0.0</c> is not recognised and fails.
+    /// The hook's price is the row as it will be (<c>new.unit_price</c>): <c>&lt; 0</c>, <c>0 &gt;</c>, or
+    /// <c>!(… &gt;= 0)</c>. <b>A known limit:</b> a wrapped operand such as <c>double(new.unit_price) &lt; 0.0</c> is not
+    /// recognised and fails. The validation is not read by its spelling: see <see cref="KeepsThePriceNonNegative"/>.
     /// </remarks>
     private static Verdict RejectNegativePrice(TurnRecord turn)
     {
         var guarded = _priceSlots.Where(slot => Entries(turn.Proposed($"{PartsHooks}/{slot}"))
             .Any(hook => NegativePrice().IsMatch(Condition(hook)) && hook["action"]?["reject"] is JsonValue)).ToList();
+        var hooks = OnlyUnder(turn, PartsHooks) && guarded.Count == _priceSlots.Length;
+        var validation = turn.HasValidProposal && turn.ChangedPaths is [PriceValidation] && KeepsThePriceNonNegative(turn);
         return Verdict.When(
-            turn.HasValidProposal && OnlyUnder(turn, PartsHooks) && guarded.Count == _priceSlots.Length,
-            $"valid={turn.HasValidProposal} changed=[{Joined(turn.ChangedPaths)}] rejectsIn=[{Joined(guarded)}]");
+            turn.HasValidProposal && (hooks || validation),
+            $"valid={turn.HasValidProposal} changed=[{Joined(turn.ChangedPaths)}] rejectsIn=[{Joined(guarded)}] validation={validation}");
     }
+
+    /// <summary>
+    /// Whether the proposed <c>parts.unit_price</c> validation, as the core makes it — mapped to its canonical
+    /// <c>CHECK</c> expression, compiled as a rule over parts — refuses a price of -1 and admits a price of 0.
+    /// </summary>
+    /// <remarks>Read only for a proposal the real dry run accepted, so the descriptor parses and maps.</remarks>
+    private static bool KeepsThePriceNonNegative(TurnRecord turn)
+    {
+        var schema = DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(turn.Proposal!.DescriptorJson));
+        var parts = schema.Entities.Single(entity => entity.Name == "parts");
+        var check = parts.Fields.Single(field => field.Name == "unit_price").CheckExpression;
+        var compiled = check is null ? null : new CelCompiler().Compile(check, CelProfile.Rule, parts).Expression;
+        return compiled is not null && !Admits(compiled, -1m) && Admits(compiled, 0m);
+    }
+
+    private static bool Admits(CompiledExpression check, decimal price) =>
+        CelInterpreter.EvaluatePredicate(
+            check, new AlvoRecord(new Dictionary<string, object?>(StringComparer.Ordinal) { ["unit_price"] = price }), null, AlvoContext.System(tenant: null));
 
     /// <summary>
     /// Exactly one change, a new field on customers holding a <c>count</c> rollup from rentals — so a hook maintaining

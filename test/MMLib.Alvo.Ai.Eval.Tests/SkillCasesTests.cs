@@ -20,6 +20,7 @@ namespace MMLib.Alvo.Ai.Eval.Tests;
 public sealed class SkillCasesTests
 {
     private const string Hooks = "alvo-descriptor-hooks";
+    private const string EntitiesAndFields = "alvo-descriptor-entities-and-fields";
     private const string Computed = "alvo-descriptor-computed-and-rollups";
     private const string Indexes = "alvo-descriptor-indexes";
     private const string Rules = "alvo-descriptor-rules-and-cel";
@@ -138,6 +139,43 @@ public sealed class SkillCasesTests
     public void Negative_price_fails_the_right_hooks_beside_a_validation_facet() =>
         Grade("reject_negative_price", Proposing("reject_negative_price", document =>
             document.Fields("parts")["unit_price"]!["validation"] = "value >= 0")).Passed.ShouldBeFalse();
+
+    /// <summary>
+    /// Since HX-11 a field's <c>validation</c> keeps the price non-negative too, as a <c>CHECK</c>: the second right
+    /// answer, graded by what its canonical expression does to a price of -1 and of 0, and loading the skill its path
+    /// needs (<c>entities-and-fields</c>) rather than the hooks one.
+    /// </summary>
+    [Theory]
+    [InlineData("value >= 0")]
+    [InlineData("value >= 0.0")]
+    [InlineData("0 <= value")]
+    [InlineData("!(value < 0)")]
+    [InlineData("unit_price >= 0.00")]
+    public void A_validation_on_the_price_passes_reject_negative_price(string validation)
+    {
+        var turn = Validating(validation, EntitiesAndFields);
+
+        Grade("reject_negative_price", turn).Passed.ShouldBeTrue(Grade("reject_negative_price", turn).Why);
+        EvalRunner.Graded(Case("reject_negative_price"), ReplyLanguage.English, turn).Passed.ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData("value > 0")]
+    [InlineData("value >= -1")]
+    [InlineData("value < 0")]
+    [InlineData("value != 0")]
+    public void Negative_price_fails_a_validation_that_admits_a_negative_or_refuses_zero(string validation) =>
+        Grade("reject_negative_price", Validating(validation, EntitiesAndFields)).Passed.ShouldBeFalse();
+
+    [Fact]
+    public void Negative_price_fails_the_right_validation_on_another_field() =>
+        Grade("reject_negative_price", Turn(Edited(document => document.Fields("parts")["name"]!["validation"] = "size(value) > 0"),
+            Proposed, calls: [Loads(EntitiesAndFields, 1), Read("get_descriptor", 1), Propose(Valid(), round: 2)])).Passed.ShouldBeFalse();
+
+    [Fact]
+    public void Negative_price_fails_the_right_validation_whose_dry_run_was_refused() =>
+        Grade("reject_negative_price", Turn(Edited(document => document.Fields("parts")["unit_price"]!["validation"] = "value >= 0"),
+            Proposed, refusals: ["refused"], calls: [Loads(EntitiesAndFields, 1), Propose(Refused("validation", "Refused."), 2)])).Passed.ShouldBeFalse();
 
     [Fact]
     public void Rentals_count_fails_the_right_rollup_beside_a_counter_hook() =>
@@ -285,6 +323,11 @@ public sealed class SkillCasesTests
         change?.Invoke(document);
         return Turn(document.ToJsonString(), Proposed, calls: [Loads(_skillOf[name], 1), Read("get_descriptor", 1), Propose(Valid(), round: 2)]);
     }
+
+    /// <summary><c>reject_negative_price</c> answered with a <c>validation</c> on <c>parts.unit_price</c>, the skill loaded first.</summary>
+    private static TurnRecord Validating(string validation, string skill) =>
+        Turn(Edited(document => document.Fields("parts")["unit_price"]!["validation"] = validation),
+            Proposed, calls: [Loads(skill, 1), Read("get_descriptor", 1), Propose(Valid(), round: 2)]);
 
     /// <summary>The case's right-answer patch applied to the fixture.</summary>
     private static string Answer(string name)
