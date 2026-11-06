@@ -4,6 +4,7 @@
   "name": "reads-desk",
   "tenancy": { "enabled": true },
   "auth": { "roles": ["clerk", "auditor"] },
+  "access": { "admin": "'auditor' in @user.roles" },
   "entities": {
     "notes": {
       "tenancy": "scoped",
