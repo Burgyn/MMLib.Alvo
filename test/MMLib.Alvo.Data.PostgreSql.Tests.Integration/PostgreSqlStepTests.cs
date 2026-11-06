@@ -28,6 +28,7 @@ public sealed class PostgreSqlStepTests(PostgresFixture postgres)
 
     protected override async Task<StepDatabase> DatabaseAsync()
     {
+        Assert.SkipUnless(!OperatingSystem.IsWindows(), "PostgreSQL Testcontainers requires a Linux Docker daemon; unavailable on Windows-container runners.");
         Assert.SkipWhen(string.IsNullOrEmpty(postgres.ConnectionString), "Docker is unavailable on this platform, so the PostgreSQL engine cannot be started.");
 
         var name = $"alvo_steps_{Guid.NewGuid():N}";
