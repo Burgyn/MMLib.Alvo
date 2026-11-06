@@ -722,6 +722,14 @@ namespace MMLib.Alvo.Rules
         public static bool TryBuild(MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Expressions.ICelCompiler compiler, out MMLib.Alvo.Rules.PolicyCatalog? catalog, out System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.DescriptorValidationError> errors) { }
     }
 }
+namespace MMLib.Alvo.Scheduling
+{
+    public static class AlvoSchedulerExtensions
+    {
+        public static System.Threading.Tasks.Task ScheduleAsync<TMessage>(this MMLib.Alvo.Scheduling.IAlvoScheduler scheduler, string key, System.DateTimeOffset at, TMessage message, MMLib.Alvo.TenantId? tenant = default, System.Threading.CancellationToken cancellationToken = default)
+            where TMessage :  class { }
+    }
+}
 namespace Microsoft.AspNetCore.Builder
 {
     public static class AlvoCommandEndpointRouteBuilderExtensions

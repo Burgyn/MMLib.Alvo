@@ -8,6 +8,8 @@ internal sealed class FakeFlowUnit : IAlvoFlowUnit
 
     public bool IsOpen { get; set; } = true;
 
+    public AlvoContext Caller { get; set; } = AlvoContext.System(null);
+
     internal IReadOnlyList<Exception> Poisoned => _poisoned;
 
     internal IReadOnlyList<Exception> Blamed => _blamed;

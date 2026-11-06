@@ -317,7 +317,7 @@ public abstract class LedgerFacts
 
     private static CommandKey Held(CommandKey key, CommandClaim claim) => key with { Token = claim.Token };
 
-    private static AlvoEvent Completion() => AlvoFrameworkEvent.Create(
+    private static AlvoFrameworkEnvelope Completion() => AlvoFrameworkEvent.Create(
         "alvo.command.quote_stay.completed", "commands/quote_stay", new Dictionary<string, object?> { ["command"] = "quote_stay" }, _caller, _now);
 
     private static async Task<IReadOnlyList<string>> PendingTypesAsync(IServiceProvider services)

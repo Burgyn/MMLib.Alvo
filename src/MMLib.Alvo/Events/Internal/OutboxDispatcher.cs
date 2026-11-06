@@ -258,12 +258,12 @@ internal sealed class OutboxDispatcher(
     {
         if (options.Value.DispatchMode is not AlvoEventDispatchMode.Manual)
         {
-            throw NotManual(options.Value);
+            throw DispatcherGates.NotManual(options.Value);
         }
 
         if (!options.Value.Enabled)
         {
-            throw EventsDisabled();
+            throw DispatcherGates.EventsDisabled();
         }
     }
 
@@ -275,12 +275,12 @@ internal sealed class OutboxDispatcher(
     {
         if (boot.Phase is not AlvoBootPhase.Ready)
         {
-            throw NotReady();
+            throw DispatcherGates.NotReady();
         }
 
         if (catalogs.Current is null)
         {
-            throw Unprimed();
+            throw DispatcherGates.Unprimed();
         }
 
         await EnsureStoreAsync(cancellationToken).ConfigureAwait(false);
@@ -298,30 +298,6 @@ internal sealed class OutboxDispatcher(
             _storeReady = true;
         }
     }
-
-    private static InvalidOperationException NotManual(AlvoEventOptions configured) => new(
-        "A manual dispatch round was refused before anything was claimed: this process drains its outbox with the "
-        + "background loop, and two drivers of one outbox break per-entity-key ordering. Set "
-        + $"{AlvoEventOptionsConfiguration.DispatchModeKey} to '{AlvoEventDispatchMode.Manual}' and "
-        + $"{AlvoEventOptions.SectionName}:{nameof(AlvoEventOptions.Enabled)} to true to drive it with "
-        + $"IAlvoEventPump.DrainAsync. Configured: mode '{configured.DispatchMode}', enabled {configured.Enabled}.");
-
-    private static InvalidOperationException EventsDisabled() => new(
-        "A manual dispatch round was refused before anything was claimed: the dispatch mode is manual, but events are "
-        + $"switched off ({AlvoEventOptions.SectionName}:{nameof(AlvoEventOptions.Enabled)} = false), so there is "
-        + $"nothing to drive. Set {AlvoEventOptions.SectionName}:{nameof(AlvoEventOptions.Enabled)} to true to drive "
-        + "the outbox with IAlvoEventPump.DrainAsync.");
-
-    private static InvalidOperationException NotReady() => new(
-        "A manual dispatch round was refused before anything was claimed: the boot has not reached Ready, and an event "
-        + "judged against an unprimed catalog would match no hook and be retired as delivered. Start the host and let "
-        + "its boot finish first.");
-
-    private static InvalidOperationException Unprimed() => new(
-        "A manual dispatch round was refused before anything was claimed: the boot is Ready but primed no schema, "
-        + "because the project has no descriptor applied yet, and an event judged against an unprimed catalog would "
-        + "match no hook and be retired as delivered. Apply a descriptor to the project first; if it should already "
-        + $"have one, check {AlvoSchemaOptions.ProjectEnvironmentVariable}.");
 
     /// <summary>
     /// Delivers one entry, containing whatever it throws so neither the rest of the batch nor the host is

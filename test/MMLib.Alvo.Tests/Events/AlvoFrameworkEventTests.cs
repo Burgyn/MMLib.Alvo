@@ -26,7 +26,7 @@ public sealed class AlvoFrameworkEventTests
             "bookings/42",
             new Dictionary<string, object?> { ["command"] = "confirm_booking" },
             caller,
-            _now);
+            _now).Envelope;
 
         @event.Type.ShouldBe("alvo.command.confirm_booking.completed");
         @event.Subject.ShouldBe("bookings/42");
@@ -44,7 +44,7 @@ public sealed class AlvoFrameworkEventTests
     public void A_tenantless_completion_is_partitioned_under_the_tenantless_scope() =>
         AlvoFrameworkEvent.Create(
                 "alvo.command.quote.completed", "commands/quote", new Dictionary<string, object?>(), AlvoContext.System(null), _now)
-            .PartitionKey.ShouldBe("framework.event:global:commands/quote");
+            .Envelope.PartitionKey.ShouldBe("framework.event:global:commands/quote");
 
     [Theory]
     [InlineData("orders.approved")]

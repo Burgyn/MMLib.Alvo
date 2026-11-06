@@ -87,6 +87,8 @@ public sealed class UnitSavepointJoinTests
     {
         public bool IsOpen => true;
 
+        public AlvoContext Caller { get; } = AlvoContext.System(null);
+
         public void Poison(Exception failure)
         {
         }
