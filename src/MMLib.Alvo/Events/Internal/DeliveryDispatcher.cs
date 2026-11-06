@@ -232,32 +232,8 @@ internal sealed class DeliveryDispatcher(
         }
     }
 
-    private async Task<bool> GatesOpenAsync(CancellationToken stop)
-    {
-        if (!events.Value.Enabled)
-        {
-            return false;
-        }
-
-        if (events.Value.DispatchMode is AlvoEventDispatchMode.Manual)
-        {
-            DeliveryLog.DeliveryDispatcherManual(logger);
-            return false;
-        }
-
-        if (await boot.SettledAsync(stop).ConfigureAwait(false) is not AlvoBootPhase.Ready)
-        {
-            return false;
-        }
-
-        if (catalogs.Current is null)
-        {
-            DeliveryLog.DeliveryDispatcherStoodDownUnprimed(logger);
-            return false;
-        }
-
-        return true;
-    }
+    private Task<bool> GatesOpenAsync(CancellationToken stop) => DispatcherGates.OpenAsync(
+        events.Value, boot, catalogs, () => DeliveryLog.DeliveryDispatcherManual(logger), () => DeliveryLog.DeliveryDispatcherStoodDownUnprimed(logger), stop);
 
     /// <summary>Brings the store up once; the loop and the manual rounds never run in one process together, so no lock.</summary>
     private async Task EnsureStoreAsync(CancellationToken ct)

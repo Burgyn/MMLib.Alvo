@@ -1,11 +1,15 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
+using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules.Internal;
+using MMLib.Alvo.Scheduling;
 using MMLib.Alvo.Tests.Extensions;
 
 using NSubstitute;
@@ -263,8 +267,13 @@ public sealed partial class OutboxDispatcherTests
     {
         var lifetime = Substitute.For<IHostApplicationLifetime>();
         lifetime.ApplicationStopping.Returns(stopping?.Token ?? CancellationToken.None);
-        return new(dispatcher, deliveries ?? NoDeliveries(), lifetime);
+        return new(NoTimers(), dispatcher, deliveries ?? NoDeliveries(), lifetime);
     }
+
+    /// <summary>A timer pump with no timer store, whose manual round answers an empty result.</summary>
+    private static TimerPump NoTimers() => new(
+        store: null, new AlvoBootState(), new PolicyCatalogProvider(), Options.Create(new AlvoEventOptions()), TimeProvider.System,
+        NullLogger<TimerPump>.Instance);
 
     /// <summary>A delivery dispatcher with one pending delivery whose handler waits for its token.</summary>
     private async Task<DeliveryDispatcher> BlockingDeliveryAsync(FakeDeliveryStore store)

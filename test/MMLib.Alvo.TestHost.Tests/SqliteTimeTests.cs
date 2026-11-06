@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace MMLib.Alvo.TestHost.Tests;
 
@@ -23,6 +24,6 @@ public sealed class SqliteTimeTests : TimeFacts, IDisposable
         _files.Add(path);
         var connectionString = SqliteTempFile.ConnectionStringFor(path);
 
-        return Task.FromResult(new TimeDatabase(alvo => alvo.UseSqlite(connectionString)));
+        return Task.FromResult(new TimeDatabase(alvo => alvo.UseSqlite(connectionString), () => new SqliteConnection(connectionString)));
     }
 }

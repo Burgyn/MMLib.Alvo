@@ -35,7 +35,7 @@ public sealed class PostgreSqlTimeTests(PostgresFixture postgres)
         _databases.Add(name);
         var connectionString = new NpgsqlConnectionStringBuilder(postgres.ConnectionString) { Database = name }.ToString();
 
-        return new TimeDatabase(alvo => alvo.UsePostgreSql(connectionString));
+        return new TimeDatabase(alvo => alvo.UsePostgreSql(connectionString), () => new NpgsqlConnection(connectionString));
     }
 
     private async Task ExecuteAsync(string sql)
