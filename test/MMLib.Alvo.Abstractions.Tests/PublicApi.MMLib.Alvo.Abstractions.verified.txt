@@ -1547,6 +1547,8 @@ namespace MMLib.Alvo.Management
         AfterDelete = 6,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("narrowing")]
         Narrowing = 7,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("enricher")]
+        Enricher = 8,
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Management.AlvoExtensionStage>))]
     public enum AlvoExtensionStage

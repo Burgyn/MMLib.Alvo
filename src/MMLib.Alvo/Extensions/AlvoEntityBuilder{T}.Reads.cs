@@ -11,7 +11,8 @@ namespace MMLib.Alvo.Extensions;
 /// <remarks>
 /// A narrowing's predicate is translated into an <see cref="AlvoFilter"/> on every read — a captured value is read then and
 /// bound as a parameter — and ANDed into the SQL of every list, get and count a caller other than the system makes. It can
-/// only remove rows, never add one, and writes are never narrowed; one that cannot be translated fails the read.
+/// only remove rows, never add one, and writes are never narrowed; one that cannot be translated fails the read. An enricher
+/// sees each returned row as <typeparamref name="T"/> and may only hide a field or fill a virtual one.
 /// </remarks>
 public sealed partial class AlvoEntityBuilder<T>
 {
@@ -21,7 +22,7 @@ public sealed partial class AlvoEntityBuilder<T>
     /// <returns>This builder.</returns>
     public AlvoEntityBuilder<T> Narrow<TNarrowing>(string id)
         where TNarrowing : class, IQueryNarrowing<T> =>
-        AddRead(id, ReadInvoker.NarrowingClass<TNarrowing>((narrowing, query) => Translated(narrowing.Narrow(query), query.Entity)));
+        AddRead(id, ReadExtensionKind.Narrowing, ReadInvoker.NarrowingClass<TNarrowing>((narrowing, query) => Translated(narrowing.Narrow(query), query.Entity)));
 
     /// <summary>Narrows every non-system read of the entity by the predicate <paramref name="narrow"/> answers.</summary>
     /// <param name="id">A stable id, lower-case letters, digits and hyphens.</param>
@@ -30,15 +31,35 @@ public sealed partial class AlvoEntityBuilder<T>
     public AlvoEntityBuilder<T> Narrow(string id, Func<QueryNarrowing, Expression<Func<T, bool>>?> narrow)
     {
         ArgumentNullException.ThrowIfNull(narrow);
-        return AddRead(id, ReadInvoker.NarrowingDelegate(query => Translated(narrow(query), query.Entity)));
+        return AddRead(id, ReadExtensionKind.Narrowing, ReadInvoker.NarrowingDelegate(query => Translated(narrow(query), query.Entity)));
+    }
+
+    /// <summary>Shapes every row a read or a write's echo returns of the entity by a <typeparamref name="TEnricher"/>, built once per read.</summary>
+    /// <typeparam name="TEnricher">The enricher class.</typeparam>
+    /// <param name="id">A stable id, lower-case letters, digits and hyphens.</param>
+    /// <returns>This builder.</returns>
+    public AlvoEntityBuilder<T> Enrich<TEnricher>(string id)
+        where TEnricher : class, IRecordEnricher<T> =>
+        AddRead(id, ReadExtensionKind.Enricher, ReadInvoker.EnricherClass<TEnricher>(
+            (enricher, row, caller, operation) => enricher.Enrich(new Enrich<T>(row, caller, operation))));
+
+    /// <summary>Shapes every row a read or a write's echo returns of the entity by <paramref name="enrich"/>.</summary>
+    /// <param name="id">A stable id, lower-case letters, digits and hyphens.</param>
+    /// <param name="enrich">Hides fields of, or fills virtual fields on, one returned row.</param>
+    /// <returns>This builder.</returns>
+    public AlvoEntityBuilder<T> Enrich(string id, Action<Enrich<T>> enrich)
+    {
+        ArgumentNullException.ThrowIfNull(enrich);
+        return AddRead(id, ReadExtensionKind.Enricher, ReadInvoker.EnricherDelegate(
+            (row, caller, operation) => enrich(new Enrich<T>(row, caller, operation))));
     }
 
     private static AlvoFilter? Translated(Expression<Func<T, bool>>? where, string entity) =>
         where is null ? null : FilterTranslator.Translate(where, entity);
 
-    private AlvoEntityBuilder<T> AddRead(string id, ReadInvoker invoker)
+    private AlvoEntityBuilder<T> AddRead(string id, ReadExtensionKind kind, ReadInvoker invoker)
     {
-        ReadExtensionRegistration.Add(_services, id, [_entity], ReadExtensionKind.Narrowing, invoker, RecordShape.Of(typeof(T)));
+        ReadExtensionRegistration.Add(_services, id, [_entity], kind, invoker, RecordShape.Of(typeof(T)));
 
         return this;
     }

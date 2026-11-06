@@ -114,6 +114,31 @@ public sealed class ExtensionBootRefusalTests
             .ShouldContain("Did you mean 'notes'?");
     }
 
+    [Fact]
+    public async Task An_enricher_depending_on_IAlvoData_refuses_boot_naming_the_parameter()
+    {
+        var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(() => AlvoTestHost.StartAsync(alvo =>
+        {
+            alvo.FromDescriptor(ReadsDesk);
+            alvo.Entity("notes", n => n.Enrich<DataReadingEnricher>("peeking-enricher"));
+        }, cancellationToken: Ct));
+
+        refusal.Message.ShouldContain("'peeking-enricher'");
+        refusal.Message.ShouldContain("extensions/peeking-enricher/dependencies");
+    }
+
+    [Fact]
+    public async Task An_enricher_on_every_entity_refuses_boot()
+    {
+        var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(() => AlvoTestHost.StartAsync(alvo =>
+        {
+            alvo.FromDescriptor(ReadsDesk);
+            alvo.Entity("*", every => every.Enrich("everywhere", (Enrich<AlvoRecord> _) => { }));
+        }, cancellationToken: Ct));
+
+        refusal.Message.ShouldContain("'everywhere' (enricher) at extensions/everywhere/entity");
+    }
+
     private static string ReadsDesk => Path.Combine(AppContext.BaseDirectory, "descriptors", "reads-desk.alvo.json");
 }
 
@@ -124,4 +149,9 @@ public sealed class DataReadingNarrowing(IAlvoData data) : IQueryNarrowing
         _ = data;
         return null;
     }
+}
+
+public sealed class DataReadingEnricher(IAlvoData data) : IRecordEnricher<AlvoRecord>
+{
+    public void Enrich(Enrich<AlvoRecord> row) => row.SetVirtual("display", data.GetType().Name);
 }

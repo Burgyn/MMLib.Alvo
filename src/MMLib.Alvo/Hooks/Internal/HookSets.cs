@@ -35,7 +35,7 @@ internal static class HookSets
         return null;
     }
 
-    private static object? Coerce(FieldSchema? field, object? value) => (field?.Type, value) switch
+    internal static object? Coerce(FieldSchema? field, object? value) => (field?.Type, value) switch
     {
         (_, float single) => (double)single,
         (FieldType.Decimal, long whole) => (decimal)whole,

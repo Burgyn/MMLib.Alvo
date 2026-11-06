@@ -12,9 +12,11 @@ namespace MMLib.Alvo.Reads.Internal;
 
 /// <summary>
 /// The core's <see cref="IReadExtensionRunner"/>: the narrowings registered on an entity, in registration order, each asked
-/// once per read and ANDed together — for every caller but the system, and never for a rules-only read. It fails closed: a
+/// once per read and ANDed together — for every caller but the system, and never for a rules-only read; and the enrichers,
+/// which shape every row a read returns for every caller, the system too, but never for a rules-only read. It fails closed: a
 /// narrowing that is unbound, throws, cannot be translated, exceeds the filter limits or names a field the entity does not
-/// declare fails the read, logged with its id and reason only.
+/// declare fails the read, logged with its id and reason only — as does an unbound enricher (see <see cref="ReadEnrichment"/>
+/// for the rest).
 /// </summary>
 internal sealed class ReadExtensionRunner(
     ExtensionRegistry registry, ExtensionBinder binder, IPolicyCatalogProvider catalogs, IServiceScopeFactory scopes,
@@ -42,8 +44,34 @@ internal sealed class ReadExtensionRunner(
         }
     }
 
-    private List<ReadExtensionRegistration> Narrowings(string entity) =>
-        [.. registry.ReadExtensions.Where(read => read.Kind == ReadExtensionKind.Narrowing && read.Covers(entity))];
+    public IReadEnrichment? BeginEnrichment(string entity, DataOperation operation, AlvoContext context)
+    {
+        var registered = Registered(ReadExtensionKind.Enricher, entity);
+        if (registered.Count == 0 || AlvoFlow.IsRulesOnlyRead)
+        {
+            return null;
+        }
+
+        var schema = EnsureBound(registered, entity);
+        var scope = registered.Any(read => read.Invoker.IsClass) ? scopes.CreateAsyncScope() : (AsyncServiceScope?)null;
+        return new ReadEnrichment(registered, schema, context, operation, scope, logger);
+    }
+
+    private List<ReadExtensionRegistration> Narrowings(string entity) => Registered(ReadExtensionKind.Narrowing, entity);
+
+    private List<ReadExtensionRegistration> Registered(ReadExtensionKind kind, string entity) =>
+        [.. registry.ReadExtensions.Where(read => read.Kind == kind && read.Covers(entity))];
+
+    private EntitySchema EnsureBound(List<ReadExtensionRegistration> registered, string entity)
+    {
+        var (schema, _, bindings) = Bound(entity);
+        if (registered.FirstOrDefault(read => schema is null || bindings.ReadExtension(read.Id) is null) is { } unbound)
+        {
+            throw Failed(unbound.Id, HookFailedException.Unbound, cause: null);
+        }
+
+        return schema!;
+    }
 
     private static ReadNarrowing? Combined(List<ReadExtensionRegistration> registered, List<AlvoFilter> terms) =>
         terms.Count == 0
@@ -130,19 +158,5 @@ internal sealed class ReadExtensionRunner(
         }
     }
 
-    private HookFailedException Failed(string id, string reason, Exception? cause)
-    {
-        ReadLog.ReadExtensionFailed(logger, id, reason, cause?.GetType().FullName ?? "-");
-        var failure = HookFailedException.OfRead([id], reason);
-        AlvoFlow.Unit?.Blame(failure);
-        return failure;
-    }
-
-    /// <summary>The services a delegate narrowing is handed: none — it takes no service.</summary>
-    private sealed class EmptyServices : IServiceProvider
-    {
-        internal static EmptyServices Instance { get; } = new();
-
-        public object? GetService(Type serviceType) => null;
-    }
+    private HookFailedException Failed(string id, string reason, Exception? cause) => ReadFailures.Failed(logger, id, reason, cause);
 }

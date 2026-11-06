@@ -16,6 +16,7 @@ public sealed class VirtualFieldCheckTests
     [InlineData("rollup", "\"rollup\": {\"from\": \"comments\", \"op\": \"count\"}")]
     [InlineData("default", "\"default\": \"x\"")]
     [InlineData("required", "\"required\": true")]
+    [InlineData("nullable", "\"nullable\": false")]
     [InlineData("unique", "\"unique\": true")]
     [InlineData("index", "\"index\": true")]
     [InlineData("validation", "\"validation\": \"size(value) > 1\"")]
