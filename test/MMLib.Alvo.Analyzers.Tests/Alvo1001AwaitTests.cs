@@ -40,6 +40,27 @@ public sealed class Alvo1001AwaitTests
     }
 
     [Fact]
+    public async Task Awaiting_the_scheduler_in_a_before_write_hook_is_not_reported()
+    {
+        const string source = Usings + """
+            using MMLib.Alvo.Scheduling;
+            [AlvoEvent("tickets.reminder_due")]
+            public sealed class ReminderDue { public Guid TicketId { get; init; } }
+            public sealed class Guard(IAlvoScheduler scheduler) : IBeforeWriteHook
+            {
+                public async ValueTask BeforeWriteAsync(BeforeWrite<AlvoRecord> write, CancellationToken cancellationToken)
+                {
+                    await scheduler.ScheduleAsync("remind", DateTimeOffset.UtcNow, "tickets.reminder_due", null, cancellationToken: cancellationToken);
+                    await scheduler.ScheduleAsync("typed", DateTimeOffset.UtcNow, new ReminderDue(), cancellationToken: cancellationToken);
+                    _ = await scheduler.CancelAsync("remind", cancellationToken: cancellationToken);
+                }
+            }
+            """;
+
+        (await AnalyzerHarness.Alvo1001Async(source)).ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Awaiting_a_typed_client_the_host_wrote_itself_is_reported()
     {
         const string source = Usings + """

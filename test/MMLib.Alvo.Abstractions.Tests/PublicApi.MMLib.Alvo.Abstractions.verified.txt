@@ -2125,6 +2125,11 @@ namespace MMLib.Alvo.Scheduling
         public required string Provenance { get; init; }
         public required string Scope { get; init; }
     }
+    public interface IAlvoScheduler
+    {
+        System.Threading.Tasks.Task<bool> CancelAsync(string key, MMLib.Alvo.TenantId? tenant = default, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task ScheduleAsync(string key, System.DateTimeOffset at, string eventType, System.Collections.Generic.IReadOnlyDictionary<string, object?>? data, MMLib.Alvo.TenantId? tenant = default, System.Threading.CancellationToken cancellationToken = default);
+    }
     public interface ITimerStore
     {
         System.Threading.Tasks.Task<bool> AdvanceScheduleAsync(MMLib.Alvo.Scheduling.ScheduleAdvance advance, System.Threading.CancellationToken cancellationToken = default);

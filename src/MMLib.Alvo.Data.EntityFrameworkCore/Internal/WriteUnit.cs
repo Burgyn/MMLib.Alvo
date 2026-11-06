@@ -141,7 +141,7 @@ internal sealed partial class WriteUnit : IAlvoFlowUnit, IAsyncDisposable
     internal DbTransaction Transaction => _parts.Transaction.GetDbTransaction();
 
     /// <summary>Gets the caller who opened the unit.</summary>
-    internal AlvoContext Caller { get; }
+    public AlvoContext Caller { get; }
 
     /// <summary>Gets the unit's provenance: the caller's effective one, with a correlation id of the unit's own when it had none.</summary>
     internal AlvoProvenance Provenance { get; }

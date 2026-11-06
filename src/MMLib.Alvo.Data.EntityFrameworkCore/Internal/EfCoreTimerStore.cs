@@ -67,7 +67,7 @@ internal sealed partial class EfCoreTimerStore : ITimerStore
         ArgumentNullException.ThrowIfNull(timer);
         var generation = Guid.CreateVersion7(_time.GetUtcNow());
 
-        return WriteAsync(
+        return JoinedWriteAsync(
             async (connection, transaction, ct) =>
             {
                 await ExecuteAsync(connection, transaction, TimerTable.UpsertSql(_timers), command => BindTimer(command, timer, generation), ct)
@@ -82,7 +82,7 @@ internal sealed partial class EfCoreTimerStore : ITimerStore
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(key);
 
-        return WriteAsync(
+        return JoinedWriteAsync(
             async (connection, transaction, ct) =>
                 await ExecuteAsync(connection, transaction, TimerTable.CancelSql(_timers), command => BindKey(command, scope, key), ct)
                     .ConfigureAwait(false) == 1,
@@ -187,6 +187,13 @@ internal sealed partial class EfCoreTimerStore : ITimerStore
 
         return true;
     }
+
+    /// <summary>
+    /// A timer write in the transaction unit open on the flow when there is one — so it commits or rolls back with the unit —
+    /// and in a transaction of its own otherwise.
+    /// </summary>
+    private Task<T> JoinedWriteAsync<T>(Func<DbConnection, DbTransaction, CancellationToken, Task<T>> write, CancellationToken ct) =>
+        AlvoFlow.Unit is WriteUnit unit ? _data().InFlowUnitAsync(unit, write, ct) : WriteAsync(write, ct);
 
     private Task<T> WriteAsync<T>(Func<DbConnection, DbTransaction, CancellationToken, Task<T>> write, CancellationToken ct) =>
         InTransactionAsync(write, _ => true, ct);
