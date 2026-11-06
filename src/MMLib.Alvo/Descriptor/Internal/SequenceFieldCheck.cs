@@ -138,6 +138,11 @@ internal static class SequenceFieldCheck
             return $"names no field of '{finding.Entity}'";
         }
 
+        if (target.Virtual == true)
+        {
+            return "is virtual and has no value when the number is allocated";
+        }
+
         if (IsMaintained(target))
         {
             return "is maintained by the framework and has no value when the number is allocated";

@@ -370,7 +370,7 @@ internal sealed class WriteExtensionRunner(
 
     /// <summary>The fields the store fills — <c>computed</c>, <c>rollup</c> and <c>sequence</c> — which an image of a row not yet stored lacks.</summary>
     private static HashSet<string> Derived(EntitySchema? entity) =>
-        entity?.Fields.Where(field => field.IsMaintained()).Select(field => field.Name).ToHashSet(StringComparer.Ordinal)
+        entity?.Fields.Where(field => field.IsMaintained() || field.IsVirtual).Select(field => field.Name).ToHashSet(StringComparer.Ordinal)
             ?? new HashSet<string>(StringComparer.Ordinal);
 
     private static EntitySchema? Entity(PolicyCatalog? catalog, string entity) =>

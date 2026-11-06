@@ -22,6 +22,7 @@ public sealed class HookSetsTests
             new FieldSchema { Name = "deleted_at", Type = FieldType.DateTime, Nullable = true },
             new FieldSchema { Name = "created_by", Type = FieldType.Uuid, Nullable = true },
             new FieldSchema { Name = "updated_at", Type = FieldType.DateTime, Nullable = true },
+            new FieldSchema { Name = "display", Type = FieldType.String, Nullable = true, IsVirtual = true },
         ],
         Audit = true,
         SoftDelete = true,
@@ -44,6 +45,10 @@ public sealed class HookSetsTests
     [Fact]
     public void A_mutate_targeting_a_sequence_field_is_refused_at_apply() =>
         HookSets.FirstProblem(new Dictionary<string, object?> { ["number"] = 5L }, _entity).ShouldBe(("number", "maintained"));
+
+    [Fact]
+    public void A_hook_s_set_of_a_virtual_field_is_maintained() =>
+        HookSets.FirstProblem(new Dictionary<string, object?> { ["display"] = "x" }, _entity).ShouldBe(("display", "maintained"));
 
     [Fact]
     public void A_whole_number_into_a_decimal_field_and_a_declared_value_are_accepted_and_widened()

@@ -82,6 +82,7 @@ export const SCHEMA_FACETS = {
     "index",
     "hidden",
     "readOnly",
+    "virtual",
     "computed",
     "rollup",
     "sequence"

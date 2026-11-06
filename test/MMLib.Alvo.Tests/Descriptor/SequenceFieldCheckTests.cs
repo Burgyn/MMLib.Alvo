@@ -90,6 +90,17 @@ public sealed class SequenceFieldCheckTests
             "Field 'orders.number' counts its 'sequence' per 'kind', which is maintained by the framework and has no value when the number is allocated.");
     }
 
+    [Fact]
+    public void A_per_naming_a_virtual_field_is_refused()
+    {
+        var fields = "{" + Branch + ", \"number\": {\"type\": \"integer\", \"sequence\": {\"per\": \"kind\"}}, \"kind\": {\"type\": \"string\", \"virtual\": true}}";
+
+        var error = Check(fields).ShouldHaveSingleItem();
+        error.Path.ShouldBe(Pointer + "/per");
+        error.Message.ShouldBe(
+            "Field 'orders.number' counts its 'sequence' per 'kind', which is virtual and has no value when the number is allocated.");
+    }
+
     [Theory]
     [InlineData("json", "")]
     [InlineData("decimal", """, "precision": 10, "scale": 2""")]

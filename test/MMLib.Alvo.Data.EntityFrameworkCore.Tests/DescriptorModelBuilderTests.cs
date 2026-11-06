@@ -556,4 +556,24 @@ public class DescriptorModelBuilderTests
 
         efModel.FindEntityType("vehicles")!.GetTableName().ShouldBe("vehicles");
     }
+    [Fact]
+    public void A_virtual_field_maps_no_column()
+    {
+        var model = new SchemaModel([
+            new EntitySchema
+            {
+                Name = "notes",
+                Fields = [
+                    new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
+                    new FieldSchema { Name = "title", Type = FieldType.String, Nullable = true },
+                    new FieldSchema { Name = "display", Type = FieldType.String, Nullable = true, IsVirtual = true },
+                ],
+            },
+        ]);
+
+        var notes = DescriptorModelBuilder.Build(model, NewSqliteBuilder).FindEntityType("notes")!;
+
+        notes.FindProperty("display").ShouldBeNull();
+        notes.FindProperty("title").ShouldNotBeNull();
+    }
 }

@@ -35,7 +35,7 @@ internal static class HookSets
         return null;
     }
 
-    private static object? Coerce(FieldSchema? field, object? value) => (field?.Type, value) switch
+    internal static object? Coerce(FieldSchema? field, object? value) => (field?.Type, value) switch
     {
         (_, float single) => (double)single,
         (FieldType.Decimal, long whole) => (decimal)whole,
@@ -64,7 +64,8 @@ internal static class HookSets
         || field.Name == AlvoManagedColumns.DeletedAt
         || AlvoManagedColumns.Audit.Contains(field.Name)
         || field.Name == AlvoManagedColumns.VersionColumn(entity)
-        || field.IsMaintained();
+        || field.IsMaintained()
+        || field.IsVirtual;
 
     private static bool Holds(FieldSchema field, object? value) => value is null || FieldClrType.Of(field).IsInstanceOfType(value);
 }

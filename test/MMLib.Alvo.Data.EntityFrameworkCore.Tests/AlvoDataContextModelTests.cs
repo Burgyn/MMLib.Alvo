@@ -182,4 +182,17 @@ public sealed class AlvoDataContextModelTests : IDisposable
 
         return options.Options;
     }
+    [Fact]
+    public void A_virtual_field_configures_no_property()
+    {
+        var notes = AlvoDataFixtures.Vehicle with
+        {
+            Fields = [
+                .. AlvoDataFixtures.Vehicle.Fields,
+                new FieldSchema { Name = "display", Type = FieldType.String, Nullable = true, IsVirtual = true },
+            ],
+        };
+
+        Rows(notes).FindProperty("display").ShouldBeNull();
+    }
 }

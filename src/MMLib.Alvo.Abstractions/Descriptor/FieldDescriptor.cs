@@ -76,6 +76,9 @@ public sealed record FieldDescriptor
     /// <summary>Whether the field is read-only via the API (static or a per-role CEL expression).</summary>
     public BoolOrCel? ReadOnly { get; init; }
 
+    /// <summary>Whether the field has no column: an embedded host's enricher fills it when a record is read; read-only everywhere.</summary>
+    public bool? Virtual { get; init; }
+
     /// <summary>CEL expression deriving the value from other fields of the same row; makes the field read-only.</summary>
     public string? Computed { get; init; }
 

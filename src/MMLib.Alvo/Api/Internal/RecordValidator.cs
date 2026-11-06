@@ -1,6 +1,7 @@
 ﻿using MMLib.Alvo.Data;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using System.Collections.Frozen;
 using System.Text;
 
 namespace MMLib.Alvo.Api.Internal;
@@ -85,6 +86,12 @@ internal static class RecordValidator
         }
 
         var supplied = request.Values.TryGetValue(field.Name, out var value);
+        if (supplied && field.IsVirtual)
+        {
+            violations.Add(request.HiddenFields.Contains(field.Name) ? PayloadViolations.UnknownField(field.Name) : PayloadViolations.Virtual(field));
+            return;
+        }
+
         if (supplied && request.ReadOnlyFields.Contains(field.Name))
         {
             violations.Add(PayloadViolations.ReadOnly(field));
@@ -505,4 +512,11 @@ internal sealed record RecordValidationRequest(
     IReadOnlySet<string> AlreadyReported,
     FormatCatalog Formats,
     IAlvoData Data,
-    AlvoContext Context);
+    AlvoContext Context)
+{
+    /// <summary>
+    /// Gets the fields this caller's policy hides. A <c>virtual</c> one named in the payload is answered as an unknown
+    /// field, never as virtual: naming it would tell the caller it exists.
+    /// </summary>
+    internal IReadOnlySet<string> HiddenFields { get; init; } = FrozenSet<string>.Empty;
+}

@@ -1,4 +1,7 @@
-﻿namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
+﻿using MMLib.Alvo.Schema;
+using MMLib.Alvo.Testing.Data;
+
+namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 
 /// <summary>
 /// What each write tells <c>WritePayloadGuard</c> and <c>AlvoPrecondition</c> about itself, judged by the
@@ -92,5 +95,23 @@ public class EfAlvoDataWritePayloadGuardTests
             WritePathFixture.Entity, WritePathFixture.CreatePayload("seed"), world.Caller, cancellationToken: Ct);
 
         return (Guid)seeded["id"]!;
+    }
+    /// <summary>A virtual field has no column: a payload naming it is refused with the port's sentence, naming the field.</summary>
+    [Fact]
+    public void A_virtual_field_in_a_payload_is_refused_naming_it()
+    {
+        var entity = AlvoDataFixtures.Vehicle with
+        {
+            Fields = [
+                .. AlvoDataFixtures.Vehicle.Fields,
+                new FieldSchema { Name = "display", Type = FieldType.String, Nullable = true, IsVirtual = true },
+            ],
+        };
+
+        var refused = Should.Throw<AlvoAuthorizationException>(() => WritePayloadGuard.EnsureWritable(
+            new Dictionary<string, object?> { ["display"] = "forged" }, entity, SnapshotFixture.UpdateDecision(null), isUpdate: false));
+
+        refused.Message.ShouldBe(
+            "Field 'display' is virtual and cannot be written: an enricher fills it when the record is read. Remove it from the payload.");
     }
 }

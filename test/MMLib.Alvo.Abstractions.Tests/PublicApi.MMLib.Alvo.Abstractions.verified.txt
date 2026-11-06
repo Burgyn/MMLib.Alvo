@@ -866,6 +866,7 @@ namespace MMLib.Alvo.Descriptor
         public bool? Unique { get; init; }
         public string? Validation { get; init; }
         public System.Collections.Generic.IReadOnlyList<string>? Values { get; init; }
+        public bool? Virtual { get; init; }
     }
     public sealed class FieldSequence : System.IEquatable<MMLib.Alvo.Descriptor.FieldSequence>
     {
@@ -1569,6 +1570,8 @@ namespace MMLib.Alvo.Management
         AfterDelete = 6,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("narrowing")]
         Narrowing = 7,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("enricher")]
+        Enricher = 8,
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Management.AlvoExtensionStage>))]
     public enum AlvoExtensionStage
@@ -2269,6 +2272,7 @@ namespace MMLib.Alvo.Schema
         public string? Format { get; init; }
         public string? FormatPattern { get; init; }
         public bool Indexed { get; init; }
+        public bool IsVirtual { get; init; }
         public int? MaxLength { get; init; }
         public required string Name { get; init; }
         public bool Nullable { get; init; }

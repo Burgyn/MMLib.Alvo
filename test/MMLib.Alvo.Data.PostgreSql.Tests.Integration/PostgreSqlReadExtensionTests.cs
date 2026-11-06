@@ -35,7 +35,18 @@ public sealed class PostgreSqlReadExtensionTests(PostgresFixture postgres)
         _databases.Add(name);
         var connectionString = new NpgsqlConnectionStringBuilder(postgres.ConnectionString) { Database = name }.ToString();
 
-        return new ReadsDatabase(alvo => alvo.UsePostgreSql(connectionString), name);
+        return new ReadsDatabase(alvo => alvo.UsePostgreSql(connectionString), name, table => ColumnsAsync(connectionString, table));
+    }
+
+    private static async Task<IReadOnlyList<string>> ColumnsAsync(string connectionString, string table)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(Ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT column_name FROM information_schema.columns WHERE table_name = @table";
+        command.Parameters.AddWithValue(nameof(table), table);
+
+        return await NamesAsync(command);
     }
 
     private async Task ExecuteAsync(string sql)
