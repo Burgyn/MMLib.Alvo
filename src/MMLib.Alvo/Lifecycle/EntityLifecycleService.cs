@@ -43,6 +43,23 @@ internal sealed class EntityLifecycleService(CelFunctionBudgetPolicy budget, Alv
         return EntityTimerPlanner.Plan(timers, write, depth);
     }
 
+    /// <inheritdoc />
+    public IReadOnlyList<string> TimerKeys(PolicyDecision decision, string entity, Guid id) =>
+        EntityTimerPlanner.Keys(LifecycleOf(decision).Timers, entity, id);
+
+    /// <inheritdoc />
+    public IReadOnlyList<TimerChange> ReplanTimers(PolicyDecision decision, EntityTimerReplan replan)
+    {
+        ArgumentNullException.ThrowIfNull(replan);
+        if (LifecycleOf(decision).Timers is not { Count: > 0 } timers)
+        {
+            return [];
+        }
+
+        using var pass = budget.Enter();
+        return EntityTimerPlanner.Replan(timers, replan, depth);
+    }
+
     private static EntityLifecycle LifecycleOf(PolicyDecision decision)
     {
         ArgumentNullException.ThrowIfNull(decision);

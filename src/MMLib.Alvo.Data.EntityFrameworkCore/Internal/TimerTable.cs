@@ -70,6 +70,13 @@ internal static class TimerTable
     /// <param name="table">The validated table name.</param>
     internal static string CancelSql(string table) => $"DELETE FROM {table} WHERE scope = @scope AND timer_key = @key";
 
+    /// <summary>Reads the scope, key and due of every timer armed under one of <paramref name="keys"/> keys, bound as <see cref="KeyParameter"/>.</summary>
+    internal static string ArmedSql(string table, int keys) =>
+        $"SELECT scope, timer_key, due_at FROM {table} WHERE timer_key IN ({string.Join(", ", Enumerable.Range(0, keys).Select(KeyParameter))})";
+
+    /// <summary>The name the <paramref name="index"/>th key of <see cref="ArmedSql"/> is bound as.</summary>
+    internal static string KeyParameter(int index) => $"@key{index}";
+
     /// <summary>Leases up to <c>@batch</c> claimable timers, the earliest due first, and returns them.</summary>
     /// <param name="table">The validated table name.</param>
     /// <remarks>

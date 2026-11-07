@@ -4,7 +4,8 @@
   "name": "lifecycle-desk",
   "description": "The state-machine and declarative-timer facts' desk.",
   "tenancy": { "enabled": true },
-  "auth": { "roles": ["staff", "manager"] },
+  "auth": { "roles": ["staff", "manager", "ops"] },
+  "access": { "developer": "'ops' in @user.roles" },
   "entities": {
     "bookings": {
       "tenancy": "scoped",

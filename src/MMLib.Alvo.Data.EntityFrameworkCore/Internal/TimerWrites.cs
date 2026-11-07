@@ -27,6 +27,29 @@ internal static class TimerWrites
         DbConnection connection, DbTransaction transaction, string table, string scope, string key, CancellationToken ct) =>
         ExecuteAsync(connection, transaction, TimerTable.CancelSql(table), command => BindKey(command, scope, key), ct);
 
+    /// <summary>The due of every timer armed under one of <paramref name="keys"/>, in any scope, read on <paramref name="transaction"/>.</summary>
+    /// <returns>Each armed timer's due, by scope and key.</returns>
+    internal static async Task<Dictionary<(string Scope, string Key), DateTimeOffset>> ArmedAsync(
+        DbConnection connection, DbTransaction transaction, string table, List<string> keys, CancellationToken ct)
+    {
+        var armed = new Dictionary<(string Scope, string Key), DateTimeOffset>();
+        if (keys.Count == 0)
+        {
+            return armed;
+        }
+
+        var command = connection.CreateCommand();
+        await using (command.ConfigureAwait(false))
+        {
+            command.Transaction = transaction;
+            command.CommandText = TimerTable.ArmedSql(table, keys.Count);
+            BindKeys(command, keys);
+            await ReadArmedAsync(command, armed, ct).ConfigureAwait(false);
+        }
+
+        return armed;
+    }
+
     /// <summary>Runs one statement on <paramref name="transaction"/>.</summary>
     /// <returns>The rows affected.</returns>
     internal static async Task<int> ExecuteAsync(
@@ -57,6 +80,26 @@ internal static class TimerWrites
         RelationalSqlBatch.AddParameter(command, "@message_type", timer.MessageType);
         RelationalSqlBatch.AddParameter(command, "@payload", timer.Payload);
         RelationalSqlBatch.AddParameter(command, "@provenance", timer.Provenance);
+    }
+
+    private static void BindKeys(DbCommand command, List<string> keys)
+    {
+        for (var index = 0; index < keys.Count; index++)
+        {
+            RelationalSqlBatch.AddParameter(command, TimerTable.KeyParameter(index), keys[index]);
+        }
+    }
+
+    private static async Task ReadArmedAsync(DbCommand command, Dictionary<(string Scope, string Key), DateTimeOffset> armed, CancellationToken ct)
+    {
+        var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await using (reader.ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                armed[(reader.GetString(0), reader.GetString(1))] = StoredInstant.Of(reader.GetString(2));
+            }
+        }
     }
 
     private static void BindKey(DbCommand command, string scope, string key)

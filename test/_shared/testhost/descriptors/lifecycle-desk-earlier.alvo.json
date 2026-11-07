@@ -1,0 +1,34 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "lifecycle-desk",
+  "description": "The declarative-timer facts' desk with its reminder moved to 36 hours ahead: a changed at.",
+  "tenancy": { "enabled": true },
+  "auth": { "roles": ["staff", "manager", "ops"] },
+  "access": { "developer": "'ops' in @user.roles" },
+  "entities": {
+    "bookings": {
+      "tenancy": "scoped",
+      "fields": {
+        "status": { "type": "enum", "values": ["draft", "confirmed", "cancelled", "done"], "default": "draft" },
+        "starts_at": { "type": "datetime" },
+        "note": { "type": "text" }
+      },
+      "rules": { "list": "true", "get": "true", "create": "true", "update": "true", "delete": "true" },
+      "hooks": { "beforeUpdate": [ { "condition": "new.note == 'skip'", "action": { "mutate": { "status": "done" } } } ] },
+      "stateMachine": {
+        "field": "status",
+        "initial": "draft",
+        "transitions": {
+          "confirm": { "from": ["draft"], "to": "confirmed", "when": "new.starts_at > now()" },
+          "cancel": { "from": ["draft", "confirmed"], "to": "cancelled" },
+          "close": { "from": ["confirmed"], "to": "done", "roles": ["manager"] },
+          "reopen": { "from": ["*"], "to": "draft", "roles": ["admin"] }
+        }
+      },
+      "timers": {
+        "reminder": { "at": "starts_at - duration('36h')", "when": "status == 'confirmed'", "event": "bookings.reminder_due" }
+      }
+    }
+  }
+}

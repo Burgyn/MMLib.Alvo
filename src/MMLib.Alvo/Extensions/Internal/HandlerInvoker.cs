@@ -3,6 +3,7 @@
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
+using MMLib.Alvo.Lifecycle;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Scheduling;
 
@@ -101,6 +102,13 @@ internal sealed class HandlerInvoker
             (services, _, context, ct) => services.GetRequiredService<DescriptorActionRunner>().RunAsync(action, context, services, ct),
             _ => []);
     }
+
+    /// <summary>The framework's timer re-plan of <paramref name="entity"/>, run by <see cref="EntityTimerReplanJob"/>; it reads no message.</summary>
+    internal static HandlerInvoker ForTimerReplan(string entity) => new(
+        typeof(AlvoRecord),
+        typeName: null,
+        (services, _, _, ct) => services.GetRequiredService<EntityTimerReplanJob>().RunAsync(entity, ct),
+        _ => []);
 
     private static void EnsureReturnsTask(Delegate handler)
     {

@@ -2637,6 +2637,10 @@ internal sealed partial class EfAlvoData : IAlvoData
     private static AlvoRecord Unmasked(Dictionary<string, object> row) =>
         RecordMaterializer.ToRecord(row, _noMask, FrozenSet<string>.Empty);
 
+    /// <summary>The ADO.NET connection and transaction under <paramref name="db"/> and <paramref name="transaction"/>, for a framework table's statement.</summary>
+    private static (DbConnection Connection, DbTransaction Transaction) ConnectionOf(AlvoDataContext db, IDbContextTransaction transaction) =>
+        (db.Database.GetDbConnection(), transaction.GetDbTransaction());
+
     /// <summary>
     /// The empty mask: a row a policy decision is <em>reached over</em> is never masked, only a row this data
     /// path <em>returns</em> is. A masked field read as <see langword="null"/> would silently change what a

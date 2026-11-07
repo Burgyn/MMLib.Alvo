@@ -75,7 +75,7 @@ internal sealed class DataMigrationStarter(
         var round = MigrationRound.None;
         foreach (var migration in pending.Where(migration => current.Revision >= migration.Job!.AfterRevision))
         {
-            round = Tally(round, await TryStartAsync(store, migration, current.Revision, perTenant, ct).ConfigureAwait(false));
+            round = Tally(round, await TryStartAsync(store, migration, current.Revision, perTenant && !migration.Job!.SpansTenants, ct).ConfigureAwait(false));
         }
 
         return round;
