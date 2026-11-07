@@ -128,10 +128,7 @@ internal sealed partial class DescriptorActionSweep(
         if (stale.Count > 0)
         {
             await timers.SyncSchedulesAsync([], stale, ct).ConfigureAwait(false);
-            if (logger.IsEnabled(LogLevel.Information))
-            {
-                SchedulesRemoved(logger, string.Join(", ", stale));
-            }
+            SchedulesRemoved(logger, stale);
         }
     }
 
@@ -165,5 +162,5 @@ internal sealed partial class DescriptorActionSweep(
         EventName = "DescriptorActionSchedulesRemoved",
         Level = LogLevel.Information,
         Message = "Alvo removed the stored schedules of cron rules the serving descriptor no longer declares: {Ids}.")]
-    private static partial void SchedulesRemoved(ILogger logger, string ids);
+    private static partial void SchedulesRemoved(ILogger logger, IReadOnlyList<string> ids);
 }
