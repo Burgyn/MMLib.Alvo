@@ -7,6 +7,7 @@ using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.TestHost;
 using MMLib.Alvo.Tests.Data;
+using MMLib.Alvo.Tests.Events;
 
 using Npgsql;
 
@@ -17,8 +18,11 @@ namespace MMLib.Alvo.Data.PostgreSql.Tests.Integration;
 /// <summary>
 /// What only PostgreSQL's concurrent writers can show about flow control: claimants racing one key's slots, two debounced
 /// fan-outs racing one lane, two steps recorded at once, and two dispatchers sharing one tenant's cap. SQLite serialises its
-/// writers, so none of these races exists there.
+/// writers, so none of these races exists there. Its two-dispatcher fact drives the outbox dispatcher, so it belongs to
+/// <see cref="DispatchedEventCollection"/>: run beside the outbox chaos criterion, its eight events summed into that run's
+/// dispatched counter.
 /// </summary>
+[Collection(DispatchedEventCollection.Name)]
 public sealed class PostgreSqlConcurrencyRaceTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>, IAsyncLifetime
 {
     private const string Subscriber = "confirm-booking";
