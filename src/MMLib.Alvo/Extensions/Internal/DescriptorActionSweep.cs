@@ -2,7 +2,6 @@
 
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
-using MMLib.Alvo.Management.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Scheduling;
 
