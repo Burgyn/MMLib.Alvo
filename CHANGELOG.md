@@ -1130,6 +1130,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A PostgreSQL deadlock (`40P01`) is a retryable refusal, not a 500** (issue 443, HX-11 Ruling 74's residual). A write
+  the database fails to break a deadlock — two transaction units taking the same rows or exclusion keys in opposite
+  order — throws the new public `AlvoTransientConflictException` (the data port's eighth exception family, the engine's
+  failure kept inside), which the Data API answers **409 `conflict` with `Retry-After: 1`**; nothing was written, and the
+  same request is expected to succeed. An apply or rollback the database fails — a parent's cascade delete against the
+  backfill's child locks — answers like a lock timeout: 409 `conflict` with `Retry-After: 5` and a detail that says
+  deadlock, a refused start at boot. Nothing is retried automatically. SQLite, with one writer, raises none.
 - **A delivery claim over a large fresh backlog answers in a fraction of a second on PostgreSQL** (#482). With ten
   thousand deliveries fanned out before the first claim — a webhook receiver down for long — one claim ran past
   Npgsql's 30 s command timeout (36 s measured), stalling every delivery: PostgreSQL planned the lane checks as

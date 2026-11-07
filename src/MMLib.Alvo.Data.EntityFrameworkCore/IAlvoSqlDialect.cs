@@ -520,6 +520,16 @@ public interface IAlvoSqlDialect
     internal bool IsLockTimeout(DbException failure) => false;
 
     /// <summary>
+    /// Whether <paramref name="failure"/> is this engine's deadlock detector failing the statement's transaction to break a
+    /// lock cycle — PostgreSQL's <c>40P01</c> — so a write answers a retryable <see cref="AlvoTransientConflictException"/>
+    /// and an apply a retryable lock refusal instead of a 500 (issue 443, the residual of HX-11 Ruling 74).
+    /// <see langword="false"/> by default: SQLite admits one writer at a time, so no cycle forms and none is broken.
+    /// </summary>
+    /// <remarks>Internal, for <see cref="IsLockTimeout"/>'s reason: the published dialect port does not grow.</remarks>
+    /// <param name="failure">The provider's own exception, unwrapped.</param>
+    internal bool IsDeadlock(DbException failure) => false;
+
+    /// <summary>
     /// Whether <paramref name="failure"/> is this engine refusing a partial index's predicate — PostgreSQL's <c>42P17</c> over
     /// a function that is not <c>IMMUTABLE</c>, SQLite's non-deterministic use of a function in an index — so the apply
     /// answers it at the index's <c>where</c> rather than as a 500 (HX-12). <see langword="false"/> by default.
@@ -561,7 +571,8 @@ public interface IAlvoSqlDialect
     /// apply that took the parent first (its <c>ALTER TABLE</c>, or an earlier backfill's row locks) and then waited for a
     /// child would deadlock against it. <b>The residual:</b> a parent delete that cascades to its children runs parent then
     /// child, and can still deadlock against the apply in any position of this lock. That is rarer, and the engine's
-    /// deadlock detector resolves it by failing one side — an unmapped <c>40P01</c> today (a follow-up).
+    /// deadlock detector resolves it by failing one side — the apply answers <see cref="IsDeadlock"/>'s retryable refusal, a
+    /// write the port's <see cref="AlvoTransientConflictException"/> (issue 443).
     /// </para>
     /// <para>
     /// <b>Internal</b>, for <see cref="ApplyLockTimeoutStatement"/>'s reason: the published dialect port does not grow.

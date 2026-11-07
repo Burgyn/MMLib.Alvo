@@ -1071,8 +1071,10 @@ the apply holds the single write lock. The lock is bounded by the apply's 5 s `l
   with the old definition after the apply commits, and the parent's stored value stays stale until its next child
   write. Roll every replica after a change to a rollup's definition. A revision fence at recompute is a follow-up.
 - **A parent delete that cascades to its children** runs parent then child, and can still deadlock against the apply
-  in any position of the lock. The engine's detector resolves it by failing one side — an unmapped `40P01` today, a
-  follow-up.
+  in any position of the lock. The engine's detector resolves it by failing one side, and either side answers a
+  retryable refusal (issue 443): the apply the lock timeout's 409 `conflict` with `Retry-After: 5` and its own detail
+  (`AlvoApplyLockTimeoutException.DeadlockRefusal`), the write the port's `AlvoTransientConflictException` — see
+  *Deadlocks are a retryable refusal* below.
 
 The empty answer is the engine's: `0` for `count` and `NULL` for the other four. A `COALESCE(…, 0)` here would
 make "no children yet" indistinguishable from "children summing to zero" on a field an author declared
@@ -1136,6 +1138,18 @@ the loser, blocked more than 5 s on the winner's uncommitted version row, now an
 then yields the 412), and at boot it is a refused start rather than the lost-race retry. An embedded host calling
 `EfCoreSchemaMigrator.ApplyAsync` directly receives the internal exception — deliberately, as its doc comment states.
 SQLite has one writer and no lock queue to bound.
+
+**Deadlocks are a retryable refusal** (issue 443, the residual of Ruling 74). Whether a provider failure is a deadlock is
+the dialect's decision (`IAlvoSqlDialect.IsDeadlock`, internal like `IsLockTimeout`): PostgreSQL's `40P01`, nothing on
+SQLite, whose single writer forms no lock cycle. On an apply, `CheckApplyRefusal` turns it into the lock timeout's
+`AlvoApplyLockTimeoutException` with its own sentence — same 409 and `Retry-After: 5`, same refused start at boot, same
+convergence when it hit the version row — because the apply lost a lock wait either way and the fix is the same retry. On
+the write path, `TransientConflictTranslator` turns it into the public `AlvoTransientConflictException` (the port's eighth
+family) at the port's boundaries: each `IAlvoData` write, each call through a unit, and `TransactAsync` itself, whose
+`COMMIT` can be the statement that fails. It looks through the whole exception chain, because the Npgsql provider's
+execution strategy wraps a failure it deems transient in an `InvalidOperationException` (measured by
+`PostgreSqlDeadlockTests`). Nothing is retried automatically (spec §4.5) — except where a keyed write's attempt loop
+already re-ran any storage failure, which it still does. The Data API answers **409 `conflict` with `Retry-After: 1`**.
 
 **The scan runs at plan time** (`CheckViolationScan`, 22, 49), so a dry run reports it: for each added or changed
 constraint, `SELECT COUNT(*) FROM <table> WHERE NOT (<check>)` across every tenant — only when the table exists, is

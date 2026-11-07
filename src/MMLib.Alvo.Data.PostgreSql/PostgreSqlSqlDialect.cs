@@ -238,6 +238,16 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
     /// <remarks>Decided from the SQLSTATE alone, like <see cref="DecodeConstraintViolation"/>.</remarks>
     bool IAlvoSqlDialect.IsLockTimeout(DbException failure) => failure is PostgresException { SqlState: LockNotAvailable };
 
+    /// <summary>SQLSTATE 40P01 — <c>deadlock_detected</c>, what the detector raises in the transaction it fails to break a cycle.</summary>
+    private const string DeadlockDetected = "40P01";
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Decided from the SQLSTATE alone, like <see cref="DecodeConstraintViolation"/>. <c>40001</c> (<c>serialization_failure</c>)
+    /// is not one: no Alvo transaction runs above <c>READ COMMITTED</c>, so nothing raises it.
+    /// </remarks>
+    bool IAlvoSqlDialect.IsDeadlock(DbException failure) => failure is PostgresException { SqlState: DeadlockDetected };
+
     /// <summary>SQLSTATE 42P17 — <c>invalid_object_definition</c>, what an index predicate calling a non-immutable function raises.</summary>
     private const string InvalidObjectDefinition = "42P17";
 

@@ -36,7 +36,7 @@ namespace MMLib.Alvo.Data;
 /// all. Neither exception's message names the entity, the row id, or whether the row exists.
 /// </para>
 /// <para>
-/// <b>Seven exception families, and the boundary between them is the contract — not a detail.</b> A layer
+/// <b>Eight exception families, and the boundary between them is the contract — not a detail.</b> A layer
 /// above this port (PR3's RFC 7807 problem-details layer) has nothing but the exception type to map a status
 /// code from, so an implementation must place every refusal in exactly one of these:
 /// </para>
@@ -122,6 +122,16 @@ namespace MMLib.Alvo.Data;
 ///     <c>id</c> or <c>tenant_id</c>, so a conflict on those alone is an invariant the implementation relies
 ///     on, and it belongs below with its stack trace intact.
 ///     </para>
+///     </description>
+///   </item>
+///   <item>
+///     <term><see cref="AlvoTransientConflictException"/></term>
+///     <description>
+///     <b>The database broke a deadlock between this write and a concurrent transaction by failing this one</b> — a
+///     PostgreSQL <c>40P01</c> — so it rolled back and changed nothing. Nothing about the request, the caller or the stored
+///     state is wrong, and the same request is expected to succeed. Render 409 <c>conflict</c> with a <c>Retry-After</c>;
+///     the fix is to retry unchanged. Whether a provider failure is a deadlock is the driver's decision, behind its SQL seam,
+///     never a message pattern; an engine with no lock cycles (SQLite) raises none.
 ///     </description>
 ///   </item>
 ///   <item>
