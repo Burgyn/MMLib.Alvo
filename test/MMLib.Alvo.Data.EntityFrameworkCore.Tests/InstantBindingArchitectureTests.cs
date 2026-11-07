@@ -119,11 +119,12 @@ public class InstantBindingArchitectureTests
                 "MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::GetAsync",
                 "MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::QueryAsync",
                 "MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::ReplaceAsync",
+                "MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::ReplanTimersAsync",
                 "MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::UpdateAsync",
                 "MMLib.Alvo.Data.EntityFrameworkCore.EfAlvoData::UpdateManyAsync",
             ],
             ignoreOrder: false,
-            "every IAlvoData member binds an instant for an embedded call");
+            "every IAlvoData member, and the timer re-plan the core calls, binds an instant for an embedded call");
     }
 
     public static TheoryData<string> EntryMembers() => [.. EntryMemberNames()];

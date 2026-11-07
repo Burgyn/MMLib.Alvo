@@ -41,6 +41,9 @@ internal static class DescriptorActionIds
     /// <summary>The id of a cron rule's trigger-only schedule.</summary>
     internal static string Schedule(string rule, AutomationTrigger trigger) => For($"/automation/{rule}", Text(trigger));
 
+    /// <summary>The id of the data migration that re-plans entity <paramref name="entity"/>'s timers, over each timer's definition.</summary>
+    internal static string TimerReplan(string entity, string[] timers) => For($"/entities/{entity}/timers", timers);
+
     /// <summary>Whether <paramref name="subscriber"/> is a descriptor action rather than a registered extension.</summary>
     internal static bool IsDescriptorAction(string subscriber) => subscriber.StartsWith('/');
 

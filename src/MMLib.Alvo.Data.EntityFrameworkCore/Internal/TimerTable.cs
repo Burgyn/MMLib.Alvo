@@ -70,6 +70,24 @@ internal static class TimerTable
     /// <param name="table">The validated table name.</param>
     internal static string CancelSql(string table) => $"DELETE FROM {table} WHERE scope = @scope AND timer_key = @key";
 
+    /// <summary>The most primary keys one <see cref="ArmedSql"/> reads: two parameters each, well under the 2100 a third engine may allow.</summary>
+    internal const int ArmedKeysPerStatement = 500;
+
+    /// <summary>
+    /// Reads the scope, key and due of the timers armed under <paramref name="keys"/> primary keys, each an equality on the
+    /// whole <c>(scope, timer_key)</c> key — bound as <see cref="ScopeParameter"/> and <see cref="KeyParameter"/> — so every
+    /// engine seeks the primary key; a row-value <c>IN</c> is not portable.
+    /// </summary>
+    internal static string ArmedSql(string table, int keys) =>
+        $"SELECT scope, timer_key, due_at FROM {table} WHERE "
+        + string.Join(" OR ", Enumerable.Range(0, keys).Select(index => $"(scope = {ScopeParameter(index)} AND timer_key = {KeyParameter(index)})"));
+
+    /// <summary>The name the <paramref name="index"/>th scope of <see cref="ArmedSql"/> is bound as.</summary>
+    internal static string ScopeParameter(int index) => $"@scope{index}";
+
+    /// <summary>The name the <paramref name="index"/>th key of <see cref="ArmedSql"/> is bound as.</summary>
+    internal static string KeyParameter(int index) => $"@key{index}";
+
     /// <summary>Leases up to <c>@batch</c> claimable timers, the earliest due first, and returns them.</summary>
     /// <param name="table">The validated table name.</param>
     /// <remarks>

@@ -6,9 +6,11 @@ namespace MMLib.Alvo.Scheduling;
 
 /// <summary>
 /// What makes a handler registration a job: its delivery kind, and — for a schedule — its cron, zone and scope, or — for a
-/// data migration — the revision it waits for.
+/// data migration — the revision it waits for, and whether it spans tenants: runs once over every tenant's rows rather than
+/// once per tenant on a scoped schema — the framework's own timer re-plan, which reads below the policy layer; a host
+/// migration never does.
 /// </summary>
-internal sealed record JobSpec(string DeliveryKind, string? Cron, string? TimeZone, AlvoScheduleScope Scope, int? AfterRevision)
+internal sealed record JobSpec(string DeliveryKind, string? Cron, string? TimeZone, AlvoScheduleScope Scope, int? AfterRevision, bool SpansTenants = false)
 {
     internal bool IsSchedule => DeliveryKind == Kinds.Schedule;
 
