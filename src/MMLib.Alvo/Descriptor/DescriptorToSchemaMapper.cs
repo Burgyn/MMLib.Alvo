@@ -534,6 +534,7 @@ internal static class DescriptorToSchemaMapper
         {
             Per = sequence.Per,
             Period = MapPeriod(sequence.Period),
+            TimeZone = sequence.TimeZone,
             Start = sequence.Start ?? 1,
             Format = sequence.Format,
         };

@@ -59,6 +59,11 @@ LABEL org.opencontainers.image.source="https://github.com/Burgyn/MMLib.Alvo" \
       org.opencontainers.image.version="$VERSION" \
       org.opencontainers.image.revision="$REVISION"
 
+# The IANA time zone database. The Alpine base image ships none, and .NET on Linux reads zones from
+# /usr/share/zoneinfo: without it every IANA id but "UTC" is unknown, so a sequence's or a
+# schedule's `timeZone` such as "Europe/Bratislava" would be refused (#479).
+RUN apk add --no-cache tzdata
+
 WORKDIR /app
 COPY --from=build /app .
 

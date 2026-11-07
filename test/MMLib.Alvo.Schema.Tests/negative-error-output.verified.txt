@@ -89,6 +89,15 @@
     ]
   },
   {
+    file: sequence-windows-time-zone.json,
+    failures: [
+      {
+        Pointer: #/entities/orders/fields/number/sequence/timeZone,
+        Message: Validation pattern - Central Europe Standard Time did not match '^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$'
+      }
+    ]
+  },
+  {
     file: state-machine-no-transitions.json,
     failures: [
       {
