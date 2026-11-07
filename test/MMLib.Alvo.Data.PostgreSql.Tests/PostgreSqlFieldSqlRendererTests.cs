@@ -73,6 +73,24 @@ public class PostgreSqlFieldSqlRendererTests
         => ((IFieldSqlRenderer)_fields).RenderComparableOperands("\"price\"", "@alvo_f0", type)
             .ShouldBe(("\"price\"", "@alvo_f0"));
 
+    [Fact]
+    public void A_concatenation_is_the_standard_operator_in_parentheses()
+        => ((IFieldSqlRenderer)_fields).RenderStringConcatenation("\"a\"", "@alvo_f0").ShouldBe("(\"a\" || @alvo_f0)");
+
+    /// <summary>The epoch is read as an exact numeric and scaled to whole microseconds, so a timestamp compares as an integer.</summary>
+    [Fact]
+    public void An_epoch_is_microseconds_cast_to_bigint()
+        => ((IFieldSqlRenderer)_fields).RenderEpochMicroseconds("\"starts_at\"")
+            .ShouldBe("CAST(EXTRACT(EPOCH FROM \"starts_at\") * 1000000 AS bigint)");
+
+    [Fact]
+    public void A_string_literal_is_an_escape_string_with_doubled_backslashes_and_quotes()
+        => ((IFieldSqlRenderer)_fields).RenderStringLiteral("a\\b'c").ShouldBe("E'a\\\\b''c'");
+
+    [Fact]
+    public void A_missing_string_literal_is_refused()
+        => Should.Throw<ArgumentNullException>(() => ((IFieldSqlRenderer)_fields).RenderStringLiteral(null!)).ParamName.ShouldBe("value");
+
     private static EntitySchema Entity() => new()
     {
         Name = "vehicle",
