@@ -136,6 +136,21 @@ public abstract partial class AutomationFacts
         (await OrderAsync(alvo, TenantA, order))["number"].ShouldBe("A-0123456789", "a value past maxLength is stored on neither engine");
     }
 
+    [Fact]
+    public async Task An_entity_update_is_held_to_the_target_s_rules()
+    {
+        var desk = JsonNode.Parse(WithRule("mark-order", "entity.orders.created", Update("{{new.id}}", new JsonObject { ["status"] = "closed" })))!;
+        desk["entities"]!["orders"]!["rules"]!["update"] = "false";
+        await using var alvo = await StartAsync(descriptor: desk.ToJsonString());
+        var order = await CreateOrderAsync(alvo, TenantA, "A-1", total: 1m);
+
+        await alvo.DrainEventsAsync(Ct);
+
+        var delivery = (await DeliveriesAsync(alvo, MarkRule)).ShouldHaveSingleItem();
+        (delivery.Status, delivery.Attempts).ShouldBe(("dead", 1));
+        (await OrderAsync(alvo, TenantA, order))["status"].ShouldBe("open", "the system caller is an admin, not a bypass: an update rule that denies holds");
+    }
+
     private static JsonObject Update(string recordId, JsonObject payload) => new()
     {
         ["type"] = "entity.update",
