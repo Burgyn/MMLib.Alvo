@@ -317,6 +317,7 @@ internal sealed partial class AlvoManagementService(
         EnsureMayPerform(ManagementOperation.ApplyDescriptor);
         EnsureServed(project);
         ArgumentNullException.ThrowIfNull(request);
+        EnsureNotStoodDownForSecrets(request.DryRun);
         await EnsureApplyMayChangeAccessAsync(project, request, ct).ConfigureAwait(false);
 
         var token = TokenFor(request.IdempotencyKey, request.DryRun, () => FingerprintOf(project, request));
@@ -391,6 +392,7 @@ internal sealed partial class AlvoManagementService(
         EnsureMayPerform(ManagementOperation.RollbackRevision);
         EnsureServed(project);
         ArgumentNullException.ThrowIfNull(request);
+        EnsureNotStoodDownForSecrets(request.DryRun);
         await EnsureRestoreMayChangeAccessAsync(project, targetRevision, ct).ConfigureAwait(false);
 
         var token = TokenFor(
@@ -1036,6 +1038,22 @@ internal sealed partial class AlvoManagementService(
         if (!boot.Projects.ContainsKey(project))
         {
             throw new ManagementProjectNotFoundException(project, [.. boot.Projects.Keys]);
+        }
+    }
+
+    /// <summary>
+    /// Refuses an apply or a rollback while this boot stands down for a required secret (HX-15 review m3): it would prime the
+    /// catalog and serve routes without the secret. A dry run changes nothing, so it is answered.
+    /// </summary>
+    /// <param name="dryRun">Whether the caller asked only for the plan.</param>
+    /// <exception cref="ManagementConflictException">The boot stood down for a required secret.</exception>
+    private void EnsureNotStoodDownForSecrets(bool dryRun)
+    {
+        if (!dryRun && boot.SecretStandDown is { } reason)
+        {
+            throw new ManagementConflictException(
+                $"{reason} This host stood down at boot for it, so nothing is applied until it restarts: add the secret "
+                + "(Settings → Secrets), then restart the host.");
         }
     }
 

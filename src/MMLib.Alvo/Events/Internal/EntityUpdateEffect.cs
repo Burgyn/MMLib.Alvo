@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Data;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Hooks;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
@@ -87,6 +88,7 @@ internal sealed class EntityUpdateEffect(
 
         var recordId = RecordIdOf(action, context.Event);
         var written = Converted(values.Evaluate(action, context.Event, ct), target);
+        EnsureEveryValueFits(written, target);
         if (recordId is null && target.Tenancy == TenancyMode.Scoped)
         {
             written[AlvoManagedColumns.TenantId] = context.Caller.Tenant!.Value.Value;
@@ -116,6 +118,23 @@ internal sealed class EntityUpdateEffect(
         : throw new ActionRefusedException(DeliveryErrors.ActionInputInvalid);
 
     /// <summary>Each value as the data port takes it: a literal converted to the field's type, an expression's value as it is.</summary>
+    /// <summary>
+    /// Refuses the write, before its unit opens, when a value breaks its target field's declared facets — Ruling Q22, the
+    /// before-hook measure (Ruling V) applied to an expression's result. Dead <c>write-refused</c>: a retry evaluates the
+    /// same row to the same value. The value is never put in the reason or a log.
+    /// </summary>
+    private static void EnsureEveryValueFits(Dictionary<string, object?> written, EntitySchema target)
+    {
+        foreach (var (name, value) in written)
+        {
+            var field = target.Fields.FirstOrDefault(candidate => candidate.Name == name);
+            if (field is not null && PayloadFacets.TargetOf(field, target, descriptor: null).Violation(value) is not null)
+            {
+                throw new ActionRefusedException(DeliveryErrors.WriteRefused);
+            }
+        }
+    }
+
     private static Dictionary<string, object?> Converted(Dictionary<string, object?> payload, EntitySchema target) =>
         payload.ToDictionary(
             pair => pair.Key,
@@ -136,7 +155,8 @@ internal sealed class EntityUpdateEffect(
     {
         ActionRefusedException => failure,
         AlvoRecordNotFoundException => new ActionRefusedException(DeliveryErrors.RecordNotFound),
-        AlvoConstraintViolationException or AlvoWriteRejectedException => new ActionRefusedException(DeliveryErrors.WriteRefused),
+        AlvoConstraintViolationException or AlvoWriteRejectedException or AlvoAuthorizationException => new ActionRefusedException(DeliveryErrors.WriteRefused),
+        CelFunctionException => new ActionRefusedException(DeliveryErrors.ActionInputInvalid),
         ArgumentException and not ArgumentNullException => new ActionRefusedException(DeliveryErrors.WriteRefused),
         _ => failure,
     };

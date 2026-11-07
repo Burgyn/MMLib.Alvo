@@ -83,8 +83,8 @@ export const CAPABILITIES = {
     },
     {
       "slot": "bodyFile",
-      "consequence": "A template's 'bodyFile' is not read yet: nothing in this build resolves a path inside a descriptor bundle, so an after-hook rendering this template would send a message with an empty body rather than fail.",
-      "fix": "Move the body inline into the template's 'body' — it takes the same '{{...}}' placeholders — or stop referencing this template from an after-hook until bundle files are read."
+      "consequence": "A template's 'bodyFile' is not read yet: nothing in this build resolves a path inside a descriptor bundle, so an email action rendering this template would send a message with an empty body rather than fail.",
+      "fix": "Move the body inline into the template's 'body' — it takes the same '{{...}}' placeholders — or stop referencing this template from an email action until bundle files are read."
     },
     {
       "slot": "http.call",

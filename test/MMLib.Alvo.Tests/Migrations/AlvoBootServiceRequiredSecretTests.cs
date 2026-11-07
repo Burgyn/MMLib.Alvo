@@ -33,6 +33,7 @@ public sealed class AlvoBootServiceRequiredSecretTests
 
         world.State.Phase.ShouldBe(AlvoBootPhase.Failed);
         world.State.Failure.ShouldNotBeNull().ShouldContain("'missing-secret'");
+        world.State.SecretStandDown.ShouldNotBeNull().ShouldContain("'missing-secret'");
         world.PrimedEntities.ShouldBeEmpty();
     }
 

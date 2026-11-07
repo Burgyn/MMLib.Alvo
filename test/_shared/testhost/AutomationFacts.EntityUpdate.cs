@@ -122,6 +122,20 @@ public abstract partial class AutomationFacts
         (delivery.Status, delivery.Attempts, delivery.LastErrorType).ShouldBe(("dead", 1, "write-refused"));
     }
 
+    [Fact]
+    public async Task An_entity_update_value_breaking_a_facet_is_dead_write_refused()
+    {
+        var concat = new JsonObject { ["$cel"] = "new.number + \"-0123456789\"" };
+        await using var alvo = await StartAsync(descriptor: WithRule("mark-order", "entity.orders.created", Update("{{new.id}}", new JsonObject { ["number"] = concat })));
+        var order = await CreateOrderAsync(alvo, TenantA, "A-0123456789", total: 1m);
+
+        await alvo.DrainEventsAsync(Ct);
+
+        var delivery = (await DeliveriesAsync(alvo, MarkRule)).ShouldHaveSingleItem();
+        (delivery.Status, delivery.Attempts, delivery.LastErrorType).ShouldBe(("dead", 1, "write-refused"));
+        (await OrderAsync(alvo, TenantA, order))["number"].ShouldBe("A-0123456789", "a value past maxLength is stored on neither engine");
+    }
+
     private static JsonObject Update(string recordId, JsonObject payload) => new()
     {
         ["type"] = "entity.update",

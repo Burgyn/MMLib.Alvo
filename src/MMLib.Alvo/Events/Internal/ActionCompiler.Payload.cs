@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Descriptor;
+﻿using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Internal;
 using MMLib.Alvo.Rules;
@@ -124,19 +125,52 @@ internal static partial class ActionCompiler
         JsonElement literal, FieldSchema field, PayloadTarget target, string path, AfterHookScope scope)
     {
         var isNull = literal.ValueKind == JsonValueKind.Null;
+        var converted = isNull ? null : FieldLiteral.Convert(literal, CelFieldType.Of(field));
         var refusal = isNull
             ? (field.Required ? $"Field '{field.Name}' is required on '{target.Entity.Name}', so an 'entity.update' cannot set it to null." : null)
-            : FieldLiteral.Convert(literal, CelFieldType.Of(field)) is null
+            : converted is null
                 ? $"This literal is a JSON {literal.ValueKind.ToString().ToLowerInvariant()}, and '{field.Name}' is declared as '{field.Type}'."
                 : null;
-        if (refusal is null)
+        if (refusal is not null)
         {
-            return new CompiledValue(literal, Expression: null);
+            scope.Errors.Add(Error(path, refusal, isNull ? RequiredNullFix(target) : $"Write a literal a '{field.Type}' field holds, or a {{\"$cel\": \"…\"}} that yields one."));
+            return null;
         }
 
-        scope.Errors.Add(Error(path, refusal, isNull ? RequiredNullFix(target) : $"Write a literal a '{field.Type}' field holds, or a {{\"$cel\": \"…\"}} that yields one."));
-        return null;
+        return HonoursTheFacets(converted, PayloadFacets.TargetOf(field, target.Entity, target.Host.Descriptor), path, scope)
+            ? new CompiledValue(literal, Expression: null)
+            : null;
     }
+
+    /// <summary>
+    /// Whether a converted literal honours the target field's declared facets — Ruling Q22: an <c>entity.update</c> payload
+    /// is measured exactly as a before-hook <c>mutate</c> is (Ruling V), so a literal that breaks one is refused at apply.
+    /// </summary>
+    private static bool HonoursTheFacets(object? value, MutationTarget target, string path, AfterHookScope scope)
+    {
+        if (target.Violation(value) is not { } violation)
+        {
+            return true;
+        }
+
+        scope.Errors.Add(Error(
+            path,
+            $"This literal breaks the '{violation.Code}' facet '{target.Field.Name}' declares: {violation.Message}",
+            violation.FixSuggestion));
+        return false;
+    }
+
+    /// <summary>A create that leaves out a required field the framework does not fill: the write would refuse it every time.</summary>
+    private static IEnumerable<DescriptorValidationError> MissingRequired(
+        EntityUpdateAction update, EntitySchema target, ActionHost host, string path) =>
+        target.Fields
+            .Where(field => field.Required && field.Default is null && FrameworkWritten(field) is null)
+            .Where(field => !AlvoManagedColumns.For(target).Contains(field.Name) && !update.Payload.ContainsKey(field.Name))
+            .Where(field => !IsReadOnly(host.Descriptor, target.Name, field.Name))
+            .Select(field => Error(
+                path,
+                $"This 'entity.update' creates a '{target.Name}' record and leaves out '{field.Name}', which is required, so every write would be refused.",
+                $"Add '{field.Name}' to the payload, or name the record to update with 'recordId'."));
 
     private static string RequiredNullFix(PayloadTarget target) => target.IsCreate
         ? "Write a value; a create must fill every required field."

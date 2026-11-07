@@ -210,10 +210,10 @@ internal static class UnhonouredFeatures
     internal static UnhonouredSlot TemplateBodyFile { get; } = new(
         "bodyFile",
         "A template's 'bodyFile' is not read yet: nothing in this build resolves a path inside a descriptor "
-        + "bundle, so an after-hook rendering this template would send a message with an empty body rather "
+        + "bundle, so an email action rendering this template would send a message with an empty body rather "
         + "than fail.",
         "Move the body inline into the template's 'body' — it takes the same '{{...}}' placeholders — or stop "
-        + "referencing this template from an after-hook until bundle files are read.");
+        + "referencing this template from an email action until bundle files are read.");
 
     /// <summary>The action <c>type</c> discriminators this build declares and never runs.</summary>
     /// <remarks>

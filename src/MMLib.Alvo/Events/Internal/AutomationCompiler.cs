@@ -27,6 +27,12 @@ internal static class AutomationCompiler
     private const string BatchSuffix = "batch";
     private const string CronZone = "UTC";
 
+    /// <summary>
+    /// The instant a cron is parsed against at apply: fixed, so compile reads no wall clock. A five-field cron repeats every
+    /// year, so one that fires at all fires after any instant (HX-15 review m7).
+    /// </summary>
+    private static readonly DateTimeOffset _parseInstant = DateTimeOffset.UnixEpoch;
+
     private static readonly string[] _nonEntitySources = ["auth", "storage"];
 
     private static readonly Dictionary<string, (HandlerVerb Verb, string Point)> _operations = new(StringComparer.Ordinal)
@@ -179,7 +185,7 @@ internal static class AutomationCompiler
 
     private static CronTrigger? CronTriggerOf(string name, AutomationTrigger trigger, string cron, bool tenanted, string path, AutomationScope scope)
     {
-        if (!CronSchedule.TryParse(cron, CronZone, DateTimeOffset.UtcNow, out _, out var problem))
+        if (!CronSchedule.TryParse(cron, CronZone, _parseInstant, out _, out var problem))
         {
             scope.Errors.Add(Error(path, problem!, "Write five fields — minute hour day-of-month month day-of-week — read in UTC, such as '0 2 * * *'."));
             return null;

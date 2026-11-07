@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 
 using MMLib.Alvo.Auth;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Migrations;
@@ -59,7 +60,8 @@ public sealed class RequiredSecretTests
             alvo => alvo.AddRequiredSecret(Present).AddRequiredSecret("missing-secret"), logs));
         await using var alvo = await StartAsync(alvo => alvo.AddRequiredSecret(Present), logs);
 
-        var applyRefusal = await Should.ThrowAsync<Exception>(() => ApplyAsync(alvo, WithSecretRef(PastedSecret)));
+        var applyRefusal = await Should.ThrowAsync<DescriptorValidationException>(() => ApplyAsync(alvo, WithSecretRef(PastedSecret)));
+        applyRefusal.Result.Errors.ShouldContain(error => error.Path.TrimStart('#') == "/webhooks/endpoints/erp/secretRef");
         await ApplyAsync(alvo, WithSecretRef("not-yet-stored"));
 
         string[] seen = [refusal.ToString(), applyRefusal.ToString(), .. logs.Lines];

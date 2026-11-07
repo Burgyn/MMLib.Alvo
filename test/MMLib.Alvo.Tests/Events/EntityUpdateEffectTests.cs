@@ -40,16 +40,32 @@ public sealed class EntityUpdateEffectTests
         ledger.Calls.ShouldBe(["claim"]);
     }
 
+    [Fact]
+    public async Task An_authorization_refusal_from_the_unit_is_dead_write_refused_not_retried()
+    {
+        var ledger = new ScriptedLedger(CommandClaim.Granted("token"));
+        var effect = new EntityUpdateEffect(ledger, new RefusingTransactions(), Catalogs(), new ActionValues(TestBudgets.Default()), TimeProvider.System);
+
+        var refusal = await Should.ThrowAsync<ActionRefusedException>(() => effect.ApplyAsync(Action(), Tenanted(), Ct));
+
+        refusal.Reason.ShouldBe(DeliveryErrors.WriteRefused);
+        ledger.Calls.ShouldBe(["claim", "release"]);
+    }
+
     private static CompiledAction Action() =>
         new(new EntityUpdateAction { Entity = "ledger", Payload = new Dictionary<string, ValueOrExpr>() }, new Dictionary<string, AlvoTemplate>(), null, "entity.update")
         {
             Target = "ledger",
         };
 
-    private static AlvoEventContext Tenantless()
+    private static AlvoEventContext Tenantless() => ContextAs(AlvoContext.System(null));
+
+    private static AlvoEventContext Tenanted() => ContextAs(AlvoContext.System(TenantId.New()));
+
+    private static AlvoEventContext ContextAs(AlvoContext caller)
     {
         var session = Substitute.For<IAlvoSession>();
-        session.Context.Returns(AlvoContext.System(null));
+        session.Context.Returns(caller);
         var @event = new AlvoEvent
         {
             Id = Guid.CreateVersion7(),
@@ -80,6 +96,14 @@ public sealed class EntityUpdateEffectTests
         catalogs.Current.Returns(PolicyCatalog.Build(descriptor, DescriptorToSchemaMapper.Map(descriptor), CelFixtures.Compiler));
 
         return catalogs;
+    }
+
+    /// <summary>Refuses every unit the way the data port refuses a caller it does not authorize.</summary>
+    private sealed class RefusingTransactions : IAlvoTransactions
+    {
+        public Task<T> TransactAsync<T>(
+            AlvoContext context, Func<IAlvoTransaction, CancellationToken, Task<T>> work, AlvoTransactionOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new AlvoAuthorizationException();
     }
 
     /// <summary>Answers every claim with one scripted state and records which calls were made.</summary>

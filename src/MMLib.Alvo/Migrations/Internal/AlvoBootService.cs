@@ -258,7 +258,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         var stored = await _history.GetCurrentAsync(project, ct).ConfigureAwait(false);
         if (stored is null)
         {
-            await RefuseOrphanedWorkAsync(project, catalog: null, ct).ConfigureAwait(false);
+            await RefuseOrphanedWorkAsync(project, catalog: null, ct, secretsHeld: true).ConfigureAwait(false);
             await RetireThenReadyAsync(project, SchemaStartupOutcome.Awaiting, revision: null, ct).ConfigureAwait(false);
 
             return;
@@ -269,7 +269,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
             return;
         }
 
-        await RefuseOrphanedWorkAsync(project, boot.Catalog, ct).ConfigureAwait(false);
+        await RefuseOrphanedWorkAsync(project, boot.Catalog, ct, secretsHeld: true).ConfigureAwait(false);
         _ = Prime(boot, stored.Revision);
         await RetireThenReadyAsync(project, SchemaStartupOutcome.Unchanged, stored.Revision, ct).ConfigureAwait(false);
     }
@@ -802,11 +802,22 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// the host registers no tenant list: it reads which migrations have run, so it belongs here rather than in stage 0.
     /// </para>
     /// </remarks>
-    private async Task RefuseOrphanedWorkAsync(string project, PolicyCatalog? catalog, CancellationToken ct)
+    /// <param name="project">The project booting.</param>
+    /// <param name="catalog">The catalog the boot primes, or <see langword="null"/>.</param>
+    /// <param name="ct">Cancels the reads.</param>
+    /// <param name="secretsHeld">
+    /// Whether the dashboard-first boot already checked the required secrets (<see cref="RequiredSecretsHeldAsync"/>), so
+    /// each is read once per boot.
+    /// </param>
+    private async Task RefuseOrphanedWorkAsync(string project, PolicyCatalog? catalog, CancellationToken ct, bool secretsHeld = false)
     {
         try
         {
-            await RefuseMissingSecretsAsync(ct).ConfigureAwait(false);
+            if (!secretsHeld)
+            {
+                await RefuseMissingSecretsAsync(ct).ConfigureAwait(false);
+            }
+
             await _extensionState.RefuseOrphansAsync(ct).ConfigureAwait(false);
             if (catalog is not null)
             {
@@ -841,13 +852,14 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         }
         catch (AlvoStartupRefusedException refusal)
         {
-            _state.Failed(project, refusal.Message);
             BootRefused(_logger, refusal.Message);
             if (_requiredSecrets is { CanBeFixedInProcess: true })
             {
+                _state.StoodDownForSecrets(project, refusal.Message);
                 return false;
             }
 
+            _state.Failed(project, refusal.Message);
             throw;
         }
     }

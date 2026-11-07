@@ -7,6 +7,8 @@ using MMLib.Alvo.Functions.Internal;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Tests.Expressions;
 
+using System.Text.Json;
+
 namespace MMLib.Alvo.Tests.Events;
 
 /// <summary>
@@ -91,6 +93,25 @@ public sealed class ActionCompileTests
         errors.ShouldNotBeEmpty();
         errors.ShouldAllBe(error => error.Path == $"{HookPath}/input/amount");
         errors[0].Message.ShouldContain("old.total");
+    }
+
+    [Fact]
+    public void A_cel_input_value_reading_an_image_the_event_lacks_is_refused_as_a_value_not_a_condition()
+    {
+        var errors = Errors(Function("""{ "orderId": "x", "amount": { "$cel": "old.total" } }"""));
+
+        errors[0].Message.ShouldStartWith("This 'afterCreate' value reads 'old.total'");
+    }
+
+    [Fact]
+    public void A_function_input_with_neither_form_set_is_refused_at_apply()
+    {
+        var written = JsonSerializer.Serialize(new FunctionInput());
+
+        var errors = Errors(Function(written));
+
+        errors.ShouldNotBeEmpty();
+        errors.Select(error => error.Path).ShouldBe([$"#{HookPath}"]);
     }
 
     [Fact]
@@ -180,7 +201,7 @@ public sealed class ActionCompileTests
         error.Path.ShouldBe($"{HookPath}/payload/number");
         error.Message.ShouldContain("written verbatim");
         error.FixSuggestion.ShouldNotBeNull().ShouldContain("$cel");
-        Errors(Update("invoices", """{ "number": "INV-1 {not a placeholder}", "amount": 1 }""")).ShouldBeEmpty();
+        Errors(Update("invoices", """{ "number": "INV {not one}", "amount": 1 }""")).ShouldBeEmpty();
     }
 
     [Fact]
@@ -212,6 +233,33 @@ public sealed class ActionCompileTests
         error.Path.ShouldBe($"{HookPath}/type");
         error.Message.ShouldBe("This composition keeps no command ledger, so 'entity.update' cannot be written exactly once.");
         error.FixSuggestion.ShouldBe("Use a relational provider (UseSqlite, UsePostgreSql).");
+    }
+
+    [Fact]
+    public void An_entity_update_literal_outside_the_enum_values_is_refused_at_apply()
+    {
+        var error = SingleError(Update("invoices", """{ "number": "INV-1", "kind": "bogus" }"""));
+
+        error.Path.ShouldBe($"{HookPath}/payload/kind");
+        error.Message.ShouldStartWith("This literal breaks the 'enum-value' facet 'kind' declares");
+    }
+
+    [Fact]
+    public void An_entity_update_literal_past_max_length_is_refused_at_apply()
+    {
+        var error = SingleError(Update("invoices", $$"""{ "number": "{{new string('9', 21)}}" }"""));
+
+        error.Path.ShouldBe($"{HookPath}/payload/number");
+        error.Message.ShouldContain("'max-length' facet 'number' declares");
+    }
+
+    [Fact]
+    public void An_entity_update_create_missing_a_required_field_is_refused()
+    {
+        var error = SingleError(Update("invoices", """{ "amount": 1 }"""));
+
+        error.Path.ShouldBe($"{HookPath}/payload");
+        error.Message.ShouldContain("leaves out 'number', which is required");
     }
 
     [Fact]
@@ -272,7 +320,8 @@ public sealed class ActionCompileTests
                 "number": { "type": "string", "required": true, "maxLength": 20 },
                 "amount": { "type": "decimal", "precision": 12, "scale": 2 },
                 "gross": { "type": "decimal", "precision": 12, "scale": 2, "computed": "amount + amount" },
-                "note": { "type": "string", "maxLength": 200 }
+                "note": { "type": "string", "maxLength": 200 },
+                "kind": { "type": "enum", "values": ["proforma", "final"] }
               }
             },
             "ledger": {

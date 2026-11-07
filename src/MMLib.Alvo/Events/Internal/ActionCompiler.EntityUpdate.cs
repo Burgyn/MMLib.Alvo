@@ -35,12 +35,14 @@ internal static partial class ActionCompiler
         }
 
         var recordId = CompileRecordId(update.RecordId, $"{path}/{RecordIdSlot}", scope, out var recordIdValid);
+        var missing = update.RecordId is null ? MissingRequired(update, target, host, $"{path}/{ActionSlot.Payload}").ToList() : [];
+        scope.Errors.AddRange(missing);
         var fields = update.Payload.ToDictionary(
             field => field.Key,
             field => CompilePayloadValue(field.Key, field.Value, new PayloadTarget(target, host, update.RecordId is null), $"{path}/{ActionSlot.Payload}", scope),
             StringComparer.Ordinal);
 
-        return !recordIdValid || fields.Values.Any(value => value is null)
+        return !recordIdValid || missing.Count > 0 || fields.Values.Any(value => value is null)
             ? null
             : new CompiledAction(update, _noTemplates, Endpoint: null, ActionType.EntityUpdate)
             {

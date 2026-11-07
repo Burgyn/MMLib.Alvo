@@ -96,7 +96,7 @@ internal static partial class ActionCompiler
         var expression = result.Expression!;
         IReadOnlyList<DescriptorValidationError> refusals =
         [
-            .. AfterImagePhase.Refusals(expression.Root, AfterImages.At(scope.Point), scope.Point, path),
+            .. AfterImagePhase.Refusals(expression.Root, AfterImages.At(scope.Point), scope.Point, path, "value"),
             .. EventConditionReads.ExcludedFieldsRead(expression.Root, scope.Schema).Select(field => Error(
                 path, ExcludedValueRead(field), ExcludedPlaceholderFix(scope, field))),
         ];
