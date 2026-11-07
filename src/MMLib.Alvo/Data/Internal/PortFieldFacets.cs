@@ -2,6 +2,7 @@
 using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Schema;
+using System.Runtime.CompilerServices;
 
 namespace MMLib.Alvo.Data.Internal;
 
@@ -43,15 +44,17 @@ internal sealed class PortFieldFacets : IFieldFacets
     }
 
     /// <summary>The declared fields the write supplies a non-null value for, in declaration order; managed and virtual ones excluded.</summary>
-    private static IEnumerable<FieldSchema> Measured(EntitySchema entity, IReadOnlyDictionary<string, object?> values)
+    private static IEnumerable<FieldSchema> Measured(EntitySchema entity, IReadOnlyDictionary<string, object?> values) =>
+        _measurable.GetValue(entity, Measurable).Where(field => values.TryGetValue(field.Name, out var value) && value is not null);
+
+    /// <summary>The fields a write may carry a caller's value for, computed once per schema instance — the hot path runs per write.</summary>
+    private static FieldSchema[] Measurable(EntitySchema entity)
     {
         var managed = AlvoManagedColumns.For(entity);
-        return entity.Fields.Where(field =>
-            !managed.Contains(field.Name)
-            && !field.IsVirtual
-            && values.TryGetValue(field.Name, out var value)
-            && value is not null);
+        return [.. entity.Fields.Where(field => !managed.Contains(field.Name) && !field.IsVirtual)];
     }
+
+    private static readonly ConditionalWeakTable<EntitySchema, FieldSchema[]> _measurable = [];
 
     private static AlvoConstraintViolationException Refused(
         FieldSchema field, AlvoViolation violation, IReadOnlySet<string> unnameable) =>

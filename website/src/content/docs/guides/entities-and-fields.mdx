@@ -148,7 +148,7 @@ target does to this row.
 
 Each entity becomes a table, each field a column, and each `ref` to a declared entity a foreign key. The API checks the
 facets it can before the write, and so does `IAlvoData` for a write from your own code: a value outside `maxLength`,
-the enum values, `format` or the decimal precision is refused the same on SQLite and PostgreSQL, as an
+the enum values, the decimal precision or scale, or `format` is refused the same on SQLite and PostgreSQL, as an
 `AlvoConstraintViolationException` with `Kind` `Check` naming the field. `unique` and `restrict` are enforced by the database, and Alvo translates their
 refusals into the same problem shape. [The descriptor](/concepts/descriptor/) explains the model.
 

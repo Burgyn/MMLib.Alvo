@@ -1,7 +1,10 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Time.Testing;
 
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Hooks;
+using MMLib.Alvo.Rules;
 
 namespace MMLib.Alvo.TestHost.Tests;
 
@@ -182,6 +185,64 @@ public abstract class PortFacetFacts
         (await CountAsync(alvo)).ShouldBe(0);
     }
 
+    /// <summary>The core's own runner measures a host <c>Set</c> itself and fails the write as <c>invalid-set</c> (the documented shape).</summary>
+    [Fact]
+    public async Task A_host_before_write_setting_a_value_past_max_length_fails_the_write_and_stores_nothing()
+    {
+        EnsureEngineAvailable();
+        await using var alvo = await StartAsync(alvo => alvo.Entity(Tickets, b => b.BeforeWrite("stretch", (BeforeWrite<AlvoRecord> write) =>
+        {
+            write.Set("title", "eleven char");
+            return ValueTask.CompletedTask;
+        })));
+
+        (await Should.ThrowAsync<InvalidOperationException>(() => alvo.Data.CreateAsync(Tickets, Ticket(), Caller, cancellationToken: Ct)))
+            .Message.ShouldContain("invalid-set");
+        (await CountAsync(alvo)).ShouldBe(0);
+    }
+
+    /// <summary>
+    /// <see cref="IWriteExtensionRunner"/> is public, so a host can replace it; the port measures whatever patch it returns, so host
+    /// code cannot store through a runner what it cannot store through <see cref="IAlvoData"/>.
+    /// </summary>
+    [Fact]
+    public async Task A_replaced_runner_s_create_patch_past_max_length_is_refused_at_the_field()
+    {
+        EnsureEngineAvailable();
+        await using var alvo = await StartAsync(UnmeasuredRunner);
+
+        var refused = await Should.ThrowAsync<AlvoConstraintViolationException>(() => alvo.Data.CreateAsync(Tickets, Ticket(priority: "low"), Caller, cancellationToken: Ct));
+
+        (refused.Kind, refused.Fields.ShouldHaveSingleItem()).ShouldBe((AlvoConstraintKind.Check, "title"));
+        (await CountAsync(alvo)).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_replaced_runner_s_update_patch_past_max_length_is_refused_and_leaves_the_row_unchanged()
+    {
+        EnsureEngineAvailable();
+        await using var alvo = await StartAsync(UnmeasuredRunner);
+        var id = await CreatedAsync(alvo);
+
+        var refused = await Should.ThrowAsync<AlvoConstraintViolationException>(() =>
+            alvo.Data.UpdateAsync(Tickets, id, new Dictionary<string, object?> { ["priority"] = "low" }, Caller, cancellationToken: Ct));
+
+        (refused.Kind, refused.Fields.ShouldHaveSingleItem()).ShouldBe((AlvoConstraintKind.Check, "title"));
+        (await alvo.Data.GetAsync(Tickets, id, Caller, Ct))!["title"].ShouldBe("ticket");
+    }
+
+    [Fact]
+    public async Task A_replaced_runner_s_batch_patch_past_max_length_is_refused_by_its_index()
+    {
+        EnsureEngineAvailable();
+        await using var alvo = await StartAsync(UnmeasuredRunner);
+
+        var result = await alvo.Data.CreateManyAsync(Tickets, [Ticket(), Ticket(priority: "low")], Caller, cancellationToken: Ct);
+
+        var refusal = result.Refusals.ShouldHaveSingleItem();
+        (refusal.Index, refusal.Code, result.Affected).ShouldBe((1, "max-length", 0));
+    }
+
     protected abstract Task<Action<IAlvoBuilder>> DatabaseAsync();
 
     /// <summary>Skips the fact where the deriving engine cannot run; every fact calls it first, before any assertion can catch the skip.</summary>
@@ -191,7 +252,10 @@ public abstract class PortFacetFacts
 
     private static AlvoContext Caller { get; } = AlvoTestHost.Caller("staff");
 
-    private async Task<AlvoTestHost> StartAsync()
+    private static void UnmeasuredRunner(IAlvoBuilder alvo) =>
+        alvo.Services.Replace(ServiceDescriptor.Singleton<IWriteExtensionRunner>(new UnmeasuringRunner()));
+
+    private async Task<AlvoTestHost> StartAsync(Action<IAlvoBuilder>? configure = null)
     {
         var use = await DatabaseAsync();
         return await AlvoTestHost.StartAsync(
@@ -199,6 +263,7 @@ public abstract class PortFacetFacts
             {
                 use(alvo);
                 alvo.FromDescriptor(Path.Combine(AppContext.BaseDirectory, "descriptors", FacetDesk));
+                configure?.Invoke(alvo);
             },
             Time,
             cancellationToken: Ct);
@@ -209,6 +274,23 @@ public abstract class PortFacetFacts
 
     private static async Task<int> CountAsync(AlvoTestHost alvo) =>
         (await alvo.Data.QueryAsync(new AlvoQuery { Entity = Tickets }, Caller, Ct)).Items.Count;
+
+    /// <summary>A host's own runner that patches a write storing priority <c>low</c> with a title past its <c>maxLength</c>, measuring nothing.</summary>
+    private sealed class UnmeasuringRunner : IWriteExtensionRunner
+    {
+        public bool Validates(string entity, AlvoWriteOperation operation) => false;
+
+        public bool RunsInTransaction(string entity, AlvoWriteOperation operation) => operation != AlvoWriteOperation.Delete;
+
+        public Task ValidateAsync(WriteInvocation invocation, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<IReadOnlyDictionary<string, object?>> BeforeWriteAsync(WriteInvocation invocation, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyDictionary<string, object?>>(invocation.New?.Values.GetValueOrDefault("priority") is "low"
+                ? new Dictionary<string, object?> { ["title"] = "eleven char" }
+                : new Dictionary<string, object?>());
+
+        public Task<string?> AfterWriteAsync(WriteInvocation invocation, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
+    }
 
     private static Dictionary<string, object?> Ticket(string title = "ticket", string priority = "high", decimal amount = 10.5m) => new()
     {

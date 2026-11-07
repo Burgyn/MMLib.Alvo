@@ -1920,7 +1920,9 @@ internal sealed partial class EfAlvoData : IAlvoData
         var hidden = branches.Create.HiddenFields.Union(branches.Update.HiddenFields).ToHashSet(StringComparer.Ordinal);
         WritePayloadGuard.EnsureWritable(values, schema, branches.Create, isUpdate: true, hidden);
         WritePayloadGuard.EnsureWritable(values, schema, branches.Update, isUpdate: true, hidden);
-        EnsureFacetsFit(schema, values, branches.Create.Unnameable.Union(branches.Update.Unnameable).ToHashSet(StringComparer.Ordinal));
+        /* Unnameable is the descriptor's hidden set, the same for both branches of an allowed decision and empty for a denied
+           one — so the non-empty branch is the union without building one per write. */
+        EnsureFacetsFit(schema, values, branches.Update.Unnameable.Count > 0 ? branches.Update.Unnameable : branches.Create.Unnameable);
         /* Asked about the row that will be stored, not the one that arrived: a field the caller omitted and
            the descriptor gives a default is supplied by the time anything writes it. Asking about the raw
            payload instead would refuse a create the defaults make valid; exempting defaulted fields inside

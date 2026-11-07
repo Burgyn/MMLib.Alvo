@@ -1475,7 +1475,10 @@ to run only in the HTTP layer, so host C# writing through `IAlvoData` stored an 
 two answers. Every write face now calls the core's internal `IFieldFacets` (the `IEntityLifecycle` precedent: a port
 because the measure — `RecordValidator.FacetViolation` and the compiled formats — lives in the core while the caller is
 a driver; internal so no registration can switch it off) right after `WritePayloadGuard`, before any candidate is built:
-create, update (over the fields it writes only), replace, both batch verbs and a transaction unit's writes. The first
+create, update (over the fields it writes only), replace, both batch verbs and a transaction unit's writes — and again
+over the fields a host before-write patch sets (the core's runner refuses a bad `Set` as `invalid-set` first, but
+`IWriteExtensionRunner` is public and replaceable). The facets are exactly `maxLength`, enum `values`, decimal
+`precision`/`scale` and `format`; the schema has no min/max or `pattern` facet. The first
 value that breaks a facet is refused as `AlvoConstraintViolationException` of kind `Check`, carrying the validator's own
 code, message and fix, so the HTTP renderer answers it with the very violation the body validator would have produced;
 a field the descriptor hides is refused naming nothing (Ruling X). HTTP keeps its own pass — it reports every violation

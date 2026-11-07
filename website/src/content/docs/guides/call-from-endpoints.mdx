@@ -89,7 +89,7 @@ complete list, with what the generated API answers for each:
 | `ArgumentException`, except `ArgumentNullException` | The query or the values are malformed. | 422 `validation` or `malformed-query` |
 | `AlvoPreconditionFailedException` | The precondition names a version the row no longer has. | 412 `precondition-failed` |
 | `AlvoIdempotencyConflictException` | The idempotency key was used for a different request. | 409 `idempotency-conflict` |
-| `AlvoConstraintViolationException` | A `unique` value or a `restrict` reference is in the way; with `Kind` `Check`, a value breaks a validation or a field's facet (`maxLength`, enum values, `format`, precision). | 409 `conflict`; 422 `validation` for `Check` |
+| `AlvoConstraintViolationException` | A `unique` value or a `restrict` reference is in the way; with `Kind` `Check`, a value breaks a validation or a field's facet (`maxLength`, enum values, decimal precision or scale, `format`). | 409 `conflict`; 422 `validation` for `Check` |
 | `InvalidOperationException`, `ArgumentNullException` | An invariant inside Alvo, or your call, is broken. | 500 `internal`, with `AddAlvoProblemDetails()` |
 | `Exception` | A CEL function failed: a built-in refused its input, or a custom function threw or ran past its time budget. | 422 `expression-failed` when a built-in refused a value the request's body sent (every host); otherwise 500 `function-failed`, with `AddAlvoProblemDetails()` |
 

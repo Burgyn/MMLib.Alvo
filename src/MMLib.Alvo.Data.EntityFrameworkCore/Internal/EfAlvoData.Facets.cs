@@ -9,7 +9,9 @@ internal sealed partial class EfAlvoData
     /// <summary>
     /// The core's facet measure, called on every write face after the caller's payload guard and before any candidate is
     /// built — so a host writing through this port meets the facets an HTTP body meets, and SQLite and PostgreSQL answer
-    /// the same; see <see cref="IFieldFacets"/>.
+    /// the same; see <see cref="IFieldFacets"/>. It measures a host before-write patch too, over the fields the patch sets:
+    /// the core's runner already refuses a bad <c>Set</c> as <c>invalid-set</c>, but <see cref="IWriteExtensionRunner"/> is
+    /// public and replaceable, and host code must not store through a runner what it cannot store through this port.
     /// </summary>
     private readonly IFieldFacets _facets;
 
@@ -31,7 +33,8 @@ internal sealed partial class EfAlvoData
     /// <see cref="CheckCode"/> for a field the descriptor hides.
     /// </summary>
     private AlvoRowRefusal? FacetRefusal(int index, EntitySchema schema, IReadOnlyDictionary<string, object?> values, PolicyDecision decision) =>
-        _facets.Refusal(schema, values, decision.Unnameable) is { } refused
-            ? new AlvoRowRefusal(index, refused.FacetCode ?? CheckCode, refused.Message, refused.FacetFix)
-            : null;
+        _facets.Refusal(schema, values, decision.Unnameable) is { } refused ? FacetRowRefusal(index, refused) : null;
+
+    private static AlvoRowRefusal FacetRowRefusal(int index, AlvoConstraintViolationException refused) =>
+        new(index, refused.FacetCode ?? CheckCode, refused.Message, refused.FacetFix);
 }
