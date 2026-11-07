@@ -301,7 +301,7 @@
                                Label="@(period => period.Length == 0 ? "never" : $"every {period}")"
                                SelectedChanged="picked => _facets.SequencePeriod = picked[0]" />
                 </ChildContent>
-                <Hint>A new count starts at each UTC calendar period, read from the create's own time.</Hint>
+                <Hint>A new count starts at each calendar period, read from the create's own time in the sequence's <code class="a-mono">timeZone</code> (UTC unless the descriptor declares one).</Hint>
             </Field>
 
             <Field Label="Start" For="sequence-start">
@@ -332,7 +332,7 @@
                     <Hint>
                         The text stored: one <code class="a-mono">{n}</code>, or <code class="a-mono">{n:4}</code> to pad it to four
                         digits, and any of <code class="a-mono">{yyyy}</code> <code class="a-mono">{yy}</code>
-                        <code class="a-mono">{MM}</code> <code class="a-mono">{dd}</code> from the create's UTC date.
+                        <code class="a-mono">{MM}</code> <code class="a-mono">{dd}</code> from the create's date in that time zone.
                     </Hint>
                 </Field>
             }

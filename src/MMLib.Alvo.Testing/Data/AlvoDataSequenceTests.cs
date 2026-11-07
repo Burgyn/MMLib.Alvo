@@ -241,6 +241,129 @@ public abstract class AlvoDataSequenceTests
         error.Message.ShouldStartWith("'orders.legacy' still holds the sequence counts of an earlier declaration of that name");
     }
 
+    /// <summary>
+    /// A <c>timeZone</c> names the period and the date tokens by the calendar date in that zone: half an hour before
+    /// midnight UTC on New Year's Eve, Bratislava is already in the new year (#479).
+    /// </summary>
+    [Fact]
+    public async Task A_time_zone_starts_the_period_at_its_own_midnight()
+    {
+        _clock.Now = _lastSecondOf2026.AddMinutes(-30);
+        var data = await CreateAsync(Zoned(Schema, Bratislava), ZonedDescriptor(Bratislava), _clock);
+
+        (await CreatedAsync(data, _acme, "north")).ShouldBe((1L, "SO-2027-0001"));
+    }
+
+    /// <summary>
+    /// A <c>period: day</c> in a zone with daylight saving counts the spring-forward day's 23 hours and the fall-back day's
+    /// 25 hours each as one day, from its local midnight to the next.
+    /// </summary>
+    [Fact]
+    public async Task A_daily_count_spans_a_dst_day_from_local_midnight_to_local_midnight()
+    {
+        _clock.Now = new DateTimeOffset(2026, 3, 28, 23, 0, 0, TimeSpan.Zero);
+        var data = await CreateAsync(Daily(Bratislava), DailyDescriptor(Bratislava), _clock);
+
+        (await DailyCodeAsync(data)).ShouldBe("D-20260329-1");
+        _clock.Now = new DateTimeOffset(2026, 3, 29, 21, 59, 59, TimeSpan.Zero);
+        (await DailyCodeAsync(data)).ShouldBe("D-20260329-2");
+        _clock.Now = new DateTimeOffset(2026, 3, 29, 22, 0, 0, TimeSpan.Zero);
+        (await DailyCodeAsync(data)).ShouldBe("D-20260330-1");
+
+        _clock.Now = new DateTimeOffset(2026, 10, 24, 22, 0, 0, TimeSpan.Zero);
+        (await DailyCodeAsync(data)).ShouldBe("D-20261025-1");
+        _clock.Now = new DateTimeOffset(2026, 10, 25, 22, 59, 59, TimeSpan.Zero);
+        (await DailyCodeAsync(data)).ShouldBe("D-20261025-2");
+        _clock.Now = new DateTimeOffset(2026, 10, 25, 23, 0, 0, TimeSpan.Zero);
+        (await DailyCodeAsync(data)).ShouldBe("D-20261026-1");
+    }
+
+    /// <summary>
+    /// Changing an existing sequence's <c>timeZone</c> keeps every count: the period key is the calendar label, never the
+    /// zone, so the next create continues the same year's count — only the instant the next year starts moves.
+    /// </summary>
+    [Fact]
+    public async Task Changing_the_time_zone_keeps_counting_and_moves_only_the_next_boundary()
+    {
+        _clock.Now = _lastSecondOf2026.AddHours(-2);
+        var data = await CreateAsync(Schema, Descriptor, _clock);
+        (await CreatedAsync(data, _acme, "north")).ShouldBe((1L, "SO-2026-0001"));
+
+        await ApplyAsync(Schema, Zoned(Schema, Bratislava), ZonedDescriptor(Bratislava));
+
+        _clock.Now = _lastSecondOf2026.AddHours(-1).AddMinutes(-1);
+        (await CreatedAsync(data, _acme, "north")).ShouldBe((2L, "SO-2026-0002"));
+        _clock.Now = _lastSecondOf2026.AddHours(-1).AddSeconds(1);
+        (await CreatedAsync(data, _acme, "north")).ShouldBe((3L, "SO-2027-0001"));
+    }
+
+    private const string Bratislava = "Europe/Bratislava";
+    private const string Tickets = "tickets";
+
+    private static async Task<string> DailyCodeAsync(IAlvoData data) =>
+        (string)(await data.CreateAsync(Tickets, new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["tenant_id"] = _acme.Tenant!.Value.Value,
+        }, _acme, cancellationToken: Ct))["code"]!;
+
+    private static SchemaModel Zoned(SchemaModel schema, string timeZone) => new([
+        schema.Entities[0] with
+        {
+            Fields =
+            [
+                .. schema.Entities[0].Fields.Select(field => field.Sequence is { Period: not null } sequence
+                    ? field with { Sequence = sequence with { TimeZone = timeZone } }
+                    : field),
+            ],
+        },
+    ]);
+
+    private static AlvoDescriptor ZonedDescriptor(string timeZone) => DescriptorFor(Orders, "number", timeZone);
+
+    private static SchemaModel Daily(string timeZone) => new([
+        new EntitySchema
+        {
+            Name = Tickets,
+            Tenancy = TenancyMode.Scoped,
+            Fields =
+            [
+                new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true },
+                new FieldSchema
+                {
+                    Name = "code",
+                    Type = SchemaField.String,
+                    Required = true,
+                    Sequence = new SequenceSchema { Period = SequenceResetPeriod.Day, TimeZone = timeZone, Format = "D-{yyyy}{MM}{dd}-{n}" },
+                },
+                new FieldSchema { Name = "tenant_id", Type = SchemaField.Uuid, Required = true, Indexed = true },
+            ],
+        },
+    ]);
+
+    private static AlvoDescriptor DailyDescriptor(string timeZone) => new()
+    {
+        ApiVersion = "alvo.dev/v1",
+        Name = "sequences",
+        Tenancy = new Tenancy { Enabled = true },
+        Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
+        {
+            [Tickets] = new()
+            {
+                Tenancy = EntityTenancy.Scoped,
+                Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+                {
+                    ["code"] = new()
+                    {
+                        Type = DescField.String,
+                        Required = true,
+                        Sequence = new FieldSequence { Period = SequencePeriod.Day, TimeZone = timeZone, Format = "D-{yyyy}{MM}{dd}-{n}" },
+                    },
+                },
+                Rules = new AccessRules { List = "true", Get = "true", Create = "true", Update = "true", Delete = "true" },
+            },
+        },
+    };
+
     private static SchemaModel WithLegacy(SchemaModel schema, string name, string? renamedFrom, bool sequenced) => new([
         schema.Entities[0] with
         {
@@ -322,7 +445,7 @@ public abstract class AlvoDataSequenceTests
 
     private static AlvoDescriptor RenamedDescriptor => DescriptorFor(SalesOrders, "seq");
 
-    private static AlvoDescriptor DescriptorFor(string entity, string numberField) => new()
+    private static AlvoDescriptor DescriptorFor(string entity, string numberField, string? timeZone = null) => new()
     {
         ApiVersion = "alvo.dev/v1",
         Name = "sequences",
@@ -341,7 +464,7 @@ public abstract class AlvoDataSequenceTests
                     {
                         Type = DescField.String,
                         Required = true,
-                        Sequence = new FieldSequence { Period = SequencePeriod.Year, Format = "SO-{yyyy}-{n:4}" },
+                        Sequence = new FieldSequence { Period = SequencePeriod.Year, TimeZone = timeZone, Format = "SO-{yyyy}-{n:4}" },
                     },
                 },
                 Rules = new AccessRules { List = "true", Get = "true", Create = "true", Update = "true", Delete = "true" },
