@@ -67,7 +67,7 @@ violation's `code` is stable. Take the part after the last `/` and switch on it:
 | [`forbidden`](/reference/problem-types/#forbidden) | 403 | A rule, a before-hook or a [write hook](/extending/write-hooks/) refused. | Change the request, or call with a role the rules grant. |
 | [`out-of-scope`](/reference/problem-types/#out-of-scope) | 403 | The key's scopes do not cover this. | Grant the key the scope. |
 | [`not-found`](/reference/problem-types/#not-found) | 404 | No such row, or your rules hide it. | Check the id and the rules. |
-| [`conflict`](/reference/problem-types/#conflict) | 409 | A `unique` value or a `restrict` reference is in the way, or a [write hook](/extending/write-hooks/) found a conflict. | Send another value, or remove what is in the way. |
+| [`conflict`](/reference/problem-types/#conflict) | 409 | A `unique` value or a `restrict` reference is in the way, or a [write hook](/extending/write-hooks/) found a conflict. With `Retry-After`, a concurrent transaction won a lock (a PostgreSQL deadlock or an apply's lock timeout) and nothing changed. | Send another value, or remove what is in the way; with `Retry-After`, send the same request again after it. |
 | [`destructive-change`](/reference/problem-types/#destructive-change) | 409 | A Management API apply would discard data. | Resend with `allowDestructive: true`, or keep what the plan drops. |
 | [`idempotency-conflict`](/reference/problem-types/#idempotency-conflict) | 409 | The `Idempotency-Key` was used for a different request. | Send a new key. |
 | [`precondition-failed`](/reference/problem-types/#precondition-failed) | 412 | The row changed since you read it. | Read it again, reapply, resend. |
