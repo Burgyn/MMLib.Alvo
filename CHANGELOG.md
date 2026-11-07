@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "Not declared" is judged only against the database's current revision: a boot or a code-first apply whose descriptor
   differs from the stored one (an older worker over the same database) sweeps nothing.
 
+||||||| 8db94f7e
+- **A sequence's `timeZone`** (#479, HX-12 D6): `sequence.timeZone`, an IANA id such as `"Europe/Bratislava"`, makes
+  the `period` and the `{yyyy}` `{yy}` `{MM}` `{dd}` tokens read the create's calendar date in that zone — a
+  `period: day` count runs from local midnight to local midnight, 23 or 25 hours on a DST day. Absent, both stay UTC,
+  unchanged. An id that is not an IANA id in its exact spelling, or that the machine does not resolve, is refused at
+  apply at `…/sequence/timeZone`. Changing it on an existing sequence keeps every count (the count is keyed by its
+  calendar label, not the zone); only the instant the next period starts moves. The container images now install
+  `tzdata`.
 - **Functions in the descriptor** (HX-15): `IAlvoFunction<TInput>`, registered with `AddFunction<T>(name)`, is called
   from an after-hook or an automation rule as `{"type": "function", "name": …, "input": {…}}` — each `input` value a
   literal or `{"$cel": "…"}` over the triggering row, checked at apply against the JSON Schema exported for `TInput`

@@ -33,7 +33,9 @@ internal sealed class InMemorySequences
         foreach (var field in sequenced)
         {
             var number = Next(schema, field, values, instant);
-            values[field.Name] = field.Sequence!.Format is { } format ? SequenceFormat.Render(format, number, instant) : number;
+            values[field.Name] = field.Sequence!.Format is { } format
+                ? SequenceFormat.Render(format, number, instant, field.Sequence.TimeZone)
+                : number;
         }
 
         return new AlvoRecord(values);
@@ -47,7 +49,7 @@ internal sealed class InMemorySequences
             field.Name,
             KeyOf(values, AlvoManagedColumns.TenantId),
             sequence.Per is { } per ? KeyOf(values, per) : string.Empty,
-            SequenceFormat.PeriodKey(sequence.Period, instant));
+            SequenceFormat.PeriodKey(sequence.Period, instant, sequence.TimeZone));
         var number = _last.TryGetValue(key, out var last) ? last + 1 : sequence.Start;
         _last[key] = number;
         return number;
