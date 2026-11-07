@@ -110,6 +110,23 @@ public sealed class ScheduleRegistrationTests
         (registration.Settings.Ordering, registration.Settings.RunAs).ShouldBe((AlvoOrdering.None, AlvoRunAs.System));
     }
 
+    [Fact]
+    public void A_host_migration_never_spans_tenants() =>
+        Registry(alvo => alvo.AddDataMigration<BackfillNotes>("backfill-notes", afterRevision: 1)).Handlers.ShouldHaveSingleItem()
+            .Job.ShouldNotBeNull().SpansTenants.ShouldBeFalse("only the framework's timer re-plan reads every tenant below the policy layer");
+
+    [Theory]
+    [InlineData("/entities/bookings/timers#27dfb2eb")]
+    [InlineData("/automation/notify/actions#1f0c9a2e")]
+    public void A_host_registration_cannot_take_a_descriptor_owned_id(string id)
+    {
+        var refusal = Should.Throw<AlvoStartupRefusedException>(() => EnsureRegistrable(alvo => alvo
+            .AddDataMigration<BackfillNotes>(id, afterRevision: 1)
+            .AddEventHandler(id, "orders.approved", OnRecord)));
+
+        refusal.Message.ShouldContain($"'{id}' is not an extension id.");
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]

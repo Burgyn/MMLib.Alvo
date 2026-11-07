@@ -58,12 +58,18 @@ internal static class EntityTimerPlanner
         return [.. timers.Select(timer => Replanned(timer, row)).OfType<TimerChange>()];
     }
 
-    /// <summary>The key of each of <paramref name="timers"/> for the row <paramref name="id"/> of <paramref name="entity"/>.</summary>
+    /// <summary>The scope and key of each of <paramref name="timers"/> for one stored row of <paramref name="entity"/>.</summary>
     /// <param name="timers">The entity's compiled timers.</param>
     /// <param name="entity">The entity.</param>
-    /// <param name="id">The row's id.</param>
-    internal static IReadOnlyList<string> Keys(IReadOnlyList<CompiledTimer> timers, string entity, Guid id) =>
-        [.. timers.Select(timer => KeyOf(entity, timer, id))];
+    /// <param name="row">The stored row.</param>
+    internal static IReadOnlyList<(string Scope, string Key)> Keys(IReadOnlyList<CompiledTimer> timers, string entity, AlvoRecord row)
+    {
+        ArgumentNullException.ThrowIfNull(timers);
+        ArgumentNullException.ThrowIfNull(row);
+        var (scope, id) = (ScopeOf(row), IdOf(row));
+
+        return [.. timers.Select(timer => (scope, KeyOf(entity, timer, id)))];
+    }
 
     private static string KeyOf(string entity, CompiledTimer timer, Guid id) => $"{TimerEntries.ReservedKeyPrefix}{entity}:{timer.Name}:{id:D}";
 

@@ -160,7 +160,7 @@ public sealed class EntityTimerPlannerTests
 
     [Fact]
     public void The_re_plan_keys_are_the_write_path_s_keys() =>
-        EntityTimerPlanner.Keys(_timers, "bookings", _id).ShouldBe([Key]);
+        EntityTimerPlanner.Keys(_timers, "bookings", Row("confirmed", _startsAt)).ShouldBe([(_tenant.ToString(), Key)]);
 
     private static IReadOnlyList<TimerChange> Plan(AlvoRecord? previous, AlvoRecord? stored) =>
         EntityTimerPlanner.Plan(_timers, Write(previous, stored), AlvoChainDepthLimit.Default);

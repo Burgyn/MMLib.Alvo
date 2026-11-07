@@ -44,8 +44,8 @@ internal sealed class EntityLifecycleService(CelFunctionBudgetPolicy budget, Alv
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<string> TimerKeys(PolicyDecision decision, string entity, Guid id) =>
-        EntityTimerPlanner.Keys(LifecycleOf(decision).Timers, entity, id);
+    public IReadOnlyList<(string Scope, string Key)> TimerKeys(PolicyDecision decision, string entity, AlvoRecord row) =>
+        EntityTimerPlanner.Keys(LifecycleOf(decision).Timers, entity, row);
 
     /// <inheritdoc />
     public IReadOnlyList<TimerChange> ReplanTimers(PolicyDecision decision, EntityTimerReplan replan)

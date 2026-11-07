@@ -67,7 +67,7 @@ internal sealed partial class EfAlvoData : IEntityTimerReplanner
         List<Dictionary<string, object>> rows, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var (connection, inner) = ConnectionOf(db, transaction);
-        var keys = rows.SelectMany(row => _lifecycle.TimerKeys(decision, schema.Name, (Guid)row[AlvoDataContext.IdColumn])).ToList();
+        var keys = rows.SelectMany(row => _lifecycle.TimerKeys(decision, schema.Name, Unmasked(row))).ToList();
         var armed = await TimerWrites.ArmedAsync(connection, inner, _timerTable, keys, cancellationToken);
         foreach (var row in rows)
         {

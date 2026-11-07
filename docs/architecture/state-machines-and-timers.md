@@ -123,7 +123,9 @@ migration**, synthesized from the catalog beside the descriptor actions (`TimerR
   tenant, so it needs no tenant list and is never held for one.
 - **Keyset-paged, one page per transaction** (`IEntityTimerReplanner`, internal, implemented by `EfAlvoData`): 100 rows by
   id, locked with the update pre-image lock, then the timers already armed for them read, then changed, on the same
-  connection — the write path's lock order, so a racing write either waits or is waited for.
+  connection — the write path's lock order, so a racing write either waits or is waited for. The armed read is one
+  equality on the whole `(scope, timer_key)` primary key per timer, OR-ed (a row-value `IN` is not portable), so it seeks
+  the key; at most 500 keys — 1 000 parameters — per statement, well under the 2 100 a third engine may allow.
 - **The rule** (`EntityTimerPlanner.Replan`), with the armed timer in place of the pre-image:
 
 | `due(row)` | Armed timer | Change |
@@ -135,16 +137,27 @@ migration**, synthesized from the catalog beside the descriptor actions (`TimerR
 | non-null, still ahead | none | upsert |
 | non-null, already passed | none | nothing |
 
-  Re-running it changes nothing — no upsert, so no new generation. The last row is the one deliberate difference from a
-  write: the re-plan cannot tell a timer that never was armed from one that already fired, and firing a reminder twice is
-  the worse mistake. A row whose new due has already passed is therefore armed only by its next due-changing write.
+  Re-running it changes nothing — no upsert, so no new generation. The last row is **a deliberate deviation from the
+  write path's arming rule**, which arms any non-null due, past or not. *Why:* a fired timer's row is deleted by
+  `FireAsync`, so an unarmed due that has already passed is indistinguishable from one that already fired; arming it would
+  fire it again, and a second run would no longer change nothing. *Cost:* an overdue old row — say a timer added with an
+  `at` already behind it — fires only at its next write that changes its due, never from the re-plan.
 - **Provenance.** An armed timer resumes the run's flow (`AlvoEventProvenance.Effective` of the system caller inside the
   delivery): its correlation and causation, and its depth, checked against the chain-depth limit.
 - **The catalog it plans with is the current one**, not the start revision's.
-- **Caveats.** A rollback to a definition that was already re-planned once starts nothing (its id is started); rows written
-  in between keep the due the later definition gave them until their next write. `setNull` changes (M8) are covered only
-  when a re-plan runs for another reason. A removed timer's armed rows are not cancelled by the re-plan.
-  The run cannot be redelivered from the dashboard: like a descriptor action, its subscriber is not a catalog entry.
+- **Caveats.**
+  - A rollback to a definition that was already re-planned once starts nothing (its id is started); rows keep the due the
+    later definition gave them until their next write.
+  - `setNull` changes (M8) are covered only when a re-plan runs for another reason.
+  - **Removing a timer is a known gap.** The re-plan plans only the timers the catalog declares, and `TimerPump` fires a
+    claimed row from its stored message without consulting the catalog, so a removed timer's armed rows still fire their
+    event once each. No sweep exists; a host handler of a retired event should ignore it.
+  - **A fire racing the re-plan can fire twice — the write path's own race.** If `FireAsync` deletes a claimed timer after
+    the re-plan's `now` was taken but before its armed read, the re-plan finds no row and a due still ahead of its `now`,
+    and arms it again; it fires once more. The same holds for a write that moves a due while a fire of the old due
+    commits first: the old due fired, the new one fires too. The generation fence prevents only the opposite order.
+    Handlers are at-least-once already.
+  - The run cannot be redelivered from the dashboard: like a descriptor action, its subscriber is not a catalog entry.
 
 A transition `when` reading a field hidden from the caller makes 200-vs-422 an oracle on that field — the property
 `WITH CHECK` already has; left to the stack-level security review.
@@ -165,8 +178,10 @@ A transition `when` reading a field hidden from the caller makes 200-vs-422 an o
 9. **Key `alvo:<entity>:<timer>:<id>`, scope = `tenant_id` or `""`; `IAlvoScheduler` refuses `alvo:`** — a host key with
    that prefix is refused.
 10. **Arming rule above** — one PK delete per timer per write; existing rows are armed by the framework's re-plan data
-    migration when a revision first carries a new or changed timer definition (issue 483, above) — a lapsed unarmed due
-    is not armed.
+    migration when a revision first carries a new or changed timer definition (issue 483, above). Deviation from the
+    arming rule: the re-plan does not arm an unarmed due that has already passed, because a fired timer's row is deleted
+    and is therefore indistinguishable from one never armed — cost: such an overdue old row fires only at its next
+    due-changing write.
 11. **Written at the emit site on the write's connection** — §7's "through the unit's `ITimerStore`" holds in
     substance, not in the call.
 12. **`at` compiles in `Condition` as a `Timestamp` through the internal `IValueCompiler`** — a host-replaced
