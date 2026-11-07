@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deleted by the same sweep. Host-registered handlers are never touched; cancelled is final — a rollback that declares the
   old action again does not bring the cancelled rows back (redeliver or replay them), and the restored action receives the
   events written from then on. A failed sweep is logged and never fails the apply; the next apply or boot sweeps again.
+  "Not declared" is judged only against the database's current revision: a boot or a code-first apply whose descriptor
+  differs from the stored one (an older worker over the same database) sweeps nothing.
 
 - **Functions in the descriptor** (HX-15): `IAlvoFunction<TInput>`, registered with `AddFunction<T>(name)`, is called
   from an after-hook or an automation rule as `{"type": "function", "name": …, "input": {…}}` — each `input` value a

@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 
 using MMLib.Alvo.Auth;
+using MMLib.Alvo.Events;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Scheduling;
 
@@ -74,6 +75,27 @@ public abstract partial class AutomationFacts
         restored.Single(delivery => delivery.EventId == stale.EventId).Status.ShouldBe("cancelled");
         restored.Single(delivery => delivery.EventId != stale.EventId).Status.ShouldBe("succeeded");
         receiver.Bodies.Count.ShouldBe(2, "the first order's post, then the second's — never the cancelled one again");
+    }
+
+    /// <summary>
+    /// A boot over the stored revision ends the work of a <c>/…</c> subscriber that revision does not declare — a row an
+    /// old-catalog replica fanned out after the apply's sweep — and leaves a host-registered id's work alone.
+    /// </summary>
+    [Fact]
+    public async Task A_boot_over_the_stored_revision_cancels_the_work_of_an_action_it_does_not_declare()
+    {
+        const string Gone = Webhook + "deadbeef";
+        var database = await DatabaseAsync();
+        await using (var first = await StartAsync(database: database))
+        {
+            await first.Services.GetRequiredService<IDeliveryStore>().FanOutAsync(
+                [new DeliveryRequest { EventId = Guid.NewGuid(), Subscriber = Gone, PartitionKey = "orders:1", Kind = "action" }], Ct);
+        }
+
+        await using var second = await StartAsync(database: database);
+
+        (await DeliveriesAsync(database, Gone)).ShouldHaveSingleItem().Status.ShouldBe("cancelled");
+        (await DeliveryRows.OperationRowsAsync(database.Connect, Ct)).ShouldHaveSingleItem().Target.ShouldBe(Gone);
     }
 
     [Fact]

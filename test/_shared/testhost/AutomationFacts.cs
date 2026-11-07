@@ -224,7 +224,12 @@ public abstract partial class AutomationFacts
     }
 
     [Fact]
-    public async Task Editing_a_hook_between_boots_cancels_its_retrying_delivery_and_the_boot_starts()
+    /// <summary>
+    /// The edit changes no schema, so the second boot primes its file's catalog without writing a revision: the database's
+    /// revision still declares the old action, and the sweep — which judges only against that revision (issue 480) — leaves
+    /// its work alone, as it must for a worker serving an older file over the same database.
+    /// </summary>
+    public async Task A_boot_whose_descriptor_differs_from_the_stored_revision_cancels_nothing_and_starts()
     {
         var database = await DatabaseAsync();
         var receiver = new ScriptedReceiver(HttpStatusCode.ServiceUnavailable);
@@ -240,8 +245,8 @@ public abstract partial class AutomationFacts
         await second.DrainEventsAsync(Ct);
 
         receiver.Bodies.Count.ShouldBe(1, "the edited action never runs for the old subscriber's pending row");
-        (await DeliveriesAsync(database, Webhook)).Single(delivery => delivery.Subscriber == stale.Subscriber).Status.ShouldBe("cancelled");
-        (await DeliveryRows.OperationRowsAsync(database.Connect, Ct)).ShouldHaveSingleItem().Target.ShouldBe(stale.Subscriber);
+        (await DeliveriesAsync(database, Webhook)).Single(delivery => delivery.Subscriber == stale.Subscriber).Status.ShouldBe("retrying");
+        (await DeliveryRows.OperationRowsAsync(database.Connect, Ct)).ShouldBeEmpty();
     }
 
     protected abstract Task<AutomationDatabase> DatabaseAsync();

@@ -217,20 +217,50 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
             return;
         }
 
-        await RetireThenReadyAsync(project, outcome, revision, ct).ConfigureAwait(false);
+        var authoritative = await ServesTheStoredRevisionAsync(boot, ct).ConfigureAwait(false) ? boot.Catalog : null;
+        await RetireThenReadyAsync(project, outcome, revision, ct, authoritative).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// The boot's last step on every shape that serves: retirements apply, the work of descriptor actions the primed catalog
-    /// no longer binds is ended, then Ready is published and recorded. Both run before Ready because the delivery dispatcher
-    /// waits for it, so nothing claims work they are about to end.
+    /// Whether the code-first descriptor this process primed is, canonically, the database's current revision — the only
+    /// catalog the descriptor-action sweep may judge "no longer declared" against (issue 480).
     /// </summary>
-    private async Task RetireThenReadyAsync(string project, SchemaStartupOutcome outcome, int? revision, CancellationToken ct)
+    /// <remarks>
+    /// An unchanged boot primes the file's catalog without writing a revision, so a process whose file differs from the
+    /// stored descriptor only in hooks or rules — an older worker, a newer pod before its apply — serves a catalog no other
+    /// process shares. Sweeping against it would cancel the live work of the descriptor every other process serves.
+    /// </remarks>
+    private async Task<bool> ServesTheStoredRevisionAsync(BootPlan boot, CancellationToken ct)
+    {
+        if (_actionSweep is null)
+        {
+            return false;
+        }
+
+        var stored = await _history.GetCurrentAsync(boot.Descriptor.Name, ct).ConfigureAwait(false);
+        return stored is not null && DescriptorContent.IsSame(boot.Descriptor, stored.DescriptorJson);
+    }
+
+    /// <summary>
+    /// The boot's last step on every shape that serves: retirements apply, the work of descriptor actions the database's
+    /// current revision no longer declares is ended, then Ready is published and recorded. Both run before Ready because the
+    /// delivery dispatcher waits for it, so nothing claims work they are about to end.
+    /// </summary>
+    /// <param name="project">The project.</param>
+    /// <param name="outcome">What the boot decided.</param>
+    /// <param name="revision">The revision served.</param>
+    /// <param name="ct">Cancels the boot.</param>
+    /// <param name="authoritative">
+    /// The primed catalog when it is the database's current revision, which alone the sweep may run against; otherwise
+    /// <see langword="null"/>, and nothing is swept.
+    /// </param>
+    private async Task RetireThenReadyAsync(
+        string project, SchemaStartupOutcome outcome, int? revision, CancellationToken ct, PolicyCatalog? authoritative = null)
     {
         await _extensionState.RetireAsync(ct).ConfigureAwait(false);
-        if (_actionSweep is not null && _policyCatalogProvider.Current is { } catalog)
+        if (_actionSweep is not null && authoritative is not null)
         {
-            await _actionSweep.SweepAsync(catalog, revision, ct).ConfigureAwait(false);
+            await _actionSweep.SweepAsync(authoritative, revision, ct).ConfigureAwait(false);
         }
 
         _state.Ready(project, revision);
@@ -284,7 +314,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
 
         await RefuseOrphanedWorkAsync(project, boot.Catalog, ct, secretsHeld: true).ConfigureAwait(false);
         _ = Prime(boot, stored.Revision);
-        await RetireThenReadyAsync(project, SchemaStartupOutcome.Unchanged, stored.Revision, ct).ConfigureAwait(false);
+        await RetireThenReadyAsync(project, SchemaStartupOutcome.Unchanged, stored.Revision, ct, boot.Catalog).ConfigureAwait(false);
     }
 
     /// <summary>

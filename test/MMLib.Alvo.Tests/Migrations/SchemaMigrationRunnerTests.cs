@@ -119,6 +119,30 @@ public sealed class SchemaMigrationRunnerTests
         deliveries.Operations.ShouldHaveSingleItem().Reason.ShouldNotBeNull().ShouldContain("Revision 1");
     }
 
+    /// <summary>
+    /// An empty plan saves no revision, so a descriptor that differs from the stored one only outside the schema is this
+    /// process's alone: the sweep, which judges only against the stored revision, cancels nothing (issue 480).
+    /// </summary>
+    [Theory]
+    [InlineData(false, "pending")]
+    [InlineData(true, "cancelled")]
+    public async Task An_empty_plan_sweeps_only_when_the_descriptor_is_the_stored_revision(bool stored, string expected)
+    {
+        var deliveries = new Events.FakeDeliveryStore(TimeProvider.System);
+        await deliveries.FanOutAsync(
+            [new MMLib.Alvo.Events.DeliveryRequest { EventId = Guid.NewGuid(), Subscriber = "/entities/vehicles/hooks/afterCreate#00000000", PartitionKey = "vehicles:1", Kind = "action" }],
+            TestContext.Current.CancellationToken);
+        var binder = new ExtensionBinder(ExtensionRegistry.Empty, new CelCompiler(), HandlerCatalog.EveryService(), NullLogger<ExtensionBinder>.Instance);
+        var sweep = new DescriptorActionSweep(binder, TimeProvider.System, NullLogger<DescriptorActionSweep>.Instance, deliveries);
+        var runner = new SchemaMigrationRunner(BootPlan(), _migrator, _introspector, _store, new PolicyCatalogProvider(), extensions: null, sweep);
+        var storedJson = stored ? FleetDescriptorJson : FleetDescriptorJson.Replace("\"name\": \"fleet\",", "\"name\": \"fleet\", \"description\": \"an older worker\",", StringComparison.Ordinal);
+        _store.GetCurrentAsync("fleet", Arg.Any<CancellationToken>()).Returns(new AppliedSchema(MapFleetDescriptor(), storedJson, 3, DateTimeOffset.UtcNow));
+
+        (await runner.RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken)).Plan.IsEmpty.ShouldBeTrue();
+
+        deliveries.Rows.ShouldHaveSingleItem().Status.ShouldBe(expected);
+    }
+
     [Fact]
     public async Task Second_run_with_unchanged_descriptor_is_a_true_no_op()
     {
