@@ -36,9 +36,10 @@ public sealed class DeliveryTableTests
         var sql = DeliveryTable.ClaimSql(Table, Outbox, Controls, ordered: 2, unordered: 1);
 
         Regex.Count(sql, Regex.Escape("status IN ('pending', 'retrying')"), RegexOptions.None, _matchTimeout).ShouldBe(2);
-        Regex.Count(sql, "NOT EXISTS", RegexOptions.None, _matchTimeout).ShouldBe(6, "two lane checks and the pause check in each half");
+        Regex.Count(sql, "NOT EXISTS", RegexOptions.None, _matchTimeout).ShouldBe(2, "the pause check in each half");
+        Regex.Count(sql, Regex.Escape("LIMIT 1) IS NULL"), RegexOptions.None, _matchTimeout).ShouldBe(4, "two lane checks in each half");
         sql.ShouldContain("subscriber IN (@s0, @s1, @s2)");
-        sql.ShouldContain("subscriber IN (@s2) OR (NOT EXISTS");
+        sql.ShouldContain("subscriber IN (@s2) OR ((SELECT 1 FROM");
         sql.ShouldContain("LIMIT @batch");
     }
 
@@ -83,7 +84,24 @@ public sealed class DeliveryTableTests
 
     [Fact]
     public void A_claim_with_no_unordered_subscriber_orders_every_lane() =>
-        DeliveryTable.ClaimSql(Table, Outbox, Controls, ordered: 1, unordered: 0).ShouldNotContain("OR (NOT EXISTS");
+        DeliveryTable.ClaimSql(Table, Outbox, Controls, ordered: 1, unordered: 0).ShouldNotContain("OR ((SELECT 1");
+
+    /// <summary>
+    /// The lane checks are scalar probes, not <c>NOT EXISTS</c>: PostgreSQL turns a correlated <c>NOT EXISTS</c> into an
+    /// anti-join planned from statistics, and over a fresh backlog it has none — the claim then walked the subscriber's
+    /// whole backlog once per candidate and ran past the 30 s command timeout on 10 000 rows (#482). A scalar subquery stays
+    /// a per-row index seek whatever the statistics say.
+    /// </summary>
+    [Fact]
+    public void The_lane_checks_are_probes_the_planner_cannot_turn_into_a_join()
+    {
+        var sql = DeliveryTable.ClaimSql(Table, Outbox, Controls, ordered: 1, unordered: 0);
+
+        sql.ShouldNotContain($"NOT EXISTS (SELECT 1 FROM {Table} earlier");
+        sql.ShouldNotContain($"NOT EXISTS (SELECT 1 FROM {Outbox} unfanned");
+        sql.ShouldContain($"(SELECT 1 FROM {Table} earlier WHERE");
+        sql.ShouldContain("unfanned.claimed_at >= @outbox_stale_before)) LIMIT 1) IS NULL");
+    }
 
     /// <summary>
     /// An attempt is numbered after the delivery's last recorded one, not by the row's claim count: a redelivered row
