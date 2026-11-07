@@ -1088,7 +1088,9 @@ applies `AddRetiredExtension` (`DeadLetter` → dead `retired`, `Discard` → `c
 boot; a delivery of that id still running elsewhere may finish its side effect — only its answer is fenced off. Both
 steps call `IDeliveryStore.EnsureAsync` first (idempotent): the port promises that call builds the storage, so a
 third-party store that builds its tables there is not read before they exist on its first boot; the contract suite pins
-that ensured, empty storage reads as no work.
+that ensured, empty storage reads as no work. A descriptor action's id (leading `/`) is neither refused nor retired by
+the guard: `DescriptorActionSweep` cancels the unfinished work of every such id the serving catalog no longer binds, after
+each apply and just before Ready (#480; `docs/architecture/automation.md`).
 
 **The orphan check refuses two starts an operator may not expect** (E3: "rolling deploys need an explicit drop"). A
 **rollback** to a build that does not know a handler a newer build added, while that handler has unfinished work, is

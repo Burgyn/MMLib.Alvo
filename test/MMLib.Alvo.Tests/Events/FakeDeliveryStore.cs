@@ -8,7 +8,7 @@ namespace MMLib.Alvo.Tests.Events;
 /// The delivery store in memory, held to <see cref="Testing.Events.DeliveryStoreContractTests"/> by
 /// <see cref="FakeDeliveryStoreTests"/>, so the core's dispatcher facts run against a store with the real semantics.
 /// </summary>
-internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
+internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore, ISupersededDeliveryStore
 {
     private static readonly string[] _unfinished = ["pending", "running", "retrying"];
     private static readonly string[] _blocking = ["pending", "running", "retrying", "dead"];
@@ -243,6 +243,23 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
 
     public Task<int> CancelPendingAsync(string subscriber, CancellationToken cancellationToken = default) =>
         Task.FromResult(End(subscriber, "cancelled", "retired"));
+
+    public Task<int> CancelSupersededAsync(string subscriber, DeliveryOperationEntry entry, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subscriber);
+        EnsureEntry(entry);
+        lock (_gate)
+        {
+            EnsureLoggable(entry);
+            var cancelled = End(subscriber, "cancelled", ISupersededDeliveryStore.Superseded);
+            if (cancelled > 0)
+            {
+                _operations.Add(entry with { Affected = cancelled });
+            }
+
+            return Task.FromResult(cancelled);
+        }
+    }
 
     public Task<IReadOnlyList<StoredDelivery>> ListAsync(DeliveryFilter filter, CancellationToken cancellationToken = default)
     {

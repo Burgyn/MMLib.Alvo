@@ -45,6 +45,7 @@ internal sealed class SchemaMigrationRunner
     private readonly IAppliedSchemaStore _store;
     private readonly IPolicyCatalogProvider _policyCatalogProvider;
     private readonly ExtensionApplyGuard? _extensions;
+    private readonly DescriptorActionSweep? _sweep;
 
     public SchemaMigrationRunner(
         DescriptorBootPlan bootPlan,
@@ -52,7 +53,8 @@ internal sealed class SchemaMigrationRunner
         ISchemaIntrospector introspector,
         IAppliedSchemaStore store,
         IPolicyCatalogProvider policyCatalogProvider,
-        ExtensionApplyGuard? extensions = null)
+        ExtensionApplyGuard? extensions = null,
+        DescriptorActionSweep? sweep = null)
     {
         ArgumentNullException.ThrowIfNull(bootPlan);
         ArgumentNullException.ThrowIfNull(migrator);
@@ -66,6 +68,7 @@ internal sealed class SchemaMigrationRunner
         _store = store;
         _policyCatalogProvider = policyCatalogProvider;
         _extensions = extensions;
+        _sweep = sweep;
     }
 
     /// <summary>Runs the code-first migration flow described in the type's remarks.</summary>
@@ -100,7 +103,8 @@ internal sealed class SchemaMigrationRunner
 
         if (plan.IsEmpty)
         {
-            _policyCatalogProvider.SetCurrent(descriptor.Name, catalog);
+            var stored = appliedSnapshot is not null && DescriptorContent.IsSame(descriptor, appliedSnapshot.DescriptorJson);
+            await ServeAsync(descriptor.Name, catalog, appliedSnapshot?.Revision, sweep: stored).ConfigureAwait(false);
             return new MigrationResult(Applied: false, plan, WasDryRun: options.DryRun);
         }
 
@@ -121,9 +125,28 @@ internal sealed class SchemaMigrationRunner
             var revision = (appliedSnapshot?.Revision ?? 0) + 1;
             var snapshot = new AppliedSchema(desired, descriptorJson, revision, DateTimeOffset.UtcNow);
             await _store.SaveAsync(descriptor.Name, snapshot, ct).ConfigureAwait(false);
-            _policyCatalogProvider.SetCurrent(descriptor.Name, catalog);
+            await ServeAsync(descriptor.Name, catalog, revision, sweep: true).ConfigureAwait(false);
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Publishes <paramref name="catalog"/>, then — when it is the stored revision — ends the work of the descriptor actions it
+    /// no longer binds (issue 480): after the snapshot is saved, and not cancelled with the call, as
+    /// <see cref="RuntimeSchemaService"/> does.
+    /// </summary>
+    /// <remarks>
+    /// An empty plan saves nothing, so a descriptor that differs from the stored one only in hooks or rules is served by
+    /// this process alone; the sweep runs only against the database's own revision (<paramref name="sweep"/>), never a
+    /// process-local catalog another process sharing the database does not serve.
+    /// </remarks>
+    private async Task ServeAsync(string project, PolicyCatalog catalog, int? revision, bool sweep)
+    {
+        _policyCatalogProvider.SetCurrent(project, catalog);
+        if (sweep && _sweep is not null)
+        {
+            await _sweep.SweepAsync(catalog, revision, CancellationToken.None).ConfigureAwait(false);
+        }
     }
 }

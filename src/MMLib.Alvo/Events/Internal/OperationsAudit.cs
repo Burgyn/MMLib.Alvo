@@ -1,12 +1,12 @@
 ﻿using Microsoft.Extensions.Logging;
 
-using MMLib.Alvo.Events;
-
-namespace MMLib.Alvo.Management.Internal;
+namespace MMLib.Alvo.Events.Internal;
 
 /// <summary>
 /// The <c>ManagementAudit</c> log event (spec E11): who made which operation on what, how much it changed, and why —
-/// written once per committed change, beside the operations log row the store wrote in the change's own transaction.
+/// written once per committed change, beside the operations log row the store wrote in the change's own transaction —
+/// by an operator's change (Management) and by the framework's own (<c>DescriptorActionSweep</c>), so it lives with the
+/// event backbone both use.
 /// </summary>
 /// <remarks>
 /// Warning, so it survives a production log level that drops information. Ids and the operator's own one-line reason only —
