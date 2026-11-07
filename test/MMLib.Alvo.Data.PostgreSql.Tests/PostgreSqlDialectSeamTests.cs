@@ -69,6 +69,15 @@ public sealed class PostgreSqlDialectSeamTests
     }
 
     [Fact]
+    public void Only_the_deadlock_detected_state_is_a_deadlock()
+    {
+        Dialect.IsDeadlock(Failure("40P01")).ShouldBeTrue();
+        Dialect.IsDeadlock(Failure("55P03")).ShouldBeFalse();
+        Dialect.IsDeadlock(Failure("40001")).ShouldBeFalse();
+        Dialect.IsDeadlock(new NpgsqlException("the connection dropped")).ShouldBeFalse();
+    }
+
+    [Fact]
     public void Only_the_invalid_object_definition_state_is_an_index_predicate_refusal()
     {
         Dialect.IsIndexPredicateRefusal(Failure("42P17")).ShouldBeTrue();

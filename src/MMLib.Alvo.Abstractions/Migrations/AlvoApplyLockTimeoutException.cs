@@ -1,14 +1,23 @@
 ﻿namespace MMLib.Alvo.Migrations;
 
 /// <summary>
-/// Thrown when an apply waited longer than its lock timeout for a table other transactions are using, and so changed
-/// nothing — a retryable refusal, never a broken invariant (HX-11 Ruling 20).
+/// Thrown when an apply waited longer than its lock timeout for a table other transactions are using — or the database
+/// failed it to break a deadlock with one of them — and so changed nothing: a retryable refusal, never a broken invariant
+/// (HX-11 Ruling 20; issue 443).
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>Why the wait is bounded at all.</b> Adding a <c>CHECK</c> on PostgreSQL takes <c>ACCESS EXCLUSIVE</c>, and a lock
 /// request queued behind a long reader also blocks every reader that arrives after it. A driver that can bound the wait
 /// does so as the first statement of every apply transaction, and its executors raise this when the bound is hit.
+/// </para>
+/// <para>
+/// <b>A deadlock is the same refusal with its own sentence</b> (<see cref="Deadlocked"/>, issue 443). The backfill's child
+/// locks are taken before the DDL so writers and applies agree on an order (HX-11 Ruling 74), but a parent delete that
+/// cascades to its children runs parent then child, and the engine may break that cycle by failing the apply. Either way
+/// the apply lost a wait for a lock and changed nothing, and either way the answer is to retry it — so every surface that
+/// already answers a lock timeout answers this one, and only the message tells them apart. One type rather than a sibling
+/// keeps the boot's convergence on a lost version-row race (<see cref="AtTheVersionRow"/>) for both.
 /// </para>
 /// <para>
 /// <b>Internal.</b> It is a fact about one apply, answered by the Management API (409 <c>conflict</c> with
@@ -23,6 +32,10 @@ internal sealed class AlvoApplyLockTimeoutException : Exception
     /// <summary>The one sentence every answer to this refusal carries.</summary>
     internal const string Refusal =
         "The apply waited longer than its lock timeout for a table other transactions are using, and changed nothing. Retry it.";
+
+    /// <summary>The one sentence every answer to a deadlock the apply lost carries.</summary>
+    internal const string DeadlockRefusal =
+        "The database failed the apply to break a deadlock with another transaction, and nothing changed. Retry it.";
 
     /// <summary>The seconds a caller should wait before retrying — the bound the apply itself waits.</summary>
     internal const int RetryAfterSeconds = 5;
@@ -64,4 +77,8 @@ internal sealed class AlvoApplyLockTimeoutException : Exception
         : base(Refusal, innerException)
     {
     }
+
+    /// <summary>The refusal for an apply the engine failed to break a deadlock, its own failure kept as the inner exception.</summary>
+    /// <param name="engine">The engine's own deadlock failure.</param>
+    internal static AlvoApplyLockTimeoutException Deadlocked(Exception engine) => new(DeadlockRefusal, engine);
 }

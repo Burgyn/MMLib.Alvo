@@ -552,6 +552,13 @@ namespace MMLib.Alvo.Data
         public bool SuppressHostHooks { get; init; }
         public System.TimeSpan Timeout { get; init; }
     }
+    public sealed class AlvoTransientConflictException : System.Exception
+    {
+        public AlvoTransientConflictException() { }
+        public AlvoTransientConflictException(System.Exception innerException) { }
+        public AlvoTransientConflictException(string message) { }
+        public AlvoTransientConflictException(string message, System.Exception innerException) { }
+    }
     public sealed class AlvoUnitInProgressException : System.InvalidOperationException
     {
         public AlvoUnitInProgressException() { }
