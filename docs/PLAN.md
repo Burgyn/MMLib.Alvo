@@ -97,7 +97,8 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   what a read returns, never a row after its SQL) is done too, in three PRs, built beside HX-12 and HX-13 rather
   than after them; HX-14 (steps, sleep, debounce, concurrency limits) the fourteenth; HX-19 (relation rules,
   lookup checks) the nineteenth; HX-18 (`stateMachine` and declarative timers, in the write before host hooks and
-  in its own transaction) is done too, built beside HX-19.
+  in its own transaction) is done too, built beside HX-19; HX-17 (generated typed entities — a source generator in
+  the core nupkg, and a boot warning when a generated class no longer fits the live schema) is done too.
   This line runs ahead of F5's close, the way F4 ran beside F3; the marker stays on F5.
 
 ## 3a. What closed F4

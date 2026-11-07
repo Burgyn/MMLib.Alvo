@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <Import Project="$(MSBuildThisFileDirectory)../../src/MMLib.Alvo/build/MMLib.Alvo.props" />
+
   <PropertyGroup>
     <AlvoSharedArchTests>false</AlvoSharedArchTests>
     <NoWarn>$(NoWarn);CA1707</NoWarn>
@@ -22,6 +24,8 @@
   <ItemGroup>
     <Compile Include="$(ExtendingSnippets)/**/*.cs" Link="Snippets/%(RecursiveDir)%(Filename)%(Extension)" />
     <None Include="$(ExtendingSnippets)/**/*.alvo.json" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The Generated types page: its descriptor generates Booking, BookingStatus, BookingPatch and BookingRoles, as a packed consumer's would. -->
+    <AdditionalFiles Include="$(ExtendingSnippets)/generated/booking.alvo.json" AlvoDescriptor="true" AlvoNamespace="Snippets.Generated" />
   </ItemGroup>
 
 </Project>
