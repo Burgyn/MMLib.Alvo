@@ -22,8 +22,12 @@ jobs:
     # Windows gets 45: its ring2 is bound by SQLite's per-write cost there (#410) and swings ~35 % between runners.
     # On 2026-11-06 PR #454's Windows leg took 25 of its 30 minutes; the next run (PR #457) spent 16 instead of 12
     # minutes on the unit tier — in suites that PR did not touch (Host, Data.Sqlite) as much as in the one it did —
-    # and was cancelled at 30 mid-way through Data.Sqlite.Tests.Integration with nothing failed. Linux takes ~20.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 30 }}
+    # and was cancelled at 30 mid-way through Data.Sqlite.Tests.Integration with nothing failed.
+    # Linux gets 40: since HX-14/15 its full ring2 takes ~24 min on a fast runner (run 42332557028: Api 5 min, Data.Sqlite
+    # 2, Data.PostgreSql 7), and on 2026-11-07 the same steps ran 35-60 % slower (build 1:42 -> 2:15, format 1:42 -> 2:47,
+    # Api.Tests.Integration 5:02 -> 8:09): PRs #488 and #490 were both cancelled at 30 minutes six to seven minutes into
+    # Data.PostgreSql.Tests.Integration, with nothing failed and nothing hung (the module completes in ~9.5 min locally).
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 40 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
