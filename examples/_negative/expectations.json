@@ -8,6 +8,7 @@
   "reserved-users-entity.json": { "pointer": "#/entities/users" },
   "sequence-two-numbers.json": { "pointer": "#/entities/orders/fields/code/sequence/format", "messageContains": "pattern" },
   "sequence-unknown-period.json": { "pointer": "#/entities/orders/fields/number/sequence/period" },
+  "sequence-windows-time-zone.json": { "pointer": "#/entities/orders/fields/number/sequence/timeZone", "messageContains": "pattern" },
   "state-machine-no-transitions.json": { "pointer": "#/entities/bookings/stateMachine/transitions", "messageContains": "minProperties" },
   "timer-without-at.json": { "pointer": "#/entities/bookings/timers/reminder", "messageContains": "at" },
   "typo-property.json": { "pointer": "#/entities/widgets/fields/name/requird" },

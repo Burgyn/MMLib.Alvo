@@ -937,7 +937,7 @@
         "sequence": {
           "type": "object",
           "additionalProperties": false,
-          "description": "A number the framework assigns on create: gapless and never reused, counted per tenant, and optionally per another field's value (`per`) and per calendar period (`period`, in UTC). type=integer stores the number; type=string requires `format`. The field becomes read-only.",
+          "description": "A number the framework assigns on create: gapless and never reused, counted per tenant, and optionally per another field's value (`per`) and per calendar period (`period`, in `timeZone`, UTC by default). type=integer stores the number; type=string requires `format`. The field becomes read-only.",
           "properties": {
             "per": {
               "type": "string",
@@ -950,7 +950,12 @@
                 "month",
                 "day"
               ],
-              "description": "Restart the count each UTC calendar period."
+              "description": "Restart the count each calendar period, read in `timeZone`."
+            },
+            "timeZone": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$",
+              "description": "IANA time zone id, e.g. \"Europe/Bratislava\", whose calendar date names the `period` and fills the date tokens of `format`. Absent = UTC. Changing it keeps every count: only the instant the next period starts moves."
             },
             "start": {
               "type": "integer",
@@ -961,7 +966,7 @@
             "format": {
               "type": "string",
               "pattern": "^[^{}]*(\\{(yyyy|yy|MM|dd)\\}[^{}]*)*\\{n(:([1-9]|1[0-8]))?\\}[^{}]*(\\{(yyyy|yy|MM|dd)\\}[^{}]*)*$",
-              "description": "type=string only: the text stored, e.g. \"SO-{yyyy}-{n:4}\" → SO-2026-0042. Exactly one {n} or {n:width}; {yyyy} {yy} {MM} {dd} read the create's UTC date."
+              "description": "type=string only: the text stored, e.g. \"SO-{yyyy}-{n:4}\" → SO-2026-0042. Exactly one {n} or {n:width}; {yyyy} {yy} {MM} {dd} read the create's date in `timeZone`."
             }
           }
         }

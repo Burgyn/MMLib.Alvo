@@ -190,11 +190,18 @@ numbered per room and per year:
 
 - **`integer` or `string`.** An `integer` field stores the number. A `string` field needs `format`, the text stored:
   exactly one `{n}` — or `{n:3}` to pad it to three digits, up to 18 — and any of `{yyyy}`, `{yy}`, `{MM}` and `{dd}`,
-  read from the create's own instant in UTC.
+  read from the create's own instant in the sequence's `timeZone`.
 - **What counts separately.** Every tenant counts on its own. `per` names a required field a caller writes — a string,
   integer, enum, ref, uuid, date or boolean, never another sequence, computed, rollup or virtual field — and each of its values
-  counts on its own. `period` (`year`, `month` or `day`) starts a new count each UTC period. `start` is the first
+  counts on its own. `period` (`year`, `month` or `day`) starts a new count each calendar period. `start` is the first
   number of every count, 1 by default.
+- **Which calendar.** `timeZone` is an IANA id such as `"Europe/Bratislava"`; the period and the date tokens are the
+  create's calendar date in that zone, so a `period: day` count runs from local midnight to local midnight — 23 hours
+  on the spring-forward day, 25 on the fall-back one. Without it they are read in UTC. An id the machine does not know
+  is refused when the descriptor is applied. Changing `timeZone` later never restarts a count: a count is keyed by its
+  calendar label (`2026`, `2026-11`, `2026-11-06`), not by the zone, so the next create continues the current
+  period's count and only the instant the next period starts moves. Around that boundary, for at most the difference
+  between the two zones, a number of the old period can still follow one of the new.
 - **Gapless and never reused.** The number is taken in the create's own transaction, just before the row is
   inserted, so a create that fails or is rolled back gives its number back, and no two creates ever get the same one.
   Concurrent creates into one count wait for each other until the first commits. A number is never handed out
