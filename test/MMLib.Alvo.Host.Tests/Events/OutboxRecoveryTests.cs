@@ -83,7 +83,9 @@ public class OutboxRecoveryTests
                 await hanging.UntilRequestedAsync();
             }
 
-            SqliteOutboxProbe.Rows(database).ShouldHaveSingleItem().Dispatched.ShouldBeTrue("fan-out preceded the action");
+            // Fan-out and the outbox stamp are separate commits (ruling Q11): the stamp can still be pending when the host
+            // goes away, so only the event row itself and the claimed delivery are asserted.
+            SqliteOutboxProbe.Rows(database).ShouldHaveSingleItem();
             RunningDeliveries(database).ShouldBe(1, "the action's delivery is still held by the claim of the host that went away");
         }
         finally
