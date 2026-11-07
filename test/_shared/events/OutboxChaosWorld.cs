@@ -158,6 +158,13 @@ internal sealed class OutboxChaosWorld : IAsyncDisposable
     /// reported as <see cref="ChaosRun.HitClaimCap"/> and asserted, so it cannot pass as a drain.
     /// </para>
     /// <para>
+    /// <b>Each fanned-out batch is followed by one delivery round</b>, as the host's two dispatchers run side by side: the
+    /// outbox fans each event out into its webhook delivery (HX-15), and draining all ten thousand first would hand the
+    /// delivery claim a backlog no running host builds — on PostgreSQL its first claim over 10 000 fresh pending rows ran
+    /// past the 30 s command timeout (a follow-up for the claim query, not this criterion's subject). The leftovers and
+    /// the retries are drained once the outbox is empty.
+    /// </para>
+    /// <para>
     /// <b>An empty claim ends the run and does not end the fact.</b> Whether the queue was really drained is the
     /// tally's answer, taken after the loop and asserted by the criterion — so a pump that gave up while entries
     /// were still pending fails on the number of entries left rather than on the loop's own opinion.
@@ -178,7 +185,12 @@ internal sealed class OutboxChaosWorld : IAsyncDisposable
             }
 
             claims++;
-            if (await _dispatcher.PumpOneBatchAsync(Ct) == 0 && !await DeliverFannedOutAsync())
+            var fannedOut = await _dispatcher.PumpOneBatchAsync(Ct);
+            if (fannedOut > 0)
+            {
+                await _deliveries.PumpOneRoundAsync(Ct);
+            }
+            else if (!await DeliverFannedOutAsync())
             {
                 break;
             }

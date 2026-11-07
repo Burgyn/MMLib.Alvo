@@ -446,7 +446,8 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
     /// </summary>
     /// <remarks>
     /// The audit's finding: <c>FieldEditor</c> filters <c>capabilities.refused</c> to <c>field.*</c> and
-    /// nothing consumed the rest, so a missing control for <c>entity.update</c> read as an oversight. The
+    /// nothing consumed the rest, so a missing control for a refused action read as an oversight. Since HX-15 only
+    /// <c>http.call</c> is refused. The
     /// wording is the framework's, because a reworded refusal is the one nobody tested.
     /// </remarks>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
@@ -457,8 +458,8 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await session.OpenTabAsync("On write");
 
         var refused = await session.Page.Locator("[data-testid='hooks-refused']").InnerTextAsync();
-        refused.ShouldContain("entity.update");
         refused.ShouldContain("http.call");
+        refused.ShouldNotContain("entity.update", Case.Sensitive, "HX-15 runs entity.update; only http.call is refused");
 
         session.AssertConsoleClean();
     }
