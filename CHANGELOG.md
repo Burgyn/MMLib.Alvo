@@ -1129,6 +1129,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same request is expected to succeed. An apply or rollback the database fails — a parent's cascade delete against the
   backfill's child locks — answers like a lock timeout: 409 `conflict` with `Retry-After: 5` and a detail that says
   deadlock, a refused start at boot. Nothing is retried automatically. SQLite, with one writer, raises none.
+- **A delivery claim over a large fresh backlog answers in a fraction of a second on PostgreSQL** (#482). With ten
+  thousand deliveries fanned out before the first claim — a webhook receiver down for long — one claim ran past
+  Npgsql's 30 s command timeout (36 s measured), stalling every delivery: PostgreSQL planned the lane checks as
+  anti-joins from statistics freshly inserted rows do not have, and walked the subscriber's whole backlog once per
+  candidate. The lane checks are now per-row index probes whatever the statistics say (≈0.2 s on the same backlog);
+  what a claim takes is unchanged on both engines.
 - **A `null` in an `entity.update` payload** (#328, HX-15) is the null literal it was written as: refused at apply into a
   required field, written as `null` into an optional one.
 - **A rollup added to a populated parent is filled by the apply** (HX-11), instead of reading empty until a child write
