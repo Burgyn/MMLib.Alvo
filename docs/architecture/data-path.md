@@ -1277,7 +1277,14 @@ depends on the server version (`bool` from 15); that is verified on 16 only.
 **Writers queue, they do not deadlock** (D3). On PostgreSQL a write to an entity with an exclusion first takes
 transaction-scoped advisory locks, one per exclusion, keyed on SHA-256 of the name, the tenant and the equality values,
 in sorted order — so concurrent inserters of one resource wait for each other instead of meeting `40P01` between
-exclusion waiters. No test fails without them yet; they are defensive.
+exclusion waiters. The interleaving that needs them is a writer whose transaction already holds an uncommitted row of
+the resource: two transaction units of one room, each holding a booking when it writes a second that overlaps the
+other's first, deadlock every time without the keys and end in one commit and one 409 with them
+(`PostgreSqlExclusionLockTests.Two_units_booking_one_room_crosswise_queue_and_the_loser_is_refused_not_deadlocked`,
+issue 478). Two single-statement creates rarely meet that cycle — the insert and its check are one statement apart —
+which is why the twenty-writer and racing-patch facts pass without the keys. **Not covered:** two units that each hold
+one resource and then write the other's, in opposite order, still deadlock — on the keys instead of on each other's
+rows. A unit orders its own writes; a batch's keys are sorted.
 
 **A refused write is a 409.** `ConstraintViolationTranslator` resolves the constraint name over the written entity
 and names `exclude.from` (filtered by `Unnameable`); the API answers `conflict` with the violation code `exclusion` at
