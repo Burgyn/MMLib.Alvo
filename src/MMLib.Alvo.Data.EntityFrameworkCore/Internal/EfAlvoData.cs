@@ -109,6 +109,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         AlvoOptions options,
         AlvoChainDepthLimit depthLimit,
         IEntityLifecycle lifecycle,
+        IFieldFacets facets,
         IRelationalWriteGate? writeGate = null,
         IWriteExtensionRunner? extensions = null,
         IServiceScopeFactory? scopes = null,
@@ -127,6 +128,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(depthLimit);
         ArgumentNullException.ThrowIfNull(lifecycle);
+        ArgumentNullException.ThrowIfNull(facets);
         _policy = policy;
         _evaluator = evaluator;
         _hooks = hooks;
@@ -145,6 +147,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         _operationsLog = DeliveryOperationsTable.LogNameFor(options.SchemaPrefix);
         _depthLimit = depthLimit;
         _lifecycle = lifecycle;
+        _facets = facets;
         _timerTable = TimerTable.NameFor(options.SchemaPrefix);
         _writeGate = writeGate ?? NoRelationalWriteGate.Instance;
         _extensions = extensions ?? NoWriteExtensions.Instance;
@@ -495,6 +498,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     {
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: false);
+        EnsureFacetsFit(schema, values, decision.Unnameable);
 
         var candidate = Candidate(
             db.Rows(entity).EntityType,
@@ -1471,12 +1475,13 @@ internal sealed partial class EfAlvoData : IAlvoData
     }
 
     /// <summary>The entity an update may write, with both of the update's own payload guards applied.</summary>
-    private static EntitySchema UpdatableEntity(
+    private EntitySchema UpdatableEntity(
         AlvoDataContext db, string entity, IReadOnlyDictionary<string, object?> values, PolicyDecision decision,
         AlvoPrecondition? precondition)
     {
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: true);
+        EnsureFacetsFit(schema, values, decision.Unnameable);
         AlvoPrecondition.EnsureSupported(precondition, schema);
 
         return schema;
@@ -1907,7 +1912,7 @@ internal sealed partial class EfAlvoData : IAlvoData
     /// <param name="values">The caller's own payload.</param>
     /// <param name="branches">The caller's decision for each branch.</param>
     /// <param name="precondition">The caller's precondition, if any.</param>
-    private static EntitySchema ReplaceableEntity(
+    private EntitySchema ReplaceableEntity(
         AlvoDataContext db, string entity, IReadOnlyDictionary<string, object?> values, ReplaceDecisions branches,
         AlvoPrecondition? precondition)
     {
@@ -1915,6 +1920,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         var hidden = branches.Create.HiddenFields.Union(branches.Update.HiddenFields).ToHashSet(StringComparer.Ordinal);
         WritePayloadGuard.EnsureWritable(values, schema, branches.Create, isUpdate: true, hidden);
         WritePayloadGuard.EnsureWritable(values, schema, branches.Update, isUpdate: true, hidden);
+        EnsureFacetsFit(schema, values, branches.Create.Unnameable.Union(branches.Update.Unnameable).ToHashSet(StringComparer.Ordinal));
         /* Asked about the row that will be stored, not the one that arrived: a field the caller omitted and
            the descriptor gives a default is supplied by the time anything writes it. Asking about the raw
            payload instead would refuse a create the defaults make valid; exempting defaulted fields inside
@@ -3027,6 +3033,11 @@ internal sealed partial class EfAlvoData : IAlvoData
             return (null, Forbidden(index, unwritable));
         }
 
+        if (FacetRefusal(index, schema, values, decision) is { } unfit)
+        {
+            return (null, unfit);
+        }
+
         var candidate = Candidate(
             db.Rows(schema.Name).EntityType,
             Stamped(schema, WholeRowValues(schema, values), context, now, isUpdate: false));
@@ -3143,6 +3154,12 @@ internal sealed partial class EfAlvoData : IAlvoData
             if (WritePayloadGuard.PayloadRefusal(patch.Values, schema, decision, isUpdate: true) is { } unwritable)
             {
                 refusals.Add(Forbidden(index, unwritable));
+                continue;
+            }
+
+            if (FacetRefusal(index, schema, patch.Values, decision) is { } unfit)
+            {
+                refusals.Add(unfit);
                 continue;
             }
 

@@ -485,6 +485,11 @@ internal sealed partial class EfAlvoData
                 return new RowValidation(null, Forbidden(index, unwritable));
             }
 
+            if (FacetRefusal(index, schema, rows[index].Values, decision) is { } unfit)
+            {
+                return new RowValidation(null, unfit);
+            }
+
             return await PreReadAsync(db, schema, decision, context, rows[index].Id, cancellationToken).ConfigureAwait(false) is { } old
                 ? new RowValidation(Validation(schema.Name, AlvoWriteOperation.Update, context, now) with { Old = old, New = Merge(old, rows[index].Values) }, null)
                 : new RowValidation(null, Unavailable(index));

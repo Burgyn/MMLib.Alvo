@@ -574,7 +574,8 @@ internal static class ProblemResultFactory
 
     /// <summary>
     /// A broken validation (HX-11 Ruling 24): 422 <c>validation</c>, code <c>check</c>, one entry per field the port
-    /// named, or one entry pointed at the whole document when it named none.
+    /// named, or one entry pointed at the whole document when it named none. A value the port's facet measure refused
+    /// (issue 481) is the one entry the payload validator would have produced for it — its own code, wording and fix.
     /// </summary>
     /// <remarks>
     /// <b>The text is fixed, and that is the security property.</b> Neither the value, the expression nor the
@@ -584,7 +585,9 @@ internal static class ProblemResultFactory
     /// </remarks>
     /// <param name="exception">The port's refusal.</param>
     private static IReadOnlyList<AlvoViolation> CheckViolations(AlvoConstraintViolationException exception) =>
-        exception.DescriptorMessage is { } message
+        exception.FacetCode is { } facet
+            ? [new AlvoViolation("/" + exception.Fields[0], facet, exception.Message, exception.FacetFix)]
+            : exception.DescriptorMessage is { } message
             ? [LookupCheckViolation(exception.Fields, message)]
             : exception.Fields.Count > 0
                 ? [.. exception.Fields.Select(field => CheckViolation(field, exception))]

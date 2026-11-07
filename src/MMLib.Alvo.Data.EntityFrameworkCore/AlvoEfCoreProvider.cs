@@ -127,6 +127,7 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<IOptions<AlvoOptions>>().Value,
         services.GetRequiredService<AlvoChainDepthLimit>(),
         services.GetRequiredService<IEntityLifecycle>(),
+        services.GetRequiredService<IFieldFacets>(),
         services.GetRequiredService<IRelationalWriteGate>(),
         services.GetService<IWriteExtensionRunner>(),
         services.GetRequiredService<IServiceScopeFactory>(),
