@@ -49,9 +49,9 @@ A field's `sequence` makes Alvo number each create — gapless, never reused, co
 
 - `"type": "integer"` stores the number itself. `"type": "string"` needs `format`, the text stored:
   `"SO-{yyyy}-{n:4}"` gives SO-2026-0042. Exactly one `{n}`, or `{n:4}` to pad to four digits (1 to 18), plus any
-  of `{yyyy}` `{yy}` `{MM}` `{dd}` from the create's UTC date.
+  of `{yyyy}` `{yy}` `{MM}` `{dd}` from the create's date.
 - `per` names a required, stored string, integer, enum, ref, uuid, date or boolean field a caller writes: each value
-  counts on its own — never a computed, rollup, sequence or virtual field. `period` (`year`, `month` or `day`) restarts the count each UTC period. `start` is the first
+  counts on its own — never a computed, rollup, sequence or virtual field. `period` (`year`, `month` or `day`) restarts the count each calendar period; dates read in `timeZone` (IANA, e.g. `"Europe/Bratislava"`; default UTC). `start` is the first
   number, 1 by default.
 - Alvo writes the value: a write that sends it is refused 403. `default`, `computed`, `rollup`, `maxLength`, `virtual`
   and a field-level `format` (such as `email`) are each refused beside it. A rolled-back create gives its number back. Not accepted on a `storage: dynamic` entity.
