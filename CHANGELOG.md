@@ -1122,6 +1122,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **SQLite: two concurrent opens could share one native connection** (#485). Microsoft.Data.Sqlite 10.0.10, which
+  EF Core 10.0.10 brings, could lend one pooled native connection to two open `SqliteConnection`s (dotnet/efcore#39008),
+  failing an open with "unable to delete/modify collation sequence due to active statements" or a stale "database is
+  locked" under concurrent identity reads and writes. `Microsoft.Data.Sqlite.Core` is pinned to 10.0.14, which carries
+  the upstream fix.
 - **A `null` in an `entity.update` payload** (#328, HX-15) is the null literal it was written as: refused at apply into a
   required field, written as `null` into an optional one.
 - **A rollup added to a populated parent is filled by the apply** (HX-11), instead of reading empty until a child write
