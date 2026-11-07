@@ -87,7 +87,7 @@ public sealed record FieldDescriptor
 
     /// <summary>
     /// A number the framework assigns on create — gapless and never reused, counted per tenant, and optionally per
-    /// another field's value and per UTC calendar period; the field is read-only.
+    /// another field's value and per calendar period (in its <c>timeZone</c>, UTC by default); the field is read-only.
     /// </summary>
     public FieldSequence? Sequence { get; init; }
 
@@ -121,15 +121,21 @@ public sealed record FieldSequence
     /// <summary>A required field of the same entity whose value starts its own count.</summary>
     public string? Per { get; init; }
 
-    /// <summary>The UTC calendar period after which the count restarts; <see langword="null"/> never restarts.</summary>
+    /// <summary>The calendar period after which the count restarts; <see langword="null"/> never restarts.</summary>
     public SequencePeriod? Period { get; init; }
+
+    /// <summary>
+    /// The IANA time zone whose calendar date names the <see cref="Period"/> and fills the date tokens of
+    /// <see cref="Format"/>; <see langword="null"/> means UTC.
+    /// </summary>
+    public string? TimeZone { get; init; }
 
     /// <summary>The first number of every count; <see langword="null"/> means <c>1</c>.</summary>
     public long? Start { get; init; }
 
     /// <summary>
     /// For a <see cref="FieldType.String"/> field, the text stored — exactly one <c>{n}</c> or <c>{n:width}</c>, plus
-    /// any of <c>{yyyy}</c>, <c>{yy}</c>, <c>{MM}</c>, <c>{dd}</c> read from the create's UTC date.
+    /// any of <c>{yyyy}</c>, <c>{yy}</c>, <c>{MM}</c>, <c>{dd}</c> read from the create's date in <see cref="TimeZone"/>.
     /// </summary>
     public string? Format { get; init; }
 }

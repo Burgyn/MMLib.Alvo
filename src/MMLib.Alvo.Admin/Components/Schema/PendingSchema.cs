@@ -224,6 +224,7 @@ internal static class PendingSchema
                 Per = String(sequence, "per"),
                 Period = Enum.TryParse<SequenceResetPeriod>(String(sequence, "period"), ignoreCase: true, out var period)
                     && Enum.IsDefined(period) ? period : null,
+                TimeZone = String(sequence, "timeZone"),
                 Start = sequence.TryGetProperty("start", out var start) && start.TryGetInt64(out var first) ? first : 1,
                 Format = String(sequence, "format"),
             }

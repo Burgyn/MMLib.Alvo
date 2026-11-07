@@ -1,0 +1,11 @@
+{
+  "apiVersion": "alvo.dev/v1",
+  "name": "bad-sequence-time-zone",
+  "entities": {
+    "orders": {
+      "fields": {
+        "number": { "type": "integer", "sequence": { "period": "day", "timeZone": "Central Europe Standard Time" } }
+      }
+    }
+  }
+}
