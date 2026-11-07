@@ -5,6 +5,7 @@
     <!-- The analyzer's subject: its tests compile consumer sources against the real core and abstractions. -->
     <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <PackageReference Include="CsCheck" />
   </ItemGroup>
 
 </Project>

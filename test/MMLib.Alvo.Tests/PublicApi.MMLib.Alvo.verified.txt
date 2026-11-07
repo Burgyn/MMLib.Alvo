@@ -193,6 +193,7 @@ namespace MMLib.Alvo.Data
     {
         public static T As<T>(this MMLib.Alvo.Data.AlvoRecord record)
             where T :  class { }
+        public static T Get<T>(this MMLib.Alvo.Data.AlvoRecord record, string field) { }
     }
     public sealed class AlvoTranslationException : System.Exception
     {

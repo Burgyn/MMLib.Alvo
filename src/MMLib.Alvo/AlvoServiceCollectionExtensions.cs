@@ -9,6 +9,7 @@ using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Api;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Commands;
+using MMLib.Alvo.Data.Internal;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Expressions;
@@ -119,7 +120,8 @@ public static class AlvoServiceCollectionExtensions
             provider.GetRequiredService<ICelCompiler>(),
             provider.GetRequiredService<ILogger<DescriptorBootPlan>>(),
             provider.GetRequiredService<ExtensionBinder>(),
-            provider.GetRequiredService<DescriptorHost>()));
+            provider.GetRequiredService<DescriptorHost>(),
+            provider.GetRequiredService<GeneratedEntitySource>()));
 
     /// <summary>Registers the runtime apply path, guarded for the host's extensions.</summary>
     /// <remarks>

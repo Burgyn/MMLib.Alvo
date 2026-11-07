@@ -172,6 +172,30 @@ public class CSharpApiTests
     }
 
     [Fact]
+    public void The_typed_layer_a_generated_class_uses_is_in_scope()
+    {
+        var types = ApiScope.TypesOf(ShippedPackages.All.Single(p => p.Package == "MMLib.Alvo").Assembly);
+        var names = types.Select(type => type.Name).ToList();
+
+        names.ShouldContain("IAlvoEntity");
+        names.ShouldContain("AlvoEntityAttribute");
+        names.ShouldContain("AlvoFieldAttribute");
+        names.ShouldContain("AlvoEnumValueAttribute");
+        names.ShouldContain("IAlvoPatch`1");
+        names.ShouldContain("AlvoPatch");
+        names.ShouldContain("AlvoRecordExtensions");
+        ApiScope.MembersOf(types.Single(type => type.Name == "AlvoRecordExtensions")).Select(member => member.Name).ShouldContain("Get");
+    }
+
+    [Fact]
+    public void The_core_package_description_names_its_source_generator()
+    {
+        var core = ShippedPackages.All.Single(p => p.Package == "MMLib.Alvo").Assembly;
+
+        core.GetCustomAttribute<AssemblyDescriptionAttribute>()!.Description.ShouldContain("typed-entity source generator");
+    }
+
+    [Fact]
     public void A_package_without_host_facing_types_says_so()
     {
         var page = CSharpApiGenerator.RenderPackage("Fixture", "A fixture package.", [], XmlDocs.Parse("<doc><members/></doc>"), 20);

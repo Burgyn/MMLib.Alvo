@@ -21,7 +21,7 @@
   PR3, the generated **HTTP Data API** and its OpenAPI enrichment. EF-free
   (enforced by an arch test), but **an ASP.NET Core library** — see Hard
   dependency rules.
-- `src/MMLib.Alvo.Analyzers` — the Roslyn analyzers (`ALVO1001` from HX-10; the typed-entity generator joins it in
+- `src/MMLib.Alvo.Analyzers` — the Roslyn analyzers (`ALVO1001` from HX-10, and the typed-entity generator from
   HX-17). **A project, not a package** (spec 2026-10-14 E6): `IsPackable=false`, and `MMLib.Alvo`'s pack places its
   assembly at `analyzers/dotnet/cs/`, so every project that references `MMLib.Alvo` directly gets the rule — NuGet does
   not flow an analyzer asset transitively (a package depending on the core gets `exclude="Build,Analyzers"` by default),
@@ -30,7 +30,8 @@
   loads an analyzer from a `netstandard2.0` assembly of its own; rule (a) names Roslyn because a *runtime* Roslyn
   dependency is heavy, and an analyzer asset adds nothing to a consumer's runtime closure. `Microsoft.CodeAnalysis.CSharp`
   is pinned to 4.14.0, older than the compiler of the minimum SDK in `global.json`, and `scripts/test-packed-analyzer`
-  builds a packed consumer on that SDK. `SolutionConventionTests` lets a `<IsRoslynComponent>` project declare
+  builds a packed consumer on that SDK. The core nupkg also carries `build/MMLib.Alvo.props` (HX-17), which makes the
+  generator's `AlvoDescriptor`/`AlvoNamespace` item metadata visible to the compiler. `SolutionConventionTests` lets a `<IsRoslynComponent>` project declare
   `TargetFramework=netstandard2.0`, and nothing else.
 - `src/MMLib.Alvo.Data.EntityFrameworkCore` — shared EF-based host (the
   descriptor→`IModel` builder, the EF-differ migrator, the introspector, the

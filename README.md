@@ -193,7 +193,7 @@ Nothing is on NuGet yet. Until v0.1, reference the projects from a clone, or pac
 | Package | Description |
 | --- | --- |
 | `MMLib.Alvo.Abstractions` | The interface-first root of the Alvo dependency graph: every port, and nothing that implements one. |
-| `MMLib.Alvo` | The Alvo core: schema registry, Data API, rule engine, events and management, registered with AddAlvo. |
+| `MMLib.Alvo` | The Alvo core: schema registry, Data API, rule engine, events and management, registered with AddAlvo — with the ALVO1001 analyzer and the typed-entity source generator. |
 | `MMLib.Alvo.Data.EntityFrameworkCore` | The relational adapter every Alvo engine driver is built on. |
 | `MMLib.Alvo.Data.Sqlite` | The SQLite driver for Alvo, registered with UseSqlite. |
 | `MMLib.Alvo.Data.PostgreSql` | The PostgreSQL driver for Alvo, registered with UsePostgreSql. |

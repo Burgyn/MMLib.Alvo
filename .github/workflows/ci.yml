@@ -53,8 +53,15 @@ jobs:
       # Formatting is OS-independent — run the verify gate once (Linux) to avoid
       # cross-platform line-ending flakiness. It catches formatting/style that
       # .editorconfig marks below warning (whitespace, using order, IDE naming).
+      # Configuration=Release (an MSBuild property from the environment) makes the
+      # format workspace resolve the typed-entity generator, a ProjectReference
+      # with OutputItemType=Analyzer, to the Release build above. Left at Debug it
+      # points at a bin/Debug analyzer this job never builds, nothing is
+      # generated, and the code using generated types looks broken to the fixers.
       - name: Format gate
         if: runner.os == 'Linux'
+        env:
+          Configuration: Release
         run: dotnet format --verify-no-changes
 
       # The PR is the gate for every layer but mutation (Stryker runs post-merge

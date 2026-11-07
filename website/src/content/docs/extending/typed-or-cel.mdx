@@ -190,4 +190,5 @@ session, subscriber)` builds one from an `IAlvoSession` you already have.
 
 A class implementing `IAlvoEntity` — an `AlvoRecord Record { get; }` and a public constructor taking an `AlvoRecord` —
 wraps the record instead of copying it: fields the class does not declare survive, and `x.Record["field"]` reaches any
-of them in a condition or a query. That is the shape generated classes will have; they arrive in a later release.
+of them in a condition or a query. That is the shape the build generates for you from the descriptor: see
+[Generated types](/extending/generated-types/).

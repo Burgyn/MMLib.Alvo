@@ -36,6 +36,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that breaks a field's facet, or a create that leaves out a required field, is refused at apply, and a `$cel` value
   that breaks one is dead `write-refused`. Its condition and values may read the triggering row's `hidden` fields; a
   rule that re-triggers itself stops at the chain-depth limit. Docs: *Automation*.
+- **Generated typed entities** (HX-17): mark the descriptor, or a Management API snapshot of it
+  (`GET …/projects/{p}/descriptor`), as `<AdditionalFiles Include="…" AlvoDescriptor="true" />`, with an optional
+  `AlvoNamespace`, and the build generates the following, all implementing `IAlvoEntity`:
+  - a `sealed partial class` wrapper per entity that keeps the fields it does not declare;
+  - an enum per `enum` field;
+  - a typed `{Class}Patch`;
+  - a `{Project}Roles` class of role constants.
+
+  The source generator ships inside the `MMLib.Alvo` nupkg (`analyzers/dotnet/cs`, plus `build/MMLib.Alvo.props`) and
+  reaches projects that reference the core directly. A class name that a type in the SDK's implicit global usings
+  already has gets `Entity` appended (`tasks` → `TaskEntity`). Docs: *Generated types*.
+- **`AlvoRecordExtensions.Get<T>(record, field)`** (HX-17): reads one field typed, with the conversion `As<T>()`
+  applies. Generated properties read through it.
+- **`GeneratedEntityStale`** (HX-17): at boot, a Warning log event for each generated class of the booting project that
+  no longer fits the live schema. It names the class, the entity and the problems, and never refuses the start.
+- **`ALVO2001` / `ALVO2002`** (HX-17): generator diagnostics, category `Alvo.Generator`.
+  - `ALVO2001` (Error): a file marked `AlvoDescriptor` is not a descriptor the generator can read.
+  - `ALVO2002` (Warning): two entities or descriptors would generate the same type, so the later one is skipped.
 - **State machines** (HX-18): `entities.<e>.stateMachine { field, initial?, transitions: { <name>: { from, to, roles?, when? } } }`
   names which values an `enum` field may move between. An update that changes the field must take a declared
   transition — checked in the write after the declarative before-hooks and before any host before-write hook, and

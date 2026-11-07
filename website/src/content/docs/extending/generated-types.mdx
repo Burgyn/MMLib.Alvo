@@ -1,0 +1,165 @@
+---
+title: Generated types
+description: Mark your descriptor, or a Management API snapshot of it, as an AlvoDescriptor file and the build generates a typed class per entity, an enum per enum field, a typed patch and role constants — checked against the live schema at boot.
+sidebar:
+  order: 4
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import snippets from '../../../snippets/extending/generated/GeneratedTypesSnippets.cs?raw';
+import tests from '../../../snippets/extending/generated/GeneratedTypesSnippetsTests.cs?raw';
+import descriptor from '../../../snippets/extending/generated/booking.alvo.json?raw';
+
+You can write the class a [typed handler or a typed read](/extending/typed-or-cel/) uses yourself, or let the build
+write it from the descriptor. The `MMLib.Alvo` package carries a source generator next to its
+[analyzer](/extending/analyzer-rules/). It reads the descriptor at compile time and emits one class per entity. Each
+class wraps the record, so it works with `As<T>()`, the typed reads and writes, `Entity<T>(…)` and lambda conditions
+without any further setup.
+
+## Turn it on
+
+Add the descriptor to your project as an `AdditionalFiles` item marked `AlvoDescriptor="true"`:
+
+```xml
+<ItemGroup>
+  <AdditionalFiles Include="booking.alvo.json" AlvoDescriptor="true" />
+</ItemGroup>
+```
+
+The types go into your project's `RootNamespace`. Use `AlvoNamespace="MyApp.Model"` on the item to choose another
+namespace, and set it per file when one project generates from several descriptors. With neither set, the namespace is
+`Alvo.Generated`. Marking a second file works the same way. A file that is not marked is never read.
+
+This page's executed example generates from this descriptor:
+
+<Code code={descriptor} lang="json" title="booking.alvo.json" />
+
+## What you get
+
+For each entity, the generator emits:
+
+- **A wrapper class**, `public sealed partial class Booking : IAlvoEntity`. It holds the record it wraps as `Record`, so
+  fields the class does not declare survive a read, a replace and a write. `x.Record["field"]` reaches any of them, in
+  code or in a lambda condition. Properties are read-only, and each one reads through `AlvoRecordExtensions.Get<T>`, the
+  same conversion `As<T>()` applies.
+- **A static `Create(…)`**. Required fields come first as parameters, and the others are optional and default to null.
+  A null argument is left out of the create, so the field's descriptor `default` applies. Store-maintained fields
+  (computed, rollups, `readOnly` fields, the managed columns) are not parameters.
+- **A patch**, `BookingPatch`, from `Booking.Patch()`. It has one `Set…` method for each field a caller may write, and
+  it is what `UpdateAsync` takes.
+- **An enum for each `enum` field**, named after the class and the property (`BookingStatus`). Each member keeps its
+  raw value in `[AlvoEnumValue]`, so `in_review` becomes `InReview` and still reads and writes `in_review`.
+- **A roles class for the project**, `{Project}Roles` (`BookingRoles`). It holds `Anon`, `Authenticated`, `Admin` and
+  every `auth.roles` entry, as `const string`.
+
+<SourceExcerpt code={snippets} from="public const string FrontDeskRole" to="return await session.GetAsync<Booking>" title="GeneratedTypesSnippets.cs" />
+
+A handler over the generated class is an ordinary typed handler. `e.Old` is `null` on a create, and the compiler knows
+that: `e.Old.Status` without a check is a nullable warning.
+
+<SourceExcerpt code={snippets} from="public static IAlvoBuilder AddBookingLog" to="e.Old.Status" title="GeneratedTypesSnippets.cs" />
+
+<SourceExcerpt code={tests} from="public async Task A_typed_handler_on_a_generated_class" to="log.ShouldBe(" title="GeneratedTypesSnippetsTests.cs" />
+
+### Names
+
+- **Class.** The class name is the entity name in PascalCase and in the singular: `work_orders` becomes `WorkOrder`.
+  The singular follows a short fixed rule, applied to the last word:
+  1. A small table first: `statuses` becomes `status`, `buses` becomes `bus`, `people` becomes `person`, `children`
+     becomes `child`, and `data` stays `data`.
+  2. Otherwise, `ies` becomes `y` (`categories` becomes `Category`).
+  3. Otherwise, `sses`, `xes`, `zes`, `ches` and `shes` drop the `es` (`addresses` becomes `Address`, `boxes` becomes
+     `Box`).
+  4. Otherwise, a trailing `s` is dropped, unless the name ends in `ss`, `us` or `is` (`houses` becomes `House`,
+     `campus` stays `Campus`).
+
+  The rule is not a dictionary. `news` becomes `New` and `series` becomes `Sery`. If you dislike a name, rename the
+  entity: the rule will not change, because changing it would rename your types.
+- **Reserved class names.** A class whose name a .NET type in the SDK's implicit global usings already has gets
+  `Entity` appended. So `tasks` generates `TaskEntity`, not `Task`, because a `Task` in your namespace would break every
+  `async Task` method there. The same applies to `Type`, `File`, `Path`, `Timer`, `Version`, `Guid`, `List`, `LogLevel`
+  and the rest of that set. An enum whose name would clash the same way gets `Enum` appended. A class named `Record`,
+  `Patch` or `Create` also gets `Entity`, because the class uses those names itself.
+- **Properties and enum members.** These are PascalCase, with the raw name kept in `[AlvoField]` or `[AlvoEnumValue]`.
+  A name that starts with a digit gets `_` (`1st_call` becomes `_1stCall`). A parameter that is a C# keyword is escaped
+  (`@class`). A member name the type already has (`Record`, `Equals`, `GetType`, the class's own name, and `Parse` for
+  enum members) gets `Value` appended. Two fields that map to one name get `2`, `3` and so on.
+- **Clashes.** When two entities or two descriptors would generate the same type in one namespace, the first file by
+  path keeps the name. The later entity is skipped with [`ALVO2002`](#alvo2002). Set `AlvoNamespace` on one of the files
+  to keep both.
+
+### Fields without a property
+
+- **Hidden fields** (`hidden: true`, or a CEL condition) get no property: a read never returns them, and `As<T>()`
+  refuses a record that lacks a field the class maps. In the example above, `internal_note` is one.
+- **Fields `events.exclude` lists** get no property, because a typed handler that maps one is refused at boot.
+- **`json` fields** get no property, because there is no single C# type for them.
+
+All three are still reachable as `x.Record["field"]`, and the class's `<remarks>` lists them. Each wrapper also has the
+managed columns: `Id`, then `TenantId` on a tenant-scoped entity, then `CreatedAt`, `CreatedBy`, `UpdatedAt` and
+`UpdatedBy`, then the descriptor's fields in descriptor order. A property is nullable exactly when the field may be
+empty: as `nullable` says when the descriptor sets it, otherwise when the field is not `required`.
+
+## Dashboard-first: generate from a snapshot
+
+A project built in the dashboard has no descriptor file in your repository. Instead, download the Management API's
+export of the current descriptor and mark that file:
+
+```sh
+curl -sS localhost:8080/management/projects/booking/descriptor \
+  -H "X-Alvo-Api-Key: admin.$ALVO_ADMIN_KEY_SECRET" -o booking.snapshot.json
+```
+
+```xml
+<AdditionalFiles Include="booking.snapshot.json" AlvoDescriptor="true" />
+```
+
+The response, `{"project": …, "revision": …, "descriptorJson": "…"}`, generates exactly what the descriptor inside it
+would. After you change the project in the dashboard, download the snapshot again and rebuild. The boot check below
+tells you when you forgot to.
+
+## When the schema moves
+
+Generated code is fixed at build time, and the live schema can move ahead of it. A dashboard edit, or an apply through
+the Management API, can remove a field or an entity.
+
+- **At boot, Alvo checks every generated class of the booting project** against the schema it serves, using the same
+  mapping check a typed read applies. It logs one Warning, `GeneratedEntityStale`, for each class that no longer fits:
+
+  ```text
+  Generated class MyApp.Booking no longer fits entity 'bookings' of the live schema: … Regenerate it from the current descriptor or a Management API snapshot, and rebuild.
+  ```
+
+  The boot carries on. A stale class that nothing uses does no harm, and a dashboard-first host has to stay up when its
+  descriptor moves ahead of its build.
+- **A stale class registered as a typed handler** (`Entity<Booking>(…)`) still refuses the start, as any typed handler
+  that does not fit does. See [Typed or CEL](/extending/typed-or-cel/#your-class).
+- **A stale class used anyway** fails at its first `As<T>()` or typed read, with an `InvalidOperationException` that
+  names the missing field.
+- **A field the class does not know about** is never a problem. The wrapper keeps it in `Record`, and a replace sends it
+  back unchanged.
+
+Only classes generated from the booting project's descriptor (matched by its `name`) are checked. Discovery walks your
+entry assembly and the assemblies it references that themselves reference `MMLib.Alvo`. It does not see an assembly
+loaded only at run time, such as a plugin, or a reference the compiler dropped because no code uses one of its types.
+
+## Diagnostics
+
+### ALVO2001
+
+`'{file}' is not an Alvo descriptor the generator can read: {reason}`. This is an **error**. A file marked
+`AlvoDescriptor="true"` is malformed JSON (the message gives the line and column), or not an object, or has no
+`entities`, or has an `apiVersion` other than `alvo.dev/v1`. For a snapshot, the position is inside its
+`descriptorJson` string. Fix the file, or remove the `AlvoDescriptor` mark.
+
+### ALVO2002
+
+`'{file}' would generate '{type}', which another entity or descriptor already generates; it is skipped. Rename the
+entity, or set AlvoNamespace on one of the descriptors.` This is a **warning**. The entity it names is not generated.
+
+## Reach
+
+Like the [analyzer](/extending/analyzer-rules/), the generator reaches only projects that reference `MMLib.Alvo`
+**directly**. Put the `AdditionalFiles` item in such a project. A project that references only `MMLib.Alvo.TestHost`,
+or gets the core through another package, generates nothing.

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "booking",
+  "auth": { "roles": ["staff"] },
+  "entities": {
+    "bookings": {
+      "fields": {
+        "guest": { "type": "string", "required": true, "maxLength": 80 },
+        "nights": { "type": "integer", "required": true },
+        "status": { "type": "enum", "values": ["requested", "confirmed", "cancelled"], "default": "requested" },
+        "total": { "type": "decimal", "precision": 10, "scale": 2 },
+        "internal_note": { "type": "string", "hidden": true }
+      },
+      "rules": {
+        "list": "'staff' in @user.roles",
+        "get": "'staff' in @user.roles",
+        "create": "'staff' in @user.roles",
+        "update": "'staff' in @user.roles"
+      }
+    }
+  }
+}

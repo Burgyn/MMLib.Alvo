@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Data.Internal;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions;
@@ -80,6 +81,7 @@ internal sealed class DescriptorBootPlan
     private readonly ILogger<DescriptorBootPlan> _logger;
     private readonly ExtensionBinder? _extensions;
     private readonly DescriptorHost _host;
+    private readonly GeneratedEntitySource? _generated;
 
     /// <summary>Initializes a new instance of the <see cref="DescriptorBootPlan"/> class.</summary>
     /// <param name="source">
@@ -94,13 +96,18 @@ internal sealed class DescriptorBootPlan
     /// to check — see <see cref="EnsureRegistrable"/> and <see cref="EnsureBindable"/>.
     /// </param>
     /// <param name="host">The functions and services the host registers, which a descriptor's actions compile against; <see langword="null"/> for none.</param>
+    /// <param name="generated">
+    /// The host's generated typed classes, or <see langword="null"/> for a composition with none to check — see
+    /// <see cref="WarnAboutGeneratedEntities"/>.
+    /// </param>
     public DescriptorBootPlan(
         IDescriptorSource? source,
         IDescriptorValidator validator,
         ICelCompiler compiler,
         ILogger<DescriptorBootPlan> logger,
         ExtensionBinder? extensions = null,
-        DescriptorHost? host = null)
+        DescriptorHost? host = null,
+        GeneratedEntitySource? generated = null)
     {
         ArgumentNullException.ThrowIfNull(validator);
         ArgumentNullException.ThrowIfNull(compiler);
@@ -112,6 +119,7 @@ internal sealed class DescriptorBootPlan
         _logger = logger;
         _extensions = extensions;
         _host = host ?? DescriptorHost.Empty;
+        _generated = generated;
     }
 
     /// <summary>
@@ -222,6 +230,65 @@ internal sealed class DescriptorBootPlan
     /// </remarks>
     /// <exception cref="AlvoStartupRefusedException">A registration is wrong whatever the descriptor says.</exception>
     internal void EnsureRegistrable() => _extensions?.EnsureRegistrable();
+
+    /// <summary>
+    /// Logs <c>GeneratedEntityStale</c> for each class generated from project <paramref name="project"/> that no longer fits
+    /// <paramref name="schema"/>; never refuses the boot.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A warning, not a refusal</b>: a dashboard-first host must stay up when its descriptor moves ahead of its build, and a
+    /// stale class that is registered as a typed handler is refused by <see cref="EnsureBindable"/> anyway. An unregistered one
+    /// would otherwise fail only at its first typed read, far from the change that broke it.
+    /// </para>
+    /// <para>
+    /// Only the booting project's classes are checked: a host may carry classes generated from other descriptors. A failure of
+    /// the check itself — an assembly that will not load, a class whose shape cannot be read — is logged and swallowed for the
+    /// same reason; a class that fails is skipped, the others are still checked.
+    /// </para>
+    /// </remarks>
+    /// <param name="schema">The schema the boot serves.</param>
+    /// <param name="project">The booting project's name.</param>
+    internal void WarnAboutGeneratedEntities(SchemaModel schema, string project)
+    {
+        if (_generated is null)
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var type in GeneratedEntityCheck.OfProject(_generated.Types, project))
+            {
+                WarnIfStale(type, schema);
+            }
+        }
+        catch (Exception failure) when (failure is not OperationCanceledException)
+        {
+            ExtensionLog.GeneratedEntityCheckFailed(_logger, failure.Message);
+        }
+    }
+
+    private void WarnIfStale(Type type, SchemaModel schema)
+    {
+        try
+        {
+            WarnAboutStale(type, schema);
+        }
+        catch (Exception failure) when (failure is not OperationCanceledException)
+        {
+            ExtensionLog.GeneratedEntityCheckFailed(_logger, failure.Message);
+        }
+    }
+
+    private void WarnAboutStale(Type type, SchemaModel schema)
+    {
+        foreach (var (shape, problems) in GeneratedEntityCheck.Stale([type], schema))
+        {
+            ExtensionLog.GeneratedEntityStale(
+                _logger, shape.Type.FullName ?? shape.Name, shape.Entity ?? string.Empty, string.Join(" ", problems.Select(problem => problem.Message)));
+        }
+    }
 
     private void EnsureValid(string descriptorJson)
     {
