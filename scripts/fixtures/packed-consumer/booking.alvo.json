@@ -1,0 +1,21 @@
+{
+  "apiVersion": "alvo.dev/v1",
+  "name": "booking",
+  "auth": { "roles": ["front_desk"] },
+  "entities": {
+    "bookings": {
+      "description": "A stay one guest booked.",
+      "fields": {
+        "guest": { "type": "string", "required": true, "maxLength": 80 },
+        "nights": { "type": "integer" },
+        "status": { "type": "enum", "values": ["pending", "confirmed", "cancelled"], "default": "pending" }
+      },
+      "rules": {
+        "list": "'front_desk' in @user.roles",
+        "get": "'front_desk' in @user.roles",
+        "create": "'front_desk' in @user.roles",
+        "update": "'front_desk' in @user.roles"
+      }
+    }
+  }
+}
