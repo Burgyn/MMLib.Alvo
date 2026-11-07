@@ -24,8 +24,9 @@ which moves of a status field are legal, and `timers` say when the record should
 
 - **`from`** lists the states a transition leaves, and **`to`** the one it enters. `["*"]` means any state — including an
   empty one and a value outside the machine — and stands alone.
-- **`initial`**, when declared, is the state every create must store; a create that sends none stores the field's
-  `default`, which must then be the same value. Without `initial`, a create may store any state.
+- **`initial`**, when declared, is the state every create must store. A create that sends no state stores the field's
+  `default`, so when the field declares one, apply requires it to equal `initial`; with no `default`, such a create is
+  refused. Without `initial`, a create may store any state.
 - An update that **changes** the field must take a declared transition. An update that leaves it alone — or a `PATCH`
   that does not name it — is no transition, and a delete is none either.
 
@@ -88,6 +89,10 @@ Each entry under `timers` is one durable timer per record:
 
 `at` and `when` read bare fields only — never `old.`/`new.`/`changed()`, the caller, a relation, or a rollup field
 (a rollup is recomputed without a write of the record, so the timer would not move with it).
+
+An entity with a cascading ref (`onDelete: cascade`) cannot declare `timers`: a cascade delete never reaches the write
+path, so the timer would outlive its row. `onDelete: setNull` on a ref that `at` or `when` reads is accepted but changes
+the row outside the write path, so the timer keeps its old due until the row's next write.
 
 ## What is not covered
 
