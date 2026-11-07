@@ -86,7 +86,7 @@ public sealed class ControlContrastScenarios(AdminWorld world) : IClassFixture<A
         await session.Page.GetByTestId("overview-revision").WaitForAsync();
         var badges = session.Page.GetByTestId("overview-revision").Or(session.Page.GetByTestId("nav-not-yet"));
         var readings = await ContrastProbe.ReadAsync(badges);
-        readings.Count.ShouldBeGreaterThanOrEqualTo(3, "the revision badge and both Not yet pills");
+        readings.Count.ShouldBeGreaterThanOrEqualTo(2, "the revision badge and the Functions Not yet pill");
         return readings.Where(r => r.Ratio < ContrastProbe.AA).Select(r => $"the badge: {r}");
     }
 
@@ -97,7 +97,7 @@ public sealed class ControlContrastScenarios(AdminWorld world) : IClassFixture<A
     /// </summary>
     private static async Task<IEnumerable<string>> InfoAlertBelowAAAsync(AdminSession session)
     {
-        await session.GoAsync("/automations");
+        await session.GoAsync("/functions");
         var alert = session.Page.GetByTestId("notyet-panel");
         await alert.WaitForAsync();
         /* Every element inside the alert frame, by its test id rather than the library's classes; the ones with no text

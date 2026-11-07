@@ -12,8 +12,8 @@ public class HookBuilderTests
     [InlineData("beforeCreate", new[] { "reject", "mutate" })]
     [InlineData("beforeUpdate", new[] { "reject", "mutate" })]
     [InlineData("beforeDelete", new[] { "reject" })]
-    [InlineData("afterCreate", new[] { "webhook", "email" })]
-    [InlineData("afterDelete", new[] { "webhook", "email" })]
+    [InlineData("afterCreate", new[] { "webhook", "email", "function" })]
+    [InlineData("afterDelete", new[] { "webhook", "email", "function" })]
     public void A_point_admits_only_the_kinds_the_apply_accepts_there(string point, string[] kinds)
     {
         var hook = new HookBuilder();
@@ -136,4 +136,87 @@ public class HookBuilderTests
         refusal.ShouldBeNull();
         return action.ShouldNotBeNull().ToJsonString();
     }
+
+    [Fact]
+    public void Function_is_not_offered_before_a_write()
+    {
+        foreach (var point in new[] { "beforeCreate", "beforeUpdate", "beforeDelete" })
+        {
+            var hook = new HookBuilder();
+            hook.Choose(point);
+
+            hook.Kinds.ShouldNotContain(HookBuilder.Function);
+        }
+    }
+
+    [Fact]
+    public void A_function_hook_builds_its_input_object()
+    {
+        var hook = FunctionHook();
+        Row(hook, "orderId").Text = "ORD-1";
+        Row(hook, "amount").Mode = MutateMode.Expression;
+        Row(hook, "amount").Text = "new.total";
+
+        var action = hook.Build(out var refusal);
+
+        action.ShouldNotBeNull(refusal).ToJsonString().ShouldBe(
+            """{"type":"function","name":"issue-invoice","input":{"amount":{"$cel":"new.total"},"orderId":"ORD-1","note":null}}""");
+    }
+
+    [Fact]
+    public void A_required_input_left_empty_is_refused()
+    {
+        var hook = FunctionHook();
+        Row(hook, "amount").Text = "12.5";
+
+        hook.Build(out var refusal).ShouldBeNull();
+        refusal.ShouldBe("'orderId' is required by issue-invoice.");
+    }
+
+    [Fact]
+    public void A_nullable_required_input_left_empty_is_written_as_null_and_an_optional_one_is_omitted()
+    {
+        var hook = FunctionHook();
+        Row(hook, "orderId").Text = "ORD-1";
+        Row(hook, "amount").Text = "3";
+
+        hook.Build(out _).ShouldNotBeNull()["input"]!.ToJsonString().ShouldBe("""{"amount":3,"orderId":"ORD-1","note":null}""");
+    }
+
+    [Fact]
+    public void A_literal_the_input_type_cannot_hold_is_refused()
+    {
+        var hook = FunctionHook();
+        Row(hook, "orderId").Text = "ORD-1";
+        Row(hook, "amount").Text = "twelve";
+
+        hook.Build(out var refusal).ShouldBeNull();
+        refusal.ShouldBe("'amount' takes number; 'twelve' is not one.");
+    }
+
+    [Fact]
+    public void A_function_hook_without_a_function_is_refused()
+    {
+        var hook = new HookBuilder();
+        hook.Choose("afterCreate");
+        hook.Kind = HookBuilder.Function;
+
+        hook.Build(out var refusal).ShouldBeNull();
+        refusal.ShouldBe("A function action names a function the host registered with AddFunction.");
+    }
+
+    private const string InvoiceSchema = """
+        {"type":"object","properties":{"orderId":{"type":"string"},"amount":{"type":"number"},"note":{"type":["string","null"]},"memo":{"type":"string"}},"required":["orderId","amount","note"]}
+        """;
+
+    private static HookBuilder FunctionHook()
+    {
+        var hook = new HookBuilder();
+        hook.Choose("afterCreate");
+        hook.Kind = HookBuilder.Function;
+        hook.ChooseFunction("issue-invoice", System.Text.Json.JsonDocument.Parse(InvoiceSchema).RootElement);
+        return hook;
+    }
+
+    private static FunctionInputRow Row(HookBuilder hook, string name) => hook.InputRows.Single(row => row.Name == name);
 }

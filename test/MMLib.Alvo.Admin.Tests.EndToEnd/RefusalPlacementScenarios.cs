@@ -23,7 +23,6 @@ public sealed class RefusalPlacementScenarios(AdminWorld world) : IClassFixture<
     }
 
     [Theory(Timeout = AdminWorld.ScenarioTimeout)]
-    [InlineData("/automations")]
     [InlineData("/functions")]
     public async Task A_not_yet_page_finds_its_warned_block_and_shows_the_wildcard_refusal(string route)
     {

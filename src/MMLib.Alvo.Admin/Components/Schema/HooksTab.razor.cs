@@ -117,6 +117,7 @@ public partial class HooksTab
         _writable = WritableFields();
         ReadPickers();
         LoadFunctions();
+        LoadHostFunctions();
         EnsureMutateRow();
         _adding = true;
         SettleConditionMode();

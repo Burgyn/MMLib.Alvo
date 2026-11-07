@@ -42,7 +42,7 @@ public class AdminPathsTests
         { AdminPaths.History, typeof(Components.History.History) },
         { AdminPaths.Integrations, typeof(Components.Integrations.Integrations) },
         { AdminPaths.Operations, typeof(Components.Operations.Operations) },
-        { AdminPaths.Automations, typeof(Components.Shell.NotYet) },
+        { AdminPaths.Automations, typeof(Components.Automations.Automations) },
         { AdminPaths.Functions, typeof(Components.Shell.NotYet) },
         { AdminPaths.Settings, typeof(Components.Settings.Settings) },
         { AdminPaths.SignIn, typeof(Components.Shell.SignIn) },

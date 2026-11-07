@@ -22,6 +22,7 @@ public class HookBuilderEditTests
     [InlineData("beforeUpdate", """{"action":{"mutate":{"completed_at":{"$cel":"now()"},"status":"open","quantity":3,"paid":true,"note":null}}}""")]
     [InlineData("afterCreate", """{"action":{"type":"webhook","endpoint":"desk","payload":"[{{new.quantity}}]"},"condition":"new.paid == true"}""")]
     [InlineData("afterUpdate", """{"action":{"type":"email","template":"done","to":"{{new.note}}"}}""")]
+    [InlineData("afterCreate", """{"action":{"type":"function","name":"issue-invoice","input":{"orderId":"A-1","amount":{"$cel":"new.price"},"count":2,"flag":true,"note":null}}}""")]
     public void A_drawable_hook_saved_unchanged_is_written_back_byte_for_byte(string point, string json)
     {
         var original = Parse(json);

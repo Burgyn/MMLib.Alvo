@@ -55,13 +55,13 @@ internal static class RefusalPlaces
     {
         ["field.default"] = [RefusalScreen.FieldEditor, RefusalScreen.FieldsList],
         ["entity.softDelete"] = [RefusalScreen.EntityHeader],
-        ["function"] = [RefusalScreen.OnWrite],
         ["http.call"] = [RefusalScreen.OnWrite],
-        ["entity.update"] = [RefusalScreen.OnWrite],
         ["JSONata"] = [RefusalScreen.OnWrite, RefusalScreen.Integrations],
         ["email.data"] = [RefusalScreen.OnWrite, RefusalScreen.Integrations],
         ["bodyFile"] = [RefusalScreen.Integrations],
         ["trigger.event"] = [RefusalScreen.Automations, RefusalScreen.Functions],
+        ["batch"] = [RefusalScreen.Automations],
+        ["trigger.source"] = [RefusalScreen.Automations],
     };
 
     /// <summary>The refusals one screen shows, in the order the build published them.</summary>

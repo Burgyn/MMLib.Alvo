@@ -16,7 +16,7 @@ namespace MMLib.Alvo.Admin.Components.Shell;
 /// <param name="NotYet">
 /// Whether this section is declared and not running. The navigation shows it, greyed, under its
 /// own separator, because hiding it would make the dashboard look complete when it is not — and an
-/// operator who cannot find Automations at all has no way to learn that Alvo means to have them.
+/// operator who cannot find Functions at all has no way to learn that Alvo means to have them.
 /// </param>
 internal sealed record AdminSection(
     string Title, string Path, string Icon, char? GoKey = null, bool NotYet = false)
@@ -75,6 +75,7 @@ internal static class AdminNavigation
         new("Access", AdminPaths.Access, Icons.Access, 'a'),
         new("Configuration history", AdminPaths.History, Icons.History, 'h') { ShortTitle = "History" },
         new("Integrations", AdminPaths.Integrations, Icons.Integrations, 'i'),
+        new("Automations", AdminPaths.Automations, Icons.Automations, 'u'),
         new("Operations", AdminPaths.Operations, Icons.Operations, 'p'),
     ];
 
@@ -86,7 +87,6 @@ internal static class AdminNavigation
     /// </remarks>
     public static IReadOnlyList<AdminSection> NotYet { get; } =
     [
-        new("Automations", AdminPaths.Automations, Icons.Automations, NotYet: true),
         new("Functions", AdminPaths.Functions, Icons.Functions, NotYet: true),
     ];
 
