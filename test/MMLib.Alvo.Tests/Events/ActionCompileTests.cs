@@ -190,7 +190,7 @@ public sealed class ActionCompileTests
         var error = SingleError(Update("invoices", """{ "number": "INV-1", "amount": 1 }""", tenancy: true, ordersTenancy: "scoped"));
 
         error.Path.ShouldBe($"{HookPath}/entity");
-        error.Message.ShouldContain("runs as the system and bypasses the target's rules");
+        error.Message.ShouldContain("runs as the system in the event's tenant, under the target's rules");
     }
 
     [Fact]

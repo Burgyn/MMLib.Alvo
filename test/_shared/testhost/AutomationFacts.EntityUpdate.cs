@@ -147,7 +147,7 @@ public abstract partial class AutomationFacts
         await alvo.DrainEventsAsync(Ct);
 
         var delivery = (await DeliveriesAsync(alvo, MarkRule)).ShouldHaveSingleItem();
-        (delivery.Status, delivery.Attempts).ShouldBe(("dead", 1));
+        (delivery.Status, delivery.Attempts, delivery.LastErrorType).ShouldBe(("dead", 1, "record-not-found"));
         (await OrderAsync(alvo, TenantA, order))["status"].ShouldBe("open", "the system caller is an admin, not a bypass: an update rule that denies holds");
     }
 

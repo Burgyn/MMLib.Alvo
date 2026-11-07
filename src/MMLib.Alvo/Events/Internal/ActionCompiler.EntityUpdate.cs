@@ -86,7 +86,7 @@ internal static partial class ActionCompiler
                 + "carries no tenant to write the row in.",
             (false, true) =>
                 $"'{scope.Schema.Name}' is tenant-scoped and '{target.Name}' is not, so a tenant's event would write a row every "
-                + "tenant shares — the action runs as the system and bypasses the target's rules.",
+                + "tenant shares — the action runs as the system in the event's tenant, under the target's rules.",
             _ => null,
         };
 

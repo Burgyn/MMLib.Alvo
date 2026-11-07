@@ -25,8 +25,8 @@ namespace MMLib.Alvo.Events.Internal;
 /// <b>In the event's tenant, fail closed.</b> The unit runs as the delivery's caller, the system in the event's tenant, so a
 /// <c>recordId</c> of another tenant's row is not found and the delivery ends dead <c>record-not-found</c>; a tenant-scoped target
 /// written from an event that carries no tenant ends the same way rather than as a tenantless system write. The write runs as the
-/// system: it bypasses the target's rules, and its own event is one hop deeper, so the chain-depth limit stops a rule that
-/// re-triggers itself.
+/// system in the event's tenant, under the target's rules — the system caller holds <c>admin</c>, so a rule that denies it
+/// refuses the write — and its own event is one hop deeper, so the chain-depth limit stops a rule that re-triggers itself.
 /// </para>
 /// </remarks>
 /// <param name="ledger">The command ledger; absent outside a relational provider, where apply already refused the action.</param>
@@ -117,7 +117,6 @@ internal sealed class EntityUpdateEffect(
         : Guid.TryParse(template.Render(@event), out var id) ? id
         : throw new ActionRefusedException(DeliveryErrors.ActionInputInvalid);
 
-    /// <summary>Each value as the data port takes it: a literal converted to the field's type, an expression's value as it is.</summary>
     /// <summary>
     /// Refuses the write, before its unit opens, when a value breaks its target field's declared facets — Ruling Q22, the
     /// before-hook measure (Ruling V) applied to an expression's result. Dead <c>write-refused</c>: a retry evaluates the
@@ -135,6 +134,7 @@ internal sealed class EntityUpdateEffect(
         }
     }
 
+    /// <summary>Each value as the data port takes it: a literal converted to the field's type, an expression's value as it is.</summary>
     private static Dictionary<string, object?> Converted(Dictionary<string, object?> payload, EntitySchema target) =>
         payload.ToDictionary(
             pair => pair.Key,

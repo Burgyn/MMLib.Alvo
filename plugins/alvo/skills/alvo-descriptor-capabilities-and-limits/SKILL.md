@@ -23,7 +23,7 @@ These are declared by the schema and accepted, and are not honoured, or only in 
 
 **Declarative actions.** `webhook`, `email`, `function` and `entity.update` run from after-hooks and `automation` rules,
 each action as its own retried delivery; `entity.update` writes once per event, as the system in the event's tenant,
-bypassing the target's rules. A `webhook` or `email` names an endpoint under `webhooks.endpoints` or a template under
+under the target's rules. A `webhook` or `email` names an endpoint under `webhooks.endpoints` or a template under
 `templates` the descriptor already declares — never a new `webhooks` or `templates` block, which is a warned block. A
 `function` names one the host registered (`get_extensions`). Deliveries stay **unsigned**: no `secretRef` is read, no
 HMAC header is sent and the payload is not projected per endpoint, so the receiver cannot verify the sender. Say so
