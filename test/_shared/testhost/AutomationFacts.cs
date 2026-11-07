@@ -224,7 +224,7 @@ public abstract partial class AutomationFacts
     }
 
     [Fact]
-    public async Task Editing_a_hook_leaves_its_pending_deliveries_unclaimed_and_the_boot_starts()
+    public async Task Editing_a_hook_between_boots_cancels_its_retrying_delivery_and_the_boot_starts()
     {
         var database = await DatabaseAsync();
         var receiver = new ScriptedReceiver(HttpStatusCode.ServiceUnavailable);
@@ -240,7 +240,8 @@ public abstract partial class AutomationFacts
         await second.DrainEventsAsync(Ct);
 
         receiver.Bodies.Count.ShouldBe(1, "the edited action never runs for the old subscriber's pending row");
-        (await DeliveriesAsync(database, Webhook)).Single(delivery => delivery.Subscriber == stale.Subscriber).Status.ShouldBe("retrying");
+        (await DeliveriesAsync(database, Webhook)).Single(delivery => delivery.Subscriber == stale.Subscriber).Status.ShouldBe("cancelled");
+        (await DeliveryRows.OperationRowsAsync(database.Connect, Ct)).ShouldHaveSingleItem().Target.ShouldBe(stale.Subscriber);
     }
 
     protected abstract Task<AutomationDatabase> DatabaseAsync();
@@ -310,10 +311,10 @@ public abstract partial class AutomationFacts
         return desk.ToJsonString();
     }
 
-    private static string WithEditedWebhook()
+    private static string WithEditedWebhook(string condition = "new.number != ''")
     {
         var desk = Desk();
-        desk["entities"]!["orders"]!["hooks"]!["afterCreate"]![0]!["condition"] = "new.number != ''";
+        desk["entities"]!["orders"]!["hooks"]!["afterCreate"]![0]!["condition"] = condition;
         return desk.ToJsonString();
     }
 
@@ -333,7 +334,7 @@ public abstract partial class AutomationFacts
 
     protected static AlvoContext Staff(TenantId tenant) => AlvoTestHost.Caller("staff") with { Tenant = tenant };
 
-    protected static async Task ApplyAsync(AlvoTestHost alvo, string json)
+    protected static async Task<int> ApplyAsync(AlvoTestHost alvo, string json)
     {
         using var scope = alvo.Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<IAlvoContextAccessor>().Principal =
@@ -341,7 +342,9 @@ public abstract partial class AutomationFacts
         var management = scope.ServiceProvider.GetRequiredService<IAlvoManagement>();
         var current = await management.GetDescriptorAsync(OrderDesk, Ct);
 
-        (await management.ApplyDescriptorAsync(OrderDesk, new ManagementApplyRequest(json, current.Revision), Ct)).Applied.ShouldBeTrue();
+        var applied = await management.ApplyDescriptorAsync(OrderDesk, new ManagementApplyRequest(json, current.Revision), Ct);
+        applied.Applied.ShouldBeTrue();
+        return applied.Revision;
     }
 
     protected static async Task<List<StoredDelivery>> DeliveriesAsync(AlvoTestHost alvo, string subscriberPrefix) =>

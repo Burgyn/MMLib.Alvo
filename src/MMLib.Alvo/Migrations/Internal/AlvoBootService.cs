@@ -79,6 +79,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     private readonly ExtensionStateGuard _extensionState;
     private readonly DataMigrationBootCheck _migrationCheck;
     private readonly RequiredSecretsCheck? _requiredSecrets;
+    private readonly DescriptorActionSweep? _actionSweep;
     private readonly ILogger<AlvoBootService> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="AlvoBootService"/> class.</summary>
@@ -98,6 +99,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// <param name="migrationCheck">Refuses a data migration not yet started on a scoped schema without a tenant list.</param>
     /// <param name="logger">Records what the boot decided, so a restart's no-op is visible.</param>
     /// <param name="requiredSecrets">Refuses a start that lacks a secret the host declared with <c>AddRequiredSecret</c>.</param>
+    /// <param name="actionSweep">Ends the work of descriptor actions the serving catalog no longer binds, just before Ready (issue 480).</param>
     public AlvoBootService(
         DescriptorBootPlan bootPlan,
         ISchemaMigrator migrator,
@@ -111,7 +113,8 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         ExtensionStateGuard extensionState,
         DataMigrationBootCheck migrationCheck,
         ILogger<AlvoBootService> logger,
-        RequiredSecretsCheck? requiredSecrets = null)
+        RequiredSecretsCheck? requiredSecrets = null,
+        DescriptorActionSweep? actionSweep = null)
     {
         ArgumentNullException.ThrowIfNull(bootPlan);
         ArgumentNullException.ThrowIfNull(migrator);
@@ -139,6 +142,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         _migrationCheck = migrationCheck;
         _logger = logger;
         _requiredSecrets = requiredSecrets;
+        _actionSweep = actionSweep;
     }
 
     /// <summary>Runs the whole boot, before the server binds.</summary>
@@ -216,10 +220,19 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         await RetireThenReadyAsync(project, outcome, revision, ct).ConfigureAwait(false);
     }
 
-    /// <summary>The boot's last step on every shape that serves: retirements apply, then Ready is published and recorded.</summary>
+    /// <summary>
+    /// The boot's last step on every shape that serves: retirements apply, the work of descriptor actions the primed catalog
+    /// no longer binds is ended, then Ready is published and recorded. Both run before Ready because the delivery dispatcher
+    /// waits for it, so nothing claims work they are about to end.
+    /// </summary>
     private async Task RetireThenReadyAsync(string project, SchemaStartupOutcome outcome, int? revision, CancellationToken ct)
     {
         await _extensionState.RetireAsync(ct).ConfigureAwait(false);
+        if (_actionSweep is not null && _policyCatalogProvider.Current is { } catalog)
+        {
+            await _actionSweep.SweepAsync(catalog, revision, ct).ConfigureAwait(false);
+        }
+
         _state.Ready(project, revision);
         RecordWhatTheBootDid(project, outcome, revision);
     }
