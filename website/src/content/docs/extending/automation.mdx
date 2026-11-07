@@ -1,0 +1,78 @@
+---
+title: Automation
+description: Event and cron rules in the descriptor — a condition and webhook, email, function and entity.update actions, each its own retried delivery, entity.update written once per event.
+sidebar:
+  order: 11
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import descriptor from '../../../snippets/extending/automation/sales-desk.alvo.json?raw';
+import tests from '../../../snippets/extending/automation/AutomationTests.cs?raw';
+
+An after-hook belongs to one entity and one write. An **automation rule** is a project-level rule: a trigger, an
+optional condition, and a list of actions. It runs after the commit, from the same deliveries as after-hooks and host
+event handlers.
+
+<Code code={descriptor} lang="json" title="sales-desk.alvo.json" />
+
+## Triggers
+
+- **An entity event**, `entity.<entity>.<created|updated|deleted>`. The condition and the actions read the row as the
+  matching after-hook does: `new.` on create and update, `old.` on update and delete.
+- **A five-field cron**, read in UTC: `{"schedule": "0 2 * * *"}`. On a project with tenancy it runs **once per tenant**,
+  each run in that tenant, and the host must register an `IAlvoTenantCatalog`; without tenancy it runs once. A cron
+  rule takes no condition — it has no row to read.
+
+## Actions
+
+- `webhook` — posts the event, or the rendered `payload`, to an endpoint under `webhooks.endpoints`.
+- `email` — renders a template under `templates`.
+- `function` — calls a host function ([Functions in the descriptor](/extending/functions/)).
+- `entity.update` — writes a record: `recordId` names it, as a UUID or one `{{…}}` placeholder over the triggering row,
+  or, left out, a new record is created. Each `payload` value is a literal or `{"$cel": "…"}`.
+
+**Each action is its own delivery**, retried on its own: in the test below the CRM webhook fails once and is retried,
+and the email of the same event is sent once. A delivery that fails seven times (5 s up to 6 h) is dead, on the
+dashboard's [Operations](/extending/operate-deliveries/) page. The *Automations* screen lists every rule and links to
+its deliveries.
+
+## `entity.update` writes once per event
+
+The write and a ledger key for the event commit in one transaction, so a retry, a crash after the commit or an operator's
+*run again* within a day writes nothing a second time. It runs as the system caller in the **event's tenant**:
+
+- A `recordId` of another tenant ends the delivery dead `record-not-found` and writes nothing.
+- The system caller holds the `admin` role, and **the target's rules still apply** — the example's `update` rule admits
+  `'admin' in @user.roles`. A rule that denies ends the delivery dead.
+- The payload is measured like a before-hook `mutate`: a literal that breaks a field's facet (`values`, `maxLength`,
+  `format`) is refused at apply, a `$cel` result that does is dead `write-refused`, and a create that leaves out a
+  required field is refused at apply.
+- A rule that updates the row that triggered it stops at the chain-depth limit, dead `chain-depth-exceeded`.
+- The condition and `$cel` values may read the triggering row's `hidden` fields.
+
+## Secrets
+
+`secretRef` and `headersSecretRef` must be secret names (`^[a-z][a-z0-9._-]{0,63}$`); anything else is refused at apply,
+and the value is never echoed. A well-formed name the store does not hold yet is a warning. Nothing reads it yet:
+deliveries are **unsigned** until [#120](https://github.com/Burgyn/MMLib.Alvo/issues/120). A secret your host code
+cannot run without is declared with `AddRequiredSecret("name")`: the start is refused while the store holds no value
+for it, naming it and never a value. A dashboard-first host whose store is writable stands down instead — not ready, and
+refusing applies — so the secret can be added under *Settings → Secrets*; then restart it.
+
+## Test it
+
+<SourceExcerpt code={tests} from="public sealed class AutomationTests" to="private sealed class FailingOnce" title="AutomationTests.cs" />
+
+## What is refused
+
+| Refused | Why |
+|---|---|
+| `http.call` | Not run by this build; a `webhook` to a declared endpoint, or a `function`, does the job. |
+| `delivery: batch`, a `.batch` trigger | One delivery per row only ([#193](https://github.com/Burgyn/MMLib.Alvo/issues/193)). |
+| A wildcard trigger (`entity.*.created`) | Name the entity: a rule's row images are one entity's. |
+| `auth.*` and `storage.*` triggers | No such event exists in this build. |
+| A `condition` on a cron rule | A schedule has no row to read. |
+
+Editing a rule makes it a new subscriber: deliveries of the old one still pending are not run, and stay listed until
+cleaned up.

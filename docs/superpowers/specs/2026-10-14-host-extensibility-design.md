@@ -858,7 +858,7 @@ subscriber blocks only its own (subscriber, record) lane; retries X5; `dead` aft
 - (51) **The orphan check's operator cost is stated** (F3, E3): it refuses a rollback to a build that does not know a handler with unfinished work, and two applications with different handler sets over one database. The guide gives the remedy — roll forward, drain first (or cancel the rows), roll back to a build carrying `AddRetiredExtension`, or register the same handlers / use two databases.
 - (52) **Every dispatcher log line names an exception by its type's full name only** (F6, review M9): `DeliveryDispatcherStopped` no longer carries the exception, and the outbox's `DispatcherRoundFailed` and `HoldBackFailed` use the full name like the delivery lines. The outbox's own `DispatcherStopped` backstop, pre-existing on `main`, still logs the exception.
 - (53) **Parked: unit-testing a class handler** (review M10). `AlvoEventContext` has only an internal constructor, so a class handler is tested through `AlvoTestHost` (the guide says so); a public factory or a Testing helper belongs to HX-05's typed layer.
-- **Order trade-off until HX-15.** Acceptance (6) holds for the failing event's own delivery; a later delivery of the same record waits behind an event whose descriptor action keeps failing — about `attempts × PollInterval` per failing event (≈ 45 s at the defaults: 1 + 2 + … + 9 s), bounded by the outbox ceiling — so with a webhook endpoint down, a record with *n* quick updates reaches its handler after ≈ *n* × 45 s. If that bites before HX-15 moves declarative actions onto deliveries, decouple "fanned out" from `dispatched_at` with a per-event fan-out marker in `alvo_deliveries` (no `ALTER` of the outbox).
+- **Order trade-off until HX-15.** — **Resolved by HX-15:** every declarative action is its own delivery, so a failing action holds only its own (action, record) lane and the outbox only fans out (*HX-15 settled details* (2)). Acceptance (6) holds for the failing event's own delivery; a later delivery of the same record waits behind an event whose descriptor action keeps failing — about `attempts × PollInterval` per failing event (≈ 45 s at the defaults: 1 + 2 + … + 9 s), bounded by the outbox ceiling — so with a webhook endpoint down, a record with *n* quick updates reaches its handler after ≈ *n* × 45 s. If that bites before HX-15 moves declarative actions onto deliveries, decouple "fanned out" from `dispatched_at` with a per-event fan-out marker in `alvo_deliveries` (no `ALTER` of the outbox).
 - **Follow-ups this PR leaves open:** #398 and #399 (after-hook `changed()` defects — (7): #398 cannot reach a handler, #399 is inherited through `EnvelopeReading`), #400 (an apply-time warning for a condition reading `@tenant.id` on a global entity, which a handler's `when` meets the same way), #405 (the `embed/**` snippets; the handler page's C# is under `extending/**`, compiled by the HX-02 harness), #410 (SQLite delivery throughput — (35) answers its done-when, 1 029 s → 55 s at concurrency 16; closing it is the maintainer's call after the PR).
 - **Recorded deviation from the *Fan-out* paragraph** (review B1): its in-batch stop alone did not keep order across batches, a failed fan-out and a dead dispatcher, so the claim also waits for an earlier undispatched outbox entry of the key (20).
 
@@ -1341,7 +1341,7 @@ Roslyn dependency is needed.
 | `AlvoConstraintKind.Exclusion`; `IAlvoSqlDialect.ExclusionConstraint(…)` | Abstractions; EF driver | 12 | **DIM** returning null (precedent `GeneratedColumnDefinition`, `IAlvoSqlDialect.cs:312`); null → apply refuses `exclude` on that engine. **Amended (HX-12):** `IAlvoSqlDialect.SequenceAllocationStatement`, `ExclusionConstraintDefinition`, `ExclusionConstraintSql`, and the descriptor and schema members — *HX-12 settled details*, Amendments |
 | `IAlvoScheduler`, `IAlvoScheduledJob`, `AlvoJobContext`, `AlvoScheduleOptions`, `AlvoScheduleScope`, `IAlvoTenantCatalog`, `IAlvoDataMigration`, `AddSchedule<T>`, `AddDataMigration<T>`, `ITimerStore` + `TimerStoreContractTests`; **as built (*HX-13 settled details*):** also `TimerEntry`, `ClaimedTimer`, `TimerCounts`, `ScheduleDefinition`, `ClaimedSchedule`, `ScheduleAdvance`, `StoredSchedule`, `AlvoFrameworkEnvelope`, `AlvoSchedulerExtensions.ScheduleAsync<TMessage>`, `ITimerStoreWorld`, `AlvoDeliveryOptions.MaxJobConcurrency`, `AlvoExtensionKind.Schedule`/`.DataMigration`, `AlvoExtensionStage.Scheduled`, `ManagementExtension.Cron`/`.TimeZone`/`.NextRunAt`/`.LastRunAt`/`.LastOutcome`/`.AfterRevision`, `ManagementExtensionCatalog.Timers`, `ManagementTimerCounts` | core; Abstractions; Testing | 13 | |
 | `IAlvoSteps`, `AlvoConcurrency`, `AlvoHandlerOptions.Concurrency`/`Debounce` behaviour; **as built (*HX-14 settled details*):** also `AlvoEventContext.Steps`, `AlvoJobContext.Steps`, the `IDeliveryStore` members `StepsAsync`/`RecordStepAsync`/`SleepAsync`, `DeliveryStep`, `DeliveryLimit`, `DeliveryRequest.Debounce`, `DeliveryClaim.Limits`, `ManagementExtension.Concurrency`, `ManagementDelivery.Steps`, `ManagementDeliveryStep`, `IDeliveryStoreWorld.ReadSlotsAsync` and the new `DeliveryStoreContractTests` facts | core / Events; Abstractions; Testing | 14 | |
-| `IAlvoFunction<TInput>`, `AlvoFunctionContext`, `AlvoFunctionSkippedException`, `AddFunction<T>`, `AddRequiredSecret` | core | 15 | |
+| `IAlvoFunction<TInput>`, `AlvoFunctionContext`, `AlvoFunctionSkippedException`, `AddFunction<T>`, `AddRequiredSecret` | core | 15 | **Amended (HX-15):** also `AlvoExtensionKind.Function = 11` (appended), `ManagementExtension.InputSchema` (`JsonElement?`, init), `FunctionInput` (Abstractions / Descriptor), and `FunctionAction.Input` changes type `string?` → `FunctionInput?` (breaking, *HX-15 settled details* (13)). `ManagementExtension.Secrets` is not added. |
 | `IRecordEnricher<T>`, `Enrich<T>`, `IQueryNarrowing<T>`, `QueryNarrowing`; `FieldSchema.IsVirtual` | core; Abstractions / Schema | 16 | **Amended (HX-16):** also the untyped `IQueryNarrowing` (`AlvoFilter?`, *HX-16 settled details* (10)); `AlvoEntityBuilder<T>.Narrow<TNarrowing>(string)`, `.Narrow(string, Func<QueryNarrowing, Expression<Func<T,bool>>?>)`, `.Enrich<TEnricher>(string)`, `.Enrich(string, Action<Enrich<T>>)` and `AlvoEntityBuilder.Narrow<TNarrowing>(string)`, `.Narrow(string, Func<QueryNarrowing, AlvoFilter?>)`, `.Enrich<TEnricher>(string)`, `.Enrich(string, Action<Enrich<AlvoRecord>>)` (core / `MMLib.Alvo.Extensions`); `AlvoExtensionKind.Narrowing = 7`, `.Enricher = 8`, `AlvoExtensionStage.Read = 4` (appended, *HX-04 settled details* (17)); `FieldDescriptor.Virtual` (`bool?`, init — the descriptor model). Everything else — `IReadExtensionRunner`, `IReadEnrichment`, `ReadNarrowing`, `VirtualFieldWrites` — is internal. |
 | (generator output only) | Analyzers in the `MMLib.Alvo` nupkg | 17 | |
 | schema-model members for `stateMachine`, `timers` | Abstractions / Schema | 18 | **Amended (HX-18):** descriptor members only (*HX-18 settled details* (7)) — `EntityDescriptor.StateMachine`, `EntityDescriptor.Timers`, `EntityStateMachine`, `StateTransition`, `EntityTimer`; `AlvoConstraintKind.Transition` (appended); `ManagementTransitionVerdict`, `ManagementPolicyVerdict.Transitions`; no `Abstractions/Schema` member. `IEntityLifecycle`, `EntityTimerWrite` and `TimerChange` are internal. |
@@ -1943,6 +1943,103 @@ executed snippet, `data-path.md`, this section). The security-core review (`alvo
   the same event is not resent. (3) `entity.update` fires once per event under redelivery, both engines.
   (4) A missing required secret refuses boot. (5) `batch` delivery, `http.call` and wildcard patterns refused
   by name. (6) KilledHostRecovery suite green. (7) `UnhonouredSubsystems` no longer warns `automation`.
+
+#### HX-15 settled details
+
+Decisions taken while planning (1–14, verbatim from `docs/superpowers/plans/2026-11-06-hx-15-functions-automation.md`
+*Decisions*), then the rulings of the plan and task reviews (Q1–Q22) and the deviations taken while building (as built),
+so a later reader can tell a decision from an oversight. Where a ruling and the scope above, §4.11 or §5 row `15`
+disagree, the ruling is what shipped.
+
+1. **Subscriber id = pointer + content hash** (SHA-256 over the canonical JSON of trigger, condition and action). An edit makes a new subscriber; the old one's pending rows are never claimed, never run the edited action, and do not refuse the boot (`ExtensionStateGuard` skips ids starting with `/`). Cost: stale `pending` rows after an edit, visible in Operations, until a follow-up sweeps them to `cancelled`.
+2. **Actions run as synthetic `BoundHandler`s** with default settings: timeout 30 s, `PerRecord`, default retry, run as `System(event tenant)`; they are not catalog entries (HX-04 (2): the catalog lists registrations). Cost: no per-action tuning.
+3. **`entity.update` is exactly-once through the command ledger** committed inside `TransactAsync`; horizon = the ledger's 1-day sweep. Cost: an operator redeliver of a *succeeded* `entity.update` more than a day later writes again.
+4. **Function `input` is validated by top-level `properties`, `required` and the JSON `type` of literals only.** Cost: a nested typo dies at runtime as `function-input-invalid`.
+5. **`$cel` values** in function input and `entity.update.payload` compile in the `Mutate` profile over the **triggering** row's images (`new.`/`old.` per point); the result type is checked against the target. Cost: no `@user`/`@tenant` there (the function reads `context.Event`).
+6. **The JSONata string form of `input` stays refused** by the `JSONata` slot, fix "use the object form". X12 widens the schema additively; the build honours the object form only.
+7. **`AlvoFunctionSkippedException`** ends the delivery `succeeded` with a `FunctionSkipped` log line and span outcome `skipped`; no store change. Cost: Operations shows it as succeeded.
+8. **`secretRef`/`headersSecretRef`: grammar refused, existence warned.** A name `SecretName.TryParse` rejects is an apply error; a well-formed name absent from the store is a `Warning` finding (names only). Not refused: nothing reads it until #120 signs, and dashboard-first authors add the endpoint before the secret. Cost: breaking for a malformed name (CHANGELOG).
+9. **Required-secret boot check reads each value** through `ISecretStore.GetAsync`; empty = missing; a throwing store refuses the boot. Runs on file and dashboard-first boots.
+10. **Triggers honoured:** `entity.<entity>.<created|updated|deleted>` and a 5-field UTC cron. Refused: wildcard (existing slot), `.batch` and `delivery: batch` (new `batch` slot, #193), `auth.*`/`storage.*` (new `trigger.source` slot — no such event exists), a `condition` on a cron rule.
+11. **A cron rule runs once globally** on a project without tenancy, **once per tenant** with tenancy; then apply refuses it when the host registers no `IAlvoTenantCatalog`.
+12. **`entity.update` into a tenant-scoped entity from a trigger with no tenant is refused at apply;** a `recordId` not found in the event's tenant ends the delivery dead `record-not-found`.
+13. **`FunctionAction.Input` becomes `FunctionInput?`** (pre-1.0 breaking; nothing outside the validator read it). `ManagementExtension.Secrets` is **not** added: no extension fills it (HX-04 (1)). `ManagementExtension.InputSchema` is added (§4.11's "catalog entry with an input JSON Schema").
+14. **Dashboard:** the Automations page is read-only (edits go through the descriptor editor or the assistant); `/admin/functions` stays *Not yet* (csx, #34) and points at the hooks editor.
+
+Rulings of the plan review (Q1–Q18), the Task 1–3 review (Q19–Q21) and the Task 4–7 review (Q22):
+
+- **Q1** A cron rule's event type is `alvo.automation.<ExtensionIds.DerivedSegment(rule)>`; rule names that differ only by
+  `-`/`_` are refused at apply.
+- **Q2** The subscriber-id hash serializes trigger, condition and action separately through the descriptor's typed
+  `JsonTypeInfo` (compact writer), joined by U+001F — stable across processes.
+- **Q3** `AddRequiredSecret` registers `services.AddSingleton(new RequiredSecret(name))`; two required, only the second
+  missing, is refused naming it alone.
+- **Q4** One shared `JsonSerializerOptions` (web defaults, `RespectNullableAnnotations`,
+  `RespectRequiredConstructorParameters`) for the input schema export and the input binding.
+- **Q5** A refused `secretRef` value is never echoed: "This value is not a secret name" and the pointer only.
+- **Q6** A dashboard-first boot whose store is writable stands down on a missing required secret (Failed, readiness 503,
+  nothing primed, no throw), so Settings → Secrets stays reachable; a code-first boot refuses. **As built (review m5):**
+  on that path a store that throws stands down too — still closed (Failed, nothing primed), its exception type named.
+  **As built (review m3):** while such a stand-down lasts, an apply or a rollback (not a dry run) is refused
+  `ManagementConflictException` naming the missing secret, "add the secret, then restart the host" — an apply would
+  prime the catalog and serve routes without the secret.
+- **Q7** Subscriber id = point (or `/automation/<rule>/actions`) + `#` + hash, no sibling index; an ordinal `-2` only for
+  exact duplicates; the sweep of stale pending rows to `cancelled` is a follow-up.
+- **Q8** Apply refuses a tenant-scoped trigger writing a non-tenant-scoped `entity.update` target, and an untenanted
+  trigger writing a scoped one; at run time a scoped target from an event with no tenant is dead `record-not-found`.
+  **Corrected as built:** `entity.update` runs as `AlvoContext.System(event tenant)`, which holds `admin` — it is **not**
+  a rule bypass. The target's rules apply to it (as *HX-18 settled details* (6) states for state machines): an `update`
+  rule that denies ends the delivery dead, a missing one is default-deny. Pinned on both engines by
+  `AutomationFacts.An_entity_update_is_held_to_the_target_s_rules`; the docs and the CHANGELOG say so instead of the
+  plan's "bypasses the target's rules".
+- **Q9** A cron row's tenancy is the job scope: `EachTenant` when the project has a scoped entity.
+- **Q10** The new verdicts are asserted (when-failed and chain-depth dead rows for after-hooks) and listed in the
+  CHANGELOG as breaking.
+- **Q11** KilledHostRecovery's second fact asserts the delivery row exists running/claimed, not the outbox stamp.
+- **Q12** An internal `AlvoDeliveryOptions.ActionTimeout` knob (undocumented `Alvo:Deliveries:ActionTimeout`), lowered
+  in `ChildHostHarness`; `WaitUntilRetiredAsync` waits for delivery rows.
+- **Q13** `DescriptorActionIds` arrives in Task 4; the descriptor's own source-generated context serializes.
+- **Q14** Branch `hx/15a-functions-automation`.
+- **Q15** The dashboard's *Deliveries* link: the smaller option — **a prefix filter on the Operations page**, applied by
+  the page to the deliveries it loaded (`?subscriber=/automation/<rule>/actions#`), no public member. One link per
+  rule, not per action: an action id carries no index, so a prefix cannot single one action out. `AlvoHookRecorder`
+  matches a descriptor action by its point pointer.
+- **Q16** `$defs/secretRef` and `headersSecretRef` carry `pattern` (= `SecretName.Pattern`).
+- **Q17** CHANGELOG notes `AlvoRetryPolicy.Default` for webhook and email, the when-failed/chain-depth dead rows, and
+  stale stored schedules after a cron edit.
+- **Q18** `A_cron_rule_runs_once_per_tenant` (as built: one nightly delivery and one closing per tenant).
+- **Q19** No `AllowReadingFromString`: numbers export and bind as numbers only.
+- **Q20** A `null` entry into a required field is refused at apply for an update too, not only a create (#328 strict).
+- **Q21** A `{{…}}` string in an `entity.update` payload is refused at apply; the fix points to `{"$cel": …}`.
+- **Q22** An `entity.update` payload is measured exactly like a before-hook `mutate` (Ruling V): at apply a literal is
+  checked against the target field's facets (`MutationTarget` — enum `values`, `maxLength`, type, `format`) and a create
+  that leaves out a required, undefaulted, framework-unwritten field is refused; at run time each `$cel` value is
+  measured in `EntityUpdateEffect.Planned` before the unit opens and a violation ends the delivery dead `write-refused`,
+  no retry, the value in no log or reason. Pinned on both engines (`An_entity_update_value_breaking_a_facet_is_dead_write_refused`).
+  Host `IAlvoData` writes still skip facets — a follow-up (the port measures them, or its contract says callers own them).
+
+As built:
+
+- **Decision 7 deviation (review m1):** a skipped function ends its delivery `succeeded` and its span outcome is
+  `succeeded`, not `skipped`. The delivery vocabulary has no `skipped` outcome and the span mirrors the delivery, so
+  traces and Operations agree; the skip is the `FunctionSkipped` log line.
+- **An authorization refusal** from the `entity.update` unit is dead `write-refused`, and a CEL evaluation failure of a
+  value dead `action-input-invalid` (review m9): no retry cures either.
+- **Function input rows (dashboard):** a property the schema requires but whose type admits `null` is optional in the
+  form and written as `null` when left empty; a property not required is omitted when empty. A nullable constructor
+  parameter is required by the exported schema, so a descriptor writes `null` for it.
+- **A `FunctionInput` with neither form set** (only a C#-built descriptor can make one) serializes as JSON `null`, which
+  the schema refuses at apply (pinned).
+- **Cron rule actions compile over an empty row at `afterCreate`**; a cron rule reads no row.
+- **The Operations page lists descriptor-action deliveries on a host with no registered handler**, and the empty state
+  says they will appear there.
+- **The Automations page** renders a cron in words for the common shapes (daily, weekly, monthly, every *n* minutes,
+  hourly) and shows any other as written; there was no existing cron wording helper to reuse.
+- **The assistant eval case** `function_action_refused` became `unregistered_function_refused`: the bike-workshop host
+  registers no function, so the right answer reads the capability report or the extension catalog and proposes nothing.
+- **Review minors carried:** `CompiledAutomationRule`/`CompiledAfterHook` keep their write-only `Required`/`ReadsRoles`
+  (review m6, not removed); the schema pass and the grammar pass still report a secret slot under two pointer forms
+  (review m8).
 
 ### HX-16 — Enricher, narrowing, virtual fields
 - **Scope:** §4.12; `IAlvoData` docs for the key-set contract.

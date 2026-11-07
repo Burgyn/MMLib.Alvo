@@ -55,8 +55,9 @@ schema:
 | [`tenancy`](/reference/descriptor/tenancy/) | whether the backend is multi-tenant | honoured |
 | [`access`](/reference/descriptor/access/) | which roles reach the `viewer`, `developer` and `admin` management levels | honoured |
 | [`formats`](/reference/descriptor/formats/) | named validation formats a field can reference | honoured |
-| [`templates`](/reference/descriptor/templates/), [`webhooks`](/reference/descriptor/webhooks/) | message templates and webhook endpoints an after-hook uses | run when an after-hook uses them; the rest is not |
-| [`automation`](/reference/descriptor/automation/), [`functions`](/reference/descriptor/functions/), [`dynamicEntities`](/reference/descriptor/dynamic-entities/) | event rules, custom functions, runtime entities | parsed, not run |
+| [`templates`](/reference/descriptor/templates/), [`webhooks`](/reference/descriptor/webhooks/) | message templates and webhook endpoints an action uses | run when an after-hook or automation action uses them; the rest is not |
+| [`automation`](/reference/descriptor/automation/) | event and cron rules whose actions run after the commit | honoured ([Automation](/extending/automation/)) |
+| [`functions`](/reference/descriptor/functions/), [`dynamicEntities`](/reference/descriptor/dynamic-entities/) | csx functions, runtime entities | parsed, not run — a host function is registered in C# ([Functions](/extending/functions/)) |
 | [`branding`](/reference/descriptor/branding/) | the project's display name and logo | parsed, nothing renders it yet |
 
 `$schema`, `description` and `revision` are metadata, and keys starting with `x-` are carried through apply and export

@@ -30,9 +30,10 @@ starting from the stack in [Run your own descriptor](/start-here/run-your-own/).
 
 ## 1. Declare the endpoint and the template
 
-Every write appends an event, and an after-hook says which events to act on and what to do. This build runs two
+Every write appends an event, and an after-hook says which events to act on and what to do. This page uses two
 actions: `webhook`, which posts the event to an endpoint, and `email`, which renders a template. Both targets are
-declared once, at the top of the descriptor.
+declared once, at the top of the descriptor. The other two, `function` and `entity.update`, are on
+[Functions in the descriptor](/extending/functions/) and [Automation](/extending/automation/).
 
 <Steps>
 
@@ -117,18 +118,19 @@ the envelope with a `{{…}}` template you write, which must be JSON around its 
 ## 4. Delivery and retries
 
 The event is written in the same transaction as the row, so a write that rolls back leaves no event, and a committed
-write always has one. One background dispatcher then claims events in order and runs each matching after-hook.
+write always has one. A background dispatcher fans each event out into one **delivery per matching action** — the
+same delivery a [host event handler](/extending/event-handlers/) gets — and runs it.
 
-- **Every failure is retried**, whatever it was: a 500, a 404, a timeout, a name that does not resolve. A redirect is
-  a failure too; the client follows none. An endpoint that answers 2xx is done.
-- **Each attempt waits at most 10 seconds** for a 2xx; a slower endpoint counts as a failure. The body is sent as
-  `application/json`.
-- **Retries back off linearly:** the wait grows by one poll interval per attempt, so at the defaults ten attempts span
-  at least 45 seconds. After [`Alvo:Events:MaxAttempts`](/reference/configuration/#alvoevents) (10) the
-  event is left alone: it stays in the outbox table, undelivered, and the log has an error line naming it. Nothing
-  deletes it, and nothing redelivers it.
-- **Retries are not in order.** An event whose delivery failed is tried again later, after events that came behind it,
-  including events for the same row: above, the close's mail went out while the create's webhook was still failing.
+- **Each action is retried on its own.** A webhook that fails does not resend the email of the same event. Every
+  failure is retried, whatever it was: a 500, a 404, a timeout, a name that does not resolve. A redirect is a failure
+  too; the client follows none. An endpoint that answers 2xx is done.
+- **Each webhook attempt waits at most 10 seconds** for a 2xx; a slower endpoint counts as a failure. The body is sent
+  as `application/json`.
+- **Retries back off:** 5 s, 30 s, 2 min, 15 min, 1 h and 6 h — seven attempts across about seven hours. Then the
+  delivery is **dead**: it stays listed on the dashboard's [Operations](/extending/operate-deliveries/) page, where it
+  can be run again.
+- **At least once.** A crash between the send and its answer sends again; a receiver dedupes on the CloudEvents `id`.
+- **In order per record.** A later delivery of the same row and action waits behind one that is retrying.
 - **Run one dispatcher.** Two hosts draining one database break ordering silently
   ([#150](https://github.com/Burgyn/MMLib.Alvo/issues/150)). With several replicas, set `Alvo:Events:Enabled` to
   `false` on all but one: writes still append events, and the one dispatcher delivers them.
@@ -174,10 +176,9 @@ Its envelope carries the publisher's provenance exactly as a data event's does, 
 - **Projection.** The body is the whole envelope or the whole rendered `payload`; there is no per-endpoint selection
   of fields ([#152](https://github.com/Burgyn/MMLib.Alvo/issues/152)).
 - **Mail.** The only mail provider writes to the log. An embedded host can register its own `IEmailSender`.
-- **Other actions.** `function`, `entity.update` and `http.call` are refused by name at apply; a JSONata expression
-  in `payload` is refused too ([#149](https://github.com/Burgyn/MMLib.Alvo/issues/149)), and so are an email's
-  `data` and a template's `bodyFile`.
-- **`automation`**, rules that run on events or on a schedule, is parsed and warned about, and nothing runs.
+- **Other actions.** `http.call` is refused by name at apply; a JSONata expression in `payload` is refused too
+  ([#149](https://github.com/Burgyn/MMLib.Alvo/issues/149)), and so are an email's `data` and a template's
+  `bodyFile`.
 - **A dead-letter queue** with redelivery, and **retention** for the outbox table, which keeps every event's
   complete rows ([#154](https://github.com/Burgyn/MMLib.Alvo/issues/154)).
 
@@ -197,7 +198,7 @@ wrong shows up when the descriptor is applied, or in the log:
 |---|---|---|
 | Apply | The endpoint's URL is relative, or `http` to a host that is not loopback. | Use an absolute `https` URL. |
 | Apply | A placeholder names a field the entity does not have, or a hook names an endpoint or a template that is not declared. | Correct the name; the refusal points at the hook. |
-| Apply | The action is `function`, `entity.update` or `http.call`, or `payload` holds JSONata. | Use `webhook` or `email`, and a `{{…}}` template. |
+| Apply | The action is `http.call`, or `payload` holds JSONata. | Use `webhook`, `email`, `function` or `entity.update`, and a `{{…}}` template. |
 | Apply | A condition or placeholder reads a row the event lacks: `old.` on `afterCreate`, `new.` or a bare field on `afterDelete`, or `changed()` on either. | Read the image the point has, or move the hook to `afterUpdate`. |
 | Apply | A condition or placeholder reads a field listed in `events.exclude`. | Stop reading it, or remove it from `events.exclude`. `changed(field)` is still allowed. |
 | Log | *failed to deliver … on attempt N* | Check the endpoint; a non-public address needs `Alvo:Events:WebhookAllowedNetworks`. |
