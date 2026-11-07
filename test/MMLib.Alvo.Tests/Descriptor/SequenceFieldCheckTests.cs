@@ -23,6 +23,19 @@ public sealed class SequenceFieldCheckTests
     {
         Validate(Number("integer", """{"per": "branch", "period": "year", "start": 1000}""")).ShouldBeEmpty();
         Validate(Number("string", """{"format": "SO-{yyyy}-{n:4}"}""")).ShouldBeEmpty();
+        Validate(Number("string", """{"period": "year", "timeZone": "Europe/Bratislava", "format": "SO-{yyyy}-{n:4}"}""")).ShouldBeEmpty();
+    }
+
+    /// <summary>An unknown zone is refused at its own pointer, before any create could fail on it (#479).</summary>
+    [Theory]
+    [InlineData("Mars/Olympus_Mons")]
+    [InlineData("Central Europe Standard Time")]
+    public void A_time_zone_that_is_not_a_known_iana_id_is_refused(string timeZone)
+    {
+        var error = Check(Number("integer", $$"""{"period": "day", "timeZone": "{{timeZone}}"}""")).ShouldHaveSingleItem();
+        error.Path.ShouldBe(Pointer + "/timeZone");
+        error.Message.ShouldBe($"Field 'orders.number' reads its 'sequence' dates in the time zone '{timeZone}', which is not an IANA time zone id this machine knows.");
+        error.FixSuggestion.ShouldBe("Use an IANA time zone id such as 'Europe/Bratislava', or remove 'timeZone' to count in UTC.");
     }
 
     [Fact]
@@ -149,13 +162,14 @@ public sealed class SequenceFieldCheckTests
     public void The_mapper_resolves_start_and_period()
     {
         var model = DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(Descriptors.WithEntity(
-            "orders", Number("string", """{"per": "branch", "period": "month", "format": "{n}"}"""), "physical")));
+            "orders", Number("string", """{"per": "branch", "period": "month", "timeZone": "Europe/Bratislava", "format": "{n}"}"""), "physical")));
 
         var sequence = model.Entities.Single().Fields.Single(field => field.Name == "number").Sequence.ShouldNotBeNull();
         sequence.ShouldBe(new MMLib.Alvo.Schema.SequenceSchema
         {
             Per = "branch",
             Period = MMLib.Alvo.Schema.SequenceResetPeriod.Month,
+            TimeZone = "Europe/Bratislava",
             Start = 1,
             Format = "{n}",
         });

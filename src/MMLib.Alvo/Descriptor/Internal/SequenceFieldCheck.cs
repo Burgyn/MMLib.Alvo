@@ -5,7 +5,8 @@ namespace MMLib.Alvo.Descriptor.Internal;
 
 /// <summary>
 /// The apply-time findings for a field's <c>sequence</c>: what it may sit on, what it may not be combined with, the
-/// field its count runs <c>per</c>, the grammar of its <c>format</c>, and its refusal on a <c>storage: dynamic</c> entity.
+/// field its count runs <c>per</c>, the grammar of its <c>format</c>, the zone its dates are read in, and its refusal on a
+/// <c>storage: dynamic</c> entity.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -53,9 +54,20 @@ internal static class SequenceFieldCheck
             return [finding.At(string.Empty, DynamicMessage(entity, field), $"Remove 'sequence', or make '{entity}' a physical entity.")];
         }
 
-        return new[] { TypeError(finding, descriptor), ConflictError(finding, descriptor), PerError(finding, declaring, descriptor) }
-            .OfType<DescriptorValidationError>();
+        return new[]
+        {
+            TypeError(finding, descriptor), ConflictError(finding, descriptor), PerError(finding, declaring, descriptor),
+            TimeZoneError(finding, descriptor),
+        }.OfType<DescriptorValidationError>();
     }
+
+    private static DescriptorValidationError? TimeZoneError(Finding finding, FieldDescriptor descriptor) =>
+        descriptor.Sequence!.TimeZone is not { } zone || SequenceSchema.IsKnownTimeZone(zone)
+            ? null
+            : finding.At(
+                "/timeZone",
+                $"Field '{finding.Name}' reads its 'sequence' dates in the time zone '{zone}', which is not an IANA time zone id this machine knows.",
+                "Use an IANA time zone id such as 'Europe/Bratislava', or remove 'timeZone' to count in UTC.");
 
     private static DescriptorValidationError? TypeError(Finding finding, FieldDescriptor descriptor)
     {
