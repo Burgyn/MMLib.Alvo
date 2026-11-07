@@ -93,8 +93,11 @@ Each entry under `timers` is one durable timer per record:
 
 - **Deletes** are not transitions: "only drafts may be deleted" is a `rules.delete`.
 - **Dynamic entities** carry neither member yet.
-- **Existing rows** are not back-filled: a timer added to an entity, or a changed `at`, reaches a stored record at its next
-  write that changes its due. Arm the rest with a data migration.
+- **Existing rows** are armed by a re-plan Alvo starts itself: the first apply that adds a timer to an entity, or changes
+  its `at`, `when` or `event`, starts a data migration that re-plans every stored row — it arms a due still ahead, moves
+  one armed at another time and cancels one whose `when` is now false, so running it again changes nothing. A due that has
+  already passed is not armed (the re-plan cannot tell it from a timer that already fired); that row is armed at its next
+  write that changes its due.
 - **Descriptor automation** cannot subscribe to a timer's event; a host handler acts on it.
 - **Transition commands** — invoking a transition by name — are not part of this release.
 - The in-memory test double (`InMemoryAlvoData`) enforces neither member; test transitions and timers with

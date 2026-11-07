@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Declarative timers reach existing rows** (HX-18 follow-up, issue 483): the first apply that adds a timer to an entity,
+  or changes its `at`, `when` or `event`, starts a framework data migration (`alvo.migration.timers.<entity>`, one run
+  spanning tenants) that re-plans every stored row, 100 per transaction — arming a due still ahead, moving one armed at
+  another time, cancelling one whose `when` is now false — so re-running it changes nothing. A lapsed due with no armed
+  timer is not armed. Docs: *State machines and timers*.
 - **Functions in the descriptor** (HX-15): `IAlvoFunction<TInput>`, registered with `AddFunction<T>(name)`, is called
   from an after-hook or an automation rule as `{"type": "function", "name": …, "input": {…}}` — each `input` value a
   literal or `{"$cel": "…"}` over the triggering row, checked at apply against the JSON Schema exported for `TInput`
@@ -67,7 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   record's own fields (`starts_at - duration('24h')`), armed, moved and cancelled in the write's own transaction
   (create arms, an update moves it only when its due changes, an inactive `when` or a delete cancels), keyed
   `alvo:<entity>:<timer>:<id>` in the row's tenant, and fired through the timer pump as `event` (default
-  `<entity>.<timer>`) with data `entity`, `id`, `timer`, `at` for host handlers. Existing rows are not back-filled.
+  `<entity>.<timer>`) with data `entity`, `id`, `timer`, `at` for host handlers. Existing rows are armed by a re-plan (below).
 - **Rules over relations** (HX-19): a rule may follow a ref (`customer_id.owner_id == @user.id`) or reach the rows that reference this one (`project_members.exists(m, m.user_id == @user.id)`, `<child>_via_<field>` when ambiguous). Each term is one correlated `EXISTS` in the query that ANDs in the related entity's own `list` rule and tenant scope, so it never matches a row the caller could not list (a host narrowing is not part of it); a write judges it in SQL inside its transaction. Apply refuses a cycle among `list` rules, a chain deeper than 3, a relation under `!`, and a relation outside `rules`/`checks`. Not supported by `InMemoryAlvoData`. Docs: *Rules over relations*.
 - **Dashboard: relations** (HX-19): the policy simulator lists, under *Reads through*, each relation a decision reads and the related `list` rule it was bound to for the caller (`ManagementPolicyVerdict.Relations`); the rules editor offers the relation terms of the entity under each rule; a lookup-check refusal is shown with its own message, not as a field validation.
 - **Lookup checks** (HX-19): `entities.<e>.checks: [{ lookup, expr, message }]` follows a ref field to the row it names and refuses a create, or an update that changes a field the check reads, when that row is not one the caller may list or fails `expr` — 422 `validation`, violation code `check`, the check's own `message` and a pointer at the lookup field (none when the field is hidden). A null lookup skips the check; a check reads no `@user`/`@tenant`, and apply refuses one that does or reads no `<lookup>.<field>`.
