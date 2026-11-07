@@ -128,7 +128,10 @@ internal sealed partial class DescriptorActionSweep(
         if (stale.Count > 0)
         {
             await timers.SyncSchedulesAsync([], stale, ct).ConfigureAwait(false);
-            SchedulesRemoved(logger, string.Join(", ", stale));
+            if (logger.IsEnabled(LogLevel.Information))
+            {
+                SchedulesRemoved(logger, string.Join(", ", stale));
+            }
         }
     }
 
