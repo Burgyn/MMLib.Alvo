@@ -15,6 +15,9 @@ namespace MMLib.Alvo.Data.PostgreSql.Tests.Integration;
 public sealed class PostgreSqlDeliveryStoreTests : DeliveryStoreContractTests, IClassFixture<PostgresFixture>, IDisposable
 {
     private const string Subscriber = "send-confirmation";
+    private const int BacklogSize = 10_000;
+    private const int BacklogBatch = 100;
+    private const int FanOutChunk = 500;
 
     private readonly string _connectionString = string.Empty;
 
@@ -68,6 +71,27 @@ public sealed class PostgreSqlDeliveryStoreTests : DeliveryStoreContractTests, I
         var plan = await world.ExplainClaimAsync("EXPLAIN", "SET enable_seqscan = off", "DROP INDEX ix_alvo_deliveries_lane");
 
         plan.ShouldContain("ix_alvo_deliveries_lane_open on alvo_deliveries earlier");
+    }
+
+    /// <summary>
+    /// A receiver down long enough builds a backlog of due deliveries no claim has looked at yet — rows the planner has no
+    /// statistics for. A claim over ten thousand of them, one lane each, must still answer promptly with the oldest batch:
+    /// planned as a join without statistics, the lane check walked the subscriber's whole backlog once per row and ran past
+    /// Npgsql's 30 s command timeout (#482).
+    /// </summary>
+    [Fact]
+    public async Task A_claim_over_a_fresh_backlog_of_ten_thousand_deliveries_answers_promptly()
+    {
+        EnsureEngineAvailable();
+        await using var world = await ConcreteWorldAsync();
+        var events = await FanOutBacklogAsync(world, BacklogSize);
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var claimed = await world.Store.ClaimAsync(ClaimFor("worker-1") with { BatchSize = BacklogBatch }, Ct);
+        stopwatch.Stop();
+
+        claimed.Select(delivery => delivery.EventId).ShouldBe(events.Take(BacklogBatch), "the claim takes the oldest batch, one head per lane");
+        stopwatch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(2), "a claim over a fresh backlog must not walk it once per row");
     }
 
     /// <summary>
@@ -196,6 +220,29 @@ public sealed class PostgreSqlDeliveryStoreTests : DeliveryStoreContractTests, I
 
     private Task<DeliveryStoreWorld> ConcreteWorldAsync() =>
         DeliveryStoreWorld.StartAsync(() => new NpgsqlConnection(_connectionString), new PostgreSqlSqlDialect());
+
+    /// <summary>
+    /// Fans out one delivery of <see cref="Subscriber"/> per event, each on a lane of its own, in statements small enough
+    /// for PostgreSQL's parameter limit; answers the event ids in the order the claim takes them.
+    /// </summary>
+    private static async Task<IReadOnlyList<Guid>> FanOutBacklogAsync(DeliveryStoreWorld world, int count)
+    {
+        var events = Enumerable.Range(0, count)
+            .Select(_ => AlvoEventId.Create(DateTimeOffset.UnixEpoch))
+            .OrderBy(id => id.ToString(), StringComparer.Ordinal)
+            .ToList();
+        foreach (var chunk in events.Select((id, index) => (Id: id, Index: index)).Chunk(FanOutChunk))
+        {
+            await world.Store.FanOutAsync(
+                [.. chunk.Select(@event => new DeliveryRequest
+                {
+                    EventId = @event.Id, Subscriber = Subscriber, PartitionKey = $"tickets:{@event.Index}", Kind = "webhook",
+                })],
+                Ct);
+        }
+
+        return events;
+    }
 
     private static DeliveryClaim ClaimFor(string claimant) => new()
     {

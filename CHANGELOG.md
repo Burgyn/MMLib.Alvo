@@ -1127,6 +1127,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compares a boolean only from 1.7. The prerequisite probe reads `server_version_num` and, once btree_gist is installed,
   its operator classes from `pg_opclass`, so a server upgraded past an old extension version is told to run
   `ALTER EXTENSION btree_gist UPDATE;`. Every other admitted equality type is compared on every supported version.
+- **A delivery claim over a large fresh backlog answers in a fraction of a second on PostgreSQL** (#482). With ten
+  thousand deliveries fanned out before the first claim — a webhook receiver down for long — one claim ran past
+  Npgsql's 30 s command timeout (36 s measured), stalling every delivery: PostgreSQL planned the lane checks as
+  anti-joins from statistics freshly inserted rows do not have, and walked the subscriber's whole backlog once per
+  candidate. The lane checks are now per-row index probes whatever the statistics say (≈0.2 s on the same backlog);
+  what a claim takes is unchanged on both engines.
 - **A `null` in an `entity.update` payload** (#328, HX-15) is the null literal it was written as: refused at apply into a
   required field, written as `null` into an optional one.
 - **A rollup added to a populated parent is filled by the apply** (HX-11), instead of reading empty until a child write
