@@ -21,16 +21,18 @@ public sealed partial class OutboxDispatcherTests
     private const string DealHandler = "deal-won";
 
     [Fact]
-    public async Task Fan_out_runs_first_and_a_failing_after_hook_action_keeps_the_handler_s_delivery()
+    public async Task An_after_hook_action_is_a_delivery_beside_the_handler_s_and_the_entry_is_retired()
     {
         var deliveries = new FakeDeliveryStore(TimeProvider.System);
-        var store = StoreWith(WonDeal());
-        var pump = Subject(store, Ready, status: HttpStatusCode.InternalServerError, fanOut: FanOutTo(deliveries));
+        var deal = WonDeal();
+        var store = StoreWith(deal);
+        var pump = Subject(store, Ready, fanOut: FanOutTo(deliveries));
 
         await pump.PumpOneBatchAsync(Cancellation);
 
-        store.DispatchedIds.ShouldBeEmpty("the webhook failed, so the entry is handed back");
-        deliveries.Rows.ShouldHaveSingleItem().Subscriber.ShouldBe(DealHandler);
+        store.DispatchedIds.ShouldBe([deal.Id], "fanned out is dispatched; the action runs, and fails, on its own");
+        deliveries.Rows.Select(row => (row.Subscriber.Split('#')[0], row.Kind)).Order().ShouldBe(
+            [("/entities/deals/hooks/afterUpdate", "action"), (DealHandler, "handler")]);
     }
 
     [Fact]
@@ -90,7 +92,7 @@ public sealed partial class OutboxDispatcherTests
 
         store.HeldBackIds.ShouldBe([second.Id]);
         store.DispatchedIds.ShouldBe([other.Id]);
-        deliveries.Rows.ShouldHaveSingleItem().EventId.ShouldBe(other.Id);
+        deliveries.Rows.ShouldAllBe(row => row.EventId == other.Id);
     }
 
     /// <summary>A hand-back the store refuses is contained to its entry: the rest of the batch is still delivered.</summary>
@@ -110,7 +112,7 @@ public sealed partial class OutboxDispatcherTests
     }
 
     /// <summary>
-    /// The entry is retried because its webhook failed; the retry re-fans it out into the row that already exists, so the
+    /// The entry is retried because its retirement failed; the retry re-fans it out into the rows that already exist, so the
     /// dead delivery is recorded and counted once.
     /// </summary>
     [Fact]
@@ -120,23 +122,24 @@ public sealed partial class OutboxDispatcherTests
         using var dead = new DeadDeliveries(handler);
         var deliveries = new FakeDeliveryStore(TimeProvider.System);
         var store = StoreWith(WonDeal() with { ChainDepth = AlvoChainDepthLimit.DefaultMaxDepth });
-        var pump = Subject(store, Ready, status: HttpStatusCode.InternalServerError, fanOut: FanOutTo(deliveries, handler));
+        store.MarkDispatchedFailures = 1;
+        var pump = Subject(store, Ready, fanOut: FanOutTo(deliveries, handler));
 
         await pump.PumpOneBatchAsync(Cancellation);
         await pump.PumpOneBatchAsync(Cancellation);
 
-        store.ReleasedIds.Count.ShouldBe(2, "both attempts ran");
-        deliveries.Rows.ShouldHaveSingleItem().LastErrorType.ShouldBe("chain-depth-exceeded");
+        store.ReleasedIds.Count.ShouldBe(1, "the first retirement failed, so the entry was fanned out twice");
+        deliveries.Rows.ShouldAllBe(row => row.LastErrorType == "chain-depth-exceeded", "the after-hook action is past the limit too");
+        deliveries.Rows.Count(row => row.Subscriber == handler).ShouldBe(1);
         dead.Count.ShouldBe(1);
     }
 
     /// <summary>Ruling 21: an event whose only reach is a dead delivery is dispatched, not filtered.</summary>
     [Theory]
-    [InlineData(0, 0, false)]
-    [InlineData(0, 1, true)]
-    [InlineData(1, 0, true)]
-    public void An_event_is_counted_dispatched_when_it_reached_a_hook_or_any_delivery(int hooks, int deliveries, bool dispatched) =>
-        OutboxDispatcher.Counted(hooks, deliveries).ShouldBeSameAs(dispatched ? AlvoEventMetrics.Dispatched : AlvoEventMetrics.Filtered);
+    [InlineData(0, false)]
+    [InlineData(1, true)]
+    public void An_event_is_counted_dispatched_when_it_reached_any_delivery(int deliveries, bool dispatched) =>
+        OutboxDispatcher.Counted(deliveries).ShouldBeSameAs(dispatched ? AlvoEventMetrics.Dispatched : AlvoEventMetrics.Filtered);
 
     private static AlvoEvent OtherRecord() => WonDeal() with
     {

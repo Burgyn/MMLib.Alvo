@@ -49,7 +49,7 @@ entries whose delivery failed, subscribers attempted. Webhooks go to the handler
   `Failed`; it never leaves the process. The host does not dispose your handler, so one handler can serve several hosts.
 - **`Hooks.AssertRan(id, times)`** counts the runs of a hook inside this host's drains, and the runs of a
   [write hook](/extending/write-hooks/) inside the writes made through `alvo.Data` — a write hook's rejection counts as
-  a run. A descriptor after-hook's id is its JSON pointer, `/entities/tickets/hooks/afterCreate/0`. A failed attempt is not a run, and neither is one cut
+  a run. A descriptor action's id is its point's JSON pointer and a hash, and the pointer alone, `/entities/tickets/hooks/afterCreate`, names every action declared there. A failed attempt is not a run, and neither is one cut
   short by the host stopping. On a mismatch it throws, listing every run it recorded. Hosts running side by side never
   see each other's runs.
 - **Loops are refused.** A subscriber that writes to what it subscribes to — a webhook receiver writing back — keeps

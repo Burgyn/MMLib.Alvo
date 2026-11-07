@@ -42,7 +42,7 @@ internal sealed partial class HookBuilder
 
     private static readonly string[] _beforeKinds = [Reject, Mutate];
     private static readonly string[] _deleteKinds = [Reject];
-    private static readonly string[] _afterKinds = [Webhook, Email];
+    private static readonly string[] _afterKinds = [Webhook, Email, Function];
     private static readonly IReadOnlyDictionary<string, FieldSchema> _noFields = new Dictionary<string, FieldSchema>(StringComparer.Ordinal);
 
     /// <summary>The six hook points, in the order a write passes them.</summary>
@@ -130,7 +130,7 @@ internal sealed partial class HookBuilder
     /// <remarks>The point and the kind are not counted, for the reason <c>HooksTab.Dirty</c> gives.</remarks>
     public bool HasInput => Condition.Length > 0 || RejectMessage.Length > 0 || Endpoint.Length > 0 || Payload.Length > 0
         || Template.Length > 0 || To.Length > 0
-        || MutateRows.Any(HoldsInput);
+        || MutateRows.Any(HoldsInput) || FunctionName.Length > 0 || InputRows.Any(HoldsInput);
 
     /// <summary>Whether a point runs inside the write's transaction.</summary>
     public static bool IsBefore(string point)
@@ -190,6 +190,8 @@ internal sealed partial class HookBuilder
         To,
         Rows = MutateRows.Where(HoldsInput)
             .Select(row => new { row.Field, Mode = row.Mode.ToString(), row.Text, row.Empty, Kind = row.DeclaredKind?.ToString() }),
+        FunctionName,
+        Inputs = InputRows.Where(HoldsInput).Select(row => new { row.Name, Mode = row.Mode.ToString(), row.Text, row.IsDeclared }),
     });
 
     /// <summary>
@@ -204,7 +206,12 @@ internal sealed partial class HookBuilder
     /// <returns>The action, or <see langword="null"/> with <paramref name="refusal"/> set.</returns>
     public JsonObject? Build(out string? refusal)
     {
-        refusal = Missing() ?? (Kind == Mutate ? MutateRefusal() : null);
+        refusal = Missing() ?? Kind switch
+        {
+            Mutate => MutateRefusal(),
+            Function => FunctionRefusal(),
+            _ => null,
+        };
         return refusal is null ? Action() : null;
     }
 
@@ -246,6 +253,8 @@ internal sealed partial class HookBuilder
         Template = string.Empty;
         To = string.Empty;
         MutateRows.Clear();
+        FunctionName = string.Empty;
+        InputRows.Clear();
     }
 
     /// <summary>The schema's required facet the kind is missing, or nothing.</summary>
@@ -260,6 +269,7 @@ internal sealed partial class HookBuilder
             ? "A mutate patches at least one field. Name the field and what to set it to."
             : null,
         Webhook => Blank(Endpoint) ? "A webhook names an endpoint declared under 'webhooks.endpoints'." : null,
+        Function => FunctionMissing(),
         _ => Blank(Template) || Blank(To) ? "An email names a template and who it goes to." : null,
     };
 
@@ -294,6 +304,7 @@ internal sealed partial class HookBuilder
         Reject => new JsonObject { [Reject] = RejectMessage },
         Mutate => new JsonObject { [Mutate] = Patch() },
         Webhook => WebhookAction(),
+        Function => FunctionAction(),
         _ => new JsonObject { ["type"] = Email, ["template"] = Template, ["to"] = To },
     };
 
@@ -343,7 +354,9 @@ internal sealed partial class HookBuilder
             Template = Stand(Template),
             To = Stand(To),
             Fields = Fields,
+            FunctionName = Stand(FunctionName),
         };
+        stand.InputRows.AddRange(InputRows);
         stand.MutateRows.AddRange(MutateRows.Where(row => !Blank(row.Field)).Select(row =>
             new MutateRow(row.Field, row.Mode, row.Mode == MutateMode.Expression ? Stand(row.Text) : row.Text) { Empty = row.Empty }));
         if (stand.MutateRows.Count == 0)

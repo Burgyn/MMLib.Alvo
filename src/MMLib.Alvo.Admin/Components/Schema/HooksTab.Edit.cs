@@ -30,6 +30,7 @@ public partial class HooksTab
         _writable = WritableFields();
         ReadPickers();
         LoadFunctions();
+        LoadHostFunctions();
         SettleConditionMode();
         _refusal.Clear();
         CheckAll();

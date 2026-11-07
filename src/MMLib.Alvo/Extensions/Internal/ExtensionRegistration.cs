@@ -13,6 +13,9 @@ internal abstract record ExtensionRegistration(string Id, int Sequence);
 /// <summary>
 /// An event handler; <paramref name="Typed"/> is set when it was registered over a host type, and <paramref name="Job"/> when
 /// it is a scheduled job or a data migration — a handler of the framework event Alvo mints for each of its runs.
+/// <paramref name="Kind"/> overrides the delivery kind its deliveries record — a descriptor action's <c>action</c> or
+/// <c>function</c> — and <paramref name="TriggerOnly"/> marks a schedule that only mints its event: it selects no event, so
+/// no delivery is ever recorded for it.
 /// </summary>
 internal sealed record HandlerRegistration(
     string Id,
@@ -22,8 +25,14 @@ internal sealed record HandlerRegistration(
     HandlerSettings Settings,
     HandlerInvoker Invoker,
     TypedHandler? Typed = null,
-    JobSpec? Job = null)
-    : ExtensionRegistration(Id, Sequence);
+    JobSpec? Job = null,
+    string? Kind = null,
+    bool TriggerOnly = false)
+    : ExtensionRegistration(Id, Sequence)
+{
+    /// <summary>The delivery kind this registration's deliveries record.</summary>
+    internal string DeliveryKind => Kind ?? Job?.DeliveryKind ?? Events.Internal.DeliveryKind.Handler;
+}
 
 /// <summary>An id that is no longer registered, and what happens to its unfinished work.</summary>
 internal sealed record RetiredExtension(string Id, int Sequence, AlvoRetirement Retirement) : ExtensionRegistration(Id, Sequence);

@@ -48,7 +48,7 @@ namespace MMLib.Alvo.Management.Internal;
 /// is the second spelling this type exists to prevent.
 /// </para>
 /// <para>
-/// <b>The static <see cref="Honoured"/> stays the five blocks.</b> The skill region and the design prototype are held to
+/// <b>The static <see cref="Honoured"/> stays the six blocks.</b> The skill region and the design prototype are held to
 /// it, and it describes the build. A host's registered extension kinds describe the host, so they are appended per
 /// request by <see cref="Project(IReadOnlyList{string})"/>, after the blocks, as <c>extensions.&lt;kind&gt;</c>.
 /// </para>
@@ -74,7 +74,7 @@ internal static class CapabilityReport
     /// </para>
     /// </remarks>
     internal static IReadOnlyList<string> Honoured { get; } =
-        ["entities", "auth", "tenancy", "access", "formats"];
+        ["entities", "auth", "tenancy", "access", "formats", "automation"];
 
     /// <summary>What this build honours, warns about, and refuses, for a host that registers no extension.</summary>
     internal static ManagementCapabilities Project() => Project([]);

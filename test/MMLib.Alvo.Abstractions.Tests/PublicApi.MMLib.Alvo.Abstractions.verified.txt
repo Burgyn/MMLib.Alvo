@@ -934,7 +934,7 @@ namespace MMLib.Alvo.Descriptor
     public sealed class FunctionAction : MMLib.Alvo.Descriptor.AutomationAction, System.IEquatable<MMLib.Alvo.Descriptor.FunctionAction>
     {
         public FunctionAction() { }
-        public string? Input { get; init; }
+        public MMLib.Alvo.Descriptor.FunctionInput? Input { get; init; }
         public required string Name { get; init; }
     }
     public sealed class FunctionDescriptor : System.IEquatable<MMLib.Alvo.Descriptor.FunctionDescriptor>
@@ -957,6 +957,13 @@ namespace MMLib.Alvo.Descriptor
         public FunctionHttpTrigger() { }
         public MMLib.Alvo.Descriptor.HttpVerb? Method { get; init; }
         public required string Route { get; init; }
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(MMLib.Alvo.Descriptor.FunctionInputConverter?))]
+    public sealed class FunctionInput : System.IEquatable<MMLib.Alvo.Descriptor.FunctionInput>
+    {
+        public FunctionInput() { }
+        public System.Collections.Generic.IReadOnlyDictionary<string, MMLib.Alvo.Descriptor.ValueOrExpr?>? Fields { get; init; }
+        public string? Transform { get; init; }
     }
     public sealed class FunctionTrigger : System.IEquatable<MMLib.Alvo.Descriptor.FunctionTrigger>
     {
@@ -1641,6 +1648,8 @@ namespace MMLib.Alvo.Management
         Schedule = 9,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("dataMigration")]
         DataMigration = 10,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("function")]
+        Function = 11,
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Management.AlvoExtensionStage>))]
     public enum AlvoExtensionStage
@@ -1849,6 +1858,7 @@ namespace MMLib.Alvo.Management
         public string? Event { get; init; }
         public string? HttpMethod { get; init; }
         public required string Id { get; init; }
+        public System.Text.Json.JsonElement? InputSchema { get; init; }
         public required MMLib.Alvo.Management.AlvoExtensionKind Kind { get; init; }
         public string? LastOutcome { get; init; }
         public System.DateTimeOffset? LastRunAt { get; init; }

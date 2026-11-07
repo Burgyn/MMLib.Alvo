@@ -497,6 +497,9 @@ before-hook profile owes a budget with it.**
 
 ## After-hooks
 
+> **HX-15:** after-hook and automation actions no longer run inline from the outbox: each is its own delivery. See
+> [`automation.md`](./automation.md) for the synthetic bindings, the subscriber ids and `entity.update`'s ledger.
+
 `afterCreate`, `afterUpdate` and `afterDelete` are compiled into the **`PolicyCatalog`** — the same
 holder the rules live on, primed by the same pass. That is not tidiness: `EntitySchema`/`SchemaModel`
 carry no hooks, and a fourth independently primed holder would mean a hook compiled against a different

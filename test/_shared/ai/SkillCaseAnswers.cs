@@ -14,7 +14,7 @@ internal static class SkillCaseAnswers
     /// <summary>The read rule of <c>own_orders_only</c>'s right answer.</summary>
     internal const string ReadRule = "'admin' in @user.roles || 'manager' in @user.roles || assigned_user_id == @user.id";
 
-    /// <summary><c>function_action_refused</c>'s wrong answer: a <c>function</c> after-hook, which this build refuses.</summary>
+    /// <summary><c>unregistered_function_refused</c>'s wrong answer: a <c>function</c> after-hook naming a function the host does not register, which apply refuses.</summary>
     internal const string FunctionHook = """
         [{"op": "add", "path": "/entities/service_orders/hooks/afterUpdate/-",
           "value": {"condition": "new.status == 'ready'", "action": {"type": "function", "name": "invoice"}}}]

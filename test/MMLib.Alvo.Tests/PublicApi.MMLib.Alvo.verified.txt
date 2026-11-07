@@ -505,6 +505,31 @@ namespace MMLib.Alvo.Extensions
         EventActor = 1,
     }
 }
+namespace MMLib.Alvo.Functions
+{
+    public sealed class AlvoFunctionContext
+    {
+        public int Attempt { get; }
+        public MMLib.Alvo.AlvoContext Caller { get; }
+        public MMLib.Alvo.Data.IAlvoSession Data { get; }
+        public MMLib.Alvo.Events.AlvoEvent Event { get; }
+        public System.Guid EventId { get; }
+        public string Function { get; }
+        public MMLib.Alvo.Events.IAlvoSteps Steps { get; }
+        public static MMLib.Alvo.Functions.AlvoFunctionContext Create(string function, MMLib.Alvo.Events.AlvoEvent @event, MMLib.Alvo.Data.IAlvoSession data, int attempt = 1) { }
+    }
+    public sealed class AlvoFunctionSkippedException : System.Exception
+    {
+        public AlvoFunctionSkippedException() { }
+        public AlvoFunctionSkippedException(string message) { }
+        public AlvoFunctionSkippedException(string message, System.Exception innerException) { }
+    }
+    public interface IAlvoFunction<in TInput>
+        where in TInput :  class
+    {
+        System.Threading.Tasks.Task InvokeAsync(TInput input, MMLib.Alvo.Functions.AlvoFunctionContext context, System.Threading.CancellationToken cancellationToken);
+    }
+}
 namespace MMLib.Alvo.Hooks
 {
     public sealed class AfterDelete<T>
@@ -850,6 +875,9 @@ namespace Microsoft.Extensions.DependencyInjection
         public static MMLib.Alvo.IAlvoBuilder AddEventHandler<TMessage, THandler>(this MMLib.Alvo.IAlvoBuilder builder, string id, string? when = null, System.Action<MMLib.Alvo.Extensions.AlvoHandlerOptions>? configure = null)
             where TMessage :  class
             where THandler :  class, MMLib.Alvo.Events.IAlvoEventHandler<TMessage> { }
+        public static MMLib.Alvo.IAlvoBuilder AddFunction<TFunction>(this MMLib.Alvo.IAlvoBuilder builder, string name)
+            where TFunction :  class { }
+        public static MMLib.Alvo.IAlvoBuilder AddRequiredSecret(this MMLib.Alvo.IAlvoBuilder builder, string name) { }
         public static MMLib.Alvo.IAlvoBuilder AddRetiredExtension(this MMLib.Alvo.IAlvoBuilder builder, string id, MMLib.Alvo.Extensions.AlvoRetirement retirement) { }
         public static MMLib.Alvo.IAlvoBuilder AddSchedule<TJob>(this MMLib.Alvo.IAlvoBuilder builder, string id, string cron, string timeZone = "UTC", System.Action<MMLib.Alvo.Scheduling.AlvoScheduleOptions>? configure = null)
             where TJob :  class, MMLib.Alvo.Scheduling.IAlvoScheduledJob { }

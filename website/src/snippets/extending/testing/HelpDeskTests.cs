@@ -36,7 +36,7 @@ public sealed class HelpDeskTests
         await alvo.DrainEventsAsync(ct);
 
         opsBoard.Received.ShouldBe(1);
-        alvo.Hooks.AssertRan("/entities/tickets/hooks/afterCreate/0", times: 1);
+        alvo.Hooks.AssertRan("/entities/tickets/hooks/afterCreate", times: 1);
     }
 
     private static Dictionary<string, object?> Values(params (string Field, object? Value)[] values) =>

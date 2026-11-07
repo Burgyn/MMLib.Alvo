@@ -260,7 +260,6 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
     /// fires when somebody removes an entry from <c>UnhonouredSubsystems</c> and forgets the UI.
     /// </remarks>
     [Theory(Timeout = AdminWorld.ScenarioTimeout)]
-    [InlineData("/automations")]
     [InlineData("/functions")]
     public async Task A_not_yet_section_opens_and_says_what_does_not_happen(string route)
     {

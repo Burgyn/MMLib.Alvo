@@ -1,0 +1,73 @@
+﻿@page "/admin/automations"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject ILogger<Automations> Logger
+
+<PageTitle>Automations · Alvo</PageTitle>
+
+@*
+    The descriptor's automation rules, read-only (HX-15 Decision 14): each rule's trigger in words, its condition, its
+    actions, and a link to their deliveries on Operations. A rule is edited in the descriptor editor or by the assistant;
+    a second editor here would be a second spelling of the descriptor. What the build refuses in a rule is the capability
+    report's own sentence, placed here by RefusalPlaces.
+*@
+<div class="a-stack">
+    <PageHeader Title="Automations"
+                Subtitle="The automation rules the applied descriptor declares. Each action runs after its trigger as its own delivery, retried on failure; an entity.update writes once per event." />
+
+    @if (_problem is not null)
+    {
+        <Panel Padded="true">
+            <p class="a-section__sub" data-testid="automations-unreadable">@_problem</p>
+        </Panel>
+    }
+    else if (_rows is null)
+    {
+        <Skeleton />
+    }
+    else
+    {
+        @foreach (var refusal in RefusalPlaces.On(RefusalScreen.Automations, _capabilities?.Refused ?? []))
+        {
+            <Refusal data-testid="@($"refused-{refusal.Slot}")">
+                <code class="a-mono">@refusal.Slot</code> — @refusal.Consequence @refusal.Fix
+            </Refusal>
+        }
+
+        @if (_rows.Count == 0)
+        {
+            <div data-testid="automations-empty">
+                <EmptyState Title="No automation rules." Body="Add one in the descriptor, or ask the assistant." />
+            </div>
+        }
+        else
+        {
+            <Panel Title="Rules" data-testid="automations-rules">
+                @foreach (var rule in _rows)
+                {
+                    <ListRow class="a-listrow--stacked" data-testid="@($"automation-{rule.Name}")">
+                        <div class="a-row a-row--wrap">
+                            <span class="a-mono">@rule.Name</span>
+                            @if (!rule.Enabled)
+                            {
+                                <span class="a-badge" data-testid="automation-disabled">disabled</span>
+                            }
+                            <span class="a-section__sub" data-testid="automation-trigger">@rule.Trigger</span>
+                        </div>
+                        @if (rule.Condition is { } condition)
+                        {
+                            <span class="a-section__sub">if <code class="a-mono">@condition</code></span>
+                        }
+                        <ol class="a-section__sub" aria-label="@($"Actions of {rule.Name}")">
+                            @foreach (var action in rule.Actions)
+                            {
+                                <li data-testid="automation-action"><code class="a-mono">@action.Type</code>@(action.Target.Length > 0 ? $" — {action.Target}" : string.Empty)</li>
+                            }
+                        </ol>
+                        <a href="@DeliveriesHref(rule)" data-testid="@($"automation-deliveries-{rule.Name}")">Deliveries</a>
+                    </ListRow>
+                }
+            </Panel>
+        }
+    }
+</div>

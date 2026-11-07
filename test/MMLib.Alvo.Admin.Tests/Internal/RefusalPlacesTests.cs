@@ -16,9 +16,7 @@ public class RefusalPlacesTests
     [InlineData("field.default", nameof(RefusalScreen.FieldEditor))]
     [InlineData("field.default", nameof(RefusalScreen.FieldsList))]
     [InlineData("entity.softDelete", nameof(RefusalScreen.EntityHeader))]
-    [InlineData("function", nameof(RefusalScreen.OnWrite))]
     [InlineData("http.call", nameof(RefusalScreen.OnWrite))]
-    [InlineData("entity.update", nameof(RefusalScreen.OnWrite))]
     [InlineData("JSONata", nameof(RefusalScreen.OnWrite))]
     [InlineData("JSONata", nameof(RefusalScreen.Integrations))]
     [InlineData("email.data", nameof(RefusalScreen.OnWrite))]
@@ -26,6 +24,8 @@ public class RefusalPlacesTests
     [InlineData("bodyFile", nameof(RefusalScreen.Integrations))]
     [InlineData("trigger.event", nameof(RefusalScreen.Automations))]
     [InlineData("trigger.event", nameof(RefusalScreen.Functions))]
+    [InlineData("batch", nameof(RefusalScreen.Automations))]
+    [InlineData("trigger.source", nameof(RefusalScreen.Automations))]
     public void A_published_slot_is_shown_on_its_screen(string slot, string screen)
         => RefusalPlaces.On(Enum.Parse<RefusalScreen>(screen), [Refused(slot)]).ShouldHaveSingleItem().Slot.ShouldBe(slot);
 

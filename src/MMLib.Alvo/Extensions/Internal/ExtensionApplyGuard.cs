@@ -1,6 +1,7 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Extensions.Internal;
@@ -20,7 +21,7 @@ internal sealed record ExtensionApplyCheck(PolicyCatalog Catalog, IReadOnlyList<
 /// closed (Ruling 7), until a descriptor fits it.
 /// </summary>
 internal sealed class ExtensionApplyGuard(
-    ExtensionRegistry registry, ExtensionBinder binder, ICelCompiler compiler, IPolicyCatalogProvider catalogs)
+    ExtensionRegistry registry, ExtensionBinder binder, ICelCompiler compiler, IPolicyCatalogProvider catalogs, DescriptorHost? host = null)
 {
     /// <summary>Builds the catalog <paramref name="descriptor"/> proposes and checks it; <see langword="null"/> when no extension is registered.</summary>
     /// <param name="descriptor">The proposed descriptor.</param>
@@ -29,7 +30,7 @@ internal sealed class ExtensionApplyGuard(
     internal ExtensionApplyCheck? Check(AlvoDescriptor descriptor, SchemaModel schema)
     {
         registry.Seal();
-        return registry.IsEmpty ? null : Check(PolicyCatalog.Build(descriptor, schema, compiler));
+        return registry.IsEmpty ? null : Check(PolicyCatalog.Build(descriptor, schema, compiler, host ?? DescriptorHost.Empty));
     }
 
     /// <summary>Refuses <paramref name="proposed"/> when an extension that binds the current catalog would no longer bind it.</summary>

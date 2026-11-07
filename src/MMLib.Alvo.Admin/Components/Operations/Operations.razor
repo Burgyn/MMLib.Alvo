@@ -28,10 +28,10 @@
             <Skeleton Size="Skeleton.SkeletonSize.Lg" />
         }
     }
-    else if (_handlers.Count == 0 && _jobs is { Count: 0 })
+    else if (_handlers.Count == 0 && _jobs is { Count: 0 } && _deliveries is { Count: 0 } && _status is null && _subscriberPrefix is null)
     {
         <EmptyState Title="This host registers no event handlers"
-                    Body="Handlers are registered in the host's code with Entity(…).OnCreated and their kin, schedules with AddSchedule; the standalone image registers none." />
+                    Body="Handlers are registered in the host's code with Entity(…).OnCreated and their kin, schedules with AddSchedule; the standalone image registers none. A descriptor's after-hook and automation actions are listed here once they run." />
     }
     else
     {
@@ -125,11 +125,18 @@
                     }
                 </div>
                 <div data-testid="ops-delivery-list">
-                    @if (_deliveries is { Count: 0 })
+                    @if (_subscriberPrefix is { } prefix)
+                    {
+                        <p class="a-section__sub a-panel__body" data-testid="ops-subscriber-filter">
+                            Showing the deliveries whose handler starts with <code class="a-mono">@prefix</code>, among the latest loaded.
+                            <a href="@AdminPaths.Operations" data-testid="ops-subscriber-filter-clear" @onclick="ClearSubscriberFilter" @onclick:preventDefault>Show every handler</a>
+                        </p>
+                    }
+                    @if (ShownDeliveries is { Count: 0 })
                     {
                         <p class="a-section__sub a-panel__body">No deliveries@(_status is null ? string.Empty : $" {_status}") yet.</p>
                     }
-                    @foreach (var delivery in _deliveries ?? [])
+                    @foreach (var delivery in ShownDeliveries ?? [])
                     {
                         <ListRow class="@($"a-listrow--stacked{(delivery.Id == _selected?.Id ? " a-listrow--accent" : string.Empty)}")"
                                  data-testid="@($"ops-row-{delivery.Id}")" OnClick="() => OpenAsync(delivery.Id)">

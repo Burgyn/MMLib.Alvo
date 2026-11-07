@@ -35,8 +35,8 @@ namespace MMLib.Alvo.Tests.Descriptor;
 /// </remarks>
 public class UnhonouredJsonataTests
 {
-    /// <summary>The three action types the frozen schema declares and this build never runs.</summary>
-    private static readonly string[] _unrunnableActionTypes = ["function", "http.call", "entity.update"];
+    /// <summary>The action types the frozen schema declares and this build never runs.</summary>
+    private static readonly string[] _unrunnableActionTypes = ["http.call"];
 
     [Fact]
     public void A_raw_jsonata_webhook_payload_is_refused_at_apply_with_a_pointer_and_a_fix()
@@ -103,8 +103,8 @@ public class UnhonouredJsonataTests
     /// <para>
     /// Each allowed file is allowed for a stated reason, and none of them can evaluate anything:
     /// <c>JsonataSlot.cs</c> is the classifier that refuses it, <c>UnhonouredFeatures.cs</c> words the
-    /// refusal, and <c>AfterHookCompiler.cs</c> is the one caller of the classifier — those three are the refusal
-    /// pipeline. <c>RefusalPlaces.cs</c> is allowed for a different reason: it is not part of that pipeline but a
+    /// refusal, and <c>ActionCompiler.cs</c> is the one caller of the classifier, with <c>ActionCompiler.Function.cs</c>
+    /// refusing a function's string input through the same wording — those are the refusal pipeline. <c>RefusalPlaces.cs</c> is allowed for a different reason: it is not part of that pipeline but a
     /// UI consumer of the wire slot name, the admin dashboard's table of which screen shows the published refusal
     /// (a lookup key, read by nothing that runs a transformation — docs/todo-admin.md §8d item 19). Comments are stripped
     /// before the search, so the XML docs that explain the absence are not mistaken for it.
@@ -113,7 +113,7 @@ public class UnhonouredJsonataTests
     [Fact]
     public void No_jsonata_evaluator_exists_on_any_path()
         => ShippedSources.FileNamesMentioning("jsonata").ShouldBe(
-            ["JsonataSlot.cs", "UnhonouredFeatures.cs", "AfterHookCompiler.cs", "RefusalPlaces.cs"],
+            ["JsonataSlot.cs", "UnhonouredFeatures.cs", "ActionCompiler.cs", "ActionCompiler.Function.cs", "RefusalPlaces.cs"],
             ignoreOrder: true,
             "the only code mentioning JSONata is the classifier that refuses it, the table that words the "
             + "refusal, the compiler that asks the classifier, and the dashboard's table of where the refusal is "
@@ -121,15 +121,13 @@ public class UnhonouredJsonataTests
             + "(deviation 65, issue #149)");
 
     /// <summary>
-    /// Deviation 66: <c>function</c> and <c>http.call</c> are frozen into <c>$defs/action</c> and neither is
-    /// implemented; <c>entity.update</c> is PR5b's. All three are refused <b>by name</b>, each naming what
-    /// does not happen.
+    /// Deviation 66: <c>http.call</c> is frozen into <c>$defs/action</c> and not implemented, so it is refused
+    /// <b>by name</b>, naming what does not happen. <c>function</c> and <c>entity.update</c> compile against the
+    /// host (<c>ActionCompileTests</c>).
     /// </summary>
     /// <param name="type">The action's <c>type</c> discriminator.</param>
     [Theory]
-    [InlineData("function")]
     [InlineData("http.call")]
-    [InlineData("entity.update")]
     public void An_after_hook_action_this_build_does_not_run_is_refused_by_name(string type)
     {
         var refusal = Should.Throw<DescriptorValidationException>(() => Apply(ActionOfType(type)));
@@ -148,9 +146,7 @@ public class UnhonouredJsonataTests
     /// <param name="type">The action's <c>type</c> discriminator.</param>
     /// <param name="named">A consequence of refusing exactly that action, which no other of the three shares.</param>
     [Theory]
-    [InlineData("function", "functions")]
     [InlineData("http.call", "headersSecretRef")]
-    [InlineData("entity.update", "no record is written")]
     public void Each_refused_action_names_its_own_consequence(string type, string named)
     {
         var consequences = _unrunnableActionTypes

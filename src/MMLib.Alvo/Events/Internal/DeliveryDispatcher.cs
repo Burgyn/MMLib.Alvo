@@ -92,9 +92,18 @@ internal sealed class DeliveryDispatcher(
     /// </summary>
     /// <exception cref="InvalidOperationException">A gate is shut; nothing was claimed.</exception>
     /// <exception cref="OperationCanceledException">The round was cancelled; what it claimed is left to its lease.</exception>
-    internal async Task<AlvoDrainResult> ManualRoundAsync(CancellationToken cancellationToken)
+    internal async Task<AlvoDrainResult> ManualRoundAsync(CancellationToken cancellationToken) =>
+        await RoundAsync(EnsureManualGates(), cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// One round over the primed catalog with no mode gate — <see langword="internal"/> so a test that drives the outbox
+    /// with <see cref="OutboxDispatcher.PumpOneBatchAsync"/> can run the deliveries it fanned out the same deterministic way.
+    /// </summary>
+    internal Task<AlvoDrainResult> PumpOneRoundAsync(CancellationToken cancellationToken) =>
+        RoundAsync(catalogs.Current ?? throw DispatcherGates.Unprimed(), cancellationToken);
+
+    private async Task<AlvoDrainResult> RoundAsync(PolicyCatalog catalog, CancellationToken cancellationToken)
     {
-        var catalog = EnsureManualGates();
         await EnsureStoreAsync(cancellationToken).ConfigureAwait(false);
         var bindings = binder.For(catalog);
         var round = new DrainRound();
@@ -266,7 +275,7 @@ internal sealed class DeliveryDispatcher(
     /// up to <see cref="AlvoDeliveryOptions.MaxJobConcurrency"/>, so a long job never takes a handler's slot.
     /// </summary>
     private static List<BoundHandler> Pool(ExtensionBindings bindings, bool jobs) =>
-        [.. bindings.Handlers.Where(handler => handler.Registration.Job is not null == jobs)];
+        [.. bindings.Handlers.Where(handler => !handler.Registration.TriggerOnly && handler.Registration.Job is not null == jobs)];
 
     /// <summary>
     /// Claims up to <paramref name="batchSize"/> lane heads of one pool's handlers that are not stood down, under a claimant

@@ -66,4 +66,11 @@ public enum AlvoExtensionKind
     /// </summary>
     [JsonStringEnumMemberName("dataMigration")]
     DataMigration = 10,
+
+    /// <summary>
+    /// A function: host C# a descriptor's <c>function</c> action calls by name, with an input checked when the descriptor is
+    /// applied — run after the write commits, as a delivery.
+    /// </summary>
+    [JsonStringEnumMemberName("function")]
+    Function = 11,
 }

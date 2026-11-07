@@ -27,8 +27,6 @@ namespace MMLib.Alvo.Tests.Events;
 /// </summary>
 public sealed partial class OutboxDispatcherTests
 {
-    private const string DealsHook = "/entities/deals/hooks/afterUpdate/0";
-
     [Fact]
     public async Task A_manual_round_dispatches_what_is_due_and_reports_it()
     {
@@ -40,7 +38,7 @@ public sealed partial class OutboxDispatcherTests
         round.Claimed.ShouldBe(3);
         round.Failed.ShouldBe(0);
         round.IsQuiet.ShouldBeFalse();
-        round.Subscribers.ShouldBe([DealsHook], "each subscriber is named once, however many events it ran for");
+        round.Subscribers.ShouldBeEmpty("the outbox only fans out; the subscribers a round names are the deliveries it ran");
         store.DispatchedIds.Count.ShouldBe(3);
     }
 
@@ -66,7 +64,6 @@ public sealed partial class OutboxDispatcherTests
 
         round.Claimed.ShouldBe(1);
         round.Failed.ShouldBe(1);
-        round.Subscribers.ShouldBe([DealsHook]);
         store.ReleasedIds.ShouldHaveSingleItem();
         store.DispatchedIds.ShouldBeEmpty();
     }
@@ -260,9 +257,7 @@ public sealed partial class OutboxDispatcherTests
         store.ReleasedIds.ShouldBeEmpty("a cut-short round is not a failed attempt, so nothing is handed back");
         store.OnlyEntry.Dispatched.ShouldBeFalse();
         _logs.Entries.ShouldNotContain(entry => entry.Level >= LogLevel.Warning);
-        var span = spans.Recorded.ShouldHaveSingleItem();
-        span.GetTagItem("alvo.outcome").ShouldBeNull();
-        span.Status.ShouldBe(ActivityStatusCode.Unset);
+        spans.Recorded.ShouldBeEmpty("the outbox opens no delivery span; a delivery's own run does");
     }
 
     private EventPump Pump(OutboxDispatcher dispatcher, CancellationTokenSource? stopping = null, DeliveryDispatcher? deliveries = null)

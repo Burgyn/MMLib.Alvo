@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Commands.Internal;
+using MMLib.Alvo.Functions.Internal;
 using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.Reads.Internal;
 
@@ -23,6 +24,7 @@ internal static class ExtensionIdProblems
     {
         RetiredExtension => ExtensionIds.IsRetirableId(registration.Id),
         CommandRegistration => ExtensionIds.IsCommandName(registration.Id),
+        FunctionRegistration => ExtensionIds.IsFunctionName(registration.Id),
         _ => ExtensionIds.IsExtensionId(registration.Id),
     };
 
@@ -69,6 +71,7 @@ internal static class ExtensionIdProblems
     {
         RetiredExtension => ExtensionBindingCompiler.RetiredKind,
         CommandRegistration => CommandBinding.Kind,
+        FunctionRegistration => FunctionRegistration.Kind,
         WriteHookRegistration hook => WriteHookBinding.KindOf(hook.Stage),
         ReadExtensionRegistration read => ReadExtensionBinding.KindOf(read.Kind),
         HandlerRegistration handler => ExtensionBindingCompiler.KindOf(handler),

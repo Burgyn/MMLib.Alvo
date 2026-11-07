@@ -10,6 +10,17 @@ internal static partial class DeliveryLog
 {
     [LoggerMessage(
         Level = LogLevel.Warning,
+        Message = "Alvo could not bind the input of function {Function} for event {EventId} ({Subscriber}): a value does not "
+            + "fit the input type, so the delivery is dead (function-input-invalid). Neither the input nor the record is logged.")]
+    internal static partial void FunctionInputInvalid(ILogger logger, string function, string subscriber, Guid eventId);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Function {Function} skipped event {EventId} ({Subscriber}); the delivery ends succeeded.")]
+    internal static partial void FunctionSkipped(ILogger logger, string function, string subscriber, Guid eventId);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
         Message = "Alvo recorded a dead delivery of event {EventId} for {Subscriber}: its when condition failed while it "
             + "was judged ({ErrorType}). Fix the condition, then redeliver it.")]
     internal static partial void HandlerConditionFailed(ILogger logger, string subscriber, Guid eventId, string errorType);

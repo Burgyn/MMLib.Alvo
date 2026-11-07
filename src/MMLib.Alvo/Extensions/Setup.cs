@@ -7,6 +7,8 @@ using MMLib.Alvo.Commands.Internal;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Data.Internal;
 using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Rules.Internal;
+using MMLib.Alvo.Secrets.Internal;
 
 namespace MMLib.Alvo.Extensions;
 
@@ -34,11 +36,14 @@ internal static class ExtensionsSetup
         services.TryAddSingleton<IAlvoSessions, AlvoSessions>();
         services.TryAddSingleton(provider => new ExtensionRegistry(
             provider.GetServices<ExtensionRegistration>(), provider.GetRequiredService<CommandRegistry>()));
+        services.TryAddSingleton(provider => DescriptorHost.From(
+            provider.GetRequiredService<ExtensionRegistry>(), provider.GetRequiredService<IServiceProviderIsService>()));
         services.TryAddSingleton<ExtensionBinder>();
         services.TryAddSingleton(_ => new GeneratedEntitySource());
         services.TryAddSingleton<ExtensionCatalog>();
         services.TryAddSingleton<ExtensionApplyGuard>();
         services.TryAddSingleton<ExtensionStateGuard>();
+        services.TryAddSingleton<RequiredSecretsCheck>();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton(provider => new ExtensionStats(
             provider.GetRequiredService<TimeProvider>(), provider.GetRequiredService<ExtensionRegistry>()));

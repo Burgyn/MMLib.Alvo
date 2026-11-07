@@ -1,0 +1,437 @@
+﻿using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Descriptor.Internal;
+using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Internal;
+using MMLib.Alvo.Rules;
+using MMLib.Alvo.Rules.Internal;
+using MMLib.Alvo.Schema;
+
+namespace MMLib.Alvo.Events.Internal;
+
+/// <summary>
+/// Compiles one post-commit action at apply: a <c>webhook</c>'s endpoint and payload, an <c>email</c>'s recipient and
+/// template, a <c>function</c>'s name and input against the host's registrations, and an <c>entity.update</c>'s target,
+/// payload and record id against the target entity — every slot resolved so nothing is resolved at delivery.
+/// </summary>
+/// <remarks>
+/// The after-hook compiler asks it once per hook; an automation rule's actions compile through it too, so a hook's action
+/// and a rule's action of the same type are judged by one set of rules.
+/// </remarks>
+internal static partial class ActionCompiler
+{
+    /// <summary>Compiles <paramref name="action"/>, declared at <paramref name="path"/>, appending every problem to the scope.</summary>
+    /// <param name="action">The declared action.</param>
+    /// <param name="path">The action's JSON pointer, such as <c>/entities/deals/hooks/afterUpdate/0/action</c>.</param>
+    /// <param name="scope">The triggering entity, its point, the project's references and the error accumulator.</param>
+    /// <returns>The compiled action, or <see langword="null"/> when any slot was refused.</returns>
+    internal static CompiledAction? Compile(AutomationAction action, string path, AfterHookScope scope) =>
+        action switch
+        {
+            WebhookAction webhook => CompileWebhook(webhook, path, scope),
+            EmailAction email => CompileEmail(email, path, scope),
+            FunctionAction function => CompileFunction(function, path, scope),
+            EntityUpdateAction update => CompileEntityUpdate(update, path, scope),
+            _ => RefuseAction(action, path, scope),
+        };
+
+    private const string ActionSegment = "/action";
+    private const string BodyFileSlot = "bodyFile";
+    private const string EndpointSlot = "endpoint";
+    private const string EndpointsBlock = "endpoints";
+    private const string TemplateSlot = "template";
+    private const string TypeSlot = "type";
+    private const string UrlSlot = "url";
+
+    private static CompiledAction? RefuseAction(AutomationAction action, string path, AfterHookScope scope)
+    {
+        var refusal = UnhonouredFeatures.UnhonouredAction(ActionType.NameOf(action));
+        scope.Errors.Add(Error($"{path}/{TypeSlot}", refusal.Consequence, refusal.Fix));
+
+        return null;
+    }
+
+    private static CompiledAction? CompileWebhook(WebhookAction webhook, string path, AfterHookScope scope)
+    {
+        if (!scope.Endpoints.TryGetValue(webhook.Endpoint, out var endpoint))
+        {
+            scope.Errors.Add(UndeclaredReference(
+                $"{path}/{EndpointSlot}", webhook.Endpoint, "webhooks.endpoints", scope.Endpoints.Keys));
+            return null;
+        }
+
+        var target = ResolveTarget(webhook.Endpoint, endpoint, scope);
+        var templates = new Dictionary<string, AlvoTemplate>(StringComparer.Ordinal);
+        var payloadPath = $"{path}/{ActionSlot.Payload}";
+        var payload = AddTransformSlot(templates, ActionSlot.Payload, webhook.Payload, payloadPath, scope)
+            && PayloadRendersJson(templates, payloadPath, scope);
+
+        return target is not null && payload ? new CompiledAction(webhook, templates, target, ActionType.NameOf(webhook)) : null;
+    }
+
+    /// <summary>
+    /// Turns a declared endpoint into the <see cref="WebhookTarget"/> a delivery uses, refusing a URL that is
+    /// not an absolute HTTPS one <b>here</b> rather than at delivery.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The schema's <c>"format": "uri"</c> is an annotation, not an assertion</b> — nothing in the frozen
+    /// schema rejects <c>/hooks/crm</c> or <c>htp://x</c>. Left to delivery, a malformed URL is a
+    /// <see cref="UriFormatException"/> per attempt, retried to the ceiling and abandoned, which an author reads
+    /// as an endpoint outage rather than as the typo it is. It is also the endpoint mistake an author is most
+    /// likely to make, which is precisely the case apply-time resolution exists for.
+    /// </para>
+    /// <para>
+    /// <b><c>http</c> is refused rather than warned, and the carve-out is loopback only.</b> The body is the
+    /// unmasked record — <c>hidden</c> fields included — the delivery is unsigned, and the schema's own
+    /// description of the slot says <em>HTTPS target</em>; cleartext is the one combination where decision D7's
+    /// "bounded by who declares what" premise fails outright, because an on-path observer is nobody's author.
+    /// A warning would describe a tolerance the apply path does not have, which is the argument
+    /// <see cref="UnhonouredFeatures"/> already records for every one of its own entries. The exception is a
+    /// <see cref="Uri.IsLoopback"/> host: there is no network to observe, and <c>http://localhost:5000/hook</c>
+    /// is the shape a local receiver and this repository's own end-to-end suites use.
+    /// </para>
+    /// <para>
+    /// <b>This checks the URL, not the destination.</b> Where a name resolves is unknowable at apply and can
+    /// change before delivery, so the non-public-network refusal lives at connect time in
+    /// <see cref="WebhookEgressGuard"/>, which admits loopback only for the same literal-or-<c>localhost</c>
+    /// hosts <see cref="Uri.IsLoopback"/> admits here.
+    /// </para>
+    /// </remarks>
+    private static WebhookTarget? ResolveTarget(string name, WebhookEndpoint endpoint, AfterHookScope scope)
+    {
+        var path = $"/webhooks/{EndpointsBlock}/{name}/{UrlSlot}";
+        if (!Uri.TryCreate(endpoint.Url, UriKind.Absolute, out var url))
+        {
+            scope.Errors.Add(Error(path, NotAnAbsoluteUrl(endpoint.Url), AbsoluteUrlFix));
+            return null;
+        }
+
+        return IsDeliverable(url) ? new WebhookTarget(name, url) : RefuseCleartext(path, url, scope);
+    }
+
+    private static bool IsDeliverable(Uri url) =>
+        string.Equals(url.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal)
+        || (string.Equals(url.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal) && url.IsLoopback);
+
+    private static WebhookTarget? RefuseCleartext(string path, Uri url, AfterHookScope scope)
+    {
+        scope.Errors.Add(Error(path, NotHttps(url.Scheme), NotHttpsFix));
+
+        return null;
+    }
+
+    private static CompiledAction? CompileEmail(EmailAction email, string path, AfterHookScope scope)
+    {
+        if (!scope.Templates.TryGetValue(email.Template, out var message))
+        {
+            scope.Errors.Add(UndeclaredReference(
+                $"{path}/{TemplateSlot}", email.Template, "templates", scope.Templates.Keys));
+            return null;
+        }
+
+        var templates = new Dictionary<string, AlvoTemplate>(StringComparer.Ordinal);
+        var recipient = AddHeaderSlot(templates, ActionSlot.To, email.To, $"{path}/{ActionSlot.To}", scope);
+        var data = RefuseEmailData(email.Data, $"{path}/{ActionSlot.Data}", scope);
+        var reference = new TemplateReference(email.Template, path[..^ActionSegment.Length]);
+        var body = AddMessageTemplate(templates, message, reference, scope);
+
+        return recipient && data && body ? new CompiledAction(email, templates, Endpoint: null, ActionType.NameOf(email)) : null;
+    }
+
+    /// <summary>
+    /// Refuses <c>email.data</c>, because nothing renders it: it was compiled, validated and stored under
+    /// <see cref="ActionSlot.Data"/>, and <c>EventActionExecutor</c> reads only <c>to</c>, <c>subject</c> and
+    /// <c>body</c>.
+    /// </summary>
+    /// <remarks>
+    /// A slot that compiles cleanly and is then discarded is the exact failure mode a partial JSONata evaluator
+    /// is refused for (<see cref="UnhonouredFeatures.RawJsonata"/>) — the action still runs and the body is not
+    /// the one the author declared — except that the honoured fraction here is zero. A <c>data.*</c> placeholder
+    /// root would be new surface and is PR5b's, so the slot is refused by name until something reads it.
+    /// </remarks>
+    private static bool RefuseEmailData(string? source, string path, AfterHookScope scope)
+    {
+        if (source is null)
+        {
+            return true;
+        }
+
+        var refusal = UnhonouredFeatures.EmailData;
+        scope.Errors.Add(Error(path, refusal.Consequence, refusal.Fix));
+
+        return false;
+    }
+
+    /// <summary>
+    /// Adds the referenced message template's <c>subject</c> and <c>body</c>, refusing a <c>bodyFile</c>
+    /// because nothing in this build reads a path inside a descriptor bundle.
+    /// </summary>
+    /// <remarks>
+    /// What the template's text gets wrong is reported at the template; what only the referencing hook's point makes
+    /// unrenderable — a row image that point lacks, a field the entity excludes — is reported at the hook, once per
+    /// placeholder across subject and body, because the same template can be referenced from another point where it
+    /// renders.
+    /// </remarks>
+    private static bool AddMessageTemplate(
+        Dictionary<string, AlvoTemplate> templates, MessageTemplate message, TemplateReference reference, AfterHookScope scope)
+    {
+        var path = $"/templates/{reference.Name}";
+        if (message.BodyFile is not null)
+        {
+            var refusal = UnhonouredFeatures.TemplateBodyFile;
+            scope.Errors.Add(Error($"{path}/{BodyFileSlot}", refusal.Consequence, refusal.Fix));
+            return false;
+        }
+
+        var subject = AddHeaderSlot(
+            templates, ActionSlot.Subject, message.Subject, $"{path}/{ActionSlot.Subject}", scope, reference);
+        var body = AddSugarSlot(templates, ActionSlot.Body, message.Body, $"{path}/{ActionSlot.Body}", scope, reference);
+
+        return subject && body && RendersForThisHook(templates, reference, scope);
+    }
+
+    private static bool RendersForThisHook(
+        Dictionary<string, AlvoTemplate> templates, TemplateReference reference, AfterHookScope scope)
+    {
+        var message = new AlvoTemplate(
+            [.. new[] { ActionSlot.Subject, ActionSlot.Body }
+                .Where(templates.ContainsKey)
+                .SelectMany(slot => templates[slot].Segments)]);
+        IReadOnlyList<DescriptorValidationError> refusals =
+        [
+            .. AfterImagePhase.Refusals(message, AfterImages.At(scope.Point), scope.Point, reference),
+            .. ExcludedPlaceholders(message, scope.Schema).Select(field => Error(
+                reference.Pointer, ExcludedReferencedPlaceholder(field, reference, scope), ExcludedReferencedFix(scope, field))),
+        ];
+        scope.Errors.AddRange(refusals);
+
+        return refusals.Count == 0;
+    }
+
+    /// <summary>
+    /// A plain-string slot with <c>{{…}}</c> sugar — <c>email.to</c>, <c>templates.subject</c>/<c>body</c>.
+    /// </summary>
+    /// <remarks>
+    /// The classifier is deliberately <em>not</em> consulted: the schema types these as plain strings, so a
+    /// placeholder-free value is a legitimate literal (a hard-coded address) rather than evidence of JSONata.
+    /// </remarks>
+    private static bool AddSugarSlot(
+        Dictionary<string, AlvoTemplate> templates,
+        string slot,
+        string? source,
+        string path,
+        AfterHookScope scope,
+        TemplateReference? reference = null) =>
+        source is null || AddTemplate(templates, slot, source, path, scope, reference);
+
+    /// <summary>
+    /// A sugar slot that becomes a mail header — <c>email.to</c>, <c>templates.subject</c> — whose author-written
+    /// text is checked here for what can already be refused: a line break, and a literal recipient that is not
+    /// one mailbox. What a row renders into it is checked again at delivery, by the same <see cref="MailHeaders"/>.
+    /// </summary>
+    private static bool AddHeaderSlot(
+        Dictionary<string, AlvoTemplate> templates,
+        string slot,
+        string? source,
+        string path,
+        AfterHookScope scope,
+        TemplateReference? reference = null) =>
+        AddSugarSlot(templates, slot, source, path, scope, reference) && HeaderIsSafe(templates, slot, path, scope);
+
+    private static bool HeaderIsSafe(
+        Dictionary<string, AlvoTemplate> templates, string slot, string path, AfterHookScope scope)
+    {
+        var refusal = templates.TryGetValue(slot, out var template) ? MailHeaders.LiteralRefusal(slot, template) : null;
+        if (refusal is null)
+        {
+            return true;
+        }
+
+        scope.Errors.Add(Error(path, refusal, MailHeaderFix));
+        return false;
+    }
+
+    /// <summary>
+    /// Refuses a <c>webhook.payload</c> template that is not JSON once its placeholders are filled — at apply,
+    /// because the shape of what <see cref="JsonPayload"/> renders depends on the author's text and never on a
+    /// row, so this check is complete here and a delivery-time refusal would only repeat it too late.
+    /// </summary>
+    private static bool PayloadRendersJson(Dictionary<string, AlvoTemplate> templates, string path, AfterHookScope scope)
+    {
+        if (!templates.TryGetValue(ActionSlot.Payload, out var payload) || JsonPayload.TryValidate(payload, out var refusal))
+        {
+            return true;
+        }
+
+        scope.Errors.Add(Error(path, refusal, JsonPayloadFix));
+        return false;
+    }
+
+    /// <summary>
+    /// A <c>$defs/jsonata</c>-typed slot — <c>webhook.payload</c>, <c>email.data</c>. Here a placeholder-free
+    /// or brace-carrying string is raw JSONata and is refused by name; only a template goes through.
+    /// </summary>
+    private static bool AddTransformSlot(
+        Dictionary<string, AlvoTemplate> templates, string slot, string? source, string path, AfterHookScope scope)
+    {
+        if (source is null)
+        {
+            return true;
+        }
+
+        if (JsonataSlot.IsTemplate(source))
+        {
+            return AddTemplate(templates, slot, source, path, scope, reference: null);
+        }
+
+        var refusal = UnhonouredFeatures.RawJsonata;
+        scope.Errors.Add(Error(path, refusal.Consequence, refusal.Fix));
+        return false;
+    }
+
+    /// <summary>
+    /// Parses one template and resolves every placeholder in it against the entity's schema, the point's event
+    /// images (#325) and the entity's <c>events.exclude</c>, so the compiled action carries only templates that are
+    /// known to render. A slot of a named message template (<paramref name="reference"/> set) leaves the point-dependent
+    /// checks to <see cref="RendersForThisHook"/>, which reports them at the referencing hook.
+    /// </summary>
+    private static bool AddTemplate(
+        Dictionary<string, AlvoTemplate> templates,
+        string slot,
+        string source,
+        string path,
+        AfterHookScope scope,
+        TemplateReference? reference)
+    {
+        if (!AlvoTemplate.TryParse(source, out var template, out var malformed))
+        {
+            scope.Errors.Add(Error(path, malformed!, MalformedTemplateFix));
+            return false;
+        }
+
+        var refusals = Refusals(template!, scope.Schema);
+        if (refusals.Count > 0)
+        {
+            scope.Errors.AddRange(refusals.Select(refusal => Error(path, refusal, UnresolvablePlaceholderFix)));
+            return false;
+        }
+
+        var unrenderable = reference is null ? Unrenderable(template!, path, scope) : [];
+        if (unrenderable.Count > 0)
+        {
+            scope.Errors.AddRange(unrenderable);
+            return false;
+        }
+
+        templates[slot] = template!;
+        return true;
+    }
+
+    /// <summary>
+    /// Every placeholder that resolves against the schema but reads a row image the point's event lacks, or a field
+    /// the entity leaves out of its event images — each would render empty on every delivery.
+    /// </summary>
+    private static IReadOnlyList<DescriptorValidationError> Unrenderable(
+        AlvoTemplate template, string path, AfterHookScope scope) =>
+        [
+            .. AfterImagePhase.Refusals(template, AfterImages.At(scope.Point), scope.Point, path),
+            .. ExcludedPlaceholders(template, scope.Schema)
+                .Select(field => Error(path, ExcludedPlaceholder(field), ExcludedPlaceholderFix(scope, field))),
+        ];
+
+    private static IEnumerable<string> ExcludedPlaceholders(AlvoTemplate template, EntitySchema entity) =>
+        template.Placeholders
+            .Select(TemplatePlaceholder.RowImageRead)
+            .OfType<(CelRecordState State, string Field)>()
+            .Select(read => read.Field)
+            .Where(field => entity.EventImageExclusions.Contains(field, StringComparer.Ordinal))
+            .Distinct(StringComparer.Ordinal);
+
+    private static string ExcludedPlaceholder(string field) =>
+        $"This template reads '{field}', which this entity leaves out of its event images (events.exclude), so it "
+        + "would render empty on every delivery.";
+
+    private static string ExcludedReferencedPlaceholder(string field, TemplateReference reference, AfterHookScope scope) =>
+        $"Template '{reference.Name}', which the '{scope.Point}' hook at {reference.HookPath} references, reads "
+        + $"'{field}', which this entity leaves out of its event images (events.exclude), so it would render empty on "
+        + "every delivery from this hook.";
+
+    private static string ExcludedPlaceholderFix(AfterHookScope scope, string field) =>
+        $"Remove '{field}' from {scope.EntityPath}/events/exclude, or stop reading it here.";
+
+    private static string ExcludedReferencedFix(AfterHookScope scope, string field) =>
+        $"Remove '{field}' from {scope.EntityPath}/events/exclude, or reference a template that does not read '{field}'.";
+
+    private static IReadOnlyList<string> Refusals(AlvoTemplate template, EntitySchema entity) =>
+        [.. template.Placeholders.Select(placeholder => Refusal(placeholder, entity)).OfType<string>()];
+
+    private static string? Refusal(string placeholder, EntitySchema entity) =>
+        TemplatePlaceholder.TryResolve(placeholder, entity, out var refusal) ? null : refusal;
+
+    private static string NotAnAbsoluteUrl(string url) =>
+        $"'{url}' is not an absolute URL, so no delivery to this endpoint could ever be attempted. It is "
+        + "refused when the descriptor is applied rather than at delivery, where it would be one failed attempt "
+        + "per retry until the event hit the attempt ceiling and was abandoned.";
+
+    private const string AbsoluteUrlFix =
+        "Give the endpoint an absolute HTTPS URL, such as 'https://example.com/hooks/crm'. The schema's "
+        + "\"format\": \"uri\" is an annotation and asserts nothing, so this is the only place the URL is checked.";
+
+    private static string NotHttps(string scheme) =>
+        $"This endpoint's URL uses '{scheme}', and a delivery carries the record's complete unmasked image — "
+        + "'hidden' fields included — with no signature and no field projection. Over cleartext that image is "
+        + "readable by anyone on the path, who is not the author the disclosure decision is bounded by.";
+
+    private const string NotHttpsFix =
+        "Use an 'https' URL. A cleartext 'http' URL is accepted only for a loopback host (localhost, 127.0.0.1, "
+        + "[::1]), which is the local-receiver shape and has no network to observe.";
+
+    private const string MalformedTemplateFix =
+        "Close every '{{' with a '}}' and put a single root-and-member placeholder inside each pair. It is "
+        + "refused here rather than shipped as literal text, which is what an unclosed placeholder would "
+        + "otherwise be delivered as.";
+
+    private const string JsonPayloadFix =
+        "Write the payload as JSON around its placeholders: put a placeholder inside quotes for a string "
+        + "(\"{{new.title}}\") or bare where a JSON value goes ([{{new.amount}}]). A bare placeholder renders as one "
+        + "JSON value — a text field as a quoted string — and a value never becomes structure.";
+
+    private const string MailHeaderFix =
+        "Keep 'to' and 'subject' on one line, and give 'to' exactly one address such as 'ops@example.com' — no "
+        + "display name and no list. To reach several recipients, declare one email action per recipient.";
+
+    private const string UnresolvablePlaceholderFix =
+        "Fix the placeholder named in the message, or use a literal value. Templates are validated when the "
+        + "descriptor is applied and never at delivery, where a refusal would be a delivery that fails until it "
+        + "hits the attempt ceiling instead of an authoring error you can act on.";
+
+    /// <summary>
+    /// The "names something the project does not declare" refusal, reusing the same "did you mean" shape an
+    /// unknown field, enum value or role literal gets — a typo is by far the likeliest cause.
+    /// </summary>
+    private static DescriptorValidationError UndeclaredReference(
+        string path, string name, string block, IEnumerable<string> declared)
+    {
+        var candidates = declared.OrderBy(candidate => candidate, StringComparer.Ordinal).ToList();
+        var closest = NameSuggestion.Closest(name, candidates);
+        var known = candidates.Count == 0
+            ? $"'{block}' declares none."
+            : $"Declared under '{block}': {string.Join(", ", candidates)}.";
+
+        return Error(
+            path,
+            $"'{name}' is not declared under '{block}', so this action could never run.",
+            closest is not null ? $"Did you mean '{closest}'? {known}" : $"{known} Add it, or point at an existing one.");
+    }
+
+
+    private static DescriptorValidationError Error(string path, string message, string? fix) =>
+        new(path, message, fix, DescriptorValidationSeverity.Error);
+}
+
+/// <summary>What a <c>function</c> or <c>entity.update</c> action resolves against, beside the triggering entity.</summary>
+/// <param name="Host">The functions and services the host registers.</param>
+/// <param name="Descriptor">The descriptor being compiled — its <c>functions</c> block and its fields' <c>readOnly</c> flags.</param>
+/// <param name="Model">The schema the descriptor maps to, where an update's target is resolved.</param>
+internal sealed record ActionHost(DescriptorHost Host, AlvoDescriptor Descriptor, SchemaModel Model);

@@ -337,6 +337,9 @@ else
             case HookBuilder.Email:
                 @EmailFields
                 break;
+            case HookBuilder.Function:
+                @HostFunctionFields
+                break;
         }
     </text>;
 
@@ -549,5 +552,59 @@ else
                 <code class="a-mono">@Current.RecipientExample</code>, on one line. Checked once a declared template is chosen.
             </Hint>
         </Field>
+    </text>;
+
+    /// <summary>A function action: the registered function, and one box per input property its schema declares.</summary>
+    private RenderFragment HostFunctionFields => @<text>
+        <Field Label="Function" LabelId="hook-function-label">
+            <ChildContent>
+                <MudSelect @ref="_selects[HostFunctionSelectId]" T="string" Variant="Variant.Outlined" Value="Current.FunctionName"
+                           ValueChanged="ChooseHostFunctionAsync"
+                           aria-labelledby="hook-function-label" aria-describedby="hook-function-hint" Class="a-mono"
+                           data-testid="hook-function" Disabled="@(HostFunctionNames.Count == 0)">
+                    @foreach (var name in HostFunctionNames)
+                    {
+                        <MudSelectItem Value="@name">@HostFunctionLabel(name)</MudSelectItem>
+                    }
+                </MudSelect>
+            </ChildContent>
+            <Hint><span id="hook-function-hint" data-testid="hook-function-hint">@HostFunctionHint</span></Hint>
+        </Field>
+        @for (var index = 0; index < Current.InputRows.Count; index++)
+        {
+            var row = Current.InputRows[index];
+            var i = index;
+            var fit = InputFit(row);
+            <div class="a-stack" role="group" aria-label="@($"Input {row.Name}")" data-testid="hook-input-row">
+                <Field Label="@($"{row.Name} takes")" LabelId="@($"{InputId(i)}-mode-label")">
+                    <ChipGroup TValue="string" Items="_mutateModes" Selected="[row.Mode == MutateMode.Expression ? ExpressionWord : ValueWord]"
+                               aria-labelledby="@($"{InputId(i)}-mode-label")" data-testid="@($"{InputId(i)}-mode")"
+                               SelectedChanged="modes => ChooseInputMode(i, modes[0])" />
+                </Field>
+                <Field Label="@(row.Required ? $"{row.Name} (required)" : row.Name)" For="@InputId(i)">
+                    <ChildContent>
+                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="@InputId(i)" Class="a-mono" autocomplete="off"
+                                      spellcheck="false" data-testid="@InputId(i)"
+                                      Placeholder="@(row.Mode == MutateMode.Expression ? "new.total" : row.Placeholder)"
+                                      aria-describedby="@(fit is null ? $"{InputId(i)}-hint" : $"{InputId(i)}-hint {InputId(i)}-fit")"
+                                      Value="row.Text" ValueChanged="text => TypeInput(i, text)" />
+                        @if (fit is not null)
+                        {
+                            <p class="a-field__problem" id="@($"{InputId(i)}-fit")" data-testid="@($"{InputId(i)}-fit")">@fit</p>
+                        }
+                    </ChildContent>
+                    <Hint>
+                        @if (row.Mode == MutateMode.Expression)
+                        {
+                            <text>A CEL expression over @((MarkupString)Current.Images), stored as <code class="a-mono">{"$cel": "…"}</code>.</text>
+                        }
+                        else
+                        {
+                            <text>A literal: @row.Placeholder.@(row.Required ? string.Empty : row.WritesNullWhenEmpty ? " Left empty, it is sent as null." : " Left empty, it is not sent.")</text>
+                        }
+                    </Hint>
+                </Field>
+            </div>
+        }
     </text>;
 }

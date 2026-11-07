@@ -54,7 +54,7 @@ internal static partial class EventLog
     /// execution-log criterion no counter can express.
     /// </remarks>
     /// <param name="logger">The logger the executor writes through.</param>
-    /// <param name="hook">The hook's own JSON pointer, such as <c>/entities/deals/hooks/afterUpdate/0</c>.</param>
+    /// <param name="hook">The action's subscriber id, such as <c>/entities/deals/hooks/afterUpdate#1f0c9a2e</c>.</param>
     /// <param name="action">The action's <c>type</c> discriminator, as the descriptor spells it.</param>
     /// <param name="eventId">The event's id — the join key to its <c>alvo_outbox</c> row and the consumer's dedup key.</param>
     /// <param name="eventType">The event type, such as <c>entity.deals.updated</c>.</param>

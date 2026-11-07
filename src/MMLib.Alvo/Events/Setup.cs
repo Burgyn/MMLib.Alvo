@@ -6,6 +6,7 @@ using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Options;
 
 using MMLib.Alvo.Events.Internal;
+using MMLib.Alvo.Functions.Internal;
 
 using System.Net;
 
@@ -79,6 +80,10 @@ internal static class EventsSetup
         services.TryAddSingleton<WebhookDelivery>();
         services.TryAddSingleton<IEmailSender, ConsoleEmailSender>();
         services.TryAddSingleton<EventActionExecutor>();
+        services.TryAddSingleton<ActionValues>();
+        services.TryAddSingleton<FunctionInvocation>();
+        services.TryAddSingleton<EntityUpdateEffect>();
+        services.TryAddSingleton<DescriptorActionRunner>();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IAlvoEvents, AlvoEvents>();
         services.TryAddSingleton<DeliveryFanOut>();

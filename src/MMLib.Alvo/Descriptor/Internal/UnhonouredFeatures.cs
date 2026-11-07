@@ -135,6 +135,23 @@ internal static class UnhonouredFeatures
         + "day matching lands, with nothing between it and delivery.");
 
     /// <summary>
+    /// Batch delivery — <c>delivery: "batch"</c> on a rule, or the <c>.batch</c> event shape — refused: one execution per
+    /// affected row is the only delivery this build runs (#193).
+    /// </summary>
+    internal static UnhonouredSlot BatchDelivery { get; } = new(
+        "batch",
+        "Batch delivery is not implemented: one execution per affected row is the only delivery this build runs, and an "
+        + "array payload would silently become one call per row.",
+        "Remove 'delivery' (perItem is the default), and trigger on the per-row event (entity.orders.created, not "
+        + "entity.orders.created.batch). Tracked in #193.");
+
+    /// <summary>An <c>auth.*</c> or <c>storage.*</c> trigger: refused, because nothing emits those events.</summary>
+    internal static UnhonouredSlot NonEntityTrigger { get; } = new(
+        "trigger.source",
+        "This build emits only entity events, so an auth or storage trigger would never fire.",
+        "Trigger on an entity event, or react in host code (an event handler) to what you need.");
+
+    /// <summary>
     /// A raw JSONata expression in any <c>$defs/jsonata</c>-typed slot: refused, never partially evaluated.
     /// </summary>
     /// <remarks>
@@ -193,10 +210,10 @@ internal static class UnhonouredFeatures
     internal static UnhonouredSlot TemplateBodyFile { get; } = new(
         "bodyFile",
         "A template's 'bodyFile' is not read yet: nothing in this build resolves a path inside a descriptor "
-        + "bundle, so an after-hook rendering this template would send a message with an empty body rather "
+        + "bundle, so an email action rendering this template would send a message with an empty body rather "
         + "than fail.",
         "Move the body inline into the template's 'body' — it takes the same '{{...}}' placeholders — or stop "
-        + "referencing this template from an after-hook until bundle files are read.");
+        + "referencing this template from an email action until bundle files are read.");
 
     /// <summary>The action <c>type</c> discriminators this build declares and never runs.</summary>
     /// <remarks>
@@ -204,7 +221,7 @@ internal static class UnhonouredFeatures
     /// in declaration order, so a list built above this line would enumerate <see langword="null"/>.
     /// </remarks>
     internal static IReadOnlyList<string> EveryActionType { get; } =
-        [FunctionType, HttpCallType, EntityUpdateType];
+        [HttpCallType];
 
     /// <summary>
     /// Every fix suggestion this table can produce — the one thing common to every refusal it authors, and
@@ -228,8 +245,8 @@ internal static class UnhonouredFeatures
     /// static <see cref="UnhonouredSlot"/> properties makes a new slot join the list by being declared.
     /// </para>
     /// <para>
-    /// The two typed tables are enumerated directly because they already are collections, and the three
-    /// action refusals are generated rather than declared — so their types come from the same three constants
+    /// The two typed tables are enumerated directly because they already are collections, and the action
+    /// refusals are generated rather than declared — so their types come from the same constants
     /// <see cref="ActionFix"/> switches on, whose <c>default</c> arm throws for an unmapped type.
     /// </para>
     /// </remarks>
@@ -302,12 +319,8 @@ internal static class UnhonouredFeatures
     /// <param name="type">The action's <c>type</c> discriminator.</param>
     private static string ActionConsequence(string type) => type switch
     {
-        FunctionType => "invokes nothing — no function declared under 'functions' runs, on this hook or on "
-            + "any trigger or schedule it declares elsewhere",
         HttpCallType => "makes no request: the URL is never called, and 'headersSecretRef' is never read, so "
             + "a receiver you believe is being notified is not",
-        EntityUpdateType => "writes nothing — no record is written or patched on the target entity, and no "
-            + "event is emitted for the write that did not happen",
         _ => throw new ArgumentOutOfRangeException(
             nameof(type), type, "Unmapped action type; name what specifically does not happen for it here."),
     };
@@ -316,19 +329,13 @@ internal static class UnhonouredFeatures
     /// <param name="type">The action's <c>type</c> discriminator.</param>
     private static string ActionFix(string type) => type switch
     {
-        FunctionType => "Use a 'webhook' or 'email' action, which this build does run. Custom functions are "
-            + "an F4 concern and the schema freezes their shape ahead of the implementation.",
         HttpCallType => "Declare the target under 'webhooks.endpoints' and use a 'webhook' action instead — "
             + "that is the managed path, and it is the one this build delivers on.",
-        EntityUpdateType => "Perform the follow-up write through the Data API for now. 'entity.update' lands "
-            + "with automation, where the causation chain it creates can be bounded.",
         _ => throw new ArgumentOutOfRangeException(
             nameof(type), type, "Unmapped action type; name the alternative for it here."),
     };
 
-    private const string FunctionType = "function";
     private const string HttpCallType = "http.call";
-    private const string EntityUpdateType = "entity.update";
 }
 
 /// <summary>

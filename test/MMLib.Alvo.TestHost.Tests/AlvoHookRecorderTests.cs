@@ -13,7 +13,7 @@ namespace MMLib.Alvo.TestHost.Tests;
 /// </summary>
 public sealed class AlvoHookRecorderTests
 {
-    private const string TicketsWebhook = "/entities/tickets/hooks/afterCreate/0";
+    private const string TicketsWebhook = "/entities/tickets/hooks/afterCreate";
     private const string HooksSource = "MMLib.Alvo.Hooks";
     private const string AmbientSource = "MMLib.Alvo.TestHost.Tests.Ambient";
 
@@ -44,7 +44,8 @@ public sealed class AlvoHookRecorderTests
 
         alvo.Hooks.AssertRan(TicketsWebhook, times: 0);
         var mismatch = Should.Throw<InvalidOperationException>(() => alvo.Hooks.AssertRan(TicketsWebhook));
-        mismatch.Message.ShouldContain($"{TicketsWebhook} (failed)", Case.Sensitive, "the message lists every recorded run");
+        mismatch.Message.ShouldContain($"{TicketsWebhook}#", Case.Sensitive, "the message lists every recorded run");
+        mismatch.Message.ShouldContain("(failed)", Case.Sensitive);
     }
 
     [Fact]
@@ -52,7 +53,7 @@ public sealed class AlvoHookRecorderTests
     {
         await using var alvo = await StartAsync(new StubWebhookReceiver());
 
-        var mismatch = Should.Throw<InvalidOperationException>(() => alvo.Hooks.AssertRan("/entities/tickets/hooks/afterCreate/9"));
+        var mismatch = Should.Throw<InvalidOperationException>(() => alvo.Hooks.AssertRan("/entities/tickets/hooks/afterUpdate"));
 
         mismatch.Message.ShouldContain("ran 0");
         mismatch.Message.ShouldContain("Recorded runs: none");

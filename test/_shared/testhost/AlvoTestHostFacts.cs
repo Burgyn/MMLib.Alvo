@@ -15,10 +15,10 @@ public abstract class AlvoTestHostFacts
 {
     protected const string HelpDesk = "help-desk.alvo.json";
     protected const string Tickets = "tickets";
-    protected const string TicketsWebhook = "/entities/tickets/hooks/afterCreate/0";
+    protected const string TicketsWebhook = "/entities/tickets/hooks/afterCreate";
     protected const string EchoLoop = "echo-loop.alvo.json";
     protected const string Echoes = "echoes";
-    protected const string EchoesWebhook = "/entities/echoes/hooks/afterCreate/0";
+    protected const string EchoesWebhook = "/entities/echoes/hooks/afterCreate";
 
     private static readonly DateTimeOffset _stamped = new(2026, 1, 15, 9, 30, 0, TimeSpan.Zero);
 
@@ -61,9 +61,9 @@ public abstract class AlvoTestHostFacts
         var drained = await alvo.DrainEventsAsync(Ct);
 
         receiver.Deliveries.ShouldHaveSingleItem().ShouldContain("Server down");
-        drained.Claimed.ShouldBe(2, "both writes emitted an event; only the high-priority one matched the hook");
+        drained.Claimed.ShouldBe(3, "both writes emitted an event; only the high-priority one matched the hook, whose delivery is the third");
         drained.Failed.ShouldBe(0);
-        drained.Subscribers.ShouldBe([TicketsWebhook]);
+        drained.Subscribers.ShouldHaveSingleItem().ShouldStartWith($"{TicketsWebhook}#");
         alvo.Hooks.AssertRan(TicketsWebhook, times: 1);
     }
 
@@ -79,7 +79,7 @@ public abstract class AlvoTestHostFacts
         var loop = await Should.ThrowAsync<AlvoDrainNotQuiescentException>(() => alvo.DrainEventsAsync(Ct));
 
         loop.Rounds.ShouldBe(100);
-        loop.Subscribers.ShouldBe([EchoesWebhook]);
+        loop.Subscribers.ShouldHaveSingleItem().ShouldStartWith($"{EchoesWebhook}#");
         loop.Message.ShouldContain(EchoesWebhook);
     }
 

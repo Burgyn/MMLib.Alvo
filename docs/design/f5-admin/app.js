@@ -900,7 +900,7 @@ const HOOK_POINTS = [
    `beforeCreate` would be a control whose only possible output is a descriptor the apply rejects.
 
    `$defs/afterHookList` admits `{ action: $defs/action }`, which is the five discriminated types.
-   Three of them this build refuses. */
+   One of them this build refuses. */
 
 /** What a BEFORE hook may do. Two shapes, keyed by their own property, no `type` discriminator. */
 const BEFORE_ACTIONS = [
@@ -908,12 +908,12 @@ const BEFORE_ACTIONS = [
   { kind: 'mutate', what: 'Patch the payload before it is written', honoured: true },
 ];
 
-/** What an AFTER hook may do — `$defs/action`'s five, three of them refused at apply. */
+/** What an AFTER hook may do — `$defs/action`'s five, one of them refused at apply. */
 const AFTER_ACTIONS = [
   { kind: 'webhook', honoured: true, what: 'Post to an endpoint declared under webhooks' },
   { kind: 'email', honoured: true, what: 'Render a template and send it' },
-  { kind: 'function', honoured: false, what: 'Invoke a function declared under functions' },
-  { kind: 'entity.update', honoured: false, what: 'Write to another entity' },
+  { kind: 'function', honoured: true, what: 'Invoke a host function (AddFunction)' },
+  { kind: 'entity.update', honoured: true, what: 'Write to another entity, exactly once per event' },
   { kind: 'http.call', honoured: false, what: 'Call a URL directly' },
 ];
 
@@ -947,7 +947,7 @@ function hooksTab(e) {
       <span class="p-muted">A hook is a condition and an action, at one point of one write. The two kinds are never one list.</span>
       <button class="a-btn a-btn--sm a-btn--primary" style="margin-left:auto" data-act="overlay" data-kind="new-hook" data-id="${esc(e.name)}">${icon('plus')} Add a hook</button></div>
     ${total === 0 ? `<div class="a-empty"><span class="a-empty__title">Nothing happens on a write to ${esc(e.name)}</span>
-      <span class="a-empty__body">A hook can refuse a write before it commits, fill a field in, or — once committed — send an email or call a webhook. Both kinds run today; three of the seven action types do not, and this editor says which.</span>
+      <span class="a-empty__body">A hook can refuse a write before it commits, fill a field in, or — once committed — send an email or call a webhook. Both kinds run today; one of the seven action types does not, and this editor says which.</span>
       <button class="a-btn a-btn--primary" data-act="overlay" data-kind="new-hook" data-id="${esc(e.name)}">${icon('plus')} Add a hook</button></div>` : `
     <div class="a-section"><span class="a-section-title">Before the write commits</span>
       <span class="a-section-sub">In the same transaction. May refuse the write or change the values, and reaches no network.</span></div>
@@ -2587,7 +2587,7 @@ function screenIntegrations() {
 
       <div style="padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border)">
         <span class="a-label">After the write commits — <code class="a-mono">$defs/action</code></span>
-        <p class="p-muted p-tight" style="margin-top:var(--space-2)">Five discriminated types, from the outbox, after the transaction. Three of them this build refuses at apply, so no control offers them and each says why.</p>
+        <p class="p-muted p-tight" style="margin-top:var(--space-2)">Five discriminated types, from the outbox, after the transaction. One of them this build refuses at apply, so no control offers it and it says why.</p>
       </div>
       ${AFTER_ACTIONS.map((a) => `<div style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border)">
         <div class="a-row"><code class="a-mono" style="color:var(--text);font-size:var(--text-sm);width:120px;flex:none">${esc(a.kind)}</code>
@@ -2608,6 +2608,22 @@ function screenIntegrations() {
       <div class="p-note" style="margin:var(--space-4)"><span class="p-note__tag">not yet</span>
         <span>There is no delivery log to show: a subscriber receives an event in process and nothing records that it did. A wildcard subscription is <strong>refused</strong> rather than accepted — ${esc(refusal('trigger.event').consequence)}</span></div>
     </div>
+  </div></div>`;
+}
+
+function screenAutomations() {
+  return `${header([{ label: 'Automations' }])}
+  <div class="a-content"><div class="a-stack" style="max-width:860px">
+    <div class="a-row"><h1 class="a-page-title p-tight">Automations</h1></div>
+    <p class="p-muted p-tight" style="max-width:70ch">When something happens, do something. A rule's trigger is an entity event or a five-field UTC cron; its condition and actions compile at apply, and every action runs as its own retried delivery, shown on Operations.</p>
+    <div class="a-panel">
+      <div class="a-section"><span class="a-section-title">Refused at apply</span></div>
+      ${['batch', 'trigger.source'].map((slot) => `<div style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border)">
+        <code class="a-mono">${esc(slot)}</code>
+        <div class="a-refused__reason">⚠ <span>${esc(refusal(slot)?.consequence ?? '')}</span></div>
+        <div class="a-refused__reason" style="color:var(--dim)"><span>→</span> <span>${esc(refusal(slot)?.fix ?? '')}</span></div></div>`).join('')}
+    </div>
+    <div class="p-note"><span class="p-note__tag">design</span><span>The list of rules is read-only here: a rule is edited in the descriptor, like every other block.</span></div>
   </div></div>`;
 }
 
@@ -3045,7 +3061,7 @@ function overlay() {
 
       <div class="a-field"><span class="a-label">Do what<span class="a-label__hint">${before
         ? '<code class="a-mono">$defs/beforeHookList</code> admits these two and nothing else.'
-        : '<code class="a-mono">$defs/action</code>\u2019s five types. Three are refused at apply.'}</span></span>
+        : '<code class="a-mono">$defs/action</code>\u2019s five types. One is refused at apply.'}</span></span>
         <div class="p-hstack">${available.map((a) => `<button class="a-preset${chosen.kind === a.kind ? ' a-preset--on' : ''}" data-act="hookkind" data-value="${esc(a.kind)}" data-honoured="${a.honoured}"${a.honoured ? '' : ' disabled aria-disabled="true" title="Refused at apply"'}>${esc(a.kind)}${a.honoured ? '' : ' ⚠'}</button>`).join('')}</div>
         <span class="a-label__hint">${chosen.what}</span></div>
 
@@ -3148,9 +3164,7 @@ const ROUTES = {
   '#/history': screenHistory,
   '#/settings': screenSettings,
   '#/notes': screenNotes,
-  '#/automations': () => screenNotYet('automation', 'Automations',
-    'When something happens, do something — a job is completed, so the customer is emailed. The hooks on an entity already do a narrow version of this; automation is the general one, and its engine is not built.',
-    'When it lands, this is a list of rules — a trigger, a condition, an ordered list of actions — with the dry run the schema editor has: pick a past event, see which rules would have fired and what each action would have sent.'),
+  '#/automations': screenAutomations,
   '#/functions': () => screenNotYet('functions', 'Functions',
     'Your own C# running inside Alvo, on a trigger or a schedule, with the same database context an endpoint has.',
     'When it lands, this lists functions with their trigger, their last run and their output — and the editor is a code pane, not a form. Nothing about it is drawn yet, because a code editor designed before the runtime exists is a guess.'),

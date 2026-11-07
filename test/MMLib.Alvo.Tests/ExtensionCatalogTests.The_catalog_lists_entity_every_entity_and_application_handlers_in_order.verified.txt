@@ -31,7 +31,8 @@
       "lastRunAt": null,
       "lastOutcome": null,
       "afterRevision": null,
-      "concurrency": null
+      "concurrency": null,
+      "inputSchema": null
     },
     {
       "id": "ticket-resolved",
@@ -63,7 +64,8 @@
       "lastRunAt": null,
       "lastOutcome": null,
       "afterRevision": null,
-      "concurrency": null
+      "concurrency": null,
+      "inputSchema": null
     },
     {
       "id": "orders-approved",
@@ -91,7 +93,8 @@
       "lastRunAt": null,
       "lastOutcome": null,
       "afterRevision": null,
-      "concurrency": null
+      "concurrency": null,
+      "inputSchema": null
     }
   ],
   "timers": null

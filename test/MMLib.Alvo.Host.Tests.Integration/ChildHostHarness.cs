@@ -90,6 +90,29 @@ internal sealed class ChildHostHarness : IAsyncDisposable
     /// <summary>Every outbox row in the child's database, read off the file rather than out of the child.</summary>
     internal IReadOnlyList<OutboxRowState> OutboxRows() => SqliteOutboxProbe.Rows(_databasePath);
 
+    /// <summary>The delivery rows, as the database holds them.</summary>
+    internal IReadOnlyList<ChildDeliveryRow> DeliveryRows()
+    {
+        using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_databasePath};Pooling=False");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id, subscriber, status, attempts, claimed_by, completed_at FROM alvo_deliveries ORDER BY id";
+        using var reader = command.ExecuteReader();
+        var rows = new List<ChildDeliveryRow>();
+        while (reader.Read())
+        {
+            rows.Add(new ChildDeliveryRow(
+                Guid.Parse(reader.GetString(0), CultureInfo.InvariantCulture),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetInt32(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4),
+                reader.IsDBNull(5) ? null : reader.GetString(5)));
+        }
+
+        return rows;
+    }
+
     /// <summary>Creates one order over HTTP, which is what emits the event this harness is about.</summary>
     /// <param name="reference">The order's unique reference.</param>
     /// <param name="status">The order's status.</param>
@@ -193,22 +216,23 @@ internal sealed class ChildHostHarness : IAsyncDisposable
         }
     }
 
-    /// <summary>Waits, bounded, until every outbox row is retired.</summary>
+    /// <summary>Waits, bounded, until every outbox row is retired and every delivery has succeeded.</summary>
     /// <exception cref="TimeoutException">Something was still pending when the budget ran out.</exception>
     /// <remarks>
-    /// The closing half of a redelivery fact: the dispatcher retires an entry only after every matched action has
-    /// run, so a repeat that is never retired would be a repeat that failed again rather than one that succeeded.
+    /// The closing half of a redelivery fact: the outbox retires an entry once it fans out, and each action is a delivery
+    /// of its own, so a repeat that never succeeds would be a repeat that failed again rather than one that succeeded.
     /// </remarks>
     internal async Task WaitUntilRetiredAsync()
     {
         var deadline = DateTimeOffset.UtcNow + _exitBudget;
-        while (OutboxRows().Any(row => !row.Dispatched))
+        while (OutboxRows().Any(row => !row.Dispatched) || DeliveryRows().Any(row => row.Status != "succeeded"))
         {
             if (DateTimeOffset.UtcNow > deadline)
             {
                 throw new TimeoutException(
-                    $"Waited {_exitBudget} for every outbox row to be retired; "
-                    + $"{OutboxRows().Count(row => !row.Dispatched)} still had dispatched_at unset.");
+                    $"Waited {_exitBudget} for every outbox row to be retired and every delivery to succeed; "
+                    + $"{OutboxRows().Count(row => !row.Dispatched)} rows had dispatched_at unset, deliveries: "
+                    + string.Join(", ", DeliveryRows().Select(row => $"{row.Subscriber} {row.Status}")) + ".");
             }
 
             await Task.Delay(_pollDelay, Ct).ConfigureAwait(false);
@@ -366,6 +390,7 @@ internal sealed class ChildHostHarness : IAsyncDisposable
             ["Alvo__Events__BatchSize"] = "10",
             ["Alvo__Events__MaxAttempts"] = "10",
             ["Alvo__Events__ClaimLease"] = "00:00:01",
+            ["Alvo__Deliveries__ActionTimeout"] = "00:00:01",
             ["Alvo__Auth__DevKeys__0__KeyId"] = AdminKeyId,
             ["Alvo__Auth__DevKeys__0__Secret"] = AdminSecret,
             ["Alvo__Auth__DevKeys__0__User"] = "6f9619ff-8b86-d011-b42d-00c04fc964ff",
@@ -576,6 +601,9 @@ internal sealed class ChildHostHarness : IAsyncDisposable
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 }
+
+/// <summary>One row of <c>alvo_deliveries</c>, as a crash fact reads it.</summary>
+internal sealed record ChildDeliveryRow(Guid Id, string Subscriber, string Status, int Attempts, string? ClaimedBy, string? CompletedAt);
 
 /// <summary>How one child host is configured.</summary>
 /// <remarks>

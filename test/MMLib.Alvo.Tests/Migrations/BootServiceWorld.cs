@@ -153,6 +153,9 @@ internal sealed class BootServiceWorld : IDisposable
     /// <summary>The registrations the extension state guard judges the delivery store's work against.</summary>
     internal ExtensionRegistry Registrations { get; set; } = ExtensionRegistry.Empty;
 
+    /// <summary>The required-secret check the boot runs; none when a fact does not declare one.</summary>
+    internal MMLib.Alvo.Secrets.Internal.RequiredSecretsCheck? RequiredSecrets { get; set; }
+
     /// <summary>The delivery store the extension state guard reads and ends work in.</summary>
     internal FakeDeliveryStore Deliveries { get; } = new(new ManualClock(new DateTimeOffset(2026, 10, 23, 9, 0, 0, TimeSpan.Zero)));
 
@@ -272,7 +275,8 @@ internal sealed class BootServiceWorld : IDisposable
             new OptionsWrapper<AlvoSchemaOptions>(Options),
             ExtensionState(),
             MigrationCheck(),
-            _loggers.CreateLogger<AlvoBootService>());
+            _loggers.CreateLogger<AlvoBootService>(),
+            RequiredSecrets);
 
     /// <summary>
     /// The same twelve ports <see cref="Build"/> passes, positionally — for the facts that null one of them.
@@ -291,6 +295,7 @@ internal sealed class BootServiceWorld : IDisposable
         ExtensionState(),
         MigrationCheck(),
         _loggers.CreateLogger<AlvoBootService>(),
+        RequiredSecrets,
     ];
 
     private ISchemaMigrator Migrator() =>
@@ -303,7 +308,7 @@ internal sealed class BootServiceWorld : IDisposable
         new(Registrations, Tests.Extensions.HandlerCatalog.EveryService(), store: null);
 
     private DescriptorBootPlan Plan() =>
-        new(Source, new DescriptorValidator(), new CelCompiler(), _loggers.CreateLogger<DescriptorBootPlan>(), Extensions, Generated);
+        new(Source, new DescriptorValidator(), new CelCompiler(), _loggers.CreateLogger<DescriptorBootPlan>(), Extensions, generated: Generated);
 
     private ConflictingRuntimeSchemaWriter Writer() =>
         _writer = new ConflictingRuntimeSchemaWriter(

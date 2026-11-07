@@ -158,6 +158,25 @@ public sealed class AlvoBootState
         Publish(snapshot => snapshot with { Failure = reason });
     }
 
+    /// <summary>
+    /// The reason this boot stood down for a required secret it does not hold, or <see langword="null"/>. Set once, by a
+    /// dashboard-first boot whose secret store is writable (HX-15 ruling Q6), and kept until the process restarts.
+    /// </summary>
+    /// <remarks>
+    /// The apply path reads it (HX-15 review m3): an apply would prime the catalog, and the request-path routes would serve
+    /// without the secret the host declared it cannot run without, while the dispatchers stayed off. Names only, never a value.
+    /// </remarks>
+    internal string? SecretStandDown { get; private set; }
+
+    /// <summary>Publishes a required-secret stand-down for one project, and records it for the apply path.</summary>
+    /// <param name="project">The project whose boot stood down.</param>
+    /// <param name="reason">The refusal, naming the missing secrets.</param>
+    internal void StoodDownForSecrets(string project, string reason)
+    {
+        Failed(project, reason);
+        SecretStandDown = reason;
+    }
+
     /// <summary>Publishes a refusal for one project.</summary>
     /// <param name="project">The project whose boot refused.</param>
     /// <param name="reason">The operator-readable reason.</param>

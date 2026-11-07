@@ -1,0 +1,86 @@
+---
+title: Functions in the descriptor
+description: Register a C# function with AddFunction and call it from an after-hook or an automation rule — its input checked against the function's type at apply, each call its own retried delivery.
+sidebar:
+  order: 11
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import descriptor from '../../../snippets/extending/functions/billing-desk.alvo.json?raw';
+import invoice from '../../../snippets/extending/functions/IssueInvoice.cs?raw';
+import tests from '../../../snippets/extending/functions/IssueInvoiceTests.cs?raw';
+
+An order that is created should raise an invoice in your billing system. The billing call is C#: it needs your client,
+your credentials and your error handling. A **function** keeps that code in the host and lets the descriptor decide
+*when* it runs: an after-hook or an [automation rule](/extending/automation/) names it, and passes it an input built
+from the row.
+
+## Write the function
+
+A function implements `IAlvoFunction<TInput>`. `TInput` is a class or record: its properties are the function's input,
+and the JSON Schema `System.Text.Json` exports for it is the contract the descriptor is checked against.
+
+<SourceExcerpt code={invoice} from="namespace Billing;" to="public interface IInvoicing" title="IssueInvoice.cs" />
+
+Register it by name; the name is what the descriptor writes:
+
+```csharp
+builder.Services.AddAlvo(alvo => alvo
+    .FromDescriptor("billing-desk.alvo.json")
+    .AddFunction<IssueInvoice>("issue-invoice"));
+```
+
+The function is resolved from the host's services for each call, so its constructor takes whatever it needs.
+
+## Call it from the descriptor
+
+<Code code={descriptor} lang="json" title="billing-desk.alvo.json" />
+
+The action is `{"type": "function", "name": "…", "input": {…}}`. Each `input` value is a JSON literal or
+`{"$cel": "…"}` — a CEL expression in the `mutate` profile over the triggering row (`new.` and `old.` as the point
+carries them). A function action runs only after a write, from an after-hook or an automation rule; a before-hook
+cannot call one.
+
+## What apply checks
+
+The input is checked against the exported schema when the descriptor is applied, so a mistake is refused with a fix
+before any write:
+
+- **An unknown name** is refused with the closest registered name, or the list of registered ones.
+- **An unknown input property** is refused with the closest declared one: `orderNumbr` reads
+  *Did you mean 'orderNumber'?*
+- **A missing required property** is refused. A constructor parameter of a record is required unless it has a default
+  value — a nullable one too: write `null` for it.
+- **A literal of the wrong JSON type**, and a `$cel` value whose type the property cannot hold, are refused.
+- **A name both registered and declared under `functions`** (the csx block this build does not run) is ambiguous and
+  refused.
+
+Only the top level is checked: a nested object's typo is found at run time, when the input does not bind, and that
+delivery ends dead `function-input-invalid` after one attempt, its input and row kept out of the log.
+
+## The context
+
+`AlvoFunctionContext` carries what the call is about:
+
+- `Event` and `EventId` — the event that triggered it. **A call is at least once**: dedupe on `context.EventId`, as the
+  example does with its idempotency key.
+- `Data` — a data session as the system, in the event's tenant. A write through it raises its own events.
+- `Steps` — [steps](/extending/steps/) for a function that calls more than one system: each named step completes once
+  across retries.
+- `Attempt` — 1 on the first run.
+
+Throw `AlvoFunctionSkippedException` to end the call with nothing to do: the delivery succeeds and the log says it was
+skipped. Any other exception fails the attempt, and the delivery is retried on the default policy (5 s up to 6 h, seven
+attempts) and then dead, on the dashboard's [Operations](/extending/operate-deliveries/) page.
+
+## Test it
+
+<SourceExcerpt code={tests} from="public sealed class IssueInvoiceTests" to="private static AlvoContext Staff()" title="IssueInvoiceTests.cs" />
+
+:::caution[Not in this build]
+- **The JSONata form of `input`** (a string) is refused; write the object form.
+- **csx functions under `functions`** are parsed and not run. A host function is registered in C#.
+- **The dashboard** offers a registered function in an entity's hooks editor, with a form for its input; there is no
+  functions screen of its own.
+:::

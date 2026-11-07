@@ -6,6 +6,7 @@ using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Migrations.Internal;
@@ -79,6 +80,7 @@ internal sealed class DescriptorBootPlan
     private readonly ICelCompiler _compiler;
     private readonly ILogger<DescriptorBootPlan> _logger;
     private readonly ExtensionBinder? _extensions;
+    private readonly DescriptorHost _host;
     private readonly GeneratedEntitySource? _generated;
 
     /// <summary>Initializes a new instance of the <see cref="DescriptorBootPlan"/> class.</summary>
@@ -93,6 +95,7 @@ internal sealed class DescriptorBootPlan
     /// Binds the host's handler registrations to the boot's catalog, or <see langword="null"/> for a composition with none
     /// to check — see <see cref="EnsureRegistrable"/> and <see cref="EnsureBindable"/>.
     /// </param>
+    /// <param name="host">The functions and services the host registers, which a descriptor's actions compile against; <see langword="null"/> for none.</param>
     /// <param name="generated">
     /// The host's generated typed classes, or <see langword="null"/> for a composition with none to check — see
     /// <see cref="WarnAboutGeneratedEntities"/>.
@@ -103,6 +106,7 @@ internal sealed class DescriptorBootPlan
         ICelCompiler compiler,
         ILogger<DescriptorBootPlan> logger,
         ExtensionBinder? extensions = null,
+        DescriptorHost? host = null,
         GeneratedEntitySource? generated = null)
     {
         ArgumentNullException.ThrowIfNull(validator);
@@ -114,6 +118,7 @@ internal sealed class DescriptorBootPlan
         _compiler = compiler;
         _logger = logger;
         _extensions = extensions;
+        _host = host ?? DescriptorHost.Empty;
         _generated = generated;
     }
 
@@ -195,7 +200,7 @@ internal sealed class DescriptorBootPlan
         WarnAboutUnhonouredBlocks(descriptor);
         EnsureServable(desired);
 
-        return new BootPlan(descriptor, desired, descriptorJson, PolicyCatalog.Build(descriptor, desired, _compiler));
+        return new BootPlan(descriptor, desired, descriptorJson, PolicyCatalog.Build(descriptor, desired, _compiler, _host));
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
@@ -18,7 +19,8 @@ internal sealed class ExtensionBinder(
     ICelCompiler compiler,
     IServiceProviderIsService services,
     ILogger<ExtensionBinder> logger,
-    TimeProvider? time = null)
+    TimeProvider? time = null,
+    IOptions<AlvoDeliveryOptions>? deliveries = null)
 {
     private readonly ConditionalWeakTable<PolicyCatalog, CatalogBinding> _bindings = new();
 
@@ -82,7 +84,7 @@ internal sealed class ExtensionBinder(
     private CatalogBinding Binding(PolicyCatalog catalog)
     {
         registry.Seal();
-        return _bindings.GetValue(catalog, primed => new(ExtensionBindingCompiler.Compile(registry, primed, compiler, services, Now)));
+        return _bindings.GetValue(catalog, primed => new(ExtensionBindingCompiler.Compile(registry, primed, compiler, services, Now, deliveries?.Value.ActionTimeout)));
     }
 
     /// <summary>One catalog's binding, and whether its unbound extensions were reported.</summary>

@@ -743,6 +743,32 @@ public sealed class ManagementToolsTests
         answer.ShouldContain("eventHandler");
     }
 
+    /// <summary>A host function is listed with the input JSON Schema a `function` action's `input` is checked against.</summary>
+    [Fact]
+    public async Task A_function_is_listed_with_its_input_schema()
+    {
+        var management = Substitute.For<IAlvoManagement>();
+        management.GetExtensionsAsync(Project, Arg.Any<CancellationToken>()).Returns(new ManagementExtensionCatalog
+        {
+            Items =
+            [
+                new ManagementExtension
+                {
+                    Id = "issue-invoice",
+                    Kind = AlvoExtensionKind.Function,
+                    Stage = AlvoExtensionStage.PostCommit,
+                    InputSchema = JsonDocument.Parse("""{"type":"object","properties":{"orderId":{"type":"string"}},"required":["orderId"]}""").RootElement,
+                },
+            ],
+        });
+
+        var function = JsonNode.Parse(await InvokeAsync(management, "get_extensions", []))!["items"]![0]!;
+
+        function["kind"]!.GetValue<string>().ShouldBe("function");
+        function["inputSchema"]!["required"]![0]!.GetValue<string>().ShouldBe("orderId");
+        ManagementTools.For(management, Project).Functions.Single(tool => tool.Name == "get_extensions").Description.ShouldContain("inputSchema");
+    }
+
     /// <summary>The descriptor read says per entity how many host extensions run there, so a hook case spends no extra call.</summary>
     [Fact]
     public async Task The_descriptor_read_counts_the_host_extensions_per_entity()

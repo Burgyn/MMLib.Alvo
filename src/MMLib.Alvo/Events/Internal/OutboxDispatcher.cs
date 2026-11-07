@@ -11,8 +11,8 @@ using System.Diagnostics.Metrics;
 namespace MMLib.Alvo.Events.Internal;
 
 /// <summary>
-/// The one thing that drains the outbox: claim a batch under a lease, deliver every after-hook each event is
-/// subscribed to, retire what was delivered and hand back what was not.
+/// The one thing that drains the outbox: claim a batch under a lease, fan each event out to the deliveries it is subscribed
+/// to — host handlers and descriptor actions alike — retire what was fanned out and hand back what was not.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -59,8 +59,8 @@ namespace MMLib.Alvo.Events.Internal;
 /// </para>
 /// <para>
 /// <b>There is no dispatcher-wide caller, and that is a correction rather than a simplification.</b> A hook
-/// condition's <c>@user.id</c> is resolved per event from the envelope's own <c>authid</c> by
-/// <see cref="EventSubscriptions"/>, because the actor an author means is the one who made the change and not
+/// condition's <c>@user.id</c> is resolved per event from the envelope's own <c>authid</c> by the fan-out
+/// (<see cref="DeliveryFanOut"/>), because the actor an author means is the one who made the change and not
 /// whoever happens to be draining the queue. A shared <see cref="AlvoContext.System"/> answered both
 /// <c>@user.id</c> and <c>@user.roles</c> with the framework's own identity — so
 /// <c>new.owner_id != @user.id</c> never matched and <c>'admin' in @user.roles</c> always did — and answered
@@ -85,9 +85,7 @@ namespace MMLib.Alvo.Events.Internal;
 /// <param name="store">The queue: claim under a lease, mark dispatched, release.</param>
 /// <param name="boot">The readiness signal this service waits on before it claims anything.</param>
 /// <param name="catalogs">The primed policy catalog every subscription is decided against.</param>
-/// <param name="evaluator">The evaluator every hook condition is judged by.</param>
-/// <param name="executor">Runs one matched hook's action; it decides nothing and catches nothing.</param>
-/// <param name="fanOut">Records the deliveries each claimed event fans out to, before its actions run.</param>
+/// <param name="fanOut">Records the deliveries each claimed event fans out to; each action then runs as its own delivery.</param>
 /// <param name="options">The validated poll interval, batch size, attempt ceiling and lease.</param>
 /// <param name="time">The clock the idle wait is measured on, so a test clock can drive the pump.</param>
 /// <param name="logger">Where a failed attempt, an abandoned event and a stopped pump are recorded.</param>
@@ -95,8 +93,6 @@ internal sealed class OutboxDispatcher(
     IOutboxStore store,
     AlvoBootState boot,
     IPolicyCatalogProvider catalogs,
-    IPredicateEvaluator evaluator,
-    EventActionExecutor executor,
     DeliveryFanOut fanOut,
     IOptions<AlvoEventOptions> options,
     TimeProvider time,
@@ -327,7 +323,7 @@ internal sealed class OutboxDispatcher(
 
         try
         {
-            await DeliverAsync(entry, round, stopped, stoppingToken).ConfigureAwait(false);
+            await DeliverAsync(entry, stopped, stoppingToken).ConfigureAwait(false);
         }
         catch (Exception failure) when (!stoppingToken.IsCancellationRequested)
         {
@@ -337,47 +333,22 @@ internal sealed class OutboxDispatcher(
     }
 
     /// <summary>
-    /// Runs every hook the entry's event is subscribed to, retires the entry, and counts it exactly once.
+    /// Fans the entry's event out, retires the entry, and counts it exactly once.
     /// </summary>
     /// <remarks>
-    /// The entry is retired <b>after</b> the last action and the counter increments <b>after</b> the retirement,
-    /// so "dispatched" means what <c>alvo.events.dispatched</c> claims it means: every matched hook ran and the
-    /// row is gone from the queue. An event that matched nothing takes the same path and increments
-    /// <c>alvo.events.filtered</c> instead — once per event, never per hook — and writes no execution-log entry
-    /// at all, which is the half of that criterion no counter can express.
-    /// <para>
-    /// <b>There is no per-hook progress, so a partial failure re-runs the hooks that already succeeded.</b> Two
-    /// hooks match, the first POSTs, the second throws: nothing is retired, the whole entry is released, and the
-    /// next attempt runs the first hook again. That is a consequence of at-least-once rather than an oversight —
-    /// the receiver is already told to deduplicate on the event's <c>id</c>
-    /// (<see cref="MMLib.Alvo.Events.IEmailSender"/> and <see cref="EventActionExecutor"/> both say so), and that
-    /// key is unchanged by a redelivery whichever hook triggers it. Recording per-hook progress would mean a
-    /// second piece of mutable state per entry to keep consistent with the row, which buys nothing a dedup key
-    /// does not already buy.
-    /// </para>
-    /// <para>
-    /// <b>Fan-out runs first.</b> A failing action re-runs the actions on the next attempt; the deliveries already
-    /// recorded are not touched, and a second fan-out of the event records nothing. An event that produced a delivery —
-    /// even a dead one — counts as dispatched, never filtered.
-    /// </para>
+    /// "Dispatched" means fanned out: every delivery the event is subscribed to is recorded — host handlers and descriptor
+    /// actions alike, each then run, retried and dead-lettered on its own — and the row is gone from the queue. An event that
+    /// fanned out to nothing increments <c>alvo.events.filtered</c> instead. A second fan-out of one event records nothing,
+    /// so an entry whose retirement failed is fanned out again harmlessly.
     /// </remarks>
-    private async Task DeliverAsync(
-        OutboxEntry entry, DrainRound round, Dictionary<string, TimeSpan> stopped, CancellationToken stoppingToken)
+    private async Task DeliverAsync(OutboxEntry entry, Dictionary<string, TimeSpan> stopped, CancellationToken stoppingToken)
     {
         var @event = AlvoEventJson.Read(entry.Payload);
-        var catalog = Catalog;
-        var deliveries = await FanOutAsync(entry, @event, catalog, stopped, stoppingToken).ConfigureAwait(false);
-        var hooks = EventSubscriptions.Matching(catalog, @event, evaluator, logger);
-
-        foreach (var hook in hooks)
-        {
-            round.Ran(hook.Path);
-            await RunAsync(hook, @event, stoppingToken).ConfigureAwait(false);
-        }
+        var deliveries = await FanOutAsync(entry, @event, Catalog, stopped, stoppingToken).ConfigureAwait(false);
 
         await store.MarkDispatchedAsync(entry.Id, stoppingToken).ConfigureAwait(false);
 
-        Counted(hooks.Count, deliveries).Add(1);
+        Counted(deliveries).Add(1);
     }
 
     /// <summary>
@@ -414,27 +385,6 @@ internal sealed class OutboxDispatcher(
         catch (Exception) when (!stoppingToken.IsCancellationRequested)
         {
             stopped[entry.PartitionKey] = RetryAfter(entry);
-            throw;
-        }
-    }
-
-    /// <summary>Runs one hook's action under its <c>alvo.delivery</c> span, recording how it ended.</summary>
-    /// <remarks>
-    /// The failure is rethrown untouched: the span observes it, the entry's release still decides it. A cancellation
-    /// while the host stops is neither outcome, exactly as <see cref="DispatchAsync"/> does not count it as an attempt
-    /// (a cancellation landing between the two filters reads as failed here only, which is harmless).
-    /// </remarks>
-    private async Task RunAsync(CompiledAfterHook hook, AlvoEvent @event, CancellationToken stoppingToken)
-    {
-        using var delivery = AlvoHookTelemetry.StartDelivery(hook.Path, @event);
-        try
-        {
-            await executor.ExecuteAsync(hook, @event, stoppingToken).ConfigureAwait(false);
-            AlvoHookTelemetry.Finish(delivery, AlvoHookTelemetry.Succeeded);
-        }
-        catch when (!stoppingToken.IsCancellationRequested)
-        {
-            AlvoHookTelemetry.Finish(delivery, AlvoHookTelemetry.Failed);
             throw;
         }
     }
@@ -493,11 +443,11 @@ internal sealed class OutboxDispatcher(
     private TimeSpan RetryAfter(OutboxEntry entry) => entry.Attempts * options.Value.PollInterval;
 
     /// <summary>
-    /// The counter one retired event increments: <c>alvo.events.dispatched</c> when it matched a hook or fanned out to any
-    /// delivery — a dead one included — and <c>alvo.events.filtered</c> only when it reached nothing at all.
+    /// The counter one retired event increments: <c>alvo.events.dispatched</c> when it fanned out to any delivery — a dead one
+    /// included — and <c>alvo.events.filtered</c> only when it reached nothing at all.
     /// </summary>
-    internal static Counter<long> Counted(int matchedHooks, int deliveries) =>
-        matchedHooks == 0 && deliveries == 0 ? AlvoEventMetrics.Filtered : AlvoEventMetrics.Dispatched;
+    internal static Counter<long> Counted(int deliveries) =>
+        deliveries == 0 ? AlvoEventMetrics.Filtered : AlvoEventMetrics.Dispatched;
 
     /// <summary>
     /// The primed catalog, or a refusal — never an empty one.

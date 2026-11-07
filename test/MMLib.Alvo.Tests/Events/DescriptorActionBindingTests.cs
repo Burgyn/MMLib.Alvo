@@ -6,6 +6,7 @@ using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Tests.Expressions;
@@ -31,17 +32,14 @@ namespace MMLib.Alvo.Tests.Events;
 /// about the engine that will judge it in production rather than about a substitute that answered false.
 /// </para>
 /// </remarks>
-public sealed class EventSubscriptionsTests : IDisposable
+public sealed class DescriptorActionBindingTests
 {
-    /// <inheritdoc/>
-    public void Dispose() => _logger.Dispose();
-
     [Fact]
     public void An_event_selects_only_the_hooks_of_its_own_operation()
     {
         var matched = Matching(CatalogWithAHookOnEveryPoint, Event("entity.deals.updated"));
 
-        matched.ShouldHaveSingleItem().Path.ShouldContain("afterUpdate");
+        matched.ShouldHaveSingleItem().Id.ShouldContain("afterUpdate");
     }
 
     [Theory]
@@ -50,7 +48,7 @@ public sealed class EventSubscriptionsTests : IDisposable
     [InlineData("entity.deals.deleted", "afterDelete")]
     public void The_type_the_driver_wrote_selects_the_point_named_after_that_operation(string type, string point)
         => Matching(CatalogWithAHookOnEveryPoint, Event(type))
-            .ShouldHaveSingleItem().Path.ShouldContain(point);
+            .ShouldHaveSingleItem().Id.ShouldContain(point);
 
     [Fact]
     public void An_event_for_an_entity_with_no_hooks_selects_nothing()
@@ -138,82 +136,40 @@ public sealed class EventSubscriptionsTests : IDisposable
     /// predicate is a fail-closed refusal, exactly as an unprimed catalog denies every operation.
     /// </summary>
     [Fact]
-    public void A_condition_that_throws_selects_nothing_rather_than_everything()
-        => EventSubscriptions
-            .Matching(CatalogConditionedOnWinning, Updated("won", "lead"), new ThrowingEvaluator(), _logger)
-            .ShouldBeEmpty();
+    public void A_condition_that_throws_is_judged_failed_rather_than_matched()
+        => Judgements(CatalogConditionedOnWinning, Updated("won", "lead"), new ThrowingEvaluator())
+            .ShouldHaveSingleItem().Verdict.ShouldBe(HandlerVerdict.Failed);
 
     /// <summary>
     /// The refusal is diagnosable at Debug and nothing louder: one line per event and per hook is the noise the
     /// whole execution-log criterion exists to prevent.
     /// </summary>
     [Fact]
-    public void A_condition_that_throws_is_recorded_at_debug_naming_the_hook_and_the_event()
+    public void A_condition_that_throws_records_its_exception_type_and_never_its_message()
+        => Judgements(CatalogConditionedOnWinning, Updated("won", "lead"), new ThrowingEvaluator())
+            .ShouldHaveSingleItem().ErrorType.ShouldBe(nameof(InvalidOperationException));
+
+    [Fact]
+    public void A_failing_cel_function_in_a_condition_is_judged_failed_by_its_type_alone()
     {
-        var @event = Updated("won", "lead");
+        var judgement = Judgements(CatalogConditionedOnWinning, Updated("won", "lead"), new FailingFunctionEvaluator()).ShouldHaveSingleItem();
 
-        EventSubscriptions.Matching(
-            CatalogConditionedOnWinning, @event, new ThrowingEvaluator(), _logger).ShouldBeEmpty();
-
-        var line = _logger.Entries.ShouldHaveSingleItem();
-        line.Level.ShouldBe(LogLevel.Debug);
-        line.Message.ShouldContain("/entities/deals/hooks/afterUpdate/0");
-        line.Message.ShouldContain(@event.Id.ToString());
-        line.Exception.ShouldNotBeNull();
+        judgement.Verdict.ShouldBe(HandlerVerdict.Failed);
+        judgement.ErrorType.ShouldBe(nameof(CelFunctionException));
     }
 
-    /// <summary>
-    /// A CEL function that fails inside an after-hook condition drops the hook (the spec sanctions it: an event
-    /// consumer cannot refuse a write that already committed) but is <b>loud</b>: a Warning naming the hook, the
-    /// function and the event, carrying the host's exception — never the event's own record data.
-    /// </summary>
     [Fact]
-    public void A_failing_cel_function_in_a_condition_drops_the_hook_and_warns_without_the_row()
-    {
-        var @event = Updated("won", "lead");
-
-        EventSubscriptions.Matching(
-            CatalogConditionedOnWinning, @event, new FailingFunctionEvaluator(), _logger).ShouldBeEmpty();
-
-        var line = _logger.Entries.ShouldHaveSingleItem();
-        line.Level.ShouldBe(LogLevel.Warning);
-        line.Message.ShouldContain("/entities/deals/hooks/afterUpdate/0");
-        line.Message.ShouldContain("normalizePhone");
-        line.Message.ShouldContain(@event.Id.ToString());
-        line.Message.ShouldNotContain("won");
-        line.Message.ShouldNotContain("lead");
-        line.Exception.ShouldBeOfType<InvalidOperationException>().Message.ShouldBe("the host broke");
-    }
-
-    /// <summary>
-    /// An operator's failure in an after-hook condition — here a division by a zero field, which fails closed in a hook
-    /// condition (spec §5.6, D-7) — drops the hook exactly as a failing function does: a Warning naming the hook, the
-    /// operator and the event, through the real compiled condition and the product's own evaluator, and never the
-    /// record's values.
-    /// </summary>
-    [Fact]
-    public void An_arithmetic_failure_in_a_condition_drops_the_hook_and_warns_without_the_row()
+    public void An_arithmetic_failure_in_a_condition_is_judged_failed_without_the_row()
     {
         var catalog = Catalog(new EntityHooks { AfterCreate = [Hook("new.qty / new.zero > 1")] });
         var @event = Event("entity.deals.created", record: Record(("qty", 4242L), ("zero", 0L)));
 
-        Matching(catalog, @event).ShouldBeEmpty();
+        var judgement = Judgements(catalog, @event).ShouldHaveSingleItem();
 
-        var line = _logger.Entries.ShouldHaveSingleItem();
-        line.Level.ShouldBe(LogLevel.Warning);
-        line.Message.ShouldContain("/entities/deals/hooks/afterCreate/0");
-        line.Message.ShouldContain("_/_");
-        line.Message.ShouldContain(@event.Id.ToString());
-        line.Message.ShouldNotContain("4242");
-        line.Exception.ShouldBeOfType<CelFunctionException>().Message.ShouldNotContain("4242");
+        judgement.Verdict.ShouldBe(HandlerVerdict.Failed);
+        judgement.ErrorType.ShouldBe(nameof(CelFunctionException));
     }
 
-    /// <summary>
-    /// After the commit, an after-hook condition's <c>now()</c> is the event's time, never the dispatch's (HX-11 Ruling 1):
-    /// the outbox may deliver it long after the write.
-    /// </summary>
-    /// <param name="secondsLater">How long after the event's time the row says it happened.</param>
-    /// <param name="selected">Whether the hook fires.</param>
     [Theory]
     [InlineData(0, true)]
     [InlineData(1, false)]
@@ -246,7 +202,7 @@ public sealed class EventSubscriptionsTests : IDisposable
         var catalog = HostFunctionCatalog(TestCelFunctions.IsBlank, "!isBlank(new.note)");
         var @event = Event("entity.deals.created", record: Record(("note", note)));
 
-        EventSubscriptions.Matching(catalog, @event, CelFixtures.Evaluator, _logger).Count.ShouldBe(selected ? 1 : 0, note);
+        Matching(catalog, @event).Count.ShouldBe(selected ? 1 : 0, note);
     }
 
     /// <summary>
@@ -254,38 +210,24 @@ public sealed class EventSubscriptionsTests : IDisposable
     /// the product's own evaluator.
     /// </summary>
     [Fact]
-    public void A_host_function_that_throws_in_a_condition_drops_the_hook_with_a_warning()
+    public void A_host_function_that_throws_in_a_condition_is_judged_failed()
     {
         var boom = TestCelFunctions.Host(
             "boom", CelValueType.Bool, _ => throw new InvalidOperationException("the host broke"),
             TestCelFunctions.Parameter("s", CelValueType.String, nullable: true));
         var catalog = HostFunctionCatalog(boom, "boom(new.note)");
 
-        EventSubscriptions.Matching(
-            catalog, Event("entity.deals.created", record: Record(("note", "x"))), CelFixtures.Evaluator, _logger)
-            .ShouldBeEmpty();
-
-        var line = _logger.Entries.ShouldHaveSingleItem();
-        line.Level.ShouldBe(LogLevel.Warning);
-        line.Message.ShouldContain("boom");
-        line.Message.ShouldNotContain("\"x\"");
-        line.Exception.ShouldBeOfType<InvalidOperationException>().Message.ShouldBe("the host broke");
+        Judgements(catalog, Event("entity.deals.created", record: Record(("note", "x"))))
+            .ShouldHaveSingleItem().Verdict.ShouldBe(HandlerVerdict.Failed);
     }
 
-    /// <summary>
-    /// A call over <c>@user.id</c> reads that value, so an event that records no actor selects nothing — even for
-    /// a negated condition that would be true of the anonymous id. This is the row that fails if the gate cannot
-    /// see through the call: without the gate, <c>!isActor(@user.id)</c> is true for the reserved anonymous id.
-    /// </summary>
     [Fact]
     public void A_call_over_user_id_is_not_selected_when_the_event_records_no_actor()
     {
         var catalog = HostFunctionCatalog(IsActor, "!isActor(@user.id)");
 
-        EventSubscriptions.Matching(
-            catalog, Event("entity.deals.created", record: Record(("note", "x")), authId: null), CelFixtures.Evaluator, _logger)
-            .ShouldBeEmpty();
-        _logger.Entries.ShouldHaveSingleItem().Message.ShouldContain("@user.id");
+        Judgements(catalog, Event("entity.deals.created", record: Record(("note", "x")), authId: null))
+            .ShouldHaveSingleItem().Unread.ShouldBe("@user.id");
     }
 
     /// <summary>A call over <c>@user.id</c> is judged against the envelope's actor.</summary>
@@ -298,8 +240,7 @@ public sealed class EventSubscriptionsTests : IDisposable
     {
         var catalog = HostFunctionCatalog(IsActor, condition);
 
-        EventSubscriptions.Matching(
-            catalog, Event("entity.deals.created", record: Record(("note", "x")), authId: Actor), CelFixtures.Evaluator, _logger)
+        Matching(catalog, Event("entity.deals.created", record: Record(("note", "x")), authId: Actor))
             .Count.ShouldBe(selected ? 1 : 0);
     }
 
@@ -345,11 +286,7 @@ public sealed class EventSubscriptionsTests : IDisposable
         var @event = OwnedBy(Bystander, actedBy: null);
 
         Matching(CatalogConditionedOnAnotherActor, @event).ShouldBeEmpty();
-
-        var line = _logger.Entries.ShouldHaveSingleItem();
-        line.Level.ShouldBe(LogLevel.Debug);
-        line.Message.ShouldContain("@user.id");
-        line.Message.ShouldContain(@event.Id.ToString());
+        Judgements(CatalogConditionedOnAnotherActor, @event).ShouldHaveSingleItem().Unread.ShouldBe("@user.id");
     }
 
     /// <summary>
@@ -363,7 +300,7 @@ public sealed class EventSubscriptionsTests : IDisposable
     [Fact]
     public void A_hook_that_never_reads_user_id_is_still_selected_for_an_actorless_event()
         => Matching(CatalogWithAHookOnEveryPoint, OwnedBy(Bystander, actedBy: null))
-            .ShouldHaveSingleItem().Path.ShouldContain("afterUpdate");
+            .ShouldHaveSingleItem().Id.ShouldContain("afterUpdate");
 
     /// <summary>
     /// A condition's <c>@tenant.id</c> is the tenant the envelope's <c>tenantid</c> records — the writer's, as at the
@@ -393,10 +330,7 @@ public sealed class EventSubscriptionsTests : IDisposable
         var @event = Event("entity.deals.updated", record: Record(("tenant_id", Guid.Parse(TenantA))), oldRecord: Record());
 
         Matching(CatalogConditionedOnAnotherTenant, @event).ShouldBeEmpty("a negated comparison against an absent tenant would otherwise pass every tenant");
-        var line = _logger.Entries.ShouldHaveSingleItem();
-        line.Level.ShouldBe(LogLevel.Debug);
-        line.Message.ShouldContain("@tenant.id");
-        line.Message.ShouldContain(@event.Id.ToString());
+        Judgements(CatalogConditionedOnAnotherTenant, @event).ShouldHaveSingleItem().Unread.ShouldBe("@tenant.id");
     }
 
     /// <summary>
@@ -415,8 +349,7 @@ public sealed class EventSubscriptionsTests : IDisposable
             oldRecord: Record(),
             tenantId: tenantId);
 
-        Matching(CatalogConditionedOnAnotherTenant, @event).ShouldBeEmpty();
-        _logger.Entries.ShouldHaveSingleItem().Message.ShouldContain("@tenant.id");
+        Judgements(CatalogConditionedOnAnotherTenant, @event).ShouldHaveSingleItem().Unread.ShouldBe("@tenant.id");
     }
 
     /// <summary>
@@ -449,7 +382,8 @@ public sealed class EventSubscriptionsTests : IDisposable
     {
         Matching(CatalogConditionedOnAdmins, Event("entity.deals.updated", record: Record(), oldRecord: Record(), authClaims: claims))
             .ShouldBeEmpty("'!(admin in roles)' against no roles at all would fire for every event, the admin's included");
-        _logger.Entries.ShouldHaveSingleItem().Message.ShouldContain("@user.roles");
+        Judgements(CatalogConditionedOnAdmins, Event("entity.deals.updated", record: Record(), oldRecord: Record(), authClaims: claims))
+            .ShouldHaveSingleItem().Unread.ShouldBe("@user.roles");
     }
 
     /// <summary>
@@ -515,15 +449,26 @@ public sealed class EventSubscriptionsTests : IDisposable
             => Task.CompletedTask;
     }
 
-    private readonly CapturingLogger _logger = new();
-
     private static readonly DateTimeOffset _eventTime = new(2026, 8, 3, 10, 0, 0, TimeSpan.Zero);
 
     private const string Actor = "019000aa-0000-7000-8000-00000000a001";
     private const string Bystander = "019000aa-0000-7000-8000-00000000b002";
 
-    private IReadOnlyList<CompiledAfterHook> Matching(PolicyCatalog catalog, AlvoEvent @event) =>
-        EventSubscriptions.Matching(catalog, @event, CelFixtures.Evaluator, _logger);
+    private static List<BoundHandler> Matching(PolicyCatalog catalog, AlvoEvent @event) =>
+        [.. Selected(catalog, @event, CelFixtures.Evaluator).Where(pair => pair.Judgement.Verdict is HandlerVerdict.Match).Select(pair => pair.Handler)];
+
+    private static List<HandlerJudgement> Judgements(PolicyCatalog catalog, AlvoEvent @event, IPredicateEvaluator? evaluator = null) =>
+        [.. Selected(catalog, @event, evaluator ?? CelFixtures.Evaluator).Select(pair => pair.Judgement)];
+
+    /// <summary>The descriptor actions the fan-out selects for <paramref name="event"/>, each with the judgement it records.</summary>
+    private static IEnumerable<(BoundHandler Handler, HandlerJudgement Judgement)> Selected(
+        PolicyCatalog catalog, AlvoEvent @event, IPredicateEvaluator evaluator)
+    {
+        var caller = EnvelopeReading.CallerOf(@event);
+        var bindings = new ExtensionBindings(DescriptorActionBindings.Bind(catalog, TimeSpan.FromSeconds(30)));
+
+        return bindings.Selecting(@event).Select(pair => (pair.Handler, HandlerCondition.Judge(pair.Condition, @event, evaluator, caller)));
+    }
 
     /// <summary>
     /// The schema every catalog below is compiled against.

@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Functions in the descriptor** (HX-15): `IAlvoFunction<TInput>`, registered with `AddFunction<T>(name)`, is called
+  from an after-hook or an automation rule as `{"type": "function", "name": …, "input": {…}}` — each `input` value a
+  literal or `{"$cel": "…"}` over the triggering row, checked at apply against the JSON Schema exported for `TInput`
+  (an unknown name or property gets the closest one as the fix; a missing required property, a wrong literal type and
+  a name both registered and under `functions` are refused). `AlvoFunctionContext` carries the event, a system data
+  session in its tenant and `Steps`; `AlvoFunctionSkippedException` ends a call with nothing to do. The extension
+  catalog lists each function (`AlvoExtensionKind.Function = 11`) with its `ManagementExtension.InputSchema`. Docs:
+  *Functions in the descriptor*.
+- **Dashboard: function hooks and the Automations page** (HX-15): an entity's hooks editor offers `function` at the
+  after-points, with the host's registered functions and a form for the input (a value or a CEL expression per
+  property, required ones first). *Automations* leaves *Not yet*: it lists the applied rules read-only — trigger in
+  words, condition, actions — with a link to each rule's deliveries, which Operations filters by subscriber prefix;
+  Operations lists descriptor-action deliveries on a host with no registered handler too.
+- **`AddRequiredSecret(name)`** (HX-15): a host declares a secret it cannot run without; the start is refused while the
+  secret store holds no non-empty value under that name (a dashboard-first host whose store is writable stands down
+  instead, so Settings → Secrets stays reachable, and refuses an apply or a rollback until it restarts). A store that
+  fails refuses the start naming its exception type. An apply warns, by name, about a `secretRef` the store does not
+  hold yet. No secret value reaches a log, a refusal or a warning.
+- **Automation and `entity.update`** (HX-15): the `automation` block runs — an `entity.<entity>.<created|updated|deleted>`
+  or a five-field UTC cron trigger (once per tenant on a tenanted project, with an `IAlvoTenantCatalog`), a condition, and
+  `webhook`, `email`, `function` and `entity.update` actions, each its own retried delivery. `entity.update` writes its
+  target exactly once per event through the command ledger, in the event's tenant: a record of another tenant is dead
+  `record-not-found`. It runs as the system caller, which holds `admin`, and the target's rules still apply — an
+  `update` rule that denies ends the delivery dead. Its payload is measured like a before-hook `mutate`: a literal
+  that breaks a field's facet, or a create that leaves out a required field, is refused at apply, and a `$cel` value
+  that breaks one is dead `write-refused`. Its condition and values may read the triggering row's `hidden` fields; a
+  rule that re-triggers itself stops at the chain-depth limit. Docs: *Automation*.
 - **Generated typed entities** (HX-17): mark the descriptor, or a Management API snapshot of it
   (`GET …/projects/{p}/descriptor`), as `<AdditionalFiles Include="…" AlvoDescriptor="true" />`, with an optional
   `AlvoNamespace`, and the build generates the following, all implementing `IAlvoEntity`:
@@ -371,6 +398,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **A `secretRef` or `headersSecretRef` outside the secret-name grammar is refused at apply** (HX-15): the schema now
+  carries the name `pattern`, and the refusal names the slot without repeating its value, which may be the secret
+  itself pasted in the wrong place.
+- **Every descriptor action is its own delivery** (HX-15): an after-hook's `webhook`/`email` (and every automation
+  action) is fanned out as a delivery of kind `action` (`function` for a function), retried on `AlvoRetryPolicy.Default`,
+  dead-lettered and visible on Operations like a handler; the outbox only fans out, so a failing action no longer
+  re-runs its siblings or holds its event. Its subscriber id is the point's pointer plus a content hash
+  (`/entities/orders/hooks/afterCreate#1f0c9a2e`), no longer `/…/afterCreate/0`; `AlvoHookRecorder.AssertRan` takes the
+  pointer alone. A condition that throws records a dead `when-failed` delivery instead of dropping the hook, and an
+  event past the chain-depth limit records dead `chain-depth-exceeded` rows for its actions. Editing an action makes a
+  new subscriber: the old one's pending rows stay unclaimed until swept, and an edited cron rule leaves its old stored
+  schedule row inert.
+- **`FunctionAction.Input` is a `FunctionInput?`, not a `string?`** (HX-15): a `function` action's `input` is an object of
+  literals and `{"$cel": "…"}` values (`FunctionInput.Fields`), checked at apply against the registered function's input
+  schema; the JSONata string form parses into `FunctionInput.Transform` and stays refused. Code that read the string
+  reads `Input.Transform`.
+- **An `entity.update` payload is stricter at apply** (HX-15): a `null` into a required field is refused on an update
+  as well as a create, and a string value containing `{{…}}` is refused — it was never rendered and would be written
+  verbatim; use `{"$cel": "…"}`. A function input's number property no longer accepts a string literal. A literal
+  outside an enum's `values`, past `maxLength` or failing a `format` is refused, and so is a create that leaves out a
+  required field.
+- **`AlvoExtensionKind` gains `Function` (11)** (HX-15): an exhaustive `switch` over it gains a case.
+- **The assistant eval case `function_action_refused` is `unregistered_function_refused`** (HX-15): a descriptor may call
+  a host function now, so the case grades a request for a function the host does not register.
 - **`ITimerStore` is a new provider obligation** (HX-13): a data provider that implements `IOutboxStore` implements
   `ITimerStore` over the same database, so a timer fire or a schedule advance and its outbox append commit together;
   `TimerStoreContractTests` (`MMLib.Alvo.Testing`) is the suite it must pass. Its schedule and migration writes take an
@@ -1071,6 +1122,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A `null` in an `entity.update` payload** (#328, HX-15) is the null literal it was written as: refused at apply into a
+  required field, written as `null` into an optional one.
 - **A rollup added to a populated parent is filled by the apply** (HX-11), instead of reading empty until a child write
   happened to recompute it; an apply that changes a rollup's definition recomputes it too.
 

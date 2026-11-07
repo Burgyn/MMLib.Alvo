@@ -22,7 +22,7 @@ public sealed class EvalCasesTests
     [InlineData("rollup_rentals_count")]
     [InlineData("unique_part_per_order")]
     [InlineData("own_orders_only")]
-    [InlineData("function_action_refused")]
+    [InlineData("unregistered_function_refused")]
     [InlineData("can_alvo_call_http")]
     [InlineData("extension_named_not_duplicated")]
     [InlineData("bound_field_removal_refused")]

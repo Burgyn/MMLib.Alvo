@@ -13,12 +13,16 @@ public class HookShapeTests
     [InlineData("afterCreate", """{"action":{"type":"webhook","endpoint":"desk","payload":"[{{new.total}}]"}}""")]
     [InlineData("afterUpdate", """{"action":{"type":"email","template":"t","to":"a@b.c"}}""")]
     [InlineData("afterUpdate", """{"action":{"type":"email","template":"t","to":"a@b.c"},"condition":"changed(stage)"}""")]
+    [InlineData("afterCreate", """{"action":{"type":"function","name":"f"}}""")]
+    [InlineData("afterCreate", """{"action":{"type":"function","name":"f","input":{"a":"x","b":{"$cel":"new.total"},"c":1,"d":null}}}""")]
     public void A_shape_the_editor_writes_is_drawable(string point, string json)
         => HookShape.Undrawable(JsonNode.Parse(json), point).ShouldBeNull();
 
     [Theory]
-    [InlineData("afterUpdate", """{"action":{"type":"entity.update","entity":"x","payload":{}}}""", "'entity.update' is refused")]
-    [InlineData("afterUpdate", """{"action":{"type":"function","name":"f"}}""", "'function' is refused")]
+    [InlineData("afterUpdate", """{"action":{"type":"entity.update","entity":"x","payload":{}}}""", "'entity.update' is not one this editor draws")]
+    [InlineData("afterUpdate", """{"action":{"type":"function","name":"f","input":{"a":{"b":1}}}}""", "'a'")]
+    [InlineData("afterUpdate", """{"action":{"type":"function","name":"f","input":"$merge([new])"}}""", "input is not an object")]
+    [InlineData("afterUpdate", """{"action":{"type":"function","name":7}}""", "'name' is missing")]
     [InlineData("afterUpdate", """{"action":{"type":"http.call","url":"https://x"}}""", "'http.call' is refused")]
     [InlineData("afterUpdate", """{"action":{"type":"email","template":"t","to":"a@b.c","data":"{{new.a}}"}}""", "'data'")]
     [InlineData("afterUpdate", """{"action":{"type":"sms","to":"x"}}""", "not one the schema declares")]

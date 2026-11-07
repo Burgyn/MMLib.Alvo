@@ -1,10 +1,13 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Functions.Internal;
 using MMLib.Alvo.Lifecycle;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 
 namespace MMLib.Alvo.Rules;
 
@@ -16,14 +19,14 @@ namespace MMLib.Alvo.Rules;
 /// not at request time" true.
 /// </summary>
 /// <remarks>
-/// <see cref="Build"/>/<see cref="TryBuild"/> compile rules for exactly the entities present in the
+/// <see cref="Build(AlvoDescriptor, SchemaModel, ICelCompiler)"/>/<see cref="TryBuild(AlvoDescriptor, SchemaModel, ICelCompiler, out PolicyCatalog?, out IReadOnlyList{DescriptorValidationError})"/> compile rules for exactly the entities present in the
 /// <c>schema</c> argument, not every entity the <c>descriptor</c> argument declares. This is correct
 /// for a descriptor entity that is legitimately absent from the mapped schema (a dynamic-storage
 /// entity, filtered out by <c>DescriptorToSchemaMapper</c>, which this compiler does not yet police),
 /// but it means a descriptor entity with no matching schema entry for some other reason — a caller
 /// building the two arguments by hand, inconsistently, rather than from
 /// <c>DescriptorToSchemaMapper.Map(descriptor)</c> — compiles with no error for rules on that entity: a
-/// mismatch neither <see cref="Build"/> nor <see cref="TryBuild"/> can detect from these two arguments
+/// mismatch neither <see cref="Build(AlvoDescriptor, SchemaModel, ICelCompiler)"/> nor <see cref="TryBuild(AlvoDescriptor, SchemaModel, ICelCompiler, out PolicyCatalog?, out IReadOnlyList{DescriptorValidationError})"/> can detect from these two arguments
 /// alone. Callers must keep <c>schema</c> consistent with <c>descriptor</c> (in practice, by passing
 /// <c>DescriptorToSchemaMapper.Map(descriptor)</c>'s own output), which every call site in this
 /// codebase does by construction.
@@ -37,11 +40,13 @@ public sealed class PolicyCatalog
     /// <param name="roles">The project's declared roles, built from the same descriptor.</param>
     /// <param name="schema">The schema every rule in <paramref name="entities"/> was compiled against.</param>
     /// <param name="managementAccess">The compiled <c>access</c> levels, built from the same descriptor in the same pass.</param>
+    /// <param name="automation">The enabled automation rules, compiled in the same pass; empty when the descriptor declares none.</param>
     internal PolicyCatalog(
         IReadOnlyDictionary<string, EntityPolicy> entities,
         RoleCatalog roles,
         SchemaModel schema,
-        ManagementAccessCatalog managementAccess)
+        ManagementAccessCatalog managementAccess,
+        IReadOnlyList<CompiledAutomationRule>? automation = null)
     {
         ArgumentNullException.ThrowIfNull(entities);
         ArgumentNullException.ThrowIfNull(roles);
@@ -51,7 +56,14 @@ public sealed class PolicyCatalog
         Roles = roles;
         Schema = schema;
         ManagementAccess = managementAccess;
+        Automation = automation ?? [];
     }
+
+    /// <summary>Gets the enabled automation rules, in declaration order; a disabled rule is validated and not compiled here.</summary>
+    internal IReadOnlyList<CompiledAutomationRule> Automation { get; }
+
+    /// <summary>Gets every entity's compiled policy, keyed by entity name.</summary>
+    internal IEnumerable<KeyValuePair<string, EntityPolicy>> Entities => _entities;
 
     /// <summary>
     /// Gets the roles this project recognises: the built-ins plus the descriptor's <c>auth.roles</c>.
@@ -70,7 +82,7 @@ public sealed class PolicyCatalog
 
     /// <summary>
     /// Gets the schema every rule in this catalog was compiled and type-checked against — the same
-    /// <see cref="SchemaModel"/> handed to <see cref="Build"/>.
+    /// <see cref="SchemaModel"/> handed to <see cref="Build(AlvoDescriptor, SchemaModel, ICelCompiler)"/>.
     /// </summary>
     /// <remarks>
     /// <see langword="internal"/> for exactly the reason <see cref="Roles"/> is: a consumer reads the
@@ -99,9 +111,19 @@ public sealed class PolicyCatalog
     /// <param name="compiler">The CEL compiler every rule and field flag is compiled through.</param>
     /// <returns>The built catalog.</returns>
     /// <exception cref="DescriptorValidationException">Any rule, tenant scope, or field flag failed to compile.</exception>
-    public static PolicyCatalog Build(AlvoDescriptor descriptor, SchemaModel schema, ICelCompiler compiler)
+    public static PolicyCatalog Build(AlvoDescriptor descriptor, SchemaModel schema, ICelCompiler compiler) =>
+        Build(descriptor, schema, compiler, DescriptorHost.Empty);
+
+    /// <summary>Builds a <see cref="PolicyCatalog"/> whose actions compile against <paramref name="host"/>.</summary>
+    /// <param name="descriptor">The project descriptor.</param>
+    /// <param name="schema">The schema <paramref name="descriptor"/> maps to.</param>
+    /// <param name="compiler">The CEL compiler.</param>
+    /// <param name="host">The functions and services the host registers.</param>
+    /// <returns>The built catalog.</returns>
+    /// <exception cref="DescriptorValidationException">Anything failed to compile.</exception>
+    internal static PolicyCatalog Build(AlvoDescriptor descriptor, SchemaModel schema, ICelCompiler compiler, DescriptorHost host)
     {
-        if (!TryBuild(descriptor, schema, compiler, out var catalog, out var errors))
+        if (!TryBuild(descriptor, schema, compiler, host, out var catalog, out var errors))
         {
             throw new DescriptorValidationException(new DescriptorValidationResult(errors));
         }
@@ -121,12 +143,30 @@ public sealed class PolicyCatalog
         SchemaModel schema,
         ICelCompiler compiler,
         out PolicyCatalog? catalog,
+        out IReadOnlyList<DescriptorValidationError> errors) =>
+        TryBuild(descriptor, schema, compiler, DescriptorHost.Empty, out catalog, out errors);
+
+    /// <summary>Attempts to build a <see cref="PolicyCatalog"/> whose actions compile against <paramref name="host"/>.</summary>
+    /// <param name="descriptor">The project descriptor.</param>
+    /// <param name="schema">The schema <paramref name="descriptor"/> maps to.</param>
+    /// <param name="compiler">The CEL compiler.</param>
+    /// <param name="host">The functions and services the host registers.</param>
+    /// <param name="catalog">The built catalog, when everything compiled; otherwise <see langword="null"/>.</param>
+    /// <param name="errors">Every compilation problem found; empty on success.</param>
+    /// <returns><see langword="true"/> when everything compiled.</returns>
+    internal static bool TryBuild(
+        AlvoDescriptor descriptor,
+        SchemaModel schema,
+        ICelCompiler compiler,
+        DescriptorHost host,
+        out PolicyCatalog? catalog,
         out IReadOnlyList<DescriptorValidationError> errors)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(compiler);
-        return PolicyCatalogBuilder.TryBuild(descriptor, schema, compiler, out catalog, out errors);
+        ArgumentNullException.ThrowIfNull(host);
+        return PolicyCatalogBuilder.TryBuild(descriptor, schema, compiler, host, out catalog, out errors);
     }
 
     /// <summary>Looks up an entity's compiled policy.</summary>
@@ -235,6 +275,10 @@ internal sealed record EntityAfterHooks(
         DataOperation.Delete => AfterDelete,
         _ => [],
     };
+
+    /// <summary>The three lists by the handler verb whose event selects them.</summary>
+    internal IEnumerable<(HandlerVerb Verb, IReadOnlyList<CompiledAfterHook> Hooks)> ByVerb() =>
+        [(HandlerVerb.Created, AfterCreate), (HandlerVerb.Updated, AfterUpdate), (HandlerVerb.Deleted, AfterDelete)];
 }
 
 /// <summary>
@@ -263,7 +307,14 @@ internal sealed record CompiledAfterHook(
     CompiledExpression? Condition,
     RequiredContext Required,
     CompiledAction Action,
-    bool ReadsRoles = false);
+    bool ReadsRoles = false)
+{
+    /// <summary>
+    /// Gets the subscriber id its deliveries are recorded under: the point's pointer, <c>#</c> and a hash of the condition and
+    /// action (<see cref="DescriptorActionIds"/>); <see cref="Path"/> for a hook built by hand.
+    /// </summary>
+    internal string SubscriberId { get; init; } = Path;
+}
 
 /// <summary>
 /// One compiled action: the parsed descriptor action, plus every <c>{{…}}</c> template it declares, already
@@ -312,7 +363,27 @@ internal sealed record CompiledAction(
     AutomationAction Action,
     IReadOnlyDictionary<string, AlvoTemplate> Templates,
     WebhookTarget? Endpoint,
-    string TypeName);
+    string TypeName)
+{
+    private static readonly Dictionary<string, CompiledValue> _noFields = new(StringComparer.Ordinal);
+
+    /// <summary>Gets the host function a <c>function</c> action calls; <see langword="null"/> for every other type.</summary>
+    internal FunctionRegistration? Function { get; init; }
+
+    /// <summary>Gets a function's input or an <c>entity.update</c>'s payload, by property or field; empty otherwise.</summary>
+    internal IReadOnlyDictionary<string, CompiledValue> Fields { get; init; } = _noFields;
+
+    /// <summary>Gets the entity an <c>entity.update</c> writes; <see langword="null"/> for every other type.</summary>
+    internal string? Target { get; init; }
+
+    /// <summary>Gets the record an <c>entity.update</c> patches; <see langword="null"/> for a create or another type.</summary>
+    internal AlvoTemplate? RecordId { get; init; }
+}
+
+/// <summary>One value of a function's input or an <c>entity.update</c>'s payload: a JSON literal or a compiled expression.</summary>
+/// <param name="Literal">The literal, as written — JSON <c>null</c> included; <see langword="null"/> for an expression.</param>
+/// <param name="Expression">The compiled CEL, over the triggering row's images; <see langword="null"/> for a literal.</param>
+internal sealed record CompiledValue(JsonElement? Literal, CompiledExpression? Expression);
 
 /// <summary>
 /// The compiled <c>USING</c>/<c>WITH CHECK</c> pair for one operation. Exactly Postgres's

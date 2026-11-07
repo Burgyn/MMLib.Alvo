@@ -151,13 +151,14 @@ internal static partial class EvalCases
     }
 
     /// <summary>
-    /// Nothing proposed touches a hook — a <c>function</c> action is refused, and a <c>webhook</c> or <c>http.call</c>
-    /// substitute is not what was asked — the capability report was read, and the turn answered.
+    /// Nothing proposed touches a hook — the host registers no invoicing function, so a <c>function</c> action naming one
+    /// is refused at apply, and a <c>webhook</c> or <c>http.call</c> substitute is not what was asked — the capability report
+    /// or the extension catalog was read, and the turn answered.
     /// </summary>
-    private static Verdict FunctionActionRefused(TurnRecord turn)
+    private static Verdict UnregisteredFunctionRefused(TurnRecord turn)
     {
         var hooks = turn.ChangedPaths.Any(path => path.Contains("/hooks", StringComparison.Ordinal));
-        var read = turn.ToolCalls.Contains(Capabilities);
+        var read = turn.ToolCalls.Contains(Capabilities) || turn.ToolCalls.Contains(Extensions);
         return Verdict.When(
             !hooks && read && turn.Answer.Trim().Length > 0,
             $"proposesHook={hooks} readCapabilities={read}");

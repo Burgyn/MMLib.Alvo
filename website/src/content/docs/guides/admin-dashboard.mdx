@@ -159,8 +159,9 @@ a descriptor file, put the restored descriptor back in the file afterwards:
 :::caution[Not in this build]
 There is no danger zone: deleting a project has no route. API keys are neither issued nor revoked here, because no
 endpoint does that yet ([#36](https://github.com/Burgyn/MMLib.Alvo/issues/36)). There is no audit trail of data
-changes, only of configuration, and no automations or functions screen beyond the *Not yet* placeholder
-([Capabilities in this build](/reference/capabilities/)). The *author* a Management API caller sends is not
+changes, only of configuration. The *Automations* screen lists the rules read-only — edit them in the descriptor or
+with the assistant — and *Functions* is a *Not yet* placeholder: a host function appears in an entity's hooks editor
+instead ([Capabilities in this build](/reference/capabilities/)). The *author* a Management API caller sends is not
 verified ([#344](https://github.com/Burgyn/MMLib.Alvo/issues/344)); a dashboard apply records the signed-in person.
 :::
 

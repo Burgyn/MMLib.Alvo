@@ -54,7 +54,7 @@ public class UnhonouredSubsystemsTests
     /// two disagreeing is the whole signal.
     /// </remarks>
     private static readonly string[] _blocksComplexCrmDeclares =
-        ["dynamicEntities", "automation", "templates", "webhooks", "functions"];
+        ["dynamicEntities", "templates", "webhooks", "functions"];
 
     /// <summary>
     /// <b>The warning names each declared-but-unhonoured block</b>, and the fixture is a descriptor that was
@@ -200,42 +200,15 @@ public class UnhonouredSubsystemsTests
             + "what an author reads");
     }
 
-    /// <summary>
-    /// <b>The two blocks an after-hook now reaches say so</b>, rather than going on claiming that nothing
-    /// renders a template and no event is ever delivered.
-    /// </summary>
-    /// <remarks>
-    /// The consequence is the whole product of an entry — a line that names the right block and describes the
-    /// wrong absence sends the author to the wrong layer just as effectively as no line at all. PR5a made both
-    /// of these half true: an after-hook <em>does</em> render a template and <em>does</em> post to an endpoint,
-    /// while automation still reaches neither. Both halves have to be in the words, which is what these two
-    /// substrings check for.
-    /// </remarks>
-    /// <param name="block">The block whose consequence must name both halves.</param>
-    [Theory]
-    [InlineData("templates")]
-    [InlineData("webhooks")]
-    public void The_two_blocks_an_after_hook_reaches_name_both_halves(string block)
+    [Fact]
+    public void Automation_is_no_longer_warned()
     {
-        var consequence = Consequence(block);
-
-        consequence.ShouldContain(
-            "after-hook", Shouldly.Case.Sensitive, "the honoured half — this build does run these from a hook");
-        consequence.ShouldContain(
-            "automation", Shouldly.Case.Sensitive, "the unhonoured half — no automation rule is evaluated yet");
+        UnhonouredSubsystems.All.Select(subsystem => subsystem.Block).ShouldNotContain(
+            "automation", "a rule's trigger, condition and actions now compile at apply and run as deliveries");
+        var crm = AlvoDescriptor.Parse(File.ReadAllText(ComplexCrm()));
+        UnhonouredSubsystems.DeclaredBy(crm).Select(subsystem => subsystem.Block).ShouldNotContain("automation");
     }
 
-    /// <summary>
-    /// <b>The <c>webhooks</c> line names that a delivery is unsigned</b>, because that is a <em>security</em>
-    /// absence an author reading the old wording would have assumed away.
-    /// </summary>
-    /// <remarks>
-    /// Standard Webhooks signing is 7.1's, so a delivery that happens today carries no HMAC header and
-    /// <c>secretRef</c> is never read — and the endpoint declaration <em>requires</em> a <c>secretRef</c>, so
-    /// an author has already supplied one and has every reason to believe it is in use. Naming the two
-    /// specific absences rather than "signing is not implemented" is deliberate: <c>secretRef</c> is the key
-    /// they wrote, and the HMAC header is the thing the receiver looks for and will not find.
-    /// </remarks>
     [Fact]
     public void The_webhook_line_names_the_unsigned_delivery_and_the_unread_secret_ref()
     {

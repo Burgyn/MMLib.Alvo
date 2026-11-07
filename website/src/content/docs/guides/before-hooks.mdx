@@ -155,8 +155,7 @@ A custom CEL function an embedded host registers runs synchronously inside the w
 budget of 250 ms per evaluation ([Custom CEL functions](/guides/custom-cel-functions/#5-keep-the-functions-promises));
 one that never returns still holds the row locks until it does. A before-hook cannot
 call the network, send mail or write another entity; that is what [after-hooks](/guides/after-hooks-and-webhooks/)
-are for. A hook that runs on a schedule is `automation`, which this build parses and does not run
-([Capabilities in this build](/reference/capabilities/#declared-but-not-run-in-this-build)).
+are for. Work on a schedule is an [`automation`](/extending/automation/) rule with a cron trigger.
 :::
 
 ## What can go wrong

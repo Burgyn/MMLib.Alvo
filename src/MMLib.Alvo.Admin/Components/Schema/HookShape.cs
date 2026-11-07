@@ -23,7 +23,9 @@ internal static class HookShape
     private static readonly HashSet<string> _hookKeys = new(StringComparer.Ordinal) { "condition", "action" };
     private static readonly HashSet<string> _webhookKeys = new(StringComparer.Ordinal) { "type", "endpoint", "payload" };
     private static readonly HashSet<string> _emailKeys = new(StringComparer.Ordinal) { "type", "template", "to" };
-    private static readonly HashSet<string> _refusedTypes = new(StringComparer.Ordinal) { "function", "http.call", "entity.update" };
+    private static readonly HashSet<string> _functionKeys = new(StringComparer.Ordinal) { "type", "name", "input" };
+    private static readonly HashSet<string> _refusedTypes = new(StringComparer.Ordinal) { "http.call" };
+    private static readonly HashSet<string> _undrawnTypes = new(StringComparer.Ordinal) { "entity.update" };
 
     /// <summary>Why the editor cannot draw this hook, or <see langword="null"/> when it can.</summary>
     /// <param name="hook">The declared hook.</param>
@@ -99,10 +101,26 @@ internal static class HookShape
             HookBuilder.Webhook => Keys(action, _webhookKeys) ?? Required(action, "endpoint") ?? Optional(action, "payload"),
             HookBuilder.Email when action.ContainsKey("data") => "It carries 'data', which this build refuses (email.data).",
             HookBuilder.Email => Keys(action, _emailKeys) ?? Required(action, "template", "to"),
+            HookBuilder.Function => Keys(action, _functionKeys) ?? Required(action, "name") ?? FunctionInput(action),
+            _ when _undrawnTypes.Contains(type) => $"Its action type '{type}' is not one this editor draws; edit it in the descriptor.",
             _ when _refusedTypes.Contains(type) => $"Its action type '{type}' is refused by this build.",
             _ => $"Its action type '{type}' is not one the schema declares.",
         };
     }
+
+    private static string? FunctionInput(JsonObject action) => action.TryGetPropertyValue("input", out var input) switch
+    {
+        false => null,
+        true when input is JsonObject values => values.Select(InputValue).FirstOrDefault(reason => reason is not null),
+        _ => "Its input is not an object, the one form this editor draws.",
+    };
+
+    private static string? InputValue(KeyValuePair<string, JsonNode?> pair) => pair.Value switch
+    {
+        JsonObject tagged when tagged.Count == 1 && IsString(tagged["$cel"]) => null,
+        JsonObject or JsonArray => $"The input value for '{pair.Key}' is a JSON object or array, which the editor cannot draw.",
+        _ => null,
+    };
 
     private static string? Keys(JsonObject action, HashSet<string> allowed)
         => Unknown(action, allowed) is { } keys ? $"Its action carries keys the editor does not know: {keys}." : null;

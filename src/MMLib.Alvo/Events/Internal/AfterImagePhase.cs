@@ -50,10 +50,11 @@ internal static class AfterImagePhase
     /// <param name="images">The images the event behind <paramref name="point"/> carries.</param>
     /// <param name="point">The point's name, quoted in each refusal.</param>
     /// <param name="path">The condition's JSON pointer, where each refusal is reported.</param>
+    /// <param name="noun">What the expression is to its slot, quoted in each refusal: a <c>condition</c>, or a <c>value</c>.</param>
     /// <returns>One refusal per distinct offending reference and per distinct <c>changed()</c> call, in source order.</returns>
     internal static IReadOnlyList<DescriptorValidationError> Refusals(
-        CelNode root, AfterImages images, string point, string path) =>
-        [.. MissingImageReads(root, images, point, path), .. UnmeasurableChanges(root, images, point, path)];
+        CelNode root, AfterImages images, string point, string path, string noun = "condition") =>
+        [.. MissingImageReads(root, images, (point, noun), path), .. UnmeasurableChanges(root, images, (point, noun), path)];
 
     /// <summary>The refusals for every placeholder in <paramref name="template"/> that reads an image <paramref name="images"/> lacks.</summary>
     /// <param name="template">The parsed template.</param>
@@ -98,24 +99,24 @@ internal static class AfterImagePhase
             .Distinct();
 
     private static IEnumerable<DescriptorValidationError> MissingImageReads(
-        CelNode root, AfterImages images, string point, string path) =>
+        CelNode root, AfterImages images, (string Point, string Noun) slot, string path) =>
         Nodes(root).OfType<CelFieldRef>()
             .Where(reference => !images.Carries(reference.State))
             .DistinctBy(reference => (reference.State, reference.FieldName))
             .Select(reference => Error(
-                path, MissingImage(reference, point), ReadInstead(reference.FieldName, reference.State, images, point)));
+                path, MissingImage(reference, slot), ReadInstead(reference.FieldName, reference.State, images, slot.Point)));
 
     private static IEnumerable<DescriptorValidationError> UnmeasurableChanges(
-        CelNode root, AfterImages images, string point, string path) =>
+        CelNode root, AfterImages images, (string Point, string Noun) slot, string path) =>
         images is { Pre: true, Post: true }
             ? []
             : Nodes(root).OfType<CelChanged>()
                 .DistinctBy(call => call.FieldName, StringComparer.Ordinal)
-                .Select(call => Error(path, NoComparison(call.FieldName, images, point), CompareInstead(images, point)));
+                .Select(call => Error(path, NoComparison(call.FieldName, images, slot), CompareInstead(images, slot.Point)));
 
-    private static string MissingImage(CelFieldRef reference, string point) =>
-        $"This '{point}' condition reads '{Spelling(reference)}' ({Kind(reference.State)}), which its event cannot "
-        + $"answer: the event behind '{point}' carries no row from {Side(reference.State)} the write, so the "
+    private static string MissingImage(CelFieldRef reference, (string Point, string Noun) slot) =>
+        $"This '{slot.Point}' {slot.Noun} reads '{Spelling(reference)}' ({Kind(reference.State)}), which its event cannot "
+        + $"answer: the event behind '{slot.Point}' carries no row from {Side(reference.State)} the write, so the "
         + "reference reads null and every comparison against it — including '!=' — collapses to false, silently and "
         + "not always in the denying direction.";
 
@@ -129,9 +130,9 @@ internal static class AfterImagePhase
         + $"'{Placeholder(state, field)}', which that hook's event cannot answer: the event behind '{point}' carries no "
         + $"row from {Side(state)} the write, so the placeholder renders empty on every delivery from this hook.";
 
-    private static string NoComparison(string field, AfterImages images, string point) =>
-        $"This '{point}' condition calls 'changed({field})' (a 'changed(<field>)' call), which compares the row "
-        + $"before the write with the row after it. The event behind '{point}' carries {Carried(images)}, so every "
+    private static string NoComparison(string field, AfterImages images, (string Point, string Noun) slot) =>
+        $"This '{slot.Point}' {slot.Noun} calls 'changed({field})' (a 'changed(<field>)' call), which compares the row "
+        + $"before the write with the row after it. The event behind '{slot.Point}' carries {Carried(images)}, so every "
         + "field that held a value reads as changed.";
 
     private static string ReadInstead(string field, CelRecordState missing, AfterImages images, string point) =>

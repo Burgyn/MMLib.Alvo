@@ -1,8 +1,6 @@
-﻿@page "/admin/automations"
-@page "/admin/functions"
+﻿@page "/admin/functions"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
-@inject NavigationManager Navigation
 
 @*
     A section that is declared and does not run.
@@ -40,7 +38,7 @@
         <Skeleton />
     }
 
-    @foreach (var refusal in RefusalPlaces.On(IsFunctions ? RefusalScreen.Functions : RefusalScreen.Automations, _capabilities?.Refused ?? []))
+    @foreach (var refusal in RefusalPlaces.On(RefusalScreen.Functions, _capabilities?.Refused ?? []))
     {
         <Refusal data-testid="@($"refused-{refusal.Slot}")">
             <code class="a-mono">@refusal.Slot</code> — @refusal.Consequence @refusal.Fix
@@ -54,19 +52,16 @@
 </div>
 
 @code {
+    private const string Title = "Functions";
+
+    @* The build's own block name (UnhonouredSubsystems.cs). Automations left this page when HX-15 made the block run. *@
+    private const string Block = "functions";
+
+    private const string Alternative =
+        "A host function registered with AddFunction appears in an entity's hooks editor, under an after-hook's 'function' action, with a form for its input.";
+
     private ManagementCapabilities? _capabilities;
     private ManagementWarnedBlock? _warning;
-
-    private bool IsFunctions => Navigation.Uri.EndsWith("functions", StringComparison.Ordinal);
-
-    private string Title => IsFunctions ? "Functions" : "Automations";
-
-    @* The build's own block name, singular (UnhonouredSubsystems.cs:127): "automations" found nothing, and the page denied the block existed (§8d item 20). *@
-    private string Block => IsFunctions ? "functions" : "automation";
-
-    private string Alternative => IsFunctions
-        ? "Nothing. A code editor designed before the runtime exists is a guess, so none is drawn."
-        : "An entity's hooks already do the narrow version of this — before a write, and after one. They are on the entity's On write tab.";
 
     protected override async Task OnParametersSetAsync()
     {

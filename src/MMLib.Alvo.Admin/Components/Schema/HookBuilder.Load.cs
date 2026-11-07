@@ -37,6 +37,10 @@ internal sealed partial class HookBuilder
             Kind = Mutate;
             LoadRows(patch);
         }
+        else if ((string?)action["type"] == Function)
+        {
+            LoadFunction(action);
+        }
         else if ((string?)action["type"] == Webhook)
         {
             (Kind, Endpoint, Payload) = (Webhook, (string)action["endpoint"]!, (string?)action["payload"] ?? string.Empty);

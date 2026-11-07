@@ -226,7 +226,7 @@ public sealed class HookShapeScenarios(BikeWorkshopWorld world) : IClassFixture<
         await HookEditInPlaceScenarios.OnWriteAsync(session, "rentals");
         var readOnly = session.Page.GetByTestId("hook-readonly");
         await readOnly.WaitForAsync();
-        (await readOnly.InnerTextAsync()).ShouldContain("'entity.update' is refused");
+        (await readOnly.InnerTextAsync()).ShouldContain("'entity.update' is not one this editor draws");
         (await session.Page.Locator("#hook-afterUpdate-0 [data-testid='hook-edit']").CountAsync()).ShouldBe(0);
 
         var editor = await HookEditInPlaceScenarios.OpenEditAsync(session, "afterCreate", 0);

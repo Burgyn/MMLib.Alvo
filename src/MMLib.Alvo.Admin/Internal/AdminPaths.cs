@@ -53,7 +53,7 @@ internal static class AdminPaths
     /// <summary>Deliveries of the host's handlers: history, pause, redeliver, replay, fixtures.</summary>
     public const string Operations = $"{AlvoAdmin.BasePath}/operations";
 
-    /// <summary>Automations, declared and not yet built.</summary>
+    /// <summary>Automations: the descriptor's automation rules, read-only.</summary>
     public const string Automations = $"{AlvoAdmin.BasePath}/automations";
 
     /// <summary>Functions, declared and not yet built.</summary>

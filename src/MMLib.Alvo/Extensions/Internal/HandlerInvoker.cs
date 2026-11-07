@@ -2,6 +2,8 @@
 
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
+using MMLib.Alvo.Events.Internal;
+using MMLib.Alvo.Rules;
 using MMLib.Alvo.Scheduling;
 
 using System.Reflection;
@@ -83,6 +85,21 @@ internal sealed class HandlerInvoker
         }
 
         return new(typeof(AlvoRecord), typeof(TJob).FullName, JobInvocation.InvokeAsync<TJob>, isService => ClassUnresolvable(typeof(TJob), isService));
+    }
+
+    /// <summary>A schedule that only mints its event: no delivery is ever recorded for it, so nothing calls this.</summary>
+    internal static HandlerInvoker TriggerOnly { get; } = new(typeof(AlvoRecord), typeName: null, (_, _, _, _) => Task.CompletedTask, _ => []);
+
+    /// <summary>A descriptor action, run by <see cref="DescriptorActionRunner"/> from the delivery's scope; it reads no message.</summary>
+    internal static HandlerInvoker ForAction(CompiledAction action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        return new(
+            typeof(AlvoRecord),
+            typeName: null,
+            (services, _, context, ct) => services.GetRequiredService<DescriptorActionRunner>().RunAsync(action, context, services, ct),
+            _ => []);
     }
 
     private static void EnsureReturnsTask(Delegate handler)

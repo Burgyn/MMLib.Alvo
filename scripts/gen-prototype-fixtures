@@ -138,14 +138,17 @@ def refused() -> list[dict]:
         literals = strings_in(_paren_at(text, match.end() - 1))
         out.append({"slot": literals[0], "consequence": literals[1], "fix": literals[2]})
 
-    # The three action types, assembled exactly as `UnhonouredAction` assembles them.
+    # The refused action types, in `EveryActionType`'s order, assembled exactly as `UnhonouredAction` assembles them.
     consequences = _switch_arms(text, "private static string ActionConsequence(string type) => type switch")
     fixes = _switch_arms(text, "private static string ActionFix(string type) => type switch")
     types = {
         name: value
         for name, value in re.findall(r'private const string (\w+) = "([^"]+)";', text)
     }
-    for arm in ("FunctionType", "HttpCallType", "EntityUpdateType"):
+    listed = re.search(r"EveryActionType \{ get; \} =\s*\[([^\]]*)\]", text)
+    if listed is None:
+        raise ValueError("UnhonouredFeatures.EveryActionType not found")
+    for arm in (name.strip() for name in listed.group(1).split(",") if name.strip()):
         wire = types[arm]
         out.append(
             {

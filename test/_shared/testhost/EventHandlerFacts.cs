@@ -73,7 +73,7 @@ public abstract class EventHandlerFacts
 
         drained.Failed.ShouldBeGreaterThanOrEqualTo(1, "the webhook has no receiver, so its attempt fails");
         alvo.Hooks.AssertRan("audits", times: 1);
-        (await DeliveryRows.ReadAsync(database.Connect, Ct)).ShouldHaveSingleItem().Status.ShouldBe("succeeded");
+        (await DeliveryRows.ReadAsync(database.Connect, Ct)).Single(row => !row.Subscriber.StartsWith('/')).Status.ShouldBe("succeeded");
     }
 
     /// <summary>(8) A handler writing what it subscribes to, through its own data access, stops dead at the depth limit.</summary>

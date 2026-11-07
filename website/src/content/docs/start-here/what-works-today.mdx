@@ -36,14 +36,14 @@ nothing renders it yet and nothing warns about it. Apart from that, Alvo never a
 with it without saying so.
 
 - **Honoured** blocks work as documented: `entities` (with their fields, rules, hooks, computed fields, rollups and
-  indexes), `auth`, `tenancy`, `access` and `formats`.
+  indexes), `auth`, `tenancy`, `access`, `formats` and `automation`.
 - **Declared but not run in this build**: the descriptor applies, and the dashboard and the capabilities answer warn
-  that nothing runs. That covers `dynamicEntities`, `automation`, `functions`, sign-in providers other than `local`,
-  `entity.storage: dynamic`, `entity.realtime`, and the parts of `templates` and `webhooks` that only automation would
-  use. Webhook deliveries from after-hooks are made, but not signed yet.
+  that nothing runs. That covers `dynamicEntities`, `functions` (csx; a host function registered in C# runs),
+  sign-in providers other than `local`, `entity.storage: dynamic`, `entity.realtime`, and webhook signing: deliveries
+  from after-hooks and automation are made, but not signed yet.
 - **Refused at apply**: the descriptor is rejected with a reason and a fix, because accepting it would silently give
-  you something other than what it says. Examples: a `$cel` default, `softDelete`, JSONata transformations and the
-  `function`, `http.call` and `entity.update` hook actions.
+  you something other than what it says. Examples: a `$cel` default, `softDelete`, JSONata transformations, the
+  `http.call` action and `delivery: batch`.
 
 **Dynamic entities**, record types your end users define at runtime in one shared store, are **planned** for a later
 phase: [Dynamic entities (planned)](/concepts/dynamic-entities/).

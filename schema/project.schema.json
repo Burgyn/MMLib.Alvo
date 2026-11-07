@@ -235,6 +235,7 @@
               },
               "secretRef": {
                 "type": "string",
+                "pattern": "^[a-z][a-z0-9._-]{0,63}$",
                 "description": "Secret name in ISecretStore (never the secret value itself)."
               },
               "description": {
@@ -1340,10 +1341,21 @@
             },
             "name": {
               "$ref": "#/$defs/identifier",
-              "description": "The name of a function declared in the top-level `functions` block."
+              "description": "The name of a function the host registers (AddFunction)."
             },
             "input": {
-              "$ref": "#/$defs/jsonata"
+              "description": "The function's input: an object of input property -> literal value or tagged {\"$cel\": \"...\"} expression (checked at apply against the function's input schema), or a JSONata transformation.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/jsonata"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/$defs/valueOrExpr"
+                  }
+                }
+              ]
             }
           }
         },
@@ -1373,7 +1385,7 @@
               "additionalProperties": {
                 "$ref": "#/$defs/valueOrExpr"
               },
-              "description": "Field -> literal value or tagged {\"$cel\": \"...\"} expression; {{...}} sugar allowed in string values."
+              "description": "Field -> literal value or tagged {\"$cel\": \"...\"} expression; a string containing {{...}} is refused at apply (it is not rendered here); compute values with {\"$cel\": \"...\"}."
             }
           }
         },
@@ -1406,6 +1418,7 @@
             },
             "headersSecretRef": {
               "type": "string",
+              "pattern": "^[a-z][a-z0-9._-]{0,63}$",
               "description": "Secret name in ISecretStore holding request headers (e.g. auth token); never the value itself."
             },
             "payload": {

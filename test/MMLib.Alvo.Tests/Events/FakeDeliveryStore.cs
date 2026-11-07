@@ -109,7 +109,20 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
 
     public Task EnsureAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-    public Task<int> FanOutAsync(IReadOnlyList<DeliveryRequest> requests, CancellationToken cancellationToken = default)
+    /// <summary>Runs before every fan-out and may throw or wait, so a fact can fail or hold a fan-out the way a store would.</summary>
+    internal Func<IReadOnlyList<DeliveryRequest>, CancellationToken, Task>? BeforeFanOut { get; init; }
+
+    public async Task<int> FanOutAsync(IReadOnlyList<DeliveryRequest> requests, CancellationToken cancellationToken = default)
+    {
+        if (BeforeFanOut is { } before)
+        {
+            await before(requests, cancellationToken);
+        }
+
+        return FanOut(requests);
+    }
+
+    private int FanOut(IReadOnlyList<DeliveryRequest> requests)
     {
         lock (_gate)
         {
@@ -128,7 +141,7 @@ internal sealed class FakeDeliveryStore(TimeProvider time) : IDeliveryStore
                 Supersede(lane);
             }
 
-            return Task.FromResult(fresh.Count);
+            return fresh.Count;
         }
     }
 

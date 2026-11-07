@@ -9,8 +9,9 @@ namespace MMLib.Alvo.TestHost;
 /// </summary>
 /// <remarks>
 /// <para>
-/// In this build what runs there is a descriptor after-hook's action during <see cref="AlvoTestHost.DrainEventsAsync"/>,
-/// named by its JSON pointer, such as <c>/entities/tickets/hooks/afterCreate/0</c>; host-code extensions join under
+/// In this build what runs there is a descriptor action's delivery during <see cref="AlvoTestHost.DrainEventsAsync"/>,
+/// named by its point's JSON pointer and a hash, such as <c>/entities/tickets/hooks/afterCreate#1f0c9a2e</c> — the pointer
+/// alone names every action declared there; host-code extensions join under
 /// their own ids as they ship. A run counts unless it failed: a failed attempt is not a run, a run cut short by the host
 /// stopping (no outcome) is not either, and any other outcome — a write hook that rejects, from HX-09 on — is.
 /// </para>
@@ -49,7 +50,11 @@ public sealed class AlvoHookRecorder
     }
 
     /// <summary>Asserts that <paramref name="id"/> ran exactly <paramref name="times"/> times, failed attempts not counted.</summary>
-    /// <param name="id">The hook or subscriber id; for a descriptor after-hook, its JSON pointer.</param>
+    /// <param name="id">
+    /// The hook or subscriber id. A descriptor action's id is its point's JSON pointer, <c>#</c> and a hash of what it does; the
+    /// pointer alone — <c>/entities/tickets/hooks/afterCreate</c>, <c>/automation/notify/actions</c> — counts the runs of every
+    /// action declared there.
+    /// </param>
     /// <param name="times">How many runs are expected; <c>0</c> asserts it never ran.</param>
     /// <exception cref="ArgumentException"><paramref name="id"/> is empty or white space.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="id"/> is <see langword="null"/>.</exception>
@@ -60,12 +65,16 @@ public sealed class AlvoHookRecorder
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentOutOfRangeException.ThrowIfNegative(times);
 
-        var ran = _runs.Count(run => run.Id == id && run.Outcome is { } outcome && outcome != Failed);
+        var ran = _runs.Count(run => Names(run.Id, id) && run.Outcome is { } outcome && outcome != Failed);
         if (ran != times)
         {
             throw Mismatch(id, times, ran);
         }
     }
+
+    /// <summary>Whether <paramref name="id"/> names <paramref name="run"/>: exactly, or as the point of a descriptor action.</summary>
+    private static bool Names(string run, string id) =>
+        run == id || (run.StartsWith(id, StringComparison.Ordinal) && run.Length > id.Length && run[id.Length] == '#');
 
     /// <summary>Claims every activity of the drain whose root trace is <paramref name="drain"/> for this host.</summary>
     internal void Track(ActivityTraceId drain) => _drains.TryAdd(drain, 0);

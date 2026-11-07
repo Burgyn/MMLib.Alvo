@@ -1,4 +1,6 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.DependencyInjection;
 
 using MMLib.Alvo.Admin.Components.DesignSystem;
 using MMLib.Alvo.Admin.Internal;
@@ -25,6 +27,10 @@ public partial class Operations
     private readonly NestedBusy _busy = new();
     private OperationsLoader? _loader;
     private Question? _confirming;
+    private string? _subscriberPrefix;
+
+    [Inject]
+    private NavigationManager Navigation { get; set; } = default!;
 
     private bool Loading => _loader?.Loading ?? true;
 
@@ -34,8 +40,32 @@ public partial class Operations
     protected override Task OnInitializedAsync()
     {
         _loader = new OperationsLoader(Gateway);
+        _subscriberPrefix = SubscriberPrefix(Navigation.Uri);
         return LoadAsync();
     }
+
+    /// <summary>
+    /// The deliveries the list draws: every loaded one, or — opened from the Automations page with <c>?subscriber=</c> — those
+    /// whose subscriber starts with that prefix.
+    /// </summary>
+    /// <remarks>
+    /// A descriptor action's subscriber id ends in a content hash the dashboard cannot compute, so the link carries the rule's
+    /// prefix and the list filters the page it loaded (HX-15 ruling Q15: the smaller of the two options, no public surface).
+    /// </remarks>
+    private IReadOnlyList<ManagementDelivery>? ShownDeliveries => _subscriberPrefix is { } prefix && _deliveries is { } loaded
+        ? [.. loaded.Where(delivery => delivery.Subscriber.StartsWith(prefix, StringComparison.Ordinal))]
+        : _deliveries;
+
+    private void ClearSubscriberFilter()
+    {
+        _subscriberPrefix = null;
+        Navigation.NavigateTo(AdminPaths.Operations);
+    }
+
+    private static string? SubscriberPrefix(string uri) =>
+        QueryHelpers.ParseQuery(new Uri(uri).Query).TryGetValue("subscriber", out var values) && values.ToString() is { Length: > 0 } prefix
+            ? prefix
+            : null;
 
     private ManagementExtensionStat? Stat(string id) => _stats?.Items.FirstOrDefault(item => item.Id == id);
 

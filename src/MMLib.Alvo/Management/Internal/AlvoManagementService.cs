@@ -16,6 +16,7 @@ using MMLib.Alvo.Rules;
 using MMLib.Alvo.Scheduling;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Secrets;
+using MMLib.Alvo.Secrets.Internal;
 using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
@@ -316,6 +317,7 @@ internal sealed partial class AlvoManagementService(
         EnsureMayPerform(ManagementOperation.ApplyDescriptor);
         EnsureServed(project);
         ArgumentNullException.ThrowIfNull(request);
+        EnsureNotStoodDownForSecrets(request.DryRun);
         await EnsureApplyMayChangeAccessAsync(project, request, ct).ConfigureAwait(false);
 
         var token = TokenFor(request.IdempotencyKey, request.DryRun, () => FingerprintOf(project, request));
@@ -338,14 +340,23 @@ internal sealed partial class AlvoManagementService(
     {
         var options = OptionsFor(request);
         var schema = runtime();
-        var preview = await schema.PreviewAsync(
-            project, request.DescriptorJson, request.ExpectedRevision, options, ct).ConfigureAwait(false);
+        var preview = await WithSecretWarningsAsync(
+            await schema.PreviewAsync(project, request.DescriptorJson, request.ExpectedRevision, options, ct).ConfigureAwait(false),
+            request.DescriptorJson,
+            ct).ConfigureAwait(false);
         Guard(project, preview);
 
         return request.DryRun
             ? new ManagementApplyResult(Applied: false, preview.CurrentRevision, Summary(preview.Plan)) { Warnings = preview.Warnings }
             : await AppendAsync(schema, project, request, options, preview, ct).ConfigureAwait(false);
     }
+
+    /// <summary>The preview, with a warning per secret reference the store does not hold — names only, never a value.</summary>
+    private async Task<DescriptorApplyPreview> WithSecretWarningsAsync(DescriptorApplyPreview preview, string descriptorJson, CancellationToken ct) =>
+        preview with
+        {
+            Warnings = [.. preview.Warnings, .. await SecretReferenceCheck.MissingAsync(AlvoDescriptor.Parse(descriptorJson), secrets, ct).ConfigureAwait(false)],
+        };
 
     /// <summary>What makes two applies of this project the same request.</summary>
     /// <param name="project">The project being changed.</param>
@@ -381,6 +392,7 @@ internal sealed partial class AlvoManagementService(
         EnsureMayPerform(ManagementOperation.RollbackRevision);
         EnsureServed(project);
         ArgumentNullException.ThrowIfNull(request);
+        EnsureNotStoodDownForSecrets(request.DryRun);
         await EnsureRestoreMayChangeAccessAsync(project, targetRevision, ct).ConfigureAwait(false);
 
         var token = TokenFor(
@@ -1026,6 +1038,22 @@ internal sealed partial class AlvoManagementService(
         if (!boot.Projects.ContainsKey(project))
         {
             throw new ManagementProjectNotFoundException(project, [.. boot.Projects.Keys]);
+        }
+    }
+
+    /// <summary>
+    /// Refuses an apply or a rollback while this boot stands down for a required secret (HX-15 review m3): it would prime the
+    /// catalog and serve routes without the secret. A dry run changes nothing, so it is answered.
+    /// </summary>
+    /// <param name="dryRun">Whether the caller asked only for the plan.</param>
+    /// <exception cref="ManagementConflictException">The boot stood down for a required secret.</exception>
+    private void EnsureNotStoodDownForSecrets(bool dryRun)
+    {
+        if (!dryRun && boot.SecretStandDown is { } reason)
+        {
+            throw new ManagementConflictException(
+                $"{reason} This host stood down at boot for it, so nothing is applied until it restarts: add the secret "
+                + "(Settings → Secrets), then restart the host.");
         }
     }
 

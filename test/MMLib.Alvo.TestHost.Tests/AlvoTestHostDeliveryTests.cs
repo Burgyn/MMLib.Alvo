@@ -10,7 +10,7 @@ namespace MMLib.Alvo.TestHost.Tests;
 /// <summary>Delivery on the test's schedule, and never to the network — the package's own delivery promises.</summary>
 public sealed class AlvoTestHostDeliveryTests
 {
-    private const string TicketsWebhook = "/entities/tickets/hooks/afterCreate/0";
+    private const string TicketsWebhook = "/entities/tickets/hooks/afterCreate";
 
     private static string HelpDesk => Path.Combine(AppContext.BaseDirectory, "descriptors", "help-desk.alvo.json");
 
@@ -47,12 +47,11 @@ public sealed class AlvoTestHostDeliveryTests
 
         var drained = await alvo.DrainEventsAsync(Ct);
 
-        drained.Claimed.ShouldBe(1);
+        drained.Claimed.ShouldBe(2, "the event, then its webhook's delivery");
         drained.Failed.ShouldBe(1, "the refusing default handler fails the attempt");
-        drained.Subscribers.ShouldBe([TicketsWebhook]);
-        logs.Exceptions.ShouldContain(
-            failure => failure.ToString().Contains("without a webhook receiver", StringComparison.Ordinal),
-            "the failed attempt says why, and how to pass a receiver");
+        drained.Subscribers.ShouldHaveSingleItem().ShouldStartWith($"{TicketsWebhook}#");
+        var delivery = (await alvo.Services.GetRequiredService<IDeliveryStore>().ListAsync(new DeliveryFilter { Limit = 10 }, Ct)).ShouldHaveSingleItem();
+        delivery.LastErrorType.ShouldBe(typeof(HttpRequestException).FullName, "the refusing default handler fails the delivery, never the network");
     }
 
     [Fact]

@@ -1,8 +1,8 @@
 ﻿namespace MMLib.Alvo.Tests.Expressions;
 
 /// <summary>
-/// The interpreter's hook entry points are called from exactly the five places that run inside a host-function budget pass —
-/// the state-machine guard's and the timer planner's pass is opened by <c>EntityLifecycleService</c>, their only caller — so a sixth caller — which would run host functions with no limit — is a deliberate, reviewed change.
+/// The interpreter's hook entry points are called from exactly the six places that run inside a host-function budget pass —
+/// the state-machine guard's and the timer planner's pass is opened by <c>EntityLifecycleService</c>, their only caller — so a seventh caller — which would run host functions with no limit — is a deliberate, reviewed change.
 /// </summary>
 /// <remarks>
 /// A textual scan of <c>src/MMLib.Alvo</c>, by file, so it has blind spots it does not try to close: a
@@ -21,7 +21,7 @@ public sealed class CelEvaluationSitesTests
         var callers = CallersOf(_entryPoints).Where(file => file != "Expressions/Internal/CelInterpreter.cs");
 
         callers.ShouldBe(
-            ["Expressions/Internal/PredicateEvaluator.cs", "Hooks/Internal/WriteExtensionRunner.cs", "Lifecycle/EntityTimerPlanner.cs", "Lifecycle/StateMachineGuard.cs",
+            ["Events/Internal/ActionValues.cs", "Expressions/Internal/PredicateEvaluator.cs", "Hooks/Internal/WriteExtensionRunner.cs", "Lifecycle/EntityTimerPlanner.cs", "Lifecycle/StateMachineGuard.cs",
                 "Rules/Internal/BeforeHookRunner.cs"]);
     }
 

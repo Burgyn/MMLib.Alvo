@@ -19,12 +19,11 @@ public class ManagementCapabilitiesHttpTests
 
         var body = await (await world.SendAsync(
             HttpMethod.Get, $"{ManagedFleet.Routes}/capabilities", _ops)).ReadJsonObjectAsync();
-        var automation = body["warned"]!.AsArray()
-            .Single(block => block!["block"]!.GetValue<string>() == "automation")!;
+        var templates = body["warned"]!.AsArray()
+            .Single(block => block!["block"]!.GetValue<string>() == "templates")!;
 
-        automation["consequence"]!.GetValue<string>().ShouldBe(
-            "no rule is ever evaluated, so no declared action runs — which looks exactly like a condition "
-            + "that never matched",
+        templates["consequence"]!.GetValue<string>().ShouldBe(
+            "a template's 'bodyFile' is not read",
             "serialisation must not touch the sentence either — this is the whole point of the endpoint");
     }
 

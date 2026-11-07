@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Commands.Internal;
+using MMLib.Alvo.Functions.Internal;
 using MMLib.Alvo.Hooks.Internal;
 using MMLib.Alvo.Reads.Internal;
 
@@ -21,6 +22,7 @@ internal sealed class ExtensionRegistry
         Retired = [.. _registered.OfType<RetiredExtension>()];
         WriteHooks = [.. _registered.OfType<WriteHookRegistration>()];
         ReadExtensions = [.. _registered.OfType<ReadExtensionRegistration>()];
+        Functions = [.. _registered.OfType<FunctionRegistration>()];
     }
 
     internal static ExtensionRegistry Empty { get; } = new([]);
@@ -36,9 +38,17 @@ internal sealed class ExtensionRegistry
     /// <summary>Gets the narrowings and enrichers, in registration order — the order they run in.</summary>
     internal IReadOnlyList<ReadExtensionRegistration> ReadExtensions { get; }
 
+    /// <summary>Gets the host functions a descriptor's <c>function</c> actions may name, in registration order.</summary>
+    internal IReadOnlyList<FunctionRegistration> Functions { get; }
+
+    /// <summary>The function registered as <paramref name="name"/>, or <see langword="null"/>.</summary>
+    internal FunctionRegistration? Function(string name) =>
+        Functions.FirstOrDefault(function => string.Equals(function.Id, name, StringComparison.Ordinal));
+
     internal IReadOnlyList<CommandRegistration> Commands => [.. All.OfType<CommandRegistration>()];
 
-    internal bool IsEmpty => Handlers.Count == 0 && Commands.Count == 0 && WriteHooks.Count == 0 && ReadExtensions.Count == 0;
+    internal bool IsEmpty => Handlers.Count == 0 && Commands.Count == 0 && WriteHooks.Count == 0 && ReadExtensions.Count == 0
+        && Functions.Count == 0;
 
     /// <summary>Ends mapping: a command mapped after the first binding throws (Rulings 13, 40).</summary>
     internal void Seal() => _commands?.Seal();

@@ -12,7 +12,8 @@ export const CAPABILITIES = {
     "auth",
     "tenancy",
     "access",
-    "formats"
+    "formats",
+    "automation"
   ],
   "warned": [
     {
@@ -20,20 +21,16 @@ export const CAPABILITIES = {
       "consequence": "no runtime entity can be created and the whole dynamic schema-registry driver is absent, so every governance limit declared here bounds nothing (F7)"
     },
     {
-      "block": "automation",
-      "consequence": "no rule is ever evaluated, so no declared action runs — which looks exactly like a condition that never matched"
-    },
-    {
       "block": "templates",
-      "consequence": "a template referenced by an after-hook 'email' action is rendered, but one referenced only from an automation rule is not, because no rule is evaluated yet — and a 'bodyFile' is not read on either path"
+      "consequence": "a template's 'bodyFile' is not read"
     },
     {
       "block": "webhooks",
-      "consequence": "an endpoint an after-hook posts to is delivered to, but one referenced only from an automation rule never receives anything; and no delivery is signed — 'secretRef' is not read and no Standard Webhooks HMAC header is sent, so a receiver cannot yet verify the sender (7.1), nor is the payload projected per endpoint (#152)"
+      "consequence": "no delivery is signed — 'secretRef' is not read for signing and no Standard Webhooks HMAC header is sent, so a receiver cannot yet verify the sender (7.1), nor is the payload projected per endpoint (#152)"
     },
     {
       "block": "functions",
-      "consequence": "no function is ever invoked, on any trigger or schedule it declares"
+      "consequence": "a csx script never runs; a 'function' action calls a host function registered with AddFunction instead"
     },
     {
       "block": "auth.providers",
@@ -65,6 +62,16 @@ export const CAPABILITIES = {
       "fix": "Name the entity and the operation exactly — 'entity.orders.created' rather than 'entity.orders.*' — and declare one rule per pair. Wildcards are refused rather than accepted-and-ignored because a descriptor outlives the build that applied it: accepted today, it becomes the fan-out above on the day matching lands, with nothing between it and delivery."
     },
     {
+      "slot": "batch",
+      "consequence": "Batch delivery is not implemented: one execution per affected row is the only delivery this build runs, and an array payload would silently become one call per row.",
+      "fix": "Remove 'delivery' (perItem is the default), and trigger on the per-row event (entity.orders.created, not entity.orders.created.batch). Tracked in #193."
+    },
+    {
+      "slot": "trigger.source",
+      "consequence": "This build emits only entity events, so an auth or storage trigger would never fire.",
+      "fix": "Trigger on an entity event, or react in host code (an event handler) to what you need."
+    },
+    {
       "slot": "JSONata",
       "consequence": "JSONata transformations are not evaluated yet: the action still runs, but with Alvo's canonical event envelope as its body instead of the transformation declared here — a delivery that succeeded carrying data you did not declare, which is indistinguishable from a bug in the consumer.",
       "fix": "Use a '{{...}}' template instead (e.g. \"{{new.title}}\"), which this build does render, or remove the transformation and accept the canonical envelope. A partial JSONata implementation is deliberately not offered: silently producing a different payload for the part it does not implement costs more than this refusal. Tracked in #149."
@@ -76,23 +83,13 @@ export const CAPABILITIES = {
     },
     {
       "slot": "bodyFile",
-      "consequence": "A template's 'bodyFile' is not read yet: nothing in this build resolves a path inside a descriptor bundle, so an after-hook rendering this template would send a message with an empty body rather than fail.",
-      "fix": "Move the body inline into the template's 'body' — it takes the same '{{...}}' placeholders — or stop referencing this template from an after-hook until bundle files are read."
-    },
-    {
-      "slot": "function",
-      "consequence": "The 'function' action is declared in the schema but not implemented in this build, so this hook invokes nothing — no function declared under 'functions' runs, on this hook or on any trigger or schedule it declares elsewhere.",
-      "fix": "Use a 'webhook' or 'email' action, which this build does run. Custom functions are an F4 concern and the schema freezes their shape ahead of the implementation."
+      "consequence": "A template's 'bodyFile' is not read yet: nothing in this build resolves a path inside a descriptor bundle, so an email action rendering this template would send a message with an empty body rather than fail.",
+      "fix": "Move the body inline into the template's 'body' — it takes the same '{{...}}' placeholders — or stop referencing this template from an email action until bundle files are read."
     },
     {
       "slot": "http.call",
       "consequence": "The 'http.call' action is declared in the schema but not implemented in this build, so this hook makes no request: the URL is never called, and 'headersSecretRef' is never read, so a receiver you believe is being notified is not.",
       "fix": "Declare the target under 'webhooks.endpoints' and use a 'webhook' action instead — that is the managed path, and it is the one this build delivers on."
-    },
-    {
-      "slot": "entity.update",
-      "consequence": "The 'entity.update' action is declared in the schema but not implemented in this build, so this hook writes nothing — no record is written or patched on the target entity, and no event is emitted for the write that did not happen.",
-      "fix": "Perform the follow-up write through the Data API for now. 'entity.update' lands with automation, where the causation chain it creates can be bounded."
     }
   ],
   "routes": [

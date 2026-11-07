@@ -89,6 +89,8 @@ public class KilledHostRecoveryTests
             "the event the killed process committed is the one the restart must deliver, by id — anything else "
             + "would be a new event rather than a recovered one");
         await harness.WaitUntilRetiredAsync();
+        harness.OutboxRows().ShouldHaveSingleItem().Dispatched.ShouldBeTrue();
+        harness.DeliveryRows().ShouldHaveSingleItem().Status.ShouldBe("succeeded");
     }
 
     /// <summary>
@@ -112,20 +114,21 @@ public class KilledHostRecoveryTests
 
         AssertKilled(harness);
         var midAction = harness.OutboxRows().ShouldHaveSingleItem();
-        midAction.Dispatched.ShouldBeFalse(
-            "the action provably reached its endpoint — the receiver recorded the body before killing the child — "
-            + "and dispatched_at provably was not stamped, which is what makes the repeat below mandatory");
-        midAction.Claimed.ShouldBeTrue(
-            "the dead process died holding the claim, and nothing but the lease hands it back");
+        midAction.Dispatched.ShouldBeTrue("the event was fanned out before its action ran, so the outbox row is retired");
+        var held = harness.DeliveryRows().ShouldHaveSingleItem(
+            "the action provably reached its endpoint — the receiver recorded the body before killing the child");
+        held.Status.ShouldBe("running", "the dead process died holding the delivery's claim, and nothing but its lease hands it back");
+        held.ClaimedBy.ShouldNotBeNull();
+        held.CompletedAt.ShouldBeNull();
 
         await harness.RestartAsync(new ChildHostSetup { DispatcherEnabled = true });
 
-        var deliveries = await harness.Receiver.WaitForDeliveriesAsync(count: 2);
+        var deliveries = await harness.Receiver.WaitForDeliveriesAsync(count: 2, timeout: TimeSpan.FromMinutes(3));
         deliveries.Count.ShouldBe(2, "the action must have run again after the restart");
         deliveries.Select(ChildHostHarness.EventIdOf).Distinct().ShouldHaveSingleItem(
             "the repeat must be the SAME event redelivered, not a second event; at-least-once delivery is the "
             + "claim, and a different id would mean the write path emitted twice")
-            .ShouldBe(midAction.Id, "and it must be the entry the killed process left claimed");
+            .ShouldBe(midAction.Id, "and it must be the event whose delivery the killed process left claimed");
         await harness.WaitUntilRetiredAsync();
     }
 

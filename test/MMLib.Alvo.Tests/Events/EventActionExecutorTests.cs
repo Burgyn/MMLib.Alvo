@@ -749,3 +749,10 @@ public sealed class EventActionExecutorTests : IDisposable
         }
     }
 }
+
+/// <summary>Runs a compiled hook's action as its delivery does: the action, under the hook's pointer as its subscriber.</summary>
+internal static class EventActionExecutorHookCalls
+{
+    internal static Task ExecuteAsync(this EventActionExecutor executor, CompiledAfterHook hook, AlvoEvent @event, CancellationToken cancellationToken) =>
+        executor.ExecuteAsync(hook.Action, hook.Path, @event, cancellationToken);
+}

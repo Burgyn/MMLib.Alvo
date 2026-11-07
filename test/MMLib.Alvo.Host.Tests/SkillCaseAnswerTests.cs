@@ -39,17 +39,17 @@ public sealed class SkillCaseAnswerTests
         var attempt = await AttemptAsync(SkillCaseAnswers.TaskManagement);
 
         attempt.Valid.ShouldBeTrue(string.Join(" | ", attempt.Refusals));
-        attempt.Violations.Where(violation => violation.Severity == "warning").ShouldBeEmpty();
+        attempt.Violations.Where(violation => violation.Severity == "warning" && !IsUnstoredSecret(violation)).ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task The_function_cases_wrong_answer_is_refused_as_unhonoured()
+    public async Task The_function_cases_wrong_answer_is_refused_as_an_unregistered_function()
     {
         var attempt = await AttemptAsync(SkillCaseAnswers.FunctionHook);
 
         attempt.Valid.ShouldBeFalse();
         attempt.Refusals.ShouldContain(
-            refusal => refusal.Contains(UnhonouredFeatures.UnhonouredAction("function").Consequence, StringComparison.Ordinal),
+            refusal => refusal.Contains("'invoice' is not a function this host registers.", StringComparison.Ordinal),
             string.Join(" | ", attempt.Refusals));
     }
 
@@ -62,4 +62,7 @@ public sealed class SkillCaseAnswerTests
         using var document = JsonDocument.Parse(operations);
         return await InstructionExampleOutcomeTests.AttemptAsync(management, document.RootElement.Clone());
     }
+
+    /// <summary>The bike-workshop endpoint names a secret no test host stores; that warning is the secret check's, not the case's.</summary>
+    private static bool IsUnstoredSecret(MMLib.Alvo.Ai.Internal.ToolViolation violation) => violation.Pointer.EndsWith("/secretRef", StringComparison.Ordinal);
 }

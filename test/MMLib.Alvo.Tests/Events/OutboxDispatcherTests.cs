@@ -460,21 +460,15 @@ public sealed partial class OutboxDispatcherTests : IDisposable
             store,
             boot,
             catalogs ?? PrimedCatalogs,
-            CelFixtures.Evaluator,
-            new EventActionExecutor(
-                new WebhookDelivery(new StubHttpClientFactory(
-                    new StubWebhookReceiver(status, refuseBodiesNaming, blockDeliveriesOn))),
-                new DiscardingEmailSender(),
-                _loggers.CreateLogger<EventActionExecutor>()),
-            fanOut ?? NoHandlers(),
+            fanOut ?? NoHandlers(new ScriptedFanOut(status, refuseBodiesNaming, blockDeliveriesOn).RunAsync),
             Options.Create(options),
             TimeProvider.System,
             _loggers.CreateLogger<OutboxDispatcher>());
     }
 
     /// <summary>A fan-out with no handler registered: every pre-HX-03 fact here keeps its meaning.</summary>
-    private DeliveryFanOut NoHandlers() => new(
-        new FakeDeliveryStore(TimeProvider.System),
+    private DeliveryFanOut NoHandlers(Func<IReadOnlyList<DeliveryRequest>, CancellationToken, Task>? beforeFanOut = null) => new(
+        new FakeDeliveryStore(TimeProvider.System) { BeforeFanOut = beforeFanOut },
         new ExtensionBinder(ExtensionRegistry.Empty, CelFixtures.Compiler, HandlerCatalog.EveryService(), _loggers.CreateLogger<ExtensionBinder>()),
         CelFixtures.Evaluator,
         AlvoChainDepthLimit.Default,
@@ -772,10 +766,19 @@ public sealed partial class OutboxDispatcherTests : IDisposable
             return Task.FromResult(Claimed(claimant, batchSize, maxAttempts));
         }
 
+        /// <summary>How many of the next retirements fail, as a store refusing the write would.</summary>
+        internal int MarkDispatchedFailures { get; set; }
+
         public Task MarkDispatchedAsync(Guid id, CancellationToken cancellationToken = default)
         {
             lock (_gate)
             {
+                if (MarkDispatchedFailures > 0)
+                {
+                    MarkDispatchedFailures--;
+                    return Task.FromException(new InvalidOperationException("the retirement was refused"));
+                }
+
                 var entry = _entries.Single(candidate => candidate.Id == id);
                 entry.Dispatched = true;
                 entry.Claimed = false;
@@ -871,32 +874,24 @@ public sealed partial class OutboxDispatcherTests : IDisposable
     private sealed record ClaimRequest(string Claimant, int BatchSize, int MaxAttempts, TimeSpan Lease);
 
     /// <summary>
-    /// The receiver every delivery goes to: answers <paramref name="status"/>, refuses a body naming
-    /// <paramref name="refuseBodiesNaming"/>, and can be held open so a fact can stop the host mid-delivery.
+    /// The fan-out every claimed event goes through: fails when <paramref name="status"/> is not OK or a request names
+    /// <paramref name="refuseEvent"/>, and can be held open so a fact can stop the host mid-dispatch. The outbox now only fans
+    /// out, so a failing fan-out is the one failure an outbox entry can have.
     /// </summary>
-    private sealed class StubWebhookReceiver(
-        HttpStatusCode status, Guid? refuseBodiesNaming, TaskCompletionSource? blockOn) : HttpMessageHandler
+    private sealed class ScriptedFanOut(HttpStatusCode status, Guid? refuseEvent, TaskCompletionSource? blockOn)
     {
-        protected override async Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request, CancellationToken cancellationToken)
+        internal async Task RunAsync(IReadOnlyList<DeliveryRequest> requests, CancellationToken cancellationToken)
         {
-            ArgumentNullException.ThrowIfNull(request);
-
             if (blockOn is not null)
             {
                 await blockOn.Task.WaitAsync(cancellationToken);
             }
 
-            var body = request.Content is null
-                ? string.Empty
-                : await request.Content.ReadAsStringAsync(cancellationToken);
-
-            return new HttpResponseMessage(Refuses(body) ? HttpStatusCode.ServiceUnavailable : status);
+            if (status != HttpStatusCode.OK || requests.Any(request => request.EventId == refuseEvent))
+            {
+                throw new InvalidOperationException("The scripted fan-out refused this event.");
+            }
         }
-
-        private bool Refuses(string body) =>
-            refuseBodiesNaming is { } poison
-            && body.Contains(poison.ToString(), StringComparison.Ordinal);
     }
 
     /// <summary>An <see cref="IHttpClientFactory"/> over one handler.</summary>

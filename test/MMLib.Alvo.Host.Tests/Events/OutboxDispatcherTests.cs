@@ -48,7 +48,7 @@ public class OutboxDispatcherTests
         await using var world = await StartAsync();
         (await Create(world, "W-1")).StatusCode.ShouldBe(HttpStatusCode.Created);
 
-        await UntilAsync(world, GaveUp, "the dispatcher to give the event up");
+        await UntilAsync(world, Failed, "the action's delivery to fail an attempt");
 
         (await world.SendAnonymouslyAsync(HttpMethod.Get, AlvoHealth.ReadinessPath))
             .StatusCode.ShouldBe(HttpStatusCode.OK, "a poison event must not make the host unready");
@@ -57,22 +57,18 @@ public class OutboxDispatcherTests
     }
 
     /// <summary>
-    /// Every failed attempt is a Warning naming the event, and the attempt ceiling comes from configuration —
-    /// so the ceiling is honoured rather than hard-coded, and a retried event is visible per attempt.
+    /// A failing after-hook action is its own delivery: its attempts are delivery warnings, retried on the delivery's own
+    /// schedule, and its event is retired the moment it fanned out — the outbox records no failed attempt for it.
     /// </summary>
     [Fact]
-    public async Task The_configured_attempt_ceiling_is_what_bounds_the_retries()
+    public async Task A_failing_action_is_retried_as_its_own_delivery_and_its_event_is_retired()
     {
         await using var world = await StartAsync();
         await Create(world, "W-1");
 
-        await UntilAsync(world, GaveUp, "the dispatcher to give the event up");
+        await UntilAsync(world, Failed, "the action's delivery to fail an attempt");
 
-        world.Logs.Entries.Count(Failed).ShouldBe(
-            ConfiguredAttempts,
-            "one warning per attempt, and the ceiling is the configured one — a hard-coded ceiling would show "
-            + "its own number here");
-        world.Logs.Entries.Single(GaveUp).Message.ShouldContain("dispatched_at");
+        world.Logs.Entries.ShouldNotContain(entry => OutboxFailed(entry), "the outbox only fans out, so a failing action never fails its entry");
     }
 
     /// <summary>
@@ -92,7 +88,7 @@ public class OutboxDispatcherTests
         await Task.Delay(_absenceBudget, TestContext.Current.CancellationToken);
 
         world.Logs.Entries.ShouldNotContain(
-            entry => Failed(entry) || GaveUp(entry),
+            entry => Failed(entry) || OutboxFailed(entry),
             "the queue still fills — the write emitted its event — and nothing drains it");
     }
 
@@ -193,10 +189,11 @@ public class OutboxDispatcherTests
         });
 
     private static bool Failed(LoggedRecord entry) =>
-        entry.Level == LogLevel.Warning && entry.Message.Contains("failed to deliver", StringComparison.Ordinal);
+        entry.Level == LogLevel.Warning && entry.Message.Contains("of delivery", StringComparison.Ordinal)
+        && entry.Message.Contains("failed (", StringComparison.Ordinal);
 
-    private static bool GaveUp(LoggedRecord entry) =>
-        entry.Level == LogLevel.Error && entry.Message.Contains("gave up", StringComparison.Ordinal);
+    private static bool OutboxFailed(LoggedRecord entry) =>
+        entry.Level == LogLevel.Warning && entry.Message.Contains("failed to deliver", StringComparison.Ordinal);
 
     /// <summary>Waits for a log record the host really wrote, and throws rather than giving up quietly.</summary>
     private static async Task UntilAsync(AlvoHostWorld world, Func<LoggedRecord, bool> matches, string what)

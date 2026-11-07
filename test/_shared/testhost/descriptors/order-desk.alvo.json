@@ -1,0 +1,55 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "order-desk",
+  "description": "The automation facts' desk: an order posts to the ERP and mails sales after it is created, a rule invoices it through a host function, and a nightly rule writes a closing per tenant.",
+  "tenancy": { "enabled": true },
+  "auth": { "roles": ["staff", "ops"] },
+  "access": { "admin": "'ops' in @user.roles", "developer": "'ops' in @user.roles" },
+  "webhooks": {
+    "endpoints": { "erp": { "url": "https://erp.example/hooks/orders", "secretRef": "erp-signing" } }
+  },
+  "templates": {
+    "order-created": { "subject": "Order {{new.number}}", "body": "Order {{new.number}} was created." }
+  },
+  "entities": {
+    "orders": {
+      "tenancy": "scoped",
+      "fields": {
+        "number": { "type": "string", "required": true, "maxLength": 20 },
+        "total": { "type": "decimal", "precision": 12, "scale": 2 },
+        "note": { "type": "string", "maxLength": 200 },
+        "status": { "type": "enum", "values": ["open", "closed"], "default": "open" },
+        "touches": { "type": "integer" }
+      },
+      "rules": { "list": "true", "get": "true", "create": "true", "update": "true", "delete": "true" },
+      "hooks": {
+        "afterCreate": [
+          { "action": { "type": "webhook", "endpoint": "erp" } },
+          { "action": { "type": "email", "template": "order-created", "to": "sales@example.com" } }
+        ]
+      }
+    },
+    "closings": {
+      "tenancy": "scoped",
+      "fields": {
+        "note": { "type": "string", "required": true, "maxLength": 80 }
+      },
+      "rules": { "list": "true", "get": "true", "create": "true", "update": "true", "delete": "true" }
+    }
+  },
+  "automation": {
+    "invoice-on-create": {
+      "trigger": { "event": "entity.orders.created" },
+      "actions": [
+        { "type": "function", "name": "issue-invoice", "input": { "orderId": { "$cel": "new.id" }, "amount": { "$cel": "new.total" } } }
+      ]
+    },
+    "nightly-close": {
+      "trigger": { "schedule": "0 2 * * *" },
+      "actions": [
+        { "type": "entity.update", "entity": "closings", "payload": { "note": "nightly" } }
+      ]
+    }
+  }
+}
