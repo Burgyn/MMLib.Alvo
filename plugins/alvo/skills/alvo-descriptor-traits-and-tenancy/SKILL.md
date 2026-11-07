@@ -38,8 +38,8 @@ shared reference data every tenant sees.
 ## State machine and timers
 
 `stateMachine` names one stored `enum` field and its named `transitions`, each `{from, to, roles?, when?}`. `from`
-lists the states it leaves (`["*"]` alone means any); `initial`, if set, is what every create stores and must equal the
-field's `default`. An update that changes the field must take a transition, else 422 code `transition`; a transition
+lists the states it leaves (`["*"]` alone means any); `initial`, if set, is the state every create must store; a field
+`default` is what a create sending none stores, and must equal `initial`. An update that changes the field must take a transition, else 422 code `transition`; a transition
 whose `roles` the caller lacks is 403. `when` is CEL over `old`/`new`, and one that fails refuses. The system caller
 holds `admin`, so a job needs a transition listing it. A host before-write hook may not set the field.
 
@@ -47,7 +47,7 @@ holds `admin`, so a job needs a transition listing it. A host before-write hook 
 (`now() + duration('24h')`), `when` a condition. A create arms it, an update moves it only when its due changes, an
 inactive `when` or a delete cancels it, all in the write's transaction. It fires `event` (default `<entity>.<timer>`)
 with `entity`, `id`, `timer`, `at`: a timer's event is handled in code by a host handler, never by descriptor
-automation. Existing rows are not back-filled. Neither member is allowed on `storage: "dynamic"`.
+automation. Existing rows are not back-filled. `timers` is refused on an entity with a cascading ref; an `onDelete: setNull` on a ref `at` reads leaves the old due until the row's next write. Neither member is allowed on `storage: "dynamic"`.
 
 <!-- example: audit-rental-fleet -->
 **Record who created and last changed each rental bike.**
