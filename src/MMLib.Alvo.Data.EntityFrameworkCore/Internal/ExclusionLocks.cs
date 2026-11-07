@@ -18,7 +18,15 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// <b>Why.</b> PostgreSQL checks an exclusion against rows other transactions have not committed by waiting for them; two
 /// writers that each inserted before checking wait for each other, and the engine breaks the cycle with a <c>40P01</c>
 /// deadlock — a 500 where the caller should see one 409. Queuing them first on one key per resource turns the second into
-/// an ordinary check against a committed row.
+/// an ordinary check against a committed row. Measured (issue 478): two transaction units of one room, each holding an
+/// uncommitted booking when it writes a second that overlaps the other's first, deadlock every time without the keys and
+/// end in one commit and one 409 with them (<c>PostgreSqlExclusionLockTests</c>). Two single-statement creates rarely meet
+/// that cycle — the insert and its check are one statement apart — so the concurrency facts pass without the keys.
+/// </para>
+/// <para>
+/// <b>What they do not cover.</b> Two units that each hold one resource and then write the other's, in opposite order, still
+/// deadlock: each holds its first resource's key and waits for the other's, as they would wait for each other's rows
+/// without the keys. A unit orders its own writes; a batch's keys are sorted.
 /// </para>
 /// <para>
 /// <b>An engine whose dialect answers no lock statement</b> — SQLite, whose single writer already sees every committed row —
