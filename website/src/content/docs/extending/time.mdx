@@ -57,6 +57,12 @@ A timer belongs to a tenant: the `tenant` argument, or else the open unit's tena
 entity one is required, and an argument that differs from the open unit's tenant is refused. The same key in two
 tenants is two timers. The fired event carries the tenant, and its handlers run as the system in that tenant.
 
+### Reserved keys
+
+Keys starting `alvo:` belong to the descriptor's [declarative timers](/extending/state-machines/#timers-that-follow-a-record).
+`IAlvoScheduler` refuses to arm or cancel one. `ITimerStore` is public and does not refuse them: a host that writes the
+store directly can touch a declarative timer's row, and is on its own when it does.
+
 ### Depth
 
 A timer armed from a handler remembers the handler's correlation, causation and depth, and its event is one level
