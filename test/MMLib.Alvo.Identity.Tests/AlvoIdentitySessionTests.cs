@@ -324,41 +324,44 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
     /// sends every stylesheet, script and font at once, each with the cookie; an administration write in
     /// flight on the same SQLite file must make them wait, never answer <c>500</c>.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The write is held, not raced.</b> This fact used to run a writer in a tight loop beside ten waves of
+    /// checks, and on <c>windows-latest</c> it failed again and again (issue 485). The failures were Microsoft.Data.Sqlite
+    /// 10.0.10's pool lending one native connection to two owners, which <c>Directory.Packages.props</c> now pins past;
+    /// but the hammer was also a fact whose outcome the scheduler decided — a writer that never pauses can hold the lock
+    /// at every one of the busy-retry polls for the whole 30-second command timeout — and its unstopped writer kept the
+    /// file open past the teardown whenever a check failed.
+    /// </para>
+    /// <para>
+    /// The moment a reader can actually collide with is the writer's commit: under the store's rollback journal a
+    /// write transaction holds only a <c>RESERVED</c> lock, which readers pass, until it commits under
+    /// <c>EXCLUSIVE</c>. So a second connection takes <c>BEGIN EXCLUSIVE</c> on the file, every check is sent and
+    /// observed to have reached the store while that lock is held, and only then is it released — each check
+    /// provably met the write in flight, on any machine, however slow.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public async Task Parallel_cookie_checks_during_identity_writes_all_succeed()
+    public async Task Parallel_cookie_checks_behind_a_write_in_flight_wait_and_all_succeed()
     {
-        var id = await CreateAsync();
+        await CreateAsync();
         var cookie = await SignInAsync();
-        var bystander = await CreateOtherAsync();
-        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        var before = _probe.Reads;
+        const int Checks = 16;
 
-        var writes = Task.Run(async () =>
+        Task<HttpStatusCode[]> answers;
+        await using (var writer = await HoldExclusiveLockAsync())
         {
-            var count = 0;
-            while (!stop.IsCancellationRequested)
-            {
-                await AdministerAsync(people => people.SetTenantAsync(bystander, TenantId.New(), Ct));
-                count++;
-            }
-
-            return count;
-        }, Ct);
-
-        var statuses = new List<HttpStatusCode>();
-        for (var wave = 0; wave < 10; wave++)
-        {
-            var answers = await Task.WhenAll(Enumerable.Range(0, 30).Select(async _ =>
+            answers = Task.WhenAll(Enumerable.Range(0, Checks).Select(async _ =>
             {
                 using var response = await GetMeAsync(cookie);
                 return response.StatusCode;
             }));
-            statuses.AddRange(answers);
+
+            await UntilAsync(() => _probe.Reads >= before + Checks, "every check to reach the store behind the write");
         }
 
-        await stop.CancelAsync();
-        (await writes).ShouldBeGreaterThan(0, "the checks must really have raced writes");
-        statuses.ShouldAllBe(status => status == HttpStatusCode.OK);
-        id.ShouldNotBe(default);
+        (await answers).ShouldAllBe(status => status == HttpStatusCode.OK, "a check behind a write waits for it");
     }
 
     /// <summary>
@@ -539,16 +542,6 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
         return new UserId(row.Id);
     }
 
-    /// <summary>Creates a second person, whom the concurrent writes are aimed at.</summary>
-    /// <returns>Their identifier.</returns>
-    private async Task<UserId> CreateOtherAsync()
-    {
-        UserId other = default;
-        await AdministerAsync(async people =>
-            other = (await people.CreateAsync(new AlvoUserCreation("otto@example.test", []), Ct)).Id);
-        return other;
-    }
-
     /// <summary>Signs in through the endpoint and returns the session cookie it set.</summary>
     /// <param name="password">The password to present.</param>
     /// <param name="expected">The status the attempt is expected to answer.</param>
@@ -589,6 +582,39 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
         using var other = _app.Services.CreateScope();
         await write(other.ServiceProvider.GetRequiredKeyedService<IAlvoUserAdministration>(
             AlvoUserAdministration.UnguardedKey));
+    }
+
+    /// <summary>
+    /// Opens a second, unpooled connection to the store's file holding <c>BEGIN EXCLUSIVE</c> — a write at its commit;
+    /// disposing it rolls back and releases the lock.
+    /// </summary>
+    /// <returns>The connection holding the lock.</returns>
+    private async Task<SqliteConnection> HoldExclusiveLockAsync()
+    {
+        var connection = new SqliteConnection($"Data Source={_file};Pooling=False");
+        await connection.OpenAsync(Ct);
+        using var begin = connection.CreateCommand();
+        begin.CommandText = "BEGIN EXCLUSIVE";
+        await begin.ExecuteNonQueryAsync(Ct);
+
+        return connection;
+    }
+
+    /// <summary>Polls <paramref name="satisfied"/> until it holds, and throws when the budget runs out.</summary>
+    /// <param name="satisfied">The condition being waited for.</param>
+    /// <param name="what">What the failure message says was being waited for.</param>
+    private static async Task UntilAsync(Func<bool> satisfied, string what)
+    {
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(20);
+        while (!satisfied())
+        {
+            if (DateTimeOffset.UtcNow > deadline)
+            {
+                throw new TimeoutException($"Waited 20 s for {what}.");
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(10), Ct);
+        }
     }
 
     /// <summary>What the probed store was asked, and whether it is down.</summary>
