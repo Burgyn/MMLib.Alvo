@@ -1122,6 +1122,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An exclusion per a `boolean` field on PostgreSQL older than 15** (#477, HX-12) is refused at apply, at
+  `/entities/<e>/indexes/<i>/fields/<n>`, naming PostgreSQL 15 as the minimum, instead of failing in the DDL: btree_gist
+  compares a boolean only from 1.7. The prerequisite probe reads `server_version_num` and, once btree_gist is installed,
+  its operator classes from `pg_opclass`, so a server upgraded past an old extension version is told to run
+  `ALTER EXTENSION btree_gist UPDATE;`. Every other admitted equality type is compared on every supported version.
 - **A `null` in an `entity.update` payload** (#328, HX-15) is the null literal it was written as: refused at apply into a
   required field, written as `null` into an optional one.
 - **A rollup added to a populated parent is filled by the apply** (HX-11), instead of reading empty until a child write
