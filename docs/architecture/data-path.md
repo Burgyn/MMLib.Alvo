@@ -1275,8 +1275,14 @@ the rows itself. Either failure is translated back to that pointer.
 **The prerequisite.** Before an apply that adds an exclusion on PostgreSQL, the dialect probes `pg_extension`,
 `pg_available_extensions` and `has_database_privilege(…, 'CREATE')` (D12): installed → nothing; installable → the plan's
 first statement is `CREATE EXTENSION IF NOT EXISTS btree_gist` (trusted since PostgreSQL 13); otherwise the apply is
-refused at the exclusion's pointer with the fix to ask the database owner. Which scalar types `btree_gist` supports
-depends on the server version (`bool` from 15); that is verified on 16 only.
+refused at the exclusion's pointer with the fix to ask the database owner. Which scalar types `btree_gist` compares
+depends on its version (issue 477, measured on postgres:12 to 16): `boolean` from 1.7, which ships with PostgreSQL 15;
+`text`, `bigint`, `numeric`, `uuid`, `date` and `timestamptz` on all of them (a descriptor `enum` is `text`). The same
+probe returns `server_version_num` and the types no default GiST operator class compares: an installed extension's
+`pg_opclass` decides (which also catches a `pg_upgrade`d server still on an old extension version — fix: `ALTER EXTENSION
+btree_gist UPDATE`), and before the plan's `CREATE EXTENSION` the server's version decides. An equality field the server
+cannot compare is refused at `/entities/<e>/indexes/<i>/fields/<n>`, naming the minimum version. The decision is pinned
+without a database; one postgres:14 container proves the refusal and that every other type applies there.
 
 **Writers queue, they do not deadlock** (D3). On PostgreSQL a write to an entity with an exclusion first takes
 transaction-scoped advisory locks, one per exclusion, keyed on SHA-256 of the name, the tenant and the equality values,

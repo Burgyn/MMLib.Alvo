@@ -34,7 +34,8 @@ to a declared entity. A `ref` to the built-in `users` is not indexed by itself. 
   `where` to leave cancelled rows out.
 - Rows that already overlap make the apply refuse the exclusion, so say that when you propose one. On PostgreSQL it
   needs the btree_gist extension: the apply installs it when the database role may, and refuses with the fix
-  otherwise. Rows deleted by `softDelete` still count, for `exclude` as for `unique`.
+  otherwise. A `boolean` in `fields` needs PostgreSQL 15 or later; on an older server the apply refuses it at that
+  field. Rows deleted by `softDelete` still count, for `exclude` as for `unique`.
 - Neither is accepted on a `storage: dynamic` entity.
 
 The shape: `schema/project.schema.json#/$defs/entity/properties/indexes`.
