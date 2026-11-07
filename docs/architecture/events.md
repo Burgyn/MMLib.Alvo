@@ -993,7 +993,12 @@ partial index keeps that a seek). The second half is what keeps a record's order
 fan-out and a dispatcher that died between claiming an entry and fanning it out; it also means a descriptor action that
 keeps failing on event 1 holds the record's later handler deliveries back until it succeeds or reaches the outbox
 ceiling — about `attempts × PollInterval` per failing event, ≈ 45 s at the defaults (HX-15 moves actions onto
-deliveries and removes that coupling). On SQLite both claims — the delivery claim and the outbox's — run in a
+deliveries and removes that coupling). Both lane checks are spelled as scalar probes — `(SELECT 1 … LIMIT 1) IS NULL`,
+not `NOT EXISTS` — because PostgreSQL turns a correlated `NOT EXISTS` into an anti-join planned from statistics, and
+rows fanned out moments ago have none: over 10 000 deliveries fanned out before the first claim the planner walked the
+subscriber's whole backlog per candidate and the claim ran 36 s; as probes they are index seeks on the two partial
+indexes whatever the statistics say (≈0.2 s, #482; `PostgreSqlDeliveryStoreTests` and the outbox chaos criterion pin
+it). On SQLite both claims — the delivery claim and the outbox's — run in a
 write-first transaction (`BEGIN IMMEDIATE`), because `Microsoft.Data.Sqlite` retries a busy engine only on a
 statement's first step, and an auto-committed `UPDATE … RETURNING` met its busy on commit; the outbox claim had the
 same latent "database is locked" on `main`. On PostgreSQL a deadlock between two claimants (`40P01`) is a failed round,
