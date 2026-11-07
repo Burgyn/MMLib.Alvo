@@ -38,6 +38,13 @@ internal static class ApiScope
         "AlvoSaved`1",
         "IAlvoSession",
         "IAlvoSessions",
+        "IAlvoEntity",
+        "AlvoEntityAttribute",
+        "AlvoFieldAttribute",
+        "AlvoEnumValueAttribute",
+        "IAlvoPatch`1",
+        "AlvoPatch",
+        "AlvoRecordExtensions",
     };
 
     private static readonly Type[] _registrationTargets = [typeof(IServiceCollection), typeof(IAlvoBuilder), typeof(IEndpointRouteBuilder)];

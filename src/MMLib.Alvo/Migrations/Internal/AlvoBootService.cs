@@ -323,6 +323,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
             }
 
             _bootPlan.EnsureBindable(plan.Catalog);
+            _bootPlan.WarnAboutGeneratedEntities(plan.Desired, plan.Descriptor.Name);
             return (plan, null);
         }
         catch (AlvoStartupRefusedException refused)
@@ -459,6 +460,7 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         {
             var boot = await _bootPlan.LoadAsync(ct).ConfigureAwait(false);
             _bootPlan.EnsureBindable(boot.Catalog);
+            _bootPlan.WarnAboutGeneratedEntities(boot.Desired, boot.Descriptor.Name);
 
             return boot;
         }

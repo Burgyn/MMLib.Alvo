@@ -1,5 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
+  <Import Project="$(MSBuildThisFileDirectory)../../src/MMLib.Alvo/build/MMLib.Alvo.props" />
+
   <!-- Testcontainers-backed integration project, not a 1:1 unit test project
        (hence the ".Tests.Integration" suffix instead of ".Tests"): opt out of
        the shared architecture + public-API approval gate. A fast unit test
@@ -106,5 +108,22 @@
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/literals/LiteralText.cs" Link="_shared/LiteralText.cs" />
   </ItemGroup>
+
+  <!--
+    The typed-entity generator over the shared generated/ descriptors, wired as a packed consumer's build/MMLib.Alvo.props
+    and analyzers/dotnet/cs would wire it. desk-v1 is desk-live without legacy_code, for the unknown-field round trip.
+    ALVO1001 is silenced: these suites deliberately put banned I/O in hooks to prove the boot ban.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="$(MSBuildThisFileDirectory)../../src/MMLib.Alvo.Analyzers/MMLib.Alvo.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)../_shared/testhost/generated/desk-live.alvo.json" AlvoDescriptor="true" AlvoNamespace="MMLib.Alvo.TestHost.Tests.Generated" />
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)../_shared/testhost/generated/desk-v1.alvo.json" AlvoDescriptor="true" AlvoNamespace="MMLib.Alvo.TestHost.Tests.Generated.V1" />
+    <None Include="$(MSBuildThisFileDirectory)../_shared/testhost/generated/desk-live.alvo.json" Link="generated/desk-live.alvo.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../_shared/testhost/generated/desk-v1.alvo.json" Link="generated/desk-v1.alvo.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);ALVO1001</NoWarn>
+  </PropertyGroup>
 
 </Project>

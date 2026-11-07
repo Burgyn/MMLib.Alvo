@@ -153,6 +153,7 @@ export default defineConfig({
           page('The event envelope', 'extending/event-envelope'),
           page('React to changes', 'extending/event-handlers'),
           page('Typed or CEL', 'extending/typed-or-cel'),
+          page('Generated types', 'extending/generated-types'),
           page('See your extensions in the dashboard', 'extending/extension-catalog'),
           page('Operate deliveries', 'extending/operate-deliveries'),
           page('Validate and guard writes', 'extending/write-hooks'),

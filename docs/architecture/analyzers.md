@@ -1,7 +1,7 @@
 # Analyzers
 
-Alvo's Roslyn analyzers: what they are, where they ship, what `ALVO1001` decides and what it cannot, and how a rule is
-added. The user-facing page is *Analyzer rules* (`website/src/content/docs/extending/analyzer-rules.mdx`); the design is
+Alvo's Roslyn analyzers: what they are, where they ship, what `ALVO1001` decides and what it cannot, the typed-entity
+generator, and how a rule is added. The user-facing page is *Analyzer rules* (`website/src/content/docs/extending/analyzer-rules.mdx`); the design is
 `docs/superpowers/specs/2026-10-14-host-extensibility-design.md` §4.4.5 and E6, settled in *HX-10 settled details* there
 and in `docs/superpowers/plans/2026-11-05-hx-10-hook-guards.md` (Rulings 10–18, 25, 31–33, 39, 45, 46).
 
@@ -109,7 +109,10 @@ it on the Linux leg right after `Pack`, inside the required **Build & test** che
 The analyzer is applied in this repository **only to the docs snippets** (Ruling 17): `MMLib.Alvo.DocsSnippets.Tests`
 references it with `OutputItemType="Analyzer"`, so every `website/src/snippets/extending/**` snippet compiles with
 `ALVO1001` as an error (`TreatWarningsAsErrors`) — the code a reader copies is clean, and a false positive fails the
-build. No other project gets it: test suites deliberately inject banned types into hooks to prove the boot ban, and the
+build. HX-17 adds two more consumers, for the generator only: `MMLib.Alvo.TestHost.Tests` and
+`MMLib.Alvo.Data.PostgreSql.Tests.Integration` import `build/MMLib.Alvo.props` and generate from
+`test/_shared/testhost/generated/*.alvo.json`, with `ALVO1001` in `NoWarn`, and the docs snippets generate from
+`generated/booking.alvo.json`. No other project gets the analyzer: test suites deliberately inject banned types into hooks to prove the boot ban, and the
 analyzer's own suite compiles consumer sources through `AnalyzerHarness`.
 
 ## Not mutated
@@ -135,6 +138,95 @@ does, except one that never returns.
 transaction, so `AlvoSymbols` allows awaiting `IAlvoScheduler`'s methods and the typed `AlvoSchedulerExtensions`
 (beside `IAlvoSession` and `MMLib.Alvo.Hooks`); a scheduler call in a hook is not a false positive that breaks a
 `TreatWarningsAsErrors` build (Ruling 39).
+
+## The typed-entity generator
+
+HX-17 adds `AlvoEntityGenerator`, an `IIncrementalGenerator` in the same assembly, so it ships the same way:
+`analyzers/dotnet/cs/` in the core nupkg, with no new package (spec E6). The user-facing page is *Generated types*
+(`website/src/content/docs/extending/generated-types.mdx`). The decisions are recorded in *HX-17 settled details* of the
+spec and in `docs/superpowers/plans/2026-11-06-hx-17-source-generator.md` (Decisions 1–17, rulings G1–G17).
+
+**Input.** The generator reads `AdditionalFiles` whose item metadata `AlvoDescriptor` is `true` (case-insensitive),
+plus the optional `AlvoNamespace`. A compiler sees item metadata only when it is declared `CompilerVisibleItemMetadata`,
+so the core nupkg also carries `build/MMLib.Alvo.props`, which declares `AlvoDescriptor`, `AlvoNamespace` and
+`CompilerVisibleProperty RootNamespace`. Like the analyzer asset, `build/` does not flow transitively, so the generator
+reaches exactly the projects `ALVO1001` reaches. The namespace is `AlvoNamespace`, else `RootNamespace`, else
+`Alvo.Generated`. An empty or whitespace value counts as absent.
+
+**Pipeline and caching.** The pipeline has two steps, each with a tracking name:
+
+- `AlvoDescriptorFiles` projects each marked file to a `DescriptorFile` (path, text, namespace), a record struct of
+  strings.
+- `AlvoDescriptorModels` parses it into a `DescriptorRead(Path, DescriptorReadResult)` over the equatable
+  `DescriptorModel`.
+
+The output step emits from the model only. The cookbook rule holds: no `ISymbol`, `Compilation` or `AdditionalText` in
+any cached value. Every model type is a record of strings, bools and `EquatableArray<T>`, and
+`The_model_holds_no_symbol_or_compilation` enforces this by reflection. The cache tests check two things with
+`trackIncrementalGeneratorSteps`:
+
+- an unrelated edit leaves both steps Cached or Unchanged;
+- an edit to one descriptor re-reads only that file.
+
+**Its own JSON reader** (Decision 1). `DescriptorJson` is a recursive-descent RFC 8259 reader that keeps object member
+order and refuses nesting deeper than 256 levels. It is not a packed `System.Text.Json`: an analyzer that brings its own
+STJ conflicts with the copy the IDE loads. Its parity with `JsonDocument` is a property over a corpus of 3000
+one-character mutations. Cost: a parser bug, which that property guards.
+
+**A snapshot reads as its descriptor** (Decision 8). A file with a top-level string `descriptorJson` is the body of
+`GET …/projects/{p}/descriptor`, and it generates exactly what the descriptor inside it would. Cost: an envelope change
+needs a reader change.
+
+**Output.** Each entity gets:
+
+- a `sealed partial class` implementing `IAlvoEntity`, with every property reading through
+  `AlvoRecordExtensions.Get<T>`;
+- a static `Create(…)` and a `{Class}Patch`;
+- an enum for each `enum` field;
+- one `{Project}Roles` class for the project.
+
+Generated sources start with `// <auto-generated/>` and `#nullable enable`, name every type `global::`-qualified, carry
+a `<summary>` on every public member, and use `\n` line endings. They are deterministic: descriptor order and no
+timestamps. `[GeneratedCode("MMLib.Alvo.Analyzers", <informational version>)]` reads the version through one cached
+attribute read (Decision 15). Naming follows Decisions 3/13, 16 and 17: singular by the irregular table and the three
+suffix rules, `Value` for reserved member names, and `Entity`/`Enum` for type names the SDK's implicit global usings
+bring in.
+
+**One public core helper** (Decision 2, G13). Generated code lives in the consumer and can call only public API, so each
+property reads through `AlvoRecordExtensions.Get<T>(record, field)`. It is a first-class typed single-field read that
+shares `RecordValue`'s conversion with `As<T>()`. A second, emitted copy of that conversion would drift. Cost: one
+permanent public member, a deviation from §5 row 17 "(generator output only)".
+
+**Diagnostics.** Two ids, category `Alvo.Generator`, tracked in `AnalyzerReleases.Unshipped.md`:
+
+- `ALVO2001` (Error): the file is not a descriptor the generator can read.
+- `ALVO2002` (Warning): a type name is already generated in that namespace. The first file by path keeps it, and the
+  later entity is skipped.
+
+**Boot check** (Decisions 9, 10, G1, G10). Each generated entity file also emits
+`[assembly: AssemblyMetadata("MMLib.Alvo.Analyzers.Project:{Namespace}.{Class}", "{project}")]`, a BCL attribute, so
+the public API does not grow. At boot, `DescriptorBootPlan.WarnAboutGeneratedEntities` runs at both boot sites, code-first
+and dashboard-first. It asks `GeneratedEntityCheck` for classes that meet all of these conditions:
+
+- they are in the entry assembly, or in an assembly it references that references the core;
+- the assembly carries a project marker;
+- the class has `[GeneratedCode]` tool `MMLib.Alvo.Analyzers`, `[AlvoEntity]` and `IAlvoEntity`;
+- its marker equals the booting descriptor's `name`.
+
+It logs `GeneratedEntityStale` (Warning) for each class that `ShapeMapping` finds no longer fits. It never refuses the
+boot. A failure of the check is logged as `GeneratedEntityCheckFailed`, per class, so one unreadable class does not hide
+the others. A stale class registered as a typed handler keeps HX-05's boot refusal. Costs:
+
+- a stale, unregistered class fails at its first `As<T>()` rather than at boot;
+- a class in an assembly loaded only at run time is not checked;
+- a class in a reference the compiler dropped is not checked (a library used only reflectively).
+
+**Proof.** `AlvoEntityGeneratorSnapshotTests` takes a Verify snapshot per `examples/*` descriptor. `GeneratedCompileTests`
+compiles every example against the real core, warning-free under strict settings, including host code that uses
+`async Task` in and beside the generated namespace. `GeneratedEntityFacts` runs on SQLite and PostgreSQL: round trip,
+create, patch, handler, typed condition, and the real boot's stale warning. `scripts/test-packed-analyzer` builds a
+packed consumer that generates from `booking.alvo.json` on the minimum SDK, and fails on any diagnostic in a generated
+`*.g.cs`.
 
 ## Adding a rule
 

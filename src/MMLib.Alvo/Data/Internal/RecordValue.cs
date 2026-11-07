@@ -37,15 +37,23 @@ internal static class RecordValue
             ? $"Field '{property.Field}' holds a value {map.Type.Name} has no member for: name the member's value with [AlvoEnumValue(\"…\")]."
             : $"Field '{property.Field}' holds {ShapeProblems.WithArticle(raw.GetType().Name)}, which {shape.Name}.{property.Property.Name} ({property.ValueType.Name}) cannot take.");
 
-    private static object? Held(object raw, MappedProperty property)
-    {
-        if (property.Enum is { } map)
-        {
-            return raw is string text ? map.MemberOf(text) : raw.GetType() == map.Type ? raw : null;
-        }
+    private static object? Held(object raw, MappedProperty property) => Convert(raw, property.ValueType);
 
-        return Scalar(raw, property.ValueType);
+    /// <summary>
+    /// <paramref name="raw"/> as <paramref name="target"/> holds it — an enum from its declared value, a whole number, an id,
+    /// a day or an instant from what a read carries — or <see langword="null"/> when <paramref name="target"/> cannot take it.
+    /// </summary>
+    /// <param name="raw">A field's non-null value.</param>
+    /// <param name="target">The type to hold it; a <see cref="Nullable{T}"/> is unwrapped.</param>
+    internal static object? Convert(object raw, Type target)
+    {
+        var held = Nullable.GetUnderlyingType(target) ?? target;
+
+        return held.IsEnum ? Member(raw, held) : Scalar(raw, held);
     }
+
+    private static object? Member(object raw, Type enumType) =>
+        raw is string text ? EnumMap.Of(enumType).MemberOf(text) : raw.GetType() == enumType ? raw : null;
 
     private static object? Scalar(object raw, Type target)
     {

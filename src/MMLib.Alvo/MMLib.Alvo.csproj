@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>The Alvo core: schema registry, Data API, rule engine, events and management, registered with AddAlvo.</Description>
+    <Description>The Alvo core: schema registry, Data API, rule engine, events and management, registered with AddAlvo — with the ALVO1001 analyzer and the typed-entity source generator.</Description>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -72,6 +72,12 @@
       <TfmSpecificPackageFile Include="@(AlvoAnalyzerAssembly)" PackagePath="analyzers/dotnet/cs" />
     </ItemGroup>
   </Target>
+
+  <ItemGroup>
+    <!-- The generator's MSBuild half: makes the AlvoDescriptor/AlvoNamespace item metadata and RootNamespace visible to it.
+         Packed at build/, so it reaches exactly the projects analyzers/dotnet/cs reaches (a direct reference). -->
+    <None Include="build/MMLib.Alvo.props" Pack="true" PackagePath="build/" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- Consumed at BUILD time by Corvus.Json.SourceGenerator (see GeneratedProjectDescriptor.cs)

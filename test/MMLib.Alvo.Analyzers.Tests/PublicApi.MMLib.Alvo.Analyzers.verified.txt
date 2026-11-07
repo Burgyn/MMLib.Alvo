@@ -3,6 +3,12 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETStandard,Version=v2.0", FrameworkDisplayName=".NET Standard 2.0")]
 namespace MMLib.Alvo.Analyzers
 {
+    [Microsoft.CodeAnalysis.Generator("C#", new string[0])]
+    public sealed class AlvoEntityGenerator : Microsoft.CodeAnalysis.IIncrementalGenerator
+    {
+        public AlvoEntityGenerator() { }
+        public void Initialize(Microsoft.CodeAnalysis.IncrementalGeneratorInitializationContext context) { }
+    }
     [Microsoft.CodeAnalysis.Diagnostics.DiagnosticAnalyzer("C#", new string[0])]
     public sealed class InTransactionIoAnalyzer : Microsoft.CodeAnalysis.Diagnostics.DiagnosticAnalyzer
     {

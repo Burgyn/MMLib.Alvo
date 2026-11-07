@@ -1,0 +1,72 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "desk",
+  "auth": {
+    "roles": [
+      "agent"
+    ]
+  },
+  "entities": {
+    "orders": {
+      "fields": {
+        "reference": {
+          "type": "string",
+          "required": true,
+          "maxLength": 60
+        },
+        "status": {
+          "type": "enum",
+          "values": [
+            "draft",
+            "in_review",
+            "ok"
+          ],
+          "default": "draft"
+        },
+        "total": {
+          "type": "decimal",
+          "precision": 12,
+          "scale": 2
+        },
+        "legacy_code": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "line_count": {
+          "type": "integer",
+          "rollup": {
+            "from": "order_lines",
+            "op": "count"
+          }
+        }
+      },
+      "rules": {
+        "list": "'agent' in @user.roles",
+        "get": "'agent' in @user.roles",
+        "create": "'agent' in @user.roles",
+        "update": "'agent' in @user.roles"
+      }
+    },
+    "order_lines": {
+      "fields": {
+        "order_id": {
+          "type": "ref",
+          "entity": "orders",
+          "required": true,
+          "onDelete": "cascade"
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 200
+        }
+      },
+      "rules": {
+        "list": "'agent' in @user.roles",
+        "get": "'agent' in @user.roles",
+        "create": "'agent' in @user.roles",
+        "update": "'agent' in @user.roles"
+      }
+    }
+  }
+}
