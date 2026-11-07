@@ -62,8 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **State machines** (HX-18): `entities.<e>.stateMachine { field, initial?, transitions: { <name>: { from, to, roles?, when? } } }`
   names which values an `enum` field may move between. An update that changes the field must take a declared
   transition — checked in the write after the declarative before-hooks and before any host before-write hook, and
-  again over what will be stored when a host hook patched — else 422 `validation` with code `transition` at the
-  field; a transition whose `roles` the caller lacks is 403; a create stores `initial`. `from: ["*"]` means any state;
+  checked again at stage 5 over what will be stored (always on an update, on a create only when a host hook
+  patched) — else 422 `validation` with code `transition` at the field; a transition whose `roles` the caller lacks
+  is 403; a create must store `initial` (a create that sends none stores the field's `default`, which must equal it). `from: ["*"]` means any state;
   the system caller holds `admin`. In a batch the row is refused with code `transition` (a batch refused only by
   transitions answers 422). Dashboard: the entity's *States* tab draws the graph, and the policy simulator answers
   per transition whether the caller may take it (`ManagementPolicyVerdict.Transitions`, `ManagementTransitionVerdict`).

@@ -174,7 +174,7 @@ A transition `when` reading a field hidden from the caller makes 200-vs-422 an o
 6. **No system bypass** — one more transition (listing `admin`) for jobs.
 7. **Descriptor members only, no `EntitySchema` member** — a provider sees the machine only through the internal port.
 8. **Refused at apply** (non-enum/non-stored/hidden state field, values outside `values`, `"*"` beside others, `to`
-   in its own `from`, `initial` ≠ `default`, undeclared role, dynamic entities) — dynamic entities wait for a follow-up.
+   in its own `from`, `initial` ≠ the field's `default` when it declares one, undeclared role, dynamic entities) — dynamic entities wait for a follow-up.
 9. **Key `alvo:<entity>:<timer>:<id>`, scope = `tenant_id` or `""`; `IAlvoScheduler` refuses `alvo:`** — a host key with
    that prefix is refused.
 10. **Arming rule above** — one PK delete per timer per write; existing rows are armed by the framework's re-plan data
