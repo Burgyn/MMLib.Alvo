@@ -34,7 +34,7 @@ internal sealed partial class FieldFacets
     /// <summary>The field whose value starts its own count, or empty for one count per tenant.</summary>
     public string SequencePer { get; set; } = string.Empty;
 
-    /// <summary>The UTC period after which the count restarts — one of <see cref="SequencePeriods"/>.</summary>
+    /// <summary>The calendar period after which the count restarts — one of <see cref="SequencePeriods"/>.</summary>
     public string SequencePeriod { get; set; } = string.Empty;
 
     /// <summary>The first number as typed, or empty for the schema's default of 1.</summary>
