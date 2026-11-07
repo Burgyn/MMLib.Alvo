@@ -4,6 +4,7 @@ using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Lifecycle;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Tests.Lifecycle;
 
@@ -139,6 +140,26 @@ public sealed class LifecycleCompilerTests
 
         CelInterpreter.EvaluateInstant(at, Row(startsAt), AlvoContext.System(null), now).ShouldBe(startsAt.AddHours(-24));
         CelInterpreter.EvaluateInstant(at, Row(null), AlvoContext.System(null), now).ShouldBeNull();
+    }
+
+    [Fact]
+    public void Timers_under_a_compiler_that_cannot_type_a_timestamp_are_refused_by_name()
+    {
+        var descriptor = Descriptor([Timers(""" "reminder": {"at": "starts_at"} """)]);
+
+        PolicyCatalog.TryBuild(descriptor, DescriptorToSchemaMapper.Map(descriptor), new PlainCompiler(), out _, out var errors).ShouldBeFalse();
+
+        var error = errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe(Pointer + "/timers/reminder/at");
+        error.Message.ShouldContain("replaced it");
+    }
+
+    /// <summary>An <see cref="ICelCompiler"/> that is not Alvo's own, so it has no <see cref="IValueCompiler"/> face.</summary>
+    private sealed class PlainCompiler : ICelCompiler
+    {
+        private readonly CelCompiler _inner = new();
+
+        public CelCompilationResult Compile(string source, CelProfile profile, EntitySchema entity) => _inner.Compile(source, profile, entity);
     }
 
     private static AlvoRecord Row(DateTimeOffset? startsAt) => new(new Dictionary<string, object?> { ["starts_at"] = startsAt });
