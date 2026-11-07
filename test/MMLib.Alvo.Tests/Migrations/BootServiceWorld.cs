@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Data.Internal;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions.Internal;
@@ -145,6 +146,9 @@ internal sealed class BootServiceWorld : IDisposable
         new CelCompiler(),
         Tests.Extensions.HandlerCatalog.EveryService(),
         _loggers.CreateLogger<ExtensionBinder>());
+
+    /// <summary>The generated classes stage 0 checks against the boot's schema, or <see langword="null"/> for none.</summary>
+    internal GeneratedEntitySource? Generated { get; set; }
 
     /// <summary>The registrations the extension state guard judges the delivery store's work against.</summary>
     internal ExtensionRegistry Registrations { get; set; } = ExtensionRegistry.Empty;
@@ -299,7 +303,7 @@ internal sealed class BootServiceWorld : IDisposable
         new(Registrations, Tests.Extensions.HandlerCatalog.EveryService(), store: null);
 
     private DescriptorBootPlan Plan() =>
-        new(Source, new DescriptorValidator(), new CelCompiler(), _loggers.CreateLogger<DescriptorBootPlan>(), Extensions);
+        new(Source, new DescriptorValidator(), new CelCompiler(), _loggers.CreateLogger<DescriptorBootPlan>(), Extensions, Generated);
 
     private ConflictingRuntimeSchemaWriter Writer() =>
         _writer = new ConflictingRuntimeSchemaWriter(

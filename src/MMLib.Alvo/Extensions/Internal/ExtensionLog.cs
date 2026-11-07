@@ -21,4 +21,18 @@ internal static partial class ExtensionLog
         Level = LogLevel.Information,
         Message = "Alvo retired extension {Id} ({Retirement}): {Deliveries} unfinished deliveries were ended.")]
     internal static partial void ExtensionRetired(ILogger logger, string id, AlvoRetirement retirement, int deliveries);
+
+    [LoggerMessage(
+        EventName = "GeneratedEntityStale",
+        Level = LogLevel.Warning,
+        Message = "Generated class {Type} no longer fits entity '{Entity}' of the live schema: {Problems} Regenerate it from the "
+            + "current descriptor or a Management API snapshot, and rebuild.")]
+    internal static partial void GeneratedEntityStale(ILogger logger, string type, string entity, string problems);
+
+    [LoggerMessage(
+        EventName = "GeneratedEntityCheckFailed",
+        Level = LogLevel.Warning,
+        Message = "Alvo could not check the generated classes against the live schema: {Reason} The boot continues; a stale "
+            + "class fails at its first typed read instead.")]
+    internal static partial void GeneratedEntityCheckFailed(ILogger logger, string reason);
 }

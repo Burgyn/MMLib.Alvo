@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Commands.Internal;
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Data.Internal;
 using MMLib.Alvo.Extensions.Internal;
 
 namespace MMLib.Alvo.Extensions;
@@ -34,6 +35,7 @@ internal static class ExtensionsSetup
         services.TryAddSingleton(provider => new ExtensionRegistry(
             provider.GetServices<ExtensionRegistration>(), provider.GetRequiredService<CommandRegistry>()));
         services.TryAddSingleton<ExtensionBinder>();
+        services.TryAddSingleton(_ => new GeneratedEntitySource());
         services.TryAddSingleton<ExtensionCatalog>();
         services.TryAddSingleton<ExtensionApplyGuard>();
         services.TryAddSingleton<ExtensionStateGuard>();
