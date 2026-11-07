@@ -12,7 +12,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// </summary>
 /// <remarks>
 /// It runs after the before-hooks, immediately before the row is added: a hook never sees a number, <c>per</c> reads the
-/// row the hooks left, and the period is the write's own stamp in UTC.
+/// row the hooks left, and the period is the write's own stamp read in the sequence's <c>timeZone</c> (UTC by default).
 /// </remarks>
 /// <param name="dialect">The engine's dialect, which spells the allocation.</param>
 /// <param name="table">The prefixed counter table.</param>
@@ -66,7 +66,9 @@ internal sealed class SequenceNumbers(IAlvoSqlDialect dialect, string table)
             foreach (var row in count)
             {
                 var number = await NextAsync(db, count.Key, field.Sequence!.Start, ct).ConfigureAwait(false);
-                row[field.Name] = field.Sequence.Format is { } format ? SequenceFormat.Render(format, number, instant) : number;
+                row[field.Name] = field.Sequence.Format is { } format
+                    ? SequenceFormat.Render(format, number, instant, field.Sequence.TimeZone)
+                    : number;
             }
         }
     }
@@ -76,7 +78,7 @@ internal sealed class SequenceNumbers(IAlvoSqlDialect dialect, string table)
         field.Name,
         SequenceFormat.KeyText(row.TryGetValue(AlvoDataContext.TenantIdColumn, out var tenant) ? tenant : null),
         SequenceFormat.KeyText(field.Sequence!.Per is { } per && row.TryGetValue(per, out var scope) ? scope : null),
-        SequenceFormat.PeriodKey(field.Sequence.Period, instant));
+        SequenceFormat.PeriodKey(field.Sequence.Period, instant, field.Sequence.TimeZone));
 
     private async Task<long> NextAsync(AlvoDataContext db, CountKeys keys, long start, CancellationToken ct)
     {
