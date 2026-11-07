@@ -164,6 +164,21 @@ public abstract class StateMachineFacts
     }
 
     [Fact]
+    public async Task A_create_a_host_before_write_patched_is_judged_again_and_still_stores_initial()
+    {
+        EnsureEngineAvailable();
+        await using var alvo = await StartAsync(await DatabaseAsync(), alvo => alvo.Entity(Bookings, b => b.BeforeWrite("annotate", (BeforeWrite<AlvoRecord> write) =>
+        {
+            write.Set("note", "patched by host");
+            return ValueTask.CompletedTask;
+        })));
+
+        var created = await alvo.Data.CreateAsync(Bookings, Booking(_now.AddHours(48)), Caller("staff"), cancellationToken: Ct);
+
+        (created["note"], created["status"]).ShouldBe(("patched by host", "draft"));
+    }
+
+    [Fact]
     public async Task A_create_storing_a_state_other_than_initial_is_refused_and_writes_nothing()
     {
         EnsureEngineAvailable();
