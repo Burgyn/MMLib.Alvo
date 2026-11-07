@@ -11,7 +11,7 @@ internal static class EntityEmitter
     internal static string Emit(DescriptorModel model, EntityModel entity)
     {
         var writer = new SourceWriter();
-        GeneratedText.Header(writer, model);
+        GeneratedText.Header(writer, model, entity.ClassName);
         WrapperEmitter.Emit(writer, model, entity);
         foreach (var field in entity.Fields)
         {

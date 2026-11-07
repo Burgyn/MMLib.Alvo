@@ -74,6 +74,12 @@
   </Target>
 
   <ItemGroup>
+    <!-- The generator's MSBuild half: makes the AlvoDescriptor/AlvoNamespace item metadata and RootNamespace visible to it.
+         Packed at build/, so it reaches exactly the projects analyzers/dotnet/cs reaches (a direct reference). -->
+    <None Include="build/MMLib.Alvo.props" Pack="true" PackagePath="build/" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Consumed at BUILD time by Corvus.Json.SourceGenerator (see GeneratedProjectDescriptor.cs)
          to emit strongly-typed validator types; no longer embedded/read at runtime. -->
     <AdditionalFiles Include="../../schema/project.schema.json" />

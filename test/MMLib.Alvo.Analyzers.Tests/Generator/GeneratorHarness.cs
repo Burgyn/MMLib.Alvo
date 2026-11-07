@@ -20,6 +20,9 @@ internal static class GeneratorHarness
             .Select(path => (MetadataReference)MetadataReference.CreateFromFile(path)),
     ]);
 
+    /// <summary>The running process's own assemblies, the real core among them.</summary>
+    internal static ImmutableArray<MetadataReference> References => _references.Value;
+
     internal static DescriptorModel Model(string descriptor, string @namespace = Namespace)
     {
         var result = DescriptorReader.Read("descriptor.alvo.json", descriptor, @namespace);
