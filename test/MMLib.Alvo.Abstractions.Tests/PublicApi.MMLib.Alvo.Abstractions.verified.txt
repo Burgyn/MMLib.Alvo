@@ -904,6 +904,7 @@ namespace MMLib.Alvo.Descriptor
         public string? Per { get; init; }
         public MMLib.Alvo.Descriptor.SequencePeriod? Period { get; init; }
         public long? Start { get; init; }
+        public string? TimeZone { get; init; }
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.FieldType>))]
     public enum FieldType
@@ -2496,6 +2497,7 @@ namespace MMLib.Alvo.Schema
         public string? Per { get; init; }
         public MMLib.Alvo.Schema.SequenceResetPeriod? Period { get; init; }
         public long Start { get; init; }
+        public string? TimeZone { get; init; }
     }
     public enum TenancyMode
     {
