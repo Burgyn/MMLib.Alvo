@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An apply cancels the unfinished deliveries of a descriptor action it no longer declares** (#480): editing or removing
+  an after-hook action, an automation action, its condition or a rule's trigger makes a new subscriber id, and the old
+  one's `pending`/`retrying`/`running` deliveries used to stay on Operations forever. After each committed apply, rollback
+  or re-apply, and at the boot just before Ready, every `/…` subscriber the serving descriptor does not declare has them
+  set `cancelled` (error type `superseded`), with one `cancel-superseded` row in the operations log per subscriber (actor
+  `system`, naming the revision) and a `ManagementAudit` line. The stored schedule of an edited or removed cron rule is
+  deleted by the same sweep. Host-registered handlers are never touched; cancelled is final — a rollback that declares the
+  old action again does not bring the cancelled rows back (redeliver or replay them), and the restored action receives the
+  events written from then on. A failed sweep is logged and never fails the apply; the next apply or boot sweeps again.
+
 - **Functions in the descriptor** (HX-15): `IAlvoFunction<TInput>`, registered with `AddFunction<T>(name)`, is called
   from an after-hook or an automation rule as `{"type": "function", "name": …, "input": {…}}` — each `input` value a
   literal or `{"$cel": "…"}` over the triggering row, checked at apply against the JSON Schema exported for `TInput`
@@ -408,8 +418,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`/entities/orders/hooks/afterCreate#1f0c9a2e`), no longer `/…/afterCreate/0`; `AlvoHookRecorder.AssertRan` takes the
   pointer alone. A condition that throws records a dead `when-failed` delivery instead of dropping the hook, and an
   event past the chain-depth limit records dead `chain-depth-exceeded` rows for its actions. Editing an action makes a
-  new subscriber: the old one's pending rows stay unclaimed until swept, and an edited cron rule leaves its old stored
-  schedule row inert.
+  new subscriber; the old one's unfinished work is cancelled by the apply (below).
 - **`FunctionAction.Input` is a `FunctionInput?`, not a `string?`** (HX-15): a `function` action's `input` is an object of
   literals and `{"$cel": "…"}` values (`FunctionInput.Fields`), checked at apply against the registered function's input
   schema; the JSONata string form parses into `FunctionInput.Transform` and stays refused. Code that read the string

@@ -74,5 +74,7 @@ refusing applies — so the secret can be added under *Settings → Secrets*; th
 | `auth.*` and `storage.*` triggers | No such event exists in this build. |
 | A `condition` on a cron rule | A schedule has no row to read. |
 
-Editing a rule makes it a new subscriber: deliveries of the old one still pending are not run, and stay listed until
-cleaned up.
+Editing a rule makes it a new subscriber: the apply cancels the old one's unfinished deliveries (error type
+`superseded`) and records one `cancel-superseded` row in the [operations log](/extending/operate-deliveries/#audit),
+naming the revision. A rollback to the old rule does not bring them back — redeliver or replay them if they should
+still run — and an edited or removed cron rule's old schedule is deleted by the same apply.

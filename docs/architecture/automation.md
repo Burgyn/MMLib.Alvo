@@ -42,7 +42,21 @@ The parts are serialized separately through the descriptor's typed `JsonTypeInfo
 U+001F, so the id is stable across processes and platforms. There is no sibling index: inserting a hook above another
 does not rename it. Exact duplicates take an ordinal `-2`. An **edit makes a new subscriber**: the old one's pending
 rows are never claimed again, and `ExtensionStateGuard` ignores ids starting with `/`, so they never refuse a boot.
-They stay visible on Operations until a sweep cancels them (a follow-up).
+
+**`DescriptorActionSweep` ends them** (#480). After each committed apply, rollback or re-apply (`RuntimeSchemaService`,
+never before the commit, so a refused apply cancels nothing) and at the boot just before Ready, every subscriber id
+starting with `/` that has unfinished work and that the serving catalog does not bind has that work cancelled (error
+type `superseded`) — through the internal `ISupersededDeliveryStore`, which the EF store implements as one transaction:
+the subscriber lock taken exclusively (as a pause takes it, so a claim under way finishes first), the cancel, and one
+`cancel-superseded` operations-log row (actor `system`, the revision in its reason, `affected` = how many). A store
+without that member still cancels through `IDeliveryStore.CancelPendingAsync`, unlogged but audited. A subscriber with
+nothing unfinished writes nothing, so the sweep is idempotent across replicas and applies. It works per subscriber, across
+tenants: one id names one action whatever the event's tenant, so it cannot reach a live subscriber's rows. Host ids
+(no leading `/`) are never touched. The same sweep deletes the stored schedule of a cron rule whose trigger changed or
+whose rule is gone, through `ITimerStore.SyncSchedulesAsync`'s retired ids. Cancelled is final: a rollback that binds the
+old id again leaves those rows cancelled and receives only the events written after it. A failed sweep logs
+`DescriptorActionSweepFailed` and never fails the committed apply; the next apply or boot sweeps again. Residual window: an
+event fanned out by a replica still serving the old catalog after the sweep leaves a row the next sweep ends.
 
 The Operations page filters by an id prefix (`?subscriber=/automation/<rule>/actions#`), which is how the
 Automations page links a rule to its deliveries.
@@ -95,7 +109,7 @@ refuse until a restart. A store that throws fails closed, naming its exception t
 
 ## Decisions
 
-1. Subscriber id = pointer + content hash; an edit makes a new subscriber, and the old one's pending rows are left unclaimed.
+1. Subscriber id = pointer + content hash; an edit makes a new subscriber, and the next apply's (or boot's) sweep cancels the old one's unfinished rows, one log row per subscriber (#480).
 2. Actions run as synthetic `BoundHandler`s with default settings (30 s, `PerRecord`, default retry, system in the event's tenant); not catalog entries.
 3. `entity.update` is exactly-once through the command ledger committed inside `TransactAsync`; the horizon is the ledger's one-day sweep.
 4. Function `input` is validated by top-level `properties`, `required` and the JSON `type` of literals only; a nested typo dies at run time.
