@@ -45,6 +45,7 @@ internal sealed class SchemaMigrationRunner
     private readonly IAppliedSchemaStore _store;
     private readonly IPolicyCatalogProvider _policyCatalogProvider;
     private readonly ExtensionApplyGuard? _extensions;
+    private readonly DescriptorActionSweep? _sweep;
 
     public SchemaMigrationRunner(
         DescriptorBootPlan bootPlan,
@@ -52,7 +53,8 @@ internal sealed class SchemaMigrationRunner
         ISchemaIntrospector introspector,
         IAppliedSchemaStore store,
         IPolicyCatalogProvider policyCatalogProvider,
-        ExtensionApplyGuard? extensions = null)
+        ExtensionApplyGuard? extensions = null,
+        DescriptorActionSweep? sweep = null)
     {
         ArgumentNullException.ThrowIfNull(bootPlan);
         ArgumentNullException.ThrowIfNull(migrator);
@@ -66,6 +68,7 @@ internal sealed class SchemaMigrationRunner
         _store = store;
         _policyCatalogProvider = policyCatalogProvider;
         _extensions = extensions;
+        _sweep = sweep;
     }
 
     /// <summary>Runs the code-first migration flow described in the type's remarks.</summary>
@@ -100,7 +103,7 @@ internal sealed class SchemaMigrationRunner
 
         if (plan.IsEmpty)
         {
-            _policyCatalogProvider.SetCurrent(descriptor.Name, catalog);
+            await ServeAsync(descriptor.Name, catalog, appliedSnapshot?.Revision).ConfigureAwait(false);
             return new MigrationResult(Applied: false, plan, WasDryRun: options.DryRun);
         }
 
@@ -121,9 +124,22 @@ internal sealed class SchemaMigrationRunner
             var revision = (appliedSnapshot?.Revision ?? 0) + 1;
             var snapshot = new AppliedSchema(desired, descriptorJson, revision, DateTimeOffset.UtcNow);
             await _store.SaveAsync(descriptor.Name, snapshot, ct).ConfigureAwait(false);
-            _policyCatalogProvider.SetCurrent(descriptor.Name, catalog);
+            await ServeAsync(descriptor.Name, catalog, revision).ConfigureAwait(false);
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Publishes <paramref name="catalog"/>, then ends the work of the descriptor actions it no longer binds (issue 480) — after
+    /// the snapshot is saved, and not cancelled with the call, as <see cref="RuntimeSchemaService"/> does.
+    /// </summary>
+    private async Task ServeAsync(string project, PolicyCatalog catalog, int? revision)
+    {
+        _policyCatalogProvider.SetCurrent(project, catalog);
+        if (_sweep is not null)
+        {
+            await _sweep.SweepAsync(catalog, revision, CancellationToken.None).ConfigureAwait(false);
+        }
     }
 }

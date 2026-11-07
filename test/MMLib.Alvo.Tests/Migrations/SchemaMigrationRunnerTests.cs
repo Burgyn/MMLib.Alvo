@@ -96,6 +96,29 @@ public sealed class SchemaMigrationRunnerTests
         VehicleFieldNames(saved.Schema).ShouldBe(_expectedFieldNames);
     }
 
+    /// <summary>
+    /// A code-first apply ends the work of a descriptor action the catalog no longer binds, as the runtime apply does
+    /// (issue 480), naming the revision it saved.
+    /// </summary>
+    [Fact]
+    public async Task An_apply_cancels_the_work_of_a_descriptor_action_the_catalog_no_longer_binds()
+    {
+        var deliveries = new Events.FakeDeliveryStore(TimeProvider.System);
+        await deliveries.FanOutAsync(
+            [new MMLib.Alvo.Events.DeliveryRequest { EventId = Guid.NewGuid(), Subscriber = "/entities/vehicles/hooks/afterCreate#00000000", PartitionKey = "vehicles:1", Kind = "action" }],
+            TestContext.Current.CancellationToken);
+        var binder = new ExtensionBinder(ExtensionRegistry.Empty, new CelCompiler(), HandlerCatalog.EveryService(), NullLogger<ExtensionBinder>.Instance);
+        var sweep = new DescriptorActionSweep(binder, TimeProvider.System, NullLogger<DescriptorActionSweep>.Instance, deliveries);
+        var runner = new SchemaMigrationRunner(BootPlan(), _migrator, _introspector, _store, new PolicyCatalogProvider(), extensions: null, sweep);
+        _store.GetCurrentAsync("fleet", Arg.Any<CancellationToken>()).Returns((AppliedSchema?)null);
+        _introspector.IntrospectAsync(Arg.Any<CancellationToken>()).Returns(new SchemaModel([]));
+
+        await runner.RunAsync(new MigrationOptions(), TestContext.Current.CancellationToken);
+
+        deliveries.Rows.ShouldHaveSingleItem().Status.ShouldBe("cancelled");
+        deliveries.Operations.ShouldHaveSingleItem().Reason.ShouldNotBeNull().ShouldContain("Revision 1");
+    }
+
     [Fact]
     public async Task Second_run_with_unchanged_descriptor_is_a_true_no_op()
     {
