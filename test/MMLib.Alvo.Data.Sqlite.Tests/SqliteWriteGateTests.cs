@@ -122,6 +122,61 @@ public sealed class SqliteWriteGateTests : IDisposable
         await Should.ThrowAsync<OperationCanceledException>(waiting.WaitAsync(_deadline, Ct));
     }
 
+    /// <summary>The key is the database's full path or its name, tagged by which — the same one under every spelling.</summary>
+    [Fact]
+    public void A_database_is_keyed_by_its_full_path_or_by_its_memory_name()
+    {
+        SqliteWriteGates.DatabaseKey($"Data Source={_databasePath}").ShouldBe("file:" + Path.GetFullPath(_databasePath));
+        SqliteWriteGates.DatabaseKey("Data Source=shared-name;Mode=Memory;Cache=Shared").ShouldBe("memory:shared-name");
+        SqliteWriteGates.DatabaseKey("Data Source=;Mode=Memory").ShouldBe("memory:");
+        SqliteWriteGates.DatabaseKey("Data Source=").ShouldBe("memory:");
+    }
+
+    /// <summary>
+    /// The path compares without case where the platform's default file system does, and exactly where it does not: on Linux
+    /// two spellings that differ in case are two files and two lines; elsewhere they are one.
+    /// </summary>
+    [Fact]
+    public void Paths_differing_only_in_case_share_a_gate_exactly_where_the_file_system_ignores_case()
+    {
+        var lower = SqliteWriteGates.For($"Data Source={_databasePath.ToLowerInvariant()}");
+        var upper = SqliteWriteGates.For($"Data Source={_databasePath.ToLowerInvariant().ToUpperInvariant()}");
+
+        if (OperatingSystem.IsLinux())
+        {
+            upper.Line.ShouldNotBeSameAs(lower.Line);
+        }
+        else
+        {
+            upper.Line.ShouldBeSameAs(lower.Line);
+        }
+    }
+
+    /// <summary>A zero busy timeout is an unbounded wait, as for the engine's own lock wait; any other bound is that many seconds.</summary>
+    [Theory]
+    [InlineData(0, -1)]
+    [InlineData(1, 1)]
+    [InlineData(45, 45)]
+    public void The_wait_is_the_default_timeout_in_seconds_and_unbounded_for_zero(int defaultTimeout, int expectedSeconds)
+    {
+        var gate = SqliteWriteGates.For($"Data Source={_databasePath};Default Timeout={defaultTimeout}");
+
+        gate.Wait.ShouldBe(expectedSeconds < 0 ? Timeout.InfiniteTimeSpan : TimeSpan.FromSeconds(expectedSeconds));
+    }
+
+    /// <summary>The busy error reads as the engine's own — its code, extended code and message — because callers already match it.</summary>
+    [Fact]
+    public async Task The_busy_error_carries_the_engines_code_extended_code_and_message()
+    {
+        var gate = SqliteWriteGates.For($"Data Source={_databasePath};Default Timeout=1");
+        using var holder = await gate.EnterAsync(Ct);
+
+        var busy = await Should.ThrowAsync<SqliteException>(gate.EnterAsync(Ct).AsTask().WaitAsync(_deadline, Ct));
+
+        (busy.SqliteErrorCode, busy.SqliteExtendedErrorCode).ShouldBe((5, 5));
+        busy.Message.ShouldContain("database is locked");
+    }
+
     [Fact]
     public async Task The_gate_admits_one_writer_at_a_time()
     {
