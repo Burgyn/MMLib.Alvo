@@ -27,6 +27,7 @@ public class PostgreSqlConstraintDecodeTests
     private const string UniqueViolation = "23505";
     private const string ForeignKeyViolation = "23503";
     private const string CheckViolation = "23514";
+    private const string StringDataRightTruncation = "22001";
 
     private static PostgresException Failure(string sqlState, string? constraintName) =>
         new(
@@ -61,6 +62,21 @@ public class PostgreSqlConstraintDecodeTests
 
         decoded.ShouldNotBeNull();
         decoded.Kind.ShouldBe(AlvoConstraintKind.Unique);
+        decoded.ConstraintName.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// A string past its column's <c>varchar(n)</c> (<c>string_data_right_truncation</c>) is the validation family, naming
+    /// no constraint (issue 481): the port measures <c>maxLength</c> before the engine, so this is defence in depth for a
+    /// value that still reaches it — a stored generated column, say — which was an unmapped 500 before.
+    /// </summary>
+    [Fact]
+    public void A_string_past_its_column_length_is_a_check_violation_naming_no_constraint()
+    {
+        var decoded = _dialect.DecodeConstraintViolation(Failure(StringDataRightTruncation, "ignored"));
+
+        decoded.ShouldNotBeNull();
+        decoded.Kind.ShouldBe(AlvoConstraintKind.Check);
         decoded.ConstraintName.ShouldBeNull();
     }
 

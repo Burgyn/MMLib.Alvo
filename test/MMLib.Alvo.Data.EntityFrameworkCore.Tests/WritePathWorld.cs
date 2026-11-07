@@ -146,6 +146,7 @@ internal sealed class WritePathWorld : IAsyncDisposable
             new AlvoOptions(),
             AlvoChainDepthLimit.Default,
             services.GetRequiredService<IEntityLifecycle>(),
+            services.GetRequiredService<IFieldFacets>(),
             writeGate: null,
             extensions: hooks.Extensions,
             scopes: world.Scopes,
