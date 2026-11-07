@@ -243,23 +243,43 @@ internal static class DeliveryTable
 
     private static string Registered(int subscribers) => $"subscriber IN ({Parameters(0, subscribers)})";
 
+    /// <summary>
+    /// The lane-head test: no earlier delivery of the lane that still holds it, and no earlier entry of the key the outbox
+    /// has yet to fan out — each a <see cref="NoneOf"/> probe, not a <c>NOT EXISTS</c>.
+    /// </summary>
+    /// <remarks>
+    /// <b>A probe, because PostgreSQL turns a correlated <c>NOT EXISTS</c> into an anti-join, and an anti-join is planned
+    /// from statistics a fresh backlog does not have yet</b> (#482). Over ten thousand deliveries fanned out before the first
+    /// claim the planner, believing the subscriber held one row, joined each candidate against the whole subscriber's
+    /// backlog — the lane and the event id a join filter, not an index condition — and the claim ran 36 s on 10 000 rows.
+    /// A scalar subquery is never pulled up into a join: it stays a per-row probe whose outer columns are parameters, so it
+    /// is an index seek on <c>ix_&lt;table&gt;_lane_open</c> and <c>ix_&lt;outbox&gt;_unfanned</c> whatever the statistics
+    /// say (≈0.2 s on the same backlog). The rows it finds are exactly the ones the <c>NOT EXISTS</c> found, so the
+    /// claim's semantics on both engines are unchanged.
+    /// </remarks>
     private static string LaneHead(string table, string outbox, int ordered, int unordered)
     {
-        var noEarlier =
-            $"NOT EXISTS (SELECT 1 FROM {table} earlier WHERE earlier.subscriber = {table}.subscriber "
+        var noEarlier = NoneOf(
+            $"{table} earlier WHERE earlier.subscriber = {table}.subscriber "
             + $"AND earlier.partition_key = {table}.partition_key AND earlier.event_id < {table}.event_id "
             + $"AND earlier.{LaneBlocking} "
             + "AND (earlier.status IN ('pending', 'running', 'retrying') "
-            + "OR (earlier.status = 'dead' AND COALESCE(earlier.last_error_type, '') <> 'unbound')))";
-        var noUnfanned =
-            $"NOT EXISTS (SELECT 1 FROM {outbox} unfanned WHERE unfanned.partition_key = {table}.partition_key "
+            + "OR (earlier.status = 'dead' AND COALESCE(earlier.last_error_type, '') <> 'unbound'))");
+        var noUnfanned = NoneOf(
+            $"{outbox} unfanned WHERE unfanned.partition_key = {table}.partition_key "
             + $"AND unfanned.id < {table}.event_id AND unfanned.dispatched_at IS NULL "
             + "AND (unfanned.attempts < @outbox_max_attempts "
-            + "OR (unfanned.claimed_by IS NOT NULL AND unfanned.claimed_at >= @outbox_stale_before)))";
+            + "OR (unfanned.claimed_by IS NOT NULL AND unfanned.claimed_at >= @outbox_stale_before))");
         var laneHead = $"{noEarlier} AND {noUnfanned}";
 
         return unordered == 0 ? laneHead : $"(subscriber IN ({Parameters(ordered, unordered)}) OR ({laneHead}))";
     }
+
+    /// <summary>
+    /// True when <paramref name="source"/> — a table, its alias and a <c>WHERE</c> — has no row: <c>NOT EXISTS</c>, spelled
+    /// as a scalar probe for the planner's sake (see <see cref="LaneHead"/>), and the same on SQLite.
+    /// </summary>
+    private static string NoneOf(string source) => $"(SELECT 1 FROM {source} LIMIT 1) IS NULL";
 
     private static string Parameters(int from, int count) =>
         string.Join(", ", Enumerable.Range(from, count).Select(index => $"@s{index}"));
