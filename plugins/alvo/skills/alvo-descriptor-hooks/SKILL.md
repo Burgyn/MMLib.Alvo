@@ -14,7 +14,7 @@ An entity's `hooks` hold lists under `beforeCreate`, `beforeUpdate` and `beforeD
 A before-hook runs inside the write's transaction, with no network: it can refuse or change this row
 only. A hook without a `condition` runs on every write, never on a schedule. Timed jobs are host code
 (`AddSchedule`, `IAlvoScheduler`) or a `timers` entry; steps that must not repeat are `IAlvoSteps`. No hook
-skips a `stateMachine`. The descriptor's `automation` does not run in this build.
+skips a `stateMachine`. So is an `automation` cron.
 
 The shape: `schema/project.schema.json#/$defs/beforeHookList`.
 
@@ -43,7 +43,7 @@ A `substring` past the end fails the write, so to fit a field's `maxLength`, cut
 `substring(new.description, 0, math.least(size(new.description), 40))`. A value derived from other fields of the row
 belongs in a computed field, which stays true on every write; a `mutate` stamps it once.
 
-Host CEL functions compute a value and never run your code (the `function` action is refused); they
+Host CEL functions compute a value and never run your code (the `function` action does); they
 work in a `condition` and a `mutate` only. Call `get_cel_functions` for this host's list — never assume one exists.
 
 <!-- gen:cel-mutate -->
@@ -90,13 +90,17 @@ Adding a hook depends on what the entity already has:
 ```
 
 <!-- gen:descriptor-or-code -->
-Host C# may react after a commit (an extension). When `get_descriptor`'s `hostExtensions` names the entity or `*`,
+An extension (host code) may run post-commit. When `get_descriptor`'s `hostExtensions` names the entity or `*`,
 call `get_extensions` before proposing an after-hook there, and name one that already does it instead. Apply
-refuses removing, or excluding from event images, a field or entity an extension reads.
+refuses removing, or leaving out of event images, a field or entity it reads.
 <!-- /gen:descriptor-or-code -->
 
-After-hooks (`afterCreate`, `afterUpdate`, `afterDelete`) run after the commit, and only some of their action types
-run in this build: see `alvo-descriptor-capabilities-and-limits`.
+<!-- gen:function-action -->
+After-hooks and `automation` call host C# as `{"type":"function","name":"…","input":{…}}`; `get_extensions` lists
+functions and each `inputSchema`. Apply refuses an unknown name or input key.
+<!-- /gen:function-action -->
 
-In the dashboard: read with `get_descriptor`, then `check_change` or `propose_change` the operations.
-In this repo: edit `examples/**/*.alvo.json` or your own descriptor, then run `scripts/test-ring0` or `PUT …/descriptor?dryRun=true`.
+After-hooks run post-commit: see `alvo-descriptor-capabilities-and-limits`.
+
+In the dashboard: `get_descriptor`, then `check_change` or `propose_change`.
+In this repo: edit a `*.alvo.json`; run `scripts/test-ring0`.

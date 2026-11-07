@@ -27,8 +27,8 @@ public sealed class SkillCasesTests
     private const string Capabilities = "alvo-descriptor-capabilities-and-limits";
     private const string Proposed = "I proposed the change. Nothing changes until you apply it from Preview.";
     private const string FunctionAnswer =
-        "> The 'function' action is declared in the schema but not implemented in this build.\n\n"
-        + "This build does not run functions, so I did not propose a hook for the invoicing function.";
+        "This host registers no invoicing function, so a 'function' action naming one would be refused at apply. "
+        + "Register it in C# with AddFunction, and I can then propose the hook.";
     private const string HttpAnswer =
         "No, not in this build: an after-hook http.call is refused. A webhook action posts to a declared endpoint, but it is not signed.";
 
@@ -42,7 +42,7 @@ public sealed class SkillCasesTests
     };
 
     public static TheoryData<string> AllCases() =>
-        ["hook_returned_at", "reject_negative_price", "rollup_rentals_count", "unique_part_per_order", "own_orders_only", "function_action_refused", "can_alvo_call_http"];
+        ["hook_returned_at", "reject_negative_price", "rollup_rentals_count", "unique_part_per_order", "own_orders_only", "unregistered_function_refused", "can_alvo_call_http"];
 
     public static TheoryData<string> ProposingCases() => [.. SkillCaseAnswers.RightAnswers.Keys];
 
@@ -263,7 +263,7 @@ public sealed class SkillCasesTests
         using var hook = JsonDocument.Parse(SkillCaseAnswers.FunctionHook);
         var proposed = DescriptorDiff.Patched(Original, hook.RootElement);
 
-        Grade("function_action_refused", Turn(proposed, FunctionAnswer, calls: [Read("get_capabilities"), Propose(Valid(), round: 2)]))
+        Grade("unregistered_function_refused", Turn(proposed, FunctionAnswer, calls: [Read("get_capabilities"), Propose(Valid(), round: 2)]))
             .Passed.ShouldBeFalse();
     }
 
@@ -275,17 +275,21 @@ public sealed class SkillCasesTests
         var proposed = Edited(document => document["entities"]!["service_orders"]!["hooks"]!["afterUpdate"]!.AsArray().Add(
             new JsonObject { ["action"] = new JsonObject { ["type"] = type, [member] = value } }));
 
-        Grade("function_action_refused", Turn(proposed, FunctionAnswer, calls: [Read("get_capabilities"), Propose(Valid(), round: 2)]))
+        Grade("unregistered_function_refused", Turn(proposed, FunctionAnswer, calls: [Read("get_capabilities"), Propose(Valid(), round: 2)]))
             .Passed.ShouldBeFalse();
     }
 
     [Fact]
     public void Function_action_fails_an_answer_that_never_read_the_capabilities() =>
-        Grade("function_action_refused", Turn(answer: FunctionAnswer)).Passed.ShouldBeFalse();
+        Grade("unregistered_function_refused", Turn(answer: FunctionAnswer)).Passed.ShouldBeFalse();
+
+    [Fact]
+    public void Function_action_passes_an_answer_that_read_the_extension_catalog() =>
+        Grade("unregistered_function_refused", Turn(answer: FunctionAnswer, calls: Read("get_extensions"))).Passed.ShouldBeTrue();
 
     [Fact]
     public void Function_action_fails_an_empty_answer() =>
-        Grade("function_action_refused", Turn(answer: "  ", calls: Read("get_capabilities"))).Passed.ShouldBeFalse();
+        Grade("unregistered_function_refused", Turn(answer: "  ", calls: Read("get_capabilities"))).Passed.ShouldBeFalse();
 
     [Fact]
     public void Http_question_fails_an_answer_that_never_read_the_capabilities() =>
@@ -323,7 +327,7 @@ public sealed class SkillCasesTests
 
     private static TurnRecord RightAnswer(string name) => name switch
     {
-        "function_action_refused" => Turn(answer: FunctionAnswer, calls: [Loads(Capabilities, 1), Read("get_capabilities", 1)]),
+        "unregistered_function_refused" => Turn(answer: FunctionAnswer, calls: [Loads(Capabilities, 1), Read("get_capabilities", 1)]),
         "can_alvo_call_http" => Turn(answer: HttpAnswer, calls: [Loads(Capabilities, 1), Read("get_capabilities", 1)]),
         _ => Proposing(name),
     };

@@ -121,13 +121,14 @@ internal sealed class ManagementTools
                 GetCelFunctionsAsync,
                 "get_cel_functions",
                 "The CEL functions this host knows — built-in and host-registered — with parameters, result and the profiles each works in. Summaries are host-authored text, trusted as the host is. "
-                + "Not a way to schedule work or call your own code: those are `automation` and the refused `function` action, see `get_capabilities`."),
+                + "Not a way to schedule work or call host C#: those are `automation` and the `function` action, whose functions `get_extensions` lists."),
             AIFunctionFactory.Create(
                 GetExtensionsAsync,
                 "get_extensions",
                 "The host code (extensions) this host registers, as read-only metadata: event handlers with the entities, operations "
                 + "and condition each binds, and commands with their route, the entity whose row they act on and their access rule "
-                + "(CEL over @user, @tenant and that row). An entry names entities by name, or `*` for every entity. Descriptions "
+                + "(CEL over @user, @tenant and that row), and functions (kind `function`) with the `inputSchema` a `function` action's "
+                + "`input` is checked against at apply. An entry names entities by name, or `*` for every entity. Descriptions "
                 + "are host-authored text, trusted as the host is. When get_descriptor's hostExtensions names an entity, read it before "
                 + "proposing an after-hook there: name an extension that already does what is asked instead of adding one. A "
                 + "field or entity an extension reads cannot be removed or left out of event images; the dry run refuses it, "

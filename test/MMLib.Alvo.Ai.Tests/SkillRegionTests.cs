@@ -17,7 +17,7 @@ public sealed class SkillRegionTests
     /// <summary>The regions this suite holds to the schema and the ports.</summary>
     private static readonly string[] _heldHere =
         ["entity-keys", "field-keys", "field-types", "on-delete", "built-in-formats", "managed-columns", "rollup-ops",
-            "descriptor-or-code"];
+            "descriptor-or-code", "function-action"];
 
     /// <summary>
     /// The regions whose source is the core, held in <c>MMLib.Alvo.Host.Tests</c>: the reserved fields by
@@ -81,6 +81,19 @@ public sealed class SkillRegionTests
     {
         Holds("hooks", "descriptor-or-code", ["get_descriptor", "hostExtensions", "*", "get_extensions"]);
         ManagementTools.For(Substitute.For<IAlvoManagement>(), "p").Functions.Select(tool => tool.Name).ShouldContain("get_extensions");
+    }
+
+    /// <summary>
+    /// The hooks skill's "function action" region spells the action as the schema does and names the read that lists the
+    /// functions and the input schema apply checks against.
+    /// </summary>
+    [Fact]
+    public void The_function_action_region_names_the_shape_and_the_function_read()
+    {
+        Holds("hooks", "function-action", ["automation", """{"type":"function","name":"…","input":{…}}""", "get_extensions", "inputSchema"]);
+        var action = Schema()["$defs"]!["action"]!["oneOf"]!.AsArray().Single(arm => arm!["properties"]!["type"]!["const"]!.GetValue<string>() == "function")!;
+        Keys(action["properties"]!).ShouldBe(["type", "name", "input"], ignoreOrder: true);
+        ManagementTools.For(Substitute.For<IAlvoManagement>(), "p").Functions.Single(tool => tool.Name == "get_extensions").Description.ShouldContain("inputSchema");
     }
 
     private static void Holds(string area, string region, IReadOnlyList<string> source) =>
