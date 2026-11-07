@@ -158,11 +158,10 @@ internal sealed class OutboxChaosWorld : IAsyncDisposable
     /// reported as <see cref="ChaosRun.HitClaimCap"/> and asserted, so it cannot pass as a drain.
     /// </para>
     /// <para>
-    /// <b>Each fanned-out batch is followed by one delivery round</b>, as the host's two dispatchers run side by side: the
-    /// outbox fans each event out into its webhook delivery (HX-15), and draining all ten thousand first would hand the
-    /// delivery claim a backlog no running host builds — on PostgreSQL its first claim over 10 000 fresh pending rows ran
-    /// past the 30 s command timeout (a follow-up for the claim query, not this criterion's subject). The leftovers and
-    /// the retries are drained once the outbox is empty.
+    /// <b>The deliveries are claimed only once the outbox is drained</b>: the outbox fans each event out into its webhook
+    /// delivery (HX-15), so the first delivery claim meets all ten thousand pending rows at once, freshly inserted — the
+    /// backlog a receiver that was down for long builds. On PostgreSQL that claim once ran past the 30 s command timeout
+    /// (#482); this run is what keeps it answering over a backlog the planner has no statistics for.
     /// </para>
     /// <para>
     /// <b>An empty claim ends the run and does not end the fact.</b> Whether the queue was really drained is the
@@ -185,12 +184,7 @@ internal sealed class OutboxChaosWorld : IAsyncDisposable
             }
 
             claims++;
-            var fannedOut = await _dispatcher.PumpOneBatchAsync(Ct);
-            if (fannedOut > 0)
-            {
-                await _deliveries.PumpOneRoundAsync(Ct);
-            }
-            else if (!await DeliverFannedOutAsync())
+            if (await _dispatcher.PumpOneBatchAsync(Ct) == 0 && !await DeliverFannedOutAsync())
             {
                 break;
             }
