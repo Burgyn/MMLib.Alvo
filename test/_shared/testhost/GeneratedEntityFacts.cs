@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
@@ -13,12 +14,14 @@ namespace MMLib.Alvo.TestHost.Tests;
 
 /// <summary>
 /// Classes the typed-entity generator emitted from <c>generated/desk-live.alvo.json</c> (and an older copy without
-/// <c>legacy_code</c>) over the real pipeline, on whichever engine the deriving class supplies — the SQLite leg in
+/// <c>legacy_code</c>) over the real pipeline and the real boot, on whichever engine the deriving class supplies — the SQLite leg in
 /// <c>MMLib.Alvo.TestHost.Tests</c>, the PostgreSQL leg in <c>MMLib.Alvo.Data.PostgreSql.Tests.Integration</c>.
 /// </summary>
 public abstract class GeneratedEntityFacts
 {
     private const string DeskLive = "desk-live.alvo.json";
+
+    private const string DeskV1 = "desk-v1.alvo.json";
 
     protected static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -97,17 +100,32 @@ public abstract class GeneratedEntityFacts
         alvo.Hooks.AssertRan("order-in-review", times: 1);
     }
 
+    [Fact]
+    public async Task A_boot_over_a_schema_without_a_generated_field_warns_once_naming_the_class_and_the_field()
+    {
+        var stale = new WarningCapture("GeneratedEntityStale");
+
+        await using var alvo = await StartAsync(await DatabaseAsync(), DeskV1, builder => builder.Services.AddSingleton<ILoggerProvider>(stale));
+
+        var line = stale.Lines.ShouldHaveSingleItem();
+        line.ShouldContain("MMLib.Alvo.TestHost.Tests.Generated.Order");
+        line.ShouldContain("legacy_code");
+    }
+
     protected abstract Task<GeneratedDatabase> DatabaseAsync();
 
     private static IAlvoSession Session(AlvoTestHost alvo) =>
         alvo.Services.GetRequiredService<IAlvoSessions>().For(AlvoTestHost.Caller(DeskRoles.Agent));
 
-    private static async Task<AlvoTestHost> StartAsync(GeneratedDatabase database, Action<IAlvoBuilder> configure) =>
+    private static Task<AlvoTestHost> StartAsync(GeneratedDatabase database, Action<IAlvoBuilder> configure) =>
+        StartAsync(database, DeskLive, configure);
+
+    private static async Task<AlvoTestHost> StartAsync(GeneratedDatabase database, string descriptor, Action<IAlvoBuilder> configure) =>
         await AlvoTestHost.StartAsync(
             alvo =>
             {
                 database.Use(alvo);
-                alvo.FromDescriptor(Path.Combine(AppContext.BaseDirectory, "generated", DeskLive));
+                alvo.FromDescriptor(Path.Combine(AppContext.BaseDirectory, "generated", descriptor));
                 configure(alvo);
             },
             cancellationToken: Ct);

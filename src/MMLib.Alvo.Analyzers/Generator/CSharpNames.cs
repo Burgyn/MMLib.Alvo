@@ -11,6 +11,15 @@ internal static class CSharpNames
 {
     private static readonly HashSet<string> _reservedClassNames = new(StringComparer.Ordinal) { "Record", "Patch", "Create" };
 
+    private static readonly HashSet<string> _implicitlyImported = new(StringComparer.Ordinal)
+    {
+        "Action", "Array", "Attribute", "Boolean", "Byte", "CancellationToken", "Char", "Console", "Convert", "DateOnly", "DateTime",
+        "DateTimeOffset", "Decimal", "Delegate", "Dictionary", "Directory", "Double", "Enum", "Environment", "EventArgs", "Exception",
+        "File", "Func", "Guid", "HashSet", "Host", "HttpClient", "HttpContext", "Index", "Int16", "Int32", "Int64", "Lazy", "List",
+        "Lock", "LogLevel", "Math", "Monitor", "Nullable", "Object", "Parallel", "Path", "Random", "Range", "Results", "Single",
+        "Stream", "String", "Task", "TaskStatus", "Thread", "TimeOnly", "TimeSpan", "Timer", "Tuple", "Type", "Uri", "ValueTask", "Version",
+    };
+
     private static readonly KeyValuePair<string, string>[] _irregular =
     [
         new("statuses", "status"),
@@ -95,13 +104,33 @@ internal static class CSharpNames
             : name;
     }
 
-    /// <summary>The generated class of an entity: <c>Pascal(Singular(entity))</c>, a name the class's own members use suffixed with <c>Entity</c>.</summary>
+    /// <summary>
+    /// The type names the SDK's implicit global usings (and the web SDK's) bring into every host file: a generated type of that
+    /// name would shadow the BCL type inside its namespace and make it ambiguous wherever the namespace is imported.
+    /// </summary>
+    internal static IReadOnlyCollection<string> ImplicitlyImportedTypeNames => _implicitlyImported;
+
+    /// <summary>
+    /// The generated class of an entity: <c>Pascal(Singular(entity))</c>, suffixed with <c>Entity</c> when the class's own
+    /// members use the name or an implicitly imported BCL type already has it.
+    /// </summary>
     internal static string Class(string entity)
     {
         var name = Pascal(Singular(entity));
         name = name.Length == 0 ? "Entity" : name;
 
-        return _reservedClassNames.Contains(name) ? name + "Entity" : name;
+        return _reservedClassNames.Contains(name) || _implicitlyImported.Contains(name) ? name + "Entity" : name;
+    }
+
+    /// <summary>
+    /// The enum of a field: <c>{Class}{Property}</c>, suffixed with <c>Enum</c> when a type the SDK's implicit global usings
+    /// bring in already has that name.
+    /// </summary>
+    internal static string EnumType(string className, string property)
+    {
+        var name = className + property;
+
+        return _implicitlyImported.Contains(name) ? name + "Enum" : name;
     }
 
     /// <summary>An enum member: <see cref="Pascal"/>, or <c>Value{index}</c> when nothing of the raw text is a letter or digit.</summary>

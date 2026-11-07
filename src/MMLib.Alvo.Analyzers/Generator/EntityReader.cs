@@ -22,15 +22,20 @@ internal static class EntityReader
         return EntityNames.Named(new EntityModel(name, name, entity.String("description"), fields.ToImmutable(), untyped.ToImmutable()));
     }
 
-    private static Stack<JsonMember> LastOfEachKey(EquatableArray<JsonMember> members)
+    private static List<JsonMember> LastOfEachKey(EquatableArray<JsonMember> members)
     {
-        var later = new HashSet<string>(StringComparer.Ordinal);
-        var kept = new Stack<JsonMember>();
-        for (var i = members.Count - 1; i >= 0; i--)
+        var last = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var i = 0; i < members.Count; i++)
         {
-            if (later.Add(members[i].Key))
+            last[members[i].Key] = i;
+        }
+
+        var kept = new List<JsonMember>(last.Count);
+        for (var i = 0; i < members.Count; i++)
+        {
+            if (last[members[i].Key] == i)
             {
-                kept.Push(members[i]);
+                kept.Add(members[i]);
             }
         }
 

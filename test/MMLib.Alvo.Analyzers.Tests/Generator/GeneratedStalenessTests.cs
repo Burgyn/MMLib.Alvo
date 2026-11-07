@@ -32,8 +32,8 @@ public sealed class GeneratedStalenessTests
     public void Real_generator_output_fits_the_schema_of_the_example_it_came_from(string example)
     {
         var input = AlvoEntityGeneratorSnapshotTests.Input(example);
-        var schema = AppliedSchema(input.Text);
-        Assert.SkipWhen(schema is null, $"This build's mapper refuses the {example} example, so it has no applied schema to compare with.");
+        var schema = AppliedSchema(example, input.Text);
+        Assert.SkipWhen(schema is null, "This build's mapper refuses complex-crm's CEL default on owner_id, so it has no applied schema to compare with.");
         var types = Generated(input);
 
         types.ShouldNotBeEmpty();
@@ -43,13 +43,13 @@ public sealed class GeneratedStalenessTests
 
     private static SchemaModel Schema(string descriptor) => DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(descriptor));
 
-    private static SchemaModel? AppliedSchema(string descriptor)
+    private static SchemaModel? AppliedSchema(string example, string descriptor)
     {
         try
         {
             return Schema(descriptor);
         }
-        catch (InvalidDataException)
+        catch (InvalidDataException) when (example == "complex-crm")
         {
             return null;
         }

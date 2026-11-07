@@ -22,7 +22,7 @@ internal static class EntityNames
         {
             PropertyName = property,
             ParameterName = CSharpNames.Camel(property),
-            EnumTypeName = field.Kind == FieldKind.Enum ? className + property : null,
+            EnumTypeName = field.Kind == FieldKind.Enum ? CSharpNames.EnumType(className, property) : null,
             EnumValues = Members(field.EnumValues),
         };
     }

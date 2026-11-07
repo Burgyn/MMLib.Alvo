@@ -238,7 +238,8 @@ internal sealed class DescriptorBootPlan
     /// </para>
     /// <para>
     /// Only the booting project's classes are checked: a host may carry classes generated from other descriptors. A failure of
-    /// the check itself — an assembly that will not load — is logged and swallowed for the same reason.
+    /// the check itself — an assembly that will not load, a class whose shape cannot be read — is logged and swallowed for the
+    /// same reason; a class that fails is skipped, the others are still checked.
     /// </para>
     /// </remarks>
     /// <param name="schema">The schema the boot serves.</param>
@@ -252,7 +253,10 @@ internal sealed class DescriptorBootPlan
 
         try
         {
-            WarnAboutStale(GeneratedEntityCheck.OfProject(_generated.Types, project), schema);
+            foreach (var type in GeneratedEntityCheck.OfProject(_generated.Types, project))
+            {
+                WarnIfStale(type, schema);
+            }
         }
         catch (Exception failure) when (failure is not OperationCanceledException)
         {
@@ -260,9 +264,21 @@ internal sealed class DescriptorBootPlan
         }
     }
 
-    private void WarnAboutStale(IReadOnlyList<Type> types, SchemaModel schema)
+    private void WarnIfStale(Type type, SchemaModel schema)
     {
-        foreach (var (shape, problems) in GeneratedEntityCheck.Stale(types, schema))
+        try
+        {
+            WarnAboutStale(type, schema);
+        }
+        catch (Exception failure) when (failure is not OperationCanceledException)
+        {
+            ExtensionLog.GeneratedEntityCheckFailed(_logger, failure.Message);
+        }
+    }
+
+    private void WarnAboutStale(Type type, SchemaModel schema)
+    {
+        foreach (var (shape, problems) in GeneratedEntityCheck.Stale([type], schema))
         {
             ExtensionLog.GeneratedEntityStale(
                 _logger, shape.Type.FullName ?? shape.Name, shape.Entity ?? string.Empty, string.Join(" ", problems.Select(problem => problem.Message)));

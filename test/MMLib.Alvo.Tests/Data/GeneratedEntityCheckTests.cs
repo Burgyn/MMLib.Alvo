@@ -86,7 +86,7 @@ public sealed class GeneratedEntityCheckTests
         GeneratedEntityCheck.Discover(typeof(GeneratedEntityCheckTests).Assembly).ShouldNotContain(typeof(OtherGeneratorsDepot));
 
     [Fact]
-    public void Discovery_follows_references_to_assemblies_that_reference_the_core() =>
+    public void Discovery_finds_every_generated_class_of_its_root_assembly() =>
         GeneratedEntityCheck.Discover(typeof(GeneratedEntityCheckTests).Assembly).ShouldBe(_generated, ignoreOrder: true);
 
     [Fact]

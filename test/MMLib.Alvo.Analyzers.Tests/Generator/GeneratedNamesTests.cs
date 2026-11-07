@@ -125,6 +125,30 @@ public sealed class GeneratedNamesTests
     public void A_class_name_the_class_s_own_members_use_is_suffixed(string entity, string className) =>
         CSharpNames.Class(entity).ShouldBe(className);
 
+    [Theory]
+    [InlineData("tasks", "TaskEntity")]
+    [InlineData("types", "TypeEntity")]
+    [InlineData("files", "FileEntity")]
+    [InlineData("timers", "TimerEntity")]
+    [InlineData("versions", "VersionEntity")]
+    [InlineData("log_levels", "LogLevelEntity")]
+    public void A_class_name_an_implicit_global_using_brings_in_is_suffixed(string entity, string className) =>
+        CSharpNames.Class(entity).ShouldBe(className);
+
+    [Fact]
+    public void An_enum_name_an_implicit_global_using_brings_in_is_suffixed()
+    {
+        var model = GeneratorHarness.Model(Descriptors.With(
+            """{ "values": { "fields": { "task": { "type": "enum", "values": ["a"] } } }, "tasks": { "fields": { "status": { "type": "enum", "values": ["open"] } } } }"""));
+
+        model.Entities.Select(e => e.Fields.Single(f => f.EnumTypeName is not null).EnumTypeName).ShouldBe(["ValueTaskEnum", "TaskEntityStatus"]);
+    }
+
+    [Fact]
+    public void No_patch_or_roles_name_can_clash_with_an_implicitly_imported_type() =>
+        CSharpNames.ImplicitlyImportedTypeNames.Where(name => name.EndsWith("Patch", StringComparison.Ordinal) || name.EndsWith("Roles", StringComparison.Ordinal))
+            .ShouldBeEmpty();
+
     [Fact]
     public void Every_emitted_type_name_is_listed_for_collision_checks()
     {

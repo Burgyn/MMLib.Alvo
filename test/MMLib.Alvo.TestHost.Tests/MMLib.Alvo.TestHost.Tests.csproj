@@ -27,6 +27,7 @@
     <AdditionalFiles Include="$(MSBuildThisFileDirectory)../_shared/testhost/generated/desk-live.alvo.json" AlvoDescriptor="true" AlvoNamespace="MMLib.Alvo.TestHost.Tests.Generated" />
     <AdditionalFiles Include="$(MSBuildThisFileDirectory)../_shared/testhost/generated/desk-v1.alvo.json" AlvoDescriptor="true" AlvoNamespace="MMLib.Alvo.TestHost.Tests.Generated.V1" />
     <None Include="$(MSBuildThisFileDirectory)../_shared/testhost/generated/desk-live.alvo.json" Link="generated/desk-live.alvo.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../_shared/testhost/generated/desk-v1.alvo.json" Link="generated/desk-v1.alvo.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -101,10 +101,13 @@ internal static class GeneratedEntityCheck
     }
 
     private static IEnumerable<Type> GeneratedIn(Assembly assembly) =>
-        LoadableTypes(assembly).Where(type => type.IsClass
+        !HasProjectMarker(assembly) ? [] : LoadableTypes(assembly).Where(type => type.IsClass
             && typeof(IAlvoEntity).IsAssignableFrom(type)
             && type.GetCustomAttribute<AlvoEntityAttribute>() is not null
             && type.GetCustomAttribute<GeneratedCodeAttribute>()?.Tool == GeneratorName);
+
+    private static bool HasProjectMarker(Assembly assembly) =>
+        assembly.GetCustomAttributes<AssemblyMetadataAttribute>().Any(metadata => metadata.Key.StartsWith(ProjectMarker, StringComparison.Ordinal));
 
     private static Type[] LoadableTypes(Assembly assembly)
     {

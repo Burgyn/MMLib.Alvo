@@ -12,6 +12,40 @@ public sealed class GeneratedCompileTests
             OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable, warningLevel: 9999)
         .WithGeneralDiagnosticOption(ReportDiagnostic.Error);
 
+    private const string ImplicitUsings = """
+        global using System;
+        global using System.Collections.Generic;
+        global using System.IO;
+        global using System.Linq;
+        global using System.Net.Http;
+        global using System.Threading;
+        global using System.Threading.Tasks;
+        """;
+
+    private const string HostCode = """
+        namespace Examples.SimpleTasks
+        {
+            internal static class Inside
+            {
+                internal static async Task<TaskStatus> RunAsync(CancellationToken cancellationToken)
+                {
+                    await Task.Delay(1, cancellationToken);
+                    return TaskStatus.RanToCompletion;
+                }
+            }
+        }
+
+        namespace Elsewhere
+        {
+            using Examples.SimpleTasks;
+
+            internal static class Outside
+            {
+                internal static Task<TaskEntity?> NoneAsync() => Task.FromResult<TaskEntity?>(null);
+            }
+        }
+        """;
+
     private const string Handler = """
         using Microsoft.Extensions.DependencyInjection;
         using MMLib.Alvo.Events;
@@ -29,6 +63,13 @@ public sealed class GeneratedCompileTests
                 })));
         }
         """;
+
+    [Fact]
+    public void Host_code_in_or_importing_the_generated_namespace_still_sees_the_implicit_usings() =>
+        Problems(
+                GeneratorDriverHarness.Compilation(_strict).AddSyntaxTrees(Parse(ImplicitUsings), Parse(HostCode)),
+                AlvoEntityGeneratorSnapshotTests.Input("simple-tasks"))
+            .ShouldBeEmpty();
 
     [Theory]
     [MemberData(nameof(AlvoEntityGeneratorSnapshotTests.Examples), MemberType = typeof(AlvoEntityGeneratorSnapshotTests))]
@@ -51,8 +92,10 @@ public sealed class GeneratedCompileTests
             .Select(d => d.Id).ShouldBe(["CS8602"]);
 
     private static CSharpCompilation Consumer(string body) => GeneratorDriverHarness.Compilation(_strict)
-        .AddSyntaxTrees(CSharpSyntaxTree.ParseText(
-            Handler.Replace("BODY", body, StringComparison.Ordinal), GeneratorDriverHarness.ParseOptions, cancellationToken: TestContext.Current.CancellationToken));
+        .AddSyntaxTrees(Parse(Handler.Replace("BODY", body, StringComparison.Ordinal)));
+
+    private static SyntaxTree Parse(string text) =>
+        CSharpSyntaxTree.ParseText(text, GeneratorDriverHarness.ParseOptions, cancellationToken: TestContext.Current.CancellationToken);
 
     private static IReadOnlyList<Diagnostic> Problems(CSharpCompilation compilation, InputFile input)
     {
