@@ -236,6 +236,20 @@ public class SqliteDialectRefusalTests
         LikeIsCaseSensitive(connection).ShouldBeTrue();
     }
 
+    /// <summary>The async path hands its token to the pragma's command, so a cancelled open does not run it.</summary>
+    [Fact]
+    public async Task A_cancelled_asynchronous_open_does_not_run_the_pragma()
+    {
+        using var connection = OpenConnection();
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        await Should.ThrowAsync<OperationCanceledException>(
+            () => new SqliteCaseSensitiveLike().ConnectionOpenedAsync(connection, null!, cancelled.Token));
+
+        LikeIsCaseSensitive(connection).ShouldBeFalse();
+    }
+
     /// <summary>Without the interceptor SQLite's default is case-INsensitive, which is what makes the two
     /// facts above worth asserting rather than tautological.</summary>
     [Fact]

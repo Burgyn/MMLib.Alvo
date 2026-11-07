@@ -88,6 +88,20 @@ public class SqliteFieldSqlRendererTests
     public void Every_other_type_is_already_comparable_and_is_left_alone(CelValueType type)
         => _fields.RenderComparableOperands("\"mileage\"", "@alvo_f0", type).ShouldBe(("\"mileage\"", "@alvo_f0"));
 
+    [Fact]
+    public void A_concatenation_is_the_standard_operator_in_parentheses()
+        => ((IFieldSqlRenderer)_fields).RenderStringConcatenation("\"a\"", "@alvo_f0").ShouldBe("(\"a\" || @alvo_f0)");
+
+    /// <summary>Rounded in milliseconds and then scaled as an integer, so a timestamp compares as whole microseconds.</summary>
+    [Fact]
+    public void An_epoch_is_milliseconds_rounded_then_scaled_to_microseconds()
+        => ((IFieldSqlRenderer)_fields).RenderEpochMicroseconds("\"starts_at\"")
+            .ShouldBe("(CAST(round(unixepoch(\"starts_at\", 'subsec') * 1000) AS INTEGER) * 1000)");
+
+    [Fact]
+    public void A_string_literal_is_the_standard_one_and_a_backslash_is_ordinary()
+        => ((IFieldSqlRenderer)_fields).RenderStringLiteral("a\\b'c").ShouldBe("'a\\b''c'");
+
     private static EntitySchema Entity() => new()
     {
         Name = "vehicle",
