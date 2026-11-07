@@ -398,6 +398,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **The data port measures field facets on every write** (#481): `IAlvoData` and `IAlvoTransaction` creates, updates,
+  replaces and batches measure each value they are handed against its field's `maxLength`, enum `values`, decimal
+  `precision`/`scale` and `format` — the HTTP validator's own checks, once in the core before the driver — so a host
+  write answers the same on SQLite and PostgreSQL. Before, SQLite stored an out-of-enum value or an over-long string
+  that PostgreSQL refused as an unmapped 500. The refusal is `AlvoConstraintViolationException` with `Kind` `Check`
+  and `Fields` the field (none for a field the descriptor hides), carrying the facet's own message; a batch row is
+  refused by its index with the facet's code (`max-length`, `enum-value`, …). A partial update measures only the
+  fields it writes. HTTP answers are unchanged: its own pass still runs first and reports every violation. PostgreSQL's
+  `22001` (a string past its column) is now translated to the same `Check` refusal instead of a 500, as defence in
+  depth.
 - **A `secretRef` or `headersSecretRef` outside the secret-name grammar is refused at apply** (HX-15): the schema now
   carries the name `pattern`, and the refusal names the slot without repeating its value, which may be the secret
   itself pasted in the wrong place.

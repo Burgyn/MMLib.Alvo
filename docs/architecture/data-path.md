@@ -1413,6 +1413,7 @@ validator owns. It is not implemented and is declared here rather than left look
 | `is` with a non-bool, `in` with a non-list, a value the column cannot hold, a fractional bound against an integral column, a NUL in text | `ArgumentException` family | the query alone |
 | A schema this port cannot serve (`softDelete`), a field the read model does not map, an unknown bound-value origin | `InvalidOperationException` | the implementation's own invariant |
 | Payload names a framework-managed column a caller may not write (`AlvoManagedColumns`), or a read-only or undeclared field | `AlvoAuthorizationException` | the payload alone |
+| A supplied value breaks its field's `maxLength`, enum `values`, decimal `precision`/`scale` or `format` (#481) | `AlvoConstraintViolationException`, `Kind` `Check`, naming the field unless hidden; a batch row: its index and the facet's code | the payload + schema alone, through the core's `IFieldFacets` |
 | `get` of an invisible or absent row | `null` | the engine |
 | `update`/`delete` of an invisible or absent row | `AlvoRecordNotFoundException`, identical message | rows affected / pre-image |
 | Post-image fails `WITH CHECK` or the tenant scope | `AlvoAuthorizationException` | `IPredicateEvaluator` |
@@ -1467,6 +1468,23 @@ A missing **required** value is refused by the database's own `NOT NULL` and sur
 request validation belongs above this port. Pinned by
 `SqliteAlvoDataCreateTests.A_missing_required_value_is_refused_by_the_database_constraint` as the rough edge
 PR3's RFC 7807 layer closes.
+
+**The declared facets are measured by the port itself (#481), not left to the layer above.** `RecordValidator` used
+to run only in the HTTP layer, so host C# writing through `IAlvoData` stored an out-of-enum value or a string past
+`maxLength` on SQLite while PostgreSQL's `varchar(n)` refused the same write as an unmapped `22001` — one descriptor,
+two answers. Every write face now calls the core's internal `IFieldFacets` (the `IEntityLifecycle` precedent: a port
+because the measure — `RecordValidator.FacetViolation` and the compiled formats — lives in the core while the caller is
+a driver; internal so no registration can switch it off) right after `WritePayloadGuard`, before any candidate is built:
+create, update (over the fields it writes only), replace, both batch verbs and a transaction unit's writes. The first
+value that breaks a facet is refused as `AlvoConstraintViolationException` of kind `Check`, carrying the validator's own
+code, message and fix, so the HTTP renderer answers it with the very violation the body validator would have produced;
+a field the descriptor hides is refused naming nothing (Ruling X). HTTP keeps its own pass — it reports every violation
+with body pointers, and it runs first, so no HTTP response changed. Measuring twice per HTTP write is deliberate: the
+check is in-memory and O(fields), and a "this was already measured" flag would be a switch that turns the port's guard
+off. A `null` stays `required`'s (the engine's `NOT NULL` answers it the same everywhere), and PostgreSQL's `22001` is
+decoded as `Check` for any value that still reaches a column, such as a stored generated one. **Deviation:**
+`InMemoryAlvoData` does not measure facets — it depends on Abstractions alone and the facet facts are asked of the two
+shipped engines through the real host (`PortFacetFacts`), not of the reference implementation.
 
 ## The cursor carries no data
 
