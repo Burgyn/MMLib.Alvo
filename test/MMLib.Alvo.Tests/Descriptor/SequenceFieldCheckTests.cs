@@ -30,12 +30,15 @@ public sealed class SequenceFieldCheckTests
     [Theory]
     [InlineData("Mars/Olympus_Mons")]
     [InlineData("Central Europe Standard Time")]
+    [InlineData("europe/bratislava")]
     public void A_time_zone_that_is_not_a_known_iana_id_is_refused(string timeZone)
     {
         var error = Check(Number("integer", $$"""{"period": "day", "timeZone": "{{timeZone}}"}""")).ShouldHaveSingleItem();
         error.Path.ShouldBe(Pointer + "/timeZone");
         error.Message.ShouldBe($"Field 'orders.number' reads its 'sequence' dates in the time zone '{timeZone}', which is not an IANA time zone id this machine knows.");
-        error.FixSuggestion.ShouldBe("Use an IANA time zone id such as 'Europe/Bratislava', or remove 'timeZone' to count in UTC.");
+        error.FixSuggestion.ShouldBe(
+            "Use an IANA time zone id, spelled exactly, such as 'Europe/Bratislava' (on an Alpine-like image install the 'tzdata' "
+            + "package), or remove 'timeZone' to count in UTC.");
     }
 
     [Fact]

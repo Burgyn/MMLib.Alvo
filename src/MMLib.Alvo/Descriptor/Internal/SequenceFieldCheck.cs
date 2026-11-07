@@ -67,7 +67,8 @@ internal static class SequenceFieldCheck
             : finding.At(
                 "/timeZone",
                 $"Field '{finding.Name}' reads its 'sequence' dates in the time zone '{zone}', which is not an IANA time zone id this machine knows.",
-                "Use an IANA time zone id such as 'Europe/Bratislava', or remove 'timeZone' to count in UTC.");
+                "Use an IANA time zone id, spelled exactly, such as 'Europe/Bratislava' (on an Alpine-like image install the "
+                + "'tzdata' package), or remove 'timeZone' to count in UTC.");
 
     private static DescriptorValidationError? TypeError(Finding finding, FieldDescriptor descriptor)
     {

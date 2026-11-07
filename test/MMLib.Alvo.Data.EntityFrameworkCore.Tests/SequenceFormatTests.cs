@@ -74,6 +74,9 @@ public sealed class SequenceFormatTests
     [InlineData("America/Argentina/Buenos_Aires", true)]
     [InlineData("UTC", true)]
     [InlineData("Etc/UTC", true)]
+    [InlineData("europe/bratislava", false)]
+    [InlineData("utc", false)]
+    [InlineData("Central Europe Standard Time", false)]
     [InlineData("Mars/Olympus_Mons", false)]
     [InlineData("", false)]
     public void A_zone_is_known_when_it_is_an_iana_id_this_machine_resolves(string timeZone, bool known) =>

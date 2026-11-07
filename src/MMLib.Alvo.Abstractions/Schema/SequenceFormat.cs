@@ -40,6 +40,11 @@ internal static class SequenceFormat
     /// <summary>The wall-clock reading of <paramref name="instant"/> in <paramref name="timeZone"/>, or in UTC when it is absent.</summary>
     /// <param name="instant">The create's stamp.</param>
     /// <param name="timeZone">An IANA zone <see cref="SequenceSchema.IsKnownTimeZone"/> accepts, or <see langword="null"/>.</param>
+    /// <remarks>
+    /// The zone was resolved when the descriptor was applied, but the tz database is read again here: a host that moved to
+    /// a machine without one (an Alpine-like image without <c>tzdata</c>) throws <see cref="TimeZoneNotFoundException"/>,
+    /// which refuses the create inside its transaction — no number is taken and no row is written.
+    /// </remarks>
     private static DateTime CalendarDate(DateTimeOffset instant, string? timeZone) => timeZone is null
         ? instant.UtcDateTime
         : TimeZoneInfo.ConvertTime(instant, TimeZoneInfo.FindSystemTimeZoneById(timeZone)).DateTime;

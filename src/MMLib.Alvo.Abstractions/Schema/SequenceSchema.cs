@@ -58,18 +58,46 @@ public sealed partial record SequenceSchema
     }
 
     /// <summary>
-    /// Whether <paramref name="timeZone"/> is an IANA zone id this machine resolves — on Linux and macOS from the tz
-    /// database, on Windows through ICU — so a declaration never depends on the zone ids of one operating system.
+    /// Whether <paramref name="timeZone"/> is an IANA zone id, in its canonical spelling, that this machine resolves — on
+    /// Linux and macOS from the tz database, on Windows through ICU — so one declaration answers the same on every OS.
     /// </summary>
     /// <remarks>
-    /// A Windows id resolves on every platform too, and is refused here because it does not name the same zone on a
-    /// machine without ICU's mapping; <c>UTC</c> is accepted by name, since Windows reports its own <c>UTC</c> zone as
-    /// a Windows id.
+    /// <para>
+    /// <b>The spelling is checked against the tz database itself, not the resolved zone's id</b>: macOS's
+    /// case-insensitive file system resolves <c>europe/bratislava</c>, where Linux refuses it, and .NET's zone cache is
+    /// case-insensitive too, so the resolved <see cref="TimeZoneInfo.Id"/> echoes whichever spelling was looked up first.
+    /// On Linux and macOS every segment must name an entry of <c>$TZDIR</c> (default <c>/usr/share/zoneinfo</c>)
+    /// ordinally; on Windows ICU's IANA table, which is case-sensitive, decides.
+    /// </para>
+    /// <para>
+    /// A Windows id resolves on every platform too, and is refused because it is not an IANA id. <c>UTC</c> is accepted
+    /// by name: .NET knows it without a tz database.
+    /// </para>
     /// </remarks>
     /// <param name="timeZone">The declared zone.</param>
     internal static bool IsKnownTimeZone(string timeZone) =>
         TimeZoneInfo.TryFindSystemTimeZoneById(timeZone, out var zone)
-        && (zone.HasIanaId || string.Equals(timeZone, "UTC", StringComparison.Ordinal));
+        && (string.Equals(timeZone, "UTC", StringComparison.Ordinal)
+            || (OperatingSystem.IsWindows()
+                ? TimeZoneInfo.TryConvertIanaIdToWindowsId(timeZone, out _)
+                : zone.HasIanaId && IsZoneFile(timeZone)));
+
+    private static bool IsZoneFile(string timeZone)
+    {
+        var directory = Environment.GetEnvironmentVariable("TZDIR") is { Length: > 0 } tzdir ? tzdir : "/usr/share/zoneinfo";
+        foreach (var segment in timeZone.Split('/'))
+        {
+            if (!Directory.Exists(directory)
+                || !Directory.EnumerateFileSystemEntries(directory).Any(entry => string.Equals(Path.GetFileName(entry), segment, StringComparison.Ordinal)))
+            {
+                return false;
+            }
+
+            directory = Path.Combine(directory, segment);
+        }
+
+        return true;
+    }
 
     private static bool IsNumber(Match token) => token.Groups["token"].Value.StartsWith('n');
 }
