@@ -1130,6 +1130,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **SQLite: two concurrent opens could share one native connection** (#485). Microsoft.Data.Sqlite 10.0.10, which
+  EF Core 10.0.10 brings, could lend one pooled native connection to two open `SqliteConnection`s (dotnet/efcore#39008),
+  failing an open with "unable to delete/modify collation sequence due to active statements" or a stale "database is
+  locked" under concurrent identity reads and writes. `Microsoft.Data.Sqlite.Core` is pinned to 10.0.14, which carries
+  the upstream fix.
+- **Dashboard: fast typing in a reference box no longer loses keystrokes** (#485). The box echoed each keystroke back
+  from the server over a bare `value`, so an echo that arrived between two keys rewound the text and the next key
+  landed on the rewound term ("grac" could become "gac", which matches nothing); it is now bound with `@bind`, whose
+  echo is suppressed while it equals what the browser sent.
 - **A delivery claim over a large fresh backlog answers in a fraction of a second on PostgreSQL** (#482). With ten
   thousand deliveries fanned out before the first claim — a webhook receiver down for long — one claim ran past
   Npgsql's 30 s command timeout (36 s measured), stalling every delivery: PostgreSQL planned the lane checks as

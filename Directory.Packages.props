@@ -108,6 +108,14 @@
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" Condition="'$(MSBuildProjectName)' == 'MMLib.Alvo.Analyzers' Or '$(MSBuildProjectName)' == 'MMLib.Alvo.Analyzers.Tests'" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.10" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.10" />
+    <!-- Microsoft.EntityFrameworkCore.Sqlite 10.0.10 transitively brings Microsoft.Data.Sqlite.Core 10.0.10, whose pool
+         can lend ONE native connection to two open SqliteConnections under concurrent opens (dotnet/efcore#39008: a
+         checkout marked active before its owner is published reads as leaked and is reclaimed). The second owner then
+         meets the first's statements: "unable to delete/modify collation sequence due to active statements", or a
+         stale "database is locked", thrown from Open - the identity store's failures on windows-latest (issue 485).
+         Fixed in 10.0.13 (#39012); pinned transitively here until the EF Core packages themselves move past it, which
+         drags the Microsoft.Extensions pins along. -->
+    <PackageVersion Include="Microsoft.Data.Sqlite.Core" Version="10.0.14" />
     <!-- Test-only: bootstraps each provider's design-time services (IDatabaseModelFactory is
          design-time-only in modern EF Core, never registered by the runtime AddDbContext/UseX
          pipeline) so EfCoreSchemaIntrospector has a real factory to drive in-process, without a

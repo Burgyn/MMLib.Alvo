@@ -139,6 +139,13 @@
     /// An option is chosen on <c>mousedown</c>, with the default prevented, so the box keeps focus and its
     /// <c>blur</c> — which puts the chosen label back — does not run first. Escape closes the list and
     /// stops there, rather than also closing the sheet around it.
+    /// <para>
+    /// <b>The typed term is bound with <c>@bind</c>, not <c>value</c> plus <c>@oninput</c>.</b> Only a binding
+    /// tells the renderer which value the browser held when it raised the event, so the server's echo of a
+    /// keystroke is never sent back over a box the operator has typed further into. With a bare <c>value</c>
+    /// attribute, an echo that arrived between two keystrokes rewound the box and the next key landed on the
+    /// rewound text — "grac" could become "gac", which matches nothing (issue 485).
+    /// </para>
     /// </remarks>
     private RenderFragment Reference(RefPicker picker)
     {
@@ -153,9 +160,9 @@
                    aria-activedescendant="@(picker.ActiveOption is { } active ? OptionId(column, active) : null)"
                    aria-required="@Required(column)" aria-describedby="@DescribedBy(column)"
                    aria-invalid="@(Refused(column) ? "true" : null)"
-                   placeholder="@Placeholder(picker)" title="@_draft.Text(column.Name)" value="@picker.Term"
+                   placeholder="@Placeholder(picker)" title="@_draft.Text(column.Name)"
                    data-testid="ref-input"
-                   @oninput="args => RefTypedAsync(picker, args.Value?.ToString())"
+                   @bind:get="picker.Term" @bind:set="text => RefTypedAsync(picker, text)" @bind:event="oninput"
                    @onfocus="() => RefFocusedAsync(picker)" @onblur="() => RefLeft(picker)"
                    @onkeydown="args => RefKeyAsync(picker, args)" @onkeydown:stopPropagation="picker.Open" />
             @if (picker.Open)
