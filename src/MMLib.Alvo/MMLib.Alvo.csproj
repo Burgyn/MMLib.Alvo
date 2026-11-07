@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>The Alvo core: schema registry, Data API, rule engine, events and management, registered with AddAlvo.</Description>
+    <Description>The Alvo core: schema registry, Data API, rule engine, events and management, registered with AddAlvo — with the ALVO1001 analyzer and the typed-entity source generator.</Description>
   </PropertyGroup>
 
   <PropertyGroup>
