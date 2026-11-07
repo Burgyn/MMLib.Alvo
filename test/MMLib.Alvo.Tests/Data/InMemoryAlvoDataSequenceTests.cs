@@ -55,6 +55,20 @@ public sealed class InMemoryAlvoDataSequenceTests
         }
     }
 
+    /// <summary>
+    /// A <c>timeZone</c> reaches the in-memory counts too: Bratislava's year starts at 23:00 UTC (#479).
+    /// </summary>
+    [Fact]
+    public async Task A_time_zone_names_the_period_and_the_date_tokens()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 12, 31, 22, 59, 59, TimeSpan.Zero));
+        var data = Store(clock, timeZone: "Europe/Bratislava");
+
+        (await CreatedAsync(data, "north")).ShouldBe((10L, "SO-2026-0001"));
+        clock.Advance(TimeSpan.FromSeconds(1));
+        (await CreatedAsync(data, "north")).ShouldBe((11L, "SO-2027-0001"));
+    }
+
     private sealed class TickingClock(DateTimeOffset start, TimeSpan step) : TimeProvider
     {
         private DateTimeOffset _next = start;
@@ -75,16 +89,16 @@ public sealed class InMemoryAlvoDataSequenceTests
 
     private static Dictionary<string, object?> Row(string branch) => new(StringComparer.Ordinal) { ["branch"] = branch };
 
-    private static InMemoryAlvoData Store(TimeProvider clock, bool audited = false)
+    private static InMemoryAlvoData Store(TimeProvider clock, bool audited = false, string? timeZone = null)
     {
-        var catalog = PolicyCatalog.Build(Descriptor, audited ? new SchemaModel([Schema.Entities[0] with { Audit = true }]) : Schema, MMLib.Alvo.Tests.Expressions.CelFixtures.Compiler);
+        var schema = audited ? new SchemaModel([Schema(timeZone).Entities[0] with { Audit = true }]) : Schema(timeZone);
+        var catalog = PolicyCatalog.Build(Descriptor, schema, MMLib.Alvo.Tests.Expressions.CelFixtures.Compiler);
         var provider = new PolicyCatalogProvider();
         provider.SetCurrent(Descriptor.Name, catalog);
-        var schema = audited ? new SchemaModel([Schema.Entities[0] with { Audit = true }]) : Schema;
         return new InMemoryAlvoData(new PolicyEngine(provider), new PredicateEvaluator(), schema, clock);
     }
 
-    private static SchemaModel Schema => new([
+    private static SchemaModel Schema(string? timeZone) => new([
         new EntitySchema
         {
             Name = "orders",
@@ -105,7 +119,7 @@ public sealed class InMemoryAlvoDataSequenceTests
                     Name = "code",
                     Type = MMLib.Alvo.Schema.FieldType.String,
                     Required = true,
-                    Sequence = new SequenceSchema { Period = SequenceResetPeriod.Year, Format = "SO-{yyyy}-{n:4}" },
+                    Sequence = new SequenceSchema { Period = SequenceResetPeriod.Year, TimeZone = timeZone, Format = "SO-{yyyy}-{n:4}" },
                 },
             ],
         },

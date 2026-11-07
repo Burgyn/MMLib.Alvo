@@ -1211,13 +1211,17 @@ apply.
 ## Sequences are a counter row in the create's transaction (HX-12)
 
 A field's `sequence` (HX-12, spec 2026-10-14 §7; the decisions are the spec's *HX-12 settled details*) is a number the
-port assigns on create: gapless, never reused, counted per tenant and optionally per another field's value and per UTC
-period. The plan is `docs/superpowers/plans/2026-11-06-hx-12-integrity-sequence-exclusion.md`.
+port assigns on create: gapless, never reused, counted per tenant and optionally per another field's value and per
+calendar period, read in the sequence's `timeZone` (UTC by default, #479). The plan is `docs/superpowers/plans/2026-11-06-hx-12-integrity-sequence-exclusion.md`.
 
 **One framework table, one row per count.** `<prefix>_sequences` (`AlvoFrameworkTables.SequencesSuffix`) holds
 `entity, field, tenant_key, scope_key, period_key, last_value`, keyed on the first five. `tenant_key` is the tenant id
 (`""` on a global entity), `scope_key` the `per` value in invariant text (`""` without `per`), `period_key` the
-`yyyy` / `yyyy-MM` / `yyyy-MM-dd` of the write's UTC stamp (`""` without `period`).
+`yyyy` / `yyyy-MM` / `yyyy-MM-dd` of the write's stamp read in the sequence's `timeZone` (`""` without `period`). The
+key is the calendar label and never names the zone, so changing `timeZone` keeps counting in the same row; only the
+instant the next period begins moves, and for at most the two zones' difference a number of the old period can follow
+one of the new. Refusing the change instead would strand a business that declared the wrong zone; keying the zone into
+the period would restart every count mid-period (#479).
 
 **One statement, in the create's own transaction** (D6, D15). `SequenceNumbers` runs the dialect's
 `SequenceAllocationStatement(table)` — `INSERT … ON CONFLICT DO UPDATE SET last_value = last_value + 1 RETURNING
@@ -1235,7 +1239,7 @@ takes the counter row's lock, which is held until the create commits, so:
   per partition.
 
 The number is formatted in-process (`SequenceFormat`: `{n}`, `{n:W}`, `{yyyy}`, `{yy}`, `{MM}`, `{dd}`) from the same
-UTC stamp the period key is read from. Before-hooks see no number; `per` is read from the post-hook row; changing `per`
+stamp, in the same zone, the period key is read from. Before-hooks see no number; `per` is read from the post-hook row; changing `per`
 later does not renumber (D6).
 
 **Counter rows are never deleted** (D7). Removing a sequence and adding it back resumes the count; a declared entity or

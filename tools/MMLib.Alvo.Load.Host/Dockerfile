@@ -44,6 +44,9 @@ RUN dotnet publish tools/MMLib.Alvo.Load.Host/MMLib.Alvo.Load.Host.csproj \
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS final
 
+# The IANA time zone database, as in the standalone image (#479).
+RUN apk add --no-cache tzdata
+
 WORKDIR /app
 COPY --from=build /app .
 
