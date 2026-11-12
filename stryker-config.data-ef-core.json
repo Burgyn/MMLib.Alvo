@@ -28,7 +28,8 @@
     },
     "reporters": [
       "progress",
-      "cleartext"
+      "cleartext",
+      "json"
     ]
   }
 }
