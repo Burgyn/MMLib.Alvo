@@ -107,9 +107,10 @@
       "A value another record already holds on a `unique` field.",
       "A delete that a `ref` declaring `onDelete: \"restrict\"` refuses, because other records still point at the row.",
       "A write hook in the host's code refused the write with `Conflict`: the violation's `code` is the hook's own, and the document's `extensions` names the hook.",
-      "On PostgreSQL, a Management API apply waited longer than its 5 s lock timeout for a table other transactions are using, and changed nothing; the response carries `Retry-After: 5`."
+      "On PostgreSQL, a Management API apply waited longer than its 5 s lock timeout for a table other transactions are using, or the database failed it to break a deadlock with one of them, and changed nothing; the response carries `Retry-After: 5`.",
+      "On PostgreSQL, the database broke a deadlock between a write and a concurrent one by failing the write, and nothing was written; the response carries `Retry-After: 1`."
     ],
-    "fix": "Send a value no other record holds, or delete or repoint the records that reference this one, then retry; retry an apply that timed out on a lock unchanged, after `Retry-After`.",
+    "fix": "Send a value no other record holds, or delete or repoint the records that reference this one, then retry; a response that carries `Retry-After` — an apply that timed out on a lock, or a write or an apply the database failed to break a deadlock — is retried unchanged, after `Retry-After`.",
     "violationCodes": ["unique", "referenced"],
     "guides": ["guides/write-data", "guides/entities-and-fields", "guides/indexes"],
     "needsProblemDetails": false

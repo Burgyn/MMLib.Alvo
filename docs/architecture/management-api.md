@@ -340,7 +340,9 @@ PostgreSQL every apply transaction starts with `SET LOCAL lock_timeout = '5s'`; 
 than its lock timeout for a table other transactions are using, and changed nothing. Retry it." — on `PUT descriptor`
 and `POST rollback` (`ManagementEndpoints`, `ProblemResultFactory.ManagementApplyLockTimeout`). The fix is the same
 request, later, which `Retry-After` says; no slug in the catalogue keys on "retry unchanged", and `conflict` already
-means "colliding with what other transactions hold". The exception behind it, `AlvoApplyLockTimeoutException`, is
+means "colliding with what other transactions hold". An apply the database fails to break a deadlock (`40P01`, issue
+443) answers the same 409 and `Retry-After: 5`, its detail "The database failed the apply to break a deadlock with
+another transaction, and nothing changed. Retry it." — the same exception type, carrying the sentence. The exception behind it, `AlvoApplyLockTimeoutException`, is
 internal: an embedded caller of `IAlvoManagement` receives it as an exception it cannot catch by type, which the
 interface's own docs state; the dashboard matches it through the D45 grant. Two concurrent applies change answer with
 it: the loser, blocked more than 5 s on the winner's uncommitted version row, now gets this 409 where it got 412, and a

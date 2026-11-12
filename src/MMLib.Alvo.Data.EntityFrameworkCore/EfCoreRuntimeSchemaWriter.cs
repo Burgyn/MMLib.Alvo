@@ -130,12 +130,13 @@ internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposa
     }
 
     /// <summary>
-    /// Marks a lock timeout raised by the version-row insert as such: that insert waits only on another writer's
-    /// uncommitted row for the same revision, so the boot reads it as a lost race (HX-11 Ruling 81).
+    /// Marks a lock timeout — or a deadlock — raised by the version-row insert as such: that insert waits only on another
+    /// writer's uncommitted row for the same revision, so the boot reads it as a lost race (HX-11 Ruling 81). The refusal's
+    /// sentence is kept, so a deadlock still says deadlock.
     /// </summary>
     private static Exception Located(Exception refused, bool atTheVersionRow) =>
         atTheVersionRow && refused is AlvoApplyLockTimeoutException { InnerException: { } engine }
-            ? new AlvoApplyLockTimeoutException(engine) { AtTheVersionRow = true }
+            ? new AlvoApplyLockTimeoutException(refused.Message, engine) { AtTheVersionRow = true }
             : refused;
 
     /// <summary>
