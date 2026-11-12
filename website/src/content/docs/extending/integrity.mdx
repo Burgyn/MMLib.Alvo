@@ -271,7 +271,10 @@ It names neither the other record nor its range. Concurrent writers to one room 
 On PostgreSQL an exclusion is an `EXCLUDE USING gist` constraint, which compares the equality fields through the
 btree_gist extension. It ships with PostgreSQL and is trusted since PostgreSQL 13, so the apply installs it when the
 connection's role may create in the database. When it may not, the apply is refused with the fix: ask the database
-owner to run `CREATE EXTENSION btree_gist;`, then apply again. SQLite enforces an exclusion with triggers; its
+owner to run `CREATE EXTENSION btree_gist;`, then apply again. btree_gist compares a `boolean` equality field from
+PostgreSQL 15 on; on an older server the apply refuses that field at `/entities/<e>/indexes/<i>/fields/<n>` and names the
+version, and when the server is new enough but the installed extension predates it, the fix is
+`ALTER EXTENSION btree_gist UPDATE;`. Every other admitted type is compared on every supported version. SQLite enforces an exclusion with triggers; its
 `datetime` bounds compare to the millisecond, PostgreSQL's to the microsecond.
 :::
 
