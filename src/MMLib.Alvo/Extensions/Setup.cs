@@ -43,6 +43,7 @@ internal static class ExtensionsSetup
         services.TryAddSingleton<ExtensionCatalog>();
         services.TryAddSingleton<ExtensionApplyGuard>();
         services.TryAddSingleton<ExtensionStateGuard>();
+        services.TryAddSingleton<DescriptorActionSweep>();
         services.TryAddSingleton<RequiredSecretsCheck>();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton(provider => new ExtensionStats(

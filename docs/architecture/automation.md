@@ -42,7 +42,38 @@ The parts are serialized separately through the descriptor's typed `JsonTypeInfo
 U+001F, so the id is stable across processes and platforms. There is no sibling index: inserting a hook above another
 does not rename it. Exact duplicates take an ordinal `-2`. An **edit makes a new subscriber**: the old one's pending
 rows are never claimed again, and `ExtensionStateGuard` ignores ids starting with `/`, so they never refuse a boot.
-They stay visible on Operations until a sweep cancels them (a follow-up).
+
+**`DescriptorActionSweep` ends them** (#480). After each committed apply, rollback or re-apply (`RuntimeSchemaService`,
+never before the commit, so a refused apply cancels nothing) and at the boot just before Ready, every subscriber id
+starting with `/` that has unfinished work and that the serving catalog does not bind has that work cancelled (error
+type `superseded`) — through the internal `ISupersededDeliveryStore`, which the EF store implements as one transaction:
+the subscriber lock taken exclusively (as a pause takes it, so a claim under way finishes first), the cancel, and one
+`cancel-superseded` operations-log row (actor `system`, the revision in its reason, `affected` = how many). A store
+without that member still cancels through `IDeliveryStore.CancelPendingAsync`, unlogged but audited. A subscriber with
+nothing unfinished writes nothing, so the sweep is idempotent across replicas and applies. It works per subscriber, across
+tenants: one id names one action whatever the event's tenant, so it cannot reach a live subscriber's rows. Host ids
+(no leading `/`) are never touched. The same sweep deletes the stored schedule of a cron rule whose trigger changed or
+whose rule is gone, through `ITimerStore.SyncSchedulesAsync`'s retired ids. Cancelled is final: a rollback that binds the
+old id again leaves those rows cancelled and receives only the events written after it. A failed sweep logs
+`DescriptorActionSweepFailed` and never fails the committed apply; the next apply or boot sweeps again.
+
+**"Not declared" is judged against the database's current revision, never a process-local catalog.** Processes sharing one
+database can serve different code-first files — a web host and a worker, an old pod and a new one mid-rollout — and an
+unchanged boot (or `ApplyAlvoDescriptorAsync` with an empty plan) primes its file's catalog *without* writing a revision
+when the file differs from the stored descriptor only in hooks, rules or automation. Sweeping against such a catalog would
+cancel the live work of the descriptor every other process serves and delete its cron schedules. So each call site sweeps
+only a catalog that *is* the stored revision: the runtime apply, rollback and identical re-apply (the catalog of the version
+just written, or already stored); the code-first runner after it saved a snapshot, or on an empty plan only when its
+descriptor is canonically the stored one (`DescriptorContent.IsSame`); the dashboard-first boot (it primes from the stored
+descriptor); and the code-first boot only when its file is canonically the stored descriptor. A process serving any other
+catalog sweeps nothing.
+
+**Rolling deploys.** An apply's sweep cancels what the new revision no longer declares even while an old-catalog replica
+is still running: that replica may already have fanned out events to the old subscriber, or may fan out more until it
+picks up the new revision on restart — those rows are cancelled by this sweep or the next one (apply or boot over the stored
+revision), never run by the new catalog. Nothing is lost for good: `cancelled` is a finished status, so each row stays
+inspectable on Operations and can be put back with redeliver or replay once a catalog that declares the action serves
+again (a rollback, say). A rollback itself never resurrects them on its own.
 
 The Operations page filters by an id prefix (`?subscriber=/automation/<rule>/actions#`), which is how the
 Automations page links a rule to its deliveries.
@@ -95,7 +126,7 @@ refuse until a restart. A store that throws fails closed, naming its exception t
 
 ## Decisions
 
-1. Subscriber id = pointer + content hash; an edit makes a new subscriber, and the old one's pending rows are left unclaimed.
+1. Subscriber id = pointer + content hash; an edit makes a new subscriber, and the next apply's (or boot's) sweep cancels the old one's unfinished rows, one log row per subscriber (#480).
 2. Actions run as synthetic `BoundHandler`s with default settings (30 s, `PerRecord`, default retry, system in the event's tenant); not catalog entries.
 3. `entity.update` is exactly-once through the command ledger committed inside `TransactAsync`; the horizon is the ledger's one-day sweep.
 4. Function `input` is validated by top-level `properties`, `required` and the JSON `type` of literals only; a nested typo dies at run time.

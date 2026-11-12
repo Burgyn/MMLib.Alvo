@@ -9,7 +9,8 @@ namespace MMLib.Alvo.Extensions.Internal;
 /// <summary>
 /// Decides what becomes of durable work keyed by an id this host no longer registers (spec 2026-10-14 E3): a declared
 /// retirement dead-letters or discards it; anything else refuses the start, because that work would never run and, with
-/// per-record order, the lanes behind it would wait forever.
+/// per-record order, the lanes behind it would wait forever. A descriptor action's id (a leading <c>/</c>) is not the
+/// guard's: <see cref="DescriptorActionSweep"/> ends the work of one the serving catalog no longer binds.
 /// </summary>
 /// <remarks>
 /// <para>
