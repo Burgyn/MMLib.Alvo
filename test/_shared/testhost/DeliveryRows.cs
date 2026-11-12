@@ -6,6 +6,9 @@ namespace MMLib.Alvo.TestHost.Tests;
 /// <summary>One row of <c>alvo_deliveries</c>, as a fact reads it.</summary>
 internal sealed record DeliveryRow(Guid EventId, string Subscriber, string Status, int Attempts, string? LastErrorType);
 
+/// <summary>One row of <c>alvo_operations_log</c>, as a fact reads it.</summary>
+internal sealed record OperationRow(string Actor, string Operation, string Target, string? Reason, int? Affected);
+
 /// <summary>Reads the delivery and operations tables straight off the database, so a fact sees what the engine holds, not what the port reports.</summary>
 internal static class DeliveryRows
 {
@@ -54,5 +57,26 @@ internal static class DeliveryRows
         }
 
         return operations;
+    }
+
+    internal static async Task<IReadOnlyList<OperationRow>> OperationRowsAsync(Func<DbConnection> connect, CancellationToken ct)
+    {
+        await using var connection = connect();
+        await connection.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT actor, operation, target, reason, affected FROM alvo_operations_log ORDER BY at, id";
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        var rows = new List<OperationRow>();
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new OperationRow(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3),
+                reader.IsDBNull(4) ? null : Convert.ToInt32(reader.GetValue(4), CultureInfo.InvariantCulture)));
+        }
+
+        return rows;
     }
 }

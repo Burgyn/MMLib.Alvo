@@ -296,6 +296,7 @@ internal sealed class BootServiceWorld : IDisposable
         MigrationCheck(),
         _loggers.CreateLogger<AlvoBootService>(),
         RequiredSecrets,
+        ActionSweep(),
     ];
 
     private ISchemaMigrator Migrator() =>
@@ -303,6 +304,12 @@ internal sealed class BootServiceWorld : IDisposable
 
     private ExtensionStateGuard ExtensionState() =>
         new(Registrations, Deliveries, _loggers.CreateLogger<ExtensionStateGuard>());
+
+    private DescriptorActionSweep ActionSweep() => new(
+        new ExtensionBinder(Registrations, new CelCompiler(), Tests.Extensions.HandlerCatalog.EveryService(), _loggers.CreateLogger<ExtensionBinder>()),
+        TimeProvider.System,
+        _loggers.CreateLogger<DescriptorActionSweep>(),
+        Deliveries);
 
     private DataMigrationBootCheck MigrationCheck() =>
         new(Registrations, Tests.Extensions.HandlerCatalog.EveryService(), store: null);
