@@ -539,14 +539,20 @@ public interface IAlvoSqlDialect
     internal bool IsIndexPredicateRefusal(DbException failure) => false;
 
     /// <summary>
-    /// What this engine needs before an apply can add an exclusion — nothing, a statement the apply runs first, or a refusal
-    /// because the database lacks something the connection's role may not install (HX-12 D12). Asked once per plan that
-    /// adds one; <see cref="ExclusionPrerequisite.Ready"/> by default.
+    /// What this engine needs before an apply can add an exclusion — nothing, a statement the apply runs first, or refusals
+    /// because the database lacks something the connection's role may not install (HX-12 D12) or cannot compare one of
+    /// <paramref name="equalityFields"/> for equality on this server (issue 477). Asked once per plan that adds one;
+    /// <see cref="ExclusionPrerequisite.Ready"/> by default.
     /// </summary>
-    /// <remarks>Internal, for <see cref="IsLockTimeout"/>'s reason: the published dialect port does not grow.</remarks>
+    /// <remarks>
+    /// Internal, for <see cref="IsLockTimeout"/>'s reason: the published dialect port does not grow. Which types an engine
+    /// compares, and from which version, is the engine's own question — the shared migrator only hands it the fields.
+    /// </remarks>
     /// <param name="connection">An open connection to the database being planned against.</param>
+    /// <param name="equalityFields">Every author-declared equality field of the exclusions the plan adds.</param>
     /// <param name="ct">A token to cancel the probe.</param>
-    internal ValueTask<ExclusionPrerequisite> ExclusionPrerequisiteAsync(DbConnection connection, CancellationToken ct) =>
+    internal ValueTask<ExclusionPrerequisite> ExclusionPrerequisiteAsync(
+        DbConnection connection, IReadOnlyList<ExclusionEqualityField> equalityFields, CancellationToken ct) =>
         ValueTask.FromResult(ExclusionPrerequisite.Ready);
 
     /// <summary>

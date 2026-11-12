@@ -102,11 +102,29 @@ internal static class ExclusionPlan
     /// <summary>The JSON pointer of <paramref name="entity"/>'s index <paramref name="index"/>'s <c>exclude</c>.</summary>
     /// <param name="entity">The declaring entity.</param>
     /// <param name="index">One of its indexes.</param>
-    internal static string Pointer(EntitySchema entity, IndexSchema index)
+    internal static string Pointer(EntitySchema entity, IndexSchema index) => $"{IndexPointer(entity, index)}/exclude";
+
+    private static string IndexPointer(EntitySchema entity, IndexSchema index)
     {
         var position = entity.Indexes.ToList().IndexOf(index);
-        return $"/entities/{entity.Name}/indexes/{Math.Max(position, 0)}/exclude";
+        return $"/entities/{entity.Name}/indexes/{Math.Max(position, 0)}";
     }
+
+    /// <summary>
+    /// Every author-declared equality field of <paramref name="added"/>, at its pointer under the index's <c>fields</c> —
+    /// the managed <c>tenant_id</c> a scoped entity leads with is not one.
+    /// </summary>
+    /// <param name="added">The exclusions a plan adds.</param>
+    internal static IReadOnlyList<ExclusionEqualityField> EqualityFields(IEnumerable<Declared> added) =>
+    [
+        .. from declared in added
+           from position in Enumerable.Range(0, declared.Index.Fields.Count)
+           let name = declared.Index.Fields[position]
+           let field = declared.Entity.Fields.FirstOrDefault(field => string.Equals(field.Name, name, StringComparison.Ordinal))
+           where field is not null
+           select new ExclusionEqualityField(
+               $"{IndexPointer(declared.Entity, declared.Index)}/fields/{position}", name, field.Type),
+    ];
 
     /// <summary>Every index of <paramref name="schema"/> that declares an exclusion, with its entity.</summary>
     /// <param name="schema">The schema to read.</param>

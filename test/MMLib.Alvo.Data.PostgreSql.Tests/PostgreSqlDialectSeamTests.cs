@@ -125,7 +125,7 @@ public sealed class PostgreSqlDialectSeamTests
     {
         var connection = new ProbeConnection(true, true, true);
 
-        await Dialect.ExclusionPrerequisiteAsync(connection, Ct);
+        await Dialect.ExclusionPrerequisiteAsync(connection, [], Ct);
 
         connection.CommandText.ShouldContain("pg_extension");
         connection.CommandText.ShouldContain("pg_available_extensions");
@@ -148,7 +148,7 @@ public sealed class PostgreSqlDialectSeamTests
     [InlineData(false, false, false, "refused")]
     public async Task The_prerequisite_is_decided_from_the_three_answers_of_the_probe(bool installed, bool available, bool mayInstall, string expected)
     {
-        var prerequisite = await Dialect.ExclusionPrerequisiteAsync(new ProbeConnection(installed, available, mayInstall), Ct);
+        var prerequisite = await Dialect.ExclusionPrerequisiteAsync(new ProbeConnection(installed, available, mayInstall), [], Ct);
 
         switch (expected)
         {
@@ -161,9 +161,11 @@ public sealed class PostgreSqlDialectSeamTests
                 break;
             default:
                 prerequisite.Statement.ShouldBeNull();
-                prerequisite.RefusalMessage.ShouldBe(
+                var refusal = prerequisite.Refusals.ShouldHaveSingleItem();
+                refusal.Pointer.ShouldBeNull();
+                refusal.Message.ShouldBe(
                     "Excluding overlaps needs PostgreSQL's btree_gist extension, which this database does not have and this connection's role may not install. Nothing was applied.");
-                prerequisite.RefusalFix.ShouldBe(
+                refusal.Fix.ShouldBe(
                     "Ask the database owner to run CREATE EXTENSION btree_gist; in this database (it ships with PostgreSQL and is trusted since PostgreSQL 13), then apply again.");
                 break;
         }
@@ -171,8 +173,116 @@ public sealed class PostgreSqlDialectSeamTests
 
     [Fact]
     public async Task A_prerequisite_probe_without_a_connection_is_refused()
-        => (await Should.ThrowAsync<ArgumentNullException>(async () => await Dialect.ExclusionPrerequisiteAsync(null!, Ct)))
+        => (await Should.ThrowAsync<ArgumentNullException>(async () => await Dialect.ExclusionPrerequisiteAsync(null!, [], Ct)))
             .ParamName.ShouldBe("connection");
+
+    [Fact]
+    public async Task A_prerequisite_probe_without_equality_fields_is_refused()
+        => (await Should.ThrowAsync<ArgumentNullException>(async () => await Dialect.ExclusionPrerequisiteAsync(new ProbeConnection(true, true, true), null!, Ct)))
+            .ParamName.ShouldBe("equalityFields");
+
+    [Fact]
+    public async Task The_prerequisite_probe_asks_which_equality_types_btree_gist_can_compare()
+    {
+        var connection = new ProbeConnection(true, true, true);
+
+        await Dialect.ExclusionPrerequisiteAsync(connection, [], Ct);
+
+        connection.CommandText.ShouldContain("pg_opclass");
+        connection.CommandText.ShouldContain("amname = 'gist'");
+        connection.CommandText.ShouldContain("opcdefault");
+        connection.CommandText.ShouldContain("'boolean'");
+    }
+
+    /// <summary>
+    /// Issue 477: btree_gist compares a boolean from PostgreSQL 15 (btree_gist 1.7). Before the extension is installed, the
+    /// version the server ships decides; the field is refused at its own pointer, naming the minimum version.
+    /// </summary>
+    [Fact]
+    public async Task A_boolean_equality_field_on_a_server_older_than_15_is_refused_at_its_pointer()
+    {
+        var prerequisite = await Dialect.ExclusionPrerequisiteAsync(
+            new ProbeConnection(installed: false, available: true, mayInstall: true, serverVersion: 140011), [Archived], Ct);
+
+        prerequisite.Statement.ShouldBeNull();
+        var refusal = prerequisite.Refusals.ShouldHaveSingleItem();
+        refusal.Pointer.ShouldBe("/entities/bookings/indexes/0/fields/1");
+        refusal.Message.ShouldBe(
+            "Excluding overlaps per 'archived' compares a boolean for equality, which btree_gist cannot do on this PostgreSQL 14 server. Nothing was applied.");
+        refusal.Fix.ShouldBe("Upgrade the server to PostgreSQL 15 or later, or remove 'archived' from 'fields'.");
+    }
+
+    [Fact]
+    public async Task A_boolean_equality_field_on_15_installs_btree_gist_as_usual()
+    {
+        var prerequisite = await Dialect.ExclusionPrerequisiteAsync(
+            new ProbeConnection(installed: false, available: true, mayInstall: true, serverVersion: 150000), [Archived], Ct);
+
+        prerequisite.Statement.ShouldBe("CREATE EXTENSION IF NOT EXISTS btree_gist");
+        prerequisite.Refused.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// Once installed, the extension's own operator classes decide — a server upgraded with pg_upgrade keeps the old
+    /// extension version until it is updated, so a version-15 server can still lack the boolean class.
+    /// </summary>
+    [Fact]
+    public async Task An_installed_btree_gist_without_the_boolean_class_on_15_is_refused_with_the_update()
+    {
+        var prerequisite = await Dialect.ExclusionPrerequisiteAsync(
+            new ProbeConnection(installed: true, available: true, mayInstall: false, serverVersion: 150004, uncomparable: "boolean"), [Archived], Ct);
+
+        var refusal = prerequisite.Refusals.ShouldHaveSingleItem();
+        refusal.Pointer.ShouldBe("/entities/bookings/indexes/0/fields/1");
+        refusal.Message.ShouldBe(
+            "Excluding overlaps per 'archived' compares a boolean for equality, which the btree_gist installed in this database cannot do. Nothing was applied.");
+        refusal.Fix.ShouldBe("Ask the database owner to run ALTER EXTENSION btree_gist UPDATE; in this database, then apply again.");
+    }
+
+    [Fact]
+    public async Task An_installed_btree_gist_with_the_boolean_class_is_ready_whatever_the_version_number_says()
+        => (await Dialect.ExclusionPrerequisiteAsync(
+            new ProbeConnection(installed: true, available: true, mayInstall: false, serverVersion: 140000), [Archived], Ct))
+            .ShouldBe(ExclusionPrerequisite.Ready);
+
+    [Fact]
+    public async Task An_installed_btree_gist_without_the_boolean_class_on_14_names_the_upgrade()
+        => (await Dialect.ExclusionPrerequisiteAsync(
+            new ProbeConnection(installed: true, available: true, mayInstall: false, serverVersion: 140000, uncomparable: "boolean"), [Archived], Ct))
+            .Refusals.ShouldHaveSingleItem().Fix.ShouldBe("Upgrade the server to PostgreSQL 15 or later, or remove 'archived' from 'fields'.");
+
+    /// <summary>Every other admitted equality type is compared by every supported server's btree_gist (probed 12 to 16).</summary>
+    [Theory]
+    [InlineData(FieldType.String)]
+    [InlineData(FieldType.Text)]
+    [InlineData(FieldType.Enum)]
+    [InlineData(FieldType.Integer)]
+    [InlineData(FieldType.Decimal)]
+    [InlineData(FieldType.Uuid)]
+    [InlineData(FieldType.Ref)]
+    [InlineData(FieldType.Date)]
+    [InlineData(FieldType.DateTime)]
+    public async Task Every_other_equality_type_on_12_installs_btree_gist_as_usual(FieldType type)
+    {
+        var prerequisite = await Dialect.ExclusionPrerequisiteAsync(
+            new ProbeConnection(installed: false, available: true, mayInstall: true, serverVersion: 120000),
+            [new ExclusionEqualityField("/entities/bookings/indexes/0/fields/0", "room", type)], Ct);
+
+        prerequisite.Statement.ShouldBe("CREATE EXTENSION IF NOT EXISTS btree_gist");
+        prerequisite.Refused.ShouldBeFalse();
+    }
+
+    /// <summary>A database lacking the extension and a boolean the server cannot compare: both are reported at once.</summary>
+    [Fact]
+    public async Task A_missing_extension_and_an_uncomparable_field_are_both_refused()
+    {
+        var prerequisite = await Dialect.ExclusionPrerequisiteAsync(
+            new ProbeConnection(installed: false, available: false, mayInstall: false, serverVersion: 140000), [Archived], Ct);
+
+        prerequisite.Refusals.Select(refusal => refusal.Pointer).ShouldBe([null, "/entities/bookings/indexes/0/fields/1"]);
+    }
+
+    private static ExclusionEqualityField Archived => new("/entities/bookings/indexes/0/fields/1", "archived", FieldType.Boolean);
 
     private static PostgresException Failure(string sqlState) =>
         new(messageText: "refused", severity: "ERROR", invariantSeverity: "ERROR", sqlState: sqlState);
@@ -183,8 +293,11 @@ public sealed class PostgreSqlDialectSeamTests
         Fields = [new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true }],
     };
 
-    /// <summary>A connection whose one command answers the probe's single row of three booleans.</summary>
-    private sealed class ProbeConnection(bool installed, bool available, bool mayInstall) : DbConnection
+    /// <summary>
+    /// A connection whose one command answers the probe's single row: three booleans, the server's version number, and the
+    /// comma-separated types the installed btree_gist cannot compare.
+    /// </summary>
+    private sealed class ProbeConnection(bool installed, bool available, bool mayInstall, int serverVersion = 160000, string uncomparable = "") : DbConnection
     {
         public string CommandText { get; private set; } = string.Empty;
 
@@ -211,12 +324,12 @@ public sealed class PostgreSqlDialectSeamTests
 
         protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel) => throw new NotSupportedException();
 
-        protected override DbCommand CreateDbCommand() => new ProbeCommand(this, installed, available, mayInstall);
+        protected override DbCommand CreateDbCommand() => new ProbeCommand(this, installed, available, mayInstall, serverVersion, uncomparable);
 
         internal void Record(string text) => CommandText = text;
     }
 
-    private sealed class ProbeCommand(ProbeConnection owner, bool installed, bool available, bool mayInstall) : DbCommand
+    private sealed class ProbeCommand(ProbeConnection owner, bool installed, bool available, bool mayInstall, int serverVersion, string uncomparable) : DbCommand
     {
         private string _text = string.Empty;
 
@@ -265,7 +378,9 @@ public sealed class PostgreSqlDialectSeamTests
             table.Columns.Add("installed", typeof(bool));
             table.Columns.Add("available", typeof(bool));
             table.Columns.Add("may_install", typeof(bool));
-            table.Rows.Add(installed, available, mayInstall);
+            table.Columns.Add("server_version_num", typeof(int));
+            table.Columns.Add("uncomparable", typeof(string));
+            table.Rows.Add(installed, available, mayInstall, serverVersion, uncomparable);
             return table.CreateDataReader();
         }
     }

@@ -40,6 +40,12 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
     /// <summary>The host's connection pool size, or <see langword="null"/> for Npgsql's default of 100.</summary>
     public int? MaxPoolSize { get; init; }
 
+    /// <summary>
+    /// The server image — <c>postgres:16-alpine</c>, which every suite runs on, unless a fact is about what an older server
+    /// cannot do.
+    /// </summary>
+    public string Image { get; init; } = "postgres:16-alpine";
+
     public async ValueTask InitializeAsync()
     {
         // Windows GitHub runners run Docker in Windows-container mode when they run it at all, and that
@@ -51,7 +57,7 @@ public sealed class PostgreSqlAlvoDataFixture : IAsyncLifetime
             return;
         }
 
-        var builder = new PostgreSqlBuilder("postgres:16-alpine");
+        var builder = new PostgreSqlBuilder(Image);
         var container = (MaxConnections is { } max ? builder.WithCommand("-c", $"max_connections={max}") : builder).Build();
         await container.StartAsync();
         _container = container;
