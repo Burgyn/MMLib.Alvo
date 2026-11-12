@@ -81,11 +81,16 @@ public class OutboxRecoveryTests
             {
                 await CreateAsync(first, "W-1");
                 await hanging.UntilRequestedAsync();
+
+                // Fan-out and the outbox stamp are separate commits (ruling Q11), and the delivery engine can start the
+                // action between them — so the request arriving does not mean the stamp has landed. The stamp does not
+                // wait for the action, though: the host goes away once it has, with the action still hanging.
+                await UntilAsync(
+                    () => SqliteOutboxProbe.Rows(database).ShouldHaveSingleItem().Dispatched,
+                    "the outbox row to be retired while the action still hangs");
             }
 
-            // Fan-out and the outbox stamp are separate commits (ruling Q11): the stamp can still be pending when the host
-            // goes away, so only the event row itself and the claimed delivery are asserted.
-            SqliteOutboxProbe.Rows(database).ShouldHaveSingleItem();
+            SqliteOutboxProbe.Rows(database).ShouldHaveSingleItem().Dispatched.ShouldBeTrue("fan-out preceded the action");
             RunningDeliveries(database).ShouldBe(1, "the action's delivery is still held by the claim of the host that went away");
         }
         finally
@@ -188,9 +193,9 @@ public class OutboxRecoveryTests
     /// <param name="database">The database file to read.</param>
     /// <param name="id">The event id whose row must end up with <c>dispatched_at</c> set.</param>
     /// <remarks>
-    /// Asserted after the delivery rather than instead of it: the dispatcher retires an entry only once every
-    /// matched action has run, so an entry still pending here would mean the delivery was counted without the
-    /// queue ever agreeing.
+    /// Asserted after the delivery rather than instead of it: the dispatcher retires an entry once it has fanned out,
+    /// in a commit of its own after the fan-out's (ruling Q11), so the delivery can arrive first — an entry that never
+    /// retires would mean the delivery was counted without the queue ever agreeing.
     /// </remarks>
     private static Task UntilRetiredAsync(string database, Guid id) => UntilAsync(
         () => SqliteOutboxProbe.Rows(database).Single(row => row.Id == id).Dispatched,

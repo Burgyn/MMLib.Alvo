@@ -1161,6 +1161,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **SQLite: two concurrent opens could share one native connection** (#485). Microsoft.Data.Sqlite 10.0.10, which
+  EF Core 10.0.10 brings, could lend one pooled native connection to two open `SqliteConnection`s (dotnet/efcore#39008),
+  failing an open with "unable to delete/modify collation sequence due to active statements" or a stale "database is
+  locked" under concurrent identity reads and writes. `Microsoft.Data.Sqlite.Core` is pinned to 10.0.14, which carries
+  the upstream fix.
+- **Dashboard: fast typing in a reference box no longer loses keystrokes** (#485). The box echoed each keystroke back
+  from the server over a bare `value`, so an echo that arrived between two keys rewound the text and the next key
+  landed on the rewound term ("grac" could become "gac", which matches nothing); it is now bound with `@bind`, whose
+  echo is suppressed while it equals what the browser sent.
+||||||| 4b0f25d7
+||||||| cd77e7ff
 - **A PostgreSQL deadlock (`40P01`) is a retryable refusal, not a 500** (issue 443, HX-11 Ruling 74's residual). A write
   the database fails to break a deadlock — two transaction units taking the same rows or exclusion keys in opposite
   order — throws the new public `AlvoTransientConflictException` (the data port's eighth exception family, the engine's
