@@ -169,6 +169,13 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
     /// <summary>SQLSTATE 23514 — <c>check_violation</c>, what a field's validation raises.</summary>
     private const string CheckViolation = "23514";
 
+    /// <summary>
+    /// SQLSTATE 22001 — <c>string_data_right_truncation</c>, what a value past a <c>varchar(n)</c> raises. The port measures
+    /// <c>maxLength</c> in the core before any driver (issue 481), so this is defence in depth for a value that still reaches
+    /// the column — a stored generated one, say: the validation family naming no field, never an unmapped 500.
+    /// </summary>
+    private const string StringDataRightTruncation = "22001";
+
     /// <summary>SQLSTATE 23P01 — <c>exclusion_violation</c>, what an <c>EXCLUDE</c> constraint raises.</summary>
     private const string ExclusionViolation = "23P01";
 
@@ -214,6 +221,7 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
                 Kind = AlvoConstraintKind.Check,
                 ConstraintName = NullIfEmpty(postgres.ConstraintName),
             },
+            StringDataRightTruncation => new SqlConstraintViolation { Kind = AlvoConstraintKind.Check },
             ExclusionViolation => new SqlConstraintViolation
             {
                 Kind = AlvoConstraintKind.Exclusion,

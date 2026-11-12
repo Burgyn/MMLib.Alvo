@@ -104,12 +104,24 @@ namespace MMLib.Alvo.Data;
 ///     <description>
 ///     <b>The request collides with stored state the database itself guards.</b> A value another record
 ///     already holds on a <c>unique</c> field, or a delete a <c>ref</c> declaring <c>onDelete: "restrict"</c>
-///     refuses. The payload is well-formed and every facet an implementation can check itself has already
-///     passed, so this is neither the malformed-query channel nor a policy refusal; what is wrong is the
-///     request's relationship to rows the caller may not even be able to see. Render 409, naming the fields
-///     the exception carries — see its own remarks for what may and may not appear there. The one kind rendered
-///     otherwise is <see cref="AlvoConstraintKind.Check"/>, a row breaking a field's <c>validation</c>: its fix is a
-///     different value in this request, so it is 422 <c>validation</c>, pointed at the field it names.
+///     refuses. The payload is well-formed and every facet has already passed, so this is neither the
+///     malformed-query channel nor a policy refusal; what is wrong is the request's relationship to rows the
+///     caller may not even be able to see. Render 409, naming the fields the exception carries — see its own
+///     remarks for what may and may not appear there. The one kind rendered otherwise is
+///     <see cref="AlvoConstraintKind.Check"/>, a row breaking a field's <c>validation</c> — or a value breaking its
+///     field's declared facets: its fix is a different value in this request, so it is 422 <c>validation</c>,
+///     pointed at the field it names.
+///     <para>
+///     <b>An implementation measures every value a write supplies against its field's facets itself</b> —
+///     <c>maxLength</c>, enum <c>values</c>, decimal <c>precision</c> and <c>scale</c>, <c>format</c> — before the
+///     row reaches the engine, on every write face including a transaction unit's, and refuses the first value
+///     that breaks one with this exception of kind <see cref="AlvoConstraintKind.Check"/>, naming the field unless
+///     the descriptor hides it (issue 481). A caller does not own them: an engine that enforces no length (SQLite)
+///     and one that does (PostgreSQL's <c>varchar(n)</c>) must give the same answer to the same write. A partial
+///     update measures only the fields it writes; a <see langword="null"/> is <c>required</c>'s, which the engine
+///     answers. A batch reports a row breaking a facet on <see cref="AlvoBatchResult.Refusals"/> by its index, with
+///     the facet's own code (<c>max-length</c>, <c>enum-value</c>, <c>precision</c>, <c>scale</c>, <c>format</c>).
+///     </para>
 ///     <para>
 ///     <b>An implementation must not let the provider's exception escape as this family's neighbour below.</b>
 ///     Rendered as a 500 it tells the caller nothing they can act on, invites a retry that cannot succeed, and
@@ -404,7 +416,8 @@ public interface IAlvoData
     /// <paramref name="idempotency"/>'s key was already used for a request with a different fingerprint.
     /// </exception>
     /// <exception cref="AlvoConstraintViolationException">
-    /// <paramref name="values"/> supplies a value another record already holds on a <c>unique</c> field.
+    /// <paramref name="values"/> supplies a value another record already holds on a <c>unique</c> field, or a value
+    /// its field's declared facets refuse (<see cref="AlvoConstraintKind.Check"/>; see the type remarks).
     /// </exception>
     /// <exception cref="ArgumentException">
     /// <paramref name="idempotency"/> is supplied for an anonymous <paramref name="context"/>. Every anonymous
@@ -459,7 +472,8 @@ public interface IAlvoData
     /// read-only.
     /// </exception>
     /// <exception cref="AlvoConstraintViolationException">
-    /// <paramref name="values"/> supplies a value another record already holds on a <c>unique</c> field.
+    /// <paramref name="values"/> supplies a value another record already holds on a <c>unique</c> field, or a value
+    /// its field's declared facets refuse (<see cref="AlvoConstraintKind.Check"/>; see the type remarks).
     /// </exception>
     /// <exception cref="AlvoIdempotencyConflictException">
     /// <paramref name="idempotency"/>'s key was already used for a request with a different fingerprint.
@@ -538,7 +552,8 @@ public interface IAlvoData
     /// </exception>
     /// <exception cref="AlvoConstraintViolationException">
     /// A unique or reference constraint refused the row — including a collision on <paramref name="id"/>
-    /// itself, which is what a row excluded by this caller's <c>USING</c> answers.
+    /// itself, which is what a row excluded by this caller's <c>USING</c> answers — or a value its field's declared
+    /// facets refuse (<see cref="AlvoConstraintKind.Check"/>; see the type remarks).
     /// </exception>
     /// <exception cref="AlvoPreconditionFailedException">
     /// <paramref name="precondition"/> does not match the stored row's version, the row does not exist, or
