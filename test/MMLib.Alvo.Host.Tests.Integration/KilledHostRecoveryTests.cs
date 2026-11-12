@@ -113,8 +113,9 @@ public class KilledHostRecoveryTests
         await harness.WaitUntilExitedAsync();
 
         AssertKilled(harness);
+        /* Fan-out and the outbox stamp are separate commits (ruling Q11): the stamp can still be pending when the child
+           dies, so only the event row and the claimed delivery are asserted; the restart retires the row below. */
         var midAction = harness.OutboxRows().ShouldHaveSingleItem();
-        midAction.Dispatched.ShouldBeTrue("the event was fanned out before its action ran, so the outbox row is retired");
         var held = harness.DeliveryRows().ShouldHaveSingleItem(
             "the action provably reached its endpoint — the receiver recorded the body before killing the child");
         held.Status.ShouldBe("running", "the dead process died holding the delivery's claim, and nothing but its lease hands it back");
