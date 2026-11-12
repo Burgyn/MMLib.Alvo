@@ -116,6 +116,8 @@ internal static class AdminProblemFixes
             => "The record is gone, or the read rule no longer admits it. Both answer 404, deliberately.",
         AlvoPreconditionFailedException
             => "Somebody else saved this record since you opened it, so your write was not made. Reload to see it as it is now, then make your change again; Reload discards what you changed here.",
+        AlvoTransientConflictException
+            => "Another write held the same rows at the same moment and the database stopped this one; nothing was saved. Save again.",
         _ => null,
     };
 }

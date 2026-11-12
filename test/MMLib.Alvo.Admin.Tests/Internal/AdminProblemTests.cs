@@ -107,6 +107,19 @@ public class AdminProblemTests
     }
 
     [Fact]
+    public void A_write_failed_to_break_a_deadlock_is_a_refusal_that_says_to_save_again()
+    {
+        var lost = new AlvoTransientConflictException();
+
+        var problem = AdminProblem.From(lost, ProblemSite.RecordWrite)!;
+
+        problem.IsFault.ShouldBeFalse("a deadlock the database broke is a documented, retryable refusal, not an error");
+        problem.Title.ShouldBe("Another write got in the way, so nothing was saved");
+        problem.Detail.ShouldBe(lost.Message);
+        problem.Fix.ShouldNotBeNull().ShouldContain("Save again");
+    }
+
+    [Fact]
     public void A_scoped_read_without_a_tenant_is_told_about_the_tenant_rather_than_the_rules()
     {
         var refused = new AlvoAuthorizationException("refused");

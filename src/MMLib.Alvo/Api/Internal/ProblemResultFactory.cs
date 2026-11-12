@@ -293,13 +293,29 @@ internal static class ProblemResultFactory
         StatusCodes.Status409Conflict, AlvoProblemTypes.Conflict, detail);
 
     /// <summary>
-    /// The 409 for an apply that gave up waiting for a table lock and changed nothing, with the <c>Retry-After</c> the
-    /// apply's own bound suggests (HX-11 Ruling 20) — a retryable refusal, never the 500 of a broken invariant.
+    /// The 409 for an apply that gave up waiting for a table lock — or that the database failed to break a deadlock — and
+    /// changed nothing, with the <c>Retry-After</c> the apply's own bound suggests (HX-11 Ruling 20; issue 443) — a
+    /// retryable refusal, never the 500 of a broken invariant.
     /// </summary>
-    internal static IResult ManagementApplyLockTimeout() => new AdvertisingResult(
-        Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.Conflict, Migrations.AlvoApplyLockTimeoutException.Refusal),
+    /// <param name="detail">The refusal's own sentence, which says which of the two it was.</param>
+    internal static IResult ManagementApplyLockTimeout(string detail) => new AdvertisingResult(
+        Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.Conflict, detail),
         HeaderNames.RetryAfter,
         Migrations.AlvoApplyLockTimeoutException.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    /// <summary>
+    /// The 409 for a write the database failed to break a deadlock, with a <c>Retry-After</c> of one second: nothing was
+    /// written, and the transaction it lost to has usually committed by the time the caller sends the same request again
+    /// (issue 443). The <c>conflict</c> slug, like the apply's lock timeout — what differs is that a retry needs no change.
+    /// </summary>
+    /// <param name="detail">The port's own sentence.</param>
+    private static AdvertisingResult TransientConflict(string detail) => new(
+        Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.Conflict, detail),
+        HeaderNames.RetryAfter,
+        TransientConflictRetryAfterSeconds);
+
+    /// <summary>The seconds <see cref="TransientConflict"/> advertises — one: a deadlock's winner is a single short transaction.</summary>
+    private const string TransientConflictRetryAfterSeconds = "1";
 
     /// <summary>
     /// The 404 for a row that does not exist <em>or</em> that the caller's policy excludes — one
@@ -684,6 +700,7 @@ internal static class ProblemResultFactory
             StatusCodes.Status422UnprocessableEntity, AlvoProblemTypes.Validation, CheckViolations(check)),
         AlvoConstraintViolationException constraint => Conflict(constraint),
         AlvoChainDepthExceededException loop => ChainDepthExceeded(loop.Message),
+        AlvoTransientConflictException lost => TransientConflict(lost.Message),
         AlvoWriteRejectedException { ExtensionId.Length: > 0 } rejected => HookRejected(rejected),
         _ => null,
     };

@@ -348,11 +348,19 @@ internal sealed partial class EfAlvoData : IAlvoData
         string entity, IReadOnlyDictionary<string, object?> values, AlvoContext context,
         AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
     {
+        using var instant = AlvoFlow.EnsureInstant(_time);
+        return await TransientConflictTranslator.MappedAsync(() => UnmappedCreateAsync(entity, values, context, idempotency, cancellationToken), _dialect);
+    }
+
+    /// <summary><see cref="CreateAsync"/>, before a deadlock is answered as a transient conflict.</summary>
+    private async Task<AlvoRecord> UnmappedCreateAsync(
+        string entity, IReadOnlyDictionary<string, object?> values, AlvoContext context, AlvoIdempotency? idempotency,
+        CancellationToken cancellationToken)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
         AlvoFlow.RefuseInsideUnit("IAlvoData.CreateAsync", keyed: idempotency is not null);
-        using var instant = AlvoFlow.EnsureInstant(_time);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
         _depthLimit.EnsureWithin(context);
 
@@ -1361,11 +1369,20 @@ internal sealed partial class EfAlvoData : IAlvoData
         AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null,
         CancellationToken cancellationToken = default)
     {
+        using var instant = AlvoFlow.EnsureInstant(_time);
+        return await TransientConflictTranslator.MappedAsync(
+            () => UnmappedUpdateAsync(entity, id, values, context, precondition, idempotency, cancellationToken), _dialect);
+    }
+
+    /// <summary><see cref="UpdateAsync"/>, before a deadlock is answered as a transient conflict.</summary>
+    private async Task<AlvoRecord> UnmappedUpdateAsync(
+        string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context,
+        AlvoPrecondition? precondition, AlvoIdempotency? idempotency, CancellationToken cancellationToken)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
         AlvoFlow.RefuseInsideUnit("IAlvoData.UpdateAsync", keyed: idempotency is not null);
-        using var instant = AlvoFlow.EnsureInstant(_time);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
         _depthLimit.EnsureWithin(context);
 
@@ -1549,11 +1566,20 @@ internal sealed partial class EfAlvoData : IAlvoData
         AlvoPrecondition? precondition = null, AlvoIdempotency? idempotency = null,
         CancellationToken cancellationToken = default)
     {
+        using var instant = AlvoFlow.EnsureInstant(_time);
+        return await TransientConflictTranslator.MappedAsync(
+            () => UnmappedReplaceAsync(entity, id, values, context, precondition, idempotency, cancellationToken), _dialect);
+    }
+
+    /// <summary><see cref="ReplaceAsync"/>, before a deadlock is answered as a transient conflict.</summary>
+    private async Task<AlvoReplaceResult> UnmappedReplaceAsync(
+        string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context,
+        AlvoPrecondition? precondition, AlvoIdempotency? idempotency, CancellationToken cancellationToken)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(context);
         AlvoFlow.RefuseInsideUnit("IAlvoData.ReplaceAsync", keyed: idempotency is not null);
-        using var instant = AlvoFlow.EnsureInstant(_time);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
         _depthLimit.EnsureWithin(context);
 
@@ -1991,10 +2017,19 @@ internal sealed partial class EfAlvoData : IAlvoData
         string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition = null,
         AlvoIdempotency? idempotency = null, CancellationToken cancellationToken = default)
     {
+        using var instant = AlvoFlow.EnsureInstant(_time);
+        await TransientConflictTranslator.MappedAsync(
+            () => UnmappedDeleteAsync(entity, id, context, precondition, idempotency, cancellationToken), _dialect);
+    }
+
+    /// <summary><see cref="DeleteAsync"/>, before a deadlock is answered as a transient conflict.</summary>
+    private async Task UnmappedDeleteAsync(
+        string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition, AlvoIdempotency? idempotency,
+        CancellationToken cancellationToken)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentNullException.ThrowIfNull(context);
         AlvoFlow.RefuseInsideUnit("IAlvoData.DeleteAsync", keyed: idempotency is not null);
-        using var instant = AlvoFlow.EnsureInstant(_time);
         AlvoIdempotency.EnsureUsableToken(idempotency, context);
         _depthLimit.EnsureWithin(context);
 
@@ -2818,7 +2853,8 @@ internal sealed partial class EfAlvoData : IAlvoData
             ? OneBatchAsync(entity, operation, context, idempotency, attempt, producesRows, unit, cancellationToken)
             : HookedAsync(entity, operation, context, (own, ct) => OneBatchAsync(entity, operation, context, idempotency, attempt, producesRows, own, ct), cancellationToken);
 
-        return idempotency is null ? Once() : KeyedBatchAsync(Once, cancellationToken);
+        return TransientConflictTranslator.MappedAsync(
+            () => idempotency is null ? Once() : KeyedBatchAsync(Once, cancellationToken), _dialect);
     }
 
     /// <summary>A keyed batch's attempt loop, its idempotency table ensured before any unit of its own opens.</summary>

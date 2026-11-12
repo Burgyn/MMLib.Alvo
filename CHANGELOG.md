@@ -1161,6 +1161,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A PostgreSQL deadlock (`40P01`) is a retryable refusal, not a 500** (issue 443, HX-11 Ruling 74's residual). A write
+  the database fails to break a deadlock — two transaction units taking the same rows or exclusion keys in opposite
+  order — throws the new public `AlvoTransientConflictException` (the data port's eighth exception family, the engine's
+  failure kept inside), which the Data API answers **409 `conflict` with `Retry-After: 1`**; nothing was written, and the
+  same request is expected to succeed. An apply or rollback the database fails — a parent's cascade delete against the
+  backfill's child locks — answers like a lock timeout: 409 `conflict` with `Retry-After: 5` and a detail that says
+  deadlock, a refused start at boot. Nothing is retried automatically. SQLite, with one writer, raises none.
+||||||| 4b0f25d7
 - **An exclusion per a `boolean` field on PostgreSQL older than 15** (#477, HX-12) is refused at apply, at
   `/entities/<e>/indexes/<i>/fields/<n>`, naming PostgreSQL 15 as the minimum, instead of failing in the DDL: btree_gist
   compares a boolean only from 1.7. The prerequisite probe reads `server_version_num` and, once btree_gist is installed,

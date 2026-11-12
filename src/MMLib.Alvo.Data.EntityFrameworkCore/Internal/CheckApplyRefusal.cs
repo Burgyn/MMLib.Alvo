@@ -11,8 +11,8 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Two refusals, everything else untouched.</b> A lock the apply gave up waiting for is a retryable
-/// <see cref="AlvoApplyLockTimeoutException"/>; a <c>CHECK</c> the engine refused is a <see cref="DescriptorValidationException"/>
+/// <b>Two refusals, everything else untouched.</b> A lock the apply gave up waiting for — or a deadlock the engine broke
+/// by failing the apply (issue 443) — is a retryable <see cref="AlvoApplyLockTimeoutException"/>; a <c>CHECK</c> the engine refused is a <see cref="DescriptorValidationException"/>
 /// at the validation's pointer. Any other failure answers <see langword="null"/>, so the caller's <c>when</c> filter lets
 /// it propagate with the provider's own stack.
 /// </para>
@@ -52,6 +52,11 @@ internal static class CheckApplyRefusal
         if (dialect.IsLockTimeout(provider))
         {
             return new AlvoApplyLockTimeoutException(provider);
+        }
+
+        if (dialect.IsDeadlock(provider))
+        {
+            return AlvoApplyLockTimeoutException.Deadlocked(provider);
         }
 
         return dialect.DecodeConstraintViolation(provider) switch
