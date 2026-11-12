@@ -1,0 +1,18 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "facet-desk",
+  "description": "The data-port facet facts' desk (issue 481): a host write is measured against the same facets an HTTP body is.",
+  "auth": { "roles": ["staff"] },
+  "entities": {
+    "tickets": {
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 10 },
+        "priority": { "type": "enum", "values": ["low", "high"] },
+        "amount": { "type": "decimal", "precision": 5, "scale": 2 },
+        "secret": { "type": "string", "maxLength": 5, "hidden": true }
+      },
+      "rules": { "list": "true", "get": "true", "create": "true", "update": "true", "delete": "true" }
+    }
+  }
+}

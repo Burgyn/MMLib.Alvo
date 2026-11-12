@@ -131,11 +131,12 @@ public sealed class ControlContrastScenarios(AdminWorld world) : IClassFixture<A
         return readings.Where(r => r.Ratio < ContrastProbe.AA).Select(r => $"the snackbar: {r}");
     }
 
+    /// <summary>A region per scheme; its code stays inside the field-service descriptor's <c>maxLength: 12</c>, which the data port measures.</summary>
     private async Task SeedARegionAsync(ColorScheme scheme)
     {
         using var scope = world.Services.CreateScope();
         await FieldServiceSeed.RegionAsync(
-            scope.ServiceProvider.GetRequiredService<IAlvoData>(), AlvoContext.System(TenantId.New()), $"CONTRAST-{scheme}");
+            scope.ServiceProvider.GetRequiredService<IAlvoData>(), AlvoContext.System(TenantId.New()), $"CTR-{scheme}");
     }
 
     private static async Task StageAFieldAsync(AdminSession session, ColorScheme scheme)

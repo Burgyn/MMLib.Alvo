@@ -216,8 +216,9 @@ internal static class RecordValidator
     /// enum membership, <c>format</c> — or <see langword="null"/> when the value honours every facet.
     /// </summary>
     /// <remarks>
-    /// <b>The one definition of "a value fits its field", and it has two consumers on purpose:</b> a caller's
-    /// payload (this type) and a before-hook's <c>mutate</c> result (<c>MutationTarget</c>, Ruling V). A hook
+    /// <b>The one definition of "a value fits its field", and it has three consumers on purpose:</b> a caller's
+    /// payload (this type), a before-hook's <c>mutate</c> result (<c>MutationTarget</c>, Ruling V), and every value a
+    /// data-port write supplies (<c>PortFieldFacets</c>, issue 481 — so host code meets the same facets). A hook
     /// that wrote what a caller may not would make the facets a request-layer courtesy instead of a property of
     /// the stored row, and two copies of the checks would drift on exactly the edge cases (code points, trailing
     /// zeros, a format timeout) the remarks below argue.
