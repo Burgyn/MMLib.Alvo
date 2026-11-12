@@ -344,6 +344,11 @@ public static class SampleHost
         {
             return Results.Problem(detail: exception.Message, statusCode: StatusCodes.Status422UnprocessableEntity);
         }
+        catch (AlvoConstraintViolationException exception) when (exception.Kind == AlvoConstraintKind.Check)
+        {
+            // A value past its field's facets (a colour longer than maxLength) is refused by the port itself.
+            return Results.Problem(detail: exception.Message, statusCode: StatusCodes.Status422UnprocessableEntity);
+        }
     }
 
     /// <summary>

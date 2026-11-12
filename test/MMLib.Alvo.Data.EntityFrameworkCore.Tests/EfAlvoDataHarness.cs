@@ -106,7 +106,8 @@ internal sealed class EfAlvoDataHarness : IDisposable
         TimeProvider.System,
         new AlvoOptions(),
         AlvoChainDepthLimit.Default,
-        _services.GetRequiredService<IEntityLifecycle>());
+        _services.GetRequiredService<IEntityLifecycle>(),
+        _services.GetRequiredService<IFieldFacets>());
 
     private void ConfigureProvider(DbContextOptionsBuilder options) =>
         options.UseSqlite(_connection, static sqlite => sqlite.UseRelationalNulls());

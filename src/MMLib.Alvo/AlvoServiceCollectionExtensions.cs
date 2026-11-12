@@ -9,6 +9,7 @@ using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Api;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Commands;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Data.Internal;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events;
@@ -84,6 +85,8 @@ public static class AlvoServiceCollectionExtensions
         services.AddAlvoExpressions();
         services.AddAlvoRules();
         services.AddAlvoLifecycle();
+        // Internal, so no host can supply its own: a facet cannot be switched off by a registration (issue 481).
+        services.TryAddSingleton<IFieldFacets, PortFieldFacets>();
         services.AddAlvoManagement();
         services.AddAlvoExtensions();
         services.AddAlvoWriteHooks();
