@@ -74,6 +74,7 @@ internal sealed partial class EfAlvoData
         IReadOnlyDictionary<string, object?> patch, CancellationToken cancellationToken)
     {
         EnsureHookMayWrite(patch, decision);
+        EnsureFacetsFit(schema, patch, decision.Unnameable);
         var patched = Patched(db.Rows(schema.Name).EntityType, candidate, patch);
         await EnsureWriteAllowedAsync(db, schema, decision, Unmasked(patched), previous: null, context, cancellationToken).ConfigureAwait(false);
         EnsureTransition(decision, DataOperation.Create, Unmasked(patched), previous: null, context);
@@ -110,6 +111,11 @@ internal sealed partial class EfAlvoData
         if (HookReadOnlyRefusal(patch, decision) is { } frozen)
         {
             return (null, Forbidden(index, frozen));
+        }
+
+        if (FacetRefusal(index, schema, patch, decision) is { } unfit)
+        {
+            return (null, unfit);
         }
 
         var patched = Patched(db.Rows(schema.Name).EntityType, candidate, patch);
@@ -166,6 +172,7 @@ internal sealed partial class EfAlvoData
         }
 
         EnsureHookMayWrite(patch, decision);
+        EnsureFacetsFit(schema, patch, decision.Unnameable);
         return Overlaid(values, patch);
     }
 
@@ -196,6 +203,10 @@ internal sealed partial class EfAlvoData
         catch (AlvoAuthorizationException frozen)
         {
             return (null, Forbidden(index, frozen.Message));
+        }
+        catch (AlvoConstraintViolationException unfit) when (unfit.Kind == AlvoConstraintKind.Check)
+        {
+            return (null, FacetRowRefusal(index, unfit));
         }
     }
 
@@ -483,6 +494,11 @@ internal sealed partial class EfAlvoData
             if (WritePayloadGuard.PayloadRefusal(rows[index].Values, schema, decision, isUpdate: true) is { } unwritable)
             {
                 return new RowValidation(null, Forbidden(index, unwritable));
+            }
+
+            if (FacetRefusal(index, schema, rows[index].Values, decision) is { } unfit)
+            {
+                return new RowValidation(null, unfit);
             }
 
             return await PreReadAsync(db, schema, decision, context, rows[index].Id, cancellationToken).ConfigureAwait(false) is { } old
