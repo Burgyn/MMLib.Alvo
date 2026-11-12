@@ -12,9 +12,10 @@ namespace MMLib.Alvo.Events.Internal;
 /// expression's result (Ruling Q22).
 /// </summary>
 /// <remarks>
-/// The data port measures no facet (its contract leaves that to the HTTP layer's <c>RecordValidator</c>), so without this a
-/// value past <c>maxLength</c> would be stored by SQLite and refused by PostgreSQL's <c>varchar(n)</c> — one descriptor,
-/// two answers. Each entity's formats are compiled once per schema instance.
+/// The data port measures every value it is handed too (issue 481, <c>PortFieldFacets</c>), but an action measures its own
+/// values first, at apply for a literal, so a bad one is a dead <c>write-refused</c> decided before its unit opens rather
+/// than a refusal from inside it. Each entity's formats are compiled once per schema instance, and the port's measure reads
+/// the same cache (<see cref="FormatsOf"/>).
 /// </remarks>
 internal static class PayloadFacets
 {
@@ -28,7 +29,12 @@ internal static class PayloadFacets
     /// nothing.
     /// </param>
     internal static MutationTarget TargetOf(FieldSchema field, EntitySchema entity, AlvoDescriptor? descriptor) =>
-        new(field, _formats.GetValue(entity, static schema => FormatCatalog.Build([schema])), Disclosable(descriptor, entity.Name, field.Name));
+        new(field, FormatsOf(entity), Disclosable(descriptor, entity.Name, field.Name));
+
+    /// <summary>The compiled formats of <paramref name="entity"/>, built once per schema instance.</summary>
+    /// <param name="entity">The entity whose fields' <c>format</c> facets are compiled.</param>
+    internal static FormatCatalog FormatsOf(EntitySchema entity) =>
+        _formats.GetValue(entity, static schema => FormatCatalog.Build([schema]));
 
     private static bool Disclosable(AlvoDescriptor? descriptor, string entity, string field) =>
         descriptor?.Entities.GetValueOrDefault(entity)?.Fields?.GetValueOrDefault(field) is { } declared

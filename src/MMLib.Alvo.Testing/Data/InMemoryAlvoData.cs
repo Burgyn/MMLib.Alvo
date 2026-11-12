@@ -43,6 +43,10 @@ namespace MMLib.Alvo.Testing.Data;
 /// <b>It enforces no <c>stateMachine</c> and arms no <c>timers</c></b>, for the hooks' reason: both run in the write's
 /// pipeline, and a test of a transition's 422/403 or of a timer firing uses <c>MMLib.Alvo.TestHost</c>.
 /// </para>
+/// <para>
+/// <b>It does not measure field facets</b> (<c>maxLength</c>, enum values, decimal precision and scale, <c>format</c>): the shipped
+/// drivers do, through the core's internal facet port (issue 481), which this Abstractions-only double cannot reach.
+/// </para>
 /// </remarks>
 public sealed class InMemoryAlvoData : IAlvoData
 {
