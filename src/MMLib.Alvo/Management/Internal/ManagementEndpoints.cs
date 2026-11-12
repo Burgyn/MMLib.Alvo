@@ -744,9 +744,9 @@ internal static partial class ManagementEndpoints
         {
             return ProblemResultFactory.PreconditionFailed(refusal.Message);
         }
-        catch (AlvoApplyLockTimeoutException)
+        catch (AlvoApplyLockTimeoutException refused)
         {
-            return ProblemResultFactory.ManagementApplyLockTimeout();
+            return ProblemResultFactory.ManagementApplyLockTimeout(refused.Message);
         }
         catch (Data.AlvoPreconditionFailedException refusal)
         {

@@ -162,6 +162,7 @@ internal sealed record AdminProblem(string Title, string Detail, string? Fix, Ex
         AlvoRecordNotFoundException => "That record is not there",
         AlvoPreconditionFailedException => "The record changed since it was read",
         AlvoIdempotencyConflictException => "That request was already made with different content",
+        AlvoTransientConflictException => "Another write got in the way, so nothing was saved",
         ArgumentException and not ArgumentNullException when IsDataSite(site) => "The values were refused",
         NotSupportedException when site == ProblemSite.People => "This deployment does not support that",
         /* An apply or a rollback gave up waiting for a table other transactions held, and changed nothing (HX-11

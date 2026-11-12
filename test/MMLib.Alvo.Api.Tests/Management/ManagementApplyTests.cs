@@ -125,7 +125,9 @@ public class ManagementApplyTests
         await using var world = await AlvoApiWorld.FromDescriptorAsync(
             ManagedFleet.Descriptor,
             [_dev],
-            new AlvoApiWorldSetup(MapBeforePriming: true, MapManagementApi: true, ConfigureServicesAfterAlvo: services => TimingOut(services, timingOut)));
+            new AlvoApiWorldSetup(
+                MapBeforePriming: true, MapManagementApi: true,
+                ConfigureServicesAfterAlvo: services => TimingOut(services, timingOut, () => new AlvoApplyLockTimeoutException())));
         timingOut.Value = true;
 
         var response = await ApplyAsync(world, WithExtraField(await CurrentAsync(world)), ifMatch: "\"1\"");
@@ -136,21 +138,46 @@ public class ManagementApplyTests
         (await RevisionAsync(world)).ShouldBe(1);
     }
 
-    /// <summary>Wraps the registered writer so it throws the lock timeout once <paramref name="armed"/> is set — after the boot.</summary>
-    private static void TimingOut(IServiceCollection services, StrongBox<bool> armed)
+    /// <summary>
+    /// An apply the database failed to break a deadlock — a parent's cascade delete against the backfill's child locks — is
+    /// the same retryable 409, and its detail says a deadlock, not a lock timeout (issue 443).
+    /// </summary>
+    [Fact]
+    public async Task An_apply_failed_to_break_a_deadlock_is_409_with_retry_after_naming_the_deadlock()
+    {
+        var deadlocking = new StrongBox<bool>();
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            ManagedFleet.Descriptor,
+            [_dev],
+            new AlvoApiWorldSetup(
+                MapBeforePriming: true, MapManagementApi: true,
+                ConfigureServicesAfterAlvo: services => TimingOut(
+                    services, deadlocking, () => AlvoApplyLockTimeoutException.Deadlocked(new InvalidOperationException("40P01")))));
+        deadlocking.Value = true;
+
+        var response = await ApplyAsync(world, WithExtraField(await CurrentAsync(world)), ifMatch: "\"1\"");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        response.Headers.RetryAfter.ShouldNotBeNull().Delta.ShouldBe(TimeSpan.FromSeconds(5));
+        (await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).ShouldContain("deadlock");
+        (await RevisionAsync(world)).ShouldBe(1);
+    }
+
+    /// <summary>Wraps the registered writer so it throws <paramref name="refusal"/> once <paramref name="armed"/> is set — after the boot.</summary>
+    private static void TimingOut(IServiceCollection services, StrongBox<bool> armed, Func<Exception> refusal)
     {
         var registered = services.Last(service => service.ServiceType == typeof(IRuntimeSchemaWriter));
         services.AddSingleton<IRuntimeSchemaWriter>(provider =>
-            new TimingOutWriter((IRuntimeSchemaWriter)registered.ImplementationFactory!(provider), armed));
+            new TimingOutWriter((IRuntimeSchemaWriter)registered.ImplementationFactory!(provider), armed, refusal));
     }
 
-    private sealed class TimingOutWriter(IRuntimeSchemaWriter inner, StrongBox<bool> armed) : IRuntimeSchemaWriter
+    private sealed class TimingOutWriter(IRuntimeSchemaWriter inner, StrongBox<bool> armed, Func<Exception> refusal) : IRuntimeSchemaWriter
     {
         public Task<DescriptorVersion> ApplyAndAppendAsync(
             string project, MigrationPlan plan, DescriptorVersion candidate, int expectedRevision, MigrationOptions options,
             CancellationToken ct = default) =>
             armed.Value
-                ? Task.FromException<DescriptorVersion>(new AlvoApplyLockTimeoutException())
+                ? Task.FromException<DescriptorVersion>(refusal())
                 : inner.ApplyAndAppendAsync(project, plan, candidate, expectedRevision, options, ct);
     }
 

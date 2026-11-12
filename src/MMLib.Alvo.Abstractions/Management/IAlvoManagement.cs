@@ -212,7 +212,8 @@ public interface IAlvoManagement
     /// <para>
     /// <b>On PostgreSQL an apply waits at most five seconds for a table lock</b> (HX-11) — adding a field's
     /// <c>validation</c> takes the table's <c>ACCESS EXCLUSIVE</c> lock, and a rollup recompute holds its child's
-    /// writes. One that gives up changes nothing and is a retryable refusal: over HTTP the Management API answers
+    /// writes. One that gives up — or that the database fails to break a deadlock — changes nothing and is a retryable
+    /// refusal: over HTTP the Management API answers
     /// <c>409 conflict</c> with <c>Retry-After: 5</c>; an in-process caller receives an exception of an internal type,
     /// <c>AlvoApplyLockTimeoutException</c>, which it cannot catch by name — deliberately, since only the family's own
     /// surfaces answer it. Retry the same request.
@@ -270,7 +271,8 @@ public interface IAlvoManagement
     /// <para>
     /// <b>On PostgreSQL an apply waits at most five seconds for a table lock</b> (HX-11) — adding a field's
     /// <c>validation</c> takes the table's <c>ACCESS EXCLUSIVE</c> lock, and a rollup recompute holds its child's
-    /// writes. One that gives up changes nothing and is a retryable refusal: over HTTP the Management API answers
+    /// writes. One that gives up — or that the database fails to break a deadlock — changes nothing and is a retryable
+    /// refusal: over HTTP the Management API answers
     /// <c>409 conflict</c> with <c>Retry-After: 5</c>; an in-process caller receives an exception of an internal type,
     /// <c>AlvoApplyLockTimeoutException</c>, which it cannot catch by name — deliberately, since only the family's own
     /// surfaces answer it. Retry the same request.

@@ -390,6 +390,27 @@ public sealed class ProblemDetailsTests
     }
 
     /// <summary>
+    /// A write the database failed to break a deadlock is a 409 <c>conflict</c> with <c>Retry-After</c>, its detail the
+    /// port's own sentence — never the 500 an unmapped provider failure is (issue 443).
+    /// </summary>
+    [Fact]
+    public async Task A_write_failed_to_break_a_deadlock_is_409_conflict_with_retry_after()
+    {
+        var refused = new AlvoTransientConflictException();
+        await using var services = new ServiceCollection().AddLogging().AddProblemDetails().BuildServiceProvider();
+        var context = new DefaultHttpContext { RequestServices = services };
+        context.Response.Body = new MemoryStream();
+
+        await Guarded(refused).ExecuteAsync(context);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status409Conflict);
+        context.Response.Headers.RetryAfter.ToString().ShouldBe("1");
+        var (_, document) = await DocumentWrittenByAsync(Guarded(refused));
+        document["type"]!.GetValue<string>().ShouldBe(AlvoProblemTypes.BaseUri + AlvoProblemTypes.Conflict);
+        document["detail"]!.GetValue<string>().ShouldBe(refused.Message);
+    }
+
+    /// <summary>
     /// Only the chain-depth refusal carries <c>retryable</c>: every other problem the factory can render leaves it out,
     /// because its absence makes no claim and a stray <c>false</c> would tell an agent to give up on a retryable refusal.
     /// </summary>
@@ -777,6 +798,7 @@ public sealed class ProblemDetailsTests
         Guarded(new AlvoIdempotencyConflictException("reused")),
         Guarded(new AlvoConstraintViolationException(AlvoConstraintKind.Unique, ["email"])),
         Guarded(new AlvoChainDepthExceededException("too deep")),
+        Guarded(new AlvoTransientConflictException()),
         Guarded(new AlvoWriteRejectedException(AlvoWriteRejectionKind.Forbidden, "probe", [Violation()])),
         Guarded(new ArgumentException("malformed")),
     ];

@@ -154,18 +154,30 @@ internal sealed partial class EfAlvoData
         }
     }
 
+    /// <summary>
+    /// Runs <paramref name="work"/> — a unit's whole run, or one call through it — answering a deadlock it raised as the
+    /// port's retryable <see cref="AlvoTransientConflictException"/> (issue 443).
+    /// </summary>
+    /// <typeparam name="T">What the work answers.</typeparam>
+    /// <param name="work">The run or the call.</param>
+    internal Task<T> ConflictMappedAsync<T>(Func<Task<T>> work) => TransientConflictTranslator.MappedAsync(work, _dialect);
+
+    /// <summary>One call of <paramref name="unit"/> (<see cref="WriteUnit.RunAsync"/>), a deadlock it raised answered as a transient conflict.</summary>
+    private Task<T> RunInUnitAsync<T>(WriteUnit unit, Func<CancellationToken, Task<T>> call, CancellationToken cancellationToken) =>
+        ConflictMappedAsync(() => unit.RunAsync(call, cancellationToken));
+
     /// <summary>One page of a query inside <paramref name="unit"/>.</summary>
     internal Task<AlvoPage> QueryInUnitAsync(WriteUnit unit, AlvoQuery query, AlvoContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return unit.RunAsync(token => QueriedAsync(query, context, unit, token), cancellationToken);
+        return RunInUnitAsync(unit, token => QueriedAsync(query, context, unit, token), cancellationToken);
     }
 
     /// <summary>One record inside <paramref name="unit"/>.</summary>
     internal Task<AlvoRecord?> GetInUnitAsync(WriteUnit unit, string entity, Guid id, AlvoContext context, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
-        return unit.RunAsync(token => GotAsync(entity, id, context, unit, token), cancellationToken);
+        return RunInUnitAsync(unit, token => GotAsync(entity, id, context, unit, token), cancellationToken);
     }
 
     /// <summary>One create inside <paramref name="unit"/>, as <paramref name="context"/>, under its own savepoint.</summary>
@@ -173,7 +185,8 @@ internal sealed partial class EfAlvoData
         WriteUnit unit, string entity, IReadOnlyDictionary<string, object?> values, AlvoContext context, CancellationToken cancellationToken)
     {
         EnsureUnitWrite(entity, values);
-        return unit.RunAsync(
+        return RunInUnitAsync(
+            unit,
             token => CreatedAsync(entity, values, Decided(entity, DataOperation.Create, context), context, unit, token), cancellationToken);
     }
 
@@ -183,7 +196,8 @@ internal sealed partial class EfAlvoData
         AlvoPrecondition? precondition, CancellationToken cancellationToken)
     {
         EnsureUnitWrite(entity, values);
-        return unit.RunAsync(
+        return RunInUnitAsync(
+            unit,
             token => UpdatedAsync(entity, id, values, Decided(entity, DataOperation.Update, context), context, precondition, unit, token),
             cancellationToken);
     }
@@ -194,7 +208,8 @@ internal sealed partial class EfAlvoData
         AlvoPrecondition? precondition, CancellationToken cancellationToken)
     {
         EnsureUnitWrite(entity, values);
-        return unit.RunAsync(
+        return RunInUnitAsync(
+            unit,
             token => ReplacedAsync(entity, id, values, Branches(entity, context), context, precondition, unit, token), cancellationToken);
     }
 
@@ -203,7 +218,8 @@ internal sealed partial class EfAlvoData
         WriteUnit unit, string entity, Guid id, AlvoContext context, AlvoPrecondition? precondition, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
-        return unit.RunAsync(
+        return RunInUnitAsync(
+            unit,
             async token =>
             {
                 await ErasedAsync(entity, id, Decided(entity, DataOperation.Delete, context), context, precondition, unit, token).ConfigureAwait(false);
@@ -218,7 +234,8 @@ internal sealed partial class EfAlvoData
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(rows);
-        return unit.RunAsync(
+        return RunInUnitAsync(
+            unit,
             token =>
             {
                 var decision = BatchDecision(entity, DataOperation.Create, rows.Count, context, idempotency: null);
@@ -235,7 +252,8 @@ internal sealed partial class EfAlvoData
         WriteUnit unit, string entity, IReadOnlyList<AlvoRowPatch> rows, AlvoContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(rows);
-        return unit.RunAsync(
+        return RunInUnitAsync(
+            unit,
             token =>
             {
                 var decision = BatchDecision(entity, DataOperation.Update, rows.Count, context, idempotency: null);
@@ -252,7 +270,8 @@ internal sealed partial class EfAlvoData
         WriteUnit unit, string entity, IReadOnlyList<Guid> ids, AlvoContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(ids);
-        return unit.RunAsync(
+        return RunInUnitAsync(
+            unit,
             token =>
             {
                 var decision = BatchDecision(entity, DataOperation.Delete, ids.Count, context, idempotency: null);
@@ -270,14 +289,15 @@ internal sealed partial class EfAlvoData
         CancellationToken cancellationToken)
     {
         AlvoCustomEnvelope.Ensure(type, subject, data);
-        return unit.RunAsync(token => PublishedAsync(unit, type, subject, data, context, token), cancellationToken);
+        return RunInUnitAsync(unit, token => PublishedAsync(unit, type, subject, data, context, token), cancellationToken);
     }
 
     /// <summary>One framework event (a command's completion) written into <paramref name="unit"/>'s transaction.</summary>
     internal Task PublishFrameworkInUnitAsync(WriteUnit unit, AlvoFrameworkEnvelope @event, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(@event);
-        return unit.RunAsync(
+        return RunInUnitAsync(
+            unit,
             token => InUnitAsync(
                 unit, (connection, transaction, ct) => OutboxTable.InsertAsync(connection, transaction, _outboxTable, @event.Envelope, ct), token),
             cancellationToken);
@@ -291,7 +311,7 @@ internal sealed partial class EfAlvoData
         WriteUnit unit, Func<DbConnection, DbTransaction, CancellationToken, Task<T>> write, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(write);
-        return unit.RunAsync(token => WrittenInUnitAsync(unit, write, token), cancellationToken);
+        return RunInUnitAsync(unit, token => WrittenInUnitAsync(unit, write, token), cancellationToken);
     }
 
     private async Task<T> WrittenInUnitAsync<T>(
@@ -313,7 +333,8 @@ internal sealed partial class EfAlvoData
     {
         ArgumentNullException.ThrowIfNull(key);
         CommandLedgerTable.Claimed(key);
-        return unit.RunAsync(
+        return RunInUnitAsync(
+            unit,
             token => InUnitAsync(
                 unit, (connection, transaction, ct) => CommittedOrLostAsync(unit, connection, transaction, key, now, ct), token),
             cancellationToken);
