@@ -39,6 +39,17 @@ internal interface IEntityLifecycle
     /// <param name="decision">The write's allowed decision.</param>
     /// <param name="write">The write.</param>
     IReadOnlyList<TimerChange> TimerChanges(PolicyDecision decision, EntityTimerWrite write);
+
+    /// <summary>The scope and key of every timer the decision's entity declares, for one stored row — the timer table's primary key.</summary>
+    /// <param name="decision">The re-plan's allowed decision.</param>
+    /// <param name="entity">The entity.</param>
+    /// <param name="row">The stored row.</param>
+    IReadOnlyList<(string Scope, string Key)> TimerKeys(PolicyDecision decision, string entity, AlvoRecord row);
+
+    /// <summary>The timers a system re-plan arms, moves and cancels for one stored row, against the timers already armed for it.</summary>
+    /// <param name="decision">The re-plan's allowed decision.</param>
+    /// <param name="replan">The row and what is armed for it.</param>
+    IReadOnlyList<TimerChange> ReplanTimers(PolicyDecision decision, EntityTimerReplan replan);
 }
 
 /// <summary>

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "lifecycle-desk",
+  "description": "The declarative-timer facts' desk before its timer and machine: the re-plan facts apply lifecycle-desk over it.",
+  "tenancy": { "enabled": true },
+  "auth": { "roles": ["staff", "manager", "ops"] },
+  "access": { "developer": "'ops' in @user.roles" },
+  "entities": {
+    "bookings": {
+      "tenancy": "scoped",
+      "fields": {
+        "status": { "type": "enum", "values": ["draft", "confirmed", "cancelled", "done"], "default": "draft" },
+        "starts_at": { "type": "datetime" },
+        "note": { "type": "text" }
+      },
+      "rules": { "list": "true", "get": "true", "create": "true", "update": "true", "delete": "true" },
+      "hooks": { "beforeUpdate": [ { "condition": "new.note == 'skip'", "action": { "mutate": { "status": "done" } } } ] }
+    }
+  }
+}

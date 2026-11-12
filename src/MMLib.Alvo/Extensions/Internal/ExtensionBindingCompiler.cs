@@ -3,6 +3,7 @@
 using MMLib.Alvo.Commands.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Hooks.Internal;
+using MMLib.Alvo.Lifecycle;
 using MMLib.Alvo.Reads.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Scheduling;
@@ -59,6 +60,7 @@ internal static class ExtensionBindingCompiler
         var refused = Refused(problems);
         List<BoundHandler> binds = [.. bound.Where(handler => !refused.Contains(handler.Id))];
         var actions = DescriptorActionBindings.Bind(catalog, actionTimeout ?? AlvoHandlerOptions.DefaultTimeout).ToList();
+        actions.AddRange(TimerReplanBindings.Bind(catalog, AlvoHandlerOptions.DefaultTimeout));
         List<BoundWriteHook> boundHooks = [.. hooks.Where(hook => !refused.Contains(hook.Id))];
         var bindings = new ExtensionBindings(
             [.. binds, .. actions],
