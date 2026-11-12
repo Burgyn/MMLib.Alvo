@@ -13,6 +13,15 @@ namespace MMLib.Alvo.Scheduling;
 internal sealed record EntityTimerWrite(
     string Entity, AlvoRecord? Previous, AlvoRecord? Stored, AlvoContext Caller, DateTimeOffset Now, string? CorrelationId, string? CausationId);
 
+/// <summary>One stored row, as a system re-plan of the descriptor's timers sees it.</summary>
+/// <param name="Entity">The entity.</param>
+/// <param name="Row">The stored row, unmasked.</param>
+/// <param name="Armed">The due of every timer already armed for the row, by scope and key.</param>
+/// <param name="Caller">The system context the re-plan runs as, whose flow an armed timer resumes.</param>
+/// <param name="Now">The re-plan's instant, which <c>now()</c> resolves to and a lapsed due is measured against.</param>
+internal sealed record EntityTimerReplan(
+    string Entity, AlvoRecord Row, IReadOnlyDictionary<(string Scope, string Key), DateTimeOffset> Armed, AlvoContext Caller, DateTimeOffset Now);
+
 /// <summary>One timer a write arms or moves (<see cref="Arm"/> set), or cancels by key (<see cref="Arm"/> null).</summary>
 /// <param name="Scope">The timer's scope: the row's tenant, or empty.</param>
 /// <param name="Key">The timer's key, <c>alvo:&lt;entity&gt;:&lt;timer&gt;:&lt;id&gt;</c>.</param>

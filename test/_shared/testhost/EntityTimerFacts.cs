@@ -13,7 +13,7 @@ namespace MMLib.Alvo.TestHost.Tests;
 /// in the write's own transaction, fired through the timer pump. On whichever engine the deriving class supplies.
 /// </summary>
 /// <remarks>Every fact runs on a fake clock: a timer fires when a fact advances it and drains, never on a slow runner.</remarks>
-public abstract class EntityTimerFacts
+public abstract partial class EntityTimerFacts
 {
     private const string Reminder = "bookings.reminder_due";
 

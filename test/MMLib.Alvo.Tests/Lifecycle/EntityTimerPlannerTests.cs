@@ -106,8 +106,77 @@ public sealed class EntityTimerPlannerTests
             EntityTimerPlanner.Plan(_timers, Write(previous: null, Row("confirmed", _startsAt)) with { Caller = deep }, AlvoChainDepthLimit.Default));
     }
 
+    [Fact]
+    public void A_re_plan_arms_an_unarmed_row_whose_due_is_ahead() =>
+        Replan(Row("confirmed", _startsAt)).ShouldHaveSingleItem().Arm.ShouldNotBeNull().DueAt.ShouldBe(_startsAt.AddHours(-24));
+
+    [Fact]
+    public void A_re_plan_leaves_a_timer_already_armed_at_its_due_alone() =>
+        Replan(Row("confirmed", _startsAt), armedAt: _startsAt.AddHours(-24)).ShouldBeEmpty();
+
+    [Fact]
+    public void A_re_plan_moves_a_timer_armed_at_another_due() =>
+        Replan(Row("confirmed", _startsAt), armedAt: _startsAt).ShouldHaveSingleItem().Arm.ShouldNotBeNull().DueAt.ShouldBe(_startsAt.AddHours(-24));
+
+    [Fact]
+    public void A_re_plan_cancels_an_armed_timer_whose_when_is_false()
+    {
+        var change = Replan(Row("cancelled", _startsAt), armedAt: _startsAt.AddHours(-24)).ShouldHaveSingleItem();
+
+        (change.Scope, change.Key, change.Arm).ShouldBe((_tenant.ToString(), Key, null));
+    }
+
+    [Fact]
+    public void A_re_plan_of_an_unarmed_row_whose_when_is_false_changes_nothing() =>
+        Replan(Row("cancelled", _startsAt)).ShouldBeEmpty();
+
+    [Fact]
+    public void A_re_plan_does_not_arm_a_due_that_has_already_passed() =>
+        Replan(Row("confirmed", _now.AddHours(12))).ShouldBeEmpty();
+
+    [Fact]
+    public void A_re_plan_reads_an_armed_timer_only_in_the_row_s_own_scope() =>
+        Replan(Row("confirmed", _startsAt), armedAt: _startsAt.AddHours(-24), armedScope: string.Empty).ShouldHaveSingleItem().Arm.ShouldNotBeNull();
+
+    [Fact]
+    public void A_re_planned_timer_resumes_the_re_plan_s_flow()
+    {
+        var run = AlvoContext.System(null) with { Provenance = new AlvoProvenance { CorrelationId = "migration-run", CausationId = "migration-event", Depth = 1 } };
+
+        var arm = Replan(Row("confirmed", _startsAt), caller: run).ShouldHaveSingleItem().Arm.ShouldNotBeNull();
+
+        var provenance = TimerProvenance.Read(arm.Provenance);
+        (provenance.CorrelationId, provenance.CausationId, provenance.Depth).ShouldBe(("migration-run", "migration-event", 1));
+        arm.Scope.ShouldBe(_tenant.ToString());
+    }
+
+    [Fact]
+    public void A_re_plan_past_the_depth_limit_is_refused()
+    {
+        var deep = AlvoContext.System(null) with { Provenance = new AlvoProvenance { Depth = AlvoChainDepthLimit.DefaultMaxDepth + 1 } };
+
+        Should.Throw<AlvoChainDepthExceededException>(() => Replan(Row("confirmed", _startsAt), caller: deep));
+    }
+
+    [Fact]
+    public void The_re_plan_keys_are_the_write_path_s_keys() =>
+        EntityTimerPlanner.Keys(_timers, "bookings", Row("confirmed", _startsAt)).ShouldBe([(_tenant.ToString(), Key)]);
+
     private static IReadOnlyList<TimerChange> Plan(AlvoRecord? previous, AlvoRecord? stored) =>
         EntityTimerPlanner.Plan(_timers, Write(previous, stored), AlvoChainDepthLimit.Default);
+
+    private static IReadOnlyList<TimerChange> Replan(
+        AlvoRecord row, DateTimeOffset? armedAt = null, string? armedScope = null, AlvoContext? caller = null)
+    {
+        var armed = new Dictionary<(string Scope, string Key), DateTimeOffset>();
+        if (armedAt is { } due)
+        {
+            armed[(armedScope ?? _tenant.ToString(), Key)] = due;
+        }
+
+        return EntityTimerPlanner.Replan(
+            _timers, new EntityTimerReplan("bookings", row, armed, caller ?? AlvoContext.System(null), _now), AlvoChainDepthLimit.Default);
+    }
 
     private static EntityTimerWrite Write(AlvoRecord? previous, AlvoRecord? stored) =>
         new("bookings", previous, stored, AlvoContext.System(_tenant), _now, Correlation, "event-1");

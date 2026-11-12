@@ -149,7 +149,7 @@ public class ChangeTrackerReachTests
     /// (<c>EfCoreDeliveryStore.Operations.cs</c>) builds no command of its own and goes through the main file's;
     /// <c>EfCoreTimerStore</c> reads and writes only the timer, schedule and data-migration tables and appends to the
     /// outbox, binding every value, and never an entity table — its schedule half builds no command of its own;
-    /// <c>TimerWrites</c> is the timer table's upsert and cancel that store shares with a data write arming its entity's
+    /// <c>TimerWrites</c> is the timer table's upsert, cancel and armed-due read that store shares with a data write arming its entity's
     /// declarative timers, binding every value, and never touches an entity table;
     /// <c>RelationalReachability</c> executes one <c>const</c> of its own (<c>SELECT 1</c>) that names no
     /// table, carries no <c>WHERE</c> and binds no parameter, so there is nothing in it a caller could

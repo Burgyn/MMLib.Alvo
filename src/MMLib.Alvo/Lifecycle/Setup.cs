@@ -1,6 +1,8 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Scheduling;
 
 namespace MMLib.Alvo.Lifecycle;
 
@@ -13,6 +15,10 @@ internal static class LifecycleSetup
     {
         services.TryAddSingleton<IEntityLifecycle, EntityLifecycleService>();
         services.TryAddSingleton<TransitionSimulator>();
+        services.TryAddSingleton(provider => new EntityTimerReplanJob(
+            provider.GetRequiredService<IPolicyCatalogProvider>(),
+            provider.GetRequiredService<ICelCompiler>(),
+            provider.GetService<IEntityTimerReplanner>()));
         return services;
     }
 }

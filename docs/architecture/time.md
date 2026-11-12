@@ -97,6 +97,8 @@ Two things matter here:
   `IAlvoScheduler.ScheduleAsync` and `CancelAsync` refuse any key with that prefix, so host code cannot move or cancel one.
   `ITimerStore` is public and does **not** refuse it: a host writing the store directly can still touch an `alvo:` row,
   and is on its own when it does.
+- **Existing rows are re-planned by a framework data migration** that this same starter runs, one per entity and timer
+  definition, spanning tenants — see *Re-planning existing rows* in `state-machines-and-timers.md`.
 - **Written at the emit site.** The driver upserts or cancels the row through `TimerWrites` — the SQL `EfCoreTimerStore`
   uses — on the write's own connection and transaction, beside the outbox append, not through `ScheduleAsync`.
 

@@ -101,6 +101,7 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton(registration.Dialect);
         builder.Services.TryAddSingleton(CreateData);
         builder.Services.TryAddSingleton<IAlvoData>(services => services.GetRequiredService<EfAlvoData>());
+        builder.Services.TryAddSingleton<IEntityTimerReplanner>(services => services.GetRequiredService<EfAlvoData>());
         builder.Services.TryAddSingleton<IAlvoTransactions>(services => new EfAlvoTransactions(
             services.GetRequiredService<EfAlvoData>(),
             services.GetRequiredService<IServiceScopeFactory>(),

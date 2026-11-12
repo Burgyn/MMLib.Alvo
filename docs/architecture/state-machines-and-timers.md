@@ -105,7 +105,59 @@ subscribe (`$defs/eventPattern` stays frozen).
 rollup is recomputed by a raw update with no emit, so nothing would re-plan the timer. Also refused: `timers` on an
 entity with a cascading ref (a cascade delete never reaches the write path). Accepted and documented: `onDelete:
 setNull` on a ref a timer reads changes the row outside the write path, so the timer keeps its old due until the row's
-next write. Existing rows are not back-filled when a timer is added or its `at`/`when` change.
+next write, or until the next re-plan of the entity (below).
+
+## Re-planning existing rows (issue 483)
+
+A write arms only the row it writes, so a timer added to an entity — or a changed `at`, `when` or `event` — would reach a
+stored row only at its next due-changing write. Each entity that declares timers therefore gets one **framework data
+migration**, synthesized from the catalog beside the descriptor actions (`TimerReplanBindings`) and started by HX-13's
+`DataMigrationStarter` (*time.md*): no dashboard step, no host registration.
+
+- **Id = definition.** `/entities/<entity>/timers#<hash>`, the hash over every timer's name, `at`, `when` and `event`. The
+  starter starts an id once per database, so the first revision that carries a new or changed definition starts it and an
+  apply that leaves the timers alone starts nothing. The run is one `migration` delivery of that subscriber (retried,
+  recorded, dead-lettered like any other), on event `alvo.migration.timers.<entity>`.
+- **One run spanning tenants** (`JobSpec.SpansTenants`). The re-plan reads every row below the policy layer — an
+  always-true predicate, no tenant scope, unmasked, as a rollup recompute reads — and arms each timer in its row's own
+  tenant, so it needs no tenant list and is never held for one.
+- **Keyset-paged, one page per transaction** (`IEntityTimerReplanner`, internal, implemented by `EfAlvoData`): 100 rows by
+  id, locked with the update pre-image lock, then the timers already armed for them read, then changed, on the same
+  connection — the write path's lock order, so a racing write either waits or is waited for. The armed read is one
+  equality on the whole `(scope, timer_key)` primary key per timer, OR-ed (a row-value `IN` is not portable), so it seeks
+  the key; at most 500 keys — 1 000 parameters — per statement, well under the 2 100 a third engine may allow.
+- **The rule** (`EntityTimerPlanner.Replan`), with the armed timer in place of the pre-image:
+
+| `due(row)` | Armed timer | Change |
+|---|---|---|
+| null | none | nothing |
+| null | any | cancel by key |
+| non-null | at the same due | nothing |
+| non-null | at another due | upsert (fresh generation) |
+| non-null, still ahead | none | upsert |
+| non-null, already passed | none | nothing |
+
+  Re-running it changes nothing — no upsert, so no new generation. The last row is **a deliberate deviation from the
+  write path's arming rule**, which arms any non-null due, past or not. *Why:* a fired timer's row is deleted by
+  `FireAsync`, so an unarmed due that has already passed is indistinguishable from one that already fired; arming it would
+  fire it again, and a second run would no longer change nothing. *Cost:* an overdue old row — say a timer added with an
+  `at` already behind it — fires only at its next write that changes its due, never from the re-plan.
+- **Provenance.** An armed timer resumes the run's flow (`AlvoEventProvenance.Effective` of the system caller inside the
+  delivery): its correlation and causation, and its depth, checked against the chain-depth limit.
+- **The catalog it plans with is the current one**, not the start revision's.
+- **Caveats.**
+  - A rollback to a definition that was already re-planned once starts nothing (its id is started); rows keep the due the
+    later definition gave them until their next write.
+  - `setNull` changes (M8) are covered only when a re-plan runs for another reason.
+  - **Removing a timer is a known gap.** The re-plan plans only the timers the catalog declares, and `TimerPump` fires a
+    claimed row from its stored message without consulting the catalog, so a removed timer's armed rows still fire their
+    event once each. No sweep exists; a host handler of a retired event should ignore it.
+  - **A fire racing the re-plan can fire twice — the write path's own race.** If `FireAsync` deletes a claimed timer after
+    the re-plan's `now` was taken but before its armed read, the re-plan finds no row and a due still ahead of its `now`,
+    and arms it again; it fires once more. The same holds for a write that moves a due while a fire of the old due
+    commits first: the old due fired, the new one fires too. The generation fence prevents only the opposite order.
+    Handlers are at-least-once already.
+  - The run cannot be redelivered from the dashboard: like a descriptor action, its subscriber is not a catalog entry.
 
 A transition `when` reading a field hidden from the caller makes 200-vs-422 an oracle on that field — the property
 `WITH CHECK` already has; left to the stack-level security review.
@@ -125,7 +177,11 @@ A transition `when` reading a field hidden from the caller makes 200-vs-422 an o
    in its own `from`, `initial` ≠ the field's `default` when it declares one, undeclared role, dynamic entities) — dynamic entities wait for a follow-up.
 9. **Key `alvo:<entity>:<timer>:<id>`, scope = `tenant_id` or `""`; `IAlvoScheduler` refuses `alvo:`** — a host key with
    that prefix is refused.
-10. **Arming rule above** — one PK delete per timer per write; no back-fill (a data migration does it).
+10. **Arming rule above** — one PK delete per timer per write; existing rows are armed by the framework's re-plan data
+    migration when a revision first carries a new or changed timer definition (issue 483, above). Deviation from the
+    arming rule: the re-plan does not arm an unarmed due that has already passed, because a fired timer's row is deleted
+    and is therefore indistinguishable from one never armed — cost: such an overdue old row fires only at its next
+    due-changing write.
 11. **Written at the emit site on the write's connection** — §7's "through the unit's `ITimerStore`" holds in
     substance, not in the call.
 12. **`at` compiles in `Condition` as a `Timestamp` through the internal `IValueCompiler`** — a host-replaced
