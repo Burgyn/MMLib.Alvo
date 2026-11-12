@@ -188,6 +188,14 @@ public sealed class SqliteDialectSeamTests
     public void A_failure_that_is_not_sqlites_is_not_an_index_predicate_refusal()
         => Dialect.IsIndexPredicateRefusal(new NotSqliteException()).ShouldBeFalse();
 
+    /// <summary>One writer at a time forms no lock cycle, so a busy database is a wait that ran out, never a deadlock.</summary>
+    [Theory]
+    [InlineData(5)]
+    [InlineData(517)]
+    [InlineData(6)]
+    public void No_sqlite_failure_is_a_deadlock(int code)
+        => Dialect.IsDeadlock(new SqliteException("database is locked", code)).ShouldBeFalse();
+
     /// <summary>The verify query is executable and names a row left orphaned, scoped to the touched tables and their referrers.</summary>
     [Theory]
     [InlineData("[\"child\"]", 1)]

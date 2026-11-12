@@ -14,7 +14,9 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// <para>
 /// <b>Never retried</b> (spec 2026-10-14 §4.5): the delegate runs once. SQLite's writer contention is absorbed before it
 /// runs — at the unit's single <c>BEGIN</c>, by this process's write gate and the provider's busy timeout — and any other
-/// failure surfaces to the caller, so a deterministic violation never re-runs host code.
+/// failure surfaces to the caller, so a deterministic violation never re-runs host code. A PostgreSQL deadlock that fails
+/// the unit — in a call or at its <c>COMMIT</c> — surfaces as <see cref="AlvoTransientConflictException"/>: the unit rolled
+/// back, and running the same delegate again in a new unit is the caller's decision (issue 443).
 /// </para>
 /// <para>
 /// The delegate runs inside <see cref="WriteUnit.EnterFlow"/>, the one way a unit gets onto the flow (Ruling 48): every
@@ -48,7 +50,8 @@ internal sealed partial class EfAlvoTransactions(EfAlvoData data, IServiceScopeF
         var unit = await data.OpenUnitAsync(context, settings, scopes, cancellationToken).ConfigureAwait(false);
         try
         {
-            var (result, audit) = await UnitRun.CommittedAsync(unit, () => AuditedWorkAsync(unit, settings, work, context)).ConfigureAwait(false);
+            var (result, audit) = await data.ConflictMappedAsync(
+                () => UnitRun.CommittedAsync(unit, () => AuditedWorkAsync(unit, settings, work, context))).ConfigureAwait(false);
             Audited(audit);
 
             return result;
