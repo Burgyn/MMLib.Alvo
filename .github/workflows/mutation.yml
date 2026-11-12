@@ -302,8 +302,8 @@ name: Mutation
 #
 # `low` is the Killed-only score floored. It colours the cleartext report and NOTHING ELSE
 # READS IT — this is stated because the first version of this section listed it as a
-# mitigation, and it is not one: these configs declare no `json` reporter, the workflow
-# uploads only `stryker-output.log`, `scripts/assert-mutation-run` never looks at the
+# mitigation, and it is not one: these configs declare a `json` reporter (added by #486)
+# but `scripts/assert-mutation-run` never reads it or looks at the
 # score, and the `notify` job fires only when a leg fails. A leg that drops from 57.88 % to
 # 57.1 % passes `break`, shows a GREEN check, files no issue, and its amber colour exists
 # only as a line in a log artifact on a green run nobody opens. `high` stays the AMBITION —
@@ -437,6 +437,14 @@ name: Mutation
 # `− max(2 pp, 2 mutants)` latch above; REAL SLACK 54 − ceil(0.40 × 121) = 5 kills.
 # `low` 44, `high` 80. The leg is far under 80 and the survivors are the debt, by file,
 # above.
+#
+# RUN 42335661278 (2026-11-07, #486) DID NOT SCORE THIS LEG BELOW ITS BREAK: it scored nothing.
+# 148 mutants tested, 0 Killed / 0 Survived / 0 Timeout / 148 Errors, 3 h 47 min (~6 min per mutant
+# per runner, i.e. about one `additional-timeout`), and `assert-mutation-run` failed it as vacuous.
+# Every test-host run under a mutant ended in a RuntimeError, where the 2026-10-30 probe had 24 of
+# 145; the suite itself passes under the Stryker environment variables (1133 / 0 failed, run by
+# hand). The cause is not in the log Stryker prints, so the leg now writes Stryker's debug log
+# (`log-to-file`) and uploads it with the json report; read `logs/` in `stryker-log-<shard>` first.
 #
 # WHY data-ef IS TWO LEGS, AND WHY IT IS SPLIT BY *TEST PROJECT* RATHER THAN BY FILE.
 # The single data-ef leg was killed by `timeout-minutes: 120` on three consecutive main
@@ -969,7 +977,14 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: stryker-log-${{ matrix.name }}
-          path: test/stryker-output.log
+          # `json` reporter -> mutation-report.json: one entry per mutant with file, line,
+          # mutator, replacement and status, so a survivor is readable instead of only a
+          # per-file count (#486). `logs/` is Stryker's own debug log (config `log-to-file`),
+          # the only place a RuntimeError's cause can show up.
+          path: |
+            test/stryker-output.log
+            test/StrykerOutput/**/reports/mutation-report.json
+            test/StrykerOutput/**/logs/*.log
           if-no-files-found: ignore
           retention-days: 30
 

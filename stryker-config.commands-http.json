@@ -6,6 +6,7 @@
     ],
     "test-runner": "mtp",
     "coverage-analysis": "off",
+    "log-to-file": true,
     "additional-timeout": 300000,
     "mutate": [
       "**/Commands/Internal/CommandEndpointFilter.cs",
@@ -22,7 +23,8 @@
     },
     "reporters": [
       "progress",
-      "cleartext"
+      "cleartext",
+      "json"
     ]
   }
 }
