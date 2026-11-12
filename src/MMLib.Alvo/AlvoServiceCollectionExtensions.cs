@@ -142,7 +142,8 @@ public static class AlvoServiceCollectionExtensions
             provider.GetRequiredService<ICelCompiler>(),
             provider.GetRequiredService<IPolicyCatalogProvider>(),
             provider.GetRequiredService<ExtensionApplyGuard>(),
-            provider.GetRequiredService<DescriptorHost>()));
+            provider.GetRequiredService<DescriptorHost>(),
+            provider.GetRequiredService<DescriptorActionSweep>()));
 
     /// <summary>
     /// Registers the boot: the state a readiness probe reads, the hosted lifecycle service that fills it in

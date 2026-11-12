@@ -21,6 +21,11 @@ Alvo records one **delivery** per (event, handler). It is `pending`, `running`, 
 `cancelled`. A dead delivery holds that record's later deliveries for the same handler back — unless the handler was
 registered with `Ordering = None` — until it is redelivered, replayed or cancelled.
 
+A descriptor action — an after-hook action or an automation action, whose id starts with `/` — that an apply edits or
+removes becomes a new subscriber, and its old one's unfinished deliveries are cancelled by that apply (or by the next
+boot), with error type `superseded`. A host handler's deliveries are never cancelled that way: retire it with
+`AddRetiredExtension`.
+
 <Code code={descriptor} lang="json" title="repair-desk.alvo.json" />
 
 <SourceExcerpt code={handlers} from="public static IAlvoBuilder AddRepairDesk" to="Orders the part a new repair needs." title="RepairDeskHandlers.cs" />
@@ -119,7 +124,8 @@ the fields your type reads, then deliver the fixture again.
 
 Every pause, resume, redeliver and replay that changed something writes one row to `<prefix>_operations_log` (who,
 when, what, on what, why, how many) and one `ManagementAudit` log line at Warning; one that changed nothing writes
-neither. A replay always writes its row — it is its idempotency key's record. The log is not pruned yet.
+neither. An apply that cancels a superseded descriptor action's deliveries writes one `cancel-superseded` row per
+subscriber the same way, by `system`, naming the revision. A replay always writes its row — it is its idempotency key's record. The log is not pruned yet.
 
 ## On the dashboard
 
