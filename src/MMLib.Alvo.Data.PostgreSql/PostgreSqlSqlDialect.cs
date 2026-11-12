@@ -84,8 +84,9 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
                COALESCE((has_database_privilege(current_database(), 'CREATE')
                          AND has_schema_privilege(current_schema(), 'CREATE')
                          AND current_setting('server_version_num')::int >= 130000)
-                        OR (SELECT rolsuper FROM pg_roles WHERE rolname = current_user), FALSE)
-        """;
+                        OR (SELECT rolsuper FROM pg_roles WHERE rolname = current_user), FALSE),
+               current_setting('server_version_num')::int,
+        """ + BtreeGistComparison.UncomparableTypesColumn;
 
     /// <inheritdoc/>
     /// <remarks>
@@ -93,11 +94,14 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
     /// role may install it → the plan's first statement installs it; otherwise the apply is refused, naming what the database
     /// owner runs. A role may install it as a superuser, or with <c>CREATE</c> on the database <em>and</em> on the schema the
     /// extension lands in (the first on the search path; since PostgreSQL 15 nobody's by default) on a server that trusts it
-    /// (PostgreSQL 13 and later) — review M2.
+    /// (PostgreSQL 13 and later) — review M2. An equality field whose type this server's btree_gist cannot compare is refused
+    /// at its own pointer, naming the version that can (<see cref="BtreeGistComparison"/>, issue 477).
     /// </remarks>
-    async ValueTask<ExclusionPrerequisite> IAlvoSqlDialect.ExclusionPrerequisiteAsync(DbConnection connection, CancellationToken ct)
+    async ValueTask<ExclusionPrerequisite> IAlvoSqlDialect.ExclusionPrerequisiteAsync(
+        DbConnection connection, IReadOnlyList<ExclusionEqualityField> equalityFields, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(equalityFields);
         var command = connection.CreateCommand();
         await using (command.ConfigureAwait(false))
         {
@@ -106,20 +110,37 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
             await using (reader.ConfigureAwait(false))
             {
                 await reader.ReadAsync(ct).ConfigureAwait(false);
-                return Prerequisite(installed: reader.GetBoolean(0), installable: reader.GetBoolean(1) && reader.GetBoolean(2));
+                var installed = reader.GetBoolean(0);
+                var uncomparable = BtreeGistComparison.Refusals(equalityFields, installed, reader.GetInt32(3), reader.GetString(4));
+                return Prerequisite(installed, installable: reader.GetBoolean(1) && reader.GetBoolean(2), [.. uncomparable]);
             }
         }
     }
 
-    private static ExclusionPrerequisite Prerequisite(bool installed, bool installable) => (installed, installable) switch
+    /// <summary>
+    /// A database that lacks btree_gist and may not get it is refused, together with every field it could not compare
+    /// anyway; any uncomparable field is refused; otherwise an installed extension needs nothing and an installable one is
+    /// installed first.
+    /// </summary>
+    private static ExclusionPrerequisite Prerequisite(bool installed, bool installable, IReadOnlyList<ExclusionRefusal> uncomparable)
     {
-        (true, _) => ExclusionPrerequisite.Ready,
-        (false, true) => new ExclusionPrerequisite("CREATE EXTENSION IF NOT EXISTS btree_gist"),
-        _ => new ExclusionPrerequisite(
-            Statement: null,
-            "Excluding overlaps needs PostgreSQL's btree_gist extension, which this database does not have and this connection's role may not install. Nothing was applied.",
-            "Ask the database owner to run CREATE EXTENSION btree_gist; in this database (it ships with PostgreSQL and is trusted since PostgreSQL 13), then apply again."),
-    };
+        if (!installed && !installable)
+        {
+            return new ExclusionPrerequisite(Statement: null, [MissingBtreeGist, .. uncomparable]);
+        }
+
+        if (uncomparable.Count > 0)
+        {
+            return new ExclusionPrerequisite(Statement: null, uncomparable);
+        }
+
+        return installed ? ExclusionPrerequisite.Ready : new ExclusionPrerequisite("CREATE EXTENSION IF NOT EXISTS btree_gist");
+    }
+
+    private static ExclusionRefusal MissingBtreeGist { get; } = new(
+        Pointer: null,
+        "Excluding overlaps needs PostgreSQL's btree_gist extension, which this database does not have and this connection's role may not install. Nothing was applied.",
+        "Ask the database owner to run CREATE EXTENSION btree_gist; in this database (it ships with PostgreSQL and is trusted since PostgreSQL 13), then apply again.");
 
     /// <inheritdoc/>
     /// <remarks>
