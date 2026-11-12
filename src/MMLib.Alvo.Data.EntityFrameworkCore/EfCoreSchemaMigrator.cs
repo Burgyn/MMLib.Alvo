@@ -265,12 +265,19 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
                 await RefuseOverlappingRowsAsync(connection, ExclusionOverlapScan.Countable(current, prePass, added, _filters), ct).ConfigureAwait(false);
             }
 
-            var prerequisite = await _dialect.ExclusionPrerequisiteAsync(connection, ct).ConfigureAwait(false);
+            var prerequisite = await _dialect.ExclusionPrerequisiteAsync(connection, ExclusionPlan.EqualityFields(added), ct).ConfigureAwait(false);
             return prerequisite.Refused
-                ? throw Refusal(added[0].Pointer, prerequisite.RefusalMessage!, prerequisite.RefusalFix ?? string.Empty)
+                ? throw Refusals(added[0].Pointer, prerequisite.Refusals)
                 : prerequisite.Statement is { } statement ? [statement] : [];
         }
     }
+
+    private static DescriptorValidationException Refusals(string exclusionPointer, IReadOnlyList<ExclusionRefusal> refusals) =>
+        new(new DescriptorValidationResult(
+        [
+            .. refusals.Select(refusal => new DescriptorValidationError(
+                refusal.Pointer ?? exclusionPointer, refusal.Message, refusal.Fix, DescriptorValidationSeverity.Error)),
+        ]));
 
     private async Task RefuseOverlappingRowsAsync(DbConnection connection, IReadOnlyList<ExclusionPlan.Declared> countable, CancellationToken ct)
     {
@@ -302,9 +309,6 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
             return ExclusionOverlapScan.Uncountable(declared);
         }
     }
-
-    private static DescriptorValidationException Refusal(string pointer, string message, string fix) =>
-        new(new DescriptorValidationResult([new DescriptorValidationError(pointer, message, fix, DescriptorValidationSeverity.Error)]));
 
     /// <summary>
     /// Refuses a declared rename onto a name that still holds an earlier sequence's counter rows (they are never deleted),
