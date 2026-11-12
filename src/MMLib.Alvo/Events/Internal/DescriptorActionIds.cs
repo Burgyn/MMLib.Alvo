@@ -16,7 +16,8 @@ namespace MMLib.Alvo.Events.Internal;
 /// <remarks>
 /// <para>
 /// <b>No sibling index.</b> Reordering a point's actions keeps every id; editing one makes a new subscriber, so the old one's
-/// pending deliveries are never claimed and never run the edited action. Two identical actions at one point are told apart
+/// pending deliveries are never claimed and never run the edited action — the apply's
+/// <see cref="Extensions.Internal.DescriptorActionSweep"/> cancels them. Two identical actions at one point are told apart
 /// by an ordinal suffix, <c>-2</c> onwards, in declaration order.
 /// </para>
 /// <para>

@@ -57,6 +57,7 @@ public sealed class RuntimeSchemaService
     private readonly IPolicyCatalogProvider _policyCatalogProvider;
     private readonly ExtensionApplyGuard? _extensions;
     private readonly DescriptorHost _host;
+    private readonly DescriptorActionSweep? _sweep;
 
     /// <summary>Initializes a new instance of the <see cref="RuntimeSchemaService"/> class.</summary>
     /// <param name="validator">Validates untrusted descriptor JSON before it is parsed.</param>
@@ -89,11 +90,14 @@ public sealed class RuntimeSchemaService
     /// checked; <see langword="null"/> for a service a host builds itself, which then carries no guard.
     /// </param>
     /// <param name="host">The functions and services the host registers, which a descriptor's actions compile against; <see langword="null"/> for none.</param>
+    /// <param name="sweep">
+    /// Ends the work of descriptor actions a committed apply or rollback no longer binds (issue 480); <see langword="null"/> for none.
+    /// </param>
     internal RuntimeSchemaService(
         IDescriptorValidator validator, ISchemaMigrator migrator,
         IDescriptorVersionStore store, IRuntimeSchemaWriter writer,
         ICelCompiler compiler, IPolicyCatalogProvider policyCatalogProvider,
-        ExtensionApplyGuard? extensions, DescriptorHost? host = null)
+        ExtensionApplyGuard? extensions, DescriptorHost? host = null, DescriptorActionSweep? sweep = null)
     {
         ArgumentNullException.ThrowIfNull(validator);
         ArgumentNullException.ThrowIfNull(migrator);
@@ -109,6 +113,7 @@ public sealed class RuntimeSchemaService
         _policyCatalogProvider = policyCatalogProvider;
         _extensions = extensions;
         _host = host ?? DescriptorHost.Empty;
+        _sweep = sweep;
     }
 
     /// <summary>Validates, plans, guards, and atomically applies + versions a runtime descriptor change.</summary>
@@ -164,15 +169,32 @@ public sealed class RuntimeSchemaService
 
         if (IsUnchangedReapply(plan, current, descriptor))
         {
-            _policyCatalogProvider.SetCurrent(project, checkedCatalog ?? PolicyCatalog.Build(descriptor, desired, _compiler, _host));
-            return current!;
+            return await ServeAsync(project, checkedCatalog ?? PolicyCatalog.Build(descriptor, desired, _compiler, _host), current!).ConfigureAwait(false);
         }
 
         var catalog = checkedCatalog ?? PolicyCatalog.Build(descriptor, desired, _compiler, _host);
         var candidate = new DescriptorVersion(desired, descriptorJson, 0, DateTimeOffset.UtcNow, options.Author, options.Reason);
         var applied = await _writer.ApplyAndAppendAsync(project, plan, candidate, expectedRevision, options, ct).ConfigureAwait(false);
+        return await ServeAsync(project, catalog, applied).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Publishes <paramref name="catalog"/>, then ends the work of the descriptor actions it no longer binds — only ever after
+    /// the version committed, so a refused apply cancels nothing.
+    /// </summary>
+    /// <remarks>
+    /// The sweep is not cancelled with the request: once the version committed, the call reports it, and the sweep — which
+    /// never throws — finishes rather than turning a committed apply into a cancelled one.
+    /// </remarks>
+    private async Task<DescriptorVersion> ServeAsync(string project, PolicyCatalog catalog, DescriptorVersion served)
+    {
         _policyCatalogProvider.SetCurrent(project, catalog);
-        return applied;
+        if (_sweep is not null)
+        {
+            await _sweep.SweepAsync(catalog, served.Revision, CancellationToken.None).ConfigureAwait(false);
+        }
+
+        return served;
     }
 
     /// <summary>
@@ -304,8 +326,7 @@ public sealed class RuntimeSchemaService
             restored, target.DescriptorJson, 0, DateTimeOffset.UtcNow,
             options.Author, options.Reason ?? $"Rollback to revision {targetRevision}", RolledBackFrom: targetRevision);
         var reverted = await _writer.ApplyAndAppendAsync(project, plan, candidate, currentVersion.Revision, options, ct).ConfigureAwait(false);
-        _policyCatalogProvider.SetCurrent(project, catalog);
-        return reverted;
+        return await ServeAsync(project, catalog, reverted).ConfigureAwait(false);
     }
 
     /// <summary>Validates the descriptor, throwing on any error, and returns what it checked — warnings included (D52).</summary>

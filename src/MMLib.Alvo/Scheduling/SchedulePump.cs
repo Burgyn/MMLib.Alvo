@@ -21,7 +21,8 @@ namespace MMLib.Alvo.Scheduling;
 /// round over each newly applied catalog — so a cron rule an apply adds is scheduled without a restart — a new id
 /// gets its first occurrence, a changed cron or zone moves its next run, and an id declared with <c>AddRetiredExtension</c> is
 /// removed. A schedule this process does not register is neither removed nor claimed: processes sharing one database — a web
-/// host and a worker — register different schedules. A boot that had no primed catalog at start leaves the sync to the first
+/// host and a worker — register different schedules. The one exception is a cron rule's schedule, which the descriptor
+/// declares for every process alike: the apply's <see cref="DescriptorActionSweep"/> deletes one the catalog no longer binds. A boot that had no primed catalog at start leaves the sync to the first
 /// round that has one; a process with nothing to sync writes nothing.
 /// </para>
 /// <para>
