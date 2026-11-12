@@ -349,9 +349,14 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
         var before = _probe.Reads;
         const int Checks = 16;
 
-        Task<HttpStatusCode[]> answers;
-        await using (var writer = await HoldExclusiveLockAsync())
+        /* Microsoft.Data.Sqlite's busy retry sleeps on the calling thread, so every check behind the lock holds a pool
+           thread; on a two-core runner the pool's minimum is reached long before all of them arrive (issue 485). */
+        ThreadPool.GetMinThreads(out var workers, out var completions);
+        ThreadPool.SetMinThreads(Math.Max(workers, Checks * 2), completions);
+        Task<HttpStatusCode[]>? answers = null;
+        try
         {
+            await using var writer = await HoldExclusiveLockAsync();
             answers = Task.WhenAll(Enumerable.Range(0, Checks).Select(async _ =>
             {
                 using var response = await GetMeAsync(cookie);
@@ -359,6 +364,12 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
             }));
 
             await UntilAsync(() => _probe.Reads >= before + Checks, "every check to reach the store behind the write");
+        }
+        finally
+        {
+            /* The lock is released by now; a failed wait must still let the checks finish before the teardown deletes the file. */
+            await (answers ?? Task.FromResult(Array.Empty<HttpStatusCode>())).ContinueWith(_ => { }, TaskScheduler.Default);
+            ThreadPool.SetMinThreads(workers, completions);
         }
 
         (await answers).ShouldAllBe(status => status == HttpStatusCode.OK, "a check behind a write waits for it");
