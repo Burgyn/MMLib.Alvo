@@ -19,11 +19,20 @@
 /// can never succeed; and the operator was paged, with a stack trace, for an ordinary caller mistake.
 /// </para>
 /// <para>
-/// <b>Not <see cref="ArgumentException"/> either.</b> The payload is well-formed and every declared facet
-/// the framework can check itself — <c>required</c>, <c>maxLength</c>, <c>enum</c>, <c>format</c>,
-/// <c>precision</c> — already passed. What is wrong is its relationship to rows the caller may not even be
+/// <b>Not <see cref="ArgumentException"/> either.</b> For the conflict kinds the payload is well-formed and every
+/// declared facet the framework can check itself — <c>maxLength</c>, <c>enum</c>, <c>format</c>, <c>precision</c>,
+/// <c>scale</c> — already passed. What is wrong is its relationship to rows the caller may not even be
 /// able to see, which nothing about the payload alone could have revealed. That is
 /// <see cref="AlvoIdempotencyConflictException"/>'s reasoning exactly, and it is why both render 409.
+/// </para>
+/// <para>
+/// <b>A value outside its field's facets is <see cref="AlvoConstraintKind.Check"/> (issue 481).</b> The data port
+/// measures every value a write supplies against its field's declared facets in the core, before any driver sees it,
+/// so SQLite (which enforces no length and no enum) and PostgreSQL (whose <c>varchar(n)</c> and <c>numeric(p, s)</c>
+/// refuse on their own) answer the same. It is the validation family because its fix is the same — a different value
+/// in this request — and it names the field unless the descriptor hides it, in which case it names nothing and carries
+/// the fixed validation wording. A PostgreSQL <c>string_data_right_truncation</c> (<c>22001</c>) that still reaches
+/// the engine — a stored generated column, say — is translated to the same kind, naming no field.
 /// </para>
 /// <para>
 /// <b>What <see cref="Fields"/> may and may not contain.</b> Field <em>names</em>, from the entity's own
@@ -149,8 +158,39 @@ public sealed class AlvoConstraintViolationException : Exception
         DescriptorMessage = message;
     }
 
+    /// <summary>Initializes a new instance of the <see cref="AlvoConstraintViolationException"/> class for a value outside its field's facets.</summary>
+    /// <remarks>
+    /// Raised by the data port's own facet measure (issue 481): <paramref name="message"/>, <paramref name="code"/> and
+    /// <paramref name="fixSuggestion"/> are the payload validator's own — the <c>max-length</c>, <c>enum-value</c>,
+    /// <c>precision</c>, <c>scale</c>, <c>format</c> or <c>format-not-evaluated</c> refusal an HTTP body would have met, built
+    /// from server-owned values and never from the value itself. <see cref="Kind"/> is <see cref="AlvoConstraintKind.Check"/>.
+    /// </remarks>
+    /// <param name="field">The field whose facet refused the value.</param>
+    /// <param name="code">The payload validator's code for the facet.</param>
+    /// <param name="message">The payload validator's message for the facet.</param>
+    /// <param name="fixSuggestion">The payload validator's fix for the facet.</param>
+    internal AlvoConstraintViolationException(string field, string code, string message, string? fixSuggestion)
+        : base(message)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(field);
+        ArgumentException.ThrowIfNullOrWhiteSpace(code);
+        Kind = AlvoConstraintKind.Check;
+        Fields = [field];
+        FacetCode = code;
+        FacetFix = fixSuggestion;
+    }
+
     /// <summary>Which constraint the request collided with.</summary>
     public AlvoConstraintKind Kind { get; }
+
+    /// <summary>
+    /// The payload validator's code when the port's facet measure refused the value (<c>max-length</c>, <c>enum-value</c>,
+    /// …); <see langword="null"/> for every refusal the engine or a validation raised.
+    /// </summary>
+    internal string? FacetCode { get; }
+
+    /// <summary>The payload validator's fix when <see cref="FacetCode"/> is set.</summary>
+    internal string? FacetFix { get; }
 
     /// <summary>
     /// The descriptor author's message when a lookup check refused the write; <see langword="null"/> for every refusal the
