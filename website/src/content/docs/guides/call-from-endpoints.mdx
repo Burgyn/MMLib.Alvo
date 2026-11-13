@@ -21,6 +21,9 @@ minutes, starting from an app that embeds Alvo as in [Embed Alvo in ASP.NET Core
 - To try the endpoints, the commands in [Use your own authentication, step 4](/guides/own-authentication/#4-try-it),
   or a descriptor of your own from [Run your own descriptor](/start-here/run-your-own/).
 
+A named domain action — confirm a stay, approve an order — with an access rule, an idempotency key and a completion
+event is better mapped as a [command](/extending/commands/) than written as a plain endpoint.
+
 ## 1. Call `IAlvoData` from an endpoint
 
 `IAlvoData` is the one port every Alvo read and write goes through, the same one the generated API calls. Resolve it
@@ -45,7 +48,8 @@ an optional precondition (the `If-Match` of the HTTP API) and an idempotency tok
 `ReplaceAsync`, `DeleteAsync` and the three batch methods follow the same shape; each is in the
 [C# API reference](/reference/csharp/mmlib-alvo-abstractions/#ialvodata).
 
-The before-hooks, the rules and the after-hook events all run inside these calls, exactly as for an HTTP request.
+The before-hooks, the rules, your [write hooks](/extending/write-hooks/) and the after-hook events all run inside
+these calls, exactly as for an HTTP request.
 
 Several writes that must commit together go through [`IAlvoTransactions`](/extending/transactions/) instead — inside
 one, `IAlvoData` is refused.

@@ -169,6 +169,10 @@ A field's `type` decides which facets it takes. A facet on any other type is ref
 | `enum` | one value of a fixed list | [`values`](/reference/descriptor/entities-fields/#entities.fields.values), required |
 | `ref` | the id of a row in another entity | [`entity`](/reference/descriptor/entities-fields/#entities.fields.entity), required; [`onDelete`](/reference/descriptor/entities-fields/#entities.fields.onDelete): `restrict`, `cascade` or `setNull` |
 
+A status whose values may move only along named transitions is an `enum` with a
+[state machine](/extending/state-machines/); a number Alvo assigns without gaps is a
+[`sequence`](/extending/integrity/#numbers-that-never-skip-sequence).
+
 Every type also takes [`required`](/reference/descriptor/entities-fields/#entities.fields.required),
 [`unique`](/reference/descriptor/entities-fields/#entities.fields.unique),
 [`default`](/reference/descriptor/entities-fields/#entities.fields.default),

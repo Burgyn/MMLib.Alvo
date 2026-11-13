@@ -12,7 +12,7 @@ one process, in the standalone image and in your own ASP.NET Core host alike.
 ```mermaid
 flowchart TB
   accTitle: How Alvo fits together
-  accDescr: Control path, the dashboard and agents call the Management API, which, like the descriptor file, feeds the schema registry. Runtime path, an HTTP request passes authentication, the rules compiled to SQL, then a transaction that runs the before-hooks and writes the row with its outbox event, then the after-hooks. The schema registry supplies the rules and the hooks.
+  accDescr: Control path, the dashboard and agents call the Management API, which, like the descriptor file, feeds the schema registry. Runtime path, an HTTP request passes authentication, the rules compiled to SQL, an embedded host's validate hooks, then a transaction that runs the before-hooks and write hooks and writes the row with its outbox event, then the deliveries to after-hooks, automation and event handlers. The schema registry supplies the rules and the hooks.
   subgraph Control
     direction LR
     clients["Dashboard · agents"] --> mgmt["Management API"]
@@ -23,8 +23,9 @@ flowchart TB
     direction TB
     request["HTTP request"] --> auth["Auth: API key → @user"]
     auth --> rules["Rules: CEL → SQL"]
-    rules --> tx["Transaction: before-hooks, row + outbox"]
-    tx --> after["After-hooks"]
+    rules --> validate["Validate hooks (host C#)"]
+    validate --> tx["Transaction: before-hooks, write hooks, row + outbox"]
+    tx --> after["Deliveries: after-hooks, automation, event handlers"]
   end
   registry -. "rules" .-> rules
   registry -. "hooks" .-> tx
@@ -63,7 +64,13 @@ Every generated route is a minimal-API endpoint, and every one takes the same st
   boundary, each `AND`-ed on and parenthesised.
 - **Write** in one transaction: the before-hooks run over the row locked for the write, the rule's `WITH CHECK` judges
   the row as it will be stored, then the row and its event are written together and committed.
-- **After the commit**, a background dispatcher delivers the event to the after-hooks.
+- **After the commit**, a background dispatcher fans the event out into one delivery per subscriber — each after-hook
+  action, each automation action, each host event handler — and runs them.
+
+In an embedded host, your C# joins this path at fixed points: a validate hook before the write's transaction, before-
+and after-write hooks inside it ([Validate and guard writes](/extending/write-hooks/)), and event handlers among the
+deliveries after the commit ([React to changes](/extending/event-handlers/)). [Extending in code](/extending/) maps the
+rest.
 
 Your own endpoints in an embedded host enter at **Decide**: they call `IAlvoData` with the caller's context, and the
 same decision is made inside the port. [Security model](/concepts/security-model/) says what each step
@@ -100,18 +107,20 @@ renderer for a field stored as JSON.
 ## Events and the outbox
 
 Every write records an event in the same transaction as the row, in an outbox table: no change without an event, and
-no event without a change. An event takes five stages:
+no event without a change. An event takes these stages:
 
 | Stage | What happens |
 |---|---|
 | **emit** | inside the write's transaction, on the same connection, one row is appended to the outbox |
-| **claim** | a dispatcher takes the oldest undelivered entries with one statement and counts the attempt |
-| **deliver** | the after-hooks subscribed to the event run their `webhook` or `email` action |
-| **mark** | the entry is stamped as delivered, only after every matched hook ran |
+| **claim** | a dispatcher takes the oldest entries not yet fanned out, under a lease |
+| **fan out** | one **delivery** is recorded per subscriber the event matches: each after-hook action, each automation action, each host event handler whose condition holds; fanning the same event out twice records nothing new |
+| **mark** | the entry is stamped as dispatched once it is fanned out |
+| **deliver** | each delivery runs on its own and is retried on its own, in order per record and subscriber |
 | **retire** | the entry stays: nothing deletes it, so an abandoned event remains countable |
 
-A delivery that fails releases the entry for another attempt, up to a ceiling, after which it is left alone and still
-observable. A process killed mid-delivery repeats the action after a restart. That makes delivery **at-least-once**, so
+A delivery that fails is retried with backoff; after its last attempt it is **dead**, and stays on the dashboard's
+[Operations](/extending/operate-deliveries/) page until it is redelivered, replayed or cancelled. A process killed
+mid-delivery repeats the action after a restart. That makes delivery **at-least-once**, so
 every receiver must be idempotent: the event's `id` is the one value stable across redeliveries, and the key to
 deduplicate on. The envelope is CloudEvents 1.0.
 
@@ -135,6 +144,7 @@ feature rather than by technical layer.
 | [`MMLib.Alvo.Identity`](/reference/csharp/mmlib-alvo-identity/) | the people who sign in to the dashboard, and the bootstrap administrator |
 | [`MMLib.Alvo.Admin`](/reference/csharp/mmlib-alvo-admin/) | the admin dashboard, which reaches the core only through the Management API's port |
 | [`MMLib.Alvo.Ai`](/reference/csharp/mmlib-alvo-ai/) | the schema assistant, which also sees only the ports |
+| [`MMLib.Alvo.TestHost`](/reference/csharp/mmlib-alvo-testhost/) | the real pipeline over an in-memory SQLite database, for your own tests ([Testing your backend](/extending/testing/)) |
 
 The standalone host is not a package: it is the container image, composed from these with both database drivers and
 an API browser. Architecture tests keep the boundaries, for example that the dashboard holds no reference to the core.
@@ -144,6 +154,7 @@ an API browser. Architecture tests keep the boundaries, for example that the das
 - [Standalone and embedded](/concepts/modes/): the two ways to run the same engine.
 - [Embed in ASP.NET Core](/start-here/embed/): compose the packages in your own host.
 - [Call Alvo from your endpoints](/guides/call-from-endpoints/): use `IAlvoData` directly.
+- [Extending in code](/extending/): where your own C# runs in the pipeline.
 - [C# API](/reference/csharp/): every public type.
 - Design notes: [package boundary](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/package-boundary.md),
   [event backbone](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/events.md),

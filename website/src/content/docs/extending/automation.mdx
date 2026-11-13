@@ -2,7 +2,7 @@
 title: Automation
 description: Event and cron rules in the descriptor — a condition and webhook, email, function and entity.update actions, each its own retried delivery, entity.update written once per event.
 sidebar:
-  order: 11
+  order: 22
 ---
 
 import { Code } from '@astrojs/starlight/components';
@@ -73,6 +73,7 @@ refusing applies — so the secret can be added under *Settings → Secrets*; th
 | A wildcard trigger (`entity.*.created`) | Name the entity: a rule's row images are one entity's. |
 | `auth.*` and `storage.*` triggers | No such event exists in this build. |
 | A `condition` on a cron rule | A schedule has no row to read. |
+| A cron rule on a project with tenancy, in a host that registers no `IAlvoTenantCatalog` — the standalone image registers none | Alvo does not know which tenants to run it for. |
 
 Editing a rule makes it a new subscriber: the apply cancels the old one's unfinished deliveries (error type
 `superseded`) and records one `cancel-superseded` row in the [operations log](/extending/operate-deliveries/#audit),

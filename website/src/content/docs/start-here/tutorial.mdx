@@ -198,6 +198,10 @@ of `docker compose logs alvo`; see [Run your own descriptor](/start-here/run-you
 - Two before-hooks: one normalises the title with a built-in function, one refuses an incomplete urgent ticket.
 - A computed field derived from two others.
 
+All of it is declarative. When a rule or a hook cannot say something — a check that calls another service, a reaction
+in code after a commit — an embedded host writes C# for it: [Where logic goes](/extending/where-logic-goes/) says
+which mechanism fits, and [Extending in code](/extending/) maps them all.
+
 ## Reference
 
 - Descriptor keys: [`entities`](/reference/descriptor/entities/),

@@ -1,6 +1,6 @@
 ---
 title: "Glossary"
-description: "Look up the terms Alvo's docs use, from access level and apply to warned and working copy, each with a link to where it is taught."
+description: "Look up the terms Alvo's docs use, from access level and apply to working copy and write hook, each with a link to where it is taught."
 ---
 
 The words these docs use with a precise meaning, in alphabetical order. Each links to the page that teaches it.
@@ -27,8 +27,9 @@ The CEL profile of the `access` block's three levels: a boolean over `@user` alo
 <dt id="after-hook">After-hook</dt>
 <dd>
 
-An action that runs after a write has committed, delivered from the outbox: a webhook or an e-mail. It may reach the
-network and is retried, so its receiver must tolerate a repeat.
+An action that runs after a write has committed, delivered from the outbox: a webhook, an e-mail, a host
+[function](#function) or an `entity.update`. Each action is its own [delivery](#delivery). It may reach the network and
+is retried, so its receiver must tolerate a repeat.
 [After-hooks, events and webhooks](/guides/after-hooks-and-webhooks/)
 
 </dd>
@@ -61,11 +62,29 @@ The first dashboard account, created once from configuration rather than from th
 
 </dd>
 
+<dt id="causation-depth">Causation depth</dt>
+<dd>
+
+How many hops a write or an event sits from the request that started it: a write a hook or a handler makes is one
+hop deeper than what ran it, and the envelope carries it as `chaindepth`. Past `Alvo:Extensions:MaxDepth` (8) it is
+refused with `508 chain-depth-exceeded`, so a loop stops. [Extending in code](/extending/#the-chain-depth-limit)
+
+</dd>
+
 <dt id="cel-profile">CEL profile</dt>
 <dd>
 
 The set of CEL constructs an expression may use, decided by where it stands in the descriptor. There are five: Rule,
 Computed, Condition, Mutate and Access. [CEL in Alvo](/concepts/cel/#the-five-profiles)
+
+</dd>
+
+<dt id="command">Command</dt>
+<dd>
+
+A named action of your host's — `confirm-stay` rather than a raw `PATCH` — with an access rule, an idempotency key and
+a completion event, mapped over HTTP with `MapAlvoCommand` or invoked in process.
+[Commands and inbound webhooks](/extending/commands/)
 
 </dd>
 
@@ -93,6 +112,26 @@ may call `changed(field)`. [CEL in Alvo](/concepts/cel/#the-five-profiles)
 
 </dd>
 
+<dt id="custom-cel-function">Custom CEL function</dt>
+<dd>
+
+A C# function an embedded host adds to CEL with `AddCelFunction`, such as `normalizeVin(new.vin)`: pure, synchronous,
+inside the write's transaction, no network. Not a [host function](#host-function).
+[Custom CEL functions](/guides/custom-cel-functions/)
+
+</dd>
+
+<dt id="delivery">Delivery, dead delivery</dt>
+<dd>
+
+One run of one [subscriber](#subscriber) for one event — an after-hook action, an automation action or a host
+[event handler](#event-handler) — recorded with its attempts, retried on its own and kept in order per record. After its
+last attempt it is **dead**: it stays listed, and holds that record's later deliveries for the same subscriber back,
+until an operator redelivers, replays or cancels it. A schedule's run and a data migration are deliveries too.
+[Operate deliveries](/extending/operate-deliveries/)
+
+</dd>
+
 <dt id="descriptor">Descriptor</dt>
 <dd>
 
@@ -112,7 +151,8 @@ the refusal a real apply would give. [Apply and evolve your descriptor](/guides/
 <dt id="embedded">Embedded</dt>
 <dd>
 
-Running Alvo as NuGet packages inside your own ASP.NET Core app, beside your own endpoints and users.
+Running Alvo as NuGet packages inside your own ASP.NET Core app, beside your own endpoints and users. It is the mode
+in which your own C# joins Alvo's pipeline: [Extending in code](/extending/).
 [Standalone and embedded](/concepts/modes/)
 
 </dd>
@@ -125,11 +165,57 @@ API. [Entities and fields](/guides/entities-and-fields/)
 
 </dd>
 
+<dt id="event-envelope">Event envelope</dt>
+<dd>
+
+What every event carries, as a CloudEvents 1.0 document: its type, the row before and after, who acted, in which tenant
+and flow, and its [causation depth](#causation-depth). After-hooks, automation and event handlers read the same one.
+[The event envelope](/extending/event-envelope/)
+
+</dd>
+
+<dt id="event-handler">Event handler</dt>
+<dd>
+
+Host C# that runs after a write commits, once per matching event: at least once, retried, in order per record, each
+run its own [delivery](#delivery). It can never undo the write. [React to changes](/extending/event-handlers/)
+
+</dd>
+
+<dt id="function">Function</dt>
+<dd>
+
+Three different things in these docs. A [custom CEL function](#custom-cel-function) (`AddCelFunction`) is called from
+an expression, inside the transaction. A [host function](#host-function) (`AddFunction`) is called by a descriptor's
+`function` action, after the commit. The descriptor's `functions` block names csx scripts, which this build does not
+run, so the dashboard's *Functions* screen is marked *Not yet*.
+
+</dd>
+
 <dt id="honoured">Honoured</dt>
 <dd>
 
 A descriptor block this build runs as documented. The others are warned or refused.
 [Capabilities in this build](/reference/capabilities/)
+
+</dd>
+
+<dt id="host-function">Host function</dt>
+<dd>
+
+C# an embedded host registers with `AddFunction<T>` and a descriptor calls by name with a `{"type": "function"}`
+after-hook or automation action. It runs after the commit, as a [delivery](#delivery), with its input checked at apply.
+Not a [custom CEL function](#custom-cel-function). [Functions in the descriptor](/extending/functions/)
+
+</dd>
+
+<dt id="lifecycle-tab">Lifecycle tab</dt>
+<dd>
+
+The tab of an entity on the dashboard's *Schema* screen that lists, read-only, the code around its writes and reads:
+the descriptor's after-hooks and, in an embedded host, the write hooks, event handlers, commands and read extensions
+registered in C#. The descriptor's before-hooks stay on the *On write* tab.
+[See your extensions in the dashboard](/extending/extension-catalog/#in-the-dashboard)
 
 </dd>
 
@@ -153,7 +239,8 @@ and Mutate profiles can read them. [Validate and transform writes (before-hooks)
 <dd>
 
 The table every write appends its event to, in the same transaction as the row, so there is no change without an event
-and no event without a change. After-hooks are delivered from it. [Architecture](/concepts/architecture/#events-and-the-outbox)
+and no event without a change. Every [delivery](#delivery) — an after-hook action, an automation action, a host
+[event handler](#event-handler) — is fanned out from it. [Architecture](/concepts/architecture/#events-and-the-outbox)
 
 </dd>
 
@@ -217,6 +304,15 @@ The CEL profile of rules and of `hidden` and `readOnly` flags: a boolean over th
 
 </dd>
 
+<dt id="savepoint">Savepoint</dt>
+<dd>
+
+A point inside a transaction that a failed statement can roll back to without ending the transaction. Each call in a
+[transaction unit](#transaction-unit) runs under its own, so one refused write undoes that call alone and the unit
+goes on. [Transactions in your own code](/extending/transactions/#a-refused-write-does-not-end-the-unit)
+
+</dd>
+
 <dt id="scope">Scope</dt>
 <dd>
 
@@ -234,11 +330,31 @@ Running Alvo as a container image driven by a mounted descriptor, with the dashb
 
 </dd>
 
+<dt id="subscriber">Subscriber</dt>
+<dd>
+
+Whatever receives an event's [deliveries](#delivery): a host event handler, named by the id it was registered under,
+or a descriptor after-hook or automation action, named by its JSON pointer and a hash, such as
+`/entities/tickets/hooks/afterCreate#1f0c9a2e`. Pausing, filtering and replaying go by it.
+[Operate deliveries](/extending/operate-deliveries/)
+
+</dd>
+
 <dt id="tenant">Tenant, @tenant</dt>
 <dd>
 
 The customer or organisation a caller acts for, at most one per caller. On a tenant-scoped entity every row belongs to
 one tenant, and `@tenant.id` is the caller's tenant in a rule. [Multi-tenancy](/guides/multi-tenancy/)
+
+</dd>
+
+<dt id="transaction-unit">Transaction unit</dt>
+<dd>
+
+Several writes, batches and events your host code makes as one database transaction, opened with
+`IAlvoTransactions.TransactAsync` (or a command's `ctx.TransactAsync`): returning commits, throwing rolls back. Every
+call runs under the caller's rules, and under its own [savepoint](#savepoint).
+[Transactions in your own code](/extending/transactions/)
 
 </dd>
 
@@ -263,6 +379,16 @@ capabilities answer say what does not happen. [Capabilities in this build](/refe
 
 The dashboard's one unapplied draft of the descriptor, which every screen and the schema assistant edit. Nothing changes
 until you preview and apply it. [The admin dashboard](/guides/admin-dashboard/#3-change-the-schema)
+
+</dd>
+
+<dt id="write-hook">Write hook</dt>
+<dd>
+
+Host C# inside a write. A **validate** hook runs before the transaction, may call the network, and can only refuse; a
+**before-write** or **after-write** hook (and the delete pair) runs inside the transaction and can refuse, set fields
+or write other rows. Contrast the descriptor's [before-hook](#before-hook).
+[Validate and guard writes](/extending/write-hooks/)
 
 </dd>
 

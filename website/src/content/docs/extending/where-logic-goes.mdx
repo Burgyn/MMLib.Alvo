@@ -2,15 +2,17 @@
 title: Where logic goes
 description: Pick the first row that fits — descriptor first, then host code, each at the stage where its guarantees hold.
 sidebar:
-  order: 1
+  order: 2
 ---
 
 **Reach for C# only when the descriptor cannot express it.** The order is always the same: the descriptor first, then
 a [custom CEL function](/guides/custom-cel-functions/), and only then a hook, a handler or a command in your host. What
-the descriptor says is compiled to SQL, shown by the policy simulator, readable by the dashboard and the schema
-assistant, and runs in the standalone image too; host C# needs an [embedded host](/start-here/embed/) and a redeploy.
+the descriptor says is checked when it is applied, shown by the policy simulator, readable by the dashboard and the
+schema assistant, and runs in the standalone image too; host C# needs an [embedded host](/start-here/embed/) and a redeploy.
 
-Read the table from the top and stop at the first row that fits. Every row runs in this build.
+Read the table from the top and stop at the first row that fits. Every row runs in this build. New to host code?
+[Your first extension](/extending/first-extension/) walks one row end to end: a validate hook, its registration and its
+test.
 
 | Situation | Where | Why | Today |
 |---|---|---|---|

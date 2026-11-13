@@ -2,7 +2,7 @@
 title: See your extensions in the dashboard
 description: Every handler your host registers is listed — in the dashboard, the Management API and the assistant — and no apply can quietly drop what it reads.
 sidebar:
-  order: 5
+  order: 17
 ---
 
 import { Code } from '@astrojs/starlight/components';
@@ -71,7 +71,7 @@ not know, so a client that must tolerate one reads the raw string.
 and one on the application event `orders.approved` gets this answer, pinned by a test, so it cannot drift from the
 code:
 
-<Code code={catalog.replace(/^\uFEFF/, '')} lang="json" title="GET …/extensions" />
+<SourceExcerpt code={catalog} from="{" lang="json" title="GET …/extensions" />
 
 `timers` counts the timers this instance holds — `pending` (armed) and `due` (armed and already due; a number that stays
 above zero means nothing is firing them) — and is `null` when the data provider keeps no timers.

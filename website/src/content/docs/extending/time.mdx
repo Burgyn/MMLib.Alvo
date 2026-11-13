@@ -68,7 +68,7 @@ store directly can touch a declarative timer's row, and is on its own when it do
 A timer armed from a handler remembers the handler's correlation, causation and depth, and its event is one level
 deeper than the handler. A handler already runs one level deeper than the event it handles, so a timer that re-arms
 itself from its own handler climbs **two levels per cycle**: at the
-[chain-depth limit](/extending/#one-limit-already-enforced) of 8 (the default) it fires about four times, then stops
+[chain-depth limit](/extending/#the-chain-depth-limit) of 8 (the default) it fires about four times, then stops
 with a dead `chain-depth-exceeded` delivery, as an event loop does. `ScheduleAsync` itself is refused past the limit.
 
 ## Schedules

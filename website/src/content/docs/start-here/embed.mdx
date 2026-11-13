@@ -133,7 +133,7 @@ store instead. The packages' entry points are in the C# reference:
 
 ## What your host still owns
 
-Alvo adds no authentication, authorization or routing middleware on your behalf. Three things stay yours:
+Alvo adds no authentication, authorization or routing middleware on your behalf. Four things stay yours:
 
 - **Authentication of your own users.** Alvo's generated API authenticates its own API keys. Your app's cookie or token
   users reach the same data through your own endpoints, which pass Alvo the caller and let the descriptor's rules
@@ -144,6 +144,9 @@ Alvo adds no authentication, authorization or routing middleware on your behalf.
   ([Problem types](/reference/problem-types/)).
 - **Your own endpoints.** They call Alvo in process through `IAlvoData`, with no HTTP round trip and no second
   authorization model: [Call Alvo from your endpoints](/guides/call-from-endpoints/).
+- **Your own logic.** What the descriptor cannot express — a check that calls a service, a reaction after a commit, a
+  job on a timer, a named command — is C# that runs inside Alvo's pipeline, under the same rules and outbox:
+  [Extending in code](/extending/), starting with [Your first extension](/extending/first-extension/).
 
 :::caution[Not in this build]
 A host cannot yet publish its own signed-in user to the generated `/api/alvo` routes: they authenticate the API-key
@@ -167,6 +170,8 @@ what to set.
   [`MMLib.Alvo.Data.Sqlite`](/reference/csharp/mmlib-alvo-data-sqlite/),
   [`MMLib.Alvo.Data.PostgreSql`](/reference/csharp/mmlib-alvo-data-postgresql/).
 - Configuration: [`Alvo:Auth`, `Alvo:Api` and every other key](/reference/configuration/).
+- Tests: [`MMLib.Alvo.TestHost`](/extending/testing/) runs your descriptor and your extensions through the real
+  pipeline inside a unit test; reference it from your test project the same way as the core.
 - The rules every extending package follows:
   [`docs/architecture/extensibility.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/extensibility.md).
 
@@ -174,3 +179,5 @@ what to set.
 
 **[Call Alvo from your endpoints](/guides/call-from-endpoints/)**: read and write Alvo's data from your own
 minimal-API routes, under your users' identity and the descriptor's rules.
+
+**[Extending in code](/extending/)**: put your own C# into Alvo's writes, events and time.

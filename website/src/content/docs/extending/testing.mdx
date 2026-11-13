@@ -2,7 +2,7 @@
 title: Testing your backend
 description: Run your descriptor — rules, hooks and webhooks — through the real Alvo pipeline inside a unit test, with event delivery on your schedule.
 sidebar:
-  order: 13
+  order: 15
 ---
 
 import { Code } from '@astrojs/starlight/components';
@@ -39,7 +39,7 @@ database, dropped when the host is disposed (a provider you register yourself is
 
 A test host never delivers on its own. `DrainEventsAsync` runs the production dispatcher round after round until
 nothing is due — including the events the deliveries themselves cause — and returns what it did: entries claimed,
-entries whose delivery failed, subscribers attempted. Webhooks go to the handler you pass as `webhooks`:
+entries whose delivery failed, [subscribers](/concepts/glossary/#subscriber) attempted. Webhooks go to the handler you pass as `webhooks`:
 
 <SourceExcerpt code={tests} from="A_high_priority_ticket_notifies_the_ops_board()" to="alvo.Hooks.AssertRan" title="HelpDeskTests.cs" />
 

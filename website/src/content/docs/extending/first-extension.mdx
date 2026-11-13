@@ -20,7 +20,7 @@ and run by the repository's own tests.
 :::
 
 **Reach for C# only when the descriptor cannot express it.** A rule, a before-hook or a field's `validation` says most
-things, and says them where the policy simulator, the dashboard and the schema assistant can read them; a
+things, and says them where the dashboard and the schema assistant can read them; a
 [custom CEL function](/guides/custom-cel-functions/) adds a calculation. Asking the courier's service whether it delivers
 to a postcode is neither: it is a call over the network, which no CEL expression can make. That is what a host hook is
 for. [Where logic goes](/extending/where-logic-goes/) makes the same decision for every other case.

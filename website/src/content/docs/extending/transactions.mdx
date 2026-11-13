@@ -2,7 +2,7 @@
 title: Transactions in your own code
 description: Make several writes, batches and events one unit that commits together or not at all — as the caller, under the same rules, on SQLite and PostgreSQL alike.
 sidebar:
-  order: 10
+  order: 6
 ---
 
 import { Code } from '@astrojs/starlight/components';
@@ -54,7 +54,7 @@ An exception out of the delegate ends the unit. So do these failures, **even whe
 the unit's work can no longer be trusted:
 
 - the unit's `Timeout`;
-- the [chain-depth limit](/extending/#one-limit-already-enforced);
+- the [chain-depth limit](/extending/#the-chain-depth-limit);
 - a cancelled call;
 - two calls at once on one unit — await each call before you make the next;
 - a call still running when the delegate returns — one you started and did not await. The unit rolls back and
