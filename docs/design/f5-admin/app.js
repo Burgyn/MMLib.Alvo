@@ -2517,15 +2517,21 @@ function screenIntegrations() {
   const endpoints = declaredEndpoints().map((x) => ({ ...x, name: safeName(x.name) }));
   const templates = Object.entries(wc.working.templates ?? {}).map(([name, t]) => [safeName(name), t]);
 
-  /* Every action type that names an endpoint or a template, across every entity's hooks. */
-  const usage = { endpoints: {}, templates: {} };
+  /* Every action that names an endpoint or a template: every entity's hooks, and every automation rule.
+     Null-prototype maps, so a name like `__proto__` is a key and not the prototype. */
+  const usage = { endpoints: Object.create(null), templates: Object.create(null) };
+  const use = (action, where) => {
+    const a = action?.action ?? action;
+    if (a?.endpoint) (usage.endpoints[a.endpoint] ??= []).push(where);
+    if (a?.template) (usage.templates[a.template] ??= []).push(where);
+  };
   for (const e of entities()) {
     for (const [point, list] of Object.entries(e.hooks ?? {})) {
-      for (const h of list ?? []) {
-        if (h.endpoint) (usage.endpoints[h.endpoint] ??= []).push(`${e.name} ${point}`);
-        if (h.template) (usage.templates[h.template] ??= []).push(`${e.name} ${point}`);
-      }
+      for (const h of list ?? []) use(h, `${e.name} ${point}`);
     }
+  }
+  for (const [rule, body] of Object.entries(wc.working.automation ?? {})) {
+    for (const action of body?.actions ?? []) use(action, `automation ${safeName(rule)}`);
   }
 
   return `${header([{ label: 'Integrations' }])}
@@ -2569,7 +2575,7 @@ function screenIntegrations() {
       </div>`).join('') : `<div class="a-empty"><span class="a-empty__title">No template declared</span>
         <span class="a-empty__body">A template is a subject and a body with <code class="a-mono">{{…}}</code> placeholders that an <code class="a-mono">email</code> action renders.</span></div>`}
       <div class="p-note" style="margin:var(--space-4)"><span class="p-note__tag">what "unused" means here</span>
-        <span>A template an after-hook sends is rendered. A template referenced only from an automation rule is not, because no automation rule is evaluated — so "nothing renders it" on this screen does not mean unused in your descriptor.</span></div>
+        <span>A template an after-hook sends is rendered. So is one an automation rule sends, and both count here — "nothing renders it" means nothing in this descriptor does.</span></div>
     </div>
 
     <div class="a-panel">
@@ -3553,9 +3559,14 @@ function schemaActions(act, d, el, ev) {
     case 'addendpoint': {
       const name = ($('#ep-name')?.value ?? '').trim();
       if (!name) return true;
-      /* The schema keys endpoints by name: written as that map, whatever shape was read. */
+      /* The schema keys endpoints by name: written as that map, whatever shape was read. A name the schema
+         cannot carry (`__proto__` among them) is refused here rather than silently lost on a plain object. */
+      if (!/^[a-z][a-z0-9-]{0,62}$/.test(name)) return true;
       const endpoints = Object.fromEntries(declaredEndpoints().map(({ name: n, ...rest }) => [n, rest]));
-      endpoints[name] = { url: $('#ep-url')?.value ?? '', secretRef: $('#ep-secret')?.value || undefined };
+      Object.defineProperty(endpoints, name, {
+        value: { url: $('#ep-url')?.value ?? '', secretRef: $('#ep-secret')?.value || undefined },
+        enumerable: true, writable: true, configurable: true,
+      });
       editors.setAt('/webhooks', { endpoints });
       state.overlay = null;
       render();

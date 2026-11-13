@@ -588,7 +588,8 @@ export function declaredEndpoints(doc = wc.working) {
   const endpoints = doc.webhooks?.endpoints ?? {};
   return Array.isArray(endpoints)
     ? endpoints
-    : Object.entries(endpoints).map(([name, endpoint]) => ({ ...endpoint, name }));
+    : Object.keys(endpoints).filter((name) => Object.hasOwn(endpoints, name))
+      .map((name) => ({ ...endpoints[name], name }));
 }
 export const declaredFormats = (doc = wc.working) => Object.keys(doc.formats ?? {}).map((f) => safeName(f));
 export const tenancyEnabled = (doc = wc.working) => doc.tenancy?.enabled === true;

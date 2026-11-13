@@ -30,7 +30,7 @@ export const APPLIED_DESCRIPTOR = {
     }
   },
   "access": {
-    "admin": "'admin' in @user.roles"
+    "developer": "'admin' in @user.roles"
   },
   "webhooks": {
     "endpoints": {
@@ -365,7 +365,7 @@ export const APPLIED_DESCRIPTOR = {
             ]
           },
           "reopen": {
-            "description": "Only an administrator reopens a closed job.",
+            "description": "Only an administrator reopens a closed job, and clears its sign-off day in the same write, so completing it again needs a new one.",
             "from": [
               "completed",
               "cancelled"
@@ -373,7 +373,8 @@ export const APPLIED_DESCRIPTOR = {
             "to": "scheduled",
             "roles": [
               "admin"
-            ]
+            ],
+            "when": "!has(new.completed_on)"
           }
         }
       },
@@ -427,7 +428,7 @@ export const APPLIED_DESCRIPTOR = {
         "list": "'dispatcher' in @user.roles || 'admin' in @user.roles || work_order_id.assigned_to == @user.id",
         "get": "'dispatcher' in @user.roles || 'admin' in @user.roles || work_order_id.assigned_to == @user.id",
         "create": "'dispatcher' in @user.roles || 'admin' in @user.roles",
-        "update": "'dispatcher' in @user.roles || 'admin' in @user.roles || technician_id == @user.id",
+        "update": "'dispatcher' in @user.roles || 'admin' in @user.roles || (technician_id == @user.id && work_order_id.assigned_to == @user.id)",
         "delete": "'dispatcher' in @user.roles || 'admin' in @user.roles"
       },
       "checks": [
