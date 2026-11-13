@@ -142,7 +142,7 @@
         },
         "status": {
           "type": "enum",
-          "description": "Where the job is in its life cycle. Every move is guarded by the state machine below: new, then scheduled, in progress and completed — or cancelled, and only an administrator reopens.",
+          "description": "Where the job is in its life cycle. Every move is guarded by the descriptor's state machine: new, then scheduled, in progress and completed — or cancelled, and only an administrator reopens.",
           "required": true,
           "values": ["new", "scheduled", "in_progress", "completed", "cancelled"]
         },
