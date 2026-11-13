@@ -11,12 +11,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A docs-only PR (website/**, docs/** but the prototype, root *.md) runs build + format + ring0 on
+  # Linux and nothing else: Windows, ring1/ring2 integration, both e2e suites and packing read none of
+  # those files, and the fast modules that do (DocsGen, DocsSnippets, Schema, MMLib.Alvo.Tests) are all
+  # ring0. Every other diff — or one that cannot be read — runs everything. scripts/ci-changes decides;
+  # scripts/test-ci-changes is its suite, in the Script suites job below.
+  changes:
+    name: What changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.classify.outputs.full }}
+      os: ${{ steps.classify.outputs.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Classify the diff
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: scripts/ci-changes "$BASE_SHA" >> "$GITHUB_OUTPUT"
+
   build-test:
     name: Build & test (${{ matrix.os }})
+    needs: changes
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: ${{ fromJSON(needs.changes.outputs.os) }}
     runs-on: ${{ matrix.os }}
     # 30, not 20: HX-03's delivery chaos criteria (SQLite + PostgreSQL) added ~6 min to ring2.
     # Windows gets 45: its ring2 is bound by SQLite's per-write cost there (#410) and swings ~35 % between runners.
@@ -90,8 +116,11 @@ jobs:
         # zero executed tests, which MTP reports as exit code 8 ("ran zero
         # tests"). Treat only code 8 as success on Windows; Linux stays strict
         # so a genuine zero-tests regression is still caught there.
+          ALVO_FULL: ${{ needs.changes.outputs.full }}
         run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then
+          if [ "$ALVO_FULL" != "true" ]; then
+            scripts/test-ring0
+          elif [ "$RUNNER_OS" = "Windows" ]; then
             TESTINGPLATFORM_EXITCODE_IGNORE=8 scripts/test-ring2
           else
             scripts/test-ring2
@@ -153,17 +182,17 @@ jobs:
       # Pack-only on the PR (issue #14): prove packaging works and publish the
       # .nupkg as an artifact. No feed publish — that lands with v0.1.
       - name: Pack
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && needs.changes.outputs.full == 'true'
         run: dotnet pack --configuration Release --no-build --output artifacts
 
       # HX-10 acceptance (2): the packed analyzer reaches a consumer built on the minimum SDK (global.json's), from the
       # very packages the step above produced. Linux only: it builds the consumer in that SDK's container.
       - name: Packed analyzer on the minimum SDK
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && needs.changes.outputs.full == 'true'
         run: ALVO_FEED=artifacts scripts/test-packed-analyzer
 
       - name: Upload packages
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && needs.changes.outputs.full == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: nupkg
@@ -172,6 +201,8 @@ jobs:
 
   e2e:
     name: E2E (compose + TeaPie)
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -266,6 +297,11 @@ jobs:
       - name: Vacuum resolver suite
         run: bash scripts/test-ensure-vacuum
 
+      # The classifier that decides whether a PR runs everything: a wrong "docs-only" skips real
+      # gates, so the decision has a suite like every other guard here.
+      - name: CI change-classifier suite
+        run: bash scripts/test-ci-changes
+
       # The F5 admin prototype quotes UnhonouredFeatures, UnhonouredSubsystems, the management
       # route table and the frozen schema VERBATIM, and generates all of it rather than holding a
       # copy — because the first version held copies and nine of them were wrong. This check is
@@ -329,6 +365,8 @@ jobs:
 
   admin-e2e:
     name: Admin dashboard scenarios
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     # Pinned: ubuntu-latest moved to 26.04, where Playwright ships no Chromium ("does not support chromium on ubuntu26.04-x64"). Unpin once it does.
     runs-on: ubuntu-24.04
     # Two budgets, not one. The browser's system packages come from the runner's apt mirror, and on a
@@ -373,16 +411,31 @@ jobs:
   # The script suites fold in for the same reason.
   build-and-test:
     name: Build & test
-    needs: [build-test, e2e, scripts, admin-e2e]
+    needs: [changes, build-test, e2e, scripts, admin-e2e]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require all matrix legs, the e2e and the script suites to pass
+        env:
+          FULL: ${{ needs.changes.outputs.full }}
         run: |
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "Classifying the diff failed."
+            exit 1
+          fi
           if [ "${{ needs.build-test.result }}" != "success" ]; then
             echo "One or more Build & test matrix legs failed."
             exit 1
+          fi
+          # A docs-only PR skips both e2e suites by design (see the changes job); anything else must pass them.
+          if [ "$FULL" != "true" ]; then
+            if [ "${{ needs.scripts.result }}" != "success" ]; then
+              echo "A shell script suite failed (see the 'Script suites' job for which one)."
+              exit 1
+            fi
+            echo "Docs-only: Linux build, format, ring0 and the script suites passed."
+            exit 0
           fi
           if [ "${{ needs.e2e.result }}" != "success" ]; then
             echo "The compose + TeaPie e2e failed."

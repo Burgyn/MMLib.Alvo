@@ -116,7 +116,7 @@ compresses out. Violating one of these is a bug, not a style nit.
 | ring0 | `scripts/test-ring0` | after every small step |
 | ring1 | `scripts/test-ring1` | after finishing a slice |
 | ring2 | `scripts/test-ring2` | before opening a PR |
-| full (+ e2e) | CI on the PR | never run locally |
+| full (+ e2e) | CI on the PR (a docs-only diff runs Linux build + ring0 only — `scripts/ci-changes`) | never run locally |
 | mutation | CI post-merge on `main` | never run locally |
 | load | `scripts/test-load` | in no ring — see below |
 | prototype | `scripts/test-prototype` | in no ring — see below |
