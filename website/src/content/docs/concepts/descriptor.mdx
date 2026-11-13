@@ -50,7 +50,7 @@ schema:
 
 | Block | What it defines | In this build |
 |---|---|---|
-| [`entities`](/reference/descriptor/entities/) | entities with their [fields](/reference/descriptor/entities-fields/), [rules](/reference/descriptor/entities-rules/), [hooks](/reference/descriptor/entities-hooks/), [computed fields and rollups](/reference/descriptor/entities-computed-and-rollups/) and [indexes](/reference/descriptor/entities-indexes/) | honoured, except the parts listed as refused |
+| [`entities`](/reference/descriptor/entities/) | entities with their [fields](/reference/descriptor/entities-fields/), [rules](/reference/descriptor/entities-rules/), [hooks](/reference/descriptor/entities-hooks/), [computed fields and rollups](/reference/descriptor/entities-computed-and-rollups/) and [indexes](/reference/descriptor/entities-indexes/) (also partial and exclusion indexes), a field's [`validation` and `sequence`](/extending/integrity/), [lookup `checks`](/extending/relation-rules/#lookup-checks), a [`stateMachine` and `timers`](/extending/state-machines/), and the fields `events.exclude` keeps out of every event | honoured, except the parts listed as refused |
 | [`auth`](/reference/descriptor/auth/) | the application's roles, and the sign-in providers | honoured; sign-in providers other than `local` are not run |
 | [`tenancy`](/reference/descriptor/tenancy/) | whether the backend is multi-tenant | honoured |
 | [`access`](/reference/descriptor/access/) | which roles reach the `viewer`, `developer` and `admin` management levels | honoured |

@@ -25,7 +25,8 @@ runs as a Docker container or as a library inside your own app.
 - **Agent-first.** A JSON Schema with a description on every key, structured errors with fix suggestions, idempotent
   operations, a Management API and `llms.txt`, so a coding agent can do the work. [For coding agents](/start-here/coding-agents/)
 - **.NET-native, two modes.** The Docker image and the embedded library are one codebase; embedded, you extend it in
-  C# with your own functions and endpoints. [Standalone and embedded](/concepts/modes/)
+  C# inside Alvo's own pipeline: validate and guard writes, react to changes, run commands and timers, beside your own
+  endpoints. [Standalone and embedded](/concepts/modes/), [Extending in code](/extending/)
 - **An admin dashboard** with a schema editor, rule and hook editors, a data browser, history with rollback, and an AI
   assistant that uses the same skills your agents can. [The admin dashboard](/guides/admin-dashboard/)
 - **Dynamic entities (planned).** Your end users define their own record types at runtime, in one shared store, in an
@@ -50,7 +51,8 @@ runs as a Docker container or as a library inside your own app.
 - **You need sign-in through Google, Microsoft or another identity provider.** Only local accounts and API keys exist
   in this build; embedded, your app can bring its own authentication.
 - **Your logic does not fit declarative rules and hooks.** If most of your backend is custom code, the escape hatch is
-  the embedded mode with your own endpoints, but then weigh how much Alvo still does for you.
+  the embedded mode, where your C# joins Alvo's write pipeline and outbox rather than replacing them
+  ([Where logic goes](/extending/where-logic-goes/)); but then weigh how much Alvo still does for you.
 
 ## Compared with
 
@@ -58,7 +60,7 @@ How Alvo answers the same questions as the platforms closest to it:
 
 | | Runtime | Where rules run | Backend defined as | Extending in .NET | Embedding in your app |
 |---|---|---|---|---|---|
-| **Alvo** | .NET: a Docker image, or a library in your host | CEL compiled to SQL predicates, inside the database query | one JSON descriptor | C# functions, endpoints and providers in the embedded mode | yes, in an ASP.NET Core app |
+| **Alvo** | .NET: a Docker image, or a library in your host | CEL compiled to SQL predicates, inside the database query | one JSON descriptor | C# hooks, handlers, commands, functions, endpoints and providers in the embedded mode | yes, in an ASP.NET Core app |
 | **Supabase** | about seven services around PostgreSQL (gateway, auth, PostgREST, realtime, storage, functions, studio) | PostgreSQL row-level security policies, in the database | SQL: schema, policies and migrations | a community C# client; server-side logic in Deno edge functions | no |
 | **PocketBase** | a single Go binary over SQLite | API rules per collection and operation, in PocketBase's filter syntax, applied as a filter on the record query (superusers bypass them) | collections with their API rules | no; extended in Go or with JavaScript hooks | yes, in a Go app |
 | **Hand-written ASP.NET Core** | your own .NET app | a check in each endpoint, written by you | C# code | everything is .NET | it is your app |

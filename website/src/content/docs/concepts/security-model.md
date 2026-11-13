@@ -225,7 +225,9 @@ client should branch on them in [Handle errors](/guides/handle-errors/).
 PostgreSQL's native row-level security as a second line under Alvo's own rules, a change feed that records writes made
 outside Alvo, an audit log of data changes, issuing and revoking API keys
 ([#36](https://github.com/Burgyn/MMLib.Alvo/issues/36)), signed webhook deliveries, and rate limiting on the Data and
-Management APIs are not in this build ([Capabilities in this build](/reference/capabilities/)).
+Management APIs are not in this build ([Capabilities in this build](/reference/capabilities/)). Alvo ships no rate
+limiter of its own; an embedded host attaches ASP.NET Core's to Alvo's routes
+([HTTP conventions](/extending/http-conventions/#one-entitys-routes-forentity)).
 :::
 
 ## Put it to work

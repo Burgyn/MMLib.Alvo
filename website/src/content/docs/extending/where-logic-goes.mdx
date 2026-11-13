@@ -2,26 +2,32 @@
 title: Where logic goes
 description: Pick the first row that fits — descriptor first, then host code, each at the stage where its guarantees hold.
 sidebar:
-  order: 1
+  order: 2
 ---
 
-Read from the top and stop at the first row that fits. A row marked *planned* names the mechanism the design commits to;
-until it ships, use the row above it or an after-hook `webhook`.
+**Reach for C# only when the descriptor cannot express it.** The order is always the same: the descriptor first, then
+a [custom CEL function](/guides/custom-cel-functions/), and only then a hook, a handler or a command in your host. What
+the descriptor says is checked when it is applied, shown by the policy simulator, readable by the dashboard and the
+schema assistant, and runs in the standalone image too; host C# needs an [embedded host](/start-here/embed/) and a redeploy.
+
+Read the table from the top and stop at the first row that fits. Every row runs in this build. New to host code?
+[Your first extension](/extending/first-extension/) walks one row end to end: a validate hook, its registration and its
+test.
 
 | Situation | Where | Why | Today |
 |---|---|---|---|
 | A condition or a calculation over one row; access; whether a field is visible | descriptor: `rules`, before-hook, `computed` | Compiled to SQL, shown by the policy simulator, written by an agent on its own. | available |
 | Who may see a row depends on a related row; a write must agree with a related row | descriptor: a relation rule (`customer_id.owner_id == @user.id`, `members.exists(…)`); a lookup check (`checks`) | One correlated `EXISTS` in the query, through the related entity's own list rule; a check refuses with your message. | available — [Rules over relations](/extending/relation-rules/) |
-| CEL lacks a function (VAT, working hours) | `AddCelFunction` | A pure calculation: synchronous, in the transaction, no network. | available |
-| Integrity across rows: stock, capacity, numbering, overlaps | descriptor: `CHECK`, `sequence`, `exclude` | The database enforces it atomically on every engine; code would be slower and race. | planned |
-| Validation needs an external service (VIES, fraud, billing) | `IValidateWriteHook` | Before the transaction, with network and a timeout. Not atomic, so nothing integrity depends on. | available — [Validate and guard writes](/extending/write-hooks/) |
-| It must happen atomically with the write and depends on other rows | `IBeforeWriteHook` | The same transaction and locks; refuses as 422, 409 or 403. No network. | available — [Validate and guard writes](/extending/write-hooks/) |
-| Atomic, but needs the id or the result of the write | `IAfterWriteHook` | Audit rows, children, a first sprint. Can still cancel the whole write. | available — [Validate and guard writes](/extending/write-hooks/) |
-| A side effect after a successful write: mail, Slack, ERP, payment, cache | `IAlvoEventHandler` | After the commit, retried on failure, never undoes the write. | available — typed (`Entity<T>(e => e.OnCreated(…))`) and untyped (`Entity("name", e => e.OnCreated(…))`) |
-| The effect has several steps (payment → invoice → ERP) | handler + `IAlvoSteps` | Each step runs once; a retry continues where it failed. | planned |
-| The same effect must be visible and configurable in the descriptor | `IAlvoFunction` + `"type": "function"` | An agent wires it with a condition; the code is named and typed. | planned |
+| CEL lacks a function (VAT, working hours) | `AddCelFunction` | A pure calculation: synchronous, in the transaction, no network. | available — [Custom CEL functions](/guides/custom-cel-functions/) |
+| Integrity across rows: stock, capacity, numbering, overlaps | descriptor: a field's `validation` (a `CHECK`), `sequence`, an index's `exclude` | The database enforces it atomically on every engine; code would be slower and race. | available — [Integrity in the descriptor](/extending/integrity/) |
+| Validation needs an external service (VIES, fraud, billing) | `IValidateWriteHook<T>` | Before the transaction, with network and a timeout. Not atomic, so nothing integrity depends on. | available — [Validate and guard writes](/extending/write-hooks/) |
+| It must happen atomically with the write and depends on other rows | `IBeforeWriteHook<T>` | The same transaction and locks; refuses as 422, 409 or 403. No network. | available — [Validate and guard writes](/extending/write-hooks/) |
+| Atomic, but needs the id or the result of the write | `IAfterWriteHook<T>` | Audit rows, children, a first sprint. Can still cancel the whole write. | available — [Validate and guard writes](/extending/write-hooks/) |
+| A side effect after a successful write: mail, Slack, ERP, payment, cache | `IAlvoEventHandler<TMessage>` | After the commit, retried on failure, never undoes the write. | available — typed (`Entity<T>(e => e.OnCreated(…))`) and untyped (`Entity("name", e => e.OnCreated(…))`) |
+| The effect has several steps (payment → invoice → ERP) | handler + `IAlvoSteps` | Each step runs once; a retry continues where it failed. | available — [Multi-step side effects](/extending/steps/) |
+| The same effect must be visible and configurable in the descriptor | `IAlvoFunction<TInput>` + `"type": "function"` | An agent wires it with a condition; the code is named and typed. | available — [Functions in the descriptor](/extending/functions/) |
 | Not CRUD, or an inbound webhook | `MapAlvoCommand` / `MapAlvoWebhookReceiver` / minimal API | Your own route and contract; Alvo's rules and hooks still apply. A named command is visible to agents. | available — [commands and inbound webhooks](/extending/commands/) |
 | Only some rows for some callers, decided in code | `IQueryNarrowing` | ANDed into the read's SQL after the rules, so pages and counts agree; never widens, never narrows a write. | available — [Shape what reads return](/extending/reads/) |
-| Hide a field, or add a derived one, on read | `IRecordEnricher` | Only hides or fills a declared virtual field; never rewrites rows. | available — [Shape what reads return](/extending/reads/) |
+| Hide a field, or add a derived one, on read | `IRecordEnricher<T>` | Only hides or fills a declared virtual field; never rewrites rows. | available — [Shape what reads return](/extending/reads/) |
 | Rate limits, captcha, caching, headers, CORS | endpoint filter, convention | An HTTP concern; ASP.NET Core has the tool. | available — [HTTP conventions](/extending/http-conventions/) |
 | Something must happen at a time, or regularly | `IAlvoScheduler`, `AddSchedule` | Keyed timers and cron on the outbox, one run across replicas. | available — [Time: timers and schedules](/extending/time/) |

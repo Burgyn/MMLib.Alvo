@@ -120,6 +120,11 @@ refused before any rule runs, so a missing tenant can never match rows by accide
 [`docs/architecture/cel.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/cel.md#the-required-context-gate-no-expression-runs-against-a-context-value-the-caller-lacks)
 has the details.
 
+Alvo does not keep a list of your tenants: a tenant is whatever a caller's key names. Work that runs per tenant with no
+caller — an [automation](/extending/automation/#triggers) rule with a cron trigger, a per-tenant
+[schedule](/extending/time/#schedules) or a [data migration](/extending/time/#data-migrations) over a tenant-scoped
+entity — needs an embedded host that registers an `IAlvoTenantCatalog` listing them.
+
 ## What isolation guarantees
 
 - **A tenant cannot see, change or delete another tenant's rows.** Every attempt is the answer for a row that does

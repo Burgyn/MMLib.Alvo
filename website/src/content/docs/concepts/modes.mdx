@@ -41,8 +41,9 @@ Your app owns the process, and Alvo is a part of it.
   the descriptor's rules decide ([Use your own authentication](/guides/own-authentication/)).
 - **Your endpoints**: they call `IAlvoData` in process, under the same rules as the generated API
   ([Call Alvo from your endpoints](/guides/call-from-endpoints/)).
-- **Your C#**: functions a descriptor's hooks can call, registered with `AddCelFunction`
-  ([Custom CEL functions](/guides/custom-cel-functions/)).
+- **Your C#, inside Alvo's pipeline**: custom CEL functions, write hooks, event handlers, commands, timers and
+  schedules, and read shaping, all running through the same rules, transactions and outbox as the descriptor
+  ([Extending in code](/extending/); start with [Your first extension](/extending/first-extension/)).
 
 The dashboard (`MMLib.Alvo.Admin`) and the schema assistant (`MMLib.Alvo.Ai`) are separate packages a host can add;
 the one-file host in [Embed Alvo in ASP.NET Core](/start-here/embed/) adds them as an optional step.
@@ -55,8 +56,10 @@ compose stack serves **and** the one the embedded sample,
 [`samples/MMLib.Alvo.Samples.EmbeddedHost`](https://github.com/Burgyn/MMLib.Alvo/tree/main/samples/MMLib.Alvo.Samples.EmbeddedHost),
 runs; the sample's integration suite boots both and asserts that they generate the same routes.
 
-So moving from standalone to embedded is carrying the file over. The signal to move is needing code: your own
-functions, endpoints, identity or providers. That is an upgrade path, not a limit of the standalone mode.
+So moving from standalone to embedded is carrying the file over. The signal to move is needing code the descriptor
+cannot express: your own functions, write hooks, event handlers, endpoints, identity or providers
+([Where logic goes](/extending/where-logic-goes/) says which). That is an upgrade path, not a limit of the standalone
+mode.
 
 ## What differs
 
@@ -69,6 +72,7 @@ functions, endpoints, identity or providers. That is an upgrade path, not a limi
 | Who calls the generated API | API keys from configuration | API keys; your own users go through your endpoints |
 | Custom CEL functions | built-in functions only | built-ins plus your `AddCelFunction` registrations |
 | Your own endpoints | none | yes, through `IAlvoData` |
+| Host C# in the pipeline | none: the descriptor only | write hooks, event handlers, commands, timers and schedules, read shaping ([Extending in code](/extending/)) |
 | OpenAPI document and API browser | `/openapi/v1.json` and `/scalar`, switched by `Alvo:Docs:Enabled` | none of its own: call `AddOpenApi()` and `MapOpenApi()`, and Alvo's routes and schemas appear in your document |
 | Dashboard and schema assistant | included, at `/admin` | add `MMLib.Alvo.Admin` and `MMLib.Alvo.Ai` |
 | Configuration | `Alvo:*` keys, environment variables in the container | the same options, bound or set in code |
@@ -91,5 +95,6 @@ project ([#141](https://github.com/Burgyn/MMLib.Alvo/issues/141)).
 
 - [Quick start](/start-here/quick-start/): the standalone stack in a few minutes.
 - [Embed in ASP.NET Core](/start-here/embed/): Alvo inside your app.
+- [Extending in code](/extending/): your own C# inside the embedded engine.
 - [Running in production](/guides/production/): configure the standalone host for real use.
 - [Architecture](/concepts/architecture/): the packages both modes are built from.

@@ -17,6 +17,13 @@ number in one canonical form. About fifteen minutes, starting from an app that e
 [Embed Alvo in ASP.NET Core](/start-here/embed/).
 :::
 
+:::note[Three things called "function"]
+A **custom CEL function** (`AddCelFunction`, this page) is called from an expression, inside the write's transaction,
+with no network. A **host function** (`AddFunction`) is called by a descriptor's `function` action after the commit,
+and may call a service: [Functions in the descriptor](/extending/functions/). The descriptor's `functions` block names
+csx scripts, which this build does not run. See the [glossary](/concepts/glossary/#function).
+:::
+
 ## Before you start
 
 - The repository's embedded sample, which registers this same function, from [Embed Alvo in ASP.NET Core](/start-here/embed/), run from a clone with the
@@ -94,7 +101,9 @@ Alvo cannot check these, and breaking one breaks writes, not only your function.
 
 - **Pure.** The same arguments give the same result, with no side effects. It runs inside the write's transaction,
   and a write that rolls back must leave nothing behind. Sending mail or calling a service belongs in an
-  [after-hook](/guides/after-hooks-and-webhooks/).
+  [after-hook](/guides/after-hooks-and-webhooks/); in an embedded host, in a
+  [validate hook](/extending/write-hooks/#validate-before-the-transaction) before the write, or an
+  [event handler](/extending/event-handlers/) after it.
 - **Fast.** It runs while the row's locks are held, inside a time budget: every host function call in one evaluation —
   one row's before-hooks, one write hook's `when`, one after-hook or handler condition — shares **250 ms**
   (`Alvo:Extensions:CelFunctionBudget`, at most 30 s). Take a trailing `CancellationToken` —
@@ -163,4 +172,5 @@ the Management API, the apply answers 422 `validation`.
 
 ## Next
 
-**[Running in production](/guides/production/)**: take a backend from a laptop to a server.
+**[Validate and guard writes](/extending/write-hooks/)**: C# that runs in a write, when a pure function is not
+enough. Or [Running in production](/guides/production/): take a backend from a laptop to a server.

@@ -191,6 +191,7 @@ through the Data API with that caller's key. The dashboard's rules screen runs t
 | Public to everyone, including no key | `'anon' in @user.roles \|\| 'authenticated' in @user.roles` | Data meant for the open internet; `list` and `get` only. |
 | Public or own | `is_public \|\| owner_id == @user.id` | A boolean field read as a condition. Because it reads `@user.id`, a caller without a key is refused with a 403 even for public rows. |
 | Combined | `created_by == @user.id \|\| 'admin' in @user.roles` | Keep earlier grants by adding a clause with `\|\|`. |
+| Through a related row | `customer_id.owner_id == @user.id` | A `ref` followed to the row it points at, through that entity's own `list` rule: [Rules over relations](/extending/relation-rules/). |
 
 Each rule's slot is in the reference: [`list`](/reference/descriptor/entities-rules/#entities.rules.list),
 [`get`](/reference/descriptor/entities-rules/#entities.rules.get),
@@ -208,7 +209,8 @@ A rule admits no function call, not even a built-in one such as `trim` (`now()` 
 not calls): a rule is a SQL filter, and functions are not
 translated to SQL yet (the profiles are in the [CEL function catalog](/reference/cel-functions/)). To
 filter by a normalised value, store it with a before-hook `mutate` and compare that field. A rule also cannot read
-any attribute of the caller beyond `@user.id`, `@user.roles` and `@tenant.id`.
+any attribute of the caller beyond `@user.id`, `@user.roles` and `@tenant.id`. To narrow rows by logic a rule cannot
+express, an embedded host adds a query narrowing in C# ([Shape what reads return](/extending/reads/)).
 :::
 
 ## What can go wrong

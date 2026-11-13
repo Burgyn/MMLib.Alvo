@@ -20,6 +20,7 @@ The plan moves in phases, each a GitHub milestone, one at a time:
 | Vertical slice | descriptor to tables to a generated REST API, with validation | done |
 | Demo from the start | runnable examples and the end-to-end suites that drive them | done |
 | Admin mode | the dashboard, the rule and hook editors, the schema assistant | **in progress** |
+| Host extensibility | your own C# in the write pipeline, events, commands, time and reads ([Extending in code](/extending/)); part of Further components, built ahead of the rest | done |
 | v0.1 | the documentation you are reading, the logo, and the release | next |
 | Further components | the rest of the backend-as-a-service surface, by value, including dynamic entities | planned |
 
