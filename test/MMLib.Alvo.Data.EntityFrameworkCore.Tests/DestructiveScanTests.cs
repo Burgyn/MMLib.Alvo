@@ -82,6 +82,14 @@ public class DestructiveScanTests
         => DestructiveScan.Classify(AddForeignKey("owner_id", "tenant_id")).Field.ShouldBe("owner_id");
 
     /// <summary>
+    /// A tenant guard (#161) is declared on <c>[tenant_id, ref]</c>, and is attributed to the reference it guards — never to
+    /// <c>tenant_id</c>, a column no descriptor declares.
+    /// </summary>
+    [Fact]
+    public void An_added_tenant_guard_names_the_reference_it_guards_as_the_field()
+        => DestructiveScan.Classify(AddForeignKey("tenant_id", "work_order_id")).Field.ShouldBe("work_order_id");
+
+    /// <summary>
     /// EF's drop carries no column list at all, so there is no field to attribute the change to and the
     /// classifier must not reach for one.
     /// </summary>

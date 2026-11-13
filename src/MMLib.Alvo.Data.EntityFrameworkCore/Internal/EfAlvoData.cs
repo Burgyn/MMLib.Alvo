@@ -1111,7 +1111,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         await ExclusionLocks.TakeAsync(db, _dialect, schema, [Lookup(candidate)], cancellationToken);
         await ConstraintViolationTranslator.TranslatedAsync(
             () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema,
-            callerKeyed, db.AppliedSchema, decision.Unnameable);
+            callerKeyed, removes: false, db.AppliedSchema, decision.Unnameable);
 
         var id = (Guid)candidate[AlvoDataContext.IdColumn];
         return await SingleAsync(db, schema, decision, context, id, lockFor: null, cancellationToken, unmasked: true)
@@ -1157,7 +1157,7 @@ internal sealed partial class EfAlvoData : IAlvoData
         await ExclusionLocks.TakeAsync(db, _dialect, schema, [.. candidates.Select(Lookup)], cancellationToken);
         await ConstraintViolationTranslator.TranslatedAsync(
             () => db.SaveChangesAsync(cancellationToken), _dialect, db.Rows(schema.Name).EntityType, schema,
-            callerKeyed: false, db.AppliedSchema, decision.Unnameable);
+            callerKeyed: false, removes: false, db.AppliedSchema, decision.Unnameable);
 
         var stored = new List<Dictionary<string, object>>(candidates.Count);
         foreach (var candidate in candidates)
@@ -1351,6 +1351,7 @@ internal sealed partial class EfAlvoData : IAlvoData
                 db.Rows(schema.Name).EntityType,
                 schema,
                 callerKeyed: false,
+                removes: false,
                 db.AppliedSchema,
                 unnameable,
                 bodySent)
@@ -2183,7 +2184,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             _dialect,
             db.Rows(schema.Name).EntityType,
             schema,
-            callerKeyed: false, db.AppliedSchema, decision.Unnameable);
+            callerKeyed: false, removes: true, db.AppliedSchema, decision.Unnameable);
         if (affected == 0)
         {
             throw new AlvoRecordNotFoundException();
@@ -2363,7 +2364,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             _dialect,
             db.Rows(schema.Name).EntityType,
             schema,
-            callerKeyed: false, db.AppliedSchema, decision.Unnameable);
+            callerKeyed: false, removes: false, db.AppliedSchema, decision.Unnameable);
     }
 
     private static Func<string, object?> Lookup(Dictionary<string, object> row) => column => row.GetValueOrDefault(column);
@@ -3403,7 +3404,7 @@ internal sealed partial class EfAlvoData : IAlvoData
                 _dialect,
                 db.Rows(schema.Name).EntityType,
                 schema,
-                callerKeyed: false, db.AppliedSchema, decision.Unnameable);
+                callerKeyed: false, removes: true, db.AppliedSchema, decision.Unnameable);
             if (affected == 0)
             {
                 throw new AlvoRecordNotFoundException();

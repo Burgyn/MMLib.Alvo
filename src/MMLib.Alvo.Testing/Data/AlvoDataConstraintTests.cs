@@ -161,9 +161,12 @@ public abstract class AlvoDataConstraintTests
 
         var refusal = await Should.ThrowAsync<AlvoConstraintViolationException>(
             () => data.DeleteAsync(WorkOrders, (Guid)parent["id"]!, north, cancellationToken: Ct));
+        var batchRefusal = await Should.ThrowAsync<AlvoConstraintViolationException>(
+            () => data.DeleteManyAsync(WorkOrders, [(Guid)parent["id"]!], north, cancellationToken: Ct));
 
-        refusal.Kind.ShouldBe(AlvoConstraintKind.Referenced);
         refusal.Fields.ShouldBeEmpty("naming the referencing entity would disclose data the caller may not read");
+        ShouldBeTheRestrictRefusal(refusal);
+        ShouldBeTheRestrictRefusal(batchRefusal);
         (await data.GetAsync(WorkOrders, (Guid)parent["id"]!, north, Ct)).ShouldNotBeNull(
             "a refused delete must leave the row alone");
     }
@@ -211,11 +214,169 @@ public abstract class AlvoDataConstraintTests
         refusal.InnerException.ShouldNotBeNull("the engine's own diagnostics must survive for the host's log");
     }
 
+    /// <summary>
+    /// #161. A <c>ref</c> between two <c>tenancy: "scoped"</c> entities naming another tenant's row is refused exactly as
+    /// one naming no row at all — under every <c>onDelete</c>, because the reference is a key over
+    /// <c>(tenant_id, id)</c> and the caller's own <c>tenant_id</c> is half of it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is the port, not HTTP.</b> A generated route resolves a reference through the caller's own read before the
+    /// port is reached (<c>unresolved-reference</c>); host code, an automation action or a hook's <c>mutate</c> writes
+    /// through the port with no such check, so before the key a row of tenant A could name tenant B's row and be stored.
+    /// </para>
+    /// <para>
+    /// <b>Indistinguishable is the property</b>: same type, kind, fields and message — anything that differed would be an
+    /// existence oracle across tenants, one write per candidate id. The two refusals are compared with each other, never
+    /// with a literal, so a provider outside the <c>MMLib.Alvo</c> family can pass the fact with the public constructor;
+    /// which wording the shipped drivers choose for a write is their own engine tests' to pin.
+    /// </para>
+    /// </remarks>
+    /// <param name="child">The referencing entity — one per <c>onDelete</c> (restrict, cascade, setNull).</param>
+    [Theory]
+    [InlineData(Visits)]
+    [InlineData(Tasks)]
+    [InlineData(Notes)]
+    public async Task A_reference_to_another_tenants_row_is_refused_exactly_as_one_to_no_row(string child)
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+        var north = NewContext(TenantId.New());
+        var south = NewContext(TenantId.New());
+        var theirs = await CreateWorkOrderAsync(data, south, "WO-SOUTH");
+
+        var crossTenant = await Should.ThrowAsync<AlvoConstraintViolationException>(
+            () => CreateChildAsync(data, north, child, (Guid)theirs["id"]!));
+        var nowhere = await Should.ThrowAsync<AlvoConstraintViolationException>(
+            () => CreateChildAsync(data, north, child, Guid.NewGuid()));
+
+        ShouldBeIndistinguishable(crossTenant, nowhere);
+        (await ListChildrenAsync(data, north, child)).ShouldBeEmpty("a refused write stores nothing");
+    }
+
+    /// <summary>
+    /// #161, the update path: re-pointing a stored reference at another tenant's row is refused exactly as re-pointing it
+    /// at no row, and the reference keeps naming the caller's own row.
+    /// </summary>
+    /// <remarks>
+    /// A separate fact for the reason <see cref="A_duplicate_unique_value_on_update_is_refused_naming_the_field"/> gives: a
+    /// create fails out of <c>SaveChanges</c> and an update out of <c>ExecuteUpdate</c>, and a driver could translate one
+    /// and not the other.
+    /// </remarks>
+    /// <param name="child">The referencing entity — one per <c>onDelete</c> (restrict, cascade, setNull).</param>
+    [Theory]
+    [InlineData(Visits)]
+    [InlineData(Tasks)]
+    [InlineData(Notes)]
+    public async Task An_update_pointing_a_reference_at_another_tenants_row_is_refused_exactly_as_one_to_no_row(string child)
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+        var north = NewContext(TenantId.New());
+        var south = NewContext(TenantId.New());
+        var ours = (Guid)(await CreateWorkOrderAsync(data, north, "WO-NORTH"))["id"]!;
+        var theirs = (Guid)(await CreateWorkOrderAsync(data, south, "WO-SOUTH"))["id"]!;
+        var row = (Guid)(await CreateChildAsync(data, north, child, ours))["id"]!;
+
+        var crossTenant = await Should.ThrowAsync<AlvoConstraintViolationException>(
+            () => RepointChildAsync(data, north, child, row, theirs));
+        var nowhere = await Should.ThrowAsync<AlvoConstraintViolationException>(
+            () => RepointChildAsync(data, north, child, row, Guid.NewGuid()));
+
+        ShouldBeIndistinguishable(crossTenant, nowhere);
+        (await data.GetAsync(child, row, north, Ct))![WorkOrderId].ShouldBe(ours, "a refused update leaves the row alone");
+    }
+
+    /// <summary>
+    /// The counterweight to the two facts above: a reference to a row of the caller's <b>own</b> tenant is stored and reads
+    /// back. Without it, a key that refused every reference would satisfy both refusals and break every <c>ref</c>.
+    /// </summary>
+    /// <param name="child">The referencing entity — one per <c>onDelete</c> (restrict, cascade, setNull).</param>
+    [Theory]
+    [InlineData(Visits)]
+    [InlineData(Tasks)]
+    [InlineData(Notes)]
+    public async Task A_reference_to_a_row_of_the_callers_own_tenant_is_accepted(string child)
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+        var north = NewContext(TenantId.New());
+        var ours = (Guid)(await CreateWorkOrderAsync(data, north, "WO-NORTH"))["id"]!;
+
+        var row = (Guid)(await CreateChildAsync(data, north, child, ours))["id"]!;
+
+        (await data.GetAsync(child, row, north, Ct))![WorkOrderId].ShouldBe(ours);
+    }
+
+    /// <summary>
+    /// #161: <c>onDelete: "restrict"</c> still refuses a delete when the reference is the <c>(tenant_id, id)</c> key —
+    /// the restrict action rides on the tenant guard itself, so moving the key must not have dropped it.
+    /// </summary>
+    [Fact]
+    public async Task Deleting_a_row_a_restricting_scoped_reference_names_is_refused()
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+        var north = NewContext(TenantId.New());
+        var parent = (Guid)(await CreateWorkOrderAsync(data, north, "WO-NORTH"))["id"]!;
+        await CreateChildAsync(data, north, Visits, parent);
+
+        var refusal = await Should.ThrowAsync<AlvoConstraintViolationException>(
+            () => data.DeleteAsync(WorkOrders, parent, north, cancellationToken: Ct));
+        var batchRefusal = await Should.ThrowAsync<AlvoConstraintViolationException>(
+            () => data.DeleteManyAsync(WorkOrders, [parent], north, cancellationToken: Ct));
+
+        ShouldBeTheRestrictRefusal(refusal);
+        ShouldBeTheRestrictRefusal(batchRefusal);
+        (await data.GetAsync(WorkOrders, parent, north, Ct)).ShouldNotBeNull("a refused delete must leave the row alone");
+    }
+
+    /// <summary>#161: <c>onDelete: "cascade"</c> over the <c>(tenant_id, id)</c> key still removes the children.</summary>
+    [Fact]
+    public async Task Deleting_a_row_cascades_to_its_scoped_children()
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+        var north = NewContext(TenantId.New());
+        var parent = (Guid)(await CreateWorkOrderAsync(data, north, "WO-NORTH"))["id"]!;
+        var task = (Guid)(await CreateChildAsync(data, north, Tasks, parent))["id"]!;
+
+        await data.DeleteAsync(WorkOrders, parent, north, cancellationToken: Ct);
+
+        (await data.GetAsync(Tasks, task, north, Ct)).ShouldBeNull();
+    }
+
+    /// <summary>
+    /// #161: <c>onDelete: "setNull"</c> over the <c>(tenant_id, id)</c> key clears the reference and only the reference.
+    /// </summary>
+    /// <remarks>
+    /// A composite <c>SET NULL</c> that nulled every column of the key would null the child's <c>tenant_id</c> too — a
+    /// <c>NOT NULL</c> failure at best, and a row no tenant owns at worst. Reading the child back <b>as north</b> is what
+    /// proves its tenant survived: a row whose <c>tenant_id</c> moved is invisible to its old tenant.
+    /// </remarks>
+    [Fact]
+    public async Task Deleting_a_row_clears_its_scoped_set_null_references_and_keeps_their_tenant()
+    {
+        var data = await CreateAsync(Schema, Descriptor);
+        var north = NewContext(TenantId.New());
+        var parent = (Guid)(await CreateWorkOrderAsync(data, north, "WO-NORTH"))["id"]!;
+        var note = (Guid)(await CreateChildAsync(data, north, Notes, parent))["id"]!;
+
+        await data.DeleteAsync(WorkOrders, parent, north, cancellationToken: Ct);
+
+        var stored = await data.GetAsync(Notes, note, north, Ct);
+        stored.ShouldNotBeNull("the note keeps its tenant, so north still reads it");
+        stored![WorkOrderId].ShouldBeNull();
+    }
+
     private const string WorkOrders = "work_orders";
 
     private const string LineItems = "line_items";
 
     private const string Codes = "codes";
+
+    private const string Visits = "visits";
+
+    private const string Tasks = "tasks";
+
+    private const string Notes = "notes";
+
+    private const string WorkOrderId = "work_order_id";
 
     private static Task<AlvoRecord> CreateWorkOrderAsync(IAlvoData data, AlvoContext caller, string reference) =>
         data.CreateAsync(
@@ -247,13 +408,59 @@ public abstract class AlvoDataConstraintTests
             caller,
             cancellationToken: Ct);
 
+    private static Task<AlvoRecord> CreateChildAsync(IAlvoData data, AlvoContext caller, string child, Guid workOrderId) =>
+        data.CreateAsync(
+            child,
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = caller.Tenant!.Value.Value,
+                [WorkOrderId] = workOrderId,
+            },
+            caller,
+            cancellationToken: Ct);
+
+    private static Task<AlvoRecord> RepointChildAsync(IAlvoData data, AlvoContext caller, string child, Guid row, Guid workOrderId) =>
+        data.UpdateAsync(
+            child,
+            row,
+            new Dictionary<string, object?>(StringComparer.Ordinal) { [WorkOrderId] = workOrderId },
+            caller,
+            cancellationToken: Ct);
+
+    private static async Task<IReadOnlyList<AlvoRecord>> ListChildrenAsync(IAlvoData data, AlvoContext caller, string child) =>
+        (await data.QueryAsync(new AlvoQuery { Entity = child }, caller, Ct)).Items;
+
+    /// <summary>
+    /// Asserts a refusal of a reference to another tenant's row is the refusal of a reference to no row (#161): kind
+    /// <see cref="AlvoConstraintKind.Referenced"/>, and the same type, kind, fields and message as each other.
+    /// </summary>
+    private static void ShouldBeIndistinguishable(AlvoConstraintViolationException crossTenant, AlvoConstraintViolationException nowhere)
+    {
+        crossTenant.Kind.ShouldBe(AlvoConstraintKind.Referenced);
+        crossTenant.GetType().ShouldBe(nowhere.GetType());
+        crossTenant.Kind.ShouldBe(nowhere.Kind);
+        crossTenant.Fields.ShouldBe(nowhere.Fields);
+        crossTenant.Message.ShouldBe(nowhere.Message);
+    }
+
+    /// <summary>
+    /// Asserts a refused delete is the <c>restrict</c> refusal — kind <see cref="AlvoConstraintKind.Referenced"/>, naming no
+    /// field — whether one row or a batch was deleted. Its wording is the shipped drivers' engine tests' to pin.
+    /// </summary>
+    private static void ShouldBeTheRestrictRefusal(AlvoConstraintViolationException refusal)
+    {
+        refusal.Kind.ShouldBe(AlvoConstraintKind.Referenced);
+        refusal.Fields.ShouldBeEmpty();
+    }
+
     private static AlvoContext NewContext(TenantId tenant) =>
         new() { User = UserId.New(), Roles = new HashSet<Role> { Role.Authenticated }, Tenant = tenant };
 
     /// <summary>
-    /// Three entities, one per shape a constraint fact needs: a tenant-scoped one with a <c>unique</c> field, a
+    /// One entity per shape a constraint fact needs: a tenant-scoped one with a <c>unique</c> field, a
     /// non-scoped one with a <c>unique</c> field (so "scoping narrows it" and "nothing else narrows it" are two
-    /// facts rather than one), and one that references the first with <c>onDelete: "restrict"</c>.
+    /// facts rather than one), a global one that references the first with <c>onDelete: "restrict"</c>, and three
+    /// scoped ones that reference it under each <c>onDelete</c> — the <c>(tenant_id, id)</c> key of #161.
     /// </summary>
     private static AlvoDescriptor Descriptor => new()
     {
@@ -296,7 +503,21 @@ public abstract class AlvoDataConstraintTests
                 },
                 Rules = AllowAll,
             },
+            [Visits] = ScopedChild(OnDeleteAction.Restrict, required: true),
+            [Tasks] = ScopedChild(OnDeleteAction.Cascade, required: true),
+            [Notes] = ScopedChild(OnDeleteAction.SetNull, required: false),
         },
+    };
+
+    /// <summary>A scoped entity whose one <c>ref</c> names <c>work_orders</c> — the #161 shape, one per <c>onDelete</c>.</summary>
+    private static EntityDescriptor ScopedChild(OnDeleteAction onDelete, bool required) => new()
+    {
+        Tenancy = EntityTenancy.Scoped,
+        Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+        {
+            [WorkOrderId] = new() { Type = DescField.Ref, Entity = WorkOrders, Required = required, OnDelete = onDelete },
+        },
+        Rules = AllowAll,
     };
 
     private static AccessRules AllowAll =>
@@ -351,5 +572,27 @@ public abstract class AlvoDataConstraintTests
                 new FieldSchema { Name = "value", Type = SchemaField.String, Required = true, MaxLength = 40, Unique = true },
             ],
         },
+        ScopedChildSchema(Visits, MMLib.Alvo.Schema.OnDelete.Restrict, required: true),
+        ScopedChildSchema(Tasks, MMLib.Alvo.Schema.OnDelete.Cascade, required: true),
+        ScopedChildSchema(Notes, MMLib.Alvo.Schema.OnDelete.SetNull, required: false),
     ]);
+
+    private static EntitySchema ScopedChildSchema(string name, MMLib.Alvo.Schema.OnDelete onDelete, bool required) => new()
+    {
+        Name = name,
+        Tenancy = TenancyMode.Scoped,
+        Fields =
+        [
+            new FieldSchema { Name = AlvoManagedColumns.Id, Type = SchemaField.Uuid, Required = true },
+            new FieldSchema
+            {
+                Name = WorkOrderId,
+                Type = SchemaField.Ref,
+                Required = required,
+                Nullable = !required,
+                Reference = new RefSchema(WorkOrders, onDelete),
+            },
+            new FieldSchema { Name = AlvoManagedColumns.TenantId, Type = SchemaField.Uuid, Required = true, Indexed = true },
+        ],
+    };
 }

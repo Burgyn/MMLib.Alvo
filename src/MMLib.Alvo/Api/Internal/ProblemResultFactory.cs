@@ -551,12 +551,19 @@ internal static class ProblemResultFactory
         StatusCodes.Status409Conflict, AlvoProblemTypes.Conflict, ConflictViolations(exception));
 
     /// <summary>One violation per named field, or one for the whole document when none was named.</summary>
+    /// <remarks>
+    /// A create or update whose <c>ref</c> names a record it cannot point at is <c>referenced</c> like a restricted delete,
+    /// but carries the write's own wording and fix: it is answered alike whether the record exists nowhere or in another
+    /// tenant (#161), and telling its caller to remove the records that point at this one would send them the wrong way.
+    /// </remarks>
     /// <param name="exception">The port's refusal.</param>
     private static IReadOnlyList<AlvoViolation> ConflictViolations(AlvoConstraintViolationException exception) =>
         exception switch
         {
             { Kind: AlvoConstraintKind.Unique, Fields.Count: > 0 } => [.. exception.Fields.Select(UniqueViolation)],
             { Kind: AlvoConstraintKind.Exclusion, Fields.Count: > 0 } => [ExclusionViolation(exception.Fields[0])],
+            { IsUnresolvedReference: true } => [new AlvoViolation(
+                string.Empty, CodeFor(exception.Kind), exception.Message, AlvoConstraintViolationException.UnresolvedReferenceFix)],
             _ => [new AlvoViolation(string.Empty, CodeFor(exception.Kind), exception.Message, FixFor(exception.Kind))],
         };
 

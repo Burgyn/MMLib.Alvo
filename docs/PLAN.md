@@ -104,6 +104,13 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   The line is complete: HX-01…HX-19 are merged, and its follow-ups (#475–#486) are resolved except #475 and #476,
   which need design decisions, and #486, a red mutation gate that is only partly addressed.
   This line runs ahead of F5's close, the way F4 ran beside F3; the marker stays on F5.
+  **End-user accounts and self-service tenancy** — Google sign-in, people who own data, tenants they share
+  with members and invitations, and integrator tokens, chosen per app at three levels in the descriptor; seven
+  stacked slices S0–S6, designed in
+  `docs/superpowers/specs/2026-11-13-end-user-accounts-and-self-service-tenancy-design.md` and sequenced in
+  `docs/superpowers/plans/2026-11-13-accounts-00-master.md` (#36, #140, #210, #376 territory). Prioritised by
+  the maintainer ahead of F5's close; the marker stays on F5. **S0**: a scoped → scoped `ref` is a foreign key
+  over `(tenant_id, id)` (#161, an F6 debt, closed as the initiative's prerequisite). S1 (role provenance) is next.
 
 ## 3a. What closed F4
 
@@ -226,10 +233,11 @@ measurement** (the rule and the full table live in the `mutation.yml` header).
 The remaining debt — **581 non-prose survivors plus 19 unresolved timeouts, 600
 undetected mutants** across the six shards — is tracked in `#245`, with `#241`
 and `#244` for the two causes that are not test debt.
-**`#161`** — a scoped `ref` may name a row in another
-tenant, because the foreign key does not span `(tenant_id, id)`. That is the
-same shape as `#198`, and both are the tenant-isolation seam the composite key
-would close.
+**`#161`** — a scoped `ref` could name a row in another
+tenant, because the foreign key did not span `(tenant_id, id)`. **Closed by S0**
+of the accounts initiative: the key now spans it between two scoped entities
+(`docs/architecture/data-path.md`, *A scoped ref is a key over (tenant_id, id)*).
+`#198` (a composite *primary* key) stays open.
 
 Counts after the triage were **F4 = 5** (four real, plus `#105` closing with its
 PR), F5 = 3, F6 = 45, F7 = 37. **F4 is now 0** — `#24`, `#191` and `#25` closed

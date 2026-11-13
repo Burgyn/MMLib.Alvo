@@ -23,6 +23,10 @@ public abstract partial class DataApiEngineTests
 
     private static readonly TestApiKey _relationsBob = new("relations-bob", ["member"], _relationScopes, _relationsTenant);
 
+    private static readonly Guid _relationsOtherTenant = Guid.NewGuid();
+
+    private static readonly TestApiKey _relationsOtherClerk = new("relations-other-clerk", ["clerk"], _relationScopes, _relationsOtherTenant);
+
     [Fact]
     public async Task A_relation_rule_scopes_list_get_count_and_patch_over_http_on_every_engine()
     {
@@ -89,6 +93,52 @@ public abstract partial class DataApiEngineTests
             "Point 'product_id' at a record that satisfies this check, or change the values the check compares.");
         (await world.CountRowsAsync("order_lines")).ShouldBe(0);
         (await world.CountRowsAsync("alvo_outbox")).ShouldBe(events, "a refused write emits no event");
+    }
+
+    /// <summary>
+    /// #161 over HTTP: an order line of tenant A naming tenant B's product answers exactly as one naming no product — the
+    /// same status and the same problem document, byte for byte once the per-request <c>traceId</c> is removed.
+    /// </summary>
+    /// <remarks>
+    /// The generated route resolves the reference through the caller's own read before the port is reached, so this pins
+    /// the HTTP half of the indistinguishability; the store's <c>(tenant_id, id)</c> key is the port half, pinned by
+    /// <c>AlvoDataConstraintTests</c>.
+    /// </remarks>
+    [Fact]
+    public async Task A_reference_to_another_tenants_row_answers_exactly_as_one_to_no_row_on_every_engine()
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            "relations-desk.alvo.json", [_relationsClerk, _relationsAlice, _relationsOtherClerk]);
+        using var product = await world.SendAsync(HttpMethod.Post, "/api/products", _relationsOtherClerk, body: new JsonObject
+        {
+            ["active"] = true,
+            ["stock"] = 5,
+            ["tenant_id"] = _relationsOtherTenant,
+        });
+        product.StatusCode.ShouldBe(HttpStatusCode.Created, await product.ReadTextAsync());
+
+        using var crossTenant = await PostOrderLineAsync(world, (await product.ReadJsonObjectAsync())["id"]!.GetValue<Guid>());
+        using var nowhere = await PostOrderLineAsync(world, Guid.NewGuid());
+
+        crossTenant.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await crossTenant.ReadTextAsync());
+        nowhere.StatusCode.ShouldBe(crossTenant.StatusCode);
+        (await ProblemWithoutTraceAsync(nowhere)).ShouldBe(await ProblemWithoutTraceAsync(crossTenant));
+        (await world.CountRowsAsync("order_lines")).ShouldBe(0);
+    }
+
+    private static Task<HttpResponseMessage> PostOrderLineAsync(AlvoApiWorld world, Guid product) =>
+        world.SendAsync(HttpMethod.Post, "/api/order_lines", _relationsAlice, body: new JsonObject
+        {
+            ["product_id"] = product,
+            ["quantity"] = 1,
+            ["tenant_id"] = _relationsTenant,
+        });
+
+    private static async Task<string> ProblemWithoutTraceAsync(HttpResponseMessage response)
+    {
+        var problem = await response.ReadJsonObjectAsync();
+        problem.Remove("traceId");
+        return problem.ToJsonString();
     }
 
     private static async Task<Guid> CreateRelatedOrderAsync(AlvoApiWorld world, TestApiKey owner)

@@ -110,6 +110,12 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     /// <c>foreign_key_check(table)</c> per table in scope — the touched tables that still exist, and every table
     /// referencing one of them — or, when the plan names no table (<c>@touched</c> is <c>NULL</c>), every table.
     /// </para>
+    /// <para>
+    /// <b>One row per violating key, at its last column.</b> <c>pragma_foreign_key_list</c> has a row per column of a key,
+    /// so a tenant guard (#161) over <c>(tenant_id, ref)</c> would otherwise answer each violation twice, once at
+    /// <c>tenant_id</c> — a field no descriptor declares. A single-column key's only column and a guard's reference are both
+    /// the key's last.
+    /// </para>
     /// </remarks>
     public MigrationBatchFraming MigrationFraming { get; } = new()
     {
@@ -127,6 +133,7 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
             FROM scope AS s
             JOIN pragma_foreign_key_check(s.name) AS k
             JOIN pragma_foreign_key_list(k."table") AS l ON l.id = k.fkid
+                AND l.seq = (SELECT MAX(c.seq) FROM pragma_foreign_key_list(k."table") AS c WHERE c.id = k.fkid)
             """,
     };
 

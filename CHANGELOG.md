@@ -466,6 +466,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **A scoped `ref` can no longer name another tenant's row** (#161): a reference between two `tenancy: "scoped"`
+  entities is now a foreign key over `(tenant_id, id)`, with a matching alternate key on the target, so the database
+  refuses a row whose reference names another tenant's. A write that tries it through `IAlvoData` is refused as
+  `Referenced` (409 `conflict`, code `referenced`) with the same wording as an id that exists nowhere — no existence
+  oracle — and a delete the key refuses keeps its own wording. `restrict` and `cascade` carry their action on the one
+  composite key; `onDelete: setNull` is one composite key `ON DELETE SET NULL (<ref>)` on PostgreSQL and a single-column
+  `SET NULL` key plus a separate composite guard on SQLite. A scoped → global or global → scoped reference is unchanged.
+  **The emitted DDL changed for every scoped → scoped reference, and there is no upgrade path: a database created before
+  this change keeps the old key and must be recreated.** `setNull` between scoped entities needs PostgreSQL 15 and is
+  refused at plan, at `/entities/{child}/fields/{ref}/onDelete`, on an older server. Dynamic entities are not covered
+  (no driver yet). See `docs/architecture/data-path.md`.
+  A declared rename of a `ref` field, of its entity or of its target now re-creates the reference's foreign key, index
+  and (for a guard) the target's alternate key under the new names; before, on PostgreSQL, renaming a referenced entity
+  failed its apply and a later drop after a field rename named a constraint that did not exist — plain references
+  included.
 - **The data port measures field facets on every write** (#481): `IAlvoData` and `IAlvoTransaction` creates, updates,
   replaces and batches measure each value they are handed against its field's `maxLength`, enum `values`, decimal
   `precision`/`scale` and `format` (the facets the descriptor has; there is no min/max or `pattern` facet) — the HTTP
