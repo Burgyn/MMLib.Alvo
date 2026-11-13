@@ -12,7 +12,8 @@ eval/
 StrykerOutput/
 *.md
 playground/
-# Only the descriptor skills of plugins/alvo enter the context: MMLib.Alvo.Ai embeds them (D33).
+# Only plugins/alvo/skills enters the context: MMLib.Alvo.Ai embeds its alvo-descriptor-* skills (D33); the
+# developer-only alvo-host-extensions rides along unused.
 .claude/
 .claude-plugin/
 plugins/*

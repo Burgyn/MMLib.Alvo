@@ -158,7 +158,7 @@ without growing the always-in-context prompt.
 | D30 | The model sees two more tools. This departs from the reliability plan's Global Constraint "tool set unchanged" | Both are read-only. The iteration cap (12) and the refusal budget (3) are unchanged |
 | D31 | A **skill-read grader** (`SkillsRead`) runs on every turn, as D21 does. A proposal that touches an area fails when that area's skill was not loaded before the first dry run touching it | Otherwise "knows Alvo" is ungraded. This makes existing cases stricter; the pass bar itself is unchanged |
 | D32 | Size limits are test-enforced (§7.4 AC 2) | They keep the always-in-context budget flat and a loaded skill well under the standard's 5k tokens |
-| D33 | **One source, two consumers** (maintainer ruling, 2026-09-29): the descriptor skills live in `.claude/skills/alvo-descriptor-<area>/SKILL.md`, where Claude Code discovers them for work in this repository. `MMLib.Alvo.Ai` embeds exactly those directories through an `EmbeddedResource` glob, never a copy. A build that finds none fails. The Docker context carries them. Bodies are tool-neutral where the two consumers differ: the rule first, then one line *"In the dashboard: `check_change` / `propose_change` / `get_capabilities`. In this repo: edit the descriptor file, then the validator via `dotnet test` or the Management API."* Each `description` says when to use the skill, so it triggers in Claude Code and reads well in the agent's list | A skill that teaches the assistant a rule is the same text a developer's agent needs, and two copies would drift. The `alvo-descriptor-` prefix keeps them apart from the dev-discipline `alvo-*` skills. It supersedes the draft's `src/MMLib.Alvo.Ai/Skills/` location |
+| D33 | **One source, two consumers** (maintainer ruling, 2026-09-29): the descriptor skills live in `.claude/skills/alvo-descriptor-<area>/SKILL.md`, where Claude Code discovers them for work in this repository. `MMLib.Alvo.Ai` embeds exactly those directories through an `EmbeddedResource` glob, never a copy. A build that finds none fails. The Docker context carries them. Bodies are tool-neutral where the two consumers differ: the rule first, then one line *"In the dashboard: `check_change` / `propose_change` / `get_capabilities`. In this repo: edit the descriptor file, then the validator via `dotnet test` or the Management API."* Each `description` says when to use the skill, so it triggers in Claude Code and reads well in the agent's list | A skill that teaches the assistant a rule is the same text a developer's agent needs, and two copies would drift. The `alvo-descriptor-` prefix keeps them apart from the dev-discipline `alvo-*` skills. It supersedes the draft's `src/MMLib.Alvo.Ai/Skills/` location. *Amended 2026-11-13 (location only, the ruling stands): since f2d464be the skills live in `plugins/alvo/skills/alvo-descriptor-<area>/`, the `alvo` Claude Code plugin; Claude Code discovers them in this repository only with that plugin installed.* |
 | D34 | The eval's per-turn ≤ 6 tool-call invariant counts **management tools only**. Skill reads (`load_skill` and `read_skill_resource`) are bounded separately at ≤ 4 per turn | The ≤ 6 bar predates skills. Without the split, a turn that loads two skills, reads one resource and proposes after one refusal fails the invariant for doing what the instructions ask. A separate bar still catches a model that browses the catalogue |
 | D35 | The CEL-profile regions are drift-tested by **probing `CelCompiler.Compile(source, profile, entity)`** (Host.Tests), not by reading `CelTypeChecker._allowedProfiles` | The table and its key enum `CelConstructKind` are `private`. A probe of each stated example against its profile is the drift test the Computed quotes already use (`InstructionExampleOutcomeTests`), and it needs no core change |
 | D36 | The eval cases (§7.5) are retargeted from the draft to what `bike-workshop` does not already contain, and to what this build truly refuses | `service_orders` already sets `completed_at` in a `mutate` hook. `customers.bikes_count` already exists. `bikes.frame_number` is already unique. **Webhook and email after-hook actions are delivered** (`rentals` posts to `rental-desk`), so the draft's `webhook_on_finish` and `can_alvo_email` would have graded a correct answer as a failure, the D6 trap. The refused action types are `function`, `http.call` and `entity.update` |
@@ -166,7 +166,7 @@ without growing the always-in-context prompt.
 
 ### 7.3 The skill set
 
-These are nine skills, each `.claude/skills/alvo-descriptor-<area>/SKILL.md`. **G** marks a drift-tested region.
+These are nine skills, each `plugins/alvo/skills/alvo-descriptor-<area>/SKILL.md` (`.claude/skills/` until f2d464be; see D33). **G** marks a drift-tested region.
 
 | Area | What it teaches | G region → source (test home) |
 |---|---|---|
@@ -252,7 +252,7 @@ Worked examples in a skill use the base prompt's `<!-- example: name -->` + two-
 
 ### 7.4 Acceptance criteria
 
-1. `.claude/skills/` holds exactly **9** `alvo-descriptor-*` directories. Each `SKILL.md` has frontmatter with only
+1. `plugins/alvo/skills/` (`.claude/skills/` until f2d464be) holds exactly **9** `alvo-descriptor-*` directories. Each `SKILL.md` has frontmatter with only
    `name` and `description`, `name` equals the directory name, and `new AgentSkillFrontmatter(name, description)`
    accepts both.
 2. **Sizes**, measured in UTF-8 after LF normalisation:
@@ -271,7 +271,7 @@ Worked examples in a skill use the base prompt's `<!-- example: name -->` + two-
 5. Every **G** region equals its source. Every skill worked example gets its claimed outcome from the real validator
    on `bike-workshop`. Every `schema/project.schema.json#` pointer resolves. Every snake_case name in a skill's code
    spans is a tool, schema or `bike-workshop` name.
-6. The embedded catalogue equals `.claude/skills/alvo-descriptor-*` after LF normalisation. `docker build` over
+6. The embedded catalogue equals `plugins/alvo/skills/alvo-descriptor-*` after LF normalisation. `docker build` over
    `src/MMLib.Alvo.Host/Dockerfile` succeeds, and the packed `MMLib.Alvo.Ai.dll` carries 9 `SKILL.md` resources and the
    schema.
 7. `schema-assistant.md` is **v4**. Its tools section lists all eight tools, it states the load-skill rule, and §4 is

@@ -51,7 +51,7 @@ A field's `sequence` makes Alvo number each create — gapless, never reused, co
   `"SO-{yyyy}-{n:4}"` gives SO-2026-0042. Exactly one `{n}`, or `{n:4}` to pad to four digits (1 to 18), plus any
   of `{yyyy}` `{yy}` `{MM}` `{dd}` from the create's date.
 - `per` names a required, stored string, integer, enum, ref, uuid, date or boolean field a caller writes: each value
-  counts on its own — never a computed, rollup, sequence or virtual field. `period` (`year`, `month` or `day`) restarts the count each calendar period; dates read in `timeZone` (IANA, e.g. `"Europe/Bratislava"`; default UTC). `start` is the first
+  counts on its own — never a computed, rollup, sequence or virtual field. `period` (`year`, `month` or `day`) restarts the count each calendar period; dates read in `timeZone` (IANA, e.g. `"Europe/Bratislava"`; default UTC; changing it later never restarts a count). `start` is the first
   number, 1 by default.
 - Alvo writes the value: a write that sends it is refused 403. `default`, `computed`, `rollup`, `maxLength`, `virtual`
   and a field-level `format` (such as `email`) are each refused beside it. A rolled-back create gives its number back. Not accepted on a `storage: dynamic` entity.
@@ -83,4 +83,4 @@ A field's `sequence` makes Alvo number each create — gapless, never reused, co
 ```
 
 In the dashboard: read with `get_descriptor`, then `check_change` or `propose_change` the operations.
-In this repo: edit `examples/**/*.alvo.json` or your own descriptor, then run `scripts/test-ring0` or `PUT …/descriptor?dryRun=true`.
+In this repo: dry-run the edited `*.alvo.json`: `PUT /management/projects/<project>/descriptor?dryRun=true` (Alvo repo: `scripts/test-ring0`).

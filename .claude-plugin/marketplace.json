@@ -9,7 +9,7 @@
     {
       "name": "alvo",
       "source": "./plugins/alvo",
-      "description": "Teaches your coding agent the Alvo descriptor: entities, fields, rules (CEL), hooks, rollups, indexes, tenancy, access, limits."
+      "description": "Teaches your coding agent the Alvo descriptor: entities, fields, rules (CEL), hooks, rollups, indexes, tenancy, access, limits, automation; and, as a last resort, an embedded host's C# extensions."
     }
   ]
 }

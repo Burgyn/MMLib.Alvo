@@ -9,14 +9,15 @@
 #   curl -fsSL https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/scripts/install-agent-skills | sh
 #   curl -fsSL https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/scripts/install-agent-skills | sh -s -- ~/.claude/skills
 #
-# Downloads the nine alvo-descriptor-* skills (the same Markdown the dashboard's schema assistant loads, published as
-# the alvo plugin in plugins/alvo/skills) into <dir>/alvo-descriptor-*/SKILL.md. <dir> defaults to .claude/skills, a
+# Downloads every skill of the alvo plugin (plugins/alvo/skills) into <dir>/<skill>/SKILL.md: the nine
+# alvo-descriptor-* skills, the same Markdown the dashboard's schema assistant loads, and alvo-host-extensions, the
+# developer-only skill for an embedded host's C# (the assistant never loads it). <dir> defaults to .claude/skills, a
 # project's own skills folder; pass ~/.claude/skills for every project, or another agent's skills folder. An existing
 # SKILL.md is replaced.
 # Any failed download stops the script with a non-zero exit, so a half-installed set never looks complete.
 #
 # ALVO_SKILLS_BASE overrides where the files come from (a branch, a tag, or a local file:// clone).
-# The list below must name every plugins/alvo/skills/alvo-descriptor-* directory; a DocsGen test keeps it complete.
+# The list below must name every plugins/alvo/skills/* directory; a DocsGen test keeps it complete.
 set -eu
 
 SKILLS="
@@ -29,6 +30,7 @@ alvo-descriptor-indexes
 alvo-descriptor-project-access
 alvo-descriptor-rules-and-cel
 alvo-descriptor-traits-and-tenancy
+alvo-host-extensions
 "
 
 base="${ALVO_SKILLS_BASE:-https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/plugins/alvo/skills}"
