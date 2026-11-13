@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Classifies a PR's diff for .github/workflows/ci.yml: docs-only, or everything.
+#
+#   scripts/ci-changes <base-sha> [<head-ref>]   prints `full=true|false` and `os=<json>` lines
+#
+# Docs-only means every changed path is documentation nothing but the fast (ring0) modules read:
+#   website/**                    the docs site; DocsGen.Tests, DocsSnippets.Tests, Schema.Tests and
+#                                 MMLib.Alvo.Tests read it by path, all ring0
+#   docs/** except docs/design/f5-admin/**   prose; the prototype has its own scenarios job
+#   <root>/*.md                   README/CHANGELOG/CONTRIBUTING; DocsGen.Tests reads the README
+# Such a PR runs build + format + ring0 on Linux only; Windows, ring1/ring2 integration, both e2e
+# suites and packing are skipped, because none of them reads those files. Anything else — any
+# other path, an empty or unreadable diff — is `full=true`: the failure mode is a slower PR, never
+# a skipped gate.
+set -euo pipefail
+BASE="${1:?usage: ci-changes <base-sha> [<head-ref>]}"
+HEAD="${2:-HEAD}"
+FULL='full=true'
+OS_ALL='os=["ubuntu-latest","windows-latest"]'
+
+is_docs() {
+  case "$1" in
+    docs/design/f5-admin/*) return 1 ;;
+    website/*|docs/*) return 0 ;;
+    */*) return 1 ;;
+    *.md) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+if ! files="$(git diff --name-only "$BASE...$HEAD" 2>/dev/null)" || [ -z "$files" ]; then
+  echo "[ci-changes] diff unreadable or empty: everything" >&2
+  echo "$FULL"; echo "$OS_ALL"; exit 0
+fi
+
+while IFS= read -r path; do
+  if ! is_docs "$path"; then
+    echo "[ci-changes] $path is not docs-only: everything" >&2
+    echo "$FULL"; echo "$OS_ALL"; exit 0
+  fi
+done <<< "$files"
+
+echo "[ci-changes] docs-only: $(wc -l <<< "$files" | tr -d ' ') file(s)" >&2
+echo 'full=false'
+echo 'os=["ubuntu-latest"]'
