@@ -24,7 +24,7 @@ internal sealed class PostgreSqlMigrationsSqlGenerator : NpgsqlMigrationsSqlGene
     /// <inheritdoc />
     protected override void ForeignKeyConstraint(AddForeignKeyOperation operation, IModel? model, MigrationCommandListBuilder builder)
     {
-        if (operation.OnDelete != ReferentialAction.SetNull || TenantGuards.GuardedField(operation.Columns) is not { } field)
+        if (operation.OnDelete != ReferentialAction.SetNull || !TenantGuards.IsGuard(operation) || TenantGuards.GuardedField(operation.Columns) is not { } field)
         {
             base.ForeignKeyConstraint(operation, model, builder);
             return;

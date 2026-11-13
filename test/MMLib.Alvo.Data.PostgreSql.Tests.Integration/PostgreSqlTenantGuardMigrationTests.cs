@@ -11,7 +11,7 @@ namespace MMLib.Alvo.Data.PostgreSql.Tests.Integration;
 /// The tenant guard (#161) on PostgreSQL: a scoped reference spans <c>(tenant_id, id)</c>, and <c>onDelete: setNull</c> must
 /// clear only the reference column — PostgreSQL 15's <c>ON DELETE SET NULL (column)</c>.
 /// </summary>
-public sealed class PostgreSqlTenantGuardMigrationTests : IClassFixture<PostgresFixture>, IDisposable
+public sealed class PostgreSqlTenantGuardMigrationTests : TenantGuardMigrationFacts, IClassFixture<PostgresFixture>, IDisposable
 {
     private readonly ServiceProvider _services;
 
@@ -30,9 +30,9 @@ public sealed class PostgreSqlTenantGuardMigrationTests : IClassFixture<Postgres
         _services = builder.Services.BuildServiceProvider();
     }
 
-    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+    protected override IServiceProvider Services => _services;
 
-    private ISchemaMigrator Migrator => _services.GetRequiredService<ISchemaMigrator>();
+    protected override bool Runnable => !OperatingSystem.IsWindows();
 
     [Fact]
     public async Task A_scoped_set_null_reference_names_the_column_it_clears()
@@ -44,6 +44,19 @@ public sealed class PostgreSqlTenantGuardMigrationTests : IClassFixture<Postgres
         var sql = string.Join("\n", plan.Sql);
         sql.ShouldContain("ON DELETE SET NULL (work_order_id)");
         sql.ShouldNotContain("FOREIGN KEY (work_order_id) REFERENCES");
+    }
+
+    [Fact]
+    public async Task Restrict_and_cascade_guards_are_emitted_unchanged()
+    {
+        Assert.SkipUnless(Runnable, "PostgreSQL Testcontainers requires a Linux Docker daemon.");
+
+        var plan = await Migrator.PlanAsync(new SchemaModel([]), TenantGuardSchemas.AllActions(), new MigrationOptions(), Ct);
+
+        var sql = string.Join("\n", plan.Sql);
+        sql.ShouldContain("ON DELETE CASCADE");
+        sql.ShouldContain("ON DELETE RESTRICT");
+        System.Text.RegularExpressions.Regex.Matches(sql, "SET NULL \\(").Count.ShouldBe(1);
     }
 
     public void Dispose()

@@ -42,7 +42,7 @@ public static class TenantGuardSchemas
         Tenancy = TenancyMode.Scoped,
         Fields = [
             Id(),
-            new FieldSchema { Name = "work_order_id", Type = FieldType.Ref, Required = required, Reference = new RefSchema("work_orders", onDelete) },
+            new FieldSchema { Name = "work_order_id", Type = FieldType.Ref, Required = required, Nullable = !required, Reference = new RefSchema("work_orders", onDelete) },
             TenantId(),
         ],
     };
