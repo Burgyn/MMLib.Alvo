@@ -9,13 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Docs: an explicit "Extending in code" section**: the sidebar lists every page under `extending/` (adds *Shape what reads
+  return*, *Rules over relations* and *State machines and timers*), the section's index is grouped into six areas and says the
+  host-extensibility line is complete, the roadmap no longer lists `automation` or the C# `functions` as not running, and the
+  README gains an *Extend it in C#* section.
 - **Declarative timers reach existing rows** (HX-18 follow-up, issue 483): the first apply that adds a timer to an entity,
   or changes its `at`, `when` or `event`, starts a framework data migration (`alvo.migration.timers.<entity>`, one run
   spanning tenants) that re-plans every stored row, 100 per transaction — arming a due still ahead, moving one armed at
   another time, cancelling one whose `when` is now false — so re-running it changes nothing. A lapsed due with no armed
   timer is not armed. Docs: *State machines and timers*.
-||||||| 8db94f7e
-||||||| f1015b3b
 - **An apply cancels the unfinished deliveries of a descriptor action it no longer declares** (#480): editing or removing
   an after-hook action, an automation action, its condition or a rule's trigger makes a new subscriber id, and the old
   one's `pending`/`retrying`/`running` deliveries used to stay on Operations forever. After each committed apply, rollback
@@ -28,7 +30,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "Not declared" is judged only against the database's current revision: a boot or a code-first apply whose descriptor
   differs from the stored one (an older worker over the same database) sweeps nothing.
 
-||||||| 8db94f7e
 - **A sequence's `timeZone`** (#479, HX-12 D6): `sequence.timeZone`, an IANA id such as `"Europe/Bratislava"`, makes
   the `period` and the `{yyyy}` `{yy}` `{MM}` `{dd}` tokens read the create's calendar date in that zone — a
   `period: day` count runs from local midnight to local midnight, 23 or 25 hours on a DST day. Absent, both stay UTC,
@@ -1170,8 +1171,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the server over a bare `value`, so an echo that arrived between two keys rewound the text and the next key
   landed on the rewound term ("grac" could become "gac", which matches nothing); it is now bound with `@bind`, whose
   echo is suppressed while it equals what the browser sent.
-||||||| 4b0f25d7
-||||||| cd77e7ff
 - **A PostgreSQL deadlock (`40P01`) is a retryable refusal, not a 500** (issue 443, HX-11 Ruling 74's residual). A write
   the database fails to break a deadlock — two transaction units taking the same rows or exclusion keys in opposite
   order — throws the new public `AlvoTransientConflictException` (the data port's eighth exception family, the engine's
@@ -1179,7 +1178,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same request is expected to succeed. An apply or rollback the database fails — a parent's cascade delete against the
   backfill's child locks — answers like a lock timeout: 409 `conflict` with `Retry-After: 5` and a detail that says
   deadlock, a refused start at boot. Nothing is retried automatically. SQLite, with one writer, raises none.
-||||||| 4b0f25d7
 - **An exclusion per a `boolean` field on PostgreSQL older than 15** (#477, HX-12) is refused at apply, at
   `/entities/<e>/indexes/<i>/fields/<n>`, naming PostgreSQL 15 as the minimum, instead of failing in the DDL: btree_gist
   compares a boolean only from 1.7. The prerequisite probe reads `server_version_num` and, once btree_gist is installed,

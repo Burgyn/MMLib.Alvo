@@ -1,6 +1,6 @@
 ---
 title: Extending in code
-description: When the descriptor cannot say it, write C# in your host — through the same pipeline and guarantees the descriptor's own hooks use. What exists today, and what lands next.
+description: When the descriptor cannot say it, write C# in your host — through the same pipeline and guarantees the descriptor's own hooks use. What exists today.
 sidebar:
   order: 0
 ---
@@ -13,40 +13,68 @@ Start with [Where logic goes](/extending/where-logic-goes/): the first question 
 
 ## What exists in this build
 
+The host-extensibility line is complete: every page below describes something that runs. They fall into six groups.
+
+### Where logic goes, and how it is called
+
+- [Where logic goes](/extending/where-logic-goes/) — descriptor, CEL function, hook, handler or command: which one fits.
 - [Custom CEL functions](/guides/custom-cel-functions/) — pure, synchronous, in the write's transaction.
 - [Call Alvo from your endpoints](/guides/call-from-endpoints/) — `IAlvoData` and `IAlvoEvents.PublishAsync`.
-- [The event envelope](/extending/event-envelope/) — what every event carries: who acted, in which tenant and flow,
-  and which fields it leaves out.
-- [React to changes (event handlers)](/extending/event-handlers/) — C# after a write commits: at least once, retried,
-  in order per record.
 - [Typed or CEL](/extending/typed-or-cel/) — handlers over your own classes, conditions as lambdas, typed reads.
 - [Generated types](/extending/generated-types/) — typed classes, enums, patches and role constants the build
   generates from your descriptor or a Management API snapshot.
-- [See your extensions in the dashboard](/extending/extension-catalog/) — the catalog, the Lifecycle tab, and the apply
-  guard.
-- [Operate deliveries](/extending/operate-deliveries/) — history, pause, redeliver, replay and fixtures for your handlers.
+- [Commands and inbound webhooks](/extending/commands/) — named, access-ruled actions over HTTP or in process; Standard Webhooks received verified and once.
+- [HTTP conventions](/extending/http-conventions/) — Alvo's caller on your own endpoints, conventions on one entity's routes, and the gate that stays on.
+
+### Writes
+
 - [Validate and guard writes](/extending/write-hooks/) — C# in a write: validate before its transaction, guard and
   complete inside it, with the caller's rules applied to everything a hook does.
-- [Shape what reads return](/extending/reads/) — narrow which rows a caller reads, and hide a field or fill a virtual
-  one in every returned row, after the rules.
+- [Transactions in your own code](/extending/transactions/) — several writes, batches and events as one unit, with savepoints and a time limit.
 - [Integrity in the descriptor](/extending/integrity/) — a field's `validation` as a `CHECK` the database enforces, a
   rollup that counts some children, and time with `now()` and durations.
 - [Rules over relations](/extending/relation-rules/) — a rule that follows a ref or reaches the records that point
   here, always through the related entity's own list rule; lookup checks against a related row.
-- [Analyzer rules](/extending/analyzer-rules/) — `ALVO1001`, shipped inside `MMLib.Alvo`: what it reports in hooks and
-  CEL functions that run inside the write's transaction, and what it cannot see.
-- [Transactions in your own code](/extending/transactions/) — several writes, batches and events as one unit, with savepoints and a time limit.
+- [State machines and timers](/extending/state-machines/) — the values a status field may move between, as named
+  transitions with roles and a condition; per-record timers armed, moved and cancelled in the write's transaction.
+
+### Events and deliveries
+
+- [The event envelope](/extending/event-envelope/) — what every event carries: who acted, in which tenant and flow,
+  and which fields it leaves out.
+- [React to changes (event handlers)](/extending/event-handlers/) — C# after a write commits: at least once, retried,
+  in order per record.
+- [Multi-step side effects](/extending/steps/) — named steps that each complete once, sleeping, debouncing and
+  concurrency limits.
+- [Functions in the descriptor](/extending/functions/) — a C# function registered with `AddFunction`, called from an
+  after-hook or an automation rule.
+- [Automation](/extending/automation/) — event and cron rules in the descriptor, each action its own retried delivery.
+- [Operate deliveries](/extending/operate-deliveries/) — history, pause, redeliver, replay and fixtures for your handlers.
+
+### Time
+
 - [Time: timers and schedules](/extending/time/) — a keyed timer that fires once at its latest time, a cron schedule
   that runs once across replicas, a data migration that runs once per revision.
-- [Commands and inbound webhooks](/extending/commands/) — named, access-ruled actions over HTTP or in process; Standard Webhooks received verified and once.
-- [HTTP conventions](/extending/http-conventions/) — Alvo's caller on your own endpoints, conventions on one entity's routes, and the gate that stays on.
+
+### Reads
+
+- [Shape what reads return](/extending/reads/) — narrow which rows a caller reads, and hide a field or fill a virtual
+  one in every returned row, after the rules.
+
+### Seeing, checking and testing
+
+- [See your extensions in the dashboard](/extending/extension-catalog/) — the catalog, the Lifecycle tab, and the apply
+  guard.
+- [Analyzer rules](/extending/analyzer-rules/) — `ALVO1001`, shipped inside `MMLib.Alvo`: what it reports in hooks and
+  CEL functions that run inside the write's transaction, and what it cannot see.
 - [Testing your backend](/extending/testing/) — `MMLib.Alvo.TestHost`: your descriptor through the real pipeline,
   inside a unit test, with event delivery on your schedule.
 
-## What lands next
+## The line is complete
 
-The rest of the host-extensibility line arrives one release at a time; each page appears here when its feature ships. The design is public:
-[host extensibility](https://github.com/Burgyn/MMLib.Alvo/issues/370).
+Nothing in the host-extensibility line is still to come. The design, and the history of how it was built, is
+[host extensibility](https://github.com/Burgyn/MMLib.Alvo/issues/370); a few follow-ups are open there, and the
+[Roadmap](/project/roadmap/) lists what this build still does not run.
 
 ## One limit already enforced
 
