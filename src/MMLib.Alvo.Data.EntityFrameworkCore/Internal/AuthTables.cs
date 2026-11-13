@@ -201,4 +201,66 @@ internal sealed class AuthTables(string schemaPrefix)
 
     /// <summary>Gets the statement replacing an account's display name.</summary>
     internal string SetDisplayNameSql => $"UPDATE {Accounts} SET display_name = @display_name WHERE id = @account_id";
+
+    /// <summary>
+    /// Gets the statement reading a refresh token with its child (if any), its session and its account's disabled stamp —
+    /// everything a refresh judges, in one read.
+    /// </summary>
+    internal string RefreshTokenSql =>
+        $"""
+        SELECT t.session_id, t.created_at, t.rotated_at, c.id, s.account_id, s.provider, s.revoked_at, s.expires_at, a.disabled_at
+          FROM {RefreshTokens} t
+          JOIN {Sessions} s ON s.id = t.session_id
+          JOIN {Accounts} a ON a.id = s.account_id
+          LEFT JOIN {RefreshTokens} c ON c.parent_id = t.id
+         WHERE t.id = @token_id
+        """;
+
+    /// <summary>
+    /// Gets the statement rotating an unrotated token. Matching no row means a concurrent refresh rotated it first: on
+    /// PostgreSQL this statement waited on that refresh's row lock and re-checked <c>rotated_at IS NULL</c> against its
+    /// committed row.
+    /// </summary>
+    internal string RotateSql => $"UPDATE {RefreshTokens} SET rotated_at = @now WHERE id = @token_id AND rotated_at IS NULL";
+
+    /// <summary>Gets the statement stamping a live session's last refresh; matching no row means it died meanwhile.</summary>
+    internal string TouchSessionSql =>
+        $"UPDATE {Sessions} SET last_refreshed_at = @now WHERE id = @session_id AND revoked_at IS NULL AND expires_at > @now";
+
+    /// <summary>Gets the statement revoking one session; a revoked one keeps its first instant and reason.</summary>
+    internal string RevokeSessionSql =>
+        $"""
+        UPDATE {Sessions} SET revoked_at = COALESCE(revoked_at, @now), revoked_reason = COALESCE(revoked_reason, @reason)
+         WHERE id = @session_id
+        """;
+
+    /// <summary>Gets the statement revoking every live session of one account.</summary>
+    internal string RevokeAccountSessionsSql =>
+        $"UPDATE {Sessions} SET revoked_at = @now, revoked_reason = @reason WHERE account_id = @account_id AND revoked_at IS NULL";
+
+    /// <summary>Gets the statement disabling an account; a disabled one keeps its first instant.</summary>
+    internal string DisableAccountSql => $"UPDATE {Accounts} SET disabled_at = COALESCE(disabled_at, @now) WHERE id = @account_id";
+
+    /// <summary>Gets the statement enabling an account.</summary>
+    internal string EnableAccountSql => $"UPDATE {Accounts} SET disabled_at = NULL WHERE id = @account_id";
+
+    /// <summary>Gets the statement storing a key unless its purpose and generation already has one.</summary>
+    internal string InsertKeySql =>
+        $"""
+        INSERT INTO {Keys} (kid, purpose, generation, material, created_at, retires_at)
+        VALUES (@kid, @purpose, @generation, @material, @now, NULL)
+        ON CONFLICT (purpose, generation) DO NOTHING
+        """;
+
+    /// <summary>Gets the statement reading the key of one purpose and generation.</summary>
+    internal string KeySql =>
+        $"SELECT purpose, generation, kid, material, created_at, retires_at FROM {Keys} WHERE purpose = @purpose AND generation = @generation";
+
+    /// <summary>Gets the statement reading the unretired keys of one purpose, by generation.</summary>
+    internal string LiveKeysSql =>
+        $"""
+        SELECT purpose, generation, kid, material, created_at, retires_at FROM {Keys}
+         WHERE purpose = @purpose AND (retires_at IS NULL OR retires_at > @now)
+         ORDER BY generation
+        """;
 }

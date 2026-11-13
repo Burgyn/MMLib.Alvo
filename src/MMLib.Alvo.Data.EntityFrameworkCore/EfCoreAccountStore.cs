@@ -30,21 +30,27 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// <c>SystemSchemaInitializer</c> creates them at boot.
 /// </para>
 /// </remarks>
-internal sealed class EfCoreAccountStore : IAccountStore
+internal sealed partial class EfCoreAccountStore : IAccountStore
 {
     private readonly RelationalConnectionFactory _connections;
     private readonly AuthTables _tables;
+    private readonly SecretCipher? _cipher;
     private readonly OnceDdl _ddl;
 
     /// <summary>Creates the store.</summary>
     /// <param name="connections">The database's connections and write gate.</param>
     /// <param name="options">The options whose schema prefix names the tables.</param>
-    public EfCoreAccountStore(RelationalConnectionFactory connections, AlvoOptions options)
+    /// <param name="cipher">
+    /// The deployment's secret cipher, which seals every key's material; <see langword="null"/> when no key file is mounted,
+    /// and then every key operation is refused naming the setting.
+    /// </param>
+    public EfCoreAccountStore(RelationalConnectionFactory connections, AlvoOptions options, SecretCipher? cipher)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(options);
         _connections = connections;
         _tables = new AuthTables(options.SchemaPrefix);
+        _cipher = cipher;
         _ddl = new OnceDdl(EnsureTablesAsync);
     }
 
@@ -255,7 +261,9 @@ internal sealed class EfCoreAccountStore : IAccountStore
 
     private static string Id(UserId id) => Id(id.Value);
 
-    private static UserId UserIdOf(string text) => new(Guid.Parse(text, CultureInfo.InvariantCulture));
+    private static UserId UserIdOf(string text) => new(GuidOf(text));
+
+    private static Guid GuidOf(string text) => Guid.Parse(text, CultureInfo.InvariantCulture);
 
     private static string Instant(DateTimeOffset instant) => StoredInstant.Text(instant.ToUniversalTime());
 

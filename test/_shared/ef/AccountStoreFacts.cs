@@ -25,6 +25,10 @@ public abstract class AccountStoreFacts : IAsyncDisposable
 
     private static readonly TimeSpan _session = TimeSpan.FromDays(180);
 
+    private static readonly TimeSpan _grace = TimeSpan.FromSeconds(10);
+
+    private static readonly TimeSpan _idle = TimeSpan.FromDays(30);
+
     private static readonly string[] _authTables =
         ["alvo_auth_accounts", "alvo_auth_identities", "alvo_auth_sessions", "alvo_auth_refresh_tokens", "alvo_auth_keys"];
 
@@ -190,6 +194,265 @@ public abstract class AccountStoreFacts : IAsyncDisposable
     [Fact]
     public void The_tables_are_reserved_framework_names() =>
         _authTables.Except(AlvoFrameworkTables.NamesFor("alvo"), StringComparer.Ordinal).ShouldBeEmpty();
+
+    [Fact]
+    public async Task A_fresh_refresh_token_rotates_into_one_child()
+    {
+        var (store, services) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+        var refresh = Refresh(session.RefreshTokenId, _now.AddMinutes(1));
+
+        var outcome = await store.RefreshAsync(refresh, Ct);
+
+        outcome.ShouldBe(new RefreshOutcome(RefreshStatus.Rotated, refresh.ChildId, account, session.SessionId, "google"));
+        (await ChildrenAsync(services, session.RefreshTokenId)).ShouldBe(1);
+        (await store.IsSessionLiveAsync(account, session.SessionId, refresh.Now, Ct)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task A_rotated_token_inside_the_grace_window_answers_the_same_child()
+    {
+        var (store, services) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+        var rotated = Refresh(session.RefreshTokenId, _now.AddMinutes(1));
+        await store.RefreshAsync(rotated, Ct);
+
+        var first = await store.RefreshAsync(Refresh(session.RefreshTokenId, rotated.Now.AddSeconds(2)), Ct);
+        var second = await store.RefreshAsync(Refresh(session.RefreshTokenId, rotated.Now.AddSeconds(5)), Ct);
+
+        first.ShouldBe(new RefreshOutcome(RefreshStatus.Replayed, rotated.ChildId, account, session.SessionId, "google"));
+        second.ShouldBe(first);
+        (await ChildrenAsync(services, session.RefreshTokenId)).ShouldBe(1, "a replay inside the window never forks the family");
+    }
+
+    [Fact]
+    public async Task A_rotated_token_after_the_window_revokes_the_session()
+    {
+        var (store, _) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+        var rotated = Refresh(session.RefreshTokenId, _now.AddMinutes(1));
+        await store.RefreshAsync(rotated, Ct);
+
+        var reuse = await store.RefreshAsync(Refresh(session.RefreshTokenId, rotated.Now.AddSeconds(11)), Ct);
+
+        reuse.Status.ShouldBe(RefreshStatus.Reused);
+        (await store.RefreshAsync(Refresh(rotated.ChildId, rotated.Now.AddSeconds(12)), Ct)).Status.ShouldBe(RefreshStatus.Refused);
+        (await store.IsSessionLiveAsync(account, session.SessionId, rotated.Now.AddSeconds(12), Ct)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task The_window_boundary_is_inclusive()
+    {
+        var (store, _) = await StoreAsync();
+        var (_, session) = await SignedInAsync(store);
+        var rotated = Refresh(session.RefreshTokenId, _now.AddMinutes(1));
+        await store.RefreshAsync(rotated, Ct);
+
+        var atTheEdge = await store.RefreshAsync(Refresh(session.RefreshTokenId, rotated.Now.AddSeconds(10)), Ct);
+
+        atTheEdge.Status.ShouldBe(RefreshStatus.Replayed);
+        atTheEdge.ChildId.ShouldBe(rotated.ChildId);
+    }
+
+    [Fact]
+    public async Task A_zero_grace_window_revokes_on_any_reuse()
+    {
+        var (store, _) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+        var rotated = Refresh(session.RefreshTokenId, _now.AddMinutes(1)) with { Grace = TimeSpan.Zero };
+        await store.RefreshAsync(rotated, Ct);
+
+        var reuse = await store.RefreshAsync(rotated with { ChildId = Guid.NewGuid() }, Ct);
+
+        reuse.Status.ShouldBe(RefreshStatus.Reused, "even at the rotation's own instant");
+        (await store.IsSessionLiveAsync(account, session.SessionId, rotated.Now, Ct)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Two_concurrent_refreshes_of_one_token_get_the_same_child()
+    {
+        var (store, services) = await StoreAsync();
+
+        for (var iteration = 0; iteration < Iterations; iteration++)
+        {
+            var (account, session) = await SignedInAsync(store);
+            var at = _now.AddMinutes(1);
+
+            var outcomes = await Task.WhenAll(
+                store.RefreshAsync(Refresh(session.RefreshTokenId, at), Ct),
+                store.RefreshAsync(Refresh(session.RefreshTokenId, at), Ct));
+
+            outcomes.Select(outcome => outcome.Status).ShouldBe([RefreshStatus.Rotated, RefreshStatus.Replayed], ignoreOrder: true);
+            outcomes[0].ChildId.ShouldNotBeNull();
+            outcomes[1].ChildId.ShouldBe(outcomes[0].ChildId);
+            (await ChildrenAsync(services, session.RefreshTokenId)).ShouldBe(1);
+            (await store.IsSessionLiveAsync(account, session.SessionId, at, Ct)).ShouldBeTrue();
+        }
+    }
+
+    [Fact]
+    public async Task An_idle_token_is_refused()
+    {
+        var (store, _) = await StoreAsync();
+        var (_, session) = await SignedInAsync(store);
+        var (_, fresh) = await SignedInAsync(store);
+
+        var idle = await store.RefreshAsync(Refresh(session.RefreshTokenId, _now + _idle), Ct);
+        var justInTime = await store.RefreshAsync(Refresh(fresh.RefreshTokenId, _now + _idle - TimeSpan.FromTicks(1)), Ct);
+
+        idle.ShouldBe(new RefreshOutcome(RefreshStatus.Refused, null, null, null, null));
+        justInTime.Status.ShouldBe(RefreshStatus.Rotated);
+    }
+
+    [Fact]
+    public async Task An_unknown_token_and_an_expired_session_are_refused()
+    {
+        var (store, _) = await StoreAsync();
+        var (_, session) = await SignedInAsync(store);
+
+        (await store.RefreshAsync(Refresh(Guid.NewGuid(), _now), Ct)).Status.ShouldBe(RefreshStatus.Refused);
+        (await store.RefreshAsync(Refresh(session.RefreshTokenId, session.SessionExpiresAt) with { Idle = _session + _session }, Ct))
+            .Status.ShouldBe(RefreshStatus.Refused);
+    }
+
+    [Fact]
+    public async Task A_disabled_account_s_tokens_are_refused_and_its_sessions_revoked()
+    {
+        var (store, services) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+
+        (await store.SetDisabledAsync(account, disabled: true, _now.AddMinutes(1), Ct)).ShouldBeTrue();
+
+        (await store.RefreshAsync(Refresh(session.RefreshTokenId, _now.AddMinutes(2)), Ct)).Status.ShouldBe(RefreshStatus.Refused);
+        (await store.IsSessionLiveAsync(account, session.SessionId, _now.AddMinutes(2), Ct)).ShouldBeFalse();
+        (await RevokedReasonAsync(services, session.SessionId)).ShouldBe(SessionRevocations.Disabled);
+        (await store.SignInAsync(SignIn(session.Identity), Ct)).ShouldBe(new SignInOutcome(SignInStatus.Disabled, null));
+        (await CountAsync(services, AlvoFrameworkTables.AuthSessionsSuffix)).ShouldBe(1, "a refused sign-in starts nothing");
+        (await store.SetDisabledAsync(UserId.New(), disabled: true, _now, Ct)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Enabling_an_account_leaves_its_old_sessions_revoked()
+    {
+        var (store, _) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+        await store.SetDisabledAsync(account, disabled: true, _now.AddMinutes(1), Ct);
+
+        (await store.SetDisabledAsync(account, disabled: false, _now.AddMinutes(2), Ct)).ShouldBeTrue();
+
+        (await store.IsSessionLiveAsync(account, session.SessionId, _now.AddMinutes(3), Ct)).ShouldBeFalse();
+        (await store.RefreshAsync(Refresh(session.RefreshTokenId, _now.AddMinutes(3)), Ct)).Status.ShouldBe(RefreshStatus.Refused);
+        var again = SignIn(session.Identity);
+        (await store.SignInAsync(again, Ct)).ShouldBe(new SignInOutcome(SignInStatus.SignedIn, account));
+        (await store.IsSessionLiveAsync(account, again.SessionId, _now, Ct)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Signing_out_twice_is_the_same_as_once()
+    {
+        var (store, services) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+
+        (await store.RevokeSessionAsync(session.SessionId, SessionRevocations.Logout, _now.AddMinutes(1), Ct)).ShouldBeTrue();
+        (await store.RevokeSessionAsync(session.SessionId, SessionRevocations.Reuse, _now.AddMinutes(2), Ct)).ShouldBeTrue();
+
+        (await RevokedReasonAsync(services, session.SessionId)).ShouldBe(SessionRevocations.Logout, "the first revocation stands");
+        (await store.IsSessionLiveAsync(account, session.SessionId, _now.AddMinutes(3), Ct)).ShouldBeFalse();
+        (await store.RefreshAsync(Refresh(session.RefreshTokenId, _now.AddMinutes(3)), Ct)).Status.ShouldBe(RefreshStatus.Refused);
+        (await store.RevokeSessionAsync(Guid.NewGuid(), SessionRevocations.Logout, _now, Ct)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Two_concurrent_first_keys_converge_on_one()
+    {
+        var (store, services) = await StoreAsync();
+
+        for (var iteration = 0; iteration < Iterations; iteration++)
+        {
+            var purpose = "signing-" + iteration.ToString(CultureInfo.InvariantCulture);
+
+            var keys = await Task.WhenAll(
+                store.EnsureKeyAsync(Candidate(purpose, "kid-a-" + iteration, "material-a"), Ct),
+                store.EnsureKeyAsync(Candidate(purpose, "kid-b-" + iteration, "material-b"), Ct));
+
+            keys[1].Kid.ShouldBe(keys[0].Kid);
+            keys[1].Material.ShouldBe(keys[0].Material);
+            (await store.ReadKeysAsync(purpose, _now, Ct)).ShouldHaveSingleItem().Kid.ShouldBe(keys[0].Kid);
+        }
+
+        (await CountAsync(services, AlvoFrameworkTables.AuthKeysSuffix)).ShouldBe(Iterations);
+    }
+
+    [Fact]
+    public async Task A_key_s_material_is_stored_encrypted()
+    {
+        var (store, services) = await StoreAsync();
+
+        var stored = await store.EnsureKeyAsync(Candidate(AccountKeyPurposes.Signing, "kid-1", "-----PRIVATE KEY-----"), Ct);
+
+        stored.ShouldBe(new StoredKey(AccountKeyPurposes.Signing, 1, "kid-1", "-----PRIVATE KEY-----", _now, null));
+        var raw = (string)(await ScalarAsync(services, $"SELECT material FROM {TableOf(services, AlvoFrameworkTables.AuthKeysSuffix)}"))!;
+        raw.ShouldNotContain("PRIVATE KEY");
+        (await store.ReadKeysAsync(AccountKeyPurposes.Signing, _now, Ct)).ShouldBe([stored]);
+    }
+
+    [Fact]
+    public async Task A_retired_key_is_not_read()
+    {
+        var (store, services) = await StoreAsync();
+        await store.EnsureKeyAsync(Candidate(AccountKeyPurposes.Refresh, "kid-1", "hmac"), Ct);
+        await ScalarAsync(
+            services,
+            $"UPDATE {TableOf(services, AlvoFrameworkTables.AuthKeysSuffix)} SET retires_at = '2026-11-13T10:00:00.0000000+00:00'");
+
+        (await store.ReadKeysAsync(AccountKeyPurposes.Refresh, _now.AddMinutes(59), Ct)).ShouldHaveSingleItem();
+        (await store.ReadKeysAsync(AccountKeyPurposes.Refresh, _now.AddHours(1), Ct)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Without_a_key_file_key_operations_are_refused_naming_the_setting()
+    {
+        var (store, _) = await StoreAsync(withKey: false);
+
+        var ensure = await Should.ThrowAsync<InvalidOperationException>(
+            () => store.EnsureKeyAsync(Candidate(AccountKeyPurposes.Signing, "kid-1", "material"), Ct));
+        var read = await Should.ThrowAsync<InvalidOperationException>(() => store.ReadKeysAsync(AccountKeyPurposes.Signing, _now, Ct));
+
+        ensure.Message.ShouldContain("Alvo:Secrets:EncryptionKeyFile");
+        read.Message.ShouldContain("Alvo:Secrets:EncryptionKeyFile");
+    }
+
+    [Fact]
+    public void Key_records_never_print_their_material()
+    {
+        var candidate = Candidate(AccountKeyPurposes.Signing, "kid-1", "s3cret-material");
+        var stored = new StoredKey(AccountKeyPurposes.Signing, 1, "kid-1", "s3cret-material", _now, null);
+
+        candidate.ToString().ShouldNotContain("s3cret-material");
+        stored.ToString().ShouldNotContain("s3cret-material");
+        stored.ToString().ShouldContain("kid-1");
+    }
+
+    private static async Task<(UserId Account, SignInRequest Session)> SignedInAsync(IAccountStore store)
+    {
+        var request = SignIn(Identity("sub-" + Guid.NewGuid().ToString("N")));
+        var outcome = await store.SignInAsync(request, Ct);
+        return (outcome.Account!.Value, request);
+    }
+
+    private static RefreshRequest Refresh(Guid token, DateTimeOffset now) => new(token, Guid.NewGuid(), now, _grace, _idle);
+
+    private static KeyCandidate Candidate(string purpose, string kid, string material) => new(purpose, 1, kid, material, _now);
+
+    private static async Task<long> ChildrenAsync(IServiceProvider services, Guid parent) => Convert.ToInt64(
+        await ScalarAsync(
+            services,
+            $"SELECT COUNT(*) FROM {TableOf(services, AlvoFrameworkTables.AuthRefreshTokensSuffix)} WHERE parent_id = '{parent:D}'"),
+        CultureInfo.InvariantCulture);
+
+    private static async Task<string?> RevokedReasonAsync(IServiceProvider services, Guid session) => (string?)await ScalarAsync(
+        services,
+        $"SELECT revoked_reason FROM {TableOf(services, AlvoFrameworkTables.AuthSessionsSuffix)} WHERE id = '{session:D}'");
 
     private async Task<(IAccountStore Store, IServiceProvider Services)> StoreAsync(bool withKey = true)
     {

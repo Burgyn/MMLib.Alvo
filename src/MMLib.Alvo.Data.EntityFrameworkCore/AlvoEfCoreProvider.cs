@@ -217,7 +217,8 @@ public static class AlvoEfCoreProvider
     /// </remarks>
     private static EfCoreAccountStore CreateAccountStore(IServiceProvider services) => new(
         services.GetRequiredService<RelationalConnectionFactory>(),
-        services.GetRequiredService<IOptions<AlvoOptions>>().Value);
+        services.GetRequiredService<IOptions<AlvoOptions>>().Value,
+        Cipher(services));
 
     private static EfCoreHookRejectionLog CreateHookRejectionLog(IServiceProvider services) => new(
         services.GetRequiredService<RelationalConnectionFactory>(),
