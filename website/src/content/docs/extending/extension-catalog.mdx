@@ -18,11 +18,12 @@ apply that would take away what a handler reads is refused, naming the handler.
 
 ## What is listed
 
-Every piece of host code the host registers — [event handlers](/extending/event-handlers/),
-[commands](/extending/commands/), [write hooks](/extending/write-hooks/), [query narrowings and record
-enrichers](/extending/reads/), [schedules and data migrations](/extending/time/) and [functions](/extending/functions/) —
-as **metadata, never code**: what it is, what it binds to and when it runs. Nothing in the catalog can change one; it is
-changed in the host's C# and redeployed.
+Every [event handler](/extending/event-handlers/), [command](/extending/commands/), [write hook](/extending/write-hooks/),
+[query narrowing and record enricher](/extending/reads/), [schedule and data migration](/extending/time/) and
+[host function](/extending/functions/) the host registers, as **metadata, never code**. A
+[custom CEL function](/guides/custom-cel-functions/) is not listed here (the Management API lists those under
+`/cel/functions`), and neither are your own endpoints or conventions. Each entry says what it is, what it binds to
+and when it runs. Nothing in the catalog can change one; it is changed in the host's C# and redeployed.
 
 <Code code={descriptor} lang="json" title="fleet-desk.alvo.json" />
 
@@ -55,7 +56,7 @@ over `Entity("vehicles", …)` with that text as a CEL string `when`, the handle
 | `enabled` | `false` once an administrator switched a validate hook off ([Validate and guard writes](/extending/write-hooks/#validate-before-the-transaction)); `true` for everything else |
 | `cron`, `timeZone` | a schedule's five-field cron and the IANA time zone it is read in; `null` for any other kind |
 | `nextRunAt`, `lastRunAt` | when a schedule next runs and the occurrence it last ran for, in UTC; `null` for any other kind, or before the schedule recorded one |
-| `lastOutcome` | the status of a schedule's newest delivery — `pending`, `running`, `retrying`, `succeeded` or `dead`; `null` for any other kind, or before its first run |
+| `lastOutcome` | the status of a schedule's newest delivery — `pending`, `running`, `retrying`, `succeeded`, `dead` or `cancelled`; `null` for any other kind, or before its first run |
 | `afterRevision` | the descriptor revision a data migration waits for; `null` for any other kind |
 | `concurrency` | an event handler's cap on its running deliveries, as key and limit (`tenant:2`, `record:1`); `null` without a cap, or for any other kind |
 | `inputSchema` | a function's input as a JSON Schema document; `null` for any other kind |
@@ -73,7 +74,7 @@ code:
 
 <SourceExcerpt code={catalog} from="{" lang="json" title="GET …/extensions" />
 
-`timers` counts the timers this instance holds — `pending` (armed) and `due` (armed and already due; a number that stays
+`timers` counts the timers in the database, shared by every replica — `pending` (armed) and `due` (armed and already due; a number that stays
 above zero means nothing is firing them) — and is `null` when the data provider keeps no timers.
 
 - **Type names stay hidden by default.** `Alvo:Extensions:ExposeTypeNames` (`false`) fills `typeName` for a class

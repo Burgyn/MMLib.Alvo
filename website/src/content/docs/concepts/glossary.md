@@ -385,9 +385,10 @@ until you preview and apply it. [The admin dashboard](/guides/admin-dashboard/#3
 <dt id="write-hook">Write hook</dt>
 <dd>
 
-Host C# inside a write. A **validate** hook runs before the transaction, may call the network, and can only refuse; a
-**before-write** or **after-write** hook (and the delete pair) runs inside the transaction and can refuse, set fields
-or write other rows. Contrast the descriptor's [before-hook](#before-hook).
+Host C# inside a write. A **validate** hook runs before the transaction and may call the network; it can refuse, and
+write other rows that commit on their own, but cannot change the row being written. A **before-write** hook runs inside
+the transaction and can refuse, set fields or write other rows; an **after-write** hook and the delete pair run there
+too and can refuse or write other rows. Contrast the descriptor's [before-hook](#before-hook).
 [Validate and guard writes](/extending/write-hooks/)
 
 </dd>

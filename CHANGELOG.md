@@ -14,8 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   host-extensibility line is complete, the roadmap no longer lists `automation` or the C# `functions` as not running, and the
   README gains an *Extend it in C#* section.
 - **Docs: extending in code is findable from every entry point, and matches the code again**: a new *Your first
-  extension* page (one validate hook, its `Program.cs` registration and an `AlvoTestHost` test, all compiled and run by
-  `MMLib.Alvo.DocsSnippets.Tests`); a task-grouped sidebar (*Start in your host*, *Validate and guard writes*, *React to
+  extension* page (one validate hook, its `Program.cs` registration, a dev key and an `AlvoTestHost` test; its C# is
+  compiled by `MMLib.Alvo.DocsSnippets.Tests`, which runs the hook, the test and the page's HTTP answer, while
+  `Program.cs` is compiled only); a task-grouped sidebar (*Start in your host*, *Validate and guard writes*, *React to
   changes*, *Run something later*, *Actions and endpoints*, *Shape reads*, *Test and operate*), with *Integrity*,
   *Rules over relations*, *State machines* and *Automation* moved beside the descriptor guides (URLs unchanged); links
   from the home page, *Embed*, the tutorial, *For coding agents*, *Standalone and embedded*, *Architecture*, *The
