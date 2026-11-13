@@ -1,0 +1,11 @@
+### The host's `notify-customer-visit` handler tells the customer when the technician is coming. It runs after the
+### dispatch's commit, as its own delivery, and posts to the sink (FieldService:NotificationsUrl) — so it is polled.
+# @name CustomerNotices
+## RETRY-UNTIL-TEST-PASS: The customer of WO-7001 was told.
+## RETRY-MAX-ATTEMPTS: 30
+## RETRY-BACKOFF-TYPE: Constant
+## RETRY-MAX-DELAY: 00:00:01
+POST {{fshSinkUrl}}/__admin/requests/find
+Content-Type: application/json
+
+{ "method": "POST", "urlPath": "/notifications/customers" }

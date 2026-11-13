@@ -1,0 +1,5 @@
+### The extension catalog: what this host registered on top of the descriptor
+# @name Extensions
+## TEST-EXPECT-STATUS: [200]
+GET {{fshBaseUrl}}/management/projects/field-service/extensions
+X-Alvo-Api-Key: {{keyAdmin}}

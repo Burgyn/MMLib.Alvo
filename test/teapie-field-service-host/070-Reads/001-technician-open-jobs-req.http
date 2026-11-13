@@ -1,0 +1,17 @@
+### tech-north's job list, through the host's `technician-open-jobs` narrowing: the jobs still to do
+# @name TechnicianList
+## TEST-EXPECT-STATUS: [200]
+GET {{fshBaseUrl}}/api/work_orders?select=reference,status
+X-Alvo-Api-Key: {{keyTechNorth}}
+
+### Control: the dispatcher is not narrowed, and sees the completed job
+# @name DispatcherList
+## TEST-EXPECT-STATUS: [200]
+GET {{fshBaseUrl}}/api/work_orders?select=reference,status
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### A narrowing applies to a get too (reads.mdx): tech-north's finished job reads as absent
+# @name TechnicianGetsCompleted
+## TEST-EXPECT-STATUS: [404]
+GET {{fshBaseUrl}}/api/work_orders/{{Wo7001Id}}
+X-Alvo-Api-Key: {{keyTechNorth}}

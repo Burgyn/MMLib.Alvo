@@ -1,0 +1,35 @@
+### WO-7101: an emergency call-out, new, priority 3, to be scheduled within seconds — and nobody will
+# @name CreateWo7101
+## TEST-EXPECT-STATUS: [201]
+POST {{fshBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-7101", "title": "Burst pipe", "status": "new", "priority": 3, "is_emergency": true, "respond_by": "{{RespondBy}}", "access_code": "7101", "customer_id": "{{CustomerNorthId}}", "region_id": "{{RegionNorthId}}" }
+
+### Control WO-7102: the same emergency, the same deadline...
+# @name CreateWo7102
+## TEST-EXPECT-STATUS: [201]
+POST {{fshBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-7102", "title": "Burst pipe, next door", "status": "new", "priority": 3, "is_emergency": true, "respond_by": "{{RespondBy}}", "access_code": "7102", "customer_id": "{{CustomerNorthId}}", "region_id": "{{RegionNorthId}}" }
+
+### ... dispatched before it: the write that schedules it makes the timer's `when` false and cancels it
+# @name DispatchWo7102
+## TEST-EXPECT-STATUS: [200]
+POST {{fshBaseUrl}}/commands/work-orders/{{CreateWo7102.response.body.$.id}}/dispatch
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "technicianId": "{{userSpareNorth}}", "startsAt": "2027-03-02T09:00:00Z", "durationMinutes": 60 }
+
+### WO-7101 as the dispatcher sees it — polled until the host's `escalate-sla-breach` handler raised it, at most ~30 s
+# @name ReadWo7101
+## RETRY-UNTIL-TEST-PASS: WO-7101 escalated to priority 1.
+## RETRY-MAX-ATTEMPTS: 30
+## RETRY-BACKOFF-TYPE: Constant
+## RETRY-MAX-DELAY: 00:00:01
+GET {{fshBaseUrl}}/api/work_orders/{{CreateWo7101.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
