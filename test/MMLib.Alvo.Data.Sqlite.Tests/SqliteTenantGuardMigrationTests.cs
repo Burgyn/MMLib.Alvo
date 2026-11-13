@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Schema;
@@ -47,6 +48,13 @@ public sealed class SqliteTenantGuardMigrationTests : TenantGuardMigrationFacts,
     public void Dispose()
     {
         _services.Dispose();
+
+        // Only this file's pool: a pooled handle keeps the file open on Windows, and clearing every pool disposes a handle
+        // another fact is opening (see SqliteWriteGateTests).
+        using (var connection = new SqliteConnection($"Data Source={_databasePath}"))
+        {
+            SqliteConnection.ClearPool(connection);
+        }
 
         if (File.Exists(_databasePath))
         {
