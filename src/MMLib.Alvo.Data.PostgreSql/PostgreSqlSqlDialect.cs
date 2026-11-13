@@ -14,6 +14,7 @@ namespace MMLib.Alvo.Data.PostgreSql;
 /// </summary>
 public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
 {
+    private const int SetNullColumnListMinimumVersion = 150000;
     private const string NoKeyUpdate = "FOR NO KEY UPDATE";
     private const string FullUpdate = "FOR UPDATE";
 
@@ -260,6 +261,23 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
     /// composite key — <see cref="PostgreSqlMigrationsSqlGenerator"/> spells it.
     /// </summary>
     ScopedSetNullShape IAlvoSqlDialect.ScopedSetNull => ScopedSetNullShape.NamedColumns;
+
+    /// <inheritdoc/>
+    /// <remarks><c>ON DELETE SET NULL (column)</c> is PostgreSQL 15's; an older server refuses it as a syntax error.</remarks>
+    async ValueTask<string?> IAlvoSqlDialect.ScopedSetNullRefusalAsync(DbConnection connection, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        var command = connection.CreateCommand();
+        await using (command.ConfigureAwait(false))
+        {
+            command.CommandText = "SELECT current_setting('server_version_num')::int";
+            var version = Convert.ToInt32(await command.ExecuteScalarAsync(ct).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+            return version >= SetNullColumnListMinimumVersion
+                ? null
+                : $"This PostgreSQL server is version {version / 10000}; onDelete: setNull between two scoped entities needs PostgreSQL 15 or later. "
+                  + "Use restrict or cascade, or upgrade the server.";
+        }
+    }
 
     /// <inheritdoc/>
     /// <remarks>

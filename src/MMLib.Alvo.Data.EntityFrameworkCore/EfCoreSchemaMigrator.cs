@@ -168,6 +168,7 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         }
 
         var operations = ForThisEngine(AssembleOperations(prePass, residual));
+        await RefuseUnsupportedScopedSetNullAsync(operations, ct).ConfigureAwait(false);
         var exclusions = ExclusionPlan.Plan(prePass, desired, _dialect, _filters, TouchedTables(operations), Epoch);
         var prerequisite = await PrepareExclusionsAsync(current, prePass, exclusions.Added, counted, ct).ConfigureAwait(false);
         var backfill = Backfill(prePass.AlignedCurrent, desired);
@@ -184,6 +185,29 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         var plan = new MigrationPlan { Steps = steps, Sql = sql };
         _plannedAgainst.AddOrUpdate(plan, desired);
         return plan;
+    }
+
+    // A plan that adds a guard with ON DELETE SET NULL on an engine that spells the column list asks the server whether it can.
+    private async Task RefuseUnsupportedScopedSetNullAsync(IReadOnlyList<MigrationOperation> operations, CancellationToken ct)
+    {
+        if (_dialect.ScopedSetNull != ScopedSetNullShape.NamedColumns || ScopedSetNullGuards.In(operations) is not { Count: > 0 } guards)
+        {
+            return;
+        }
+
+        var connection = _connections.Create();
+        await using (connection.ConfigureAwait(false))
+        {
+            await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
+            if (await _dialect.ScopedSetNullRefusalAsync(connection, ct).ConfigureAwait(false) is { } message)
+            {
+                throw new DescriptorValidationException(new DescriptorValidationResult(
+                [
+                    .. guards.Select(pointer => new DescriptorValidationError(
+                        pointer, message, "Use onDelete: restrict or cascade, or upgrade the server.", DescriptorValidationSeverity.Error)),
+                ]));
+            }
+        }
     }
 
     private async Task RefuseRowsThatBreakNewChecksAsync(
