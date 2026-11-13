@@ -993,8 +993,11 @@ Seven consequences worth naming:
   that subquery binds to the parent's column the moment the child has none — which is true for every child row
   and therefore aggregates every tenant's. A pair that *disagrees* about tenancy cannot be narrowed at all and is
   refused: at apply by `RollupResolver`, naming both entities and their modes, and again inside `RollupRecompute`
-  for a schema that never came through the mapper. Two two-tenant facts in the shared suite pin the predicates, and both
-  go red with either removed (measured: Acme's `sum` read 15 instead of 10, then 17 instead of 12).
+  for a schema that never came through the mapper. Before #161 two two-tenant facts in the shared suite pinned the
+  predicates, and both went red with either removed (measured: Acme's `sum` read 15 instead of 10, then 17 instead of 12).
+  Since the key refuses the cross-tenant child before it is stored, those facts pass either way; the predicates — both
+  recompute statements and the apply's backfill — are pinned on the composed text by `RollupTenantPredicateTests`, and a
+  pair that disagrees about tenancy by `RollupRecomputeStatementTests` and `RollupBackfillTenancyTests`.
 
 - **The lock is the dialect's, and is a no-op on SQLite** — where reading the parent before writing inside a
   deferred transaction killed 12 of 24 writers on `SQLITE_BUSY_SNAPSHOT`. So a dialect that expresses no lock in
@@ -1370,8 +1373,9 @@ created before this change simply has the old DDL and must be recreated (the CHA
 will have no foreign key at all; see the F7 section for the obligation that leaves.
 
 **The rollup's tenant predicate stays**, as defence in depth: it no longer closes a reachable case for a scoped pair (the
-cross-tenant child cannot be stored), but a `SchemaModel` that never came through the mapper still gets it, and
-`RollupTenantPredicateTests` / `RollupBackfillTenancyTests` still pin it.
+cross-tenant child cannot be stored), but a `SchemaModel` that never came through the mapper still gets it.
+`RollupTenantPredicateTests` pins it on the composed text — the recompute's two statements and the backfill's — because
+the shared suite's two-tenant facts now pass with or without it.
 
 ## `softDelete` is refused, not silently ignored
 

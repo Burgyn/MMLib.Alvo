@@ -486,8 +486,8 @@ public abstract class AlvoDataComputedRollupTests
     /// </para>
     /// <para>
     /// It asserts both halves: the write is refused, and Acme's stored aggregates did not move — a <c>count</c> that
-    /// stayed while a <c>sum</c> moved is the same defect. The recompute's tenant predicate is now defence in depth,
-    /// pinned without the store's key by <c>RollupTenantPredicateTests</c> and <c>RollupBackfillTenancyTests</c>.
+    /// stayed while a <c>sum</c> moved is the same defect. The recompute's tenant predicate is now defence in depth, and
+    /// this fact passes with or without it; it is pinned on the composed text by <c>RollupTenantPredicateTests</c>.
     /// </para>
     /// </remarks>
     [Fact]
@@ -519,8 +519,8 @@ public abstract class AlvoDataComputedRollupTests
     /// <b>Since #161 that child cannot be stored:</b> a <c>ref</c> between two scoped entities is a foreign key over
     /// <c>(tenant_id, id)</c>, so Globex's child naming Acme's invoice is refused
     /// (<see cref="AlvoConstraintKind.Referenced"/>), and Acme's next recompute counts only Acme's own rows. The
-    /// aggregate's tenant predicate is now defence in depth, pinned by <c>RollupTenantPredicateTests</c> and
-    /// <c>RollupBackfillTenancyTests</c>.
+    /// aggregate's tenant predicate is now defence in depth, and this fact passes with or without it; it is pinned on the
+    /// composed text by <c>RollupTenantPredicateTests</c>.
     /// </para>
     /// </remarks>
     [Fact]
@@ -594,7 +594,8 @@ public abstract class AlvoDataComputedRollupTests
     /// <remarks>
     /// Since #161 that child is refused by the store — a <c>ref</c> between two scoped entities is a foreign key over
     /// <c>(tenant_id, id)</c> — so the fact asserts the refusal and Acme's total; the filtered aggregate's tenant predicate
-    /// is defence in depth, pinned by <c>RollupTenantPredicateTests</c> and <c>RollupBackfillTenancyTests</c>.
+    /// is defence in depth, which this fact no longer discriminates, pinned on the composed text by
+    /// <c>RollupTenantPredicateTests</c>.
     /// </remarks>
     [Fact]
     public async Task A_filter_with_an_or_never_aggregates_another_tenants_children()
@@ -685,13 +686,14 @@ public abstract class AlvoDataComputedRollupTests
     }
 
     /// <summary>
-    /// The backfill's tenant predicate, pinned (Ruling 32): Globex's released child names Acme's product, and the apply that
+    /// The backfill over two tenants (Ruling 32): Globex's released child names Acme's product, and the apply that
     /// switches the filter to <c>released</c> recomputes Acme's row from Acme's own children alone.
     /// </summary>
     /// <remarks>
     /// Since #161 Globex's child is refused by the store — a <c>ref</c> between two scoped entities is a foreign key over
-    /// <c>(tenant_id, id)</c> — so the fact asserts the refusal and the backfilled total; the backfill's tenant predicate is
-    /// defence in depth, pinned without the store's key by <c>RollupBackfillTenancyTests</c>.
+    /// <c>(tenant_id, id)</c> — so the fact asserts the refusal and the backfilled total, and passes with or without the
+    /// backfill's tenant predicate. That predicate is defence in depth, pinned on the composed statement by
+    /// <c>RollupTenantPredicateTests</c>.
     /// </remarks>
     [Fact]
     public async Task A_backfill_never_aggregates_another_tenants_children()
