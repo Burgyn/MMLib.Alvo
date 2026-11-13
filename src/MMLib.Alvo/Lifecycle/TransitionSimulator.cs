@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Management;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Rules.Internal;
 
 namespace MMLib.Alvo.Lifecycle;
 
@@ -28,21 +29,22 @@ internal sealed class TransitionSimulator(IPolicyCatalogProvider catalog)
             return [];
         }
 
-        return [.. machine.Transitions.Select(transition => Verdict(transition, caller))];
+        var held = RoleProvenance.Visible(caller, machine.Tenancy);
+        return [.. machine.Transitions.Select(transition => Verdict(transition, held))];
     }
 
-    private static ManagementTransitionVerdict Verdict(CompiledTransition transition, AlvoContext caller) => new()
+    private static ManagementTransitionVerdict Verdict(CompiledTransition transition, IReadOnlySet<Role> held) => new()
     {
         Name = transition.Name,
         From = transition.From is null ? _anyState : [.. transition.From.Order(StringComparer.Ordinal)],
         To = transition.To,
         Roles = transition.Roles is null ? [] : [.. transition.Roles.Select(role => role.Name).Order(StringComparer.Ordinal)],
         When = transition.When?.Source,
-        Allowed = Allowed(transition, caller),
+        Allowed = Allowed(transition, held),
     };
 
-    private static bool? Allowed(CompiledTransition transition, AlvoContext caller) =>
-        transition.Roles is null || transition.Roles.Overlaps(caller.Roles)
+    private static bool? Allowed(CompiledTransition transition, IReadOnlySet<Role> held) =>
+        transition.Roles is null || transition.Roles.Overlaps(held)
             ? (transition.When is null ? true : null)
             : false;
 }

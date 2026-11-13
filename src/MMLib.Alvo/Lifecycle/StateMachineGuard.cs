@@ -1,6 +1,7 @@
 ﻿using MMLib.Alvo.Data;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Rules.Internal;
 
 namespace MMLib.Alvo.Lifecycle;
 
@@ -17,6 +18,10 @@ namespace MMLib.Alvo.Lifecycle;
 /// <para>
 /// <b>What the 403 discloses is the caller's own and the author's.</b> It names the state the caller sent and the declared
 /// roles and transition names; the 422 names nothing but the field.
+/// </para>
+/// <para>
+/// <b>A transition's roles read <c>@user.roles</c>'s set.</b> The caller's tenant roles count only on a
+/// <see cref="Schema.TenancyMode.Scoped"/> entity's machine, exactly as they do in that entity's rules (spec §6.2).
 /// </para>
 /// </remarks>
 internal static class StateMachineGuard
@@ -48,7 +53,8 @@ internal static class StateMachineGuard
     private static void EnsureDeclaredMove(
         CompiledStateMachine machine, List<CompiledTransition> declared, AlvoRecord candidate, AlvoRecord previous, AlvoContext caller)
     {
-        var permitted = declared.Where(transition => transition.Roles is null || transition.Roles.Overlaps(caller.Roles)).ToList();
+        var held = RoleProvenance.Visible(caller, machine.Tenancy);
+        var permitted = declared.Where(transition => transition.Roles is null || transition.Roles.Overlaps(held)).ToList();
         if (declared.Count > 0 && permitted.Count == 0)
         {
             throw new AlvoAuthorizationException(RolesRefusal(declared, StateOf(candidate, machine.Field)));

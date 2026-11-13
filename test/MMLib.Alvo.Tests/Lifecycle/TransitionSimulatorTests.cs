@@ -4,6 +4,7 @@ using MMLib.Alvo.Lifecycle;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
+using MMLib.Alvo.Tests.Expressions;
 
 namespace MMLib.Alvo.Tests.Lifecycle;
 
@@ -48,6 +49,21 @@ public sealed class TransitionSimulatorTests
         Verdict(Machine, "update", "manager", "cancel").Allowed.ShouldBe(false);
     }
 
+    [Theory]
+    [InlineData("scoped", true)]
+    [InlineData("global", false)]
+    [InlineData(null, false)]
+    public void A_simulated_tenant_role_is_allowed_only_on_a_scoped_machine(string? tenancy, bool allowed)
+    {
+        var manager = CelFixtures.Alice with
+        {
+            Roles = new HashSet<Role> { Role.Authenticated },
+            TenantRoles = new HashSet<Role> { Role.Application("manager") },
+        };
+
+        Simulator(Machine, tenancy).Simulate("bookings", "update", manager).Single(verdict => verdict.Name == "close").Allowed.ShouldBe(allowed);
+    }
+
     [Fact]
     public void Transitions_are_listed_in_declaration_order() =>
         Simulate(Machine, "update", "staff").Select(verdict => verdict.Name).ShouldBe(["confirm", "close", "cancel"]);
@@ -76,11 +92,14 @@ public sealed class TransitionSimulatorTests
     private static IReadOnlyList<ManagementTransitionVerdict> Simulate(string members, string operation, string role) =>
         Simulator(members).Simulate("bookings", operation, Caller(role));
 
-    private static TransitionSimulator Simulator(string members)
+    private static TransitionSimulator Simulator(string members, string? tenancy = null)
     {
         var provider = new PolicyCatalogProvider();
         var descriptor = AlvoDescriptor.Parse(
-            """{"apiVersion": "alvo.dev/v1", "name": "simulated", "auth": {"roles": ["staff", "manager"]}, "entities": {"bookings": {"fields": {"""
+            """{"apiVersion": "alvo.dev/v1", "name": "simulated", "auth": {"roles": ["staff", "manager"]}, """
+            + (tenancy is null
+                ? """ "entities": {"bookings": {"fields": {"""
+                : $$""" "tenancy": {"enabled": true}, "entities": {"bookings": {"tenancy": "{{tenancy}}", "fields": {""")
             + """ "status": {"type": "enum", "values": ["draft", "confirmed", "cancelled", "done"], "default": "draft"}, "starts_at": {"type": "datetime"}}"""
             + members
             + """, "rules": {"list": "true", "get": "true", "create": "true", "update": "true", "delete": "true"}}}}""");
