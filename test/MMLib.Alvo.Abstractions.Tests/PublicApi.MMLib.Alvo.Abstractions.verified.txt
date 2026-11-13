@@ -149,6 +149,7 @@ namespace MMLib.Alvo
         public MMLib.Alvo.AlvoProvenance Provenance { get; init; }
         public required System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Role> Roles { get; init; }
         public MMLib.Alvo.TenantId? Tenant { get; init; }
+        public System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Role> TenantRoles { get; init; }
         public required MMLib.Alvo.UserId User { get; init; }
         public static MMLib.Alvo.AlvoContext Anonymous { get; }
         public bool HasRole(MMLib.Alvo.Role role) { }

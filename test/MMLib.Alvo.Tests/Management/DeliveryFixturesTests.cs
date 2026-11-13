@@ -137,6 +137,32 @@ public sealed class DeliveryFixturesTests
     }
 
     [Fact]
+    public void A_tenant_role_writer_s_claims_keep_the_roles_and_the_tenant_roles()
+    {
+        const string claims = """{"roles":["admin"],"tenantRoles":["owner"]}""";
+        var envelope = Edit(Envelope("entity.tickets.updated", Row("Printer jam", 12.5m)), node => node["authclaims"] = claims);
+
+        var fixture = DeliveryFixtures.Of(Delivery(), envelope, _schema);
+
+        fixture.Envelope.GetProperty("authclaims").GetString().ShouldBe(claims, "a fixture must run as the event's actor, tenant roles included");
+        fixture.Redacted.ShouldNotContain("/authclaims");
+    }
+
+    [Theory]
+    [InlineData("""{"roles":["admin"],"tenantRoles":["owner"],"email":"jane@example.com"}""", "a third member")]
+    [InlineData("""{"roles":["admin"],"tenantRoles":"jane@example.com"}""", "tenant roles that are not a name list")]
+    [InlineData("""{"roles":["admin"],"tenantRoles":[{"email":"jane@example.com"}]}""", "a tenant role that is not a name")]
+    [InlineData("""{"tenantRoles":["owner"],"email":"jane@example.com"}""", "tenant roles without the roles")]
+    public void Claims_beside_the_tenant_roles_still_redact_the_whole_claims_attribute(string claims, string because)
+    {
+        var envelope = Edit(Envelope("entity.tickets.updated", Row("Printer jam", 12.5m)), node => node["authclaims"] = claims);
+
+        var fixture = DeliveryFixtures.Of(Delivery(), envelope, _schema);
+
+        fixture.Envelope.GetProperty("authclaims").GetString().ShouldBe("<redacted:authclaims>", because);
+    }
+
+    [Fact]
     public void A_key_field_whose_value_is_not_a_uuid_or_an_enum_outside_its_values_is_redacted()
     {
         var envelope = Edit(Envelope("entity.tickets.updated", Row("Printer jam", 12.5m)), node =>

@@ -30,6 +30,8 @@ public static class AlvoEventProvenance
 {
     private const string RolesClaim = "roles";
 
+    private const string TenantRolesClaim = "tenantRoles";
+
     /// <summary>How <paramref name="context"/> authenticated, as <see cref="AlvoEvent.AuthType"/> spells it.</summary>
     /// <param name="context">The caller the event is emitted for.</param>
     /// <returns>One of the <see cref="AlvoEventAuthType"/> values.</returns>
@@ -112,6 +114,11 @@ public static class AlvoEventProvenance
     }
 
     /// <summary>The caller's roles as the authcontext <c>authclaims</c> JSON string, in ordinal order.</summary>
+    /// <remarks>
+    /// The caller's tenant roles follow as <c>tenantRoles</c> only when it carries some <em>and</em> acts in a tenant —
+    /// without a tenant they count nowhere — so every other caller's claims are exactly what they were before tenant
+    /// roles existed, and no stored envelope or payload moves for it.
+    /// </remarks>
     internal static string AuthClaimsOf(AlvoContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -119,22 +126,40 @@ public static class AlvoEventProvenance
         using (var writer = new Utf8JsonWriter(buffer))
         {
             writer.WriteStartObject();
-            writer.WriteStartArray(RolesClaim);
-            foreach (var role in context.Roles.Select(role => role.Name).Order(StringComparer.Ordinal))
+            WriteNames(writer, RolesClaim, context.Roles);
+            if (context.Tenant is not null && context.TenantRoles.Count > 0)
             {
-                writer.WriteStringValue(role);
+                WriteNames(writer, TenantRolesClaim, context.TenantRoles);
             }
 
-            writer.WriteEndArray();
             writer.WriteEndObject();
         }
 
         return Encoding.UTF8.GetString(buffer.WrittenSpan);
     }
 
+    private static void WriteNames(Utf8JsonWriter writer, string claim, IReadOnlySet<Role> roles)
+    {
+        writer.WriteStartArray(claim);
+        foreach (var role in roles.Select(role => role.Name).Order(StringComparer.Ordinal))
+        {
+            writer.WriteStringValue(role);
+        }
+
+        writer.WriteEndArray();
+    }
+
     /// <summary>The role names an <c>authclaims</c> string carries, or <see langword="null"/> when it carries none readably.</summary>
     /// <remarks>Tolerant on purpose: a dispatcher must treat a foreign or damaged value as absent — fail-closed — never throw.</remarks>
-    internal static IReadOnlyList<string>? RolesIn(string? authClaims)
+    internal static IReadOnlyList<string>? RolesIn(string? authClaims) => NamesIn(authClaims, RolesClaim);
+
+    /// <summary>
+    /// The tenant role names an <c>authclaims</c> string carries, or <see langword="null"/> when it carries none readably.
+    /// </summary>
+    /// <remarks>As tolerant as <see cref="RolesIn"/>: a foreign or damaged member reads as absent, never throws.</remarks>
+    internal static IReadOnlyList<string>? TenantRolesIn(string? authClaims) => NamesIn(authClaims, TenantRolesClaim);
+
+    private static List<string>? NamesIn(string? authClaims, string claim)
     {
         if (string.IsNullOrWhiteSpace(authClaims))
         {
@@ -144,7 +169,7 @@ public static class AlvoEventProvenance
         try
         {
             using var document = JsonDocument.Parse(authClaims);
-            return RoleNames(document.RootElement);
+            return Names(document.RootElement, claim);
         }
         catch (Exception exception) when (exception is JsonException or ArgumentException)
         {
@@ -152,11 +177,11 @@ public static class AlvoEventProvenance
         }
     }
 
-    private static List<string>? RoleNames(JsonElement root) =>
+    private static List<string>? Names(JsonElement root, string claim) =>
         root.ValueKind == JsonValueKind.Object
-        && root.TryGetProperty(RolesClaim, out var roles)
-        && roles.ValueKind == JsonValueKind.Array
-        && roles.EnumerateArray().All(role => role.ValueKind == JsonValueKind.String)
-            ? [.. roles.EnumerateArray().Select(role => role.GetString()!)]
+        && root.TryGetProperty(claim, out var names)
+        && names.ValueKind == JsonValueKind.Array
+        && names.EnumerateArray().All(name => name.ValueKind == JsonValueKind.String)
+            ? [.. names.EnumerateArray().Select(name => name.GetString()!)]
             : null;
 }

@@ -15,7 +15,9 @@ namespace MMLib.Alvo.Rules.Internal;
 /// <b>The key holds every input a related decision's allow or deny depends on, and nothing that renders later.</b> The
 /// entity, operation and slot name the tree; the depth caps the recursion; the presence of the caller's identity and
 /// tenant decide the related tenant guard and required-context gate. Role membership is not in the key: a bound tree
-/// still holds the related rule's <c>in @user.roles</c> node, and the renderer folds it per caller.
+/// still holds the related rule's <c>in @user.roles</c> node, and the renderer folds it per caller. Tenant roles are not
+/// in the key for the same reason; the fold reads them per render path (<see cref="Expressions.Internal.RoleProvenance"/>), so a tenant-role caller
+/// and one without them share a bound tree and never a fold.
 /// </para>
 /// <para>
 /// <b>The identity bit is exactly <see cref="RequiredContext.HasIdentity"/></b>, the gate's own test: the all-zero user

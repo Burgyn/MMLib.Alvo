@@ -3,13 +3,14 @@
 namespace MMLib.Alvo.Events.Internal;
 
 /// <summary>
-/// The caller as at the event (spec 2026-10-14 E8): its id, tenant and the roles its envelope recorded, resolved against
-/// the roles the descriptor still declares — a role that is no longer declared is not held.
+/// The caller as at the event (spec 2026-10-14 E8): its id, tenant and the roles and tenant roles its envelope recorded,
+/// resolved against the roles the descriptor still declares — a role that is no longer declared is not held.
 /// </summary>
 /// <remarks>
 /// Built from the envelope alone, through <see cref="EnvelopeReading.CallerOf"/> — the one reading the subscription
 /// conditions resolve against too — and never from whoever dispatches. An envelope with no readable credential is an
-/// anonymous change: its actor holds only <see cref="Role.Anon"/>, whatever roles the envelope records beside it.
+/// anonymous change: its actor holds only <see cref="Role.Anon"/> and no tenant role, whatever the envelope records
+/// beside it. Unlike the roles, which fall back to <see cref="Role.Anon"/>, no tenant role stands in for none.
 /// </remarks>
 internal static class EventActor
 {
@@ -24,17 +25,23 @@ internal static class EventActor
             return AlvoContext.Anonymous with { Tenant = recorded.Tenant };
         }
 
-        return recorded with { Roles = StillDeclared(recorded.Roles, declared), ActorKind = KindOf(@event.AuthType) };
+        return recorded with
+        {
+            Roles = StillDeclaredOrAnon(recorded.Roles, declared),
+            TenantRoles = StillDeclared(recorded.TenantRoles, declared),
+            ActorKind = KindOf(@event.AuthType),
+        };
     }
 
-    private static HashSet<Role> StillDeclared(IReadOnlySet<Role> recorded, RoleCatalog declared)
+    private static HashSet<Role> StillDeclaredOrAnon(IReadOnlySet<Role> recorded, RoleCatalog declared)
     {
-        var roles = recorded
-            .SelectMany(role => declared.TryGet(role.Name, out var held) ? new[] { held } : [])
-            .ToHashSet();
-
+        var roles = StillDeclared(recorded, declared);
         return roles.Count > 0 ? roles : [Role.Anon];
     }
+
+    private static HashSet<Role> StillDeclared(IReadOnlySet<Role> recorded, RoleCatalog declared) => recorded
+        .SelectMany(role => declared.TryGet(role.Name, out var held) ? new[] { held } : [])
+        .ToHashSet();
 
     private static AlvoActorKind KindOf(string authType) => authType switch
     {

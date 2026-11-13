@@ -6,21 +6,15 @@ using MMLib.Alvo.Rules;
 
 namespace MMLib.Alvo.Api.Internal;
 
-/// <summary>What resolving a request's credential decided: the caller, or the refusal to answer with.</summary>
-/// <param name="Principal">The resolved key's principal, or <see langword="null"/> for an anonymous caller.</param>
-/// <param name="Refusal">The 401 or 403 to answer instead, when the credential cannot be used.</param>
-internal readonly record struct CallerAdmission(AlvoPrincipal? Principal, IResult? Refusal)
-{
-    /// <summary>Gets the caller to act as.</summary>
-    internal AlvoContext Context => Principal?.Context ?? AlvoContext.Anonymous;
-}
-
 /// <summary>
 /// Resolves a request's credential with the same <see cref="CallerResolution"/> the generated routes use: no credential
-/// is anonymous, a credential that cannot be used is 401, and — when a scope is asked for — a key whose scopes exclude
+/// is anonymous, a credential that cannot be used is 401, and — when a scope is asked for — a caller whose scopes exclude
 /// it is 403.
 /// </summary>
-internal sealed class CallerGate(IAlvoContextResolver resolver, ScopeGate scopes, IOptions<AlvoAuthOptions> options)
+/// <param name="resolvers">The API-key resolver and, when a host registered one, the person resolver.</param>
+/// <param name="scopes">Gates an operation against the caller's scopes.</param>
+/// <param name="options">Carries the header names a credential and a requested tenant are read from.</param>
+internal sealed class CallerGate(CallerResolvers resolvers, ScopeGate scopes, IOptions<AlvoAuthOptions> options)
 {
     /// <summary>The scope entity a command bound to no entity needs: only a wildcard scope covers it.</summary>
     internal const string AnyEntity = "*";
@@ -36,22 +30,15 @@ internal sealed class CallerGate(IAlvoContextResolver resolver, ScopeGate scopes
         HttpContext http, string? scopeEntity, DataOperation operation, bool alsoRead = false)
     {
         ArgumentNullException.ThrowIfNull(http);
-        var settings = options.Value;
-        var presented = CallerResolution.Presented(http.Request, settings.HeaderName);
-        if (presented is null)
-        {
-            return new CallerAdmission(null, null);
-        }
-
-        var principal = await CallerResolution.ResolveAsync(resolver, presented, http.Request, settings)
+        var admission = await CallerResolution.AdmitAsync(http.Request, resolvers, options.Value, CredentialSurface.Data)
             .ConfigureAwait(false);
-        if (principal is null)
+        if (admission is not { Principal: { } principal, Refusal: null })
         {
-            return new CallerAdmission(null, ProblemResultFactory.Unauthenticated(settings.HeaderName));
+            return admission;
         }
 
         return scopeEntity is null || Covers(principal, scopeEntity, operation, alsoRead)
-            ? new CallerAdmission(principal, null)
+            ? admission
             : new CallerAdmission(principal, ProblemResultFactory.ScopeRefused());
     }
 

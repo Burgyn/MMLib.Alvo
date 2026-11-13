@@ -971,8 +971,63 @@ one document-wide list of every classification Alvo can mint, not a per-operatio
   whole reason this guard is needed. The tenant header buys an attacker nothing on its own, and is covered
   because it is the same one-variable mistake in the same section. `Authorization` is deliberately *not*
   refused: a browser re-sends it only to an origin where the user already completed an HTTP authentication
-  challenge, it is not CORS-safelisted, and it is a legitimate place for an API key. A host that wants its
+  challenge, it is not CORS-safelisted, and it is a legitimate place for an API key. Alvo still ignores that header
+  unless a person resolver is registered, and then only when it is not the API-key header; the rules are in
+  [How a request becomes a caller](#how-a-request-becomes-a-caller-one-credential-reading). A host that wants its
   own users on the generated routes wants **#210**, not any of this.
+
+## How a request becomes a caller: one credential reading
+
+**The guarantee.** A host that runs its own authentication keeps working. Alvo reads the `Authorization` header only
+when a person resolver (an `IAlvoContextResolver` registered under the key `alvo-person`) is registered, and then only
+for the `Bearer` scheme. Without one, every `Authorization` value, `Bearer` included, is left alone for the host's
+own `JwtBearer` or a Basic-auth proxy, exactly as before. The Management API never reads it at all.
+
+**Why one reading.** Three places turn a request into an `AlvoContext`: the Data API filter (`AlvoContextFilter`), the
+command gate (`CallerGate`) and the Management filter (`ManagementCallerFilter`). When each reads headers for itself,
+they drift, and the drift is a security bug: a credential one of them honours and another ignores is a credential that
+works on one surface and silently downgrades to anonymous on the next. All three now call `CallerResolution`, which
+reads the request once into a `PresentedCredential` and admits it by channel. The reading is pure and tested on its own
+(`CredentialReadingTests`); the surface is a parameter (`Data` for the Data API, commands and `WithAlvoCaller`
+endpoints; `Management`), not three copies.
+
+**What is presented, and what happens**
+
+| Presented | Data API and commands | Management API |
+|---|---|---|
+| nothing | anonymous, as today | anonymous, as today |
+| `X-Alvo-Api-Key` | the API-key resolver, as today | the API-key resolver (refusing a personal or service token arrives with those tokens) |
+| `Authorization: Bearer ...` and a person resolver is registered | the person resolver | **ignored** |
+| `Authorization` with another scheme, or Bearer with no person resolver registered | **ignored, exactly as today** | ignored |
+| `X-Alvo-Api-Key` and a Bearer token Alvo owns, well-formed or malformed | **401**, ambiguous; never settled by precedence | API key as above |
+
+**The rules the table leaves open**
+
+- `Authorization` is read only when `Alvo:Auth:HeaderName` is *not* `Authorization` (compared ignoring case). Naming it
+  as the API-key header is allowed today, and the API-key channel then owns it exactly as before. The accounts slice
+  that registers the person resolver (S2) must refuse that combination at startup, because the two channels cannot both
+  own one header.
+- The scheme is the text before the first space, compared ignoring case (RFC 7235 section 2.1). Any scheme but `Bearer`
+  is ignored.
+- A Bearer value is malformed when its token is empty or contains whitespace, or when more than one `Authorization`
+  line arrives and any of them is Bearer. That is a 401, never "take the first": it is the repeated-header rule the
+  API key already follows.
+- "A person resolver is registered" is read once, from the container's keyed-service lookup; a container that cannot
+  answer counts as *not registered*, which is today's behaviour. Only a registration under exactly `alvo-person`
+  counts: one under `KeyedService.AnyKey` answers for every key, so the lookup is also asked of a key nobody can
+  register, and a container that says yes to that one holds a catch-all, not a person resolver — the channel stays
+  closed. The resolver itself is resolved per request, so a scoped one works.
+- The tenant header is passed to the person resolver as received, as it is to the API-key resolver. Validating it is the
+  resolver's job.
+
+**The three 401s.** A Bearer the resolver refuses answers `WWW-Authenticate: Bearer error="invalid_token"`. A malformed
+one answers `Bearer error="invalid_request"`. An ambiguous request answers with both challenges (API key and Bearer).
+The problem `type` stays `unauthenticated` throughout.
+
+**Deviation from RFC 6750 section 3.1, on purpose.** The RFC answers `invalid_request` with **400**. Alvo answers 401.
+Every credential that was *presented but cannot be used* already gets one diagnosis on all three sites, and agents
+branch on it; a Bearer that is syntactically broken is the same situation as an API key that is unknown, and splitting
+them across two statuses would make the client tell them apart for no gain.
 
 ## The status and `type`-slug catalogue
 

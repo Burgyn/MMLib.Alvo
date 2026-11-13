@@ -46,7 +46,8 @@ internal static class LifecycleCompiler
             machine.Field,
             machine.Initial,
             StateMachineCheck.DefaultStateOf(descriptor, machine.Field),
-            [.. machine.Transitions.Select(transition => CompileTransition(transition.Key, transition.Value, $"{path}/{transition.Key}", scope))]);
+            [.. machine.Transitions.Select(transition => CompileTransition(transition.Key, transition.Value, $"{path}/{transition.Key}", scope))],
+            scope.Schema.Tenancy);
     }
 
     private static CompiledTransition CompileTransition(string name, StateTransition transition, string path, LifecycleScope scope) => new(

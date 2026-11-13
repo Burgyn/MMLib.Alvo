@@ -443,9 +443,24 @@ Where they count:
 
 | Evaluated where | `@user.roles` is |
 |---|---|
-| a rule of a **`tenancy: scoped`** entity (and a relation term whose related entity is scoped) | project roles ∪ tenant roles |
-| a rule of a **`tenancy: global`** entity (and a relation term whose related entity is global) | project roles only |
+| a rule of a **`tenancy: scoped`** entity, and every relation term reached from it **while every entity on the path is scoped** | project roles ∪ tenant roles |
+| a rule of a **`tenancy: global`** entity, and **everything reached from it** — including a relation term into a scoped entity and that entity's own `list` rule bound into it | project roles only |
+| a scoped entity's relation term into a global entity, and anything reached through it | project roles only |
 | a Management `access` level | project roles only |
+
+**The rule in one line: a tenant role counts only while every entity on the decision's path is scoped.** A
+decision about a global entity must never depend on a tenant role, not even transitively: otherwise a global
+`regions` with `update: "jobs.exists(j, true)"` and a scoped `jobs` whose `list` admits `'dispatcher' in
+@user.roles` would let anyone who creates a tenant and holds `dispatcher` there update shared reference data.
+(Found by the S1 task review; the first version of this table folded by the *related* entity alone.)
+
+**What this rule governs, and what it does not.** It governs every *authorization decision*: entity rules, relation
+terms, masks, lookup checks, state-machine transitions, conditions evaluated as the caller, and Management access.
+It does **not** govern an automation action the app author declared to run **as `System`**: a scoped entity's
+after-hook whose condition admits a tenant role may still fire a `System` action against a global entity, because
+running as `System` is the author's explicit, reviewed escalation (spec §3.3 of the product spec), not the caller's
+authority leaking. The guides say so next to the hook docs, so an author who writes such a hook knows a tenant
+member can trigger it.
 
 Rule authors still write `'dispatcher' in @user.roles` — one spelling. The policy cache key already
 separates by entity, and role literals fold per caller at render, so the split is an evaluation-time

@@ -44,6 +44,9 @@ internal static class ProblemResultFactory
     /// </remarks>
     private const string ApiKeyScheme = "AlvoApiKey";
 
+    /// <summary>The RFC 6750 scheme a person's access token is presented under, advertised when Alvo owns it.</summary>
+    private const string BearerScheme = "Bearer";
+
     /// <summary>The extension member that marks a refusal no retry of the same request can get past.</summary>
     private const string RetryableMember = "retryable";
 
@@ -68,6 +71,38 @@ internal static class ProblemResultFactory
             "The presented API key could not be used. Check the key, whether it has been revoked or has expired, "
             + "and whether it was issued for the tenant you requested."),
         $"{ApiKeyScheme} header=\"{headerName}\"");
+
+    /// <summary>
+    /// The 401 for a Bearer token Alvo owns that cannot be used — refused by the person resolver
+    /// (<c>invalid_token</c>), or malformed before any resolver saw it (<c>invalid_request</c>).
+    /// </summary>
+    /// <remarks>
+    /// The challenge is RFC 6750 §3's, with its <c>error</c> code. One wording for every refusal, for the reason
+    /// <see cref="Unauthenticated"/> gives, and the token itself is never echoed: it is a secret. RFC 6750 §3.1 would
+    /// answer <c>invalid_request</c> with 400; Alvo keeps every presented-but-unusable credential on 401, the one
+    /// diagnosis its three authenticating sites give.
+    /// </remarks>
+    /// <param name="error">The RFC 6750 error code: <c>invalid_token</c> or <c>invalid_request</c>.</param>
+    internal static IResult BearerUnauthenticated(string error) => new UnauthenticatedResult(
+        Problem(
+            StatusCodes.Status401Unauthorized,
+            AlvoProblemTypes.Unauthenticated,
+            "The presented bearer token could not be used. Sign in again, or check that it has not expired or been "
+            + "revoked and that you belong to the tenant you requested."),
+        $"{BearerScheme} error=\"{error}\"");
+
+    /// <summary>
+    /// The 401 for a request that presents both an API key and a Bearer token Alvo owns — refused rather than
+    /// resolved by precedence, since either choice would act as a caller the request did not unambiguously name.
+    /// </summary>
+    /// <remarks>Both challenges are advertised, so the caller learns the two ways in and keeps one.</remarks>
+    /// <param name="headerName">The header an API key is read from, named in the challenge and the detail.</param>
+    internal static IResult AmbiguousCredential(string headerName) => new UnauthenticatedResult(
+        Problem(
+            StatusCodes.Status401Unauthorized,
+            AlvoProblemTypes.Unauthenticated,
+            $"The request presents both {headerName} and a bearer token. Present one credential, never both."),
+        $"{ApiKeyScheme} header=\"{headerName}\", {BearerScheme}");
 
     /// <summary>
     /// The 403 for a resolved key whose scopes do not cover this operation — a different slug from

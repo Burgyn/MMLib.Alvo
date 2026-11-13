@@ -35,6 +35,17 @@ public sealed class LifecycleCompilerTests
         timer.When.ShouldNotBeNull();
     }
 
+    [Theory]
+    [InlineData("scoped", TenancyMode.Scoped)]
+    [InlineData(null, null)]
+    public void The_compiled_machine_carries_its_entity_s_tenancy(string? tenancy, TenancyMode? expected)
+    {
+        var machine = Machine(""" "close": {"from": ["confirmed"], "to": "cancelled", "roles": ["manager"]} """);
+        var descriptor = tenancy is null ? Descriptor([machine]) : Descriptor([$$""", "tenancy": "{{tenancy}}" """, machine], tenanted: true);
+
+        Policy(descriptor).Lifecycle.StateMachine.ShouldNotBeNull().Tenancy.ShouldBe(expected);
+    }
+
     [Fact]
     public void A_transition_role_the_project_does_not_declare_is_refused()
     {
@@ -173,9 +184,10 @@ public sealed class LifecycleCompilerTests
 
     private static string Timers(string timers) => """, "timers": {""" + timers + "}";
 
-    private static EntityPolicy Compile(params string[] members)
+    private static EntityPolicy Compile(params string[] members) => Policy(Descriptor(members));
+
+    private static EntityPolicy Policy(AlvoDescriptor descriptor)
     {
-        var descriptor = Descriptor(members);
         PolicyCatalog.TryBuild(descriptor, DescriptorToSchemaMapper.Map(descriptor), new CelCompiler(), out var catalog, out var errors)
             .ShouldBeTrue(string.Join(" | ", errors.Select(error => $"{error.Path}: {error.Message}")));
         catalog!.TryGetEntity("bookings", out var policy).ShouldBeTrue();
@@ -189,8 +201,10 @@ public sealed class LifecycleCompilerTests
         return errors;
     }
 
-    private static AlvoDescriptor Descriptor(string[] members) => AlvoDescriptor.Parse(
-        """{"apiVersion": "alvo.dev/v1", "name": "lifecycles", "auth": {"roles": ["manager"]}, "entities": {"bookings": {"fields": {"""
+    private static AlvoDescriptor Descriptor(string[] members, bool tenanted = false) => AlvoDescriptor.Parse(
+        """{"apiVersion": "alvo.dev/v1", "name": "lifecycles", "auth": {"roles": ["manager"]}, """
+        + (tenanted ? """ "tenancy": {"enabled": true}, """ : string.Empty)
+        + """ "entities": {"bookings": {"fields": {"""
         + """ "status": {"type": "enum", "values": ["draft", "confirmed", "cancelled"], "default": "draft"},"""
         + """ "starts_at": {"type": "datetime"}, "note": {"type": "string"}, "site_id": {"type": "uuid"},"""
         + """ "room_id": {"type": "ref", "entity": "rooms"}, "last_item_at": {"type": "datetime", "rollup": {"from": "booking_items", "op": "max", "field": "added_at"}}}"""
