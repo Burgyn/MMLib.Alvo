@@ -11,7 +11,7 @@ Put a derived value on the lowest rung that expresses it:
 2. **rollup** — an aggregate over related rows, kept consistent in the write's transaction. Never a hook that
    recomputes a parent.
 3. **before-hook** — a value decided at write time (`alvo-descriptor-hooks`).
-4. actions, automation, functions — mostly not run by this build (`alvo-descriptor-capabilities-and-limits`).
+4. after-hook actions and `automation` — post-commit, never a derived value (`alvo-descriptor-capabilities-and-limits`).
 
 ## Rollups
 
@@ -78,4 +78,4 @@ names the refusal the framework gives, so you can explain it.
 <!-- /gen:cel-computed -->
 
 In the dashboard: read with `get_descriptor`, then `check_change` or `propose_change` the operations.
-In this repo: edit `examples/**/*.alvo.json` or your own descriptor, then run `scripts/test-ring0` or `PUT …/descriptor?dryRun=true`.
+In this repo: dry-run the edited `*.alvo.json`: `PUT /management/projects/<project>/descriptor?dryRun=true` (Alvo repo: `scripts/test-ring0`).

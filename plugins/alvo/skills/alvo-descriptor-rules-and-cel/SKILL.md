@@ -34,8 +34,10 @@ each in its own skill.
 Also allowed: `order_id.assigned_user_id == @user.id` and `service_orders.exists(o, o.assigned_user_id == @user.id)`.
 A rule may follow a ref (`customer_id.city == 'Brno'`) or reach the rows that reference this one
 (`service_orders.exists(o, o.status == 'ready')`); the related entity's own list rule always applies, only under `&&`/`||`
-(never `!`), one hop; a null ref matches nothing. An entity's `checks`, e.g. `{"lookup": "part_id", "expr": "!part_id.discontinued && quantity <= part_id.stock_quantity", "message": "…"}`,
+(never `!`), one hop; a null ref matches nothing. Refused: a chain of list rules deeper than three, a cycle among
+list rules, and following a ref to `users` or to a `storage: "dynamic"` entity. An entity's `checks`, e.g. `{"lookup": "part_id", "expr": "!part_id.discontinued && quantity <= part_id.stock_quantity", "message": "…"}`,
 refuse a write whose looked-up row fails `expr` with 422 and that message; a check reads no `@user` or `@tenant`.
+A null lookup skips the check, and an update runs it only when a field it reads changed.
 
 A rule calls no function — not `trim`, not a host function: a rule filters in SQL. Two forms are not calls: `now()`,
 the instant of the request, and `duration('…')`, a constant such as `duration('90m')` (units `h m s ms us ns`).
@@ -86,4 +88,4 @@ ref to any other entity holds that entity's id and never equals it, and the vali
 A `ref` to `users` takes no `onDelete`; a `ref` to `service_orders` does.
 
 In the dashboard: read with `get_descriptor`, then `check_change` or `propose_change` the operations.
-In this repo: edit `examples/**/*.alvo.json` or your own descriptor, then run `scripts/test-ring0` or `PUT …/descriptor?dryRun=true`.
+In this repo: dry-run the edited `*.alvo.json`: `PUT /management/projects/<project>/descriptor?dryRun=true` (Alvo repo: `scripts/test-ring0`).

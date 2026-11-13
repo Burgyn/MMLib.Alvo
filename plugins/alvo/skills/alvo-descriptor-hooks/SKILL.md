@@ -12,9 +12,8 @@ An entity's `hooks` hold lists under `beforeCreate`, `beforeUpdate` and `beforeD
 - `{"mutate": {"<field>": …}}` sets fields before the write: each value is a JSON literal or `{"$cel": "…"}`.
 
 A before-hook runs inside the write's transaction, with no network: it can refuse or change this row
-only. A hook without a `condition` runs on every write, never on a schedule. Timed jobs are host code
-(`AddSchedule`, `IAlvoScheduler`) or a `timers` entry; steps that must not repeat are `IAlvoSteps`. No hook
-skips a `stateMachine`. So is an `automation` cron.
+only. A hook without a `condition` runs on every write, never on a schedule: timed work is an `automation`
+cron, a `timers` entry or host code. No hook skips a `stateMachine`.
 
 The shape: `schema/project.schema.json#/$defs/beforeHookList`.
 
@@ -103,4 +102,4 @@ functions and each `inputSchema`. Apply refuses an unknown name or input key.
 After-hooks run post-commit: see `alvo-descriptor-capabilities-and-limits`.
 
 In the dashboard: `get_descriptor`, then `check_change` or `propose_change`.
-In this repo: edit a `*.alvo.json`; run `scripts/test-ring0`.
+In this repo: dry-run the edited `*.alvo.json`: `PUT /management/projects/<project>/descriptor?dryRun=true` (Alvo repo: `scripts/test-ring0`).
