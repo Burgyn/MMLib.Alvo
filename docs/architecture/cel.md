@@ -735,6 +735,10 @@ of a standard:
    (`@user.role` → test membership via `in @user.roles`; `@user.claims`/`@user.teams` → tracked by
    `#37`), and an unrecognized `@name` throws at the lexer.
 
+   `@user.roles` is one spelling with two sources: the caller's project roles, plus its tenant roles while every entity
+   on the decision's path is `tenancy: scoped` (`relation-rules.md`, *Binding*). It is folded at evaluation, not
+   compiled twice, so a rule is written the same way either way.
+
    **Deviation from `baas-analyza.md` §16.1 (line 1155), stated because the analysis sketches what
    this forecloses.** Its worked `access` block reads
    `"admin": "'manager' in @user.roles && @user.email.endsWith('@firma.sk')"` — an *attribute* gate

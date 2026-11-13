@@ -855,6 +855,18 @@ envelope, as `{{@user.id}}` does for an anonymous write; `{{@user.roles}}` rende
 ordinal order. An author-declared template may render `{{@user.roles}}`; only the **default** webhook body strips
 `authclaims`, because nobody chose to post it.
 
+**Tenant roles travel in the same claim, and an after-hook condition can admit one.** When the writer held tenant roles
+in the event's tenant, `authclaims` also carries `"tenantRoles":[...]` (written only when non-empty, so no existing
+envelope moves), and `EventSubscriptions.CallerOf` rebuilds them for the condition beside `roles`, only when the envelope
+names both an identity and a tenant, and never a built-in. The condition's entity decides whether they fold, by the
+same path rule the request path uses (`relation-rules.md`, *Binding*): on a `tenancy: scoped` entity
+`'dispatcher' in @user.roles` is true for a tenant `dispatcher`; on a global entity it is not. That rule governs
+*authorization decisions*, and an after-hook is not one. So a scoped entity's after-hook whose condition admits a tenant
+role may fire an action that runs **as `System`** against a global entity, and any member of that tenant holding the
+role can cause it. That is the app author's explicit escalation, reviewed where the hook is written, and not the
+caller's authority leaking: the action runs with the author's grant, not the member's. An author who does not want a
+tenant member to trigger it keeps the role test out of the condition.
+
 The PR5a refusal lived at the *after-hook* compile site and **not** in
 `CelTypeChecker`'s profile table, because the reason belongs to the envelope and not to the profile: PR5b's
 before-hooks compile in the same `Condition` profile and run inside the request, where both names have a

@@ -284,6 +284,16 @@ anonymous caller reaches no level — so it is refused, on reads as well as on w
 applied to the surface that admits it does not know who is calling. A host that wants an unattended apply
 publishes a caller the project's own `access` block admits, or applies through the boot.
 
+**Who the Management API believes the caller is.** It never reads `Authorization`: a Bearer token is ignored there
+even when a person resolver is registered, so Management stays the surface of operators and development keys (the
+reading is in [`data-api.md`](./data-api.md#how-a-request-becomes-a-caller-one-credential-reading)). And an `access`
+level sees **project roles only**. A caller can also hold *tenant roles*, which a membership grants inside one tenant
+and which count only in the rules of a `tenancy: scoped` entity; a role someone gives themselves by creating a tenant
+must never open a level of the project's own management. Two independent locks hold that: the `access` block compiles
+with no tenancy, so its `@user.roles` has no tenant scope to fold into, and `ManagementAccessEvaluator` strips
+`TenantRoles` from the context before a host-replaceable `IPredicateEvaluator` sees it.
+`TenantRoleManagementTests` pins the outcome in process.
+
 ## D3: `If-Match` carries `revision`, not an `ETag`
 
 The Data API's optimistic concurrency is a strong `ETag` over a row version. The Management API's is an

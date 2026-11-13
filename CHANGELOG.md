@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`AlvoContext.TenantRoles`**: the roles a caller holds inside the tenant a request acts in, kept apart from `Roles`.
+  Empty for every existing caller, so nothing changes for API keys or operators. They count only where every entity on a
+  decision's path is `tenancy: scoped` (a scoped entity's rules, masks, state-machine transitions and relation terms
+  into other scoped entities); a global entity's rules, anything reached from one, and Management `access` levels read
+  project roles only. The event envelope records them (`authclaims.tenantRoles`, written only when non-empty) so an
+  after-hook condition judges what the write saw. The `Authorization` header is still ignored unless a person resolver is
+  registered; one credential reading now serves the Data API, the commands and Management.
 - **The advanced demo's host layer: `samples/MMLib.Alvo.Samples.FieldService`**, an embedded host over the same
   `examples/field-service` descriptor (PostgreSQL, typed against the generated `WorkOrder`, `Visit` and roles) that adds
   what the descriptor has no construct for: the `work_orders.dispatch` command (schedule the job and book its visit in
