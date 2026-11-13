@@ -10,23 +10,14 @@ public sealed class DispatchCommandTests : IAsyncLifetime
     private static readonly DateTimeOffset _nineInTheEvening = new(2026, 11, 16, 20, 0, 0, TimeSpan.Zero);
 
     private HttpWorld _world = null!;
-    private Guid _customer;
-    private Guid _region;
+    private (Guid Region, Guid Customer) _seed;
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     public async ValueTask InitializeAsync()
     {
         _world = await HttpWorld.StartAsync(Ct);
-        _region = Id(await _world.CreateAsync("regions", "admin", new JsonObject { ["code"] = "NORTH", ["name"] = "North" }));
-        _customer = Id(await _world.CreateAsync("customers", "dispatcher", new JsonObject
-        {
-            ["tenant_id"] = FieldServiceWorld.North.Value,
-            ["name"] = "Kaviareň Dunaj",
-            ["tier"] = "standard",
-            ["service_opens_hour"] = 7,
-            ["service_closes_hour"] = 19,
-        }));
+        _seed = await _world.SeedAsync();
     }
 
     [Fact]
@@ -115,19 +106,8 @@ public sealed class DispatchCommandTests : IAsyncLifetime
             body: new { technicianId = FieldServiceWorld.Technician, startsAt, durationMinutes = 90 },
             idempotency: idempotency);
 
-    private async Task<Guid> NewJobAsync(string reference, Guid? assignedTo = null) =>
-        Id(await _world.CreateAsync("work_orders", "dispatcher", new JsonObject
-        {
-            ["tenant_id"] = FieldServiceWorld.North.Value,
-            ["reference"] = reference,
-            ["title"] = $"Job {reference}",
-            ["status"] = "new",
-            ["priority"] = 3,
-            ["access_code"] = "4711",
-            ["customer_id"] = _customer,
-            ["region_id"] = _region,
-            ["assigned_to"] = assignedTo,
-        }));
+    private Task<Guid> NewJobAsync(string reference, Guid? assignedTo = null) =>
+        _world.NewJobAsync(_seed, reference, assignedTo: assignedTo);
 
     private async Task<List<JsonObject>> VisitsOfAsync(Guid job)
     {

@@ -87,6 +87,51 @@ internal sealed class HttpWorld : IAsyncDisposable
         return (await response.Content.ReadFromJsonAsync<JsonObject>(TestContext.Current.CancellationToken))!;
     }
 
+    /// <summary>A region (as the administrator) and a customer open 07–19 (as the dispatcher), in tenant north.</summary>
+    public async Task<(Guid Region, Guid Customer)> SeedAsync()
+    {
+        var region = await CreateAsync("regions", "admin", new JsonObject { ["code"] = "NORTH", ["name"] = "North" });
+        var customer = await CreateAsync("customers", "dispatcher", new JsonObject
+        {
+            ["tenant_id"] = FieldServiceWorld.North.Value,
+            ["name"] = "Kaviareň Dunaj",
+            ["tier"] = "standard",
+            ["service_opens_hour"] = 7,
+            ["service_closes_hour"] = 19,
+        });
+
+        return (region["id"]!.GetValue<Guid>(), customer["id"]!.GetValue<Guid>());
+    }
+
+    /// <summary>A work order created by the dispatcher in tenant north.</summary>
+    public async Task<Guid> NewJobAsync((Guid Region, Guid Customer) seed, string reference, string status = "new", Guid? assignedTo = null)
+    {
+        var created = await CreateAsync("work_orders", "dispatcher", new JsonObject
+        {
+            ["tenant_id"] = FieldServiceWorld.North.Value,
+            ["reference"] = reference,
+            ["title"] = $"Job {reference}",
+            ["status"] = status,
+            ["priority"] = 3,
+            ["access_code"] = "4711",
+            ["customer_id"] = seed.Customer,
+            ["region_id"] = seed.Region,
+            ["assigned_to"] = assignedTo,
+        });
+
+        return created["id"]!.GetValue<Guid>();
+    }
+
+    /// <summary>The dispatcher dispatches <paramref name="job"/> to the technician at <paramref name="startsAt"/>, for 90 minutes.</summary>
+    public async Task DispatchAsync(Guid job, DateTimeOffset startsAt)
+    {
+        using var dispatched = await SendAsync(
+            $"/commands/work-orders/{job}/dispatch",
+            "dispatcher",
+            body: new { technicianId = FieldServiceWorld.Technician, startsAt, durationMinutes = 90 });
+        dispatched.EnsureSuccessStatusCode();
+    }
+
     /// <summary>A Standard Webhooks delivery, signed the way a sender signs it.</summary>
     public async Task<HttpResponseMessage> SignedAsync(string path, string id, string body, string secret = SigningSecret)
     {
