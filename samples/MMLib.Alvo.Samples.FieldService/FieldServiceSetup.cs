@@ -3,6 +3,7 @@ using MMLib.Alvo.Samples.FieldService.Dispatch;
 using MMLib.Alvo.Samples.FieldService.Mobile;
 using MMLib.Alvo.Samples.FieldService.Model;
 using MMLib.Alvo.Samples.FieldService.Notifications;
+using MMLib.Alvo.Samples.FieldService.Reports;
 using MMLib.Alvo.Samples.FieldService.Scheduling;
 using MMLib.Alvo.Samples.FieldService.Sla;
 using MMLib.Alvo.Samples.FieldService.Tenancy;
@@ -33,7 +34,12 @@ public static class FieldServiceSetup
                 .OnUpdated<NotifyCustomerOfVisit>(
                     NotifyCustomerOfVisit.Id,
                     when: e => e.Changed(x => x.Status) && e.New.Status == WorkOrderStatus.Scheduled))
-            .AddEventHandler<SlaBreached, EscalateSlaBreach>(EscalateSlaBreach.Id);
+            .AddEventHandler<SlaBreached, EscalateSlaBreach>(EscalateSlaBreach.Id)
+            .AddSchedule<OverdueReportJob>(OverdueReportJob.Id, options.OverdueReportCron, options.TimeZone, schedule =>
+            {
+                schedule.Scope = AlvoScheduleScope.EachTenant;
+                schedule.Description = OverdueReportJob.Description;
+            });
     }
 
     /// <summary>Registers this host's own services: its options, its tenant catalog and its notifier.</summary>
