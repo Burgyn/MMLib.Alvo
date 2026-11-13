@@ -67,7 +67,7 @@ whole before any slice. It is the authority; this plan only sequences it.
 | S3 | `accounts/s3-tenants` | `…-accounts-s3-tenants.md` | registry, memberships, `tenancy.selfService`, `/tenants`, personal tenant, conditional catalog | levels 2–3 minus invitations |
 | S4 | `accounts/s4-invitations` | `…-accounts-s4-invitations.md` | invitations, `invitationOnly` sign-up | level 3 |
 | S5 | `accounts/s5-tokens` | `…-accounts-s5-tokens.md` | persisted API keys, personal and service tokens, `/tokens`, `auth.accessTokens` | integrators |
-| S6 | `accounts/s6-demo-docs` | `…-accounts-s6-demo-docs.md` | field-service self-service, TeaPie `170-SelfService`, website guides, `docs/architecture/accounts.md`, skills, PLAN.md | demo + docs |
+| S6 | `accounts/s6-demo-docs` | `…-accounts-s6-demo-docs.md` | field-service self-service, TeaPie `170-SelfService`, website guides, `docs/architecture/accounts.md`, skills (every slice keeps PLAN.md current) | demo + docs |
 
 ## Review Focus
 

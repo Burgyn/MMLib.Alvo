@@ -3,6 +3,12 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or
 > superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Superseded in part (2026-11-13 ruling — Alvo has no deployments).** Everything below about *existing*
+> databases — upgrading them through a catalog read, rows that already cross tenants refusing the plan, D3, D4,
+> Review Focus 2–3, Task 7's upgrade wording, Task 8's scan and #137 follow-up — was dropped (Task 5 removed,
+> Task 6 reduced to the PostgreSQL < 15 refusal). A database created before this change must be recreated. The
+> shipped CHANGELOG and `docs/architecture/data-path.md` describe what was built.
+
 **Goal:** A `ref` between two `tenancy: "scoped"` entities is enforced by the database as a key over
 `(tenant_id, id)`, on both engines, for new and existing databases — and a write naming another tenant's row is
 refused exactly as a write naming no row at all.
