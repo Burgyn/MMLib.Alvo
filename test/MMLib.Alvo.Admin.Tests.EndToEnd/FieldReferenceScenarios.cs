@@ -38,9 +38,9 @@ public sealed class FieldReferenceScenarios(AdminWorld world) : IClassFixture<Ad
 
     /// <summary>
     /// A field named by a transition's condition and by another entity's relation rule is carried, or named as not
-    /// carried, before Preview — today neither happens (#513).
+    /// carried, before Preview (#513): both are rewritten, so no leftover note is shown and Preview plans the change.
     /// </summary>
-    [Fact(Skip = "Issue 513: a field rename misses state-machine conditions and other entities' relation paths", Timeout = AdminWorld.ScenarioTimeout)]
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task A_rename_carries_the_state_machine_and_the_relation_rules_or_names_them()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
@@ -52,13 +52,12 @@ public sealed class FieldReferenceScenarios(AdminWorld world) : IClassFixture<Ad
         await session.Page.GetByTestId("field-save").ClickAsync();
         await session.Page.GetByTestId("field-row-technician_id").WaitForAsync();
 
-        if (await session.Page.GetByTestId("rename-leftovers").CountAsync() == 0)
-        {
-            await session.PreviewPendingAsync();
-            (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0);
-            (await session.Content.InnerTextAsync()).ShouldContain("has(new.technician_id)");
-            (await session.Content.InnerTextAsync()).ShouldContain("work_order_id.technician_id == @user.id");
-        }
+        (await session.Page.GetByTestId("rename-leftovers").CountAsync()).ShouldBe(0);
+
+        await session.PreviewPendingAsync();
+        (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0);
+        (await session.Content.InnerTextAsync()).ShouldContain("has(new.technician_id)");
+        (await session.Content.InnerTextAsync()).ShouldContain("work_order_id.technician_id == @user.id");
 
         session.AssertConsoleClean();
     }

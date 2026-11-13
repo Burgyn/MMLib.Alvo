@@ -1189,6 +1189,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Dashboard: renaming or removing a field finds every place that names it** (#513). The schema editor's field
+  references missed the constructs added on 2026-11-06, so a rename left them behind (Preview then failed server-side) and
+  a removal did not name them. It now carries — and a removal names as blocking — a state machine's `field` and each
+  transition's `when`, a timer's `at` and `when`, a lookup check's `lookup` and `expr`, an index's `where` and
+  `exclude.from`/`to`, a sequence's `per`, the condition and `$cel` values of every automation rule the entity's events
+  trigger, the `$cel` values of an after-hook's `entity.update` payload or function input, and the payload keys of every
+  `entity.update` that writes the entity. A relation path in another entity's rules and checks
+  (`visits.rules.list: work_order_id.assigned_to == @user.id`) is rewritten through the ref, a renamed ref carries the
+  paths it heads, a reverse `<child>.exists(…)` that reads the field is listed as a rename leftover, and removing a child's only ref
+  to its parent is blocked by the parent's `<child>.exists(…)` that reaches the child through it.
 - **SQLite: two concurrent opens could share one native connection** (#485). Microsoft.Data.Sqlite 10.0.10, which
   EF Core 10.0.10 brings, could lend one pooled native connection to two open `SqliteConnection`s (dotnet/efcore#39008),
   failing an open with "unable to delete/modify collation sequence due to active statements" or a stale "database is

@@ -16,6 +16,12 @@ namespace MMLib.Alvo.Admin.Components.Schema;
 /// followed by <c>.</c> is a namespace or an image (<c>math.round</c>, <c>new.</c>), never a column.
 /// </para>
 /// <para>
+/// <b>Relation paths change the spelling, not the rules</b> (<see cref="CelSpelling"/>): in a rule or a lookup check
+/// the refs to the field's entity are prefixes beside <c>new</c>/<c>old</c> (<c>work_order_id.assigned_to</c>), another
+/// entity's bare names are its own columns, and a ref being renamed is also the head of a path
+/// (<c>work_order_id.status</c>) — unless the member after the dot is called, which no path is.
+/// </para>
+/// <para>
 /// <b>Declined rather than guessed</b> when the answer cannot be told from the text: a binding macro
 /// (<c>.all(x, …)</c> binds a variable that may shadow the field — looked for outside string literals only, so
 /// <c>'.all('</c> as data does not decline), a triple-quoted string, or a field named like a CEL reserved word.
@@ -41,12 +47,21 @@ internal static class CelNames
 
     private static readonly string[] _tripleQuotes = ["'''", "\"\"\""];
 
-    private static readonly string[] _images = ["new", "old"];
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(1);
 
-    /// <summary>The expression with every reference to <paramref name="from"/> renamed, or <see langword="null"/> when that cannot be done safely.</summary>
-    public static string? Rename(string cel, string from, string to)
+    private const string WordEnd = "(?![A-Za-z0-9_])";
+
+    /// <summary>A name that is neither a member of something else nor a claim of <c>@user</c>/<c>@tenant</c>.</summary>
+    private const string Unqualified = @"(?<![A-Za-z0-9_@])(?<!\.\s*)";
+
+    /// <summary>The expression with every reference to <paramref name="from"/> in its own entity renamed, or <see langword="null"/> when that cannot be done safely.</summary>
+    public static string? Rename(string cel, string from, string to) => Rename(cel, from, to, CelSpelling.Own);
+
+    /// <summary>The expression with every reference to <paramref name="from"/> spelled as <paramref name="spelling"/> says renamed, or <see langword="null"/> when that cannot be done safely.</summary>
+    public static string? Rename(string cel, string from, string to, CelSpelling spelling)
     {
         ArgumentNullException.ThrowIfNull(cel);
+        ArgumentNullException.ThrowIfNull(spelling);
         if (Declines(cel, from, to))
         {
             return null;
@@ -56,16 +71,31 @@ internal static class CelNames
         for (var at = 0; at < cel.Length;)
         {
             at = cel[at] is '\'' or '"' ? CopyString(cel, at, output)
-                : IsStart(cel[at]) && !IsPart(Before(cel, at)) ? CopyName(cel, at, from, to, output)
+                : IsStart(cel[at]) && !IsPart(Before(cel, at)) ? CopyName(cel, at, new(from, to, spelling), output)
                 : Copy(cel, at, output);
         }
 
         return output.ToString();
     }
 
-    /// <summary>Whether the text contains the name as a whole word — for a place <see cref="Rename"/> declined.</summary>
+    /// <summary>Whether the text contains the name as a whole word — for a place <see cref="Rename(string, string, string, CelSpelling)"/> declined.</summary>
     public static bool MayName(string cel, string name)
-        => Regex.IsMatch(cel, @"(?<![A-Za-z0-9_])" + Regex.Escape(name) + @"(?![A-Za-z0-9_])", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+        => Regex.IsMatch(cel, @"(?<![A-Za-z0-9_])" + Regex.Escape(name) + WordEnd, RegexOptions.CultureInvariant, _timeout);
+
+    /// <summary>Whether the code, outside string literals, reads <paramref name="name"/> as a member of <paramref name="prefix"/>: <c>work_order_id.status</c>.</summary>
+    public static bool MayReadThrough(string cel, string prefix, string name)
+        => Regex.IsMatch(Code(cel), Unqualified + Regex.Escape(prefix) + @"\s*\.\s*" + Regex.Escape(name) + WordEnd, RegexOptions.CultureInvariant, _timeout);
+
+    /// <summary>
+    /// The argument text of every <c>&lt;receiver&gt;.exists(…)</c> outside string literals (literals blanked) — the reverse
+    /// relation terms over one child (<c>docs/architecture/relation-rules.md</c>).
+    /// </summary>
+    public static IEnumerable<string> ExistsBodies(string cel, string receiver)
+    {
+        var code = Code(cel);
+        var receivers = Regex.Matches(code, Unqualified + Regex.Escape(receiver) + @"\s*\.\s*exists\s*\(", RegexOptions.CultureInvariant, _timeout);
+        return [.. receivers.Select(match => Arguments(code, match.Index + match.Length))];
+    }
 
     /// <summary>Whether the names in this expression cannot be told apart from the text alone.</summary>
     private static bool Declines(string cel, string from, string to)
@@ -101,6 +131,22 @@ internal static class CelNames
         return code.ToString();
     }
 
+    /// <summary>The text from <paramref name="start"/> up to the parenthesis that closes the one just opened.</summary>
+    private static string Arguments(string code, int start)
+    {
+        var depth = 1;
+        for (var at = start; at < code.Length; at++)
+        {
+            depth += code[at] switch { '(' => 1, ')' => -1, _ => 0 };
+            if (depth == 0)
+            {
+                return code[start..at];
+            }
+        }
+
+        return code[start..];
+    }
+
     private static int CopyString(string cel, int at, StringBuilder output)
     {
         var quote = cel[at];
@@ -115,17 +161,22 @@ internal static class CelNames
         return end;
     }
 
-    private static int CopyName(string cel, int at, string from, string to, StringBuilder output)
+    private static int CopyName(string cel, int at, Renaming renaming, StringBuilder output)
     {
-        var end = at;
-        while (end < cel.Length && IsPart(cel[end]))
+        var end = NameEnd(cel, at);
+        var name = cel[at..end];
+        output.Append(string.Equals(name, renaming.From, StringComparison.Ordinal) && IsColumn(cel, at, end, renaming.Spelling) ? renaming.To : name);
+        return end;
+    }
+
+    private static int NameEnd(string cel, int at)
+    {
+        while (at < cel.Length && IsPart(cel[at]))
         {
-            end++;
+            at++;
         }
 
-        var name = cel[at..end];
-        output.Append(string.Equals(name, from, StringComparison.Ordinal) && IsColumn(cel, at, end) ? to : name);
-        return end;
+        return at;
     }
 
     private static int Copy(string cel, int at, StringBuilder output)
@@ -134,27 +185,34 @@ internal static class CelNames
         return at + 1;
     }
 
-    /// <summary>A bare name that is not a call or a namespace, or a member of <c>new</c>/<c>old</c>.</summary>
-    private static bool IsColumn(string cel, int at, int end)
+    /// <summary>A bare name that is not a call or a namespace, a member of one of the spelling's prefixes, or the head of a relation path.</summary>
+    private static bool IsColumn(string cel, int at, int end, CelSpelling spelling)
     {
-        /* A name followed by '(' is a call; one followed by '.' is a namespace (math.round) or an image (new., old.), never
-           a column: Alvo has no other dotted field path (cel.md deviation 8), so renaming it could only rewrite a call
-           (spec §13). */
-        if (NextNonSpace(cel, end) is '.' or '(')
-        {
-            return false;
-        }
-
+        /* A name followed by '(' is a call; one followed by '.' is a namespace (math.round) or an image (new., old.),
+           a column only where the slot reads relation paths and the field is the ref that heads one (spec §13). */
         var before = PreviousNonSpace(cel, at, out var dot);
-        return before switch
+        return NextNonSpace(cel, end, out var next) switch
         {
-            '@' => false,
-            '.' => IsImageBefore(cel, dot),
-            _ => true,
+            '(' => false,
+            '.' => spelling.Head && before is not ('.' or '@') && IsMemberRead(cel, next + 1),
+            _ => before switch
+            {
+                '@' => false,
+                '.' => IsPrefixBefore(cel, dot, spelling.Prefixes),
+                _ => spelling.Bare,
+            },
         };
     }
 
-    private static bool IsImageBefore(string cel, int dot)
+    /// <summary>Whether a field, not a call, follows the dot: <c>ref.status</c> rather than <c>ref.size()</c>.</summary>
+    private static bool IsMemberRead(string cel, int afterDot)
+    {
+        NextNonSpace(cel, afterDot, out var start);
+        var end = NameEnd(cel, start);
+        return end > start && NextNonSpace(cel, end, out _) != '(';
+    }
+
+    private static bool IsPrefixBefore(string cel, int dot, IReadOnlyCollection<string> prefixes)
     {
         PreviousNonSpace(cel, dot, out var last);
         var start = last + 1;
@@ -163,7 +221,7 @@ internal static class CelNames
             start--;
         }
 
-        return _images.Contains(cel[start..(last + 1)]) && PreviousNonSpace(cel, start, out _) is not ('.' or '@');
+        return prefixes.Contains(cel[start..(last + 1)]) && PreviousNonSpace(cel, start, out _) is not ('.' or '@');
     }
 
     private static char PreviousNonSpace(string cel, int at, out int position)
@@ -177,14 +235,15 @@ internal static class CelNames
         return position >= 0 ? cel[position] : '\0';
     }
 
-    private static char NextNonSpace(string cel, int at)
+    private static char NextNonSpace(string cel, int at, out int position)
     {
-        while (at < cel.Length && char.IsWhiteSpace(cel[at]))
+        position = at;
+        while (position < cel.Length && char.IsWhiteSpace(cel[position]))
         {
-            at++;
+            position++;
         }
 
-        return at < cel.Length ? cel[at] : '\0';
+        return position < cel.Length ? cel[position] : '\0';
     }
 
     private static char Before(string cel, int at) => at == 0 ? ' ' : cel[at - 1];
@@ -192,4 +251,6 @@ internal static class CelNames
     private static bool IsStart(char c) => char.IsAsciiLetter(c) || c == '_';
 
     private static bool IsPart(char c) => char.IsAsciiLetterOrDigit(c) || c == '_';
+
+    private sealed record Renaming(string From, string To, CelSpelling Spelling);
 }
