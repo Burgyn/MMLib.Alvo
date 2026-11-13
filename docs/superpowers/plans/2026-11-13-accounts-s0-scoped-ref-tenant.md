@@ -433,173 +433,40 @@ git add src/MMLib.Alvo.Data.EntityFrameworkCore/EfCoreSchemaIntrospector.cs test
 git commit -m "test(data-ef): freeze the tenant guard's DDL and introspect it as its reference"
 ```
 
-### Task 5: Existing databases get the guard (catalog read, rename alignment, plan steps)
+### Task 5: (dropped — no existing deployments)
+
+**Ruling (2026-11-13, the maintainer):** Alvo has no users yet, so there is no pre-S0 database to upgrade. The
+catalog read, rename alignment and upgrade snapshots this task carried are not built. A database created after S0
+gets the guard from the model (Task 4 proves the DDL); a descriptor change that *adds* a scoped ref is an ordinary
+model diff and gets the guard the same way. `TenantGuardShape`'s "missing sites" input (if Task 1 built one) stays
+unused-but-harmless or is removed by Task 6's implementer if nothing reads it. The CHANGELOG (Task 7) says: emitted
+DDL changes; databases created before this change must be recreated.
+
+### Task 6: Refusal — `setNull` between scoped entities on PostgreSQL < 15
+
+The cross-tenant row scan this task also carried is **dropped** (no existing data — see Task 5's ruling). Only the
+version refusal stays: it is product behaviour on a supported server (the repo tests PostgreSQL 14 already).
 
 **Files:**
-- Create: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/TenantGuardCatalog.cs`
-- Create: `src/MMLib.Alvo.Data.EntityFrameworkCore/EfCoreSchemaMigrator.TenantGuards.cs` (partial)
-- Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/EfCoreSchemaMigrator.cs` (ctor gains a last optional `IDatabaseModelFactory? catalog = null`; `PlanAsync` and `ComputeResidualDiff:382-396`; `RebuildsTheTable:455`)
-- Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/AlvoEfCoreProvider.cs:222-243` (pass `registration.CreateDatabaseModelFactory(efServices)`)
-- Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/DestructiveScan.cs` (guard steps)
-- Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/TenantGuards.cs` (`Aligned`)
-- Test: `TenantGuardsTests`, `DestructiveScanTests` (EF.Tests); `TenantGuardMigrationFacts` (both engines)
-- New baselines: `{Sqlite,PostgreSql}TenantGuardMigrationTests.A_legacy_scoped_reference_is_upgraded_in_place.verified.txt`
+- Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/IAlvoSqlDialect.cs`, `src/MMLib.Alvo.Data.PostgreSql/PostgreSqlSqlDialect.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/EfCoreSchemaMigrator.cs` (`PlanAsync`)
+- Create: `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlOlderServerTenantGuardTests.cs`
+- If Task 1 built a "missing sites" input to `TenantGuardShape` that nothing now reads, remove it (YAGNI).
 
 **Interfaces:**
-- Consumes: `TenantGuardShape`, `TenantGuards.Sites/IsGuard/IsGuardKey/GuardedField` (Task 1).
-- Produces:
-  - `internal static IReadOnlySet<TenantGuardSite> TenantGuardCatalog.Missing(IDatabaseModelFactory catalog, DbConnection connection, IReadOnlyList<TenantGuardSite> sites)` —
-    reads only the sites' child tables (`DatabaseModelFactoryOptions(tables: …)`); a site is *missing* when its child
-    table exists **and** has no FK with columns `[tenant_id, Field]` to `Target`. A table the database does not hold is
-    never missing (the snapshot is trusted where the catalog has no evidence).
-  - `internal static IReadOnlySet<TenantGuardSite> TenantGuards.Aligned(IReadOnlySet<TenantGuardSite> sites, IReadOnlyList<MigrationOperation> renames)` — maps
-    each site's names through `RenameTableOperation` / `RenameColumnOperation` (child, field and target).
-  - `private async Task<IReadOnlySet<TenantGuardSite>> MissingGuardsAsync(SchemaModel current, CancellationToken ct)` (partial file) — empty, with no connection opened, when `_catalog` is null or `TenantGuards.Sites(current)` is empty.
-  - `DestructiveScan.AddsTenantGuard` = `"Adds the tenant guard: the referenced record must belong to the same tenant (#161)."`,
-    `DestructiveScan.AddsTenantKey` = `"Adds the (tenant_id, id) key a tenant guard references (#161)."` — both non-destructive;
-    a guard step's `Field` is the guarded field (never `tenant_id`; today's `ForeignKeyChange` takes `columns[0]`).
-  - `ComputeResidualDiff(SchemaModel current, SchemaModel desired, IReadOnlySet<TenantGuardSite> missing)` builds the
-    aligned current model with `new TenantGuardShape(_dialect.ScopedSetNull, TenantGuards.Aligned(missing, renames))` and the desired one with `TenantGuardShape.For(_dialect.ScopedSetNull)`.
+- `IAlvoSqlDialect`: `internal ValueTask<string?> ScopedSetNullRefusalAsync(DbConnection connection, CancellationToken ct) => ValueTask.FromResult<string?>(null);`
+  PostgreSQL returns, below `server_version_num` 150000,
+  `"This PostgreSQL server is version {x}; onDelete: setNull between two scoped entities needs PostgreSQL 15 or later. Use restrict or cascade, or upgrade the server."`;
+  the migrator refuses at `/entities/{child}/fields/{field}/onDelete` when the plan adds a guard with
+  `ReferentialAction.SetNull` and the dialect's shape is `NamedColumns` — in counted and uncounted plans.
 
-- [ ] **Step 1: Write the failing facts**
-
-  EF.Tests: `TenantGuardsTests.Aligned_follows_a_field_rename_and_an_entity_rename` (a `RenameColumnOperation` on the
-  child and a `RenameTableOperation` on the target both move the site); `DestructiveScanTests.A_tenant_guard_is_a_non_destructive_step_naming_its_reference`
-  (`AddForeignKeyOperation { Table = "visits", Columns = ["tenant_id", "work_order_id"], PrincipalColumns = ["tenant_id", "id"] }`
-  → `IsDestructive == false`, `Field == "work_order_id"`, `Detail == DestructiveScan.AddsTenantGuard`) and
-  `…A_tenant_key_is_a_non_destructive_step` (`AddUniqueConstraintOperation` over `["tenant_id","id"]` → `AddsTenantKey`).
-
-  `TenantGuardMigrationFacts` (both engines; `Pair`/`Legacy` from `TenantGuardSchemas`):
-
-```csharp
-[Theory, InlineData(OnDelete.Restrict), InlineData(OnDelete.Cascade), InlineData(OnDelete.SetNull)]
-public async Task An_unchanged_schema_over_a_legacy_database_plans_the_guard_and_nothing_destructive(OnDelete onDelete)
-{
-    await MigrateAsync(new SchemaModel([]), TenantGuardSchemas.Legacy(onDelete));
-    var plan = await Migrator.PlanAsync(TenantGuardSchemas.Pair(onDelete), TenantGuardSchemas.Pair(onDelete), new MigrationOptions(), Ct);
-    plan.IsEmpty.ShouldBeFalse("an applied snapshot cannot show a guard the database lacks");
-    plan.HasDestructiveChanges.ShouldBeFalse();
-    plan.Steps.ShouldContain(step => step.Change.Detail == DestructiveScan.AddsTenantGuard && step.Change.Field == "work_order_id");
-}
-
-[Theory, InlineData(OnDelete.Restrict), InlineData(OnDelete.Cascade), InlineData(OnDelete.SetNull)]
-public async Task Applying_the_upgrade_guards_the_reference_and_the_next_plan_is_empty(OnDelete onDelete)
-// apply that plan; PlanAsync(Pair, Pair) IsEmpty; RawAsync inserting a work order of tenant B and a visit of tenant A naming it returns a DbException.
-
-[Fact]
-public async Task A_legacy_reference_renamed_in_the_same_apply_is_guarded_under_its_new_name()
-// Legacy(Restrict) applied; desired = Pair(Restrict) with work_order_id renamed to order_id (RenamedFrom = "work_order_id");
-// apply; PlanAsync(desired, desired) IsEmpty; the introspected visits.order_id is Ref → work_orders.
-
-[Fact]
-public async Task A_legacy_scoped_reference_is_upgraded_in_place()
-// Legacy(Restrict) applied; Verify(string.Join("\n;\n", (await Migrator.PlanAsync(Pair(Restrict), Pair(Restrict), …)).Sql)).
-```
-
-- [ ] **Step 2: Run to see them fail**
-
-Run: `dotnet test --project test/MMLib.Alvo.Data.EntityFrameworkCore.Tests -- --filter-class '*TenantGuardsTests*' --filter-class '*DestructiveScanTests*'`
-Run: `dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests -- --filter-class '*SqliteTenantGuardMigrationTests*'`
-Expected: FAIL — `Aligned`/constants missing; `plan.IsEmpty` is `true` over the legacy database (D3's defect, observed).
-
-- [ ] **Step 3: Implement.** `PlanAsync` calls `MissingGuardsAsync(current, ct)` first (counted and uncounted alike) and
-  hands the set to `ComputeResidualDiff`. `DestructiveScan.Classify` routes a guard-shaped `AddForeignKeyOperation` and a
-  `[tenant_id, id]` `AddUniqueConstraintOperation` to the two new details. `RebuildsTheTable` also answers `true` for
-  those two shapes, so SQLite's guard steps carry `GeneratedColumnAdds.RebuildNote` — the operator did not ask for them.
-  The migrator's remarks gain D3 (why planning reads the catalog).
-
-- [ ] **Step 4: Accept the upgrade snapshots and rerun**
-
-Read each `.received.txt`: PostgreSQL drops `FK_visits_work_orders_work_order_id`, adds the `work_orders` alternate key,
-adds the composite FK (and EF's FK index); SQLite rebuilds `work_orders` and `visits`. No `DROP TABLE` that is not part of
-a rebuild, no `DROP COLUMN`. Move over the `.verified.txt`; `alvo-snapshot-judge` when asked.
-Run: the Step 2 commands, plus `dotnet test --project test/MMLib.Alvo.Data.PostgreSql.Tests.Integration -- --filter-class '*PostgreSqlTenantGuardMigrationTests*'`
-Expected: PASS on all three.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/MMLib.Alvo.Data.EntityFrameworkCore test/MMLib.Alvo.Data.EntityFrameworkCore.Tests test/_shared/ef test/MMLib.Alvo.Data.Sqlite.Tests test/MMLib.Alvo.Data.PostgreSql.Tests.Integration
-git commit -m "feat(data-ef): an existing database gains the tenant guard on its next plan"
-```
-
-### Task 6: Refusals — rows already across tenants, and `setNull` on PostgreSQL < 15
-
-**Files:**
-- Create: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/CrossTenantReferenceScan.cs`
-- Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/EfCoreSchemaMigrator.TenantGuards.cs`, `EfCoreSchemaMigrator.cs` (`PlanAsync`)
-- Modify: `src/MMLib.Alvo.Data.EntityFrameworkCore/IAlvoSqlDialect.cs`, `src/MMLib.Alvo.Data.PostgreSql/PostgreSqlSqlDialect.cs`
-- Test: `TenantGuardMigrationFacts`; Create: `test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/PostgreSqlOlderServerTenantGuardTests.cs`
-
-**Interfaces:**
-- Consumes: `MissingGuardsAsync`, `TenantGuards.IsGuard/GuardedField` (Task 5).
-- Produces:
-  - `internal static IReadOnlyList<TenantGuardSite> CrossTenantReferenceScan.Targets(IReadOnlySet<TenantGuardSite> missing, SchemaModel current, IReadOnlyList<MigrationOperation> renames, IReadOnlyList<MigrationOperation> residual)` —
-    every missing site (already in `current`'s names), plus every guard the residual adds whose child, field, target and
-    both `tenant_id` columns exist in `current` under the same names and are neither renamed nor altered by this plan
-    (`CheckViolationScan`'s countability rule). Anything else is left to the DDL.
-  - `internal static Task<long> CrossTenantReferenceScan.CountAsync(DbConnection connection, TenantGuardSite site, CancellationToken ct)` over
-    `SELECT COUNT(*) FROM c WHERE c.<field> IS NOT NULL AND NOT EXISTS (SELECT 1 FROM t WHERE t.id = c.<field> AND t.tenant_id = c.tenant_id)`,
-    every identifier through `AlvoSqlIdentifier.Quote`, no value interpolated.
-  - Errors (partial file): path `/entities/{child}/fields/{field}`, message
-    `"{count} row(s) of '{child}' name a '{target}' record that is not in their own tenant, so the tenant guard cannot be added. Nothing was applied."`,
-    fix `"Point those rows at a record of their own tenant, or clear the reference, then apply again."`; the uncountable
-    variant mirrors `Uncountable` (`CheckViolationScan` precedent, logged through a new `LoggerMessage`).
-  - `IAlvoSqlDialect`: `internal ValueTask<string?> ScopedSetNullRefusalAsync(DbConnection connection, CancellationToken ct) => ValueTask.FromResult<string?>(null);`
-    PostgreSQL returns, below `server_version_num` 150000,
-    `"This PostgreSQL server is version {x}; onDelete: setNull between two scoped entities needs PostgreSQL 15 or later. Use restrict or cascade, or upgrade the server."`;
-    the migrator refuses at `/entities/{child}/fields/{field}/onDelete` when the plan adds a guard with
-    `ReferentialAction.SetNull` and the dialect's shape is `NamedColumns` — in counted and uncounted plans (a capability,
-    not a count).
-
-- [ ] **Step 1: Write the failing facts**
-
-```csharp
-[Fact]
-public async Task An_upgrade_over_cross_tenant_rows_is_refused_with_their_count_and_applies_nothing()
-{
-    await MigrateAsync(new SchemaModel([]), TenantGuardSchemas.Legacy(OnDelete.Restrict));
-    (await RawAsync(SeedCrossTenantVisit)).ShouldBeNull("the legacy shape admits it — that is the hole");
-    var refusal = await Should.ThrowAsync<DescriptorValidationException>(() =>
-        Migrator.PlanAsync(TenantGuardSchemas.Pair(OnDelete.Restrict), TenantGuardSchemas.Pair(OnDelete.Restrict), new MigrationOptions(), Ct));
-    var error = refusal.Result.Errors.ShouldHaveSingleItem();
-    error.Path.ShouldBe("/entities/visits/fields/work_order_id");
-    error.Message.ShouldStartWith("1 row(s) of 'visits'");
-    error.Message.ShouldNotContain(CrossTenantWorkOrderId.ToString());
-}
-
-[Fact]
-public async Task An_uncounted_plan_over_cross_tenant_rows_still_reports_the_upgrade()
-// same seed; ((IUncountedSchemaPlanner)Migrator).PlanWithoutCountingAsync(Pair, Pair, …) → not empty, contains the AddsTenantGuard step.
-
-[Fact]
-public async Task A_same_tenant_legacy_database_is_counted_and_upgraded()
-// seed a same-tenant visit; the counted plan does not throw.
-```
-
-  `PostgreSqlOlderServerTenantGuardTests : IClassFixture<PostgreSqlOlderServerExclusionTests.Postgres14>`:
+- [ ] **Step 1: Write the failing facts** — `PostgreSqlOlderServerTenantGuardTests : IClassFixture<PostgreSqlOlderServerExclusionTests.Postgres14>`:
   `A_scoped_set_null_reference_is_refused_at_its_on_delete_on_postgresql_14` → `DescriptorValidationException`, single
   error, `Path == "/entities/visits/fields/work_order_id/onDelete"`, message contains `"PostgreSQL 15"`; and
   `A_scoped_restrict_reference_still_applies_on_postgresql_14` (plan + apply succeed).
-
-- [ ] **Step 2: Run to see them fail**
-
-Run: `dotnet test --project test/MMLib.Alvo.Data.Sqlite.Tests -- --filter-class '*SqliteTenantGuardMigrationTests*'`
-Run: `dotnet test --project test/MMLib.Alvo.Data.PostgreSql.Tests.Integration -- --filter-class '*PostgreSqlTenantGuardMigrationTests*' --filter-class '*PostgreSqlOlderServerTenantGuardTests*'`
-Expected: FAIL — SQLite plans without throwing (and would apply, keeping the row); PostgreSQL 14 fails with a raw
-syntax error, not a `DescriptorValidationException`.
-
-- [ ] **Step 3: Implement** the scan, the refusal (inside `if (counted)`, beside `RefuseRowsThatBreakNewChecksAsync`,
-  same open-connection pattern) and the version refusal (outside it). Each new method under the ceiling.
-
-- [ ] **Step 4: Run them to see them pass** — the Step 2 commands; Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/MMLib.Alvo.Data.EntityFrameworkCore src/MMLib.Alvo.Data.PostgreSql test/_shared/ef test/MMLib.Alvo.Data.PostgreSql.Tests.Integration
-git commit -m "feat(data-ef): refuse a tenant guard over rows that already cross tenants"
-```
+- [ ] **Step 2: Run to see them fail** — `dotnet test --project test/MMLib.Alvo.Data.PostgreSql.Tests.Integration -- --filter-class '*PostgreSqlOlderServerTenantGuardTests*'`; Expected: FAIL (raw syntax error, not a `DescriptorValidationException`).
+- [ ] **Step 3: Implement** the dialect member and the refusal in `PlanAsync`.
+- [ ] **Step 4: Run to see them pass** — same command; Expected: PASS.
+- [ ] **Step 5: Commit** — `feat(data-postgres): refuse a scoped setNull ref on PostgreSQL older than 15`
 
 ### Task 7: Say it where it is read
 
