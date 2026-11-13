@@ -50,7 +50,7 @@ internal sealed class HttpWorld : IAsyncDisposable
         builder.Services.Configure<AlvoSecretOptions>(options => options.Values["technician_app"] = SigningSecret);
         builder.Services.Configure<AlvoAuthOptions>(AddKeys);
         builder.Services.AddAlvoProblemDetails();
-        builder.Services.AddAlvo(alvo => FieldServiceWorld.Compose(alvo.UseSqlite(database.ConnectionString)));
+        builder.Services.AddAlvo(alvo => FieldServiceWorld.Compose(alvo.UseSqlite(database.ConnectionString), new RecordingNotifier()));
 
         var app = builder.Build();
         app.UseExceptionHandler();

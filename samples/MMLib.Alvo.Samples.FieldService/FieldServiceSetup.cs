@@ -1,7 +1,10 @@
-﻿using MMLib.Alvo.Samples.FieldService.Dispatch;
+﻿using Microsoft.Extensions.Options;
+using MMLib.Alvo.Samples.FieldService.Dispatch;
 using MMLib.Alvo.Samples.FieldService.Mobile;
 using MMLib.Alvo.Samples.FieldService.Model;
+using MMLib.Alvo.Samples.FieldService.Notifications;
 using MMLib.Alvo.Samples.FieldService.Scheduling;
+using MMLib.Alvo.Samples.FieldService.Sla;
 using MMLib.Alvo.Samples.FieldService.Tenancy;
 using MMLib.Alvo.Scheduling;
 
@@ -26,7 +29,11 @@ public static class FieldServiceSetup
 
         return alvo
             .Entity<WorkOrder>(workOrders => workOrders
-                .BeforeWrite<WithinServiceHours>(WithinServiceHours.Id));
+                .BeforeWrite<WithinServiceHours>(WithinServiceHours.Id)
+                .OnUpdated<NotifyCustomerOfVisit>(
+                    NotifyCustomerOfVisit.Id,
+                    when: e => e.Changed(x => x.Status) && e.New.Status == WorkOrderStatus.Scheduled))
+            .AddEventHandler<SlaBreached, EscalateSlaBreach>(EscalateSlaBreach.Id);
     }
 
     /// <summary>Registers this host's own services: its options, its tenant catalog and its notifier.</summary>
@@ -38,8 +45,13 @@ public static class FieldServiceSetup
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        services.Configure<FieldServiceOptions>(configuration.GetSection(FieldServiceOptions.SectionName));
+        services.AddOptions<FieldServiceOptions>()
+            .Bind(configuration.GetSection(FieldServiceOptions.SectionName))
+            .Validate(options => IsAbsoluteUrl(options.NotificationsUrl), NotificationsUrlRequired)
+            .ValidateOnStart();
         services.AddSingleton<IAlvoTenantCatalog, ConfiguredTenantCatalog>();
+        services.AddHttpClient<IFieldServiceNotifier, HttpFieldServiceNotifier>((provider, http) =>
+            http.BaseAddress = new Uri(provider.GetRequiredService<IOptions<FieldServiceOptions>>().Value.NotificationsUrl.TrimEnd('/') + "/"));
 
         return services;
     }
@@ -53,6 +65,13 @@ public static class FieldServiceSetup
 
         return app.MapDispatch().MapTechnicianApp();
     }
+
+    private const string NotificationsUrlRequired =
+        "FieldService:NotificationsUrl must be an absolute http(s) URL: where the customer's visit notice, the on-call page "
+        + "and the overdue report are posted (an SMS or e-mail gateway; the WireMock sidecar in the demo stack).";
+
+    private static bool IsAbsoluteUrl(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var parsed) && (parsed.Scheme == Uri.UriSchemeHttp || parsed.Scheme == Uri.UriSchemeHttps);
 
     /// <summary>The settings as configured, for the composition steps that need them before the container is built.</summary>
     /// <param name="configuration">The configuration.</param>

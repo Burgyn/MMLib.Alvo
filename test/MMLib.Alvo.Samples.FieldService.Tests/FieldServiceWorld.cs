@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Samples.FieldService.Model;
+using MMLib.Alvo.Samples.FieldService.Notifications;
 using MMLib.Alvo.TestHost;
 
 namespace MMLib.Alvo.Samples.FieldService.Tests;
@@ -23,21 +24,30 @@ internal static class FieldServiceWorld
 
     public static string Descriptor => Path.Combine(AppContext.BaseDirectory, "field-service.alvo.json");
 
-    public static Task<AlvoTestHost> StartAsync(CancellationToken cancellationToken, FakeTimeProvider? time = null) =>
-        AlvoTestHost.StartAsync(builder => Compose(builder), time ?? new FakeTimeProvider(Now), cancellationToken: cancellationToken);
+    public static Task<AlvoTestHost> StartAsync(
+        CancellationToken cancellationToken, FakeTimeProvider? time = null, RecordingNotifier? notifier = null, string? cron = null) =>
+        AlvoTestHost.StartAsync(
+            builder => Compose(builder, notifier ?? new RecordingNotifier(), cron),
+            time ?? new FakeTimeProvider(Now),
+            cancellationToken: cancellationToken);
 
-    /// <summary>The host's three composition steps over a test's builder: the same calls <c>FieldServiceHost</c> makes.</summary>
-    public static IAlvoBuilder Compose(IAlvoBuilder builder)
+    /// <summary>
+    /// The host's composition steps over a test's builder — the same calls <c>FieldServiceHost</c> makes — with the
+    /// notifier recording instead of posting.
+    /// </summary>
+    public static IAlvoBuilder Compose(IAlvoBuilder builder, RecordingNotifier notifier, string? cron = null)
     {
-        var configuration = Configuration();
+        var configuration = Configuration(cron);
         builder.FromDescriptor(Descriptor).AddFieldService(FieldServiceSetup.ReadOptions(configuration));
         builder.Services.AddFieldServiceServices(configuration);
+        builder.Services.AddSingleton<IFieldServiceNotifier>(notifier);
         return builder;
     }
 
-    public static IConfiguration Configuration() => new ConfigurationBuilder()
+    public static IConfiguration Configuration(string? cron = null) => new ConfigurationBuilder()
         .AddInMemoryCollection(new Dictionary<string, string?>
         {
+            ["FieldService:OverdueReportCron"] = cron ?? "0 6 * * *",
             ["FieldService:TimeZone"] = "Europe/Bratislava",
             ["FieldService:NotificationsUrl"] = "http://localhost:9090/notifications",
             ["FieldService:Tenants:0"] = North.Value.ToString(),
