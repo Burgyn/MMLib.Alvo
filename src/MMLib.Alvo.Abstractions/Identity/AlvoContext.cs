@@ -105,7 +105,7 @@ public sealed record AlvoContext
     };
 
     private static bool HoldsBuiltIn(IReadOnlySet<Role> roles) =>
-        roles.Contains(Role.Anon) || roles.Contains(Role.Authenticated) || roles.Contains(Role.Admin);
+        roles.Any(role => role == Role.Anon || role == Role.Authenticated || role == Role.Admin);
 
     private static AlvoActorKind DerivedActorKind(UserId user) =>
         user == default ? AlvoActorKind.Anonymous

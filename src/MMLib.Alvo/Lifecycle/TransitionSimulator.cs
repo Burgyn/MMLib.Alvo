@@ -1,6 +1,6 @@
-﻿using MMLib.Alvo.Management;
+﻿using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Management;
 using MMLib.Alvo.Rules;
-using MMLib.Alvo.Rules.Internal;
 
 namespace MMLib.Alvo.Lifecycle;
 

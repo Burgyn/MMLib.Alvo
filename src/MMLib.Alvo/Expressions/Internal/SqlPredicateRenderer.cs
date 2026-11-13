@@ -1,5 +1,4 @@
-﻿using MMLib.Alvo.Rules.Internal;
-using MMLib.Alvo.Schema;
+﻿using MMLib.Alvo.Schema;
 using System.Collections.Frozen;
 
 namespace MMLib.Alvo.Expressions.Internal;
@@ -381,12 +380,13 @@ internal sealed partial class SqlPredicateRenderer : IPredicateRenderer
     /// <summary>
     /// Renders role membership. The right operand is never read — the caller's role set answers it — so
     /// <see cref="RoleMembership"/> asserts that the operand really is <c>@user.roles</c> first. The set is the one
-    /// <see cref="RoleProvenance"/> makes visible in this scope's entity: tenant roles count only in a scoped entity's.
+    /// <see cref="RoleProvenance"/> makes visible on this scope's path: tenant roles count only while every entity on it,
+    /// from the top-level one to this scope's, is scoped.
     /// </summary>
     private static PredicateFragment RenderIn(CelBinary binary, RenderScope scope)
     {
         RoleMembership.RequireUserRolesOperand(binary.Right);
-        var roles = RoleProvenance.Visible(Caller(scope.Context, binary), scope.Entity.Tenancy);
+        var roles = RoleProvenance.OnPath(Caller(scope.Context, binary), scope.EveryEntityScoped);
 
         if (binary.Left is CelLiteral { Type: CelValueType.String, Value: string text })
         {

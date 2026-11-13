@@ -53,8 +53,8 @@ internal static class EnvelopeReading
     /// tenant role — and never borrowed from the dispatcher's own <see cref="AlvoContext.System"/> identity. Each
     /// subscriber's gate keeps a condition reading an absent value from being decided against it. <c>authclaims</c> is
     /// parsed once here, and whether it named any role travels with the context. Tenant roles are read only when the
-    /// envelope names a tenant, and a built-in named among them is dropped: it is never a tenant role, and a stored
-    /// envelope must not make the dispatch throw.
+    /// envelope names both an identity and a tenant, as <see cref="EventActor"/> reads them, and a built-in named among
+    /// them is dropped: it is never a tenant role, and a stored envelope must not make the dispatch throw.
     /// </remarks>
     internal static EnvelopeCaller CallerOf(AlvoEvent @event)
     {
@@ -63,8 +63,9 @@ internal static class EnvelopeReading
         var names = AlvoEventProvenance.RolesIn(@event.AuthClaims);
         var roles = names is { Count: > 0 } ? RoleCatalog.Create(names).Resolve(names) : null;
         var context = new AlvoContext { User = actor, Roles = roles ?? _noRoles, Tenant = tenant };
+        var tenanted = tenant is null || actor == default ? context : context with { TenantRoles = TenantRolesOf(@event) };
 
-        return new EnvelopeCaller(tenant is null ? context : context with { TenantRoles = TenantRolesOf(@event) }, roles is not null);
+        return new EnvelopeCaller(tenanted, roles is not null);
     }
 
     private static IReadOnlySet<Role> TenantRolesOf(AlvoEvent @event)

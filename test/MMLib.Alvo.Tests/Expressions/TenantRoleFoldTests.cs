@@ -5,15 +5,16 @@ using MMLib.Alvo.Schema;
 
 using System.Text.Json.Nodes;
 
+using static MMLib.Alvo.Tests.Expressions.TenantRoleCallers;
 using static MMLib.Alvo.Tests.Rules.RelationDescriptors;
-using static MMLib.Alvo.Tests.Rules.RoleProvenanceTests;
 
 namespace MMLib.Alvo.Tests.Expressions;
 
 /// <summary>
-/// <c>@user.roles</c> folds by the tenancy of the entity whose scope reads it, and both backends agree: a tenant role
-/// counts in a scoped entity's rule, mask and condition, and in a relation term into a scoped entity — never in a global
-/// or untenanted one's — and a warm relation cache never lends one caller's fold to another (S1 D1, D2).
+/// <c>@user.roles</c> folds tenant roles only while every entity on the decision's path is scoped (spec §6.2), and both
+/// backends agree: a tenant role counts in a scoped entity's rule, mask and condition and in a relation term from it into
+/// a scoped entity — never in a global or untenanted entity's, never in anything reached from a global entity, never past
+/// a global hop — and a warm relation cache never lends one caller's fold to another (S1 D1, D2).
 /// </summary>
 public sealed class TenantRoleFoldTests
 {
@@ -75,6 +76,48 @@ public sealed class TenantRoleFoldTests
         FoldInside(Read(world, "region_id.code == 'N'", ProjectDispatcher), "regions").ShouldBe("TRUE");
     }
 
+    [Fact]
+    public void A_global_entity_s_relation_into_a_scoped_entity_never_sees_the_tenant_role()
+    {
+        var world = RelationRenderWorld.Over(Descriptor());
+
+        Fold(world, "regions", "orders.exists(o, o.title == 'x')", Person, "orders").ShouldBe("FALSE");
+        Fold(world, "regions", "jobs.exists(j, " + DispatcherOnly + ")", Person, "jobs").ShouldBe("FALSE");
+        Fold(world, "regions", "orders.exists(o, o.title == 'x')", ProjectDispatcher, "orders").ShouldBe("TRUE");
+        Fold(world, "regions", "jobs.exists(j, " + DispatcherOnly + ")", ProjectDispatcher, "jobs").ShouldBe("TRUE");
+    }
+
+    [Fact]
+    public void A_scoped_entity_s_relation_into_a_scoped_entity_sees_the_tenant_role_in_its_body()
+    {
+        var world = RelationRenderWorld.Over(Descriptor());
+
+        Fold(world, "orders", "jobs.exists(j, " + DispatcherOnly + ")", Person, "jobs").ShouldBe("TRUE");
+        Fold(world, "orders", "jobs.exists(j, " + DispatcherOnly + ")", Plain, "jobs").ShouldBe("FALSE");
+    }
+
+    [Fact]
+    public void A_tenant_role_never_counts_past_a_global_hop()
+    {
+        var world = RelationRenderWorld.Over(Descriptor());
+
+        Fold(world, "jobs", "zone_id.code == 'N'", Person, "orders").ShouldBe("FALSE");
+        Fold(world, "jobs", "zone_id.code == 'N'", ProjectDispatcher, "orders").ShouldBe("TRUE");
+    }
+
+    [Fact]
+    public void A_write_probe_from_a_global_entity_never_sees_the_tenant_role()
+    {
+        var world = RelationRenderWorld.Over(Descriptor());
+        var relation = (CelRelation)world.Bound("regions", "orders.exists(o, o.title == 'x')", Person).Root;
+        var image = RelationSqlRenderTests.Image(("id", Guid.Parse("0b9f6a57-6a4d-4c1e-9a0e-6f1b1d1c0003")));
+
+        var probe = _renderer.RenderRelation(
+            relation, world.EntityOf("regions"), Person, new TestFieldSqlRenderer(), "alvo_q", RelationSqlRenderTests.ImageOf("test", image));
+
+        FoldInside(probe.Sql, "orders").ShouldBe("FALSE");
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -100,8 +143,11 @@ public sealed class TenantRoleFoldTests
     private static string Read(RelationRenderWorld world, string source, AlvoContext caller) =>
         Render(world.Bound("jobs", source, caller), caller).Sql;
 
-    private static SqlPredicate Render(CompiledExpression bound, AlvoContext caller) =>
-        _renderer.Render(bound, caller, new TestFieldSqlRenderer(), Prefix, RelationSqlRenderTests.ReadOf("test", "jobs"));
+    private static SqlPredicate Render(CompiledExpression bound, AlvoContext caller, string outer = "jobs") =>
+        _renderer.Render(bound, caller, new TestFieldSqlRenderer(), Prefix, RelationSqlRenderTests.ReadOf("test", outer));
+
+    private static string Fold(RelationRenderWorld world, string outer, string source, AlvoContext caller, string table) =>
+        FoldInside(Render(world.Bound(outer, source, caller), caller, outer).Sql, table);
 
     /// <summary>
     /// The related <c>list</c> rule's fold inside the <c>EXISTS</c> over <paramref name="table"/>: the one constant
@@ -117,12 +163,21 @@ public sealed class TenantRoleFoldTests
         return folds.ShouldHaveSingleItem($"one constant fold inside the EXISTS over {table}: {exists}");
     }
 
+    /// <summary>
+    /// <c>regions</c> and <c>zones</c> are global, <c>orders</c> and <c>jobs</c> scoped. <c>regions</c> and <c>orders</c>
+    /// list only for <c>dispatcher</c>; <c>zones</c> list through an order (a scoped entity behind a global hop);
+    /// <c>jobs</c> list by a column, so no constant of its own competes with a fold inside its <c>EXISTS</c>.
+    /// </summary>
     private static string Descriptor()
     {
         var project = JsonNode.Parse(Project(
             ("regions", Tenancy("global", Entity([Field("code", "string")], ("list", DispatcherOnly)))),
-            ("orders", Tenancy("scoped", Entity([Field("title", "string")], ("list", DispatcherOnly)))),
-            ("jobs", Tenancy("scoped", Entity([Ref("region_id", "regions"), Ref("order_id", "orders")], ("list", "true"))))))!
+            ("zones", Tenancy("global", Entity([Field("code", "string")], ("list", "orders.exists(o, o.title == 'x')")))),
+            ("orders", Tenancy("scoped", Entity(
+                [Field("title", "string"), Ref("region_id", "regions"), Ref("zone_id", "zones")], ("list", DispatcherOnly)))),
+            ("jobs", Tenancy("scoped", Entity(
+                [Ref("region_id", "regions"), Ref("order_id", "orders"), Ref("zone_id", "zones"), Field("note", "string")],
+                ("list", "note == 'open'"))))))!
             .AsObject();
         project["tenancy"] = new JsonObject { ["enabled"] = true };
         project["auth"] = new JsonObject { ["roles"] = new JsonArray("dispatcher") };

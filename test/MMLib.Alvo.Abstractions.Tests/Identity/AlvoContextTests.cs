@@ -82,6 +82,15 @@ public class AlvoContextTests
     }
 
     [Fact]
+    public void A_built_in_is_refused_even_when_the_set_s_own_comparer_would_not_find_it()
+    {
+        var blind = new HashSet<Role>(EqualityComparer<Role>.Create((_, _) => false, _ => 0)) { Role.Admin };
+
+        blind.Contains(Role.Admin).ShouldBeFalse();
+        Should.Throw<ArgumentException>(() => AlvoContext.Anonymous with { TenantRoles = blind }).ParamName.ShouldBe("TenantRoles");
+    }
+
+    [Fact]
     public void Null_tenant_roles_are_refused()
     {
         Should.Throw<ArgumentNullException>(() => AlvoContext.Anonymous with { TenantRoles = null! });

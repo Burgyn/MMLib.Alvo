@@ -75,9 +75,13 @@ public sealed class EventActorTests
     }
 
     [Fact]
-    public void An_anonymous_change_carries_no_tenant_roles() =>
-        EventActor.Of(Event(authId: null, """{"roles":["anon"],"tenantRoles":["dispatcher"]}"""), RoleCatalog.Create(["dispatcher"]))
-            .TenantRoles.ShouldBeEmpty();
+    public void An_anonymous_change_carries_no_tenant_roles()
+    {
+        var @event = Event(authId: null, """{"roles":["anon"],"tenantRoles":["dispatcher"]}""");
+
+        EnvelopeReading.CallerOf(@event).Context.TenantRoles.ShouldBeEmpty("a condition never sees tenant roles without an identity");
+        EventActor.Of(@event, RoleCatalog.Create(["dispatcher"])).TenantRoles.ShouldBeEmpty();
+    }
 
     private static AlvoEvent Event(string? authId, string? authClaims) => new()
     {
