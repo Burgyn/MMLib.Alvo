@@ -819,7 +819,7 @@ mechanism that covers a process that died.
 
 **There is no dispatcher-wide caller, and the claim that there was one was wrong in both directions.** A
 hook condition's `@user.id` is resolved **per event, from the envelope's own `authid`**
-(`EventSubscriptions.CallerOf`), because the actor an author means is the credential that made the change
+(`EnvelopeReading.CallerOf`), because the actor an author means is the credential that made the change
 and not whoever happens to be draining the queue. Since HX-01, `@tenant.id` and `@user.roles` are resolved
 the same way, from `tenantid` and `authclaims` (below). What a shared `AlvoContext.System(tenant: null)` actually did:
 
@@ -844,7 +844,7 @@ in the same words `TemplatePlaceholder` refused them in a template — one autho
 refuse what it cannot.**
 
 **HX-01 (2026-10-14) gave the envelope both values, so the refusal is gone (#153).** `tenantid` carries the
-write's tenant and `authclaims` the caller's roles, and `EventSubscriptions.CallerOf` resolves `@tenant.id` and
+write's tenant and `authclaims` the caller's roles, and `EnvelopeReading.CallerOf` resolves `@tenant.id` and
 `@user.roles` from them, as the writer held them *at the event*. The rule above still decides what happens when an
 envelope cannot answer — now per event rather than per hook: a hook whose condition reads `@tenant.id` is **not
 selected** for an event without `tenantid` (a global row, a tenantless system write, an envelope written before
@@ -857,7 +857,7 @@ ordinal order. An author-declared template may render `{{@user.roles}}`; only th
 
 **Tenant roles travel in the same claim, and an after-hook condition can admit one.** When the writer held tenant roles
 in the event's tenant, `authclaims` also carries `"tenantRoles":[...]` (written only when non-empty, so no existing
-envelope moves), and `EventSubscriptions.CallerOf` rebuilds them for the condition beside `roles`, only when the envelope
+envelope moves), and `EnvelopeReading.CallerOf` rebuilds them for the condition beside `roles`, only when the envelope
 names both an identity and a tenant, and never a built-in. The condition's entity decides whether they fold, by the
 same path rule the request path uses (`relation-rules.md`, *Binding*): on a `tenancy: scoped` entity
 `'dispatcher' in @user.roles` is true for a tenant `dispatcher`; on a global entity it is not. That rule governs

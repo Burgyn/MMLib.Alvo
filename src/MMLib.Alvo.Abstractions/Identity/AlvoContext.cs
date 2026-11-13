@@ -40,8 +40,10 @@ public sealed record AlvoContext
 
     /// <summary>
     /// Gets the roles the caller holds inside <see cref="Tenant"/> only — a membership's roles, never a built-in; empty
-    /// unless given. They count where a rule of a tenant-scoped entity (or a relation term into one) reads
-    /// <c>@user.roles</c>, and nowhere else: not on a global entity, not at Management, and not without a tenant.
+    /// unless given. They count where <c>@user.roles</c> is read while every entity on the decision's path is
+    /// tenant-scoped — a scoped entity's own rule, and a relation term from it into another scoped entity — and nowhere
+    /// else: not in a global entity's rule nor in anything reached from one, not past a global hop, not at Management,
+    /// and not without a tenant.
     /// </summary>
     /// <exception cref="ArgumentNullException">The value is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">The value holds <c>anon</c>, <c>authenticated</c> or <c>admin</c>.</exception>
@@ -113,8 +115,8 @@ public sealed record AlvoContext
         : AlvoActorKind.ApiKey;
 
     /// <summary>
-    /// Answers whether the caller holds a role — project roles only; a tenant role counts only where a scoped entity's
-    /// rule reads <c>@user.roles</c>.
+    /// Answers whether the caller holds a role — project roles only; a tenant role counts only where <c>@user.roles</c>
+    /// is read while every entity on the decision's path is scoped (see <see cref="TenantRoles"/>).
     /// </summary>
     /// <param name="role">The role to test.</param>
     public bool HasRole(Role role) => Roles.Contains(role);
