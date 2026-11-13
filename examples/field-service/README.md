@@ -33,7 +33,7 @@ Then `http://localhost:8081/scalar`, or `scripts/test-e2e`, which does all of th
 secrets and runs both TeaPie suites against both stacks.
 
 The stack has three containers: PostgreSQL, Alvo, and **`sink`** — a WireMock that plays the billing
-system (see *The billing webhook* below). Its request journal is on `http://localhost:8091/__admin/requests`.
+system (see *The billing webhook* below). Its request journal is on `http://localhost:8083/__admin/requests`.
 
 The repo-root `docker-compose.yml` is untouched and still serves `vehicle-registry` on `:8080`. This
 demo is a **second compose file** rather than a second service in that one because Compose interpolates
@@ -62,7 +62,7 @@ or done); new calls are created `new` by convention.
 | `start` | `scheduled` → `in_progress` | technician, dispatcher, admin | — |
 | `complete` | `in_progress` → `completed` | technician, dispatcher, admin | `has(new.completed_on)` |
 | `cancel` | `new`, `scheduled`, `in_progress` → `cancelled` | dispatcher, admin | — |
-| `reopen` | `completed`, `cancelled` → `scheduled` | admin | — |
+| `reopen` | `completed`, `cancelled` → `scheduled` | admin | `!has(new.completed_on)` — the admin clears the sign-off day in the same write, so completing the job again needs a new one |
 
 A move no transition admits, or whose condition fails, is **422** with code `transition` at `/status`; a
 move a transition matches but whose roles the caller lacks is **403**. A `PATCH` that does not name
@@ -75,9 +75,9 @@ in the standalone image nothing acts on it — the embedded host sample does.
 
 | Construct | Where | The behaviour a test measures |
 |---|---|---|
-| `tenancy.enabled` + `tenancy: scoped` | `customers`, `work_orders` | Tenant B cannot see, read, update, delete or infer the existence of tenant A's rows — every attempt is a 404, not a 403. |
+| `tenancy.enabled` + `tenancy: scoped` | `customers`, `work_orders`, `visits` | Tenant B cannot see, read, update, delete or infer the existence of tenant A's rows — every attempt is a 404, not a 403. |
 | `tenancy: global` | `regions` | A global entity is visible to every tenant; it is what makes the scoped entities' isolation a *contrast* rather than an assumption. |
-| `audit: true` | `work_orders` | Mints `created_at`/`created_by`/`updated_at`/`updated_by`, and `updated_at` is the row version an `ETag` encodes. A stale `If-Match` is 412. |
+| `audit: true` | `work_orders`, `visits` | Mints `created_at`/`created_by`/`updated_at`/`updated_by`, and `updated_at` is the row version an `ETag` encodes. A stale `If-Match` is 412. |
 | `audit` **absent** | `customers` | No version column, so **no `ETag` at all** and any `If-Match` naming a version is refused. Both directions matter; one entity cannot show both. |
 | `hidden: true`, optional | `work_orders.internal_notes` | Never in any response, and **its name appears nowhere in `/openapi/v1.json`**. A filter over it is refused *byte-identically* to a filter over an undeclared field — otherwise the refusal answers "does this field exist". |
 | `hidden: true`, **`required`** | `work_orders.access_code` | The one case a hidden field's name is published: in `work_ordersCreate`/`work_ordersPatch` only, never in a response schema. A mandatory field a caller was never told about could not be supplied. |
@@ -100,17 +100,17 @@ in the standalone image nothing acts on it — the embedded host sample does.
 | Construct | Where | The behaviour a test measures | Case |
 |---|---|---|---|
 | `stateMachine` | `work_orders.status` | Skipped steps and failed conditions are 422 `transition`; a transition the caller holds no role for is 403; a batch with one illegal move writes nothing. | `130-Lifecycle/001`, `/002` |
-| `sequence` | `work_orders.job_number` (`JOB-{yyyy}-{n:5}`, per tenant, per year in Bratislava) | The seed is numbered 1..7 per tenant; a create refused by a CHECK gives its number back; a write that sends it is 403; it is `readOnly` in the document. | `140-Integrity/001`, `090-Docs/001` |
+| `sequence` | `work_orders.job_number` (`JOB-{yyyy}-{n:5}`, per tenant, per year in Bratislava) | The seed is numbered 1..7 in north and 1 in south (each tenant counts on its own); a create refused by a CHECK gives its number back; a write that sends it is 403; it is `readOnly` in the document. | `140-Integrity/001`, `090-Docs/001` |
 | `field.validation` (CHECK) | `priority` 1–5, `quoted_price >= 0`, `customers.service_opens_hour`/`service_closes_hour`, `visits.minutes_on_site` | 422 `check` at exactly the field to fix, for every writer — the database enforces it. | `140-Integrity/002` |
 | Partial unique index | `["customer_id","po_number"]` `where: status != 'cancelled'` | A second open job on a customer's PO is 409 `unique` at `/customer_id` and `/po_number`; another customer, or a cancelled job, frees it. | `140-Integrity/003` |
 | Exclusion | `visits`: `["technician_id"]` over `[starts_at, ends_at)` | A technician booked twice at once is 409 `exclusion` at `/starts_at`; back-to-back slots pass. | `140-Integrity/004` |
 | Lookup check | `visits.checks` | A visit on a completed or cancelled job is 422 `check` at `/work_order_id`, with the descriptor's message. | `140-Integrity/004` |
 | Rollup | `work_orders.on_site_minutes = sum(visits.minutes_on_site)` | Kept by the visit writes, in their transaction. | `140-Integrity/004` |
-| Relation rule | `visits.rules.list/get`: `work_order_id.assigned_to == @user.id` | A technician lists exactly the visits of jobs assigned to them; a row failing it is 404. | `150-Relations/001` |
+| Relation rule | `visits.rules.list/get`: `work_order_id.assigned_to == @user.id`; `update` adds being the booked technician | A technician lists exactly the visits of jobs assigned to them; a row failing it is 404. They write only a visit they can read — a booked technician whose job is not theirs gets 404 — and cannot re-point it at a job they cannot read. | `150-Relations/001` |
 | `timers` | `work_orders.sla_breach` on `respond_by` | Armed in the write; its effect is host code (see *The lifecycle*). | — (embedded host) |
 | `automation` + `webhooks` | `job-completed-to-billing` → endpoint `billing` | A completed purchase-order job is posted to billing once, after the commit; a completion without a PO, or an update that completes nothing, sends nothing. | `160-Automation/001` |
 | `events.exclude` | `work_orders`: `access_code`, `internal_notes` | Neither name nor value is in any delivery to billing. | `160-Automation/001` |
-| `access` | `{ "admin": "'admin' in @user.roles" }` | The `admin` key may operate deliveries and *Run now* a schedule over the Management API. Admin only: a management `viewer` sees every tenant's deliveries, which a tenant role must not. | — |
+| `access` | `{ "developer": "'admin' in @user.roles" }` | A key holding the `admin` role may operate deliveries over the Management API (redeliver, replay, pause). Management access is **instance-wide**: it spans every tenant (a management `viewer` already lists every tenant's deliveries), so the key holding the `admin` role is the *instance operator*, and the tenant on that dev key only scopes its data-plane writes. `developer` is the least level that redelivers, replays and pauses deliveries (and runs a schedule, which the embedded host adds); `admin` (users, keys, switching an extension off) stays with the bootstrap administrator. | — |
 
 ## The billing webhook
 
@@ -119,6 +119,9 @@ loopback host, and the webhook egress guard refuses every non-public address unl
 declares loopback — so in this stack the `sink` container (WireMock) runs with
 `network_mode: "service:alvo"`: it shares the Alvo container's network namespace, `localhost:9090` really
 is loopback, and the guard stays fully on. Nothing is allow-listed (`WebhookAllowedNetworks` stays empty).
+
+A cancelled job's visits stay on the calendar: visits carry no status of their own and the exclusion has no
+`where`, so delete a cancelled job's visits to free the technician's slots.
 
 **Only a purchase-order job reaches billing** (`condition: changed(status) && new.status == 'completed'
 && has(new.po_number)`); a job without a PO is settled on site. That is a business rule, and it is also
@@ -165,3 +168,7 @@ written without them. The five key secrets are credentials and are never committ
   answer is `403 The write was rejected by policy.` — correct, but it names no field.
 - **`job_number` and `on_site_minutes` are Alvo's to write.** A create or update that sends either is
   refused `403`, with a detail that says why; read them back from the response.
+- **The dashboard's field rename does not carry everything yet.** Renaming a field a transition's `when`, a timer,
+  an index `where`/`exclude`, a lookup check, an automation condition or another entity's relation rule names
+  (`work_orders.assigned_to`, `status`, `starts_at`, …) leaves those places unrewritten and reports no leftover, and
+  Preview then refuses the descriptor — #513. Edit the descriptor file for those renames.

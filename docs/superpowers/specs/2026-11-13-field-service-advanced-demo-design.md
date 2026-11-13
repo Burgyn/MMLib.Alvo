@@ -54,7 +54,7 @@ behaviour. All are honoured by the standalone image unless §5 says otherwise.
 | D10 | **Rollup** `on_site_minutes` = `sum(visits.minutes_on_site)` | `work_orders` | What billing invoices, kept transactionally by the visit writes. |
 | D11 | **`automation.job-completed-to-billing`**: `entity.work_orders.updated`, `changed(status) && new.status == 'completed' && has(new.po_number)`, `webhook` → endpoint `billing` | top level + `webhooks.endpoints.billing` | Completing a purchase-order job tells billing, as its own retried delivery, after the commit; a job without a PO is settled on site (R6a). |
 | D12 | **`events.exclude`** `["access_code","internal_notes"]` | `work_orders` | The site access code and dispatcher notes must never leave in an event or a webhook to billing. |
-| D13 | **`access`** `{ "admin": "'admin' in @user.roles" }` | top level | Lets the demo's `admin` key operate deliveries and *Run now* a schedule over the Management API. Admin only: a management `viewer` sees every tenant's deliveries, which a tenant role must not. |
+| D13 | **`access`** `{ "developer": "'admin' in @user.roles" }` | top level | Lets the demo's `admin` key operate deliveries and (PR-B) *Run now* a schedule over the Management API — both `developer` operations (`ManagementOperations`), so `developer` is the least level that does the job; `admin` stays with the bootstrap administrator. Management access is instance-wide: it spans every tenant (a management `viewer` already lists every tenant's deliveries), so the key holding the `admin` role is the *instance operator*, and the tenant on that dev key only scopes its data-plane writes. `developer` is the least level that redelivers, replays and pauses deliveries (and runs a schedule, which the embedded host adds); `admin` (users, keys, switching an extension off) stays with the bootstrap administrator. (Review round 1: was `admin`, with a wrong "a tenant role must not see every tenant's deliveries" argument.) |
 
 ### Rulings on the descriptor layer
 
@@ -109,7 +109,8 @@ behaviour. All are honoured by the standalone image unless §5 says otherwise.
   "complete": { "from": ["in_progress"], "to": "completed", "roles": ["technician", "dispatcher", "admin"],
                 "when": "has(new.completed_on)" },
   "cancel":   { "from": ["new", "scheduled", "in_progress"], "to": "cancelled", "roles": ["dispatcher", "admin"] },
-  "reopen":   { "from": ["completed", "cancelled"], "to": "scheduled", "roles": ["admin"] } } },
+  "reopen":   { "from": ["completed", "cancelled"], "to": "scheduled", "roles": ["admin"],
+                "when": "!has(new.completed_on)" } } },
 "timers": { "sla_breach": { "at": "respond_by", "when": "is_emergency == true && status == 'new'",
                             "event": "work_orders.sla_breached" } }
 ```
@@ -165,14 +166,14 @@ shapes, exact sets, a control for every claim):
 
 | File | Asserts |
 |---|---|
-| `130-Lifecycle/001-transitions` | Skipping a step (`scheduled → completed`) is 422 code `transition` at `/status`; `schedule` without an assignee is 422; a technician's `cancel` of their own job is 403 (the row is visible, the move is not theirs); `complete` without `completed_on` is 422 and with it 200; dispatcher `reopen` is 403, admin `reopen` is 200; a `PATCH` that does not name `status` is no transition. |
+| `130-Lifecycle/001-transitions` | Skipping a step (`scheduled → completed`) is 422 code `transition` at `/status`; `schedule` without an assignee, with only an assignee, or with only a time is 422 (so `&&` is distinguishable from `||`); a technician's `cancel` of their own job is 403 (the row is visible, the move is not theirs); `complete` without `completed_on` is 422 and with it 200; dispatcher `reopen` is 403, an admin `reopen` keeping `completed_on` is 422 and one clearing it is 200 (review round 1: `reopen.when: !has(new.completed_on)`); a `PATCH` that does not name `status` is no transition. |
 | `130-Lifecycle/002-batch-transition` | A batch with one illegal move answers 422, the failing index carries `transition`, and **no** row moved. |
 | `140-Integrity/001-sequence` | Seeded orders carry `JOB-<yyyy>-00001…00007` in creation order; south's first is `…-00001` (per tenant); a create refused by a CHECK (priority 9, 422 `check`) gives its number back — the next create is exactly +1; a write that sends `job_number` is 403. |
-| `140-Integrity/002-validation` | `priority: 9`, `service_opens_hour: 25`, `service_closes_hour <= service_opens_hour` → 422, code `check`, pointer at the field; boundary values pass. |
+| `140-Integrity/002-validation` | `priority: 9`, `service_opens_hour: 25`, `service_closes_hour <= service_opens_hour` → 422, code `check`, pointer at the field; boundary values pass; a closing hour with no opening hour passes (the `!has(service_opens_hour)` arm). |
 | `140-Integrity/003-partial-unique` | Second open order on the same `(customer, po_number)` → 409 `unique` at `/customer_id` or `/po_number` (pin what the product answers); cancel the first → the PO is free; another customer may reuse it. |
-| `140-Integrity/004-visits` | Overlapping visit for one technician → 409 `exclusion` at `/starts_at`; back-to-back (`[10,11)`,`[11,12)`) passes; another technician at the same time passes; a visit on a completed job → 422 `check` at `/work_order_id` with the descriptor's message; `on_site_minutes` on the job equals the sum. |
-| `150-Relations/001-visits-through-the-job` | `tech-north` lists exactly the visits of jobs assigned to them; `spare-north` an empty page; the dispatcher all; `tech-north` `GET` of another job's visit is 404. |
-| `160-Automation/001-billing-webhook` | Completing a job delivers exactly one POST to the sink whose CloudEvent `data.record` names that job as `completed` and carries neither `access_code` nor `internal_notes`; a non-completing update of another job delivers nothing for it (control). Polls WireMock's journal with `## RETRY-UNTIL-TEST-PASS`. |
+| `140-Integrity/004-visits` | Overlapping visit for one technician → 409 `exclusion` at `/starts_at`; back-to-back (`[10,11)`,`[11,12)`) passes; another technician at the same time passes; a visit on a completed or a cancelled job → 422 `check` at `/work_order_id` with the descriptor's message; `on_site_minutes` on the job equals the sum. |
+| `150-Relations/001-visits-through-the-job` | `tech-north` lists exactly the visits of jobs assigned to them; `spare-north` an empty page; the dispatcher all; `tech-north` `GET` of another job's visit is 404; `visits.update` is the read rule plus being the booked technician, so `spare-north`'s `PATCH` of the unassigned job's visit is 404 and changes nothing, `tech-north`'s `PATCH` of their own is 200, and re-pointing it at a job they cannot read is 422 `unresolved-reference`. |
+| `160-Automation/001-billing-webhook` | Completing a job delivers exactly one POST to the sink whose CloudEvent `data.record` names that job as `completed` and carries neither `access_code` nor `internal_notes`; a non-completing update and a completion without a PO deliver nothing (controls). Polls WireMock's journal with `## RETRY-UNTIL-TEST-PASS` until a sentinel PO completion, written last, has also arrived, and only then judges the counts. |
 | `090-Docs/001` (edit) | Path set gains `/api/visits*`; `work_orders` property set gains `job_number`, `on_site_minutes`, `po_number`, `respond_by`; `status` enum gains `new`; `job_number` is `readOnly`. |
 | `080-Tenancy/002` (edit) | `job_number` joins the fingerprint's excluded fields — it is assigned per row, like `id` (each tenant's count advances). |
 
