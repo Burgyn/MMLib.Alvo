@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Samples.FieldService.Model;
+﻿using MMLib.Alvo.Samples.FieldService.Dispatch;
+using MMLib.Alvo.Samples.FieldService.Model;
 using MMLib.Alvo.Samples.FieldService.Scheduling;
 using MMLib.Alvo.Samples.FieldService.Tenancy;
 using MMLib.Alvo.Scheduling;
@@ -49,7 +50,7 @@ public static class FieldServiceSetup
     {
         ArgumentNullException.ThrowIfNull(app);
 
-        return app;
+        return app.MapDispatch();
     }
 
     /// <summary>The settings as configured, for the composition steps that need them before the container is built.</summary>
