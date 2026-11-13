@@ -116,10 +116,11 @@ does (see *The embedded host layer* below).
 ## The embedded host layer
 
 [`samples/MMLib.Alvo.Samples.FieldService`](../../samples/MMLib.Alvo.Samples.FieldService/README.md) serves **this same
-file** from an embedded ASP.NET Core host and adds only what JSON cannot say: the `dispatch` command (schedule the job
-and book the visit in one unit), the technician app's signed inbound webhook, a before-write hook for the customer's
-service hours, the customer's visit notice, the SLA timer's escalation, a per-tenant overdue report every morning and a
-technician's open-jobs view. `docker-compose.field-service-host.yml` runs it (`:8082`, sink `:8092`) and
+file** from an embedded ASP.NET Core host and adds what this file has no construct for: the `dispatch` command (schedule
+the job and book the visit in one unit), the technician app's signed inbound webhook, before-write hooks that keep jobs
+and visits inside the customer's service hours (a time-zone-aware hour), the SLA timer's escalation (automation cannot
+subscribe to a timer's event) and a per-tenant overdue report every morning. Telling the customer when the technician
+comes would be an `automation` with an `email` action here — left out only because the demo runs no mail provider. `docker-compose.field-service-host.yml` runs it (`:8082`, sink `:8092`) and
 `test/teapie-field-service-host` guards it inside `scripts/test-e2e`. Its README says, slice by slice, why each piece is
 code.
 

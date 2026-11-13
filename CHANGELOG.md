@@ -11,11 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The advanced demo's host layer: `samples/MMLib.Alvo.Samples.FieldService`**, an embedded host over the same
   `examples/field-service` descriptor (PostgreSQL, typed against the generated `WorkOrder`, `Visit` and roles) that adds
-  only what the descriptor cannot express: the `work_orders.dispatch` command (schedule the job and book its visit in one
-  unit, `Idempotency-Key`), a signed Standard Webhook receiver for the technician app, a `within-service-hours`
-  before-write hook, a customer notice handler, a handler of the SLA timer's own event (priority 1, page on-call), a
-  per-tenant `overdue-report` schedule with a configured tenant catalog, and a `technician-open-jobs` narrowing. Its
-  README says per slice why it is code. `MMLib.Alvo.Samples.FieldService.Tests` (ring0) covers each slice on
+  what the descriptor has no construct for: the `work_orders.dispatch` command (schedule the job and book its visit in
+  one unit, validated input, `Idempotency-Key`), a signed Standard Webhook receiver for the technician app,
+  `within-service-hours` / `visit-within-service-hours` before-write hooks (a visit starts and ends inside the customer's
+  local hours), a handler of the SLA timer's own event (page on-call, priority 1), and a per-tenant `overdue-report`
+  schedule with a configured tenant catalog. Its README says per slice which construct is missing, and why the customer
+  notice and an "open jobs" view are left to the descriptor. `MMLib.Alvo.Samples.FieldService.Tests` (ring0) covers each slice on
   `AlvoTestHost` and over `TestServer`; `docker-compose.field-service-host.yml` (`:8082`, sink `:8092`) runs it, and
   `scripts/test-e2e` now drives a third stack and a third suite, `test/teapie-field-service-host`, inside the required e2e
   check — the overdue report through the Management API's *Run now*, the SLA through a near `respond_by`, nothing

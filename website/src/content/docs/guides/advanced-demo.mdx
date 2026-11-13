@@ -1,6 +1,6 @@
 ---
 title: The advanced demo
-description: "One field-service domain in two layers: a descriptor that runs unchanged in the standalone image, and an embedded host over the same file that adds only what JSON cannot say — each guarded by its own end-to-end suite."
+description: "One field-service domain in two layers: a descriptor that runs unchanged in the standalone image, and an embedded host over the same file that adds what the descriptor has no construct for — each guarded by its own end-to-end suite."
 sidebar:
   order: 16
 ---
@@ -13,7 +13,7 @@ exactly where JSON stops and code starts.
 ## The story
 
 A call comes in and a job is created `new`. The dispatcher assigns a technician and a slot and books the visit in the
-calendar, in one atomic step. The customer is told when the technician is coming. The technician starts and finishes the
+calendar, in one atomic step. The technician starts and finishes the
 job from a mobile app, which posts a signed webhook. Billing is told a purchase-order job is done. An emergency nobody
 scheduled by its respond-by time escalates on its own, and every morning each tenant's dispatch desk gets the list of
 overdue jobs.
@@ -42,23 +42,30 @@ or on its own stack with the five demo keys — see [Examples](/examples/).
 ## Layer 2: the embedded host
 
 [`samples/MMLib.Alvo.Samples.FieldService`](https://github.com/Burgyn/MMLib.Alvo/tree/main/samples/MMLib.Alvo.Samples.FieldService)
-is an ASP.NET Core host that serves **the same file** on PostgreSQL and adds only what the descriptor cannot express.
+is an ASP.NET Core host that serves **the same file** on PostgreSQL and adds what the descriptor has no construct for.
 It is typed against the classes the build [generates from the descriptor](/extending/generated-types/), and
 `test/teapie-field-service-host` runs it in compose.
 
-| Slice | Extension | Why it is code | Read more |
+| Slice | Extension | What the descriptor lacks | Read more |
 |---|---|---|---|
-| Dispatch | A command that schedules the job and books the visit in one transaction | Two writes to two entities must commit together | [Commands and inbound webhooks](/extending/commands/) |
-| Mobile | An inbound Standard Webhook that completes the job and records the minutes | The descriptor describes what Alvo sends, not what it receives | [Commands and inbound webhooks](/extending/commands/) |
-| Scheduling | A before-write hook: a slot must fall inside the customer's service hours | It reads another row and converts into a time zone | [Write hooks](/extending/write-hooks/) |
-| Notifications | An event handler that tells the customer when the technician is coming | The message goes to an SMS or e-mail gateway | [Event handlers](/extending/event-handlers/) |
-| SLA | A handler of the timer's own event: priority 1, and page on-call | Descriptor automation cannot subscribe to a timer's event | [Timers, schedules and data migrations](/extending/time/) |
-| Reports | A cron schedule that runs once per tenant | A cron automation takes no condition and needs a tenant catalog | [Timers, schedules and data migrations](/extending/time/) |
-| Reads | A narrowing: a technician's list shows open jobs only | It is a view for one app, not a permission | [Narrow rows, hide or add fields](/extending/reads/) |
+| Dispatch | A command that schedules the job and books the visit in one transaction | A transaction over two entities | [Commands and inbound webhooks](/extending/commands/) |
+| Mobile | An inbound Standard Webhook that completes the job and records the minutes | Inbound webhooks — the descriptor declares what Alvo sends | [Commands and inbound webhooks](/extending/commands/) |
+| Scheduling | Before-write hooks: a job's start and a visit's whole slot fall inside the customer's service hours | A time-zone-aware hour in CEL; the hours live on another row | [Write hooks](/extending/write-hooks/) |
+| SLA | A handler of the timer's own event: page on-call, then priority 1 | A subscriber for a timer's event | [Timers, schedules and data migrations](/extending/time/) |
+| Reports | A cron schedule that runs once per tenant | A per-tenant job: a cron automation takes no condition, and the image has no tenant catalog | [Timers, schedules and data migrations](/extending/time/) |
 
 The descriptor still judges every write the host makes: the dispatch command's unit takes the state machine's
-`schedule` transition, hits the technician's exclusion on the calendar and runs the service-hours hook, and any refusal
+`schedule` transition, hits the technician's exclusion on the calendar and runs the service-hours hooks, and any refusal
 rolls the whole unit back.
+
+Two things the demo could have written in C# stay out of it, because the descriptor already says them:
+
+- **Telling the customer when the technician comes** is an [automation](/extending/automation/) on
+  `entity.work_orders.updated` with `changed(status) && new.status == 'scheduled'` and an `email` action (or a `webhook`
+  with a `{{…}}` payload). The demo leaves it out only because it runs no mail provider.
+- **A technician's "open jobs only" list** is a `list` rule. `rules.list` and `rules.get` are separate, so the list can
+  filter by status while each job stays readable by id. A [read narrowing](/extending/reads/) is for a filter whose input
+  only code has.
 
 ## Nothing is test-only
 

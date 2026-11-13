@@ -144,6 +144,22 @@ Ruling **R10 — the notifier is an HTTP client to a sink**, not an in-memory ou
 an inspection route would be test code in the sample. In compose the sink is the same WireMock sidecar
 (`http://localhost:9090/notifications/…`); a real deployment points the URL at its SMS/e-mail provider.
 
+**Review round 1 (PR-B), deviations from the table above.** Rule 1 must be true in the sample, so:
+
+- **H5 is dropped.** A customer notice is a descriptor `automation` on `entity.work_orders.updated` with an `email`
+  action, or a `webhook` with a `{{…}}` payload. The demo leaves it out because it runs no mail provider, not because
+  the descriptor cannot express it.
+- **H8 is dropped.** A narrowing applies to list *and* get. A list-only variant (`QueryNarrowing.Operation`) would equal
+  a `rules.list` change, because `list` and `get` are separate rules. A narrowing belongs to input only code has.
+- **H4 now checks the whole visit**, on a second hook on `visits`: it must start at or after opening and end by
+  closing, in local time. The first hook checks the job's start only.
+- **H2 validates its input.** A bad field is 422 at that field. A job that is not `new` is 409, not 403: the access
+  rule is the role only.
+- **H3 refuses a notice missing a field or naming the empty tenant.** The README states the shared-secret trust
+  model.
+- **H6 re-reads the row before it escalates, and pages first, as a step.** It skips a job whose breach no longer
+  holds, and a retry never pages twice.
+
 ## 5. What is deliberately left out, and what the standalone build cannot do
 
 - **Timer effects in standalone.** The `sla_breach` timer is armed by the standalone image, but its event has
