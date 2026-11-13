@@ -1,0 +1,69 @@
+### A delivery signed with the wrong key: 401 before any of the host's code runs — sent FIRST, so the job is still
+### `scheduled` and a forged completion that got through would be visible
+# @name Forged
+## TEST-EXPECT-STATUS: [401]
+POST {{fshBaseUrl}}/hooks/technician-app
+webhook-id: {{ForgedId}}
+webhook-timestamp: {{MobileTimestamp}}
+webhook-signature: {{ForgedSignature}}
+Content-Type: application/json
+
+{{MobileBody}}
+
+### A genuinely signed notice naming tenant SOUTH for north's WO-7001: the tenant comes from the signed body, the job
+### is read under it, and south holds no such job — 404, and nothing moves
+# @name OtherTenant
+## TEST-EXPECT-STATUS: [404]
+POST {{fshBaseUrl}}/hooks/technician-app
+webhook-id: {{SouthId}}
+webhook-timestamp: {{MobileTimestamp}}
+webhook-signature: {{SouthSignature}}
+Content-Type: application/json
+
+{{SouthBody}}
+
+### Neither the forged nor the other-tenant delivery changed anything
+# @name ReadAfterForged
+## TEST-EXPECT-STATUS: [200]
+GET {{fshBaseUrl}}/api/work_orders/{{Wo7001Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The app's signed "job completed": WO-7001 is only scheduled, so the host starts AND completes it in one unit
+# @name Complete
+## TEST-EXPECT-STATUS: [200]
+POST {{fshBaseUrl}}/hooks/technician-app
+webhook-id: {{MobileId}}
+webhook-timestamp: {{MobileTimestamp}}
+webhook-signature: {{MobileSignature}}
+Content-Type: application/json
+
+{{MobileBody}}
+
+###
+# @name ReadAfterComplete
+## TEST-EXPECT-STATUS: [200]
+GET {{fshBaseUrl}}/api/work_orders/{{Wo7001Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The minutes were recorded on the job's visit
+# @name VisitAfterComplete
+## TEST-EXPECT-STATUS: [200]
+GET {{fshBaseUrl}}/api/visits?work_order_id=eq.{{Wo7001Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The app's retry of the very same delivery: acknowledged without running again
+# @name CompleteAgain
+## TEST-EXPECT-STATUS: [200]
+POST {{fshBaseUrl}}/hooks/technician-app
+webhook-id: {{MobileId}}
+webhook-timestamp: {{MobileTimestamp}}
+webhook-signature: {{MobileSignature}}
+Content-Type: application/json
+
+{{MobileBody}}
+
+###
+# @name ReadAfterReplay
+## TEST-EXPECT-STATUS: [200]
+GET {{fshBaseUrl}}/api/work_orders/{{Wo7001Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

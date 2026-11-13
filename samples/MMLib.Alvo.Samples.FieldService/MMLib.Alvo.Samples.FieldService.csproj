@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    The field-service embedded host: the advanced demo's second layer. It serves the SAME descriptor the
+    standalone stack mounts (examples/field-service/field-service.alvo.json) and adds only what that
+    descriptor cannot express — see README.md for the construct-by-construct reason.
+
+    Project references rather than PackageReferences, as in MMLib.Alvo.Samples.EmbeddedHost: a breaking
+    change to a seam this sample uses breaks it in the same build instead of rotting until someone runs it.
+  -->
+  <Import Project="$(MSBuildThisFileDirectory)../../src/MMLib.Alvo/build/MMLib.Alvo.props" />
+
+  <PropertyGroup>
+    <RootNamespace>MMLib.Alvo.Samples.FieldService</RootNamespace>
+    <!-- The image's Alpine base carries no ICU, as for MMLib.Alvo.Host. Time zones come from tzdata, not ICU. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
+    <ProjectReference Include="../../src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj" />
+    <!-- The typed-entity generator and ALVO1001, wired as a packed consumer's analyzers/dotnet/cs would wire them. -->
+    <ProjectReference Include="../../src/MMLib.Alvo.Analyzers/MMLib.Alvo.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The slices are internal — a sample's surface is its routes and its registration, not its classes — and its tests read them. -->
+    <InternalsVisibleTo Include="MMLib.Alvo.Samples.FieldService.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The SAME file the standalone stack mounts: one descriptor, two runtimes. A renamed field breaks this build. -->
+    <AdditionalFiles Include="../../examples/field-service/field-service.alvo.json" AlvoDescriptor="true" AlvoNamespace="MMLib.Alvo.Samples.FieldService.Model" />
+  </ItemGroup>
+
+</Project>

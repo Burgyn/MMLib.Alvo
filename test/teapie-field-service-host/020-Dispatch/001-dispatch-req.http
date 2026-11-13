@@ -1,0 +1,122 @@
+### Tenant isolation through a command: dispatcher-south asks for north's WO-7001. The command reads the row as the
+### caller first, under the tenant scope, so the job does not exist for them — 404, the same answer as no row at all.
+### Sent FIRST, while WO-7001 is still new: a dispatch that got through would show in every read below.
+# @name SouthDispatchesNorthJob
+## TEST-EXPECT-STATUS: [404]
+POST {{fshBaseUrl}}/commands/work-orders/{{Wo7001Id}}/dispatch
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{ "technicianId": "{{userDispatcherSouth}}", "startsAt": "2027-03-01T09:00:00Z", "durationMinutes": 90 }
+
+### A zero-minute visit would overlap nothing and slip past the calendar's exclusion: the input is refused first
+# @name DurationZero
+## TEST-EXPECT-STATUS: [422]
+POST {{fshBaseUrl}}/commands/work-orders/{{Wo7001Id}}/dispatch
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "technicianId": "{{userTechNorth}}", "startsAt": "2027-03-01T09:00:00Z", "durationMinutes": 0 }
+
+### `work_orders.dispatch`: assign tech-north, set the slot, move to `scheduled` AND book the visit — one unit
+### 2027-03-01 09:00 UTC is 10:00 in Bratislava, inside the customer's 07:00-19:00.
+# @name DispatchWo7001
+## TEST-EXPECT-STATUS: [200]
+POST {{fshBaseUrl}}/commands/work-orders/{{Wo7001Id}}/dispatch
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Idempotency-Key: dispatch-7001
+Content-Type: application/json
+
+{ "technicianId": "{{userTechNorth}}", "startsAt": "2027-03-01T09:00:00Z", "durationMinutes": 90 }
+
+### The dispatcher's retried click, same key and same input: the first answer is replayed and nothing runs again
+# @name DispatchWo7001Replay
+## TEST-EXPECT-STATUS: [200]
+POST {{fshBaseUrl}}/commands/work-orders/{{Wo7001Id}}/dispatch
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Idempotency-Key: dispatch-7001
+Content-Type: application/json
+
+{ "technicianId": "{{userTechNorth}}", "startsAt": "2027-03-01T09:00:00Z", "durationMinutes": 90 }
+
+### The technician may READ WO-7002 (it is assigned to them) but the command's rule names dispatcher or admin
+# @name TechnicianDispatches
+## TEST-EXPECT-STATUS: [403]
+POST {{fshBaseUrl}}/commands/work-orders/{{Wo7002Id}}/dispatch
+X-Alvo-Api-Key: {{keyTechNorth}}
+Content-Type: application/json
+
+{ "technicianId": "{{userTechNorth}}", "startsAt": "2027-03-03T09:00:00Z", "durationMinutes": 60 }
+
+### 20:00 UTC is 21:00 in Bratislava: the host's before-write hook refuses it inside the unit
+# @name OutsideHours
+## TEST-EXPECT-STATUS: [422]
+POST {{fshBaseUrl}}/commands/work-orders/{{Wo7002Id}}/dispatch
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "technicianId": "{{userTechNorth}}", "startsAt": "2027-03-03T20:00:00Z", "durationMinutes": 60 }
+
+### 17:30 UTC is 18:30 in Bratislava: it STARTS inside 07:00-19:00, but a 120-minute visit ends at 20:30 — the visit's
+### service-hours hook refuses it at /ends_at, and the job's own update in the same unit rolls back with it
+# @name EndsAfterClosing
+## TEST-EXPECT-STATUS: [422]
+POST {{fshBaseUrl}}/commands/work-orders/{{Wo7002Id}}/dispatch
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "technicianId": "{{userTechNorth}}", "startsAt": "2027-03-03T17:30:00Z", "durationMinutes": 120 }
+
+### WO-7001 is scheduled now: dispatching it again is a state conflict, not a refusal of the dispatcher
+# @name DispatchAgain
+## TEST-EXPECT-STATUS: [409]
+POST {{fshBaseUrl}}/commands/work-orders/{{Wo7001Id}}/dispatch
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "technicianId": "{{userTechNorth}}", "startsAt": "2027-03-04T09:00:00Z", "durationMinutes": 60 }
+
+### tech-north is on WO-7001 from 09:00 to 10:30; a slot from 09:30 overlaps — the descriptor's exclusion refuses the visit
+# @name DoubleBooking
+## TEST-EXPECT-STATUS: [409]
+POST {{fshBaseUrl}}/commands/work-orders/{{Wo7003Id}}/dispatch
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "technicianId": "{{userTechNorth}}", "startsAt": "2027-03-01T09:30:00Z", "durationMinutes": 60 }
+
+### The refused double booking left the job exactly as it was: the unit is all or nothing
+# @name ReadWo7003AfterRefusal
+## TEST-EXPECT-STATUS: [200]
+GET {{fshBaseUrl}}/api/work_orders/{{Wo7003Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### ... and booked nothing
+# @name VisitsOfWo7003
+## TEST-EXPECT-STATUS: [200]
+GET {{fshBaseUrl}}/api/visits?work_order_id=eq.{{Wo7003Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The refused out-of-hours slot left WO-7002 new, unscheduled and with no visit
+# @name ReadWo7002AfterRefusal
+## TEST-EXPECT-STATUS: [200]
+GET {{fshBaseUrl}}/api/work_orders/{{Wo7002Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+###
+# @name VisitsOfWo7002
+## TEST-EXPECT-STATUS: [200]
+GET {{fshBaseUrl}}/api/visits?work_order_id=eq.{{Wo7002Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The dispatched job, as stored
+# @name ReadWo7001
+## TEST-EXPECT-STATUS: [200]
+GET {{fshBaseUrl}}/api/work_orders/{{Wo7001Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### ... and its visit — exactly one, though the command was sent twice
+# @name VisitsOfWo7001
+## TEST-EXPECT-STATUS: [200]
+GET {{fshBaseUrl}}/api/visits?work_order_id=eq.{{Wo7001Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

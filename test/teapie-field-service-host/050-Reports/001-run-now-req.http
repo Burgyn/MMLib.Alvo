@@ -1,0 +1,24 @@
+### A dispatcher is no instance operator: running a schedule is a Management API `developer` operation, which the
+### descriptor's `access.developer` grants to the `admin` role only
+# @name DispatcherRunsNow
+## TEST-EXPECT-STATUS: [403]
+POST {{fshBaseUrl}}/management/projects/field-service/schedules/overdue-report/run
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The administrator's *Run now* (spec ruling R8): the host's cron stays `0 6 * * *`, and the suite starts one run
+### outside it, one per tenant the host's catalog lists — no test switch in the host. 200 with the run it started.
+# @name AdminRunsNow
+## TEST-EXPECT-STATUS: [200]
+POST {{fshBaseUrl}}/management/projects/field-service/schedules/overdue-report/run
+X-Alvo-Api-Key: {{keyAdmin}}
+
+### What the dispatch desks received — polled until both tenants' reports are in, at most ~30 s
+# @name OverdueReports
+## RETRY-UNTIL-TEST-PASS: Both tenants received their overdue report.
+## RETRY-MAX-ATTEMPTS: 30
+## RETRY-BACKOFF-TYPE: Constant
+## RETRY-MAX-DELAY: 00:00:01
+POST {{fshSinkUrl}}/__admin/requests/find
+Content-Type: application/json
+
+{ "method": "POST", "urlPath": "/notifications/reports/overdue" }

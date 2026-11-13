@@ -1,0 +1,79 @@
+---
+title: The advanced demo
+description: "One field-service domain in two layers: a descriptor that runs unchanged in the standalone image, and an embedded host over the same file that adds what the descriptor has no construct for — each guarded by its own end-to-end suite."
+sidebar:
+  order: 16
+---
+
+The simple demo, [`examples/vehicle-registry`](https://github.com/Burgyn/MMLib.Alvo/blob/main/examples/vehicle-registry/vehicles.alvo.json),
+shows how little it takes to use Alvo. The advanced demo shows the sophisticated constructs in one real use case — a
+multi-tenant field-service dispatch backend — and it is built in two layers over **one descriptor file**, so you can see
+exactly where JSON stops and code starts.
+
+## The story
+
+A call comes in and a job is created `new`. The dispatcher assigns a technician and a slot and books the visit in the
+calendar, in one atomic step. The technician starts and finishes the
+job from a mobile app, which posts a signed webhook. Billing is told a purchase-order job is done. An emergency nobody
+scheduled by its respond-by time escalates on its own, and every morning each tenant's dispatch desk gets the list of
+overdue jobs.
+
+## Layer 1: the descriptor
+
+[`examples/field-service/field-service.alvo.json`](https://github.com/Burgyn/MMLib.Alvo/blob/main/examples/field-service/field-service.alvo.json)
+runs in the standalone image with no code at all, and `test/teapie-field-service` measures every construct in it:
+
+| Construct | What it does here | Read more |
+|---|---|---|
+| State machine | `new → scheduled → in_progress → completed`, cancel, and an admin-only reopen; a skipped step is 422 `transition` | [State machines and timers](/extending/state-machines/) |
+| Sequence | Gapless `JOB-2026-00001` per tenant and year, in Bratislava time | [Integrity](/extending/integrity/) |
+| Timer | `sla_breach` armed at a job's own `respond_by` while it is an unscheduled emergency | [State machines and timers](/extending/state-machines/) |
+| CHECK validations | Priority 1–5, service hours 0–24, minutes on site | [Integrity](/extending/integrity/) |
+| Partial unique index | One open job per customer and purchase order | [Indexes and uniqueness](/guides/indexes/) |
+| Exclusion | A technician is never booked twice at once | [Integrity](/extending/integrity/) |
+| Relation rule, lookup check | A technician sees a visit through its job; no visit on a closed job | [Rules over relations](/extending/relation-rules/) |
+| Rollup | Minutes on site summed onto the job | [Computed fields and rollups](/guides/computed-and-rollups/) |
+| Automation + webhook | A completed purchase-order job is posted to billing, without the excluded fields | [Automation rules](/extending/automation/) |
+
+Run it from the published image with
+`ALVO_DESCRIPTOR=/alvo/examples/field-service/field-service.alvo.json docker compose -f docker-compose.quickstart.yml up --wait`,
+or on its own stack with the five demo keys — see [Examples](/examples/).
+
+## Layer 2: the embedded host
+
+[`samples/MMLib.Alvo.Samples.FieldService`](https://github.com/Burgyn/MMLib.Alvo/tree/main/samples/MMLib.Alvo.Samples.FieldService)
+is an ASP.NET Core host that serves **the same file** on PostgreSQL and adds what the descriptor has no construct for.
+It is typed against the classes the build [generates from the descriptor](/extending/generated-types/), and
+`test/teapie-field-service-host` runs it in compose.
+
+| Slice | Extension | What the descriptor lacks | Read more |
+|---|---|---|---|
+| Dispatch | A command that schedules the job and books the visit in one transaction | A transaction over two entities | [Commands and inbound webhooks](/extending/commands/) |
+| Mobile | An inbound Standard Webhook that completes the job and records the minutes | Inbound webhooks — the descriptor declares what Alvo sends | [Commands and inbound webhooks](/extending/commands/) |
+| Scheduling | Before-write hooks: a job's start and a visit's whole slot fall inside the customer's service hours | A time-zone-aware hour in CEL; the hours live on another row | [Write hooks](/extending/write-hooks/) |
+| SLA | A handler of the timer's own event: page on-call, then priority 1 | A subscriber for a timer's event | [Timers, schedules and data migrations](/extending/time/) |
+| Reports | A cron schedule that runs once per tenant | A per-tenant job: a cron automation takes no condition, and the image has no tenant catalog | [Timers, schedules and data migrations](/extending/time/) |
+
+The descriptor still judges every write the host makes: the dispatch command's unit takes the state machine's
+`schedule` transition, hits the technician's exclusion on the calendar and runs the service-hours hooks, and any refusal
+rolls the whole unit back.
+
+Two things the demo could have written in C# stay out of it, because the descriptor already says them:
+
+- **Telling the customer when the technician comes** is an [automation](/extending/automation/) on
+  `entity.work_orders.updated` with `changed(status) && new.status == 'scheduled'` and an `email` action (or a `webhook`
+  with a `{{…}}` payload). The demo leaves it out only because it runs no mail provider.
+- **A technician's "open jobs only" list** is a `list` rule. `rules.list` and `rules.get` are separate, so the list can
+  filter by status while each job stays readable by id. A [read narrowing](/extending/reads/) is for a filter whose input
+  only code has.
+
+## Nothing is test-only
+
+Both suites run inside the required check, against the code as shipped. The SLA deadline is data — a job's
+`respond_by`, sent a few seconds ahead — and the overdue report keeps its production cron and is started with the
+Management API's **Run now**. There is no debug route, no shortened constant and no clock control in the host.
+
+## See also
+
+- [Where logic goes](/extending/where-logic-goes/) — the order to try the descriptor, a CEL function, then code.
+- [Your first extension](/extending/first-extension/) — the smallest embedded host.

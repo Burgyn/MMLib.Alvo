@@ -4,6 +4,7 @@
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/MMLib.Alvo.Samples.EmbeddedHost/MMLib.Alvo.Samples.EmbeddedHost.csproj" />
+    <Project Path="samples/MMLib.Alvo.Samples.FieldService/MMLib.Alvo.Samples.FieldService.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/MMLib.Alvo.Abstractions/MMLib.Alvo.Abstractions.csproj" />
@@ -42,6 +43,7 @@
     <Project Path="test/MMLib.Alvo.Host.Tests/MMLib.Alvo.Host.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Identity.Tests/MMLib.Alvo.Identity.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Samples.EmbeddedHost.Tests.Integration/MMLib.Alvo.Samples.EmbeddedHost.Tests.Integration.csproj" />
+    <Project Path="test/MMLib.Alvo.Samples.FieldService.Tests/MMLib.Alvo.Samples.FieldService.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Schema.Tests/MMLib.Alvo.Schema.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.TestHost.Tests/MMLib.Alvo.TestHost.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj" />

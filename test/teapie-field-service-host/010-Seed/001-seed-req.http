@@ -1,0 +1,80 @@
+### The embedded host serves the same descriptor as the standalone stack: a region only the admin creates
+# @name CreateNorthRegion
+## TEST-EXPECT-STATUS: [201]
+POST {{fshBaseUrl}}/api/regions
+X-Alvo-Api-Key: {{keyAdmin}}
+Content-Type: application/json
+
+{ "code": "NORTH", "name": "Northern region" }
+
+### A north customer open 07:00-19:00 Bratislava: the service hours the host's before-write hook schedules against
+# @name CreateNorthCustomer
+## TEST-EXPECT-STATUS: [201]
+POST {{fshBaseUrl}}/api/customers
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "name": "Kaviareň Dunaj", "tier": "standard", "email": "ops@dunaj.test", "service_opens_hour": 7, "service_closes_hour": 19 }
+
+### A south customer with no service hours, so nothing south is ever refused for its slot
+# @name CreateSouthCustomer
+## TEST-EXPECT-STATUS: [201]
+POST {{fshBaseUrl}}/api/customers
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantSouth}}", "name": "Pekáreň Juh", "tier": "priority" }
+
+### WO-7001: a new job the dispatcher will dispatch, and the technician app will complete
+# @name CreateWo7001
+## TEST-EXPECT-STATUS: [201]
+POST {{fshBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-7001", "title": "Espresso machine leaks", "status": "new", "priority": 3, "access_code": "7001", "contact_email": "barista@dunaj.test", "customer_id": "{{CreateNorthCustomer.response.body.$.id}}", "region_id": "{{CreateNorthRegion.response.body.$.id}}" }
+
+### WO-7002: new, already assigned to tech-north — so the technician can READ it and the dispatch refusal is the rule's, not a 404
+# @name CreateWo7002
+## TEST-EXPECT-STATUS: [201]
+POST {{fshBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-7002", "title": "Grinder jams", "status": "new", "priority": 3, "access_code": "7002", "assigned_to": "{{userTechNorth}}", "customer_id": "{{CreateNorthCustomer.response.body.$.id}}", "region_id": "{{CreateNorthRegion.response.body.$.id}}" }
+
+### WO-7003: new — the double booking's victim
+# @name CreateWo7003
+## TEST-EXPECT-STATUS: [201]
+POST {{fshBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-7003", "title": "Fridge too warm", "status": "new", "priority": 3, "access_code": "7003", "customer_id": "{{CreateNorthCustomer.response.body.$.id}}", "region_id": "{{CreateNorthRegion.response.body.$.id}}" }
+
+### WO-7004: an emergency with NO respond_by — no timer is armed, and it is never overdue
+# @name CreateWo7004
+## TEST-EXPECT-STATUS: [201]
+POST {{fshBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-7004", "title": "Water on the floor", "status": "new", "priority": 2, "is_emergency": true, "access_code": "7004", "customer_id": "{{CreateNorthCustomer.response.body.$.id}}", "region_id": "{{CreateNorthRegion.response.body.$.id}}" }
+
+### WO-7005: SOUTH, scheduled for a morning long gone — south's overdue job, which north's report must never name
+# @name CreateWo7005
+## TEST-EXPECT-STATUS: [201]
+POST {{fshBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantSouth}}", "reference": "WO-7005", "title": "Oven door hinge", "status": "scheduled", "priority": 3, "access_code": "7005", "scheduled_for": "2026-01-05T09:00:00Z", "assigned_to": "{{userDispatcherSouth}}", "customer_id": "{{CreateSouthCustomer.response.body.$.id}}", "region_id": "{{CreateNorthRegion.response.body.$.id}}" }
+
+### WO-7006: north, assigned to tech-north and scheduled for a morning long gone (10:00 Bratislava) — north's overdue job
+# @name CreateWo7006
+## TEST-EXPECT-STATUS: [201]
+POST {{fshBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-7006", "title": "Milk frother", "status": "scheduled", "priority": 3, "access_code": "7006", "scheduled_for": "2026-01-05T09:00:00Z", "assigned_to": "{{userTechNorth}}", "customer_id": "{{CreateNorthCustomer.response.body.$.id}}", "region_id": "{{CreateNorthRegion.response.body.$.id}}" }

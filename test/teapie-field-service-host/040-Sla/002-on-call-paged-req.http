@@ -1,0 +1,16 @@
+### The control, dispatched in time: never escalated
+# @name ReadWo7102
+## TEST-EXPECT-STATUS: [200]
+GET {{fshBaseUrl}}/api/work_orders/{{Wo7102Id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The on-call page the escalation sent — polled, because the page is the handler's step after the priority write
+# @name OnCallPages
+## RETRY-UNTIL-TEST-PASS: On-call was paged about WO-7101.
+## RETRY-MAX-ATTEMPTS: 30
+## RETRY-BACKOFF-TYPE: Constant
+## RETRY-MAX-DELAY: 00:00:01
+POST {{fshSinkUrl}}/__admin/requests/find
+Content-Type: application/json
+
+{ "method": "POST", "urlPath": "/notifications/on-call" }

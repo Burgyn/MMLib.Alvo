@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The advanced demo's host layer: `samples/MMLib.Alvo.Samples.FieldService`**, an embedded host over the same
+  `examples/field-service` descriptor (PostgreSQL, typed against the generated `WorkOrder`, `Visit` and roles) that adds
+  what the descriptor has no construct for: the `work_orders.dispatch` command (schedule the job and book its visit in
+  one unit, validated input, `Idempotency-Key`), a signed Standard Webhook receiver for the technician app,
+  `within-service-hours` / `visit-within-service-hours` before-write hooks (a visit starts and ends inside the customer's
+  local hours), a handler of the SLA timer's own event (page on-call, priority 1), and a per-tenant `overdue-report`
+  schedule with a configured tenant catalog. Its README says per slice which construct is missing, and why the customer
+  notice and an "open jobs" view are left to the descriptor. `MMLib.Alvo.Samples.FieldService.Tests` (ring0) covers each slice on
+  `AlvoTestHost` and over `TestServer`; `docker-compose.field-service-host.yml` (`:8082`, sink `:8092`) runs it, and
+  `scripts/test-e2e` now drives a third stack and a third suite, `test/teapie-field-service-host`, inside the required e2e
+  check — the overdue report through the Management API's *Run now*, the SLA through a near `respond_by`, nothing
+  test-only in the host. The docs gain *The advanced demo*.
 - **`examples/field-service` is the advanced demo** (`examples/vehicle-registry` stays the simple one): the descriptor
   gains a state machine on `work_orders.status` (`new` → `schedule` → `start` → `complete`, `cancel`, admin-only
   `reopen`), a gapless per-tenant `job_number` sequence, an SLA timer on `respond_by`, CHECK validations, a partial

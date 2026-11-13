@@ -17,7 +17,7 @@ collection per invocation. Both read one generated environment file, so nothing 
 ## Run it
 
 ```bash
-scripts/test-e2e          # both stacks, both suites, plus three PostgreSQL row-level assertions
+scripts/test-e2e          # all three stacks and suites, plus three PostgreSQL row-level assertions
 ```
 
 To iterate on one group, start the stack yourself (see `examples/field-service/README.md`), write the
