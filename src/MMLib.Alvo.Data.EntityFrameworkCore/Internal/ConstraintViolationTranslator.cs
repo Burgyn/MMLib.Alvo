@@ -49,20 +49,21 @@ internal static class ConstraintViolationTranslator
     /// expires and a collision on it is an ordinary conflict the caller can fix by choosing another id.
     /// Every other write mints its own key, passes <see langword="false"/>, and keeps the old answer.
     /// </param>
+    /// <param name="removes">
+    /// Whether the write removes rows. A foreign-key refusal of a removal is a <c>restrict</c> holding — records still
+    /// point here; of any other write, a <c>ref</c> naming a record it cannot point at (#161). The engine cannot tell the
+    /// two apart for every statement (SQLite says only <c>FOREIGN KEY constraint failed</c>), so the write says which it is
+    /// — required rather than defaulted, so no call site inherits a direction it did not state.
+    /// </param>
     /// <param name="applied">The applied schema, whose validated fields a CHECK constraint's name is recomputed from.</param>
     /// <param name="unnameable">The fields the descriptor hides, which a CHECK refusal never names (the write's decision).</param>
     /// <param name="bodySent">
     /// Whether the request carried values a refusal may point at. A delete sends none, so a parent's validation its rollup
     /// recompute breaks names no child field: there is no value of the caller's to change.
     /// </param>
-    /// <param name="removes">
-    /// Whether the write removes rows. A foreign-key refusal of a removal is a <c>restrict</c> holding — records still
-    /// point here; of any other write, a <c>ref</c> naming a record it cannot point at (#161). The engine cannot tell the
-    /// two apart for every statement (SQLite says only <c>FOREIGN KEY constraint failed</c>), so the write says which it is.
-    /// </param>
     internal static async Task<T> TranslatedAsync<T>(
-        Func<Task<T>> write, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema, bool callerKeyed,
-        SchemaModel applied, IReadOnlySet<string> unnameable, bool bodySent = true, bool removes = false)
+        Func<Task<T>> write, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema, bool callerKeyed, bool removes,
+        SchemaModel applied, IReadOnlySet<string> unnameable, bool bodySent = true)
     {
         try
         {
@@ -76,8 +77,8 @@ internal static class ConstraintViolationTranslator
 
     /// <inheritdoc cref="TranslatedAsync{T}"/>
     internal static async Task TranslatedAsync(
-        Func<Task> write, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema, bool callerKeyed,
-        SchemaModel applied, IReadOnlySet<string> unnameable, bool bodySent = true, bool removes = false)
+        Func<Task> write, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema, bool callerKeyed, bool removes,
+        SchemaModel applied, IReadOnlySet<string> unnameable, bool bodySent = true)
     {
         try
         {

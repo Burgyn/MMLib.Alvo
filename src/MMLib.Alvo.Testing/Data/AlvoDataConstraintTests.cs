@@ -161,9 +161,12 @@ public abstract class AlvoDataConstraintTests
 
         var refusal = await Should.ThrowAsync<AlvoConstraintViolationException>(
             () => data.DeleteAsync(WorkOrders, (Guid)parent["id"]!, north, cancellationToken: Ct));
+        var batchRefusal = await Should.ThrowAsync<AlvoConstraintViolationException>(
+            () => data.DeleteManyAsync(WorkOrders, [(Guid)parent["id"]!], north, cancellationToken: Ct));
 
-        refusal.Kind.ShouldBe(AlvoConstraintKind.Referenced);
         refusal.Fields.ShouldBeEmpty("naming the referencing entity would disclose data the caller may not read");
+        ShouldBeTheRestrictRefusal(refusal);
+        ShouldBeTheRestrictRefusal(batchRefusal);
         (await data.GetAsync(WorkOrders, (Guid)parent["id"]!, north, Ct)).ShouldNotBeNull(
             "a refused delete must leave the row alone");
     }
@@ -315,9 +318,11 @@ public abstract class AlvoDataConstraintTests
 
         var refusal = await Should.ThrowAsync<AlvoConstraintViolationException>(
             () => data.DeleteAsync(WorkOrders, parent, north, cancellationToken: Ct));
+        var batchRefusal = await Should.ThrowAsync<AlvoConstraintViolationException>(
+            () => data.DeleteManyAsync(WorkOrders, [parent], north, cancellationToken: Ct));
 
-        refusal.Kind.ShouldBe(AlvoConstraintKind.Referenced);
-        refusal.Fields.ShouldBeEmpty();
+        ShouldBeTheRestrictRefusal(refusal);
+        ShouldBeTheRestrictRefusal(batchRefusal);
         (await data.GetAsync(WorkOrders, parent, north, Ct)).ShouldNotBeNull("a refused delete must leave the row alone");
     }
 
@@ -438,6 +443,19 @@ public abstract class AlvoDataConstraintTests
         crossTenant.Message.ShouldNotBe(
             new AlvoConstraintViolationException(AlvoConstraintKind.Referenced, []).Message,
             "the write sent a reference and removed nothing, so the delete's wording would send the caller the wrong way");
+    }
+
+    /// <summary>
+    /// Asserts a refused delete is the <c>restrict</c> refusal — kind, no fields, and the delete's own wording ("remove
+    /// what points here"), never the write's ("point the reference elsewhere"), whether one row or a batch was deleted.
+    /// </summary>
+    private static void ShouldBeTheRestrictRefusal(AlvoConstraintViolationException refusal)
+    {
+        refusal.Kind.ShouldBe(AlvoConstraintKind.Referenced);
+        refusal.Fields.ShouldBeEmpty();
+        refusal.Message.ShouldBe(
+            new AlvoConstraintViolationException(AlvoConstraintKind.Referenced, []).Message,
+            "a refused delete is answered with the delete's fix, not with a write's");
     }
 
     private static AlvoContext NewContext(TenantId tenant) =>

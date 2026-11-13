@@ -36,6 +36,7 @@ public class ConstraintViolationTranslatorTests
             Rows,
             Part,
             callerKeyed: false,
+            removes: false,
             Applied,
             Nothing);
 
@@ -51,7 +52,7 @@ public class ConstraintViolationTranslatorTests
     {
         var refused = await Should.ThrowAsync<AlvoConstraintViolationException>(
             async () => await ConstraintViolationTranslator.TranslatedAsync(
-                () => Task.FromException(Collision()), Decoding(OnColumns("code")), Rows, Part, callerKeyed: false, Applied, Nothing));
+                () => Task.FromException(Collision()), Decoding(OnColumns("code")), Rows, Part, callerKeyed: false, removes: false, Applied, Nothing));
 
         refused.Kind.ShouldBe(AlvoConstraintKind.Unique);
         refused.Fields.ShouldBe(["code"]);
@@ -239,9 +240,9 @@ public class ConstraintViolationTranslatorTests
             Rows,
             Part,
             callerKeyed: false,
+            removes,
             Applied,
-            Nothing,
-            removes: removes);
+            Nothing);
 
     private static Task Checked(string? constraintName, EntitySchema written, IReadOnlySet<string> unnameable, bool bodySent = true) =>
         ConstraintViolationTranslator.TranslatedAsync(
@@ -250,13 +251,14 @@ public class ConstraintViolationTranslatorTests
             Rows,
             written,
             callerKeyed: false,
+            removes: false,
             Applied,
             unnameable,
             bodySent);
 
     private static Task Translated(SqlConstraintViolation decoded, IEntityType rows, bool callerKeyed) =>
         ConstraintViolationTranslator.TranslatedAsync(
-            () => Task.FromException(Collision()), Decoding(decoded), rows, Part, callerKeyed, Applied, Nothing);
+            () => Task.FromException(Collision()), Decoding(decoded), rows, Part, callerKeyed, removes: false, Applied, Nothing);
 
     private static IReadOnlySet<string> Nothing { get; } = new HashSet<string>(StringComparer.Ordinal);
 
