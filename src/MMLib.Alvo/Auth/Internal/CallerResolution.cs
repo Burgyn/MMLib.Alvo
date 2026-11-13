@@ -64,6 +64,15 @@ internal readonly record struct CallerAdmission(AlvoPrincipal? Principal, IResul
 /// are constructed, so sharing a base class would couple those too. What is shared is three mechanics — reading,
 /// admitting, publishing — and mechanics are what a static helper is for.
 /// </para>
+/// <para>
+/// <b>It reaches into <c>Api.Internal</c> for one thing, <see cref="ProblemResultFactory"/>, on purpose.</b> That
+/// factory is the one home of every RFC 9457 answer — commands, Management and inbound webhooks build their refusals
+/// through it too — and its <c>UnauthenticatedResult</c> is the one place a 401 is paired with its
+/// <c>WWW-Authenticate</c> challenge. Moving the three 401s here would give the 401 wording a second home only to keep
+/// the folders acyclic, a trade the repository already declined (<c>Api</c> and <c>Commands</c>, <c>Events</c> and
+/// <c>Rules</c> reference each other the same way), and no architecture test forbids it. The reading, the admission
+/// and the choice of refusal stay here; only the document is built there.
+/// </para>
 /// </remarks>
 internal static class CallerResolution
 {
