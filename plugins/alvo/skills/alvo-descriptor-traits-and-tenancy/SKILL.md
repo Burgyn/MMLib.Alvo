@@ -47,7 +47,7 @@ holds `admin`, so a job needs a transition listing it. A host before-write hook 
 (`now() + duration('24h')`), `when` a condition. A create arms it, an update moves it only when its due changes, an
 inactive `when` or a delete cancels it, all in the write's transaction. It fires `event` (default `<entity>.<timer>`)
 with `entity`, `id`, `timer`, `at`: a timer's event is handled in code by a host handler, never by descriptor
-automation. Existing rows are not back-filled. `timers` is refused on an entity with a cascading ref; an `onDelete: setNull` on a ref `at` reads leaves the old due until the row's next write. Neither member is allowed on `storage: "dynamic"`.
+automation. The first apply that adds or changes a timer re-plans existing rows; a due already past is not armed. `timers` is refused on an entity with a cascading ref; an `onDelete: setNull` on a ref `at` reads leaves the old due until the row's next write. Neither member is allowed on `storage: "dynamic"`.
 
 <!-- example: audit-rental-fleet -->
 **Record who created and last changed each rental bike.**
@@ -77,4 +77,4 @@ automation. Existing rows are not back-filled. `timers` is refused on an entity 
 
 In the dashboard: read with `get_descriptor`, quote `get_capabilities` for what is not honoured, then
 `check_change` or `propose_change` the operations.
-In this repo: edit `examples/**/*.alvo.json` or your own descriptor, then run `scripts/test-ring0` or `PUT …/descriptor?dryRun=true`.
+In this repo: dry-run the edited `*.alvo.json`: `PUT /management/projects/<project>/descriptor?dryRun=true` (Alvo repo: `scripts/test-ring0`).

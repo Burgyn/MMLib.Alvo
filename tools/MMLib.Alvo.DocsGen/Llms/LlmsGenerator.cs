@@ -2,7 +2,6 @@
 
 internal sealed class LlmsGenerator : IPageGenerator
 {
-    private const string SkillPrefix = "alvo-descriptor-";
     private const string DescriptionKey = "description:";
 
     public Task<IReadOnlyList<GeneratedPage>> GenerateAsync(DocsGenContext context, CancellationToken ct)
@@ -25,9 +24,10 @@ internal sealed class LlmsGenerator : IPageGenerator
             .Select(file => ContentPage.Read(file, paths.DocsDir, paths.GeneratedDir)),
     ];
 
+    /// <summary>Every skill the <c>alvo</c> plugin ships: the descriptor skills and the developer-only host one.</summary>
     internal static IReadOnlyList<(string Name, string Description)> Skills(string repoRoot) =>
     [
-        .. Directory.EnumerateDirectories(Path.Combine(repoRoot, "plugins", "alvo", "skills"), SkillPrefix + "*")
+        .. Directory.EnumerateDirectories(Path.Combine(repoRoot, "plugins", "alvo", "skills"))
             .Select(directory => (Path.GetFileName(directory), DescriptionOf(Path.Combine(directory, "SKILL.md")))),
     ];
 

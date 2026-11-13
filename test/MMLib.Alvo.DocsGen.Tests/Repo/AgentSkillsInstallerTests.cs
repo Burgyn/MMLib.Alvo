@@ -9,18 +9,18 @@ public partial class AgentSkillsInstallerTests
     private static readonly string _root = RepositoryRoot.Find();
 
     [Fact]
-    public void The_installer_names_every_descriptor_skill()
+    public void The_installer_names_every_skill_the_plugin_ships()
     {
         var script = File.ReadAllText(Path.Combine(_root, "scripts", "install-agent-skills"));
         var listed = SkillList().Match(script);
         listed.Success.ShouldBeTrue("scripts/install-agent-skills needs its SKILLS=\"...\" list");
 
         var named = listed.Groups["list"].Value.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var actual = Directory.GetDirectories(Path.Combine(_root, "plugins", "alvo", "skills"), "alvo-descriptor-*")
+        var actual = Directory.GetDirectories(Path.Combine(_root, "plugins", "alvo", "skills"))
             .Select(Path.GetFileName)
             .Order(StringComparer.Ordinal);
 
-        named.Order(StringComparer.Ordinal).ShouldBe(actual, "a new alvo-descriptor-* skill must be added to scripts/install-agent-skills");
+        named.Order(StringComparer.Ordinal).ShouldBe(actual, "a new plugins/alvo/skills/* skill must be added to scripts/install-agent-skills");
     }
 
     [Fact]

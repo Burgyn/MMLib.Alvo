@@ -29,9 +29,10 @@ public sealed class SkillConformanceTests
 
     /// <summary>
     /// The areas that teach without a worked example of their own: the computed examples stay in the base prompt,
-    /// an access change needs an administrator the example cannot assume, and the limits are answered, not proposed.
+    /// and an access change needs an administrator the example cannot assume. The limits skill has one since it teaches
+    /// after-hooks and automation: an automation rule is proposed, not only answered.
     /// </summary>
-    private static readonly string[] _withoutExamples = ["capabilities-and-limits", "computed-and-rollups", "project-access"];
+    private static readonly string[] _withoutExamples = ["computed-and-rollups", "project-access"];
 
     private static readonly SearchValues<char> _quotes = SearchValues.Create("'\"");
 
