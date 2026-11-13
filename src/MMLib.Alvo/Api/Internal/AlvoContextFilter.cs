@@ -19,6 +19,11 @@ namespace MMLib.Alvo.Api.Internal;
 /// this feature refuses.
 /// </para>
 /// <para>
+/// <b>What counts as a presented credential is <see cref="CallerResolution"/>'s reading</b> (spec §5.7) — the API
+/// key, or a person's Bearer token once a host registered a person resolver; a host's own <c>Authorization</c>
+/// scheme is not one. The outcomes below hold for either channel.
+/// </para>
+/// <para>
 /// <b>Three outcomes, three different diagnoses, and the distinction is the contract.</b>
 /// </para>
 /// <list type="bullet">
@@ -64,7 +69,7 @@ internal sealed class AlvoContextFilter : IEndpointFilter
 {
     private readonly string _entity;
     private readonly DataOperation _operation;
-    private readonly IAlvoContextResolver _resolver;
+    private readonly CallerResolvers _resolvers;
     private readonly IAlvoContextAccessor _accessor;
     private readonly ScopeGate _scopeGate;
     private readonly IOptions<AlvoAuthOptions> _authOptions;
@@ -72,14 +77,14 @@ internal sealed class AlvoContextFilter : IEndpointFilter
     internal AlvoContextFilter(
         string entity,
         DataOperation operation,
-        IAlvoContextResolver resolver,
+        CallerResolvers resolvers,
         IAlvoContextAccessor accessor,
         ScopeGate scopeGate,
         IOptions<AlvoAuthOptions> authOptions)
     {
         _entity = entity;
         _operation = operation;
-        _resolver = resolver;
+        _resolvers = resolvers;
         _accessor = accessor;
         _scopeGate = scopeGate;
         _authOptions = authOptions;
@@ -92,21 +97,16 @@ internal sealed class AlvoContextFilter : IEndpointFilter
         ArgumentNullException.ThrowIfNull(next);
         using var instant = RequestInstant.Enter(context.HttpContext);
 
-        var options = _authOptions.Value;
-        var request = context.HttpContext.Request;
-        var presentedKey = CallerResolution.Presented(request, options.HeaderName);
-        if (presentedKey is null)
+        var admission = await CallerResolution.AdmitAsync(
+            context.HttpContext.Request, _resolvers, _authOptions.Value, CredentialSurface.Data).ConfigureAwait(false);
+        if (admission.Refusal is { } refusal)
         {
-            // No credential, so no principal: there is no key to describe. The endpoint reads
-            // AlvoContext.Anonymous from the accessor's absence, and the policy decides.
-            return await Publishing(principal: null, context, next).ConfigureAwait(false);
+            return refusal;
         }
 
-        var principal = await CallerResolution.ResolveAsync(_resolver, presentedKey, request, options)
-            .ConfigureAwait(false);
-        if (principal is null)
+        if (admission.Principal is not { } principal)
         {
-            return ProblemResultFactory.Unauthenticated(options.HeaderName);
+            return await Publishing(principal: null, context, next).ConfigureAwait(false);
         }
 
         return _scopeGate.Allows(principal, _entity, _operation)
@@ -138,12 +138,12 @@ internal sealed class AlvoContextFilter : IEndpointFilter
 /// Resolving the auth services here — once, at mapping time — also keeps the filter free of a
 /// per-request service lookup.
 /// </remarks>
-/// <param name="resolver">Resolves a presented credential into a principal.</param>
+/// <param name="resolvers">Resolve a presented credential — an API key, or a person's Bearer token — into a principal.</param>
 /// <param name="accessor">Publishes the resolved caller for the endpoint delegate.</param>
 /// <param name="scopeGate">Gates an operation against the presented key's scopes.</param>
 /// <param name="authOptions">Carries the header names a credential and a requested tenant are read from.</param>
 internal sealed class AlvoContextFilterFactory(
-    IAlvoContextResolver resolver,
+    CallerResolvers resolvers,
     IAlvoContextAccessor accessor,
     ScopeGate scopeGate,
     IOptions<AlvoAuthOptions> authOptions)
@@ -152,7 +152,7 @@ internal sealed class AlvoContextFilterFactory(
     /// <param name="entity">The entity the endpoint targets.</param>
     /// <param name="operation">The operation the endpoint performs.</param>
     internal AlvoContextFilter For(string entity, DataOperation operation) =>
-        new(entity, operation, resolver, accessor, scopeGate, authOptions);
+        new(entity, operation, resolvers, accessor, scopeGate, authOptions);
 
     /// <summary>
     /// Whether <paramref name="principal"/>'s key may <b>read</b> <paramref name="entity"/> — the question a
