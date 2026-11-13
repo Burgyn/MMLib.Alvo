@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 namespace MMLib.Alvo.DocsGen.Tests.Repo;
 
 /// <summary>
-/// The developer-only <c>alvo-host-extensions</c> skill against what it names: the public API baselines, the docs pages
+/// The developer-only <c>alvo-host-extensions</c> skill against what it names: the host packages' public API, the docs pages
 /// it links, and the compiled snippets its code is copied from.
 /// </summary>
 /// <remarks>
@@ -25,6 +25,21 @@ public sealed partial class HostSkillTests
     private static readonly string _path = Path.Combine(_root, "plugins", "alvo", "skills", Name, "SKILL.md");
 
     private static readonly string _text = File.ReadAllText(_path).ReplaceLineEndings("\n");
+
+    /// <summary>The public API of the packages an embedded host's code compiles against.</summary>
+    private static readonly string[] _hostBaselines =
+    [
+        "test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt",
+        "test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.verified.txt",
+        "test/MMLib.Alvo.Tests/PublicApi.MMLib.Alvo.Testing.verified.txt",
+        "test/MMLib.Alvo.TestHost.Tests/PublicApi.MMLib.Alvo.TestHost.verified.txt",
+    ];
+
+    /// <summary>Names a code span uses for the reader's own code, not Alvo's: the property a typed <c>Set</c> picks.</summary>
+    private static readonly string[] _illustrative = ["Field"];
+
+    /// <summary>.NET's own types a span names beside Alvo's: the fake clock the TestHost takes.</summary>
+    private static readonly string[] _dotnet = ["FakeTimeProvider"];
 
     [Fact]
     public void The_skill_follows_the_descriptor_skills_frontmatter_standard()
@@ -63,19 +78,36 @@ public sealed partial class HostSkillTests
         Name.ShouldNotStartWith("alvo-descriptor-");
     }
 
+    /// <summary>
+    /// Every PascalCase name inside a code span — a type, a member, an enum value — is a symbol of the packages a host
+    /// references, so a rename or a removal in their public API fails here instead of in a reader's build.
+    /// </summary>
+    /// <remarks>
+    /// Spans are paired over the text with its line breaks folded, so a span the Markdown wraps is still read whole.
+    /// Only the four baselines a host's code compiles against count: a name that survives only in, say, the dashboard's
+    /// Blazor API (<c>EventCallback OnSaved</c>) is not the builder method the skill means.
+    /// </remarks>
     [Fact]
-    public void Every_api_name_the_skill_spells_in_code_is_in_a_public_api_baseline()
+    public void Every_api_name_the_skill_spells_in_code_is_in_a_host_package_baseline()
     {
-        var baselines = string.Join('\n', Directory.GetFiles(Path.Combine(_root, "test"), "PublicApi.*.verified.txt", SearchOption.AllDirectories)
-            .Select(File.ReadAllText));
-        var names = CodeSpan().Matches(Fence().Replace(_text, string.Empty))
-            .SelectMany(span => ApiName().Matches(span.Value).Select(match => match.Value))
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
+        var baselines = string.Join('\n', _hostBaselines.Select(path => File.ReadAllText(Path.Combine(_root, path))));
+        var names = NamesInCode(_text);
 
-        names.Count.ShouldBeGreaterThan(30, "the name scan matched almost nothing; the skill or the pattern moved");
-        names.Where(name => !InBaselines(baselines, name)).ShouldBeEmpty("named in the skill, absent from every PublicApi baseline");
+        names.ShouldContain("AsSystem", "the scan must reach member names, not only type names");
+        names.ShouldContain("AlvoWriteRejectedException", "the scan must read a span the Markdown wraps across lines");
+        names.Count.ShouldBeGreaterThan(50, "the name scan matched almost nothing; the skill or the pattern moved");
+        names.Where(name => !InBaselines(baselines, name))
+            .ShouldBeEmpty("named in the skill's code, absent from the Abstractions, MMLib.Alvo, Testing and TestHost baselines");
     }
+
+    /// <summary>The PascalCase names inside the code spans of <paramref name="text"/>, fences left out, each once.</summary>
+    internal static IReadOnlyList<string> NamesInCode(string text) =>
+    [
+        .. CodeSpan().Matches(LineBreak().Replace(Fence().Replace(text, string.Empty), " "))
+            .SelectMany(span => PascalName().Matches(span.Value).Select(match => match.Value))
+            .Where(name => !GenericParameter().IsMatch(name) && !_illustrative.Contains(name) && !_dotnet.Contains(name))
+            .Distinct(StringComparer.Ordinal),
+    ];
 
     [Fact]
     public void Every_docs_page_the_skill_links_exists()
@@ -120,13 +152,20 @@ public sealed partial class HostSkillTests
     [GeneratedRegex(@"<!-- from: (?<path>\S+) -->\n```\w*\n(?<code>.*?)\n```", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
     private static partial Regex SourcedFence();
 
-    [GeneratedRegex("`[^`\n]+`", RegexOptions.CultureInvariant)]
+    [GeneratedRegex("`[^`]+`", RegexOptions.CultureInvariant)]
     private static partial Regex CodeSpan();
 
-    /// <summary>A name shaped like Alvo's API: an interface, a builder or route verb, an <c>Alvo…</c> type, an event verb.</summary>
-    [GeneratedRegex(@"\b(?:I[A-Z][A-Za-z]+|(?:Add|Map|Alvo|On|Use)[A-Z][A-Za-z]*)\b", RegexOptions.CultureInvariant)]
-    private static partial Regex ApiName();
+    [GeneratedRegex(@"[ \t]*\n[ \t]*", RegexOptions.CultureInvariant)]
+    private static partial Regex LineBreak();
 
-    [GeneratedRegex(@"https://alvo\.burgyn\.online/extending/(?<slug>[a-z0-9-]+)/", RegexOptions.CultureInvariant)]
+    /// <summary>A PascalCase identifier with at least one lower-case letter, so <c>ALVO1001</c> and <c>UTC</c> are not names.</summary>
+    [GeneratedRegex(@"\b[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*\b", RegexOptions.CultureInvariant)]
+    private static partial Regex PascalName();
+
+    /// <summary>A generic type parameter as the skill writes them: <c>TEvent</c>, <c>TInput</c>, <c>TJob</c>.</summary>
+    [GeneratedRegex("^T(?:[A-Z][a-z]+)+$", RegexOptions.CultureInvariant)]
+    private static partial Regex GenericParameter();
+
+    [GeneratedRegex(@"https://alvo\.burgyn\.online/extending/(?<slug>[a-z0-9-]+)/?", RegexOptions.CultureInvariant)]
     private static partial Regex DocsLink();
 }

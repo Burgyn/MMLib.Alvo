@@ -7,15 +7,17 @@ description: Use when writing C# in an embedded Alvo host, only after the descri
 
 ## Rule 1: C# is the last resort
 
-Solve it in the descriptor first. Host C# is code the operator cannot see, the policy simulator cannot show and the
+Solve it in the descriptor first. Host C# is code whose body the operator cannot see, the policy simulator cannot show and the
 dashboard assistant cannot change. Before writing any C#, stop at the first yes:
 
 1. **Does a descriptor construct do it?** `rules` (relation rules and `checks` too), `computed`, rollups,
    before-hooks, field `validation`, `sequence`, partial and exclusion indexes, `stateMachine`, `timers`, after-hooks
    and `automation` with `webhook`, `email`, `function` or `entity.update` actions. Load the `alvo-descriptor-*`
-   skills and read https://alvo.burgyn.online/extending/where-logic-goes/.
-2. **Is only a CEL function missing?** A pure, synchronous calculation (VAT, working hours) is `AddCelFunction`; the
-   descriptor keeps the rule.
+   skills; read https://alvo.burgyn.online/extending/where-logic-goes/ and, for stock, capacity, numbering and
+   overlaps, https://alvo.burgyn.online/extending/integrity/.
+2. **Is only a CEL function missing?** A pure, synchronous calculation (VAT, working hours) is `AddCelFunction`. It
+   works in a before-hook `condition` or `mutate` only: `rules`, `computed`, `validation` and `checks` compile to SQL
+   and call no function.
 3. **Only then** host code, at the stage whose guarantees you need:
 
 | Need | Use | Stage |
@@ -96,7 +98,8 @@ event your code publishes (`[AlvoEvent("type")]`). **At least once**: dedupe on 
 <AdditionalFiles Include="booking.alvo.json" AlvoDescriptor="true" />
 ```
 
-The build generates a class per entity, an enum per enum field, a typed patch and role constants (ALVO2001, ALVO2002).
+The build generates a class per entity, an enum per enum field, a typed patch and role constants; ALVO2001 reports a
+malformed descriptor file, ALVO2002 a clashing entity name.
 
 ## Evolving — https://alvo.burgyn.online/extending/extension-catalog/
 

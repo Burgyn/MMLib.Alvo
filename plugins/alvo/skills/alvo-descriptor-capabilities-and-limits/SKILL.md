@@ -1,6 +1,6 @@
 ---
 name: alvo-descriptor-capabilities-and-limits
-description: Use when asked whether Alvo can do something, or when a change acts after a write or on a schedule — after-hooks, automation rules, actions — and what is honoured, warned or refused.
+description: Use when asked whether Alvo can do something, or when a change acts after a write or on a schedule — after-hooks, automation rules, actions; what is honoured, warned or refused.
 ---
 
 # What this build of Alvo honours
@@ -52,12 +52,15 @@ each action is `schema/project.schema.json#/$defs/action`).
   cron in UTC, run once per tenant when the project has tenancy (the host then needs an `IAlvoTenantCatalog`). A cron
   rule has no row: it takes no `condition`, and it cannot pick rows to change — a bulk change over rows is host code.
 - A `condition` reads `new.` on create and update, `old.` on update and delete, like a before-hook's.
-- `entity.update` writes its `payload` (each value a literal or `{"$cel": "…"}`; a string with `{{…}}` is refused) to
-  the record `recordId` names (a UUID, or one `{{…}}` placeholder over the row), or creates one when it is left out.
+- `entity.update` writes `payload` into `entity` (each value a literal or `{"$cel": "…"}`; a string with `{{…}}` is
+  refused): to the record `recordId` names (a UUID, or one `{{…}}` placeholder over the row), or to a new one without it.
 - Editing a rule cancels the old rule's unfinished deliveries. A `timers` event is never a trigger: host code handles it.
 
+Adding a rule depends on what exists: when `automation` exists, `add` at `/automation/<rule>`; `add` at `/automation`
+with the whole map only when it does not, because an `add` there replaces every rule it holds.
+
 <!-- example: rental-returned-webhook -->
-**Tell the rental desk when a rental is returned.**
+**Tell the rental desk when a rental is returned** — `bike-workshop` has no `automation` yet.
 
 ```json
 {"tool": "propose_change", "baseRevision": 1, "summary": "Posts each returned rental to the rental desk.",
