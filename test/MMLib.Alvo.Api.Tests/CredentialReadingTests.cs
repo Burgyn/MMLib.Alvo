@@ -28,6 +28,8 @@ public sealed class CredentialReadingTests
         { "Data", true, null, ["Basic dXNlcjpwYXNz"], "None", null },
         { "Data", true, "k", ["Basic dXNlcjpwYXNz"], "ApiKey", "k" },
         { "Data", true, "k", ["Bearer t"], "Ambiguous", null },
+        { "Data", true, "k", ["Bearer"], "Ambiguous", null },
+        { "Data", true, "k", ["Bearer a b"], "Ambiguous", null },
         { "Data", true, null, ["Bearer"], "MalformedBearer", null },
         { "Data", true, null, ["Bearer a b"], "MalformedBearer", null },
         { "Data", true, null, ["Bearer a", "Bearer b"], "MalformedBearer", null },

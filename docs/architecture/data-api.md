@@ -999,7 +999,7 @@ endpoints; `Management`), not three copies.
 | `X-Alvo-Api-Key` | the API-key resolver, as today | the API-key resolver (refusing a personal or service token arrives with those tokens) |
 | `Authorization: Bearer ...` and a person resolver is registered | the person resolver | **ignored** |
 | `Authorization` with another scheme, or Bearer with no person resolver registered | **ignored, exactly as today** | ignored |
-| `X-Alvo-Api-Key` and a Bearer token Alvo owns | **401**, ambiguous; never settled by precedence | API key as above |
+| `X-Alvo-Api-Key` and a Bearer token Alvo owns, well-formed or malformed | **401**, ambiguous; never settled by precedence | API key as above |
 
 **The rules the table leaves open**
 

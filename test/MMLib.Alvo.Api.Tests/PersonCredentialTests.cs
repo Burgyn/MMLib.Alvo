@@ -84,6 +84,43 @@ public sealed class PersonCredentialTests
         people.Calls.ShouldBeEmpty("an ambiguous credential is never resolved by precedence");
     }
 
+    /// <summary>
+    /// An API key beside a <em>malformed</em> Bearer is still two credentials: ambiguous, not an API-key request with
+    /// some noise beside it — a broken Bearer must not be read as "no Bearer" and let the key through.
+    /// </summary>
+    [Theory]
+    [InlineData("Bearer")]
+    [InlineData("Bearer a b")]
+    public async Task An_api_key_and_a_malformed_bearer_together_are_401_and_neither_is_resolved(string authorization)
+    {
+        var people = People();
+        await using var world = await WorldAsync(people);
+
+        using var response = await world.SendAsync(
+            HttpMethod.Get, "/api/bookings", CommandWorld.Staff, headers: [new("Authorization", authorization)]);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, "the staff key alone would read the bookings");
+        var challenge = response.Headers.WwwAuthenticate.ToString();
+        challenge.ShouldContain("AlvoApiKey");
+        challenge.ShouldContain("Bearer");
+        people.Calls.ShouldBeEmpty();
+    }
+
+    /// <summary>Two <c>Authorization</c> lines with a Bearer among them are malformed over HTTP too, never "take the first".</summary>
+    [Fact]
+    public async Task Two_authorization_lines_with_a_bearer_are_401_and_reach_no_resolver()
+    {
+        var people = People();
+        await using var world = await WorldAsync(people);
+
+        using var response = await world.SendAsync(
+            HttpMethod.Get, "/api/bookings", headers: [new("Authorization", $"Bearer {Token}"), new("Authorization", "Bearer other")]);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, "the first line alone names an admitted person");
+        response.Headers.WwwAuthenticate.ToString().ShouldContain("invalid_request");
+        people.Calls.ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task A_command_runs_as_the_person_a_bearer_token_names()
     {
