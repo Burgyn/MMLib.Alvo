@@ -163,6 +163,7 @@ one `CreateManyAsync`.
 engine: a `%`, `_`, `\` or `[` in `prefix` matches itself. One-argument or `StringComparison.Ordinal` only. See
 [Typed or CEL](/extending/typed-or-cel/#typed-reads).
 
-## Not yet
+## Timers join the unit
 
-A timer scheduled inside a unit will join it; it arrives with its feature.
+A timer scheduled or cancelled while a unit is open is written through the unit's transaction: a unit that rolls back
+leaves no timer. See [Time › Inside a transaction](/extending/time/#inside-a-transaction).

@@ -58,7 +58,7 @@ entries whose delivery failed, subscribers attempted. Webhooks go to the handler
   [`Alvo:Events:BatchSize`](/reference/configuration/#alvoevents) entries is refused the same way, though nothing
   loops — drain before it grows that large.
 - **An in-process receiver runs inside the delivery.** Your `webhooks` handler is called on the dispatcher's own async
-  flow, so anything it does inherits that flow (the trace, and — as host-code hooks arrive — the causation chain). A
+  flow, so anything it does inherits that flow (the trace and the causation chain). A
   receiver that writes back should do it as a real one would, outside that flow:
   `using (ExecutionContext.SuppressFlow()) { await Task.Run(writeBack); }`. Never drain from inside a receiver or a
   handler: the call is refused, because a round would wait for the round it is in.

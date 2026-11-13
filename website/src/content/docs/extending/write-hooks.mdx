@@ -104,7 +104,7 @@ writes commits with the write or not at all, runs the other entity's rules and h
   `AlvoBudgetExceededException` — write many rows with one batch call.
 - **Depth.** A hook writing what triggers itself stops at the chain limit (`Alvo:Extensions:MaxDepth`, 8) with
   **508** `chain-depth-exceeded`.
-- **Cascades run no hooks.** Rows a declared `onDelete: cascade` or `set-null` removes or changes run no host hook —
+- **Cascades run no hooks.** Rows a declared `onDelete: cascade` or `setNull` removes or changes run no host hook —
   unlike a PostgreSQL row trigger. A hook whose write makes its own row disappear (deleting its parent through a cascade)
   fails the write (`row-vanished`).
 

@@ -79,8 +79,8 @@ documents; your endpoint decides what to answer. The write above renders three k
 <SourceExcerpt code={program} from="var record = await data.UpdateAsync" to="statusCode: StatusCodes.Status422UnprocessableEntity);" title="Program.cs" />
 
 The read catches `AlvoAuthorizationException` too: a denied `list` throws exactly as a denied `update` does, so an
-endpoint that catches only around its writes ships a 500 for the first descriptor with a narrower read rule. The
-complete list, with what the generated API answers for each:
+endpoint that catches only around its writes ships a 500 for the first descriptor with a narrower read rule. Every
+family, with what the generated API answers for each:
 
 | Exception | Means | The generated API answers |
 |---|---|---|
@@ -89,8 +89,11 @@ complete list, with what the generated API answers for each:
 | `ArgumentException`, except `ArgumentNullException` | The query or the values are malformed. | 422 `validation` or `malformed-query` |
 | `AlvoPreconditionFailedException` | The precondition names a version the row no longer has. | 412 `precondition-failed` |
 | `AlvoIdempotencyConflictException` | The idempotency key was used for a different request. | 409 `idempotency-conflict` |
-| `AlvoConstraintViolationException` | A `unique` value or a `restrict` reference is in the way; with `Kind` `Check`, a value breaks a validation or a field's facet (`maxLength`, enum values, decimal precision or scale, `format`). | 409 `conflict`; 422 `validation` for `Check` |
-| `InvalidOperationException`, `ArgumentNullException` | An invariant inside Alvo, or your call, is broken. | 500 `internal`, with `AddAlvoProblemDetails()` |
+| `AlvoConstraintViolationException` | A `unique` value, a `restrict` reference or an overlapping range (`Kind` `Exclusion`) is in the way; with `Kind` `Check`, a value breaks a validation or a field's facet (`maxLength`, enum values, decimal precision or scale, `format`); with `Kind` `Transition`, a [state machine](/extending/state-machines/) does not allow the move. | 409 `conflict`; 422 `validation` for `Check` and `Transition` |
+| `AlvoWriteRejectedException` | A host [write hook](/extending/write-hooks/) refused the write as invalid, conflicting or forbidden. | 422 `validation`, 409 `conflict` or 403 `forbidden`, with the hook's own code and its id |
+| `AlvoTransientConflictException` | On PostgreSQL, the database broke a deadlock by failing this write; nothing was written, and sending it again is safe. | 409 `conflict` with `Retry-After: 1` |
+| `AlvoChainDepthExceededException` | The write sits deeper in one causation chain than [`Alvo:Extensions:MaxDepth`](/reference/configuration/#alvoextensions) allows — a hook or handler writing what triggers itself. | 508 `chain-depth-exceeded`, never worth retrying |
+| `InvalidOperationException`, `ArgumentNullException` | An invariant inside Alvo, or your call, is broken — including a host write hook that threw or ran out of time, and an `IAlvoData` call made while a [transaction unit](/extending/transactions/) is open (`AlvoUnitInProgressException`). | 500 `internal`, or `hook-failed` for a failed write hook, with `AddAlvoProblemDetails()` |
 | `Exception` | A CEL function failed: a built-in refused its input, or a custom function threw or ran past its time budget. | 422 `expression-failed` when a built-in refused a value the request's body sent (every host); otherwise 500 `function-failed`, with `AddAlvoProblemDetails()` |
 
 Catch the ones your endpoint can cause. The write sends no precondition, no idempotency key and no unique field, so

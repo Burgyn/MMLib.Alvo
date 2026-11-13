@@ -86,11 +86,9 @@ multi-entity registration always takes:
   record's later events back, for that handler only. `options.Ordering = AlvoOrdering.None` opts out. Order is by event
   id, so two processes writing one record in the same millisecond can still interleave
   ([#150](https://github.com/Burgyn/MMLib.Alvo/issues/150)).
-- **The order has a price until descriptor actions move onto deliveries.** An earlier event whose descriptor
-  after-hook action keeps failing — a webhook endpoint that is down — holds the record's later handler deliveries back
-  until it succeeds or the outbox gives up on it
-  ([`Alvo:Events:MaxAttempts`](/reference/configuration/#alvoevents)): about 45 s per failing event at the defaults.
-  The failing event's own delivery is not held.
+- **Each subscriber keeps its own order.** A descriptor after-hook or automation action is a subscriber of its own,
+  with its own deliveries, so an action that keeps failing — a webhook endpoint that is down — holds back only that
+  action's later deliveries for the record, never your handler's.
 - **A dead delivery blocks its record until it is redelivered, replayed or cancelled** —
   [operate deliveries](/extending/operate-deliveries/).
 - **Who the handler is.** By default the system, in the event's tenant (`'admin' in @user.roles` is true, another

@@ -33,7 +33,9 @@ starting from the stack in [Run your own descriptor](/start-here/run-your-own/).
 Every write appends an event, and an after-hook says which events to act on and what to do. This page uses two
 actions: `webhook`, which posts the event to an endpoint, and `email`, which renders a template. Both targets are
 declared once, at the top of the descriptor. The other two, `function` and `entity.update`, are on
-[Functions in the descriptor](/extending/functions/) and [Automation](/extending/automation/).
+[Functions in the descriptor](/extending/functions/) and [Automation](/extending/automation/). In an embedded host,
+the same reaction written in C# is an [event handler](/extending/event-handlers/): the same outbox, the same retries,
+the same Operations page.
 
 <Steps>
 
@@ -163,8 +165,12 @@ The `type` is two or more lower-case segments separated by dots, such as `orders
 `entity.`, `auth.` or `storage.`: those are Alvo's own, and a name in one is refused. Values in `data` must be scalars.
 Know what a custom event is not, before you build on it:
 
-- **Nothing subscribes to it yet.** No after-hook can name it, so the dispatcher records it and runs nothing.
-- **It is not part of your transaction.** It is appended on its own, so it can commit when your write does not.
+- **Only host code subscribes to it.** A host [event handler](/extending/event-handlers/#application-events) registered
+  for its type runs on it. No after-hook and no automation rule can name it: their triggers are entity events.
+- **`IAlvoEvents.PublishAsync` is not part of your transaction.** It is appended on its own, so it can commit when your
+  write does not. To commit an event with your writes, publish it with `unit.PublishAsync` inside a
+  [transaction unit](/extending/transactions/#events-that-commit-with-the-writes), or from a
+  [write hook](/extending/write-hooks/)'s `PublishAsync`.
 - **A retried publish appends a second event**, with a new `id`.
 
 Its envelope carries the publisher's provenance exactly as a data event's does, `tenantid` included.
@@ -179,8 +185,9 @@ Its envelope carries the publisher's provenance exactly as a data event's does, 
 - **Other actions.** `http.call` is refused by name at apply; a JSONata expression in `payload` is refused too
   ([#149](https://github.com/Burgyn/MMLib.Alvo/issues/149)), and so are an email's `data` and a template's
   `bodyFile`.
-- **A dead-letter queue** with redelivery, and **retention** for the outbox table, which keeps every event's
-  complete rows ([#154](https://github.com/Burgyn/MMLib.Alvo/issues/154)).
+- **Retention** for the outbox table, which keeps every event's complete rows
+  ([#154](https://github.com/Burgyn/MMLib.Alvo/issues/154)). A dead delivery is not lost: it stays on the dashboard's
+  Operations page until it is redelivered, replayed or cancelled ([Operate deliveries](/extending/operate-deliveries/)).
 
 [Capabilities in this build](/reference/capabilities/) lists each of these in the framework's own words.
 :::

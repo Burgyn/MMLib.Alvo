@@ -8,22 +8,25 @@
       "The body is not a JSON object, is not valid JSON, repeats a field, or is larger, deeper or wider than the configured limits.",
       "A batch body has no `rows` array, an empty one, too many rows, or a row without a valid `id`.",
       "A Management API apply carried a descriptor that does not validate — including a new `validation` that existing rows break, with their count.",
-      "A write hook in the host's code refused the write with `Invalid`: the violation's `code` is the hook's own, and the document's `extensions` names the hook."
+      "A write hook in the host's code refused the write with `Invalid`: the violation's `code` is the hook's own, and the document's `extensions` names the hook.",
+      "A status field's `stateMachine` does not allow the move the write makes: code `transition`.",
+      "The body sets a field the entity declares `virtual`, which only a host enricher fills on read: code `virtual`."
     ],
     "fix": "Correct each field the violations point at; every violation carries a `pointer` and a `fixSuggestion`.",
     "violationCodes": [
       "required", "max-length", "enum-value", "format", "format-not-evaluated", "precision", "scale",
       "unknown-field", "invalid-value", "check", "read-only-field", "read-only-required-field", "unresolved-reference",
       "not-an-object", "malformed-json", "duplicate-field", "body-too-large", "body-too-deep", "body-too-many-fields",
-      "not-a-batch", "empty-batch", "batch-too-many-rows", "invalid-row-id", "descriptor"
+      "not-a-batch", "empty-batch", "batch-too-many-rows", "invalid-row-id", "descriptor", "transition", "virtual"
     ],
-    "guides": ["guides/write-data", "guides/entities-and-fields", "guides/handle-errors", "extending/integrity"],
+    "guides": ["guides/write-data", "guides/entities-and-fields", "guides/handle-errors", "extending/integrity", "extending/state-machines"],
     "needsProblemDetails": false
   },
   "malformed-query": {
     "causes": [
       "A `filter`, `order`, `select`, `limit`, `offset` or `after` parameter is malformed, repeated or contradicts another.",
       "A filter names a field that is unavailable to the caller, or uses an operator the field's type does not support.",
+      "A `filter`, `order` or `select` names a `virtual` field, which exists only in the returned rows: code `virtual-field`.",
       "A filter is deeper, wider or lists more `in` candidates than the limits allow.",
       "A query sent as a request body is not a JSON object, is not valid JSON, names a parameter twice, or is larger, deeper or wider than the limits allow."
     ],
@@ -35,9 +38,10 @@
       "invalid-cursor", "conflicting-paging", "malformed-order", "repeated-sort-key", "malformed-select",
       "malformed-select-alias", "colliding-projection-key", "projection-too-wide", "too-many-select-entries",
       "too-many-query-values", "unrepresentable-query-value", "repeated-parameter",
-      "not-an-object", "malformed-json", "duplicate-field", "body-too-large", "body-too-deep", "body-too-many-fields"
+      "not-an-object", "malformed-json", "duplicate-field", "body-too-large", "body-too-deep", "body-too-many-fields",
+      "virtual-field"
     ],
-    "guides": ["guides/read-data", "guides/handle-errors"],
+    "guides": ["guides/read-data", "guides/handle-errors", "extending/reads"],
     "needsProblemDetails": false
   },
   "forbidden": {
@@ -106,13 +110,14 @@
     "causes": [
       "A value another record already holds on a `unique` field.",
       "A delete that a `ref` declaring `onDelete: \"restrict\"` refuses, because other records still point at the row.",
+      "A range overlaps another record's under an index's `exclude`: code `exclusion`, pointing at the range's start field.",
       "A write hook in the host's code refused the write with `Conflict`: the violation's `code` is the hook's own, and the document's `extensions` names the hook.",
       "On PostgreSQL, a Management API apply waited longer than its 5 s lock timeout for a table other transactions are using, or the database failed it to break a deadlock with one of them, and changed nothing; the response carries `Retry-After: 5`.",
       "On PostgreSQL, the database broke a deadlock between a write and a concurrent one by failing the write, and nothing was written; the response carries `Retry-After: 1`."
     ],
     "fix": "Send a value no other record holds, or delete or repoint the records that reference this one, then retry; a response that carries `Retry-After` — an apply that timed out on a lock, or a write or an apply the database failed to break a deadlock — is retried unchanged, after `Retry-After`.",
-    "violationCodes": ["unique", "referenced"],
-    "guides": ["guides/write-data", "guides/entities-and-fields", "guides/indexes"],
+    "violationCodes": ["unique", "referenced", "exclusion"],
+    "guides": ["guides/write-data", "guides/entities-and-fields", "guides/indexes", "extending/integrity"],
     "needsProblemDetails": false
   },
   "destructive-change": {
