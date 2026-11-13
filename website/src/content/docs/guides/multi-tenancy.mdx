@@ -130,7 +130,8 @@ entity — needs an embedded host that registers an `IAlvoTenantCatalog` listing
 - **A tenant cannot see, change or delete another tenant's rows.** Every attempt is the answer for a row that does
   not exist: an empty page or a 404.
 - **A tenant cannot learn that another tenant's row exists**, with one exception. A reference to a row in another
-  tenant is refused like a reference to nothing (`unresolved-reference`), and a `unique` field is unique per tenant,
+  tenant is refused like a reference to nothing (`unresolved-reference` over HTTP; the database's own key over
+  `(tenant_id, id)` refuses it for host code too), and a `unique` field is unique per tenant,
   so two tenants may hold the same value and a duplicate tells you only about your own rows. The exception: a `PUT`
   create-or-replace on a UUID you already hold answers `409` if a row of any tenant has that id, because the primary
   key is the id alone.

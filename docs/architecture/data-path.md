@@ -984,19 +984,17 @@ implementation measured 40 of 40 and looked correct.
 Seven consequences worth naming:
 
 - **Both statements are narrowed by `tenant_id` when the pair is tenant-scoped, and neither may lean on the
-  foreign key.** A `ref` is a foreign key on the parent's `id` alone — not on `(tenant_id, id)` — so a child row
-  may legally name a parent in another tenant, and an id taken off a row image is not a promise about whose row
-  it is. Without the predicate the recompute *writes* that other tenant's parent from this tenant's children and
-  aggregates every tenant's children into it: a cross-tenant write and a cross-tenant read in one statement pair.
-  The child aggregate's predicate is **qualified by the child's table**, because an unqualified `tenant_id` inside
+  foreign key.** A scoped → scoped `ref` is now a key over `(tenant_id, id)` (#161, *A scoped ref is a key over
+  (tenant_id, id)*), so such a child cannot name another tenant's parent at all. The predicate stays as defence in depth:
+  an id taken off a row image is still not a promise about whose row it is, and a `SchemaModel` that never came through
+  the mapper has no such key. Without it the recompute would *write* another tenant's parent from this tenant's
+  children and aggregate every tenant's children into it: a cross-tenant write and a cross-tenant read in one statement
+  pair. The child aggregate's predicate is **qualified by the child's table**, because an unqualified `tenant_id` inside
   that subquery binds to the parent's column the moment the child has none — which is true for every child row
   and therefore aggregates every tenant's. A pair that *disagrees* about tenancy cannot be narrowed at all and is
   refused: at apply by `RollupResolver`, naming both entities and their modes, and again inside `RollupRecompute`
-  for a schema that never came through the mapper. Two two-tenant facts in the shared suite are the acceptance
-  bar, and both go red with either predicate removed (measured: Acme's `sum` read 15 instead of 10, then 17
-  instead of 12). What is *left* open is the cross-tenant `ref` itself: such a child now aggregates nowhere
-  instead of writing across the boundary, and the real fix — a foreign key spanning `(tenant_id, id)` — belongs
-  to every `ref`, not to rollups (#161).
+  for a schema that never came through the mapper. Two two-tenant facts in the shared suite pin the predicates, and both
+  go red with either removed (measured: Acme's `sum` read 15 instead of 10, then 17 instead of 12).
 
 - **The lock is the dialect's, and is a no-op on SQLite** — where reading the parent before writing inside a
   deferred transaction killed 12 of 24 writers on `SQLITE_BUSY_SNAPSHOT`. So a dialect that expresses no lock in
@@ -1314,6 +1312,66 @@ rows. A unit orders its own writes; a batch's keys are sorted.
 and names `exclude.from` (filtered by `Unnameable`); the API answers `conflict` with the violation code `exclusion` at
 `/<from>`. An inverted range (`to < from`) never reaches PostgreSQL's `22000`: the mapper ANDs `value >= <from>` into
 the `to` field's `CHECK` (D4), so it is a 422 `check` at `/<to>` on both engines. Soft-deleted rows still count (D13).
+
+## A scoped ref is a key over (tenant_id, id) (#161)
+
+**The guarantee.** A `ref` between two `tenancy: "scoped"` entities cannot name another tenant's row. The database
+enforces it, not the application: the reference is a foreign key over `(tenant_id, id)`, so a row of tenant A whose `ref`
+holds the id of a tenant B row has no parent to point at and the engine refuses the write. This holds for every writer,
+including the ones that never pass through the HTTP validator — host code on `IAlvoData`, automation, a hook's `mutate`.
+
+**Why it holds.** A foreign key on the parent's `id` alone only asks whether *a* row with that id exists, in any tenant.
+Matching the child's own `tenant_id` against the parent's as well makes "exists" mean "exists in this tenant". The
+target carries a matching alternate key `(tenant_id, id)` for the foreign key to reference. This is what #161 asked for
+and the same shape #137 gave unique indexes; #198 (a composite *primary* key) is a separate, larger change and not part
+of it.
+
+**What the caller sees.** A write naming another tenant's row is refused as `AlvoConstraintViolationException` of kind
+`Referenced`, with no fields, which the API answers as a 409 `conflict` with the violation code `referenced`. The message
+is the write's own wording and is byte-identical to the one for an id that exists nowhere, so the refusal is not an
+existence oracle: to the caller's tenant the two are the same missing row. A *delete* the key refuses keeps its own
+wording (a restrict, not a missing row). Over HTTP the validator answers both cases earlier, with the same 422
+`unresolved-reference`, before the port is reached; the port is where the hole was.
+
+**Which references get a guard.**
+
+| child → target | emitted |
+|---|---|
+| scoped → scoped, `restrict` / `cascade` | one composite foreign key carrying the declared action, over an alternate key on the target; the single-column key is gone |
+| scoped → scoped, `setNull` | the dialect decides (below) |
+| scoped → global | unchanged: single-column key — a global row belongs to every tenant |
+| global → scoped | unchanged: the child has no `tenant_id` to match, and a global entity is cross-tenant by definition |
+
+**Why `setNull` is the dialect's decision.** `ON DELETE SET NULL` on a composite key nulls *every* referencing column,
+and `tenant_id` is `NOT NULL`; both engines refuse such a delete. Measured on SQLite 3.54 and `postgres:16-alpine`
+(raw DDL):
+
+| shape | SQLite | PostgreSQL 16 |
+|---|---|---|
+| one composite FK, `CASCADE` / `RESTRICT` | correct | correct |
+| one composite FK, `SET NULL` | refuses the delete (`NOT NULL constraint failed: child.tenant_id`) | refuses the delete (23502 on `tenant_id`) |
+| one composite FK, `SET NULL (ref)` (PostgreSQL 15+) | no syntax | correct — `ref` nulled, `tenant_id` kept |
+| single FK with the action **plus** a composite guard `NO ACTION` | correct for all three actions, either constraint order | **order-dependent**: when the guard's RI trigger fires first, `CASCADE` and `SET NULL` deletes fail with 23503 |
+
+So `IAlvoSqlDialect.ScopedSetNull` (internal) answers per engine. **SQLite** (the default) keeps the single-column
+`SET NULL` key and adds a separate composite guard with `NO ACTION`. **PostgreSQL** emits one composite key with
+`ON DELETE SET NULL (<ref>)` — EF cannot spell the column list, so `PostgreSqlMigrationsSqlGenerator` appends it. The
+column list is PostgreSQL 15; an older server is refused **at plan**, at `/entities/{child}/fields/{ref}/onDelete`,
+rather than failing at the first delete (the same precedent as an exclusion on an old server). The introspector reads
+a guard back as the field it guards, never as `tenant_id`.
+
+**Deviations from #161's sketch, recorded.** (1) `setNull` is not "one composite key" on either engine — the measurement
+above. (2) The sketch's upgrade path for existing databases is **not built**: Alvo has no deployments, so a database
+created before this change simply has the old DDL and must be recreated (the CHANGELOG says so). A descriptor change that
+*adds* a scoped ref is an ordinary model diff and gets the guard. (3) No new problem type: the refusal reuses
+`Referenced` and its 409.
+
+**What it does not cover.** A `storage: dynamic` entity has no driver yet (F7, #41), and the shared `entity_records` store
+will have no foreign key at all; see the F7 section for the obligation that leaves.
+
+**The rollup's tenant predicate stays**, as defence in depth: it no longer closes a reachable case for a scoped pair (the
+cross-tenant child cannot be stored), but a `SchemaModel` that never came through the mapper still gets it, and
+`RollupTenantPredicateTests` / `RollupBackfillTenancyTests` still pin it.
 
 ## `softDelete` is refused, not silently ignored
 
@@ -1810,6 +1868,7 @@ asserts the boundary, because the runtime arch fact matches EF's types by name a
 | `AlvoDataComparisonTests` | a **rule** compares a decimal by value | ✔ | ✔ |
 | `AlvoDataOrderingTests` | the **filter** and the **page** (order + keyset boundary) compare by value, and a timestamp is one instant | ✔ | ✔ |
 | `AlvoDataSqlSnapshotTests` | golden CEL→SQL, per engine | `cel-to-sql-sqlite` | `cel-to-sql-postgresql` |
+| `AlvoDataConstraintTests` (the #161 facts) + `TenantGuardMigrationFacts` | a scoped ref naming another tenant's row is refused exactly as one naming no row, on create, update and delete under each `onDelete`; the emitted guard DDL is frozen and read back as the field it guards | ✔ | ✔ (and `PostgreSqlOlderServerTenantGuardTests` for the PG < 15 refusal) |
 
 Four of these are new in PR2 and each closes a hole a single-engine suite left.
 
@@ -2466,6 +2525,11 @@ this data path.
   bug. The dynamic driver must normalise the case of a `uuid`-typed JSON path per engine, and the reserved fact above is what
   says so, so this is a discovery already made rather than one waiting to happen. It is the same class of
   defect as spike `Q6d`, which is why *Values are bound through EF's own type mapping* exists.
+- **The dynamic driver must check a reference's `(tenant_id, id)` itself (#161, D7).** The physical store keeps a scoped
+  `ref` inside one tenant with a composite foreign key; the shared partitioned `entity_records` store will have no
+  foreign key at all, so nothing in the engine will refuse a record whose reference names another tenant's record. The
+  F7 driver resolves each reference by `(tenant_id, id)` in the data port and refuses a miss as `Referenced`, worded
+  exactly as an id that exists nowhere. Until it does, #161's guarantee is a property of physical entities only.
 - **The migrator maps `Dynamic` entities; the read model does not.** `DescriptorModelBuilder.Build` maps every
   entity, while `AlvoDataContext.OnModelCreating` filters to `EntityStorage.Physical`. So a descriptor
   declaring a dynamic entity today gets a physical table created for it that the read path then refuses with

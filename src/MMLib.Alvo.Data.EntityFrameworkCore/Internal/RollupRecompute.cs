@@ -97,13 +97,12 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// own issue, not a line here. A descriptor that declares one gets a correct <c>B</c> and a stale <c>A</c>.
 /// </para>
 /// <para>
-/// 3. <b>A child whose <c>ref</c> names a parent in another tenant aggregates nowhere.</b> The tenant
-/// predicate makes that write a no-op rather than a cross-tenant one — the parent's <c>UPDATE</c> matches no
-/// row — so the child exists and no rollup anywhere counts it. Closing it properly means the foreign key
-/// spanning <c>(tenant_id, id)</c>, which is a change to every <c>ref</c> on every scoped entity rather than
-/// to a rollup, so it is tracked as #161 and named in the design's open questions. Refusing the
-/// cross-tenant <c>ref</c> here instead would mean a read of the parent on every child write, to answer a
-/// question this layer is not the right one to ask.
+/// 3. <b>A child whose <c>ref</c> names a parent in another tenant cannot be stored (#161).</b> Between two
+/// scoped entities a <c>ref</c> is a foreign key over <c>(tenant_id, id)</c>, so the store refuses that child
+/// before this layer runs; the question is answered by the key, not by a read of the parent on every child write.
+/// The tenant predicate below stays as defence in depth — it is what keeps a recompute inside one tenant for a
+/// schema that never came through the mapper, and it makes a child that somehow named another tenant's parent
+/// aggregate nowhere rather than write across the boundary.
 /// </para>
 /// <para>
 /// 4. <b>The parent's change emits no event.</b> The write's outbox row is the <em>child</em>'s; the parent's
@@ -356,15 +355,14 @@ internal sealed class RollupRecompute(
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Both statements carry it, and neither of them may lean on the foreign key instead.</b> The physical
-    /// <c>ref</c> is a foreign key on the parent's <c>id</c> alone — not on <c>(tenant_id, id)</c> — so a child
-    /// row can legally name a parent row in another tenant, and the referenced row's existence is the only
-    /// thing the engine checks. Without this predicate the recompute then <em>writes</em> that other tenant's
-    /// parent row from this tenant's children, and the aggregate over the child table includes every tenant's
-    /// children of that parent: a cross-tenant write and a cross-tenant read in one statement pair. With it,
-    /// such a child moves no rollup at all — the parent's <c>UPDATE</c> matches no row — which is the
-    /// conservative of the two outcomes and is recorded as an open question in the design rather than repaired
-    /// here, because a <c>ref</c> across tenants is reachable on every entity and not only on a rollup's.
+    /// <b>Both statements carry it, and neither of them may lean on the foreign key instead.</b> Between two scoped
+    /// entities the <c>ref</c> is a key over <c>(tenant_id, id)</c> since #161, so a child cannot name another
+    /// tenant's parent — but an id taken off a row image is still not a promise about whose row it is, and a schema
+    /// that never came through the mapper has no such key. Without this predicate the recompute would <em>write</em>
+    /// another tenant's parent row from this tenant's children, and the aggregate over the child table would include
+    /// every tenant's children of that parent: a cross-tenant write and a cross-tenant read in one statement pair.
+    /// With it, such a child moves no rollup at all — the parent's <c>UPDATE</c> matches no row. It is defence in
+    /// depth, not the only line.
     /// </para>
     /// <para>
     /// The parent's own predicate is unqualified because the enclosing statement has exactly one table source;

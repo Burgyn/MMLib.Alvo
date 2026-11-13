@@ -353,6 +353,9 @@ Every rollup fact in the branch used `Global`/`Global`, which is why the suite w
    the conservative outcome, and the real fix is a change to every `ref` on every scoped entity — plus the
    accompanying question of whether the FK's existence check is itself an oracle — so it is filed as **#161**
    rather than widened into this PR. See *Open, for the maintainer*.
+   **Closed by S0 (#161):** a scoped → scoped `ref` is now a key over `(tenant_id, id)`, so such a child cannot be
+   stored; the predicate above stays as defence in depth. See `docs/architecture/data-path.md`, *A scoped ref is a key
+   over (tenant_id, id)*.
 
 **Dev-15 — a rollup over a `storage: "dynamic"` child is refused at apply, and the refusal is keyed so that
 F7 lifts it without being asked.** Not in the design, and not a case the design considered: `D3`'s ladder is
@@ -449,7 +452,9 @@ the type checker both refused. What changed, and what each decision is measured 
   "no such row" (a foreign-key violation) and "a row another tenant owns" (accepted) is observable, which is an
   existence oracle in the #137 family. Closing it means the foreign key spanning `(tenant_id, id)` for every
   scoped `ref`, which touches the migration model, the destructive-change classification and every existing
-  descriptor. Filed as **#161**.
+  descriptor. Filed as **#161**. **Closed by S0 (#161)** for scoped → scoped refs: the key spans `(tenant_id, id)`, the
+  other tenant's row is refused exactly as no row, and the oracle is gone (`docs/architecture/data-path.md`, *A scoped
+  ref is a key over (tenant_id, id)*).
 - **A `decimal` computed field is not exact on SQLite, and rounds to no scale.** `0.1 * 3` is `0.30` on
   PostgreSQL and `0.30000000000000004` on SQLite (Dev-13). The fix is the driver rounding a computed decimal
   expression to the field's declared scale, which needs a port member this design does not have. Filed as
