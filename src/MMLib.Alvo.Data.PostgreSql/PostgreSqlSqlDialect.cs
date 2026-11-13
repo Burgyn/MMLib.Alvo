@@ -255,6 +255,12 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
     /// <summary>SQLSTATE 55P03 — <c>lock_not_available</c>, what a statement raises when <c>lock_timeout</c> runs out.</summary>
     private const string LockNotAvailable = "55P03";
 
+    /// <summary>
+    /// PostgreSQL 15 names the column <c>ON DELETE SET NULL (column)</c> clears, so a scoped <c>setNull</c> reference is one
+    /// composite key — <see cref="PostgreSqlMigrationsSqlGenerator"/> spells it.
+    /// </summary>
+    ScopedSetNullShape IAlvoSqlDialect.ScopedSetNull => ScopedSetNullShape.NamedColumns;
+
     /// <inheritdoc/>
     /// <remarks>
     /// <c>SET LOCAL</c>, so the bound ends with the apply's transaction and never leaks onto a pooled connection. Five

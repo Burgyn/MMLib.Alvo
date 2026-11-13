@@ -392,7 +392,7 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
             residual,
             prePass.AlignedCurrent,
             desired,
-            schema => BuildInitializedModel(schema, TenantGuardShape.For(_dialect.ScopedSetNull)),
+            schema => BuildInitializedModel(schema, guards),
             _differ);
 
         return (prePass, desiredModel, residual);
