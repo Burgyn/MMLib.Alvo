@@ -58,12 +58,12 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// </para>
 /// <para>
 /// <b>Why every statement is tenant-narrowed.</b> A scoped rollup aggregates <em>one tenant's</em> children
-/// into <em>that tenant's</em> parent row, and nothing below this layer enforces it: the physical <c>ref</c>
-/// is a foreign key on the parent's <c>id</c> alone, so a child row may legally name a parent in another
-/// tenant, and an id taken off a row image is therefore not a promise about whose row it is. Without the
-/// predicate this recompute writes that other tenant's parent from this tenant's children and aggregates
-/// every tenant's children into it — a cross-tenant write and a cross-tenant read in one statement pair, on
-/// the shape §0 principle 5 exists for. A pair that <em>disagrees</em> about tenancy cannot be narrowed at all
+/// into <em>that tenant's</em> parent row. Since #161 the physical <c>ref</c> between two scoped entities is a
+/// foreign key over <c>(tenant_id, id)</c>, so a stored child cannot name a parent in another tenant — but an id
+/// taken off a row image is still not a promise about whose row it is, and a schema that never came through the
+/// mapper has no such key. Without the predicate this recompute would write that other tenant's parent from this
+/// tenant's children and aggregate every tenant's children into it — a cross-tenant write and a cross-tenant read
+/// in one statement pair, on the shape §0 principle 5 exists for — so it stays, as defence in depth. A pair that <em>disagrees</em> about tenancy cannot be narrowed at all
 /// and is refused: at apply by <c>RollupResolver</c>, and again here by
 /// <see cref="EnsureTenancyDoesNotCross"/> for a schema that did not come through the mapper.
 /// </para>

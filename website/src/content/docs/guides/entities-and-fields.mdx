@@ -212,7 +212,7 @@ Two keys the schema declares are refused when the descriptor is applied
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 409 | [`conflict`](/reference/problem-types/#conflict) | Another row already holds a `unique` value (code `unique`), or a `restrict` reference refuses a delete (code `referenced`). | Send a different value, or delete or repoint the rows that reference this one. | every host |
+| 409 | [`conflict`](/reference/problem-types/#conflict) | Another row already holds a `unique` value (code `unique`), a `restrict` reference refuses a delete (code `referenced`), or a write's `ref` names a row the database cannot resolve — gone between the check and the write, or written by host code that skipped the check (code `referenced`, worded for the write). | Send a different value; delete or repoint the rows that reference this one; or point the reference at a row that exists. | every host |
 | 422 | [`validation`](/reference/problem-types/#validation) | The body breaks a facet (`required`, `max-length`, `enum-value`, `format`, `precision`, `scale`), writes a field that is read-only for the caller (`read-only-field`), references a row that cannot be resolved (`unresolved-reference`), names an undeclared field (`unknown-field`), sends a value the type cannot hold (`invalid-value`), cannot create because a required field is read-only for this caller (`read-only-required-field`), or a format check timed out (`format-not-evaluated`, retry). | Follow each violation's `pointer` and `fixSuggestion`. | every host |
 
 If the container does not come back after you change the descriptor, the new version was refused when it was
