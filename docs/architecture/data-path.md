@@ -1366,8 +1366,19 @@ a guard back as the field it guards, never as `tenant_id`.
 **Deviations from #161's sketch, recorded.** (1) `setNull` is not "one composite key" on either engine — the measurement
 above. (2) The sketch's upgrade path for existing databases is **not built**: Alvo has no deployments, so a database
 created before this change simply has the old DDL and must be recreated (the CHANGELOG says so). A descriptor change that
-*adds* a scoped ref is an ordinary model diff and gets the guard. (3) No new problem type: the refusal reuses
+*adds* a scoped ref, changes its `onDelete` or flips either end's tenancy is an ordinary model diff that adds, re-shapes
+or drops the guard — pinned on both engines by `TenantGuardMigrationFacts`. (3) No new problem type: the refusal reuses
 `Referenced` and its 409.
+
+**A rename re-creates the references it touches.** A foreign key's, its index's and the target's alternate key's names
+are functions of the table and column names, and both engines carry them through `RENAME` under their old names. So a
+`ref` whose entity, field or target a descriptor renames is *released* by `RenamePrePass` — the aligned model carries the
+field without its reference — `ReleasedReferenceDrops` drops what the database holds for it by the names the *current*
+model gives them, and the residual diff re-creates it under the new names, the way a rename already re-creates a CHECK
+constraint. Measured before: on PostgreSQL renaming a referenced entity failed its own apply (the index already
+existed), and after a field rename a later drop named a constraint the database did not have — for plain references
+on `main` too, not only for guards. `After_a_rename_the_guard_holds_only_the_names_the_model_gives_it` reads the
+catalog after each kind of rename.
 
 **What it does not cover.** A `storage: dynamic` entity has no driver yet (F7, #41), and the shared `entity_records` store
 will have no foreign key at all; see the F7 section for the obligation that leaves.

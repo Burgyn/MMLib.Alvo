@@ -406,10 +406,14 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     private (RenamePrePass.Result PrePass, IModel DesiredModel, IReadOnlyList<MigrationOperation> Residual) ComputeResidualDiff(
         SchemaModel current, SchemaModel desired)
     {
-        var prePass = RenamePrePass.Compute(current, desired);
         var guards = TenantGuardShape.For(_dialect.ScopedSetNull);
+        var prePass = RenamePrePass.Compute(current, desired);
         var currentModel = BuildInitializedModel(prePass.AlignedCurrent, guards);
         var desiredModel = BuildInitializedModel(desired, guards);
+        prePass = prePass with
+        {
+            ReleasedReferences = ReleasedReferenceDrops.For(prePass.Renames, () => BuildInitializedModel(current, guards), currentModel),
+        };
 
         var residual = _differ.GetDifferences(currentModel.GetRelationalModel(), desiredModel.GetRelationalModel());
         residual = RenameGuessSplitter.Normalize(
@@ -423,14 +427,17 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     }
 
     // Assembles the full, ordered operation list: the drops of the partial indexes a rename released (by their old names,
-    // which no rename changes), then declared renames (so later operations see the new names), then the drops of the CHECK constraints a rename released (see RenamePrePass), then the
-    // (normalized) residual diff, which adds them back under their new names.
+    // which no rename changes), then declared renames (so later operations see the new names), then the drops of the
+    // references and CHECK constraints a rename released (see RenamePrePass), then the (normalized) residual diff, which
+    // adds them back under their new names.
     private static List<MigrationOperation> AssembleOperations(RenamePrePass.Result prePass, IReadOnlyList<MigrationOperation> residual)
     {
         var operations = new List<MigrationOperation>(
-            prePass.ReleasedIndexes.Count + prePass.Renames.Count + prePass.ReleasedChecks.Count + residual.Count);
+            prePass.ReleasedIndexes.Count + prePass.Renames.Count + prePass.ReleasedReferences.Count + prePass.ReleasedChecks.Count
+            + residual.Count);
         operations.AddRange(prePass.ReleasedIndexes.Select(released => released.Operation));
         operations.AddRange(prePass.Renames.Select(rename => rename.Operation));
+        operations.AddRange(prePass.ReleasedReferences.Select(released => released.Operation));
         operations.AddRange(prePass.ReleasedChecks.Select(released => released.Operation));
         operations.AddRange(residual);
         return operations;
@@ -448,9 +455,11 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         RenamePrePass.Result prePass, SchemaModel desired, IReadOnlyList<MigrationOperation> residual)
     {
         var steps = new List<MigrationStep>(
-            prePass.ReleasedIndexes.Count + prePass.Renames.Count + prePass.ReleasedChecks.Count + residual.Count);
+            prePass.ReleasedIndexes.Count + prePass.Renames.Count + prePass.ReleasedReferences.Count + prePass.ReleasedChecks.Count
+            + residual.Count);
         steps.AddRange(prePass.ReleasedIndexes.Select(released => ToStep(released.Change)));
         steps.AddRange(prePass.Renames.Select(rename => ToStep(rename.Change)));
+        steps.AddRange(prePass.ReleasedReferences.Select(released => ToStep(released.Change)));
         steps.AddRange(prePass.ReleasedChecks.Select(released => ToStep(released.Change, CostNote(released.Operation))));
         steps.AddRange(residual.Select(operation =>
             ToStep(WithValidatedField(DestructiveScan.Classify(operation), operation, prePass.AlignedCurrent, desired), CostNote(operation))));

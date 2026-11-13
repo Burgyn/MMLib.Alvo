@@ -477,6 +477,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   this change keeps the old key and must be recreated.** `setNull` between scoped entities needs PostgreSQL 15 and is
   refused at plan, at `/entities/{child}/fields/{ref}/onDelete`, on an older server. Dynamic entities are not covered
   (no driver yet). See `docs/architecture/data-path.md`.
+  A declared rename of a `ref` field, of its entity or of its target now re-creates the reference's foreign key, index
+  and (for a guard) the target's alternate key under the new names; before, on PostgreSQL, renaming a referenced entity
+  failed its apply and a later drop after a field rename named a constraint that did not exist — plain references
+  included.
 - **The data port measures field facets on every write** (#481): `IAlvoData` and `IAlvoTransaction` creates, updates,
   replaces and batches measure each value they are handed against its field's `maxLength`, enum `values`, decimal
   `precision`/`scale` and `format` (the facets the descriptor has; there is no min/max or `pattern` facet) — the HTTP
