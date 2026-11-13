@@ -52,7 +52,7 @@ behaviour. All are honoured by the standalone image unless §5 says otherwise.
 | D8 | **Relation rule** `work_order_id.assigned_to == @user.id` | `visits.rules.list/get` | A technician sees the visits of the jobs assigned to them, and nobody else's — through the work order's own `list` rule. |
 | D9 | **Lookup check** `work_order_id.status != 'completed' && work_order_id.status != 'cancelled'` | `visits.checks` | Nobody books a visit on a closed job — 422 with the author's message at `/work_order_id`. |
 | D10 | **Rollup** `on_site_minutes` = `sum(visits.minutes_on_site)` | `work_orders` | What billing invoices, kept transactionally by the visit writes. |
-| D11 | **`automation.job-completed-to-billing`**: `entity.work_orders.updated`, `changed(status) && new.status == 'completed'`, `webhook` → endpoint `billing` | top level + `webhooks.endpoints.billing` | Completing a job tells billing, as its own retried delivery, after the commit. |
+| D11 | **`automation.job-completed-to-billing`**: `entity.work_orders.updated`, `changed(status) && new.status == 'completed' && has(new.po_number)`, `webhook` → endpoint `billing` | top level + `webhooks.endpoints.billing` | Completing a purchase-order job tells billing, as its own retried delivery, after the commit; a job without a PO is settled on site (R6a). |
 | D12 | **`events.exclude`** `["access_code","internal_notes"]` | `work_orders` | The site access code and dispatcher notes must never leave in an event or a webhook to billing. |
 | D13 | **`access`** `{ "admin": "'admin' in @user.roles" }` | top level | Lets the demo's `admin` key operate deliveries and *Run now* a schedule over the Management API. Admin only: a management `viewer` sees every tenant's deliveries, which a tenant role must not. |
 
@@ -87,6 +87,14 @@ behaviour. All are honoured by the standalone image unless §5 says otherwise.
   opt-in, no TLS in the demo. Elsewhere (quickstart image, admin e2e host, load stack) nothing listens on
   `:9090`, so a completion's billing delivery fails and retries visibly on *Operations* — documented in
   the README as what an unreachable endpoint looks like.
+- **R6a — only a purchase-order job is billed** (implementation ruling, PR-A). R6 left a completion's delivery
+  failing in every stack without a sink. The maintainer ruled that the quick start and the dashboard must not
+  show a permanently failing delivery to someone who just started the demo, and the descriptor format has no
+  per-stack switch (an endpoint URL or a rule's `enabled` cannot come from configuration). The condition
+  therefore adds `has(new.po_number)` — a real business distinction (PO jobs are invoiced, the rest settled on
+  site) that an ordinary completion in those stacks does not meet. Completing a job that carries a PO there
+  still leaves a retrying delivery; the example README says so. It also gives `160-Automation` a second control
+  (a completion without a PO sends nothing).
 - **R7 — deliveries are unsigned today** (#120), so the suite asserts what billing received and that it
   carries no excluded field, not a signature. The endpoint's `secretRef: billing-signing` is declared so the
   descriptor is correct the day signing lands; an absent secret is an apply *warning*, not a refusal.

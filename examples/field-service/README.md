@@ -1,12 +1,19 @@
-# field-service — the runnable complex demo
+# field-service — the advanced demo
 
 A multi-tenant field-service dispatch backend, and the fixture the end-to-end suite in
 `test/teapie-field-service` drives. Unlike `../complex-crm`, which showcases the descriptor **format**
 and is deliberately not appliable, **every construct in this one runs**: the stack boots, the
 descriptor applies, and each feature below is measured by at least one test against a real container.
 
-`../vehicle-registry` is the smoke fixture — three entities, no tenancy, no `audit`, no `hidden`,
-no role-differentiated rules. It proves the plumbing. This example exists to prove the *product*.
+**Looking for the simple demo?** `../vehicle-registry` — three entities, no tenancy, no `audit`, no
+`hidden`, one dev key — shows how little it takes to use Alvo, and proves the plumbing. This example is
+the other end: the sophisticated constructs, in one real use case.
+
+The story it tells: a call comes in (`new`), the dispatcher assigns a technician and a slot
+(`scheduled`) and books the visit in the calendar, the technician starts and finishes the job
+(`in_progress` → `completed`), and billing is told the job is done. An emergency nobody scheduled by its
+`respond_by` time arms an SLA timer. Every job carries a gapless job number, and the database itself
+refuses what must never be stored.
 
 ## Run it
 
@@ -25,6 +32,9 @@ docker compose --env-file examples/field-service/demo-identities.env \
 Then `http://localhost:8081/scalar`, or `scripts/test-e2e`, which does all of the above with fresh
 secrets and runs both TeaPie suites against both stacks.
 
+The stack has three containers: PostgreSQL, Alvo, and **`sink`** — a WireMock that plays the billing
+system (see *The billing webhook* below). Its request journal is on `http://localhost:8091/__admin/requests`.
+
 The repo-root `docker-compose.yml` is untouched and still serves `vehicle-registry` on `:8080`. This
 demo is a **second compose file** rather than a second service in that one because Compose interpolates
 a whole file before selecting services — profiles do not defer it, measured — so five more `${…:?}`
@@ -37,7 +47,29 @@ secrets in `docker-compose.yml` would break the README quickstart for anyone who
 |---|---|---|---|
 | `regions` | **global** | no | Shared reference data (*číselník*): both tenants read the same rows, and it is the non-scoped entity that makes "scoped" mean something. It has **no `update` and no `delete` rule at all**, which is the only way to reach a genuine *unconfigured-operation* 403. |
 | `customers` | scoped | **no** | The non-audited entity. Its rows carry no version, so no `ETag` is ever minted and an `If-Match` naming one is **refused with 412 rather than ignored**. |
-| `work_orders` | scoped | **yes** | The main entity. Audited, so `ETag`/`If-Match` work — which is the other half of the pair above. |
+| `work_orders` | scoped | **yes** | The main entity. Audited, so `ETag`/`If-Match` work — which is the other half of the pair above. Its `status` moves through a state machine, and it carries a gapless `job_number`. |
+| `visits` | scoped | yes | A technician's booked slot on a job — the dispatch calendar. A technician sees a visit **through the job it belongs to**, never through its own `technician_id`. |
+
+## The lifecycle
+
+`work_orders.stateMachine` guards every **move** of `status`. A create may store any state (there is no
+`initial`, deliberately: a migration from a legacy dispatch system imports jobs that are already running
+or done); new calls are created `new` by convention.
+
+| Transition | From → to | Roles | Condition |
+|---|---|---|---|
+| `schedule` | `new` → `scheduled` | dispatcher, admin | `has(new.assigned_to) && has(new.scheduled_for)` |
+| `start` | `scheduled` → `in_progress` | technician, dispatcher, admin | — |
+| `complete` | `in_progress` → `completed` | technician, dispatcher, admin | `has(new.completed_on)` |
+| `cancel` | `new`, `scheduled`, `in_progress` → `cancelled` | dispatcher, admin | — |
+| `reopen` | `completed`, `cancelled` → `scheduled` | admin | — |
+
+A move no transition admits, or whose condition fails, is **422** with code `transition` at `/status`; a
+move a transition matches but whose roles the caller lacks is **403**. A `PATCH` that does not name
+`status` is no transition. The `sla_breach` timer (`at: respond_by`, while
+`is_emergency == true && status == 'new'`) is armed, moved and cancelled in the write's own transaction
+and publishes `work_orders.sla_breached`; descriptor automation cannot subscribe to a timer's event, so
+in the standalone image nothing acts on it — the embedded host sample does.
 
 ## What each construct is there to measure
 
@@ -62,6 +94,42 @@ secrets in `docker-compose.yml` would break the README quickstart for anyone who
 | Opt-in count | `Prefer: count=exact` | Seven rows behind a `limit=2` page, and a technician whose row rule shows fewer — so a count that was the page size, or one taken over the table, is a different number in each case. |
 | Required sort key | `priority` | The paging key the suite walks four pages of, with deliberate ties so the `id` tie-breaker is what makes the order total. |
 | `indexes` | `["status","priority"]`, `["assigned_to"]` | Cover exactly the fields the suite filters and orders on. |
+
+### The advanced constructs
+
+| Construct | Where | The behaviour a test measures | Case |
+|---|---|---|---|
+| `stateMachine` | `work_orders.status` | Skipped steps and failed conditions are 422 `transition`; a transition the caller holds no role for is 403; a batch with one illegal move writes nothing. | `130-Lifecycle/001`, `/002` |
+| `sequence` | `work_orders.job_number` (`JOB-{yyyy}-{n:5}`, per tenant, per year in Bratislava) | The seed is numbered 1..7 per tenant; a create refused by a CHECK gives its number back; a write that sends it is 403; it is `readOnly` in the document. | `140-Integrity/001`, `090-Docs/001` |
+| `field.validation` (CHECK) | `priority` 1–5, `quoted_price >= 0`, `customers.service_opens_hour`/`service_closes_hour`, `visits.minutes_on_site` | 422 `check` at exactly the field to fix, for every writer — the database enforces it. | `140-Integrity/002` |
+| Partial unique index | `["customer_id","po_number"]` `where: status != 'cancelled'` | A second open job on a customer's PO is 409 `unique` at `/customer_id` and `/po_number`; another customer, or a cancelled job, frees it. | `140-Integrity/003` |
+| Exclusion | `visits`: `["technician_id"]` over `[starts_at, ends_at)` | A technician booked twice at once is 409 `exclusion` at `/starts_at`; back-to-back slots pass. | `140-Integrity/004` |
+| Lookup check | `visits.checks` | A visit on a completed or cancelled job is 422 `check` at `/work_order_id`, with the descriptor's message. | `140-Integrity/004` |
+| Rollup | `work_orders.on_site_minutes = sum(visits.minutes_on_site)` | Kept by the visit writes, in their transaction. | `140-Integrity/004` |
+| Relation rule | `visits.rules.list/get`: `work_order_id.assigned_to == @user.id` | A technician lists exactly the visits of jobs assigned to them; a row failing it is 404. | `150-Relations/001` |
+| `timers` | `work_orders.sla_breach` on `respond_by` | Armed in the write; its effect is host code (see *The lifecycle*). | — (embedded host) |
+| `automation` + `webhooks` | `job-completed-to-billing` → endpoint `billing` | A completed purchase-order job is posted to billing once, after the commit; a completion without a PO, or an update that completes nothing, sends nothing. | `160-Automation/001` |
+| `events.exclude` | `work_orders`: `access_code`, `internal_notes` | Neither name nor value is in any delivery to billing. | `160-Automation/001` |
+| `access` | `{ "admin": "'admin' in @user.roles" }` | The `admin` key may operate deliveries and *Run now* a schedule over the Management API. Admin only: a management `viewer` sees every tenant's deliveries, which a tenant role must not. | — |
+
+## The billing webhook
+
+The `billing` endpoint is `http://localhost:9090/billing/work-orders`. Plain `http` is admitted only for a
+loopback host, and the webhook egress guard refuses every non-public address unless the URL itself
+declares loopback — so in this stack the `sink` container (WireMock) runs with
+`network_mode: "service:alvo"`: it shares the Alvo container's network namespace, `localhost:9090` really
+is loopback, and the guard stays fully on. Nothing is allow-listed (`WebhookAllowedNetworks` stays empty).
+
+**Only a purchase-order job reaches billing** (`condition: changed(status) && new.status == 'completed'
+&& has(new.po_number)`); a job without a PO is settled on site. That is a business rule, and it is also
+what keeps the other places that run this file quiet: the quick-start image (`ALVO_DESCRIPTOR=…/field-service…`)
+and the dashboard's end-to-end host have no billing sink, and nothing listens on `:9090` there (the load
+stack layers on this compose file, so it has the sink). **If you complete a job that carries a `po_number` in such a stack, its billing delivery
+fails and retries — visible on the dashboard's *Operations* page — and that is what an unreachable
+endpoint looks like.** Run this compose file (or add a sink of your own) to see it succeed.
+
+Deliveries are unsigned in this build (#120): the endpoint's `secretRef: billing-signing` is declared so
+the descriptor is right the day signing lands, and its absence is an apply *warning*, not a refusal.
 
 ## Authorization, all three shapes in one descriptor
 
@@ -90,16 +158,10 @@ Tenant ids and user ids live in `demo-identities.env` and are **not** secrets: a
 entity has to carry `tenant_id`, and `assigned_to` names a technician by user id, so no test can be
 written without them. The five key secrets are credentials and are never committed.
 
-## Two behaviours worth knowing before you write against this
+## Worth knowing before you write against this
 
 - **A create on a tenant-scoped entity must carry `tenant_id` explicitly.** Nothing stamps it from the
   caller's context; the synthesized tenant scope's `WITH CHECK` then judges the value. Omit it and the
   answer is `403 The write was rejected by policy.` — correct, but it names no field.
-- **A duplicate value on a `unique` field is answered `500`, not `409`.** The framework validates
-  `required`, `maxLength`, `enum`, `format`, `precision`/`scale` and `ref` existence, but a `unique`
-  constraint is enforced only by the database and its violation is not mapped. The same is true of a
-  delete blocked by an `onDelete: restrict` reference. `test/teapie-field-service` pins the current
-  behaviour so each case turns red the day it is fixed.
-- **A `unique` field on a scoped entity is unique across *all* tenants**, which makes it a
-  cross-tenant existence oracle. This is a *separate* defect from the one above and a status-only fix
-  does not close it — see that suite's README, and `080-Tenancy/002`, which pins it on its own.
+- **`job_number` and `on_site_minutes` are Alvo's to write.** A create or update that sends either is
+  refused `403`, with a detail that says why; read them back from the response.
