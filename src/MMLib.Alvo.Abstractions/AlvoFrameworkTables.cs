@@ -111,6 +111,21 @@ internal static class AlvoFrameworkTables
     /// <summary>The suffix of the table holding one row per concurrency slot of a limited subscriber's key.</summary>
     internal const string ConcurrencySlotsSuffix = "_concurrency_slots";
 
+    /// <summary>The suffix of the table holding one row per end-user account.</summary>
+    internal const string AuthAccountsSuffix = "_auth_accounts";
+
+    /// <summary>The suffix of the table holding one row per (provider, subject) an account signs in with.</summary>
+    internal const string AuthIdentitiesSuffix = "_auth_identities";
+
+    /// <summary>The suffix of the table holding one row per end-user session.</summary>
+    internal const string AuthSessionsSuffix = "_auth_sessions";
+
+    /// <summary>The suffix of the table holding one row per refresh token of a session.</summary>
+    internal const string AuthRefreshTokensSuffix = "_auth_refresh_tokens";
+
+    /// <summary>The suffix of the table holding the accounts' signing and refresh-token keys, encrypted.</summary>
+    internal const string AuthKeysSuffix = "_auth_keys";
+
     /// <summary>
     /// Every table <c>MMLib.Alvo.Identity</c> owns, reserved here whether or not that package is
     /// installed.
@@ -163,6 +178,11 @@ internal static class AlvoFrameworkTables
             schemaPrefix + DataMigrationsSuffix,
             schemaPrefix + StepsSuffix,
             schemaPrefix + ConcurrencySlotsSuffix,
+            schemaPrefix + AuthAccountsSuffix,
+            schemaPrefix + AuthIdentitiesSuffix,
+            schemaPrefix + AuthSessionsSuffix,
+            schemaPrefix + AuthRefreshTokensSuffix,
+            schemaPrefix + AuthKeysSuffix,
             .. IdentitySuffixes.Select(suffix => schemaPrefix + suffix),
         ];
     }

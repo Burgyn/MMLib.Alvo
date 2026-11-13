@@ -69,6 +69,7 @@ internal sealed partial class SystemSchemaInitializer
         _dataMigrationsTableName = DataMigrationTable.NameFor(schemaPrefix);
         _stepsTableName = StepTable.NameFor(schemaPrefix);
         _concurrencySlotsTableName = ConcurrencySlotTable.NameFor(schemaPrefix);
+        _authTables = new AuthTables(schemaPrefix);
     }
 
     private readonly string _idempotencyTableName;
@@ -87,6 +88,7 @@ internal sealed partial class SystemSchemaInitializer
     private readonly string _dataMigrationsTableName;
     private readonly string _stepsTableName;
     private readonly string _concurrencySlotsTableName;
+    private readonly AuthTables _authTables;
 
     /// <summary>Gets the fully-prefixed descriptor-versions table name, e.g. <c>alvo_descriptor_versions</c>.</summary>
     public string TableName { get; }
@@ -172,6 +174,7 @@ internal sealed partial class SystemSchemaInitializer
         await CreateIfMissingAsync(_stepsTableName, StepTable.Ddl(_stepsTableName), ct).ConfigureAwait(false);
         await CreateIfMissingAsync(_concurrencySlotsTableName, ConcurrencySlotTable.Ddl(_concurrencySlotsTableName), ct).ConfigureAwait(false);
         await CreateIndexIfMissingAsync(ConcurrencySlotTable.DeliveryIndexDdl(_concurrencySlotsTableName), ct).ConfigureAwait(false);
+        await _authTables.EnsureAsync(_connection, ct).ConfigureAwait(false);
     }
 
     /// <summary>
