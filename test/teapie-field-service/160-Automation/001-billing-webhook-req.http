@@ -1,0 +1,72 @@
+### `automation.job-completed-to-billing`: a purchase-order job that becomes `completed` is posted to the
+### `billing` endpoint — a WireMock sidecar in the alvo container's network namespace, so its
+### http://localhost:9090 URL is loopback and the webhook egress guard admits it with nothing
+### allow-listed. Delivered after the commit, by an outbox delivery of its own, so it is polled.
+###
+### Both controls are written BEFORE the billable completion, so a delivery they wrongly caused would be
+### dispatched no later than the one the poll waits for.
+
+### The billable job: in progress, on a purchase order, carrying both secrets `events.exclude` withholds
+# @name CreateBillable
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3601", "title": "Billing: WO-3601", "status": "in_progress", "priority": 3, "access_code": "SECRET-3601", "internal_notes": "CONFIDENTIAL-3601", "assigned_to": "{{userTechNorth}}", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}", "po_number": "PO-3601" }
+
+### Control 1: a PO job that is updated but NOT completed
+# @name CreateTouched
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3602", "title": "Billing: WO-3602", "status": "in_progress", "priority": 3, "access_code": "SECRET-3602", "internal_notes": "CONFIDENTIAL-3602", "assigned_to": "{{userTechNorth}}", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}", "po_number": "PO-3602" }
+
+### Control 2: a job WITHOUT a purchase order that IS completed — settled on site, never billed
+# @name CreateNoPo
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3603", "title": "Billing: WO-3603", "status": "in_progress", "priority": 3, "access_code": "SECRET-3603", "internal_notes": "CONFIDENTIAL-3603", "assigned_to": "{{userTechNorth}}", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" }
+
+### Control 1's update: a priority change, no status move
+# @name TouchControl
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateTouched.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "priority": 4 }
+
+### Control 2's completion
+# @name CompleteNoPo
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateNoPo.response.body.$.id}}
+X-Alvo-Api-Key: {{keyTechNorth}}
+Content-Type: application/json
+
+{ "status": "completed", "completed_on": "2026-12-03" }
+
+### The billable completion, by the technician on site
+# @name CompleteBillable
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateBillable.response.body.$.id}}
+X-Alvo-Api-Key: {{keyTechNorth}}
+Content-Type: application/json
+
+{ "status": "completed", "completed_on": "2026-12-03" }
+
+### What billing received — polled until the completion arrives, at most ~30 s
+# @name BillingJournal
+## RETRY-UNTIL-TEST-PASS: Billing received exactly one completion for WO-3601.
+## RETRY-MAX-ATTEMPTS: 30
+## RETRY-BACKOFF-TYPE: Constant
+## RETRY-MAX-DELAY: 00:00:01
+POST {{fsSinkUrl}}/__admin/requests/find
+Content-Type: application/json
+
+{ "method": "POST", "urlPath": "/billing/work-orders" }
