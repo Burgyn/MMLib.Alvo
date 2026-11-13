@@ -227,8 +227,9 @@ public abstract class AlvoDataConstraintTests
     /// </para>
     /// <para>
     /// <b>Indistinguishable is the property</b>: same type, kind, fields and message — anything that differed would be an
-    /// existence oracle across tenants, one write per candidate id. And the wording is the write side's own: the caller
-    /// sent a reference, so a refusal telling them to remove records that point at this one would send them the wrong way.
+    /// existence oracle across tenants, one write per candidate id. The two refusals are compared with each other, never
+    /// with a literal, so a provider outside the <c>MMLib.Alvo</c> family can pass the fact with the public constructor;
+    /// which wording the shipped drivers choose for a write is their own engine tests' to pin.
     /// </para>
     /// </remarks>
     /// <param name="child">The referencing entity — one per <c>onDelete</c> (restrict, cascade, setNull).</param>
@@ -430,8 +431,8 @@ public abstract class AlvoDataConstraintTests
         (await data.QueryAsync(new AlvoQuery { Entity = child }, caller, Ct)).Items;
 
     /// <summary>
-    /// Asserts a refusal of a reference to another tenant's row is the refusal of a reference to no row (#161), worded for
-    /// the write that sent the reference rather than for a delete.
+    /// Asserts a refusal of a reference to another tenant's row is the refusal of a reference to no row (#161): kind
+    /// <see cref="AlvoConstraintKind.Referenced"/>, and the same type, kind, fields and message as each other.
     /// </summary>
     private static void ShouldBeIndistinguishable(AlvoConstraintViolationException crossTenant, AlvoConstraintViolationException nowhere)
     {
@@ -440,22 +441,16 @@ public abstract class AlvoDataConstraintTests
         crossTenant.Kind.ShouldBe(nowhere.Kind);
         crossTenant.Fields.ShouldBe(nowhere.Fields);
         crossTenant.Message.ShouldBe(nowhere.Message);
-        crossTenant.Message.ShouldNotBe(
-            new AlvoConstraintViolationException(AlvoConstraintKind.Referenced, []).Message,
-            "the write sent a reference and removed nothing, so the delete's wording would send the caller the wrong way");
     }
 
     /// <summary>
-    /// Asserts a refused delete is the <c>restrict</c> refusal — kind, no fields, and the delete's own wording ("remove
-    /// what points here"), never the write's ("point the reference elsewhere"), whether one row or a batch was deleted.
+    /// Asserts a refused delete is the <c>restrict</c> refusal — kind <see cref="AlvoConstraintKind.Referenced"/>, naming no
+    /// field — whether one row or a batch was deleted. Its wording is the shipped drivers' engine tests' to pin.
     /// </summary>
     private static void ShouldBeTheRestrictRefusal(AlvoConstraintViolationException refusal)
     {
         refusal.Kind.ShouldBe(AlvoConstraintKind.Referenced);
         refusal.Fields.ShouldBeEmpty();
-        refusal.Message.ShouldBe(
-            new AlvoConstraintViolationException(AlvoConstraintKind.Referenced, []).Message,
-            "a refused delete is answered with the delete's fix, not with a write's");
     }
 
     private static AlvoContext NewContext(TenantId tenant) =>
