@@ -27,3 +27,22 @@ await tp.Test("A row failing the relation rule reads 404, and the same id reads 
     Equal(404, (int)tp.Responses["TechReadsOthersVisit"].StatusCode);
     Equal(200, (int)tp.Responses["DispatcherReadsThatVisit"].StatusCode);
 });
+
+await tp.Test("A booked technician whose job is not assigned to them cannot write the visit — it is 404, and nothing changed.", async () =>
+{
+    Equal(404, (int)tp.Responses["SpareWritesUnassignedVisit"].StatusCode);
+    Equal(System.Text.Json.JsonValueKind.Null,
+        (await BodyOf(tp.Responses["DispatcherRereadsThatVisit"])).GetProperty("minutes_on_site").ValueKind);
+});
+
+await tp.Test("The assigned technician writes their own visit, but cannot re-point it at a job that is not theirs.", async () =>
+{
+    Equal(200, (int)tp.Responses["TechWritesOwnVisit"].StatusCode);
+    // Refused as an unresolvable reference: a job the caller cannot read is indistinguishable from none.
+    Equal(new[] { "unresolved-reference" }, await ViolationCodes(tp.Responses["TechRepointsOwnVisit"]));
+    Equal(new[] { "/work_order_id" }, await ViolationPointers(tp.Responses["TechRepointsOwnVisit"]));
+
+    var visit = await BodyOf(tp.Responses["DispatcherReadsTechVisit"]);
+    Equal("Valve replaced, pressure tested.", visit.GetProperty("notes").GetString());
+    Equal(Constant("Job3401Id"), visit.GetProperty("work_order_id").GetString());
+});

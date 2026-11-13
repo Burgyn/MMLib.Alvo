@@ -4,6 +4,7 @@ await tp.Test("Capture: the job and visit ids 150-Relations reads.", async () =>
 {
     tp.SetVariable("Job3401Id", (await BodyOf(tp.Responses["CreateJob3401"])).GetProperty("id").GetString());
     tp.SetVariable("Job3402Id", (await BodyOf(tp.Responses["CreateJob3402"])).GetProperty("id").GetString());
+    tp.SetVariable("VisitOfTechNorthId", (await BodyOf(tp.Responses["V1"])).GetProperty("id").GetString());
     tp.SetVariable("VisitOnUnassignedJobId",
         (await BodyOf(tp.Responses["OtherTechSameSlot"])).GetProperty("id").GetString());
 });
@@ -31,14 +32,17 @@ await tp.Test("Back-to-back slots and another technician's identical slot are bo
         (await BodyOf(tp.Responses["OtherTechSameSlot"])).GetProperty("technician_id").GetString());
 });
 
-await tp.Test("A visit on a completed job is 422 `check` at /work_order_id, with the descriptor's message.", async () =>
+await tp.Test("A visit on a completed or a cancelled job is 422 `check` at /work_order_id, with the descriptor's message.", async () =>
 {
-    var refused = tp.Responses["OnClosedJob"];
-    Equal("https://alvo.dev/errors/validation", await ProblemType(refused));
-    Equal(new[] { "check" }, await ViolationCodes(refused));
-    Equal(new[] { "/work_order_id" }, await ViolationPointers(refused));
-    Equal("A visit can only be booked on an open work order.",
-        (await BodyOf(refused)).GetProperty("violations")[0].GetProperty("message").GetString());
+    foreach (var name in new[] { "OnClosedJob", "OnCancelledJob" })
+    {
+        var refused = tp.Responses[name];
+        Equal("https://alvo.dev/errors/validation", await ProblemType(refused));
+        Equal(new[] { "check" }, await ViolationCodes(refused));
+        Equal(new[] { "/work_order_id" }, await ViolationPointers(refused));
+        Equal("A visit can only be booked on an open work order.",
+            (await BodyOf(refused)).GetProperty("violations")[0].GetProperty("message").GetString());
+    }
 });
 
 await tp.Test("The job's on_site_minutes is the sum of its visits' minutes (45 + 30), kept by the writes.", async () =>

@@ -36,7 +36,25 @@ Content-Type: application/json
 
 { "status": "scheduled" }
 
-### The same move with both — the control that makes the 422 above the `when`, not the transition
+### An assignee but no time: refused too — the condition is `&&`, so one of the two is not enough
+# @name ScheduleWithOnlyAssignee
+## TEST-EXPECT-STATUS: [422]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateNewJob.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "status": "scheduled", "assigned_to": "{{userTechNorth}}" }
+
+### A time but no assignee: refused as well
+# @name ScheduleWithOnlyTime
+## TEST-EXPECT-STATUS: [422]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateNewJob.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "status": "scheduled", "scheduled_for": "2026-12-01T09:00:00+00:00" }
+
+### The same move with both — the control that makes the 422s above the `when`, not the transition
 # @name ScheduleProperly
 ## TEST-EXPECT-STATUS: [200]
 PATCH {{fsBaseUrl}}/api/work_orders/{{CreateNewJob.response.body.$.id}}
@@ -109,14 +127,24 @@ Content-Type: application/json
 
 { "status": "scheduled" }
 
-### The admin does
+### Even the admin may not reopen it keeping the sign-off day (`reopen.when: !has(new.completed_on)`):
+### a reopened job that kept it could be completed again with no new date
+# @name AdminReopensKeepingDate
+## TEST-EXPECT-STATUS: [422]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateNewJob.response.body.$.id}}
+X-Alvo-Api-Key: {{keyAdmin}}
+Content-Type: application/json
+
+{ "status": "scheduled" }
+
+### The admin reopens it, clearing the sign-off day in the same write
 # @name AdminReopens
 ## TEST-EXPECT-STATUS: [200]
 PATCH {{fsBaseUrl}}/api/work_orders/{{CreateNewJob.response.body.$.id}}
 X-Alvo-Api-Key: {{keyAdmin}}
 Content-Type: application/json
 
-{ "status": "scheduled" }
+{ "status": "scheduled", "completed_on": null }
 
 ### What the job ended as, read by the dispatcher
 # @name ReadBack

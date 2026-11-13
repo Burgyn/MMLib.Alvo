@@ -29,6 +29,15 @@ Content-Type: application/json
 
 { "tenant_id": "{{tenantNorth}}", "name": "SaneHours Ltd", "tier": "standard", "service_opens_hour": 7, "service_closes_hour": 19 }
 
+### A closing hour with no opening hour: the `!has(service_opens_hour) ||` arm admits it (control)
+# @name ClosesOnly
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/customers
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "name": "ClosesOnly Ltd", "tier": "standard", "service_closes_hour": 17 }
+
 ### The edges of the window are admitted: 0 and 24 (control)
 # @name EdgeHours
 ## TEST-EXPECT-STATUS: [201]

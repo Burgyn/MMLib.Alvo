@@ -2,7 +2,7 @@
 
 The end-to-end suite over `examples/field-service` — the advanced demo — driven against the container
 `docker-compose.field-service.yml` starts on `:8081`, and the WireMock billing sink it starts beside it
-(journal on `:8091`, the `fsSinkUrl` environment value).
+(journal on `:8083`, the `fsSinkUrl` environment value).
 
 `test/teapie` is the sibling suite and it answers a different question. It runs against
 `examples/vehicle-registry` and proves the **plumbing**: the image builds, the descriptor applies, the
@@ -51,8 +51,8 @@ not.
 | `120-Replace` | 1 | `PUT` creates under a client-chosen id, replaces whole, and is refused for an entity with a required hidden field. |
 | `130-Lifecycle` | 2 | The work-order state machine: 422 `transition` for a skipped step or a failed condition, 403 for a transition the caller holds no role for (with the same caller's legal move as control), and a batch with one illegal move writes nothing. |
 | `140-Integrity` | 4 | The gapless `job_number` sequence (per tenant; a refused create gives its number back), CHECK validations at the exact field, the partial unique index on `(customer_id, po_number)`, and visits: exclusion, lookup check, rollup. |
-| `150-Relations` | 1 | A technician sees visits through the job's assignee, not the visit's `technician_id`. |
-| `160-Automation` | 1 | A completed purchase-order job reaches the billing sink once, as a CloudEvent without the excluded fields; the two controls send nothing. Polled with `## RETRY-UNTIL-TEST-PASS` (≤ 30 × 1 s), because a delivery is after the commit. |
+| `150-Relations` | 1 | A technician sees visits through the job's assignee, not the visit's `technician_id`, and writes only a visit they can read (a booked-but-unassigned technician's `PATCH` is 404; re-pointing a visit at an unreadable job is `unresolved-reference`). |
+| `160-Automation` | 1 | A completed purchase-order job reaches the billing sink once, as a CloudEvent without the excluded fields; the two controls send nothing. Polled with `## RETRY-UNTIL-TEST-PASS` (≤ 30 × 1 s) until a sentinel PO completion written last has also arrived, and only then are the counts judged. |
 
 ## The bar every case meets
 

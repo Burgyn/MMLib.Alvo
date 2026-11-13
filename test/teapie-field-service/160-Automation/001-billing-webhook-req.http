@@ -3,8 +3,9 @@
 ### http://localhost:9090 URL is loopback and the webhook egress guard admits it with nothing
 ### allow-listed. Delivered after the commit, by an outbox delivery of its own, so it is polled.
 ###
-### Both controls are written BEFORE the billable completion, so a delivery they wrongly caused would be
-### dispatched no later than the one the poll waits for.
+### The poll does not stop at the billable delivery: it waits until a SENTINEL — a fourth PO job, completed
+### last — has ALSO arrived, and only then are the counts judged. Every write before the sentinel's has had at
+### least as long to be delivered, so "exactly one" and "none" are measured, not caught early.
 
 ### The billable job: in progress, on a purchase order, carrying both secrets `events.exclude` withholds
 # @name CreateBillable
@@ -33,6 +34,15 @@ Content-Type: application/json
 
 { "tenant_id": "{{tenantNorth}}", "reference": "WO-3603", "title": "Billing: WO-3603", "status": "in_progress", "priority": 3, "access_code": "SECRET-3603", "internal_notes": "CONFIDENTIAL-3603", "assigned_to": "{{userTechNorth}}", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" }
 
+### The sentinel: a PO job, completed after everything else
+# @name CreateSentinel
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3604", "title": "Billing: WO-3604", "status": "in_progress", "priority": 3, "access_code": "SECRET-3604", "internal_notes": "CONFIDENTIAL-3604", "assigned_to": "{{userTechNorth}}", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}", "po_number": "PO-3604" }
+
 ### Control 1's update: a priority change, no status move
 # @name TouchControl
 ## TEST-EXPECT-STATUS: [200]
@@ -60,9 +70,18 @@ Content-Type: application/json
 
 { "status": "completed", "completed_on": "2026-12-03" }
 
-### What billing received — polled until the completion arrives, at most ~30 s
+### The sentinel's completion, the LAST write of this case
+# @name CompleteSentinel
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateSentinel.response.body.$.id}}
+X-Alvo-Api-Key: {{keyTechNorth}}
+Content-Type: application/json
+
+{ "status": "completed", "completed_on": "2026-12-03" }
+
+### What billing received — polled until both the billable completion and the sentinel arrived, at most ~30 s
 # @name BillingJournal
-## RETRY-UNTIL-TEST-PASS: Billing received exactly one completion for WO-3601.
+## RETRY-UNTIL-TEST-PASS: Billing received the billable completion and the sentinel.
 ## RETRY-MAX-ATTEMPTS: 30
 ## RETRY-BACKOFF-TYPE: Constant
 ## RETRY-MAX-DELAY: 00:00:01

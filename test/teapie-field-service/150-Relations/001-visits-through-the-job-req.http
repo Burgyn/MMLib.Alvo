@@ -35,3 +35,45 @@ X-Alvo-Api-Key: {{keyTechNorth}}
 ## TEST-EXPECT-STATUS: [200]
 GET {{fsBaseUrl}}/api/visits/{{VisitOnUnassignedJobId}}
 X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### WRITES, after every read above. `visits.update` is the read rule plus being the booked technician:
+### `technician_id == @user.id && work_order_id.assigned_to == @user.id`. spare-north IS the 3402 visit's
+### technician, but the job is nobody's — so they may not write a visit they cannot read
+# @name SpareWritesUnassignedVisit
+## TEST-EXPECT-STATUS: [404]
+PATCH {{fsBaseUrl}}/api/visits/{{VisitOnUnassignedJobId}}
+X-Alvo-Api-Key: {{keySpareNorth}}
+Content-Type: application/json
+
+{ "minutes_on_site": 600 }
+
+### The dispatcher's read of it after that: unchanged
+# @name DispatcherRereadsThatVisit
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/visits/{{VisitOnUnassignedJobId}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The assigned AND booked technician writes their own visit (control)
+# @name TechWritesOwnVisit
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/visits/{{VisitOfTechNorthId}}
+X-Alvo-Api-Key: {{keyTechNorth}}
+Content-Type: application/json
+
+{ "notes": "Valve replaced, pressure tested." }
+
+### And may not re-point it at a job that is not theirs. The ref is resolved AS THE CALLER first, and a job
+### they cannot read is unresolvable — so it is refused before the rule's check on the new row is reached
+# @name TechRepointsOwnVisit
+## TEST-EXPECT-STATUS: [422]
+PATCH {{fsBaseUrl}}/api/visits/{{VisitOfTechNorthId}}
+X-Alvo-Api-Key: {{keyTechNorth}}
+Content-Type: application/json
+
+{ "work_order_id": "{{Job3402Id}}" }
+
+### The dispatcher's read of tech-north's visit after both writes
+# @name DispatcherReadsTechVisit
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/visits/{{VisitOfTechNorthId}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

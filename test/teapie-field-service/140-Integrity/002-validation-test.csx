@@ -24,6 +24,10 @@ await tp.Test("The boundary values beside each refusal are stored as sent.", asy
     Equal(7, sane.GetProperty("service_opens_hour").GetInt32());
     Equal(19, sane.GetProperty("service_closes_hour").GetInt32());
 
+    var closesOnly = await BodyOf(tp.Responses["ClosesOnly"]);
+    Equal(System.Text.Json.JsonValueKind.Null, closesOnly.GetProperty("service_opens_hour").ValueKind);
+    Equal(17, closesOnly.GetProperty("service_closes_hour").GetInt32());
+
     var edges = await BodyOf(tp.Responses["EdgeHours"]);
     Equal(0, edges.GetProperty("service_opens_hour").GetInt32());
     Equal(24, edges.GetProperty("service_closes_hour").GetInt32());

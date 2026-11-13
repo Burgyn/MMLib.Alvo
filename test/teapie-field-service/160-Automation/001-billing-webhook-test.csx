@@ -17,7 +17,14 @@ async Task<System.Text.Json.JsonElement[]> Events(string reference) =>
         .ToArray();
 
 // FIRST, deliberately: the request's RETRY-UNTIL-TEST-PASS names this test, and TeaPie re-sends the
-// journal query until it passes.
+// journal query until it passes. It asks only for PRESENCE — of both, in either order — so the counts below
+// are judged once the last write's delivery is in, never on the first poll that happened to see WO-3601.
+await tp.Test("Billing received the billable completion and the sentinel.", async () =>
+{
+    NotEmpty(await Events("WO-3601"));
+    NotEmpty(await Events("WO-3604"));
+});
+
 await tp.Test("Billing received exactly one completion for WO-3601.", async () =>
 {
     var received = await Events("WO-3601");

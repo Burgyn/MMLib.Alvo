@@ -9,7 +9,11 @@ async Task<string> TransitionMessage(HttpResponseMessage refused) =>
 
 await tp.Test("A move no transition admits, or whose `when` fails, is 422 `transition` at /status.", async () =>
 {
-    foreach (var name in new[] { "ScheduleWithoutAssignee", "SkipToCompleted", "CompleteWithoutDate" })
+    foreach (var name in new[]
+    {
+        "ScheduleWithoutAssignee", "ScheduleWithOnlyAssignee", "ScheduleWithOnlyTime",
+        "SkipToCompleted", "CompleteWithoutDate", "AdminReopensKeepingDate",
+    })
     {
         var refused = tp.Responses[name];
         Equal(422, (int)refused.StatusCode);
@@ -50,12 +54,12 @@ await tp.Test("Each legal move stores its state; a PATCH that does not name stat
     Equal("scheduled", (await BodyOf(tp.Responses["AdminReopens"])).GetProperty("status").GetString());
 });
 
-await tp.Test("The job ends reopened by the admin, with the sign-off day and assignee kept.", async () =>
+await tp.Test("The job ends reopened by the admin, its sign-off day cleared and its assignee kept.", async () =>
 {
     var job = await BodyOf(tp.Responses["ReadBack"]);
 
     Equal("scheduled", job.GetProperty("status").GetString());
-    Equal("2026-12-01", job.GetProperty("completed_on").GetString());
+    Equal(System.Text.Json.JsonValueKind.Null, job.GetProperty("completed_on").ValueKind);
     Equal(Constant("userTechNorth"), job.GetProperty("assigned_to").GetString());
     Equal("Lifecycle: radiator leaking, valve replaced", job.GetProperty("title").GetString());
 });

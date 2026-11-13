@@ -31,6 +31,15 @@ Content-Type: application/json
 
 { "tenant_id": "{{tenantNorth}}", "reference": "WO-3403", "title": "Visits: WO-3403", "status": "completed", "priority": 3, "access_code": "ACME-3403", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}", "completed_on": "2026-11-30" }
 
+### A job the desk cancelled
+# @name CreateJob3404
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3404", "title": "Visits: WO-3404", "status": "cancelled", "priority": 3, "access_code": "ACME-3404", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" }
+
 ### tech-north, 10:00-11:00, 45 minutes on site
 # @name V1
 ## TEST-EXPECT-STATUS: [201]
@@ -75,6 +84,15 @@ X-Alvo-Api-Key: {{keyDispatcherNorth}}
 Content-Type: application/json
 
 { "tenant_id": "{{tenantNorth}}", "work_order_id": "{{CreateJob3403.response.body.$.id}}", "technician_id": "{{userSpareNorth}}", "starts_at": "2026-12-05T10:00:00+00:00", "ends_at": "2026-12-05T11:00:00+00:00" }
+
+### A visit on the cancelled job — the other half of the check's `&&`
+# @name OnCancelledJob
+## TEST-EXPECT-STATUS: [422]
+POST {{fsBaseUrl}}/api/visits
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "work_order_id": "{{CreateJob3404.response.body.$.id}}", "technician_id": "{{userSpareNorth}}", "starts_at": "2026-12-06T10:00:00+00:00", "ends_at": "2026-12-06T11:00:00+00:00" }
 
 ### The job the two tech-north visits belong to, after both
 # @name ReadJob3401
