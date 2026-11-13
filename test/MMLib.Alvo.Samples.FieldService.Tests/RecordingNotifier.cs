@@ -6,17 +6,12 @@ namespace MMLib.Alvo.Samples.FieldService.Tests;
 internal sealed class RecordingNotifier : IFieldServiceNotifier
 {
     private readonly Lock _gate = new();
-    private readonly List<VisitNotice> _visits = [];
     private readonly List<SlaBreachNotice> _pages = [];
     private readonly List<OverdueReport> _reports = [];
-
-    public IReadOnlyList<VisitNotice> Visits => Snapshot(_visits);
 
     public IReadOnlyList<SlaBreachNotice> Pages => Snapshot(_pages);
 
     public IReadOnlyList<OverdueReport> Reports => Snapshot(_reports);
-
-    public Task NotifyCustomerAsync(VisitNotice notice, CancellationToken cancellationToken) => Record(_visits, notice);
 
     public Task PageOnCallAsync(SlaBreachNotice notice, CancellationToken cancellationToken) => Record(_pages, notice);
 

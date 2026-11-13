@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Auth;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Samples.FieldService.Model;
 using MMLib.Alvo.Secrets;
@@ -26,9 +27,9 @@ internal sealed class HttpWorld : IAsyncDisposable
     private const string KeySecret = "s3cret-value-long-enough-for-the-floor";
 
     /// <summary>
-    /// Runs the service-hours hook once per process on a fake clock before any host here serves a request. A before-write
+    /// Runs both service-hours hooks once per process on a fake clock before any host here serves a request. A before-write
     /// hook's 250 ms budget is wall-clock and includes the first run's JIT, which a loaded test machine (ring0 runs every
-    /// module at once) can exceed; once warm the hook takes a few milliseconds. The product's budget is unchanged.
+    /// module at once) can exceed — #519; once warm the hooks take a few milliseconds. The product's budget is unchanged.
     /// </summary>
     private static readonly Lazy<Task> _warmUp = new(WarmUpAsync);
 
@@ -68,11 +69,22 @@ internal sealed class HttpWorld : IAsyncDisposable
         return new HttpWorld(database, app);
     }
 
+    /// <summary>Best effort: a warm-up that itself fails (it runs cold) is swallowed, so it never fails a test, and is not cached.</summary>
     private static async Task WarmUpAsync()
     {
-        await using var alvo = await FieldServiceWorld.StartAsync(CancellationToken.None);
-        var north = await alvo.SeedAsync(FieldServiceWorld.North, CancellationToken.None);
-        await alvo.CreateJobAsync(north, "WO-0001", CancellationToken.None, scheduledFor: FieldServiceWorld.Now);
+        try
+        {
+            await using var alvo = await FieldServiceWorld.StartAsync(CancellationToken.None);
+            var north = await alvo.SeedAsync(FieldServiceWorld.North, CancellationToken.None);
+            var job = await alvo.CreateJobAsync(north, "WO-0001", CancellationToken.None, scheduledFor: FieldServiceWorld.Now);
+            await alvo.Session(FieldServiceWorld.Dispatcher(north.Tenant)).CreateAsync(
+                Visit.Create(job.Id, FieldServiceWorld.Technician, FieldServiceWorld.Now, FieldServiceWorld.Now.AddHours(1), tenantId: north.Tenant.Value),
+                CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            TestContext.Current.SendDiagnosticMessage($"Hook warm-up failed, tests run cold: {exception.Message}");
+        }
     }
 
     public async Task<HttpResponseMessage> SendAsync(
@@ -85,6 +97,14 @@ internal sealed class HttpWorld : IAsyncDisposable
             request.Headers.Add("Idempotency-Key", idempotency);
         }
 
+        return await Client.SendAsync(request, TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>A request whose JSON body is sent exactly as written — for a body a typed object cannot express, such as a missing member.</summary>
+    public async Task<HttpResponseMessage> SendRawAsync(string path, string key, string json)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+        request.Headers.Add("X-Alvo-Api-Key", $"{key}.{KeySecret}");
         return await Client.SendAsync(request, TestContext.Current.CancellationToken);
     }
 
@@ -173,11 +193,12 @@ internal sealed class HttpWorld : IAsyncDisposable
         options.DevKeys.Add(Key("dispatcher", Guid.NewGuid(), FieldServiceRoles.Dispatcher));
         options.DevKeys.Add(Key("technician", FieldServiceWorld.Technician, FieldServiceRoles.Technician));
         options.DevKeys.Add(Key("admin", Guid.NewGuid(), FieldServiceRoles.Admin));
+        options.DevKeys.Add(Key("dispatcher-south", Guid.NewGuid(), FieldServiceRoles.Dispatcher, FieldServiceWorld.South));
     }
 
-    private static AlvoDevApiKey Key(string id, Guid user, string role)
+    private static AlvoDevApiKey Key(string id, Guid user, string role, TenantId? tenant = null)
     {
-        var key = new AlvoDevApiKey { KeyId = id, Secret = KeySecret, User = user, Tenant = FieldServiceWorld.North.Value };
+        var key = new AlvoDevApiKey { KeyId = id, Secret = KeySecret, User = user, Tenant = (tenant ?? FieldServiceWorld.North).Value };
         key.Roles.Add(FieldServiceRoles.Authenticated);
         key.Roles.Add(role);
         key.Scopes.Add("*:read");

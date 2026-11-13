@@ -10,7 +10,9 @@ namespace MMLib.Alvo.Samples.FieldService;
 /// <b>The descriptor does almost everything.</b> State machine, gapless job numbers, the SLA timer, CHECKs, the partial
 /// unique index, the visit calendar's exclusion, the relation rule, the lookup check, the rollup and the billing webhook
 /// all live in <c>examples/field-service/field-service.alvo.json</c> and run unchanged in the standalone image. This host
-/// adds only what that file cannot say — each slice states why in its own remarks, and README.md tabulates it.
+/// adds what that file has no construct for — a two-entity transaction, an inbound webhook, a time-zone-aware hour, a
+/// subscriber for a timer's event, a per-tenant job — and each slice names its own reason in its remarks (README.md
+/// tabulates them).
 /// </para>
 /// <para>
 /// <b>The shape is <c>CreateBuilder</c> + <c>Build</c></b>, as in <c>MMLib.Alvo.Samples.EmbeddedHost</c>, so a test can

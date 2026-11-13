@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json.Nodes;
 
@@ -107,6 +108,26 @@ public sealed class JobCompletedReceiverTests : IAsyncLifetime
 
         refused.StatusCode.ShouldBe(HttpStatusCode.Conflict);
         (await _world.ReadAsync($"/api/work_orders/{job}", "dispatcher"))["status"]!.GetValue<string>().ShouldBe("new");
+    }
+
+    [Theory]
+    [InlineData("{\"workOrderId\":\"{job}\",\"tenantId\":\"00000000-0000-0000-0000-000000000000\",\"completedOn\":\"2026-11-16\",\"minutesOnSite\":95}", "/tenantId")]
+    [InlineData("{\"workOrderId\":\"{job}\",\"completedOn\":\"2026-11-16\",\"minutesOnSite\":95}", "/tenantId")]
+    [InlineData("{\"workOrderId\":\"{job}\",\"tenantId\":\"{tenant}\",\"minutesOnSite\":95}", "/completedOn")]
+    [InlineData("{\"workOrderId\":\"{job}\",\"tenantId\":\"{tenant}\",\"completedOn\":\"2026-11-16\"}", "/minutesOnSite")]
+    [InlineData("{\"workOrderId\":\"{job}\",\"tenantId\":\"{tenant}\",\"completedOn\":\"2026-11-16\",\"minutesOnSite\":5000}", "/minutesOnSite")]
+    public async Task A_signed_notice_missing_a_field_or_naming_the_empty_tenant_is_422_and_changes_nothing(string template, string field)
+    {
+        var job = await DispatchedJobAsync("WO-7001");
+        var body = template.Replace("{job}", job.ToString(), StringComparison.Ordinal)
+            .Replace("{tenant}", FieldServiceWorld.North.Value.ToString(), StringComparison.Ordinal);
+
+        using var refused = await _world.SignedAsync(Route, "msg_1", body);
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        var problem = (await refused.Content.ReadFromJsonAsync<JsonObject>(Ct))!;
+        problem["violations"]!.AsArray().Select(v => v!["pointer"]!.GetValue<string>()).ShouldBe([field]);
+        (await _world.ReadAsync($"/api/work_orders/{job}", "dispatcher"))["status"]!.GetValue<string>().ShouldBe("scheduled");
     }
 
     public async ValueTask DisposeAsync() => await _world.DisposeAsync();

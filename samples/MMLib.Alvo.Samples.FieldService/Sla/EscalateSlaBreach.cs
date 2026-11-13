@@ -24,9 +24,10 @@ internal sealed record SlaBreached(string Entity, Guid Id, string Timer, DateTim
 /// image the breach is published and nobody acts on it. A host handler closes that loop.
 /// </para>
 /// <para>
-/// It runs as the system in the job's tenant. The page is a named step, so a retry after the page failed raises the
-/// priority again (harmless) but never pages twice once the page went out. A job scheduled meanwhile is left alone: the
-/// timer is cancelled in the write that scheduled it, and this check covers a delivery already in flight.
+/// It runs as the system in the job's tenant and re-reads the row first: a job scheduled meanwhile, no longer an
+/// emergency, or given a later deadline is left alone — the write that changed it cancelled or moved the timer, and this
+/// check covers a delivery already in flight. The page goes first, as a named step: if raising the priority then fails,
+/// the retried delivery skips the page that already went out and only raises the priority.
 /// </para>
 /// </remarks>
 internal sealed class EscalateSlaBreach(IFieldServiceNotifier notifier) : IAlvoEventHandler<SlaBreached>
@@ -38,15 +39,25 @@ internal sealed class EscalateSlaBreach(IFieldServiceNotifier notifier) : IAlvoE
     public async Task HandleAsync(SlaBreached breach, AlvoEventContext context, CancellationToken cancellationToken)
     {
         var job = await context.Data.GetAsync<WorkOrder>(breach.Id, cancellationToken);
-        if (job is not { Status: WorkOrderStatus.New })
+        if (job is null || !StillBreached(job, breach))
         {
             return;
         }
 
-        await context.Data.UpdateAsync(job.Id, WorkOrder.Patch().SetPriority(TopPriority), cancellationToken: cancellationToken);
         await context.Steps.RunAsync(
             "page-on-call",
             token => notifier.PageOnCallAsync(new SlaBreachNotice(job.Id, job.Reference, job.JobNumber, breach.At), token),
             cancellationToken);
+        await context.Data.UpdateAsync(job.Id, WorkOrder.Patch().SetPriority(TopPriority), cancellationToken: cancellationToken);
     }
+
+    /// <summary>
+    /// The row as it is now still breaches the deadline that fired: an unscheduled emergency whose <c>respond_by</c> has not
+    /// moved past it. A deadline moved later re-armed the timer for the new time, and that timer's own event will come.
+    /// </summary>
+    private static bool StillBreached(WorkOrder job, SlaBreached breach) =>
+        job.Status == WorkOrderStatus.New
+        && job.IsEmergency == true
+        && job.RespondBy is { } due
+        && due <= breach.At;
 }

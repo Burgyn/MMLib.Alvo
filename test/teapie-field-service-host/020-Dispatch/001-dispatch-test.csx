@@ -49,12 +49,38 @@ await tp.Test("An out-of-hours slot is 422 outside-service-hours at /scheduled_f
     Equal(new[] { "/scheduled_for" }, await ViolationPointers(refused));
 });
 
+await tp.Test("Another tenant's dispatcher finds no such job: 404 not-found, and the rest of this file shows nothing moved.", async () =>
+{
+    Equal("https://alvo.dev/errors/not-found", await ProblemType(tp.Responses["SouthDispatchesNorthJob"]));
+});
+
+await tp.Test("A zero-minute visit is 422 at /durationMinutes, before anything is written.", async () =>
+{
+    var refused = tp.Responses["DurationZero"];
+
+    Equal(new[] { "out-of-range" }, await ViolationCodes(refused));
+    Equal(new[] { "/durationMinutes" }, await ViolationPointers(refused));
+});
+
+await tp.Test("A visit that starts in hours but ends after closing is 422 outside-service-hours at /ends_at.", async () =>
+{
+    var refused = tp.Responses["EndsAfterClosing"];
+
+    Equal(new[] { "outside-service-hours" }, await ViolationCodes(refused));
+    Equal(new[] { "/ends_at" }, await ViolationPointers(refused));
+});
+
+await tp.Test("Dispatching a job that is already scheduled is 409 conflict.", async () =>
+{
+    Equal("https://alvo.dev/errors/conflict", await ProblemType(tp.Responses["DispatchAgain"]));
+});
+
 await tp.Test("A double-booked technician is the descriptor's exclusion on the calendar.", async () =>
 {
     Equal(new[] { "exclusion" }, await ViolationCodes(tp.Responses["DoubleBooking"]));
 });
 
-await tp.Test("Both refused dispatches left their job new, unscheduled, unassigned by them, with no visit: all or nothing.", async () =>
+await tp.Test("Every refused dispatch left their job new, unscheduled, unassigned by them, with no visit: all or nothing.", async () =>
 {
     var wo7003 = await BodyOf(tp.Responses["ReadWo7003AfterRefusal"]);
     Equal("new", wo7003.GetProperty("status").GetString());

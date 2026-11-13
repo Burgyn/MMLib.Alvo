@@ -17,7 +17,7 @@ await tp.Test("Both tenants received their overdue report.", async () =>
 
 await tp.Test("North's report names exactly its own overdue jobs: the stale slot and the breached emergency.", async () =>
 {
-    // WO-7006 is scheduled for a morning long gone; WO-7101 is new and past its respond_by (050-Sla). Not WO-7001
+    // WO-7006 is scheduled for a morning long gone; WO-7101 is new and past its respond_by (040-Sla). Not WO-7001
     // (completed), not WO-7004 (an emergency with no deadline), not WO-7102 (scheduled for 2027) — and never WO-7005,
     // which is south's: each run reads only its own tenant's rows.
     Equal(new[] { "WO-7006", "WO-7101" }, References(Single(await Reports(Constant("tenantNorth")))));

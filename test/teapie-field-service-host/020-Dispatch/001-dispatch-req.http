@@ -1,3 +1,23 @@
+### Tenant isolation through a command: dispatcher-south asks for north's WO-7001. The command reads the row as the
+### caller first, under the tenant scope, so the job does not exist for them — 404, the same answer as no row at all.
+### Sent FIRST, while WO-7001 is still new: a dispatch that got through would show in every read below.
+# @name SouthDispatchesNorthJob
+## TEST-EXPECT-STATUS: [404]
+POST {{fshBaseUrl}}/commands/work-orders/{{Wo7001Id}}/dispatch
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+Content-Type: application/json
+
+{ "technicianId": "{{userDispatcherSouth}}", "startsAt": "2027-03-01T09:00:00Z", "durationMinutes": 90 }
+
+### A zero-minute visit would overlap nothing and slip past the calendar's exclusion: the input is refused first
+# @name DurationZero
+## TEST-EXPECT-STATUS: [422]
+POST {{fshBaseUrl}}/commands/work-orders/{{Wo7001Id}}/dispatch
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "technicianId": "{{userTechNorth}}", "startsAt": "2027-03-01T09:00:00Z", "durationMinutes": 0 }
+
 ### `work_orders.dispatch`: assign tech-north, set the slot, move to `scheduled` AND book the visit — one unit
 ### 2027-03-01 09:00 UTC is 10:00 in Bratislava, inside the customer's 07:00-19:00.
 # @name DispatchWo7001
@@ -36,6 +56,25 @@ X-Alvo-Api-Key: {{keyDispatcherNorth}}
 Content-Type: application/json
 
 { "technicianId": "{{userTechNorth}}", "startsAt": "2027-03-03T20:00:00Z", "durationMinutes": 60 }
+
+### 17:30 UTC is 18:30 in Bratislava: it STARTS inside 07:00-19:00, but a 120-minute visit ends at 20:30 — the visit's
+### service-hours hook refuses it at /ends_at, and the job's own update in the same unit rolls back with it
+# @name EndsAfterClosing
+## TEST-EXPECT-STATUS: [422]
+POST {{fshBaseUrl}}/commands/work-orders/{{Wo7002Id}}/dispatch
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "technicianId": "{{userTechNorth}}", "startsAt": "2027-03-03T17:30:00Z", "durationMinutes": 120 }
+
+### WO-7001 is scheduled now: dispatching it again is a state conflict, not a refusal of the dispatcher
+# @name DispatchAgain
+## TEST-EXPECT-STATUS: [409]
+POST {{fshBaseUrl}}/commands/work-orders/{{Wo7001Id}}/dispatch
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "technicianId": "{{userTechNorth}}", "startsAt": "2027-03-04T09:00:00Z", "durationMinutes": 60 }
 
 ### tech-north is on WO-7001 from 09:00 to 10:30; a slot from 09:30 overlaps — the descriptor's exclusion refuses the visit
 # @name DoubleBooking

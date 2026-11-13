@@ -10,7 +10,19 @@ Content-Type: application/json
 
 {{MobileBody}}
 
-### The forged delivery changed nothing
+### A genuinely signed notice naming tenant SOUTH for north's WO-7001: the tenant comes from the signed body, the job
+### is read under it, and south holds no such job — 404, and nothing moves
+# @name OtherTenant
+## TEST-EXPECT-STATUS: [404]
+POST {{fshBaseUrl}}/hooks/technician-app
+webhook-id: {{SouthId}}
+webhook-timestamp: {{MobileTimestamp}}
+webhook-signature: {{SouthSignature}}
+Content-Type: application/json
+
+{{SouthBody}}
+
+### Neither the forged nor the other-tenant delivery changed anything
 # @name ReadAfterForged
 ## TEST-EXPECT-STATUS: [200]
 GET {{fshBaseUrl}}/api/work_orders/{{Wo7001Id}}

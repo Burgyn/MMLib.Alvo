@@ -3,7 +3,6 @@ using MMLib.Alvo.Samples.FieldService.Dispatch;
 using MMLib.Alvo.Samples.FieldService.Mobile;
 using MMLib.Alvo.Samples.FieldService.Model;
 using MMLib.Alvo.Samples.FieldService.Notifications;
-using MMLib.Alvo.Samples.FieldService.Reads;
 using MMLib.Alvo.Samples.FieldService.Reports;
 using MMLib.Alvo.Samples.FieldService.Scheduling;
 using MMLib.Alvo.Samples.FieldService.Sla;
@@ -20,6 +19,14 @@ namespace MMLib.Alvo.Samples.FieldService;
 /// </remarks>
 public static class FieldServiceSetup
 {
+    private const string TimeZoneRequired =
+        "FieldService:TimeZone must be an IANA zone this machine knows (the image installs tzdata). Checking it at start also "
+        + "loads the zone once, so the service-hours hook never pays for the first lookup inside a write's 250 ms budget.";
+
+    private const string NotificationsUrlRequired =
+        "FieldService:NotificationsUrl must be an absolute http(s) URL: where the on-call page and the overdue "
+        + "report are posted (an SMS or e-mail gateway; the WireMock sidecar in the demo stack).";
+
     /// <summary>Registers every extension this host adds to the descriptor.</summary>
     /// <param name="alvo">The Alvo builder.</param>
     /// <param name="options">The host's settings, read where the host is composed (the overdue report's cron).</param>
@@ -31,11 +38,9 @@ public static class FieldServiceSetup
 
         return alvo
             .Entity<WorkOrder>(workOrders => workOrders
-                .BeforeWrite<WithinServiceHours>(WithinServiceHours.Id)
-                .OnUpdated<NotifyCustomerOfVisit>(
-                    NotifyCustomerOfVisit.Id,
-                    when: e => e.Changed(x => x.Status) && e.New.Status == WorkOrderStatus.Scheduled)
-                .Narrow<TechnicianOpenJobs>(TechnicianOpenJobs.Id))
+                .BeforeWrite<WithinServiceHours>(WithinServiceHours.Id))
+            .Entity<Visit>(visits => visits
+                .BeforeWrite<VisitWithinServiceHours>(VisitWithinServiceHours.Id))
             .AddEventHandler<SlaBreached, EscalateSlaBreach>(EscalateSlaBreach.Id)
             .AddSchedule<OverdueReportJob>(OverdueReportJob.Id, options.OverdueReportCron, options.TimeZone, schedule =>
             {
@@ -74,14 +79,6 @@ public static class FieldServiceSetup
 
         return app.MapDispatch().MapTechnicianApp();
     }
-
-    private const string TimeZoneRequired =
-        "FieldService:TimeZone must be an IANA zone this machine knows (the image installs tzdata). Checking it at start also "
-        + "loads the zone once, so the service-hours hook never pays for the first lookup inside a write's 250 ms budget.";
-
-    private const string NotificationsUrlRequired =
-        "FieldService:NotificationsUrl must be an absolute http(s) URL: where the customer's visit notice, the on-call page "
-        + "and the overdue report are posted (an SMS or e-mail gateway; the WireMock sidecar in the demo stack).";
 
     private static bool IsAbsoluteUrl(string url) =>
         Uri.TryCreate(url, UriKind.Absolute, out var parsed) && (parsed.Scheme == Uri.UriSchemeHttp || parsed.Scheme == Uri.UriSchemeHttps);

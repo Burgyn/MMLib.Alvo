@@ -1,6 +1,9 @@
-﻿using Microsoft.Extensions.Time.Testing;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Time.Testing;
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Hooks;
 using MMLib.Alvo.Samples.FieldService.Model;
+using MMLib.Alvo.Samples.FieldService.Sla;
 using MMLib.Alvo.TestHost;
 
 namespace MMLib.Alvo.Samples.FieldService.Tests.Sla;
@@ -69,6 +72,52 @@ public sealed class EscalateSlaBreachTests
         await alvo.DrainEventsAsync(Ct);
 
         notifier.Pages.ShouldHaveSingleItem().RespondBy.ShouldBe(FieldServiceWorld.Now.AddHours(4));
+    }
+
+    [Fact]
+    public async Task A_breach_delivered_after_the_deadline_moved_later_is_left_alone()
+    {
+        var notifier = new RecordingNotifier();
+        await using var alvo = await FieldServiceWorld.StartAsync(Ct, notifier: notifier);
+        var north = await alvo.SeedAsync(FieldServiceWorld.North, Ct);
+        var job = await alvo.CreateJobAsync(north, "WO-7104", Ct, isEmergency: true, respondBy: FieldServiceWorld.Now.AddHours(4));
+        var firedForTheOldDeadline = new SlaBreached("work_orders", job.Id, "sla_breach", FieldServiceWorld.Now.AddHours(1));
+
+        await new EscalateSlaBreach(notifier).HandleAsync(
+            firedForTheOldDeadline, alvo.EventContext(AlvoContext.System(north.Tenant), EscalateSlaBreach.Id), Ct);
+
+        (await PriorityAsync(alvo, north, job)).ShouldBe(3);
+        notifier.Pages.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_delivery_retried_after_the_page_went_out_does_not_page_again()
+    {
+        var (time, notifier) = (new FakeTimeProvider(FieldServiceWorld.Now), new RecordingNotifier());
+        var refusals = 0;
+        await using var alvo = await FieldServiceWorld.StartAsync(Ct, time, notifier, also: builder => builder
+            .Entity<WorkOrder>(workOrders => workOrders.BeforeWrite(
+                "refuse-the-first-escalation",
+                (BeforeWrite<WorkOrder> write, CancellationToken _) =>
+                {
+                    if (write.New.Priority == 1 && Interlocked.Increment(ref refusals) == 1)
+                    {
+                        write.Conflict("busy", "Refused once, so the escalation's delivery is retried.");
+                    }
+
+                    return ValueTask.CompletedTask;
+                })));
+        var north = await alvo.SeedAsync(FieldServiceWorld.North, Ct);
+        var job = await alvo.CreateJobAsync(north, "WO-7105", Ct, isEmergency: true, respondBy: FieldServiceWorld.Now.AddHours(1));
+
+        time.Advance(TimeSpan.FromHours(1));
+        await alvo.DrainEventsAsync(Ct);
+        (notifier.Pages.Count, await PriorityAsync(alvo, north, job)).ShouldBe((1, 3L), "paged, then the priority write was refused");
+
+        time.Advance(TimeSpan.FromMinutes(1));
+        await alvo.DrainEventsAsync(Ct);
+
+        (notifier.Pages.Count, await PriorityAsync(alvo, north, job)).ShouldBe((1, 1L), "the retry skipped the completed page step");
     }
 
     private static async Task<long> PriorityAsync(AlvoTestHost alvo, Seeded seed, WorkOrder job) =>

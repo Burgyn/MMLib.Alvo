@@ -15,9 +15,16 @@ namespace MMLib.Alvo.Samples.FieldService.Mobile;
 /// </para>
 /// <para>
 /// The handler runs as the system, which holds <c>admin</c> — every transition this needs lists it. The tenant comes from
-/// the signed body only: the path, the query and every other header are not signed. A notice for a job already completed
+/// the signed body only: the path, the query and every other header are not signed. A notice that names no tenant, or the
+/// all-zero one, resolves to none, which every tenant-scoped entity refuses; a missing field is a 422 naming it. A notice for a job already completed
 /// is acknowledged and changes nothing, so the app may resend under a new id; one for a job this tenant does not hold is
 /// 404, and one for a job nobody scheduled is 409 — both given back, so the app's retry runs again.
+/// </para>
+/// <para>
+/// <b>Trust:</b> one <c>technician_app</c> secret signs for every tenant, so whoever holds it may complete a job in any
+/// tenant by naming it — platform-wide trust in the app's backend. A notice naming tenant A still cannot touch tenant B's
+/// job (it is read under tenant A, and answers 404). Where each tenant's app signs for itself, give each tenant its own
+/// secret and receiver (<c>options.Tenant</c> per route, or a group per tenant): the stronger option.
 /// </para>
 /// </remarks>
 internal static class JobCompletedReceiver
@@ -41,11 +48,16 @@ internal static class JobCompletedReceiver
     }
 
     private static ValueTask<TenantId?> TenantOf(HttpRequest request, ReadOnlyMemory<byte> body, CancellationToken cancellationToken) =>
-        ValueTask.FromResult(JobCompleted.TryRead(body) is { } notice ? new TenantId(notice.TenantId) : (TenantId?)null);
+        ValueTask.FromResult(JobCompleted.TenantOf(body));
 
     private static async Task<IResult> CompleteAsync(
         JobCompleted notice, AlvoCaller caller, IAlvoTransactions transactions, CancellationToken ct)
     {
+        if (notice.Violations() is { Count: > 0 } violations)
+        {
+            return FieldServiceProblems.Invalid(violations);
+        }
+
         var outcome = await transactions.TransactAsync(
             caller.Context, (unit, token) => CompleteInUnitAsync(unit, notice, token), cancellationToken: ct);
 
@@ -59,7 +71,7 @@ internal static class JobCompletedReceiver
 
     private static async Task<Outcome> CompleteInUnitAsync(IAlvoTransaction unit, JobCompleted notice, CancellationToken ct)
     {
-        var order = await unit.GetAsync<WorkOrder>(notice.WorkOrderId, ct);
+        var order = await unit.GetAsync<WorkOrder>(notice.WorkOrderId!.Value, ct);
         if (order is null)
         {
             return Outcome.NotFound;
@@ -75,8 +87,8 @@ internal static class JobCompletedReceiver
             return Outcome.NotStarted;
         }
 
-        await RecordMinutesAsync(unit, order.Id, notice.MinutesOnSite, ct);
-        await MoveToCompletedAsync(unit, order, notice.CompletedOn, ct);
+        await RecordMinutesAsync(unit, order.Id, notice.MinutesOnSite!.Value, ct);
+        await MoveToCompletedAsync(unit, order, notice.CompletedOn!.Value, ct);
         return Outcome.Completed;
     }
 

@@ -14,7 +14,8 @@ namespace MMLib.Alvo.Samples.FieldService.Reports;
 /// (<see cref="AlvoScheduleScope.EachTenant"/>), as the system in that tenant — so each run reads only its own rows.
 /// </para>
 /// <para>
-/// "Overdue" is judged against the occurrence (<see cref="AlvoJobContext.ScheduledFor"/>), not the wall clock, so a run
+/// The overdue predicate is part of the query, so only overdue rows are read; a desk with more than 500 gets the first 500
+/// and <c>truncated: true</c>, never a silently shortened list. "Overdue" is judged against the occurrence (<see cref="AlvoJobContext.ScheduledFor"/>), not the wall clock, so a run
 /// retried later reports the same morning. The cron comes from configuration (<c>FieldService:OverdueReportCron</c>), and
 /// an operator starts a run outside it with the Management API's <em>Run now</em> — the end-to-end suite does exactly that,
 /// so there is no test switch in this host.
@@ -26,7 +27,7 @@ internal sealed class OverdueReportJob(IFieldServiceNotifier notifier) : IAlvoSc
 
     public const string Description = "Every morning, per tenant, the open jobs past their slot or their respond-by time.";
 
-    private const int MaxOpenJobs = 500;
+    private const int MaxReported = 500;
 
     public async Task RunAsync(AlvoJobContext context, CancellationToken cancellationToken)
     {
@@ -35,17 +36,14 @@ internal sealed class OverdueReportJob(IFieldServiceNotifier notifier) : IAlvoSc
             return;
         }
 
-        var open = await context.Data.QueryAsync<WorkOrder>(
-            x => x.Status == WorkOrderStatus.New || x.Status == WorkOrderStatus.Scheduled, MaxOpenJobs, cancellationToken);
-        var overdue = open
-            .Where(job => IsOverdue(job, context.ScheduledFor))
-            .Select(job => job.Reference)
-            .Order(StringComparer.Ordinal)
-            .ToList();
+        var at = context.ScheduledFor;
+        var overdue = await context.Data.QueryAsync<WorkOrder>(
+            x => (x.Status == WorkOrderStatus.Scheduled && x.ScheduledFor < at) || (x.Status == WorkOrderStatus.New && x.RespondBy < at),
+            MaxReported + 1,
+            cancellationToken);
+        var references = overdue.Select(job => job.Reference).Order(StringComparer.Ordinal).Take(MaxReported).ToList();
 
-        await notifier.SendOverdueReportAsync(new OverdueReport(tenant.Value, context.ScheduledFor, overdue), cancellationToken);
+        await notifier.SendOverdueReportAsync(
+            new OverdueReport(tenant.Value, at, references, Truncated: overdue.Count > MaxReported), cancellationToken);
     }
-
-    private static bool IsOverdue(WorkOrder job, DateTimeOffset at) =>
-        job.Status == WorkOrderStatus.Scheduled ? job.ScheduledFor < at : job.RespondBy < at;
 }

@@ -1,7 +1,7 @@
 # The field-service EMBEDDED-HOST stack: samples/MMLib.Alvo.Samples.FieldService over real PostgreSQL, serving the SAME
-# examples/field-service descriptor as docker-compose.field-service.yml, plus the host code that descriptor cannot
-# express — the dispatch command, the technician app's signed webhook, the service-hours hook, the customer notice, the
-# SLA escalation, the per-tenant overdue report and the technician's open-jobs view.
+# examples/field-service descriptor as docker-compose.field-service.yml, plus the host code for what that descriptor has no
+# construct for — the dispatch command, the technician app's signed webhook, the service-hours hooks, the SLA escalation
+# and the per-tenant overdue report.
 #
 # A THIRD compose file, for the reason docker-compose.field-service.yml gives for being a second: Compose interpolates the
 # whole file before selecting services, so the extra `${...:?}` secrets here would break every reader of the other two.
@@ -39,7 +39,7 @@ services:
       ConnectionStrings__FieldService: Host=postgres;Port=5432;Database=alvo_field_service_host;Username=alvo;Password=alvo
       FieldService__DescriptorPath: /alvo/descriptor.json
       FieldService__TimeZone: Europe/Bratislava
-      # The customer notice, the on-call page and the overdue report go to the sink below — a real deployment points
+      # The on-call page and the overdue report go to the sink below — a real deployment points
       # this at its SMS or e-mail gateway. The sink shares this container's network namespace, so localhost is it.
       FieldService__NotificationsUrl: http://localhost:9090/notifications
       # The tenants the per-tenant overdue report runs for. Alvo owns no tenant directory; this host lists them.

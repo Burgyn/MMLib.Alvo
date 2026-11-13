@@ -1,6 +1,6 @@
 #load "../_shared/Rows.csx"
 
-await tp.Test("A forged delivery is 401 and leaves the job scheduled.", async () =>
+await tp.Test("A forged delivery is 401, a signed one naming another tenant is 404, and both leave the job scheduled.", async () =>
 {
     Equal("scheduled", (await BodyOf(tp.Responses["ReadAfterForged"])).GetProperty("status").GetString());
 });

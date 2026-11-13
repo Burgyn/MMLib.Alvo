@@ -10,9 +10,6 @@ namespace MMLib.Alvo.Samples.FieldService.Notifications;
 /// </remarks>
 internal sealed class HttpFieldServiceNotifier(HttpClient http) : IFieldServiceNotifier
 {
-    public Task NotifyCustomerAsync(VisitNotice notice, CancellationToken cancellationToken) =>
-        PostAsync("customers", notice, cancellationToken);
-
     public Task PageOnCallAsync(SlaBreachNotice notice, CancellationToken cancellationToken) =>
         PostAsync("on-call", notice, cancellationToken);
 

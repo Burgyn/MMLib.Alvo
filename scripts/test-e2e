@@ -25,8 +25,8 @@
 #   docker-compose.field-service-host.yml (:8082) — does the SAME descriptor plus host code behave as the
 #       sample claims? samples/MMLib.Alvo.Samples.FieldService, the embedded host over the same file: the
 #       dispatch command (one unit, Idempotency-Key), the technician app's signed Standard Webhook, the
-#       service-hours hook, the customer notice, the SLA timer's escalation, the per-tenant overdue report
-#       (driven by the Management API's Run now) and the technician's open-jobs narrowing.
+#       service-hours hooks, the SLA timer's escalation and the per-tenant overdue report (driven by the
+#       Management API's Run now).
 #
 # "The stack boots and answers" is not "the product behaves as documented", and only the second is
 # worth shipping — so all three run, and the run fails if any does.

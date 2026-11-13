@@ -25,9 +25,17 @@ internal static class FieldServiceWorld
     public static string Descriptor => Path.Combine(AppContext.BaseDirectory, "field-service.alvo.json");
 
     public static Task<AlvoTestHost> StartAsync(
-        CancellationToken cancellationToken, FakeTimeProvider? time = null, RecordingNotifier? notifier = null, string? cron = null) =>
+        CancellationToken cancellationToken,
+        FakeTimeProvider? time = null,
+        RecordingNotifier? notifier = null,
+        string? cron = null,
+        Action<IAlvoBuilder>? also = null) =>
         AlvoTestHost.StartAsync(
-            builder => Compose(builder, notifier ?? new RecordingNotifier(), cron),
+            builder =>
+            {
+                var composed = Compose(builder, notifier ?? new RecordingNotifier(), cron);
+                also?.Invoke(composed);
+            },
             time ?? new FakeTimeProvider(Now),
             cancellationToken: cancellationToken);
 
@@ -111,7 +119,7 @@ internal static class FieldServiceWorld
 
     /// <summary>
     /// The generated <c>Create</c> takes no hidden field, and <c>access_code</c> is required AND hidden: the wrapper keeps
-    /// any field it does not declare in its record, so the code rides along in it.
+    /// any field it does not declare in its record, so the code rides along in it (#520).
     /// </summary>
     private static WorkOrder WithAccessCode(WorkOrder job) => new(job.Record.With("access_code", "4711"));
 }
