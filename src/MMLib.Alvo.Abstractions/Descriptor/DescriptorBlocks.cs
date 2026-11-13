@@ -56,6 +56,25 @@ public sealed record Auth
 
     /// <summary>Application roles beyond the built-in ones (anon, authenticated, admin).</summary>
     public IReadOnlyList<string>? Roles { get; init; }
+
+    /// <summary>
+    /// Who may create an account by signing in; required once <see cref="Providers"/> lists a provider Alvo honours
+    /// for end users (today <c>google</c>).
+    /// </summary>
+    public AuthSignUp? SignUp { get; init; }
+}
+
+/// <summary>Who may create an account by signing in with an end-user provider (schema <c>auth.signUp</c>).</summary>
+public sealed record AuthSignUp
+{
+    /// <summary>Whether any person the provider vouches for may create an account, or only one accepting an invitation.</summary>
+    public required SignUpMode Mode { get; init; }
+
+    /// <summary>
+    /// The domains a <b>trusted</b> email must be in for its owner to sign up, lower-case hostnames; <see langword="null"/>
+    /// admits any domain.
+    /// </summary>
+    public IReadOnlyList<string>? AllowedEmailDomains { get; init; }
 }
 
 /// <summary>Who may manage this project in the admin dashboard, mapped to levels via CEL (schema <c>access</c>).</summary>

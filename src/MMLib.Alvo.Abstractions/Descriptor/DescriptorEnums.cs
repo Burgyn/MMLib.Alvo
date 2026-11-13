@@ -176,6 +176,19 @@ public enum AuthProvider
     Oidc,
 }
 
+/// <summary>Who may create an account by signing in (schema <c>auth.signUp.mode</c>).</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<SignUpMode>))]
+public enum SignUpMode
+{
+    /// <summary>Any person the provider vouches for may create an account (<c>open</c>).</summary>
+    [JsonStringEnumMemberName("open")]
+    Open,
+
+    /// <summary>An account is created only while accepting a valid invitation (<c>invitationOnly</c>).</summary>
+    [JsonStringEnumMemberName("invitationOnly")]
+    InvitationOnly,
+}
+
 /// <summary>How an automation rule dispatches over affected rows (schema <c>automationRule.delivery</c>).</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<DeliveryMode>))]
 public enum DeliveryMode

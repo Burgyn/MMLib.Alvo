@@ -24,7 +24,7 @@ namespace MMLib.Alvo.Admin.Components.Home;
 /// </remarks>
 internal static class DeclaredSlots
 {
-    /// <summary>A provider other than <c>local</c> is declared.</summary>
+    /// <summary>A provider other than <c>local</c> or <c>google</c> is declared.</summary>
     public const string AuthProviders = "auth.providers";
 
     /// <summary>An entity declares <c>storage: dynamic</c>.</summary>
@@ -47,7 +47,7 @@ internal static class DeclaredSlots
         AuthProviders => Member(descriptor, "auth") is { } auth
             && Member(auth, "providers") is { ValueKind: JsonValueKind.Array } providers
             && providers.EnumerateArray().Any(provider => provider.ValueKind != JsonValueKind.String
-                || provider.GetString() != "local"),
+                || provider.GetString() is not ("local" or "google")),
         EntityStorage => Entities(descriptor).Any(entity => Text(entity, "storage") == "dynamic"),
         EntityRealtime => Entities(descriptor).Any(entity =>
             Member(entity, "realtime") is { ValueKind: JsonValueKind.True }),

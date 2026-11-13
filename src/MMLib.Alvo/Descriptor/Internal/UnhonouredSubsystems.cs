@@ -103,7 +103,9 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// <c>entity.storage</c>, spelled as <see cref="UnhonouredFeatures"/>' slots are — says exactly which key is not
 /// honoured and keeps the two lists disjoint. Both rows are limb one: a <c>storage: dynamic</c> entity is dropped
 /// by the mapper (<c>DescriptorToSchemaMapper.IsPhysical</c>) and looks like an apply that did not take, and a
-/// declared <c>google</c> sign-in that is not there looks like a misconfigured provider. <b>Warned, not refused</b>:
+/// declared <c>microsoft</c> sign-in that is not there looks like a misconfigured provider. <c>google</c> is honoured
+/// by the descriptor (S2); whether <em>this host</em> registered sign-in is a separate boot warning
+/// (<c>DescriptorBootPlan</c>), so this table stays a fact about the build, not about one host's composition. <b>Warned, not refused</b>:
 /// nothing is wrongly <em>permitted</em> by either absence — a dropped entity serves nothing, a missing provider
 /// admits nobody — which is the line between this table and <see cref="UnhonouredFeatures"/>.
 /// </para>
@@ -162,10 +164,9 @@ internal static partial class UnhonouredSubsystems
     [
         new(
             "auth.providers",
-            descriptor => descriptor.Auth?.Providers?.Any(provider => provider != AuthProvider.Local) == true,
-            "only local credentials exist in this build — a person signs in with an address and a password Alvo "
-            + "holds; google, microsoft, github, apple and oidc sign-in are #36 (F7), so a declared provider other "
-            + "than local offers no way in"),
+            descriptor => descriptor.Auth?.Providers?.Any(provider => provider is not (AuthProvider.Local or AuthProvider.Google)) == true,
+            "only local credentials and google sign-in exist in this build; microsoft, github, apple and oidc "
+            + "sign-in are #36 (F7), so a declared provider other than local or google offers no way in"),
         new(
             "entity.storage",
             descriptor => descriptor.Entities?.Values.Any(entity => entity.Storage == StorageMode.Dynamic) == true,

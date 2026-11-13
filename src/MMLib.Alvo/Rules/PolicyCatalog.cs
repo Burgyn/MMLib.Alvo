@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Descriptor;
+﻿using MMLib.Alvo.Auth.Internal;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Extensions.Internal;
@@ -104,6 +105,14 @@ public sealed class PolicyCatalog
     /// a policy catalog.
     /// </remarks>
     internal ManagementAccessCatalog ManagementAccess { get; }
+
+    /// <summary>Gets what the descriptor says about signing in: its providers and who may create an account.</summary>
+    /// <remarks>
+    /// <see langword="internal"/> for the reason <see cref="ManagementAccess"/> is; the sign-in exchange reads it as
+    /// <c>IPolicyCatalogProvider.Current?.SignIn ?? SignInPolicy.None</c>, so a descriptor that drops a provider closes
+    /// it on the apply that drops it.
+    /// </remarks>
+    internal SignInPolicy SignIn { get; init; } = SignInPolicy.None;
 
     /// <summary>Builds a <see cref="PolicyCatalog"/> from a descriptor and its mapped schema.</summary>
     /// <param name="descriptor">The project descriptor whose <c>rules</c>/<c>hidden</c>/<c>readOnly</c> are compiled.</param>

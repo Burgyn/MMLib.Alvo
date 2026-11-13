@@ -8,6 +8,7 @@ using MMLib.Alvo.Ai;
 using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Api;
 using MMLib.Alvo.Auth;
+using MMLib.Alvo.Auth.Internal;
 using MMLib.Alvo.Commands;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Data.Internal;
@@ -124,7 +125,8 @@ public static class AlvoServiceCollectionExtensions
             provider.GetRequiredService<ILogger<DescriptorBootPlan>>(),
             provider.GetRequiredService<ExtensionBinder>(),
             provider.GetRequiredService<DescriptorHost>(),
-            provider.GetRequiredService<GeneratedEntitySource>()));
+            provider.GetRequiredService<GeneratedEntitySource>(),
+            CallerResolvers.IsPersonRegistered(provider)));
 
     /// <summary>Registers the runtime apply path, guarded for the host's extensions.</summary>
     /// <remarks>

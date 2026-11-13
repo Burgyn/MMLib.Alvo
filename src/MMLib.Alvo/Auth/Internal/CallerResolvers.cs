@@ -36,7 +36,7 @@ internal sealed class CallerResolvers(IAlvoContextResolver apiKeys, IServiceProv
     internal IAlvoContextResolver ApiKeys { get; } = apiKeys;
 
     /// <summary>Gets whether a person resolver is registered, which is what opens the Bearer channel.</summary>
-    internal bool HasPerson { get; } = IsPersonRegistered(services.GetService<IServiceProviderIsKeyedService>());
+    internal bool HasPerson { get; } = IsPersonRegistered(services);
 
     /// <summary>The person resolver, from the request's own scope.</summary>
     /// <remarks>
@@ -50,6 +50,17 @@ internal sealed class CallerResolvers(IAlvoContextResolver apiKeys, IServiceProv
         return HasPerson
             ? http.RequestServices.GetRequiredKeyedService<IAlvoContextResolver>(CallerResolution.PersonResolverKey)
             : throw new InvalidOperationException("No person resolver is registered, so the Bearer channel is closed.");
+    }
+
+    /// <summary>
+    /// Whether <paramref name="services"/> holds a resolver under exactly the person key — the answer
+    /// <see cref="HasPerson"/> gives, asked without activating the API-key resolver (the boot plan asks it too).
+    /// </summary>
+    /// <param name="services">The root container.</param>
+    internal static bool IsPersonRegistered(IServiceProvider services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        return IsPersonRegistered(services.GetService<IServiceProviderIsKeyedService>());
     }
 
     /// <summary>Whether a resolver is registered under exactly the person key, not merely answered for it.</summary>

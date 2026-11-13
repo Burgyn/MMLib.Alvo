@@ -14,7 +14,28 @@ internal static class SchemaConditions
             return false;
         }
 
-        return TryEquals(ifNode, then, notes) || TryNotEquals(ifNode, then, notes) || TryExclusive(ifNode, then, notes);
+        return TryEquals(ifNode, then, notes) || TryNotEquals(ifNode, then, notes) || TryExclusive(ifNode, then, notes)
+            || TryContains(ifNode, then, notes);
+    }
+
+    private static bool TryContains(JsonObject ifNode, JsonObject then, Dictionary<string, List<string>> notes) =>
+        ContainsTest(ifNode) is { } test
+        && Add(notes, RequiredNames(then), $"Required when {Md.Code(test.Name)} lists {Md.Code(test.Value)}.");
+
+    private static (string Name, string Value)? ContainsTest(JsonObject ifNode)
+    {
+        if (ifNode.Count != 2 || ifNode["required"] is not JsonArray { Count: 1 } present
+            || ifNode["properties"] is not JsonObject { Count: 1 } properties)
+        {
+            return null;
+        }
+
+        var (name, schema) = properties.First();
+        return name == present[0]!.GetValue<string>()
+            && schema is JsonObject { Count: 1 } array && array["contains"] is JsonObject { Count: 1 } item
+            && item.ContainsKey("const")
+            ? (name, SchemaNode.Literal(item["const"]))
+            : null;
     }
 
     private static bool TryEquals(JsonObject ifNode, JsonObject then, Dictionary<string, List<string>> notes) =>

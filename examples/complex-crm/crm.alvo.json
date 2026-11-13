@@ -6,7 +6,8 @@
   "x-generator": "alvo-examples/complex-crm",
   "auth": {
     "providers": ["local", "google"],
-    "roles": ["sales", "manager", "finance"]
+    "roles": ["sales", "manager", "finance"],
+    "signUp": { "mode": "invitationOnly" }
   },
   "description": "Customer relationship management: companies, contacts, deals, and invoicing.",
   "branding": {

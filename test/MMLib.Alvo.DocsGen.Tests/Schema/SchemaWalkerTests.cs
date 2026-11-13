@@ -121,6 +121,21 @@ public class SchemaWalkerTests
     }
 
     [Fact]
+    public void A_contains_const_with_required_reads_required_when_it_lists()
+    {
+        var walker = new SchemaWalker(Parse("""
+            { "properties": { "auth": { "type": "object",
+              "properties": { "providers": { "type": "array", "items": { "enum": ["local", "google"] } },
+                "signUp": { "type": "object", "description": "S." } },
+              "allOf": [ { "if": { "required": ["providers"], "properties": { "providers": { "contains": { "const": "google" } } } },
+                "then": { "required": ["signUp"] } } ] } } }
+            """));
+
+        Key(walker.KeysOf("auth"), "auth.signUp").Notes.ShouldContain("Required when `providers` lists `\"google\"`.");
+        walker.UnrecognisedConditions.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Recognised_conditions_become_notes()
     {
         var keys = _walker.KeysOf("items");

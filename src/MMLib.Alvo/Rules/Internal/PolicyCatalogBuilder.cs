@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Descriptor;
+﻿using MMLib.Alvo.Auth.Internal;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
@@ -65,7 +66,10 @@ internal static class PolicyCatalogBuilder
             return false;
         }
 
-        catalog = new PolicyCatalog(entities, roles, schema, managementAccess, automation);
+        catalog = new PolicyCatalog(entities, roles, schema, managementAccess, automation)
+        {
+            SignIn = SignInPolicy.From(descriptor),
+        };
         errors = [];
         return true;
     }
