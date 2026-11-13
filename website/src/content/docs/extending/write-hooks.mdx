@@ -2,7 +2,7 @@
 title: Validate and guard writes
 description: Run your C# in a write in three phases — validate before the transaction, guard and complete inside it — with the caller's rules applied again to everything a hook does.
 sidebar:
-  order: 7
+  order: 5
 ---
 
 import { Code } from '@astrojs/starlight/components';
@@ -17,7 +17,7 @@ the descriptor's own hooks, in one of three phases:
 
 | Phase | Runs | May | May not |
 |---|---|---|---|
-| **validate** | before a create, update or replace opens its transaction; only for a write no transaction unit is open around | call another service; refuse; write other rows through `Data`, which commit on their own, outside the write | change the row being written |
+| **validate** | before a create, update or replace opens its transaction; only for a write no [transaction unit](/concepts/glossary/#transaction-unit) is open around | call another service; refuse; write other rows through `Data`, which commit on their own, outside the write | change the row being written |
 | **before-write** / **before-delete** | inside the write's transaction, after the descriptor's before-hooks | refuse; set fields; write other rows; publish an event | call the network |
 | **after-write** / **after-delete** | inside the transaction, after the row and its rollups exist | refuse — rolling the write back; write other rows; publish | write its own row; call the network |
 
@@ -32,7 +32,9 @@ and a confirmation is mailed after the commit. Staff may book; only managers rea
 
 <SourceExcerpt code={hooks} from="public static IAlvoBuilder AddOpeningDesk" to="e.Changed(x => x.Status)" title="OpeningDeskHooks.cs" />
 
-`Entity<Booking>` hands every hook your class. `when` is a lambda over `w.New`, `w.Old`, `w.Changed(…)` and `w.Caller`,
+`Entity<Booking>` hands every hook your class, mapped by `[AlvoEntity("bookings")]` — written by hand here, or
+[generated from your descriptor](/extending/generated-types/). `AddOpeningDesk` is registered on the builder
+`AddAlvo` hands you, as [Your first extension](/extending/first-extension/#2-register-it-in-programcs) shows. `when` is a lambda over `w.New`, `w.Old`, `w.Changed(…)` and `w.Caller`,
 translated to CEL once, when the hook is registered — or a CEL string. `changed(field)` is false on a create, and `old.`
 is absent there, so a condition that must hold for creates tests `new.` — `w.New.VatId != null` above. Each hook's
 condition is judged against the row as the hooks before it left it.
@@ -104,7 +106,7 @@ writes commits with the write or not at all, runs the other entity's rules and h
   `AlvoBudgetExceededException` — write many rows with one batch call.
 - **Depth.** A hook writing what triggers itself stops at the chain limit (`Alvo:Extensions:MaxDepth`, 8) with
   **508** `chain-depth-exceeded`.
-- **Cascades run no hooks.** Rows a declared `onDelete: cascade` or `set-null` removes or changes run no host hook —
+- **Cascades run no hooks.** Rows a declared `onDelete: cascade` or `setNull` removes or changes run no host hook —
   unlike a PostgreSQL row trigger. A hook whose write makes its own row disappear (deleting its parent through a cascade)
   fails the write (`row-vanished`).
 

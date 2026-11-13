@@ -24,6 +24,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   return*, *Rules over relations* and *State machines and timers*), the section's index is grouped into six areas and says the
   host-extensibility line is complete, the roadmap no longer lists `automation` or the C# `functions` as not running, and the
   README gains an *Extend it in C#* section.
+- **Docs: extending in code is findable from every entry point, and matches the code again**: a new *Your first
+  extension* page (one validate hook, its `Program.cs` registration, a dev key and an `AlvoTestHost` test; its C# is
+  compiled by `MMLib.Alvo.DocsSnippets.Tests`, which runs the hook, the test and the page's HTTP answer, while
+  `Program.cs` is compiled only); a task-grouped sidebar (*Start in your host*, *Validate and guard writes*, *React to
+  changes*, *Run something later*, *Actions and endpoints*, *Shape reads*, *Test and operate*), with *Integrity*,
+  *Rules over relations*, *State machines* and *Automation* moved beside the descriptor guides (URLs unchanged); links
+  from the home page, *Embed*, the tutorial, *For coding agents*, *Standalone and embedded*, *Architecture*, *The
+  project descriptor* and the guides; glossary entries for delivery, subscriber, envelope, transaction unit,
+  savepoint, causation depth, the Lifecycle tab and the three meanings of "function"; and descriptor first, C# last,
+  stated on the index and *Where logic goes*. Corrected: the three "planned" rows of *Where logic goes*, the stale
+  "not yet" notes on timers in a unit and the Lifecycle tab's Reads lane, the ordering price descriptor actions no
+  longer impose on handlers, the extension catalog's kinds, stages and members (its example now rendered from the
+  verified snapshot), the `IAlvoData` exception table, the analyzer's scheduler exemption, `setNull`, custom events
+  and the dead-letter caution, the dashboard's *Automations* and *Operations* screens, the home page's "coming after
+  v0.1" list, and four violation codes (`transition`, `virtual`, `virtual-field`, `exclusion`) the problem-types
+  reference lacked.
 - **Declarative timers reach existing rows** (HX-18 follow-up, issue 483): the first apply that adds a timer to an entity,
   or changes its `at`, `when` or `event`, starts a framework data migration (`alvo.migration.timers.<entity>`, one run
   spanning tenants) that re-plans every stored row, 100 per transaction — arming a due still ahead, moving one armed at

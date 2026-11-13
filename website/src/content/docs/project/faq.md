@@ -43,7 +43,9 @@ lists what does run.
 A descriptor is data: a lambda cannot live in a JSON file, be checked when the descriptor is applied, be read by an
 agent, or be rendered into the SQL that filters rows, and CEL can do all four while being unable to loop or reach the
 network ([CEL in Alvo](/concepts/cel/)). When you do need C#, an embedded host registers it as a function the
-descriptor's hooks can call ([Custom CEL functions](/guides/custom-cel-functions/)).
+descriptor's hooks can call ([Custom CEL functions](/guides/custom-cel-functions/)), or writes hooks, handlers and
+commands of its own ([Extending in code](/extending/)). Their conditions can then be C# lambdas over your own classes:
+Alvo translates each one into CEL once, when it is registered ([Typed or CEL](/extending/typed-or-cel/)).
 
 ## Where are the errors documented?
 

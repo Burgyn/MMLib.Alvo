@@ -141,6 +141,8 @@ protect: a cookie-authenticated `/app` route that changes data needs the same ca
   [`IAlvoContextAccessor`](/reference/csharp/mmlib-alvo-abstractions/#ialvocontextaccessor),
   [`IAlvoContextResolver`](/reference/csharp/mmlib-alvo-abstractions/#ialvocontextresolver).
 - Configuration: [`Alvo:Auth`](/reference/configuration/#alvoauth).
+- An endpoint whose callers present Alvo's own API keys can take the caller resolved exactly as the Data API resolves
+  it, with [`.WithAlvoCaller()`](/extending/http-conventions/#your-endpoint-alvos-caller).
 - The runnable sample step 4 starts: [`samples/MMLib.Alvo.Samples.EmbeddedHost`](https://github.com/Burgyn/MMLib.Alvo/tree/main/samples/MMLib.Alvo.Samples.EmbeddedHost).
 - Design notes: [the identity seam in `extensibility.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/extensibility.md#the-runnable-example)
   and [why a media type is a CSRF control](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md#why-a-media-type-is-a-csrf-control-at-all).

@@ -2,7 +2,7 @@
 title: Functions in the descriptor
 description: Register a C# function with AddFunction and call it from an after-hook or an automation rule — its input checked against the function's type at apply, each call its own retried delivery.
 sidebar:
-  order: 11
+  order: 10
 ---
 
 import { Code } from '@astrojs/starlight/components';
@@ -15,6 +15,10 @@ An order that is created should raise an invoice in your billing system. The bil
 your credentials and your error handling. A **function** keeps that code in the host and lets the descriptor decide
 *when* it runs: an after-hook or an [automation rule](/extending/automation/) names it, and passes it an input built
 from the row.
+
+Not to be confused with a [custom CEL function](/guides/custom-cel-functions/) (`AddCelFunction`), which an expression
+calls inside the write's transaction, pure and with no network; nor with the descriptor's `functions` block of csx
+scripts, which this build does not run ([glossary](/concepts/glossary/#function)).
 
 ## Write the function
 

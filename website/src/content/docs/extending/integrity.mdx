@@ -2,7 +2,7 @@
 title: Integrity in the descriptor
 description: State in the descriptor what the database must never hold — a field's validation as a CHECK constraint, a filtered rollup, time with now() and durations, gapless sequence numbers, partial unique indexes and ranges that never overlap.
 sidebar:
-  order: 8
+  order: 19
 ---
 
 import { Code } from '@astrojs/starlight/components';
@@ -160,7 +160,7 @@ a unit — `h`, `m`, `s`, `ms`, `us`, `ns` — such as `'90m'`, `'1h30m'`, `'-1.
 ten thousand years either way, and it must be a whole number of microseconds, the precision Alvo stores instants with.
 The arithmetic is CEL's too: a timestamp plus or minus a duration, a duration plus a timestamp, a timestamp minus a
 timestamp (a duration), a duration plus or minus a duration, and every comparison between two durations. A rule may use
-it, though it has no other arithmetic:
+it, though it has no other arithmetic. On an entity with `"audit": true`, which adds `created_at`:
 
 ```json
 "rules": { "list": "created_at > now() - duration('24h')" }

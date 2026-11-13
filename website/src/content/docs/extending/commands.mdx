@@ -2,7 +2,7 @@
 title: Commands and inbound webhooks
 description: Expose a named, access-ruled action over HTTP or in process, make its external call first and its writes in one unit, and receive Standard Webhooks verified and once.
 sidebar:
-  order: 11
+  order: 12
 ---
 
 import { Code } from '@astrojs/starlight/components';
@@ -31,7 +31,8 @@ database. A host that maps or adds a command over the in-memory reference refuse
 `MapAlvoCommand<Stay>(name, pattern, (stay, caller) => …, handler)` maps a `POST`. Before the handler runs, the row the
 route's `{id}` names is read **as the caller** — a row they cannot read is `404`, the same answer as no row — and then
 the rule is judged, `403` when it refuses. The rule here is typed; it is translated to CEL when the command is mapped,
-and the catalog lists that CEL.
+and the catalog lists that CEL. `Stay` is a class over the entity, written by hand or
+[generated from your descriptor](/extending/generated-types/).
 
 <SourceExcerpt code={desk} from="app.MapAlvoCommand<Stay>(" to="ConfirmAsync);" title="StayDeskCommands.cs" />
 

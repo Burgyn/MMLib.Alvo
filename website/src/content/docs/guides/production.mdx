@@ -180,7 +180,10 @@ API browser at `/scalar` behind a path base has not been verified
 
 - **One instance drains the outbox.** Per-row event order holds only while a single process delivers events (and no two
   events for one row are written by different processes in the same millisecond), and no lock enforces it: run one instance with [`Alvo:Events:Enabled`](/reference/configuration/#alvoevents) on
-  and the rest off. Switching it off stops delivery, never the recording of events.
+  and the rest off. Switching it off stops delivery, never the recording of events. On that replica it also stops the
+  dispatcher of host [deliveries](/extending/operate-deliveries/) and the timer and schedule pumps; where they do run,
+  deliveries, timers and schedules are claimed under leases, so a schedule's occurrence runs once
+  ([Time: timers and schedules](/extending/time/#schedules)). Dead deliveries wait on the dashboard's Operations page.
 - **Keep the data-protection keys.** Dashboard sessions and set-password links are protected with keys the host keeps
   in its user's home directory, `/home/app`. A recreated container loses them, and every session and outstanding link
   with them; a second instance cannot read the first one's. That fails closed: people sign in again or ask for a new

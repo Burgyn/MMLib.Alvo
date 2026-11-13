@@ -2,7 +2,7 @@
 title: See your extensions in the dashboard
 description: Every handler your host registers is listed — in the dashboard, the Management API and the assistant — and no apply can quietly drop what it reads.
 sidebar:
-  order: 5
+  order: 17
 ---
 
 import { Code } from '@astrojs/starlight/components';
@@ -10,6 +10,7 @@ import SourceExcerpt from '../../../components/SourceExcerpt.astro';
 import extensions from '../../../snippets/extending/catalog/FleetDeskExtensions.cs?raw';
 import tests from '../../../snippets/extending/catalog/FleetDeskExtensionsTests.cs?raw';
 import descriptor from '../../../snippets/extending/catalog/fleet-desk.alvo.json?raw';
+import catalog from '../../../../../test/MMLib.Alvo.Tests/ExtensionCatalogTests.The_catalog_lists_entity_every_entity_and_application_handlers_in_order.verified.txt?raw';
 
 Code your host registers is part of the backend as much as the descriptor is. Alvo lists it — the dashboard, the
 Management API and the schema assistant all read one **extension catalog** — and keeps the two from drifting apart: an
@@ -17,9 +18,12 @@ apply that would take away what a handler reads is refused, naming the handler.
 
 ## What is listed
 
-Every [event handler](/extending/event-handlers/) and every [command](/extending/commands/) the host registers, as
-**metadata, never code**: what it is, what it binds to and when it runs. Nothing in the catalog can change one; it is
-changed in the host's C# and redeployed.
+Every [event handler](/extending/event-handlers/), [command](/extending/commands/), [write hook](/extending/write-hooks/),
+[query narrowing and record enricher](/extending/reads/), [schedule and data migration](/extending/time/) and
+[host function](/extending/functions/) the host registers, as **metadata, never code**. A
+[custom CEL function](/guides/custom-cel-functions/) is not listed here (the Management API lists those under
+`/cel/functions`), and neither are your own endpoints or conventions. Each entry says what it is, what it binds to
+and when it runs. Nothing in the catalog can change one; it is changed in the host's C# and redeployed.
 
 <Code code={descriptor} lang="json" title="fleet-desk.alvo.json" />
 
@@ -32,8 +36,8 @@ over `Entity("vehicles", …)` with that text as a CEL string `when`, the handle
 | Member | What it says |
 |---|---|
 | `id` | the id the handler was registered under — its identity, and the key of its deliveries |
-| `kind` | `eventHandler`, `command`, or a [write hook](/extending/write-hooks/)'s phase: `validate`, `beforeWrite`, `afterWrite`, `beforeDelete`, `afterDelete` |
-| `stage` | `postCommit` for a handler: it runs after the write commits; `http` for a mapped command; `preTransaction` for an internal one, which runs in its invoker's flow before its own unit, and for a validate hook; `inTransaction` for the other write hooks |
+| `kind` | `eventHandler`, `command`, a [write hook](/extending/write-hooks/)'s phase (`validate`, `beforeWrite`, `afterWrite`, `beforeDelete`, `afterDelete`), `narrowing`, `enricher`, `schedule`, `dataMigration` or `function` |
+| `stage` | `postCommit` for a handler and a function: it runs after the write commits; `http` for a mapped command; `preTransaction` for an internal one, which runs in its invoker's flow before its own unit, and for a validate hook; `inTransaction` for the other write hooks; `read` for a narrowing and an enricher; `scheduled` for a schedule and a data migration |
 | `entities` | the entities it binds; `["*"]` for an every-entity handler, `[]` for an application-event handler and for a command bound to no entity |
 | `operations` | `create`, `update`, `delete`, as the policy names them; `OnSaved` lists `create` and `update`, and `OnUpdated`'s `update` covers a replace; `[]` for an application-event handler |
 | `event` | the event type an application-event handler handles; `null` otherwise |
@@ -50,43 +54,28 @@ over `Entity("vehicles", …)` with that text as a CEL string `when`, the handle
 | `paused` | whether an operator paused the handler ([operate deliveries](/extending/operate-deliveries/#pause-and-resume)) |
 | `topLevelOnly` | `true` for a validate hook: it runs only for a write no transaction unit is open around |
 | `enabled` | `false` once an administrator switched a validate hook off ([Validate and guard writes](/extending/write-hooks/#validate-before-the-transaction)); `true` for everything else |
+| `cron`, `timeZone` | a schedule's five-field cron and the IANA time zone it is read in; `null` for any other kind |
+| `nextRunAt`, `lastRunAt` | when a schedule next runs and the occurrence it last ran for, in UTC; `null` for any other kind, or before the schedule recorded one |
+| `lastOutcome` | the status of a schedule's newest delivery — `pending`, `running`, `retrying`, `succeeded`, `dead` or `cancelled`; `null` for any other kind, or before its first run |
+| `afterRevision` | the descriptor revision a data migration waits for; `null` for any other kind |
+| `concurrency` | an event handler's cap on its running deliveries, as key and limit (`tenant:2`, `record:1`); `null` without a cap, or for any other kind |
+| `inputSchema` | a function's input as a JSON Schema document; `null` for any other kind |
 
-An id retired with `AddRetiredExtension` is not an extension and is not listed. `kind` and `stage` gain values as later
-releases add kinds of host code; a typed .NET client older than the server cannot read a value it does not know, so a
-client that must tolerate one reads the raw string.
+An id retired with `AddRetiredExtension` is not an extension and is not listed. `kind` and `stage` are append-only: a
+later release can add a value, never reorder one. A typed .NET client older than the server cannot read a value it does
+not know, so a client that must tolerate one reads the raw string.
 
 ## Read it
 
 `GET /management/projects/<project>/extensions` answers any caller with the `viewer` level, and
-`IAlvoManagement.GetExtensionsAsync` answers in process:
+`IAlvoManagement.GetExtensionsAsync` answers in process. A host with an every-entity handler, a handler on `tickets`
+and one on the application event `orders.approved` gets this answer, pinned by a test, so it cannot drift from the
+code:
 
-```json
-{
-  "items": [
-    {
-      "id": "book-repair",
-      "kind": "eventHandler",
-      "stage": "postCommit",
-      "entities": ["vehicles"],
-      "operations": ["update"],
-      "event": null,
-      "when": "changed(status) && new.status == 'in_repair'",
-      "order": 0,
-      "timeout": "00:00:30",
-      "runAs": "system",
-      "ordering": "perRecord",
-      "description": "Books the vehicle into the workshop when it goes in for repair.",
-      "typeName": null,
-      "route": null,
-      "httpMethod": null,
-      "access": null,
-      "paused": false,
-      "topLevelOnly": false,
-      "enabled": true
-    }
-  ]
-}
-```
+<SourceExcerpt code={catalog} from="{" lang="json" title="GET …/extensions" />
+
+`timers` counts the timers in the database, shared by every replica — `pending` (armed) and `due` (armed and already due; a number that stays
+above zero means nothing is firing them) — and is `null` when the data provider keeps no timers.
 
 - **Type names stay hidden by default.** `Alvo:Extensions:ExposeTypeNames` (`false`) fills `typeName` for a class
   handler. A type name reaches every catalog viewer and the assistant's model, and it describes your code's insides,
@@ -110,7 +99,9 @@ which run inside the transaction, stay on **On write**:
 - each handler, read-only and marked `⟨/⟩ from code`, with its description, its `when`, and a line such as
   `on update · timeout 30 s · runs as the system · in order per record`;
 - in a host that maps a command, a **Commands** lane: each command bound to a row of the entity, read-only, with its
-  route and its access rule.
+  route and its access rule;
+- in a host that registers a narrowing or an enricher, a **Reads** lane: what shapes a read of this entity — "narrows
+  reads" or "shapes reads" — or, when nothing does for this entity, a note that the host registers none for it.
 
 In a host that registers a write hook, two lanes come first: **Before the transaction** holds the validate hooks,
 marked *top-level writes only* and, when an administrator switched one off, *switched off*; **In the transaction** holds the
@@ -176,7 +167,3 @@ The [schema assistant](/guides/schema-assistant/) reads the catalog when it matt
 after-hook on an entity that count names, it reads the catalog and names an extension that already does what you asked
 instead of adding a second one; and it does not propose removing a field an extension reads — the dry run would refuse
 it anyway, naming the extension.
-
-## Not yet
-
-Reads join the Lifecycle tab in a later release, in a lane of their own.
