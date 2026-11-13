@@ -1,0 +1,125 @@
+### The work-order state machine (`work_orders.stateMachine`), one job walked through every move.
+###
+###   new --schedule--> scheduled --start--> in_progress --complete--> completed
+###   new | scheduled | in_progress --cancel--> cancelled
+###   completed | cancelled --reopen--> scheduled                      (admin only)
+###
+### Each refusal is paired with the move that IS legal for the same caller on the same row, so a 403 is
+### the transition's roles and not the row rule, and a 422 is the machine and not the field's shape.
+
+### A job is created `new`. No `initial` binds creates (spec R1: imports arrive already scheduled), so
+### this is convention rather than enforcement — the machine guards every MOVE.
+# @name CreateNewJob
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{tenantNorth}}",
+  "reference": "WO-3101",
+  "title": "Lifecycle: radiator leaking",
+  "status": "new",
+  "priority": 2,
+  "access_code": "ACME-3101",
+  "customer_id": "{{CustomerAcmeId}}",
+  "region_id": "{{RegionNorthId}}"
+}
+
+### `schedule` demands an assignee and a time (`when: has(new.assigned_to) && has(new.scheduled_for)`):
+### without them the move is refused and nothing is stored
+# @name ScheduleWithoutAssignee
+## TEST-EXPECT-STATUS: [422]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateNewJob.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "status": "scheduled" }
+
+### The same move with both — the control that makes the 422 above the `when`, not the transition
+# @name ScheduleProperly
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateNewJob.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "status": "scheduled", "assigned_to": "{{userTechNorth}}", "scheduled_for": "2026-12-01T09:00:00+00:00" }
+
+### Skipping a step: no transition leads from `scheduled` to `completed`, whoever asks
+# @name SkipToCompleted
+## TEST-EXPECT-STATUS: [422]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateNewJob.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "status": "completed", "completed_on": "2026-12-01" }
+
+### The assigned technician may write the row (rules.update admits `assigned_to == @user.id`), but
+### `cancel` lists only dispatcher and admin — the customer's job is not theirs to call off
+# @name TechnicianCancels
+## TEST-EXPECT-STATUS: [403]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateNewJob.response.body.$.id}}
+X-Alvo-Api-Key: {{keyTechNorth}}
+Content-Type: application/json
+
+{ "status": "cancelled" }
+
+### The control: the SAME technician on the SAME row takes `start`, which lists technician
+# @name TechnicianStarts
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateNewJob.response.body.$.id}}
+X-Alvo-Api-Key: {{keyTechNorth}}
+Content-Type: application/json
+
+{ "status": "in_progress" }
+
+### A PATCH that does not name `status` is no transition at all
+# @name PatchNotNamingStatus
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateNewJob.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "title": "Lifecycle: radiator leaking, valve replaced" }
+
+### `complete` demands the sign-off day (`when: has(new.completed_on)`)
+# @name CompleteWithoutDate
+## TEST-EXPECT-STATUS: [422]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateNewJob.response.body.$.id}}
+X-Alvo-Api-Key: {{keyTechNorth}}
+Content-Type: application/json
+
+{ "status": "completed" }
+
+### With it, the technician signs the job off
+# @name CompleteWithDate
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateNewJob.response.body.$.id}}
+X-Alvo-Api-Key: {{keyTechNorth}}
+Content-Type: application/json
+
+{ "status": "completed", "completed_on": "2026-12-01" }
+
+### Only an administrator reopens a closed job: the dispatcher matches `reopen` but holds no admin role
+# @name DispatcherReopens
+## TEST-EXPECT-STATUS: [403]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateNewJob.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "status": "scheduled" }
+
+### The admin does
+# @name AdminReopens
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{CreateNewJob.response.body.$.id}}
+X-Alvo-Api-Key: {{keyAdmin}}
+Content-Type: application/json
+
+{ "status": "scheduled" }
+
+### What the job ended as, read by the dispatcher
+# @name ReadBack
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{CreateNewJob.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
