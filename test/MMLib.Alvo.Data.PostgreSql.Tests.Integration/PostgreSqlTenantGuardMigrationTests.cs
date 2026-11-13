@@ -70,7 +70,7 @@ public sealed class PostgreSqlTenantGuardMigrationTests(PostgresFixture fixture)
         var sql = string.Join("\n", plan.Sql);
         sql.ShouldContain("ON DELETE CASCADE");
         sql.ShouldContain("ON DELETE RESTRICT");
-        System.Text.RegularExpressions.Regex.Matches(sql, "SET NULL \\(").Count.ShouldBe(1);
+        System.Text.RegularExpressions.Regex.Count(sql, "SET NULL \\(").ShouldBe(1);
     }
 
     /// <summary>
