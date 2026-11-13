@@ -62,7 +62,7 @@ The dashboard's schema assistant learns the descriptor from nine skills, and the
 load too. Each one teaches one part of the format and the mistakes Alvo refuses.
 
 **In Claude Code, install them as a plugin.** This repository is a plugin marketplace, and its `alvo` plugin carries
-the nine skills. In a session:
+the nine descriptor skills and one for host code. In a session:
 
 <Code code={claudePlugin.trimEnd()} lang="txt" title="Claude Code" />
 
@@ -73,11 +73,18 @@ Or from your shell:
 Claude Code then loads a skill by itself when a task matches its description, such as adding a rule or a hook, and you
 can call one directly as `/alvo:alvo-descriptor-rules-and-cel`. `/plugin` updates the plugin like any other.
 
-**For another agent, or a folder of your choice**, a script downloads the same nine files, no clone needed:
+**Writing C# in an embedded host.** The same plugin carries `alvo-host-extensions`, a skill for code in your own
+ASP.NET Core host: write hooks, event handlers, commands, functions, timers and schedules, transactions, read shaping,
+generated types and `AlvoTestHost`. Its first rule is that C# is the last resort: it sends your agent to the descriptor
+first, and to host code only when no descriptor construct fits. The dashboard's assistant never loads it. For depth,
+point the agent at [Extending in code](/extending/), which `llms-full.txt` carries whole.
+
+**For another agent, or a folder of your choice**, a script downloads the same ten files — the nine descriptor
+skills and `alvo-host-extensions` — with no clone needed:
 
 <Code code={installSkills.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
-It writes them to `.claude/skills/alvo-descriptor-*/SKILL.md` under the current directory and lists what it installed;
+It writes them to `.claude/skills/<skill>/SKILL.md` under the current directory and lists what it installed;
 any failed download stops it with an error. To put them elsewhere, such as your agent's own skills folder, pass the
 folder: `curl -fsSL https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/scripts/install-agent-skills | sh -s -- ~/.claude/skills`.
 Run it again to update them.
@@ -93,6 +100,7 @@ To load them by hand instead, each skill is one file:
 - [Traits and tenancy](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/plugins/alvo/skills/alvo-descriptor-traits-and-tenancy/SKILL.md)
 - [Project access](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/plugins/alvo/skills/alvo-descriptor-project-access/SKILL.md)
 - [Capabilities and limits](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/plugins/alvo/skills/alvo-descriptor-capabilities-and-limits/SKILL.md)
+- [Host extensions](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/plugins/alvo/skills/alvo-host-extensions/SKILL.md)
 
 In the repository they live in `plugins/alvo/skills/`.
 
@@ -211,3 +219,6 @@ per-route table is in [`docs/architecture/management-api.md`](https://github.com
 
 **[Apply and evolve your descriptor](/guides/apply-and-evolve/)**: the full lifecycle of a change, from a
 dry run to a rollback.
+
+What the descriptor cannot express goes into host C#; the [Where logic goes](/extending/where-logic-goes/) table is the
+decision an agent should make first.

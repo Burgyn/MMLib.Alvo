@@ -78,13 +78,14 @@ and honoured blocks there are, and the latest configuration change.
 
 The panel *Declared, not honoured by this build* lists only the blocks your descriptor declares that this build parses
 and does not run, each with the framework's own sentence for what does not happen. It is the same answer
-[Capabilities in this build](/reference/capabilities/) is generated from. **Automations** and **Functions**
-in the navigation carry a *Not yet* badge for the same reason.
+[Capabilities in this build](/reference/capabilities/) is generated from. **Functions** in the navigation carries a
+*Not yet* badge for the same reason.
 
 ## 3. Change the schema
 
 **Schema** lists the entities. Open one to see its tabs: *Fields*, *Relationships*, *Rules*, *On write* (the hooks),
-*Lifecycle* (what runs after a commit, host code included), *Indexes* and *API*, the routes the Data API generates for it.
+*Lifecycle* (what runs outside the write's transaction, host code included: see
+[See your extensions in the dashboard](/extending/extension-catalog/#in-the-dashboard)), *Indexes* and *API*, the routes the Data API generates for it.
 
 <ThemedShot light={schemaLight} dark={schemaDark} alt="The service_orders entity on the Schema screen: badges for global tenancy, audited and physical table, tabs for fields, relationships, rules, on write, indexes and API, and the declared fields with their types, facets and descriptions." />
 
@@ -152,6 +153,11 @@ a descriptor file, put the restored descriptor back in the file afterwards:
   management levels, which are part of the descriptor and wait for an apply. A role the descriptor does not declare is
   never given to a signed-in person, so assigning one does nothing. Locked accounts can be unlocked here.
 - **Integrations**: the descriptor's webhook endpoints and templates, beside what this build does not run for them.
+- **Automations**: every [automation rule](/extending/automation/) of the descriptor, read-only, with a link to its
+  deliveries.
+- **Operations**: every handler's deliveries, with **Pause**/**Resume**, **Replay dead** and **Run again**; the
+  schedules and data migrations, with **Run now** for a schedule; and a count of armed and due timers
+  ([Operate deliveries](/extending/operate-deliveries/)).
 - **Settings**: what is running and how it starts, where the API documentation is, and the
   [schema assistant](/guides/schema-assistant/)'s connection.
 - **Search** (Ctrl+K, ⌘K) jumps to any screen or entity.

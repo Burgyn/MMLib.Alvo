@@ -2,7 +2,7 @@
 title: React to changes (event handlers)
 description: Run C# after a write commits — once per matching event, at least once, retried, in order per record, and visible in your tests.
 sidebar:
-  order: 3
+  order: 7
 ---
 
 import { Code } from '@astrojs/starlight/components';
@@ -14,7 +14,8 @@ import typedTests from '../../../snippets/extending/handlers/TicketDeskTypedHand
 
 An event handler is C# your host runs **after** a write commits: post to a chat, call an ERP, open a follow-up. It runs
 on Alvo's transactional outbox, so it never undoes the write and is never lost with it — each matching event becomes a
-**delivery** that is retried until it succeeds or is dead-lettered.
+[**delivery**](/concepts/glossary/#delivery) that is retried until it succeeds or is dead-lettered — recorded
+*dead*, and kept until an operator runs it again ([Operate deliveries](/extending/operate-deliveries/)).
 
 <Code code={descriptor} lang="json" title="ticket-desk.alvo.json" />
 
@@ -27,7 +28,8 @@ Group registrations by entity with `Entity<Ticket>(…)` over your own class —
 <SourceExcerpt code={typedHandlers} from="public static IAlvoBuilder AddTicketDeskTypedHandlers" to="TimeSpan.FromSeconds(10)));" title="TicketDeskTypedHandlers.cs" />
 
 The class maps the entity: `[AlvoEntity("tickets")]`, a property per field, an enum per enum field
-([Typed or CEL](/extending/typed-or-cel/#your-class) has the rules). Each lambda is translated into CEL when it is
+([Typed or CEL](/extending/typed-or-cel/#your-class) has the rules; the build can
+[generate it from your descriptor](/extending/generated-types/)). Each lambda is translated into CEL when it is
 registered — the first one becomes `changed(status) && new.status == 'resolved'`.
 
 The same handlers over `AlvoRecord`, with the conditions written as CEL strings — the form an every-entity or
@@ -86,11 +88,9 @@ multi-entity registration always takes:
   record's later events back, for that handler only. `options.Ordering = AlvoOrdering.None` opts out. Order is by event
   id, so two processes writing one record in the same millisecond can still interleave
   ([#150](https://github.com/Burgyn/MMLib.Alvo/issues/150)).
-- **The order has a price until descriptor actions move onto deliveries.** An earlier event whose descriptor
-  after-hook action keeps failing — a webhook endpoint that is down — holds the record's later handler deliveries back
-  until it succeeds or the outbox gives up on it
-  ([`Alvo:Events:MaxAttempts`](/reference/configuration/#alvoevents)): about 45 s per failing event at the defaults.
-  The failing event's own delivery is not held.
+- **Each subscriber keeps its own order.** A descriptor after-hook or automation action is a subscriber of its own,
+  with its own deliveries, so an action that keeps failing — a webhook endpoint that is down — holds back only that
+  action's later deliveries for the record, never your handler's.
 - **A dead delivery blocks its record until it is redelivered, replayed or cancelled** —
   [operate deliveries](/extending/operate-deliveries/).
 - **Who the handler is.** By default the system, in the event's tenant (`'admin' in @user.roles` is true, another

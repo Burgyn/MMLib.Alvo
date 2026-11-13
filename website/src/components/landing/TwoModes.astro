@@ -35,11 +35,12 @@ const standalone = `# uncomment in the compose file, under alvo:\n#   volumes:\n
         <div class="alvo-mode__head">
           <h3>Embedded</h3><span class="alvo-badge alvo-badge--mono">ASP.NET Core</span><span class="alvo-badge alvo-badge--warn">Not on NuGet yet</span>
         </div>
-        <p>A library in your own host, set up in one <code>Program.cs</code>: your authentication, your endpoints beside Alvo's, your own C# functions callable from hooks. Today through project references or a local package feed.</p>
+        <p>A library in your own host, set up in one <code>Program.cs</code>: your authentication, your endpoints beside Alvo's, and your own C# inside Alvo's pipeline — write hooks, event handlers, commands, timers. Today through project references or a local package feed.</p>
         <div class="alvo-mode__code">
           <Code code={program.trimEnd()} lang="csharp" title="Program.cs" />
         </div>
         <a class="alvo-textlink" href={page('/start-here/embed/')}>Embed in ASP.NET Core <span aria-hidden="true">→</span></a>
+        <a class="alvo-textlink" href={page('/extending/')}>Extending in code <span aria-hidden="true">→</span></a>
       </article>
     </div>
   </div>

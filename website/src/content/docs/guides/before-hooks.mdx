@@ -93,7 +93,8 @@ expression over `new`, the row as it will be stored.
 `now()` is the instant of the request: every `now()` one request evaluates returns the same value. The audit columns
 are read when the row is written, so `closed_at` can differ from `updated_at` by microseconds. The slug is stamped once, when
 the ticket is created, so it stays stable when the title changes later; a value that must always follow other fields
-of the row belongs in a [computed field](/guides/computed-and-rollups/) instead.
+of the row belongs in a [computed field](/guides/computed-and-rollups/) instead. To limit which status moves are legal
+at all, declare a [state machine](/extending/state-machines/) instead of a `reject` per move.
 
 ## 3. A value must fit its field
 
@@ -150,12 +151,14 @@ another; when it is not — a field an update left alone, a default, a field an 
 condition held this time), a custom function's result, `old.` — it is 500 `function-failed`. A call over constants that always fails, such as
 `timestamp('yesterday')`, is refused when the descriptor is applied instead.
 
-:::caution[Not in this build]
+:::caution[Limits]
 A custom CEL function an embedded host registers runs synchronously inside the write's transaction, within a shared
 budget of 250 ms per evaluation ([Custom CEL functions](/guides/custom-cel-functions/#5-keep-the-functions-promises));
 one that never returns still holds the row locks until it does. A before-hook cannot
 call the network, send mail or write another entity; that is what [after-hooks](/guides/after-hooks-and-webhooks/)
-are for. Work on a schedule is an [`automation`](/extending/automation/) rule with a cron trigger.
+are for. Work on a schedule is an [`automation`](/extending/automation/) rule with a cron trigger. In an embedded
+host, a C# [before-write hook](/extending/write-hooks/) can write other rows in the write's transaction, and a
+[validate hook](/extending/write-hooks/#validate-before-the-transaction) can call a service before it.
 :::
 
 ## What can go wrong
@@ -192,4 +195,4 @@ Branch on the problem `type`, never on `detail`: the slug is the contract, and t
 ## Next
 
 **[After-hooks, events and webhooks](/guides/after-hooks-and-webhooks/)**: react to a committed change,
-with a webhook or an email.
+with a webhook or an email. When a hook cannot say it: [Where logic goes](/extending/where-logic-goes/).
