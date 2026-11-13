@@ -1,0 +1,83 @@
+### Visits: a technician's booked slot on a job. Three constructs, each with its control:
+###   - an exclusion `["technician_id"]` over `[starts_at, ends_at)`: one technician, one place at a time
+###   - a lookup check: no visit on a completed or cancelled job, with the author's message
+###   - a rollup: the job's `on_site_minutes` is the sum of its visits' `minutes_on_site`
+### The rows created here are what 150-Relations reads.
+
+### A scheduled job assigned to tech-north
+# @name CreateJob3401
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3401", "title": "Visits: WO-3401", "status": "scheduled", "priority": 3, "access_code": "ACME-3401", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}", "assigned_to": "{{userTechNorth}}", "scheduled_for": "2026-12-01T10:00:00+00:00" }
+
+### A scheduled job assigned to NOBODY — 150-Relations needs a visit whose job no technician holds
+# @name CreateJob3402
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3402", "title": "Visits: WO-3402", "status": "scheduled", "priority": 3, "access_code": "ACME-3402", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}", "scheduled_for": "2026-12-01T10:00:00+00:00" }
+
+### A job already signed off (a create is no transition, so it can be imported completed)
+# @name CreateJob3403
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3403", "title": "Visits: WO-3403", "status": "completed", "priority": 3, "access_code": "ACME-3403", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}", "completed_on": "2026-11-30" }
+
+### tech-north, 10:00-11:00, 45 minutes on site
+# @name V1
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/visits
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "work_order_id": "{{CreateJob3401.response.body.$.id}}", "technician_id": "{{userTechNorth}}", "starts_at": "2026-12-01T10:00:00+00:00", "ends_at": "2026-12-01T11:00:00+00:00", "minutes_on_site": 45 }
+
+### tech-north again, 10:30-11:30: overlaps V1
+# @name Overlap
+## TEST-EXPECT-STATUS: [409]
+POST {{fsBaseUrl}}/api/visits
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "work_order_id": "{{CreateJob3401.response.body.$.id}}", "technician_id": "{{userTechNorth}}", "starts_at": "2026-12-01T10:30:00+00:00", "ends_at": "2026-12-01T11:30:00+00:00" }
+
+### tech-north, 11:00-12:00: starts exactly where V1 ends — `[from, to)`, so no overlap (control)
+# @name BackToBack
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/visits
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "work_order_id": "{{CreateJob3401.response.body.$.id}}", "technician_id": "{{userTechNorth}}", "starts_at": "2026-12-01T11:00:00+00:00", "ends_at": "2026-12-01T12:00:00+00:00", "minutes_on_site": 30 }
+
+### spare-north at V1's exact slot, on the unassigned job: the exclusion is per technician (control)
+# @name OtherTechSameSlot
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/visits
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "work_order_id": "{{CreateJob3402.response.body.$.id}}", "technician_id": "{{userSpareNorth}}", "starts_at": "2026-12-01T10:00:00+00:00", "ends_at": "2026-12-01T11:00:00+00:00" }
+
+### A visit on the completed job, at a slot nobody holds
+# @name OnClosedJob
+## TEST-EXPECT-STATUS: [422]
+POST {{fsBaseUrl}}/api/visits
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "work_order_id": "{{CreateJob3403.response.body.$.id}}", "technician_id": "{{userSpareNorth}}", "starts_at": "2026-12-05T10:00:00+00:00", "ends_at": "2026-12-05T11:00:00+00:00" }
+
+### The job the two tech-north visits belong to, after both
+# @name ReadJob3401
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders/{{CreateJob3401.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

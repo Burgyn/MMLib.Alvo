@@ -1,0 +1,37 @@
+### A relation rule: `visits.rules.list/get` admit a technician through the JOB —
+### `work_order_id.assigned_to == @user.id` — and the related entity's own list rule applies too.
+### Reads only; the rows are 140-Integrity/004's: two tech-north visits on WO-3401 (assigned to
+### tech-north) and one spare-north visit on WO-3402 (assigned to nobody).
+###
+### spare-north being the 3402 visit's `technician_id` yet NOT seeing it is deliberate: the relation, not
+### the `technician_id` column, decides visibility. The job is nobody's, so its visit is nobody's.
+
+### tech-north's visits
+# @name TechLists
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/visits?order=starts_at.asc&limit=100
+X-Alvo-Api-Key: {{keyTechNorth}}
+
+### spare-north's visits: the same rule, a technician with no job assigned
+# @name SpareLists
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/visits?order=starts_at.asc&limit=100
+X-Alvo-Api-Key: {{keySpareNorth}}
+
+### The dispatcher's: every visit in the tenant (control — the rows exist)
+# @name DispatcherLists
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/visits?order=starts_at.asc&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### tech-north reads the 3402 visit by id: one row failing the rule is 404, never 403
+# @name TechReadsOthersVisit
+## TEST-EXPECT-STATUS: [404]
+GET {{fsBaseUrl}}/api/visits/{{VisitOnUnassignedJobId}}
+X-Alvo-Api-Key: {{keyTechNorth}}
+
+### The same id read by the dispatcher (control — the 404 is the rule, not a missing row)
+# @name DispatcherReadsThatVisit
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/visits/{{VisitOnUnassignedJobId}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
