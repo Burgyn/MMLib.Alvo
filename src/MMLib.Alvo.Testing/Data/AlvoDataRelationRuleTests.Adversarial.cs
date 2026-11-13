@@ -52,8 +52,10 @@ public abstract partial class AlvoDataRelationRuleTests
     /// <summary>
     /// One user id in two tenants: a relation that would match the other tenant's rows reaches none of them. The outer
     /// tenant scope already keeps them apart here; the related tenant scope inside the <c>EXISTS</c> is pinned by
-    /// <see cref="A_global_row_is_visible_through_the_caller_s_tenant_children_only"/> and the other-tenant row of
-    /// <see cref="An_exists_never_matches_a_related_row_the_caller_cannot_list"/>.
+    /// <see cref="A_global_row_is_visible_through_the_caller_s_tenant_children_only"/>. A related row of the other tenant
+    /// naming one of this tenant's rows can no longer exist at all: since #161 a <c>ref</c> between two scoped entities is
+    /// a key over <c>(tenant_id, id)</c>, which the other-tenant case of
+    /// <see cref="An_exists_never_matches_a_related_row_the_caller_cannot_list"/> pins at the store.
     /// </summary>
     [Fact]
     public async Task Two_tenants_with_the_same_user_id_never_see_each_other_s_rows_through_a_relation()
@@ -84,6 +86,12 @@ public abstract partial class AlvoDataRelationRuleTests
     /// entity with no list rule, another tenant's, and one behind a role the caller lacks — never make the relation match,
     /// through list, count, get or a create probe. The caller's own row is the control that it can.
     /// </summary>
+    /// <remarks>
+    /// <b>Another tenant's row holds at the key level since #161.</b> A pin of the other tenant naming this tenant's board
+    /// used to be stored, and only the related tenant scope inside the <c>EXISTS</c> kept it from matching. A <c>ref</c>
+    /// between two scoped entities is now a key over <c>(tenant_id, id)</c>, so that pin is unrepresentable: the case
+    /// asserts the store refuses it exactly as a pin naming no board at all, and that the board still matches nothing.
+    /// </remarks>
     /// <param name="why">Which way the related row is out of the caller's reach.</param>
     /// <param name="pinsList">The related entity's list rule in this world.</param>
     /// <param name="inOtherTenant">Whether the related row lives in the other tenant.</param>
@@ -101,10 +109,13 @@ public abstract partial class AlvoDataRelationRuleTests
         _ = why;
         var (data, world) = await RelationWorldAsync(pinsList);
         var board = await world.SeedAsync(RelationWorld.Boards, world.Tenant1, ("name", "board"));
-        var pin = await world.SeedAsync(
-            RelationWorld.Pins, inOtherTenant ? world.Tenant2 : world.Tenant1,
-            ("board_id", board), ("color", "red"), ("owner_id", (ownedByCaller ? world.A : world.B).User.Value));
+        var owner = (ownedByCaller ? world.A : world.B).User.Value;
+        if (inOtherTenant)
+        {
+            await ShouldRefuseAnotherTenantsPinLikeOneNamingNoBoardAsync(world, board, owner);
+        }
 
+        var pin = inOtherTenant ? Guid.NewGuid() : await SeedPinAsync(world, world.Tenant1, board, owner);
         var page = await data.QueryAsync(new AlvoQuery { Entity = RelationWorld.Boards, IncludeTotalCount = true }, world.A, Ct);
         var got = await data.GetAsync(RelationWorld.Boards, board, world.A, Ct);
         var sticker = await Record.ExceptionAsync(() => data.CreateAsync(
@@ -174,6 +185,24 @@ public abstract partial class AlvoDataRelationRuleTests
     private const string PinsOwner = RelationWorld.PinsByOwner;
 
     private const string PinsManager = "'manager' in @user.roles";
+
+    private static Task<Guid> SeedPinAsync(RelationWorld world, TenantId tenant, Guid board, Guid owner) =>
+        world.SeedAsync(RelationWorld.Pins, tenant, ("board_id", board), ("color", "red"), ("owner_id", owner));
+
+    /// <summary>
+    /// Asserts the store refuses a pin of the other tenant naming <paramref name="board"/> exactly as it refuses one naming
+    /// no board at all (#161) — same exception, kind, fields and message, so the refusal discloses nothing.
+    /// </summary>
+    private static async Task ShouldRefuseAnotherTenantsPinLikeOneNamingNoBoardAsync(RelationWorld world, Guid board, Guid owner)
+    {
+        var crossTenant = await Should.ThrowAsync<AlvoConstraintViolationException>(() => SeedPinAsync(world, world.Tenant2, board, owner));
+        var nowhere = await Should.ThrowAsync<AlvoConstraintViolationException>(() => SeedPinAsync(world, world.Tenant2, Guid.NewGuid(), owner));
+
+        crossTenant.Kind.ShouldBe(AlvoConstraintKind.Referenced);
+        crossTenant.Kind.ShouldBe(nowhere.Kind);
+        crossTenant.Fields.ShouldBe(nowhere.Fields);
+        crossTenant.Message.ShouldBe(nowhere.Message);
+    }
 
     private static async Task<Guid> SeedProjectWithMemberAsync(RelationWorld world, TenantId tenant, Guid member)
     {

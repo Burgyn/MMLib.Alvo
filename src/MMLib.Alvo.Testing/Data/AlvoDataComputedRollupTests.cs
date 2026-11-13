@@ -479,17 +479,15 @@ public abstract class AlvoDataComputedRollupTests
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>The cross-tenant <c>ref</c> is reachable, which is what makes this a fact rather than a hypothetical.</b>
-    /// A <c>ref</c> is a foreign key on the parent's <c>id</c> alone — not on <c>(tenant_id, id)</c> — so the
-    /// engine accepts a child row naming any existing parent, and the synthesized tenant scope judges the
-    /// <em>child's</em> <c>tenant_id</c>, which is honestly this caller's. So Globex can write a child pointing at
-    /// Acme's invoice, and without a tenant predicate on the recompute's <c>UPDATE</c> that write lands on Acme's
-    /// row: a cross-tenant write through a port whose whole premise is that it cannot happen.
+    /// <b>Since #161 the cross-tenant <c>ref</c> is refused by the store.</b> A <c>ref</c> between two scoped entities
+    /// is a foreign key over <c>(tenant_id, id)</c>, so Globex's child naming Acme's invoice is refused exactly as a
+    /// child naming no invoice at all (<see cref="AlvoConstraintKind.Referenced"/>). Before that key the write was
+    /// accepted, and only the tenant predicate on the recompute's <c>UPDATE</c> kept it off Acme's row.
     /// </para>
     /// <para>
-    /// It asserts Acme's stored aggregates rather than an exception, because the write is <em>allowed</em> — what
-    /// must not happen is that it changes anything of Acme's. Both aggregates are checked: a <c>count</c> that
-    /// stayed while a <c>sum</c> moved is the same defect.
+    /// It asserts both halves: the write is refused, and Acme's stored aggregates did not move — a <c>count</c> that
+    /// stayed while a <c>sum</c> moved is the same defect. The recompute's tenant predicate is now defence in depth,
+    /// pinned without the store's key by <c>RollupTenantPredicateTests</c> and <c>RollupBackfillTenancyTests</c>.
     /// </para>
     /// </remarks>
     [Fact]
@@ -499,7 +497,8 @@ public abstract class AlvoDataComputedRollupTests
         var invoice = await CreateInvoiceInTenantAsync(data, Acme);
         await CreateItemInTenantAsync(data, Acme, invoice, amount: 10m);
 
-        await CreateItemInTenantAsync(data, Globex, invoice, amount: 5m);
+        (await Should.ThrowAsync<AlvoConstraintViolationException>(() => CreateItemInTenantAsync(data, Globex, invoice, amount: 5m)))
+            .Kind.ShouldBe(AlvoConstraintKind.Referenced);
 
         var stored = await InvoiceInTenantAsync(data, Acme, invoice);
         stored[NetTotal].ShouldBe(10m, "Globex's write must not reach a row belonging to Acme");
@@ -512,12 +511,16 @@ public abstract class AlvoDataComputedRollupTests
     /// </summary>
     /// <remarks>
     /// <para>
-    /// This is the half the parent's <c>WHERE</c> cannot cover, and it needs the foreign tenant's child to be
-    /// already present when a <em>legitimate</em> recompute runs: Globex's child names Acme's invoice, and then
-    /// Acme writes a second child of their own. That recompute correctly targets Acme's row, so the only thing
-    /// standing between Globex's amount and Acme's <c>sum</c> is the tenant predicate <b>inside the aggregate</b>.
-    /// Without it, Acme reads a number that is the sum of two tenants' rows and a <c>count</c> that reports how
-    /// many rows Globex holds — a read oracle of the same class as the unique-index one (#137).
+    /// This is the half the parent's <c>WHERE</c> cannot cover: a foreign tenant's child already present when a
+    /// <em>legitimate</em> recompute runs would be kept out of Acme's <c>sum</c> and <c>count</c> only by the tenant
+    /// predicate <b>inside the aggregate</b> — otherwise a read oracle of the same class as the unique-index one (#137).
+    /// </para>
+    /// <para>
+    /// <b>Since #161 that child cannot be stored:</b> a <c>ref</c> between two scoped entities is a foreign key over
+    /// <c>(tenant_id, id)</c>, so Globex's child naming Acme's invoice is refused
+    /// (<see cref="AlvoConstraintKind.Referenced"/>), and Acme's next recompute counts only Acme's own rows. The
+    /// aggregate's tenant predicate is now defence in depth, pinned by <c>RollupTenantPredicateTests</c> and
+    /// <c>RollupBackfillTenancyTests</c>.
     /// </para>
     /// </remarks>
     [Fact]
@@ -526,7 +529,8 @@ public abstract class AlvoDataComputedRollupTests
         var data = await CreateAsync(ScopedSchema, ScopedDescriptor);
         var invoice = await CreateInvoiceInTenantAsync(data, Acme);
         await CreateItemInTenantAsync(data, Acme, invoice, amount: 10m);
-        await CreateItemInTenantAsync(data, Globex, invoice, amount: 5m);
+        (await Should.ThrowAsync<AlvoConstraintViolationException>(() => CreateItemInTenantAsync(data, Globex, invoice, amount: 5m)))
+            .Kind.ShouldBe(AlvoConstraintKind.Referenced);
 
         await CreateItemInTenantAsync(data, Acme, invoice, amount: 2m);
 
@@ -587,13 +591,19 @@ public abstract class AlvoDataComputedRollupTests
     /// predicate, so an <c>||</c> inside it can only widen which of the tenant's own children count — never reach Globex's
     /// child that names Acme's product and matches the filter.
     /// </summary>
+    /// <remarks>
+    /// Since #161 that child is refused by the store — a <c>ref</c> between two scoped entities is a foreign key over
+    /// <c>(tenant_id, id)</c> — so the fact asserts the refusal and Acme's total; the filtered aggregate's tenant predicate
+    /// is defence in depth, pinned by <c>RollupTenantPredicateTests</c> and <c>RollupBackfillTenancyTests</c>.
+    /// </remarks>
     [Fact]
     public async Task A_filter_with_an_or_never_aggregates_another_tenants_children()
     {
         var data = await CreateAsync(ScopedFilteredSchema(EitherStatus), ScopedFilteredDescriptor(EitherStatus));
         var product = await CreateProductAsync(data, Acme);
         await CreateReservationAsync(data, product, 10m, "held", Acme);
-        await CreateReservationAsync(data, product, 5m, "released", Globex);
+        (await Should.ThrowAsync<AlvoConstraintViolationException>(() => CreateReservationAsync(data, product, 5m, "released", Globex)))
+            .Kind.ShouldBe(AlvoConstraintKind.Referenced);
 
         await CreateReservationAsync(data, product, 2m, "released", Acme);
 
@@ -678,6 +688,11 @@ public abstract class AlvoDataComputedRollupTests
     /// The backfill's tenant predicate, pinned (Ruling 32): Globex's released child names Acme's product, and the apply that
     /// switches the filter to <c>released</c> recomputes Acme's row from Acme's own children alone.
     /// </summary>
+    /// <remarks>
+    /// Since #161 Globex's child is refused by the store — a <c>ref</c> between two scoped entities is a foreign key over
+    /// <c>(tenant_id, id)</c> — so the fact asserts the refusal and the backfilled total; the backfill's tenant predicate is
+    /// defence in depth, pinned without the store's key by <c>RollupBackfillTenancyTests</c>.
+    /// </remarks>
     [Fact]
     public async Task A_backfill_never_aggregates_another_tenants_children()
     {
@@ -685,7 +700,8 @@ public abstract class AlvoDataComputedRollupTests
         var product = await CreateProductAsync(data, Acme);
         await CreateReservationAsync(data, product, 10m, "held", Acme);
         await CreateReservationAsync(data, product, 2m, "released", Acme);
-        await CreateReservationAsync(data, product, 5m, "released", Globex);
+        (await Should.ThrowAsync<AlvoConstraintViolationException>(() => CreateReservationAsync(data, product, 5m, "released", Globex)))
+            .Kind.ShouldBe(AlvoConstraintKind.Referenced);
 
         await ApplyAsync(ScopedFilteredSchema("status == 'held'"), ScopedFilteredSchema("status == 'released'"));
 

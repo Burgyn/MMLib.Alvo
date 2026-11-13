@@ -154,6 +154,118 @@ public class DescriptorModelBuilderTests
         orders.FindProperty("vehicle_id")!.ClrType.ShouldBe(typeof(Guid?));
     }
 
+    /// <summary>
+    /// #161: a reference between two scoped entities is a key over <c>(tenant_id, id)</c>, so the database refuses a
+    /// child naming another tenant's row exactly as it refuses one naming no row. <c>restrict</c> and <c>cascade</c>
+    /// carry their action on the composite key itself (D1).
+    /// </summary>
+    [Theory]
+    [InlineData(OnDelete.Restrict, DeleteBehavior.Restrict)]
+    [InlineData(OnDelete.Cascade, DeleteBehavior.Cascade)]
+    public void A_scoped_reference_to_a_scoped_target_spans_the_tenant(OnDelete onDelete, DeleteBehavior expected)
+    {
+        var fk = Visits(Build(Pair(onDelete, Scoped, Scoped))).GetForeignKeys().ShouldHaveSingleItem();
+
+        fk.Properties.Select(p => p.Name).ShouldBe(["tenant_id", "work_order_id"]);
+        fk.PrincipalKey.Properties.Select(p => p.Name).ShouldBe(["tenant_id", "id"]);
+        fk.PrincipalKey.IsPrimaryKey().ShouldBeFalse();
+        fk.DeleteBehavior.ShouldBe(expected);
+    }
+
+    /// <summary>
+    /// D2, the default shape: a composite <c>SET NULL</c> would null the non-nullable <c>tenant_id</c> too, so the field's
+    /// own single-column key keeps the action and a separate composite guard refuses nothing on delete.
+    /// </summary>
+    [Fact]
+    public void A_scoped_set_null_reference_keeps_its_action_on_the_field_and_guards_separately()
+    {
+        var fks = Visits(Build(Pair(OnDelete.SetNull, Scoped, Scoped))).GetForeignKeys().ToList();
+
+        fks.Count.ShouldBe(2);
+        fks.Single(fk => fk.Properties.Count == 1).DeleteBehavior.ShouldBe(DeleteBehavior.SetNull);
+        fks.Single(fk => fk.Properties.Count == 2).DeleteBehavior.ShouldBe(DeleteBehavior.NoAction);
+    }
+
+    /// <summary>D2, an engine that can name the column <c>SET NULL</c> clears: one composite key carries the action.</summary>
+    [Fact]
+    public void A_scoped_set_null_reference_is_one_composite_key_where_the_engine_names_set_null_columns()
+    {
+        var fk = Visits(Build(Pair(OnDelete.SetNull, Scoped, Scoped), TenantGuardShape.For(ScopedSetNullShape.NamedColumns)))
+            .GetForeignKeys().ShouldHaveSingleItem();
+
+        fk.Properties.Count.ShouldBe(2);
+        fk.DeleteBehavior.ShouldBe(DeleteBehavior.SetNull);
+    }
+
+    /// <summary>D6: a reference that is not scoped on both ends has no tenant pair to key on.</summary>
+    [Theory]
+    [InlineData(TenancyMode.Scoped, TenancyMode.Global)]
+    [InlineData(TenancyMode.Global, TenancyMode.Scoped)]
+    [InlineData(null, TenancyMode.Scoped)]
+    public void A_reference_that_is_not_scoped_on_both_ends_keeps_a_single_column_key(TenancyMode? child, TenancyMode? target)
+    {
+        var fk = Visits(Build(Pair(OnDelete.Restrict, child, target))).GetForeignKeys().ShouldHaveSingleItem();
+
+        fk.Properties.Select(p => p.Name).ShouldBe(["work_order_id"]);
+        fk.PrincipalKey.IsPrimaryKey().ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_self_reference_and_a_second_reference_on_a_scoped_child_are_each_guarded()
+    {
+        var model = Build(Pair(
+            OnDelete.Restrict,
+            Scoped,
+            Scoped,
+            Ref("follows_id", "visits", OnDelete.Restrict),
+            Ref("backup_order_id", "work_orders", OnDelete.Restrict)));
+
+        var fks = Visits(model).GetForeignKeys().ToList();
+        fks.Count.ShouldBe(3);
+        fks.ShouldAllBe(fk => fk.Properties.Count == 2 && fk.Properties[0].Name == "tenant_id");
+        AlternateKeys(model, "work_orders").ShouldHaveSingleItem().ShouldBe(["tenant_id", "id"]);
+        AlternateKeys(model, "visits").ShouldHaveSingleItem().ShouldBe(["tenant_id", "id"]);
+    }
+
+    private const TenancyMode Scoped = TenancyMode.Scoped;
+
+    private static IModel Build(SchemaModel model, TenantGuardShape? guards = null) =>
+        DescriptorModelBuilder.Build(model, NewSqliteBuilder, guards: guards);
+
+    private static IEntityType Visits(IModel model) => model.FindEntityType("visits")!;
+
+    private static IEnumerable<string[]> AlternateKeys(IModel model, string entity) =>
+        model.FindEntityType(entity)!.GetKeys().Where(key => !key.IsPrimaryKey()).Select(key => key.Properties.Select(p => p.Name).ToArray());
+
+    /// <summary>
+    /// <c>work_orders</c> (the target) and <c>visits</c> (the child, ref <c>work_order_id</c>), each carrying a trailing
+    /// <c>tenant_id</c> when scoped — the order <c>DescriptorToSchemaMapper</c> appends managed columns in.
+    /// </summary>
+    private static SchemaModel Pair(OnDelete onDelete, TenancyMode? child, TenancyMode? target, params FieldSchema[] extra) => new([
+        Entity("work_orders", target),
+        Entity("visits", child, [Ref("work_order_id", "work_orders", onDelete), .. extra]),
+    ]);
+
+    private static EntitySchema Entity(string name, TenancyMode? tenancy, IReadOnlyList<FieldSchema>? fields = null) => new()
+    {
+        Name = name,
+        Tenancy = tenancy,
+        Fields = [
+            new FieldSchema { Name = "id", Type = FieldType.Uuid, Required = true },
+            .. fields ?? [],
+            .. tenancy == TenancyMode.Scoped ? [new FieldSchema { Name = "tenant_id", Type = FieldType.Uuid, Required = true }] : Array.Empty<FieldSchema>(),
+        ],
+    };
+
+    private static FieldSchema Ref(string name, string target, OnDelete onDelete) => new()
+    {
+        Name = name,
+        Type = FieldType.Ref,
+        Required = onDelete != OnDelete.SetNull,
+        Nullable = onDelete == OnDelete.SetNull,
+        Reference = new RefSchema(target, onDelete),
+    };
+
     [Fact]
     public void Decimal_field_carries_precision_and_scale()
     {

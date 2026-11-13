@@ -383,11 +383,17 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         SchemaModel current, SchemaModel desired)
     {
         var prePass = RenamePrePass.Compute(current, desired);
-        var currentModel = BuildInitializedModel(prePass.AlignedCurrent);
-        var desiredModel = BuildInitializedModel(desired);
+        var guards = TenantGuardShape.For(_dialect.ScopedSetNull);
+        var currentModel = BuildInitializedModel(prePass.AlignedCurrent, guards);
+        var desiredModel = BuildInitializedModel(desired, guards);
 
         var residual = _differ.GetDifferences(currentModel.GetRelationalModel(), desiredModel.GetRelationalModel());
-        residual = RenameGuessSplitter.Normalize(residual, prePass.AlignedCurrent, desired, BuildInitializedModel, _differ);
+        residual = RenameGuessSplitter.Normalize(
+            residual,
+            prePass.AlignedCurrent,
+            desired,
+            schema => BuildInitializedModel(schema, TenantGuardShape.For(_dialect.ScopedSetNull)),
+            _differ);
 
         return (prePass, desiredModel, residual);
     }
@@ -658,12 +664,12 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     private static MigrationStep ToStep(SchemaChange change, string? costNote = null) =>
         new(change, change.IsDestructive, change.IsDestructive ? change.Detail : costNote);
 
-    private IModel BuildInitializedModel(SchemaModel schema)
+    private IModel BuildInitializedModel(SchemaModel schema, TenantGuardShape guards)
     {
         // DescriptorModelBuilder.Build returns a FinalizeModel()'d model; GetRelationalModel()
         // additionally requires the runtime initializer to have run (Task 0 report, gotcha #1).
         CheckConstraintNames.EnsureDistinct(schema);
-        var model = DescriptorModelBuilder.Build(schema, _newModelBuilder, _computed, _checks, _filters);
+        var model = DescriptorModelBuilder.Build(schema, _newModelBuilder, _computed, _checks, _filters, guards);
         var initialized = _modelRuntimeInitializer.Initialize(model, designTime: true);
         EnsureEveryGeneratedColumnIsExpressible(initialized);
 
