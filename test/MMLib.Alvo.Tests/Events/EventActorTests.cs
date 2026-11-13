@@ -42,6 +42,43 @@ public sealed class EventActorTests
     public void An_envelope_without_a_credential_never_lends_its_recorded_roles_to_an_anonymous_actor() =>
         EventActor.Of(Event(authId: null, "{\"roles\":[\"admin\"]}"), RoleCatalog.BuiltInOnly).Roles.ShouldBe([Role.Anon]);
 
+    [Fact]
+    public void The_actor_keeps_the_still_declared_tenant_roles_of_its_tenant()
+    {
+        var actor = EventActor.Of(
+            Event(_user.ToString(), """{"roles":["authenticated"],"tenantRoles":["dispatcher","retired-role"]}"""),
+            RoleCatalog.Create(["dispatcher"]));
+
+        actor.Tenant.ShouldBe(new TenantId(_tenant));
+        actor.Roles.ShouldBe([Role.Authenticated]);
+        actor.TenantRoles.Select(role => role.Name).ShouldBe(["dispatcher"]);
+        EventActor.Of(Event(_user.ToString(), """{"roles":["authenticated"],"tenantRoles":["retired-role"]}"""), RoleCatalog.BuiltInOnly)
+            .TenantRoles.ShouldBeEmpty("unlike the roles, no tenant role stands in for none");
+    }
+
+    [Fact]
+    public void An_envelope_without_a_tenant_yields_no_tenant_roles()
+    {
+        var @event = Event(_user.ToString(), """{"roles":["authenticated"],"tenantRoles":["dispatcher"]}""") with { TenantId = null };
+
+        EnvelopeReading.CallerOf(@event).Context.TenantRoles.ShouldBeEmpty();
+        EventActor.Of(@event, RoleCatalog.Create(["dispatcher"])).TenantRoles.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_built_in_named_as_a_tenant_role_is_dropped_not_thrown()
+    {
+        var @event = Event(_user.ToString(), """{"roles":["authenticated"],"tenantRoles":["admin","anon","authenticated","dispatcher"]}""");
+
+        EnvelopeReading.CallerOf(@event).Context.TenantRoles.Select(role => role.Name).ShouldBe(["dispatcher"]);
+        EventActor.Of(@event, RoleCatalog.Create(["dispatcher"])).TenantRoles.Select(role => role.Name).ShouldBe(["dispatcher"]);
+    }
+
+    [Fact]
+    public void An_anonymous_change_carries_no_tenant_roles() =>
+        EventActor.Of(Event(authId: null, """{"roles":["anon"],"tenantRoles":["dispatcher"]}"""), RoleCatalog.Create(["dispatcher"]))
+            .TenantRoles.ShouldBeEmpty();
+
     private static AlvoEvent Event(string? authId, string? authClaims) => new()
     {
         Id = AlvoEventId.Create(DateTimeOffset.UtcNow),
