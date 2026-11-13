@@ -99,4 +99,19 @@ public class CelNamesTests
     [Fact]
     public void Without_the_head_spelling_a_name_before_a_dot_stays_a_namespace()
         => CelNames.Rename("work_order_id.status == 1", "work_order_id", "job_id").ShouldBe("work_order_id.status == 1");
+
+    [Theory]
+    [InlineData("work_order_id.status == 'x'", true)]
+    [InlineData("work_order_id . status == 'x'", true)]
+    [InlineData("'work_order_id.status' == x", false)]
+    [InlineData("x.work_order_id.status == 1", false)]
+    [InlineData("@work_order_id.status == 1", false)]
+    [InlineData("work_order_id.statuses == 1", false)]
+    public void Reading_through_a_ref_is_told_outside_string_literals_only(string cel, bool reads)
+        => CelNames.MayReadThrough(cel, "work_order_id", "status").ShouldBe(reads);
+
+    [Fact]
+    public void The_body_of_each_exists_over_the_receiver_is_found_to_its_closing_parenthesis()
+        => CelNames.ExistsBodies("orders.exists(o, size(o.tags) > 1 && o.note == ')') || lines.exists(l, l.x) || x.orders.exists(y, y)", "orders")
+            .ShouldBe(["o, size(o.tags) > 1 && o.note ==  "]);
 }

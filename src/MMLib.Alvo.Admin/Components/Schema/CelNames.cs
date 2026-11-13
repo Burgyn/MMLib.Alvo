@@ -19,7 +19,7 @@ namespace MMLib.Alvo.Admin.Components.Schema;
 /// <b>Relation paths change the spelling, not the rules</b> (<see cref="CelSpelling"/>): in a rule or a lookup check
 /// the refs to the field's entity are prefixes beside <c>new</c>/<c>old</c> (<c>work_order_id.assigned_to</c>), another
 /// entity's bare names are its own columns, and a ref being renamed is also the head of a path
-/// (<c>work_order_id.status</c>) — unless the member after the dot is called, which makes the ref a receiver.
+/// (<c>work_order_id.status</c>) — unless the member after the dot is called, which no path is.
 /// </para>
 /// <para>
 /// <b>Declined rather than guessed</b> when the answer cannot be told from the text: a binding macro
@@ -47,6 +47,13 @@ internal static class CelNames
 
     private static readonly string[] _tripleQuotes = ["'''", "\"\"\""];
 
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(1);
+
+    private const string WordEnd = "(?![A-Za-z0-9_])";
+
+    /// <summary>A name that is neither a member of something else nor a claim of <c>@user</c>/<c>@tenant</c>.</summary>
+    private const string Unqualified = @"(?<![A-Za-z0-9_@])(?<!\.\s*)";
+
     /// <summary>The expression with every reference to <paramref name="from"/> in its own entity renamed, or <see langword="null"/> when that cannot be done safely.</summary>
     public static string? Rename(string cel, string from, string to) => Rename(cel, from, to, CelSpelling.Own);
 
@@ -73,7 +80,22 @@ internal static class CelNames
 
     /// <summary>Whether the text contains the name as a whole word — for a place <see cref="Rename(string, string, string, CelSpelling)"/> declined.</summary>
     public static bool MayName(string cel, string name)
-        => Regex.IsMatch(cel, @"(?<![A-Za-z0-9_])" + Regex.Escape(name) + @"(?![A-Za-z0-9_])", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+        => Regex.IsMatch(cel, @"(?<![A-Za-z0-9_])" + Regex.Escape(name) + WordEnd, RegexOptions.CultureInvariant, _timeout);
+
+    /// <summary>Whether the code, outside string literals, reads <paramref name="name"/> as a member of <paramref name="prefix"/>: <c>work_order_id.status</c>.</summary>
+    public static bool MayReadThrough(string cel, string prefix, string name)
+        => Regex.IsMatch(Code(cel), Unqualified + Regex.Escape(prefix) + @"\s*\.\s*" + Regex.Escape(name) + WordEnd, RegexOptions.CultureInvariant, _timeout);
+
+    /// <summary>
+    /// The argument text of every <c>&lt;receiver&gt;.exists(…)</c> outside string literals (literals blanked) — the reverse
+    /// relation terms over one child (<c>docs/architecture/relation-rules.md</c>).
+    /// </summary>
+    public static IEnumerable<string> ExistsBodies(string cel, string receiver)
+    {
+        var code = Code(cel);
+        var receivers = Regex.Matches(code, Unqualified + Regex.Escape(receiver) + @"\s*\.\s*exists\s*\(", RegexOptions.CultureInvariant, _timeout);
+        return [.. receivers.Select(match => Arguments(code, match.Index + match.Length))];
+    }
 
     /// <summary>Whether the names in this expression cannot be told apart from the text alone.</summary>
     private static bool Declines(string cel, string from, string to)
@@ -107,6 +129,22 @@ internal static class CelNames
         }
 
         return code.ToString();
+    }
+
+    /// <summary>The text from <paramref name="start"/> up to the parenthesis that closes the one just opened.</summary>
+    private static string Arguments(string code, int start)
+    {
+        var depth = 1;
+        for (var at = start; at < code.Length; at++)
+        {
+            depth += code[at] switch { '(' => 1, ')' => -1, _ => 0 };
+            if (depth == 0)
+            {
+                return code[start..at];
+            }
+        }
+
+        return code[start..];
     }
 
     private static int CopyString(string cel, int at, StringBuilder output)

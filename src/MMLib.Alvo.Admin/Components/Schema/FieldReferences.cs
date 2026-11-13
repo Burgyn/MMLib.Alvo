@@ -266,21 +266,21 @@ internal static partial class FieldReferences
         at.Add(place, blocks: true);
     }
 
-    /// <inheritdoc cref="Expression(JsonObject, string, string, CelSpelling, Site)"/>
+    /// <inheritdoc cref="Expression(JsonObject, string, string, Reading, Site)"/>
     private static void Expression(JsonObject owner, string key, string place, Site at)
-        => Expression(owner, key, place, CelSpelling.Own, at);
+        => Expression(owner, key, place, new Reading(CelSpelling.Own, cel => MayName(cel, at)), at);
 
     /// <summary>One CEL slot: rewritten token by token when that is safe; otherwise named, and not blocking.</summary>
-    private static void Expression(JsonObject owner, string key, string place, CelSpelling spelling, Site at)
+    private static void Expression(JsonObject owner, string key, string place, Reading reading, Site at)
     {
-        if (owner[key] is not JsonValue value || !value.TryGetValue<string>(out var cel))
+        if (Text(owner, key) is not { } cel)
         {
             return;
         }
 
-        if (CelNames.Rename(cel, at.Field, at.To ?? Probe, spelling) is not { } renamed)
+        if (CelNames.Rename(cel, at.Field, at.To ?? Probe, reading.Spelling) is not { } renamed)
         {
-            if (MayName(cel, at))
+            if (reading.MayName(cel))
             {
                 at.Found.Add(new(new(place, Blocks: false), Carried: false));
             }
@@ -301,7 +301,7 @@ internal static partial class FieldReferences
 
     /// <summary>Whether a declined expression may name the field — bare, as a member, or as the ref of a <c>&lt;child&gt;_via_&lt;ref&gt;</c> receiver.</summary>
     private static bool MayName(string cel, Site at)
-        => CelNames.MayName(cel, at.Field) || CelNames.MayName(cel, $"{at.Entity}_via_{at.Field}");
+        => CelNames.MayName(cel, at.Field) || CelNames.MayName(cel, Via(at.Entity, at.Field));
 
     private static void Replace(JsonArray fields, Site at)
     {
@@ -336,6 +336,9 @@ internal static partial class FieldReferences
     private static Regex Placeholder(string field)
         => new(@"(\{\{\s*(?:new|old)\.)" + Regex.Escape(field) + @"(\s*\}\})", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
+    private static string? Text(JsonObject owner, string key)
+        => owner[key] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+
     private static bool Is(JsonNode? node, string expected)
         => node is JsonValue value && value.TryGetValue<string>(out var text) && text == expected;
 
@@ -347,4 +350,7 @@ internal static partial class FieldReferences
     }
 
     private sealed record Found(DescriptorReference Reference, bool Carried);
+
+    /// <summary>How one CEL slot spells the field, and whether an expression it declined may still name it.</summary>
+    private sealed record Reading(CelSpelling Spelling, Func<string, bool> MayName);
 }

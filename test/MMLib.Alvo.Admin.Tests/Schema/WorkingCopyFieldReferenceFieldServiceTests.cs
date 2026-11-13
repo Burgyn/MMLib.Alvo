@@ -36,7 +36,8 @@ public class WorkingCopyFieldReferenceFieldServiceTests
         copy.RenameField("work_orders", "assigned_to", "owner_id", out var uncarried).ShouldBeNull();
 
         uncarried.ShouldContain(new DescriptorReference("customers.rules.list", Blocks: false));
-        Entities(copy)["customers"]!["rules"]!["list"]!.GetValue<string>().ShouldBe("work_orders.exists(w, w.assigned_to == @user.id)");
+        Entities(copy)["customers"]!["rules"]!["list"]!.GetValue<string>()
+            .ShouldBe("work_orders.exists(w, w.assigned_to == @user.id) || status == 'active'");
     }
 
     [Fact]
@@ -67,8 +68,8 @@ public class WorkingCopyFieldReferenceFieldServiceTests
 
     [Fact]
     public void A_rename_carries_a_sequences_per()
-        => Renamed("work_orders", "customer_id", "client_id")["work_orders"]!["fields"]!["job_number"]!["sequence"]!["per"]!.GetValue<string>()
-            .ShouldBe("client_id");
+        => Renamed("work_orders", "team", "crew")["work_orders"]!["fields"]!["job_number"]!["sequence"]!["per"]!.GetValue<string>()
+            .ShouldBe("crew");
 
     [Fact]
     public void A_ref_rename_carries_its_relation_paths_and_the_checks_lookup()
@@ -150,8 +151,83 @@ public class WorkingCopyFieldReferenceFieldServiceTests
 
     [Fact]
     public void A_removal_names_a_sequences_per()
-        => Copy().ReferencesToField("work_orders", "customer_id")
-            .ShouldContain(new DescriptorReference("work_orders.fields.job_number.sequence.per", Blocks: true));
+        => Copy().ReferencesToField("work_orders", "team")
+            .ShouldBe([new DescriptorReference("work_orders.fields.job_number.sequence.per", Blocks: true)]);
+
+    /// <summary>
+    /// <c>work_orders.exists(…)</c> reaches the child through its one ref to the parent (<c>RelationCatalogBuilder</c>), so
+    /// removing that ref leaves the parent's rule nothing to reach through — the rollup's implicit <c>via</c>, for rules.
+    /// </summary>
+    [Fact]
+    public void A_childs_only_ref_removal_blocks_on_the_parent_rule_that_reaches_the_child_through_it()
+        => Copy().ReferencesToField("work_orders", "customer_id").ShouldBe(
+        [
+            new DescriptorReference("work_orders.indexes[0]", Blocks: true),
+            new DescriptorReference("customers.rules.list", Blocks: true),
+        ]);
+
+    [Fact]
+    public void A_via_receiver_blocks_the_removal_of_the_ref_it_names_and_is_named_by_its_rename()
+    {
+        var copy = Copy(Descriptor.Replace("\"work_orders.exists(", "\"work_orders_via_customer_id.exists(", StringComparison.Ordinal));
+
+        copy.ReferencesToField("work_orders", "customer_id").ShouldContain(new DescriptorReference("customers.rules.list", Blocks: true));
+        copy.RenameField("work_orders", "customer_id", "client_id", out var uncarried).ShouldBeNull();
+        uncarried.ShouldBe([new DescriptorReference("customers.rules.list", Blocks: false)]);
+    }
+
+    /// <summary>The parent's binder reaches <c>work_orders</c>; its own <c>status</c> beside it is no reference to the child's.</summary>
+    [Fact]
+    public void A_parents_same_named_column_beside_a_binder_over_the_child_is_no_reference()
+    {
+        var copy = Copy();
+
+        copy.ReferencesToField("work_orders", "status").ShouldNotContain(reference => reference.Place == "customers.rules.list");
+        copy.RenameField("work_orders", "status", "state", out var uncarried).ShouldBeNull();
+        uncarried.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Renaming_the_childs_same_named_field_leaves_the_path_through_the_ref_and_the_parents_payload_key()
+    {
+        var copy = Copy();
+
+        copy.RenameField("visits", "assigned_to", "booked_by").ShouldBeNull();
+
+        var visits = Entities(copy)["visits"]!;
+        visits["rules"]!["list"]!.GetValue<string>().ShouldBe("work_order_id.assigned_to == @user.id || booked_by == @user.id");
+        visits["hooks"]!["afterCreate"]![0]!["action"]!["payload"]!.ToJsonString().ShouldBe("""{"assigned_to":{"$cel":"new.technician_id"}}""");
+        WorkOrders(copy)["stateMachine"]!["transitions"]!["schedule"]!["when"]!.GetValue<string>().ShouldBe("has(new.assigned_to) && has(new.respond_by)");
+        Node(copy)["automation"]!["visit-booked"]!["condition"]!.GetValue<string>().ShouldBe("has(new.booked_by)");
+    }
+
+    [Fact]
+    public void A_rename_through_one_ref_leaves_another_refs_member_a_string_literal_and_the_callers_claim()
+        => Renamed("work_orders", "status", "state")["visits"]!["rules"]!["delete"]!.GetValue<string>()
+            .ShouldBe("customer_id.status == 'gone' || work_order_id.state == 'done' || 'status' == @user.status");
+
+    /// <summary>A self-ref read through itself: both the head and the member are the renamed ref.</summary>
+    [Fact]
+    public void A_self_ref_rename_carries_a_path_that_reads_it_through_itself()
+    {
+        var copy = Copy("""
+            {
+              "apiVersion": "alvo.dev/v1",
+              "name": "tree",
+              "entities": {
+                "nodes": {
+                  "fields": { "parent_id": { "type": "ref", "entity": "nodes" }, "owner_id": { "type": "uuid" } },
+                  "rules": { "list": "parent_id.parent_id == null || parent_id.owner_id == @user.id" }
+                }
+              }
+            }
+            """);
+
+        copy.RenameField("nodes", "parent_id", "parent", out var uncarried).ShouldBeNull();
+
+        Entities(copy)["nodes"]!["rules"]!["list"]!.GetValue<string>().ShouldBe("parent.parent == null || parent.owner_id == @user.id");
+        uncarried.ShouldBeEmpty();
+    }
 
     [Fact]
     public void A_refs_removal_names_the_checks_lookup_and_its_relation_paths()
@@ -179,15 +255,17 @@ public class WorkingCopyFieldReferenceFieldServiceTests
         var before = copy.Json;
 
         copy.ReferencesToField("work_orders", "assigned_to");
+        copy.ReferencesToField("work_orders", "status");
+        copy.ReferencesToField("work_orders", "customer_id");
         copy.ReferencesToField("visits", "technician_id");
 
         copy.Json.ShouldBe(before);
     }
 
-    private static WorkingCopy Copy()
+    private static WorkingCopy Copy(string descriptor = Descriptor)
     {
         var copy = new WorkingCopy();
-        copy.Take(Descriptor, revision: 3);
+        copy.Take(descriptor, revision: 3);
         return copy;
     }
 
@@ -210,8 +288,8 @@ public class WorkingCopyFieldReferenceFieldServiceTests
           "name": "field-service",
           "entities": {
             "customers": {
-              "fields": { "name": { "type": "string" } },
-              "rules": { "list": "work_orders.exists(w, w.assigned_to == @user.id)" }
+              "fields": { "name": { "type": "string" }, "status": { "type": "string" } },
+              "rules": { "list": "work_orders.exists(w, w.assigned_to == @user.id) || status == 'active'" }
             },
             "work_orders": {
               "fields": {
@@ -221,7 +299,8 @@ public class WorkingCopyFieldReferenceFieldServiceTests
                 "is_emergency": { "type": "boolean" },
                 "po_number": { "type": "string" },
                 "customer_id": { "type": "ref", "entity": "customers" },
-                "job_number": { "type": "integer", "sequence": { "per": "customer_id" } }
+                "team": { "type": "string" },
+                "job_number": { "type": "integer", "sequence": { "per": "team" } }
               },
               "rules": { "list": "assigned_to == @user.id" },
               "stateMachine": {
@@ -235,6 +314,7 @@ public class WorkingCopyFieldReferenceFieldServiceTests
             "visits": {
               "fields": {
                 "work_order_id": { "type": "ref", "entity": "work_orders" },
+                "customer_id": { "type": "ref", "entity": "customers" },
                 "technician_id": { "type": "uuid" },
                 "assigned_to": { "type": "uuid" },
                 "starts_at": { "type": "datetime" },
@@ -242,7 +322,8 @@ public class WorkingCopyFieldReferenceFieldServiceTests
               },
               "rules": {
                 "list": "work_order_id.assigned_to == @user.id || assigned_to == @user.id",
-                "update": "technician_id == @user.id && work_order_id.status != 'done'"
+                "update": "technician_id == @user.id && work_order_id.status != 'done'",
+                "delete": "customer_id.status == 'gone' || work_order_id.status == 'done' || 'status' == @user.status"
               },
               "checks": [ { "lookup": "work_order_id", "expr": "work_order_id.status != 'done'", "message": "Open orders only." } ],
               "indexes": [ { "fields": ["technician_id"], "exclude": { "from": "starts_at", "to": "ends_at" } } ],
