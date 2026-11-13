@@ -2183,7 +2183,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             _dialect,
             db.Rows(schema.Name).EntityType,
             schema,
-            callerKeyed: false, db.AppliedSchema, decision.Unnameable);
+            callerKeyed: false, db.AppliedSchema, decision.Unnameable, removes: true);
         if (affected == 0)
         {
             throw new AlvoRecordNotFoundException();
@@ -3403,7 +3403,7 @@ internal sealed partial class EfAlvoData : IAlvoData
                 _dialect,
                 db.Rows(schema.Name).EntityType,
                 schema,
-                callerKeyed: false, db.AppliedSchema, decision.Unnameable);
+                callerKeyed: false, db.AppliedSchema, decision.Unnameable, removes: true);
             if (affected == 0)
             {
                 throw new AlvoRecordNotFoundException();

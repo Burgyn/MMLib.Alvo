@@ -207,6 +207,42 @@ public class ConstraintViolationTranslatorTests
             async () => await Checked(CheckConstraintNames.For("task", "subtask_count"), Subtasks, Nothing)))
             .Fields.ShouldBeEmpty();
 
+    /// <summary>
+    /// A foreign-key refusal of a create or update is a <c>ref</c> naming a record the write cannot point at (#161): kind
+    /// <see cref="AlvoConstraintKind.Referenced"/>, naming nothing, worded for the write — not the delete's "other records
+    /// still reference this record".
+    /// </summary>
+    [Fact]
+    public async Task A_foreign_key_refusal_of_a_write_is_the_unresolved_reference()
+    {
+        var refused = await Should.ThrowAsync<AlvoConstraintViolationException>(async () => await Referenced(removes: false));
+
+        (refused.Kind, refused.Fields.Count, refused.IsUnresolvedReference).ShouldBe((AlvoConstraintKind.Referenced, 0, true));
+        refused.Message.ShouldNotBe(new AlvoConstraintViolationException(AlvoConstraintKind.Referenced, []).Message);
+        refused.InnerException.ShouldBeOfType<SqliteException>("the engine's own diagnostics survive for the host's log");
+    }
+
+    /// <summary>And a foreign-key refusal of a removal is still the <c>restrict</c> refusal, worded as it always was.</summary>
+    [Fact]
+    public async Task A_foreign_key_refusal_of_a_removal_is_the_restrict_refusal()
+    {
+        var refused = await Should.ThrowAsync<AlvoConstraintViolationException>(async () => await Referenced(removes: true));
+
+        (refused.Kind, refused.Fields.Count, refused.IsUnresolvedReference).ShouldBe((AlvoConstraintKind.Referenced, 0, false));
+        refused.Message.ShouldBe(new AlvoConstraintViolationException(AlvoConstraintKind.Referenced, []).Message);
+    }
+
+    private static Task Referenced(bool removes) =>
+        ConstraintViolationTranslator.TranslatedAsync(
+            () => Task.FromException(Collision()),
+            Decoding(new SqlConstraintViolation { Kind = AlvoConstraintKind.Referenced }),
+            Rows,
+            Part,
+            callerKeyed: false,
+            Applied,
+            Nothing,
+            removes: removes);
+
     private static Task Checked(string? constraintName, EntitySchema written, IReadOnlySet<string> unnameable, bool bodySent = true) =>
         ConstraintViolationTranslator.TranslatedAsync(
             () => Task.FromException(Collision()),
