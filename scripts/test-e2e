@@ -17,7 +17,10 @@
 #       an unaudited one, hidden and readOnly fields, an unconfigured operation, and both a
 #       caller-level and a row-level predicate. Its suite drives the query grammar, problem
 #       documents, ETag/If-Match, Idempotency-Key, confidentiality, authorization, tenant isolation
-#       and six multi-step journeys.
+#       and six multi-step journeys — and, as the advanced demo, the work-order state machine, a
+#       gapless sequence, CHECK validations, a partial unique index, the visits calendar (exclusion,
+#       lookup check, rollup, relation rule) and a completion webhook to a WireMock billing sink that
+#       shares the alvo container's network namespace (so its http://localhost URL is loopback).
 #
 # "The stack boots and answers" is not "the product behaves as documented", and only the second is
 # worth shipping — so both run, and the run fails if either does.
@@ -73,6 +76,7 @@ write_teapie_environment() {
     "apiKeySecret": "$ALVO_DEMO_KEY_SECRET",
 
     "fsBaseUrl": "http://localhost:$ALVO_FS_PORT",
+    "fsSinkUrl": "http://localhost:$ALVO_FS_SINK_PORT",
 
     "tenantNorth": "$ALVO_FS_TENANT_NORTH",
     "tenantSouth": "$ALVO_FS_TENANT_SOUTH",

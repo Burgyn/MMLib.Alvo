@@ -107,6 +107,9 @@ services:
     # operator followed a quickstart.
     ports:
       - "127.0.0.1:${ALVO_FS_PORT:?set ALVO_FS_PORT (see examples/field-service/demo-identities.env)}:8080"
+      # The billing sink's port. It is published HERE because the sink below shares this container's
+      # network namespace, and a `network_mode: service:` container cannot publish one of its own.
+      - "127.0.0.1:${ALVO_FS_SINK_PORT:?set ALVO_FS_SINK_PORT (see examples/field-service/demo-identities.env)}:9090"
     volumes:
       - ./examples/field-service/field-service.alvo.json:/alvo/descriptor.json:ro
     # /health/ready rather than /health/live, for the reason docker-compose.yml states: liveness
@@ -115,6 +118,25 @@ services:
     # rows, so "healthy" has to mean the schema is there.
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/ready"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # The billing system the descriptor's webhook endpoint names. It shares the alvo container's network
+  # namespace, so `http://localhost:9090` is loopback for Alvo: ActionCompiler admits http only for a
+  # loopback host, and WebhookEgressGuard refuses every non-public address unless the URL declares
+  # loopback. The guard stays fully on; nothing is allow-listed. The suite reads what billing received
+  # from WireMock's request journal (`POST /__admin/requests/find`) on ALVO_FS_SINK_PORT.
+  sink:
+    image: wiremock/wiremock:3.9.1
+    network_mode: "service:alvo"
+    command: ["--port", "9090", "--disable-banner"]
+    volumes:
+      - ./examples/field-service/sink/mappings:/home/wiremock/mappings:ro
+    # The image's own healthcheck asks localhost:8080 — which, in this shared namespace, is Alvo. Ask
+    # WireMock on the port it really listens on, so `up --wait` waits for the sink and not for a 404.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9090/__admin/health"]
       interval: 2s
       timeout: 3s
       retries: 30
