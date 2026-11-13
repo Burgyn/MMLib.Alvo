@@ -11,7 +11,11 @@ public sealed record AlvoContext
 {
     private static readonly UserId _systemUser = new(Guid.Parse("00000000-0000-0000-0000-0000000000a1"));
 
+    private static readonly IReadOnlySet<Role> _noTenantRoles = new HashSet<Role>();
+
     private readonly IReadOnlySet<Role> _roles = new HashSet<Role> { Role.Anon };
+
+    private readonly IReadOnlySet<Role> _tenantRoles = _noTenantRoles;
 
     private readonly AlvoActorKind? _actorKind;
 
@@ -32,6 +36,26 @@ public sealed record AlvoContext
             : throw new ArgumentException(
                 "A caller always holds at least one role; use { Role.Anon } for an anonymous caller.",
                 nameof(Roles));
+    }
+
+    /// <summary>
+    /// Gets the roles the caller holds inside <see cref="Tenant"/> only — a membership's roles, never a built-in; empty
+    /// unless given. They count where a rule of a tenant-scoped entity (or a relation term into one) reads
+    /// <c>@user.roles</c>, and nowhere else: not on a global entity, not at Management, and not without a tenant.
+    /// </summary>
+    /// <exception cref="ArgumentNullException">The value is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The value holds <c>anon</c>, <c>authenticated</c> or <c>admin</c>.</exception>
+    public IReadOnlySet<Role> TenantRoles
+    {
+        get => _tenantRoles;
+        init => _tenantRoles = value switch
+        {
+            null => throw new ArgumentNullException(nameof(TenantRoles)),
+            _ when HoldsBuiltIn(value) => throw new ArgumentException(
+                "A tenant role is never a built-in role; anon, authenticated and admin are project roles only.",
+                nameof(TenantRoles)),
+            _ => value,
+        };
     }
 
     /// <summary>Gets the tenant the caller acts in; <see langword="null"/> denies on a tenant-scoped entity.</summary>
@@ -80,12 +104,18 @@ public sealed record AlvoContext
         Tenant = tenant,
     };
 
+    private static bool HoldsBuiltIn(IReadOnlySet<Role> roles) =>
+        roles.Contains(Role.Anon) || roles.Contains(Role.Authenticated) || roles.Contains(Role.Admin);
+
     private static AlvoActorKind DerivedActorKind(UserId user) =>
         user == default ? AlvoActorKind.Anonymous
         : user == _systemUser ? AlvoActorKind.System
         : AlvoActorKind.ApiKey;
 
-    /// <summary>Answers whether the caller holds a role.</summary>
+    /// <summary>
+    /// Answers whether the caller holds a role — project roles only; a tenant role counts only where a scoped entity's
+    /// rule reads <c>@user.roles</c>.
+    /// </summary>
     /// <param name="role">The role to test.</param>
     public bool HasRole(Role role) => Roles.Contains(role);
 }
