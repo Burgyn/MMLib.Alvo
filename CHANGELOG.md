@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`examples/field-service` is the advanced demo** (`examples/vehicle-registry` stays the simple one): the descriptor
+  gains a state machine on `work_orders.status` (`new` → `schedule` → `start` → `complete`, `cancel`, admin-only
+  `reopen`), a gapless per-tenant `job_number` sequence, an SLA timer on `respond_by`, CHECK validations, a partial
+  unique index on `(customer_id, po_number)`, a `visits` entity (exclusion per technician, lookup check, relation rule,
+  the `on_site_minutes` rollup), `events.exclude` for the site secrets, an `admin` access rule, and an automation that
+  posts a completed purchase-order job to a `billing` webhook. `docker-compose.field-service.yml` adds a WireMock billing
+  sink that shares the Alvo container's network namespace, so the `http://localhost:9090` endpoint is genuinely loopback
+  and the webhook egress guard stays on; it is published on `ALVO_FS_SINK_PORT` (8083; the load stack uses 8093). `test/teapie-field-service`
+  gains `130-Lifecycle`, `140-Integrity`, `150-Relations` and `160-Automation`, inside the required e2e check. Anything
+  that runs the file without a sink (the quick-start image, the dashboard's e2e host) does not bill a job without a PO;
+  completing one that carries a `po_number` there leaves a retrying delivery on *Operations*.
 - **Docs: an explicit "Extending in code" section**: the sidebar lists every page under `extending/` (adds *Shape what reads
   return*, *Rules over relations* and *State machines and timers*), the section's index is grouped into six areas and says the
   host-extensibility line is complete, the roadmap no longer lists `automation` or the C# `functions` as not running, and the

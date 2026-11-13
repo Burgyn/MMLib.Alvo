@@ -29,11 +29,11 @@ public sealed class ExtensionCatalogScenarios(ExtensionWorld world) : IClassFixt
 
         var lane = session.Page.GetByTestId("lifecycle-after-commit");
         await lane.WaitForAsync();
-        var item = lane.GetByTestId($"lane-extension-{ExtensionWorld.Reschedule}");
+        var item = lane.GetByTestId($"lane-extension-{ExtensionWorld.ContactChange}");
         var text = await item.InnerTextAsync();
         text.ShouldContain("from code");
-        text.ShouldContain(ExtensionWorld.RescheduleDescription);
-        (await item.GetByTestId("lane-extension-when").InnerTextAsync()).Trim().ShouldBe("when changed(scheduled_for)");
+        text.ShouldContain(ExtensionWorld.ContactChangeDescription);
+        (await item.GetByTestId("lane-extension-when").InnerTextAsync()).Trim().ShouldBe("when changed(contact_email)");
         (await item.GetByTestId("lane-extension-summary").InnerTextAsync()).Trim()
             .ShouldBe("on update · timeout 30 s · runs as the system · in order per record");
         (await item.GetByRole(AriaRole.Button).CountAsync()).ShouldBe(0, "host code is read-only on the dashboard");
@@ -67,7 +67,7 @@ public sealed class ExtensionApplyRefusalScenarios(ExtensionWorld world) : IClas
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema/work_orders");
-        await session.Page.GetByTestId("remove-field-scheduled_for").ClickAsync();
+        await session.Page.GetByTestId("remove-field-contact_email").ClickAsync();
         await session.Dialog("remove-field-sheet").GetByTestId("remove-field-anyway").ClickAsync();
 
         await session.Page.ClickAsync("[data-testid='pending-preview']");
@@ -76,8 +76,8 @@ public sealed class ExtensionApplyRefusalScenarios(ExtensionWorld world) : IClas
 
         var said = await refusal.InnerTextAsync();
         said.ShouldContain("The descriptor is not valid");
-        said.ShouldContain("/entities/work_orders/fields/scheduled_for");
-        said.ShouldContain($"'{ExtensionWorld.Reschedule}' (eventHandler, in this host)");
+        said.ShouldContain("/entities/work_orders/fields/contact_email");
+        said.ShouldContain($"'{ExtensionWorld.ContactChange}' (eventHandler, in this host)");
         (await session.Page.GetByTestId("plan").CountAsync()).ShouldBe(0, "a refused descriptor has no plan");
         session.AssertConsoleClean();
     }

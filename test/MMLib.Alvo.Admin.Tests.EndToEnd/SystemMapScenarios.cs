@@ -24,13 +24,14 @@ public sealed class SystemMapScenarios(AdminWorld world) : IClassFixture<AdminWo
         var map = session.Page.GetByTestId("system-map");
         await map.WaitForAsync();
 
-        foreach (var entity in new[] { "regions", "customers", "work_orders" })
+        foreach (var entity in new[] { "regions", "customers", "work_orders", "visits" })
         {
             await Box(session, entity).WaitForAsync();
         }
 
         (await map.TextContentAsync() ?? string.Empty).ShouldContain("work_orders.customer_id points at customers");
-        (await Box(session, "customers").TextContentAsync() ?? string.Empty).ShouldContain("tenant · 5 fields");
+        (await map.TextContentAsync() ?? string.Empty).ShouldContain("visits.work_order_id points at work_orders");
+        (await Box(session, "customers").TextContentAsync() ?? string.Empty).ShouldContain("tenant · 7 fields");
         session.Page.Url.ShouldContain("view=map");
         session.AssertConsoleClean();
     }

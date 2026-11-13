@@ -77,6 +77,8 @@ test('an after-hook emits a discriminated action, and only from a declared endpo
   await reset(page);
 
   // With no endpoint declared, the control says so rather than accepting a name nothing declares.
+  // field-service declares `billing`, so the premise is arranged: the working copy drops its endpoints.
+  await page.evaluate(() => { delete window.__alvoPrototype.wc.working.webhooks; });
   await openHookEditor(page, 'afterUpdate');
   await page.click('[data-act="hookkind"][data-value="webhook"]');
   await page.waitForTimeout(60);

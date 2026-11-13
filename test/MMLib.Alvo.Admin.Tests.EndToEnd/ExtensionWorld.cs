@@ -10,26 +10,26 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>
 /// The field-service world with three event handlers registered as a host developer would: one on <c>work_orders</c>
-/// reading <c>scheduled_for</c>, which nothing in the descriptor names, a typed one on <c>work_orders</c> whose
+/// reading <c>contact_email</c>, which nothing in the descriptor names, a typed one on <c>work_orders</c> whose
 /// condition is a lambda, and one on every entity — and two commands: one mapped on a <c>work_orders</c> row, one internal.
 /// </summary>
 /// <remarks>Registered through <see cref="AdminWorld"/>'s test-side builder and map seams; the shipped host gains none.</remarks>
 public sealed class ExtensionWorld : AdminWorld
 {
-    internal const string Reschedule = "notify-reschedule";
+    internal const string ContactChange = "notify-contact-change";
     internal const string Audit = "audit-every-save";
     internal const string Completed = "notify-completed";
-    internal const string RescheduleDescription = "Tells the dispatcher when a work order is rescheduled.";
+    internal const string ContactChangeDescription = "Tells the dispatcher when a work order's contact address changes.";
     internal const string Complete = "complete_work_order";
     internal const string Notify = "notify_customer";
 
     /// <inheritdoc/>
     protected override void Configure(IAlvoBuilder alvo) => alvo
         .Entity("work_orders", orders => orders.OnUpdated(
-            Reschedule,
+            ContactChange,
             (AlvoUpdated<AlvoRecord> _) => Task.CompletedTask,
-            when: "changed(scheduled_for)",
-            configure: options => options.Description = RescheduleDescription))
+            when: "changed(contact_email)",
+            configure: options => options.Description = ContactChangeDescription))
         .Entity<WorkOrder>(orders => orders.OnUpdated(
             Completed,
             (AlvoUpdated<WorkOrder> _) => Task.CompletedTask,

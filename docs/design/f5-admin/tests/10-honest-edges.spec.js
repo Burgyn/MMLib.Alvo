@@ -164,13 +164,24 @@ test.describe('the honest edges', () => {
     await reset(page);
     await go(page, '#/overview');
 
-    // field-service declares NONE of the five, so the panel must not list five inert blocks.
+    // field-service declares exactly ONE of the five — `webhooks` (the billing endpoint) — so the panel
+    // lists that one, with the server's own sentence, and not the four inert blocks it does not declare.
+    await expect(page.locator('#app')).not.toContainText('This descriptor declares none of them');
+    for (const w of CAPABILITIES.warned) {
+      if (w.block === 'webhooks') await expect(page.locator('#app')).toContainText(w.consequence);
+      else await expect(page.locator('#app')).not.toContainText(w.consequence);
+    }
+
+    // Remove it, and the panel says the descriptor declares none — and that nothing else will tell you.
+    await page.evaluate(() => {
+      delete window.__alvoPrototype.wc.working.webhooks;
+      delete window.__alvoPrototype.wc.applied.webhooks;
+    });
+    await go(page, '#/schema');
+    await go(page, '#/overview');
     await expect(page.locator('#app')).toContainText('This descriptor declares none of them');
     await expect(page.locator('#app')).toContainText('This panel is the only place you will be told');
     await expect(page.locator('#app')).toContainText('A runtime apply writes no warning line at all');
-    for (const w of CAPABILITIES.warned) {
-      await expect(page.locator('#app')).not.toContainText(w.consequence);
-    }
 
     // Declare one, and it appears — with the server's own sentence.
     await page.evaluate(() => {

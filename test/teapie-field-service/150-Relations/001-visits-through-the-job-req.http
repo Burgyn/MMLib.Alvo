@@ -1,0 +1,79 @@
+### A relation rule: `visits.rules.list/get` admit a technician through the JOB —
+### `work_order_id.assigned_to == @user.id` — and the related entity's own list rule applies too.
+### Reads only; the rows are 140-Integrity/004's: two tech-north visits on WO-3401 (assigned to
+### tech-north) and one spare-north visit on WO-3402 (assigned to nobody).
+###
+### spare-north being the 3402 visit's `technician_id` yet NOT seeing it is deliberate: the relation, not
+### the `technician_id` column, decides visibility. The job is nobody's, so its visit is nobody's.
+
+### tech-north's visits
+# @name TechLists
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/visits?order=starts_at.asc&limit=100
+X-Alvo-Api-Key: {{keyTechNorth}}
+
+### spare-north's visits: the same rule, a technician with no job assigned
+# @name SpareLists
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/visits?order=starts_at.asc&limit=100
+X-Alvo-Api-Key: {{keySpareNorth}}
+
+### The dispatcher's: every visit in the tenant (control — the rows exist)
+# @name DispatcherLists
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/visits?order=starts_at.asc&limit=100
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### tech-north reads the 3402 visit by id: one row failing the rule is 404, never 403
+# @name TechReadsOthersVisit
+## TEST-EXPECT-STATUS: [404]
+GET {{fsBaseUrl}}/api/visits/{{VisitOnUnassignedJobId}}
+X-Alvo-Api-Key: {{keyTechNorth}}
+
+### The same id read by the dispatcher (control — the 404 is the rule, not a missing row)
+# @name DispatcherReadsThatVisit
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/visits/{{VisitOnUnassignedJobId}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### WRITES, after every read above. `visits.update` is the read rule plus being the booked technician:
+### `technician_id == @user.id && work_order_id.assigned_to == @user.id`. spare-north IS the 3402 visit's
+### technician, but the job is nobody's — so they may not write a visit they cannot read
+# @name SpareWritesUnassignedVisit
+## TEST-EXPECT-STATUS: [404]
+PATCH {{fsBaseUrl}}/api/visits/{{VisitOnUnassignedJobId}}
+X-Alvo-Api-Key: {{keySpareNorth}}
+Content-Type: application/json
+
+{ "minutes_on_site": 600 }
+
+### The dispatcher's read of it after that: unchanged
+# @name DispatcherRereadsThatVisit
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/visits/{{VisitOnUnassignedJobId}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### The assigned AND booked technician writes their own visit (control)
+# @name TechWritesOwnVisit
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/visits/{{VisitOfTechNorthId}}
+X-Alvo-Api-Key: {{keyTechNorth}}
+Content-Type: application/json
+
+{ "notes": "Valve replaced, pressure tested." }
+
+### And may not re-point it at a job that is not theirs. The ref is resolved AS THE CALLER first, and a job
+### they cannot read is unresolvable — so it is refused before the rule's check on the new row is reached
+# @name TechRepointsOwnVisit
+## TEST-EXPECT-STATUS: [422]
+PATCH {{fsBaseUrl}}/api/visits/{{VisitOfTechNorthId}}
+X-Alvo-Api-Key: {{keyTechNorth}}
+Content-Type: application/json
+
+{ "work_order_id": "{{Job3402Id}}" }
+
+### The dispatcher's read of tech-north's visit after both writes
+# @name DispatcherReadsTechVisit
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/visits/{{VisitOfTechNorthId}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}

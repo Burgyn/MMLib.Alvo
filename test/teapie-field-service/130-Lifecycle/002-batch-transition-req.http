@@ -1,0 +1,41 @@
+### A batch is judged by the machine row by row, and stays one transaction: one illegal move refuses
+### the whole batch, and the legal move beside it is not written either.
+
+### Two scheduled jobs, each its own create so the batch below can name them by request variable
+### (a request variable cannot index into an array). A create is no transition: no `initial`, spec R1.
+# @name CreateWo3111
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3111", "title": "Batch lifecycle one", "status": "scheduled", "priority": 3, "access_code": "ACME-3111", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}", "assigned_to": "{{userTechNorth}}", "scheduled_for": "2026-12-02T09:00:00+00:00" }
+
+### The second, identical but for its reference and slot
+# @name CreateWo3112
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3112", "title": "Batch lifecycle two", "status": "scheduled", "priority": 3, "access_code": "ACME-3112", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}", "assigned_to": "{{userTechNorth}}", "scheduled_for": "2026-12-02T11:00:00+00:00" }
+
+### Row 0 takes `start` (legal); row 1 skips straight to `completed` (no transition admits it)
+# @name BatchWithAnIllegalMove
+## TEST-EXPECT-STATUS: [422]
+PATCH {{fsBaseUrl}}/api/work_orders/batch
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{
+  "rows": [
+    { "id": "{{CreateWo3111.response.body.$.id}}", "status": "in_progress" },
+    { "id": "{{CreateWo3112.response.body.$.id}}", "status": "completed", "completed_on": "2026-12-02" }
+  ]
+}
+
+### Both rows read back after the refusal
+# @name ReadBothBack
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?reference=in.(WO-3111,WO-3112)&select=reference,status&order=reference.asc&limit=10
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
