@@ -1,4 +1,6 @@
-﻿using MMLib.Alvo.Samples.FieldService.Tenancy;
+﻿using MMLib.Alvo.Samples.FieldService.Model;
+using MMLib.Alvo.Samples.FieldService.Scheduling;
+using MMLib.Alvo.Samples.FieldService.Tenancy;
 using MMLib.Alvo.Scheduling;
 
 namespace MMLib.Alvo.Samples.FieldService;
@@ -20,7 +22,9 @@ public static class FieldServiceSetup
         ArgumentNullException.ThrowIfNull(alvo);
         ArgumentNullException.ThrowIfNull(options);
 
-        return alvo;
+        return alvo
+            .Entity<WorkOrder>(workOrders => workOrders
+                .BeforeWrite<WithinServiceHours>(WithinServiceHours.Id));
     }
 
     /// <summary>Registers this host's own services: its options, its tenant catalog and its notifier.</summary>
