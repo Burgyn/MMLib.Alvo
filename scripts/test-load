@@ -173,6 +173,10 @@ set +a
 # sourcing overwrites an exported value rather than deferring to it — so a port exported earlier
 # would be silently replaced and this stack would collide with a running e2e one.
 export ALVO_FS_PORT="${ALVO_LOAD_PORT:-8091}"
+# The billing sink's host port, for the same reason and in the same place: the file sets the e2e
+# stack's ALVO_FS_SINK_PORT, and this stack must not collide with a running e2e one any more than its
+# ALVO_FS_PORT may. 8082/8092 belong to the embedded-host e2e stack.
+export ALVO_FS_SINK_PORT="${ALVO_LOAD_SINK_PORT:-8093}"
 BASE_URL="http://127.0.0.1:$ALVO_FS_PORT"
 
 KEY_DISPATCHER="dispatcher-north.$ALVO_FS_DISPATCHER_NORTH_SECRET"
