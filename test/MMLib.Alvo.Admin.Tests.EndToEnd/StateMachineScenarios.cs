@@ -21,7 +21,8 @@ public sealed class StateMachineScenarios(StateMachineWorld world) : IClassFixtu
 
         var machine = session.Page.GetByTestId("states-machine");
         await machine.WaitForAsync();
-        (await machine.Locator("[data-testid^='sm-state-']").CountAsync()).ShouldBe(4);
+        // Five: every value of the status enum is a state, and field-service's enum gained `new`.
+        (await machine.Locator("[data-testid^='sm-state-']").CountAsync()).ShouldBe(5);
         (await machine.Locator("[data-testid^='sm-transition-']").CountAsync()).ShouldBe(3);
         foreach (var transition in new[] { "start", "complete", "cancel" })
         {

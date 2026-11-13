@@ -32,7 +32,7 @@ public sealed class ConfirmFocusScenarios(AdminWorld world) : IClassFixture<Admi
         await confirm.GetByTestId("remove-index-run").ClickAsync();
         await session.SnackbarAsync("Removed from the working copy");
         await session.FocusAfterConfirmAsync("remove-index", "#index-row-0 [data-testid='index-remove']");
-        (await session.Page.GetByTestId("index-row").InnerTextAsync()).ShouldContain("assigned_to", Case.Sensitive,
+        (await session.Page.Locator("#index-row-0").InnerTextAsync()).ShouldContain("assigned_to", Case.Sensitive,
             "the row that took the removed one's place");
         session.AssertConsoleClean();
     }
