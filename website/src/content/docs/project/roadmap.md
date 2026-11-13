@@ -29,7 +29,7 @@ the test gates. A release does not go out with a known hole.
 ## What may change before v0.1
 
 - **The parts of the descriptor format that are warned or refused.** A block this build parses and does not run, such
-  as `automation`, `functions` or `dynamicEntities`, will start doing what it declares when its feature lands; a refused
+  as the csx form of `functions` or `dynamicEntities`, will start doing what it declares when its feature lands; a refused
   key stops being refused. The list is [Capabilities in this build](/reference/capabilities/). Today's
   honoured behaviour is not what this item is about.
 - **The Management API's routes and bodies.** It has no OpenAPI document of its own yet; its reference here is generated
@@ -82,8 +82,9 @@ Open defects the documentation pages point to.
 After v0.1, components are added one at a time, ordered by value, each with its contract tests first. The plan names
 these candidates; none has a date:
 
-- **Automation**: rules that react to events, with signed webhook deliveries and redelivery.
-- **Custom functions**: scripts and a runtime to execute them, beyond the C# functions an embedded host registers today.
+- **Custom function scripts**: a runtime to execute csx scripts. The C# functions an embedded host registers, and
+  [automation](/extending/automation/) over events and cron, already run.
+- **Signed webhook deliveries**: deliveries from after-hooks and automation are made and retried today, but not signed.
 - **Full authentication**: sign-in providers beyond local passwords, and issuing and revoking API keys
   ([#36](https://github.com/Burgyn/MMLib.Alvo/issues/36)).
 - **Teams and permissions** on top of roles, and richer caller context in rules.

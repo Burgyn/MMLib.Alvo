@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Docs: an explicit "Extending in code" section**: the sidebar lists every page under `extending/` (adds *Shape what reads
+  return*, *Rules over relations* and *State machines and timers*), the section's index is grouped into six areas and says the
+  host-extensibility line is complete, the roadmap no longer lists `automation` or the C# `functions` as not running, and the
+  README gains an *Extend it in C#* section.
 - **Declarative timers reach existing rows** (HX-18 follow-up, issue 483): the first apply that adds a timer to an entity,
   or changes its `at`, `when` or `event`, starts a framework data migration (`alvo.migration.timers.<entity>`, one run
   spanning tenants) that re-plans every stored row, 100 per transaction — arming a due still ahead, moving one armed at

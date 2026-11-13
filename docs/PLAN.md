@@ -101,6 +101,8 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   the core nupkg, and a boot warning when a generated class no longer fits the live schema) is done too; HX-15 (host
   functions called from the descriptor, `automation` running on the delivery engine with `entity.update` exactly once
   per event, and required secrets) the fifteenth.
+  The line is complete: HX-01…HX-19 are merged, and its follow-ups (#475–#486) are resolved except #475 and #476,
+  which need design decisions, and #486, a red mutation gate that is only partly addressed.
   This line runs ahead of F5's close, the way F4 ran beside F3; the marker stays on F5.
 
 ## 3a. What closed F4
