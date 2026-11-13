@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The advanced demo's host layer: `samples/MMLib.Alvo.Samples.FieldService`**, an embedded host over the same
+  `examples/field-service` descriptor (PostgreSQL, typed against the generated `WorkOrder`, `Visit` and roles) that adds
+  only what the descriptor cannot express: the `work_orders.dispatch` command (schedule the job and book its visit in one
+  unit, `Idempotency-Key`), a signed Standard Webhook receiver for the technician app, a `within-service-hours`
+  before-write hook, a customer notice handler, a handler of the SLA timer's own event (priority 1, page on-call), a
+  per-tenant `overdue-report` schedule with a configured tenant catalog, and a `technician-open-jobs` narrowing. Its
+  README says per slice why it is code. `MMLib.Alvo.Samples.FieldService.Tests` (ring0) covers each slice on
+  `AlvoTestHost` and over `TestServer`; `docker-compose.field-service-host.yml` (`:8082`, sink `:8092`) runs it, and
+  `scripts/test-e2e` now drives a third stack and a third suite, `test/teapie-field-service-host`, inside the required e2e
+  check — the overdue report through the Management API's *Run now*, the SLA through a near `respond_by`, nothing
+  test-only in the host. The docs gain *The advanced demo*.
 - **`examples/field-service` is the advanced demo** (`examples/vehicle-registry` stays the simple one): the descriptor
   gains a state machine on `work_orders.status` (`new` → `schedule` → `start` → `complete`, `cancel`, admin-only
   `reopen`), a gapless per-tenant `job_number` sequence, an SLA timer on `respond_by`, CHECK validations, a partial

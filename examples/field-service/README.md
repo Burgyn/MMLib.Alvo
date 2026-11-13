@@ -69,7 +69,8 @@ move a transition matches but whose roles the caller lacks is **403**. A `PATCH`
 `status` is no transition. The `sla_breach` timer (`at: respond_by`, while
 `is_emergency == true && status == 'new'`) is armed, moved and cancelled in the write's own transaction
 and publishes `work_orders.sla_breached`; descriptor automation cannot subscribe to a timer's event, so
-in the standalone image nothing acts on it — the embedded host sample does.
+in the standalone image nothing acts on it — the [embedded host](../../samples/MMLib.Alvo.Samples.FieldService/README.md)
+does (see *The embedded host layer* below).
 
 ## What each construct is there to measure
 
@@ -107,10 +108,20 @@ in the standalone image nothing acts on it — the embedded host sample does.
 | Lookup check | `visits.checks` | A visit on a completed or cancelled job is 422 `check` at `/work_order_id`, with the descriptor's message. | `140-Integrity/004` |
 | Rollup | `work_orders.on_site_minutes = sum(visits.minutes_on_site)` | Kept by the visit writes, in their transaction. | `140-Integrity/004` |
 | Relation rule | `visits.rules.list/get`: `work_order_id.assigned_to == @user.id`; `update` adds being the booked technician | A technician lists exactly the visits of jobs assigned to them; a row failing it is 404. They write only a visit they can read — a booked technician whose job is not theirs gets 404 — and cannot re-point it at a job they cannot read. | `150-Relations/001` |
-| `timers` | `work_orders.sla_breach` on `respond_by` | Armed in the write; its effect is host code (see *The lifecycle*). | — (embedded host) |
+| `timers` | `work_orders.sla_breach` on `respond_by` | Armed in the write; its effect is host code (see *The lifecycle*). | `test/teapie-field-service-host` `050-Sla` |
 | `automation` + `webhooks` | `job-completed-to-billing` → endpoint `billing` | A completed purchase-order job is posted to billing once, after the commit; a completion without a PO, or an update that completes nothing, sends nothing. | `160-Automation/001` |
 | `events.exclude` | `work_orders`: `access_code`, `internal_notes` | Neither name nor value is in any delivery to billing. | `160-Automation/001` |
 | `access` | `{ "developer": "'admin' in @user.roles" }` | A key holding the `admin` role may operate deliveries over the Management API (redeliver, replay, pause). Management access is **instance-wide**: it spans every tenant (a management `viewer` already lists every tenant's deliveries), so the key holding the `admin` role is the *instance operator*, and the tenant on that dev key only scopes its data-plane writes. `developer` is the least level that redelivers, replays and pauses deliveries (and runs a schedule, which the embedded host adds); `admin` (users, keys, switching an extension off) stays with the bootstrap administrator. | — |
+
+## The embedded host layer
+
+[`samples/MMLib.Alvo.Samples.FieldService`](../../samples/MMLib.Alvo.Samples.FieldService/README.md) serves **this same
+file** from an embedded ASP.NET Core host and adds only what JSON cannot say: the `dispatch` command (schedule the job
+and book the visit in one unit), the technician app's signed inbound webhook, a before-write hook for the customer's
+service hours, the customer's visit notice, the SLA timer's escalation, a per-tenant overdue report every morning and a
+technician's open-jobs view. `docker-compose.field-service-host.yml` runs it (`:8082`, sink `:8092`) and
+`test/teapie-field-service-host` guards it inside `scripts/test-e2e`. Its README says, slice by slice, why each piece is
+code.
 
 ## The billing webhook
 

@@ -197,6 +197,7 @@ export default defineConfig({
           page('The schema assistant', 'guides/schema-assistant'),
         ] },
         page('Examples', 'examples'),
+        page('The advanced demo', 'guides/advanced-demo'),
         { label: 'Concepts', collapsed: true, items: [
           page('The project descriptor', 'concepts/descriptor'),
           page('CEL in Alvo', 'concepts/cel'),
