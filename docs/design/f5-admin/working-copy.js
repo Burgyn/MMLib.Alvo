@@ -581,6 +581,15 @@ export const entityView = (name, doc = wc.working) => entities(doc).find((e) => 
 
 export const declaredRoles = (doc = wc.working) => (doc.auth?.roles ?? []).map((r) => safeName(r));
 export const accessBlock = (doc = wc.working) => doc.access ?? {};
+
+/** `webhooks.endpoints`, which the schema keys by endpoint name, as a list of `{ name, ...endpoint }`.
+    An imported list of `{ name, ... }` objects is read as such, so a hostile import still renders as text. */
+export function declaredEndpoints(doc = wc.working) {
+  const endpoints = doc.webhooks?.endpoints ?? {};
+  return Array.isArray(endpoints)
+    ? endpoints
+    : Object.entries(endpoints).map(([name, endpoint]) => ({ ...endpoint, name }));
+}
 export const declaredFormats = (doc = wc.working) => Object.keys(doc.formats ?? {}).map((f) => safeName(f));
 export const tenancyEnabled = (doc = wc.working) => doc.tenancy?.enabled === true;
 
@@ -590,7 +599,7 @@ export function declaresBlock(block, doc = wc.working) {
   if (value === undefined || value === null) return false;
   if (Array.isArray(value)) return value.length > 0;
   if (block === 'dynamicEntities') return value.enabled === true;
-  if (block === 'webhooks') return (value.endpoints ?? []).length > 0;
+  if (block === 'webhooks') return declaredEndpoints(doc).length > 0;
   if (isObject(value)) return Object.keys(value).length > 0;
   return Boolean(value);
 }

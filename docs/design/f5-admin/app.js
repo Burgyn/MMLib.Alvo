@@ -19,7 +19,7 @@
 import { CAPABILITIES } from './generated/capabilities.js';
 import { SCHEMA_FACETS } from './generated/schema-facets.js';
 import {
-  wc, editors, entities, entityView, declaredRoles, accessBlock, declaredFormats,
+  wc, editors, entities, entityView, declaredRoles, accessBlock, declaredFormats, declaredEndpoints,
   tenancyEnabled, declaresBlock, changes, count, grouped, touchesAccess, workingPlan,
   renderLines, plan as planBetween, apply as applyWorking, restore as restoreRevision,
   discard as discardWorking, reset as resetWorking, startEmpty, KINDS,
@@ -2514,7 +2514,7 @@ function revisionDiff(before, after) {
 }
 
 function screenIntegrations() {
-  const endpoints = (wc.working.webhooks?.endpoints ?? []).map((x) => ({ ...x, name: safeName(x.name) }));
+  const endpoints = declaredEndpoints().map((x) => ({ ...x, name: safeName(x.name) }));
   const templates = Object.entries(wc.working.templates ?? {}).map(([name, t]) => [safeName(name), t]);
 
   /* Every action type that names an endpoint or a template, across every entity's hooks. */
@@ -3033,7 +3033,7 @@ function overlay() {
     /* The argument a hook's action takes is the schema's own property, not a free-text box: a
        reject carries a string, a mutate carries field → value, an email carries a template AND a
        recipient, a webhook carries an endpoint name that `webhooks.endpoints` must declare. */
-    const endpoints = (wc.working.webhooks?.endpoints ?? []).map((x) => safeName(x.name));
+    const endpoints = declaredEndpoints().map((x) => safeName(x.name));
     const templates = Object.keys(wc.working.templates ?? {}).map((t) => safeName(t));
     const writable = e.fields.filter((f) => f.readOnly !== true && !f.computed && !f.rollup);
 
@@ -3551,10 +3551,12 @@ function schemaActions(act, d, el, ev) {
       return true;
     }
     case 'addendpoint': {
-      const list = wc.working.webhooks?.endpoints ?? [];
       const name = ($('#ep-name')?.value ?? '').trim();
       if (!name) return true;
-      editors.setAt('/webhooks', { endpoints: [...list, { name, url: $('#ep-url')?.value ?? '', secretRef: $('#ep-secret')?.value || undefined }] });
+      /* The schema keys endpoints by name: written as that map, whatever shape was read. */
+      const endpoints = Object.fromEntries(declaredEndpoints().map(({ name: n, ...rest }) => [n, rest]));
+      endpoints[name] = { url: $('#ep-url')?.value ?? '', secretRef: $('#ep-secret')?.value || undefined };
+      editors.setAt('/webhooks', { endpoints });
       state.overlay = null;
       render();
       return true;

@@ -84,7 +84,7 @@ test.describe('an imported descriptor', () => {
       await expect(page.locator('.a-error')).toBeVisible();
       await expect(page.locator('.a-error')).toContainText('The apply would refuse this descriptor');
       const doc = await working(page);
-      expect(Object.keys(doc.entities)).toEqual(['regions', 'customers', 'work_orders']);
+      expect(Object.keys(doc.entities)).toEqual(['regions', 'customers', 'work_orders', 'visits']);
 
       // And nothing executed.
       expect(await page.evaluate(() => window.__pwned)).toBeUndefined();
